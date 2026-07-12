@@ -22,9 +22,11 @@
 //! an Interacting-Multiple-Model estimator for manoeuvring targets, and
 //! [`imm2d`] extending that to a planar coordinated-turn IMM (a general linear
 //! Kalman filter blending constant-velocity and constant-turn-rate models) for
-//! tracking turning targets in the (x, y) plane, and [`ekf`] adding an extended
+//! tracking turning targets in the (x, y) plane, [`ekf`] adding an extended
 //! Kalman filter that tracks a Cartesian state directly from raw polar
-//! (range/bearing) radar measurements.
+//! (range/bearing) radar measurements, and [`mtt`] closing the loop with a
+//! multi-target tracker of per-target EKFs associated by a statistical
+//! (normalised-innovation-squared) validation gate.
 
 pub mod ambiguity;
 pub mod beamform;
@@ -39,6 +41,7 @@ pub mod imm2d;
 pub mod kalman;
 pub mod matched_filter;
 pub mod mti;
+pub mod mtt;
 pub mod music;
 pub mod track;
 pub mod waveform;
@@ -56,6 +59,7 @@ pub use imm2d::{Imm2D, KalmanLinear, ct_model_2d, cv_model_2d};
 pub use kalman::{Imm, KalmanCV};
 pub use matched_filter::{cross_correlate, peak_lag, peak_to_sidelobe};
 pub use mti::mti_canceller;
+pub use mtt::{RadarMultiTracker, RadarTrack};
 pub use music::music_spectrum;
 pub use track::{AlphaBeta, MultiTracker, Track, critically_damped_gains};
 pub use waveform::{barker_code, lfm_chirp};

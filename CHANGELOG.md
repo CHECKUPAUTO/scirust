@@ -5,6 +5,28 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : radar — pistage multicible à porte NIS (`radar::mtt`) — bloc 22
+Bouclage de la chaîne de pistage : un tracker **multicible** de bout en bout sur
+mesures **polaires**, un `RadarEkf` par piste, avec association par **porte
+statistique**.
+- **`RadarMultiTracker`** / **`RadarTrack`** — chaque piste est un filtre de
+  Kalman étendu (bloc 21) alimenté en distance/azimut ; l'association gate chaque
+  couple (piste, mesure) par le **carré de l'innovation normalisée** (NIS,
+  distance de Mahalanobis) comparé à un quantile du χ² (2 d.d.l.), donc la porte
+  se resserre ou s'élargit selon l'incertitude propre de chaque piste au lieu
+  d'un rayon fixe. Chaque trame : prédiction de toutes les pistes, gating par
+  NIS, association gloutonne au plus proche, mise à jour des pistes appariées,
+  coasting des autres, naissance d'une piste par mesure non associée
+  (polaire→cartésien), mort au-delà de `max_misses`.
+- **`RadarEkf::nis(...)`** — nouvelle méthode exposant `yᵀ·S⁻¹·y`, la statistique
+  de gating, sans muter le filtre.
+- Oracles : suit une cible unique (position à la vérité, id stable) ; garde deux
+  cibles séparées distinctes ; la **porte NIS rejette du clutter** (la vraie
+  piste coaste sans être contaminée, le clutter fait naître sa propre piste) ;
+  naissance puis mort d'une piste perdue ; le NIS est **petit sur cible et grand
+  hors cible** ; trames vides inertes. 6 tests (194 au total pour le crate) ;
+  `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-signal` : radar — filtre de Kalman étendu polaire (`radar::ekf`) — bloc 21
 Pistage à partir de mesures **radar réelles** : les trackers précédents
 supposent une position cartésienne déjà disponible, alors qu'un radar fournit
