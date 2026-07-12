@@ -5,6 +5,23 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : radar — statistiques d'amplitude du fouillis (`radar::clutter`) — bloc 30
+Les lois d'amplitude que les seuils CFAR visent : sur mer calme le fouillis est
+**Rayleigh**, mais sur mer forte ou terrain il devient **piqué** (queue lourde
+qu'un seuil Rayleigh sous-estime, gonflant le taux de fausse alarme).
+- **Rayleigh** — `rayleigh_pdf/cdf/quantile` (fouillis homogène, type bruit).
+- **Weibull** — `weibull_pdf/cdf/quantile` : le modèle de fouillis piqué de
+  référence, la forme `c` réglant la queue (`c=2` = Rayleigh, `c=1` =
+  exponentielle, `c<2` plus piqué).
+- **Log-normale** — `lognormal_pdf/cdf` (fouillis très piqué), via une **fonction
+  d'erreur** `erf` autonome (approximation A&S 7.1.26).
+- Oracles : `erf` sur valeurs connues (0, 1, symétrie impaire) ; CDF Rayleigh
+  monotone 0→1, quantile inverse, PDF d'intégrale 1 ; **Weibull(c=2, b=σ√2) =
+  Rayleigh(σ)** exactement ; le quantile Weibull s'inverse et une **forme plus
+  faible est plus piquée** ; CDF log-normale valide (médiane e^μ → 0,5),
+  d'intégrale 1 ; gardes de support négatif. 6 tests (221 au total pour le
+  crate) ; `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-signal` : radar — équation du radar / bilan de portée (`radar::range_equation`) — bloc 29
 L'autre moitié du bilan de liaison (le SNR *requis* venant de `radar::swerling`) :
 le SNR qu'un radar *délivre* sur une cible de SER donnée à une portée donnée, et
