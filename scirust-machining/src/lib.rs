@@ -31,6 +31,8 @@
 //!   la clavette et pression de matage sur les flancs.
 //! - [`belts`] — transmissions par courroie (**Euler-Eytelwein**) : rapport des
 //!   tensions plate/trapézoïdale, angle d'enroulement et puissance transmise.
+//! - [`power_screws`] — vis de transmission : couple de montée/descente,
+//!   rendement et condition d'irréversibilité (filets carré/trapézoïdal).
 //! - [`tolerancing`] — systèmes de tolérancement de dessin : tolérances
 //!   générales **ISO 2768** (parties 1 et 2) et catalogue des normes **GPS**.
 //!
@@ -82,6 +84,7 @@ pub mod gears;
 pub mod hertz;
 pub mod keys;
 pub mod kinematics;
+pub mod power_screws;
 pub mod roughness;
 pub mod shafts;
 pub mod springs;
@@ -114,6 +117,9 @@ pub use keys::{
 pub use kinematics::{
     cutting_speed_m_min, feed_per_rev_milling, feed_velocity_mm_min, mrr_drilling_mm3_min,
     mrr_milling_mm3_min, mrr_turning_cm3_min, spindle_speed_rpm,
+};
+pub use power_screws::{
+    efficiency, is_self_locking, lead_angle_deg, lowering_torque_nm, raising_torque_nm,
 };
 pub use roughness::{
     feed_for_target_ra, theoretical_ra_turning, theoretical_rt_sharp, theoretical_rt_turning,
