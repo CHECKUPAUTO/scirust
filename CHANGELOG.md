@@ -5,6 +5,25 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : radar — goniométrie interférométrique (phase-comparison) (`radar::interferometer`) — bloc 34
+Là où le monopulse d'amplitude ([`radar::monopulse`]) lit l'angle dans le *rapport*
+de deux faisceaux dépointés, un **interféromètre de phase** le lit dans la
+*différence de phase* entre deux éléments séparés d'une base `d` : une onde plane
+d'angle `θ` arrive à l'élément lointain avec un retard de trajet `d·sin θ`, soit une
+avance de phase `Δφ = 2π·d·sin θ/λ` ; mesurer `Δφ` et inverser donne
+`θ = arcsin(Δφ·λ/(2π·d))`.
+- **`phase_difference(θ, d, λ)`** = `2π·d·sin θ/λ` ; **`angle_from_phase(Δφ, d, λ)`**
+  = `arcsin(Δφ·λ/(2π·d))` (argument borné à [−1, 1]) ; **`phase_from_signals(near,
+  far)`** = `arg(far·conj(near))`, la phase réellement observée par le récepteur.
+- **`unambiguous_angle(d, λ)`** = `arcsin(λ/2d)` — le champ non ambigu : une base
+  large affine la mesure mais replie la phase plus tôt (compromis
+  résolution/ambiguïté) ; **`wrap_phase`** ramène une phase dans `(−π, π]`.
+- Oracles : phase **nulle au dépointage** et **impaire** ; l'estimation **inverse
+  exactement** la phase dans le champ non ambigu ; récupération de la phase depuis
+  les tensions d'éléments ; une **base large rétrécit le champ non ambigu** ; **repli
+  (aliasing)** hors champ (phase > ±π mal interprétée) ; gardes (base/λ dégénérées).
+  7 tests (245 au total pour le crate) ; `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-signal` : radar — télémétrie large bande à fréquence échelonnée (`radar::stepped_frequency`) — bloc 33
 Une résolution en distance fine sans matériel large bande : une rafale de `N`
 impulsions bande étroite aux fréquences `fₙ = n·Δf` échantillonne la réflectivité
