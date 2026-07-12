@@ -37,6 +37,11 @@
 // Intrinsèques SVE (`sv*`) encore *unstable* dans `core::arch::aarch64` —
 // kernels scalables de `crate::sve` (toolchain nightly épinglée).
 #![cfg_attr(target_arch = "aarch64", feature(stdarch_aarch64_sve))]
+// Détection runtime de `sme` encore *unstable* (cf. `crate::sme`).
+#![cfg_attr(target_arch = "aarch64", feature(stdarch_aarch64_feature_detection))]
+// Intrinsèques de tuiles Intel AMX (`_tile_*`) encore *unstable* dans
+// `core::arch::x86_64` — GEMM matriciel de `crate::amx` (toolchain nightly).
+#![cfg_attr(target_arch = "x86_64", feature(x86_amx_intrinsics))]
 #![allow(unused_crate_dependencies)]
 #![allow(unused_features)]
 
@@ -366,6 +371,8 @@ mod neon_fns {
 // =============================================================================
 
 #[cfg(target_arch = "aarch64")]
+pub mod sme;
+#[cfg(target_arch = "aarch64")]
 pub mod sve;
 
 // =============================================================================
@@ -633,5 +640,7 @@ pub mod norm;
 pub mod quant;
 pub mod transformer;
 
+#[cfg(target_arch = "x86_64")]
+pub mod amx;
 #[cfg(target_arch = "x86_64")]
 pub mod x86_ext;

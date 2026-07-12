@@ -51,6 +51,8 @@ Du bas (silicium) vers le haut (application) :
 | **BLAS — GEMM** | `gemm` | SGEMM (`f32`) & DGEMM (`f64`) tuilés/packés, multi-thread, GEMM fusionné `act(A·B+b)` |
 | **Activations** | `activations` | `exp` vectorisée (range-reduction + `scalef`) → `sigmoid`/`tanh`/`GELU`/`SiLU` |
 | **Quantification** | `quant` | dot int8 `u8·i8→i32` (VNNI **et** ARM `i8mm` USDOT), `i8·i8→i32` (ARM `dotprod` SDOT / AVX-512BW), bf16 (natif `avx512bf16` ou élargissement) — **cross-arch** |
+| **Accélérateurs matriciels** | `amx`, `sme` | GEMM à tuiles **Intel AMX** int8 (`_tile_dpbssd`) & bf16 (`_tile_dpbf16ps`) ; **ARM SME** (sonde + référence rang-1, en attente des intrinsèques ZA) |
+| **Vecteurs scalables** | `sve` | kernels SVE `saxpy`/`sdot`/`sscal` à longueur vectorielle runtime (aarch64) |
 | **Kernels x86 avancés** | `x86_ext` | masques `k` (axpy conditionnel), NT-stores, prefetch logiciel |
 | **Attention** | `attention`, `kv_cache` | naïve, **flash** (softmax en ligne), **causale**, **multi-tête**, **cache KV** |
 | **Normalisations** | `norm` | RMSNorm, LayerNorm (vectorisées), RoPE |
@@ -164,7 +166,9 @@ Chaque affirmation est vérifiée mécaniquement :
 | [`gemm`](src/gemm.rs) | SGEMM/DGEMM tuilés, parallèles, fusionnés |
 | [`activations`](src/activations.rs) | `exp`/`sigmoid`/`tanh`/`GELU`/`SiLU` vectorisés |
 | [`quant`](src/quant.rs) | int8 (VNNI/USDOT/SDOT), bf16 mixed-precision — cross-arch x86/ARM |
+| [`amx`](src/amx.rs) | GEMM Intel AMX à tuiles — int8 (`_tile_dpbssd`) & bf16 (`_tile_dpbf16ps`) (x86) |
 | [`sve`](src/sve.rs) | kernels SVE scalables `saxpy`/`sdot`/`sscal` (aarch64) |
+| [`sme`](src/sme.rs) | ARM SME — sonde + référence rang-1 (accumulateur ZA), aarch64 |
 | [`x86_ext`](src/x86_ext.rs) | masques `k`, NT-stores, prefetch (x86) |
 | [`attention`](src/attention.rs) | Attention naïve/flash/causale/multi-tête |
 | [`kv_cache`](src/kv_cache.rs) | Cache KV, décodage incrémental |
