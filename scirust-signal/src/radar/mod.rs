@@ -11,7 +11,8 @@
 //!
 //! Alongside the pulse chain sit array processing ([`beamform`], [`doa`],
 //! [`music`], [`esprit`]) for angle estimation — from the conventional
-//! beamformer through MVDR/Capon to the MUSIC and ESPRIT subspace methods —
+//! beamformer through MVDR/Capon to the MUSIC and ESPRIT subspace methods, with
+//! [`monopulse`] for single-dwell sum/difference angle estimation —
 //! [`fmcw`] for the continuous-wave /
 //! mmWave model, where range and velocity fall out of two FFTs of the mixer's
 //! beat signal rather than a matched filter, [`detect`] for the 2-D detection
@@ -56,6 +57,7 @@ pub mod imm2d;
 pub mod kalman;
 pub mod matched_filter;
 pub mod micro_doppler;
+pub mod monopulse;
 pub mod mti;
 pub mod mtt;
 pub mod music;
@@ -84,6 +86,9 @@ pub use kalman::{Imm, KalmanCV};
 pub use matched_filter::{cross_correlate, peak_lag, peak_to_sidelobe};
 pub use micro_doppler::{
     bin_frequencies, cadence, doppler_bandwidth, mean_doppler, ridge, spectrogram,
+};
+pub use monopulse::{
+    beam_voltage, estimate_angle as monopulse_estimate_angle, monopulse_ratio, monopulse_slope,
 };
 pub use mti::mti_canceller;
 pub use mtt::{RadarMultiTracker, RadarTrack};

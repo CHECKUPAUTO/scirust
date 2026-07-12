@@ -30,8 +30,9 @@
 //!   delay-and-sum beamforming,
 //!   high-resolution MVDR/Capon DOA that resolves sub-beamwidth sources,
 //!   MUSIC subspace direction finding via a from-scratch complex-Hermitian
-//!   eigensolver, and gridless ESPRIT that reads the angles straight off the
-//!   eigenvalues of the subspace rotation), FMCW processing (beat-frequency
+//!   eigensolver, gridless ESPRIT that reads the angles straight off the
+//!   eigenvalues of the subspace rotation, and single-dwell sum/difference
+//!   monopulse angle estimation), FMCW processing (beat-frequency
 //!   ranging, range
 //!   resolution, and the range-Doppler cube from raw beat chirps) and target
 //!   tracking (α–β constant-velocity track filters and a nearest-neighbour
@@ -104,11 +105,12 @@ pub use order::{order_spectrum, order_track, resample_constant_angle, rpm_profil
 pub use radar::{
     AlphaBeta, Detection, Imm, Imm2D, KalmanCV, KalmanLinear, MultiTracker, PdaFilter, RadarEkf,
     RadarLink, RadarMultiTracker, RadarTrack, Track, albersheim_pd, albersheim_snr, ambiguity,
-    barker_code, beamform_spectrum, beat_frequency_to_range, bin_frequencies, blind_speed, ca_cfar,
-    ca_cfar_2d, ca_cfar_alpha, cadence, cluster_detections, covariance, critically_damped_gains,
-    cross_correlate, ct_model_2d, cv_model_2d, doppler_bandwidth, doppler_spectrum, erf as erf_fn,
-    esprit_doa, estimate_doa, fold_range, fold_velocity, lfm_chirp, lognormal_cdf, lognormal_pdf,
-    max_doppler, mean_doppler, mti_canceller, music_spectrum, mvdr_spectrum, os_cfar,
+    barker_code, beam_voltage, beamform_spectrum, beat_frequency_to_range, bin_frequencies,
+    blind_speed, ca_cfar, ca_cfar_2d, ca_cfar_alpha, cadence, cluster_detections, covariance,
+    critically_damped_gains, cross_correlate, ct_model_2d, cv_model_2d, doppler_bandwidth,
+    doppler_spectrum, erf as erf_fn, esprit_doa, estimate_doa, fold_range, fold_velocity,
+    lfm_chirp, lognormal_cdf, lognormal_pdf, max_doppler, mean_doppler, monopulse_estimate_angle,
+    monopulse_ratio, monopulse_slope, mti_canceller, music_spectrum, mvdr_spectrum, os_cfar,
     os_cfar_alpha, peak_lag, peak_to_sidelobe, range_doppler, range_doppler_map, range_profile,
     range_resolution, rayleigh_cdf as clutter_rayleigh_cdf, rayleigh_pdf as clutter_rayleigh_pdf,
     rayleigh_quantile, ridge as micro_doppler_ridge, single_pulse_threshold, spectrogram,
