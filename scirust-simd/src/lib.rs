@@ -641,6 +641,7 @@ pub mod attention;
 pub mod complex;
 pub mod dispatch;
 pub mod gemm;
+pub mod grad;
 pub mod kv_cache;
 pub mod matrix;
 pub mod model;
