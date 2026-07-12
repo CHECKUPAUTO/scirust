@@ -50,7 +50,10 @@
 //!      and an energy invariant;
 //!    - [`laser`] — the single-mode semiconductor-laser rate equations
 //!      (carrier/photon densities), with threshold, the linear light–current
-//!      law and the relaxation-oscillation frequency as oracles.
+//!      law and the relaxation-oscillation frequency as oracles;
+//!    - [`photodiode`] — the optoelectronic receiver: optical power → photocurrent
+//!      → RC-limited voltage, with the responsivity `η·q·λ/(h·c)`, the `−3 dB`
+//!      bandwidth and the exponential step response as oracles.
 //!
 //! Everything is self-contained: the integrators, the [`SplitMix64`] random
 //! generator and every model are implemented here. There are no dependencies,
@@ -119,6 +122,7 @@ pub mod laser;
 pub mod mechanics;
 pub mod orbital;
 pub mod pharmacokinetics;
+pub mod photodiode;
 pub mod rigid_body;
 #[cfg(feature = "rl")]
 pub mod rl_bridge;
