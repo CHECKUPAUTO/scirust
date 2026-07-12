@@ -32,12 +32,23 @@ committed baselines (comparison (A)) also yields 0 mismatches for every unit.
 
 | Unit | Executed cases/rows | Compared fields | Model-vs-compiler differences |
 |---|---:|---|---:|
-| INTACCR | 75 scenarios | principal, rate, rounded interest, truncated interest, new balance | 0 |
-| AMORTSCH | 94 schedule rows | period, interest, principal, payment, balance | 0 |
-| PAYCALC | 8 scenarios | principal, rate, periods, factor, payment | 0 |
-| DAYCOUNT | 10 scenarios | NASD days, interest | 0 |
-| BRKTCALC | 9 scenarios | base, marginal tax | 0 |
-| CURRCVT | 10 scenarios | amount, source, target, triangulated result, euro intermediate | 0 (Gap-R reconciled) |
+| INTACCR | 79 scenarios | principal, rate, rounded interest, truncated interest, new balance | 0 |
+| AMORTSCH | 105 schedule rows | period, interest, principal, payment, balance | 0 |
+| PAYCALC | 12 scenarios | principal, rate, periods, factor, payment | 0 |
+| DAYCOUNT | 15 scenarios | NASD days, interest | 0 |
+| BRKTCALC | 14 scenarios | base, marginal tax | 0 |
+| CURRCVT | 14 scenarios | amount, source, target, triangulated result, euro intermediate | 0 (Gap-R reconciled) |
+
+## Scenario coverage
+
+The scenario sets deliberately include the three classes most likely to hide a
+migration defect: **bounds** (field-magnitude limits, exact bracket/period
+boundaries, zero amounts), **negative amounts** (double-negative interest, credit
+conversions, signed day-count interest — exercising away-from-zero rounding under
+sign), and **rounding limits** (exact half-cent ties at and around boundaries).
+Every one of these is COBOL↔model equivalent (comparison (B) below reports 0
+differences over all 239 baseline rows), including the reconciled 0-decimal
+Gap-R pairs.
 
 ## Two distinct comparisons — do not conflate them
 
@@ -48,7 +59,7 @@ differences, but they measure different things.
 **(A) Faithfulness / reproducibility — committed baselines vs live GnuCOBOL.**
 `tools/run_baselines.py verify` recompiles and re-runs every `*-RUN.cbl` wrapper
 and asserts that the committed `baselines/*.csv` reproduce, cell-for-cell, what a
-fresh GnuCOBOL 3.1.2 run emits: **0 mismatches over 1179 field comparisons**.
+fresh GnuCOBOL 3.1.2 run emits: **0 mismatches over 1347 field comparisons**.
 This proves the CSVs are an honest transcript of the compiler; it says nothing on
 its own about the semantic model.
 
@@ -121,7 +132,7 @@ standard-library driver `tools/run_baselines.py` (`generate` / `verify` /
 `check`). The exact toolchain, compile flags, run commands, normalization
 procedure, and manifest regeneration are documented in `REPRODUCE.md`. `verify`
 is comparison **(A)** above (committed CSVs equal live GnuCOBOL output — 0
-mismatches over 1179 field comparisons); `check` is comparison **(B)** (baselines
+mismatches over 1347 field comparisons); `check` is comparison **(B)** (baselines
 vs the semantic model — 0 unexpected, 0 divergences). The integrity manifest
 `SHA256SUMS` covers every committed file including the per-program
 `compiler-logs/`.

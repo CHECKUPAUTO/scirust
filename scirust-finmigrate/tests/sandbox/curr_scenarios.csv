@@ -9,3 +9,7 @@ dem_to_iep,100.00,DEM,IEP
 esp_to_itl,50000,ESP,ITL
 small_dem_to_frf,1.00,DEM,FRF
 large_frf_to_dem,9999999.00,FRF,DEM
+zero_dem_to_frf,0.00,DEM,FRF
+neg_dem_to_frf,-100.00,DEM,FRF
+iep_to_itl,100.00,IEP,ITL
+large_dem_to_itl,1000000.00,DEM,ITL

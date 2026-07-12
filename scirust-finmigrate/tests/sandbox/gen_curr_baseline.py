@@ -72,6 +72,14 @@ def scenarios():
         ("esp_to_itl", d("50000"), "ESP", "ITL"),     # both 0 dp
         ("small_dem_to_frf", d("1.00"), "DEM", "FRF"),
         ("large_frf_to_dem", d("9999999.00"), "FRF", "DEM"),
+        # --- boundary: zero amount converts to zero --------------------------
+        ("zero_dem_to_frf", d("0.00"), "DEM", "FRF"),
+        # --- negative amount (a credit): sign carries through triangulation --
+        ("neg_dem_to_frf", d("-100.00"), "DEM", "FRF"),
+        # --- rate < 1 source into a 0-dp target (Gap-R on a new pair) --------
+        ("iep_to_itl", d("100.00"), "IEP", "ITL"),
+        # --- large amount into a 0-dp target: whole-lira result -------------
+        ("large_dem_to_itl", d("1000000.00"), "DEM", "ITL"),
     ]
 
 

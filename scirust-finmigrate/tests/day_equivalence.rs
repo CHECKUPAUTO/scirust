@@ -97,6 +97,6 @@ fn day_equivalence_against_golden_baseline() {
         );
         checked += 1;
     }
-    assert_eq!(checked, 10, "expected 10 scenarios");
+    assert_eq!(checked, 15, "expected 15 scenarios");
     eprintln!("day equivalence: {checked} scenarios at 100% parity");
 }

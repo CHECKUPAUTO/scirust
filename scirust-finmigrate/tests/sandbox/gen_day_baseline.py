@@ -102,6 +102,20 @@ def scenarios():
         ("half_year", P, R, (2023, 1, 10), (2023, 7, 10)),       # 180
         # A rounding-sensitive interest amount: 100000*0.05*76/360 = 1055.5555..
         ("interest_rounding", P, R, (2023, 1, 15), (2023, 3, 31)),
+        # --- additional 31st / year-crossing / leap edges --------------------
+        # 31-Dec -> 31-Jan across a year: both 31 (rules 3+4) -> 30.
+        ("dec31_to_jan31", P, R, (2023, 12, 31), (2024, 1, 31)),
+        # 29-Feb (leap) -> 31-Mar same year: d1 not last-of-Feb rule? it IS
+        # last-of-Feb (leap) -> ad1=30, then d2=31 with ad1 in (30,31) -> ad2=30.
+        ("leap_feb29_to_mar31", P, R, (2024, 2, 29), (2024, 3, 31)),
+        # Multi-year span: exactly 3*360 = 1080 days.
+        ("multi_year_3", P, R, (2020, 1, 1), (2023, 1, 1)),
+        # --- boundary values -------------------------------------------------
+        # Zero rate -> zero interest regardless of the day count.
+        ("zero_rate", P, d("0.0000000"), (2023, 1, 15), (2023, 3, 31)),
+        # Negative principal (a credit) -> negative interest; signed field, the
+        # away-from-zero rounding must carry the sign.
+        ("negative_principal", d("-100000.00"), R, (2023, 1, 15), (2023, 3, 31)),
     ]
 
 

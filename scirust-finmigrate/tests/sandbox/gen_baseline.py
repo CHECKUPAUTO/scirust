@@ -122,6 +122,19 @@ def edge_cases() -> list[tuple[str, Decimal, Decimal]]:
 
         # --- an everyday posting ---------------------------------------------
         ("typical_savings", d("2500.75"), d("0.03500")),
+
+        # --- additional sign / boundary / tie edges --------------------------
+        # Double negative: -5000.00 * -0.04250 / 12 = +17.708333.. -> ROUNDED
+        # 17.71, trunc 17.70; new_balance -4982.29. Two negatives make a plus.
+        ("neg_principal_neg_rate", d("-5000.00"), d("-0.04250")),
+        # Near-max principal with a real rate: 900000000.00 * 0.09999 / 12 =
+        # 7499250.00 EXACTLY -> new_balance 907499250.00, still < PIC ceiling.
+        ("near_max_principal_high_rate", d("900000000.00"), d("0.09999")),
+        # Negative half-cent tie: -100.00 * 0.00180 / 12 = -0.015 -> ROUNDED
+        # -0.02 (away from zero), truncation -0.01. Mirrors the positive tie.
+        ("half_cent_negative_up", d("-100.00"), d("0.00180")),
+        # Tiny negative principal: interest underflows to zero, balance = -0.01.
+        ("tiny_negative", d("-0.01"), d("0.10000")),
     ]
 
 

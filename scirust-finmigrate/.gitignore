@@ -1,0 +1,5 @@
+# audit_trail.log is a committed deliverable of the COBOL->Rust migration audit
+# (the chronological decision record referenced by audit_report.md), not a
+# transient build log. Override the repo-root `*.log` ignore for this one file so
+# the trail is actually versioned and tamper-visible in review.
+!audit_trail.log

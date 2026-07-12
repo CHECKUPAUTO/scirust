@@ -75,6 +75,6 @@ fn brkt_equivalence_against_golden_baseline() {
         }
         checked += 1;
     }
-    assert_eq!(checked, 9, "expected 9 scenarios");
+    assert_eq!(checked, 14, "expected 14 scenarios");
     eprintln!("brkt equivalence: {checked} scenarios at 100% parity");
 }

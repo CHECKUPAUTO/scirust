@@ -1,0 +1,324 @@
+# INTACCR migration — audit trail
+# Append-only decision log. Format: [YYYY-MM-DD] TAG: entry
+# Companion to audit_report.md (gap analysis) and cobol/SEMANTICS.md (contract).
+
+[2026-07-11] SANDBOX: Established tests/sandbox/. gen_baseline.py encodes the
+    COBOL contract (cobol/SEMANTICS.md) in Python `decimal` (no binary float).
+    Deterministic (fixed seed 20260711). Emits dataset.csv (11 documented edge
+    cases + 64 pseudo-random rows), golden_baseline.csv, and a SHA-256.
+
+[2026-07-11] BASELINE: Golden Baseline is MODEL-DERIVED, not compiler-derived —
+    no `cobc` is available in this sandbox. This is disclosed in audit_report.md
+    §5 and cobol/SEMANTICS.md "Gate note". Equivalence claims are therefore
+    "equivalent to the documented semantic model" until the production gate
+    (live `cobc` run) is cleared. NOT eligible for production sign-off yet.
+
+[2026-07-11] RESEARCH: Legacy semantics verified against authoritative sources
+    (cited in audit_report.md §6):
+      * IBM Enterprise COBOL 6.4 ROUNDED phrase — bare ROUNDED increments the LSD
+        when the excess digit >= 5 => NEAREST-AWAY-FROM-ZERO (round half up in
+        magnitude, sign-aware). Confirms Gap-3 mitigation. NOT banker's rounding.
+      * IBM intermediate precision — fixed-point intermediates cap at 30 digits
+        (compat) / 31 (extended). Model uses 38; residual risk logged as Gap-6.
+      * IBM APAR PH64936 — COBOL arithmetic rounding/truncation is
+        compiler-version-dependent. Reinforces the mandatory live-baseline gate.
+      * COMP-3 layout confirmed: BCD, 2 digits/byte, sign nibble C/F=+, D=-,
+        decimal-exact. Confirms Gap-1 (use Decimal, never float).
+
+[2026-07-11] DECISION: Money type = rust_decimal::Decimal. Rationale: COMP-3 is
+    decimal-exact; f64 would inject base-2 error at the cent level. Trade-off:
+    Decimal is slower than f64 — irrelevant for a batch posting job, mandatory
+    for correctness. MANDATORY CONSTRAINT honored: zero f32/f64 in the money path.
+
+[2026-07-11] DECISION: Rounding = MidpointAwayFromZero for ROUNDED, ToZero for
+    the default (truncating) COMPUTE. Discriminators: half_cent_positive
+    (0.005->0.01), half_cent_up_from_even (0.025->0.03, banker's would give 0.02),
+    half_cent_negative (-0.005->-0.01). A banker's-rounding port would fail these.
+
+[2026-07-11] DECISION: Single rounding event at field store; intermediate carried
+    at full Decimal precision (Gap-4). Note: rust_decimal has 28 significant
+    digits vs the model's 38 — empirically the 2-dp result matched on all 75 rows,
+    so the difference does not bite this dataset. Re-check if inputs widen.
+
+[2026-07-11] DECISION: Size-error handling diverges from legacy DELIBERATELY.
+    Legacy has no ON SIZE ERROR => silent high-order truncation. Port returns
+    AccrualError::SizeError instead (Gap-5). REQUIRES business sign-off before
+    production: it converts a silent-wrong into a loud-stop. Sandbox inputs are
+    bounded (|principal| <= 900,000,000.00, and a generation-time assertion
+    guarantees no stored field overflows) so the equivalence set never exercises
+    this branch; it is proven separately in the unit test
+    size_error_on_overflow_instead_of_silent_truncation.
+
+[2026-07-11] TDM RED: Wrote tests/equivalence.rs FIRST, against a zero-returning
+    stub src/lib.rs. `cargo test -p scirust-finmigrate` FAILED as required:
+      DIVERGENCE in `monthly_int` for case `half_cent_positive`:
+        got 0, want 0.01, |Δ|=0.01 (> tolerance 1e-10)
+    2 failed / 0 passed. Red observed and recorded.
+
+[2026-07-11] SANDBOX FIX: During TDM found a self-inflicted defect — the original
+    random fill and the `near_max_principal` edge case could produce a
+    new_balance that overflows PIC S9(9)V99 (e.g. 1000000833.32), contradicting
+    Gap-5's "bounded inputs" promise. Tightened the random-fill bound and replaced
+    that edge case with `max_principal_zero_rate` / `large_principal_in_range`,
+    plus a generation-time overflow assertion. Baseline regenerated;
+    sha256 = 6eb91f27a64db06a510e8f212a5723c080252bab3f07c3bccf8fc3868630c3d0.
+
+[2026-07-11] TDM GREEN: Implemented the decimal port. `cargo test -p
+    scirust-finmigrate` PASSED: 8 unit + 2 equivalence (75/75 rows at exact
+    parity, deviation 0) + 1 doctest. 100% parity against the Golden Baseline.
+
+[2026-07-11] REVERSIBILITY: MigrationUnit dispatches Route::Rust | Route::Legacy
+    behind the AccrualBackend trait; set_route() reverses the migration at
+    runtime. LegacyAccrual is an explicit unimplemented!() slot — the real legacy
+    binding (FFI/service) is a deploy-time decision, not faked here.
+
+[2026-07-11] ERROR RECONSTRUCTION: Every MigrationUnit::run captures an
+    AccrualTrace (backend + exact inputs + ok flag). replay(&trace) deterministic-
+    ally reproduces the call in the sandbox. Proven by replay_reproduces_from_trace.
+
+[2026-07-11] STATUS: Phase 1 & 2 COMPLETE for INTACCR against the model baseline.
+    Phase 3 scaffolding in place. BLOCKING before production: regenerate the
+    baseline from a live target compiler (audit_report.md §5) and re-diff.
+
+# ============================================================================
+# UNIT 2 — AMORTSCH (loan amortization schedule)
+# ============================================================================
+
+[2026-07-11] SANDBOX: Added tests/sandbox/gen_amort_baseline.py (Python decimal,
+    no float), encoding cobol/SEMANTICS_AMORT.md. Emits amort_scenarios.csv
+    (7 documented scenarios) and amort_baseline.csv (per-period rows) + SHA-256
+    = ca387201019ec0e59e7b1d149e45d162b1748ff74375aee128f9496024606eb2.
+    Model-derived (no cobc); same production gate as INTACCR applies.
+
+[2026-07-11] DECISION: Scheduled payment is an INPUT, not derived from the
+    annuity formula P*i/(1-(1+i)^-n). Rationale: COBOL's ** operator evaluates
+    with FLOATING-POINT intermediates even inside a fixed-point COMPUTE, which
+    would import float into the money path and violate the mandate. Deriving the
+    payment is deferred to a separate unit with its own audit of that float
+    dependency (audit_report.md, AMORTSCH "Deliberate scope choice").
+
+[2026-07-11] DECISION: Reuse INTACCR's store_money_rounded / check_size
+    (exposed pub(crate)). One rounding event per period on the current balance;
+    principal split exact; final-payment reconciliation on `period == N OR
+    princ >= balance` -> princ := balance. The >= boundary and last-period test
+    are load-bearing (Gap-B). SizeError instead of legacy silent truncation
+    under runaway negative amortization (Gap-D), bounded out of the equivalence
+    set and proven separately.
+
+[2026-07-11] TDM RED: Wrote tests/amort_equivalence.rs first, against a stub
+    amort::amortize returning an empty Vec. cargo test --test amort_equivalence
+    FAILED on row-count mismatch (0 vs baseline). Red recorded.
+
+[2026-07-11] TDM GREEN: Implemented src/amort.rs. Full crate suite PASSED:
+    13 unit (8 INTACCR + 5 AMORTSCH) + amort equivalence (per-period parity,
+    row counts incl. early-payoff & neg-am) + INTACCR equivalence + no-float
+    guard + 2 doctests. Ending balance closes to exactly 0.00 on every
+    completed schedule.
+
+[2026-07-11] CORRECTION: The INTACCR audit_report claimed enforcement "by test
+    no_float_in_money_path", which did not exist. Made the claim true: added
+    tests/no_float_guard.rs, which greps src/lib.rs + src/amort.rs for f32/f64
+    (skipping comments) and fails if either appears. Reworded the report to
+    describe the actual guard.
+
+[2026-07-11] STATUS: Phase 1 & 2 COMPLETE for AMORTSCH against the model
+    baseline; reuses INTACCR's Phase 3 scaffolding. BLOCKING before production:
+    regenerate amort_baseline.csv from a live target compiler and re-diff.
+
+# ============================================================================
+# UNIT 3 — PAYCALC (annuity payment)
+# ============================================================================
+
+[2026-07-11] RESEARCH: COBOL exponentiation semantics verified (cited in
+    SEMANTICS_PAY.md): integer power => "a succession of multiplications" in
+    FIXED-POINT; fractional/negative exponent => whole expression promoted to
+    LONG FLOATING POINT. This is the decisive fact for the unit.
+
+[2026-07-11] DECISION (Gap-E): Migrate the annuity payment using the
+    positive-integer form P*i*f/(f-1), f=(1+i)^n, NOT the textbook
+    P*i/(1-(1+i)^-n). The negative-exponent form would evaluate in IEEE-754
+    double (importing float into the money path, violating the mandate); the
+    integer-power form stays fixed-point decimal and is algebraically identical.
+    A real migration decision, documented — not a mechanical transliteration.
+
+[2026-07-11] DECISION (Gap-F): Stage WS-FACTOR at a fixed 9 dp (single rounding
+    event) so the repeated-multiply chain's result is insensitive to the
+    compiler-specific intermediate cap (IBM 30/31 vs rust_decimal 28 sig digits).
+    Bounds n<=120, i<=0.05 keep f<=~372, well inside both. Empirically the
+    28-digit and 38-digit models produce identical 9-dp factors on all scenarios.
+
+[2026-07-11] DECISION (Gap-G): Zero-rate special case = straight-line
+    principal/num_periods (matches legacy IF WS-RATE = ZERO; avoids f-1=0
+    divide). num_periods=0 (outside the 9(3) >=1 domain) => SizeError, not a
+    divide-by-zero.
+
+[2026-07-11] AUDIT EVIDENCE: gen_pay_baseline.py computes the payment BOTH
+    decimal-native and legacy-float (IEEE-754), asserting equality at the cent
+    for all 8 scenarios. Proves the float->decimal swap does not change the
+    customer's payment. Float path lives only in the oracle; the shipped port is
+    decimal-only (no_float_guard now covers src/paycalc.rs).
+
+[2026-07-11] TDM RED: Wrote tests/pay_equivalence.rs first, against a stub
+    paycalc::payment returning zeros. FAILED (factor got 0, want 1.283361235).
+
+[2026-07-11] TDM GREEN: Implemented src/paycalc.rs. Full crate suite PASSED:
+    18 unit (8 INTACCR + 5 AMORTSCH + 5 PAYCALC) + 3 equivalence proofs +
+    no-float guard + 3 doctests. Composition proof: PAYCALC's payment amortizes
+    to exactly 0.00 in AMORTSCH.
+
+[2026-07-11] STATUS: Phase 1 & 2 COMPLETE for PAYCALC against the model
+    baseline. BLOCKING before production: regenerate pay_baseline.csv from a live
+    target compiler and re-diff. sha256(pay_baseline.csv) recorded in
+    tests/sandbox/pay_baseline.sha256.
+
+# ============================================================================
+# UNIT 4 — DAYCOUNT (30/360 US accrued interest)
+# ============================================================================
+
+[2026-07-11] RESEARCH: 30/360 US day count verified against Wikipedia (Day count
+    convention) / SIFMA. Ordered rules: (1) both D1,D2 last-day-of-Feb => D2=30;
+    (2) D1 last-day-of-Feb => D1=30; (3) D2=31 and D1 in {30,31} => D2=30;
+    (4) D1=31 => D1=30. Formula 360*(Y2-Y1)+30*(M2-M1)+(D2-D1). Key finding: the
+    SIFMA/NASD bond basis (with the Feb rules) differs from Excel DAYS360
+    (without them) by several days around Feb month-ends.
+
+[2026-07-11] DECISION (Gap-H): Implement the NASD bond basis (US corporate-bond
+    standard). Record the Excel DAYS360 count alongside in the baseline as audit
+    evidence; 3/10 scenarios diverge (e.g. 28-Feb->31-Aug: NASD 180 vs Excel
+    183 = $41.67 on $100k@5%). Equivalence test pins the NASD value AND the
+    Rust-level day count so the divergence is a checked fact, not prose.
+
+[2026-07-11] DECISION (Gap-I/J): Reproduce the rule order verbatim with Feb flags
+    from original dates and rule 3's "30 or 31" clause (else 31-Jan->31-Mar = 61
+    not 60). Leap rule y%4==0 && (y%100!=0 || y%400==0) (1900 not leap, 2000 is).
+
+[2026-07-11] TDM RED: Wrote tests/day_equivalence.rs first, against a stub
+    returning zeros. FAILED on feb_eom_nonleap NASD day count (0 vs 180).
+
+[2026-07-11] TDM GREEN: Implemented src/daycount.rs. Full crate suite PASSED:
+    23 unit (8 INTACCR + 5 AMORTSCH + 5 PAYCALC + 5 DAYCOUNT) + 4 equivalence
+    proofs + no-float guard (now covering src/daycount.rs) + 4 doctests.
+
+[2026-07-11] STATUS: Phase 1 & 2 COMPLETE for DAYCOUNT against the model
+    baseline. BLOCKING before production: regenerate day_baseline.csv from a live
+    target compiler and re-diff. sha256 in tests/sandbox/day_baseline.sha256.
+
+# ============================================================================
+# UNIT 5 — BRKTCALC (progressive bracketed tax)
+# ============================================================================
+
+[2026-07-11] SANDBOX: Added gen_brkt_baseline.py (Python decimal, no float),
+    encoding cobol/SEMANTICS_BRKT.md (OCCURS bracket table + marginal arithmetic).
+    Emits brkt_scenarios.csv + brkt_baseline.csv (tax, flat_tax, effective_pct)
+    + SHA-256 = bcf7961706ad3caad00ab1bbf1d856f75be1ef63a0bacbaccc835466eb4130f8.
+
+[2026-07-11] DECISION (Gap-L..O): Reproduce the COBOL table walk with MARGINAL
+    slices, min/max boundary clamps ((lower .. lower+1] inclusivity), full-
+    precision accumulation and a SINGLE final ROUNDED store. Record the WRONG
+    flat top-rate tax as audit evidence; equivalence test asserts marginal < flat
+    past the first bracket. Negative base => SizeError (base is >= 0 by contract).
+
+[2026-07-11] TDM RED: Wrote tests/brkt_equivalence.rs first, against a stub
+    returning zeros. FAILED (in_zero_bracket flat_tax 0 vs 1600.00).
+
+[2026-07-11] TDM GREEN: Implemented src/brktcalc.rs. Full crate suite PASSED:
+    32 unit (8+5+5+5+6 incl. 3 audit) + 5 equivalence proofs + no-float guard
+    (now covering src/brktcalc.rs) + doctests. finaudit: 5 units / 196 rows /
+    21 gaps / VERDICT PASS.
+
+[2026-07-11] STATUS: Phase 1 & 2 COMPLETE for BRKTCALC against the model
+    baseline. BLOCKING before production: regenerate brkt_baseline.csv from a
+    live target compiler and re-diff. sha256 in brkt_baseline.sha256.
+
+# ============================================================================
+# UNIT 6 — CURRCVT (euro conversion by triangulation, EC 1103/97)
+# ============================================================================
+
+[2026-07-11] RESEARCH: EC Regulation 1103/97 verified (cited in SEMANTICS_CURR.md):
+    rates = 1 euro in national currency at SIX SIGNIFICANT FIGURES, never
+    rounded/truncated when converting; national<->national MUST triangulate via
+    the euro; the intermediate euro is rounded to NOT LESS THAN 3 decimals; a
+    direct cross-rate is lawful only if it equals the triangulated result.
+
+[2026-07-11] DECISION (Gap-P..S): Implement lawful triangulation: euro =
+    ROUND(amount/rate_from, 3); result = ROUND(euro*rate_to, minor(to)); both
+    NEAREST-AWAY-FROM-ZERO. Record the WRONG direct cross-rate as audit evidence
+    (2/10 scenarios diverge by a minor unit, e.g. 100 DEM->FRF: 335.38 lawful vs
+    335.39 direct). Variable target minor unit (ITL/ESP = 0 dp). Unknown currency
+    => AccrualError::UnknownCurrency (new variant). Intermediate-euro precision
+    (3 dp) is a GATE item (Gap-Q), like INTACCR Gap-6.
+
+[2026-07-11] TDM RED: Wrote tests/curr_equivalence.rs first, against a stub
+    returning zeros. FAILED (dem_to_frf result 0 vs 335.38; unknown-currency
+    test also red).
+
+[2026-07-11] TDM GREEN: Implemented src/currcvt.rs. Full crate suite PASSED:
+    36 unit + 6 equivalence proofs + no-float guard (now covering src/currcvt.rs)
+    + doctests. finaudit: 6 units / 206 rows / 25 gaps / VERDICT PASS.
+
+[2026-07-11] STATUS: Phase 1 & 2 COMPLETE for CURRCVT against the model baseline.
+    BLOCKING before production: regenerate curr_baseline.csv from a live target
+    compiler AND confirm the intermediate-euro precision (Gap-Q). sha256 in
+    curr_baseline.sha256.
+
+[2026-07-12] COMPILER EVIDENCE: Ran all six units through a live GnuCOBOL 3.1.2
+    compiler (tests/compiler-derived/gnucobol-3.1.2). Five units + the seven
+    same-scale CURRCVT rows matched the model baseline exactly. GnuCOBOL exposed
+    ONE real COBOL-vs-model divergence: the CURRCVT COBOL as written stored its
+    result in a fixed 2-dp field (WS-RESULT PIC S9(11)V99) and did NOT implement
+    Gap-R (variable target minor unit). Raw COBOL: frf_to_itl 295182.43,
+    dem_to_esp 21267.96, esp_to_itl 581860.75 — each a minor unit off the model's
+    295182 / 21268 / 581861. The audit had flagged exactly this risk (Gap-R:
+    "a port that hard-codes 2 dp mis-rounds every lira/peseta amount").
+
+[2026-07-12] DECISION (Gap-R reconciliation): Correct the legacy COBOL to be
+    regulation-compliant rather than propagate the defect. cobol/CURRCVT.cbl (and
+    its normalized copy and the -RUN wrapper) now carry WS-MINOR-UNIT (0 for
+    ITL/ESP, 2 otherwise, from the currency master) and round into a result field
+    of the matching scale: WS-RESULT-0 PIC S9(13) for 0-dp targets, WS-RESULT-2
+    PIC S9(11)V99 otherwise. This mirrors the model's minor(to) lookup. Rationale:
+    SEMANTICS_CURR.md and EC 1103/97 make the 0-dp target minor unit mandatory;
+    the fixed 2-dp field was a genuine legacy bug, and closing it in the COBOL
+    (not just the Rust port) makes COBOL, model and Rust concordant. Historical
+    trace preserved here and in RESULTS.md. Reversible: revert this commit to
+    restore the fixed-2dp wrapper and the 3-row documented divergence.
+
+[2026-07-12] VALIDATION: Regenerated CURRCVT-compiler-baseline.csv via the
+    deterministic driver (tools/run_baselines.py generate). run_baselines.py
+    verify = 1179 field comparisons, 0 mismatches vs live GnuCOBOL. check = 859
+    comparisons, 0 unexpected mismatches, 0 divergences (Gap-R exception set now
+    explicitly empty). Normalization invariant re-checked: canonical CURRCVT.cbl
+    is character-identical (comments/whitespace/case stripped) to the normalized
+    source. SHA256SUMS regenerated; sha256sum -c all OK.
+
+# ============================================================================
+# COVERAGE EXPANSION — edge cases across all six units
+# ============================================================================
+
+[2026-07-12] DECISION: Widen the scenario sets with bounds, negative amounts and
+    rounding-limit cases (the three classes most likely to hide a migration
+    defect), extending each unit's generator scenarios() list. Added:
+    - INTACCR (75->79): double-negative principal&rate, near-max principal at a
+      high rate (new_balance just under the PIC ceiling), negative half-cent tie,
+      tiny negative principal (interest underflows to zero).
+    - AMORTSCH (94->105 rows): two-period clean payoff, near-max principal across
+      3 periods, per-period interest rounding tie.
+    - PAYCALC (8->12): max rate & max periods together, low rate over 120 periods,
+      large principal at 5 yr, zero-rate single period. The decimal==float
+      cross-check held for all 12 rows (no arithmetic-swap divergence).
+    - DAYCOUNT (10->15): 31-Dec->31-Jan across a year, leap 29-Feb->31-Mar, a
+      3-year (1080-day) span, zero rate, negative principal (signed interest).
+    - BRKTCALC (9->14): exact 85k and 165k boundaries, one cent either side of a
+      boundary, a rounding tie one cent into bracket 1.
+    - CURRCVT (10->14): zero amount, negative amount (sign through triangulation),
+      IEP->ITL (rate<1 source into a 0-dp target), large DEM->ITL whole-lira.
+
+[2026-07-12] VALIDATION: Regenerated all model baselines (finaudit PASS: 6 units,
+    239 baseline rows, all digests verify) and all compiler baselines via the
+    driver. run_baselines.py verify = 1347 field comparisons, 0 mismatches vs
+    live GnuCOBOL; check = 975 comparisons, 0 unexpected, 0 divergences. Every
+    new bound/negative/tie case is COBOL<->model equivalent — including the
+    negatives (INTACCR, DAYCOUNT, CURRCVT) and the reconciled 0-dp Gap-R pairs
+    (iep_to_itl, large_dem_to_itl). Rust equivalence tests updated for the new
+    counts (brkt 14, curr 14, day 15); full suite + no-float guard PASS.
+    SHA256SUMS regenerated; sha256sum -c all OK.

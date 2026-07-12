@@ -79,6 +79,14 @@ def scenarios() -> list[tuple[str, Decimal, Decimal, int]]:
         ("single_period", d("5000.00"), d("0.0041667"), 1),
         ("long_120", d("50000.00"), d("0.0033333"), 120),
         ("small_principal", d("100.00"), d("0.0100000"), 36),
+        # --- bounds: max rate & max periods together -------------------------
+        ("max_rate_max_periods", d("1000.00"), d("0.0500000"), 120),
+        # --- low positive rate over the full horizon -------------------------
+        ("low_rate_long", d("10000.00"), d("0.0010000"), 120),
+        # --- large principal, still within the payment field -----------------
+        ("large_principal_5yr", d("500000.00"), d("0.0025000"), 60),
+        # --- zero rate, single period: payment == principal ------------------
+        ("single_zero_rate", d("1000.00"), d("0.0000000"), 1),
     ]
 
 

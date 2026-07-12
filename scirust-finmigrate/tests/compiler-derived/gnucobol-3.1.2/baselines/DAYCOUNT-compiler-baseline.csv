@@ -9,3 +9,8 @@ same_date,0,0.00
 full_year,360,5000.00
 half_year,180,2500.00
 interest_rounding,76,1055.56
+dec31_to_jan31,30,416.67
+leap_feb29_to_mar31,30,416.67
+multi_year_3,1080,15000.00
+zero_rate,76,0.00
+negative_principal,76,-1055.56
