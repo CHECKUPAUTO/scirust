@@ -27,6 +27,20 @@
 //! correction. Le chemin AMX est compilé et prêt (drop-in matériel) ; il
 //! s'exécute dès qu'une puce AMX est présente.
 //!
+//! ## Mono-thread par conception
+//!
+//! Ces GEMM sont **volontairement mono-thread**. Une variante multi-thread (M
+//! découpé en blocs de lignes, un GEMM AMX par thread) a été prototypée et s'est
+//! révélée **non déterministe sur plateforme virtualisée** : le noyau par-thread
+//! est prouvé correct (le mono-thread coïncide *toujours* avec le scalaire), mais
+//! sous concurrence l'état de tuiles `XTILEDATA` (8 Kio de `XSAVE`) est
+//! occasionnellement corrompu au changement de contexte (~0,1 % des exécutions,
+//! mesuré) — un défaut de sauvegarde/restauration AMX de la couche
+//! d'hypervisor, non corrigeable en espace utilisateur. On n'expose donc pas de
+//! GEMM AMX parallèle : livrer un produit matriciel faux 1 fois sur 1000 serait
+//! un bug latent grave. Le parallélisme reste disponible via le GEMM `f32`
+//! ([`crate::gemm::sgemm_parallel`], SIMD classique, fiable).
+//!
 //! ## Safety
 //!
 //! Les fonctions `#[target_feature(enable = "amx-int8,amx-tile")]` ne sont
@@ -48,17 +62,23 @@ pub fn amx_matmul_i8(a: &[i8], b: &[i8], m: usize, k: usize, n: usize) -> Vec<i3
     assert_eq!(a.len(), m * k, "amx_matmul_i8: A shape mismatch");
     assert_eq!(b.len(), k * n, "amx_matmul_i8: B shape mismatch");
     let mut c = vec![0i32; m * n];
+    matmul_i8_into(a, b, m, k, n, &mut c);
+    c
+}
+
+/// Aiguillage int8 dans un tampon `C` fourni : AMX tuilé si utilisable, sinon
+/// scalaire.
+fn matmul_i8_into(a: &[i8], b: &[i8], m: usize, k: usize, n: usize, c: &mut [i32]) {
     #[cfg(target_arch = "x86_64")]
     {
         if amx_int8_usable()
         {
             // SAFETY: ISA AMX détectée + permission noyau obtenue (amx_int8_usable).
-            unsafe { amx_matmul_i8_tiled(a, b, m, k, n, &mut c) };
-            return c;
+            unsafe { amx_matmul_i8_tiled(a, b, m, k, n, c) };
+            return;
         }
     }
-    matmul_i8_scalar_into(a, b, m, k, n, &mut c);
-    c
+    matmul_i8_scalar_into(a, b, m, k, n, c);
 }
 
 /// Référence scalaire de [`amx_matmul_i8`] (aussi l'oracle des tests).
@@ -199,10 +219,18 @@ unsafe fn amx_matmul_i8_tiled(a: &[i8], b: &[i8], m: usize, k: usize, n: usize, 
             while kb < k
             {
                 let kr = MAX_K.min(k - kb);
+                // Un bloc **plein** (`kr == MAX_K`) réécrit intégralement les
+                // tampons ⇒ pas de remise à zéro (économise deux `fill` de 1 Kio
+                // par tuile, le cas courant). Seuls les blocs `K` **partiels** (le
+                // dernier) ont besoin du zéro-padding.
+                let partial = kr < MAX_K;
 
                 // Pack A : mr lignes × 64 octets (stride fixe MAX_K), zéro au-delà
                 // de kr.
-                a_buf.fill(0);
+                if partial
+                {
+                    a_buf.fill(0);
+                }
                 for i in 0..mr
                 {
                     for p in 0..kr
@@ -212,7 +240,10 @@ unsafe fn amx_matmul_i8_tiled(a: &[i8], b: &[i8], m: usize, k: usize, n: usize, 
                 }
                 // Pack B VNNI : b_buf[p*stride_b + 4*j + r] = B[kb + 4p+r][nb+j],
                 // lignes au-delà de ceil(kr/4) laissées à zéro.
-                b_buf.fill(0);
+                if partial
+                {
+                    b_buf.fill(0);
+                }
                 let kp = kr.div_ceil(4);
                 for p in 0..kp
                 {
@@ -307,17 +338,23 @@ pub fn amx_matmul_bf16(a: &[u16], b: &[u16], m: usize, k: usize, n: usize) -> Ve
     assert_eq!(a.len(), m * k, "amx_matmul_bf16: A shape mismatch");
     assert_eq!(b.len(), k * n, "amx_matmul_bf16: B shape mismatch");
     let mut c = vec![0f32; m * n];
+    matmul_bf16_into(a, b, m, k, n, &mut c);
+    c
+}
+
+/// Aiguillage bf16 dans un tampon `C` fourni : AMX tuilé si utilisable, sinon
+/// scalaire.
+fn matmul_bf16_into(a: &[u16], b: &[u16], m: usize, k: usize, n: usize, c: &mut [f32]) {
     #[cfg(target_arch = "x86_64")]
     {
         if amx_bf16_usable()
         {
             // SAFETY: ISA AMX bf16 détectée + permission noyau obtenue.
-            unsafe { amx_matmul_bf16_tiled(a, b, m, k, n, &mut c) };
-            return c;
+            unsafe { amx_matmul_bf16_tiled(a, b, m, k, n, c) };
+            return;
         }
     }
-    matmul_bf16_scalar_into(a, b, m, k, n, &mut c);
-    c
+    matmul_bf16_scalar_into(a, b, m, k, n, c);
 }
 
 /// Référence scalaire de [`amx_matmul_bf16`] (aussi l'oracle des tests) :
@@ -403,8 +440,14 @@ unsafe fn amx_matmul_bf16_tiled(a: &[u16], b: &[u16], m: usize, k: usize, n: usi
             while kb < k
             {
                 let kr = MAX_K_BF16.min(k - kb);
+                // Idem int8 : seuls les blocs `K` partiels ont besoin du zéro-
+                // padding ; un bloc plein réécrit tout le tampon.
+                let partial = kr < MAX_K_BF16;
 
-                a_buf.fill(0);
+                if partial
+                {
+                    a_buf.fill(0);
+                }
                 for i in 0..mr
                 {
                     for p in 0..kr
@@ -413,7 +456,10 @@ unsafe fn amx_matmul_bf16_tiled(a: &[u16], b: &[u16], m: usize, k: usize, n: usi
                     }
                 }
                 // Pack B VNNI bf16 : b_buf[p*(nr*2) + 2*j + r] = B[kb + 2p+r][nb+j].
-                b_buf.fill(0);
+                if partial
+                {
+                    b_buf.fill(0);
+                }
                 let kp = kr.div_ceil(2);
                 for p in 0..kp
                 {
@@ -455,11 +501,22 @@ unsafe fn amx_matmul_bf16_tiled(a: &[u16], b: &[u16], m: usize, k: usize, n: usi
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use super::*;
     use crate::quant::f32_to_bf16;
 
+    /// Sérialise l'**exécution** des tests qui touchent AMX : `cargo test` lance
+    /// les fonctions de test en parallèle, et faire tourner des instructions de
+    /// tuiles depuis plusieurs threads simultanément corrompt l'état `XTILEDATA`
+    /// sur plateforme virtualisée (cf. la note « mono-thread par conception » du
+    /// module). Un seul thread AMX à la fois ⇒ tests déterministes. `into_inner`
+    /// ignore l'empoisonnement (un échec d'assertion ne doit pas cascader).
+    static AMX_LOCK: Mutex<()> = Mutex::new(());
+
     #[test]
     fn amx_matmul_matches_scalar_or_falls_back() {
+        let _guard = AMX_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         // Sur cette machine sans AMX, `amx_matmul_i8` prend le repli scalaire ;
         // sur une puce AMX, le chemin tuilé. Les deux doivent coïncider avec la
         // référence indépendante — formes couvrant plusieurs tuiles (M/N > 16,
@@ -496,6 +553,7 @@ mod tests {
 
     #[test]
     fn qlinear_i8_matches_reference() {
+        let _guard = AMX_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         // Déquantification par canal + biais au-dessus du GEMM AMX/scalaire.
         for &(m, k, n) in &[(1usize, 1usize, 1usize), (4, 6, 3), (18, 70, 20)]
         {
@@ -537,6 +595,7 @@ mod tests {
 
     #[test]
     fn amx_bf16_matches_scalar_or_falls_back() {
+        let _guard = AMX_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         // Chemin AMX bf16 (si présent) ou repli scalaire — dans les deux cas,
         // coïncidence avec la référence indépendante (bf16→f32). Formes couvrant
         // plusieurs tuiles (M/N > 16, K > 32) et bords partiels. Tolérance bf16.
