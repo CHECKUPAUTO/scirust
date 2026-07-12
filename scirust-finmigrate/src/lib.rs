@@ -23,6 +23,7 @@ use rust_decimal::{Decimal, RoundingStrategy};
 
 pub mod amort;
 pub mod audit;
+pub mod brktcalc;
 pub mod daycount;
 pub mod paycalc;
 
