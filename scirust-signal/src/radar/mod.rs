@@ -18,7 +18,8 @@
 //! stage — CFAR over the range-Doppler map followed by clustering of the
 //! detections into target centroids — and [`track`] for the temporal layer that
 //! associates those centroids across frames and smooths them with α–β track
-//! filters.
+//! filters, with [`kalman`] adding a full constant-velocity Kalman filter and
+//! an Interacting-Multiple-Model estimator for manoeuvring targets.
 
 pub mod ambiguity;
 pub mod beamform;
@@ -28,6 +29,7 @@ pub mod doa;
 pub mod doppler;
 pub mod esprit;
 pub mod fmcw;
+pub mod kalman;
 pub mod matched_filter;
 pub mod mti;
 pub mod music;
@@ -42,6 +44,7 @@ pub use doa::{covariance, mvdr_spectrum};
 pub use doppler::{doppler_spectrum, range_doppler_map};
 pub use esprit::esprit_doa;
 pub use fmcw::{beat_frequency_to_range, range_doppler, range_profile, range_resolution};
+pub use kalman::{Imm, KalmanCV};
 pub use matched_filter::{cross_correlate, peak_lag, peak_to_sidelobe};
 pub use mti::mti_canceller;
 pub use music::music_spectrum;

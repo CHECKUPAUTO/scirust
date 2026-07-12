@@ -5,6 +5,29 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : radar — filtrage de Kalman / IMM (`radar::kalman`) — bloc 19
+Montée en gamme du pistage : le filtre α–β à gains fixes est complété par un
+filtre de Kalman adaptatif et un estimateur multi-modèles pour cibles
+manœuvrantes.
+- **`KalmanCV`** — filtre de Kalman à vitesse constante sur l'état `(p, v)` avec
+  covariance `2×2` explicite : modèle de bruit de process à accélération blanche
+  continue `Q = q·[[dt³/3, dt²/2],[dt²/2, dt]]`, gain adaptatif, variance d'état
+  et vraisemblance de l'innovation exposées.
+- **`Imm`** — estimateur **Interacting Multiple Model** : un banc de filtres de
+  Kalman (typiquement un modèle « calme » à faible bruit et un modèle « agile »
+  à fort bruit) mélangés à chaque trame par des probabilités de mode
+  markoviennes. En vol stationnaire le modèle calme domine (lisse, faible
+  variance) ; dès la manœuvre la vraisemblance du modèle agile l'emporte et
+  prend le relais, suivant la manœuvre avec bien moins de retard qu'un modèle
+  fixe. Sans dépendance (état 2-D, tout en forme fermée `2×2`).
+- Oracles : Kalman restitue la vitesse constante, la mise à jour réduit la
+  variance vers un régime permanent, la vraisemblance est maximale à la
+  prédiction ; les probabilités de mode IMM forment une distribution valide et
+  **favorisent le modèle calme sur cible stable** ; l'IMM **bat un filtre calme
+  seul à travers une manœuvre** (erreur moindre, montée de la probabilité du
+  modèle agile) ; garde du banc vide. 7 tests (175 au total pour le crate) ;
+  `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-signal` : radar — goniométrie ESPRIT (`radar::esprit`) — bloc 18
 Estimation d'angle d'arrivée **sans grille** : complément de MUSIC qui, au lieu
 de balayer un spectre, lit les angles directement sur les valeurs propres.
