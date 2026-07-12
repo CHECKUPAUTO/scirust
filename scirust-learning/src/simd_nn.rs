@@ -271,6 +271,154 @@ impl Mlp {
     }
 }
 
+/// État Adam d'une couche (moments d'ordre 1 et 2 pour `W` et `b`).
+#[derive(Clone, Debug)]
+struct AdamLayerState {
+    m_w: Vec<f32>,
+    v_w: Vec<f32>,
+    m_b: Vec<f32>,
+    v_b: Vec<f32>,
+}
+
+/// Optimiseur **AdamW** (Adam + weight decay découplé) pour un [`Mlp`].
+///
+/// Maintient les moments `m`/`v` par paramètre, applique la correction de biais
+/// `m̂ = m/(1−β₁ᵗ)`, `v̂ = v/(1−β₂ᵗ)`, puis
+/// `θ ← θ − lr·m̂/(√v̂ + eps)`, avec un **weight decay découplé** `θ ← θ − lr·wd·θ`
+/// appliqué aux **poids** uniquement (pas aux biais), comme AdamW. `wd = 0`
+/// redonne Adam standard.
+#[derive(Clone, Debug)]
+pub struct AdamW {
+    pub lr: f32,
+    pub beta1: f32,
+    pub beta2: f32,
+    pub eps: f32,
+    pub weight_decay: f32,
+    t: u64,
+    state: Vec<AdamLayerState>,
+}
+
+impl AdamW {
+    /// Nouvel optimiseur dimensionné pour `mlp` (moments à zéro).
+    pub fn new(mlp: &Mlp, lr: f32, beta1: f32, beta2: f32, eps: f32, weight_decay: f32) -> Self {
+        let state = mlp
+            .layers
+            .iter()
+            .map(|l| AdamLayerState {
+                m_w: vec![0.0; l.w.len()],
+                v_w: vec![0.0; l.w.len()],
+                m_b: vec![0.0; l.b.len()],
+                v_b: vec![0.0; l.b.len()],
+            })
+            .collect();
+        Self {
+            lr,
+            beta1,
+            beta2,
+            eps,
+            weight_decay,
+            t: 0,
+            state,
+        }
+    }
+
+    /// Réglages usuels : `β₁=0.9`, `β₂=0.999`, `eps=1e-8`, `wd=0`.
+    pub fn default_for(mlp: &Mlp, lr: f32) -> Self {
+        Self::new(mlp, lr, 0.9, 0.999, 1e-8, 0.0)
+    }
+
+    /// Applique un pas AdamW à `mlp` à partir des gradients (ordre `0..L`).
+    pub fn step(&mut self, mlp: &mut Mlp, grads: &[DenseGrads]) {
+        assert_eq!(
+            grads.len(),
+            mlp.layers.len(),
+            "AdamW::step: un gradient par couche"
+        );
+        assert_eq!(
+            self.state.len(),
+            mlp.layers.len(),
+            "AdamW::step: état incohérent"
+        );
+        self.t += 1;
+        let bc1 = 1.0 - self.beta1.powi(self.t as i32);
+        let bc2 = 1.0 - self.beta2.powi(self.t as i32);
+
+        for (li, layer) in mlp.layers.iter_mut().enumerate()
+        {
+            let st = &mut self.state[li];
+            let g = &grads[li];
+            // Poids (avec weight decay découplé).
+            adam_update(
+                &mut layer.w,
+                &g.dw,
+                &mut st.m_w,
+                &mut st.v_w,
+                self.beta1,
+                self.beta2,
+                self.eps,
+                self.lr,
+                bc1,
+                bc2,
+                self.weight_decay,
+            );
+            // Biais (pas de weight decay).
+            adam_update(
+                &mut layer.b,
+                &g.db,
+                &mut st.m_b,
+                &mut st.v_b,
+                self.beta1,
+                self.beta2,
+                self.eps,
+                self.lr,
+                bc1,
+                bc2,
+                0.0,
+            );
+        }
+    }
+
+    /// Pas d'entraînement complet AdamW sur la MSE ; renvoie la perte **avant**
+    /// mise à jour.
+    pub fn train_step_mse(
+        &mut self,
+        mlp: &mut Mlp,
+        x: &[f32],
+        batch: usize,
+        target: &[f32],
+    ) -> f32 {
+        let (loss, grads) = mlp.mse_loss_and_grads(x, batch, target);
+        self.step(mlp, &grads);
+        loss
+    }
+}
+
+/// Mise à jour AdamW d'un tenseur de paramètres en place.
+#[allow(clippy::too_many_arguments)]
+fn adam_update(
+    theta: &mut [f32],
+    grad: &[f32],
+    m: &mut [f32],
+    v: &mut [f32],
+    beta1: f32,
+    beta2: f32,
+    eps: f32,
+    lr: f32,
+    bc1: f32,
+    bc2: f32,
+    weight_decay: f32,
+) {
+    for i in 0..theta.len()
+    {
+        let g = grad[i];
+        m[i] = beta1 * m[i] + (1.0 - beta1) * g;
+        v[i] = beta2 * v[i] + (1.0 - beta2) * g * g;
+        let mhat = m[i] / bc1;
+        let vhat = v[i] / bc2;
+        theta[i] -= lr * (mhat / (vhat.sqrt() + eps) + weight_decay * theta[i]);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -518,6 +666,102 @@ mod tests {
         assert!(
             last < loss0 * 0.5,
             "la loss n'a pas suffisamment décru : {loss0} -> {last}"
+        );
+    }
+
+    /// Jeu d'entraînement jouet : entrée fixe + cible = sortie d'un MLP
+    /// "enseignant" (donc atteignable). Renvoie (mlp initial, x, target).
+    fn toy_task() -> (Mlp, Vec<f32>, Vec<f32>) {
+        let mlp = make_mlp();
+        let batch = 16;
+        let x = mk(batch * 4, 7.0);
+        let teacher = {
+            let mut t = make_mlp();
+            for l in t.layers.iter_mut()
+            {
+                for w in l.w.iter_mut()
+                {
+                    *w *= 1.3;
+                }
+            }
+            t
+        };
+        let target = teacher.forward(&x, batch);
+        (mlp, x, target)
+    }
+
+    #[test]
+    fn adamw_reduces_loss() {
+        let (mut mlp, x, target) = toy_task();
+        let batch = 16;
+        let mut opt = AdamW::default_for(&mlp, 0.02);
+        let loss0 = mlp.mse_loss_and_grads(&x, batch, &target).0;
+        let mut last = loss0;
+        for _ in 0..200
+        {
+            last = opt.train_step_mse(&mut mlp, &x, batch, &target);
+        }
+        assert!(last.is_finite());
+        assert!(last < loss0 * 0.1, "AdamW loss {loss0} -> {last}");
+    }
+
+    #[test]
+    fn adamw_converges_faster_than_sgd() {
+        // Même tâche, même MLP initial, même budget d'itérations : AdamW doit
+        // atteindre une perte plus basse que le SGD.
+        let (mlp0, x, target) = toy_task();
+        let batch = 16;
+        let steps = 120;
+
+        // SGD.
+        let mut mlp_sgd = mlp0.clone();
+        let mut sgd_last = 0.0;
+        for _ in 0..steps
+        {
+            sgd_last = mlp_sgd.train_step_mse(&x, batch, &target, 0.05);
+        }
+
+        // AdamW (mêmes conditions initiales).
+        let mut mlp_adam = mlp0.clone();
+        let mut opt = AdamW::default_for(&mlp_adam, 0.02);
+        let mut adam_last = 0.0;
+        for _ in 0..steps
+        {
+            adam_last = opt.train_step_mse(&mut mlp_adam, &x, batch, &target);
+        }
+
+        assert!(
+            adam_last < sgd_last,
+            "AdamW ({adam_last}) devrait battre SGD ({sgd_last}) à budget égal"
+        );
+    }
+
+    #[test]
+    fn adamw_weight_decay_shrinks_weights() {
+        // Avec un gradient nul mais un weight decay > 0, les poids doivent
+        // décroître vers 0 (décroissance découplée d'AdamW).
+        let mut mlp = Mlp::new(vec![DenseLayer::new(
+            3,
+            2,
+            vec![1.0f32; 6],
+            vec![0.0f32; 2],
+            Act::Identity,
+        )]);
+        let mut opt = AdamW::new(&mlp, 0.1, 0.9, 0.999, 1e-8, 0.5);
+        let zero_grads = vec![DenseGrads {
+            dx: vec![0.0; 0],
+            dw: vec![0.0f32; 6],
+            db: vec![0.0f32; 2],
+        }];
+        let w_before = mlp.layers[0].w[0];
+        for _ in 0..10
+        {
+            opt.step(&mut mlp, &zero_grads);
+        }
+        let w_after = mlp.layers[0].w[0];
+        assert!(
+            w_after < w_before,
+            "weight decay : {w_before} -> {w_after} (devrait décroître)"
         );
     }
 }
