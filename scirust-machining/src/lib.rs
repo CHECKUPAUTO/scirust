@@ -40,6 +40,8 @@
 //!   mobilité et inconnues statiques (dualité avec [`torseurs`]).
 //! - [`hyperstatism`] — isostatisme/hyperstatisme d'un mécanisme : boucles
 //!   indépendantes, mobilité et degré d'hyperstaticité `h = m + 6μ − Ic`.
+//! - [`friction`] — frottement sec de **Coulomb** : adhérence/glissement, angle
+//!   et cône d'adhérence, arc-boutement sur plan incliné.
 //! - [`tolerancing`] — systèmes de tolérancement de dessin : tolérances
 //!   générales **ISO 2768** (parties 1 et 2) et catalogue des normes **GPS**.
 //!
@@ -87,6 +89,7 @@ pub mod bearings;
 pub mod belts;
 pub mod economics;
 pub mod forces;
+pub mod friction;
 pub mod gears;
 pub mod hertz;
 pub mod hyperstatism;
@@ -113,6 +116,10 @@ pub use belts::{
 };
 pub use economics::MachiningEconomics;
 pub use forces::{KienzleModel, cutting_power_kw, motor_power_kw, spindle_torque_nm};
+pub use friction::{
+    angle_of_repose_deg, friction_angle_deg, incline_self_locking, is_sliding, kinetic_friction,
+    max_static_friction, within_adhesion_cone,
+};
 pub use gears::{
     HelicalGear, SpurGear, center_distance, gear_ratio, lewis_bending_stress,
     minimum_teeth_no_undercut, pitch_line_velocity_m_s, tangential_force_from_power,
