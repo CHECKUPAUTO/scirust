@@ -1,3 +1,8 @@
+> **Production readiness:** the blocking exit criteria for shipping any unit
+> against real money are consolidated in [`PRODUCTION_GATES.md`](PRODUCTION_GATES.md).
+> The per-unit "production gate" sections below feed that single checklist.
+> Current status: **validated under GnuCOBOL 3.1.2, not production-certified.**
+
 # Pre-Migration Audit — INTACCR (Monthly Interest Accrual)
 
 **Unit:** `cobol/INTACCR.cbl` → `scirust-finmigrate::accrue`

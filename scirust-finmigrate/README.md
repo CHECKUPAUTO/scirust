@@ -25,6 +25,12 @@ It is the reference template for the migration protocol:
 > *No migration without audit, no audit without a sandbox, no code without
 > verified equivalence.*
 
+> ⚠️ **Not production-ready.** The units are validated under **GnuCOBOL 3.1.2**,
+> not the production IBM Enterprise COBOL / z/OS toolchain, and not against real
+> data with business sign-off. The blocking exit criteria are consolidated in
+> [`PRODUCTION_GATES.md`](PRODUCTION_GATES.md) — read it before deploying
+> anything here against real money.
+
 ## Layout
 
 | Path | Phase | What it is |
