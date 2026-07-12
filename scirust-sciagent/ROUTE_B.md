@@ -218,6 +218,23 @@ train/fine-tune/generate/speculative stack rides on top unchanged.
   epochs. A genuine from-scratch code LM, trained end-to-end in bf16 on Blackwell
   Tensor cores. Still early (val hadn't plateaued); more corpus + steps keep helping.
 
+- **B13 — quality-evaluation harness (put a number on it before scaling).**
+  `examples/cuda_eval` (feature `eval` = `cuda` + `syn`) + `CudaModel::eval_loss` turn
+  the eyeball test into measurement, the gate before spending more compute. It (1)
+  reports the exact loss picture — train loss (from the checkpoint meta) vs a freshly
+  measured **held-out val loss**, perplexity `exp(loss)`, and **nats/char** (`val_loss
+  / chars_per_token`, chars counted by decoding the val stream); (2) generates a
+  **deterministic batch** of N samples (same prompt, `seed = base + i`, reproducible);
+  and (3) scores them: **valid-UTF-8** rate (only < 100 % for byte models — a BPE
+  decode is UTF-8 by construction), **balanced `()[]{}`** rate (lexical), **`syn::
+  parse_file`** accept rate, an optional **`rustc --crate-type lib`** compile rate
+  (`SCIAGENT_RUSTC=1`), and **repetition/diversity** (mean trigram-repeat, longest
+  single-token run, type-token ratio). `CudaModel::eval_loss` is the inference-only
+  twin of `CudaTrainer::eval_loss` — no fp32 masters/moments allocated, so a plain
+  2-bytes/param model scores a split. This is step 2–4 of the post-first-run plan:
+  **measure quality precisely → then** scale the corpus / add KV-cache / try FP8, in
+  that order, each gated on the previous.
+
 ## Risks / honesty
 
 - **Toolchain gate (highest risk):** if the Thor's installed CUDA can't emit sm_110,
