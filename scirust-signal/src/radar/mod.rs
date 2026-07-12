@@ -29,7 +29,9 @@
 //! (normalised-innovation-squared) validation gate, and [`pda`] adding a
 //! probabilistic data association filter that tracks through clutter by
 //! soft-combining every gated measurement instead of a hard nearest-neighbour
-//! pick.
+//! pick. [`micro_doppler`] adds the time–frequency signature of target
+//! micro-motion (a Hann-windowed spectrogram plus ridge / bulk-Doppler /
+//! bandwidth / cadence descriptors) for target classification.
 
 pub mod ambiguity;
 pub mod beamform;
@@ -43,6 +45,7 @@ pub mod fmcw;
 pub mod imm2d;
 pub mod kalman;
 pub mod matched_filter;
+pub mod micro_doppler;
 pub mod mti;
 pub mod mtt;
 pub mod music;
@@ -62,6 +65,9 @@ pub use fmcw::{beat_frequency_to_range, range_doppler, range_profile, range_reso
 pub use imm2d::{Imm2D, KalmanLinear, ct_model_2d, cv_model_2d};
 pub use kalman::{Imm, KalmanCV};
 pub use matched_filter::{cross_correlate, peak_lag, peak_to_sidelobe};
+pub use micro_doppler::{
+    bin_frequencies, cadence, doppler_bandwidth, mean_doppler, ridge, spectrogram,
+};
 pub use mti::mti_canceller;
 pub use mtt::{RadarMultiTracker, RadarTrack};
 pub use music::music_spectrum;

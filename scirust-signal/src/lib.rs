@@ -93,10 +93,11 @@ pub use order::{order_spectrum, order_track, resample_constant_angle, rpm_profil
 pub use radar::{
     AlphaBeta, Detection, Imm, Imm2D, KalmanCV, KalmanLinear, MultiTracker, PdaFilter, RadarEkf,
     RadarMultiTracker, RadarTrack, Track, ambiguity, barker_code, beamform_spectrum,
-    beat_frequency_to_range, ca_cfar, ca_cfar_2d, ca_cfar_alpha, cluster_detections, covariance,
-    critically_damped_gains, cross_correlate, ct_model_2d, cv_model_2d, doppler_spectrum,
-    esprit_doa, estimate_doa, lfm_chirp, mti_canceller, music_spectrum, mvdr_spectrum, os_cfar,
-    os_cfar_alpha, peak_lag, peak_to_sidelobe, range_doppler, range_doppler_map, range_profile,
-    range_resolution, steering_vector,
+    beat_frequency_to_range, bin_frequencies, ca_cfar, ca_cfar_2d, ca_cfar_alpha, cadence,
+    cluster_detections, covariance, critically_damped_gains, cross_correlate, ct_model_2d,
+    cv_model_2d, doppler_bandwidth, doppler_spectrum, esprit_doa, estimate_doa, lfm_chirp,
+    mean_doppler, mti_canceller, music_spectrum, mvdr_spectrum, os_cfar, os_cfar_alpha, peak_lag,
+    peak_to_sidelobe, range_doppler, range_doppler_map, range_profile, range_resolution,
+    ridge as micro_doppler_ridge, spectrogram, steering_vector,
 };
 pub use windows::{apply_window, blackman, blackman_harris, flattop, hamming, hanning};
