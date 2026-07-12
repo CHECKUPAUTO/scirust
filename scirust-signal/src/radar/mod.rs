@@ -37,11 +37,13 @@
 //! Albersheim's equation), the complement to the CFAR threshold — and
 //! [`range_equation`] for the link budget: the SNR a radar delivers on a target
 //! of a given RCS at range, and the maximum detection range that closes with the
-//! [`swerling`] required SNR.
+//! [`swerling`] required SNR. [`clutter`] supplies the amplitude distributions
+//! (Rayleigh, Weibull, log-normal) that CFAR thresholds are designed against.
 
 pub mod ambiguity;
 pub mod beamform;
 pub mod cfar;
+pub mod clutter;
 pub mod detect;
 pub mod doa;
 pub mod doppler;
@@ -64,6 +66,10 @@ pub mod waveform;
 pub use ambiguity::ambiguity;
 pub use beamform::{beamform_spectrum, estimate_doa, steering_vector};
 pub use cfar::{ca_cfar, ca_cfar_alpha, os_cfar, os_cfar_alpha};
+pub use clutter::{
+    erf, lognormal_cdf, lognormal_pdf, rayleigh_cdf, rayleigh_pdf, rayleigh_quantile, weibull_cdf,
+    weibull_pdf, weibull_quantile,
+};
 pub use detect::{Detection, ca_cfar_2d, cluster_detections};
 pub use doa::{covariance, mvdr_spectrum};
 pub use doppler::{doppler_spectrum, range_doppler_map};

@@ -50,9 +50,12 @@
 //!   spectrogram of the slow-time return with ridge / bulk-Doppler / bandwidth /
 //!   cadence descriptors for target classification), detection statistics
 //!   (Swerling I and Albersheim probability-of-detection versus SNR, the
-//!   complement to the CFAR threshold), and the radar range equation (a
+//!   complement to the CFAR threshold), the radar range equation (a
 //!   monostatic link budget giving delivered SNR versus RCS and range, and the
-//!   maximum detection range that closes with the required SNR)
+//!   maximum detection range that closes with the required SNR), and clutter
+//!   amplitude statistics (Rayleigh, Weibull, and log-normal distributions — the
+//!   spiky-clutter models CFAR thresholds are designed against, with a
+//!   self-contained error function)
 
 pub mod bearing;
 pub mod cepstrum;
@@ -101,10 +104,12 @@ pub use radar::{
     RadarLink, RadarMultiTracker, RadarTrack, Track, albersheim_pd, albersheim_snr, ambiguity,
     barker_code, beamform_spectrum, beat_frequency_to_range, bin_frequencies, ca_cfar, ca_cfar_2d,
     ca_cfar_alpha, cadence, cluster_detections, covariance, critically_damped_gains,
-    cross_correlate, ct_model_2d, cv_model_2d, doppler_bandwidth, doppler_spectrum, esprit_doa,
-    estimate_doa, lfm_chirp, mean_doppler, mti_canceller, music_spectrum, mvdr_spectrum, os_cfar,
-    os_cfar_alpha, peak_lag, peak_to_sidelobe, range_doppler, range_doppler_map, range_profile,
-    range_resolution, ridge as micro_doppler_ridge, single_pulse_threshold, spectrogram,
-    steering_vector, swerling1_pd, swerling1_required_snr,
+    cross_correlate, ct_model_2d, cv_model_2d, doppler_bandwidth, doppler_spectrum, erf as erf_fn,
+    esprit_doa, estimate_doa, lfm_chirp, lognormal_cdf, lognormal_pdf, mean_doppler, mti_canceller,
+    music_spectrum, mvdr_spectrum, os_cfar, os_cfar_alpha, peak_lag, peak_to_sidelobe,
+    range_doppler, range_doppler_map, range_profile, range_resolution,
+    rayleigh_cdf as clutter_rayleigh_cdf, rayleigh_pdf as clutter_rayleigh_pdf, rayleigh_quantile,
+    ridge as micro_doppler_ridge, single_pulse_threshold, spectrogram, steering_vector,
+    swerling1_pd, swerling1_required_snr, weibull_cdf, weibull_pdf, weibull_quantile,
 };
 pub use windows::{apply_window, blackman, blackman_harris, flattop, hamming, hanning};
