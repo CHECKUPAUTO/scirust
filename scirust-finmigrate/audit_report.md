@@ -31,8 +31,8 @@ at the cent level over a portfolio.
 denies floating point at the API boundary; there is no `f32`/`f64` in the
 money path. Enforced by construction — every signature and intermediate is
 `Decimal`, and the `no_float_in_money_path` guard test greps the crate sources
-(`src/lib.rs`, `src/amort.rs`, `src/paycalc.rs`, `src/daycount.rs`) for
-`f32`/`f64` and fails if any appears. The
+(`src/lib.rs`, `src/amort.rs`, `src/paycalc.rs`, `src/daycount.rs`,
+`src/brktcalc.rs`) for `f32`/`f64` and fails if any appears. The
 `MANDATORY CONSTRAINTS` in the audit trail record the same rule.
 
 ### Gap-2 — Implied scale is enforced on STORE, not at print. **(mitigated)**
@@ -295,4 +295,51 @@ silently "handled".
 
 ## Production gate
 Regenerate `day_baseline.csv` from a live `cobc -x -free cobol/DAYCOUNT.cbl` and
+re-diff before shipping.
+
+---
+
+# Pre-Migration Audit — BRKTCALC (Progressive Bracketed Tax)
+
+**Unit:** `cobol/BRKTCALC.cbl` → `scirust-finmigrate::brktcalc`
+**Date:** 2026-07-11 · **Gate status:** Phase 1 & 2 complete vs the model baseline
+(`tests/sandbox/brkt_baseline.csv`). Contract: `cobol/SEMANTICS_BRKT.md`.
+
+## Why a fifth unit
+The first four units were single-`COMPUTE` arithmetic. BRKTCALC introduces the
+COBOL **table (`OCCURS`) + `PERFORM VARYING`** idiom with **marginal** bracket
+arithmetic — a different shape of code with its own failure modes.
+
+### Gap-L — Marginal, not flat. **(mitigated + evidenced)**
+Each bracket's rate applies only to the slice of the base within that bracket.
+The classic porting error — `base × top_rate` — over-taxes wildly (base 100 000:
+flat 32 % = 32 000 vs correct marginal 16 500 = 3 000 + 9 900 + 3 600).
+**Mitigation:** the port sums per-bracket slices. **Evidence:** the baseline
+records the flat figure per row and the equivalence test asserts `marginal < flat`
+on every scenario past the first bracket; `flat_would_be_wrong` pins it.
+
+### Gap-M — Boundary inclusivity. **(mitigated)**
+Bracket `i` covers `(lower(i) .. lower(i+1)]` via `min(base, upper)` and
+`max(0, upper − lower)`. A base exactly on a threshold fills the lower bracket
+and leaves the next empty (base 40 000 ⇒ 3 000, bracket 3 contributes 0). An
+off-by-one on the clamp double-counts or drops the boundary cent. Pinned by
+`boundary_fills_lower_bracket_only`.
+
+### Gap-N — Single rounding event. **(mitigated)**
+Marginal amounts accumulate at full precision (COBOL `WS-ACCUM` at 7 dp; the
+Rust port at full `Decimal`) and the total rounds **once**, NEAREST-AWAY-FROM-ZERO.
+Rounding each bracket then summing can drift a cent. Pinned by
+`single_rounding_event` (`234.567 → 234.57`).
+
+### Gap-O — Empty / partial brackets. **(mitigated)**
+A base below a bracket's floor contributes 0 (the `portion = 0` branch); a base
+inside a bracket contributes a partial slice. Both are exercised by the scenario
+set (`in_zero_bracket`, `mid_third_bracket`).
+
+## Contract note
+A negative base is out of contract (a tax base is ≥ 0); the port returns
+`SizeError` rather than a nonsensical negative tax (`negative_base_is_size_error`).
+
+## Production gate
+Regenerate `brkt_baseline.csv` from a live `cobc -x -free cobol/BRKTCALC.cbl` and
 re-diff before shipping.

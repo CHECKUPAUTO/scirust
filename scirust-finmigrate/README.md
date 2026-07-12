@@ -12,6 +12,9 @@ end on two representative units:
 * `DAYCOUNT` — accrued interest on the 30/360 US (NASD bond-basis) day count,
   implementing the February end-of-month rules that Excel `DAYS360` omits (the
   divergence is recorded per-scenario as audit evidence).
+* `BRKTCALC` — progressive (marginal) bracketed tax over a COBOL `OCCURS` table;
+  each rate applies only to its slice of the base, with a single rounding event
+  (the wrong flat-top-rate figure is recorded as audit evidence).
 
 It is the reference template for the migration protocol:
 
