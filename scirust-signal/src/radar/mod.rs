@@ -24,9 +24,12 @@
 //! Kalman filter blending constant-velocity and constant-turn-rate models) for
 //! tracking turning targets in the (x, y) plane, [`ekf`] adding an extended
 //! Kalman filter that tracks a Cartesian state directly from raw polar
-//! (range/bearing) radar measurements, and [`mtt`] closing the loop with a
+//! (range/bearing) radar measurements, [`mtt`] closing the loop with a
 //! multi-target tracker of per-target EKFs associated by a statistical
-//! (normalised-innovation-squared) validation gate.
+//! (normalised-innovation-squared) validation gate, and [`pda`] adding a
+//! probabilistic data association filter that tracks through clutter by
+//! soft-combining every gated measurement instead of a hard nearest-neighbour
+//! pick.
 
 pub mod ambiguity;
 pub mod beamform;
@@ -43,6 +46,7 @@ pub mod matched_filter;
 pub mod mti;
 pub mod mtt;
 pub mod music;
+pub mod pda;
 pub mod track;
 pub mod waveform;
 
@@ -61,5 +65,6 @@ pub use matched_filter::{cross_correlate, peak_lag, peak_to_sidelobe};
 pub use mti::mti_canceller;
 pub use mtt::{RadarMultiTracker, RadarTrack};
 pub use music::music_spectrum;
+pub use pda::PdaFilter;
 pub use track::{AlphaBeta, MultiTracker, Track, critically_damped_gains};
 pub use waveform::{barker_code, lfm_chirp};

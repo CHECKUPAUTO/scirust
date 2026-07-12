@@ -5,6 +5,26 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : radar — filtre à association probabiliste PDAF (`radar::pda`) — bloc 26
+Montée en fidélité du pistage en **milieu encombré** : là où `radar::mtt`
+associe chaque piste à une seule mesure par un choix dur au plus proche voisin
+(qu'un faux écho plus proche peut détourner), le **PDAF** garde toutes les
+mesures de la porte, pondérées par leur probabilité d'association.
+- **`PdaFilter`** — PDAF monocible sur l'état cartésien à vitesse constante
+  `[x, vₓ, y, v_y]` avec mesures de position `(x, y)`. Chaque trame : prédiction,
+  puis mise à jour par innovation combinée `ν̄ = Σ βᵢ νᵢ` sur les mesures de la
+  porte, avec `β₀` la probabilité de non-détection (PDA paramétrique :
+  `b = λ·|2πS|^{1/2}·(1 − P_D·P_G)/P_D`). La covariance porte le terme de
+  **dispersion des innovations** `K(Σβᵢ νᵢνᵢᵀ − ν̄ν̄ᵀ)Kᵀ` qui la gonfle selon
+  l'ambiguïté d'association. Réutilise les utilitaires matriciels denses de
+  `radar::imm2d`. Sans dépendance.
+- Oracles : sans clutter (λ=0) et une mesure par trame, le PDAF se réduit à un
+  Kalman et **suit une cible à vitesse constante** ; **suit une cible à travers
+  un clutter dense** (mesure vraie bruitée + 5 faux échos par trame) ; une trame
+  sans détection **coaste et gonfle la covariance** (β₀=1) ; β₀ **chute quand une
+  mesure tombe sur la prédiction** et vaut 1 sur trame vide. 4 tests (198 au
+  total pour le crate) ; `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-vision` : optronique — transmission atmosphérique et bilan de portée (`atmosphere`) — bloc 25
 Le chaînon qui transforme la sensibilité intrinsèque du capteur (NETD) en **bilan
 de portée** : l'atmosphère entre la cible et le capteur atténue le contraste, donc
