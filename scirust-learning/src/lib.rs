@@ -9,6 +9,7 @@ pub mod nlp;
 pub mod optim;
 pub mod pattern_miner;
 pub mod rl;
+pub mod simd_nn;
 pub mod time_series;
 
 use serde::{Deserialize, Serialize};
