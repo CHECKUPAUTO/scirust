@@ -54,7 +54,7 @@ Du bas (silicium) vers le haut (application) :
 | **Accélérateurs matriciels** | `amx`, `sme` | GEMM à tuiles **Intel AMX** int8 (`_tile_dpbssd`) & bf16 (`_tile_dpbf16ps`) ; **ARM SME** (sonde + référence rang-1, en attente des intrinsèques ZA) |
 | **Vecteurs scalables** | `sve` | kernels SVE `saxpy`/`sdot`/`sscal` à longueur vectorielle runtime (aarch64) |
 | **Kernels x86 avancés** | `x86_ext` | masques `k` (axpy conditionnel), NT-stores, prefetch logiciel |
-| **Attention** | `attention`, `kv_cache` | naïve, **flash** (softmax en ligne), **causale**, **multi-tête**, **cache KV** |
+| **Attention** | `attention`, `kv_cache`, `qkv_cache` | naïve, **flash**, **causale**, **multi-tête**, **cache KV** (`f32` **et int8** ÷4 mémoire) |
 | **Normalisations** | `norm` | RMSNorm, LayerNorm (vectorisées), RoPE |
 | **Assemblage** | `transformer`, `model` | Bloc décodeur pre-norm (prefill **+** decode), modèle multi-couche + génération |
 | **Entraînement** | `grad` | Backward de tous les noyaux, validés par **gradcheck** |
@@ -194,7 +194,8 @@ Chaque affirmation est vérifiée mécaniquement :
 | [`sme`](src/sme.rs) | ARM SME — sonde + référence rang-1 (accumulateur ZA), aarch64 |
 | [`x86_ext`](src/x86_ext.rs) | masques `k`, NT-stores, prefetch (x86) |
 | [`attention`](src/attention.rs) | Attention naïve/flash/causale/multi-tête |
-| [`kv_cache`](src/kv_cache.rs) | Cache KV, décodage incrémental |
+| [`kv_cache`](src/kv_cache.rs) | Cache KV `f32`, décodage incrémental |
+| [`qkv_cache`](src/qkv_cache.rs) | Cache KV **int8** (÷4 mémoire, scores dot int8 VNNI/SDOT) |
 | [`norm`](src/norm.rs) | RMSNorm, LayerNorm, RoPE |
 | [`transformer`](src/transformer.rs) | Bloc décodeur (prefill + decode) |
 | [`model`](src/model.rs) | Modèle multi-bloc + génération |

@@ -637,6 +637,7 @@ pub mod kv_cache;
 pub mod matrix;
 pub mod model;
 pub mod norm;
+pub mod qkv_cache;
 pub mod quant;
 pub mod transformer;
 
