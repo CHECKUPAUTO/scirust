@@ -53,7 +53,10 @@
 //!      law and the relaxation-oscillation frequency as oracles;
 //!    - [`photodiode`] — the optoelectronic receiver: optical power → photocurrent
 //!      → RC-limited voltage, with the responsivity `η·q·λ/(h·c)`, the `−3 dB`
-//!      bandwidth and the exponential step response as oracles.
+//!      bandwidth and the exponential step response as oracles;
+//!    - [`apd`] — the avalanche-photodiode receiver: the McIntyre excess-noise
+//!      factor `F(M)` and the shot-vs-thermal SNR trade-off with its optimal
+//!      gain as oracles.
 //!
 //! Everything is self-contained: the integrators, the [`SplitMix64`] random
 //! generator and every model are implemented here. There are no dependencies,
@@ -108,6 +111,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod apd;
 pub mod battery;
 pub mod chemistry;
 pub mod ecology;
