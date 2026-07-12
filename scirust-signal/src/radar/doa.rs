@@ -64,8 +64,9 @@ pub fn covariance(snapshots: &[Vec<Complex>]) -> Vec<Vec<Complex>> {
 }
 
 /// Invert a complex square matrix by Gauss–Jordan elimination with partial
-/// pivoting. `None` if it is singular.
-fn invert(mut a: Vec<Vec<Complex>>) -> Option<Vec<Vec<Complex>>> {
+/// pivoting. `None` if it is singular. Shared with [`super::stap`] for the
+/// space-time adaptive weight computation.
+pub(super) fn invert(mut a: Vec<Vec<Complex>>) -> Option<Vec<Vec<Complex>>> {
     let n = a.len();
     let mut inv: Vec<Vec<Complex>> = (0..n)
         .map(|i| {
