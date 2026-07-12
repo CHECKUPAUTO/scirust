@@ -5,6 +5,24 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : radar — équation du radar / bilan de portée (`radar::range_equation`) — bloc 29
+L'autre moitié du bilan de liaison (le SNR *requis* venant de `radar::swerling`) :
+le SNR qu'un radar *délivre* sur une cible de SER donnée à une portée donnée, et
+la **portée de détection maximale**. Pendant radar du bilan de portée EO/IR
+(bloc 25).
+- **`RadarLink`** — regroupe les paramètres radar/système (puissance crête,
+  gain, longueur d'onde, bande, facteur de bruit, température, pertes ; unités
+  SI/linéaires).
+- **`noise_power`** = `k_B·T·B·F` ; **`received_power(rcs, range)`** — équation
+  monostatique `P_r = P_t·G²·λ²·σ / ((4π)³·R⁴·L)` ; **`snr_at_range(rcs, range)`** ;
+  **`max_range(rcs, snr_min)`** = `[P_t·G²·λ²·σ / ((4π)³·N·L·SNR_min)]^{1/4}`,
+  bouclant avec le SNR requis de `swerling`.
+- Oracles : puissance reçue en **1/R⁴** ; puissance de bruit = `k_B·T·B·F` ; SNR
+  ∝ σ et ∝ 1/R⁴ ; **cohérence portée max ↔ SNR** (le SNR délivré à `max_range`
+  égale `snr_min`) ; portée ∝ σ^{1/4} ; **intégration avec Swerling** (un `P_d`
+  plus élevé, via Albersheim, raccourcit la portée). 6 tests (215 au total pour
+  le crate) ; `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-signal` : radar — statistiques de détection Swerling (`radar::swerling`) — bloc 28
 Complément du CFAR (qui fixe le seuil pour un taux de fausse alarme donné) : la
 **probabilité de détection** `P_d` en fonction du rapport signal/bruit, selon la
