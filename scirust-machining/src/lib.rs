@@ -18,6 +18,8 @@
 //! - [`gears`] — engrenages cylindriques droits et **hélicoïdaux** : géométrie
 //!   de la denture à développante, flexion en pied de dent (**Lewis**), dents
 //!   minimales anti-interférence et rapport de conduite.
+//! - [`iso6336`] — résistance des engrenages au flanc (**ISO 6336-2**, pitting) :
+//!   contrainte de contact, facteur d'élasticité (via `hertz`) et sécurité.
 //! - [`threads`] — filetages métriques ISO : diamètres primitif/noyau, section
 //!   résistante (**ISO 898-1**), pas et angle d'hélice.
 //! - [`hertz`] — mécanique du contact de **Hertz** : pression et dimensions de
@@ -96,6 +98,7 @@ pub mod friction;
 pub mod gears;
 pub mod hertz;
 pub mod hyperstatism;
+pub mod iso6336;
 pub mod keys;
 pub mod kinematics;
 pub mod liaisons;
@@ -139,6 +142,9 @@ pub use hertz::{
 };
 pub use hyperstatism::{
     degree_of_hyperstaticity, independent_loops, is_isostatic, kinematic_unknowns, static_unknowns,
+};
+pub use iso6336::{
+    contact_stress, elasticity_factor_ze, nominal_contact_stress, safety_factor_pitting,
 };
 pub use keys::{
     key_bearing_pressure, key_shear_stress, required_length_for_bearing, tangential_force,
