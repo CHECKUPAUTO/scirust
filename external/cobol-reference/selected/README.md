@@ -29,3 +29,7 @@ Important:
 - It does not yet establish executable runtime-output baselines because
   representative production input files and runtime environments are absent.
 - Compiler warnings are preserved verbatim and must not be silently removed.
+
+Licensing and attribution:
+- Per-source attribution is documented in `ATTRIBUTION.md`.
+- Full upstream license texts are preserved in `LICENSES/`.
