@@ -126,6 +126,16 @@
 //!   chaleur sensible et contrainte thermique.
 //! - [`tolerancing`] — systèmes de tolérancement de dessin : tolérances
 //!   générales **ISO 2768** (parties 1 et 2) et catalogue des normes **GPS**.
+//! - [`dimension_chains`] — chaînes de cotes : cumul pire cas et statistique
+//!   (RSS), cote de fermeture et jeux extrêmes.
+//! - [`msa`] — MSA/**Gage R&R** : répétabilité, reproductibilité, %R&R et
+//!   nombre de catégories distinctes.
+//! - [`sheet_bending`] — développé de pliage : allongement au pli, retrait et
+//!   longueur à plat (facteur `K`).
+//! - [`process_time`] — temps de gamme : temps de série, temps par pièce et
+//!   cadence de production.
+//! - [`oee`] — taux de rendement synthétique (**TRS/OEE**) : disponibilité,
+//!   performance, qualité et leur produit.
 //!
 //! ## Positionnement
 //!
@@ -179,6 +189,7 @@ pub mod buckling;
 pub mod cams;
 pub mod creep;
 pub mod critical_speed;
+pub mod dimension_chains;
 pub mod dynamics;
 pub mod economics;
 pub mod endurance_limit;
@@ -206,13 +217,17 @@ pub mod keys;
 pub mod kinematics;
 pub mod liaisons;
 pub mod mohr;
+pub mod msa;
+pub mod oee;
 pub mod pipe_flow;
 pub mod power_screws;
+pub mod process_time;
 pub mod pulley_systems;
 pub mod pumps;
 pub mod riveted_joints;
 pub mod roughness;
 pub mod shafts;
+pub mod sheet_bending;
 pub mod slider_crank;
 pub mod springs;
 pub mod stress_concentration;
@@ -274,6 +289,9 @@ pub use creep::{larson_miller_parameter, norton_creep_rate, rupture_time_from_lm
 pub use critical_speed::{
     critical_speed_from_deflection_rad, critical_speed_rad, dunkerley_critical_speed_rad,
     rad_to_rpm,
+};
+pub use dimension_chains::{
+    closing_max, closing_min, closing_nominal, rss_tolerance, worst_case_tolerance,
 };
 pub use dynamics::{
     angular_momentum, inertia_hollow_cylinder, inertia_rod_center, inertia_rod_end,
@@ -360,12 +378,15 @@ pub use mohr::{
     principal_stresses, safety_factor, shear_stress_rotated, tresca_plane, von_mises_plane,
     von_mises_principal,
 };
+pub use msa::{gage_rr, number_distinct_categories, percent_rr, total_variation};
+pub use oee::{availability, oee, performance, quality};
 pub use pipe_flow::{
     colebrook_friction, darcy_head_loss, laminar_friction_factor, minor_loss, swamee_jain_friction,
 };
 pub use power_screws::{
     efficiency, is_self_locking, lead_angle_deg, lowering_torque_nm, raising_torque_nm,
 };
+pub use process_time::{batch_time, stations_required, throughput_per_hour, time_per_piece};
 pub use pulley_systems::{
     actual_mechanical_advantage, efficiency as pulley_efficiency, effort_required,
     velocity_ratio as pulley_velocity_ratio,
@@ -385,6 +406,7 @@ pub use shafts::{
     angle_of_twist_deg, bending_stress, polar_section_modulus_hollow, polar_section_modulus_solid,
     section_modulus_hollow, section_modulus_solid, torsional_shear_stress, von_mises_solid,
 };
+pub use sheet_bending::{bend_allowance, bend_deduction, developed_length, outside_setback};
 pub use slider_crank::{
     obliquity_ratio, piston_acceleration_approx, piston_displacement, piston_velocity,
 };
