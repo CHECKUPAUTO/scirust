@@ -205,6 +205,16 @@
 //!   **superposition** des cas de charge.
 //! - [`castigliano`] — RDM : énergie de déformation des éléments (traction,
 //!   flexion, torsion) et principe de **Castigliano**.
+//! - [`upsetting`] — mise en forme : refoulement (forgeage) — déformation vraie,
+//!   effort avec frottement et travail.
+//! - [`wire_drawing`] — mise en forme : tréfilage — réduction, contrainte et
+//!   effort d'étirage, réduction maximale.
+//! - [`extrusion`] — mise en forme : extrusion — rapport, déformation, pression
+//!   de **Johnson** et effort.
+//! - [`rolling`] — mise en forme : laminage à plat — réduction, longueur de
+//!   contact, effort et couple.
+//! - [`press_brake`] — mise en forme : pliage à la presse — effort de pliage et
+//!   retour élastique (springback).
 //!
 //! ## Positionnement
 //!
@@ -280,6 +290,7 @@ pub mod elastomer_mounts;
 pub mod endurance_limit;
 pub mod epicyclic;
 pub mod extension_springs;
+pub mod extrusion;
 pub mod fastener_groups;
 pub mod fatigue_mean_stress;
 pub mod fins;
@@ -313,6 +324,7 @@ pub mod oee;
 pub mod open_channel;
 pub mod pipe_flow;
 pub mod power_screws;
+pub mod press_brake;
 pub mod pressure_vessels;
 pub mod process_time;
 pub mod pulley_systems;
@@ -321,6 +333,7 @@ pub mod pumps;
 pub mod rack_pinion;
 pub mod radiation;
 pub mod riveted_joints;
+pub mod rolling;
 pub mod roughness;
 pub mod shafts;
 pub mod sheet_bending;
@@ -343,10 +356,12 @@ pub mod transient_conduction;
 pub mod true_stress_strain;
 pub mod trusses;
 pub mod universal_joint;
+pub mod upsetting;
 pub mod vibrations;
 pub mod water_hammer;
 pub mod wedge;
 pub mod welds;
+pub mod wire_drawing;
 
 pub use area_moments::{
     composite_second_moment, parallel_axis as parallel_axis_area, polar_second_moment,
@@ -457,6 +472,7 @@ pub use extension_springs::{
     body_shear_stress, deflection as extension_spring_deflection, force_at_deflection,
     rate as extension_spring_rate,
 };
+pub use extrusion::{extrusion_force, extrusion_pressure, extrusion_ratio, extrusion_true_strain};
 pub use fastener_groups::{group_polar_moment, primary_shear, resultant_shear, secondary_shear};
 pub use fatigue_mean_stress::{
     gerber_safety_factor, goodman_safety_factor, mean_stress, soderberg_safety_factor,
@@ -548,6 +564,7 @@ pub use pipe_flow::{
 pub use power_screws::{
     efficiency, is_self_locking, lead_angle_deg, lowering_torque_nm, raising_torque_nm,
 };
+pub use press_brake::{bending_force, springback_ratio};
 pub use pressure_vessels::{
     thick_cylinder_hoop_inner, thick_cylinder_hoop_outer, thin_cylinder_hoop,
     thin_cylinder_longitudinal, thin_sphere,
@@ -573,6 +590,7 @@ pub use riveted_joints::{
     bearing_strength, joint_efficiency, rivet_shear_strength, solid_plate_strength,
     tearing_strength,
 };
+pub use rolling::{contact_length, draft, max_draft, roll_force, roll_torque};
 pub use roughness::{
     feed_for_target_ra, theoretical_ra_turning, theoretical_rt_sharp, theoretical_rt_turning,
 };
@@ -633,6 +651,7 @@ pub use universal_joint::{
     min_velocity_ratio as cardan_min_velocity_ratio, output_angle,
     velocity_ratio as cardan_velocity_ratio,
 };
+pub use upsetting::{forming_work, upsetting_force, upsetting_true_strain};
 pub use vibrations::{
     critical_damping, damped_frequency_rad, damping_ratio, log_decrement, natural_frequency_hz,
     natural_frequency_rad, quality_factor,
@@ -642,4 +661,7 @@ pub use wedge::{driving_force, extraction_force, ideal_mechanical_advantage, sel
 pub use welds::{
     butt_weld_stress, fillet_direct_shear_stress, fillet_throat_area, throat_thickness,
     weld_group_torsional_shear,
+};
+pub use wire_drawing::{
+    MAX_REDUCTION_IDEAL, area_reduction, drawing_force, drawing_stress, drawing_true_strain,
 };
