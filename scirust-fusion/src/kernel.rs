@@ -323,11 +323,14 @@ impl FusedKernel {
 
     /// Matmul + LayerNorm.
     fn execute_matmul_layernorm(&self, inputs: &[&[f32]], output: &mut [f32]) {
-        // Similar to matmul_silu_layernorm but without SiLU
-        assert!(inputs.len() >= 2);
+        // Similar to matmul_silu_layernorm but without SiLU.
+        // inputs[0] = x, inputs[1] = W, inputs[2] = gamma, inputs[3] = beta
+        assert!(inputs.len() >= 4, "MatmulLayerNorm needs x, W, gamma, beta");
 
         let x = inputs[0];
         let w = inputs[1];
+        let gamma = inputs[2];
+        let beta = inputs[3];
 
         let batch = output.len() / self.params.out_features;
         let in_features = self.params.in_features;
@@ -367,9 +370,12 @@ impl FusedKernel {
             }
             var /= out_features as f32;
 
+            let std = (var + eps).sqrt();
+
+            // Normalize + scale/shift
             for i in 0..out_features
             {
-                output[o_off + i] = (tmp[i] - mean) / (var + eps).sqrt();
+                output[o_off + i] = (tmp[i] - mean) / std * gamma[i] + beta[i];
             }
         }
     }
@@ -566,6 +572,35 @@ mod tests {
         // y0 = relu(1*1 + 2*0) = 1 ; y1 = relu(1*0 + 2*(-1)) = relu(-2) = 0
         assert_eq!(out, [1.0, 0.0]);
         assert_eq!(k.op_count(), 2);
+    }
+
+    #[test]
+    fn matmul_layernorm_applies_gamma_and_beta() {
+        // `matmul_layernorm` (the pre-LN transformer fusion) and
+        // `matmul_silu_layernorm` both end on a LayerNorm/LayerNormFused
+        // graph node, and `build_kernel`'s generic input-collection already
+        // gathers that node's gamma/beta into inputs[2]/inputs[3] for
+        // either kernel. `execute_matmul_silu_layernorm` applies them;
+        // `execute_matmul_layernorm` must do the same instead of silently
+        // returning the raw normalized values.
+        let mut k = FusedKernel::new(KernelType::MatmulLayerNorm, vec![0, 1], vec![], vec![]);
+        k.params = KernelParams {
+            in_features: 2,
+            out_features: 2,
+            tile_size: 64,
+            eps: 0.0,
+            scale: 1.0,
+        };
+        let x = [1.0f32, 1.0];
+        // W row-major (in_features x out_features): x @ W = [2, 4].
+        let w = [2.0f32, 4.0, 0.0, 0.0];
+        let gamma = [2.0f32, 3.0];
+        let beta = [10.0f32, 20.0];
+        let mut out = [0.0f32; 2];
+        k.execute(&[&x, &w, &gamma, &beta], &mut out);
+        // mean=3, var=1, std=1 -> normalized = [-1, 1].
+        // affine: [-1*2+10, 1*3+20] = [8, 23].
+        assert_eq!(out, [8.0, 23.0]);
     }
 
     #[test]
