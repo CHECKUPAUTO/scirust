@@ -235,6 +235,16 @@
 //!   maintenabilité.
 //! - [`accelerated_life`] — essais de vie accélérée : facteur d'**Arrhenius**,
 //!   règle des « 10 °C » et déclassement (derating).
+//! - [`pneumatic_cylinders`] — vérins pneumatiques : effort théorique/utile
+//!   (rendement) et consommation d'air libre par course.
+//! - [`valve_sizing`] — dimensionnement de vannes : coefficients `Kv`/`Cv` et
+//!   débit liquide.
+//! - [`air_flow`] — écoulement d'air comprimé : régime **bloqué** (sonique),
+//!   rapport critique, vitesse du son et débit-masse.
+//! - [`compressed_air`] — air comprimé : gaz parfait, travail de compression
+//!   isotherme/adiabatique et température de refoulement.
+//! - [`vacuum_gripping`] — préhension par le vide : effort de ventouse, charge
+//!   admissible, diamètre requis et nombre de ventouses.
 //!
 //! ## Positionnement
 //!
@@ -277,6 +287,7 @@
 //! ```
 
 pub mod accelerated_life;
+pub mod air_flow;
 pub mod area_moments;
 pub mod balancing;
 pub mod beam_reactions;
@@ -297,6 +308,7 @@ pub mod chain_drive;
 pub mod chvorinov;
 pub mod combined_stress;
 pub mod composites;
+pub mod compressed_air;
 pub mod convection_correlations;
 pub mod couplings;
 pub mod creep;
@@ -350,6 +362,7 @@ pub mod msa;
 pub mod oee;
 pub mod open_channel;
 pub mod pipe_flow;
+pub mod pneumatic_cylinders;
 pub mod power_screws;
 pub mod press_brake;
 pub mod pressure_vessels;
@@ -386,6 +399,8 @@ pub mod true_stress_strain;
 pub mod trusses;
 pub mod universal_joint;
 pub mod upsetting;
+pub mod vacuum_gripping;
+pub mod valve_sizing;
 pub mod vibrations;
 pub mod water_hammer;
 pub mod wedge;
@@ -396,6 +411,7 @@ pub mod wire_drawing;
 pub use accelerated_life::{
     BOLTZMANN_EV_K, arrhenius_acceleration_factor, derated_value, ten_degree_rule_factor,
 };
+pub use air_flow::{choked_mass_flow, critical_pressure_ratio, is_choked, speed_of_sound};
 pub use area_moments::{
     composite_second_moment, parallel_axis as parallel_axis_area, polar_second_moment,
     radius_of_gyration as area_radius_of_gyration,
@@ -459,6 +475,10 @@ pub use combined_stress::{
 };
 pub use composites::{
     longitudinal_strength, reuss_modulus, rule_of_mixtures_density, voigt_modulus,
+};
+pub use compressed_air::{
+    adiabatic_outlet_temperature, adiabatic_work, compression_ratio, ideal_gas_density,
+    isothermal_work,
 };
 pub use convection_correlations::{
     convection_coefficient, dittus_boelter, prandtl_number, rayleigh_number,
@@ -602,6 +622,10 @@ pub use open_channel::{chezy_velocity, hydraulic_radius, manning_flow, manning_v
 pub use pipe_flow::{
     colebrook_friction, darcy_head_loss, laminar_friction_factor, minor_loss, swamee_jain_friction,
 };
+pub use pneumatic_cylinders::{
+    extend_force as pneumatic_extend_force, free_air_per_stroke,
+    retract_force as pneumatic_retract_force, useful_force,
+};
 pub use power_screws::{
     efficiency, is_self_locking, lead_angle_deg, lowering_torque_nm, raising_torque_nm,
 };
@@ -698,6 +722,10 @@ pub use universal_joint::{
     velocity_ratio as cardan_velocity_ratio,
 };
 pub use upsetting::{forming_work, upsetting_force, upsetting_true_strain};
+pub use vacuum_gripping::{
+    number_of_cups, required_diameter, theoretical_holding_force, working_load,
+};
+pub use valve_sizing::{cv_from_kv, kv_from_cv, liquid_flow, required_kv};
 pub use vibrations::{
     critical_damping, damped_frequency_rad, damping_ratio, log_decrement, natural_frequency_hz,
     natural_frequency_rad, quality_factor,
