@@ -3405,6 +3405,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-relativity"
+version = "0.1.0"
+dependencies = [
+ "scirust-sim",
+]
+
+[[package]]
 name = "scirust-reliability"
 version = "0.1.0"
 dependencies = [

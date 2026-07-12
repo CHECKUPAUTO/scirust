@@ -1,0 +1,9 @@
+[package]
+name = "scirust-relativity"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Deterministic differential-geometry and geodesic simulation primitives for SciRust. Pure Rust, no unsafe."
+
+[dependencies]
+scirust-sim = { path = "../scirust-sim" }

@@ -145,6 +145,7 @@ members = [
     "scirust-sigma",
     "scirust-special",
     "scirust-fractional",
+    "scirust-relativity",
     "scirust-stats",
     "scirust-interp",
     "scirust-sparse",
