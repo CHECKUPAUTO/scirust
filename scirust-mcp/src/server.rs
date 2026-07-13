@@ -9,6 +9,8 @@ use crate::registry::ToolRegistry;
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
 
+const MAX_REQUEST_BYTES: usize = 1024 * 1024;
+
 pub struct McpServer {
     registry: ToolRegistry,
     audit: AuditLog,
@@ -99,30 +101,101 @@ impl McpServer {
 }
 
 /// Lance la boucle stdio bloquante.
-pub fn run_stdio(mut server: McpServer) -> io::Result<()> {
+pub fn run_stdio(server: McpServer) -> io::Result<()> {
     let stdin = io::stdin();
-    let mut stdout = io::stdout();
-    for line in stdin.lock().lines()
+    let stdout = io::stdout();
+    run_transport(server, stdin.lock(), stdout.lock())
+}
+
+enum BoundedLine {
+    Eof,
+    Line(Vec<u8>),
+    TooLong,
+}
+
+fn read_bounded_line<R: BufRead>(reader: &mut R) -> io::Result<BoundedLine> {
+    let mut line = Vec::new();
+    let mut too_long = false;
+    loop
     {
-        let line = line?;
-        if line.trim().is_empty()
+        let available = reader.fill_buf()?;
+        if available.is_empty()
         {
-            continue;
+            return if line.is_empty() && !too_long
+            {
+                Ok(BoundedLine::Eof)
+            }
+            else if too_long
+            {
+                Ok(BoundedLine::TooLong)
+            }
+            else
+            {
+                Ok(BoundedLine::Line(line))
+            };
         }
-        let response = match serde_json::from_str::<RpcRequest>(&line)
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let consumed = newline.map_or(available.len(), |index| index + 1);
+        let content_len = newline.unwrap_or(available.len());
+        if !too_long
         {
-            Ok(req) => server.handle(req),
-            Err(e) => Some(RpcResponse::err(
+            if line.len().saturating_add(content_len) > MAX_REQUEST_BYTES
+            {
+                too_long = true;
+                line.clear();
+            }
+            else
+            {
+                line.extend_from_slice(&available[..content_len]);
+            }
+        }
+        reader.consume(consumed);
+        if newline.is_some()
+        {
+            if too_long
+            {
+                return Ok(BoundedLine::TooLong);
+            }
+            if line.last() == Some(&b'\r')
+            {
+                line.pop();
+            }
+            return Ok(BoundedLine::Line(line));
+        }
+    }
+}
+
+fn run_transport<R: BufRead, W: Write>(
+    mut server: McpServer,
+    mut input: R,
+    mut output: W,
+) -> io::Result<()> {
+    loop
+    {
+        let response = match read_bounded_line(&mut input)?
+        {
+            BoundedLine::Eof => break,
+            BoundedLine::Line(line) if line.iter().all(u8::is_ascii_whitespace) => continue,
+            BoundedLine::Line(line) => match serde_json::from_slice::<RpcRequest>(&line)
+            {
+                Ok(req) => server.handle(req),
+                Err(e) => Some(RpcResponse::err(
+                    Value::Null,
+                    PARSE_ERROR,
+                    format!("parse error: {e}"),
+                )),
+            },
+            BoundedLine::TooLong => Some(RpcResponse::err(
                 Value::Null,
                 PARSE_ERROR,
-                format!("parse error: {e}"),
+                format!("request exceeds the {MAX_REQUEST_BYTES}-byte limit"),
             )),
         };
         if let Some(resp) = response
         {
             let text = serde_json::to_string(&resp)?;
-            writeln!(stdout, "{text}")?;
-            stdout.flush()?;
+            writeln!(output, "{text}")?;
+            output.flush()?;
         }
     }
     Ok(())
@@ -241,5 +314,22 @@ mod tests {
             .handle(req(Some(1), "tools/call", json!({})))
             .unwrap();
         assert_eq!(resp.error.unwrap().code, INVALID_PARAMS);
+    }
+
+    #[test]
+    fn transport_rejects_oversized_line_and_recovers_for_next_request() {
+        let mut input = vec![b' '; MAX_REQUEST_BYTES + 1];
+        input.push(b'\n');
+        input.extend_from_slice(b"{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\"}\n");
+        let mut output = Vec::new();
+        run_transport(test_server(), io::Cursor::new(input), &mut output).unwrap();
+        let responses: Vec<Value> = String::from_utf8(output)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(responses.len(), 2);
+        assert_eq!(responses[0]["error"]["code"], json!(PARSE_ERROR));
+        assert_eq!(responses[1]["id"], json!(2));
     }
 }

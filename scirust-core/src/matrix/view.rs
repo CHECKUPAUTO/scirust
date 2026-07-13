@@ -125,18 +125,37 @@ impl<'a, T> MatrixView<'a, T> {
         col_start: usize,
         ncols: usize,
     ) -> MatrixView<'a, T> {
-        assert!(
-            row_start + nrows <= self.rows,
-            "sous-vue hors bornes (lignes)"
-        );
-        assert!(
-            col_start + ncols <= self.cols,
-            "sous-vue hors bornes (colonnes)"
-        );
+        let row_end = row_start
+            .checked_add(nrows)
+            .expect("sous-vue hors bornes (débordement lignes)");
+        let col_end = col_start
+            .checked_add(ncols)
+            .expect("sous-vue hors bornes (débordement colonnes)");
+        assert!(row_end <= self.rows, "sous-vue hors bornes (lignes)");
+        assert!(col_end <= self.cols, "sous-vue hors bornes (colonnes)");
+
+        // An empty view contains no element, so it does not need to be offset
+        // to its logical origin. Keeping the original pointer is important for
+        // shapes such as 0×N backed by an empty slice: `ptr.add(col_start)`
+        // would otherwise leave the (empty) allocation and itself be UB.
+        let offset = if nrows == 0 || ncols == 0
+        {
+            0
+        }
+        else
+        {
+            row_start
+                .checked_mul(self.row_stride)
+                .and_then(|row| {
+                    col_start
+                        .checked_mul(self.col_stride)
+                        .and_then(|col| row.checked_add(col))
+                })
+                .expect("sous-vue hors bornes (débordement offset)")
+        };
         unsafe {
             MatrixView::from_raw_parts(
-                self.ptr
-                    .add(row_start * self.row_stride + col_start * self.col_stride),
+                self.ptr.add(offset),
                 nrows,
                 ncols,
                 self.row_stride,
@@ -189,11 +208,16 @@ impl<'a, T> MatrixView<'a, T> {
 
     /// Slice contiguë sur une ligne (uniquement si col_stride == 1)
     pub fn row_slice(&self, r: usize) -> Option<&'a [T]> {
+        if r >= self.rows
+        {
+            return None;
+        }
         if self.col_stride == 1
         {
-            Some(unsafe {
-                std::slice::from_raw_parts(self.ptr.add(r * self.row_stride), self.cols)
-            })
+            let offset = r
+                .checked_mul(self.row_stride)
+                .expect("MatrixView::row_slice: row offset overflows usize");
+            Some(unsafe { std::slice::from_raw_parts(self.ptr.add(offset), self.cols) })
         }
         else
         {
@@ -314,13 +338,38 @@ impl<'a, T> MatrixViewMut<'a, T> {
         col_start: usize,
         ncols: usize,
     ) -> MatrixViewMut<'_, T> {
-        assert!(row_start + nrows <= self.rows);
-        assert!(col_start + ncols <= self.cols);
+        let row_end = row_start
+            .checked_add(nrows)
+            .expect("sous-vue mutable hors bornes (débordement lignes)");
+        let col_end = col_start
+            .checked_add(ncols)
+            .expect("sous-vue mutable hors bornes (débordement colonnes)");
+        assert!(
+            row_end <= self.rows,
+            "sous-vue mutable hors bornes (lignes)"
+        );
+        assert!(
+            col_end <= self.cols,
+            "sous-vue mutable hors bornes (colonnes)"
+        );
+        let offset = if nrows == 0 || ncols == 0
+        {
+            0
+        }
+        else
+        {
+            row_start
+                .checked_mul(self.row_stride)
+                .and_then(|row| {
+                    col_start
+                        .checked_mul(self.col_stride)
+                        .and_then(|col| row.checked_add(col))
+                })
+                .expect("sous-vue mutable hors bornes (débordement offset)")
+        };
         unsafe {
             MatrixViewMut {
-                ptr: self
-                    .ptr
-                    .add(row_start * self.row_stride + col_start * self.col_stride),
+                ptr: self.ptr.add(offset),
                 rows: nrows,
                 cols: ncols,
                 row_stride: self.row_stride,
@@ -376,11 +425,16 @@ impl<'a, T> MatrixViewMut<'a, T> {
 
     /// Slice contiguë mutable sur une ligne (uniquement si col_stride == 1)
     pub fn row_slice_mut(&mut self, r: usize) -> Option<&mut [T]> {
+        if r >= self.rows
+        {
+            return None;
+        }
         if self.col_stride == 1
         {
-            Some(unsafe {
-                std::slice::from_raw_parts_mut(self.ptr.add(r * self.row_stride), self.cols)
-            })
+            let offset = r
+                .checked_mul(self.row_stride)
+                .expect("MatrixViewMut::row_slice_mut: row offset overflows usize");
+            Some(unsafe { std::slice::from_raw_parts_mut(self.ptr.add(offset), self.cols) })
         }
         else
         {
@@ -480,6 +534,31 @@ mod tests {
         let view = MatrixView::from_slice(&data, 4, 4);
         let row2 = view.row_slice(2).unwrap();
         assert_eq!(row2, &[8.0, 9.0, 10.0, 11.0]);
+    }
+
+    #[test]
+    fn row_slice_rejects_out_of_bounds_row() {
+        let data = make_4x4();
+        let view = MatrixView::from_slice(&data, 4, 4);
+        assert!(view.row_slice(4).is_none());
+        assert!(view.row_slice(usize::MAX).is_none());
+    }
+
+    #[test]
+    fn row_slice_mut_rejects_out_of_bounds_row() {
+        let mut data = make_4x4();
+        let mut view = MatrixViewMut::from_slice(&mut data, 4, 4);
+        assert!(view.row_slice_mut(4).is_none());
+        assert!(view.row_slice_mut(usize::MAX).is_none());
+    }
+
+    #[test]
+    fn empty_subview_does_not_offset_empty_backing() {
+        let data: [u8; 0] = [];
+        let view = MatrixView::from_slice(&data, 0, usize::MAX);
+        let empty_col = view.subview(0, 0, usize::MAX - 1, 1);
+        assert_eq!(empty_col.shape(), (0, 1));
+        assert_eq!(empty_col.as_ptr(), view.as_ptr());
     }
 
     #[test]

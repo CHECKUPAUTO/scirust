@@ -23,7 +23,9 @@ impl TensorND {
                 shape
             ));
         }
-        let strides = compute_strides(&shape);
+        let strides = compute_strides(&shape).ok_or_else(|| {
+            format!("TensorND::try_new: strides for shape {shape:?} overflow usize")
+        })?;
         Ok(Self {
             data,
             shape,
@@ -63,15 +65,60 @@ impl TensorND {
         self.data.is_empty()
     }
 
-    /// Row-major flat offset of a multi-index.
-    pub fn offset(&self, index: &[usize]) -> usize {
-        debug_assert_eq!(index.len(), self.shape.len());
-        index.iter().zip(&self.strides).map(|(i, s)| i * s).sum()
+    /// Checked row-major flat offset of a multi-index.
+    pub fn try_offset(&self, index: &[usize]) -> Result<usize, String> {
+        if index.len() != self.shape.len()
+        {
+            return Err(format!(
+                "TensorND index rank {} does not match tensor rank {}",
+                index.len(),
+                self.shape.len()
+            ));
+        }
+        let expected_len = shape_product(&self.shape)
+            .ok_or_else(|| "TensorND shape product overflows usize".to_string())?;
+        let expected_strides = compute_strides(&self.shape)
+            .ok_or_else(|| "TensorND stride computation overflows usize".to_string())?;
+        if expected_len != self.data.len() || self.strides != expected_strides
+        {
+            return Err("TensorND has inconsistent public shape/data/strides fields".to_string());
+        }
+        let mut offset = 0usize;
+        for (axis, ((&coordinate, &dimension), &stride)) in
+            index.iter().zip(&self.shape).zip(&self.strides).enumerate()
+        {
+            if coordinate >= dimension
+            {
+                return Err(format!(
+                    "TensorND index {coordinate} is out of bounds for axis {axis} of size {dimension}"
+                ));
+            }
+            offset = offset
+                .checked_add(coordinate.checked_mul(stride).ok_or_else(|| {
+                    format!("TensorND offset multiplication overflows at axis {axis}")
+                })?)
+                .ok_or_else(|| format!("TensorND offset addition overflows at axis {axis}"))?;
+        }
+        Ok(offset)
     }
 
-    /// Element at a multi-index.
+    /// Row-major flat offset of a multi-index.
+    ///
+    /// Panics with a descriptive message for an invalid index. Use
+    /// [`TensorND::try_offset`] when invalid user input should be recoverable.
+    pub fn offset(&self, index: &[usize]) -> usize {
+        self.try_offset(index).expect("TensorND::offset")
+    }
+
+    /// Checked element lookup at a multi-index.
+    pub fn try_get(&self, index: &[usize]) -> Result<f32, String> {
+        self.try_offset(index).map(|offset| self.data[offset])
+    }
+
+    /// Element at a multi-index. Panics for an invalid index; use
+    /// [`TensorND::try_get`] for a fallible lookup.
     pub fn get(&self, index: &[usize]) -> f32 {
-        self.data[self.offset(index)]
+        self.try_get(index).expect("TensorND::get")
     }
 
     /// Reshape without copying data; errors if the element count changes.
@@ -101,18 +148,18 @@ fn shape_product(shape: &[usize]) -> Option<usize> {
 }
 
 /// Row-major strides for `shape`. Handles 0- and 1-D shapes without underflow.
-fn compute_strides(shape: &[usize]) -> Vec<usize> {
+fn compute_strides(shape: &[usize]) -> Option<Vec<usize>> {
     let ndim = shape.len();
     let mut strides = vec![1usize; ndim];
     if ndim <= 1
     {
-        return strides;
+        return Some(strides);
     }
     for i in (0..ndim - 1).rev()
     {
-        strides[i] = strides[i + 1] * shape[i + 1];
+        strides[i] = strides[i + 1].checked_mul(shape[i + 1])?;
     }
-    strides
+    Some(strides)
 }
 
 #[cfg(test)]
@@ -160,11 +207,30 @@ mod tests {
         // (debug); now it returns a clean error instead of touching `data.len()`.
         let err = TensorND::try_new(vec![0.0], vec![usize::MAX, 2]);
         assert!(err.is_err());
+        // The total product is zero, but a row-major suffix stride still
+        // overflows and must not wrap.
+        assert!(TensorND::try_new(vec![], vec![0, usize::MAX, 2]).is_err());
     }
 
     #[test]
     fn reshape_rejects_overflowing_shape() {
         let t = TensorND::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
         assert!(t.reshape(vec![usize::MAX, 2]).is_err());
+    }
+
+    #[test]
+    fn out_of_bounds_coordinate_cannot_alias_another_element() {
+        let t = TensorND::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
+        assert!(t.try_get(&[0, 2]).is_err());
+        assert!(t.try_get(&[2, 0]).is_err());
+        assert!(t.try_get(&[0]).is_err());
+        assert!(t.try_get(&[0, 0, 0]).is_err());
+    }
+
+    #[test]
+    fn lookup_rejects_inconsistent_public_fields() {
+        let mut t = TensorND::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
+        t.strides[0] = 1;
+        assert!(t.try_get(&[1, 0]).is_err());
     }
 }

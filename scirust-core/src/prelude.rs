@@ -23,7 +23,6 @@ pub use crate::nn::{CrossEntropyLoss, Linear, Loss, Module, MseLoss, ReLU, Seque
 
 // --- Numeric & symbolic conveniences (kept from the original prelude). ---
 pub use crate::Dual;
-pub use crate::dispatch::gpu_or_cpu;
 pub use crate::ops::{add_f32, add_f64, mul_f32, mul_f64};
 pub use crate::symbolic::{
     Expr, NaturalCommand, Optimizer, PatternMemory, Pipeline, PipelineOutput, apply_trig_identity,

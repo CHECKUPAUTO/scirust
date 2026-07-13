@@ -9,9 +9,9 @@
 //! ## Hardening (audit `AUDIT_COMPLET.md`, finding S2)
 //!
 //! La persistance (`state.json`) est **intégrité-protégée** par un tag
-//! HMAC-SHA256 dérivé d'une clé passée via `OPENCLAW_U_STATE_KEY` (ou, à
-//! défaut, une clé de démonstration fixée à la compilation — clairement non
-//! sûre, pour tests locaux uniquement). Un `state.json` dont le MAC ne
+//! HMAC-SHA256 dérivé d'une clé d'au moins 32 octets passée via
+//! `OPENCLAW_U_STATE_KEY`. Sans clé valide, la démo fonctionne sans lire ni
+//! écrire d'état persistant. Un `state.json` dont le MAC ne
 //! vérifie pas (fichier forgé, édité, ou issu d'une autre machine/clé) est
 //! **rejeté** et l'agent repart d'un état vierge (fail-safe).
 //!
@@ -23,8 +23,8 @@
 //! `target/openclaw-u/` (jamais dans `src/`), pour ne pas polluer l'arbre
 //! source du framework.
 //!
-//! Usage : `cargo run --bin openclaw-u`
-//!         `OPENCLAW_UNSAFE_MUTATE=1 cargo run --bin openclaw-u`  (active la mutation)
+//! Usage : `cargo run --features openclaw --bin openclaw-u`
+//!         `OPENCLAW_UNSAFE_MUTATE=1 cargo run --features openclaw --bin openclaw-u`
 
 use chrono::Local;
 use rand::seq::SliceRandom;
@@ -46,22 +46,16 @@ const UPGRADE_DIR: &str = "target/openclaw-u";
 /// Env var that must be set to `1` to enable autonomous code mutation + the
 /// `cargo check` validation step. Off by default (defense-in-depth).
 const MUTATE_ENV: &str = "OPENCLAW_UNSAFE_MUTATE";
-/// Env var carrying the HMAC key for `state.json`. If unset, a fixed demo key
-/// is used (NOT secure — local experimentation only).
+/// Env var carrying the HMAC key for `state.json`.
 const STATE_KEY_ENV: &str = "OPENCLAW_U_STATE_KEY";
 const HEARTBEAT_SECS: u64 = 15; // Accélération du cycle pour le développement
 const MAX_HISTORY: usize = 50;
 
-/// Fixed demonstration HMAC key used when `OPENCLAW_U_STATE_KEY` is not set.
-/// This is intentionally public and provides NO security — it only prevents
-/// accidental corruption / cross-machine state reuse. For any real use, set
-/// `OPENCLAW_U_STATE_KEY` to a high-entropy secret.
-const DEMO_STATE_KEY: &[u8] = b"openclaw-u-demo-state-key-not-for-production";
-
-fn state_key() -> Vec<u8> {
+fn state_key() -> Option<Vec<u8>> {
     std::env::var(STATE_KEY_ENV)
-        .map(|s| s.into_bytes())
-        .unwrap_or_else(|_| DEMO_STATE_KEY.to_vec())
+        .ok()
+        .map(|value| value.into_bytes())
+        .filter(|value| value.len() >= 32)
 }
 
 /// HMAC-SHA256 (RFC 2104) over `msg` keyed by the resolved state key.
@@ -127,26 +121,34 @@ struct StateEnvelope {
 }
 
 impl StateEnvelope {
-    fn seal(state: &CoreState) -> Self {
-        let json = serde_json::to_string(state).unwrap_or_default();
-        let mac = to_hex(&hmac_sha256(&state_key(), json.as_bytes()));
-        Self {
+    fn seal(state: &CoreState) -> Result<Self, String> {
+        let key =
+            state_key().ok_or_else(|| format!("{STATE_KEY_ENV} must contain at least 32 bytes"))?;
+        let json = serde_json::to_string(state)
+            .map_err(|error| format!("cannot serialize OpenClaw state: {error}"))?;
+        let mac = to_hex(&hmac_sha256(&key, json.as_bytes()));
+        Ok(Self {
             state: state.clone(),
             mac,
-        }
+        })
     }
 
     fn verify(&self) -> bool {
+        let Some(key) = state_key()
+        else
+        {
+            return false;
+        };
         let json = match serde_json::to_string(&self.state)
         {
             Ok(s) => s,
             Err(_) => return false,
         };
-        let expected = to_hex(&hmac_sha256(&state_key(), json.as_bytes()));
+        let expected = to_hex(&hmac_sha256(&key, json.as_bytes()));
         let stored = match hex_decode(&self.mac)
         {
             Some(b) => b,
-            None => return ct_eq(expected.as_bytes(), self.mac.as_bytes()),
+            None => return false,
         };
         let want = match hex_decode(&expected)
         {
@@ -263,6 +265,11 @@ enum Event {
 // l'agent repart d'un état vierge (fail-safe) plutôt que de charger un état
 // non authentifié qui pourrait piloter la génération de code.
 async fn load_state() -> CoreState {
+    if state_key().is_none()
+    {
+        eprintln!("[openclaw-u] {STATE_KEY_ENV} absent ou trop courte : persistance désactivée.");
+        return CoreState::birth();
+    }
     if Path::new(STATE_FILE).exists()
     {
         if let Ok(raw) = tokio::fs::read_to_string(STATE_FILE).await
@@ -288,10 +295,23 @@ async fn load_state() -> CoreState {
 }
 
 async fn save_state(state: &CoreState) {
-    let env = StateEnvelope::seal(state);
-    if let Ok(json) = serde_json::to_string_pretty(&env)
+    let env = match StateEnvelope::seal(state)
     {
-        let _ = tokio::fs::write(STATE_FILE, json).await;
+        Ok(envelope) => envelope,
+        Err(_) => return,
+    };
+    let json = match serde_json::to_string_pretty(&env)
+    {
+        Ok(json) => json,
+        Err(error) =>
+        {
+            eprintln!("[openclaw-u] impossible de sérialiser l'état signé : {error}");
+            return;
+        },
+    };
+    if let Err(error) = tokio::fs::write(STATE_FILE, json).await
+    {
+        eprintln!("[openclaw-u] impossible d'écrire {STATE_FILE} : {error}");
     }
 }
 
@@ -405,9 +425,19 @@ impl SimdKernel {
     // d'invoquer `cargo check` à la racine du workspace, pour ne jamais risquer
     // de valider/charger du code dans le framework SciRust lui-même.
     let target_file_clone = target_file.clone();
+    let metadata_file = format!("{target_file}.rmeta");
+    let metadata_file_clone = metadata_file.clone();
     let result = tokio::task::spawn_blocking(move || {
         Command::new("rustc")
-            .args(["--edition", "2021", "--emit=metadata", "-o", "/dev/null"])
+            .args([
+                "--edition",
+                "2021",
+                "--crate-type",
+                "lib",
+                "--emit=metadata",
+                "-o",
+            ])
+            .arg(&metadata_file_clone)
             .arg(&target_file_clone)
             .output()
     })
@@ -446,6 +476,7 @@ impl SimdKernel {
             state.log("[Evolution] Panique ou erreur lors du processus rustc");
         },
     }
+    let _ = tokio::fs::remove_file(metadata_file).await;
 }
 
 async fn heartbeat(state: &mut CoreState, engine: &GoalEngine) {

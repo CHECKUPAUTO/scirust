@@ -1,11 +1,11 @@
 Copyright 2026 Tarek Zekriti
 
-This software is dual-licensed:
+The source code in this repository is available under the PolyForm
+Noncommercial License 1.0.0. The complete license terms and Required Notice
+are in LICENSE.md.
 
-1. Noncommercial and personal use — free of charge under the PolyForm
-   Noncommercial License 1.0.0. See LICENSE.md for the full license text.
+A separate commercial license is available from the copyright holder. See
+LICENSING.md for licensing paths and contact information. The availability of
+a commercial license does not alter or replace the terms in LICENSE.md.
 
-2. Commercial use — requires a separate commercial license.
-   Contact: zekrititarek@gmail.com
-
-SPDX-License-Identifier: LicenseRef-TarekZekriti-Dual
+SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0

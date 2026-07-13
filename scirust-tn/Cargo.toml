@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 rust-version = "1.85"
 description = "Tensor Network primitives for SciRust: Tensor-Train decomposition, MPS, DMRG"
-license = "MIT OR Apache-2.0"
+license-file = "../LICENSE.md"
 repository = "https://github.com/Memorithm/scirust"
 
 [features]

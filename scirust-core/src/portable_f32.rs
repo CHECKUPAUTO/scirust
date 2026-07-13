@@ -1430,9 +1430,13 @@ mod tests {
         }
     }
 
-    /// sin/cos : ≤ 1 ulp de la référence libm f64 sur un échantillon dense
-    /// couvrant TOUTES les magnitudes f32 (y compris les très grands
-    /// arguments, qui exercent la réduction de Payne–Hanek).
+    /// sin/cos : ≤ 1 ulp de la référence f64 `libm` pure Rust sur un
+    /// échantillon dense couvrant TOUTES les magnitudes f32 (y compris les
+    /// très grands arguments, qui exercent la réduction de Payne–Hanek).
+    ///
+    /// L'oracle ne passe volontairement pas par `f64::sin`/`f64::cos` : sur
+    /// certaines CRT Windows-GNU, leur réduction d'argument est incorrecte
+    /// au-delà de 2⁵³, même lorsque le `f64` provient exactement d'un `f32`.
     #[test]
     fn sin_cos_faithful_vs_f64_oracle() {
         let mut rng = PcgEngine::new(31337);
@@ -1444,19 +1448,29 @@ mod tests {
             {
                 continue;
             }
-            let s_ref = ((x as f64).sin()) as f32;
+            let s_ref = libm::sin(x as f64) as f32;
             let s_got = sin_f32(x);
             assert!(
                 ulp_diff(s_got, s_ref) <= 1,
-                "sin_f32({x}) = {s_got}, libm = {s_ref}"
+                "sin_f32({x}) = {s_got}, libm::sin = {s_ref}"
             );
-            let c_ref = ((x as f64).cos()) as f32;
+            let c_ref = libm::cos(x as f64) as f32;
             let c_got = cos_f32(x);
             assert!(
                 ulp_diff(c_got, c_ref) <= 1,
-                "cos_f32({x}) = {c_got}, libm = {c_ref}"
+                "cos_f32({x}) = {c_got}, libm::cos = {c_ref}"
             );
         }
+    }
+
+    /// Régression pour une CRT Windows-GNU qui réduisait mal cet argument
+    /// dans `f64::sin` : les bits attendus ont été calculés indépendamment
+    /// en arithmétique décimale à 120 chiffres.
+    #[test]
+    fn sin_cos_huge_argument_regression() {
+        let x = f32::from_bits(0x6421_1380);
+        assert_eq!(sin_f32(x).to_bits(), 0x3f7b_bb71);
+        assert_eq!(cos_f32(x).to_bits(), 0xbe3a_3330);
     }
 
     /// erf : ≤ 1 ulp d'une table de référence calculée indépendamment en

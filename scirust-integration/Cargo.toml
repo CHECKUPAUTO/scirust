@@ -20,7 +20,6 @@ serde_json = "1"
 
 [features]
 default = ["simulated"]
-# Use simulated backends (no real PLC/broker needed). Real OPC-UA / MQTT
-# transport backends are not implemented in this crate; only the simulated
-# backend is available.
+# Bundled deterministic clients. Production transports implement the existing
+# OpcuaClient / MqttPublisher traits and are injected at runtime.
 simulated = []

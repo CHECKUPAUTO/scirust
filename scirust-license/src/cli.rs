@@ -3,7 +3,7 @@
 //! current time explicitly and returns captured output plus an exit code. The
 //! binary is a thin wrapper that supplies `std::env::args()` and the real clock.
 
-use crate::hashsig::{Hash, hex_decode, hex_encode};
+use crate::hashsig::{Hash, capacity_for_height, effective_height, hex_decode, hex_encode};
 use crate::{
     DEMO_HEIGHT, Entitlements, License, LicenseError, Module, SignedLicense, Vendor, demo_root,
     demo_seed, verify_license, verify_license_on_node,
@@ -108,15 +108,21 @@ fn cmd_keygen(rest: &[String]) -> CliResult {
         Err(e) => return CliResult::usage(e),
     };
     let vendor = Vendor::from_seed(&seed, height);
-    // `from_seed` clamps the requested height into a supported range, so report
-    // the *effective* height (capacity is 2^effective_height) rather than the
-    // possibly-clamped request, which would otherwise disagree with capacity.
-    let effective_height = vendor.capacity().trailing_zeros();
+    keygen_result(&vendor.root(), height)
+}
+
+/// Format key-generation metadata from a root and requested height.
+///
+/// This is deliberately independent of tree construction: reporting uses the
+/// exact same normalization as `MerkleSigner::from_seed`, while tests can cover
+/// the clamp ceiling without deriving and allocating a million Lamport leaves.
+fn keygen_result(root: &Hash, requested_height: u32) -> CliResult {
+    let height = effective_height(requested_height);
     CliResult::ok(format!(
         "root (public key): {}\ncapacity: {} one-time licenses (height {})\n",
-        hex_encode(&vendor.root()),
-        vendor.capacity(),
-        effective_height
+        hex_encode(root),
+        capacity_for_height(requested_height),
+        height
     ))
 }
 
@@ -685,8 +691,12 @@ mod tests {
     // beside a capacity of 2^20.
     #[test]
     fn keygen_reports_the_effective_clamped_height_not_the_request() {
-        let r = run(&argv(&["keygen", "--height", "30"]), 100);
-        assert_eq!(r.exit, 0, "keygen failed: {}", r.stdout);
+        // Metadata formatting is tested with a synthetic root. Invoking the
+        // full keygen path at height 30 would intentionally clamp to height 20
+        // and derive 2^20 Lamport leaves, turning this regression into a
+        // multi-minute CPU and memory stress test.
+        let r = keygen_result(&[0xabu8; 32], 30);
+        assert_eq!(r.exit, 0);
         // Clamp ceiling is 20 → 2^20 == 1048576 one-time licenses.
         assert!(
             r.stdout

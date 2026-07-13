@@ -380,17 +380,15 @@ pub enum BabResult {
     Unknown,
 }
 
-/// **Complete** robustness verification by **branch-and-bound** (the engine behind
-/// GCP-CROWN, Zhang et al., NeurIPS 2022). Where IBP/CROWN/DeepPoly give a single
-/// *sound but incomplete* bound, BaB refines: it bounds the per-class **margins**
+/// Robustness verification by deterministic **input-space branch-and-bound**.
+/// Where IBP/CROWN/DeepPoly give a single *sound but incomplete* bound, this
+/// routine refines the input domain: it bounds the per-class **margins**
 /// over the input box with [`deeppoly_certify`]; if every margin lower bound is
 /// `> 0` the box is **robust**; otherwise it probes the box centre for a genuine
 /// **counterexample**, and failing that **splits** the box along its widest axis and
-/// recurses. As the boxes shrink the DeepPoly relaxation becomes exact, so the search
-/// **decides** robustness (up to `tol`) — proving cases a single bound cannot and
-/// returning a concrete counterexample when the class really can change. Branching
-/// is over the **input domain** (GCP-CROWN's ReLU-activation splitting and cutting
-/// planes are not implemented). Deterministic.
+/// recurses. It returns [`BabResult::Unknown`] when `tol` or `max_boxes` is
+/// reached, so it does not claim the activation splitting or cutting-plane
+/// completeness of GCP-CROWN. Deterministic.
 pub fn verify_robustness(
     layers: &[IbpLinear],
     input: &Interval,

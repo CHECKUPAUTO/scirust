@@ -442,7 +442,15 @@ pub fn run_ode(args: &[String]) -> u8 {
     {
         "rk4" =>
         {
-            let traj = scirust_solvers::ode::rk4::rk4_fixed(f, t0, t1, vec![y0], h);
+            let traj = match scirust_solvers::ode::rk4::rk4_fixed(f, t0, t1, vec![y0], h)
+            {
+                Ok(traj) => traj,
+                Err(error) =>
+                {
+                    eprintln!("error: {error}");
+                    return 2;
+                },
+            };
             let (tf, yf) = traj.last().expect("at least the initial point");
             println!(
                 "y({tf:.4}) ≈ {:.8}   ({} steps, rk4)",

@@ -186,5 +186,5 @@ Motifs détectés:
 
 5. **Benchmarks**: mesurer le speedup sur les patterns targets (MatMul → SiLU → LN).
 
-6. **rustc driver pass**: implémenter la détection de motifs dans le MIR pass
-   (scirust-rustc-driver/src/passes/) pour la fusion au moment de la compilation.
+6. **Extension compilateur éventuelle** : ne réintroduire une voie MIR qu'avec
+   une transformation réelle, des oracles de code généré et un gate CI bloquant.

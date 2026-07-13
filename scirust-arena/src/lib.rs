@@ -52,5 +52,8 @@ pub fn is_aligned<T>(ptr: *const T) -> bool {
 /// Utility: align an address up to MIN_ALIGN_BYTES.
 #[inline]
 pub fn align_up(address: usize) -> usize {
-    (address + MIN_ALIGN_BYTES - 1) & !(MIN_ALIGN_BYTES - 1)
+    address
+        .checked_add(MIN_ALIGN_BYTES - 1)
+        .map(|value| value & !(MIN_ALIGN_BYTES - 1))
+        .expect("align_up: address overflows usize")
 }

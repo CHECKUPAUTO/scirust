@@ -115,10 +115,10 @@ approximated for every file:
 - **Method receivers** are treated as shared borrows (reported as an
   approximation), since `&self` vs by-value `self` is not syntactic.
 
-The deeper precision upgrade — NLL borrows, branch joins, and
-call-return types — is the `scirust-rustc-driver` (HIR/MIR) path, kept
-outside the default workspace; this `syn` frontend is the pragmatic
-real-Rust entry point that works today.
+The deeper precision upgrade — NLL borrows, branch joins, and call-return
+types — requires a future, fully tested HIR/MIR implementation. The former
+analysis-only driver was removed; this `syn` frontend is the real-Rust entry
+point that works today.
 
 Other limits unchanged from the model itself:
 

@@ -198,9 +198,9 @@ un oracle de référence.** Extrait du mapping (à compléter au fil des phases)
 | réseaux électriques / WLS                            | `scirust-grid` |
 | biosignaux / ECG / dosing                            | `scirust-biomed` |
 
-Là où aucune primitive n'existe, le transpileur **ne devine pas** : il émet un
-`TODO` typé et signale le trou (cohérent avec la frontière « not delivered »
-du reste du dépôt).
+Là où aucune primitive n'existe, le transpileur **ne devine pas** : le lowering
+retourne une erreur `unsupported ...` explicite. Il ne génère jamais de source
+contenant un `TODO` exécutable.
 
 ---
 
@@ -208,7 +208,9 @@ du reste du dépôt).
 
 « Vocabulaire cible » = les primitives Rust vérifiées vers lesquelles émettre.
 `✅` = primitives déjà présentes ; `🟡` = partiel ; `❌` = à construire.
-La transpilation elle-même reste **à construire pour tous** (colonne omise).
+La transpilation Python/NumPy et MATLAB couvre le sous-ensemble vérifié par les
+tests du crate `scirust-transpiler`; cette matrice décrit les primitives cibles
+au-delà de ce sous-ensemble, sans les présenter comme déjà abaissées.
 
 | # | Secteur | Vocabulaire cible présent ? | Crates d'ancrage |
 |---|---------|------------------------------|------------------|

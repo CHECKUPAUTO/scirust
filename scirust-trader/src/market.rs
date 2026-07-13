@@ -1,4 +1,5 @@
-//! Market data layer: snapshots, mock exchange, Binance connector (stub).
+//! Market data layer: snapshots, deterministic mock exchange, and an optional
+//! live Binance connector.
 //!
 //! A `MarketSnapshot` is the **deterministic unit of input** — a fixed-length
 //! OHLCV window that becomes the tensor fed to the model. Its hash is part of
@@ -28,16 +29,43 @@ pub struct MarketSnapshot {
 }
 
 impl MarketSnapshot {
-    /// SHA-256 fingerprint of the canonical JSON encoding.
+    /// SHA-256 fingerprint of a canonical binary encoding.
     ///
-    /// The encoding is *canonical*: keys are emitted in struct-declaration
-    /// order, floats are rendered with 6 decimals, timestamps as integers.
-    /// Two snapshots with the same fingerprint are guaranteed identical input.
+    /// Strings are length-prefixed, integers use little-endian bytes, and every
+    /// float is represented by its exact IEEE-754 bit pattern. This encoding is
+    /// total (including for NaN and infinities), deterministic, and never falls
+    /// back to hashing an empty serialization.
     pub fn fingerprint(&self) -> String {
-        let json = serde_json::to_string(self).unwrap_or_default();
         let mut hasher = Sha256::new();
-        hasher.update(json.as_bytes());
+        hash_string(&mut hasher, &self.exchange);
+        hash_string(&mut hasher, &self.symbol);
+        hash_string(&mut hasher, &self.interval);
+        hasher.update((self.candles.len() as u64).to_le_bytes());
+        for candle in &self.candles
+        {
+            hasher.update(candle.ts_ms.to_le_bytes());
+            hasher.update(candle.open.to_bits().to_le_bytes());
+            hasher.update(candle.high.to_bits().to_le_bytes());
+            hasher.update(candle.low.to_bits().to_le_bytes());
+            hasher.update(candle.close.to_bits().to_le_bytes());
+            hasher.update(candle.volume.to_bits().to_le_bytes());
+        }
         format!("{:x}", hasher.finalize())
+    }
+
+    /// Fingerprint a snapshot only if every market value is finite.
+    pub fn try_fingerprint(&self) -> Result<String, &'static str> {
+        if self.candles.iter().any(|c| {
+            !c.open.is_finite()
+                || !c.high.is_finite()
+                || !c.low.is_finite()
+                || !c.close.is_finite()
+                || !c.volume.is_finite()
+        })
+        {
+            return Err("market snapshot contains a non-finite OHLCV value");
+        }
+        Ok(self.fingerprint())
     }
 
     /// Close-price series as a `Vec<f32>` (most common model input).
@@ -59,6 +87,11 @@ impl MarketSnapshot {
     pub fn last_close(&self) -> Option<f32> {
         self.candles.last().map(|c| c.close)
     }
+}
+
+fn hash_string(hasher: &mut Sha256, value: &str) {
+    hasher.update((value.len() as u64).to_le_bytes());
+    hasher.update(value.as_bytes());
 }
 
 /// A source of market snapshots.
@@ -200,38 +233,35 @@ impl BinanceConnector {
         }
         let raw: Vec<Vec<serde_json::Value>> = resp.json().ok()?;
         let candles = raw
-            .into_iter()
-            .map(|row| Candle {
-                ts_ms: row.first().and_then(|v| v.as_i64()).unwrap_or(0),
-                open: row
-                    .get(1)
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(0.0),
-                high: row
-                    .get(2)
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(0.0),
-                low: row
-                    .get(3)
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(0.0),
-                close: row
-                    .get(4)
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(0.0),
-                volume: row
-                    .get(5)
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(0.0),
-            })
-            .collect();
+            .iter()
+            .map(|row| parse_kline(row))
+            .collect::<Option<Vec<_>>>()?;
         Some(candles)
     }
+}
+
+#[cfg(any(feature = "live", test))]
+fn parse_kline(row: &[serde_json::Value]) -> Option<Candle> {
+    fn finite_f32(value: &serde_json::Value) -> Option<f32> {
+        let parsed = if let Some(text) = value.as_str()
+        {
+            text.parse::<f32>().ok()?
+        }
+        else
+        {
+            value.as_f64()? as f32
+        };
+        parsed.is_finite().then_some(parsed)
+    }
+
+    Some(Candle {
+        ts_ms: row.first()?.as_i64()?,
+        open: finite_f32(row.get(1)?)?,
+        high: finite_f32(row.get(2)?)?,
+        low: finite_f32(row.get(3)?)?,
+        close: finite_f32(row.get(4)?)?,
+        volume: finite_f32(row.get(5)?)?,
+    })
 }
 
 impl MarketFeed for BinanceConnector {
@@ -309,5 +339,48 @@ mod tests {
         assert_eq!(snap.exchange, "binance");
         assert!(!snap.candles.is_empty());
         assert!(snap.last_close().unwrap_or(0.0) > 0.0);
+    }
+
+    #[test]
+    fn non_finite_snapshots_never_collapse_to_one_fingerprint() {
+        let mut a = MockExchange::new(1, 100.0).next_snapshot(1).unwrap();
+        let mut b = a.clone();
+        a.candles[0].close = f32::NAN;
+        b.candles[0].close = f32::INFINITY;
+        assert_ne!(a.fingerprint(), b.fingerprint());
+        assert!(a.try_fingerprint().is_err());
+        assert!(b.try_fingerprint().is_err());
+    }
+
+    #[test]
+    fn malformed_binance_rows_are_rejected_instead_of_zero_filled() {
+        let valid = serde_json::json!([
+            1_700_000_000_000_i64,
+            "100.0",
+            "101.0",
+            "99.0",
+            "100.5",
+            "42.0"
+        ]);
+        let valid_row = valid.as_array().unwrap();
+        assert_eq!(parse_kline(valid_row).unwrap().close, 100.5);
+
+        let missing_volume =
+            serde_json::json!([1_700_000_000_000_i64, "100", "101", "99", "100.5"]);
+        assert!(parse_kline(missing_volume.as_array().unwrap()).is_none());
+
+        let malformed_price = serde_json::json!([
+            1_700_000_000_000_i64,
+            "not-a-price",
+            "101",
+            "99",
+            "100.5",
+            "42"
+        ]);
+        assert!(parse_kline(malformed_price.as_array().unwrap()).is_none());
+
+        let non_finite =
+            serde_json::json!([1_700_000_000_000_i64, "NaN", "101", "99", "100.5", "42"]);
+        assert!(parse_kline(non_finite.as_array().unwrap()).is_none());
     }
 }

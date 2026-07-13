@@ -883,6 +883,12 @@ mod tests {
 
     #[test]
     fn trader_subcommands_work() {
+        let proof_path = std::env::temp_dir().join(format!(
+            "scirust-cli-trader-test-{}.json",
+            std::process::id()
+        ));
+        let proof_path = proof_path.to_string_lossy().into_owned();
+
         assert_eq!(run(&s(&["trader", "info"])), 0);
         assert_eq!(
             run(&s(&[
@@ -891,18 +897,13 @@ mod tests {
                 "--steps",
                 "2",
                 "--output",
-                "/tmp/scirust_cli_trader_test.json"
+                &proof_path
             ])),
             0
         );
-        assert_eq!(
-            run(&s(&[
-                "trader",
-                "audit",
-                "/tmp/scirust_cli_trader_test.json"
-            ])),
-            0
-        );
+        assert_eq!(run(&s(&["trader", "audit", &proof_path])), 0);
         assert_eq!(run(&s(&["trader", "predict"])), 0);
+
+        std::fs::remove_file(proof_path).unwrap();
     }
 }

@@ -190,7 +190,7 @@ ligne-précises arrivent avec les spans du frontend).
 ### `openclaw-u` — démo agent autonome (hors framework)
 
 ```bash
-cargo run --bin openclaw-u
+cargo run --features openclaw --bin openclaw-u
 ```
 
 Binaire expérimental indépendant du framework (voir README racine).
@@ -223,8 +223,7 @@ cargo run -p sentiment_demo
 ```
 
 Hors workspace par défaut : `examples/benchmarks` (criterion),
-`examples/simd_views_demo`, `scirust-burn-bridge`,
-`scirust-rustc-driver` (nécessite `rustc-dev` ; `setup-rustc-dev.sh`).
+`examples/simd_views_demo` et `scirust-burn-bridge`.
 
 ## 3. Mesures et sondes reproductibles
 

@@ -8,7 +8,7 @@
 //!   - `trader backtest`  — run a full backtest with risk management
 //!   - `trader info`      — show pipeline capabilities
 
-use crate::agent::{Action, OllamaClient, StubLlm, TradingAgent};
+use crate::agent::{Action, DeterministicNarrator, OllamaClient, TradingAgent};
 use crate::backtest::{BacktestConfig, run_backtest as run_strategy_backtest};
 use crate::chart::{ChartOptions, equity_curve_svg};
 use crate::dashboard::{DashboardOptions, render_dashboard};
@@ -61,9 +61,13 @@ fn print_help() {
     println!("scirust trader — auditable crypto-trading pipeline\n");
     println!("usage: scirust trader <subcommand> [args]\n");
     println!("subcommands:");
-    println!("  run       [--steps N] [--window N] [--seed S] [--llm stub|ollama] [--output FILE]");
+    println!(
+        "  run       [--steps N] [--window N] [--seed S] [--llm deterministic|ollama] [--output FILE]"
+    );
     println!("            Run a backtest on the mock exchange and seal a proof.");
-    println!("  predict   [--seed S] [--llm stub|ollama] [--exchange mock|binance] [--symbol S]");
+    println!(
+        "  predict   [--seed S] [--llm deterministic|ollama] [--exchange mock|binance] [--symbol S]"
+    );
     println!("            Process one snapshot and print the certified prediction.");
     println!("  audit     <file>");
     println!("            Load and verify a proof file (manifest hash check).");
@@ -87,7 +91,7 @@ fn print_help() {
     println!("  info      Show pipeline capabilities.");
     println!();
     println!("examples:");
-    println!("  scirust trader run --steps 10 --llm stub --output proof.json");
+    println!("  scirust trader run --steps 10 --llm deterministic --output proof.json");
     println!("  scirust trader predict --llm ollama --exchange binance --symbol BTCUSDT");
     println!("  scirust trader audit proof.json");
     println!("  scirust trader verify proof.json");
@@ -108,7 +112,7 @@ fn print_info() {
     println!("  • Replayable: `verify` re-runs the model and checks fingerprints match.");
     println!("  • LLM-bounded: the LLM cannot announce predictions outside certified bounds.\n");
     println!("LLM backends:");
-    println!("  stub   — deterministic, no network (default)");
+    println!("  deterministic — fixed offline narration, no network (default)");
     println!("  ollama — local Ollama instance (http://localhost:11434)\n");
     println!("Exchange feeds:");
     println!("  mock    — deterministic random-walk feed (default, no network)");
@@ -119,7 +123,7 @@ fn cmd_run(args: &[String]) -> u8 {
     let mut steps = 10usize;
     let mut window = 50usize;
     let mut seed = 42u64;
-    let mut llm = "stub";
+    let mut llm = "deterministic";
     let mut output = "proof.json";
 
     let mut i = 0;
@@ -187,7 +191,12 @@ fn cmd_run(args: &[String]) -> u8 {
             "qwen2.5-coder:1.5b",
             "http://127.0.0.1:11434",
         )),
-        _ => Box::new(StubLlm),
+        "deterministic" => Box::new(DeterministicNarrator),
+        other =>
+        {
+            eprintln!("unknown narration backend: `{other}`");
+            return 2;
+        },
     };
     let mut agent = TradingAgent::new(model, llm_client);
     agent.lookback = 10;
@@ -212,7 +221,15 @@ fn cmd_run(args: &[String]) -> u8 {
     }
     println!();
 
-    let proof = agent.seal_proof(&records);
+    let proof = match agent.seal_proof(&records)
+    {
+        Ok(proof) => proof,
+        Err(error) =>
+        {
+            eprintln!("error sealing proof: {error}");
+            return 1;
+        },
+    };
     println!("--- Proof ---");
     println!("manifest_hash: {}", proof.manifest_hash);
     println!("num_decisions: {}", proof.num_decisions);
@@ -246,7 +263,7 @@ fn cmd_run(args: &[String]) -> u8 {
 
 fn cmd_predict(args: &[String]) -> u8 {
     let mut seed = 42u64;
-    let mut llm = "stub";
+    let mut llm = "deterministic";
     let mut exchange = "mock";
     let mut symbol = "BTC/USDT";
 
@@ -300,7 +317,12 @@ fn cmd_predict(args: &[String]) -> u8 {
             "qwen2.5-coder:1.5b",
             "http://127.0.0.1:11434",
         )),
-        _ => Box::new(StubLlm),
+        "deterministic" => Box::new(DeterministicNarrator),
+        other =>
+        {
+            eprintln!("unknown narration backend: `{other}`");
+            return 2;
+        },
     };
     let mut agent = TradingAgent::new(model, llm_client);
     agent.lookback = 10;
@@ -645,7 +667,7 @@ fn cmd_backtest(args: &[String]) -> u8 {
     println!();
 
     let model = PricePredictor::new(13, &[16, 8], seed);
-    let mut agent = TradingAgent::new(model, Box::new(StubLlm));
+    let mut agent = TradingAgent::new(model, Box::new(DeterministicNarrator));
     agent.lookback = 10;
 
     let mut feed = MockExchange::new(seed, 50_000.0);
@@ -681,7 +703,15 @@ fn cmd_backtest(args: &[String]) -> u8 {
     );
     println!();
 
-    let proof = agent.seal_proof(&records);
+    let proof = match agent.seal_proof(&records)
+    {
+        Ok(proof) => proof,
+        Err(error) =>
+        {
+            eprintln!("error sealing proof: {error}");
+            return 1;
+        },
+    };
     println!("manifest_hash: {}", proof.manifest_hash);
     println!(
         "verify:        {}",
@@ -1138,6 +1168,13 @@ fn cmd_dashboard(args: &[String]) -> u8 {
 mod tests {
     use super::*;
 
+    fn temp_file(name: &str) -> String {
+        std::env::temp_dir()
+            .join(format!("scirust-{}-{name}", std::process::id()))
+            .to_string_lossy()
+            .into_owned()
+    }
+
     #[test]
     fn help_returns_zero() {
         assert_eq!(run(&[]), 0);
@@ -1155,49 +1192,48 @@ mod tests {
     }
 
     #[test]
-    fn run_with_stub_llm_produces_proof() {
+    fn run_with_deterministic_narrator_produces_proof() {
+        let output = temp_file("trader-proof.json");
         let args = vec![
             "run".to_string(),
             "--steps".to_string(),
             "3".to_string(),
             "--llm".to_string(),
-            "stub".to_string(),
+            "deterministic".to_string(),
             "--output".to_string(),
-            "/tmp/scirust_trader_test_proof.json".to_string(),
+            output,
         ];
         assert_eq!(run(&args), 0);
     }
 
     #[test]
-    fn predict_with_stub_llm() {
+    fn predict_with_deterministic_narrator() {
         let args = vec![
             "predict".to_string(),
             "--llm".to_string(),
-            "stub".to_string(),
+            "deterministic".to_string(),
         ];
         assert_eq!(run(&args), 0);
     }
 
     #[test]
     fn audit_loaded_proof() {
+        let output = temp_file("trader-audit.json");
         let run_args = vec![
             "run".to_string(),
             "--steps".to_string(),
             "2".to_string(),
             "--output".to_string(),
-            "/tmp/scirust_trader_audit_test.json".to_string(),
+            output.clone(),
         ];
         assert_eq!(run(&run_args), 0);
-        let audit_args = vec![
-            "audit".to_string(),
-            "/tmp/scirust_trader_audit_test.json".to_string(),
-        ];
+        let audit_args = vec!["audit".to_string(), output];
         assert_eq!(run(&audit_args), 0);
     }
 
     #[test]
     fn audit_missing_file_returns_one() {
-        let args = vec!["audit".to_string(), "/nonexistent/proof.json".to_string()];
+        let args = vec!["audit".to_string(), temp_file("missing-audit.json")];
         assert_eq!(run(&args), 1);
     }
 
@@ -1209,24 +1245,22 @@ mod tests {
 
     #[test]
     fn verify_loaded_proof() {
+        let output = temp_file("trader-verify.json");
         let run_args = vec![
             "run".to_string(),
             "--steps".to_string(),
             "2".to_string(),
             "--output".to_string(),
-            "/tmp/scirust_trader_verify_test.json".to_string(),
+            output.clone(),
         ];
         assert_eq!(run(&run_args), 0);
-        let verify_args = vec![
-            "verify".to_string(),
-            "/tmp/scirust_trader_verify_test.json".to_string(),
-        ];
+        let verify_args = vec!["verify".to_string(), output];
         assert_eq!(run(&verify_args), 0);
     }
 
     #[test]
     fn verify_missing_file_returns_one() {
-        let args = vec!["verify".to_string(), "/nonexistent/proof.json".to_string()];
+        let args = vec!["verify".to_string(), temp_file("missing-verify.json")];
         assert_eq!(run(&args), 1);
     }
 
@@ -1252,12 +1286,13 @@ mod tests {
 
     #[test]
     fn backtest_with_output() {
+        let output = temp_file("trader-backtest.json");
         let args = vec![
             "backtest".to_string(),
             "--steps".to_string(),
             "3".to_string(),
             "--output".to_string(),
-            "/tmp/scirust_trader_backtest_test.json".to_string(),
+            output,
         ];
         assert_eq!(run(&args), 0);
     }
@@ -1293,7 +1328,7 @@ mod tests {
 
     #[test]
     fn chart_writes_svg_file() {
-        let out = "/tmp/scirust_trader_chart_test.svg";
+        let out = temp_file("trader-chart.svg");
         let args = vec![
             "chart".to_string(),
             "--bars".to_string(),
@@ -1301,7 +1336,7 @@ mod tests {
             "--strategy".to_string(),
             "sma_cross".to_string(),
             "--output".to_string(),
-            out.to_string(),
+            out.clone(),
         ];
         assert_eq!(run(&args), 0);
         let content = std::fs::read_to_string(out).unwrap();
@@ -1310,7 +1345,7 @@ mod tests {
 
     #[test]
     fn dashboard_writes_html_file() {
-        let out = "/tmp/scirust_trader_dashboard_test.html";
+        let out = temp_file("trader-dashboard.html");
         let args = vec![
             "dashboard".to_string(),
             "--symbols".to_string(),
@@ -1318,7 +1353,7 @@ mod tests {
             "--bars".to_string(),
             "150".to_string(),
             "--output".to_string(),
-            out.to_string(),
+            out.clone(),
         ];
         assert_eq!(run(&args), 0);
         let content = std::fs::read_to_string(out).unwrap();

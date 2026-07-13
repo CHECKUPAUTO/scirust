@@ -447,9 +447,13 @@ mod tests {
         let dot: f32 = full_sv.iter().zip(&cap_sv).map(|(&a, &b)| a * b).sum();
         let nb: f32 = cap_sv.iter().map(|&b| b * b).sum::<f32>().sqrt();
         let fidelity = dot.abs() / nb.max(1e-12);
-        // Bond-1 truncation is an approximation, but a sound one (fidelity well above
-        // chance for a 16-dim space, ~0.25).
-        assert!(fidelity > 0.5, "truncated fidelity too low: {fidelity}");
+        // The best bond-1 approximation of this four-qubit linear cluster state has
+        // overlap exactly 1/2.  Compare with that analytic value instead of relying
+        // on the small upward rounding error produced by an f32 SVD.
+        assert!(
+            (fidelity - 0.5).abs() <= 1e-5,
+            "unexpected truncated fidelity: {fidelity}"
+        );
         assert!(capped.max_bond() == 1, "cap not respected");
     }
 }

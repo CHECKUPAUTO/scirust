@@ -508,16 +508,42 @@ impl CudaChain {
 
     /// Upload a row-major `rows × cols` fp32 matrix to VRAM, rounding to bf16.
     pub fn upload(&self, data: &[f32], rows: usize, cols: usize) -> CudaMatrix {
-        assert_eq!(data.len(), rows * cols, "upload: data len != rows*cols");
+        self.try_upload(data, rows, cols)
+            .expect("cuda matrix upload failed")
+    }
+
+    /// Fallible variant of [`CudaChain::upload`] for library boundaries.
+    pub fn try_upload(&self, data: &[f32], rows: usize, cols: usize) -> Result<CudaMatrix, String> {
+        let expected = rows
+            .checked_mul(cols)
+            .ok_or_else(|| format!("upload shape {rows}x{cols} overflows usize"))?;
+        if data.len() != expected
+        {
+            return Err(format!(
+                "upload data has {} elements, expected {expected}",
+                data.len()
+            ));
+        }
         let bf: Vec<bf16> = data.iter().map(|&x| bf16::from_f32(x)).collect();
-        let buf = self.stream.clone_htod(&bf).expect("cuda htod");
-        CudaMatrix { buf, rows, cols }
+        let buf = self
+            .stream
+            .clone_htod(&bf)
+            .map_err(|error| format!("CUDA host-to-device transfer failed: {error}"))?;
+        Ok(CudaMatrix { buf, rows, cols })
     }
 
     /// Download a resident bf16 matrix to a row-major fp32 `Vec`.
     pub fn download(&self, m: &CudaMatrix) -> Vec<f32> {
-        let bf: Vec<bf16> = self.stream.clone_dtoh(&m.buf).expect("cuda dtoh");
-        bf.iter().map(|x| x.to_f32()).collect()
+        self.try_download(m).expect("cuda matrix download failed")
+    }
+
+    /// Fallible variant of [`CudaChain::download`] for library boundaries.
+    pub fn try_download(&self, m: &CudaMatrix) -> Result<Vec<f32>, String> {
+        let bf: Vec<bf16> = self
+            .stream
+            .clone_dtoh(&m.buf)
+            .map_err(|error| format!("CUDA device-to-host transfer failed: {error}"))?;
+        Ok(bf.iter().map(|x| x.to_f32()).collect())
     }
 
     /// Upload an fp32 vector to VRAM **without** rounding (master-weight / moment
@@ -557,16 +583,26 @@ impl CudaChain {
     /// `Cᵀ = Bᵀ·Aᵀ` — pass `B` first and `A` second with `m`/`n` swapped. No data
     /// is transposed; only the descriptor changes.
     pub fn matmul(&self, a: &CudaMatrix, b: &CudaMatrix) -> CudaMatrix {
+        self.try_matmul(a, b).expect("CUDA matrix multiply failed")
+    }
+
+    /// Fallible variant of [`CudaChain::matmul`] for library boundaries.
+    pub fn try_matmul(&self, a: &CudaMatrix, b: &CudaMatrix) -> Result<CudaMatrix, String> {
         let (m, k, n) = (a.rows, a.cols, b.cols);
-        assert_eq!(
-            b.rows, k,
-            "matmul: inner dims disagree ({}x{} · {}x{})",
-            a.rows, a.cols, b.rows, b.cols
-        );
+        if b.rows != k
+        {
+            return Err(format!(
+                "matmul inner dimensions disagree ({}x{} · {}x{})",
+                a.rows, a.cols, b.rows, b.cols
+            ));
+        }
+        let output_len = m
+            .checked_mul(n)
+            .ok_or_else(|| format!("matmul output shape {m}x{n} overflows usize"))?;
         let mut c = self
             .stream
-            .alloc_zeros::<bf16>(m * n)
-            .expect("cuda alloc C");
+            .alloc_zeros::<bf16>(output_len)
+            .map_err(|error| format!("CUDA output allocation failed: {error}"))?;
         let cfg = MatmulConfig {
             transa: false,
             transb: false,
@@ -590,13 +626,13 @@ impl CudaChain {
         unsafe {
             self.blas
                 .matmul(cfg, &b.buf, &a.buf, &mut c, None, None)
-                .expect("cublasLt bf16 matmul");
+                .map_err(|error| format!("cuBLASLt bf16 matmul failed: {error}"))?;
         }
-        CudaMatrix {
+        Ok(CudaMatrix {
             buf: c,
             rows: m,
             cols: n,
-        }
+        })
     }
 
     /// Launch an element-wise binary kernel `c = f(a, b)` on equal-shaped inputs.

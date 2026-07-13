@@ -117,7 +117,7 @@ fn main() {
     {
         Command::Ask { prompt } => cmd_ask(&mut model, prompt, &cli),
         Command::Chat => cmd_chat(&mut model, &cli),
-        Command::Explain { path, lines } => cmd_explain(path, lines.as_deref(), &cli),
+        Command::Explain { path, lines } => cmd_explain(&mut model, path, lines.as_deref(), &cli),
         Command::Generate { description } => cmd_generate(&mut model, description, &cli),
         Command::Info => cmd_info(&model.config, &cli),
     }
@@ -217,7 +217,7 @@ fn cmd_chat(model: &mut SciAgentModel, cli: &Cli) {
     }
 }
 
-fn cmd_explain(path: &PathBuf, lines: Option<&str>, cli: &Cli) {
+fn cmd_explain(model: &mut SciAgentModel, path: &PathBuf, lines: Option<&str>, cli: &Cli) {
     let content = match std::fs::read_to_string(path)
     {
         Ok(c) => c,
@@ -232,12 +232,15 @@ fn cmd_explain(path: &PathBuf, lines: Option<&str>, cli: &Cli) {
     {
         Some(range) =>
         {
-            let parts: Vec<&str> = range.splitn(2, '-').collect();
-            let start: usize = parts[0].parse().unwrap_or(1);
-            let end: usize = parts
-                .get(1)
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(start + 30);
+            let (start, end) = match parse_line_range(range)
+            {
+                Ok(bounds) => bounds,
+                Err(error) =>
+                {
+                    eprintln!("Invalid --lines value `{range}`: {error}");
+                    return;
+                },
+            };
             content
                 .lines()
                 .skip(start.saturating_sub(1))
@@ -248,15 +251,48 @@ fn cmd_explain(path: &PathBuf, lines: Option<&str>, cli: &Cli) {
         None => content.chars().take(2000).collect::<String>(),
     };
 
-    let vocab = scirust_sciagent::config::SciAgentConfig::debug().vocab_size;
     let prompt = format!("Explain this code:\n```rust\n{excerpt}\n```");
-    cmd_ask(&mut model_placeholder(vocab), &prompt, cli);
+    cmd_ask(model, &prompt, cli);
 }
 
-fn model_placeholder(vocab_size: usize) -> SciAgentModel {
-    let mut cfg = SciAgentConfig::debug();
-    cfg.vocab_size = vocab_size;
-    SciAgentModel::new(&cfg)
+fn parse_line_range(range: &str) -> Result<(usize, usize), &'static str> {
+    let (start, end) = match range.split_once('-')
+    {
+        Some((start, end)) =>
+        {
+            if start.is_empty() || end.is_empty() || end.contains('-')
+            {
+                return Err("expected START-END with two positive line numbers");
+            }
+            let start = start
+                .parse::<usize>()
+                .map_err(|_| "START is not a positive line number")?;
+            let end = end
+                .parse::<usize>()
+                .map_err(|_| "END is not a positive line number")?;
+            (start, end)
+        },
+        None =>
+        {
+            let start = range
+                .parse::<usize>()
+                .map_err(|_| "expected a positive line number or START-END")?;
+            let end = start
+                .checked_add(30)
+                .ok_or("line range overflows this platform")?;
+            (start, end)
+        },
+    };
+
+    if start == 0 || end == 0
+    {
+        return Err("line numbers are one-based and must be greater than zero");
+    }
+    if end < start
+    {
+        return Err("END must be greater than or equal to START");
+    }
+    Ok((start, end))
 }
 
 fn cmd_generate(model: &mut SciAgentModel, description: &str, cli: &Cli) {
@@ -336,5 +372,20 @@ fn fmt_params(n: usize) -> String {
     else
     {
         format!("{n}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_line_range;
+
+    #[test]
+    fn line_ranges_are_validated() {
+        assert_eq!(parse_line_range("4-9"), Ok((4, 9)));
+        assert_eq!(parse_line_range("4"), Ok((4, 34)));
+        assert!(parse_line_range("0-2").is_err());
+        assert!(parse_line_range("9-4").is_err());
+        assert!(parse_line_range("bad").is_err());
+        assert!(parse_line_range("1-2-3").is_err());
     }
 }

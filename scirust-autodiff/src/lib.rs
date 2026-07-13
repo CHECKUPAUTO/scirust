@@ -336,14 +336,40 @@ impl Tape {
 
     pub fn backward(&self, out_idx: usize) {
         let mut nodes = self.nodes.borrow_mut();
+        assert!(
+            out_idx < nodes.len(),
+            "Tape::backward: output index {out_idx} is outside a tape with {} nodes",
+            nodes.len()
+        );
         for node in nodes.iter_mut()
         {
             node.grad = 0.0;
         }
+
+        // Only traverse the subgraph that contributes to the requested output.
+        // A tape may contain unrelated operations (including operations with a
+        // singular local derivative); propagating through all of them would
+        // incorrectly evaluate expressions such as `0 * NaN`.
+        let mut reachable = vec![false; nodes.len()];
+        let mut pending = vec![out_idx];
+        while let Some(idx) = pending.pop()
+        {
+            if reachable[idx]
+            {
+                continue;
+            }
+            reachable[idx] = true;
+            pending.extend(nodes[idx].deps.iter().map(|(dep_idx, _)| *dep_idx));
+        }
+
         nodes[out_idx].grad = 1.0;
 
         for i in (0..nodes.len()).rev()
         {
+            if !reachable[i]
+            {
+                continue;
+            }
             let grad = nodes[i].grad;
             let deps = nodes[i].deps.clone();
             for (dep_idx, partial) in deps
@@ -384,9 +410,23 @@ impl<'a> Var<'a> {
         }
     }
 
+    fn assert_same_tape(&self, other: &Var<'a>) {
+        assert!(
+            std::ptr::eq(self.tape, other.tape),
+            "automatic-differentiation variables belong to different tapes"
+        );
+    }
+
     pub fn powi(self, n: i32) -> Var<'a> {
         let val = self.value().powi(n);
-        let deriv = n as f64 * self.value().powi(n - 1);
+        let deriv = if n == 0
+        {
+            0.0
+        }
+        else
+        {
+            n as f64 * self.value().powi(n - 1)
+        };
         self.push_op(val, vec![(self.idx, deriv)])
     }
 
@@ -411,6 +451,7 @@ impl<'a> Var<'a> {
 impl<'a> Add for Var<'a> {
     type Output = Var<'a>;
     fn add(self, rhs: Var<'a>) -> Var<'a> {
+        self.assert_same_tape(&rhs);
         self.push_op(
             self.value() + rhs.value(),
             vec![(self.idx, 1.0), (rhs.idx, 1.0)],
@@ -421,6 +462,7 @@ impl<'a> Add for Var<'a> {
 impl<'a> Sub for Var<'a> {
     type Output = Var<'a>;
     fn sub(self, rhs: Var<'a>) -> Var<'a> {
+        self.assert_same_tape(&rhs);
         self.push_op(
             self.value() - rhs.value(),
             vec![(self.idx, 1.0), (rhs.idx, -1.0)],
@@ -431,6 +473,7 @@ impl<'a> Sub for Var<'a> {
 impl<'a> Mul for Var<'a> {
     type Output = Var<'a>;
     fn mul(self, rhs: Var<'a>) -> Var<'a> {
+        self.assert_same_tape(&rhs);
         self.push_op(
             self.value() * rhs.value(),
             vec![(self.idx, rhs.value()), (rhs.idx, self.value())],
@@ -441,6 +484,7 @@ impl<'a> Mul for Var<'a> {
 impl<'a> Div for Var<'a> {
     type Output = Var<'a>;
     fn div(self, rhs: Var<'a>) -> Var<'a> {
+        self.assert_same_tape(&rhs);
         let val = self.value() / rhs.value();
         let d_lhs = 1.0 / rhs.value();
         let d_rhs = -self.value() / (rhs.value() * rhs.value());
@@ -556,6 +600,37 @@ mod tests {
         tape.backward(y.idx);
         let expected = 1.0f64.exp() * (1.0f64.cos() - 1.0f64.sin());
         assert!((x.grad() - expected).abs() < 1e-10);
+    }
+
+    #[test]
+    #[should_panic(expected = "different tapes")]
+    fn reverse_mode_rejects_cross_tape_operations() {
+        let left_tape = Tape::new();
+        let right_tape = Tape::new();
+        let left = left_tape.var(2.0);
+        let right = right_tape.var(3.0);
+        let _ = left + right;
+    }
+
+    #[test]
+    fn reverse_mode_powi_zero_at_zero_has_zero_derivative() {
+        let tape = Tape::new();
+        let x = tape.var(0.0);
+        let y = x.powi(0);
+        tape.backward(y.idx);
+        assert_eq!(y.value(), 1.0);
+        assert_eq!(x.grad(), 0.0);
+    }
+
+    #[test]
+    fn backward_ignores_unreachable_singular_nodes() {
+        let tape = Tape::new();
+        let x = tape.var(0.0);
+        let y = x + x;
+        let _unused = x.powi(-1);
+        tape.backward(y.idx);
+        assert_eq!(x.grad(), 2.0);
+        assert!(x.grad().is_finite());
     }
 
     // -- Domain-edge derivative regressions (formerly NaN/Inf) -------------

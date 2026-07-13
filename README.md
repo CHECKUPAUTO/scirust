@@ -269,7 +269,7 @@ the member crates under `scirust::{core, simd, symbolic, learning, solvers}`. Th
 deep-learning and scientific-computing capabilities described here live in those crates.
 
 The repository also bundles a small **experimental autonomous-agent binary**,
-`openclaw-u` (`src/main.rs`, run with `cargo run --bin openclaw-u`). It is *not* a
+`openclaw-u` (`src/main.rs`, run with `cargo run --features openclaw --bin openclaw-u`). It is *not* a
 component of the framework, is not required to build or use it, and can be ignored
 entirely. Parts of the repository were developed with the assistance of **SoulLink**, a
 separate agent system maintained outside this repository; like OpenClaw-U, it is not part

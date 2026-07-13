@@ -127,16 +127,16 @@ fn test_slab() {
 fn test_aligned_vec() {
     use crate::AlignedVec;
 
-    let mut vec = AlignedVec::new::<f32>(100);
+    let mut vec = AlignedVec::<f32>::new(100);
 
     // Vérifier alignement
     assert!(vec.is_aligned(), "AlignedVec must be aligned on 128 bytes");
 
     // Remplir
-    vec.fill::<f32>(1.0);
+    vec.fill(1.0);
 
     // Vérifier contenu
-    let slice = vec.as_slice::<f32>();
+    let slice = vec.as_slice();
     assert_eq!(slice.len(), 100);
     assert_eq!(slice[0], 1.0);
     assert_eq!(slice[99], 1.0);
@@ -146,10 +146,10 @@ fn test_aligned_vec() {
 fn test_aligned_vec_new_fill() {
     use crate::AlignedVec;
 
-    let vec = AlignedVec::new_fill::<f64>(32, std::f64::consts::PI);
+    let vec = AlignedVec::<f64>::new_fill(32, std::f64::consts::PI);
 
     assert!(vec.is_aligned());
-    let slice = vec.as_slice::<f64>();
+    let slice = vec.as_slice();
     assert_eq!(slice.len(), 32);
     for &v in slice.iter()
     {
@@ -161,15 +161,15 @@ fn test_aligned_vec_new_fill() {
 fn test_aligned_vec_as_mut_slice() {
     use crate::AlignedVec;
 
-    let mut vec = AlignedVec::new::<i32>(16);
+    let mut vec = AlignedVec::<i32>::new(16);
     {
-        let slice = vec.as_mut_slice::<i32>();
+        let slice = vec.as_mut_slice();
         for (i, v) in slice.iter_mut().enumerate()
         {
             *v = i as i32;
         }
     }
-    let slice = vec.as_slice::<i32>();
+    let slice = vec.as_slice();
     for (i, &v) in slice.iter().enumerate()
     {
         assert_eq!(v, i as i32);

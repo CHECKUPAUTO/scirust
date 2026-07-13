@@ -20,10 +20,12 @@ The `wgpu` backend provides a portable, FFI-free acceleration path. However, the
 
 ## 3. Stubs, TODOs, and Code Quality
 
-### 3.1 Placeholders
-- `scirust-scaffold`: Contains generic `TODO` for complexity analysis. (Addressed in this PR).
-- `scirust-retrieval`: Suffered from duplicate module declarations and inconsistent exports. (Fixed in this PR).
-- `scirust-gpu`: CUDA backend remains a stub (`Unavailable`) until hardware runners are available. This is a deliberate "honest stub".
+### 3.1 Removed placeholders
+- Empty benchmark targets now contain Criterion measurements.
+- The unused `#[gpu]` macro and analysis-only rustc driver were removed because
+  they did not perform the transformations their names and docs advertised.
+- `scirust-gpu::CudaBackend` now delegates to the feature-gated CUDA chain and
+  reports hardware/runtime failures explicitly.
 
 ### 3.2 Error Handling
 Many core operations used `panic!` for shape mismatches.
@@ -35,8 +37,9 @@ Many core operations used `panic!` for shape mismatches.
 The `DESIGN_SCIRUST_TENSOR.md` outlines a sophisticated graph compiler that is only partially implemented.
 **Contribution:** Implementing `TensorGraph` and `FusedOp` structures to allow more complex operation chains (e.g., Linear+ReLU) to be represented and executed.
 
-### 4.2 Symbolic-to-MIR Bridge
-The `scirust-rustc-driver` and `scirust-symbolic` crates have an opportunity to interoperate more closely. Compiling symbolic expressions directly into MIR for optimized execution could be a major performance win for scientific solvers.
+### 4.2 Symbolic code generation
+`scirust-symbolic` emits explicit Rust source. A future MIR bridge would need a
+real, independently tested compiler extension; no analysis-only driver is shipped.
 
 ## 5. Conclusion
 SciRust is a robust research artifact transitioning into an industrial-grade tool. Its core strength lies in its transparency and determinism. The primary technical debt is the tensor stack fragmentation, and the primary growth area is the completion of the graph compiler ecosystem.

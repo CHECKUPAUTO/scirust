@@ -33,11 +33,25 @@ plutôt que de la dupliquer — voir `src/tools/dev.rs`. MCP est ici une couche
 de *transport* supplémentaire au-dessus de capacités qui existaient déjà, pas
 une réécriture.
 
-## Outils exposés par défaut
+## Profils de capacités
+
+Le serveur démarre en profil **production**. Ce profil n'enregistre ni les
+outils `dev_*` (lecture/recherche de fichiers, build, tests, git) ni le
+passe-plat `scirust_cli`; une injection de prompt ne peut donc pas les utiliser
+pour lire les secrets du processus ou démarrer un sous-processus.
+
+Le profil `development` doit être activé explicitement avec
+`SCIRUST_MCP_PROFILE=development`. Il est réservé à un checkout local de
+confiance. Ses chemins sont canonicalisés et confinés à `SCIAGENT_ROOT` (la
+racine du workspace par défaut), y compris après résolution des liens
+symboliques. Les lectures, plages de lignes, sorties, arguments et temps
+d'exécution sont bornés.
+
+## Outils disponibles
 
 | Outil | Domaine | Description |
 |---|---|---|
-| `dev_search`, `dev_grep`, `dev_read`, `dev_explain`, `dev_build`, `dev_test`, `dev_status` | Développement | Hérités de `scirust-sciagent` (recherche/lecture de code, build, tests, statut git) |
+| `dev_search`, `dev_grep`, `dev_read`, `dev_explain`, `dev_build`, `dev_test`, `dev_status` | Développement opt-in | Disponibles uniquement dans le profil `development` |
 | `linalg_eigen_symmetric` | Algèbre linéaire | Décomposition en valeurs propres symétrique (Householder + QL implicite, voir `scirust-solvers`) |
 | `linalg_svd` | Algèbre linéaire | SVD générale (Jacobi à un côté) |
 | `linalg_gmres` | Algèbre linéaire | GMRES(m) pour systèmes non symétriques |
@@ -47,7 +61,7 @@ une réécriture.
 | `sim_epidemic` | Simulation (`scirust-sim`) | Épidémie SIR : R0, pic infecté et jour du pic, taux d'attaque final |
 | `sim_battery_discharge` | Simulation (`scirust-sim`) | Cellule Thévenin 1-RC + thermique (plante `scirust-bms`) à courant constant : SoC, tension, température finales |
 | `sim_grid_stability` | Simulation (`scirust-sim`) | Équation d'oscillation machine-réseau (plante `scirust-grid`) : synchronisme, équilibre, fréquence petit signal, transitoire |
-| `scirust_cli` | Passe-plat | Exécute n'importe quelle sous-commande du CLI `scirust` (`linsolve`, `solve`, `diff`, `integrate`, `ode`, `certify`, `conformal`, `evo`, `analyze`, ...) |
+| `scirust_cli` | Passe-plat opt-in | Disponible uniquement dans le profil `development` |
 
 `discovery_scan` ne peut jamais s'auto-autoriser depuis la conversation : la
 clé qui vérifie la signature de la portée vit côté serveur
@@ -100,6 +114,15 @@ configuration Claude Desktop (`claude_desktop_config.json`) :
 `SCIRUST_BIN` (variable d'environnement) pointe l'outil `scirust_cli` vers un
 binaire `scirust` déjà compilé (`cargo install --path scirust-cli`) plutôt
 que de le reconstruire à chaque appel.
+
+Pour une session locale de développement uniquement :
+
+```bash
+SCIRUST_MCP_PROFILE=development SCIAGENT_ROOT="$PWD" \
+  cargo run -p scirust-mcp --bin scirust-mcp
+```
+
+Toute autre valeur de `SCIRUST_MCP_PROFILE` est refusée au démarrage.
 
 ## Sources
 

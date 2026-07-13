@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const GENESIS_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+const DEFAULT_MAX_ENTRIES: usize = 10_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuditEntry {
@@ -34,17 +35,36 @@ fn payload(e: &AuditEntry) -> String {
     )
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct AuditLog {
     entries: Vec<AuditEntry>,
     head: String,
+    anchor: String,
+    next_seq: u64,
+    max_entries: usize,
+}
+
+impl Default for AuditLog {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AuditLog {
     pub fn new() -> Self {
+        Self::with_max_entries(DEFAULT_MAX_ENTRIES)
+    }
+
+    /// Create a bounded in-memory audit window. When the window is full, its
+    /// oldest entry is discarded and its hash becomes the verification anchor
+    /// for the remaining chain.
+    pub fn with_max_entries(max_entries: usize) -> Self {
         Self {
             entries: Vec::new(),
             head: GENESIS_HASH.to_string(),
+            anchor: GENESIS_HASH.to_string(),
+            next_seq: 0,
+            max_entries: max_entries.max(1),
         }
     }
 
@@ -57,7 +77,8 @@ impl AuditLog {
         outcome: &str,
         result: &serde_json::Value,
     ) -> &AuditEntry {
-        let seq = self.entries.len() as u64;
+        let seq = self.next_seq;
+        self.next_seq = self.next_seq.saturating_add(1);
         let timestamp_unix_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis())
@@ -74,6 +95,11 @@ impl AuditLog {
         };
         entry.hash = sha256_hex(payload(&entry).as_bytes());
         self.head = entry.hash.clone();
+        if self.entries.len() == self.max_entries
+        {
+            let removed = self.entries.remove(0);
+            self.anchor = removed.hash;
+        }
         self.entries.push(entry);
         self.entries.last().expect("just pushed")
     }
@@ -81,7 +107,7 @@ impl AuditLog {
     /// Revérifie toute la chaîne depuis la genèse — détecte toute
     /// modification, insertion ou suppression d'entrée après coup.
     pub fn verify_chain(&self) -> bool {
-        let mut prev = GENESIS_HASH.to_string();
+        let mut prev = self.anchor.clone();
         for e in &self.entries
         {
             if e.prev_hash != prev
@@ -163,5 +189,18 @@ mod tests {
         log.record("tool_a", &json!({"secret": "topsecret"}), "ok", &json!({}));
         let exported = log.export_json().unwrap();
         assert!(!exported.contains("topsecret"));
+    }
+
+    #[test]
+    fn bounded_window_keeps_chain_valid_and_sequence_monotonic() {
+        let mut log = AuditLog::with_max_entries(2);
+        for i in 0..3
+        {
+            log.record("tool", &json!({"i": i}), "ok", &json!({}));
+        }
+        assert_eq!(log.len(), 2);
+        assert_eq!(log.entries()[0].seq, 1);
+        assert_eq!(log.entries()[1].seq, 2);
+        assert!(log.verify_chain());
     }
 }

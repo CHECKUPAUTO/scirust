@@ -26,6 +26,7 @@
 //! HMAC-SHA256 are implemented here and checked against published test vectors.
 
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 // ===========================================================================
 // Keccak-256 (Ethereum's hash — NOT SHA3-256; the padding domain byte is 0x01).
@@ -511,13 +512,28 @@ fn word_address(a: [u8; 20]) -> [u8; 32] {
 
 /// A parsed WalletConnect v2 pairing URI
 /// (`wc:{topic}@2?relay-protocol=irn&symKey={hex}`).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub struct WalletConnectUri {
     pub topic: String,
     pub version: u8,
     pub relay_protocol: String,
+    /// Pairing secret. It is intentionally omitted from serialization and
+    /// redacted from `Debug` so logs and MCP responses cannot disclose it.
+    #[serde(skip_serializing, default)]
     pub sym_key: String,
     pub expiry_timestamp: Option<u64>,
+}
+
+impl fmt::Debug for WalletConnectUri {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WalletConnectUri")
+            .field("topic", &self.topic)
+            .field("version", &self.version)
+            .field("relay_protocol", &self.relay_protocol)
+            .field("sym_key", &"[REDACTED]")
+            .field("expiry_timestamp", &self.expiry_timestamp)
+            .finish()
+    }
 }
 
 /// Parse a WalletConnect pairing URI. Supports v2 (the current standard).
@@ -536,6 +552,16 @@ pub fn parse_walletconnect_uri(uri: &str) -> Result<WalletConnectUri, String> {
     let version: u8 = version_str
         .parse()
         .map_err(|_| "invalid version".to_string())?;
+    if version != 2
+    {
+        return Err("unsupported WalletConnect version (expected 2)".to_string());
+    }
+    let valid_hex_32 =
+        |value: &str| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit());
+    if !valid_hex_32(topic)
+    {
+        return Err("WalletConnect topic must be 32-byte hex".to_string());
+    }
     let mut relay_protocol = String::new();
     let mut sym_key = String::new();
     let mut expiry_timestamp = None;
@@ -551,9 +577,9 @@ pub fn parse_walletconnect_uri(uri: &str) -> Result<WalletConnectUri, String> {
             {},
         }
     }
-    if version == 2 && sym_key.is_empty()
+    if !valid_hex_32(&sym_key)
     {
-        return Err("WalletConnect v2 URI missing symKey".to_string());
+        return Err("WalletConnect v2 symKey must be 32-byte hex".to_string());
     }
     Ok(WalletConnectUri {
         topic: topic.to_string(),
@@ -1057,6 +1083,11 @@ mod tests {
         assert_eq!(p.relay_protocol, "irn");
         assert_eq!(p.topic.len(), 64);
         assert_eq!(p.sym_key.len(), 64);
+        let serialized = serde_json::to_string(&p).unwrap();
+        let debug = format!("{p:?}");
+        assert!(!serialized.contains(&p.sym_key));
+        assert!(!debug.contains(&p.sym_key));
+        assert!(debug.contains("[REDACTED]"));
     }
 
     #[test]

@@ -95,19 +95,27 @@ fn validate_address_tool() -> McpTool {
 fn parse_wc_uri_tool() -> McpTool {
     McpTool {
         name: "wallet_parse_walletconnect_uri".to_string(),
-        description: "Parse a WalletConnect v2 pairing URI (wc:{topic}@2?relay-protocol=irn&symKey=…) \
-            into its components (topic, version, relay protocol, symKey, expiry). The first step of \
+        description:
+            "Parse a WalletConnect v2 pairing URI (wc:{topic}@2?relay-protocol=irn&symKey=…) \
+            into its non-secret components (topic, version, relay protocol, expiry). The symKey is \
+            validated but never returned. This is the first step of \
             establishing a WalletConnect session with a non-custodial wallet."
-            .to_string(),
+                .to_string(),
         input_schema: json!({
             "type": "object",
             "properties": { "uri": { "type": "string" } },
             "required": ["uri"]
         }),
         handler: Box::new(|args| {
-            let uri = args.get("uri").and_then(|x| x.as_str()).ok_or("missing `uri`")?;
+            let uri = args
+                .get("uri")
+                .and_then(|x| x.as_str())
+                .ok_or("missing `uri`")?;
             let p = parse_walletconnect_uri(uri).map_err(|e| e.to_string())?;
-            Ok(serde_json::to_value(&p).unwrap_or(Value::Null))
+            let mut value = serde_json::to_value(&p)
+                .map_err(|e| format!("failed to encode WalletConnect metadata: {e}"))?;
+            value["sym_key_present"] = json!(!p.sym_key.is_empty());
+            Ok(value)
         }),
     }
 }
@@ -308,6 +316,9 @@ fn sign_exchange_tool() -> McpTool {
                 "exchange signing is not armed: the operator has not set SCIRUST_EXCHANGE_SECRET"
                     .to_string()
             })?;
+            if secret.trim().is_empty() {
+                return Err("exchange signing is not armed: SCIRUST_EXCHANGE_SECRET is empty".to_string());
+            }
             let allowlist = std::env::var("SCIRUST_EXCHANGE_ALLOWED_PATHS").ok();
             let style = args.get("style").and_then(|x| x.as_str()).unwrap_or("binance");
             let sig = match style
@@ -365,11 +376,15 @@ fn authorization_status_tool() -> McpTool {
             }
         }),
         handler: Box::new(|args| {
-            let key = std::env::var("SCIRUST_WALLET_KEY").ok();
+            let key = std::env::var("SCIRUST_WALLET_KEY")
+                .ok()
+                .filter(|value| !value.trim().is_empty());
             let armed = key.is_some();
             let mut out = json!({
                 "signing_armed": armed,
-                "exchange_signing_armed": std::env::var("SCIRUST_EXCHANGE_SECRET").is_ok(),
+                "exchange_signing_armed": std::env::var("SCIRUST_EXCHANGE_SECRET")
+                    .map(|value| !value.trim().is_empty())
+                    .unwrap_or(false),
                 "note": "Signing/sending requires a valid WalletAuthorization under the operator's \
                          SCIRUST_WALLET_KEY. The agent cannot mint one itself.",
             });
@@ -429,6 +444,9 @@ fn authorization_status_tool() -> McpTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn tool(name: &str) -> McpTool {
         wallet_tools()
@@ -469,6 +487,12 @@ mod tests {
         })).unwrap();
         assert_eq!(out["version"], json!(2));
         assert_eq!(out["relay_protocol"], json!("irn"));
+        assert_eq!(out["sym_key_present"], json!(true));
+        assert!(out.get("sym_key").is_none());
+        assert!(
+            !out.to_string()
+                .contains("587d5484ce2a2a6ee3ba1962fdd7e8588e06200c46823bd18fbd67def96ad303")
+        );
     }
 
     #[test]
@@ -494,6 +518,7 @@ mod tests {
 
     #[test]
     fn exchange_signing_refused_without_secret() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::remove_var("SCIRUST_EXCHANGE_SECRET");
         let t = tool("wallet_sign_exchange_request");
         let r = (t.handler)(json!({ "style": "binance", "query": "symbol=BTCUSDT" }));
@@ -502,11 +527,39 @@ mod tests {
     }
 
     #[test]
+    fn exchange_signing_refused_with_empty_secret() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("SCIRUST_EXCHANGE_SECRET", "  ");
+        let t = tool("wallet_sign_exchange_request");
+        let r = (t.handler)(json!({
+            "style": "binance",
+            "query": "symbol=BTCUSDT",
+            "endpoint": "/api/v3/order"
+        }));
+        assert!(r.is_err());
+        assert!(r.unwrap_err().contains("empty"));
+        std::env::remove_var("SCIRUST_EXCHANGE_SECRET");
+    }
+
+    #[test]
     fn authorization_status_reports_disarmed() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::remove_var("SCIRUST_WALLET_KEY");
         let t = tool("wallet_authorization_status");
         let out = (t.handler)(json!({})).unwrap();
         assert_eq!(out["signing_armed"], json!(false));
+    }
+
+    #[test]
+    fn authorization_status_treats_empty_keys_as_disarmed() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("SCIRUST_WALLET_KEY", "");
+        std::env::set_var("SCIRUST_EXCHANGE_SECRET", "   ");
+        let out = (tool("wallet_authorization_status").handler)(json!({})).unwrap();
+        assert_eq!(out["signing_armed"], json!(false));
+        assert_eq!(out["exchange_signing_armed"], json!(false));
+        std::env::remove_var("SCIRUST_WALLET_KEY");
+        std::env::remove_var("SCIRUST_EXCHANGE_SECRET");
     }
 
     #[test]

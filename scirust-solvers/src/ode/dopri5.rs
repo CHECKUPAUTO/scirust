@@ -108,7 +108,7 @@ where
 {
     use dp_coeffs::*;
     let n = y0.len();
-    if t_end <= t0
+    if !t0.is_finite() || !t_end.is_finite() || t_end <= t0
     {
         return Err(SolverError::InvalidInput("t_end must be > t0".into()));
     }
@@ -118,12 +118,33 @@ where
             "system dimension must be > 0".into(),
         ));
     }
+    if !h_init.is_finite() || h_init <= 0.0
+    {
+        return Err(SolverError::InvalidInput(
+            "h_init must be finite and > 0".into(),
+        ));
+    }
+    if !rtol.is_finite()
+        || !atol.is_finite()
+        || rtol < 0.0
+        || atol < 0.0
+        || (rtol == 0.0 && atol == 0.0)
+    {
+        return Err(SolverError::InvalidInput(
+            "rtol and atol must be finite and non-negative, with at least one > 0".into(),
+        ));
+    }
+    if let Some(&value) = y0.iter().find(|value| !value.is_finite())
+    {
+        return Err(SolverError::NanDetected { iter: 0, value });
+    }
 
     let mut t = t0;
     let mut y = y0;
     let mut h = h_init.max(MIN_STEP).min(t_end - t0);
     let mut accepted = 0usize;
     let mut rejected = 0usize;
+    let mut consecutive_rejections = 0usize;
 
     // Backup du dernier état valide pour rollback sur divergence
     let mut last_good_t = t;
@@ -143,6 +164,10 @@ where
     let mut ynew = vec![0.0; n];
 
     f(t, &y, &mut k1);
+    for &value in &k1
+    {
+        check_finite(value, "initial k1")?;
+    }
 
     for _ in 0..MAX_STEPS
     {
@@ -253,6 +278,7 @@ where
             std::mem::swap(&mut y, &mut ynew);
             std::mem::swap(&mut k1, &mut k7);
             accepted += 1;
+            consecutive_rejections = 0;
             out_t.push(t);
             out_y.push(y.clone());
 
@@ -271,6 +297,7 @@ where
         {
             // Rejeté — réduction agressive
             rejected += 1;
+            consecutive_rejections += 1;
             let factor = (SAFETY * err_norm.powf(-0.2)).clamp(MIN_FACTOR, MAX_FACTOR);
             check_finite(factor, "factor_reject")?;
             h *= factor;
@@ -291,16 +318,16 @@ where
                 });
             }
 
-            if rejected > MAX_REJECTIONS
+            if consecutive_rejections > MAX_REJECTIONS
             {
                 warn!(
                     target: "solver",
                     "DOPRI5: too many consecutive rejections ({}) at t={} — aborting",
-                    rejected, t
+                    consecutive_rejections, t
                 );
                 return Err(SolverError::IntegrationFailed(format!(
                     "too many consecutive rejections ({}) at t={}, h={:.3e}",
-                    rejected, t, h
+                    consecutive_rejections, t, h
                 )));
             }
         }
@@ -382,5 +409,14 @@ mod tests {
         let last = &r.y[r.y.len() - 1];
         let e = last[1].powi(2) / 2.0 + 9.81 * (1.0 - last[0].cos());
         assert!((e - e0).abs() / e0 < 1e-6, "energy drift: e0={e0}, e={e}");
+    }
+
+    #[test]
+    fn invalid_numeric_configuration_is_rejected() {
+        let f = |_: f64, y: &[f64], dy: &mut [f64]| dy[0] = y[0];
+        assert!(dopri5(f, 0.0, 1.0, vec![1.0], 1e-6, 1e-9, 0.0).is_err());
+        assert!(dopri5(f, 0.0, 1.0, vec![1.0], f64::NAN, 1e-9, 0.1).is_err());
+        assert!(dopri5(f, 0.0, 1.0, vec![1.0], 0.0, 0.0, 0.1).is_err());
+        assert!(dopri5(f, 0.0, 1.0, vec![f64::NAN], 1e-6, 1e-9, 0.1).is_err());
     }
 }

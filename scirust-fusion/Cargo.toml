@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 description = "SciRust AST/MIR operator fusion engine for kernel compilation"
-license = "MIT OR Apache-2.0"
+license-file = "../LICENSE.md"
 
 [dependencies]
 scirust-core = { path = "../scirust-core" }
