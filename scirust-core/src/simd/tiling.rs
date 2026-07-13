@@ -51,11 +51,9 @@ impl TilingConfig {
         {
             if let Ok(size_str) =
                 std::fs::read_to_string("/sys/devices/system/cpu/cpu0/cache/index2/size")
+                && let Ok(size) = size_str.trim().trim_end_matches('K').parse::<usize>()
             {
-                if let Ok(size) = size_str.trim().trim_end_matches('K').parse::<usize>()
-                {
-                    return size * 1024; // Convertir KB → bytes
-                }
+                return size * 1024; // Convertir KB → bytes
             }
         }
 
@@ -103,16 +101,25 @@ impl TilingConfig {
         }
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(
+        target_arch = "aarch64",
+        any(target_os = "linux", target_os = "android")
+    ))]
     #[allow(dead_code)]
     fn has_sve() -> bool {
-        unsafe {
-            let hwcap = libc::getauxval(libc::AT_HWCAP);
-            (hwcap & (1 << 31)) != 0 // Bit SVE dans HWCAP
-        }
+        // Linux and Android expose AArch64 CPU capabilities through auxv.
+        // SVE is bit 22 of AT_HWCAP; other operating systems use different
+        // discovery APIs and must fall back to the portable NEON width here.
+        const AT_HWCAP: libc::c_ulong = 16;
+        const HWCAP_SVE: libc::c_ulong = 1 << 22;
+        let hwcap = unsafe { libc::getauxval(AT_HWCAP) };
+        (hwcap & HWCAP_SVE) != 0
     }
 
-    #[cfg(not(target_arch = "aarch64"))]
+    #[cfg(not(all(
+        target_arch = "aarch64",
+        any(target_os = "linux", target_os = "android")
+    )))]
     #[allow(dead_code)]
     fn has_sve() -> bool {
         false
@@ -464,11 +471,9 @@ fn detect_l1_cache() -> usize {
     #[cfg(target_os = "linux")]
     {
         if let Ok(s) = std::fs::read_to_string("/sys/devices/system/cpu/cpu0/cache/index0/size")
+            && let Ok(v) = s.trim().trim_end_matches('K').parse::<usize>()
         {
-            if let Ok(v) = s.trim().trim_end_matches('K').parse::<usize>()
-            {
-                return v * 1024;
-            }
+            return v * 1024;
         }
     }
     32_768
@@ -478,11 +483,9 @@ fn detect_l2_cache_size() -> usize {
     #[cfg(target_os = "linux")]
     {
         if let Ok(s) = std::fs::read_to_string("/sys/devices/system/cpu/cpu0/cache/index2/size")
+            && let Ok(v) = s.trim().trim_end_matches('K').parse::<usize>()
         {
-            if let Ok(v) = s.trim().trim_end_matches('K').parse::<usize>()
-            {
-                return v * 1024;
-            }
+            return v * 1024;
         }
     }
     #[cfg(target_arch = "aarch64")]
@@ -509,11 +512,9 @@ fn detect_l3_cache() -> usize {
         for path in &paths
         {
             if let Ok(s) = std::fs::read_to_string(path)
+                && let Ok(v) = s.trim().trim_end_matches('K').parse::<usize>()
             {
-                if let Ok(v) = s.trim().trim_end_matches('K').parse::<usize>()
-                {
-                    return v * 1024;
-                }
+                return v * 1024;
             }
         }
     }
