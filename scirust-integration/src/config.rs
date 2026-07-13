@@ -4,11 +4,11 @@ use std::path::Path;
 
 /// Complete pipeline configuration.
 ///
-/// Can be loaded from a TOML-like JSON file or created programmatically.
+/// Can be loaded from a JSON file or created programmatically.
 /// This is the single source of truth for an industrial monitoring deployment.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineConfig {
-    /// Backend type (simulated, opcua, mqtt, file_replay)
+    /// Backend type (`simulated`, or `external` when using `Pipeline::with_backend`).
     pub backend_type: String,
     /// OPC-UA connection settings
     pub opcua: OpcuaBackendConfig,
@@ -304,6 +304,13 @@ impl PipelineConfig {
     /// Validate the configuration.
     pub fn validate(&self) -> Vec<String> {
         let mut errors = Vec::new();
+        if crate::backend::BackendType::parse_from_str(&self.backend_type).is_none()
+        {
+            errors.push(format!(
+                "Unknown backend type `{}` (expected `simulated` or `external`)",
+                self.backend_type
+            ));
+        }
         if self.stations.is_empty()
         {
             errors.push("No monitoring stations defined".to_string());

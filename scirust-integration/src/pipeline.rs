@@ -4,8 +4,7 @@ use scirust_events_core::EventStream;
 use scirust_events_models::SpikeDetector;
 use scirust_events_runtime::EventRuntime;
 use scirust_func_safety::audit::AuditLog;
-use scirust_mqtt::MqttPublisher;
-use scirust_mqtt::event_to_payload;
+use scirust_mqtt::{EventSeverity, event_to_payload};
 use scirust_pdm::change_detection::CUSUM;
 use scirust_pdm::health::HealthIndex;
 use scirust_pdm::rul::{LinearRulEstimator, RulEstimator};
@@ -64,6 +63,9 @@ pub struct Pipeline {
     cycles_completed: usize,
     events_detected: u64,
     events_published: u64,
+    mqtt_info: usize,
+    mqtt_warning: usize,
+    mqtt_critical: usize,
     sim_time: f64,
     subscribed_node_ids: Vec<String>,
     /// Last successfully-read feature vector, used to carry forward values for
@@ -74,7 +76,7 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    /// Create a new pipeline from configuration.
+    /// Create a new pipeline with the bundled simulated backend.
     ///
     /// The pipeline is driven by the first configured station. A configuration
     /// with zero stations is not usable, so any empty `stations` list is
@@ -82,7 +84,7 @@ impl Pipeline {
     /// index-safe, panic-free construction (deserialized JSON can legally carry
     /// `"stations": []`). Use [`Pipeline::try_new`] when callers want to reject
     /// such a configuration up front instead of running against a default
-    /// station.
+    /// station. Production transports use [`Pipeline::with_backend`].
     pub fn new(mut config: PipelineConfig) -> Self {
         if config.stations.is_empty()
         {
@@ -91,18 +93,32 @@ impl Pipeline {
                 .push(crate::config::StationConfig::default());
         }
 
-        let backend_type =
-            BackendType::parse_from_str(&config.backend_type).unwrap_or(BackendType::Simulated);
-
         let opcua_cfg: scirust_opcua::OpcuaConfig = (&config.opcua).into();
         let mqtt_cfg: scirust_mqtt::MqttConfig = (&config.mqtt).into();
+        let backend = BackendFactory::create(&opcua_cfg, &mqtt_cfg, BackendType::Simulated)
+            .expect("built-in simulated backend must accept validated configuration");
+        config.backend_type = BackendType::Simulated.label().to_string();
+        Self::from_parts(config, backend)
+    }
 
-        let backend = match BackendFactory::create(&opcua_cfg, &mqtt_cfg, backend_type)
+    /// Build a pipeline around caller-supplied, connected transport adapters.
+    pub fn with_backend(mut config: PipelineConfig, backend: Backend) -> Result<Self, String> {
+        let validation_errors = config.validate();
+        if !validation_errors.is_empty()
         {
-            Ok(b) => b,
-            Err(_) => BackendFactory::try_real_or_simulated(&opcua_cfg, &mqtt_cfg),
-        };
+            return Err(format!(
+                "invalid pipeline configuration: {}",
+                validation_errors.join("; ")
+            ));
+        }
+        backend
+            .ensure_ready()
+            .map_err(|error| format!("pipeline backend is not ready: {error}"))?;
+        config.backend_type = backend.backend_type().label().to_string();
+        Ok(Self::from_parts(config, backend))
+    }
 
+    fn from_parts(config: PipelineConfig, backend: Backend) -> Self {
         // First station config drives the pipeline (guaranteed non-empty above).
         let station = &config.stations[0];
 
@@ -140,6 +156,9 @@ impl Pipeline {
             cycles_completed: 0,
             events_detected: 0,
             events_published: 0,
+            mqtt_info: 0,
+            mqtt_warning: 0,
+            mqtt_critical: 0,
             sim_time: 0.0,
             subscribed_node_ids: Vec::new(),
             last_features: Vec::new(),
@@ -153,11 +172,26 @@ impl Pipeline {
     /// returns an error (rather than backfilling a default station) when the
     /// config is unusable — most importantly when it declares no stations.
     pub fn try_new(config: PipelineConfig) -> Result<Self, String> {
-        if config.stations.is_empty()
+        let validation_errors = config.validate();
+        if !validation_errors.is_empty()
         {
-            return Err("Pipeline configuration has no monitoring stations".to_string());
+            return Err(format!(
+                "invalid pipeline configuration: {}",
+                validation_errors.join("; ")
+            ));
         }
-        Ok(Self::new(config))
+        match BackendType::parse_from_str(&config.backend_type)
+        {
+            Some(BackendType::Simulated) => Ok(Self::new(config)),
+            Some(BackendType::External) =>
+            {
+                Err("external backend configuration requires Pipeline::with_backend".to_string())
+            },
+            None => Err(format!(
+                "unknown backend type `{}`; expected `simulated` or use Pipeline::with_backend",
+                config.backend_type
+            )),
+        }
     }
 
     /// Initialize: subscribe to OPC-UA nodes matching configured sensors.
@@ -312,6 +346,12 @@ impl Pipeline {
                 if self.backend.mqtt.publish_event(&payload).is_ok()
                 {
                     self.events_published += 1;
+                    match payload.severity
+                    {
+                        EventSeverity::Info => self.mqtt_info += 1,
+                        EventSeverity::Warning => self.mqtt_warning += 1,
+                        EventSeverity::Critical => self.mqtt_critical += 1,
+                    }
                 }
             }
         }
@@ -373,11 +413,14 @@ impl Pipeline {
     /// Generate a final report.
     pub fn generate_report(&self) -> PipelineReport {
         let rul_pred = self.rul.predict();
-        // The simulated MQTT publisher tracks every message it sends, so report
-        // its real counters rather than a proxy/hardcoded zeros.
-        let mqtt_messages = self.backend.mqtt.publish_count;
-        let (mqtt_info, mqtt_warning, mqtt_critical) = self.backend.mqtt.count_by_severity();
-
+        let clock_kind = if self.backend.is_simulated()
+        {
+            "simulated"
+        }
+        else
+        {
+            "logical pipeline"
+        };
         PipelineReport {
             total_cycles: self.cycles_completed,
             total_events: self.events_detected,
@@ -389,14 +432,14 @@ impl Pipeline {
             rul_upper_bound: rul_pred.upper_bound_hours,
             audit_entries: self.audit.len(),
             audit_chain_valid: self.audit.verify_chain(),
-            mqtt_messages,
-            mqtt_info,
-            mqtt_warning,
-            mqtt_critical,
+            mqtt_messages: self.events_published,
+            mqtt_info: self.mqtt_info,
+            mqtt_warning: self.mqtt_warning,
+            mqtt_critical: self.mqtt_critical,
             drift_alarms: self.drift_alarms,
             duration_note: format!(
-                "Ran {} cycles over {:.1}s of simulated time ({} drift alarm(s))",
-                self.cycles_completed, self.sim_time, self.drift_alarms
+                "Ran {} cycles over {:.1}s of {} time ({} drift alarm(s))",
+                self.cycles_completed, self.sim_time, clock_kind, self.drift_alarms
             ),
         }
     }
@@ -561,8 +604,12 @@ mod tests {
         let mut pipeline = Pipeline::new(config);
         let report = pipeline.run(5);
 
-        let publish_count = pipeline.backend.mqtt.publish_count;
-        let (info, warning, critical) = pipeline.backend.mqtt.count_by_severity();
+        let publish_count = pipeline.events_published;
+        let (info, warning, critical) = (
+            pipeline.mqtt_info,
+            pipeline.mqtt_warning,
+            pipeline.mqtt_critical,
+        );
 
         assert!(publish_count > 0, "expected published messages");
         assert_eq!(report.mqtt_messages, publish_count);
@@ -628,6 +675,41 @@ mod tests {
         assert_eq!(pipeline.config.stations.len(), 1);
         let report = pipeline.run(3);
         assert_eq!(report.total_cycles, 3);
+    }
+
+    #[test]
+    fn test_pipeline_accepts_explicit_external_adapters() {
+        let mut opcua = scirust_opcua::SimulatedOpcuaClient::new();
+        scirust_opcua::OpcuaClient::connect(&mut opcua, &scirust_opcua::OpcuaConfig::default())
+            .unwrap();
+        let mut mqtt = scirust_mqtt::SimulatedMqttPublisher::new();
+        scirust_mqtt::MqttPublisher::connect(&mut mqtt, &scirust_mqtt::MqttConfig::default())
+            .unwrap();
+        let backend = Backend::external(Box::new(opcua), Box::new(mqtt)).unwrap();
+
+        let pipeline = Pipeline::with_backend(PipelineConfig::default(), backend).unwrap();
+        assert_eq!(pipeline.backend.backend_type(), BackendType::External);
+        assert_eq!(pipeline.config.backend_type, "external");
+    }
+
+    #[test]
+    fn test_pipeline_rechecks_opcua_readiness_at_injection() {
+        let mut opcua = scirust_opcua::SimulatedOpcuaClient::new();
+        scirust_opcua::OpcuaClient::connect(&mut opcua, &scirust_opcua::OpcuaConfig::default())
+            .unwrap();
+        let mut mqtt = scirust_mqtt::SimulatedMqttPublisher::new();
+        scirust_mqtt::MqttPublisher::connect(&mut mqtt, &scirust_mqtt::MqttConfig::default())
+            .unwrap();
+        let mut backend = Backend::external(Box::new(opcua), Box::new(mqtt)).unwrap();
+        backend.opcua.disconnect().unwrap();
+
+        let error = Pipeline::with_backend(PipelineConfig::default(), backend)
+            .err()
+            .expect("a disconnected OPC-UA adapter must be rejected");
+        assert!(
+            error.contains("OPC-UA"),
+            "unexpected readiness error: {error}"
+        );
     }
 
     /// Oracle for the two previously-untested filesystem config functions:

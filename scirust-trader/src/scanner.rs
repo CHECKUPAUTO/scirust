@@ -25,6 +25,9 @@ use crate::market::MarketSnapshot;
 use crate::strategy::{STRATEGY_NAMES, strategy_from_spec};
 use std::collections::BTreeMap;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OpportunityIntegrityError(&'static str);
+
 /// Filters the agent expresses in natural language, lowered to numbers.
 /// Unspecified fields default to "no constraint".
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -136,23 +139,53 @@ impl Opportunity {
     /// Compute the audit proof hash over the canonical opportunity content
     /// (every field except the hash itself). Two identical opportunities always
     /// produce the same proof, so a third party can recompute and verify it.
-    fn seal(mut self) -> Self {
+    fn seal(mut self) -> Result<Self, OpportunityIntegrityError> {
         self.proof_hash.clear();
-        let json = serde_json::to_string(&self).unwrap_or_default();
+        let json = self.canonical_payload()?;
         let mut hasher = Sha256::new();
-        hasher.update(json.as_bytes());
+        hasher.update(&json);
         self.proof_hash = format!("{:x}", hasher.finalize());
-        self
+        Ok(self)
     }
 
     /// Recompute and check the proof hash (tamper detection).
     pub fn verify(&self) -> bool {
         let mut clone = self.clone();
         let claimed = std::mem::take(&mut clone.proof_hash);
-        let json = serde_json::to_string(&clone).unwrap_or_default();
+        let Ok(json) = clone.canonical_payload()
+        else
+        {
+            return false;
+        };
         let mut hasher = Sha256::new();
-        hasher.update(json.as_bytes());
+        hasher.update(&json);
         format!("{:x}", hasher.finalize()) == claimed
+    }
+
+    fn canonical_payload(&self) -> Result<Vec<u8>, OpportunityIntegrityError> {
+        let numeric_fields = [
+            ("signal_strength", self.signal_strength),
+            ("last_close", self.last_close),
+            ("entry", self.entry),
+            ("stop_loss", self.stop_loss),
+            ("take_profit", self.take_profit),
+            ("position_size", self.position_size),
+            ("position_notional", self.position_notional),
+            ("risk_amount", self.risk_amount),
+            ("reward_risk", self.reward_risk),
+            ("backtest_total_return", self.backtest_total_return),
+            ("backtest_sharpe", self.backtest_sharpe),
+            ("backtest_max_drawdown", self.backtest_max_drawdown),
+            ("backtest_win_rate", self.backtest_win_rate),
+            ("backtest_profit_factor", self.backtest_profit_factor),
+            ("backtest_expectancy", self.backtest_expectancy),
+            ("score", self.score),
+        ];
+        if let Some((field, _)) = numeric_fields.iter().find(|(_, value)| !value.is_finite())
+        {
+            return Err(OpportunityIntegrityError(field));
+        }
+        serde_json::to_vec(self).map_err(|_| OpportunityIntegrityError("serialization"))
     }
 }
 
@@ -235,6 +268,11 @@ pub fn scan(
         {
             continue; // not enough history to backtest meaningfully
         }
+        let Ok(snapshot_fingerprint) = snap.try_fingerprint()
+        else
+        {
+            continue;
+        };
         let closes = snap.closes();
         let highs: Vec<f32> = snap.candles.iter().map(|c| c.high).collect();
         let lows: Vec<f32> = snap.candles.iter().map(|c| c.low).collect();
@@ -346,11 +384,13 @@ pub fn scan(
                 backtest_expectancy: perf.trades.expectancy,
                 num_trades: report.num_trades,
                 score,
-                snapshot_fingerprint: snap.fingerprint(),
+                snapshot_fingerprint: snapshot_fingerprint.clone(),
                 proof_hash: String::new(),
+            };
+            if let Ok(opp) = opp.seal()
+            {
+                matches.push(opp);
             }
-            .seal();
-            matches.push(opp);
         }
     }
 
@@ -554,5 +594,37 @@ mod tests {
             o.take_profit *= 2.0; // tamper
             assert!(!o.verify(), "tampered opportunity must fail verification");
         }
+    }
+
+    #[test]
+    fn non_finite_opportunity_cannot_be_sealed_or_verified() {
+        let report = scan(
+            &[uptrend("BTC/USDT", 200)],
+            &OpportunityConstraints::default(),
+            &ScanRiskConfig::default(),
+        );
+        let Some(mut opportunity) = report.opportunities.into_iter().next()
+        else
+        {
+            panic!("expected at least one opportunity");
+        };
+        opportunity.score = f32::NAN;
+        opportunity.proof_hash.clear();
+        assert!(opportunity.clone().seal().is_err());
+        assert!(!opportunity.verify());
+    }
+
+    #[test]
+    fn scanner_rejects_non_finite_market_data() {
+        let mut invalid = uptrend("BTC/USDT", 200);
+        invalid.candles[100].close = f32::NAN;
+        let report = scan(
+            &[invalid],
+            &OpportunityConstraints::default(),
+            &ScanRiskConfig::default(),
+        );
+        assert_eq!(report.num_candidates, 0);
+        assert!(report.opportunities.is_empty());
+        assert!(report.verify());
     }
 }

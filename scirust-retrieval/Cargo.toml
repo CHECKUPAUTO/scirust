@@ -2,7 +2,7 @@
 name = "scirust-retrieval"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.89"
 publish = false
 description = "SciRust pure semantic (dense transformer) retrieval — deterministic exact index, late-interaction reranking, and ranking metrics; an auditable alternative to RAG"
 

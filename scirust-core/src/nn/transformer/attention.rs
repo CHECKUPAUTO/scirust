@@ -39,7 +39,7 @@ impl MultiHeadAttention {
         rng: &mut PcgEngine,
     ) -> Self {
         assert!(
-            d_model % n_heads == 0,
+            d_model.is_multiple_of(n_heads),
             "MultiHeadAttention: d_model ({d_model}) doit etre divisible par n_heads ({n_heads})"
         );
         let d_head = d_model / n_heads;

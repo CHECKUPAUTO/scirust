@@ -12,7 +12,7 @@ use crate::certify::{CertifiedBounds, certify, feature_attribution};
 use crate::indicators::IndicatorSet;
 use crate::market::{MarketFeed, MarketSnapshot};
 use crate::model::{PricePredictor, build_features};
-use crate::proof::{DecisionProof, DecisionRecord};
+use crate::proof::{DecisionProof, DecisionRecord, ProofError};
 
 /// The action the agent can take.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -72,11 +72,28 @@ pub trait LlmClient {
     fn sanity_check(&self, pred: &CertifiedPrediction, narration: &str) -> bool;
 }
 
-/// A stub LLM client — deterministic, no network.
-/// Used when Ollama is not available.
-pub struct StubLlm;
+fn contains_certified_values(pred: &CertifiedPrediction, narration: &str) -> bool {
+    let prediction_4 = format!("{:.4}", pred.raw_prediction);
+    let prediction_6 = format!("{:.6}", pred.raw_prediction);
+    let interval_4 = format!(
+        "[{:.4}, {:.4}]",
+        pred.bounds.output.lo, pred.bounds.output.hi
+    );
+    let interval_6 = format!(
+        "[{:.6}, {:.6}]",
+        pred.bounds.output.lo, pred.bounds.output.hi
+    );
+    (narration.contains(&prediction_4) || narration.contains(&prediction_6))
+        && (narration.contains(&interval_4) || narration.contains(&interval_6))
+}
 
-impl LlmClient for StubLlm {
+/// Deterministic, offline narrator for certified predictions.
+///
+/// This is a complete non-AI backend: it emits a fixed auditable rendering and
+/// verifies that the rendered prediction and certified interval are present.
+pub struct DeterministicNarrator;
+
+impl LlmClient for DeterministicNarrator {
     fn narrate(&self, pred: &CertifiedPrediction) -> String {
         format!(
             "Model predicts {:?} for {} with raw return {:.4} and certified interval [{:.4}, {:.4}]. \
@@ -92,12 +109,9 @@ impl LlmClient for StubLlm {
     }
 
     fn sanity_check(&self, pred: &CertifiedPrediction, narration: &str) -> bool {
-        // The stub always passes — it just reports the bounds.
-        // A real LLM would flag inconsistencies (e.g. claiming a huge move
-        // outside the certified interval).
-        let _ = pred;
-        let _ = narration;
-        true
+        narration.contains(&pred.symbol)
+            && narration.contains(&format!("{:?}", pred.action))
+            && contains_certified_values(pred, narration)
     }
 }
 
@@ -243,6 +257,10 @@ impl LlmClient for OllamaClient {
         {
             return false;
         }
+        if !contains_certified_values(pred, narration)
+        {
+            return false;
+        }
         let lo = pred.bounds.output.lo;
         let hi = pred.bounds.output.hi;
         let tolerance = (hi - lo).abs().max(0.01) * 3.0;
@@ -369,7 +387,7 @@ impl TradingAgent {
     }
 
     /// Seal all decisions into a proof file.
-    pub fn seal_proof(&self, records: &[DecisionRecord]) -> DecisionProof {
+    pub fn seal_proof(&self, records: &[DecisionRecord]) -> Result<DecisionProof, ProofError> {
         DecisionProof::from_records(records)
     }
 }
@@ -382,7 +400,7 @@ mod tests {
     #[test]
     fn agent_processes_snapshot() {
         let model = PricePredictor::new(13, &[16, 8], 42);
-        let mut agent = TradingAgent::new(model, Box::new(StubLlm));
+        let mut agent = TradingAgent::new(model, Box::new(DeterministicNarrator));
         agent.lookback = 10;
 
         let mut feed = MockExchange::new(42, 50_000.0);
@@ -397,7 +415,7 @@ mod tests {
     #[test]
     fn backtest_produces_multiple_records() {
         let model = PricePredictor::new(13, &[16, 8], 42);
-        let mut agent = TradingAgent::new(model, Box::new(StubLlm));
+        let mut agent = TradingAgent::new(model, Box::new(DeterministicNarrator));
         agent.lookback = 10;
 
         let mut feed = MockExchange::new(42, 50_000.0);
@@ -455,6 +473,35 @@ mod tests {
             weights_fingerprint: "wf".to_string(),
             last_close: 50_000.0,
         }
+    }
+
+    #[test]
+    fn deterministic_narrator_verifies_rendered_certificate() {
+        let prediction = make_pred_with_attrs(&[]);
+        let narrator = DeterministicNarrator;
+        let narration = narrator.narrate(&prediction);
+        assert!(narrator.sanity_check(&prediction, &narration));
+
+        let tampered_prediction = narration.replace("raw return 0.0100", "raw return 0.9000");
+        assert!(!narrator.sanity_check(&prediction, &tampered_prediction));
+
+        let missing_bounds = narration.replace(
+            "certified interval [-0.0200, 0.0400]",
+            "certified interval unavailable",
+        );
+        assert!(!narrator.sanity_check(&prediction, &missing_bounds));
+    }
+
+    #[test]
+    fn ollama_sanity_check_requires_the_certified_numbers() {
+        let prediction = make_pred_with_attrs(&[]);
+        let client = OllamaClient::new("test", "http://127.0.0.1:1");
+        assert!(!client.sanity_check(&prediction, "Looks reasonable."));
+        let narration = format!(
+            "Expected return {:.6}; certified interval [{:.6}, {:.6}].",
+            prediction.raw_prediction, prediction.bounds.output.lo, prediction.bounds.output.hi
+        );
+        assert!(client.sanity_check(&prediction, &narration));
     }
 
     fn top_attrs_line(prompt: &str) -> &str {
@@ -524,12 +571,12 @@ mod tests {
     #[test]
     fn proof_seals_records() {
         let model = PricePredictor::new(13, &[16, 8], 42);
-        let mut agent = TradingAgent::new(model, Box::new(StubLlm));
+        let mut agent = TradingAgent::new(model, Box::new(DeterministicNarrator));
         agent.lookback = 10;
 
         let mut feed = MockExchange::new(42, 50_000.0);
         let records = agent.backtest(&mut feed, 3, 50);
-        let proof = agent.seal_proof(&records);
+        let proof = agent.seal_proof(&records).unwrap();
         assert_eq!(proof.num_decisions, 3);
         assert_eq!(proof.manifest_hash.len(), 64);
     }

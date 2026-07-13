@@ -53,10 +53,8 @@ systemd/turboquant-*.service
 *.bak
 *.lock
 
-# CycloneDX SBOMs: cargo-cyclonedx writes one next to every workspace member.
-# Only the curated facade SBOM under docs/sbom/ is tracked.
+# CycloneDX SBOMs are generated from Cargo.lock in CI/release and uploaded.
 *.cdx.json
-!docs/sbom/*.cdx.json
 
 # Bundles d'évidence du banc O1 sur Jetson (scripts/bench-o1-jetson.sh) :
 # les chiffres sont reportés dans paper/PAPER_PLAN.md et LIVESTATE.md,

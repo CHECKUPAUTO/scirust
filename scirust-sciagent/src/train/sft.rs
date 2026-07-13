@@ -161,7 +161,7 @@ pub fn sft_train(
 
             step += 1;
 
-            if step % 10 == 0
+            if step.is_multiple_of(10)
             {
                 println!("[SFT Epoch {epoch} Step {step}] loss: {loss_val:.4} | lr: {lr:.8}");
             }

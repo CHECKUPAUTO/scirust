@@ -87,6 +87,15 @@ pub trait OpcuaClient {
     /// Disconnect from the server.
     fn disconnect(&mut self) -> Result<(), String>;
 
+    /// Report whether the client currently has a usable OPC-UA session.
+    ///
+    /// The default is deliberately fail-closed so existing third-party
+    /// implementations keep compiling but cannot be presented as ready until
+    /// they expose their real connection state.
+    fn is_connected(&self) -> bool {
+        false
+    }
+
     /// List available variable nodes matching a filter pattern.
     fn browse(&self, path_filter: &str) -> Result<Vec<OpcuaNode>, String>;
 
@@ -482,6 +491,10 @@ impl OpcuaClient for SimulatedOpcuaClient {
         self.subscribed_nodes.clear();
         self.buffer.clear();
         Ok(())
+    }
+
+    fn is_connected(&self) -> bool {
+        self.connected
     }
 
     fn browse(&self, path_filter: &str) -> Result<Vec<OpcuaNode>, String> {

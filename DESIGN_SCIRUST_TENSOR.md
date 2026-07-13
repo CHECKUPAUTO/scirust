@@ -112,7 +112,7 @@ let c = einsum("ij,jk->ik", &[&a, &b]).unwrap();
 *   **Compilation XLA-like** : Génération d'un plan d'exécution statique réutilisable pour l'inférence.
 *   **Fusion automatique d'opérateurs** : Heuristique de fusion multi-couches.
 *   **Support GPU complet** : Kernels wgpu optimisés pour les contractions binaires.
-*   **JIT de kernels** : Utilisation de `scirust-rustc-driver` pour compiler des kernels fusionnés à la volée.
+*   **JIT de kernels** : backend à concevoir et tester ; aucun driver MIR factice n'est distribué.
 
 ## 6. Métriques à suivre
 

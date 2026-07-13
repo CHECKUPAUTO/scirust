@@ -1,52 +1,121 @@
 name: Release
 
-# Publishes a GitHub Release with a reproducible CycloneDX SBOM attached
-# whenever a version tag is pushed (e.g. `v0.14.0`). Tagging is a deliberate,
-# human action — this workflow only reacts to it.
-
 on:
   push:
     tags:
       - "v*"
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+# Validation never receives a write token. Only the final publication job
+# opts into contents:write, after every build and artifact check has passed.
 permissions:
-  contents: write
+  contents: read
 
 env:
   RUST_BACKTRACE: 1
   CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-D warnings"
 
 jobs:
-  release:
-    name: Release ${{ github.ref_name }}
+  validate:
+    name: Validate ${{ github.ref_name }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
-      - name: Install nightly toolchain
-        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # nightly
+      - name: Verify tag, Cargo version, changelog, and ancestry
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import re
+          import tomllib
 
+          tag = os.environ["RELEASE_TAG"]
+          if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag):
+              raise SystemExit(f"release tag must be exact SemVer vMAJOR.MINOR.PATCH, got {tag!r}")
+          version = tomllib.loads(pathlib.Path("Cargo.toml").read_text())["package"]["version"]
+          if tag != f"v{version}":
+              raise SystemExit(f"tag {tag!r} does not match Cargo package version {version!r}")
+          changelog = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          if f"## [{version}]" not in changelog:
+              raise SystemExit(f"CHANGELOG.md has no released section for {version}")
+          PY
+          git fetch --no-tags origin master
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/master
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: stable
+          components: clippy
+      - name: Install pinned formatting toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt
       - name: Cache cargo
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
-      # Gate the release on the same checks CI enforces, so a tag can never
-      # ship something that wouldn't pass on master.
-      - name: Build & test (workspace)
-        run: cargo test --workspace
-        env:
-          RUSTFLAGS: "-D warnings"
+      - name: Check formatting
+        run: cargo +nightly-2026-07-02 fmt --all -- --check
+      - name: Lint workspace
+        run: cargo +stable clippy --workspace --all-targets --locked -- -D warnings
+      - name: Build workspace
+        run: cargo +stable build --workspace --all-targets --locked
+      - name: Test workspace
+        run: cargo +stable test --workspace --locked
 
       - name: Install cargo-cyclonedx
         uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # v2
         with:
           tool: cargo-cyclonedx
+      - name: Generate complete workspace SBOM and checksum
+        run: |
+          ./scripts/generate-sbom.sh
+          cd docs/sbom
+          sha256sum scirust.cdx.json > SHA256SUMS
+          sha256sum -c SHA256SUMS
+      - name: Upload validated release artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-artifacts-${{ github.ref_name }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            docs/sbom/scirust.cdx.json
+            docs/sbom/SHA256SUMS
 
-      - name: Generate SBOM
-        run: ./scripts/generate-sbom.sh
-
-      - name: Create GitHub Release
+  publish:
+    name: Publish draft ${{ github.ref_name }}
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Download validated artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-artifacts-${{ github.ref_name }}
+          path: release-artifacts
+      - name: Verify artifact checksum after job boundary
+        working-directory: release-artifacts
+        run: sha256sum -c SHA256SUMS
+      - name: Create draft GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
+          draft: true
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
-            docs/sbom/scirust.cdx.json
+            release-artifacts/scirust.cdx.json
+            release-artifacts/SHA256SUMS

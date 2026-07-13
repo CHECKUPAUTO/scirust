@@ -26,6 +26,7 @@ scirust-tolerance = { path = "../scirust-tolerance" }
 scirust-trader = { path = "../scirust-trader" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+command-group = "5.0.1"
 
 [dev-dependencies]
 approx = "0.5"

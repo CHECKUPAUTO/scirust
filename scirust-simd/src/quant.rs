@@ -160,8 +160,8 @@ unsafe fn dot_bf16_avx512bf16(a: &[u16], b: &[u16]) -> f32 {
     let mut i = 0;
     while i + 32 <= n
     {
-        let va = _mm512_loadu_si512(a.as_ptr().add(i) as *const __m512i);
-        let vb = _mm512_loadu_si512(b.as_ptr().add(i) as *const __m512i);
+        let va = _mm512_loadu_si512(a.as_ptr().add(i).cast());
+        let vb = _mm512_loadu_si512(b.as_ptr().add(i).cast());
         // Réinterprétation bit-à-bit u16×32 → bf16×32 (taille identique, 512 b).
         let abh: __m512bh = core::mem::transmute(va);
         let bbh: __m512bh = core::mem::transmute(vb);
@@ -204,7 +204,7 @@ pub fn dot_u8i8_i32(a: &[u8], b: &[i8]) -> i32 {
             return unsafe { dot_u8i8_i32_vnni(a, b) };
         }
     }
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(feature = "nightly-simd", target_arch = "aarch64"))]
     {
         if std::arch::is_aarch64_feature_detected!("i8mm")
         {
@@ -234,8 +234,8 @@ unsafe fn dot_u8i8_i32_vnni(a: &[u8], b: &[i8]) -> i32 {
     let mut i = 0;
     while i + 64 <= n
     {
-        let va = _mm512_loadu_si512(a.as_ptr().add(i) as *const __m512i);
-        let vb = _mm512_loadu_si512(b.as_ptr().add(i) as *const __m512i);
+        let va = _mm512_loadu_si512(a.as_ptr().add(i).cast());
+        let vb = _mm512_loadu_si512(b.as_ptr().add(i).cast());
         // dpbusd : a non signé (u8), b signé (i8), 4 produits/voie → i32.
         acc = _mm512_dpbusd_epi32(acc, va, vb);
         i += 64;
@@ -254,7 +254,7 @@ unsafe fn dot_u8i8_i32_vnni(a: &[u8], b: &[i8]) -> i32 {
 /// Chemin **`i8mm` USDOT** de [`dot_u8i8_i32`] (aarch64) : `vusdotq_s32` prend
 /// `u8` (non signé) et `i8` (signé), 4 MAC/voie → 4 accumulateurs `i32`, 16
 /// éléments/pas ; réduction horizontale + bord scalaire.
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(feature = "nightly-simd", target_arch = "aarch64"))]
 #[target_feature(enable = "i8mm")]
 unsafe fn dot_u8i8_i32_usdot(a: &[u8], b: &[i8]) -> i32 {
     use core::arch::aarch64::*;
@@ -295,7 +295,7 @@ unsafe fn dot_u8i8_i32_usdot(a: &[u8], b: &[i8]) -> i32 {
 /// * repli scalaire sinon.
 pub fn dot_i8i8_i32(a: &[i8], b: &[i8]) -> i32 {
     assert_eq!(a.len(), b.len(), "dot_i8i8_i32: length mismatch");
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(feature = "nightly-simd", target_arch = "aarch64"))]
     {
         if std::arch::is_aarch64_feature_detected!("dotprod")
         {
@@ -326,7 +326,7 @@ pub fn dot_i8i8_i32_scalar(a: &[i8], b: &[i8]) -> i32 {
 
 /// Chemin **`dotprod` SDOT** de [`dot_i8i8_i32`] (aarch64) : `vdotq_s32`,
 /// 4 MAC signés/voie → 4 accumulateurs `i32`, 16 éléments/pas.
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(feature = "nightly-simd", target_arch = "aarch64"))]
 #[target_feature(enable = "dotprod")]
 unsafe fn dot_i8i8_i32_sdot(a: &[i8], b: &[i8]) -> i32 {
     use core::arch::aarch64::*;

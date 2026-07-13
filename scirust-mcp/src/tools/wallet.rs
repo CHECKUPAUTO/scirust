@@ -24,7 +24,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use scirust_trader::wallet::{
     Chain, Eip712Domain, Eip1559Tx, EvmAddress, TxContext, WalletAuthorization, eip155_namespace,
-    parse_walletconnect_uri, sign_binance_query, sign_coinbase_request, to_hex,
+    parse_walletconnect_uri, sign_coinbase_request_base64, to_hex,
 };
 
 /// All wallet tools.
@@ -95,19 +95,27 @@ fn validate_address_tool() -> McpTool {
 fn parse_wc_uri_tool() -> McpTool {
     McpTool {
         name: "wallet_parse_walletconnect_uri".to_string(),
-        description: "Parse a WalletConnect v2 pairing URI (wc:{topic}@2?relay-protocol=irn&symKey=…) \
-            into its components (topic, version, relay protocol, symKey, expiry). The first step of \
+        description:
+            "Parse a WalletConnect v2 pairing URI (wc:{topic}@2?relay-protocol=irn&symKey=…) \
+            into its non-secret components (topic, version, relay protocol, expiry). The symKey is \
+            validated but never returned. This is the first step of \
             establishing a WalletConnect session with a non-custodial wallet."
-            .to_string(),
+                .to_string(),
         input_schema: json!({
             "type": "object",
             "properties": { "uri": { "type": "string" } },
             "required": ["uri"]
         }),
         handler: Box::new(|args| {
-            let uri = args.get("uri").and_then(|x| x.as_str()).ok_or("missing `uri`")?;
+            let uri = args
+                .get("uri")
+                .and_then(|x| x.as_str())
+                .ok_or("missing `uri`")?;
             let p = parse_walletconnect_uri(uri).map_err(|e| e.to_string())?;
-            Ok(serde_json::to_value(&p).unwrap_or(Value::Null))
+            let mut value = serde_json::to_value(&p)
+                .map_err(|e| format!("failed to encode WalletConnect metadata: {e}"))?;
+            value["sym_key_present"] = json!(!p.sym_key.is_empty());
+            Ok(value)
         }),
     }
 }
@@ -241,9 +249,14 @@ fn eip712_tool() -> McpTool {
 /// Defense-in-depth scope check for exchange request signing. A hard denylist of
 /// fund-exfiltration / key-management endpoint patterns is *always* refused
 /// (even if the exchange API key is misconfigured to allow them); an optional
-/// operator allowlist (`SCIRUST_EXCHANGE_ALLOWED_PATHS`, comma-separated
-/// substrings) further restricts what may be signed.
-fn exchange_scope_check(target: &str, allowlist: Option<&str>) -> Result<(), String> {
+/// operator allowlist (`SCIRUST_EXCHANGE_ALLOWED_PATHS`, comma-separated exact
+/// `METHOD /path` routes) restricts what may be signed.
+fn exchange_scope_check(
+    method: &str,
+    path: &str,
+    signed_payload: &str,
+    allowlist: Option<&str>,
+) -> Result<(), String> {
     const DENY: &[&str] = &[
         "withdraw",
         "transfer",
@@ -252,7 +265,19 @@ fn exchange_scope_check(target: &str, allowlist: Option<&str>) -> Result<(), Str
         "api-key",
         "apitradingstatus",
     ];
-    let lc = target.to_ascii_lowercase();
+    let normalized_path = normalize_exchange_path(path)?;
+    if normalized_path != path
+    {
+        return Err(format!(
+            "exchange path must already be canonical; use `{normalized_path}`"
+        ));
+    }
+    validate_exchange_method(method)?;
+    let inspected_payload = percent_decode_for_inspection(signed_payload).to_ascii_lowercase();
+    let lc = format!(
+        "{} {inspected_payload}",
+        normalized_path.to_ascii_lowercase()
+    );
     if let Some(bad) = DENY.iter().find(|d| lc.contains(**d))
     {
         return Err(format!(
@@ -260,42 +285,209 @@ fn exchange_scope_check(target: &str, allowlist: Option<&str>) -> Result<(), Str
              key management are never signed by the agent"
         ));
     }
-    if let Some(allow) = allowlist
+    let allow = allowlist
+        .filter(|value| !value.trim().is_empty())
+        .ok_or(
+            "exchange signing is not armed: set SCIRUST_EXCHANGE_ALLOWED_PATHS to comma-separated `METHOD /path` routes",
+        )?;
+    let mut matched = false;
+    for allowed_route in allow.split(',').map(str::trim).filter(|p| !p.is_empty())
     {
-        let matched = allow
-            .split(',')
-            .map(|p| p.trim().to_ascii_lowercase())
-            .filter(|p| !p.is_empty())
-            .any(|p| lc.contains(&p));
-        if !matched
+        let mut fields = allowed_route.split_ascii_whitespace();
+        let allowed_method = fields
+            .next()
+            .ok_or("SCIRUST_EXCHANGE_ALLOWED_PATHS contains an empty route")?;
+        let allowed_path = fields.next().ok_or_else(|| {
+            format!("invalid exchange route `{allowed_route}`; expected `METHOD /path`")
+        })?;
+        if fields.next().is_some()
         {
-            return Err(
-                "refused: request does not match the SCIRUST_EXCHANGE_ALLOWED_PATHS allowlist"
-                    .to_string(),
-            );
+            return Err(format!(
+                "invalid exchange route `{allowed_route}`; expected `METHOD /path`"
+            ));
+        }
+        validate_exchange_method(allowed_method)?;
+        let normalized_allowed_path = normalize_exchange_path(allowed_path)?;
+        if normalized_allowed_path != allowed_path
+        {
+            return Err(format!(
+                "allowlisted exchange path must be canonical; use `{allowed_method} {normalized_allowed_path}`"
+            ));
+        }
+        if allowed_method == method && allowed_path == normalized_path
+        {
+            matched = true;
         }
     }
-    Ok(())
+    if matched
+    {
+        Ok(())
+    }
+    else
+    {
+        Err("refused: request route does not match SCIRUST_EXCHANGE_ALLOWED_PATHS".to_string())
+    }
+}
+
+fn validate_exchange_method(method: &str) -> Result<(), String> {
+    match method
+    {
+        "GET" | "POST" | "PUT" | "PATCH" | "DELETE" => Ok(()),
+        _ => Err(format!(
+            "unsupported exchange HTTP method `{method}`; use an uppercase standard method"
+        )),
+    }
+}
+
+fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte
+    {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn percent_decode(input: &str) -> Result<String, String> {
+    let bytes = input.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len()
+    {
+        if bytes[index] == b'%'
+        {
+            let hi = bytes
+                .get(index + 1)
+                .and_then(|byte| hex_nibble(*byte))
+                .ok_or("exchange path contains an invalid percent escape")?;
+            let lo = bytes
+                .get(index + 2)
+                .and_then(|byte| hex_nibble(*byte))
+                .ok_or("exchange path contains an invalid percent escape")?;
+            decoded.push((hi << 4) | lo);
+            index += 3;
+        }
+        else
+        {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).map_err(|_| "exchange path is not valid UTF-8".to_string())
+}
+
+/// Decode valid percent triplets for denylist inspection without rejecting an
+/// otherwise opaque query string or JSON body containing a literal `%`.
+fn percent_decode_for_inspection(input: &str) -> String {
+    let mut inspected = input.to_string();
+    loop
+    {
+        let bytes = inspected.as_bytes();
+        let mut decoded = Vec::with_capacity(bytes.len());
+        let mut index = 0;
+        while index < bytes.len()
+        {
+            if bytes[index] == b'%'
+            {
+                if let (Some(hi), Some(lo)) = (
+                    bytes.get(index + 1).and_then(|byte| hex_nibble(*byte)),
+                    bytes.get(index + 2).and_then(|byte| hex_nibble(*byte)),
+                )
+                {
+                    decoded.push((hi << 4) | lo);
+                    index += 3;
+                    continue;
+                }
+            }
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+        let next = String::from_utf8_lossy(&decoded).into_owned();
+        if next == inspected
+        {
+            return inspected;
+        }
+        inspected = next;
+    }
+}
+
+/// Canonicalize an exchange request path before applying policy. The path is
+/// decoded once and dot segments are resolved; query strings and fragments
+/// must be supplied through their dedicated arguments, never smuggled into the
+/// path used by the allowlist.
+fn normalize_exchange_path(path: &str) -> Result<String, String> {
+    if path.is_empty() || path.trim() != path
+    {
+        return Err("exchange path must be a non-empty, unpadded absolute path".to_string());
+    }
+    // Decode to a fixed point so `%2577ithdraw` cannot hide `withdraw` behind
+    // one extra encoding layer. Every successful pass shortens the string, so
+    // the loop is bounded by the input length.
+    let mut decoded = path.to_string();
+    loop
+    {
+        let next = percent_decode(&decoded)?;
+        if next == decoded
+        {
+            break;
+        }
+        decoded = next;
+    }
+    if !decoded.starts_with('/')
+    {
+        return Err("exchange path must start with `/`".to_string());
+    }
+    if decoded
+        .bytes()
+        .any(|byte| byte.is_ascii_control() || byte == b'\\' || byte == b'?' || byte == b'#')
+    {
+        return Err("exchange path contains a forbidden character".to_string());
+    }
+
+    let mut segments = Vec::new();
+    for segment in decoded.split('/').skip(1)
+    {
+        match segment
+        {
+            "" | "." =>
+            {},
+            ".." =>
+            {
+                segments
+                    .pop()
+                    .ok_or("exchange path escapes above its root")?;
+            },
+            _ => segments.push(segment),
+        }
+    }
+    if segments.is_empty()
+    {
+        Ok("/".to_string())
+    }
+    else
+    {
+        Ok(format!("/{}", segments.join("/")))
+    }
 }
 
 fn sign_exchange_tool() -> McpTool {
     McpTool {
         name: "wallet_sign_exchange_request".to_string(),
-        description: "HMAC-sign an exchange REST request (Binance or Coinbase style) using a secret \
+        description: "HMAC-sign an endpoint-bound Coinbase Exchange REST request using a secret \
             the OPERATOR supplies out-of-band via the SCIRUST_EXCHANGE_SECRET environment variable — \
             the secret is never taken from the conversation and never returned. The agent builds the \
             query/prehash; this tool returns only the signature to attach to the request. Signing is \
-            refused if the secret is unset, and it is ALWAYS refused for withdrawal/transfer/API-key \
-            endpoints (and, if SCIRUST_EXCHANGE_ALLOWED_PATHS is set, for anything outside that \
-            allowlist). Binance signs only the query string, so you must also pass the `endpoint` \
-            path — it is used for the safety scope check."
+            refused unless both the base64 Coinbase secret and an exact comma-separated \
+            `METHOD /path` allowlist in SCIRUST_EXCHANGE_ALLOWED_PATHS are configured. \
+            Withdrawal/transfer/API-key routes are always refused. Binance signing is deliberately \
+            unavailable here because its HMAC payload does not bind the endpoint, so an agent-facing \
+            signer cannot enforce an endpoint allowlist."
             .to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
-                "style": { "type": "string", "enum": ["binance", "coinbase"] },
-                "query": { "type": "string", "description": "binance: the query string to sign" },
-                "endpoint": { "type": "string", "description": "binance: request path, e.g. /api/v3/order (for scope check)" },
+                "style": { "type": "string", "enum": ["coinbase"] },
                 "timestamp": { "type": "string", "description": "coinbase: request timestamp" },
                 "method": { "type": "string", "description": "coinbase: HTTP method" },
                 "path": { "type": "string", "description": "coinbase: request path" },
@@ -304,41 +496,73 @@ fn sign_exchange_tool() -> McpTool {
             "required": ["style"]
         }),
         handler: Box::new(|args| {
+            let style = args
+                .get("style")
+                .and_then(|x| x.as_str())
+                .ok_or("missing `style`; expected `coinbase`")?;
+            if style == "binance"
+            {
+                return Err(
+                    "refused: Binance signatures do not bind the HTTP endpoint, so this agent-facing signer cannot enforce its route allowlist"
+                        .to_string(),
+                );
+            }
+            if style != "coinbase"
+            {
+                return Err(format!(
+                    "unsupported exchange signing style `{style}`; expected `coinbase`"
+                ));
+            }
             let secret = std::env::var("SCIRUST_EXCHANGE_SECRET").map_err(|_| {
                 "exchange signing is not armed: the operator has not set SCIRUST_EXCHANGE_SECRET"
                     .to_string()
             })?;
+            if secret.trim().is_empty() {
+                return Err("exchange signing is not armed: SCIRUST_EXCHANGE_SECRET is empty".to_string());
+            }
             let allowlist = std::env::var("SCIRUST_EXCHANGE_ALLOWED_PATHS").ok();
-            let style = args.get("style").and_then(|x| x.as_str()).unwrap_or("binance");
-            let sig = match style
-            {
-                "coinbase" =>
-                {
-                    let ts = args.get("timestamp").and_then(|x| x.as_str()).ok_or("missing `timestamp`")?;
-                    let method = args.get("method").and_then(|x| x.as_str()).ok_or("missing `method`")?;
-                    let path = args.get("path").and_then(|x| x.as_str()).ok_or("missing `path`")?;
-                    let body = args.get("body").and_then(|x| x.as_str()).unwrap_or("");
-                    // Scope on method+path+body so a withdrawal/transfer endpoint is refused.
-                    exchange_scope_check(&format!("{method} {path} {body}"), allowlist.as_deref())?;
-                    sign_coinbase_request(secret.as_bytes(), ts, method, path, body)
-                },
-                _ =>
-                {
-                    let query = args.get("query").and_then(|x| x.as_str()).ok_or("missing `query`")?;
-                    // Binance signs only the query, so the endpoint path (where a
-                    // withdrawal is identified) is not in the signed content — require
-                    // it explicitly so the scope check is not blind to it.
-                    let endpoint = args.get("endpoint").and_then(|x| x.as_str()).ok_or(
-                        "missing `endpoint` (the request path, e.g. /api/v3/order) — required so \
-                         the withdrawal/transfer scope check can see the endpoint",
-                    )?;
-                    exchange_scope_check(&format!("{endpoint} {query}"), allowlist.as_deref())?;
-                    sign_binance_query(secret.as_bytes(), query)
-                },
-            };
-            Ok(json!({ "signature": sig, "algo": "hmac-sha256", "style": style }))
+            let ts = args
+                .get("timestamp")
+                .and_then(|x| x.as_str())
+                .ok_or("missing `timestamp`")?;
+            validate_coinbase_timestamp(ts)?;
+            let method = args
+                .get("method")
+                .and_then(|x| x.as_str())
+                .ok_or("missing `method`")?;
+            let path = args
+                .get("path")
+                .and_then(|x| x.as_str())
+                .ok_or("missing `path`")?;
+            let body = args.get("body").and_then(|x| x.as_str()).unwrap_or("");
+            // Method, canonical path and body all enter the Coinbase prehash, so
+            // the allowlist decision is cryptographically bound to this signature.
+            exchange_scope_check(method, path, body, allowlist.as_deref())?;
+            let signature = sign_coinbase_request_base64(&secret, ts, method, path, body)?;
+            Ok(json!({
+                "signature": signature,
+                "algo": "hmac-sha256",
+                "encoding": "base64",
+                "style": style,
+            }))
         }),
     }
+}
+
+fn validate_coinbase_timestamp(timestamp: &str) -> Result<(), String> {
+    let mut parts = timestamp.split('.');
+    let seconds = parts.next().unwrap_or_default();
+    let fraction = parts.next();
+    if seconds.is_empty()
+        || !seconds.bytes().all(|byte| byte.is_ascii_digit())
+        || fraction.is_some_and(|value| {
+            value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit())
+        })
+        || parts.next().is_some()
+    {
+        return Err("Coinbase timestamp must be Unix seconds using decimal digits".to_string());
+    }
+    Ok(())
 }
 
 fn authorization_status_tool() -> McpTool {
@@ -365,11 +589,18 @@ fn authorization_status_tool() -> McpTool {
             }
         }),
         handler: Box::new(|args| {
-            let key = std::env::var("SCIRUST_WALLET_KEY").ok();
+            let key = std::env::var("SCIRUST_WALLET_KEY")
+                .ok()
+                .filter(|value| !value.trim().is_empty());
             let armed = key.is_some();
             let mut out = json!({
                 "signing_armed": armed,
-                "exchange_signing_armed": std::env::var("SCIRUST_EXCHANGE_SECRET").is_ok(),
+                "exchange_signing_armed": std::env::var("SCIRUST_EXCHANGE_SECRET")
+                    .map(|value| !value.trim().is_empty())
+                    .unwrap_or(false)
+                    && std::env::var("SCIRUST_EXCHANGE_ALLOWED_PATHS")
+                        .map(|value| !value.trim().is_empty())
+                        .unwrap_or(false),
                 "note": "Signing/sending requires a valid WalletAuthorization under the operator's \
                          SCIRUST_WALLET_KEY. The agent cannot mint one itself.",
             });
@@ -429,6 +660,9 @@ fn authorization_status_tool() -> McpTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn tool(name: &str) -> McpTool {
         wallet_tools()
@@ -469,6 +703,12 @@ mod tests {
         })).unwrap();
         assert_eq!(out["version"], json!(2));
         assert_eq!(out["relay_protocol"], json!("irn"));
+        assert_eq!(out["sym_key_present"], json!(true));
+        assert!(out.get("sym_key").is_none());
+        assert!(
+            !out.to_string()
+                .contains("587d5484ce2a2a6ee3ba1962fdd7e8588e06200c46823bd18fbd67def96ad303")
+        );
     }
 
     #[test]
@@ -494,52 +734,191 @@ mod tests {
 
     #[test]
     fn exchange_signing_refused_without_secret() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::remove_var("SCIRUST_EXCHANGE_SECRET");
         let t = tool("wallet_sign_exchange_request");
-        let r = (t.handler)(json!({ "style": "binance", "query": "symbol=BTCUSDT" }));
+        let r = (t.handler)(json!({ "style": "coinbase" }));
         assert!(r.is_err());
         assert!(r.unwrap_err().contains("SCIRUST_EXCHANGE_SECRET"));
     }
 
     #[test]
+    fn exchange_signing_refused_with_empty_secret() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("SCIRUST_EXCHANGE_SECRET", "  ");
+        let t = tool("wallet_sign_exchange_request");
+        let r = (t.handler)(json!({ "style": "coinbase" }));
+        assert!(r.is_err());
+        assert!(r.unwrap_err().contains("empty"));
+        std::env::remove_var("SCIRUST_EXCHANGE_SECRET");
+    }
+
+    #[test]
     fn authorization_status_reports_disarmed() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::remove_var("SCIRUST_WALLET_KEY");
+        std::env::remove_var("SCIRUST_EXCHANGE_ALLOWED_PATHS");
         let t = tool("wallet_authorization_status");
         let out = (t.handler)(json!({})).unwrap();
         assert_eq!(out["signing_armed"], json!(false));
     }
 
     #[test]
+    fn authorization_status_treats_empty_keys_as_disarmed() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("SCIRUST_WALLET_KEY", "");
+        std::env::set_var("SCIRUST_EXCHANGE_SECRET", "   ");
+        std::env::remove_var("SCIRUST_EXCHANGE_ALLOWED_PATHS");
+        let out = (tool("wallet_authorization_status").handler)(json!({})).unwrap();
+        assert_eq!(out["signing_armed"], json!(false));
+        assert_eq!(out["exchange_signing_armed"], json!(false));
+        std::env::remove_var("SCIRUST_WALLET_KEY");
+        std::env::remove_var("SCIRUST_EXCHANGE_SECRET");
+    }
+
+    #[test]
     fn exchange_scope_blocks_dangerous_endpoints() {
         // Withdrawals / transfers / key management are always refused.
-        assert!(exchange_scope_check("/sapi/v1/capital/withdraw/apply", None).is_err());
-        assert!(exchange_scope_check("/sapi/v1/asset/transfer", None).is_err());
-        assert!(exchange_scope_check("POST /v2/withdrawals/crypto ", None).is_err());
-        assert!(exchange_scope_check("symbol=BTCUSDT&type=apiKey", None).is_err());
+        assert!(
+            exchange_scope_check(
+                "POST",
+                "/sapi/v1/capital/withdraw/apply",
+                "",
+                Some("POST /sapi/v1/capital/withdraw/apply")
+            )
+            .is_err()
+        );
+        assert!(
+            exchange_scope_check(
+                "POST",
+                "/sapi/v1/asset/transfer",
+                "",
+                Some("POST /sapi/v1/asset/transfer")
+            )
+            .is_err()
+        );
+        assert!(
+            exchange_scope_check(
+                "POST",
+                "/v2/withdrawals/crypto",
+                "",
+                Some("POST /v2/withdrawals/crypto")
+            )
+            .is_err()
+        );
+        assert!(
+            exchange_scope_check(
+                "POST",
+                "/api/v3/order",
+                "symbol=BTCUSDT&type=apiKey",
+                Some("POST /api/v3/order")
+            )
+            .is_err()
+        );
+        assert!(
+            exchange_scope_check(
+                "POST",
+                "/sapi/v1/capital/%2577ithdraw/apply",
+                "",
+                Some("POST /sapi/v1/capital/withdraw/apply")
+            )
+            .is_err()
+        );
         // A normal trading request is allowed.
         assert!(
-            exchange_scope_check("symbol=BTCUSDT&side=BUY&type=LIMIT&quantity=1", None).is_ok()
+            exchange_scope_check(
+                "POST",
+                "/api/v3/order",
+                "symbol=BTCUSDT&side=BUY&type=LIMIT&quantity=1",
+                Some("POST /api/v3/order")
+            )
+            .is_ok()
         );
+        // A secret without an explicit route allowlist is not armed.
+        assert!(exchange_scope_check("POST", "/api/v3/order", "", None).is_err());
     }
 
     #[test]
     fn exchange_scope_respects_operator_allowlist() {
-        // Scope targets are "endpoint query" (binance) or "method path body"
-        // (coinbase). With an allowlist set, only matching endpoints are signable.
+        // Only the normalized path, never query/body content, may satisfy the
+        // operator allowlist.
         assert!(
             exchange_scope_check(
-                "/api/v3/order symbol=BTCUSDT&side=BUY",
-                Some("/api/v3/order")
+                "POST",
+                "/api/v3/order",
+                "symbol=BTCUSDT&side=BUY",
+                Some("POST /api/v3/order")
             )
             .is_ok()
         );
         assert!(
-            exchange_scope_check("/api/v3/account symbol=BTCUSDT", Some("/api/v3/order")).is_err()
+            exchange_scope_check(
+                "POST",
+                "/api/v3/account",
+                "redirect=/api/v3/order",
+                Some("POST /api/v3/order")
+            )
+            .is_err()
+        );
+        assert!(
+            exchange_scope_check("POST", "/api/v3/order-evil", "", Some("POST /api/v3/order"))
+                .is_err()
+        );
+        assert!(
+            exchange_scope_check("POST", "/api/v3/%6frder", "", Some("POST /api/v3/order"))
+                .is_err()
+        );
+        assert!(
+            exchange_scope_check("DELETE", "/api/v3/order", "", Some("POST /api/v3/order"))
+                .is_err()
         );
         // The denylist still wins even if the allowlist would match.
         assert!(
-            exchange_scope_check("/sapi/v1/capital/withdraw/apply coin=BTC", Some("withdraw"))
-                .is_err()
+            exchange_scope_check(
+                "POST",
+                "/sapi/v1/capital/withdraw/apply",
+                "coin=BTC",
+                Some("POST /sapi/v1/capital/withdraw/apply")
+            )
+            .is_err()
         );
+    }
+
+    #[test]
+    fn endpoint_bound_coinbase_signing_matches_oracle() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("SCIRUST_EXCHANGE_SECRET", "c2VjcmV0");
+        std::env::set_var("SCIRUST_EXCHANGE_ALLOWED_PATHS", "GET /orders");
+
+        let output = (tool("wallet_sign_exchange_request").handler)(json!({
+            "style": "coinbase",
+            "timestamp": "1700000000",
+            "method": "GET",
+            "path": "/orders"
+        }))
+        .unwrap();
+        assert_eq!(
+            output["signature"],
+            "5pq6uRxdFFvJzbzIJRObr9401649NDsVtb6H2TgxZRY="
+        );
+        assert_eq!(output["encoding"], "base64");
+
+        std::env::remove_var("SCIRUST_EXCHANGE_SECRET");
+        std::env::remove_var("SCIRUST_EXCHANGE_ALLOWED_PATHS");
+    }
+
+    #[test]
+    fn exchange_signing_rejects_missing_and_unknown_styles() {
+        let t = tool("wallet_sign_exchange_request");
+        let missing = (t.handler)(json!({})).unwrap_err();
+        assert!(missing.contains("missing `style`"));
+
+        let t = tool("wallet_sign_exchange_request");
+        let unknown = (t.handler)(json!({ "style": "kraken" })).unwrap_err();
+        assert!(unknown.contains("unsupported exchange signing style"));
+
+        let t = tool("wallet_sign_exchange_request");
+        let binance = (t.handler)(json!({ "style": "binance" })).unwrap_err();
+        assert!(binance.contains("do not bind the HTTP endpoint"));
     }
 }

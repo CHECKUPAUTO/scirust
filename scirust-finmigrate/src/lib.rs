@@ -12,9 +12,10 @@
 //! * **COBOL-exact rounding.** `ROUNDED` ⇒ [`RoundingStrategy::MidpointAwayFromZero`]
 //!   (NEAREST-AWAY-FROM-ZERO, the IBM default); the un-`ROUNDED` companion ⇒
 //!   [`RoundingStrategy::ToZero`] (truncation). One rounding event, at the store.
-//! * **Reversibility.** [`MigrationUnit`] can dispatch to the Rust port or fall
-//!   back to a `Legacy` shim, so a unit can be swapped back in production if an
-//!   audit fails (Phase 3).
+//! * **Explicit reversibility state.** [`MigrationUnit`] can select the Rust
+//!   port or the legacy route. This crate does not bundle a COBOL bridge, so the
+//!   legacy route returns [`AccrualError::BackendUnavailable`] instead of
+//!   pretending that rollback is wired or panicking at runtime.
 //! * **Error reconstruction.** Every call captures its input context in an
 //!   [`AccrualTrace`]; a production divergence can be replayed bit-for-bit in the
 //!   sandbox via [`replay`].
@@ -64,6 +65,8 @@ pub enum AccrualError {
     SizeError { field: &'static str, value: Decimal },
     /// A currency code with no fixed euro conversion rate (CURRCVT).
     UnknownCurrency { code: String },
+    /// The requested deployment-specific backend is not linked in this build.
+    BackendUnavailable { backend: &'static str },
 }
 
 /// Coerce a value into a fixed-scale money field using COBOL ROUNDED semantics.
@@ -144,21 +147,21 @@ impl AccrualBackend for RustAccrual {
     }
 }
 
-/// A slot for the legacy path (e.g. an FFI/COBOL bridge or a service call). Left
-/// unimplemented on purpose: reversibility is an *architecture*, and wiring the
-/// real legacy call is a deployment decision, not something to fake here.
+/// Marker for the deployment-specific legacy path. The open-source crate does
+/// not contain an FFI/service binding, so calls return a typed availability
+/// error. Deployments must supply their legacy integration outside this crate.
 pub struct LegacyAccrual;
 impl AccrualBackend for LegacyAccrual {
     fn accrue(&self, _p: Decimal, _r: Decimal) -> Result<Accrual, AccrualError> {
-        unimplemented!("bind the legacy INTACCR path (FFI/service) at deploy time")
+        Err(AccrualError::BackendUnavailable { backend: "legacy" })
     }
     fn name(&self) -> &'static str {
         "legacy"
     }
 }
 
-/// Which backend a [`MigrationUnit`] dispatches to. Flip to [`Route::Legacy`] to
-/// reverse the migration in production.
+/// Which backend a [`MigrationUnit`] dispatches to. [`Route::Legacy`] reports
+/// [`AccrualError::BackendUnavailable`] in this build.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Route {
     Rust,
@@ -321,6 +324,13 @@ mod tests {
         assert_eq!(trace.backend, "rust");
         unit.set_route(Route::Legacy);
         assert_eq!(unit.route(), Route::Legacy);
+        let (res, trace) = unit.run(d("2500.75"), d("0.03500"));
+        assert_eq!(
+            res,
+            Err(AccrualError::BackendUnavailable { backend: "legacy" })
+        );
+        assert_eq!(trace.backend, "legacy");
+        assert!(!trace.ok);
     }
 
     #[test]

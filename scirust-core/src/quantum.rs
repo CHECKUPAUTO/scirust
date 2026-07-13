@@ -348,10 +348,10 @@ mod tests {
         dense[0] = 1.0;
         for _ in 0..40
         {
-            if rng.next_u32() % 2 == 0
+            if rng.next_u32().is_multiple_of(2)
             {
                 let q = (rng.next_u32() as usize) % n;
-                let g = if rng.next_u32() % 2 == 0
+                let g = if rng.next_u32().is_multiple_of(2)
                 {
                     H
                 }
@@ -365,7 +365,14 @@ mod tests {
             else
             {
                 let q = (rng.next_u32() as usize) % (n - 1);
-                let g = if rng.next_u32() % 2 == 0 { CNOT } else { CZ };
+                let g = if rng.next_u32().is_multiple_of(2)
+                {
+                    CNOT
+                }
+                else
+                {
+                    CZ
+                };
                 mps.apply_2qubit_gate(q, &g, 1 << n); // no truncation
                 dense_2q(&mut dense, q, &g);
             }
@@ -379,10 +386,10 @@ mod tests {
         let mut rng2 = PcgEngine::new(7);
         for _ in 0..40
         {
-            if rng2.next_u32() % 2 == 0
+            if rng2.next_u32().is_multiple_of(2)
             {
                 let q = (rng2.next_u32() as usize) % n;
-                let g = if rng2.next_u32() % 2 == 0
+                let g = if rng2.next_u32().is_multiple_of(2)
                 {
                     H
                 }
@@ -395,7 +402,14 @@ mod tests {
             else
             {
                 let q = (rng2.next_u32() as usize) % (n - 1);
-                let g = if rng2.next_u32() % 2 == 0 { CNOT } else { CZ };
+                let g = if rng2.next_u32().is_multiple_of(2)
+                {
+                    CNOT
+                }
+                else
+                {
+                    CZ
+                };
                 mps2.apply_2qubit_gate(q, &g, 1 << n);
             }
         }
@@ -447,9 +461,13 @@ mod tests {
         let dot: f32 = full_sv.iter().zip(&cap_sv).map(|(&a, &b)| a * b).sum();
         let nb: f32 = cap_sv.iter().map(|&b| b * b).sum::<f32>().sqrt();
         let fidelity = dot.abs() / nb.max(1e-12);
-        // Bond-1 truncation is an approximation, but a sound one (fidelity well above
-        // chance for a 16-dim space, ~0.25).
-        assert!(fidelity > 0.5, "truncated fidelity too low: {fidelity}");
+        // The best bond-1 approximation of this four-qubit linear cluster state has
+        // overlap exactly 1/2.  Compare with that analytic value instead of relying
+        // on the small upward rounding error produced by an f32 SVD.
+        assert!(
+            (fidelity - 0.5).abs() <= 1e-5,
+            "unexpected truncated fidelity: {fidelity}"
+        );
         assert!(capped.max_bond() == 1, "cap not respected");
     }
 }

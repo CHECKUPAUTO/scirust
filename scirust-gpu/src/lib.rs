@@ -1,4 +1,4 @@
-//! Unified compute-backend abstraction targeted by the `#[gpu]` macro.
+//! Unified compute-backend abstraction for explicit CPU/GPU dispatch.
 //!
 //! ## Honesty policy (repo-wide)
 //! Code under `*/src/` is wired and tested and never claims a capability it
@@ -9,7 +9,9 @@
 //!   validated against.
 //! - **Portable GPU** ([`WgpuBackend`]) — real WGSL compute path behind the
 //!   `wgpu` feature (Vulkan/Metal/DX12/GL).
-//! - **CUDA** ([`CudaBackend`]) — placeholder until a GPU CI runner exists.
+//! - **CUDA** ([`CudaBackend`]) — real bf16 Tensor-core path behind the
+//!   `cuda` feature; it reports [`BackendError::Unavailable`] when CUDA support
+//!   is disabled or no CUDA device can be opened.
 //! - **Deterministic compute** — Kahan summation, INT8 quantized GEMM (bit-exact
 //!   via integer arithmetic), and fixed-order accumulation.
 //! - **Kernel library** — tiled 16×16 SGEMM, fused GEMM+bias+activation,
@@ -78,21 +80,24 @@ pub use wgpu_backend::{GpuMatrix, WgpuContext, wgpu_scale_causal_mask, wgpu_soft
 /// Error returned when a compute backend cannot service a request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackendError {
-    /// The requested hardware backend is not wired in this build (see P2.2).
+    /// The requested hardware backend is disabled or unavailable at runtime.
     Unavailable(&'static str),
     /// Operand dimensions are inconsistent for the requested operation.
     ShapeMismatch(String),
+    /// The selected backend failed while allocating, transferring, or running.
+    Execution(String),
 }
 
 impl core::fmt::Display for BackendError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self
         {
-            BackendError::Unavailable(name) => write!(
-                f,
-                "compute backend `{name}` is not wired in this build (roadmap P2.2)"
-            ),
+            BackendError::Unavailable(name) =>
+            {
+                write!(f, "compute backend `{name}` is disabled or unavailable")
+            },
             BackendError::ShapeMismatch(msg) => write!(f, "shape mismatch: {msg}"),
+            BackendError::Execution(msg) => write!(f, "backend execution failed: {msg}"),
         }
     }
 }
@@ -103,7 +108,7 @@ impl std::error::Error for BackendError {}
 /// Result specialised for backend operations.
 pub type BackendResult<T> = Result<T, BackendError>;
 
-/// Hardware abstraction targeted by the `#[gpu]` macro.
+/// Hardware abstraction shared by the explicit compute backends.
 ///
 /// `gemm_f32` computes the row-major product `C(m×n) = A(m×k) · B(k×n)`.
 /// Implementations must return an honest [`BackendError`] rather than
@@ -123,28 +128,39 @@ pub trait RawComputeBackend {
 }
 
 /// Validate that `a` and `b` hold exactly the elements an `m×k · k×n` GEMM needs.
-fn check_gemm_dims(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> BackendResult<()> {
-    if a.len() != m * k
+fn checked_matrix_len(rows: usize, cols: usize, name: &str) -> BackendResult<usize> {
+    rows.checked_mul(cols).ok_or_else(|| {
+        BackendError::ShapeMismatch(format!(
+            "{name} shape {rows}x{cols} overflows the address space"
+        ))
+    })
+}
+
+fn check_gemm_dims(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> BackendResult<usize> {
+    let a_expected = checked_matrix_len(m, k, "A")?;
+    let b_expected = checked_matrix_len(k, n, "B")?;
+    let output_len = checked_matrix_len(m, n, "C")?;
+    if a.len() != a_expected
     {
         return Err(BackendError::ShapeMismatch(format!(
             "A has {} elements, expected m*k = {}*{} = {}",
             a.len(),
             m,
             k,
-            m * k
+            a_expected
         )));
     }
-    if b.len() != k * n
+    if b.len() != b_expected
     {
         return Err(BackendError::ShapeMismatch(format!(
             "B has {} elements, expected k*n = {}*{} = {}",
             b.len(),
             k,
             n,
-            k * n
+            b_expected
         )));
     }
-    Ok(())
+    Ok(output_len)
 }
 
 /// CPU reference backend — always available, deterministic, oracle-grade.
@@ -163,8 +179,8 @@ impl RawComputeBackend for CpuBackend {
         k: usize,
         n: usize,
     ) -> BackendResult<Vec<f32>> {
-        check_gemm_dims(a, b, m, k, n)?;
-        let mut out = vec![0.0f32; m * n];
+        let output_len = check_gemm_dims(a, b, m, k, n)?;
+        let mut out = vec![0.0f32; output_len];
         for i in 0..m
         {
             for j in 0..n
@@ -199,7 +215,7 @@ impl RawComputeBackend for WgpuBackend {
     ) -> BackendResult<Vec<f32>> {
         #[cfg(feature = "wgpu")]
         {
-            check_gemm_dims(a, b, m, k, n)?;
+            let _ = check_gemm_dims(a, b, m, k, n)?;
             wgpu_backend::wgpu_gemm(a, b, m, k, n)
         }
         #[cfg(not(feature = "wgpu"))]
@@ -210,7 +226,11 @@ impl RawComputeBackend for WgpuBackend {
     }
 }
 
-/// CUDA/cuBLAS backend placeholder.
+/// CUDA Tensor-core backend.
+///
+/// Inputs are accepted as fp32, rounded to bf16 on upload, multiplied with
+/// fp32 accumulation by `scirust-cuda`, and downloaded as fp32. Results are
+/// therefore numerically close to, but not bit-identical with, [`CpuBackend`].
 pub struct CudaBackend;
 
 impl RawComputeBackend for CudaBackend {
@@ -220,13 +240,30 @@ impl RawComputeBackend for CudaBackend {
 
     fn gemm_f32(
         &self,
-        _a: &[f32],
-        _b: &[f32],
-        _m: usize,
-        _k: usize,
-        _n: usize,
+        a: &[f32],
+        b: &[f32],
+        m: usize,
+        k: usize,
+        n: usize,
     ) -> BackendResult<Vec<f32>> {
-        Err(BackendError::Unavailable("cuda"))
+        #[cfg(feature = "cuda")]
+        {
+            let output_len = check_gemm_dims(a, b, m, k, n)?;
+            if output_len == 0
+            {
+                return Ok(Vec::new());
+            }
+            let chain = scirust_cuda::CudaChain::new().ok_or(BackendError::Unavailable("cuda"))?;
+            let a = chain.try_upload(a, m, k).map_err(BackendError::Execution)?;
+            let b = chain.try_upload(b, k, n).map_err(BackendError::Execution)?;
+            let output = chain.try_matmul(&a, &b).map_err(BackendError::Execution)?;
+            chain.try_download(&output).map_err(BackendError::Execution)
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            let _ = (a, b, m, k, n);
+            Err(BackendError::Unavailable("cuda"))
+        }
     }
 }
 
@@ -302,12 +339,16 @@ mod tests {
             .gemm_f32(&[1.0, 2.0], &[1.0], 2, 2, 1)
             .unwrap_err();
         assert!(matches!(err, BackendError::ShapeMismatch(_)));
+
+        let err = CpuBackend.gemm_f32(&[], &[], usize::MAX, 2, 0).unwrap_err();
+        assert!(matches!(err, BackendError::ShapeMismatch(_)));
     }
 
     #[test]
     fn device_backends_are_honest_not_fake() {
         let a = [1.0, 2.0, 3.0, 4.0];
         let b = [1.0, 0.0, 0.0, 1.0];
+        #[cfg(not(feature = "cuda"))]
         assert_eq!(
             CudaBackend.gemm_f32(&a, &b, 2, 2, 2),
             Err(BackendError::Unavailable("cuda"))
@@ -317,6 +358,26 @@ mod tests {
             WgpuBackend.gemm_f32(&a, &b, 2, 2, 2),
             Err(BackendError::Unavailable("wgpu"))
         );
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn cuda_backend_returns_result_or_unavailable_without_panicking() {
+        let a = [1.0, 2.0, 3.0, 4.0];
+        let identity = [1.0, 0.0, 0.0, 1.0];
+        match CudaBackend.gemm_f32(&a, &identity, 2, 2, 2)
+        {
+            Ok(output) =>
+            {
+                for (actual, expected) in output.iter().zip(a)
+                {
+                    assert!((actual - expected).abs() < 5e-2);
+                }
+            },
+            Err(BackendError::Unavailable("cuda")) =>
+            {},
+            Err(error) => panic!("unexpected CUDA backend error: {error:?}"),
+        }
     }
 
     #[test]

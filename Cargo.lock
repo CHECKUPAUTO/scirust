@@ -95,9 +95,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.102"
+version = "1.0.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
+checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
 name = "approx"
@@ -520,6 +520,16 @@ checksum = "ba5a308b75df32fe02788e748662718f03fde005016435c444eea572398219fd"
 dependencies = [
  "bytes",
  "memchr",
+]
+
+[[package]]
+name = "command-group"
+version = "5.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a68fa787550392a9d58f44c21a3022cfb3ea3e2458b7f85d3b399d0ceeccf409"
+dependencies = [
+ "nix",
+ "winapi",
 ]
 
 [[package]]
@@ -1873,6 +1883,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2eb04e9c688eff1c89d72b407f168cf79bb9e867a9d3323ed6c01519eb9cc053"
+dependencies = [
+ "bitflags 2.11.1",
+ "cfg-if",
+ "libc",
+]
+
+[[package]]
 name = "num-bigint"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2947,6 +2968,7 @@ dependencies = [
  "blas-src",
  "half",
  "libc",
+ "libm",
  "matrixmultiply",
  "nalgebra",
  "ndarray",
@@ -2957,7 +2979,6 @@ dependencies = [
  "rand_distr 0.4.3",
  "rayon",
  "scirust-autodiff",
- "scirust-gpu-macros",
  "scirust-macros",
  "scirust-simd",
  "scirust-symbolic",
@@ -3118,17 +3139,8 @@ dependencies = [
  "bytemuck",
  "pollster",
  "scirust-core",
- "scirust-gpu-macros",
+ "scirust-cuda",
  "wgpu",
-]
-
-[[package]]
-name = "scirust-gpu-macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]
@@ -3264,6 +3276,7 @@ name = "scirust-mcp"
 version = "0.1.0"
 dependencies = [
  "approx",
+ "command-group",
  "scirust-agtech",
  "scirust-biomed",
  "scirust-discovery",
@@ -3472,6 +3485,7 @@ version = "0.1.0"
 dependencies = [
  "approx",
  "clap",
+ "command-group",
  "rand 0.8.6",
  "scirust-autodiff",
  "scirust-core",
@@ -3801,6 +3815,7 @@ dependencies = [
 name = "scirust-trader"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "chrono",
  "reqwest",
  "scirust-core",

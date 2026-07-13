@@ -55,22 +55,57 @@ pub struct Tensor {
 }
 
 impl Tensor {
+    #[inline]
+    fn checked_len(rows: usize, cols: usize, context: &str) -> usize {
+        rows.checked_mul(cols)
+            .unwrap_or_else(|| panic!("{context}: rows * cols overflows usize"))
+    }
+
+    /// Checks the dense row-major representation invariant.
+    pub fn validate(&self) -> Result<(), String> {
+        let expected = self
+            .rows
+            .checked_mul(self.cols)
+            .ok_or_else(|| "Tensor dimensions overflow usize".to_string())?;
+        if self.data.len() != expected
+        {
+            return Err(format!(
+                "Tensor data length mismatch: shape {}x{} requires {expected} elements, got {}",
+                self.rows,
+                self.cols,
+                self.data.len()
+            ));
+        }
+        Ok(())
+    }
+
+    #[inline]
+    fn assert_valid(&self, context: &str) {
+        if let Err(error) = self.validate()
+        {
+            panic!("{context}: invalid Tensor: {error}");
+        }
+    }
+
     pub fn zeros(rows: usize, cols: usize) -> Self {
+        let len = Self::checked_len(rows, cols, "Tensor::zeros");
         Self {
             rows,
             cols,
-            data: vec![0.0; rows * cols],
+            data: vec![0.0; len],
         }
     }
     pub fn ones(rows: usize, cols: usize) -> Self {
+        let len = Self::checked_len(rows, cols, "Tensor::ones");
         Self {
             rows,
             cols,
-            data: vec![1.0; rows * cols],
+            data: vec![1.0; len],
         }
     }
     pub fn from_vec(data: Vec<f32>, rows: usize, cols: usize) -> Self {
-        assert_eq!(data.len(), rows * cols, "Tensor::from_vec size mismatch");
+        let len = Self::checked_len(rows, cols, "Tensor::from_vec");
+        assert_eq!(data.len(), len, "Tensor::from_vec size mismatch");
         Self { rows, cols, data }
     }
     #[inline]
@@ -447,12 +482,18 @@ impl Tensor {
         out
     }
     pub fn matmul(&self, other: &Tensor) -> Tensor {
+        self.assert_valid("Tensor::matmul left operand");
+        other.assert_valid("Tensor::matmul right operand");
         assert_eq!(
             self.cols, other.rows,
             "matmul: inner dim mismatch {}x{} @ {}x{}",
             self.rows, self.cols, other.rows, other.cols
         );
         let mut out = Tensor::zeros(self.rows, other.cols);
+        if self.rows == 0 || other.cols == 0 || self.cols == 0
+        {
+            return out;
+        }
         unsafe {
             sgemm(
                 self.rows,
@@ -481,6 +522,8 @@ impl Tensor {
     /// `sgemm` blocké change d'ordre d'accumulation selon le micro-noyau.
     /// Voie de référence, plus lente.
     pub fn matmul_portable(&self, other: &Tensor) -> Tensor {
+        self.assert_valid("Tensor::matmul_portable left operand");
+        other.assert_valid("Tensor::matmul_portable right operand");
         assert_eq!(
             self.cols, other.rows,
             "matmul_portable: inner dim mismatch {}x{} @ {}x{}",
@@ -497,12 +540,9 @@ impl Tensor {
     }
 
     pub fn reshape(&self, rows: usize, cols: usize) -> Tensor {
-        assert_eq!(self.data.len(), rows * cols, "reshape: size mismatch");
-        Tensor {
-            rows,
-            cols,
-            data: self.data.clone(),
-        }
+        let len = Self::checked_len(rows, cols, "Tensor::reshape");
+        assert_eq!(self.data.len(), len, "reshape: size mismatch");
+        Tensor::from_vec(self.data.clone(), rows, cols)
     }
     pub fn broadcast_to(&self, rows: usize, cols: usize) -> Tensor {
         if self.rows == rows && self.cols == cols
@@ -535,7 +575,8 @@ impl Tensor {
         }
         else if self.rows == 1 && self.cols == 1
         {
-            Tensor::from_vec(vec![self.data[0]; rows * cols], rows, cols)
+            let len = Self::checked_len(rows, cols, "Tensor::broadcast_to");
+            Tensor::from_vec(vec![self.data[0]; len], rows, cols)
         }
         else
         {
@@ -596,7 +637,7 @@ impl Default for Tensor {
 
 #[derive(Debug, Clone)]
 pub struct DeviceTensor {
-    pub inner: Tensor,
+    inner: Tensor,
 }
 
 impl DeviceTensor {
@@ -936,18 +977,29 @@ impl Tape {
     /// CPU [`Tensor::matmul`] that is bit-identical to the explicit-transpose
     /// form. Used to plumb Conv2d's im2col GEMMs through the GPU.
     pub(crate) fn gemm_ab(&self, a: &Tensor, b: &Tensor, ta: bool, tb: bool) -> Tensor {
+        a.assert_valid("Tape::gemm_ab left operand");
+        b.assert_valid("Tape::gemm_ab right operand");
         if let Some(ref engine) = *self.gpu_engine.borrow()
         {
             let m = if ta { a.cols } else { a.rows };
             let k = if ta { a.rows } else { a.cols };
             let n = if tb { b.rows } else { b.cols };
-            let mut c = vec![0.0f32; m * n];
-            engine.gemm(1.0, &a.data, &b.data, 0.0, &mut c, m, k, n, ta, tb);
-            Tensor {
-                rows: m,
-                cols: n,
-                data: c,
-            }
+            let b_k = if tb { b.cols } else { b.rows };
+            assert_eq!(k, b_k, "Tape::gemm_ab: inner dimension mismatch");
+            let mut output = Tensor::zeros(m, n);
+            engine.gemm(
+                1.0,
+                &a.data,
+                &b.data,
+                0.0,
+                &mut output.data,
+                m,
+                k,
+                n,
+                ta,
+                tb,
+            );
+            output
         }
         else
         {
@@ -985,12 +1037,14 @@ impl Tape {
     }
 
     pub fn input(&self, t: Tensor) -> Var<'_> {
+        t.assert_valid("Tape::input");
         let idx = self.push_with_saved(Op::Input, DeviceTensor::cpu(t.clone()), SavedData::None);
         self.values.borrow_mut()[idx] = DeviceTensor::cpu(t);
         Var { tape: self, idx }
     }
 
-    pub fn push_with_saved(&self, op: Op, value: DeviceTensor, saved: SavedData) -> usize {
+    pub(crate) fn push_with_saved(&self, op: Op, value: DeviceTensor, saved: SavedData) -> usize {
+        value.as_cpu().assert_valid("Tape::push_with_saved");
         let shape = value.shape();
         if !self.is_grad_enabled()
         {
@@ -1082,6 +1136,18 @@ impl Tape {
     }
 
     pub fn set_value(&self, idx: usize, value: Tensor) {
+        value.assert_valid("Tape::set_value");
+        let expected = self
+            .nodes
+            .borrow()
+            .get(idx)
+            .unwrap_or_else(|| panic!("Tape::set_value: index {idx} out of bounds"))
+            .shape;
+        assert_eq!(
+            value.shape(),
+            expected,
+            "Tape::set_value: replacement shape must match the graph node"
+        );
         self.values.borrow_mut()[idx] = DeviceTensor::cpu(value);
     }
 
@@ -2553,11 +2619,7 @@ impl Tape {
                         let n_k = in_dims[k] * out_dims[k];
                         let r_next = ranks[k + 1];
 
-                        let d_core_tensor = Tensor {
-                            rows: r_k * n_k,
-                            cols: r_next,
-                            data: d_cores[k].clone(),
-                        };
+                        let d_core_tensor = Tensor::from_vec(d_cores[k].clone(), r_k * n_k, r_next);
                         grads[core_idx] = grads[core_idx].add(&d_core_tensor);
                     }
 
@@ -2571,11 +2633,7 @@ impl Tape {
                                 *val += g.data[i * g.cols + j];
                             }
                         }
-                        let db_tensor = Tensor {
-                            rows: 1,
-                            cols: g.cols,
-                            data: db,
-                        };
+                        let db_tensor = Tensor::from_vec(db, 1, g.cols);
                         grads[b_idx] = grads[b_idx].add(&db_tensor);
                     }
                 },
@@ -2737,13 +2795,31 @@ impl Default for Tape {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Var<'t> {
-    pub tape: &'t Tape,
-    pub idx: usize,
+    pub(crate) tape: &'t Tape,
+    pub(crate) idx: usize,
 }
 
 impl<'t> Var<'t> {
     pub fn new(tape: &'t Tape, idx: usize) -> Self {
+        assert!(
+            idx < tape.nodes.borrow().len(),
+            "Var::new: index {idx} out of bounds"
+        );
         Self { tape, idx }
+    }
+
+    #[inline]
+    fn ensure_same_tape(&self, other: &Var<'t>, op: &'static str) -> crate::error::Result<()> {
+        if std::ptr::eq(self.tape, other.tape)
+        {
+            Ok(())
+        }
+        else
+        {
+            Err(crate::error::SciRustError::InvalidConfig(format!(
+                "{op}: variables belong to different autodiff tapes"
+            )))
+        }
     }
     #[inline]
     pub fn idx(&self) -> usize {
@@ -2768,6 +2844,7 @@ impl<'t> Var<'t> {
     }
 
     pub fn try_add(self, other: Var<'t>) -> crate::error::Result<Var<'t>> {
+        self.ensure_same_tape(&other, "add")?;
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
         crate::error::check_shape("add", a.shape(), b.shape())?;
@@ -2815,19 +2892,7 @@ impl<'t> Var<'t> {
 
     #[allow(clippy::should_implement_trait)]
     pub fn sub(self, other: Var<'t>) -> Var<'t> {
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
-        assert_eq!(a.shape(), b.shape(), "sub: shape mismatch");
-        let out = a.sub(&b);
-        let new_idx = self.tape.push_with_saved(
-            Op::Sub(self.idx, other.idx),
-            DeviceTensor::cpu(out),
-            SavedData::None,
-        );
-        Var {
-            tape: self.tape,
-            idx: new_idx,
-        }
+        self.try_sub(other).unwrap()
     }
 
     #[allow(clippy::should_implement_trait)]
@@ -2836,6 +2901,7 @@ impl<'t> Var<'t> {
     }
 
     pub fn try_sub(self, other: Var<'t>) -> crate::error::Result<Var<'t>> {
+        self.ensure_same_tape(&other, "sub")?;
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
         crate::error::check_shape("sub", a.shape(), b.shape())?;
@@ -2852,6 +2918,7 @@ impl<'t> Var<'t> {
     }
 
     pub fn try_div(self, other: Var<'t>) -> crate::error::Result<Var<'t>> {
+        self.ensure_same_tape(&other, "div")?;
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
         crate::error::check_shape("div", a.shape(), b.shape())?;
@@ -2868,6 +2935,7 @@ impl<'t> Var<'t> {
     }
 
     pub fn try_matmul(self, other: Var<'t>) -> crate::error::Result<Var<'t>> {
+        self.ensure_same_tape(&other, "matmul")?;
         // Whole-model GPU switch: when the tape prefers GPU matmuls and an engine
         // is attached, record this as a MatMulGpu node so forward and backward run
         // on the device. Off by default, so the CPU path below is unchanged.
@@ -2897,6 +2965,7 @@ impl<'t> Var<'t> {
     /// falls back to the CPU path. GPU results are not bit-identical to the CPU
     /// path (different accumulation order) — see `docs/GPU.md`.
     pub fn try_matmul_gpu(self, other: Var<'t>) -> crate::error::Result<Var<'t>> {
+        self.ensure_same_tape(&other, "matmul_gpu")?;
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
         crate::error::check_inner_dim("matmul_gpu", a.cols, b.rows)?;
@@ -2905,13 +2974,20 @@ impl<'t> Var<'t> {
             if let Some(ref engine) = *engine
             {
                 let (m, k, n) = (a.rows, a.cols, b.cols);
-                let mut c = vec![0.0f32; m * n];
-                engine.gemm(1.0, &a.data, &b.data, 0.0, &mut c, m, k, n, false, false);
-                Tensor {
-                    rows: m,
-                    cols: n,
-                    data: c,
-                }
+                let mut output = Tensor::zeros(m, n);
+                engine.gemm(
+                    1.0,
+                    &a.data,
+                    &b.data,
+                    0.0,
+                    &mut output.data,
+                    m,
+                    k,
+                    n,
+                    false,
+                    false,
+                );
+                output
             }
             else
             {
@@ -3113,6 +3189,7 @@ impl<'t> Var<'t> {
     }
 
     pub fn atan2(self, x: Var<'t>) -> Var<'t> {
+        self.ensure_same_tape(&x, "atan2").unwrap();
         let y_val = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let x_val = self.tape.values.borrow()[x.idx].as_cpu().clone();
         let out = y_val.atan2(&x_val);
@@ -3178,6 +3255,7 @@ impl<'t> Var<'t> {
     /// architecture) — nœud bit-exact inter-plates-formes, contrairement à
     /// [`Var::matmul`]. Voie de référence, plus lente.
     pub fn matmul_portable(self, other: Var<'t>) -> Var<'t> {
+        self.ensure_same_tape(&other, "matmul_portable").unwrap();
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
         crate::error::check_inner_dim("matmul_portable", a.cols, b.rows).unwrap();
@@ -3461,13 +3539,14 @@ impl<'t> Var<'t> {
     }
 
     pub fn try_add_broadcast(self, other: Var<'t>) -> crate::error::Result<Var<'t>> {
+        self.ensure_same_tape(&other, "add_broadcast")?;
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
-        if b.rows != 1 && b.cols != a.cols
+        if !((b.rows == a.rows || b.rows == 1) && (b.cols == a.cols || b.cols == 1))
         {
             return Err(crate::error::SciRustError::ShapeMismatch {
                 op: "add_broadcast",
-                expected: (1, a.cols),
+                expected: (a.rows, a.cols),
                 got: (b.rows, b.cols),
             });
         }
@@ -3493,6 +3572,7 @@ impl<'t> Var<'t> {
     }
 
     pub fn sub_broadcast(self, other: Var<'t>) -> Var<'t> {
+        self.ensure_same_tape(&other, "sub_broadcast").unwrap();
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
         let out = a.sub(&b.broadcast_to(a.rows, a.cols));
@@ -3508,13 +3588,14 @@ impl<'t> Var<'t> {
     }
 
     pub fn try_mul_broadcast(self, other: Var<'t>) -> crate::error::Result<Var<'t>> {
+        self.ensure_same_tape(&other, "mul_broadcast")?;
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
-        if b.rows != 1 && b.cols != a.cols
+        if !((b.rows == a.rows || b.rows == 1) && (b.cols == a.cols || b.cols == 1))
         {
             return Err(crate::error::SciRustError::ShapeMismatch {
                 op: "mul_broadcast",
-                expected: (1, a.cols),
+                expected: (a.rows, a.cols),
                 got: (b.rows, b.cols),
             });
         }
@@ -3534,6 +3615,7 @@ impl<'t> Var<'t> {
     }
 
     pub fn div_broadcast(self, other: Var<'t>) -> Var<'t> {
+        self.ensure_same_tape(&other, "div_broadcast").unwrap();
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
         let out = a.div(&b.broadcast_to(a.rows, a.cols));
@@ -3686,6 +3768,14 @@ impl<'t> Var<'t> {
         out_dims: Vec<usize>,
         ranks: Vec<usize>,
     ) -> crate::error::Result<Var<'t>> {
+        for core in &cores
+        {
+            self.ensure_same_tape(core, "tt_contract")?;
+        }
+        if let Some(bias) = &bias
+        {
+            self.ensure_same_tape(bias, "tt_contract")?;
+        }
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
 
         let d = in_dims.len();
@@ -3738,11 +3828,7 @@ impl<'t> Var<'t> {
         let w_data = reconstruct_matrix(&tt, &in_dims, &out_dims);
         let in_features: usize = in_dims.iter().product();
         let out_features: usize = out_dims.iter().product();
-        let w_tensor = Tensor {
-            rows: in_features,
-            cols: out_features,
-            data: w_data,
-        };
+        let w_tensor = Tensor::from_vec(w_data, in_features, out_features);
 
         // The sgemm below uses `a.cols` as the contraction dimension and reads
         // the reconstructed weight (in_features × out_features) with row stride
@@ -3751,30 +3837,7 @@ impl<'t> Var<'t> {
         // `try_matmul` does, so a shape mismatch is a clean `Err` instead of UB.
         crate::error::check_inner_dim("tt_contract", a.cols, in_features)?;
 
-        let mut out_data = vec![0.0; a.rows * out_features];
-        unsafe {
-            sgemm(
-                a.rows,
-                a.cols,
-                out_features,
-                1.0,
-                a.data.as_ptr(),
-                a.cols as isize,
-                1,
-                w_tensor.data.as_ptr(),
-                w_tensor.cols as isize,
-                1,
-                0.0,
-                out_data.as_mut_ptr(),
-                out_features as isize,
-                1,
-            );
-        }
-        let mut out_tensor = Tensor {
-            rows: a.rows,
-            cols: out_features,
-            data: out_data,
-        };
+        let mut out_tensor = a.matmul(&w_tensor);
 
         let bias_idx = bias.as_ref().map(|b| b.idx);
         if let Some(ref b) = bias
@@ -3895,6 +3958,8 @@ impl<'t> Var<'t> {
         beta: Var<'t>,
         eps: f32,
     ) -> crate::error::Result<Var<'t>> {
+        self.ensure_same_tape(&gamma, "layer_norm")?;
+        self.ensure_same_tape(&beta, "layer_norm")?;
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let (rows, cols) = a.shape();
         let gv = self.tape.values.borrow()[gamma.idx].as_cpu().clone();
@@ -4004,6 +4069,7 @@ impl<'t> Var<'t> {
     /// fully differentiable with no new gradient rule. Errors if the row widths
     /// (embedding dimensions) of `self` and `other` differ.
     pub fn try_cosine_sim_matrix(self, other: Var<'t>) -> crate::error::Result<Var<'t>> {
+        self.ensure_same_tape(&other, "cosine_sim_matrix")?;
         let qn = self.l2_normalize();
         let pn = other.l2_normalize();
         qn.try_matmul(pn.transpose_2d())
@@ -4079,6 +4145,11 @@ impl<'t> Var<'t> {
         stride: usize,
         pad: usize,
     ) -> crate::error::Result<Var<'t>> {
+        self.ensure_same_tape(&weight, "conv2d_forward")?;
+        if let Some(bias) = &bias
+        {
+            self.ensure_same_tape(bias, "conv2d_forward")?;
+        }
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let wv = self.tape.values.borrow()[weight.idx].as_cpu().clone();
         let expected_input_cols = in_c * h * w;
@@ -4190,6 +4261,11 @@ impl<'t> Var<'t> {
         pad: usize,
         output_padding: usize,
     ) -> crate::error::Result<Var<'t>> {
+        self.ensure_same_tape(&weight, "conv2d_transpose_forward")?;
+        if let Some(bias) = &bias
+        {
+            self.ensure_same_tape(bias, "conv2d_transpose_forward")?;
+        }
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let wv = self.tape.values.borrow()[weight.idx].as_cpu().clone();
         let expected_input_cols = in_c * h * w;
@@ -4343,6 +4419,19 @@ pub fn concat_rows<'t>(tape: &'t Tape, rows: &[Var<'t>]) -> Var<'t> {
     {
         panic!("concat_rows: empty slice");
     }
+    for row in rows
+    {
+        assert!(
+            std::ptr::eq(tape, row.tape),
+            "concat_rows: variables belong to different autodiff tapes"
+        );
+    }
+    let cols = rows[0].shape().1;
+    assert!(
+        rows.iter().all(|row| row.shape().1 == cols),
+        "concat_rows: all inputs must have the same column count"
+    );
+
     // Recursive concat for N > 3 by grouping in chunks of 3
     if rows.len() > 3
     {
@@ -4353,7 +4442,6 @@ pub fn concat_rows<'t>(tape: &'t Tape, rows: &[Var<'t>]) -> Var<'t> {
         }
         return concat_rows(tape, &chunks);
     }
-    let cols = rows[0].tape.values.borrow()[rows[0].idx].shape().1;
     let mut indices = [0usize; 3];
     let mut counts = [0usize; 3];
     for (i, r) in rows.iter().enumerate().take(3)
@@ -4361,7 +4449,10 @@ pub fn concat_rows<'t>(tape: &'t Tape, rows: &[Var<'t>]) -> Var<'t> {
         indices[i] = r.idx;
         counts[i] = r.tape.values.borrow()[r.idx].shape().0;
     }
-    let total_rows: usize = counts.iter().sum();
+    let total_rows = counts
+        .iter()
+        .try_fold(0usize, |total, count| total.checked_add(*count))
+        .expect("concat_rows: total row count overflows usize");
     let mut out = Tensor::zeros(total_rows, cols);
     let mut off = 0;
     for (_i, r) in rows.iter().enumerate().take(3)
@@ -4489,6 +4580,84 @@ mod tests {
 
         a.hadamard_assign(&b);
         assert_eq!(a.data, vec![0.5, 3.0, 7.5, 14.0]);
+    }
+
+    #[test]
+    fn tensor_constructors_reject_dimension_overflow() {
+        let result = std::panic::catch_unwind(|| Tensor::zeros(usize::MAX, 2));
+        assert!(result.is_err());
+        let result = std::panic::catch_unwind(|| Tensor::from_vec(Vec::new(), usize::MAX, 2));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn matmul_rejects_forged_invalid_tensor_before_sgemm() {
+        // Public fields are retained for source compatibility with the wider
+        // workspace. The unsafe kernel boundary therefore validates the dense
+        // representation defensively before passing any pointer to sgemm.
+        let invalid = Tensor {
+            rows: 1,
+            cols: 1,
+            data: Vec::new(),
+        };
+        let valid = Tensor::ones(1, 1);
+        let result = std::panic::catch_unwind(|| invalid.matmul(&valid));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn binary_ops_reject_variables_from_different_tapes() {
+        let left_tape = Tape::new();
+        let right_tape = Tape::new();
+        let left = left_tape.input(Tensor::from_vec(vec![2.0], 1, 1));
+        let right = right_tape.input(Tensor::from_vec(vec![3.0], 1, 1));
+        let error = left.try_add(right).unwrap_err();
+        assert!(matches!(
+            error,
+            crate::error::SciRustError::InvalidConfig(_)
+        ));
+        assert_eq!(left_tape.num_parameters(), 0);
+    }
+
+    #[test]
+    fn try_broadcast_ops_return_shape_errors_instead_of_panicking() {
+        let tape = Tape::new();
+        let target = tape.input(Tensor::zeros(2, 4));
+        let incompatible = tape.input(Tensor::ones(3, 4));
+
+        let add_error = target.try_add_broadcast(incompatible).unwrap_err();
+        assert!(matches!(
+            add_error,
+            crate::error::SciRustError::ShapeMismatch {
+                op: "add_broadcast",
+                expected: (2, 4),
+                got: (3, 4),
+            }
+        ));
+
+        let mul_error = target.try_mul_broadcast(incompatible).unwrap_err();
+        assert!(matches!(
+            mul_error,
+            crate::error::SciRustError::ShapeMismatch {
+                op: "mul_broadcast",
+                expected: (2, 4),
+                got: (3, 4),
+            }
+        ));
+
+        // Both non-trivial broadcast axes supported by Tensor::broadcast_to
+        // remain accepted by the fallible wrappers.
+        let row = tape.input(Tensor::ones(1, 4));
+        let column = tape.input(Tensor::ones(2, 1));
+        assert!(target.try_add_broadcast(row).is_ok());
+        assert!(target.try_mul_broadcast(column).is_ok());
+    }
+
+    #[test]
+    fn var_constructor_rejects_out_of_bounds_index() {
+        let tape = Tape::new();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Var::new(&tape, 0)));
+        assert!(result.is_err());
     }
 
     #[test]

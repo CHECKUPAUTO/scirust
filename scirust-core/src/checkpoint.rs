@@ -114,14 +114,10 @@ pub fn list_checkpoints(
         {
             let ckpt_file = path.join("checkpoint.json");
             if ckpt_file.exists()
+                && let Ok(json) = fs::read_to_string(&ckpt_file)
+                && let Ok(ckpt) = serde_json::from_str::<Checkpoint>(&json)
             {
-                if let Ok(json) = fs::read_to_string(&ckpt_file)
-                {
-                    if let Ok(ckpt) = serde_json::from_str::<Checkpoint>(&json)
-                    {
-                        checkpoints.push((ckpt.epoch, path));
-                    }
-                }
+                checkpoints.push((ckpt.epoch, path));
             }
         }
     }

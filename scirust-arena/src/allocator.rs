@@ -50,6 +50,7 @@ struct MemoryBlock {
     ptr: *mut u8,
     /// Taille totale du bloc en bytes.
     capacity: usize,
+    pinned: bool,
 }
 
 unsafe impl Send for MemoryBlock {}
@@ -64,23 +65,25 @@ impl MemoryBlock {
             return Err(ArenaError::ZeroSized);
         }
 
-        let aligned_size = align_up(min_bytes); // multiple de 128
+        let aligned_size = min_bytes
+            .checked_add(MIN_ALIGN_BYTES - 1)
+            .map(|value| value & !(MIN_ALIGN_BYTES - 1))
+            .ok_or(ArenaError::Overflow)?;
         let n_blocks = (aligned_size / 128).max(1);
         let mut backing = vec![AlignedBlock([0u8; 128]); n_blocks];
         let ptr = backing.as_mut_ptr() as *mut u8;
 
         // Pinning best-effort via mlock (ignoré si non disponible / sandbox).
         #[cfg(unix)]
-        unsafe {
-            use libc::{mlock, munlock};
-            let _ = mlock(ptr as *const std::ffi::c_void, aligned_size);
-            let _ = munlock(ptr as *const std::ffi::c_void, aligned_size);
-        }
+        let pinned = unsafe { libc::mlock(ptr.cast(), aligned_size) == 0 };
+        #[cfg(not(unix))]
+        let pinned = false;
 
         Ok(Self {
             backing,
             ptr,
-            capacity: n_blocks * 128,
+            capacity: aligned_size,
+            pinned,
         })
     }
 
@@ -92,6 +95,13 @@ impl MemoryBlock {
 
 impl Drop for MemoryBlock {
     fn drop(&mut self) {
+        #[cfg(unix)]
+        if self.pinned
+        {
+            unsafe {
+                let _ = libc::munlock(self.ptr.cast(), self.capacity);
+            }
+        }
         // `backing` (Vec) libère automatiquement la mémoire possédée.
     }
 }
@@ -141,7 +151,12 @@ impl PinnedArena {
     {
         assert!(num > 0);
         let elem_size = std::mem::size_of::<T>();
+        assert!(
+            elem_size > 0,
+            "Arena::new_for_type does not support zero-sized types"
+        );
         let alignment = std::mem::align_of::<T>().max(16);
+
         // `num * elem_size` doit être vérifié : sinon un `num` trop grand
         // wrappe en release et sous-dimensionne l'arène (les `alloc_slice`
         // ultérieurs échoueront proprement, mais une taille wrappée est un
@@ -181,6 +196,11 @@ impl PinnedArena {
         let elem_size = std::mem::size_of::<T>();
         let alignment = std::mem::align_of::<T>().max(16);
 
+        if elem_size == 0
+        {
+            return Err(ArenaError::ZeroSized);
+        }
+
         // The backing block is only guaranteed to be aligned to `MIN_ALIGN_BYTES`
         // (128). A type whose alignment exceeds that could receive a pointer that
         // is 128-aligned but NOT `align_of::<T>()`-aligned — a misaligned
@@ -216,14 +236,16 @@ impl PinnedArena {
         let ptr = unsafe { self.block.ptr.add(aligned_offset) };
 
         // Construire le slice mutable
-        let slice_ptr = ptr as *mut T;
-        let slice = unsafe { std::slice::from_raw_parts_mut(slice_ptr, n) };
+        let value = T::default();
+        let uninit_ptr = ptr.cast::<std::mem::MaybeUninit<T>>();
+        for i in 0..n
+        {
+            unsafe { uninit_ptr.add(i).write(std::mem::MaybeUninit::new(value)) };
+        }
+        let slice = unsafe { std::slice::from_raw_parts_mut(ptr.cast::<T>(), n) };
 
         // Initialiser à Default (pour T: Copy, c'est zero-initialization)
-        for elem in slice.iter_mut()
-        {
-            *elem = T::default();
-        }
+        // All elements are initialized above before the typed slice is formed.
 
         let new_offset = required; // = aligned_offset + n * elem_size (déjà vérifié)
         self.allocated_bytes += new_offset - self.offset; // self.offset is still the old value
@@ -346,3 +368,33 @@ const _: () = {
         "ALIGNMENT must be power of 2"
     );
 };
+
+#[cfg(test)]
+mod safety_tests {
+    use super::*;
+
+    #[derive(Clone, Copy)]
+    struct Validated(u8);
+
+    impl Default for Validated {
+        fn default() -> Self {
+            Self(0xA5)
+        }
+    }
+
+    #[test]
+    fn initializes_storage_before_exposing_typed_slice() {
+        let mut arena = PinnedArena::new(1024);
+        let values = arena.alloc_slice::<Validated>(8).unwrap();
+        assert!(values.iter().all(|value| value.0 == 0xA5));
+    }
+
+    #[test]
+    fn zero_sized_types_are_rejected() {
+        let mut arena = PinnedArena::new(1024);
+        assert_eq!(
+            arena.alloc_slice::<()>(1).unwrap_err(),
+            ArenaError::ZeroSized
+        );
+    }
+}

@@ -26,6 +26,7 @@
 //! HMAC-SHA256 are implemented here and checked against published test vectors.
 
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 // ===========================================================================
 // Keccak-256 (Ethereum's hash — NOT SHA3-256; the padding domain byte is 0x01).
@@ -511,13 +512,28 @@ fn word_address(a: [u8; 20]) -> [u8; 32] {
 
 /// A parsed WalletConnect v2 pairing URI
 /// (`wc:{topic}@2?relay-protocol=irn&symKey={hex}`).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub struct WalletConnectUri {
     pub topic: String,
     pub version: u8,
     pub relay_protocol: String,
+    /// Pairing secret. It is intentionally omitted from serialization and
+    /// redacted from `Debug` so logs and MCP responses cannot disclose it.
+    #[serde(skip_serializing, default)]
     pub sym_key: String,
     pub expiry_timestamp: Option<u64>,
+}
+
+impl fmt::Debug for WalletConnectUri {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WalletConnectUri")
+            .field("topic", &self.topic)
+            .field("version", &self.version)
+            .field("relay_protocol", &self.relay_protocol)
+            .field("sym_key", &"[REDACTED]")
+            .field("expiry_timestamp", &self.expiry_timestamp)
+            .finish()
+    }
 }
 
 /// Parse a WalletConnect pairing URI. Supports v2 (the current standard).
@@ -536,6 +552,16 @@ pub fn parse_walletconnect_uri(uri: &str) -> Result<WalletConnectUri, String> {
     let version: u8 = version_str
         .parse()
         .map_err(|_| "invalid version".to_string())?;
+    if version != 2
+    {
+        return Err("unsupported WalletConnect version (expected 2)".to_string());
+    }
+    let valid_hex_32 =
+        |value: &str| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit());
+    if !valid_hex_32(topic)
+    {
+        return Err("WalletConnect topic must be 32-byte hex".to_string());
+    }
     let mut relay_protocol = String::new();
     let mut sym_key = String::new();
     let mut expiry_timestamp = None;
@@ -551,9 +577,9 @@ pub fn parse_walletconnect_uri(uri: &str) -> Result<WalletConnectUri, String> {
             {},
         }
     }
-    if version == 2 && sym_key.is_empty()
+    if !valid_hex_32(&sym_key)
     {
-        return Err("WalletConnect v2 URI missing symKey".to_string());
+        return Err("WalletConnect v2 symKey must be 32-byte hex".to_string());
     }
     Ok(WalletConnectUri {
         topic: topic.to_string(),
@@ -604,8 +630,14 @@ pub fn sign_binance_query(secret: &[u8], query: &str) -> String {
     to_hex(&hmac_sha256(secret, query.as_bytes()))
 }
 
-/// Sign a Coinbase-style prehash `timestamp+method+path+body` and return the
-/// hex HMAC (Coinbase Advanced uses hex for its `CB-ACCESS-SIGN` header).
+/// Legacy raw-key/hex HMAC helper kept for API compatibility.
+///
+/// This is **not** the Coinbase Exchange wire format: Coinbase supplies the
+/// secret as standard base64 and expects a base64 signature. New integrations
+/// must use [`sign_coinbase_request_base64`].
+#[deprecated(
+    note = "raw-key/hex output is not Coinbase wire format; use sign_coinbase_request_base64"
+)]
 pub fn sign_coinbase_request(
     secret: &[u8],
     timestamp: &str,
@@ -615,6 +647,26 @@ pub fn sign_coinbase_request(
 ) -> String {
     let prehash = format!("{timestamp}{method}{path}{body}");
     to_hex(&hmac_sha256(secret, prehash.as_bytes()))
+}
+
+/// Sign a Coinbase Exchange prehash `timestamp+method+path+body`.
+///
+/// Coinbase supplies the API secret as standard base64 and expects the binary
+/// HMAC-SHA256 digest to be base64-encoded in `CB-ACCESS-SIGN`.
+pub fn sign_coinbase_request_base64(
+    encoded_secret: &str,
+    timestamp: &str,
+    method: &str,
+    path: &str,
+    body: &str,
+) -> Result<String, String> {
+    use base64::Engine as _;
+
+    let secret = base64::engine::general_purpose::STANDARD
+        .decode(encoded_secret)
+        .map_err(|_| "Coinbase API secret is not valid standard base64".to_string())?;
+    let prehash = format!("{timestamp}{method}{path}{body}");
+    Ok(base64::engine::general_purpose::STANDARD.encode(hmac_sha256(&secret, prehash.as_bytes())))
 }
 
 // ===========================================================================
@@ -1057,6 +1109,11 @@ mod tests {
         assert_eq!(p.relay_protocol, "irn");
         assert_eq!(p.topic.len(), 64);
         assert_eq!(p.sym_key.len(), 64);
+        let serialized = serde_json::to_string(&p).unwrap();
+        let debug = format!("{p:?}");
+        assert!(!serialized.contains(&p.sym_key));
+        assert!(!debug.contains(&p.sym_key));
+        assert!(debug.contains("[REDACTED]"));
     }
 
     #[test]
@@ -1115,6 +1172,29 @@ mod tests {
             "symbol=LTCBTC&side=BUY&type=LIMIT",
         );
         assert_eq!(sig.len(), 64); // hex of 32-byte HMAC
+    }
+
+    #[test]
+    fn coinbase_signing_decodes_secret_and_returns_base64_hmac() {
+        let signature =
+            sign_coinbase_request_base64("c2VjcmV0", "1700000000", "GET", "/orders", "").unwrap();
+        // Independent HMAC-SHA256 oracle for key `secret` and the documented
+        // timestamp+method+path+body prehash.
+        assert_eq!(signature, "5pq6uRxdFFvJzbzIJRObr9401649NDsVtb6H2TgxZRY=");
+    }
+
+    #[test]
+    fn coinbase_signing_rejects_a_non_base64_secret() {
+        assert!(sign_coinbase_request_base64("not base64!", "1", "GET", "/orders", "").is_err());
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn legacy_coinbase_signer_preserves_raw_key_hex_contract() {
+        assert_eq!(
+            sign_coinbase_request(b"secret", "1700000000", "GET", "/orders", ""),
+            "e69abab91c5d145bc9cdbcc825139bafde34d7ae3d343b15b5be87d938316516"
+        );
     }
 
     const ADDR_A: &str = "0x3535353535353535353535353535353535353535";

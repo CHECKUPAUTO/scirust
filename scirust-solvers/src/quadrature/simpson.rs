@@ -17,18 +17,47 @@ pub fn simpson_adaptive<F: Fn(f64) -> f64>(
     tol: f64,
     max_depth: usize,
 ) -> SolverResult<f64> {
+    validate_inputs(a, b, tol)?;
     if a == b
     {
         return Ok(0.0);
     }
     let (a, b, sign) = if a < b { (a, b, 1.0) } else { (b, a, -1.0) };
-    let fa = f(a);
-    let fb = f(b);
+    let fa = eval_finite(&f, a)?;
+    let fb = eval_finite(&f, b)?;
     let m = 0.5 * (a + b);
-    let fm = f(m);
+    let fm = eval_finite(&f, m)?;
     let whole = simpson_step(a, b, fa, fb, fm);
-    let val = recurse(&f, a, b, fa, fb, fm, whole, tol, max_depth);
+    let val = recurse(&f, a, b, fa, fb, fm, whole, tol, max_depth)?;
     Ok(sign * val)
+}
+
+fn validate_inputs(a: f64, b: f64, tol: f64) -> SolverResult<()> {
+    if !a.is_finite() || !b.is_finite()
+    {
+        return Err(SolverError::InvalidInput(
+            "integration bounds must be finite".into(),
+        ));
+    }
+    if !tol.is_finite() || tol <= 0.0
+    {
+        return Err(SolverError::InvalidInput(
+            "tol must be finite and > 0".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn eval_finite<F: Fn(f64) -> f64>(f: &F, x: f64) -> SolverResult<f64> {
+    let value = f(x);
+    if value.is_finite()
+    {
+        Ok(value)
+    }
+    else
+    {
+        Err(SolverError::NanDetected { iter: 0, value })
+    }
 }
 
 #[inline]
@@ -47,25 +76,25 @@ fn recurse<F: Fn(f64) -> f64>(
     whole: f64,
     tol: f64,
     depth: usize,
-) -> f64 {
+) -> SolverResult<f64> {
     let m = 0.5 * (a + b);
     let lm = 0.5 * (a + m);
     let rm = 0.5 * (m + b);
-    let flm = f(lm);
-    let frm = f(rm);
+    let flm = eval_finite(f, lm)?;
+    let frm = eval_finite(f, rm)?;
     let left = simpson_step(a, m, fa, fm, flm);
     let right = simpson_step(m, b, fm, fb, frm);
     let sum = left + right;
     let err = (sum - whole) / 15.0; // estimateur de Richardson
     if depth == 0 || err.abs() < tol
     {
-        sum + err
+        Ok(sum + err)
     }
     else
     {
         let half_tol = tol * 0.5;
-        recurse(f, a, m, fa, fm, flm, left, half_tol, depth - 1)
-            + recurse(f, m, b, fm, fb, frm, right, half_tol, depth - 1)
+        Ok(recurse(f, a, m, fa, fm, flm, left, half_tol, depth - 1)?
+            + recurse(f, m, b, fm, fb, frm, right, half_tol, depth - 1)?)
     }
 }
 
@@ -78,11 +107,61 @@ pub fn simpson_adaptive_strict<F: Fn(f64) -> f64>(
     tol: f64,
     max_depth: usize,
 ) -> SolverResult<f64> {
+    validate_inputs(a, b, tol)?;
     if max_depth == 0
     {
         return Err(SolverError::InvalidInput("max_depth must be > 0".into()));
     }
-    simpson_adaptive(f, a, b, tol, max_depth)
+    if a == b
+    {
+        return Ok(0.0);
+    }
+    let (a, b, sign) = if a < b { (a, b, 1.0) } else { (b, a, -1.0) };
+    let fa = eval_finite(&f, a)?;
+    let fb = eval_finite(&f, b)?;
+    let m = 0.5 * (a + b);
+    let fm = eval_finite(&f, m)?;
+    let whole = simpson_step(a, b, fa, fb, fm);
+    recurse_strict(&f, a, b, fa, fb, fm, whole, tol, max_depth).map(|v| sign * v)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn recurse_strict<F: Fn(f64) -> f64>(
+    f: &F,
+    a: f64,
+    b: f64,
+    fa: f64,
+    fb: f64,
+    fm: f64,
+    whole: f64,
+    tol: f64,
+    depth: usize,
+) -> SolverResult<f64> {
+    let m = 0.5 * (a + b);
+    let lm = 0.5 * (a + m);
+    let rm = 0.5 * (m + b);
+    let flm = eval_finite(f, lm)?;
+    let frm = eval_finite(f, rm)?;
+    let left = simpson_step(a, m, fa, fm, flm);
+    let right = simpson_step(m, b, fm, fb, frm);
+    let sum = left + right;
+    let err = (sum - whole) / 15.0;
+    if err.abs() < tol
+    {
+        return Ok(sum + err);
+    }
+    if depth == 0
+    {
+        return Err(SolverError::IntegrationFailed(format!(
+            "adaptive Simpson depth exhausted on [{a}, {b}]: estimated error {} exceeds tolerance {tol}",
+            err.abs()
+        )));
+    }
+    let half_tol = tol * 0.5;
+    Ok(
+        recurse_strict(f, a, m, fa, fm, flm, left, half_tol, depth - 1)?
+            + recurse_strict(f, m, b, fm, fb, frm, right, half_tol, depth - 1)?,
+    )
 }
 
 #[cfg(test)]
@@ -139,5 +218,18 @@ mod tests {
     fn simpson_adaptive_strict_works_like_adaptive() {
         let v = simpson_adaptive_strict(|x| x.sin(), 0.0, PI, 1e-12, 30).unwrap();
         assert_relative_eq!(v, 2.0, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn strict_reports_depth_exhaustion_instead_of_returning_wrong_value() {
+        let result = simpson_adaptive_strict(|x| (1000.0 * x).sin(), 0.0, 1.0, 1e-30, 1);
+        assert!(matches!(result, Err(SolverError::IntegrationFailed(_))));
+    }
+
+    #[test]
+    fn rejects_invalid_numeric_inputs() {
+        assert!(simpson_adaptive(|x| x, 0.0, 1.0, 0.0, 10).is_err());
+        assert!(simpson_adaptive(|x| x, f64::NAN, 1.0, 1e-6, 10).is_err());
+        assert!(simpson_adaptive(|_| f64::NAN, 0.0, 1.0, 1e-6, 10).is_err());
     }
 }

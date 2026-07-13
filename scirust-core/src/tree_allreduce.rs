@@ -211,8 +211,10 @@ impl WireState for Vec<f32> {
         out
     }
     fn from_bytes(b: &[u8]) -> Self {
-        b.chunks_exact(4)
-            .map(|c| f32::from_bits(u32::from_le_bytes(c.try_into().unwrap())))
+        b.as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| f32::from_bits(u32::from_le_bytes(*c)))
             .collect()
     }
 }
@@ -234,9 +236,9 @@ impl WireState for Vec<ExactAcc> {
         b.chunks_exact(per)
             .map(|chunk| {
                 let mut words = [0u64; 22];
-                for (i, c) in chunk.chunks_exact(8).enumerate()
+                for (i, c) in chunk.as_chunks::<8>().0.iter().enumerate()
                 {
-                    words[i] = u64::from_le_bytes(c.try_into().unwrap());
+                    words[i] = u64::from_le_bytes(*c);
                 }
                 ExactAcc::from_words(&words)
             })

@@ -1129,18 +1129,6 @@ pub fn simd_add_one(data: &mut [f32]) {
     }
 }
 
-// ── GPU/CPU dispatch (CPU-only build: always runs the CPU closure) ──
-
-pub mod dispatch {
-    pub fn gpu_or_cpu<F, G, T>(_on_gpu: F, on_cpu: G) -> T
-    where
-        F: FnOnce() -> T,
-        G: FnOnce() -> T,
-    {
-        on_cpu()
-    }
-}
-
 // ── End-to-end expression pipeline (parse → simplify → diff → eval → codegen) ──
 
 pub struct Pipeline {

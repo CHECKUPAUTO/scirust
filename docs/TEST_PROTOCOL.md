@@ -50,10 +50,10 @@ gate and a handful of opt-in extras.
 | `clippy` | `cargo clippy --workspace --all-targets -- -D warnings` | No lint warnings anywhere — lib, bins, tests, examples. | ✓ |
 | `build` | `cargo build --workspace --all-targets` | The whole workspace compiles, every target. | ✓ |
 | `test` | `cargo test --workspace --no-fail-fast` | **Every crate's oracle tests** pass — this is the functionality gate. | ✓ |
-| `simd` | `cargo test -p scirust-simd --features portable-simd` | The optional nightly portable-SIMD kernels are correct. | ✓ |
+| `simd` | `cargo test -p scirust-simd --all-targets --features portable-simd` then `cargo test -p scirust-simd --all-targets --features nightly-simd` | Both optional nightly SIMD families compile and their kernels are correct. | ✓ |
 | `determinism` | determinism-tagged tests, run in **two processes**, compared | A computation reproduces bit-for-bit across process invocations. | ✓ |
 | `doc` | `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace` | The public API documents cleanly, no broken links. | ✓ |
-| `aarch64` | `cargo check --workspace --all-targets --target aarch64-unknown-linux-gnu` | The NEON/SVE `cfg(target_arch)` paths type-check for ARM. | ✓¹ |
+| `aarch64` | `cargo +nightly-2026-07-02 check --workspace --all-targets --features scirust-simd/nightly-simd --target aarch64-unknown-linux-gnu` | The stable NEON and nightly SVE/SME `cfg(target_arch)` paths type-check for ARM. | ✓¹ |
 | `deny` | `cargo deny check` | Licenses and security advisories are clean. | ✓¹ |
 | `clippy-gpu` | `cargo clippy -p scirust-gpu --features wgpu --all-targets -- -D warnings` | The optional wgpu feature lints cleanly. | optional |
 | `gpu` | `cargo test -p scirust-gpu --features wgpu` | The real wgpu GEMM matches the CPU oracle on a Vulkan adapter. | optional² |

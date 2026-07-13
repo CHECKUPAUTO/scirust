@@ -17,10 +17,10 @@
 #   clippy       clippy --workspace --all-targets -Dwarn (required)
 #   build        build  --workspace --all-targets        (required)
 #   test         test   --workspace   (ALL oracle tests) (required)
-#   simd         portable-simd feature test              (required, nightly)
+#   simd         portable-simd + nightly-simd tests      (required, nightly)
 #   determinism  two-process reproducibility re-run      (required)
 #   doc          rustdoc -D warnings                     (required)
-#   aarch64      cross-check NEON/SVE paths              (required if target)
+#   aarch64      type-check NEON + nightly ARM paths     (required if target)
 #   deny         cargo-deny license & security audit     (required if installed)
 #   clippy-gpu   scirust-gpu wgpu-feature lint           (optional)
 #   gpu          scirust-gpu wgpu test on Vulkan adapter (optional, needs ICD)
@@ -261,11 +261,11 @@ if should_run test; then
 fi
 
 # =============================================================================
-#  GATE 5 -- Optional nightly portable-simd path
+#  GATE 5 -- Optional nightly SIMD paths
 # =============================================================================
 if should_run simd; then
-  run_gate simd required "Portable-SIMD kernels (nightly feature) test" \
-    "cargo test -p scirust-simd --features portable-simd"
+  run_gate simd required "Portable-SIMD and architecture extensions (nightly)" \
+    "cargo test -p scirust-simd --all-targets --features portable-simd && cargo test -p scirust-simd --all-targets --features nightly-simd"
 fi
 
 # =============================================================================
@@ -316,7 +316,7 @@ if should_run doc; then
 fi
 
 # =============================================================================
-#  GATE 8 -- Cross-architecture compilation (aarch64 NEON/SVE paths)
+#  GATE 8 -- Cross-architecture compilation (stable NEON + nightly ARM paths)
 # =============================================================================
 if should_run aarch64; then
   if rustc --print target-list 2>/dev/null | grep -q '^aarch64-unknown-linux-gnu$'; then
@@ -333,8 +333,12 @@ if should_run aarch64; then
         warn "    reclaiming host target/debug (${A64_FREE_GB} GB free) to fit the aarch64 tree"
         rm -rf "$ROOT/target/debug" 2>/dev/null || true
       fi
-      run_gate aarch64 required "Cross-check NEON/SVE paths (aarch64)" \
-        "cargo check --workspace --all-targets --target aarch64-unknown-linux-gnu"
+      # Default aarch64 builds cover stable NEON. Explicitly forwarding the
+      # scirust-simd feature is what also compiles the nightly-only SVE/SME,
+      # dotprod and i8mm modules. This gate type-checks those ISA paths; it
+      # does not claim to execute them on the cross target.
+      run_gate aarch64 required "Type-check NEON and nightly SVE/SME/dotprod/i8mm paths (aarch64)" \
+        "cargo check --workspace --all-targets --features scirust-simd/nightly-simd --locked --target aarch64-unknown-linux-gnu"
       # Reclaim the second-architecture tree immediately -- it is ~10 GB and not
       # needed once the check passes.
       rm -rf "$ROOT/target/aarch64-unknown-linux-gnu" 2>/dev/null || true

@@ -23,12 +23,10 @@ mod tests {
         ) -> Var<'t> {
             let mut out = self.forward(tape, input);
             if let Some(h) = hook
+                && h.target_layer == self.name
             {
-                if h.target_layer == self.name
-                {
-                    let shift_var = tape.input(h.shift.clone());
-                    out = out.add_broadcast(shift_var);
-                }
+                let shift_var = tape.input(h.shift.clone());
+                out = out.add_broadcast(shift_var);
             }
             out
         }

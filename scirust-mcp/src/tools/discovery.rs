@@ -14,6 +14,9 @@ use serde_json::json;
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+const MAX_TARGETS: usize = 16;
+const MAX_TIMEOUT_MS: u64 = 2_000;
+
 pub fn discovery_tools() -> Vec<McpTool> {
     vec![scan_tool()]
 }
@@ -38,6 +41,7 @@ fn scan_tool() -> McpTool {
                 },
                 "targets": {
                     "type": "array",
+                    "maxItems": MAX_TARGETS,
                     "items": {
                         "type": "object",
                         "properties": {
@@ -50,6 +54,7 @@ fn scan_tool() -> McpTool {
                 "timeout_ms": {
                     "type": "integer",
                     "minimum": 1,
+                    "maximum": MAX_TIMEOUT_MS,
                     "description": "per-target probe timeout in milliseconds (default 2000)",
                 },
             },
@@ -60,6 +65,10 @@ fn scan_tool() -> McpTool {
                 "discovery is disabled: the server operator has not set SCIRUST_DISCOVERY_KEY"
                     .to_string()
             })?;
+            if key.trim().is_empty()
+            {
+                return Err("discovery is disabled: SCIRUST_DISCOVERY_KEY is empty".to_string());
+            }
             let scope: ScopeAuthorization =
                 serde_json::from_value(args.get("scope").cloned().ok_or("missing `scope`")?)
                     .map_err(|e| format!("invalid `scope`: {e}"))?;
@@ -68,6 +77,10 @@ fn scan_tool() -> McpTool {
                 .get("targets")
                 .and_then(|v| v.as_array())
                 .ok_or("missing `targets` array")?;
+            if targets_json.len() > MAX_TARGETS
+            {
+                return Err(format!("refused more than {MAX_TARGETS} discovery targets"));
+            }
             let mut targets = Vec::with_capacity(targets_json.len());
             for (i, t) in targets_json.iter().enumerate()
             {
@@ -90,6 +103,10 @@ fn scan_tool() -> McpTool {
                 .get("timeout_ms")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(2000);
+            if timeout_ms == 0 || timeout_ms > MAX_TIMEOUT_MS
+            {
+                return Err(format!("timeout_ms must be between 1 and {MAX_TIMEOUT_MS}"));
+            }
             let now_unix = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_secs())
@@ -124,6 +141,16 @@ mod tests {
         let result = (tool.handler)(json!({ "scope": {}, "targets": [] }));
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("SCIRUST_DISCOVERY_KEY"));
+    }
+
+    #[test]
+    fn refuses_empty_server_side_key() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("SCIRUST_DISCOVERY_KEY", "   ");
+        let result = (scan_tool().handler)(json!({ "scope": {}, "targets": [] }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("empty"));
+        std::env::remove_var("SCIRUST_DISCOVERY_KEY");
     }
 
     #[test]

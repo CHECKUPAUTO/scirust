@@ -48,7 +48,7 @@ pub fn yarn_frequencies(
     alpha: f32,
     beta: f32,
 ) -> Vec<f32> {
-    assert!(d % 2 == 0, "yarn: d must be even");
+    assert!(d.is_multiple_of(2), "yarn: d must be even");
     assert!(scale >= 1.0 && orig_ctx > 0.0, "yarn: need scale>=1, L>0");
     (0..d / 2)
         .map(|p| {

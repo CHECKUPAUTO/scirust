@@ -40,8 +40,9 @@ définition de fini (toujours : gates verts + oracle + doc).
 ### P0.3 Story « stable » : sortir du nightly pour les consommateurs
 - **Client** : équipes d'industrialisation (politiques internes
   interdisent souvent nightly).
-- **Quoi** : `portable-simd` est la seule vraie dépendance nightly du
-  cœur. La rendre réellement optionnelle de bout en bout et prouver en
+- **Quoi** : `portable-simd` et les extensions d'architecture de
+  `scirust-simd` (`nightly-simd`) sont les seules dépendances nightly du
+  cœur. Les rendre réellement optionnelles de bout en bout et prouver en
   CI un build **stable** de `scirust-core` (+ SOM, déjà compatible
   stable via `syn`) avec le dispatch runtime AVX2/NEON existant
   (intrinsics stables). Job CI `stable-build` dédié.
@@ -133,24 +134,17 @@ définition de fini (toujours : gates verts + oracle + doc).
   Conv2d CPU sur lavapipe. im2col/col2im restent CPU pour l'instant.
 - **Reste** : garder les activations en VRAM entre couches (éviter
   l'aller-retour CPU par op) + im2col/col2im sur GPU (pipelines archivés en
-  référence) ; plus d'ops (elementwise, réductions). CUDA/cuBLAS reste
-  hors périmètre tant qu'un runner GPU matériel n'existe pas.
+  référence) ; plus d'ops (elementwise, réductions). Le backend bf16/cuBLASLt
+  est désormais disponible derrière la feature `cuda` avec chargement dynamique
+  et repli `Unavailable` sans runtime ; il reste à ajouter un runner CUDA matériel
+  pour la parité device et les régressions de performance.
 
 ### P2.3 SOM précision rustc (HIR/MIR)
-- Brancher `scirust-rustc-driver` pour : types résolus (fin du
-  `let x = f();` conservateur), NLL réels, jointures de branches.
-  L'oracle `syn` actuel devient le « mode rapide », le mode rustc le
-  « mode précis » — même format de rapport.
-- **FAIT (infrastructure)** : le driver (exclu du workspace, `rustc_private`)
-  ne compilait plus sur la nightly courante (dérive d'API : `get_attrs`
-  renvoie désormais un itérateur). Réparé + warning-clean, et nouveau job CI
-  **informatif** `rustc-driver (excluded, informational)` (continue-on-error)
-  pour rendre visible la dérive future — c'est précisément parce que le crate
-  est exclu/non-gaté que la casse était invisible.
-- **Reste (le gros)** : écrire une passe MIR d'extraction ownership/emprunts
-  (NLL, types résolus) produisant le **format de rapport SOM**, brancher en
-  « mode précis ». Chantier conséquent et fragile (API rustc internes) — à
-  faire par incréments, hors des 8 gates par défaut.
+- L'oracle `syn` actuel reste le mode conservateur réellement livré.
+- **Reste** : concevoir une passe MIR d'extraction ownership/emprunts (NLL,
+  types résolus) produisant le **format de rapport SOM**, avec transformations
+  vérifiées et gate CI bloquant. L'ancien driver d'analyse, qui annonçait des
+  transformations sans modifier le MIR, a été supprimé.
 
 ### P2.4 Tenseur N-D unifié
 - Fusionner `tensor::TensorND` (déjà dans core) avec la tape 2D :

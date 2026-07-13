@@ -49,9 +49,15 @@ pub fn truncated_svd(
     assert_eq!(data.len(), m * n, "truncated_svd: data length mismatch");
     assert!(m > 0 && n > 0, "truncated_svd: empty matrix");
 
-    // nalgebra is column-major, so we feed (n, m) and transpose meaning.
-    // Equivalent: build the matrix from a row-iterator.
-    let mat = DMatrix::<f32>::from_row_slice(m, n, data);
+    // Perform the factorization in f64 even though SciRust tensors use f32.
+    // nalgebra's f32 SVD can stop with mutually inconsistent singular vectors
+    // and values on effectively low-rank matrices whose condition number is
+    // close to f32 precision.  That makes a rank-preserving truncation lose
+    // several percent on reconstruction.  Computing the decomposition in f64
+    // and casting only the retained factors keeps the public f32 representation
+    // while making the TT-SVD stable for those matrices.
+    let data_f64: Vec<f64> = data.iter().map(|&value| f64::from(value)).collect();
+    let mat = DMatrix::<f64>::from_row_slice(m, n, &data_f64);
 
     // Compute full SVD. `compute_u = true, compute_v = true`.
     let svd = SVD::new(mat, true, true);
@@ -61,7 +67,7 @@ pub fn truncated_svd(
 
     let full_rank = s_full.len();
     let s_max = s_full[0].max(1e-30);
-    let abs_threshold = tolerance * s_max;
+    let abs_threshold = f64::from(tolerance) * s_max;
 
     // Determine effective rank.
     let mut rank = 0usize;
@@ -84,12 +90,12 @@ pub fn truncated_svd(
     {
         for k in 0..rank
         {
-            u[i * rank + k] = u_full[(i, k)];
+            u[i * rank + k] = u_full[(i, k)] as f32;
         }
     }
 
     // Singular values: first `rank` entries.
-    let s: Vec<f32> = (0..rank).map(|k| s_full[k]).collect();
+    let s: Vec<f32> = (0..rank).map(|k| s_full[k] as f32).collect();
 
     // V^T: first `rank` rows → (rank, n) row-major.
     let mut vt = vec![0.0f32; rank * n];
@@ -97,7 +103,7 @@ pub fn truncated_svd(
     {
         for j in 0..n
         {
-            vt[k * n + j] = vt_full[(k, j)];
+            vt[k * n + j] = vt_full[(k, j)] as f32;
         }
     }
 

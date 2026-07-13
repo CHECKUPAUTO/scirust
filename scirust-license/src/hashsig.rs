@@ -37,6 +37,35 @@ const MSG_BITS: usize = 256;
 /// Bytes of revealed material per signed digest: `MSG_BITS * (secret + image)`.
 const REVEAL_BYTES: usize = MSG_BITS * (HASH_LEN + HASH_LEN);
 
+const MIN_TREE_HEIGHT: u32 = 1;
+const MAX_TREE_HEIGHT: u32 = 20;
+
+/// Return the supported Merkle-tree height for a caller's request.
+///
+/// Keeping this normalization in one pure function lets callers describe the
+/// effective key capacity without first constructing the (potentially very
+/// large) tree. [`MerkleSigner::from_seed`] uses this same function, so the
+/// reported metadata cannot drift from the signer's actual height.
+pub(crate) const fn effective_height(requested: u32) -> u32 {
+    if requested < MIN_TREE_HEIGHT
+    {
+        MIN_TREE_HEIGHT
+    }
+    else if requested > MAX_TREE_HEIGHT
+    {
+        MAX_TREE_HEIGHT
+    }
+    else
+    {
+        requested
+    }
+}
+
+/// Number of leaves created for a requested Merkle-tree height.
+pub(crate) const fn capacity_for_height(requested: u32) -> usize {
+    1usize << effective_height(requested)
+}
+
 fn hash(parts: &[&[u8]]) -> Hash {
     let mut h = Sha256::new();
     for p in parts
@@ -241,8 +270,8 @@ impl MerkleSigner {
     /// seed. `height` is clamped to `1..=20` (a 20-deep tree already holds a
     /// million licenses and costs a few seconds to build).
     pub fn from_seed(seed: &Hash, height: u32) -> Self {
-        let height = height.clamp(1, 20);
-        let n = 1usize << height;
+        let height = effective_height(height);
+        let n = capacity_for_height(height);
         let mut leaves = Vec::with_capacity(n);
         for k in 0..n
         {
@@ -275,7 +304,7 @@ impl MerkleSigner {
 
     /// Number of one-time leaves (`2^height`).
     pub fn capacity(&self) -> usize {
-        1usize << self.height
+        capacity_for_height(self.height)
     }
 
     /// Sign a 256-bit `digest` with one-time leaf `leaf`.
@@ -360,6 +389,16 @@ mod tests {
 
     fn digest(tag: &[u8]) -> Hash {
         hash(&[b"test-digest", tag])
+    }
+
+    #[test]
+    fn height_normalization_and_capacity_cover_both_clamp_boundaries() {
+        assert_eq!(effective_height(0), 1);
+        assert_eq!(effective_height(7), 7);
+        assert_eq!(effective_height(30), 20);
+        assert_eq!(capacity_for_height(0), 2);
+        assert_eq!(capacity_for_height(7), 128);
+        assert_eq!(capacity_for_height(30), 1_048_576);
     }
 
     #[test]

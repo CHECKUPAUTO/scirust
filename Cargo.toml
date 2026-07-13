@@ -3,7 +3,7 @@ name = "scirust"
 version = "0.14.0"
 edition = "2021"
 publish = false
-rust-version = "1.85"
+rust-version = "1.89"
 description = "SciRust — pure-Rust deterministic deep-learning & scientific-computing platform with certifiable industrial verticals (estimation, navigation, water, OT security, functional safety), validated from cloud x86 to embedded ARM (Jetson)"
 license-file = "LICENSE.md"
 repository = "https://github.com/Memorithm/scirust"
@@ -15,15 +15,22 @@ scirust-symbolic = { path = "scirust-symbolic" }
 scirust-learning = { path = "scirust-learning" }
 scirust-solvers = { path = "scirust-solvers" }
 scirust-rsi = { path = "scirust-rsi" }
-tokio = { version = "1", features = ["full"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-chrono = { version = "0.4", features = ["serde"] }
-rand = "0.8"
+tokio = { version = "1", features = ["full"], optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+chrono = { version = "0.4", features = ["serde"], optional = true }
+rand = { version = "0.8", optional = true }
 # Used only by the bundled `openclaw-u` demo binary (src/main.rs) to
 # integrity-protect its `state.json` with an HMAC-SHA256 tag. Already present
 # transitively via scirust-trader, so this adds no new download to the lockfile.
-sha2 = "0.10"
+sha2 = { version = "0.10", optional = true }
+
+[features]
+default = []
+openclaw = ["dep:tokio", "dep:serde", "dep:serde_json", "dep:chrono", "dep:rand", "dep:sha2"]
+
+[dev-dependencies]
+rand = "0.8"
 
 # The framework itself is exposed as the `scirust` library (src/lib.rs).
 # The bundled autonomous-agent demo (src/main.rs, "OpenClaw-U") is a separate,
@@ -31,6 +38,7 @@ sha2 = "0.10"
 [[bin]]
 name = "openclaw-u"
 path = "src/main.rs"
+required-features = ["openclaw"]
 
 [workspace]
 members = [
@@ -46,7 +54,6 @@ members = [
     "scirust-simd-macros",
     "scirust-simd",
     "scirust-gpu",
-    "scirust-gpu-macros",
     "scirust-cuda",
     "scirust-core",
     "scirust-runtime",
@@ -126,8 +133,6 @@ members = [
     "scirust-algogen",
     "scirust-automl",
     "scirust-rl-algo",
-    "scirust-synthesis",
-    "scirust-codetrans",
     "scirust-scaffold",
     "scirust-sciagent",
     "scirust-rsi",
@@ -157,7 +162,6 @@ members = [
     "scirust-sim",
 ]
 exclude = [
-    "scirust-rustc-driver",
     "examples/simd_views_demo",
     "examples/benchmarks",
     # Fuzz harness: its own nightly-only workspace (libfuzzer-sys), built only
@@ -168,4 +172,3 @@ exclude = [
     "scirust-burn-bridge",
 ]
 resolver = "2"
-license = "LicenseRef-TarekZekriti-Dual"

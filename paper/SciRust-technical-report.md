@@ -32,11 +32,10 @@ contributions establish SciRust as a substantive, reproducible research artifact
 
 ## 1. Introduction
 
-SciRust is a deep learning framework written in pure Rust. It is a hybrid of a
-runtime library and a transpiler system: alongside conventional tensor and neural
-network components, it implements real procedural-macro attributes — #[autodiff],
-#[simd], and #[gpu] — across three macro crates, so that annotated Rust is
-rewritten into differentiated, vectorized, or accelerator-targeted forms. The
+SciRust is a deep learning framework written in pure Rust. It combines a runtime
+library with two source-transformation attributes: #[autodiff] and #[simd]. GPU
+execution is selected explicitly through tested CPU, wgpu, and feature-gated CUDA
+backends; SciRust does not claim an automatic Rust-to-GPU procedural macro. The
 project is positioned as a **research artifact**, not as a production competitor to
 established frameworks (PyTorch, or in Rust, Burn and candle), which exceed it in
 operator coverage, kernel maturity, and hardware breadth.
@@ -63,12 +62,13 @@ activation, and transformer layers) behind a common Module trait, optimizers
 generator underpins initialization and data shuffling, which makes whole-run
 reproducibility attainable rather than incidental.
 
-What distinguishes SciRust from a plain library is its transpiler dimension. The
-macro crates (scirust-macros, scirust-simd-macros, scirust-gpu-macros) implement
-the #[autodiff], #[simd], and #[gpu] proc-macro attributes, making the system a
-hybrid runtime-plus-transpiler rather than a fixed runtime alone. The CPU numerics
-are pure Rust with no mandatory BLAS dependency, which — as Section 4 shows — is
-precisely what made cross-architecture portability straightforward.
+What distinguishes SciRust from a plain library is its focused transpiler
+dimension. The scirust-macros and scirust-simd-macros crates implement the
+#[autodiff] and #[simd] proc-macro attributes. Accelerator execution remains an
+explicit runtime choice because the removed experimental #[gpu] macro did not
+perform real kernel lowering. The CPU numerics are pure Rust with no mandatory
+BLAS dependency, which — as Section 4 shows — made cross-architecture portability
+straightforward.
 
 The framework's baseline validation comprises **579 passing tests** and several
 end-to-end demonstrations: MNIST classification at **97.70%** with bit-identical

@@ -950,7 +950,7 @@ impl NdSoap {
             }
 
             // Periodically refresh the eigenbasis and rotate the moments into it.
-            if t_now as usize % cfg.precond_freq == 0
+            if (t_now as usize).is_multiple_of(cfg.precond_freq)
             {
                 let ql_new = jacobi_eigenvectors(&st.l, m);
                 let qr_new = jacobi_eigenvectors(&st.r, n);
@@ -1036,7 +1036,7 @@ impl NdLookahead {
         self.base.step(params, grads);
         self.t += 1;
         // Every k steps: pull the slow weights toward fast, then reset fast to slow.
-        if self.t as usize % self.cfg.k == 0
+        if (self.t as usize).is_multiple_of(self.cfg.k)
         {
             let alpha = self.cfg.alpha;
             for (k, p) in params.iter_mut().enumerate()
@@ -1735,7 +1735,7 @@ impl NdShampoo {
                 {
                     *ri = b * *ri + (1.0 - b) * v;
                 }
-                if st.il.is_empty() || t % cfg.precond_freq == 0
+                if st.il.is_empty() || t.is_multiple_of(cfg.precond_freq)
                 {
                     st.il = inverse_pth_root(&st.l, m, 4.0, cfg.eps);
                     st.ir = inverse_pth_root(&st.r, n, 4.0, cfg.eps);
@@ -2481,7 +2481,7 @@ impl NdGalore {
         } = self.cfg;
         let bc1 = 1.0 - beta1.powi(self.t as i32);
         let bc2 = 1.0 - beta2.powi(self.t as i32);
-        let refresh = (self.t - 1) % update_gap.max(1) as u64 == 0;
+        let refresh = (self.t - 1).is_multiple_of(update_gap.max(1) as u64);
 
         for (k, p) in params.iter_mut().enumerate()
         {

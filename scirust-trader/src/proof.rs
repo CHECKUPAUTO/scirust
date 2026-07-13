@@ -13,6 +13,21 @@ use sha2::{Digest, Sha256};
 
 use crate::agent::CertifiedPrediction;
 
+/// A proof cannot be produced from non-finite numerical evidence or from an
+/// object that cannot be serialized canonically.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProofError {
+    pub field: &'static str,
+}
+
+impl std::fmt::Display for ProofError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "cannot seal decision proof: invalid {}", self.field)
+    }
+}
+
+impl std::error::Error for ProofError {}
+
 /// A single decision record — one trading step.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecisionRecord {
@@ -34,31 +49,45 @@ pub struct DecisionProof {
 
 impl DecisionProof {
     /// Build a proof from a list of decision records.
-    pub fn from_records(records: &[DecisionRecord]) -> Self {
-        let manifest_hash = compute_manifest_hash(records);
-        DecisionProof {
-            scirust_version: env!("CARGO_PKG_VERSION").to_string(),
-            timestamp_ms: chrono::Utc::now().timestamp_millis(),
-            num_decisions: records.len(),
+    pub fn from_records(records: &[DecisionRecord]) -> Result<Self, ProofError> {
+        let scirust_version = env!("CARGO_PKG_VERSION").to_string();
+        let timestamp_ms = chrono::Utc::now().timestamp_millis();
+        let num_decisions = records.len();
+        let manifest_hash =
+            compute_manifest_hash(&scirust_version, timestamp_ms, num_decisions, records)?;
+        Ok(DecisionProof {
+            scirust_version,
+            timestamp_ms,
+            num_decisions,
             records: records.to_vec(),
             manifest_hash,
-        }
+        })
     }
 
     /// Serialize to pretty JSON.
-    pub fn to_json(&self) -> String {
-        serde_json::to_string_pretty(self).unwrap_or_default()
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
     }
 
     /// Verify a proof: recompute the manifest hash and check it matches.
     pub fn verify(&self) -> bool {
-        let recomputed = compute_manifest_hash(&self.records);
-        recomputed == self.manifest_hash
+        self.num_decisions == self.records.len()
+            && compute_manifest_hash(
+                &self.scirust_version,
+                self.timestamp_ms,
+                self.num_decisions,
+                &self.records,
+            )
+            .map(|recomputed| recomputed == self.manifest_hash)
+            .unwrap_or(false)
     }
 
     /// Write the proof to a file (returns the path written).
     pub fn save_to_file(&self, path: &str) -> std::io::Result<()> {
-        std::fs::write(path, self.to_json())
+        let json = self
+            .to_json()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        std::fs::write(path, json)
     }
 
     /// Load a proof from a file.
@@ -124,19 +153,68 @@ pub struct ProofSummary {
     pub manifest_hash: String,
 }
 
-/// Compute the SHA-256 manifest hash of all records.
-///
-/// The hash is computed over the canonical JSON encoding of each record's
-/// prediction (not the narration — that's LLM-generated and non-deterministic).
-fn compute_manifest_hash(records: &[DecisionRecord]) -> String {
-    let mut hasher = Sha256::new();
+/// Versioned payload committed by `manifest_hash`. The domain tag prevents a
+/// proof manifest from being confused with another SHA-256-based format.
+#[derive(Serialize)]
+struct DecisionProofManifest<'a> {
+    domain: &'static str,
+    scirust_version: &'a str,
+    timestamp_ms: i64,
+    num_decisions: usize,
+    records: &'a [DecisionRecord],
+}
+
+/// Compute the SHA-256 manifest hash of all proof fields except the hash itself.
+fn compute_manifest_hash(
+    scirust_version: &str,
+    timestamp_ms: i64,
+    num_decisions: usize,
+    records: &[DecisionRecord],
+) -> Result<String, ProofError> {
     for record in records
     {
-        let json = serde_json::to_string(&record.prediction).unwrap_or_default();
-        hasher.update(json.as_bytes());
-        hasher.update(b"|");
+        validate_prediction(&record.prediction)?;
     }
-    format!("{:x}", hasher.finalize())
+    let manifest = DecisionProofManifest {
+        domain: "scirust.decision-proof.manifest.v1",
+        scirust_version,
+        timestamp_ms,
+        num_decisions,
+        records,
+    };
+    let canonical = serde_json::to_vec(&manifest).map_err(|_| ProofError {
+        field: "proof serialization",
+    })?;
+    let mut hasher = Sha256::new();
+    hasher.update((canonical.len() as u64).to_le_bytes());
+    hasher.update(&canonical);
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn validate_prediction(prediction: &CertifiedPrediction) -> Result<(), ProofError> {
+    let numeric_fields = [
+        ("raw_prediction", prediction.raw_prediction),
+        ("bounds.eps", prediction.bounds.eps),
+        ("bounds.output.lo", prediction.bounds.output.lo),
+        ("bounds.output.hi", prediction.bounds.output.hi),
+        ("bounds.midpoint", prediction.bounds.midpoint),
+        ("bounds.uncertainty", prediction.bounds.uncertainty),
+        ("last_close", prediction.last_close),
+    ];
+    if let Some((field, _)) = numeric_fields.iter().find(|(_, value)| !value.is_finite())
+    {
+        return Err(ProofError { field });
+    }
+    if prediction
+        .feature_attribution
+        .values()
+        .any(|value| !value.is_finite())
+    {
+        return Err(ProofError {
+            field: "feature_attribution",
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -176,8 +254,8 @@ mod tests {
             make_record("BTC/USDT", Action::Long),
             make_record("ETH/USDT", Action::Short),
         ];
-        let proof = DecisionProof::from_records(&records);
-        let json = proof.to_json();
+        let proof = DecisionProof::from_records(&records).unwrap();
+        let json = proof.to_json().unwrap();
         let parsed: DecisionProof = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.num_decisions, 2);
         assert_eq!(parsed.manifest_hash, proof.manifest_hash);
@@ -186,16 +264,48 @@ mod tests {
     #[test]
     fn proof_verifies() {
         let records = vec![make_record("BTC/USDT", Action::Long)];
-        let proof = DecisionProof::from_records(&records);
+        let proof = DecisionProof::from_records(&records).unwrap();
         assert!(proof.verify());
     }
 
     #[test]
     fn tampered_proof_fails_verification() {
         let records = vec![make_record("BTC/USDT", Action::Long)];
-        let mut proof = DecisionProof::from_records(&records);
+        let mut proof = DecisionProof::from_records(&records).unwrap();
         proof.records[0].prediction.raw_prediction = 999.0;
         assert!(!proof.verify());
+    }
+
+    #[test]
+    fn tampering_with_record_audit_fields_fails_verification() {
+        let records = vec![make_record("BTC/USDT", Action::Long)];
+        let proof = DecisionProof::from_records(&records).unwrap();
+
+        let mut changed = proof.clone();
+        changed.records[0].narration.push_str(" (edited)");
+        assert!(!changed.verify());
+
+        let mut changed = proof.clone();
+        changed.records[0].llm_consistent = false;
+        assert!(!changed.verify());
+
+        let mut changed = proof.clone();
+        changed.records[0].timestamp_ms += 1;
+        assert!(!changed.verify());
+    }
+
+    #[test]
+    fn tampering_with_proof_metadata_fails_verification() {
+        let records = vec![make_record("BTC/USDT", Action::Long)];
+        let proof = DecisionProof::from_records(&records).unwrap();
+
+        let mut changed = proof.clone();
+        changed.scirust_version.push_str("-forged");
+        assert!(!changed.verify());
+
+        let mut changed = proof.clone();
+        changed.timestamp_ms += 1;
+        assert!(!changed.verify());
     }
 
     #[test]
@@ -206,7 +316,7 @@ mod tests {
             make_record("BTC", Action::Short),
             make_record("BTC", Action::Flat),
         ];
-        let proof = DecisionProof::from_records(&records);
+        let proof = DecisionProof::from_records(&records).unwrap();
         let s = proof.summary();
         assert_eq!(s.num_decisions, 4);
         assert_eq!(s.longs, 2);
@@ -218,11 +328,31 @@ mod tests {
     #[test]
     fn save_and_load_file() {
         let records = vec![make_record("BTC/USDT", Action::Long)];
-        let proof = DecisionProof::from_records(&records);
-        let path = "/tmp/scirust_test_proof.json";
-        proof.save_to_file(path).unwrap();
-        let loaded = DecisionProof::load_from_file(path).unwrap();
+        let proof = DecisionProof::from_records(&records).unwrap();
+        let path =
+            std::env::temp_dir().join(format!("scirust-test-proof-{}.json", std::process::id()));
+        let path = path.to_string_lossy();
+        proof.save_to_file(&path).unwrap();
+        let loaded = DecisionProof::load_from_file(&path).unwrap();
         assert_eq!(loaded.manifest_hash, proof.manifest_hash);
         assert!(loaded.verify());
+    }
+
+    #[test]
+    fn non_finite_prediction_cannot_collapse_to_empty_hash_input() {
+        let mut nan_record = make_record("BTC/USDT", Action::Long);
+        nan_record.prediction.raw_prediction = f32::NAN;
+        let mut inf_record = make_record("BTC/USDT", Action::Long);
+        inf_record.prediction.raw_prediction = f32::INFINITY;
+        assert!(DecisionProof::from_records(&[nan_record]).is_err());
+        assert!(DecisionProof::from_records(&[inf_record]).is_err());
+    }
+
+    #[test]
+    fn tampered_non_finite_proof_fails_verification() {
+        let records = vec![make_record("BTC/USDT", Action::Long)];
+        let mut proof = DecisionProof::from_records(&records).unwrap();
+        proof.records[0].prediction.bounds.uncertainty = f32::NAN;
+        assert!(!proof.verify());
     }
 }

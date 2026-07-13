@@ -100,6 +100,9 @@ pub fn t_test_two_sample(a: &[f64], b: &[f64], equal_var: bool, tail: Tail) -> O
 /// `groups` is a slice of samples per group. Returns `None` if fewer than two
 /// groups or fewer than one degree of freedom within groups.
 pub fn one_way_anova(groups: &[&[f64]]) -> Option<TestResult> {
+    // Empty samples contain no observations and therefore are not factor
+    // levels. Counting them in k corrupts both numerator and denominator dof.
+    let groups: Vec<&[f64]> = groups.iter().copied().filter(|g| !g.is_empty()).collect();
     let k = groups.len();
     if k < 2
     {
@@ -120,10 +123,6 @@ pub fn one_way_anova(groups: &[&[f64]]) -> Option<TestResult> {
     let mut ss_within = 0.0;
     for g in groups
     {
-        if g.is_empty()
-        {
-            continue;
-        }
         let gm = mean(g);
         ss_between += g.len() as f64 * (gm - grand).powi(2);
         for &x in g.iter()
@@ -286,24 +285,51 @@ pub fn ks_test_one_sample<D: Distribution>(data: &[f64], dist: &D) -> Option<Tes
 /// The complementary Kolmogorov distribution
 /// `Q(λ) = 2 Σ_{j≥1} (−1)^{j−1} e^{−2 j² λ²}`, clamped to `[0, 1]`.
 fn kolmogorov_q(lambda: f64) -> f64 {
+    if lambda.is_nan()
+    {
+        return f64::NAN;
+    }
     if lambda <= 0.0
     {
         return 1.0;
     }
+    if lambda.is_infinite()
+    {
+        return 0.0;
+    }
+
+    // The alternating expansion below is catastrophically slow and suffers
+    // cancellation near zero. Jacobi's theta transformation gives the CDF
+    // there as a rapidly convergent sum of strictly positive terms; Q = 1-CDF.
+    if lambda < 1.18
+    {
+        let scale = std::f64::consts::PI.sqrt() * 2.0_f64.sqrt() / lambda;
+        let exponent_scale = -std::f64::consts::PI.powi(2) / (8.0 * lambda * lambda);
+        let mut cdf_sum = 0.0;
+        for j in 1..=100
+        {
+            let odd = (2 * j - 1) as f64;
+            let term = (exponent_scale * odd * odd).exp();
+            cdf_sum += term;
+            if term <= f64::EPSILON * cdf_sum.max(1.0)
+            {
+                break;
+            }
+        }
+        return (1.0 - scale * cdf_sum).clamp(0.0, 1.0);
+    }
+
     let mut sum = 0.0;
     let a = -2.0 * lambda * lambda;
-    let mut term_prev = 0.0;
-    for j in 1..=100
+    for j in 1..=10_000
     {
         let jf = j as f64;
         let term = (a * jf * jf).exp();
         sum += if j % 2 == 1 { term } else { -term };
-        // Converged when two successive terms are negligible.
-        if term < 1e-12 && term_prev < 1e-12
+        if term <= f64::EPSILON * sum.abs().max(1.0)
         {
             break;
         }
-        term_prev = term;
     }
     (2.0 * sum).clamp(0.0, 1.0)
 }
@@ -365,6 +391,16 @@ mod tests {
     }
 
     #[test]
+    fn anova_ignores_empty_groups_when_computing_degrees_of_freedom() {
+        let g1 = [1.0, 2.0];
+        let g2 = [3.0, 4.0];
+        let empty = [];
+        let result = one_way_anova(&[&g1, &g2, &empty]).unwrap();
+        assert!(close(result.statistic, 8.0, 1e-12));
+        assert_eq!(result.df, 1.0);
+    }
+
+    #[test]
     fn chi_square_gof_fair_die() {
         // A near-fair die: expect ~1/6 each of 60 rolls.
         let observed = [9.0, 11.0, 10.0, 8.0, 12.0, 10.0];
@@ -390,6 +426,15 @@ mod tests {
         let shifted = Normal::new(1.0, 1.0);
         let r2 = ks_test_one_sample(&sample, &shifted).unwrap();
         assert!(r2.p_value < 1e-6, "shifted p = {}", r2.p_value);
+    }
+
+    #[test]
+    fn kolmogorov_q_is_stable_for_small_lambda() {
+        let q = kolmogorov_q(0.001);
+        assert_eq!(q, 1.0);
+        // Reference values from the Kolmogorov limiting distribution.
+        assert!(close(kolmogorov_q(0.5), 0.963_945_243_664_875, 1e-13));
+        assert!(close(kolmogorov_q(1.0), 0.269_999_671_677_354_56, 1e-13));
     }
 
     #[test]

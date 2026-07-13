@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.85"
 description = "SciRust licensing — pure-Rust, deterministic module entitlement with hash-based (Lamport/Merkle, SHA-256 only) signed licenses; no FFI, no elliptic-curve dependency"
-license = "LicenseRef-TarekZekriti-Dual"
+license-file = "../LICENSE.md"
 repository = "https://github.com/Memorithm/scirust"
 
 [dependencies]

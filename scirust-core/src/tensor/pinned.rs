@@ -1,367 +1,315 @@
-//! # PinnedMemory — Mémoire unifiée pinée (Pilier 2)
+//! Typed pinned host memory for zero-copy accelerator transfers.
 //!
-//! Fournit des buffers de mémoire pinée qui peuvent être partagés entre
-//! CPU et accélérateurs (GPU, NPU) sans copie.
-//!
-//! ## Compatibilité multi-plateforme
-//!
-//! | Plateforme | Mécanisme de pinning |
-//! |------------|---------------------|
-//! | Linux x86_64 | `mmap(MAP_ANONYMOUS\|MAP_POPULATE)\|mlock()` |
-//! | Linux ARM64 | `mmap(MAP_ANONYMOUS\|MAP_POPULATE)\|mlock()` |
-//! | Jetson AGX Thor | `mmap(MAP_ANONYMOUS\|MAP_POPULATE)\|mlock()` + CUDA host register |
-//! | Windows | `VirtualAlloc(MEM_COMMIT\|MEM_RESERVE)\|LockVirtualMemory()` |
-//!
-//! ## Zero-Copy CUDA
-//!
-//! Sur NVIDIA (Jetson, Tesla, etc.), la mémoire pinée peut être enregistrée
-//! avec `cudaHostRegister()` pour permettre GPU Direct:
-//! - `cudaMemcpyHostToDeviceAsync` → lecture directe depuis VRAM (zero-copy)
-//! - `cudaMemcpyDeviceToHostAsync` → écriture directe dans VRAM
-//!
-//! ## Exemple
-//!
-//! ```
-//! use scirust_core::tensor::pinned::PinnedBuffer;
-//!
-//! let buf = PinnedBuffer::new::<f32>(768 * 768)?;
-//!
-//! // La mémoire est accessible directement depuis le GPU via zero-copy
-//! // sans cloner ni copier entre CPU et GPU.
-//! # Ok::<(), Box<dyn std::error::Error>>(())
-//! ```
+//! The element type is retained by the buffer and pool. Safe APIs can no
+//! longer reinterpret zero-filled bytes as an unrelated or invalid Rust type.
 
 use std::alloc::{Layout, alloc, dealloc};
-use std::ptr;
+use std::marker::PhantomData;
+use std::ptr::NonNull;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Erreur de pinning.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PinError {
     AllocationFailed,
     LockFailed,
     UnsupportedPlatform,
     SizeTooLarge(usize),
+    WrongPool,
 }
 
 impl std::fmt::Display for PinError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self
         {
-            PinError::AllocationFailed => write!(f, "Memory pinning failed: allocation error"),
-            PinError::LockFailed => write!(f, "Memory pinning failed: mlock() failed"),
-            PinError::UnsupportedPlatform => write!(f, "Platform not supported for memory pinning"),
-            PinError::SizeTooLarge(size) => write!(f, "Size {} bytes exceeds maximum", size),
+            PinError::AllocationFailed => write!(f, "memory allocation failed"),
+            PinError::LockFailed => write!(f, "memory locking failed"),
+            PinError::UnsupportedPlatform => write!(f, "platform does not support memory locking"),
+            PinError::SizeTooLarge(size) => write!(f, "size {size} bytes is invalid or too large"),
+            PinError::WrongPool => write!(f, "buffer does not belong to this pool"),
         }
     }
 }
 
 impl std::error::Error for PinError {}
 
-/// Buffer de mémoire pinée — aligné et verrouillé en RAM.
-///
-/// ## Garantis
-/// - Alignement sur 128 bytes (L1 cache line)
-/// - Non paginée (mlock) — ne sera jamais swapée en swap
-/// - Accessible en lecture/écriture directe depuis GPU (via CUDA unified memory)
-/// - Aucune allocation dynamique pendant l'utilisation
-pub struct PinnedBuffer {
-    ptr: *mut u8,
+/// Fixed-length, aligned and best-effort pinned storage of `T` values.
+pub struct PinnedBuffer<T: Copy + Default> {
+    ptr: NonNull<T>,
+    len: usize,
     len_bytes: usize,
     layout: Layout,
     pinned: bool,
+    _marker: PhantomData<T>,
 }
 
-unsafe impl Send for PinnedBuffer {}
-unsafe impl Sync for PinnedBuffer {}
+unsafe impl<T: Copy + Default + Send> Send for PinnedBuffer<T> {}
+unsafe impl<T: Copy + Default + Sync> Sync for PinnedBuffer<T> {}
 
-impl PinnedBuffer {
-    /// Alloue un buffer piné de `len` éléments de type T.
-    ///
-    /// L'alignement est de `align_of::<T>().max(128)` bytes.
-    pub fn new<T>(len: usize) -> Result<Self, PinError> {
-        if len == 0
+impl<T: Copy + Default> std::fmt::Debug for PinnedBuffer<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PinnedBuffer")
+            .field("len", &self.len)
+            .field("len_bytes", &self.len_bytes)
+            .field("alignment", &self.layout.align())
+            .field("pinned", &self.pinned)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<T: Copy + Default> PinnedBuffer<T> {
+    /// Allocates and initializes `len` elements with `T::default()`.
+    pub fn new(len: usize) -> Result<Self, PinError> {
+        if len == 0 || std::mem::size_of::<T>() == 0
         {
             return Err(PinError::SizeTooLarge(0));
         }
-
+        let len_bytes = len
+            .checked_mul(std::mem::size_of::<T>())
+            .ok_or(PinError::SizeTooLarge(usize::MAX))?;
         let alignment = std::mem::align_of::<T>().max(128);
-        let elem_size = std::mem::size_of::<T>();
-        let total_bytes = len * elem_size;
+        let layout = Layout::from_size_align(len_bytes, alignment)
+            .map_err(|_| PinError::SizeTooLarge(len_bytes))?;
 
-        let layout = Layout::from_size_align(total_bytes, alignment)
-            .map_err(|_| PinError::SizeTooLarge(total_bytes))?;
-
-        // Allouer avec l'alignement requis
-        let ptr = unsafe { alloc(layout) };
-        if ptr.is_null()
+        // Evaluate user-provided Default before allocating, so a panicking
+        // implementation cannot leak a partially initialized allocation.
+        let value = T::default();
+        let raw = unsafe { alloc(layout) } as *mut T;
+        let ptr = NonNull::new(raw).ok_or(PinError::AllocationFailed)?;
+        for i in 0..len
         {
-            return Err(PinError::AllocationFailed);
+            // SAFETY: layout holds `len` aligned T slots. Each is initialized
+            // exactly once before the buffer becomes observable.
+            unsafe { ptr.as_ptr().add(i).write(value) };
         }
 
-        // Initialiser à zéro
-        unsafe {
-            ptr::write_bytes(ptr, 0, total_bytes);
-        }
-
-        // Pinner la mémoire (mlock) — ignore errors (may lack CAP_IPC_LOCK)
-        let pinned = Self::try_pin(ptr, total_bytes);
-
+        let pinned = platform::try_pin(ptr.as_ptr().cast(), len_bytes);
         Ok(Self {
             ptr,
-            len_bytes: total_bytes,
+            len,
+            len_bytes,
             layout,
             pinned,
+            _marker: PhantomData,
         })
     }
 
-    /// Tente de pinner la mémoire via mlock.
-    #[cfg(unix)]
-    fn try_pin(ptr: *mut u8, len: usize) -> bool {
-        unsafe {
-            // Tenter de pinner — peut échouer sans CAP_IPC_LOCK
-            let ret = libc::mlock(ptr as *const std::ffi::c_void, len);
-            ret == 0
-        }
-    }
-
-    #[cfg(not(unix))]
-    fn try_pin(_: *mut u8, _: usize) -> bool {
-        false
-    }
-
-    /// Retourne le pointeur brut.
     #[inline]
-    pub fn as_ptr(&self) -> *const u8 {
-        self.ptr
+    pub fn as_ptr(&self) -> *const T {
+        self.ptr.as_ptr()
     }
 
-    /// Retourne un pointeur mutable brut.
     #[inline]
-    pub fn as_mut_ptr(&mut self) -> *mut u8 {
-        self.ptr
+    pub fn as_mut_ptr(&mut self) -> *mut T {
+        self.ptr.as_ptr()
     }
 
-    /// Retourne la taille en bytes.
+    #[inline]
+    pub fn as_slice(&self) -> &[T] {
+        // SAFETY: all `len` elements were initialized during construction.
+        unsafe { std::slice::from_raw_parts(self.ptr.as_ptr(), self.len) }
+    }
+
+    #[inline]
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        // SAFETY: `&mut self` provides exclusive access to this allocation.
+        unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len) }
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
     #[inline]
     pub fn len_bytes(&self) -> usize {
         self.len_bytes
     }
 
-    /// Vérifie si le buffer est piné.
     #[inline]
     pub fn is_pinned(&self) -> bool {
         self.pinned
     }
 
-    /// Vérifie si le buffer est vide.
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.len_bytes == 0
+        false
     }
 
-    /// Retourne un slice immutable de type T.
-    ///
-    /// The buffer is aligned to `align_of::<construction T>().max(128)`.
-    /// Reinterpreting as a `T` whose alignment the pointer does not satisfy
-    /// would yield a misaligned slice (UB); this asserts alignment instead so
-    /// the safe signature is honest (panics rather than producing UB).
-    #[inline]
-    pub fn as_slice<T>(&self) -> &[T] {
-        let ptr = self.ptr as *const T;
-        assert_eq!(
-            ptr as usize % std::mem::align_of::<T>(),
-            0,
-            "PinnedBuffer::as_slice::<T>(): pointer not aligned for T (align {})",
-            std::mem::align_of::<T>()
-        );
-        let len = self.len_bytes / std::mem::size_of::<T>();
-        unsafe { std::slice::from_raw_parts(ptr, len) }
-    }
-
-    /// Retourne un slice mutable de type T. Voir [`Self::as_slice`] pour la
-    /// garantie d'alignement.
-    #[inline]
-    pub fn as_mut_slice<T>(&mut self) -> &mut [T] {
-        let ptr = self.ptr as *mut T;
-        assert_eq!(
-            ptr as usize % std::mem::align_of::<T>(),
-            0,
-            "PinnedBuffer::as_mut_slice::<T>(): pointer not aligned for T (align {})",
-            std::mem::align_of::<T>()
-        );
-        let len = self.len_bytes / std::mem::size_of::<T>();
-        unsafe { std::slice::from_raw_parts_mut(ptr, len) }
-    }
-
-    /// Vérifie que le pointeur est aligné sur 128 bytes.
     #[inline]
     pub fn is_aligned(&self) -> bool {
-        self.ptr as usize & 127 == 0
+        (self.ptr.as_ptr() as usize).is_multiple_of(128)
     }
 }
 
-impl Drop for PinnedBuffer {
+impl<T: Copy + Default> Drop for PinnedBuffer<T> {
     fn drop(&mut self) {
+        if self.pinned
+        {
+            platform::unpin(self.ptr.as_ptr().cast(), self.len_bytes);
+        }
+        // T is Copy and therefore needs no drop glue.
+        unsafe { dealloc(self.ptr.as_ptr().cast(), self.layout) };
+    }
+}
+
+mod platform {
+    #[cfg(unix)]
+    pub(super) fn try_pin(ptr: *mut u8, len: usize) -> bool {
+        unsafe { libc::mlock(ptr.cast(), len) == 0 }
+    }
+
+    #[cfg(unix)]
+    pub(super) fn unpin(ptr: *mut u8, len: usize) {
         unsafe {
-            if self.pinned
-            {
-                libc::munlock(self.ptr as *const std::ffi::c_void, self.len_bytes);
-            }
-            dealloc(self.ptr, self.layout);
+            let _ = libc::munlock(ptr.cast(), len);
         }
     }
+
+    #[cfg(windows)]
+    mod windows {
+        use std::ffi::c_void;
+
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            pub(super) fn VirtualLock(address: *mut c_void, size: usize) -> i32;
+            pub(super) fn VirtualUnlock(address: *mut c_void, size: usize) -> i32;
+        }
+    }
+
+    #[cfg(windows)]
+    pub(super) fn try_pin(ptr: *mut u8, len: usize) -> bool {
+        unsafe { windows::VirtualLock(ptr.cast(), len) != 0 }
+    }
+
+    #[cfg(windows)]
+    pub(super) fn unpin(ptr: *mut u8, len: usize) {
+        unsafe {
+            let _ = windows::VirtualUnlock(ptr.cast(), len);
+        }
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    pub(super) fn try_pin(_: *mut u8, _: usize) -> bool {
+        false
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    pub(super) fn unpin(_: *mut u8, _: usize) {}
 }
 
-/// Pool de buffers pinés — réutilise les buffers déjà alloués.
-///
-/// Utile pour les batches de taille fixe où on ne veut pas réallouer
-/// à chaque step de training.
-pub struct PinnedPool {
-    buffers: Vec<Option<PinnedBuffer>>,
+static NEXT_POOL_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Pool of typed pinned buffers. Borrowing transfers ownership of one buffer;
+/// releasing consumes it and returns it to the originating pool.
+pub struct PinnedPool<T: Copy + Default> {
+    id: u64,
+    buffers: Vec<Option<PinnedBuffer<T>>>,
     free_indices: Vec<usize>,
 }
 
-impl PinnedPool {
-    /// Crée un pool de `capacity` buffers de `elem_count` éléments de type T.
-    ///
-    /// Les buffers sont alloués (et pinés) immédiatement à la construction, de
-    /// sorte qu'aucune allocation n'a lieu pendant l'emprunt.
-    pub fn new<T>(capacity: usize, elem_count: usize) -> Result<Self, PinError>
-    where
-        T: Copy,
-    {
+impl<T: Copy + Default> PinnedPool<T> {
+    pub fn new(capacity: usize, elem_count: usize) -> Result<Self, PinError> {
         let mut buffers = Vec::with_capacity(capacity);
         let mut free_indices = Vec::with_capacity(capacity);
-
-        for _ in 0..capacity
+        for index in 0..capacity
         {
-            buffers.push(Some(PinnedBuffer::new::<T>(elem_count)?));
-            free_indices.push(buffers.len() - 1);
+            buffers.push(Some(PinnedBuffer::new(elem_count)?));
+            free_indices.push(index);
         }
-
         Ok(Self {
+            id: NEXT_POOL_ID.fetch_add(1, Ordering::Relaxed),
             buffers,
             free_indices,
         })
     }
 
-    /// Emprunte un buffer du pool.
-    ///
-    /// Retourne `Err(AllocationFailed)` si le pool est vide (tous les buffers
-    /// sont déjà empruntés).
-    pub fn borrow<T>(&mut self) -> Result<PooledBuffer, PinError>
-    where
-        T: Copy,
-    {
-        let idx = self.free_indices.pop().ok_or(PinError::AllocationFailed)?;
-        // Le buffer a été pré-alloué à la construction ; on vérifie tout de même
-        // sa présence pour rester robuste face à un pool corrompu.
-        let buf = self.buffers[idx]
-            .as_ref()
+    pub fn borrow(&mut self) -> Result<PooledBuffer<T>, PinError> {
+        let index = self.free_indices.pop().ok_or(PinError::AllocationFailed)?;
+        let buffer = self.buffers[index]
+            .take()
             .ok_or(PinError::AllocationFailed)?;
         Ok(PooledBuffer {
-            ptr: buf.as_ptr() as *mut u8,
-            len_bytes: buf.len_bytes(),
-            idx,
-            elem_size: std::mem::size_of::<T>(),
+            buffer: Some(buffer),
+            index,
+            pool_id: self.id,
         })
     }
 
-    /// Rend un buffer au pool afin qu'il puisse être ré-emprunté.
-    pub fn release(&mut self, buf: &PooledBuffer) {
-        // On ne remet l'index dans la liste libre que s'il désigne bien un
-        // buffer du pool et qu'il n'y est pas déjà (évite les doubles release).
-        if buf.idx < self.buffers.len()
-            && self.buffers[buf.idx].is_some()
-            && !self.free_indices.contains(&buf.idx)
+    pub fn release(&mut self, mut borrowed: PooledBuffer<T>) -> Result<(), PinError> {
+        if borrowed.pool_id != self.id
+            || borrowed.index >= self.buffers.len()
+            || self.buffers[borrowed.index].is_some()
         {
-            self.free_indices.push(buf.idx);
+            return Err(PinError::WrongPool);
         }
+        let buffer = borrowed.buffer.take().ok_or(PinError::WrongPool)?;
+        self.buffers[borrowed.index] = Some(buffer);
+        self.free_indices.push(borrowed.index);
+        Ok(())
     }
 
-    /// Nombre de buffers actuellement disponibles à l'emprunt.
     #[inline]
     pub fn available(&self) -> usize {
         self.free_indices.len()
     }
 
-    /// Capacité totale du pool (nombre de buffers).
     #[inline]
     pub fn capacity(&self) -> usize {
         self.buffers.len()
     }
 }
 
-/// Buffer emprunté du pool.
-///
-/// Ne possède pas la mémoire : celle-ci reste la propriété du [`PinnedPool`]
-/// dont le buffer est issu. Le buffer doit être rendu via
-/// [`PinnedPool::release`] pour être ré-emprunté.
-pub struct PooledBuffer {
-    ptr: *mut u8,
-    len_bytes: usize,
-    idx: usize,
-    elem_size: usize,
+/// An owned buffer temporarily removed from a [`PinnedPool`]. If it is dropped
+/// without being released, its allocation is safely freed and the pool loses
+/// that capacity rather than retaining a dangling pointer.
+pub struct PooledBuffer<T: Copy + Default> {
+    buffer: Option<PinnedBuffer<T>>,
+    index: usize,
+    pool_id: u64,
 }
 
-impl PooledBuffer {
-    /// Index du buffer dans le pool d'origine.
+impl<T: Copy + Default> PooledBuffer<T> {
     #[inline]
     pub fn index(&self) -> usize {
-        self.idx
+        self.index
     }
 
-    /// Taille en bytes du buffer emprunté.
-    #[inline]
-    pub fn len_bytes(&self) -> usize {
-        self.len_bytes
-    }
-
-    /// Nombre d'éléments de type `T` que le buffer peut contenir.
     #[inline]
     pub fn len(&self) -> usize {
-        self.len_bytes / self.elem_size
+        self.buffer.as_ref().map_or(0, PinnedBuffer::len)
     }
 
-    /// Indique si le buffer est vide.
+    #[inline]
+    pub fn len_bytes(&self) -> usize {
+        self.buffer.as_ref().map_or(0, PinnedBuffer::len_bytes)
+    }
+
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.len_bytes == 0
+        self.len() == 0
     }
 
-    /// Slice immutable typé sur la mémoire empruntée.
-    ///
-    /// # Safety
-    /// L'appelant doit utiliser le même type `T` que celui passé à
-    /// [`PinnedPool::borrow`] et garantir que le pool d'origine (propriétaire
-    /// de la mémoire) est encore vivant.
     #[inline]
-    pub unsafe fn as_slice<T>(&self) -> &[T] {
-        let len = self.len_bytes / std::mem::size_of::<T>();
-        unsafe { std::slice::from_raw_parts(self.ptr as *const T, len) }
+    pub fn as_slice(&self) -> &[T] {
+        self.buffer
+            .as_ref()
+            .expect("pooled buffer released")
+            .as_slice()
     }
 
-    /// Slice mutable typé sur la mémoire empruntée.
-    ///
-    /// # Safety
-    /// L'appelant doit utiliser le même type `T` que celui passé à
-    /// [`PinnedPool::borrow`], garantir que le pool d'origine est encore
-    /// vivant, et qu'aucun autre alias mutable n'existe.
     #[inline]
-    pub unsafe fn as_mut_slice<T>(&mut self) -> &mut [T] {
-        let len = self.len_bytes / std::mem::size_of::<T>();
-        unsafe { std::slice::from_raw_parts_mut(self.ptr as *mut T, len) }
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        self.buffer
+            .as_mut()
+            .expect("pooled buffer released")
+            .as_mut_slice()
     }
 }
 
-/// Type de tenseur pour le zero-copy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryLayout {
-    /// Mémoire CPU (standard Vec)
     Cpu,
-    /// Mémoire pinée (partageable avec GPU)
     Pinned,
-    /// Mémoire GPU directe (unified)
     GpuUnified,
 }
 
@@ -370,63 +318,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn borrow_succeeds_on_first_call() {
-        // Régression : auparavant `borrow` retournait toujours
-        // `Err(AllocationFailed)` car les buffers n'étaient jamais alloués à la
-        // construction du pool.
-        let mut pool = PinnedPool::new::<f32>(2, 16).expect("pool creation");
-        let buf = pool.borrow::<f32>().expect("first borrow must succeed");
-        assert_eq!(buf.len(), 16);
-        assert_eq!(buf.len_bytes(), 16 * std::mem::size_of::<f32>());
+    fn typed_buffer_is_initialized_and_writable() {
+        let mut buffer = PinnedBuffer::<f32>::new(4).unwrap();
+        assert_eq!(buffer.as_slice(), &[0.0; 4]);
+        buffer.as_mut_slice().copy_from_slice(&[1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(buffer.as_slice(), &[1.0, 2.0, 3.0, 4.0]);
+        assert!(buffer.is_aligned());
+    }
+
+    #[test]
+    fn allocation_size_overflow_is_rejected() {
+        let result = PinnedBuffer::<u64>::new(usize::MAX);
+        assert!(matches!(result, Err(PinError::SizeTooLarge(_))));
     }
 
     #[test]
     fn borrow_release_cycle_reuses_buffers() {
-        let mut pool = PinnedPool::new::<f32>(2, 8).expect("pool creation");
-        assert_eq!(pool.capacity(), 2);
-        assert_eq!(pool.available(), 2);
-
-        let a = pool.borrow::<f32>().expect("borrow a");
-        let b = pool.borrow::<f32>().expect("borrow b");
+        let mut pool = PinnedPool::<f32>::new(2, 8).unwrap();
+        let mut first = pool.borrow().unwrap();
+        let second = pool.borrow().unwrap();
         assert_eq!(pool.available(), 0);
-
-        // Pool épuisé : le prochain emprunt échoue.
-        assert!(matches!(
-            pool.borrow::<f32>(),
-            Err(PinError::AllocationFailed)
-        ));
-
-        pool.release(&a);
-        assert_eq!(pool.available(), 1);
-
-        // Double release : ne doit pas gonfler la liste libre.
-        pool.release(&a);
-        assert_eq!(pool.available(), 1);
-
-        pool.release(&b);
+        first.as_mut_slice()[0] = 7.0;
+        pool.release(first).unwrap();
+        pool.release(second).unwrap();
         assert_eq!(pool.available(), 2);
-
-        // Après release, on peut ré-emprunter les deux buffers.
-        let _c = pool.borrow::<f32>().expect("re-borrow c");
-        let _d = pool.borrow::<f32>().expect("re-borrow d");
-        assert_eq!(pool.available(), 0);
+        let reused_a = pool.borrow().unwrap();
+        let reused_b = pool.borrow().unwrap();
+        assert!(reused_a.as_slice().contains(&7.0) || reused_b.as_slice().contains(&7.0));
     }
 
     #[test]
-    fn pooled_buffer_is_writable_and_pinned() {
-        let mut pool = PinnedPool::new::<f32>(1, 4).expect("pool creation");
-        let mut buf = pool.borrow::<f32>().expect("borrow");
-
-        // La mémoire empruntée est réellement utilisable (initialisée à zéro).
-        // SAFETY: même type `T = f32` que pour `borrow`, pool encore vivant,
-        // buffer emprunté de manière exclusive.
-        unsafe {
-            let slice = buf.as_mut_slice::<f32>();
-            assert_eq!(slice, &[0.0f32; 4]);
-            slice.copy_from_slice(&[1.0, 2.0, 3.0, 4.0]);
-        }
-        unsafe {
-            assert_eq!(buf.as_slice::<f32>(), &[1.0, 2.0, 3.0, 4.0]);
-        }
+    fn buffer_from_another_pool_is_rejected() {
+        let mut a = PinnedPool::<u32>::new(1, 4).unwrap();
+        let mut b = PinnedPool::<u32>::new(1, 4).unwrap();
+        let borrowed = a.borrow().unwrap();
+        assert_eq!(b.release(borrowed), Err(PinError::WrongPool));
     }
 }

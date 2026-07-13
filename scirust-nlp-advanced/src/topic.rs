@@ -55,6 +55,27 @@ pub struct LdaModel {
     pub vocab: Vec<String>,
 }
 
+/// Invalid vocabulary supplied to [`fit_lda_with_vocab`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LdaError {
+    /// A corpus token refers past the end of the supplied vocabulary.
+    TokenOutOfVocabulary { token: usize, vocab_size: usize },
+}
+
+impl core::fmt::Display for LdaError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self
+        {
+            Self::TokenOutOfVocabulary { token, vocab_size } => write!(
+                f,
+                "corpus token {token} is outside the vocabulary of size {vocab_size}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for LdaError {}
+
 impl LdaModel {
     /// Topic-term distribution (normalized): P(word | topic).
     pub fn topic_term_dist(&self) -> Vec<Vec<f64>> {
@@ -107,6 +128,10 @@ impl LdaModel {
     pub fn perplexity(&self, test_docs: &[Vec<usize>]) -> f64 {
         let dt = self.doc_topic_dist();
         let tt = self.topic_term_dist();
+        if tt.is_empty() || self.config.num_topics == 0
+        {
+            return f64::INFINITY;
+        }
         let mut log_likelihood = 0.0;
         let mut total_words = 0usize;
 
@@ -177,14 +202,47 @@ pub fn fit_lda(corpus: &[Vec<usize>], config: LdaConfig) -> LdaModel {
         .flat_map(|d| d.iter())
         .copied()
         .max()
-        .unwrap_or(0)
-        + 1;
+        .map(|max_token| {
+            max_token
+                .checked_add(1)
+                .expect("vocabulary index usize::MAX cannot be represented")
+        })
+        .unwrap_or(0);
+
+    // This API receives integer token ids only, so expose stable, explicit id
+    // labels instead of pretending that their original word strings are known.
+    // Call `fit_lda_with_vocab` when human-readable top words are required.
+    let vocab: Vec<String> = (0..vocab_size).map(|i| format!("token:{i}")).collect();
+    fit_lda_impl(corpus, config, vocab)
+}
+
+/// Fit LDA while preserving the caller's real token-to-word mapping.
+///
+/// Unlike [`fit_lda`], [`LdaModel::top_words`] will return the supplied words.
+/// Every token id in `corpus` is validated before sampling.
+pub fn fit_lda_with_vocab(
+    corpus: &[Vec<usize>],
+    vocab: Vec<String>,
+    config: LdaConfig,
+) -> Result<LdaModel, LdaError> {
+    if let Some(token) = corpus
+        .iter()
+        .flat_map(|document| document.iter())
+        .copied()
+        .find(|&token| token >= vocab.len())
+    {
+        return Err(LdaError::TokenOutOfVocabulary {
+            token,
+            vocab_size: vocab.len(),
+        });
+    }
+    Ok(fit_lda_impl(corpus, config, vocab))
+}
+
+fn fit_lda_impl(corpus: &[Vec<usize>], config: LdaConfig, vocab: Vec<String>) -> LdaModel {
+    let vocab_size = vocab.len();
     let num_topics = config.num_topics;
     let num_docs = corpus.len();
-
-    // Build vocabulary from corpus indices (caller is responsible for mapping).
-    // We'll create placeholder vocab labels.
-    let vocab: Vec<String> = (0..vocab_size).map(|i| format!("w{}", i)).collect();
 
     // Initialize count matrices
     let mut topic_term: Vec<Vec<usize>> = vec![vec![0; vocab_size]; num_topics];
@@ -251,9 +309,9 @@ pub fn fit_lda(corpus: &[Vec<usize>], config: LdaConfig) -> LdaModel {
                 let total: f64 = probs.iter().sum();
                 let mut r = rng.next_f64() * total;
                 let mut new_t = num_topics - 1;
-                for t in 0..num_topics
+                for (t, &probability) in probs.iter().enumerate().take(num_topics)
                 {
-                    r -= probs[t];
+                    r -= probability;
                     if r <= 0.0
                     {
                         new_t = t;
@@ -418,7 +476,7 @@ mod tests {
         assert_eq!(top.len(), 1);
         assert_eq!(top[0].len(), 3);
         // Word 0 should be top (appears 3 times)
-        assert_eq!(top[0][0].0, "w0");
+        assert_eq!(top[0][0].0, "token:0");
     }
 
     #[test]
@@ -513,5 +571,33 @@ mod tests {
         assert_eq!(model.topic_term.len(), 3);
         // All counts should be zero
         assert!(model.topic_count.iter().all(|&c| c == 0));
+        assert_eq!(model.vocab_size, 0);
+    }
+
+    #[test]
+    fn supplied_vocabulary_is_preserved_and_checked() {
+        let corpus = vec![vec![0, 0, 0, 1], vec![2, 2]];
+        let vocab = vec!["cat".to_string(), "dog".to_string(), "fish".to_string()];
+        let model = fit_lda_with_vocab(
+            &corpus,
+            vocab,
+            LdaConfig {
+                num_topics: 1,
+                iterations: 5,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(model.top_words(1)[0][0].0, "cat");
+
+        let error = fit_lda_with_vocab(&[vec![3]], vec!["only".to_string()], LdaConfig::default())
+            .unwrap_err();
+        assert_eq!(
+            error,
+            LdaError::TokenOutOfVocabulary {
+                token: 3,
+                vocab_size: 1,
+            }
+        );
     }
 }

@@ -1,207 +1,199 @@
-//! # AlignedVec — Vec avec alignement garanti
+//! # AlignedVec — typed storage with a guaranteed base alignment
 //!
-//! Alternative à `Vec<T>` avec des garanties d'alignement strictes (128 octets,
-//! la largeur de ligne de cache / vecteur SIMD sur les plateformes cibles).
-//! Le backing est un `Vec<Block>` où `Block` est `#[repr(align(128))]`, ce qui
-//! garantit que le pointeur de base est réellement aligné.
+//! Unlike the former type-erased byte buffer, the element type is part of the
+//! type. Safe accessors therefore cannot reinterpret zeroed bytes as a type for
+//! which that bit pattern is invalid.
 
 use super::MIN_ALIGN_BYTES;
+use std::alloc::{Layout, alloc, dealloc, handle_alloc_error};
+use std::marker::PhantomData;
+use std::ptr::NonNull;
 
-/// Bloc de 128 octets, aligné sur 128 — force l'alignement du buffer sous-jacent.
-#[repr(C, align(128))]
-#[derive(Clone, Copy)]
-struct Block([u8; 128]);
-
-/// Un buffer de données brutes avec alignement garanti sur 128 octets.
-#[derive(Debug)]
-pub struct AlignedVec {
-    /// Backing aligné (chaque `Block` fait 128 octets, aligné sur 128).
-    blocks: Vec<Block>,
-    /// Alignement requis (toujours >= 16).
-    alignment: usize,
-    /// Nombre d'éléments de type T.
+/// A fixed-length vector whose base pointer is aligned to at least 128 bytes.
+///
+/// Elements are initialized with [`Default`] by [`Self::new`]. The `Copy`
+/// bound reflects the arena crate's no-destructor use case and makes teardown
+/// deterministic.
+pub struct AlignedVec<T: Copy + Default> {
+    ptr: NonNull<T>,
     len: usize,
-    /// Octets effectivement utilisés (`len * size_of::<T>()`).
     byte_len: usize,
+    layout: Layout,
+    _marker: PhantomData<T>,
 }
 
-impl std::fmt::Debug for Block {
+unsafe impl<T: Copy + Default + Send> Send for AlignedVec<T> {}
+unsafe impl<T: Copy + Default + Sync> Sync for AlignedVec<T> {}
+
+impl<T: Copy + Default> std::fmt::Debug for AlignedVec<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Block(128B)")
+        f.debug_struct("AlignedVec")
+            .field("len", &self.len)
+            .field("byte_len", &self.byte_len)
+            .field("alignment", &self.layout.align())
+            .finish_non_exhaustive()
     }
 }
 
-unsafe impl Send for AlignedVec {}
-unsafe impl Sync for AlignedVec {}
+impl<T: Copy + Default> AlignedVec<T> {
+    /// Creates `len` valid elements initialized with `T::default()`.
+    pub fn new(len: usize) -> Self {
+        Self::new_fill(len, T::default())
+    }
 
-impl AlignedVec {
-    /// Crée un nouveau buffer aligné de `len` éléments de type T.
-    pub fn new<T>(len: usize) -> Self
-    where
-        T: Copy,
-    {
-        let alignment = std::mem::align_of::<T>().max(16).max(MIN_ALIGN_BYTES);
-        // Checked: `len * size_of::<T>()` wraps in release, which would
-        // under-allocate the backing and turn later accessors into OOB reads.
+    /// Creates `len` elements initialized with `val`.
+    pub fn new_fill(len: usize, val: T) -> Self {
         let byte_len = len
             .checked_mul(std::mem::size_of::<T>())
             .expect("AlignedVec::new: len * size_of::<T>() overflows usize");
-        let n_blocks = byte_len.div_ceil(128).max(1);
-        let blocks = vec![Block([0u8; 128]); n_blocks];
+        let alignment = std::mem::align_of::<T>().max(MIN_ALIGN_BYTES);
+        let layout = Layout::from_size_align(byte_len, alignment)
+            .expect("AlignedVec::new: requested allocation is too large");
+
+        // The global allocator must not be called with a zero-sized layout.
+        // Use a non-null, correctly aligned dangling pointer for empty/ZST
+        // slices; no element will be read from or written to it.
+        let ptr = if byte_len == 0
+        {
+            // SAFETY: `alignment` is non-zero and aligned for `T`. The pointer
+            // is only used to construct zero-byte slices.
+            unsafe { NonNull::new_unchecked(alignment as *mut T) }
+        }
+        else
+        {
+            let raw = unsafe { alloc(layout) } as *mut T;
+            let ptr = NonNull::new(raw).unwrap_or_else(|| handle_alloc_error(layout));
+            for i in 0..len
+            {
+                // SAFETY: the allocation holds `len` properly aligned T values,
+                // and each slot is written exactly once before `Self` escapes.
+                unsafe { ptr.as_ptr().add(i).write(val) };
+            }
+            ptr
+        };
+
         Self {
-            blocks,
-            alignment,
+            ptr,
             len,
             byte_len,
+            layout,
+            _marker: PhantomData,
         }
     }
 
-    /// Crée un buffer aligné pré-rempli avec une valeur.
-    pub fn new_fill<T>(len: usize, val: T) -> Self
-    where
-        T: Copy,
-    {
-        let mut vec = Self::new::<T>(len);
-        vec.fill(val);
-        vec
+    #[inline]
+    pub fn as_slice(&self) -> &[T] {
+        // SAFETY: construction initialized all `len` elements as T.
+        unsafe { std::slice::from_raw_parts(self.ptr.as_ptr(), self.len) }
     }
 
     #[inline]
-    fn byte_ptr(&self) -> *const u8 {
-        self.blocks.as_ptr() as *const u8
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        // SAFETY: `&mut self` guarantees exclusive access to the allocation.
+        unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len) }
     }
 
-    #[inline]
-    fn byte_ptr_mut(&mut self) -> *mut u8 {
-        self.blocks.as_mut_ptr() as *mut u8
+    pub fn fill(&mut self, val: T) {
+        self.as_mut_slice().fill(val);
     }
 
-    /// Retourne un slice mutable de type T, aligné.
-    #[inline]
-    pub fn as_mut_slice<T>(&mut self) -> &mut [T]
-    where
-        T: Copy,
-    {
-        assert!(
-            self.alignment >= std::mem::align_of::<T>(),
-            "AlignedVec alignment {} < required alignment {}",
-            self.alignment,
-            std::mem::align_of::<T>()
-        );
-        // `self.len` counts elements of the *construction* type. Reinterpreting
-        // as a larger `T` here would return a slice that reads past the backing
-        // (`from_raw_parts` is type-erased). Require that `len` elements of the
-        // accessor's `T` actually fit in the allocated bytes.
-        let need = self
-            .len
-            .checked_mul(std::mem::size_of::<T>())
-            .expect("AlignedVec::as_mut_slice: len * size_of::<T>() overflows usize");
-        assert!(
-            need <= self.blocks.len() * 128,
-            "AlignedVec::as_mut_slice::<T>(): {need} bytes exceed the {}-byte backing",
-            self.blocks.len() * 128
-        );
-        let ptr = self.byte_ptr_mut() as *mut T;
-        unsafe { std::slice::from_raw_parts_mut(ptr, self.len) }
-    }
-
-    /// Retourne un slice immutable de type T.
-    #[inline]
-    pub fn as_slice<T>(&self) -> &[T]
-    where
-        T: Copy,
-    {
-        assert!(
-            self.alignment >= std::mem::align_of::<T>(),
-            "AlignedVec alignment {} < required alignment {}",
-            self.alignment,
-            std::mem::align_of::<T>()
-        );
-        // See `as_mut_slice`: bound `len` elements of `T` by the backing bytes so
-        // a type-erased reinterpretation cannot read out of bounds.
-        let need = self
-            .len
-            .checked_mul(std::mem::size_of::<T>())
-            .expect("AlignedVec::as_slice: len * size_of::<T>() overflows usize");
-        assert!(
-            need <= self.blocks.len() * 128,
-            "AlignedVec::as_slice::<T>(): {need} bytes exceed the {}-byte backing",
-            self.blocks.len() * 128
-        );
-        let ptr = self.byte_ptr() as *const T;
-        unsafe { std::slice::from_raw_parts(ptr, self.len) }
-    }
-
-    /// Remplit le buffer avec une valeur.
-    pub fn fill<T>(&mut self, val: T)
-    where
-        T: Copy,
-    {
-        for elem in self.as_mut_slice::<T>().iter_mut()
-        {
-            *elem = val;
-        }
-    }
-
-    /// Pointeur brut (aligné sur 128 octets).
+    /// Raw byte pointer, aligned to [`Self::alignment`].
     #[inline]
     pub fn as_ptr(&self) -> *const u8 {
-        self.byte_ptr()
+        self.ptr.as_ptr().cast()
     }
 
-    /// Pointeur mutable brut (aligné sur 128 octets).
+    /// Mutable raw byte pointer, aligned to [`Self::alignment`].
     #[inline]
     pub fn as_mut_ptr(&mut self) -> *mut u8 {
-        self.byte_ptr_mut()
+        self.ptr.as_ptr().cast()
     }
 
-    /// Alignement en octets.
     #[inline]
     pub fn alignment(&self) -> usize {
-        self.alignment
+        self.layout.align()
     }
 
-    /// Longueur en octets effectivement utilisés.
+    /// Number of elements.
     #[inline]
-    #[allow(clippy::misnamed_getters)]
     pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Number of bytes occupied by the elements (excluding allocator padding).
+    #[inline]
+    pub fn len_bytes(&self) -> usize {
         self.byte_len
     }
 
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.byte_len == 0
+        self.len == 0
     }
 
-    /// Vérifie que le pointeur est aligné sur 128 octets.
     #[inline]
     pub fn is_aligned(&self) -> bool {
-        self.byte_ptr() as usize & (MIN_ALIGN_BYTES - 1) == 0
+        (self.ptr.as_ptr() as usize).is_multiple_of(MIN_ALIGN_BYTES)
     }
 }
 
-impl<T: Copy> From<AlignedVec> for Vec<T> {
-    fn from(vec: AlignedVec) -> Self {
-        vec.as_slice::<T>().to_vec()
+impl<T: Copy + Default> Drop for AlignedVec<T> {
+    fn drop(&mut self) {
+        if self.byte_len != 0
+        {
+            // T is Copy, so it has no destructor. Only release the allocation.
+            unsafe { dealloc(self.ptr.as_ptr().cast(), self.layout) };
+        }
     }
 }
 
-impl<T: Copy> From<Vec<T>> for AlignedVec {
+impl<T: Copy + Default> From<AlignedVec<T>> for Vec<T> {
+    fn from(vec: AlignedVec<T>) -> Self {
+        vec.as_slice().to_vec()
+    }
+}
+
+impl<T: Copy + Default> From<Vec<T>> for AlignedVec<T> {
     fn from(v: Vec<T>) -> Self {
-        let mut av = AlignedVec::new::<T>(v.len());
-        av.as_mut_slice::<T>().copy_from_slice(&v);
-        av
+        let mut aligned = AlignedVec::new(v.len());
+        aligned.as_mut_slice().copy_from_slice(&v);
+        aligned
     }
 }
 
-/// Extension pour `Vec<T>`: convertir en AlignedVec.
+/// Extension for converting a `Vec<T>` into aligned typed storage.
 #[allow(dead_code)]
-pub trait ToAligned<T: Copy>: Sized {
-    fn to_aligned(self) -> AlignedVec;
+pub trait ToAligned<T: Copy + Default>: Sized {
+    fn to_aligned(self) -> AlignedVec<T>;
 }
 
-impl<T: Copy> ToAligned<T> for Vec<T> {
-    fn to_aligned(self) -> AlignedVec {
+impl<T: Copy + Default> ToAligned<T> for Vec<T> {
+    fn to_aligned(self) -> AlignedVec<T> {
         AlignedVec::from(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[repr(align(256))]
+    #[derive(Clone, Copy, Default)]
+    struct OverAligned(u8);
+
+    #[test]
+    fn honors_alignment_larger_than_cache_line() {
+        let values = AlignedVec::<OverAligned>::new(2);
+        assert_eq!(values.alignment(), 256);
+        assert_eq!((values.as_ptr() as usize) % 256, 0);
+        assert_eq!(values.as_slice()[0].0, 0);
+    }
+
+    #[test]
+    fn empty_buffer_still_has_an_aligned_non_null_pointer() {
+        let values = AlignedVec::<u32>::new(0);
+        assert!(values.is_empty());
+        assert!(!values.as_ptr().is_null());
+        assert!(values.is_aligned());
     }
 }

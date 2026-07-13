@@ -354,6 +354,7 @@ impl<G: Generator, T: VerifiableTask> BootstrapTask for LlmStar<G, T> {
 pub mod anthropic {
     use super::Generator;
     use rand::rngs::StdRng;
+    use std::fmt;
 
     /// Anthropic Messages API endpoint.
     const API_URL: &str = "https://api.anthropic.com/v1/messages";
@@ -363,13 +364,25 @@ pub mod anthropic {
     pub const DEFAULT_MODEL: &str = "claude-opus-4-8";
 
     /// A [`Generator`] that calls the Claude Messages API.
-    #[derive(Debug, Clone)]
+    #[derive(Clone)]
     pub struct ClaudeGenerator {
         api_key: String,
         model: String,
         max_tokens: u32,
         system: Option<String>,
         timeout_secs: u64,
+    }
+
+    impl fmt::Debug for ClaudeGenerator {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("ClaudeGenerator")
+                .field("api_key", &"[REDACTED]")
+                .field("model", &self.model)
+                .field("max_tokens", &self.max_tokens)
+                .field("has_system_prompt", &self.system.is_some())
+                .field("timeout_secs", &self.timeout_secs)
+                .finish()
+        }
     }
 
     impl ClaudeGenerator {
@@ -390,6 +403,10 @@ pub mod anthropic {
         pub fn from_env() -> Result<Self, String> {
             let key = std::env::var("ANTHROPIC_API_KEY")
                 .map_err(|_| "ANTHROPIC_API_KEY is not set".to_string())?;
+            if key.trim().is_empty()
+            {
+                return Err("ANTHROPIC_API_KEY is empty".to_string());
+            }
             Ok(Self::new(key))
         }
 
@@ -461,6 +478,20 @@ pub mod anthropic {
             // One call per requested sample. Failed/refused calls are skipped, so
             // the loop simply records no improvement that round (never panics).
             (0..n).filter_map(|_| self.call(prompt)).collect()
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn debug_redacts_api_key_and_system_prompt() {
+            let generator = ClaudeGenerator::new("sk-super-secret").system("private prompt");
+            let debug = format!("{generator:?}");
+            assert!(debug.contains("[REDACTED]"));
+            assert!(!debug.contains("sk-super-secret"));
+            assert!(!debug.contains("private prompt"));
         }
     }
 }

@@ -453,6 +453,14 @@ impl CudaChain {
     /// custom kernels. Returns `None` if no CUDA device is available (so callers
     /// fall back exactly like the wgpu path's `GpuChain::new`).
     pub fn new() -> Option<Self> {
+        // cudarc loads CUDA dynamically, but its low-level symbol loader panics
+        // when a library is absent. Probe every library used by this constructor
+        // first so the public optional backend keeps its documented `None`
+        // contract on machines without a CUDA runtime.
+        if !cuda_libraries_available()
+        {
+            return None;
+        }
         let ctx = CudaContext::new(0).ok()?;
         let stream = ctx.default_stream();
         let blas = CudaBlasLT::new(stream.clone()).ok()?;
@@ -468,6 +476,10 @@ impl CudaChain {
     /// Compile + load the NVRTC kernels (non-fatal: any error is surfaced to stderr
     /// and leaves the GEMM path intact).
     fn compile_kernels(ctx: &Arc<CudaContext>) -> Option<Kernels> {
+        if !nvrtc_available()
+        {
+            return None;
+        }
         let ptx = compile_ptx(KERNELS_SRC)
             .map_err(|e| eprintln!("scirust-cuda: NVRTC compile failed: {e}"))
             .ok()?;
@@ -508,16 +520,42 @@ impl CudaChain {
 
     /// Upload a row-major `rows × cols` fp32 matrix to VRAM, rounding to bf16.
     pub fn upload(&self, data: &[f32], rows: usize, cols: usize) -> CudaMatrix {
-        assert_eq!(data.len(), rows * cols, "upload: data len != rows*cols");
+        self.try_upload(data, rows, cols)
+            .expect("cuda matrix upload failed")
+    }
+
+    /// Fallible variant of [`CudaChain::upload`] for library boundaries.
+    pub fn try_upload(&self, data: &[f32], rows: usize, cols: usize) -> Result<CudaMatrix, String> {
+        let expected = rows
+            .checked_mul(cols)
+            .ok_or_else(|| format!("upload shape {rows}x{cols} overflows usize"))?;
+        if data.len() != expected
+        {
+            return Err(format!(
+                "upload data has {} elements, expected {expected}",
+                data.len()
+            ));
+        }
         let bf: Vec<bf16> = data.iter().map(|&x| bf16::from_f32(x)).collect();
-        let buf = self.stream.clone_htod(&bf).expect("cuda htod");
-        CudaMatrix { buf, rows, cols }
+        let buf = self
+            .stream
+            .clone_htod(&bf)
+            .map_err(|error| format!("CUDA host-to-device transfer failed: {error}"))?;
+        Ok(CudaMatrix { buf, rows, cols })
     }
 
     /// Download a resident bf16 matrix to a row-major fp32 `Vec`.
     pub fn download(&self, m: &CudaMatrix) -> Vec<f32> {
-        let bf: Vec<bf16> = self.stream.clone_dtoh(&m.buf).expect("cuda dtoh");
-        bf.iter().map(|x| x.to_f32()).collect()
+        self.try_download(m).expect("cuda matrix download failed")
+    }
+
+    /// Fallible variant of [`CudaChain::download`] for library boundaries.
+    pub fn try_download(&self, m: &CudaMatrix) -> Result<Vec<f32>, String> {
+        let bf: Vec<bf16> = self
+            .stream
+            .clone_dtoh(&m.buf)
+            .map_err(|error| format!("CUDA device-to-host transfer failed: {error}"))?;
+        Ok(bf.iter().map(|x| x.to_f32()).collect())
     }
 
     /// Upload an fp32 vector to VRAM **without** rounding (master-weight / moment
@@ -557,16 +595,26 @@ impl CudaChain {
     /// `Cᵀ = Bᵀ·Aᵀ` — pass `B` first and `A` second with `m`/`n` swapped. No data
     /// is transposed; only the descriptor changes.
     pub fn matmul(&self, a: &CudaMatrix, b: &CudaMatrix) -> CudaMatrix {
+        self.try_matmul(a, b).expect("CUDA matrix multiply failed")
+    }
+
+    /// Fallible variant of [`CudaChain::matmul`] for library boundaries.
+    pub fn try_matmul(&self, a: &CudaMatrix, b: &CudaMatrix) -> Result<CudaMatrix, String> {
         let (m, k, n) = (a.rows, a.cols, b.cols);
-        assert_eq!(
-            b.rows, k,
-            "matmul: inner dims disagree ({}x{} · {}x{})",
-            a.rows, a.cols, b.rows, b.cols
-        );
+        if b.rows != k
+        {
+            return Err(format!(
+                "matmul inner dimensions disagree ({}x{} · {}x{})",
+                a.rows, a.cols, b.rows, b.cols
+            ));
+        }
+        let output_len = m
+            .checked_mul(n)
+            .ok_or_else(|| format!("matmul output shape {m}x{n} overflows usize"))?;
         let mut c = self
             .stream
-            .alloc_zeros::<bf16>(m * n)
-            .expect("cuda alloc C");
+            .alloc_zeros::<bf16>(output_len)
+            .map_err(|error| format!("CUDA output allocation failed: {error}"))?;
         let cfg = MatmulConfig {
             transa: false,
             transb: false,
@@ -590,13 +638,13 @@ impl CudaChain {
         unsafe {
             self.blas
                 .matmul(cfg, &b.buf, &a.buf, &mut c, None, None)
-                .expect("cublasLt bf16 matmul");
+                .map_err(|error| format!("cuBLASLt bf16 matmul failed: {error}"))?;
         }
-        CudaMatrix {
+        Ok(CudaMatrix {
             buf: c,
             rows: m,
             cols: n,
-        }
+        })
     }
 
     /// Launch an element-wise binary kernel `c = f(a, b)` on equal-shaped inputs.
@@ -1375,6 +1423,20 @@ impl CudaChain {
     }
 }
 
+/// Check the dynamically loaded libraries required by `CudaChain::new` before
+/// entering cudarc's symbol loader, which intentionally panics when a library
+/// cannot be found.
+fn cuda_libraries_available() -> bool {
+    // SAFETY: these cudarc probes only attempt to load the named shared
+    // libraries and immediately release them; they do not call CUDA functions.
+    unsafe { cudarc::driver::sys::is_culib_present() && cudarc::cublaslt::sys::is_culib_present() }
+}
+
+fn nvrtc_available() -> bool {
+    // SAFETY: as above, this is a presence probe and does not invoke NVRTC.
+    unsafe { cudarc::nvrtc::sys::is_culib_present() }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1423,9 +1485,14 @@ mod tests {
 
     /// The kernel source compiles under NVRTC — surfaces the compiler log verbatim
     /// on failure (so a broken kernel is diagnosable, not a silent `None`). NVRTC
-    /// needs the CUDA runtime, so it still only runs on the Thor.
+    /// needs the CUDA runtime, so it skips cleanly when NVRTC is unavailable.
     #[test]
     fn nvrtc_kernels_compile() {
+        if !nvrtc_available()
+        {
+            eprintln!("cuda: NVRTC unavailable, skipping kernel compilation");
+            return;
+        }
         match compile_ptx(KERNELS_SRC)
         {
             Ok(_) => eprintln!("NVRTC compiled scirust-cuda kernels — PASS"),

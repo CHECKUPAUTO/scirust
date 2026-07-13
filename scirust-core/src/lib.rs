@@ -41,16 +41,6 @@ pub use symbolic::{
     solve_quadratic, to_rust_code,
 };
 
-pub mod dispatch {
-    /// GPU or CPU fallback — dispatches work sequentially (rayon optional).
-    /// When rayon is available, use par_chunks_mut for parallel execution.
-    pub fn gpu_or_cpu<F>(data: &mut [f32], kernel: F)
-    where
-        F: Fn(&mut [f32]),
-    {
-        kernel(data);
-    }
-}
 pub mod aot;
 pub mod checkpoint;
 pub mod compute_backend;

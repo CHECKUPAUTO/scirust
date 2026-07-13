@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 description = "SciRust deterministic arena allocators for SSM sequences and zero-GC inference"
-license = "MIT OR Apache-2.0"
+license-file = "../LICENSE.md"
 
 [dependencies]
 libc = "0.2"

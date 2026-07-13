@@ -120,10 +120,11 @@ pub fn detect_backend() -> BackendKind {
                 }
             }
 
-            // ARM64 — SVE d'abord (vecteurs scalables, Graviton 3/A64FX/Neoverse
-            // V2…) puis NEON (baseline ARMv8, toujours dispo).
+            // ARM64 — SVE d'abord lorsque le chemin nightly est activé, puis
+            // NEON (baseline ARMv8, toujours disponible sur stable).
             #[cfg(target_arch = "aarch64")]
             {
+                #[cfg(feature = "nightly-simd")]
                 if std::arch::is_aarch64_feature_detected!("sve")
                 {
                     return BackendKind::Sve;
@@ -156,7 +157,7 @@ pub fn runtime_backend() -> &'static dyn SimdBackend {
 
         #[cfg(target_arch = "aarch64")]
         BackendKind::Neon => &NeonBackend,
-        #[cfg(target_arch = "aarch64")]
+        #[cfg(all(feature = "nightly-simd", target_arch = "aarch64"))]
         BackendKind::Sve => &SveBackend,
 
         _ => &ScalarBackend,
@@ -188,6 +189,7 @@ pub fn print_capabilities() {
             "  - NEON : {}",
             std::arch::is_aarch64_feature_detected!("neon")
         );
+        #[cfg(feature = "nightly-simd")]
         println!(
             "  - SVE  : {}",
             std::arch::is_aarch64_feature_detected!("sve")
@@ -1060,10 +1062,10 @@ unsafe fn sdot_f32_neon(x: &[f32], y: &[f32]) -> f32 {
 /// déterminée au runtime, cf. [`crate::sve`]). Construit uniquement quand
 /// `is_aarch64_feature_detected!("sve")` réussit (Graviton 3, A64FX, Neoverse
 /// V2…). `f64` et `relu` retombent sur le scalaire, comme le backend NEON.
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(feature = "nightly-simd", target_arch = "aarch64"))]
 pub struct SveBackend;
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(feature = "nightly-simd", target_arch = "aarch64"))]
 impl SimdBackend for SveBackend {
     fn name(&self) -> &'static str {
         "sve"
@@ -1161,6 +1163,7 @@ mod tests {
             {
                 v.push((&NeonBackend, "neon"));
             }
+            #[cfg(feature = "nightly-simd")]
             if std::arch::is_aarch64_feature_detected!("sve")
             {
                 v.push((&SveBackend, "sve"));

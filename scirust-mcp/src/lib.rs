@@ -24,17 +24,36 @@ pub mod tools;
 
 use registry::ToolRegistry;
 
-/// Construit le registre d'outils par défaut du serveur `scirust-mcp` :
-/// outils de développement (hérités de `scirust-sciagent`), algèbre
+/// Capability profile exposed by the MCP server.
+///
+/// Production deliberately excludes tools that read local files or start
+/// processes. Development capabilities must be enabled explicitly by the
+/// server operator in a trusted checkout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegistryProfile {
+    Production,
+    Development,
+}
+
+/// Construit le registre de production par défaut du serveur `scirust-mcp` :
+/// algèbre
 /// linéaire (`scirust-solvers`), découverte OT/IT (`scirust-discovery`),
 /// sûreté fonctionnelle (`scirust-sis`), et un outil par domaine industriel
-/// ajouté depuis (grid, biomed, maritime, fab, agtech, fatigue), plus
-/// l'échappatoire générique vers le CLI `scirust`.
+/// ajouté depuis (grid, biomed, maritime, fab, agtech, fatigue). Les outils
+/// locaux de développement et le CLI sont absents de ce profil.
 pub fn default_registry() -> ToolRegistry {
+    registry_for_profile(RegistryProfile::Production)
+}
+
+/// Build the allowlisted tool registry for a deployment profile.
+pub fn registry_for_profile(profile: RegistryProfile) -> ToolRegistry {
     let mut registry = ToolRegistry::new();
-    for tool in tools::dev::dev_tools()
+    if profile == RegistryProfile::Development
     {
-        registry.register(tool);
+        for tool in tools::dev::dev_tools()
+        {
+            registry.register(tool);
+        }
     }
     for tool in tools::linalg::linalg_tools()
     {
@@ -88,7 +107,10 @@ pub fn default_registry() -> ToolRegistry {
     {
         registry.register(tool);
     }
-    registry.register(tools::cli_passthrough::cli_tool());
+    if profile == RegistryProfile::Development
+    {
+        registry.register(tools::cli_passthrough::cli_tool());
+    }
     registry
 }
 
@@ -103,8 +125,8 @@ mod tests {
         let registry = default_registry();
         assert!(!registry.is_empty());
         assert!(registry.names().contains(&"linalg_svd"));
-        assert!(registry.names().contains(&"dev_search"));
-        assert!(registry.names().contains(&"scirust_cli"));
+        assert!(!registry.names().iter().any(|name| name.starts_with("dev_")));
+        assert!(!registry.names().contains(&"scirust_cli"));
         assert!(registry.names().contains(&"discovery_scan"));
         assert!(registry.names().contains(&"sis_verify_sif_loop"));
         assert!(registry.names().contains(&"sis_reactor_trip_bypass"));
@@ -168,5 +190,13 @@ mod tests {
         assert!(registry.names().contains(&"tolerance_fits"));
         assert!(registry.names().contains(&"tolerance_sequential"));
         assert!(registry.names().contains(&"tolerance_taguchi"));
+    }
+
+    #[test]
+    fn development_registry_explicitly_adds_local_tools() {
+        let registry = registry_for_profile(RegistryProfile::Development);
+        assert!(registry.names().contains(&"dev_search"));
+        assert!(registry.names().contains(&"dev_read"));
+        assert!(registry.names().contains(&"scirust_cli"));
     }
 }

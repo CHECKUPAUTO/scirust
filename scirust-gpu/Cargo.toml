@@ -7,15 +7,15 @@ publish = false
 [features]
 default = ["std"]
 std = []
-cuda = []
+cuda = ["std", "dep:scirust-cuda", "scirust-cuda/cuda"]
 # Portable GPU compute via wgpu (Vulkan/Metal/DX12/GL). Testable in CI with a
 # software Vulkan adapter (Mesa lavapipe). See docs/GPU.md (P2.2).
 # Pulls in scirust-core to implement its autograd-tape `GpuEngine` hook.
 wgpu = ["std", "dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:scirust-core"]
 
 [dependencies]
-scirust-gpu-macros = { path = "../scirust-gpu-macros" }
 scirust-core = { path = "../scirust-core", optional = true }
+scirust-cuda = { path = "../scirust-cuda", optional = true }
 wgpu = { version = "0.20", optional = true }
 pollster = { version = "0.3", optional = true }
 bytemuck = { version = "1", optional = true }

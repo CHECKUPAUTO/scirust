@@ -189,7 +189,7 @@ impl BpeTrainer {
                 *tokens = out;
             }
 
-            if id % 1000 == 0
+            if id.is_multiple_of(1000)
             {
                 eprintln!("BPE: {}/{} tokens", id, self.vocab_size);
             }

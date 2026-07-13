@@ -40,7 +40,7 @@ use crate::registry::McpTool;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
-use scirust_trader::agent::{Action, StubLlm, TradingAgent};
+use scirust_trader::agent::{Action, DeterministicNarrator, TradingAgent};
 use scirust_trader::backtest::{BacktestConfig, BacktestReport, Sizing, run_backtest};
 use scirust_trader::chart::{ChartOptions, Marker, Overlay, candlestick_svg, equity_curve_svg};
 use scirust_trader::dashboard::{DashboardOptions, render_dashboard};
@@ -1099,7 +1099,7 @@ fn certified_predict_tool() -> McpTool {
             "required": ["ohlcv"]
         }),
         handler: Box::new(|args| {
-            let mut candles = ohlcv_arg(&args)?;
+            let candles = ohlcv_arg(&args)?;
             if candles.len() < 30
             {
                 return Err("certified_predict needs at least 30 candles".to_string());
@@ -1108,10 +1108,8 @@ fn certified_predict_tool() -> McpTool {
             let seed = args.get("seed").and_then(|x| x.as_u64()).unwrap_or(42);
             // The model input dim is 13 (lookback 10 + rsi + macd_hist + atr).
             let model = PricePredictor::new(13, &[16, 8], seed);
-            let mut agent = TradingAgent::new(model, Box::new(StubLlm));
+            let mut agent = TradingAgent::new(model, Box::new(DeterministicNarrator));
             agent.lookback = 10;
-            // Force the snapshot symbol so the prediction is labelled correctly.
-            for c in candles.iter_mut() { let _ = c; }
             let snapshot = snapshot_from(&symbol, "provided", candles);
             let record = agent.process(&snapshot);
             let p = &record.prediction;

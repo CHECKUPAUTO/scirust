@@ -153,10 +153,9 @@ scirust-opcua = {{ path = "../scirust-opcua" }}
 scirust-mqtt = {{ path = "../scirust-mqtt" }}
 serde_json = "1"
 
-# Real OPC-UA / MQTT transport backends are not implemented in
-# scirust-integration; only the simulated backend is available. Wiring a real
-# backend means adding e.g. the `opcua` or `rumqttc` crate and implementing the
-# OpcuaClient / MqttPublisher traits yourself.
+# For production, implement OpcuaClient / MqttPublisher with your selected
+# transport crates, then inject the connected clients through Backend::external
+# and Pipeline::with_backend.
 # opcua = "0.13"
 # rumqttc = "0.24"
 "#,
@@ -374,15 +373,14 @@ fn generate_readme(project_name: &str, kind: TemplateKind) -> String {
 # Run with simulated data (default)
 cargo run
 
-# Real OPC-UA / MQTT transport backends are not implemented in
-# scirust-integration. To talk to a real PLC or broker you must implement the
-# OpcuaClient / MqttPublisher traits against a real transport crate.
+# Production PLC/broker clients are injected through Backend::external and
+# Pipeline::with_backend; the default executable remains fully simulated.
 ```
 
 ## Configuration
 
 Edit `config.json` to configure:
-- Backend type (simulated / opcua / mqtt)
+- Backend type (`simulated`; injected clients are marked `external`)
 - OPC-UA endpoint
 - MQTT broker
 - Monitoring stations and sensors
@@ -482,9 +480,9 @@ mod tests {
             .iter()
             .find(|t| t.filename == "Cargo.toml")
             .unwrap();
-        // Real backends are not implemented; the generated manifest documents
-        // the transport crates a user would need to wire one up themselves.
-        assert!(cargo.content.contains("not implemented"));
+        // Generated projects document the explicit adapter-injection path.
+        assert!(cargo.content.contains("Backend::external"));
+        assert!(cargo.content.contains("Pipeline::with_backend"));
         assert!(cargo.content.contains("opcua"));
         assert!(cargo.content.contains("rumqttc"));
     }

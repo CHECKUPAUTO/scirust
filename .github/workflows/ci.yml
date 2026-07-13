@@ -6,14 +6,18 @@ name: CI
 # Deliberately NOT using `--all-features`: in scirust-core the features
 # `blas-openblas` and `blas-mkl` are mutually exclusive backends of
 # blas-src and require system toolchains the runners do not have —
-# `--all-features` can never build. Feature-specific jobs can be added
-# explicitly when those paths get CI-grade setup.
+# `--all-features` can never build. Feature-specific paths are exercised by
+# dedicated jobs with the toolchain and system setup they require.
 
 on:
   push:
     branches: [master, main, develop]
   pull_request:
     branches: [master, main, develop]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 # Least privilege for the automatically-provided GITHUB_TOKEN. None of the CI
 # jobs write back to the repository — they only read the checked-out code and
@@ -49,7 +53,7 @@ jobs:
           toolchain: nightly-2026-07-02
           components: rustfmt
       - name: Check formatting
-        run: cargo fmt --all -- --check
+        run: cargo +nightly-2026-07-02 fmt --all -- --check
 
   clippy:
     name: Clippy
@@ -59,20 +63,20 @@ jobs:
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-07-02
           components: clippy
       - name: Cache cargo
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Run clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo +nightly-2026-07-02 clippy --workspace --all-targets --locked -- -D warnings
       - name: Run clippy (scirust-gpu wgpu feature)
-        run: cargo clippy -p scirust-gpu --features wgpu --all-targets -- -D warnings
+        run: cargo +nightly-2026-07-02 clippy -p scirust-gpu --features wgpu --all-targets --locked -- -D warnings
       - name: Run clippy (scirust-sim rl feature)
-        run: cargo clippy -p scirust-sim --features rl --all-targets -- -D warnings
+        run: cargo +nightly-2026-07-02 clippy -p scirust-sim --features rl --all-targets --locked -- -D warnings
       - name: Run clippy (scirust-sim stiff feature)
-        run: cargo clippy -p scirust-sim --features stiff --all-targets -- -D warnings
+        run: cargo +nightly-2026-07-02 clippy -p scirust-sim --features stiff --all-targets --locked -- -D warnings
       - name: Run clippy (scirust-biomed sim feature)
-        run: cargo clippy -p scirust-biomed --features sim --all-targets -- -D warnings
+        run: cargo +nightly-2026-07-02 clippy -p scirust-biomed --features sim --all-targets --locked -- -D warnings
 
   # Gate σ (S2 de paper/PAPER_PLAN.md) : échoue si une garde f32 sous
   # σ_sanitized (= f32::MIN_POSITIVE) subsiste hors test dans scirust-gpu/src
@@ -86,11 +90,11 @@ jobs:
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-07-02
       - name: Cache cargo
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Run epsilon-audit --check
-        run: cargo run -q -p scirust-sigma --bin epsilon-audit -- --root . --check
+        run: cargo +nightly-2026-07-02 run --locked -q -p scirust-sigma --bin epsilon-audit -- --root . --check
 
   # Tamper-evidence gate for the validated public COBOL reference corpus
   # (external/cobol-reference/selected). Verifies every file against its SHA-256
@@ -139,13 +143,13 @@ jobs:
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-07-02
       - name: Cache cargo
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Build workspace
-        run: cargo build --workspace --all-targets
+        run: cargo +nightly-2026-07-02 build --workspace --all-targets --locked
       - name: Run tests
-        run: cargo test --workspace
+        run: cargo +nightly-2026-07-02 test --workspace --locked
 
   # The optional nightly `portable-simd` feature must keep building and
   # testing warning-clean (RUSTFLAGS=-D warnings is set workspace-wide above).
@@ -157,14 +161,31 @@ jobs:
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-07-02
       - name: Cache cargo
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Build & test scirust-simd with portable-simd
-        run: cargo test -p scirust-simd --features portable-simd
+        run: cargo +nightly-2026-07-02 test -p scirust-simd --all-targets --features portable-simd --locked
+
+  # AMX, SVE/SME and the ARM dot-product paths use APIs that are not all
+  # available at the stable MSRV. Keep their compilation and tests pinned to
+  # nightly while the default scirust-simd build remains MSRV-compatible.
+  nightly-simd:
+    name: Build & Test (nightly SIMD extensions)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: nightly-2026-07-02
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Build & test unstable architecture extensions
+        run: cargo +nightly-2026-07-02 test -p scirust-simd --all-targets --features nightly-simd --locked
 
   # The whole workspace must also build and pass on STABLE Rust (the
-  # `portable-simd` nightly feature is optional and off by default) —
+  # `portable-simd` and `nightly-simd` features are optional and off by default) —
   # this is the gate industrial consumers care about.
   build-test-stable:
     name: Build & Test (stable, x86_64)
@@ -178,25 +199,79 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Build workspace (stable)
-        run: cargo build --workspace --all-targets
+        run: cargo +stable build --workspace --all-targets --locked
       - name: Run tests (stable)
-        run: cargo test --workspace
+        run: cargo +stable test --workspace --locked
       # The `rl` feature is off by default (it pulls scirust-learning), so the
       # workspace test run above does not exercise the scirust-sim ↔
       # scirust-learning RL bridge. Cover it explicitly, mirroring the
       # portable-simd / wgpu feature jobs.
       - name: Test scirust-sim rl bridge (rl feature)
-        run: cargo test -p scirust-sim --features rl
+        run: cargo +stable test -p scirust-sim --features rl --locked
       # The `stiff` feature pulls scirust-stiff and adds the stiff_bridge
       # (Robertson kinetics). Cover it explicitly like the rl feature.
       - name: Test scirust-sim stiff bridge (stiff feature)
-        run: cargo test -p scirust-sim --features stiff
+        run: cargo +stable test -p scirust-sim --features stiff --locked
       # The scirust-biomed `sim` feature exposes its glucose plant as a
       # scirust_sim::System; the default workspace run does not build it.
       - name: Test scirust-biomed sim bridge (sim feature)
-        run: cargo test -p scirust-biomed --features sim
+        run: cargo +stable test -p scirust-biomed --features sim --locked
 
-  # Type-checks every cfg(target_arch = "aarch64") path (NEON/SVE backends).
+      - name: Check OpenClaw demo feature
+        run: cargo +stable check -p scirust --bin openclaw-u --features openclaw --locked
+
+  msrv:
+    name: Check (MSRV 1.89.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install exact MSRV
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: 1.89.0
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Check workspace at the declared MSRV
+        run: cargo +1.89.0 check --workspace --all-targets --locked
+
+  platform-check:
+    name: Check (${{ matrix.os }}, stable)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Check all workspace targets
+        run: cargo +stable check --workspace --all-targets --locked
+
+  opt-in-features:
+    name: Check opt-in network features
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Check trader live HTTP path
+        run: cargo +stable check -p scirust-trader --features live --all-targets --locked
+      - name: Check RSI Anthropic path
+        run: cargo +stable check -p scirust-rsi --features anthropic --all-targets --locked
+      - name: Check SciAgent fetch path
+        run: cargo +stable check -p scirust-sciagent --features fetch --all-targets --locked
+
+  # Type-checks every cfg(target_arch = "aarch64") path (NEON/SVE backends),
+  # including the nightly-only SVE/SME and dot-product extensions.
   # A pure `cargo check` needs no cross linker and would have caught the
   # 2026-06-12 sgemv merge regression on the NEON side.
   # Additionally EXECUTES the portable-f32 cross-platform proof on aarch64
@@ -212,12 +287,12 @@ jobs:
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-07-02
           targets: aarch64-unknown-linux-gnu
       - name: Cache cargo
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Check workspace for aarch64
-        run: cargo check --workspace --all-targets --target aarch64-unknown-linux-gnu
+        run: cargo +nightly-2026-07-02 check --workspace --all-targets --features scirust-simd/nightly-simd --locked --target aarch64-unknown-linux-gnu
       - name: Install qemu-user + aarch64 cross toolchain
         run: |
           sudo apt-get update -qq
@@ -227,46 +302,92 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64 -L /usr/aarch64-linux-gnu
         run: |
-          cargo test -p scirust-core --lib portable_f32 --release --target aarch64-unknown-linux-gnu
-          cargo test -p scirust-core --lib lowprec --release --target aarch64-unknown-linux-gnu
-          cargo test -p scirust-core --lib tree_allreduce --release --target aarch64-unknown-linux-gnu
-          cargo test -p scirust-core --lib formal_proof --release --target aarch64-unknown-linux-gnu
-          cargo run --release -p scirust-core --bin proof_portable_f32 --target aarch64-unknown-linux-gnu
-          cargo run --release -p scirust-core --bin proof_portable_training --target aarch64-unknown-linux-gnu
-          cargo run --release -p scirust-core --bin proof_lowprec_training --target aarch64-unknown-linux-gnu
-          cargo run --release -p scirust-core --bin proof_fp8_training --target aarch64-unknown-linux-gnu
-          cargo run --release -p scirust-core --bin proof_formal_bounds --target aarch64-unknown-linux-gnu
+          cargo +nightly-2026-07-02 test -p scirust-core --lib portable_f32 --release --locked --target aarch64-unknown-linux-gnu
+          cargo +nightly-2026-07-02 test -p scirust-core --lib lowprec --release --locked --target aarch64-unknown-linux-gnu
+          cargo +nightly-2026-07-02 test -p scirust-core --lib tree_allreduce --release --locked --target aarch64-unknown-linux-gnu
+          cargo +nightly-2026-07-02 test -p scirust-core --lib formal_proof --release --locked --target aarch64-unknown-linux-gnu
+          cargo +nightly-2026-07-02 run --release --locked -p scirust-core --bin proof_portable_f32 --target aarch64-unknown-linux-gnu
+          cargo +nightly-2026-07-02 run --release --locked -p scirust-core --bin proof_portable_training --target aarch64-unknown-linux-gnu
+          cargo +nightly-2026-07-02 run --release --locked -p scirust-core --bin proof_lowprec_training --target aarch64-unknown-linux-gnu
+          cargo +nightly-2026-07-02 run --release --locked -p scirust-core --bin proof_fp8_training --target aarch64-unknown-linux-gnu
+          cargo +nightly-2026-07-02 run --release --locked -p scirust-core --bin proof_formal_bounds --target aarch64-unknown-linux-gnu
 
   deny:
     name: License & Security Audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - name: Run cargo-deny
+      - name: Audit default dependency graph
         uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2
         with:
           command: check
+          rust-version: stable
+          arguments: --locked --workspace
+      - name: Audit trader live dependency graph
+        uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2
+        with:
+          command: check
+          rust-version: stable
+          manifest-path: scirust-trader/Cargo.toml
+          arguments: --locked --no-default-features --features live
+      - name: Audit RSI Anthropic dependency graph
+        uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2
+        with:
+          command: check
+          rust-version: stable
+          manifest-path: scirust-rsi/Cargo.toml
+          arguments: --locked --no-default-features --features anthropic
+      - name: Audit SciAgent fetch dependency graph
+        uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2
+        with:
+          command: check
+          rust-version: stable
+          manifest-path: scirust-sciagent/Cargo.toml
+          arguments: --locked --no-default-features --features fetch
+      - name: Audit wgpu dependency graph
+        uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2
+        with:
+          command: check
+          rust-version: stable
+          manifest-path: scirust-gpu/Cargo.toml
+          arguments: --locked --no-default-features --features wgpu
+      - name: Audit CUDA dependency graph
+        uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2
+        with:
+          command: check
+          rust-version: stable
+          manifest-path: scirust-gpu/Cargo.toml
+          arguments: --locked --no-default-features --features cuda
+      - name: Audit OpenBLAS dependency graph
+        uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2
+        with:
+          command: check
+          rust-version: stable
+          manifest-path: scirust-core/Cargo.toml
+          arguments: --locked --no-default-features --features blas-openblas
+      - name: Audit MKL dependency graph
+        uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2
+        with:
+          command: check
+          rust-version: stable
+          manifest-path: scirust-core/Cargo.toml
+          arguments: --locked --no-default-features --features blas-mkl
 
-  # Miri runs the pure-numeric crates' test suites under the interpreter to
-  # catch undefined behaviour (out-of-bounds, invalid alignment, use of
-  # uninitialised memory, strict-provenance violations). These crates are all
-  # `#![forbid(unsafe_code)]`, do no I/O, and use only in-memory data, so they
-  # execute quickly under Miri and any UB would be a genuine soundness bug —
-  # this is a real merge gate, not informational. Crates that legitimately use
-  # `unsafe`/SIMD/FFI are intentionally excluded here.
+  # Miri exercises the memory-view/allocation regressions in crates that
+  # contain unsafe code, then the pure numeric suites.
   miri:
-    name: Miri (unsafe-free numeric crates)
+    name: Miri (memory safety and numeric crates)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Install nightly toolchain + miri
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-07-02
           components: miri
       - name: Cache cargo
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - name: Run Miri on pure-numeric crates
+      - name: Run targeted unsafe regressions and pure-numeric crates
         # proptest's default failure-persistence backend calls
         # std::env::current_dir() to absolutize its regression-file path —
         # entirely unrelated to the numeric code under test, but Miri's
@@ -279,7 +400,10 @@ jobs:
         env:
           MIRIFLAGS: "-Zmiri-isolation-error=warn"
         run: |
-          cargo miri test \
+          cargo +nightly-2026-07-02 miri test -p scirust-core --locked matrix::view::tests
+          cargo +nightly-2026-07-02 miri test -p scirust-arena --locked aligned::tests
+          cargo +nightly-2026-07-02 miri test -p scirust-arena --locked slab::tests
+          cargo +nightly-2026-07-02 miri test --locked \
             -p scirust-special -p scirust-stats \
             -p scirust-interp -p scirust-sparse -p scirust-stiff \
             -p scirust-gp -p scirust-units -p scirust-frame -p scirust-forecast \
@@ -304,7 +428,7 @@ jobs:
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-07-02
       - name: Install cargo-fuzz
         uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # v2
         with:
@@ -319,13 +443,13 @@ jobs:
       # unavailable ("sanitizer is incompatible with statically linked libc").
       - name: Build fuzz targets
         working-directory: fuzz
-        run: cargo fuzz build --target x86_64-unknown-linux-gnu
+        run: cargo +nightly-2026-07-02 fuzz build --target x86_64-unknown-linux-gnu
       - name: Smoke-run QSR1 deserializer fuzzer
         working-directory: fuzz
-        run: cargo fuzz run qsr1_from_bytes --target x86_64-unknown-linux-gnu -- -max_total_time=45 -runs=500000
+        run: cargo +nightly-2026-07-02 fuzz run qsr1_from_bytes --target x86_64-unknown-linux-gnu -- -max_total_time=45 -runs=500000
       - name: Smoke-run ONNX JSON importer fuzzer
         working-directory: fuzz
-        run: cargo fuzz run import_onnx_json_from_bytes --target x86_64-unknown-linux-gnu -- -max_total_time=45 -runs=500000
+        run: cargo +nightly-2026-07-02 fuzz run import_onnx_json_from_bytes --target x86_64-unknown-linux-gnu -- -max_total_time=45 -runs=500000
 
   # Real wgpu compute path, validated against the CPU oracle on a software
   # Vulkan adapter (Mesa lavapipe) — no physical GPU required.
@@ -337,7 +461,7 @@ jobs:
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-07-02
       - name: Install Mesa lavapipe (software Vulkan)
         run: |
           sudo apt-get update
@@ -345,36 +469,31 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Test wgpu backend on lavapipe
-        run: cargo test -p scirust-gpu --features wgpu
+        run: cargo +nightly-2026-07-02 test -p scirust-gpu --features wgpu --locked
 
-  # Informational: the rustc driver (excluded from the workspace) uses
-  # `rustc_private` internals that drift across nightlies. Build it so that
-  # drift is visible, but don't gate merges on the nightly-of-the-day.
-  rustc-driver:
-    name: rustc-driver (excluded, informational)
+  # The CUDA feature uses dynamic loading. Hosted runners have no CUDA runtime,
+  # which makes them the right place to enforce the public no-device contract:
+  # construction must skip / return Unavailable, never panic in cudarc's loader.
+  gpu-cuda-fallback:
+    name: GPU (CUDA no-runtime fallback)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - name: Install nightly + rustc internals
+      - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
-          toolchain: nightly
-          components: rustc-dev, rust-src, llvm-tools-preview
+          toolchain: stable
       - name: Cache cargo
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          workspaces: scirust-rustc-driver
-      - name: Build the rustc driver
-        working-directory: scirust-rustc-driver
-        run: cargo build
+      - name: Test CUDA crates without a local runtime
+        run: |
+          cargo +stable test -p scirust-cuda --features cuda --locked
+          cargo +stable test -p scirust-gpu --features cuda --locked
 
-  # Informational: regenerate the CycloneDX SBOM and publish it as an
-  # artifact. Does not gate merges (transitive-dep churn is expected).
+  # Generate and validate a complete workspace CycloneDX SBOM.
   sbom:
     name: SBOM (CycloneDX)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Install stable toolchain
@@ -404,7 +523,7 @@ jobs:
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-07-02
           components: llvm-tools-preview
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # v2
@@ -413,7 +532,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Generate coverage
-        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+        run: cargo +nightly-2026-07-02 llvm-cov --workspace --locked --lcov --output-path lcov.info
       - name: Upload coverage
         uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
         with:

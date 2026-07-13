@@ -374,15 +374,12 @@ pub fn run_diagnostics(config: &PipelineConfig) -> Diagnostics {
                 "Backend type '{}' is recognized",
                 config.backend_type
             ));
-            if let Some(crate_name) = bt.requires_external_crate()
+            if bt == scirust_integration::backend::BackendType::External
             {
-                if bt == scirust_integration::backend::BackendType::OpcUa
-                {
-                    d.issues.push(format!(
-                        "Backend '{}' requires the '{}' crate. Add the feature flag 'real-opcua' to scirust-integration in Cargo.toml",
-                        config.backend_type, crate_name
-                    ));
-                }
+                d.issues.push(
+                    "External backend requires connected OpcuaClient and MqttPublisher adapters supplied through Pipeline::with_backend; configuration alone cannot construct or diagnose them"
+                        .to_string(),
+                );
             }
         },
         None =>

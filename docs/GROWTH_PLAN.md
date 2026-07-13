@@ -90,9 +90,9 @@ valeur du projet) :
 ### F. Analyse de code (SOM) — précision rustc
 - **Objectif** : passer de l'oracle `syn` conservateur (mode rapide) à une
   précision NLL/types résolus (mode précis).
-- **Acquis** : oracle `syn` · `scirust-rustc-driver` recompile + visible en CI.
-- **Jalons** : passe **MIR** ownership/NLL → format de rapport SOM · intégration
-  linter (SARIF déjà livré).
+- **Acquis** : oracle `syn` conservateur et linter SARIF.
+- **Jalons** : concevoir une vraie passe **MIR** ownership/NLL avec oracles de
+  transformation et gate CI bloquant avant de distribuer un driver.
 
 ### G. Outillage & confiance
 - **Acquis** : CLI (53 commandes) · SBOM CycloneDX · automatisation de release ·

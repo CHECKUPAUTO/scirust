@@ -264,9 +264,12 @@ impl NdMultiHeadAttention {
         causal: bool,
         rng: &mut PcgEngine,
     ) -> Self {
-        assert!(d_model % n_heads == 0, "d_model must divide n_heads");
         assert!(
-            num_kv_heads >= 1 && n_heads % num_kv_heads == 0,
+            d_model.is_multiple_of(n_heads),
+            "d_model must divide n_heads"
+        );
+        assert!(
+            num_kv_heads >= 1 && n_heads.is_multiple_of(num_kv_heads),
             "n_heads must be a multiple of num_kv_heads"
         );
         let d_head = d_model / n_heads;
@@ -306,7 +309,7 @@ impl NdMultiHeadAttention {
     /// call sites are unaffected.
     pub fn with_rope(mut self, enabled: bool) -> Self {
         assert!(
-            !enabled || self.d_head % 2 == 0,
+            !enabled || self.d_head.is_multiple_of(2),
             "RoPE needs an even d_head (got {})",
             self.d_head
         );

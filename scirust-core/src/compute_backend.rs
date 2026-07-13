@@ -1,10 +1,11 @@
-//! Abstraction GPU — ComputeBackend trait avec fallback CPU et CUDA
+//! Backend de convolution CPU vérifié.
 //!
 //! ## Sécurité numérique
 //! - `check_finite` sur les entrées kernel/data avant exécution
 //! - Détection overflow dans la convolution CPU
-//! - `get_backend()` retourne `Result` — pas de stub silencieux
-//! - CUDA stub remplacé par `Err(BackendError::UnsupportedBackend)` honnête
+//!
+//! L'accélération matricielle GPU est fournie par `scirust-gpu`; ce module ne
+//! déclare aucun backend matériel qu'il ne peut réellement exécuter.
 
 use thiserror::Error;
 
@@ -16,9 +17,6 @@ pub enum BackendError {
 
     #[error("overflow detected during convolution at index {idx}: value {value:.3e}")]
     Overflow { idx: usize, value: f32 },
-
-    #[error("CUDA backend not available on this hardware/configuration")]
-    UnsupportedBackend,
 
     #[error("internal compute error: {0}")]
     Internal(String),
@@ -96,47 +94,12 @@ impl ComputeBackend for CpuFallback {
     }
 }
 
-/// Backend CUDA — si GPU NVIDIA disponible.
-pub struct CudaBackend;
-
-impl ComputeBackend for CudaBackend {
-    fn is_available(&self) -> bool {
-        #[cfg(feature = "gpu")]
-        {
-            std::env::var("CUDA_VISIBLE_DEVICES").is_ok()
-        }
-        #[cfg(not(feature = "gpu"))]
-        {
-            false
-        }
-    }
-
-    fn execute_kernel(&self, _kernel: &[f32], _data: &[f32]) -> BackendResult<Vec<f32>> {
-        // Vrai signal : pas de stub trompeur
-        Err(BackendError::UnsupportedBackend)
-    }
-}
-
-/// Sélectionne le meilleur backend disponible.
-/// Retourne `Err` si aucun backend ne peut être initialisé.
+/// Retourne le backend de convolution disponible dans `scirust-core`.
+///
+/// Les backends GPU ont une API matricielle distincte dans `scirust-gpu` et ne
+/// sont donc pas présentés ici comme des implémentations interchangeables.
 pub fn get_backend() -> BackendResult<Box<dyn ComputeBackend>> {
-    #[cfg(feature = "gpu")]
-    {
-        let cuda = CudaBackend;
-        if cuda.is_available()
-        {
-            return Ok(Box::new(cuda));
-        }
-    }
-
-    // Fallback CPU
-    let cpu = CpuFallback;
-    if cpu.is_available()
-    {
-        return Ok(Box::new(cpu));
-    }
-
-    Err(BackendError::UnsupportedBackend)
+    Ok(Box::new(CpuFallback))
 }
 
 #[cfg(test)]
@@ -169,17 +132,6 @@ mod tests {
         assert!(matches!(
             result.unwrap_err(),
             BackendError::NanDetected { .. }
-        ));
-    }
-
-    #[test]
-    fn test_cuda_stub_returns_err() {
-        let cuda = CudaBackend;
-        let result = cuda.execute_kernel(&[1.0], &[2.0]);
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            BackendError::UnsupportedBackend
         ));
     }
 }
