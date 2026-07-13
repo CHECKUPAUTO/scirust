@@ -21,7 +21,7 @@ pub struct PositionalEncoding {
 #[inline]
 fn pe_value(d_model: usize, pos: usize, i: usize) -> f32 {
     let div = 10000_f32.powf(2.0 * (i / 2) as f32 / d_model as f32);
-    if i % 2 == 0
+    if i.is_multiple_of(2)
     {
         (pos as f32 / div).sin()
     }

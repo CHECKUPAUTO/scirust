@@ -177,14 +177,14 @@ pub fn train_epoch(
         opt.step(&params, &tape);
         model.sync(&tape);
 
-        if steps % trainer_cfg.log_interval == 0
+        if steps.is_multiple_of(trainer_cfg.log_interval)
         {
             let avg = total_loss / steps as f64;
             let lr = opt.lr();
             println!("[Step {steps}] loss: {avg:.6} | lr: {lr:.8}");
         }
 
-        if steps % trainer_cfg.save_interval == 0
+        if steps.is_multiple_of(trainer_cfg.save_interval)
         {
             let ckpt_dir =
                 std::path::Path::new(&trainer_cfg.checkpoint_dir).join(format!("step_{steps}"));

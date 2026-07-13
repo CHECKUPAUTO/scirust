@@ -36,8 +36,10 @@ Create a branch ruleset for `master` and require these CI check contexts:
 - `Format Check`
 - `Clippy`
 - `Build & Test (nightly, x86_64)`
+- `Build & Test (portable-simd, nightly)`
+- `Build & Test (nightly SIMD extensions)`
 - `Build & Test (stable, x86_64)`
-- `Check (MSRV 1.85.0)`
+- `Check (MSRV 1.89.0)`
 - `Check (windows-latest, stable)`
 - `Check (macos-latest, stable)`
 - `Check opt-in network features`

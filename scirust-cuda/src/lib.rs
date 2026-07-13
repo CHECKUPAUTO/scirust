@@ -22,9 +22,10 @@
 //!
 //! Everything is behind the **`cuda`** feature. With it off, this crate pulls no
 //! CUDA dependency and compiles anywhere (CI included); the public surface is just
-//! [`available`]. With it on, it needs the CUDA toolkit — i.e. the Thor — to build
-//! and run. This mirrors how Route A's GPU tests skip without an adapter, one step
-//! further: Route B can't even be *built* without CUDA, so its tests are Thor-only.
+//! [`available`]. With it on, cudarc dynamically loads the driver, cuBLASLt and
+//! NVRTC libraries. The crate therefore still compiles without a local toolkit;
+//! [`CudaChain::new`] returns `None` and the device tests skip when the required
+//! runtime or a CUDA device is unavailable.
 
 #[cfg(feature = "cuda")]
 mod chain;

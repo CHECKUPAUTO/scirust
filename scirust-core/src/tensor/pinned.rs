@@ -344,10 +344,7 @@ mod tests {
         assert_eq!(pool.available(), 2);
         let reused_a = pool.borrow().unwrap();
         let reused_b = pool.borrow().unwrap();
-        assert!(
-            reused_a.as_slice().iter().any(|&value| value == 7.0)
-                || reused_b.as_slice().iter().any(|&value| value == 7.0)
-        );
+        assert!(reused_a.as_slice().contains(&7.0) || reused_b.as_slice().contains(&7.0));
     }
 
     #[test]

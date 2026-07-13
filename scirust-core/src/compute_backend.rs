@@ -3,6 +3,7 @@
 //! ## Sécurité numérique
 //! - `check_finite` sur les entrées kernel/data avant exécution
 //! - Détection overflow dans la convolution CPU
+//!
 //! L'accélération matricielle GPU est fournie par `scirust-gpu`; ce module ne
 //! déclare aucun backend matériel qu'il ne peut réellement exécuter.
 

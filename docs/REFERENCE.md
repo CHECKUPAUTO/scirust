@@ -5,10 +5,12 @@ binaires, features, et points d'entrée d'API. La documentation
 **exhaustive des fonctions** est générée par rustdoc (voir §7) — chaque
 fonction publique y est documentée depuis le code source.
 
-> Toolchains : le dépôt épingle **nightly** (rust-toolchain.toml) pour la
-> feature optionnelle `portable-simd`, mais **tout le workspace compile et
-> passe ses tests sur Rust STABLE** (686 tests vérifiés ; job CI
-> `build-test-stable`). Pur Rust, zéro FFI, aucune dépendance système.
+> Toolchains : le dépôt épingle **nightly** (rust-toolchain.toml) pour les
+> features optionnelles `portable-simd` et `nightly-simd`. Le build par défaut
+> a pour MSRV Rust **1.89** et **tout le workspace compile et passe ses tests sur
+> Rust STABLE** (job CI
+> `build-test-stable`). Le build par défaut reste pur Rust, zéro FFI et sans
+> dépendance système.
 
 ---
 
@@ -23,7 +25,7 @@ Un changement n'est livrable que si les six passent :
 | Lints | `cargo clippy --workspace --all-targets -- -D warnings` | zéro lint, code + tests + benches |
 | Build | `cargo build --workspace --all-targets` | compilation complète |
 | Tests | `cargo test --workspace` | toute la suite (1047 tests) |
-| Multi-arch | `cargo check --workspace --all-targets --target aarch64-unknown-linux-gnu` | chemins NEON/SVE (`rustup target add aarch64-unknown-linux-gnu` une fois) |
+| Multi-arch | `cargo +nightly-2026-07-02 check --workspace --all-targets --features scirust-simd/nightly-simd --locked --target aarch64-unknown-linux-gnu` | type-check des chemins NEON stables et SVE/SME/dotprod/i8mm nightly (sans les exécuter ; `rustup +nightly-2026-07-02 target add aarch64-unknown-linux-gnu` une fois) |
 | Licences/Sécurité | `cargo deny check` | advisories, licences, sources (`cargo install cargo-deny`) |
 
 La CI exporte `RUSTFLAGS="-D warnings"` : tout warning est une erreur.
@@ -239,9 +241,10 @@ Les tests `#[ignore]` sont des sondes de mesure, jamais des gates.
 | Crate | Feature | Effet |
 |---|---|---|
 | scirust-core | `rayon` *(défaut)* | data-parallélisme CPU |
-| scirust-core | `portable-simd` | kernels `std::simd` (nightly) |
+| scirust-core / scirust-simd | `portable-simd` | kernels et API générique `std::simd` (nightly ; la feature de `scirust-core` active celle de `scirust-simd`) |
+| scirust-simd | `nightly-simd` | AMX sur x86_64 ; SVE/SME, dotprod et i8mm sur AArch64 (nightly épinglée, chemins sélectionnés par architecture) |
 | scirust-core | `blas-openblas` / `blas-mkl` | matmul via BLAS système — exclusifs, exigent la toolchain système |
-| scirust-gpu | `wgpu` / `cuda` | **vides actuellement** : les kernels en `src/` sont archivés, non câblés (audit §5) |
+| scirust-gpu | `wgpu` / `cuda` | Backends opt-in réels : compute portable WGSL via wgpu, ou GEMM CUDA bf16/cuBLASLt avec accumulation fp32 |
 
 ## 5. Carte des crates (points d'entrée)
 

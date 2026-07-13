@@ -944,7 +944,7 @@ fn rope_lastaxis(t: &TensorND, base: f32, inverse: bool) -> TensorND {
     assert!(nd >= 2, "rope: need ndim >= 2 (…, seq, d)");
     let d = t.shape[nd - 1];
     let seq = t.shape[nd - 2];
-    assert!(d % 2 == 0, "rope: last axis must be even");
+    assert!(d.is_multiple_of(2), "rope: last axis must be even");
     let m = t.data.len() / (seq * d).max(1);
     let mut out = vec![0.0f32; t.data.len()];
     let sign = if inverse { -1.0 } else { 1.0 };
@@ -978,7 +978,7 @@ fn rope_portable_lastaxis(t: &TensorND, base: f32, inverse: bool) -> TensorND {
     assert!(nd >= 2, "rope: need ndim >= 2 (…, seq, d)");
     let d = t.shape[nd - 1];
     let seq = t.shape[nd - 2];
-    assert!(d % 2 == 0, "rope: last axis must be even");
+    assert!(d.is_multiple_of(2), "rope: last axis must be even");
     let m = t.data.len() / (seq * d).max(1);
     let mut out = vec![0.0f32; t.data.len()];
     let sign = if inverse { -1.0 } else { 1.0 };

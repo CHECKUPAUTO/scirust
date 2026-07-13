@@ -3542,11 +3542,11 @@ impl<'t> Var<'t> {
         self.ensure_same_tape(&other, "add_broadcast")?;
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
-        if b.rows != 1 && b.cols != a.cols
+        if !((b.rows == a.rows || b.rows == 1) && (b.cols == a.cols || b.cols == 1))
         {
             return Err(crate::error::SciRustError::ShapeMismatch {
                 op: "add_broadcast",
-                expected: (1, a.cols),
+                expected: (a.rows, a.cols),
                 got: (b.rows, b.cols),
             });
         }
@@ -3591,11 +3591,11 @@ impl<'t> Var<'t> {
         self.ensure_same_tape(&other, "mul_broadcast")?;
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
-        if b.rows != 1 && b.cols != a.cols
+        if !((b.rows == a.rows || b.rows == 1) && (b.cols == a.cols || b.cols == 1))
         {
             return Err(crate::error::SciRustError::ShapeMismatch {
                 op: "mul_broadcast",
-                expected: (1, a.cols),
+                expected: (a.rows, a.cols),
                 got: (b.rows, b.cols),
             });
         }
@@ -4617,6 +4617,40 @@ mod tests {
             crate::error::SciRustError::InvalidConfig(_)
         ));
         assert_eq!(left_tape.num_parameters(), 0);
+    }
+
+    #[test]
+    fn try_broadcast_ops_return_shape_errors_instead_of_panicking() {
+        let tape = Tape::new();
+        let target = tape.input(Tensor::zeros(2, 4));
+        let incompatible = tape.input(Tensor::ones(3, 4));
+
+        let add_error = target.try_add_broadcast(incompatible).unwrap_err();
+        assert!(matches!(
+            add_error,
+            crate::error::SciRustError::ShapeMismatch {
+                op: "add_broadcast",
+                expected: (2, 4),
+                got: (3, 4),
+            }
+        ));
+
+        let mul_error = target.try_mul_broadcast(incompatible).unwrap_err();
+        assert!(matches!(
+            mul_error,
+            crate::error::SciRustError::ShapeMismatch {
+                op: "mul_broadcast",
+                expected: (2, 4),
+                got: (3, 4),
+            }
+        ));
+
+        // Both non-trivial broadcast axes supported by Tensor::broadcast_to
+        // remain accepted by the fallible wrappers.
+        let row = tape.input(Tensor::ones(1, 4));
+        let column = tape.input(Tensor::ones(2, 1));
+        assert!(target.try_add_broadcast(row).is_ok());
+        assert!(target.try_mul_broadcast(column).is_ok());
     }
 
     #[test]

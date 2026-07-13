@@ -523,6 +523,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "command-group"
+version = "5.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a68fa787550392a9d58f44c21a3022cfb3ea3e2458b7f85d3b399d0ceeccf409"
+dependencies = [
+ "nix",
+ "winapi",
+]
+
+[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1870,6 +1880,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c196769dd60fd4f363e11d948139556a344e79d451aeb2fa2fd040738ef7691"
 dependencies = [
  "jni-sys 0.3.1",
+]
+
+[[package]]
+name = "nix"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2eb04e9c688eff1c89d72b407f168cf79bb9e867a9d3323ed6c01519eb9cc053"
+dependencies = [
+ "bitflags 2.11.1",
+ "cfg-if",
+ "libc",
 ]
 
 [[package]]
@@ -3255,6 +3276,7 @@ name = "scirust-mcp"
 version = "0.1.0"
 dependencies = [
  "approx",
+ "command-group",
  "scirust-agtech",
  "scirust-biomed",
  "scirust-discovery",
@@ -3463,6 +3485,7 @@ version = "0.1.0"
 dependencies = [
  "approx",
  "clap",
+ "command-group",
  "rand 0.8.6",
  "scirust-autodiff",
  "scirust-core",
@@ -3792,6 +3815,7 @@ dependencies = [
 name = "scirust-trader"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "chrono",
  "reqwest",
  "scirust-core",

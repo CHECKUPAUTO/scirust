@@ -111,10 +111,9 @@ impl Pipeline {
                 validation_errors.join("; ")
             ));
         }
-        if !backend.is_connected()
-        {
-            return Err("pipeline backend is not connected".to_string());
-        }
+        backend
+            .ensure_ready()
+            .map_err(|error| format!("pipeline backend is not ready: {error}"))?;
         config.backend_type = backend.backend_type().label().to_string();
         Ok(Self::from_parts(config, backend))
     }
@@ -691,6 +690,26 @@ mod tests {
         let pipeline = Pipeline::with_backend(PipelineConfig::default(), backend).unwrap();
         assert_eq!(pipeline.backend.backend_type(), BackendType::External);
         assert_eq!(pipeline.config.backend_type, "external");
+    }
+
+    #[test]
+    fn test_pipeline_rechecks_opcua_readiness_at_injection() {
+        let mut opcua = scirust_opcua::SimulatedOpcuaClient::new();
+        scirust_opcua::OpcuaClient::connect(&mut opcua, &scirust_opcua::OpcuaConfig::default())
+            .unwrap();
+        let mut mqtt = scirust_mqtt::SimulatedMqttPublisher::new();
+        scirust_mqtt::MqttPublisher::connect(&mut mqtt, &scirust_mqtt::MqttConfig::default())
+            .unwrap();
+        let mut backend = Backend::external(Box::new(opcua), Box::new(mqtt)).unwrap();
+        backend.opcua.disconnect().unwrap();
+
+        let error = Pipeline::with_backend(PipelineConfig::default(), backend)
+            .err()
+            .expect("a disconnected OPC-UA adapter must be rejected");
+        assert!(
+            error.contains("OPC-UA"),
+            "unexpected readiness error: {error}"
+        );
     }
 
     /// Oracle for the two previously-untested filesystem config functions:

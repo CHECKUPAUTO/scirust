@@ -3,6 +3,7 @@ name = "scirust-simd"
 version = "0.1.0"
 edition = "2021"
 publish = false
+rust-version = "1.89"
 authors = ["SciRust Team"]
 description = "SIMD auto-vectorization primitives for SciRust"
 license-file = "../LICENSE.md"
@@ -13,4 +14,13 @@ libc = "0.2"
 
 [features]
 portable-simd = []
+nightly-simd = []
 default = []
+
+[[example]]
+name = "amx_bench"
+required-features = ["nightly-simd"]
+
+[[example]]
+name = "qtransformer_bench"
+required-features = ["nightly-simd"]

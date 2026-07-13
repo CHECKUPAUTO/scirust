@@ -41,7 +41,7 @@ technical report ([`paper/SciRust-technical-report.md`](paper/SciRust-technical-
 - **Deep-learning core + reverse-mode autodiff** — 1718 passing workspace tests (0 failures; measured 2026-06-19); an MLP reaches 97.70% on MNIST.
 - **N-D autograd stack, research-backed and gradient-checked** — a complete causal **decoder LM** (token + positional embeddings, causal attention, fused softmax cross-entropy) that trains end-to-end and overfits a sequence *exactly*; LLaMA-family layers (**RMSNorm**, **SwiGLU**, **RoPE**, **grouped/multi-query attention**); a **LoRA** low-rank adapter (frozen base + trainable `B·A`, gradient-checked); deterministic optimizers (**Adam, AdamW, Lion, Muon, Schedule-Free, AdEMAMix, SOAP** — Adam in Shampoo's eigenbasis, with a from-scratch Jacobi eigensolver — plus **Lookahead, LAMB, Adan**); **exact speculative decoding** and **FlashAttention** (online softmax); a **DeltaNet** delta-rule linear-attention layer, a **Mamba** selective state-space layer (S6 input-dependent scan), a **RetNet** retention layer (recurrent form proven equal to the parallel form), a **GLA** gated-linear-attention layer (data-dependent forget gate), and an **HGRN** gated-linear-RNN token mixer, all linear-time recurrences unrolled on the tape; a **Neural ODE** (backprop through an RK4 solver); a **Physics-Informed Neural Network** that solves a boundary-value problem with the PDE residual in the loss (recovers `sin x` to ~4 decimals). Every op is validated by a finite-difference gradient check. See [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md).
 - **Certifiable & reproducible** — **Interval Bound Propagation** and **CROWN** (linear-relaxation back-substitution, provably *tighter* than IBP) give *provable* output bounds and robustness certificates for ReLU MLPs, shown side by side (`scirust certify`); **conformal prediction** gives distribution-free prediction sets with a *guaranteed* coverage level (`scirust conformal`); **temperature scaling** recalibrates over-confident probabilities (lowers the expected calibration error without touching accuracy, `scirust calibrate`); **order-independent floating-point reductions** are bit-identical regardless of thread count; **Wanda** pruning, **SmoothQuant**, **GPTQ** (second-order error-feedback weight quantization — beats round-to-nearest on calibration error, `scirust gptq`), **AWQ** (activation-aware search-based per-channel scaling, `scirust awq`), **BitNet b1.58** (ternary `{−1,0,+1}` weights, ~1.58 bit/weight, with a verified multiplication-free matmul, `scirust bitnet`), and **NF4** (QLoRA's 4-bit NormalFloat — quantile-matched levels that beat uniform 4-bit on Gaussian weights) extend the deterministic int8 path.
-- **Portable GPU compute (wgpu, optional)** — a real WGSL `f32` GEMM behind the `wgpu` feature, validated against the CPU oracle on a software Vulkan adapter (Mesa lavapipe) in CI, plumbed into the autograd tape (`Var::matmul_gpu` forward + backward via `WgpuEngine`) **and** into Conv2d's im2col GEMMs (forward + backward). ⚠ *Separately, a historical cuBLAS-backed BF16 matmul once reached ~63 TFLOPS on an NVIDIA Jetson Thor (aarch64); that CUDA path is archived in [`archive/scirust-gpu/`](archive/scirust-gpu/), not reproducible from today's build — see `scirust_complete_audit_report.md` §5.*
+- **Optional GPU compute (wgpu and CUDA)** — a real WGSL `f32` GEMM behind the `wgpu` feature, validated against the CPU oracle on a software Vulkan adapter (Mesa lavapipe) in CI and plumbed into the autograd tape and Conv2d's im2col GEMMs. A separate `cuda` feature exposes the current bf16/cuBLASLt backend in `scirust-cuda`; it is dynamically loaded, reports `BackendError::Unavailable` when the CUDA runtime/device is absent, and requires a CUDA-capable host for device execution. A historical run of the CUDA lineage reached ~63 TFLOPS on an NVIDIA Jetson Thor; hosted CI does not reproduce that hardware measurement — see `scirust_complete_audit_report.md` §5.
 - **Deterministic inference runtime** — bit-exact forward (a 64-bit output fingerprint identical across thread counts and processes), bounded latency (p99/p50 ~1.15), and architecture-agnostic reconstruction from a plain-text manifest plus an SRT1 weight file.
 - **Certified-deterministic multi-thread training** — `DataParallelTrainer::train_batch_threaded` runs workers across N OS threads yet reduces gradients in a fixed worker order, so the aggregate is **bit-identical for 1/2/4/8 threads** and equal to the sequential path (float addition isn't associative — the reduction order is pinned). CI-tested, including a real autograd backward. To our knowledge, SciRust is the only **self-contained** DL framework (100 % auditable Rust stack, zero FFI in the compute path) that simultaneously offers CI-tested bit-identical multi-thread training (1/2/4/8 threads == sequential), a deterministic int8 pipeline for embedded targets, and audit artifacts (inference fingerprints, hash-chained logs, manifest-based reconstruction). Closest related work: RepDL (Microsoft, 2025, [arXiv:2510.09180](https://arxiv.org/abs/2510.09180)) provides **cross-platform** bitwise reproducibility for a float32 subset of PyTorch via correctly-rounded operations — a stronger guarantee on that axis for f32, but as an overlay on a C++/Python TCB, without low-precision support and without audit artifacts. SciRust's integer and fixed-point paths are bit-exact cross-platform; its sanitized f32 path is deterministic within a single architecture.
 - **Deterministic int8 quantization for embedded** — weight-only int8 is lossless and 4x smaller; a fully-integer calibrated pipeline reproduces the float model bit-for-bit; a true integer convolution and a portable QSR1 / QModel artifact; an aarch64 NEON int8 kernel ~10x faster and bit-exact against the scalar reference; separable depthwise + pointwise convolutions in deterministic int8.
@@ -168,15 +168,18 @@ scirust-core = { path = "path/to/scirust-core" }
 > returns `BackendError::Unavailable` — never fabricated output. It is also
 > plumbed into the autograd tape (`WgpuEngine` + `Var::matmul_gpu`) and into
 > Conv2d's im2col GEMMs, forward and backward, validated end-to-end on lavapipe.
-> `cuda` stays out of scope until a GPU runner exists. Next: keep activations in
-> VRAM across layers — see `docs/GPU.md` (P2.2).
+> The optional `cuda` feature similarly uses the real bf16/cuBLASLt backend. It
+> compiles without a local toolkit through dynamic loading and returns
+> `BackendError::Unavailable` when its runtime or device is absent; device parity
+> still requires a CUDA-capable runner. Next: keep activations in VRAM across
+> layers — see `docs/GPU.md` (P2.2).
 
 ## Architecture
 
 ```
 scirust-core/          Core compute, autograd, layers (~12k loc)
 scirust-simd/          SIMD CPU kernels (AVX2, SSE2, NEON)
-scirust-gpu/           CPU reference backend + real wgpu GEMM (feature `wgpu`, tested on lavapipe)
+scirust-gpu/           CPU reference + real wgpu/CUDA dispatch (optional features)
 scirust-signal/        Signal processing: FFT, windows, bearing diagnostics, order analysis
 scirust-opcua/         OPC-UA connector: trait + 8 simulated industrial sensors
 scirust-mqtt/          MQTT publishing: SparkPlug B payloads, severity classification
@@ -247,6 +250,7 @@ examples/              Quickstart, MNIST training, industrial_monitor, benchmark
 | HPC im2col (cache-aware) | ✅ New |
 | SOM — real-Rust ownership analyzer (`som-analyze`) | ✅ New (type-aware Copy/move; see `scirust-som/README.md`) |
 | Portable GPU compute + autograd + Conv2d (`scirust-gpu`, feature `wgpu`) | ✅ New (WGSL GEMM, `Var::matmul_gpu` + Conv2d fwd/bwd, oracle-validated on lavapipe) |
+| CUDA Tensor-core GEMM (`scirust-gpu`, feature `cuda`) | ✅ Opt-in bf16/cuBLASLt backend; graceful `Unavailable` without runtime/device; hardware CI still needed |
 
 > **GPU scope (honest).** A portable wgpu GEMM is wired behind the optional
 > `wgpu` feature, tested against the CPU oracle on a software Vulkan adapter
@@ -256,9 +260,11 @@ examples/              Quickstart, MNIST training, industrial_monitor, benchmark
 > device across GEMMs. It is opt-in, so the default bit-exact guarantee is
 > unaffected. Still to do: make tape residency transparent and move im2col onto
 > the GPU (P2.2).
-> **CUDA** remains out of scope until a hardware GPU runner exists
-> (`CudaBackend` returns `Unavailable`); archived WGSL/cuBLAS drafts live
-> in `archive/scirust-gpu/`. See [`docs/GPU.md`](docs/GPU.md) and
+> **CUDA** is implemented as an opt-in bf16/cuBLASLt backend. Dynamic loading
+> keeps no-CUDA builds usable and makes `CudaBackend` return `Unavailable`
+> when the runtime/device is absent. Hardware parity and performance validation
+> still require a CUDA runner; earlier drafts live in `archive/scirust-gpu/`.
+> See [`docs/GPU.md`](docs/GPU.md) and
 > [`docs/INDUSTRIAL_ROADMAP.md`](docs/INDUSTRIAL_ROADMAP.md).
 
 

@@ -355,7 +355,7 @@ fn sin_cos_range_bound() -> BigRational {
 /// `sin(r) = r·(1 + z·s(z))` tronqué à `r¹⁵` (vérifié : `sin_poly` du code
 /// EST cette évaluation de Horner, poids fort `j=6` en premier).
 fn sin_s_coeff(j: u64) -> BigRational {
-    let sign: i64 = if j % 2 == 0 { -1 } else { 1 };
+    let sign: i64 = if j.is_multiple_of(2) { -1 } else { 1 };
     BigRational::new(BigInt::from(sign), factorial(2 * j + 3))
 }
 
@@ -363,7 +363,7 @@ fn sin_s_coeff(j: u64) -> BigRational {
 /// `c(z) = Σⱼ₌₀⁷ (−1)^(j+1) z^j / (2j+2)!` — dérivé de
 /// `cos(r) = 1 + z·c(z)` tronqué à `r¹⁶`.
 fn cos_c_coeff(j: u64) -> BigRational {
-    let sign: i64 = if j % 2 == 0 { -1 } else { 1 };
+    let sign: i64 = if j.is_multiple_of(2) { -1 } else { 1 };
     BigRational::new(BigInt::from(sign), factorial(2 * j + 2))
 }
 

@@ -19,7 +19,7 @@ fn prime_factors(mut n: usize) -> Vec<usize> {
     let mut p = 2usize;
     while p * p <= n
     {
-        while n % p == 0
+        while n.is_multiple_of(p)
         {
             factors.push(p);
             n /= p;

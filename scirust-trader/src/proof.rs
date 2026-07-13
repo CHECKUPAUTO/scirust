@@ -50,11 +50,15 @@ pub struct DecisionProof {
 impl DecisionProof {
     /// Build a proof from a list of decision records.
     pub fn from_records(records: &[DecisionRecord]) -> Result<Self, ProofError> {
-        let manifest_hash = compute_manifest_hash(records)?;
+        let scirust_version = env!("CARGO_PKG_VERSION").to_string();
+        let timestamp_ms = chrono::Utc::now().timestamp_millis();
+        let num_decisions = records.len();
+        let manifest_hash =
+            compute_manifest_hash(&scirust_version, timestamp_ms, num_decisions, records)?;
         Ok(DecisionProof {
-            scirust_version: env!("CARGO_PKG_VERSION").to_string(),
-            timestamp_ms: chrono::Utc::now().timestamp_millis(),
-            num_decisions: records.len(),
+            scirust_version,
+            timestamp_ms,
+            num_decisions,
             records: records.to_vec(),
             manifest_hash,
         })
@@ -68,9 +72,14 @@ impl DecisionProof {
     /// Verify a proof: recompute the manifest hash and check it matches.
     pub fn verify(&self) -> bool {
         self.num_decisions == self.records.len()
-            && compute_manifest_hash(&self.records)
-                .map(|recomputed| recomputed == self.manifest_hash)
-                .unwrap_or(false)
+            && compute_manifest_hash(
+                &self.scirust_version,
+                self.timestamp_ms,
+                self.num_decisions,
+                &self.records,
+            )
+            .map(|recomputed| recomputed == self.manifest_hash)
+            .unwrap_or(false)
     }
 
     /// Write the proof to a file (returns the path written).
@@ -144,21 +153,41 @@ pub struct ProofSummary {
     pub manifest_hash: String,
 }
 
-/// Compute the SHA-256 manifest hash of all records.
-///
-/// The hash is computed over the canonical JSON encoding of each record's
-/// prediction (not the narration — that's LLM-generated and non-deterministic).
-fn compute_manifest_hash(records: &[DecisionRecord]) -> Result<String, ProofError> {
-    let mut hasher = Sha256::new();
+/// Versioned payload committed by `manifest_hash`. The domain tag prevents a
+/// proof manifest from being confused with another SHA-256-based format.
+#[derive(Serialize)]
+struct DecisionProofManifest<'a> {
+    domain: &'static str,
+    scirust_version: &'a str,
+    timestamp_ms: i64,
+    num_decisions: usize,
+    records: &'a [DecisionRecord],
+}
+
+/// Compute the SHA-256 manifest hash of all proof fields except the hash itself.
+fn compute_manifest_hash(
+    scirust_version: &str,
+    timestamp_ms: i64,
+    num_decisions: usize,
+    records: &[DecisionRecord],
+) -> Result<String, ProofError> {
     for record in records
     {
         validate_prediction(&record.prediction)?;
-        let json = serde_json::to_vec(&record.prediction).map_err(|_| ProofError {
-            field: "prediction serialization",
-        })?;
-        hasher.update((json.len() as u64).to_le_bytes());
-        hasher.update(&json);
     }
+    let manifest = DecisionProofManifest {
+        domain: "scirust.decision-proof.manifest.v1",
+        scirust_version,
+        timestamp_ms,
+        num_decisions,
+        records,
+    };
+    let canonical = serde_json::to_vec(&manifest).map_err(|_| ProofError {
+        field: "proof serialization",
+    })?;
+    let mut hasher = Sha256::new();
+    hasher.update((canonical.len() as u64).to_le_bytes());
+    hasher.update(&canonical);
     Ok(format!("{:x}", hasher.finalize()))
 }
 
@@ -174,7 +203,7 @@ fn validate_prediction(prediction: &CertifiedPrediction) -> Result<(), ProofErro
     ];
     if let Some((field, _)) = numeric_fields.iter().find(|(_, value)| !value.is_finite())
     {
-        return Err(ProofError { field: *field });
+        return Err(ProofError { field });
     }
     if prediction
         .feature_attribution
@@ -245,6 +274,38 @@ mod tests {
         let mut proof = DecisionProof::from_records(&records).unwrap();
         proof.records[0].prediction.raw_prediction = 999.0;
         assert!(!proof.verify());
+    }
+
+    #[test]
+    fn tampering_with_record_audit_fields_fails_verification() {
+        let records = vec![make_record("BTC/USDT", Action::Long)];
+        let proof = DecisionProof::from_records(&records).unwrap();
+
+        let mut changed = proof.clone();
+        changed.records[0].narration.push_str(" (edited)");
+        assert!(!changed.verify());
+
+        let mut changed = proof.clone();
+        changed.records[0].llm_consistent = false;
+        assert!(!changed.verify());
+
+        let mut changed = proof.clone();
+        changed.records[0].timestamp_ms += 1;
+        assert!(!changed.verify());
+    }
+
+    #[test]
+    fn tampering_with_proof_metadata_fails_verification() {
+        let records = vec![make_record("BTC/USDT", Action::Long)];
+        let proof = DecisionProof::from_records(&records).unwrap();
+
+        let mut changed = proof.clone();
+        changed.scirust_version.push_str("-forged");
+        assert!(!changed.verify());
+
+        let mut changed = proof.clone();
+        changed.timestamp_ms += 1;
+        assert!(!changed.verify());
     }
 
     #[test]

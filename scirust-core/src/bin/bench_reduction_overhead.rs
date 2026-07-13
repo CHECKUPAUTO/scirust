@@ -37,7 +37,7 @@ const THREAD_COUNTS: [usize; 4] = [1, 2, 4, 8];
 /// Weyl 64 bits, 24 bits de poids fort → f32 exact), magnitude ±1e16 pour
 /// les workers pairs et ±1 pour les impairs — l'ordre d'addition compte.
 fn worker_gradient(w: usize, dim: usize) -> Vec<f32> {
-    let scale = if w % 2 == 0 { 1e16 } else { 1.0 };
+    let scale = if w.is_multiple_of(2) { 1e16 } else { 1.0 };
     (0..dim)
         .map(|i| {
             let h = ((i as u64) ^ ((w as u64) << 32)).wrapping_mul(0x9e37_79b9_7f4a_7c15);

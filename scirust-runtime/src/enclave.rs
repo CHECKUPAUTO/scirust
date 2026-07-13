@@ -47,6 +47,12 @@ impl EnclaveLayout {
 /// Legacy pointer-only ABI. It is retained so existing dynamic linkers still
 /// resolve the symbol, but it cannot safely inspect any buffer and therefore
 /// requires callers to migrate to [`safe_enclave_infer_v1`].
+///
+/// # Safety
+///
+/// This compatibility entry point never dereferences its pointer arguments and
+/// therefore imposes no pointer-validity requirements. Its unsafe signature is
+/// retained to preserve the legacy C ABI.
 #[deprecated(note = "use safe_enclave_infer_v1 with explicit buffer lengths")]
 #[no_mangle]
 pub unsafe extern "C" fn safe_enclave_infer(

@@ -16,7 +16,7 @@ export SOURCE_DATE_EPOCH
 # step below retains every component/dependency edge and verifies that every
 # package reported by Cargo metadata is represented in the aggregate.
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_merge_cyclonedx.py
-cargo +stable cyclonedx --workspace --format json
+cargo +stable cyclonedx --format json
 cargo +stable metadata --locked --no-deps --format-version 1 > "$tmp_dir/metadata.json"
 
 find . -name '*.cdx.json' -not -path "./$out_dir/*" -print | sort > "$tmp_dir/boms.txt"

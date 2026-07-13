@@ -1,7 +1,8 @@
 //! Benchmark d'un **bloc décodeur quantifié int8 (W8A8/AMX)** vs `f32`.
 //!
 //! ```text
-//! cargo run -p scirust-simd --release --example qtransformer_bench
+//! cargo +nightly-2026-07-02 run -p scirust-simd --release \
+//!   --features nightly-simd --example qtransformer_bench
 //! ```
 //!
 //! Compare, pour un bloc décodeur `s×d` (attention multi-tête causale + FFN) :

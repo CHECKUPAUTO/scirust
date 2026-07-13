@@ -129,7 +129,7 @@ fn main() {
         n_rows += rows;
         batches += 1;
 
-        if batches % 20 == 0
+        if batches.is_multiple_of(20)
         {
             let m = sum_loss / n_rows as f64;
             println!(

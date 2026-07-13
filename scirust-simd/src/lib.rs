@@ -14,7 +14,8 @@
 //!
 //! * **ARM64 NEON intrinsics** (Pilier 4) — 4x f32 lanes on all ARM64.
 //!
-//! * **ARM SVE intrinsics** (Pilier 4) — scalable vector length on Ampere/Graviton.
+//! * **ARM SVE intrinsics** (Pilier 4) — scalable vector length on Ampere/Graviton,
+//!   available with the nightly-only `nightly-simd` feature.
 //!
 //! ## Runtime dispatch
 //!
@@ -30,18 +31,21 @@
 //! ```
 
 #![cfg_attr(feature = "portable-simd", feature(portable_simd))]
-// Intrinsèque NEON `i8mm` (USDOT `u8·i8`) encore *unstable* dans
-// `core::arch::aarch64` — activée uniquement pour la cible aarch64 (toolchain
-// nightly épinglée). `dotprod` (SDOT) est stable depuis 1.99. Cf. `crate::quant`.
-#![cfg_attr(target_arch = "aarch64", feature(stdarch_neon_i8mm))]
-// Intrinsèques SVE (`sv*`) encore *unstable* dans `core::arch::aarch64` —
-// kernels scalables de `crate::sve` (toolchain nightly épinglée).
-#![cfg_attr(target_arch = "aarch64", feature(stdarch_aarch64_sve))]
-// Détection runtime de `sme` encore *unstable* (cf. `crate::sme`).
-#![cfg_attr(target_arch = "aarch64", feature(stdarch_aarch64_feature_detection))]
-// Intrinsèques de tuiles Intel AMX (`_tile_*`) encore *unstable* dans
-// `core::arch::x86_64` — GEMM matriciel de `crate::amx` (toolchain nightly).
-#![cfg_attr(target_arch = "x86_64", feature(x86_amx_intrinsics))]
+// Ces extensions d'architecture ne sont pas toutes disponibles dans
+// `core::arch` au MSRV. Elles sont donc isolées derrière `nightly-simd`; les
+// chemins stables conservent AVX-512/AVX2/SSE2, NEON et le repli scalaire.
+#![cfg_attr(
+    all(feature = "nightly-simd", target_arch = "aarch64"),
+    feature(
+        stdarch_neon_i8mm,
+        stdarch_aarch64_sve,
+        stdarch_aarch64_feature_detection
+    )
+)]
+#![cfg_attr(
+    all(feature = "nightly-simd", target_arch = "x86_64"),
+    feature(x86_amx_intrinsics)
+)]
 #![allow(unused_crate_dependencies)]
 #![allow(unused_features)]
 
@@ -370,9 +374,9 @@ mod neon_fns {
 // ARM SVE kernels (Pilier 4)
 // =============================================================================
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(feature = "nightly-simd", target_arch = "aarch64"))]
 pub mod sme;
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(feature = "nightly-simd", target_arch = "aarch64"))]
 pub mod sve;
 
 // =============================================================================
@@ -399,6 +403,7 @@ pub fn detect_simd_backend() -> SimdBackend {
 
     #[cfg(target_arch = "aarch64")]
     {
+        #[cfg(feature = "nightly-simd")]
         if has_sve()
         {
             return SimdBackend::Sve;
@@ -446,9 +451,9 @@ impl SimdBackend {
             SimdBackend::Avx2 => cfg!(target_arch = "x86_64") && is_x86_feature_detected!("avx2"),
             SimdBackend::Sse2 => cfg!(target_arch = "x86_64") && is_x86_feature_detected!("sse2"),
             SimdBackend::Neon => cfg!(target_arch = "aarch64"),
-            #[cfg(target_arch = "aarch64")]
+            #[cfg(all(feature = "nightly-simd", target_arch = "aarch64"))]
             SimdBackend::Sve => has_sve(),
-            #[cfg(not(target_arch = "aarch64"))]
+            #[cfg(not(all(feature = "nightly-simd", target_arch = "aarch64")))]
             SimdBackend::Sve => false,
             SimdBackend::Scalar => true,
         }
@@ -458,7 +463,11 @@ impl SimdBackend {
 #[cfg(target_arch = "x86_64")]
 use std::arch::is_x86_feature_detected;
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(
+    feature = "nightly-simd",
+    target_arch = "aarch64",
+    any(target_os = "linux", target_os = "android")
+))]
 #[allow(dead_code)]
 fn has_sve() -> bool {
     // AT_HWCAP is auxv key 16 (key 33 is AT_SYSINFO_EHDR — a pointer, whose high
@@ -471,7 +480,11 @@ fn has_sve() -> bool {
     (hwcap & HWCAP_SVE) != 0
 }
 
-#[cfg(not(target_arch = "aarch64"))]
+#[cfg(not(all(
+    feature = "nightly-simd",
+    target_arch = "aarch64",
+    any(target_os = "linux", target_os = "android")
+)))]
 #[allow(dead_code)]
 fn has_sve() -> bool {
     false
@@ -618,7 +631,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(feature = "nightly-simd", target_arch = "aarch64"))]
     fn test_sve_vector_length_elements_returns_valid_width() {
         // On aarch64, sve_vector_length_elements returns a multiple of 4 (f32 lanes).
         // On aarch64 without SVE support, returns 0.
@@ -641,9 +654,9 @@ pub mod qkv_cache;
 pub mod quant;
 pub mod transformer;
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(feature = "nightly-simd", target_arch = "x86_64"))]
 pub mod amx;
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(feature = "nightly-simd", target_arch = "x86_64"))]
 pub mod qtransformer;
 #[cfg(target_arch = "x86_64")]
 pub mod x86_ext;

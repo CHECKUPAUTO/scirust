@@ -280,8 +280,8 @@ if should_run neon; then
 fi
 
 if should_run simd; then
-  run_gate simd required "Portable-SIMD kernels (nightly feature)" \
-    "cargo test -p scirust-simd --features portable-simd"
+  run_gate simd required "Portable-SIMD and architecture extensions (nightly)" \
+    "cargo test -p scirust-simd --all-targets --features portable-simd && cargo test -p scirust-simd --all-targets --features nightly-simd"
 fi
 
 if should_run determinism; then

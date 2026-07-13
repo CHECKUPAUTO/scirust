@@ -309,9 +309,9 @@ fn fit_lda_impl(corpus: &[Vec<usize>], config: LdaConfig, vocab: Vec<String>) ->
                 let total: f64 = probs.iter().sum();
                 let mut r = rng.next_f64() * total;
                 let mut new_t = num_topics - 1;
-                for t in 0..num_topics
+                for (t, &probability) in probs.iter().enumerate().take(num_topics)
                 {
-                    r -= probs[t];
+                    r -= probability;
                     if r <= 0.0
                     {
                         new_t = t;

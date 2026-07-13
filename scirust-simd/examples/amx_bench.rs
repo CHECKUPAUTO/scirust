@@ -2,7 +2,8 @@
 //!
 //! Exécuter en release :
 //! ```text
-//! cargo run -p scirust-simd --release --example amx_bench
+//! cargo +nightly-2026-07-02 run -p scirust-simd --release \
+//!   --features nightly-simd --example amx_bench
 //! ```
 //!
 //! Compare, pour un GEMM carré `n³` :

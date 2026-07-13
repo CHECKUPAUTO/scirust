@@ -50,6 +50,20 @@ pub struct Backend {
     pub mqtt: Box<dyn MqttPublisher>,
 }
 
+/// Point-in-time transport readiness for an industrial backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackendHealth {
+    pub opcua_connected: bool,
+    pub mqtt_connected: bool,
+}
+
+impl BackendHealth {
+    /// Both transports are required for the read-process-publish pipeline.
+    pub fn is_ready(&self) -> bool {
+        self.opcua_connected && self.mqtt_connected
+    }
+}
+
 impl std::fmt::Debug for Backend {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Backend")
@@ -69,15 +83,13 @@ impl Backend {
         opcua: Box<dyn OpcuaClient>,
         mqtt: Box<dyn MqttPublisher>,
     ) -> Result<Self, String> {
-        if !mqtt.is_connected()
-        {
-            return Err("external MQTT adapter must be connected before injection".to_string());
-        }
-        Ok(Self {
+        let backend = Self {
             backend_type: BackendType::External,
             opcua,
             mqtt,
-        })
+        };
+        backend.ensure_ready()?;
+        Ok(backend)
     }
 
     pub fn backend_type(&self) -> BackendType {
@@ -89,7 +101,29 @@ impl Backend {
     }
 
     pub fn is_connected(&self) -> bool {
-        self.mqtt.is_connected()
+        self.health().is_ready()
+    }
+
+    /// Return the current readiness of each required transport.
+    pub fn health(&self) -> BackendHealth {
+        BackendHealth {
+            opcua_connected: self.opcua.is_connected(),
+            mqtt_connected: self.mqtt.is_connected(),
+        }
+    }
+
+    /// Fail with a component-specific error when the pipeline is not ready.
+    pub fn ensure_ready(&self) -> Result<(), String> {
+        let health = self.health();
+        if !health.opcua_connected
+        {
+            return Err("OPC-UA adapter is not connected".to_string());
+        }
+        if !health.mqtt_connected
+        {
+            return Err("MQTT adapter is not connected".to_string());
+        }
+        Ok(())
     }
 }
 
@@ -165,6 +199,13 @@ mod tests {
         let backend = BackendFactory::simulated();
         assert!(backend.is_simulated());
         assert!(backend.is_connected());
+        assert_eq!(
+            backend.health(),
+            BackendHealth {
+                opcua_connected: true,
+                mqtt_connected: true,
+            }
+        );
     }
 
     #[test]
@@ -190,5 +231,56 @@ mod tests {
             BackendType::External,
         );
         assert!(result.unwrap_err().contains("Backend::external"));
+    }
+
+    #[test]
+    fn external_backend_rejects_disconnected_opcua_even_when_mqtt_is_ready() {
+        let opcua = scirust_opcua::SimulatedOpcuaClient::new();
+        let mut mqtt = SimulatedMqttPublisher::new();
+        mqtt.connect(&scirust_mqtt::MqttConfig::default()).unwrap();
+
+        let error = Backend::external(Box::new(opcua), Box::new(mqtt)).unwrap_err();
+        assert!(
+            error.contains("OPC-UA"),
+            "unexpected readiness error: {error}"
+        );
+    }
+
+    #[test]
+    fn external_backend_still_rejects_disconnected_mqtt() {
+        let mut opcua = scirust_opcua::SimulatedOpcuaClient::new();
+        opcua
+            .connect(&scirust_opcua::OpcuaConfig::default())
+            .unwrap();
+        let mqtt = SimulatedMqttPublisher::new();
+
+        let error = Backend::external(Box::new(opcua), Box::new(mqtt)).unwrap_err();
+        assert!(
+            error.contains("MQTT"),
+            "unexpected readiness error: {error}"
+        );
+    }
+
+    #[test]
+    fn backend_health_tracks_opcua_disconnect_after_injection() {
+        let mut opcua = scirust_opcua::SimulatedOpcuaClient::new();
+        opcua
+            .connect(&scirust_opcua::OpcuaConfig::default())
+            .unwrap();
+        let mut mqtt = SimulatedMqttPublisher::new();
+        mqtt.connect(&scirust_mqtt::MqttConfig::default()).unwrap();
+        let mut backend = Backend::external(Box::new(opcua), Box::new(mqtt)).unwrap();
+
+        backend.opcua.disconnect().unwrap();
+
+        assert!(!backend.is_connected());
+        assert_eq!(
+            backend.health(),
+            BackendHealth {
+                opcua_connected: false,
+                mqtt_connected: true,
+            }
+        );
+        assert!(backend.ensure_ready().unwrap_err().contains("OPC-UA"));
     }
 }

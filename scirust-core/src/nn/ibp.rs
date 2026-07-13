@@ -540,12 +540,10 @@ pub fn milp_min_margin(
                 }
             }
             if let Some((val, pt)) = lp_min_2d(&cons, (a0, a1))
+                && val + d < best
             {
-                if val + d < best
-                {
-                    best = val + d;
-                    witness = pt.to_vec();
-                }
+                best = val + d;
+                witness = pt.to_vec();
             }
         }
     }
@@ -617,11 +615,9 @@ fn pattern_min_margin(
             }
         }
         if let Some((val, pt)) = lp_min_2d(&region, (a0, a1))
+            && best.as_ref().is_none_or(|(bm, _)| val + d < *bm)
         {
-            if best.as_ref().is_none_or(|(bm, _)| val + d < *bm)
-            {
-                best = Some((val + d, pt.to_vec()));
-            }
+            best = Some((val + d, pt.to_vec()));
         }
     }
     best
@@ -683,11 +679,9 @@ pub fn reluplex_verify(
             }
         }
         if let Some((m, witness)) = pattern_min_margin(l1, l2, &base, &active, true_class)
+            && m <= 0.0
         {
-            if m <= 0.0
-            {
-                return BabResult::Unsafe(witness); // SAT: a real counterexample
-            }
+            return BabResult::Unsafe(witness); // SAT: a real counterexample
         }
     }
     BabResult::Robust

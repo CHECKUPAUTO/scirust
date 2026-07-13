@@ -25,9 +25,11 @@
   `dA = g·Bᵀ` and `dB = Aᵀ·g` use the transpose path). The device + pipeline
   are created once and reused across the pass. Validated end to end against the
   CPU tape (forward + both gradients) on lavapipe.
-- **CUDA** (`CudaBackend`): out of scope until a GPU CI runner exists; always
-  returns `BackendError::Unavailable`. The archived cuBLAS draft is kept in
-  `archive/scirust-gpu/`.
+- **CUDA** (`CudaBackend`, feature `cuda`): a real bf16/cuBLASLt GEMM with fp32
+  accumulation, backed by `scirust-cuda`. CUDA libraries are loaded dynamically,
+  so the feature compiles on hosts without a local toolkit and returns
+  `BackendError::Unavailable` when the required runtime/device is absent. The
+  no-runtime path is tested in CI; device parity needs a CUDA-capable runner.
 - Default training/inference still routes through the CPU/SIMD kernels
   (AVX2/SSE2/NEON); the GPU path is opt-in (feature + an attached engine),
   keeping the bit-exact default guarantee intact.
@@ -129,11 +131,13 @@ a VRAM-resident matmul-chain API (`GpuChain`). Next:
 - Move im2col/col2im onto the GPU — the archived pipelines in
   [`archive/scirust-gpu/`](../archive/scirust-gpu/) are the reference.
 - More ops (elementwise, reductions) behind the same trait.
-- CUDA/cuBLAS only once a hardware GPU runner exists.
+- Add a CUDA hardware runner for device parity and performance regression tests;
+  the backend itself is already available behind the `cuda` feature.
 
-## Historical result (not reproducible from this build)
+## Historical performance result (not reproduced in hosted CI)
 
 A cuBLAS-backed BF16 matmul once reached ~63 TFLOPS on an NVIDIA Jetson Thor
 (aarch64), validated against a CPU oracle. This is a **historical measurement**
-from the archived code, not a current capability — see
+from the backend's earlier lineage. The current `scirust-cuda` implementation is
+buildable, but this measurement has not been re-run by hosted CI — see
 `scirust_complete_audit_report.md` §5.

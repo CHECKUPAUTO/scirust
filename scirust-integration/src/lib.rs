@@ -26,7 +26,7 @@ pub mod config;
 pub mod pipeline;
 pub mod templates;
 
-pub use backend::{Backend, BackendFactory, BackendType};
+pub use backend::{Backend, BackendFactory, BackendHealth, BackendType};
 pub use config::{
     MqttBackendConfig, OpcuaBackendConfig, PipelineConfig, SensorConfig, StationConfig,
 };

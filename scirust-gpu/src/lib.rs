@@ -360,6 +360,26 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn cuda_backend_returns_result_or_unavailable_without_panicking() {
+        let a = [1.0, 2.0, 3.0, 4.0];
+        let identity = [1.0, 0.0, 0.0, 1.0];
+        match CudaBackend.gemm_f32(&a, &identity, 2, 2, 2)
+        {
+            Ok(output) =>
+            {
+                for (actual, expected) in output.iter().zip(a)
+                {
+                    assert!((actual - expected).abs() < 5e-2);
+                }
+            },
+            Err(BackendError::Unavailable("cuda")) =>
+            {},
+            Err(error) => panic!("unexpected CUDA backend error: {error:?}"),
+        }
+    }
+
     #[test]
     fn accelerator_dispatches_and_reports_device() {
         let cpu = GpuAccelerator::cpu();

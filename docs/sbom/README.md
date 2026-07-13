@@ -6,8 +6,9 @@ not merely the dependency closure of the top-level façade crate.
 
 ## Provenance and verification
 
-- `cargo cyclonedx --workspace` generates one source BOM per member from the
-  committed `Cargo.lock`.
+- `cargo cyclonedx` generates one source BOM beside every workspace member's
+  manifest from the committed `Cargo.lock` (cargo-cyclonedx 0.5 has no
+  `--workspace` flag because workspace traversal is already the default).
 - `scripts/merge-cyclonedx.py` merges components and dependency edges, removes
   duplicate identities, sorts the result, and fails if any Cargo workspace
   package is absent.

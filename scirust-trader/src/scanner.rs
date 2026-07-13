@@ -183,7 +183,7 @@ impl Opportunity {
         ];
         if let Some((field, _)) = numeric_fields.iter().find(|(_, value)| !value.is_finite())
         {
-            return Err(OpportunityIntegrityError(*field));
+            return Err(OpportunityIntegrityError(field));
         }
         serde_json::to_vec(self).map_err(|_| OpportunityIntegrityError("serialization"))
     }

@@ -348,10 +348,10 @@ mod tests {
         dense[0] = 1.0;
         for _ in 0..40
         {
-            if rng.next_u32() % 2 == 0
+            if rng.next_u32().is_multiple_of(2)
             {
                 let q = (rng.next_u32() as usize) % n;
-                let g = if rng.next_u32() % 2 == 0
+                let g = if rng.next_u32().is_multiple_of(2)
                 {
                     H
                 }
@@ -365,7 +365,14 @@ mod tests {
             else
             {
                 let q = (rng.next_u32() as usize) % (n - 1);
-                let g = if rng.next_u32() % 2 == 0 { CNOT } else { CZ };
+                let g = if rng.next_u32().is_multiple_of(2)
+                {
+                    CNOT
+                }
+                else
+                {
+                    CZ
+                };
                 mps.apply_2qubit_gate(q, &g, 1 << n); // no truncation
                 dense_2q(&mut dense, q, &g);
             }
@@ -379,10 +386,10 @@ mod tests {
         let mut rng2 = PcgEngine::new(7);
         for _ in 0..40
         {
-            if rng2.next_u32() % 2 == 0
+            if rng2.next_u32().is_multiple_of(2)
             {
                 let q = (rng2.next_u32() as usize) % n;
-                let g = if rng2.next_u32() % 2 == 0
+                let g = if rng2.next_u32().is_multiple_of(2)
                 {
                     H
                 }
@@ -395,7 +402,14 @@ mod tests {
             else
             {
                 let q = (rng2.next_u32() as usize) % (n - 1);
-                let g = if rng2.next_u32() % 2 == 0 { CNOT } else { CZ };
+                let g = if rng2.next_u32().is_multiple_of(2)
+                {
+                    CNOT
+                }
+                else
+                {
+                    CZ
+                };
                 mps2.apply_2qubit_gate(q, &g, 1 << n);
             }
         }

@@ -29,7 +29,7 @@ impl GQAAttention {
         init: &I,
         rng: &mut PcgEngine,
     ) -> Self {
-        assert!(d_model % n_heads == 0);
+        assert!(d_model.is_multiple_of(n_heads));
         let d_head = d_model / n_heads;
         let kv_dim = n_kv_heads * d_head;
         let z = Zeros;

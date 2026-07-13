@@ -6,8 +6,8 @@ name: CI
 # Deliberately NOT using `--all-features`: in scirust-core the features
 # `blas-openblas` and `blas-mkl` are mutually exclusive backends of
 # blas-src and require system toolchains the runners do not have —
-# `--all-features` can never build. Feature-specific jobs can be added
-# explicitly when those paths get CI-grade setup.
+# `--all-features` can never build. Feature-specific paths are exercised by
+# dedicated jobs with the toolchain and system setup they require.
 
 on:
   push:
@@ -165,10 +165,27 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Build & test scirust-simd with portable-simd
-        run: cargo +nightly-2026-07-02 test -p scirust-simd --features portable-simd --locked
+        run: cargo +nightly-2026-07-02 test -p scirust-simd --all-targets --features portable-simd --locked
+
+  # AMX, SVE/SME and the ARM dot-product paths use APIs that are not all
+  # available at the stable MSRV. Keep their compilation and tests pinned to
+  # nightly while the default scirust-simd build remains MSRV-compatible.
+  nightly-simd:
+    name: Build & Test (nightly SIMD extensions)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: nightly-2026-07-02
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Build & test unstable architecture extensions
+        run: cargo +nightly-2026-07-02 test -p scirust-simd --all-targets --features nightly-simd --locked
 
   # The whole workspace must also build and pass on STABLE Rust (the
-  # `portable-simd` nightly feature is optional and off by default) —
+  # `portable-simd` and `nightly-simd` features are optional and off by default) —
   # this is the gate industrial consumers care about.
   build-test-stable:
     name: Build & Test (stable, x86_64)
@@ -204,18 +221,18 @@ jobs:
         run: cargo +stable check -p scirust --bin openclaw-u --features openclaw --locked
 
   msrv:
-    name: Check (MSRV 1.85.0)
+    name: Check (MSRV 1.89.0)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Install exact MSRV
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
-          toolchain: 1.85.0
+          toolchain: 1.89.0
       - name: Cache cargo
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Check workspace at the declared MSRV
-        run: cargo +1.85.0 check --workspace --all-targets --locked
+        run: cargo +1.89.0 check --workspace --all-targets --locked
 
   platform-check:
     name: Check (${{ matrix.os }}, stable)
@@ -253,7 +270,8 @@ jobs:
       - name: Check SciAgent fetch path
         run: cargo +stable check -p scirust-sciagent --features fetch --all-targets --locked
 
-  # Type-checks every cfg(target_arch = "aarch64") path (NEON/SVE backends).
+  # Type-checks every cfg(target_arch = "aarch64") path (NEON/SVE backends),
+  # including the nightly-only SVE/SME and dot-product extensions.
   # A pure `cargo check` needs no cross linker and would have caught the
   # 2026-06-12 sgemv merge regression on the NEON side.
   # Additionally EXECUTES the portable-f32 cross-platform proof on aarch64
@@ -274,7 +292,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Check workspace for aarch64
-        run: cargo +nightly-2026-07-02 check --workspace --all-targets --locked --target aarch64-unknown-linux-gnu
+        run: cargo +nightly-2026-07-02 check --workspace --all-targets --features scirust-simd/nightly-simd --locked --target aarch64-unknown-linux-gnu
       - name: Install qemu-user + aarch64 cross toolchain
         run: |
           sudo apt-get update -qq
@@ -425,13 +443,13 @@ jobs:
       # unavailable ("sanitizer is incompatible with statically linked libc").
       - name: Build fuzz targets
         working-directory: fuzz
-        run: cargo +nightly-2026-07-02 fuzz build --locked --target x86_64-unknown-linux-gnu
+        run: cargo +nightly-2026-07-02 fuzz build --target x86_64-unknown-linux-gnu
       - name: Smoke-run QSR1 deserializer fuzzer
         working-directory: fuzz
-        run: cargo +nightly-2026-07-02 fuzz run qsr1_from_bytes --locked --target x86_64-unknown-linux-gnu -- -max_total_time=45 -runs=500000
+        run: cargo +nightly-2026-07-02 fuzz run qsr1_from_bytes --target x86_64-unknown-linux-gnu -- -max_total_time=45 -runs=500000
       - name: Smoke-run ONNX JSON importer fuzzer
         working-directory: fuzz
-        run: cargo +nightly-2026-07-02 fuzz run import_onnx_json_from_bytes --locked --target x86_64-unknown-linux-gnu -- -max_total_time=45 -runs=500000
+        run: cargo +nightly-2026-07-02 fuzz run import_onnx_json_from_bytes --target x86_64-unknown-linux-gnu -- -max_total_time=45 -runs=500000
 
   # Real wgpu compute path, validated against the CPU oracle on a software
   # Vulkan adapter (Mesa lavapipe) — no physical GPU required.
@@ -452,6 +470,25 @@ jobs:
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Test wgpu backend on lavapipe
         run: cargo +nightly-2026-07-02 test -p scirust-gpu --features wgpu --locked
+
+  # The CUDA feature uses dynamic loading. Hosted runners have no CUDA runtime,
+  # which makes them the right place to enforce the public no-device contract:
+  # construction must skip / return Unavailable, never panic in cudarc's loader.
+  gpu-cuda-fallback:
+    name: GPU (CUDA no-runtime fallback)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Test CUDA crates without a local runtime
+        run: |
+          cargo +stable test -p scirust-cuda --features cuda --locked
+          cargo +stable test -p scirust-gpu --features cuda --locked
 
   # Generate and validate a complete workspace CycloneDX SBOM.
   sbom:

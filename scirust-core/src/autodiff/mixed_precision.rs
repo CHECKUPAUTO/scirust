@@ -70,7 +70,7 @@ impl MixedPrecisionTrainer {
 
     /// Croissance périodique du loss scale
     pub fn maybe_grow_scale(&mut self) {
-        if self.step_counter % self.growth_interval == 0
+        if self.step_counter.is_multiple_of(self.growth_interval)
         {
             self.loss_scale = (self.loss_scale * self.scale_growth_factor).min(self.max_scale);
         }

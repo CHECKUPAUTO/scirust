@@ -82,11 +82,23 @@ SHA-256 (`src/audit.rs`, `AuditLog`), sur le même principe que
 `scirust-func-safety::audit` (chaque entrée contient le hash de la
 précédente, ce qui rend toute falsification après coup détectable), mais
 avec un vrai SHA-256 (réutilisation de `scirust_sciagent::sha256`, du
-domaine public FIPS 180-4) plutôt qu'un hash maison — pour un journal
-destiné à servir de preuve, la résistance aux collisions n'est pas
+domaine public FIPS 180-4) plutôt qu'un hash maison — pour une trace
+d'intégrité d'audit, la résistance aux collisions n'est pas
 négociable. Le journal stocke le **hash** des arguments et du résultat, pas
 leur contenu en clair : il peut être exporté sans exposer de données
-potentiellement sensibles issues d'une infrastructure cliente.
+potentiellement sensibles issues d'une infrastructure cliente. Pour préserver
+le format public historique, `AuditLog::export_json` produit toujours le tableau
+d'entrées seul. `AuditLog::export_snapshot_json` produit une enveloppe versionnée
+avec l'ancre précédant la fenêtre conservée, la tête, le prochain numéro de
+séquence et les entrées ; `AuditExport::from_json` en vérifie la cohérence après
+rotation.
+
+Cette chaîne SHA-256 n'est toutefois ni une signature ni un MAC : elle ne prouve
+pas l'identité du producteur, et un acteur pouvant remplacer l'export entier peut
+recalculer tous ses hashes. Pour obtenir une preuve d'altération, conservez la
+`head` par un canal de confiance indépendant puis utilisez
+`AuditExport::validate_against_head`. Une `anchor` de confiance établit la
+continuité avec le passé, mais n'authentifie pas seule les entrées suivantes.
 
 ## Utilisation
 

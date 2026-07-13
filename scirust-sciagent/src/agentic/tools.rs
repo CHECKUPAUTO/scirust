@@ -1,13 +1,17 @@
+use command_group::{CommandGroup, GroupChild};
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const MAX_SOURCE_BYTES: u64 = 1024 * 1024;
 const MAX_TOOL_OUTPUT_BYTES: usize = 64 * 1024;
 const MAX_LINE_RANGE: usize = 200;
 const TOOL_TIMEOUT: Duration = Duration::from_secs(30);
+const REAP_GRACE: Duration = Duration::from_secs(2);
+const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const SECRET_ENV_VARS: &[&str] = &[
     "SCIRUST_DISCOVERY_KEY",
     "SCIRUST_EXCHANGE_SECRET",
@@ -143,9 +147,38 @@ struct LimitedOutput {
     stderr: Vec<u8>,
 }
 
-fn drain_pipe<R: Read + Send + 'static>(mut pipe: R) -> std::thread::JoinHandle<Vec<u8>> {
-    std::thread::spawn(move || {
-        let mut kept = Vec::new();
+struct PipeDrain {
+    bytes: Arc<Mutex<Vec<u8>>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl PipeDrain {
+    fn is_finished(&self) -> bool {
+        self.thread
+            .as_ref()
+            .is_none_or(std::thread::JoinHandle::is_finished)
+    }
+
+    fn snapshot(&self) -> Vec<u8> {
+        self.bytes
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    fn finish(mut self) -> Vec<u8> {
+        if let Some(thread) = self.thread.take()
+        {
+            let _ = thread.join();
+        }
+        self.snapshot()
+    }
+}
+
+fn drain_pipe<R: Read + Send + 'static>(mut pipe: R) -> PipeDrain {
+    let bytes = Arc::new(Mutex::new(Vec::new()));
+    let captured = Arc::clone(&bytes);
+    let thread = std::thread::spawn(move || {
         let mut chunk = [0u8; 8192];
         while let Ok(n) = pipe.read(&mut chunk)
         {
@@ -153,48 +186,162 @@ fn drain_pipe<R: Read + Send + 'static>(mut pipe: R) -> std::thread::JoinHandle<
             {
                 break;
             }
+            let mut kept = captured
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             let remaining = MAX_TOOL_OUTPUT_BYTES.saturating_sub(kept.len());
             kept.extend_from_slice(&chunk[..n.min(remaining)]);
         }
-        kept
-    })
+    });
+    PipeDrain {
+        bytes,
+        thread: Some(thread),
+    }
+}
+
+fn spawn_process_group(command: &mut Command) -> std::io::Result<GroupChild> {
+    #[cfg(windows)]
+    {
+        // A Job Object contains every descendant and kill-on-close is a final
+        // safeguard if error handling ever returns before an explicit kill.
+        command.group().kill_on_drop(true).spawn()
+    }
+    #[cfg(not(windows))]
+    {
+        command.group_spawn()
+    }
+}
+
+/// Keep ownership of a stubborn POSIX process group after the tool call has
+/// returned. On Windows, dropping the Job Object is itself the reliable
+/// kill-on-close fallback. Reader threads stay with the reaper so inherited
+/// pipes cannot block the caller indefinitely.
+fn defer_group_cleanup(child: GroupChild, stdout: PipeDrain, stderr: PipeDrain) {
+    std::thread::spawn(move || {
+        #[cfg(windows)]
+        drop(child);
+
+        #[cfg(not(windows))]
+        {
+            let mut child = child;
+            loop
+            {
+                let _ = child.kill();
+                if matches!(child.try_wait(), Ok(Some(_)))
+                {
+                    drop(child);
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+
+        let _ = stdout.finish();
+        let _ = stderr.finish();
+    });
+}
+
+/// Terminate the entire process group and reap it for a bounded grace period.
+/// If the OS keeps rejecting termination or reaping, cleanup continues on a
+/// background owner instead of either blocking this call or abandoning the
+/// descendants.
+fn terminate_and_reap(
+    mut child: GroupChild,
+    stdout: PipeDrain,
+    stderr: PipeDrain,
+) -> (Option<ExitStatus>, Vec<u8>, Vec<u8>) {
+    let deadline = Instant::now() + REAP_GRACE;
+    let mut status = None;
+    let mut next_kill = Instant::now();
+    loop
+    {
+        let now = Instant::now();
+        if now >= next_kill
+        {
+            let _ = child.kill();
+            next_kill = now + Duration::from_millis(100);
+        }
+        if status.is_none()
+        {
+            if let Ok(current) = child.try_wait()
+            {
+                status = current;
+            }
+        }
+        if status.is_some() && stdout.is_finished() && stderr.is_finished()
+        {
+            drop(child);
+            return (status, stdout.finish(), stderr.finish());
+        }
+        if now >= deadline
+        {
+            let stdout_bytes = stdout.snapshot();
+            let stderr_bytes = stderr.snapshot();
+            defer_group_cleanup(child, stdout, stderr);
+            return (status, stdout_bytes, stderr_bytes);
+        }
+        std::thread::sleep(PROCESS_POLL_INTERVAL);
+    }
 }
 
 /// Run a fixed executable/argument vector with bounded capture and wall time.
-fn run_limited(mut command: Command) -> Result<LimitedOutput, String> {
+fn run_limited(command: Command) -> Result<LimitedOutput, String> {
+    run_limited_with_timeout(command, TOOL_TIMEOUT)
+}
+
+fn run_limited_with_timeout(
+    mut command: Command,
+    timeout: Duration,
+) -> Result<LimitedOutput, String> {
     for variable in SECRET_ENV_VARS
     {
         command.env_remove(variable);
     }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|e| e.to_string())?;
-    let stdout_thread = drain_pipe(child.stdout.take().expect("stdout was piped"));
-    let stderr_thread = drain_pipe(child.stderr.take().expect("stderr was piped"));
-    let deadline = Instant::now() + TOOL_TIMEOUT;
-    let (status, timed_out) = loop
+    let mut child = spawn_process_group(&mut command).map_err(|e| e.to_string())?;
+    let stdout = drain_pipe(child.inner().stdout.take().expect("stdout was piped"));
+    let stderr = drain_pipe(child.inner().stderr.take().expect("stderr was piped"));
+    let deadline = Instant::now() + timeout;
+    let mut exit_status = None;
+    loop
     {
-        if let Some(status) = child.try_wait().map_err(|e| e.to_string())?
+        if exit_status.is_none()
         {
-            break (status, false);
+            match child.try_wait()
+            {
+                Ok(status) => exit_status = status,
+                Err(error) =>
+                {
+                    let _ = terminate_and_reap(child, stdout, stderr);
+                    return Err(error.to_string());
+                },
+            }
+        }
+        // A process-group leader may exit before its descendants. Do not join
+        // the capture threads until every inherited pipe handle has closed.
+        if exit_status.is_some() && stdout.is_finished() && stderr.is_finished()
+        {
+            break;
         }
         if Instant::now() >= deadline
         {
-            let _ = child.kill();
-            break (child.wait().map_err(|e| e.to_string())?, true);
+            let (_status, stdout, stderr) = terminate_and_reap(child, stdout, stderr);
+            return Ok(LimitedOutput {
+                success: false,
+                timed_out: true,
+                stdout,
+                stderr,
+            });
         }
-        std::thread::sleep(Duration::from_millis(10));
-    };
-    let stdout = stdout_thread
-        .join()
-        .map_err(|_| "stdout capture thread failed".to_string())?;
-    let stderr = stderr_thread
-        .join()
-        .map_err(|_| "stderr capture thread failed".to_string())?;
+        std::thread::sleep(PROCESS_POLL_INTERVAL);
+    }
+    drop(child);
+    let status = exit_status.expect("completed process group has an exit status");
     Ok(LimitedOutput {
         success: status.success(),
-        timed_out,
-        stdout,
-        stderr,
+        timed_out: false,
+        stdout: stdout.finish(),
+        stderr: stderr.finish(),
     })
 }
 
@@ -541,6 +688,71 @@ impl Tool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+
+    const PROCESS_TREE_TEST_ROLE: &str = "SCIRUST_SCIAGENT_PROCESS_TREE_TEST_ROLE";
+
+    fn process_tree_helper_name() -> String {
+        let module = module_path!();
+        let module = module
+            .split_once("::")
+            .map(|(_, rest)| rest)
+            .unwrap_or(module);
+        format!("{module}::process_tree_helper")
+    }
+
+    // The leader must deliberately exit without waiting: this reproduces the
+    // orphaned-descendant regression that the process group is meant to fix.
+    #[allow(clippy::zombie_processes)]
+    #[test]
+    fn process_tree_helper() {
+        match std::env::var(PROCESS_TREE_TEST_ROLE).as_deref()
+        {
+            Ok("leader") =>
+            {
+                Command::new(std::env::current_exe().expect("test executable"))
+                    .args(["--exact", &process_tree_helper_name(), "--nocapture"])
+                    .env(PROCESS_TREE_TEST_ROLE, "descendant")
+                    .stdout(Stdio::inherit())
+                    .stderr(Stdio::inherit())
+                    .spawn()
+                    .expect("spawn descendant");
+                println!("descendant-spawned");
+                std::io::stdout().flush().expect("flush helper output");
+            },
+            Ok("descendant") =>
+            {
+                println!("descendant-ready");
+                std::io::stdout().flush().expect("flush helper output");
+                std::thread::sleep(Duration::from_secs(30));
+            },
+            _ =>
+            {},
+        }
+    }
+
+    #[test]
+    fn timeout_terminates_descendants_that_hold_capture_pipes() {
+        let mut command = Command::new(std::env::current_exe().expect("test executable"));
+        command
+            .args(["--exact", &process_tree_helper_name(), "--nocapture"])
+            .env(PROCESS_TREE_TEST_ROLE, "leader");
+
+        let started = Instant::now();
+        let output = run_limited_with_timeout(command, Duration::from_secs(2))
+            .expect("bounded process execution");
+
+        assert!(output.timed_out);
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "capture readers remained blocked after the timeout"
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("descendant-spawned") && stdout.contains("descendant-ready"),
+            "the helper did not exercise a live descendant: {stdout}"
+        );
+    }
 
     #[test]
     fn test_search_tool() {

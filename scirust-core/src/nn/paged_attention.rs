@@ -75,7 +75,7 @@ impl PagedKvCache {
     pub fn append(&mut self, k: &[f32], v: &[f32]) {
         assert_eq!(k.len(), self.d, "append: key must be length d");
         assert_eq!(v.len(), self.d, "append: value must be length d");
-        if self.len % self.block_size == 0
+        if self.len.is_multiple_of(self.block_size)
         {
             // New logical block → grab the next physical slot from the pool.
             let phys = self.pool_k.len();

@@ -630,8 +630,14 @@ pub fn sign_binance_query(secret: &[u8], query: &str) -> String {
     to_hex(&hmac_sha256(secret, query.as_bytes()))
 }
 
-/// Sign a Coinbase-style prehash `timestamp+method+path+body` and return the
-/// hex HMAC (Coinbase Advanced uses hex for its `CB-ACCESS-SIGN` header).
+/// Legacy raw-key/hex HMAC helper kept for API compatibility.
+///
+/// This is **not** the Coinbase Exchange wire format: Coinbase supplies the
+/// secret as standard base64 and expects a base64 signature. New integrations
+/// must use [`sign_coinbase_request_base64`].
+#[deprecated(
+    note = "raw-key/hex output is not Coinbase wire format; use sign_coinbase_request_base64"
+)]
 pub fn sign_coinbase_request(
     secret: &[u8],
     timestamp: &str,
@@ -641,6 +647,26 @@ pub fn sign_coinbase_request(
 ) -> String {
     let prehash = format!("{timestamp}{method}{path}{body}");
     to_hex(&hmac_sha256(secret, prehash.as_bytes()))
+}
+
+/// Sign a Coinbase Exchange prehash `timestamp+method+path+body`.
+///
+/// Coinbase supplies the API secret as standard base64 and expects the binary
+/// HMAC-SHA256 digest to be base64-encoded in `CB-ACCESS-SIGN`.
+pub fn sign_coinbase_request_base64(
+    encoded_secret: &str,
+    timestamp: &str,
+    method: &str,
+    path: &str,
+    body: &str,
+) -> Result<String, String> {
+    use base64::Engine as _;
+
+    let secret = base64::engine::general_purpose::STANDARD
+        .decode(encoded_secret)
+        .map_err(|_| "Coinbase API secret is not valid standard base64".to_string())?;
+    let prehash = format!("{timestamp}{method}{path}{body}");
+    Ok(base64::engine::general_purpose::STANDARD.encode(hmac_sha256(&secret, prehash.as_bytes())))
 }
 
 // ===========================================================================
@@ -1146,6 +1172,29 @@ mod tests {
             "symbol=LTCBTC&side=BUY&type=LIMIT",
         );
         assert_eq!(sig.len(), 64); // hex of 32-byte HMAC
+    }
+
+    #[test]
+    fn coinbase_signing_decodes_secret_and_returns_base64_hmac() {
+        let signature =
+            sign_coinbase_request_base64("c2VjcmV0", "1700000000", "GET", "/orders", "").unwrap();
+        // Independent HMAC-SHA256 oracle for key `secret` and the documented
+        // timestamp+method+path+body prehash.
+        assert_eq!(signature, "5pq6uRxdFFvJzbzIJRObr9401649NDsVtb6H2TgxZRY=");
+    }
+
+    #[test]
+    fn coinbase_signing_rejects_a_non_base64_secret() {
+        assert!(sign_coinbase_request_base64("not base64!", "1", "GET", "/orders", "").is_err());
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn legacy_coinbase_signer_preserves_raw_key_hex_contract() {
+        assert_eq!(
+            sign_coinbase_request(b"secret", "1700000000", "GET", "/orders", ""),
+            "e69abab91c5d145bc9cdbcc825139bafde34d7ae3d343b15b5be87d938316516"
+        );
     }
 
     const ADDR_A: &str = "0x3535353535353535353535353535353535353535";

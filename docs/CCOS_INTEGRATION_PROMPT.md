@@ -22,7 +22,7 @@ PHILOSOPHIE (non négociable)
 - Tests-oracles honnêtes (valeurs dérivées à la main), jamais ajustés pour coller
   à une sortie buggée. Zéro stub, zéro TODO.
 - `cargo clippy --workspace --all-targets -- -D warnings` propre, `cargo fmt` propre,
-  MSRV 1.85.
+  MSRV 1.89.
 - Branche descriptive, PR en draft. Ne jamais pousser ailleurs sans permission.
 
 PRÉ-REQUIS

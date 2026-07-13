@@ -53,9 +53,9 @@ pub fn generate_static_pipeline(layers: &[LayerSpec], weights_bytes: &[u8]) -> S
             let end = current_offset + size * 4;
             let weights_slice = &weights_bytes[current_offset..end];
             let mut f32_weights = Vec::new();
-            for chunk in weights_slice.chunks_exact(4)
+            for chunk in weights_slice.as_chunks::<4>().0
             {
-                f32_weights.push(f32::from_le_bytes(chunk.try_into().unwrap()));
+                f32_weights.push(f32::from_le_bytes(*chunk));
             }
 
             // A Linear layer is `y = x·W + b`; the `out_features` bias values
@@ -65,9 +65,9 @@ pub fn generate_static_pipeline(layers: &[LayerSpec], weights_bytes: &[u8]) -> S
             let bias_end = end + out_features * 4;
             let bias_slice = &weights_bytes[end..bias_end];
             let mut f32_bias = Vec::new();
-            for chunk in bias_slice.chunks_exact(4)
+            for chunk in bias_slice.as_chunks::<4>().0
             {
-                f32_bias.push(f32::from_le_bytes(chunk.try_into().unwrap()));
+                f32_bias.push(f32::from_le_bytes(*chunk));
             }
 
             code.push_str(&format!(

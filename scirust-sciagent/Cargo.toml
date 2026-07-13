@@ -3,7 +3,7 @@ name = "scirust-sciagent"
 version = "0.1.0"
 edition = "2021"
 publish = false
-rust-version = "1.85"
+rust-version = "1.89"
 description = "SCIAGENT — SLM deterministe entraine from scratch, specialise Rust + agentique, infere via scirust/CCOS/SLHAv2"
 
 [dependencies]
@@ -15,6 +15,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rand = "0.8"
 clap = { version = "4", features = ["derive"] }
+command-group = "5.0.1"
 ureq = { version = "2", features = ["json"], optional = true }
 # SHA-256 to verify downloaded crate tarballs against the crates.io checksum
 # (supply-chain integrity, audit finding S3). Only needed by the `fetch` binary.

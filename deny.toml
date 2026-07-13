@@ -14,6 +14,9 @@ ignore = [
     # nalgebra -> simba and has no upstream replacement yet
     # (https://rustsec.org/advisories/RUSTSEC-2024-0436).
     { id = "RUSTSEC-2024-0436", reason = "paste unmaintained; transitively required by nalgebra/simba, no safe upgrade available" },
+    # Unmaintained notice, not a vulnerability: this is pulled in only by the
+    # optional Intel MKL source package and the advisory lists no safe upgrade.
+    { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 unmaintained; transitively required by intel-mkl-src, no safe upgrade available" },
 ]
 
 [licenses]
@@ -24,12 +27,32 @@ allow = [
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "MIT-0",
+    "CDLA-Permissive-2.0",
+    "CC0-1.0",
+    "MPL-2.0",
     "Zlib",
     "Unicode-3.0",
+    "PolyForm-Noncommercial-1.0.0",
 ]
 confidence-threshold = 0.8
+exceptions = [
+    { allow = ["LicenseRef-Intel-Simplified-Software-License"], crate = "intel-mkl-src@0.8.1" },
+]
 # Workspace members are unpublished; skip license checks for them.
 private = { ignore = true }
+
+# intel-mkl-src ships its license in a non-SPDX license-file field. Pin the
+# reviewed Intel Simplified Software License text so an upstream change fails
+# closed instead of silently inheriting this clarification.
+[[licenses.clarify]]
+crate = "intel-mkl-src@0.8.1"
+expression = "LicenseRef-Intel-Simplified-Software-License"
+license-files = [
+    { path = "License.txt", hash = 0x3bf8c2d0 },
+]
 
 [bans]
 multiple-versions = "allow"

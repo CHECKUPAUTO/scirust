@@ -133,9 +133,9 @@ impl ShardLoader {
     pub fn load_bin<P: AsRef<Path>>(&mut self, path: P) -> std::io::Result<()> {
         let bytes = std::fs::read(path.as_ref())?;
         let mut data = vec![0u32; bytes.len() / 4];
-        for (i, chunk) in bytes.chunks_exact(4).enumerate()
+        for (i, chunk) in bytes.as_chunks::<4>().0.iter().enumerate()
         {
-            data[i] = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+            data[i] = u32::from_le_bytes(*chunk);
         }
         self.buffer = data;
         Ok(())
@@ -151,9 +151,9 @@ impl ShardLoader {
         for entry in &entries
         {
             let bytes = std::fs::read(entry.path())?;
-            for chunk in bytes.chunks_exact(4)
+            for chunk in bytes.as_chunks::<4>().0
             {
-                all_data.push(u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+                all_data.push(u32::from_le_bytes(*chunk));
             }
         }
         self.buffer = all_data;
