@@ -1,0 +1,102 @@
+name: Native ARM64
+
+on:
+  pull_request:
+    branches: [master, main, develop]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "scirust-fractional/**"
+      - "scirust-relativity/**"
+      - "scirust-sim/**"
+      - "scirust-special/**"
+      - ".github/workflows/native-arm64.yml"
+  push:
+    branches: [master, main, develop]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "scirust-fractional/**"
+      - "scirust-relativity/**"
+      - "scirust-sim/**"
+      - "scirust-special/**"
+      - ".github/workflows/native-arm64.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-arm64-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-arm64:
+    name: Native ARM64 (Jetson Thor)
+
+    # Never execute untrusted code from a fork on the self-hosted runner.
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+
+    runs-on:
+      - self-hosted
+      - Linux
+      - ARM64
+      - scirust-arm64
+      - jetson-thor
+      - internal
+
+    timeout-minutes: 120
+
+    env:
+      RUST_BACKTRACE: 1
+      CARGO_INCREMENTAL: 0
+      RUSTFLAGS: "-D warnings"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Display native runner information
+        run: |
+          uname -a
+          uname -m
+          nproc
+          free -h
+          rustc --version 2>/dev/null || true
+
+      - name: Prepare executable temporary directory
+        run: |
+          tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.ci-tmp.XXXXXX")"
+          chmod 700 "$tmpdir"
+          echo "TMPDIR=$tmpdir" >> "$GITHUB_ENV"
+
+      - name: Install pinned nightly toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+
+      - name: Restore Cargo cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+        with:
+          shared-key: native-arm64-jetson-thor
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Test fractional calculus
+        run: cargo test -p scirust-fractional
+
+      - name: Test relativity and geodesics
+        run: cargo test -p scirust-relativity
+
+      - name: Run Clippy
+        run: |
+          cargo clippy \
+            -p scirust-fractional \
+            -p scirust-relativity \
+            --all-targets \
+            -- \
+            -D warnings

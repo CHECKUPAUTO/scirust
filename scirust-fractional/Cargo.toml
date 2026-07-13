@@ -1,0 +1,9 @@
+[package]
+name = "scirust-fractional"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Deterministic fractional-calculus operators for SciRust: Caputo L1 and Grünwald-Letnikov discretizations, backed by the audited gamma implementation in scirust-special. Pure Rust, no unsafe."
+
+[dependencies]
+scirust-special = { path = "../scirust-special" }
