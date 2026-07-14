@@ -12,7 +12,12 @@
 //! Boltzmann, Wien) and the NETD / MRTD sensor-sensitivity metrics that spec a
 //! thermal imager. The [`atmosphere`] module adds Beer–Lambert atmospheric
 //! transmission and the EO/IR range budget — carrying that sensitivity through
-//! an attenuating path to the target ΔT detectable at range.
+//! an attenuating path to the target ΔT detectable at range. The [`turbulence`]
+//! module adds the optical-turbulence and adaptive-optics descriptors — the Fried
+//! parameter, seeing angle, Strehl ratio, Greenwood frequency, degrees of freedom,
+//! and Rytov scintillation variance — that quantify how refractive-index
+//! turbulence blurs a long-range image and fades a laser beam, sizing a telescope
+//! or an adaptive-optics loop against a `Cn²` profile.
 
 use serde::{Deserialize, Serialize};
 
@@ -21,6 +26,7 @@ pub mod beams;
 pub mod detect;
 pub mod optics;
 pub mod radiometry;
+pub mod turbulence;
 pub use atmosphere::{
     apparent_contrast, extinction, extinction_from_transmittance, extinction_from_visibility,
     optical_depth, required_delta_t, transmittance,
@@ -37,6 +43,10 @@ pub use optics::{
 pub use radiometry::{
     band_radiance, exitance_derivative, mrtd, netd, peak_wavelength, planck_radiance,
     planck_radiance_dt, radiant_exitance, thermal_contrast,
+};
+pub use turbulence::{
+    degrees_of_freedom, fried_parameter, greenwood_frequency, rytov_variance, seeing_angle,
+    strehl_ratio,
 };
 
 // ─── Image Representation ───────────────────────────────────────────────────

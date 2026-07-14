@@ -5,6 +5,27 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-vision` : optronique — turbulence atmosphérique et optique adaptative (`turbulence`) — bloc 38
+Le module [`atmosphere`] modélise l'**atténuation** du contraste par le trajet ; ce
+module modélise le **flou** qu'y ajoute la turbulence d'indice (force donnée par la
+constante de structure `Cn²`), qui limite l'imagerie EO/IR à longue distance et fait
+scintiller un faisceau laser.
+- **`fried_parameter(Cn², λ, L)`** = `(0.423·k²·Cn²·L)^(−3/5)` — le paramètre de
+  Fried `r₀` (longueur de cohérence, `k=2π/λ`) ; **`seeing_angle(λ, r₀)`** ≈
+  `0.98·λ/r₀`, le flou de seeing qui remplace la limite de diffraction `λ/D` dès que
+  `D > r₀`.
+- **`strehl_ratio(D, r₀)`** = `[1 + (D/r₀)^(5/3)]^(−6/5)` — la fraction d'intensité
+  crête conservée sans correction ; **`greenwood_frequency(v, r₀)`** = `0.426·v/r₀`,
+  la bande passante d'une boucle d'optique adaptative ; **`degrees_of_freedom(D,
+  r₀)`** = `(D/r₀)²` ; **`rytov_variance(Cn², λ, L)`** = `1.23·Cn²·k^(7/6)·L^(11/6)`,
+  la scintillation (twinkling d'intensité) en turbulence faible.
+- Oracles : `r₀` conforme à la forme fermée et **∝ λ^(6/5)** (décroît avec Cn² et L) ;
+  seeing = `0.98·λ/r₀` et **dépasse la diffraction** `λ/D` quand `D ≫ r₀` (→ 0 sans
+  turbulence) ; Strehl → 1 pour `D ≪ r₀`, `= 2^(−6/5)` à `D = r₀`, monotone décroissant,
+  borné (0, 1] ; Greenwood ∝ v et ∝ 1/r₀ ; Rytov ∝ Cn², ∝ L^(11/6), ∝ k^(7/6) ; gardes
+  (entrées dégénérées sûres, pas de NaN). 7 tests (67 au total pour le crate) ;
+  `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-signal` : radar — codes polyphasés / CAZAC (`radar::polyphase`) — bloc 37
 Les formes d'onde de compression au-delà de Barker. Les codes de Barker sont
 optimaux mais s'arrêtent à la longueur 13 ; les **codes polyphasés** utilisent
