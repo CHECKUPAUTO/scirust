@@ -38,9 +38,7 @@ env:
 jobs:
   fmt:
     name: Format Check
-    # Internal branches and same-repository PRs use the local Jetson pool.
-    # Fork PRs remain isolated on a fresh GitHub-hosted runner.
-    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && '["ubuntu-latest"]' || '["self-hosted","Linux","ARM64","scirust-arm64","jetson-thor","internal"]') }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       # rustfmt output is version-sensitive and this repo's rustfmt.toml uses
@@ -86,9 +84,7 @@ jobs:
   # Ambiguïtés f32/f64 = WARNING non bloquant (zéro faux positif).
   epsilon-audit:
     name: Epsilon Audit (σ gate)
-    # Internal branches and same-repository PRs use the local Jetson pool.
-    # Fork PRs remain isolated on a fresh GitHub-hosted runner.
-    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && '["ubuntu-latest"]' || '["self-hosted","Linux","ARM64","scirust-arm64","jetson-thor","internal"]') }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Install nightly toolchain
@@ -106,9 +102,7 @@ jobs:
   # warning counts (7/8) are preserved. Coreutils only — no toolchain needed.
   cobol-corpus:
     name: COBOL Corpus Integrity
-    # Internal branches and same-repository PRs use the local Jetson pool.
-    # Fork PRs remain isolated on a fresh GitHub-hosted runner.
-    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && '["ubuntu-latest"]' || '["self-hosted","Linux","ARM64","scirust-arm64","jetson-thor","internal"]') }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Verify COBOL reference corpus
@@ -161,9 +155,7 @@ jobs:
   # testing warning-clean (RUSTFLAGS=-D warnings is set workspace-wide above).
   portable-simd:
     name: Build & Test (portable-simd, nightly)
-    # Internal branches and same-repository PRs use the local Jetson pool.
-    # Fork PRs remain isolated on a fresh GitHub-hosted runner.
-    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && '["ubuntu-latest"]' || '["self-hosted","Linux","ARM64","scirust-arm64","jetson-thor","internal"]') }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Install nightly toolchain
