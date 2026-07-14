@@ -350,7 +350,23 @@ fn main() {
         toks
     };
 
-    let total_steps = start_step + env_usize("SCIAGENT_STEPS", 300);
+    // Total-step target. `SCIAGENT_TOTAL_STEPS` sets it ABSOLUTELY — so resuming an
+    // interrupted run to its original target is just `SCIAGENT_TOTAL_STEPS=40000`
+    // (no arithmetic, no overshoot from the additive default). Otherwise it stays
+    // additive (`start_step + STEPS`), the historical behavior. Warmup is 10% of the
+    // ACTUAL remaining run either way, so a short resume re-warms briefly (cushioning
+    // the AdamW-moment reset) rather than re-ramping a full fresh-run warmup.
+    let steps_env = env_usize("SCIAGENT_STEPS", 300);
+    let total_steps = std::env::var("SCIAGENT_TOTAL_STEPS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|&t| t > start_step)
+        .unwrap_or(start_step + steps_env);
+    let run_len = total_steps.saturating_sub(start_step).max(1);
+    let warmup_extra = std::env::var("SCIAGENT_WARMUP")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or((run_len / 10).max(1));
     // LR must key off model *size*, not vocab: a 270M byte-level model (vocab 256)
     // diverges at the 3e-3 that suits a tiny demo. Small trunks (d_model ≤ 256) can
     // take the hot 3e-3; anything larger gets the standard 3e-4 (with warmup+cosine).
@@ -377,7 +393,7 @@ fn main() {
     let cfg = CudaPretrainConfig {
         base_lr,
         min_lr: base_lr * 0.1,
-        warmup_steps: start_step + (env_usize("SCIAGENT_STEPS", 300) / 10).max(1),
+        warmup_steps: start_step + warmup_extra,
         total_steps,
         start_step,
         seq_len,

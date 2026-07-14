@@ -277,6 +277,22 @@ train/fine-tune/generate/speculative stack rides on top unchanged.
   Together with B14 this is the *fix corpus + tokenizer* half of the endorsed plan;
   the payoff lands on the **re-tokenise → retrain** (step 6).
 
+- **v2 retrain — the fixes paid off (step 6, in progress).** Re-tokenised the same
+  ~5.3 M-token corpus with the v2 tokenizer and retrained the 304M model from scratch.
+  By step ~22 000 (interrupted by a machine power-off) **held-out val had fallen to
+  5.46–6.17** — already **below the v1 run's best of 6.42 at step 20 000**, and still
+  declining, with no `<NNN>` leaks in the tokeniser. Same size corpus, so the gain is
+  purely the reversible tokenizer + corpus filter + a longer schedule. Resumable from
+  `checkpoints/bpe350m_v2/step_21900`.
+
+- **B16 — clean resume-to-target (`SCIAGENT_TOTAL_STEPS`).** The harness computed the
+  step target *additively* (`start_step + STEPS`), so resuming a 40 k-step run naively
+  overshot and re-ran a full fresh-run warmup. Added `SCIAGENT_TOTAL_STEPS` (absolute
+  target) so resuming to the original target is `SCIAGENT_TOTAL_STEPS=40000` — no
+  arithmetic, no overshoot — and based warmup on the *actual* remaining run so a resume
+  re-warms briefly (cushioning the AdamW-moment reset) instead of ramping a full
+  warmup. `SCIAGENT_WARMUP` overrides it. Backward compatible (unset ⇒ old behavior).
+
 ## Risks / honesty
 
 - **Toolchain gate (highest risk):** if the Thor's installed CUDA can't emit sm_110,
