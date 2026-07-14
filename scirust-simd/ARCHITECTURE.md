@@ -73,7 +73,7 @@ Du bas (silicium) vers le haut (application) :
 | **Kernels x86 avancés** | `x86_ext` | masques `k` (axpy conditionnel), NT-stores, prefetch logiciel |
 | **Attention** | `attention`, `kv_cache`, `qkv_cache` | naïve, **flash**, **causale**, **multi-tête**, **cache KV** (`f32` **et int8** ÷4 mémoire) |
 | **Normalisations** | `norm` | RMSNorm, LayerNorm (vectorisées), RoPE |
-| **Assemblage** | `transformer`, `model` | Bloc décodeur pre-norm (prefill **+** decode), modèle multi-couche + génération |
+| **Assemblage** | `transformer`, `model` | Bloc décodeur pre-norm (prefill **+** decode `f32` **et int8**), modèle multi-couche + génération (`generate_hidden`/`_quant`) |
 | **Entraînement** | `grad` | Backward de tous les noyaux, validés par **gradcheck** |
 | **Application** | `scirust-learning::simd_nn` | `DenseLayer`/`Mlp` entraînables, optimiseur **AdamW** |
 

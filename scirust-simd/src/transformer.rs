@@ -24,6 +24,36 @@ use crate::gemm::{Activation, sgemm_bias_act, sgemm_tiled};
 use crate::kv_cache::KvCache;
 use crate::matrix::view::{MatrixView, MatrixViewMut};
 use crate::norm::rmsnorm;
+use crate::qkv_cache::QuantizedKvCache;
+
+/// Cache KV consommé par le décodage incrémental — abstrait sur le type de
+/// stockage (`f32` via [`KvCache`], **int8** via [`QuantizedKvCache`]) pour que
+/// [`TransformerBlock::forward_decode`] et
+/// [`TransformerBlock::forward_decode_quant`] partagent exactement le même corps.
+pub trait DecodeCache {
+    /// Empile les `K`/`V` (longueur `d_model`) du nouveau token.
+    fn append(&mut self, k_row: &[f32], v_row: &[f32]);
+    /// Attention multi-tête du query sur tout le cache courant.
+    fn decode_step(&self, q: &[f32], n_heads: usize, d_head: usize, scale: f32, out: &mut [f32]);
+}
+
+impl DecodeCache for KvCache {
+    fn append(&mut self, k_row: &[f32], v_row: &[f32]) {
+        KvCache::append(self, k_row, v_row);
+    }
+    fn decode_step(&self, q: &[f32], n_heads: usize, d_head: usize, scale: f32, out: &mut [f32]) {
+        KvCache::decode_step(self, q, n_heads, d_head, scale, out);
+    }
+}
+
+impl DecodeCache for QuantizedKvCache {
+    fn append(&mut self, k_row: &[f32], v_row: &[f32]) {
+        QuantizedKvCache::append(self, k_row, v_row);
+    }
+    fn decode_step(&self, q: &[f32], n_heads: usize, d_head: usize, scale: f32, out: &mut [f32]) {
+        QuantizedKvCache::decode_step(self, q, n_heads, d_head, scale, out);
+    }
+}
 
 /// Poids d'un bloc décodeur (tous empruntés, row-major).
 ///
@@ -145,6 +175,23 @@ impl TransformerBlock<'_> {
     /// exécuté sur toute la séquence — mais en `O(pos·d)` par token au lieu de
     /// recalculer le préfixe. Vérifié dans les tests (`decode_matches_prefill`).
     pub fn forward_decode(&self, x_t: &mut [f32], pos: usize, cache: &mut KvCache) {
+        self.forward_decode_with(x_t, pos, cache);
+    }
+
+    /// Décodage incrémental à **cache KV int8** ([`QuantizedKvCache`], ÷4
+    /// mémoire) : identique à [`Self::forward_decode`] mais `K`/`V` sont stockés
+    /// quantifiés et les scores `q·Kᵀ` passent par le dot int8 matériel (cf.
+    /// [`crate::qkv_cache`]). Les projections et le FFN restent `f32`. La sortie
+    /// approche celle du cache `f32` à la tolérance de quantification près
+    /// (vérifié : `decode_quant_close_to_prefill`).
+    pub fn forward_decode_quant(&self, x_t: &mut [f32], pos: usize, cache: &mut QuantizedKvCache) {
+        self.forward_decode_with(x_t, pos, cache);
+    }
+
+    /// Décodage incrémental **générique** sur le type de cache (cf.
+    /// [`DecodeCache`]) : corps commun de [`Self::forward_decode`] (`f32`) et
+    /// [`Self::forward_decode_quant`] (int8).
+    pub fn forward_decode_with<C: DecodeCache>(&self, x_t: &mut [f32], pos: usize, cache: &mut C) {
         let d = self.d_model;
         let h = self.n_heads;
         let dff = self.d_ff;
@@ -510,5 +557,75 @@ mod tests {
                 prefill[i]
             );
         }
+    }
+
+    #[test]
+    fn decode_quant_close_to_prefill() {
+        // Décodage incrémental via le cache KV **int8** (`forward_decode_quant`) :
+        // doit approcher le prefill causal `f32` à la tolérance de quantification
+        // près (K/V stockés en int8, scores par dot int8).
+        let (s, d, h, dff) = (12usize, 32usize, 4usize, 64usize);
+        let eps = 1e-5f32;
+        let base = 10000.0f32;
+        // Données décorrélées (LCG) : évite les produits scalaires quasi nuls des
+        // signaux sinusoïdaux qui gonflent l'erreur relative de quantification.
+        let mut seed = 0x51ED_5EEDu64;
+        let mut mk = |n: usize| -> Vec<f32> {
+            (0..n)
+                .map(|_| {
+                    seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+                    ((seed >> 33) as f32 / (1u64 << 31) as f32 - 1.0) * 0.5
+                })
+                .collect()
+        };
+        let (wq, wk, wv, wo) = (mk(d * d), mk(d * d), mk(d * d), mk(d * d));
+        let (w1, b1, w2) = (mk(d * dff), mk(dff), mk(dff * d));
+        let norm1: Vec<f32> = (0..d).map(|i| 1.0 + i as f32 * 0.005).collect();
+        let norm2: Vec<f32> = (0..d).map(|i| 0.9 + i as f32 * 0.005).collect();
+        let x0 = mk(s * d);
+
+        let block = TransformerBlock {
+            d_model: d,
+            n_heads: h,
+            d_ff: dff,
+            wq: &wq,
+            wk: &wk,
+            wv: &wv,
+            wo: &wo,
+            w1: &w1,
+            b1: &b1,
+            w2: &w2,
+            norm1: &norm1,
+            norm2: &norm2,
+            eps,
+            rope_base: base,
+            causal: true,
+        };
+
+        // Référence : prefill f32 complet.
+        let mut prefill = x0.clone();
+        block.forward(&mut prefill, s);
+
+        // Décodage incrémental avec cache int8.
+        let mut cache = QuantizedKvCache::new(s, d);
+        let mut decoded = vec![0.0f32; s * d];
+        for t in 0..s
+        {
+            let mut row = x0[t * d..t * d + d].to_vec();
+            block.forward_decode_quant(&mut row, t, &mut cache);
+            decoded[t * d..t * d + d].copy_from_slice(&row);
+        }
+        assert_eq!(cache.len(), s);
+
+        // Erreur relative RMS < 5 % (quantification int8 de K/V/q).
+        let mut num = 0f64;
+        let mut den = 0f64;
+        for i in 0..s * d
+        {
+            num += (decoded[i] - prefill[i]).powi(2) as f64;
+            den += (prefill[i] as f64).powi(2);
+        }
+        let rel = (num / den).sqrt();
+        assert!(rel < 0.05, "erreur relative RMS trop grande : {rel}");
     }
 }

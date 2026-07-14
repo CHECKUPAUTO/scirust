@@ -15,7 +15,8 @@
 //! traiter le prompt en bloc puis à générer incrémentalement sans divergence.
 
 use crate::kv_cache::KvCache;
-use crate::transformer::TransformerBlock;
+use crate::qkv_cache::QuantizedKvCache;
+use crate::transformer::{DecodeCache, TransformerBlock};
 
 /// Pile de blocs décodeur partageant la même dimension modèle.
 pub struct TransformerModel<'a> {
@@ -57,7 +58,7 @@ impl<'a> TransformerModel<'a> {
         }
     }
 
-    /// Alloue un cache KV par bloc, dimensionné pour `cap` positions.
+    /// Alloue un cache KV `f32` par bloc, dimensionné pour `cap` positions.
     pub fn new_caches(&self, cap: usize) -> Vec<KvCache> {
         self.blocks
             .iter()
@@ -65,10 +66,19 @@ impl<'a> TransformerModel<'a> {
             .collect()
     }
 
-    /// **Pas de décodage** : fait avancer le token `x_t` (`d_model`) à la
-    /// position `pos` à travers tous les blocs, chacun mettant à jour son cache.
-    /// `caches` doit avoir exactement `n_layers()` entrées (voir [`Self::new_caches`]).
-    pub fn decode_step(&self, x_t: &mut [f32], pos: usize, caches: &mut [KvCache]) {
+    /// Alloue un cache KV **int8** ([`QuantizedKvCache`], ÷4 mémoire) par bloc.
+    pub fn new_quant_caches(&self, cap: usize) -> Vec<QuantizedKvCache> {
+        self.blocks
+            .iter()
+            .map(|_| QuantizedKvCache::new(cap, self.d_model))
+            .collect()
+    }
+
+    /// **Pas de décodage** générique sur le type de cache (cf. [`DecodeCache`]) :
+    /// fait avancer le token `x_t` (`d_model`) à la position `pos` à travers tous
+    /// les blocs, chacun mettant à jour son cache. `caches` doit avoir exactement
+    /// `n_layers()` entrées.
+    pub fn decode_step_with<C: DecodeCache>(&self, x_t: &mut [f32], pos: usize, caches: &mut [C]) {
         assert_eq!(
             caches.len(),
             self.blocks.len(),
@@ -76,8 +86,18 @@ impl<'a> TransformerModel<'a> {
         );
         for (b, c) in self.blocks.iter().zip(caches.iter_mut())
         {
-            b.forward_decode(x_t, pos, c);
+            b.forward_decode_with(x_t, pos, c);
         }
+    }
+
+    /// [`Self::decode_step_with`] sur des caches `f32`.
+    pub fn decode_step(&self, x_t: &mut [f32], pos: usize, caches: &mut [KvCache]) {
+        self.decode_step_with(x_t, pos, caches);
+    }
+
+    /// [`Self::decode_step_with`] sur des caches **int8**.
+    pub fn decode_step_quant(&self, x_t: &mut [f32], pos: usize, caches: &mut [QuantizedKvCache]) {
+        self.decode_step_with(x_t, pos, caches);
     }
 
     /// Démonstration de **boucle de génération** sur l'état caché (sans vocab) :
@@ -91,20 +111,44 @@ impl<'a> TransformerModel<'a> {
     /// dé-projection + un vocabulaire, hors de ce crate de noyaux), mais elle
     /// exerce le vrai chemin `decode_step` de bout en bout.
     pub fn generate_hidden(&self, prompt: &[f32], prompt_len: usize, n_new: usize) -> Vec<f32> {
+        let mut caches = self.new_caches(prompt_len + n_new);
+        self.generate_hidden_with(prompt, prompt_len, n_new, &mut caches)
+    }
+
+    /// [`Self::generate_hidden`] avec un **cache KV int8** ([`QuantizedKvCache`],
+    /// ÷4 mémoire) : même boucle de génération, K/V stockés quantifiés. La sortie
+    /// approche celle du chemin `f32` à la tolérance de quantification près.
+    pub fn generate_hidden_quant(
+        &self,
+        prompt: &[f32],
+        prompt_len: usize,
+        n_new: usize,
+    ) -> Vec<f32> {
+        let mut caches = self.new_quant_caches(prompt_len + n_new);
+        self.generate_hidden_with(prompt, prompt_len, n_new, &mut caches)
+    }
+
+    /// Boucle de génération générique sur le type de cache (cf. [`DecodeCache`]).
+    fn generate_hidden_with<C: DecodeCache>(
+        &self,
+        prompt: &[f32],
+        prompt_len: usize,
+        n_new: usize,
+        caches: &mut [C],
+    ) -> Vec<f32> {
         let d = self.d_model;
         assert_eq!(
             prompt.len(),
             prompt_len * d,
             "generate_hidden: prompt shape"
         );
-        let mut caches = self.new_caches(prompt_len + n_new);
 
         // Prefill via les caches, position par position.
         let mut last = vec![0.0f32; d];
         for t in 0..prompt_len
         {
             let mut row = prompt[t * d..t * d + d].to_vec();
-            self.decode_step(&mut row, t, &mut caches);
+            self.decode_step_with(&mut row, t, caches);
             last = row;
         }
 
@@ -114,7 +158,7 @@ impl<'a> TransformerModel<'a> {
         {
             let pos = prompt_len + i;
             let mut row = last.clone();
-            self.decode_step(&mut row, pos, &mut caches);
+            self.decode_step_with(&mut row, pos, caches);
             out.extend_from_slice(&row);
             last = row;
         }
@@ -236,5 +280,53 @@ mod tests {
         // Déterministe : deux exécutions identiques.
         let b = model.generate_hidden(&prompt, prompt_len, n_new);
         assert_eq!(a, b, "génération non déterministe");
+    }
+
+    #[test]
+    fn generation_quant_close_to_f32() {
+        // La génération multi-couche avec caches KV **int8** doit suivre la
+        // génération `f32` à la tolérance de quantification près (données
+        // décorrélées pour un produit scalaire non dégénéré).
+        let (d, h, dff, n_layers) = (32usize, 4usize, 64usize, 2usize);
+        let mut seed = 0xBEEF_1234u64;
+        let mut mk = |n: usize| -> Vec<f32> {
+            (0..n)
+                .map(|_| {
+                    seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+                    ((seed >> 33) as f32 / (1u64 << 31) as f32 - 1.0) * 0.4
+                })
+                .collect()
+        };
+        let store: Vec<Weights> = (0..n_layers)
+            .map(|_| Weights {
+                wq: mk(d * d),
+                wk: mk(d * d),
+                wv: mk(d * d),
+                wo: mk(d * d),
+                w1: mk(d * dff),
+                b1: mk(dff),
+                w2: mk(dff * d),
+                norm1: (0..d).map(|i| 1.0 + i as f32 * 0.005).collect(),
+                norm2: (0..d).map(|i| 0.9 + i as f32 * 0.005).collect(),
+            })
+            .collect();
+        let model = TransformerModel::new(store.iter().map(|w| block(w, d, h, dff)).collect());
+
+        let (prompt_len, n_new) = (5usize, 5usize);
+        let prompt = mk(prompt_len * d);
+
+        let f32_out = model.generate_hidden(&prompt, prompt_len, n_new);
+        let q_out = model.generate_hidden_quant(&prompt, prompt_len, n_new);
+        assert_eq!(f32_out.len(), q_out.len());
+
+        let mut num = 0f64;
+        let mut den = 0f64;
+        for i in 0..f32_out.len()
+        {
+            num += (q_out[i] - f32_out[i]).powi(2) as f64;
+            den += (f32_out[i] as f64).powi(2);
+        }
+        let rel = (num / den).sqrt();
+        assert!(rel < 0.08, "génération int8 diverge du f32 : RMS {rel}");
     }
 }
