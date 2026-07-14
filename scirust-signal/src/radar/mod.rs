@@ -55,8 +55,12 @@
 //! adds the imaging mode: synthetic-aperture azimuth compression that focuses a
 //! target's quadratic slow-time phase history (an azimuth chirp) into a sharp
 //! peak, synthesising a `λR/D` aperture for the range-independent `D/2`
-//! cross-range resolution.
+//! cross-range resolution. [`accuracy`] closes the performance side with the
+//! Cramér–Rao lower bounds on measurement precision — the `1/√SNR` floors on
+//! delay/range, Doppler/velocity, and monopulse angle that bound the estimators
+//! above and that a link budget must close to meet an accuracy spec.
 
+pub mod accuracy;
 pub mod ambiguity;
 pub mod beamform;
 pub mod cfar;
@@ -87,6 +91,10 @@ pub mod swerling;
 pub mod track;
 pub mod waveform;
 
+pub use accuracy::{
+    angle_crlb, delay_crlb, doppler_crlb, range_crlb, rms_bandwidth_lfm, rms_duration_rect,
+    velocity_crlb,
+};
 pub use ambiguity::ambiguity;
 pub use beamform::{beamform_spectrum, estimate_doa, steering_vector};
 pub use cfar::{ca_cfar, ca_cfar_alpha, os_cfar, os_cfar_alpha};

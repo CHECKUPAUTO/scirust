@@ -5,6 +5,21 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : radar — précision de mesure, bornes de Cramér–Rao (`radar::accuracy`) — bloc 39
+Le plancher théorique de précision des estimateurs radar (retard/télémétrie,
+Doppler/vitesse, angle monopulse) : les **bornes de Cramér–Rao**, toutes en
+`1/√SNR`.
+- **`rms_bandwidth_lfm(B)`** = `B/√12` (bande RMS d'un spectre plat) ;
+  **`rms_duration_rect(T)`** = `T/√12` ; **`delay_crlb(SNR, β_rms)`** =
+  `1/(2π·β_rms·√(2·SNR))` ; **`range_crlb`** = `(c/2)·σ_τ`.
+- **`doppler_crlb(SNR, T_rms)`** = `1/(2π·T_rms·√(2·SNR))` ; **`velocity_crlb`** =
+  `(λ/2)·σ_fd` ; **`angle_crlb(SNR, θ₃dB, k_m)`** = `θ₃dB/(k_m·√(2·SNR))` (monopulse).
+- Oracles : formes fermées exactes ; **∝ 1/√SNR** (×4 SNR ⇒ ÷2) ; télémétrie
+  `= (c/2)·retard` et vitesse `= (λ/2)·Doppler` ; une bande plus large **affine la
+  distance**, un temps d'intégration plus long **affine la vitesse**, une pente
+  monopulse plus raide affine l'angle ; gardes (SNR/bande/durée ≤ 0 ⇒ `+∞`, pas de
+  NaN). 7 tests (273 au total pour le crate) ; `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-vision` : optronique — turbulence atmosphérique et optique adaptative (`turbulence`) — bloc 38
 Le module [`atmosphere`] modélise l'**atténuation** du contraste par le trajet ; ce
 module modélise le **flou** qu'y ajoute la turbulence d'indice (force donnée par la

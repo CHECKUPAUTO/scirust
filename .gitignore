@@ -1,3 +1,6 @@
+# Ephemeral agent workflow worktrees (transient, auto-managed)
+.claude/worktrees/
+
 # Build artifacts
 /target/
 examples/benchmarks/target/
