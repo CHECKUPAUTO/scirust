@@ -5,6 +5,28 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : radar — codes polyphasés / CAZAC (`radar::polyphase`) — bloc 37
+Les formes d'onde de compression au-delà de Barker. Les codes de Barker sont
+optimaux mais s'arrêtent à la longueur 13 ; les **codes polyphasés** utilisent
+plusieurs valeurs de phase, existent à toute longueur, et — pour Frank et
+Zadoff-Chu — possèdent une **autocorrélation périodique parfaite** (une impulsion,
+zéro lobe secondaire), la propriété recherchée quand un code est répété à chaque
+PRI. Les codes P3/P4 (LFM échantillonné) échangent un peu de cette perfection
+contre une tolérance Doppler et une phase « bruitée » qui en font les formes d'onde
+**LPI** (faible probabilité d'interception) canoniques.
+- **`frank_code(n)`** — code de Frank, longueur `N²`, phase `2π·i·k/n` ;
+  **`p3_code(L)`** = `exp(j·π·n²/L)` ; **`p4_code(L)`** = `exp(j·(π·n²/L − π·n))` ;
+  **`zadoff_chu(L, u)`** — séquence CAZAC parfaite pour tout `u` premier avec `L`.
+- **`periodic_autocorrelation(code)`** — `R[τ] = Σ code[n]·conj(code[(n+τ) mod L])`.
+- Oracles : structure de Frank (longueur `N²`, module unité, phase exacte) ;
+  **Frank a une autocorrélation périodique parfaite** (0 hors zéro, `N²` au zéro) ;
+  **Zadoff-Chu est CAZAC** (parfait pour longueur paire/première, racine non
+  première rejetée) ; P3/P4 = **phases LFM échantillonnées** (module unité, formule
+  exacte) ; le **pic d'autocorrélation apériodique = longueur** (réutilise
+  `cross_correlate`) ; l'autocorrélation **périodique** de Frank **bat Barker-13**
+  (lobes nuls vs. un lobe réel) ; gardes. 7 tests (266 au total pour le crate) ;
+  `fmt`/`clippy -D warnings` propres.
+
 ### Ajouté — `scirust-signal` : radar — imagerie SAR, compression azimutale (`radar::sar`) — bloc 36
 Le mode **imagerie** du radar. Une antenne réelle de longueur `D` a une résolution
 transverse `λR/D`, grossière à longue distance ; le **SAR** la raffine en

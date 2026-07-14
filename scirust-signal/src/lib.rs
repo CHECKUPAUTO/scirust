@@ -20,7 +20,10 @@
 //!   via cascaded second-order sections, and a general direct-form-II-transposed
 //!   `lfilter`
 //! - **Radar** — pulse-compression waveforms (linear-FM chirp, Barker phase
-//!   codes), matched filtering (cross-correlation, peak/echo-delay estimation,
+//!   codes, and polyphase / CAZAC codes — Frank, P3, P4 and Zadoff-Chu — the
+//!   perfect-periodic-autocorrelation and low-probability-of-intercept waveforms
+//!   that exist beyond the length-13 Barker limit), matched filtering
+//!   (cross-correlation, peak/echo-delay estimation,
 //!   peak-to-sidelobe ratio), the ambiguity function (joint delay-Doppler
 //!   response, range-Doppler coupling), Doppler processing (range-Doppler map),
 //!   MTI clutter cancellers, CFAR detection (cell-averaging and
@@ -125,16 +128,16 @@ pub use radar::{
     ca_cfar_alpha, cadence, cluster_detections, clutter_covariance, clutter_ridge_doppler,
     covariance, critically_damped_gains, cross_correlate, ct_model_2d, cv_model_2d,
     doppler_bandwidth, doppler_spectrum, erf as erf_fn, esprit_doa, estimate_doa, focus_azimuth,
-    fold_range, fold_velocity, lfm_chirp, lognormal_cdf, lognormal_pdf, max_doppler, mean_doppler,
-    monopulse_estimate_angle, monopulse_ratio, monopulse_slope, mti_canceller, music_spectrum,
-    mvdr_spectrum, optimal_sinr, os_cfar, os_cfar_alpha, peak_lag, peak_to_sidelobe,
-    phase_difference, phase_from_signals, range_bins, range_doppler, range_doppler_map,
-    range_profile, range_resolution, rayleigh_cdf as clutter_rayleigh_cdf,
-    rayleigh_pdf as clutter_rayleigh_pdf, rayleigh_quantile, ridge as micro_doppler_ridge,
-    single_pulse_threshold, space_time_steering, spatial_frequency, spectrogram, steering_vector,
-    stepped_range_profile, stepped_range_resolution, swerling1_pd, swerling1_required_snr,
-    synthetic_aperture_length, synthetic_bandwidth, unambiguous_angle, unambiguous_range,
-    unambiguous_velocity, velocity_from_doppler, weibull_cdf, weibull_pdf, weibull_quantile,
-    wrap_phase,
+    fold_range, fold_velocity, frank_code, lfm_chirp, lognormal_cdf, lognormal_pdf, max_doppler,
+    mean_doppler, monopulse_estimate_angle, monopulse_ratio, monopulse_slope, mti_canceller,
+    music_spectrum, mvdr_spectrum, optimal_sinr, os_cfar, os_cfar_alpha, p3_code, p4_code,
+    peak_lag, peak_to_sidelobe, periodic_autocorrelation, phase_difference, phase_from_signals,
+    range_bins, range_doppler, range_doppler_map, range_profile, range_resolution,
+    rayleigh_cdf as clutter_rayleigh_cdf, rayleigh_pdf as clutter_rayleigh_pdf, rayleigh_quantile,
+    ridge as micro_doppler_ridge, single_pulse_threshold, space_time_steering, spatial_frequency,
+    spectrogram, steering_vector, stepped_range_profile, stepped_range_resolution, swerling1_pd,
+    swerling1_required_snr, synthetic_aperture_length, synthetic_bandwidth, unambiguous_angle,
+    unambiguous_range, unambiguous_velocity, velocity_from_doppler, weibull_cdf, weibull_pdf,
+    weibull_quantile, wrap_phase, zadoff_chu,
 };
 pub use windows::{apply_window, blackman, blackman_harris, flattop, hamming, hanning};

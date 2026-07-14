@@ -7,7 +7,10 @@
 //! long coded pulse is transmitted for energy, compressed on receive into a
 //! sharp peak at the echo delay (resolution set by the bandwidth, not the pulse
 //! length), then thresholded adaptively so the false-alarm rate stays fixed as
-//! the noise/clutter level varies.
+//! the noise/clutter level varies. [`polyphase`] widens the waveform library
+//! beyond the length-13 Barker limit with Frank, P3/P4 and Zadoff-Chu (CAZAC)
+//! codes — the perfect-periodic-autocorrelation and LPI waveforms of modern
+//! radar.
 //!
 //! Alongside the pulse chain sit array processing ([`beamform`], [`doa`],
 //! [`music`], [`esprit`]) for angle estimation — from the conventional
@@ -74,6 +77,7 @@ pub mod mti;
 pub mod mtt;
 pub mod music;
 pub mod pda;
+pub mod polyphase;
 pub mod prf;
 pub mod range_equation;
 pub mod sar;
@@ -112,6 +116,7 @@ pub use mti::mti_canceller;
 pub use mtt::{RadarMultiTracker, RadarTrack};
 pub use music::music_spectrum;
 pub use pda::PdaFilter;
+pub use polyphase::{frank_code, p3_code, p4_code, periodic_autocorrelation, zadoff_chu};
 pub use prf::{
     blind_speed, fold_range, fold_velocity, max_doppler, unambiguous_range, unambiguous_velocity,
     velocity_from_doppler,
