@@ -1,0 +1,11 @@
+[package]
+name = "scirust-nonlocal-relativity"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Experimental fractional-memory test-particle worldline dynamics on fixed general-relativistic backgrounds. Pure Rust, no unsafe."
+readme = "README.md"
+
+[dependencies]
+scirust-fractional = { path = "../scirust-fractional" }
+scirust-relativity = { path = "../scirust-relativity" }

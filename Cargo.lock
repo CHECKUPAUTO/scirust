@@ -3379,6 +3379,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-nonlocal-relativity"
+version = "0.1.0"
+dependencies = [
+ "scirust-fractional",
+ "scirust-relativity",
+]
+
+[[package]]
 name = "scirust-onnx"
 version = "0.1.0"
 dependencies = [

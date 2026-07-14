@@ -8,6 +8,7 @@ on:
       - "Cargo.lock"
       - "scirust-fractional/**"
       - "scirust-relativity/**"
+      - "scirust-nonlocal-relativity/**"
       - "scirust-sim/**"
       - "scirust-special/**"
       - ".github/workflows/native-arm64.yml"
@@ -18,6 +19,7 @@ on:
       - "Cargo.lock"
       - "scirust-fractional/**"
       - "scirust-relativity/**"
+      - "scirust-nonlocal-relativity/**"
       - "scirust-sim/**"
       - "scirust-special/**"
       - ".github/workflows/native-arm64.yml"
@@ -92,11 +94,15 @@ jobs:
       - name: Test relativity and geodesics
         run: cargo test -p scirust-relativity
 
+      - name: Test experimental nonlocal relativity
+        run: cargo test -p scirust-nonlocal-relativity
+
       - name: Run Clippy
         run: |
           cargo clippy \
             -p scirust-fractional \
             -p scirust-relativity \
+            -p scirust-nonlocal-relativity \
             --all-targets \
             -- \
             -D warnings

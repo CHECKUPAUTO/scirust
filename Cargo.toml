@@ -151,6 +151,7 @@ members = [
     "scirust-special",
     "scirust-fractional",
     "scirust-relativity",
+    "scirust-nonlocal-relativity",
     "scirust-stats",
     "scirust-interp",
     "scirust-sparse",
