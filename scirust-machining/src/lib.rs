@@ -275,6 +275,43 @@
 //!   dissipée, densité de flux et élévation de température.
 //! - [`rolling_resistance`] — tribologie : résistance au roulement — coefficient,
 //!   effort résistant, puissance et pente.
+//! - [`o_ring_seals`] — joints toriques (étanchéité statique) : taux d'écrasement,
+//!   d'étirement et de remplissage de gorge.
+//! - [`gasket_seating`] — joints plats sous brides (**ASME VIII**, facteurs `m`/`y`) :
+//!   charges d'assise, de service, poussée de fond et boulonnerie requise.
+//! - [`adhesive_lap_joint`] — collage à simple recouvrement : cisaillement moyen,
+//!   capacité du joint et longueur de recouvrement requise.
+//! - [`snap_fit_cantilever`] — encliquetage à poutre cantilever : déformation
+//!   maximale, effort de déflexion et effort d'emmanchement.
+//! - [`bolt_circle`] — cercle de perçage (PCD) : angle/position des trous et corde.
+//! - [`taper`] — cônes : conicité, angle inclus et diamètre courant.
+//! - [`sine_bar`] — barre sinus : conversion réciproque hauteur de cales ↔ angle.
+//! - [`three_wire_thread`] — mesure de filetage aux trois piges : pige optimale et
+//!   cote sur piges.
+//! - [`gear_span_measurement`] — cote sur `k` dents (Wildhaber) : fonction
+//!   développante et base tangent length.
+//! - [`planetary_constraints`] — trains épicycloïdaux : coaxialité, denture
+//!   satellite et condition d'assemblage.
+//! - [`vbelt_design`] — courroies trapézoïdales : puissance de dimensionnement,
+//!   puissance corrigée par brin et nombre de courroies.
+//! - [`timing_belt`] — courroies crantées : dents de courroie, dents en prise et
+//!   longueur primitive.
+//! - [`wire_rope`] — câbles de levage : effort de rupture, charge d'utilisation et
+//!   diamètre de poulie minimal.
+//! - [`sling_tension`] — élingues : tension de brin, facteur de charge et effort
+//!   horizontal selon l'angle.
+//! - [`lifting_lug`] — oreille de levage : matage, section nette et cisaillement
+//!   double de l'axe.
+//! - [`blanking_force`] — découpage/poinçonnage : effort de découpe, dévêtisseur et
+//!   travail.
+//! - [`deep_drawing`] — emboutissage : rapport limite (LDR), effort de poinçon et
+//!   serre-flan.
+//! - [`tube_bending`] — cintrage de tube : déformation de fibre externe, rayon
+//!   minimal et fibre neutre.
+//! - [`injection_cooling`] — injection plastique : temps de refroidissement (1D),
+//!   température au cœur et épaisseur admissible.
+//! - [`hydraulic_accumulator`] — accumulateur hydropneumatique (**Boyle**) : volume
+//!   de gaz, fluide utile et volume de pré-charge.
 //!
 //! ## Positionnement
 //!
@@ -452,6 +489,29 @@ pub mod wedge;
 pub mod weibull;
 pub mod welds;
 pub mod wire_drawing;
+
+// Lot massif (vol. 24) — assemblage/étanchéité, métrologie d'atelier,
+// sélection de transmissions, levage, mise en forme, fluide/plastique.
+pub mod adhesive_lap_joint;
+pub mod blanking_force;
+pub mod bolt_circle;
+pub mod deep_drawing;
+pub mod gasket_seating;
+pub mod gear_span_measurement;
+pub mod hydraulic_accumulator;
+pub mod injection_cooling;
+pub mod lifting_lug;
+pub mod o_ring_seals;
+pub mod planetary_constraints;
+pub mod sine_bar;
+pub mod sling_tension;
+pub mod snap_fit_cantilever;
+pub mod taper;
+pub mod three_wire_thread;
+pub mod timing_belt;
+pub mod tube_bending;
+pub mod vbelt_design;
+pub mod wire_rope;
 
 pub use accelerated_life::{
     BOLTZMANN_EV_K, arrhenius_acceleration_factor, derated_value, ten_degree_rule_factor,
@@ -821,3 +881,43 @@ pub use welds::{
 pub use wire_drawing::{
     MAX_REDUCTION_IDEAL, area_reduction, drawing_force, drawing_stress, drawing_true_strain,
 };
+
+// Lot massif (vol. 24) — ré-exports à plat.
+pub use adhesive_lap_joint::{
+    adhesive_average_shear_stress, adhesive_joint_strength, required_overlap_length,
+};
+pub use blanking_force::{blanking_force, blanking_work, stripping_force};
+pub use bolt_circle::{bolt_hole_angle_rad, bolt_hole_position, chord_between_holes};
+pub use deep_drawing::{
+    blank_holder_force, drawing_force as deep_drawing_force, limiting_draw_ratio,
+};
+pub use gasket_seating::{
+    gasket_min_seating_load, gasket_operating_load, hydrostatic_end_force, required_bolt_load,
+};
+pub use gear_span_measurement::{base_tangent_length, involute_function};
+pub use hydraulic_accumulator::{gas_volume_at_pressure, required_gas_volume, usable_fluid_volume};
+pub use injection_cooling::{
+    center_temperature, cooling_fourier_number, cooling_time, wall_thickness_for_time,
+};
+pub use lifting_lug::{
+    lug_double_shear_stress, lug_net_section_stress, lug_pin_area, lug_pin_bearing_stress,
+};
+pub use o_ring_seals::{gland_fill_percent, oring_squeeze_ratio, oring_stretch_ratio};
+pub use planetary_constraints::{
+    assembly_condition, planet_teeth_from_sun_ring, ring_teeth_from_sun_planet,
+    sun_planet_center_distance,
+};
+pub use sine_bar::{sine_bar_angle_rad, sine_bar_gauge_height};
+pub use sling_tension::{sling_horizontal_force, sling_leg_tension, sling_load_factor};
+pub use snap_fit_cantilever::{snap_deflection_force, snap_mating_force, snap_max_strain};
+pub use taper::{
+    taper_diameter_at_distance, taper_half_angle_rad, taper_included_angle_rad, taper_ratio,
+    taper_ratio_from_included_angle,
+};
+pub use three_wire_thread::{
+    best_wire_diameter, measurement_over_wires, pitch_diameter_from_measurement,
+};
+pub use timing_belt::{belt_pitch_length_two_pulley, belt_teeth_in_mesh, timing_belt_teeth};
+pub use tube_bending::{minimum_bend_radius, neutral_axis_length, outer_fiber_strain};
+pub use vbelt_design::{corrected_power_per_belt, number_of_belts, vbelt_design_power};
+pub use wire_rope::{minimum_breaking_force, minimum_sheave_diameter, wire_rope_working_load};
