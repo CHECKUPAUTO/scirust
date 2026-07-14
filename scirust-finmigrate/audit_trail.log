@@ -339,3 +339,17 @@
     Gap-R behaviour change; G6 operational readiness (rollback, reconstruction).
     Per-unit gate matrix + a sign-off table. Linked from README.md and
     audit_report.md. No arithmetic changed; documentation only.
+
+[2026-07-14] ARCHIVE: All three follow-up deliverables (Gap-R reconciliation,
+    scenario coverage expansion, CI compiler-gate) completed and merged to master
+    (commit 090e96d). Project status: GnuCOBOL-validated (1347/0 comparisons,
+    975/0 equivalence checks), not production-certified. BLOCKED on z/OS access
+    for the mandatory production gates (G1 target-compiler re-run, G2-G6 dependent
+    gates per PRODUCTION_GATES.md). ARCHIVED pending that external dependency.
+    Resume path documented in ARCHIVE.md. All test harnesses, audit trails, and
+    code are ready; no development work required beyond re-validation on the
+    production target compiler / runtime. Reversibility and error reconstruction
+    both proven; rollback is deterministic (revert commit 090e96d to restore
+    legacy fixed-2dp CURRCVT behaviour; revert gap-r-reconciliation commit to
+    restore Gap-R documented divergence; all baselines are git-tracked and
+    tamper-evident via SHA-256).
