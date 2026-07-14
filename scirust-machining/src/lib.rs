@@ -265,6 +265,16 @@
 //!   forme standard et réglage de **Ziegler-Nichols**.
 //! - [`feedback_loop`] — automatique : boucle de contre-réaction — gain en boucle
 //!   fermée, sensibilité et erreur statique.
+//! - [`viscosity`] — tribologie : viscosité dynamique/cinématique, unités et
+//!   dépendance en température (**Andrade**).
+//! - [`film_lubrication`] — tribologie : nombre de **Hersey**, régimes de
+//!   **Stribeck** et rapport de film `λ`.
+//! - [`archard_wear`] — tribologie : usure — loi d'**Archard**, taux spécifique,
+//!   profondeur et distance de glissement.
+//! - [`frictional_heating`] — tribologie : échauffement par frottement — puissance
+//!   dissipée, densité de flux et élévation de température.
+//! - [`rolling_resistance`] — tribologie : résistance au roulement — coefficient,
+//!   effort résistant, puissance et pente.
 //!
 //! ## Positionnement
 //!
@@ -308,6 +318,7 @@
 
 pub mod accelerated_life;
 pub mod air_flow;
+pub mod archard_wear;
 pub mod area_moments;
 pub mod balancing;
 pub mod ball_screw;
@@ -351,6 +362,7 @@ pub mod extrusion;
 pub mod fastener_groups;
 pub mod fatigue_mean_stress;
 pub mod feedback_loop;
+pub mod film_lubrication;
 pub mod fins;
 pub mod first_order_response;
 pub mod flow_meters;
@@ -360,6 +372,7 @@ pub mod forces;
 pub mod fourbar;
 pub mod fracture;
 pub mod friction;
+pub mod frictional_heating;
 pub mod gating;
 pub mod gear_trains;
 pub mod gears;
@@ -403,6 +416,7 @@ pub mod reflected_inertia;
 pub mod reliability;
 pub mod riveted_joints;
 pub mod rolling;
+pub mod rolling_resistance;
 pub mod roughness;
 pub mod second_order_response;
 pub mod shafts;
@@ -432,6 +446,7 @@ pub mod upsetting;
 pub mod vacuum_gripping;
 pub mod valve_sizing;
 pub mod vibrations;
+pub mod viscosity;
 pub mod water_hammer;
 pub mod wedge;
 pub mod weibull;
@@ -442,6 +457,7 @@ pub use accelerated_life::{
     BOLTZMANN_EV_K, arrhenius_acceleration_factor, derated_value, ten_degree_rule_factor,
 };
 pub use air_flow::{choked_mass_flow, critical_pressure_ratio, is_choked, speed_of_sound};
+pub use archard_wear::{sliding_distance_for_depth, specific_wear_rate, wear_depth, worn_volume};
 pub use area_moments::{
     composite_second_moment, parallel_axis as parallel_axis_area, polar_second_moment,
     radius_of_gyration as area_radius_of_gyration,
@@ -570,6 +586,7 @@ pub use fatigue_mean_stress::{
 pub use feedback_loop::{
     closed_loop_gain, closed_loop_gain_with_feedback, sensitivity, steady_state_error_step,
 };
+pub use film_lubrication::{LubricationRegime, hersey_number, lambda_ratio, regime_from_lambda};
 pub use fins::{fin_effectiveness, fin_efficiency, fin_heat_rate, fin_parameter};
 pub use first_order_response::{
     corner_frequency_rad as first_order_corner_frequency_rad, cutoff_frequency_hz, step_response,
@@ -592,6 +609,7 @@ pub use friction::{
     angle_of_repose_deg, friction_angle_deg, incline_self_locking, is_sliding, kinetic_friction,
     max_static_friction, within_adhesion_cone,
 };
+pub use frictional_heating::{friction_force, friction_power, heat_flux, temperature_rise};
 pub use gating::{choke_area, pouring_time, sprue_exit_velocity, sprue_taper_ratio};
 pub use gear_trains::{
     compound_train_ratio, gear_pair_speed_ratio, is_direction_reversed, output_speed, output_torque,
@@ -712,6 +730,9 @@ pub use riveted_joints::{
     tearing_strength,
 };
 pub use rolling::{contact_length, draft, max_draft, roll_force, roll_torque};
+pub use rolling_resistance::{
+    coefficient_from_arm, resistance_on_grade, rolling_power, rolling_resistance_force,
+};
 pub use roughness::{
     feed_for_target_ra, theoretical_ra_turning, theoretical_rt_sharp, theoretical_rt_turning,
 };
@@ -786,6 +807,9 @@ pub use valve_sizing::{cv_from_kv, kv_from_cv, liquid_flow, required_kv};
 pub use vibrations::{
     critical_damping, damped_frequency_rad, damping_ratio, log_decrement, natural_frequency_hz,
     natural_frequency_rad, quality_factor,
+};
+pub use viscosity::{
+    andrade_viscosity, dynamic_from_kinematic, kinematic_from_dynamic, pa_s_from_centipoise,
 };
 pub use water_hammer::{critical_time, joukowsky_surge, wave_speed_elastic, wave_speed_rigid};
 pub use wedge::{driving_force, extraction_force, ideal_mechanical_advantage, self_locking};
