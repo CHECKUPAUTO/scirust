@@ -283,7 +283,9 @@ train/fine-tune/generate/speculative stack rides on top unchanged.
   5.46–6.17** — already **below the v1 run's best of 6.42 at step 20 000**, and still
   declining, with no `<NNN>` leaks in the tokeniser. Same size corpus, so the gain is
   purely the reversible tokenizer + corpus filter + a longer schedule. Resumable from
-  `checkpoints/bpe350m_v2/step_21900`.
+  `checkpoints/bpe350m_v2/step_21900`. It is noisy (small 2 % val tail + unshuffled,
+  near-duplicate windows) and only ~2 epochs in, so the next real lever is a **bigger
+  corpus**, not more epochs.
 
 - **B16 — clean resume-to-target (`SCIAGENT_TOTAL_STEPS`).** The harness computed the
   step target *additively* (`start_step + STEPS`), so resuming a 40 k-step run naively
@@ -292,6 +294,15 @@ train/fine-tune/generate/speculative stack rides on top unchanged.
   arithmetic, no overshoot — and based warmup on the *actual* remaining run so a resume
   re-warms briefly (cushioning the AdamW-moment reset) instead of ramping a full
   warmup. `SCIAGENT_WARMUP` overrides it. Backward compatible (unset ⇒ old behavior).
+
+- **B17 — checkpoint retention (disk-safe long runs).** The first v2 retrain saved a
+  full ~1.2 GB fp32 checkpoint **every 100 steps and never pruned** — hundreds of GB by
+  step 22k, on a disk-constrained Thor (a likely contributor to the power-off).
+  `CudaTrainer::pretrain` now keeps only the most recent `keep_last` `step_N/` dirs
+  **plus the best-val checkpoint** (tracked across saves, since the val curve is noisy
+  and the last step is rarely the best), pruning the rest each save. `cuda_pretrain`
+  raises the default save cadence to 500 and exposes `SCIAGENT_SAVE` / `SCIAGENT_KEEP`.
+  Makes long runs and resume disk-safe.
 
 ## Risks / honesty
 

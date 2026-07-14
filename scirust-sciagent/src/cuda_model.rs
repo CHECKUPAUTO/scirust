@@ -897,6 +897,10 @@ impl CudaTrainer {
             WarmupCosineSchedule::new(cfg.base_lr, cfg.min_lr, cfg.warmup_steps, cfg.total_steps);
         let mut step = cfg.start_step;
         let mut cursor = 0usize;
+        // Best-val tracking so retention never prunes the best checkpoint (the val
+        // curve is noisy — the last checkpoint is often not the best).
+        let mut best_val = f32::INFINITY;
+        let mut best_step: Option<usize> = None;
         let t0 = std::time::Instant::now();
         while step < cfg.total_steps
         {
@@ -948,12 +952,74 @@ impl CudaTrainer {
                 };
                 match save_checkpoint(model, &meta, &dir)
                 {
-                    Ok(()) => println!("  checkpoint → {}", dir.display()),
+                    Ok(()) =>
+                    {
+                        println!("  checkpoint → {}", dir.display());
+                        // Score this checkpoint on the held-out split and remember the
+                        // best, so pruning never deletes the best model.
+                        if !val_tokens.is_empty()
+                        {
+                            let v = self.eval_loss(val_tokens, s, cfg.eval_windows);
+                            if v < best_val
+                            {
+                                best_val = v;
+                                best_step = Some(step);
+                                println!("    (best val {v:.4} @ step {step} → protected)");
+                            }
+                        }
+                        // Retention: keep only the last `keep_last` checkpoints plus the
+                        // best-val one, so a long run doesn't fill the disk.
+                        prune_checkpoints(&cfg.checkpoint_dir, cfg.keep_last, best_step);
+                    },
                     Err(e) => eprintln!("  checkpoint at step {step} failed: {e}"),
                 }
             }
         }
         losses
+    }
+}
+
+/// Delete old `step_N/` checkpoints under `dir`, keeping only the most recent
+/// `keep_last` (by numeric step) plus `protect` (the best-val step, if any).
+/// `keep_last == 0` disables pruning (keep everything). Best-effort — I/O errors on
+/// individual removals are ignored so a failed delete never aborts training.
+fn prune_checkpoints(dir: &str, keep_last: usize, protect: Option<usize>) {
+    if keep_last == 0
+    {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir)
+    else
+    {
+        return;
+    };
+    let mut steps: Vec<(u64, std::path::PathBuf)> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().ok().is_some_and(|t| t.is_dir()))
+        .filter_map(|e| {
+            let p = e.path();
+            let n = p
+                .file_name()?
+                .to_str()?
+                .strip_prefix("step_")?
+                .parse::<u64>()
+                .ok()?;
+            Some((n, p))
+        })
+        .collect();
+    steps.sort_by_key(|(n, _)| *n);
+    let cutoff = steps.len().saturating_sub(keep_last);
+    for (i, (n, p)) in steps.iter().enumerate()
+    {
+        if i >= cutoff
+        {
+            continue; // among the last `keep_last`
+        }
+        if protect == Some(*n as usize)
+        {
+            continue; // the best-val checkpoint
+        }
+        let _ = std::fs::remove_dir_all(p);
     }
 }
 
@@ -996,6 +1062,10 @@ pub struct CudaPretrainConfig {
     pub eval_interval: usize,
     /// Max validation windows averaged per eval (bounds eval cost). Default `32`.
     pub eval_windows: usize,
+    /// Checkpoint retention: keep only the most recent `keep_last` `step_N/` dirs
+    /// (plus the best-val one, which is never pruned). `0` keeps everything — the old
+    /// behavior, which fills the disk on a long run. Default `3`.
+    pub keep_last: usize,
 }
 
 impl Default for CudaPretrainConfig {
@@ -1019,6 +1089,7 @@ impl Default for CudaPretrainConfig {
             val_frac: 0.02,
             eval_interval: 250,
             eval_windows: 32,
+            keep_last: 3,
         }
     }
 }

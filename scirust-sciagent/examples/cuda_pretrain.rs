@@ -390,6 +390,11 @@ fn main() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(0.02f32);
+    // Checkpoint cadence + retention. Saving every 100 steps and never pruning fills
+    // the disk on a long run (each 350M checkpoint is ~1.2 GB fp32) — so save less
+    // often and keep only the last few (SCIAGENT_KEEP) plus the best-val one.
+    let save_interval = env_usize("SCIAGENT_SAVE", 500);
+    let keep_last = env_usize("SCIAGENT_KEEP", 3);
     let cfg = CudaPretrainConfig {
         base_lr,
         min_lr: base_lr * 0.1,
@@ -400,16 +405,18 @@ fn main() {
         weight_decay: 0.0,
         adam_eps,
         log_interval: 25,
-        save_interval: 100,
+        save_interval,
         checkpoint_dir: ckpt_dir.clone(),
         max_grad_norm,
         val_frac,
         eval_interval: 100,
+        keep_last,
         ..Default::default()
     };
     println!(
         "seq_len {seq_len} | steps {start_step}..{total_steps} | base_lr {base_lr:.1e} | \
-         eps {adam_eps:.0e} | clip {max_grad_norm} | ckpt → {ckpt_dir}\n"
+         eps {adam_eps:.0e} | clip {max_grad_norm} | save/{save_interval} keep {keep_last} | \
+         ckpt → {ckpt_dir}\n"
     );
 
     let losses = trainer.pretrain(&tokens, &mut model, &config, &cfg);
