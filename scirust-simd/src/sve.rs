@@ -30,6 +30,9 @@
 
 #![allow(clippy::missing_safety_doc)]
 
+use crate::matrix::backend::{ScalarBackend, SimdBackend};
+use crate::matrix::view::{MatrixView, MatrixViewMut};
+
 /// Longueur vectorielle SVE en éléments de type `T`, ou `0` si SVE est absent.
 ///
 /// Lit la longueur architecturale avec `rdvl` (asm inline *stable*).
@@ -163,6 +166,193 @@ unsafe fn sscal_f32_sve_impl(alpha: f32, x: &mut [f32]) {
     }
 }
 
+// ===================================================================== //
+//  SGEMM packé / register-blocked SVE (au-delà du rank-1)                 //
+// ===================================================================== //
+
+/// Lignes de la tuile registre SVE. **Constante de compilation** : les types SVE
+/// sont *sizeless* (pas de `[svfloat32_t; N]`, pas de `Vec`, pas d'indexation
+/// runtime), donc les `MR_SVE` accumulateurs sont des variables **nommées**
+/// déroulées à la main. `MR_SVE + 2` registres `Z` vivants (accs + 1 vecteur B +
+/// 1 broadcast A) ⇒ 10/32, large marge (comme les tuiles `8×…` x86/NEON).
+const MR_SVE: usize = 8;
+
+/// SGEMM **packé, register-blocked, scalable** (SVE) : `C = alpha·A·B + beta·C`,
+/// row-major. Remplace la formulation rank-1 (`sscal`+`saxpy` par ligne) : ici
+/// une tuile `MR_SVE × VL` de `C` est maintenue **dans les registres** sur toute
+/// la dimension `K`, donc `C` n'est écrite **qu'une fois** (le trafic sur `C` est
+/// amorti sur `K`, comme les noyaux AVX-512/NEON packés). `VL = svcntw()` est la
+/// largeur vectorielle **runtime** ; les bords `n % VL` tombent par prédicat, les
+/// bords `m % MR_SVE` par zéro-padding de `A`. Repli scalaire hors SVE.
+pub fn sgemm_f32_sve(
+    alpha: f32,
+    a: MatrixView<f32>,
+    b: MatrixView<f32>,
+    beta: f32,
+    c: MatrixViewMut<f32>,
+) {
+    if std::arch::is_aarch64_feature_detected!("sve")
+    {
+        // SAFETY: gated by the runtime detection just above.
+        unsafe { sgemm_f32_sve_packed(alpha, a, b, beta, c) };
+        return;
+    }
+    ScalarBackend.sgemm_f32(alpha, a, b, beta, c);
+}
+
+/// `C *= beta` prédiqué (cas `k == 0` ou `alpha == 0`, où `C = beta·C`).
+/// `beta == 0` écrit des zéros sans **lire** `C` (évite un `0·NaN` si `C` est
+/// non initialisé).
+#[target_feature(enable = "sve")]
+unsafe fn scale_c_sve(beta: f32, m: usize, n: usize, c: *mut f32) {
+    use core::arch::aarch64::*;
+    if beta == 1.0
+    {
+        return;
+    }
+    let vl = svcntw() as usize;
+    let bv = svdup_n_f32(beta);
+    for i in 0..m
+    {
+        let row = c.add(i * n);
+        let mut j = 0;
+        while j < n
+        {
+            let pg = svwhilelt_b32_u64(j as u64, n as u64);
+            let r = if beta == 0.0
+            {
+                svdup_n_f32(0.0)
+            }
+            else
+            {
+                svmul_f32_x(pg, svld1_f32(pg, row.add(j)), bv)
+            };
+            svst1_f32(pg, row.add(j), r);
+            j += vl;
+        }
+    }
+}
+
+/// Cœur packé. Pour chaque panneau de `MR_SVE` lignes : `A` est empaqueté une
+/// fois (`p`-majeur, `alpha` fusionné, lignes `mr..MR_SVE` mises à zéro), puis
+/// pour chaque bande de `VL` colonnes on maintient `MR_SVE` accumulateurs sur
+/// tout `K` et on stocke la tuile (bord colonne par prédicat, `beta` fondu).
+#[target_feature(enable = "sve")]
+unsafe fn sgemm_f32_sve_packed(
+    alpha: f32,
+    a: MatrixView<f32>,
+    b: MatrixView<f32>,
+    beta: f32,
+    mut c: MatrixViewMut<f32>,
+) {
+    use core::arch::aarch64::*;
+    let (m, k, n) = (a.rows(), a.cols(), b.cols());
+    if m == 0 || n == 0
+    {
+        return;
+    }
+    let c_ptr = c.row_slice_mut(0).expect("C base").as_mut_ptr();
+    if k == 0 || alpha == 0.0
+    {
+        scale_c_sve(beta, m, n, c_ptr);
+        return;
+    }
+    let a_ptr = a.row_slice(0).expect("A base").as_ptr();
+    let b_ptr = b.row_slice(0).expect("B base").as_ptr();
+    let vl = svcntw() as usize;
+
+    // Tampon de packing de A (MR_SVE × k), réutilisé par panneau de lignes.
+    let mut apack = vec![0.0f32; MR_SVE * k];
+
+    let mut i0 = 0;
+    while i0 < m
+    {
+        let mr = MR_SVE.min(m - i0);
+        // Pack A[i0.., 0..k] : apack[p*MR_SVE + i] = alpha·A[i0+i][p], lignes
+        // manquantes (i >= mr) à zéro (accumulateurs correspondants restent nuls).
+        for p in 0..k
+        {
+            let base = p * MR_SVE;
+            for i in 0..mr
+            {
+                apack[base + i] = alpha * *a_ptr.add((i0 + i) * k + p);
+            }
+            for slot in apack[base + mr..base + MR_SVE].iter_mut()
+            {
+                *slot = 0.0;
+            }
+        }
+
+        let mut j0 = 0;
+        while j0 < n
+        {
+            let pg = svwhilelt_b32_u64(j0 as u64, n as u64);
+            let bbase = b_ptr.add(j0);
+            let cbase = c_ptr.add(i0 * n + j0);
+
+            // MR_SVE accumulateurs nommés (types SVE sizeless : pas d'array).
+            let z = svdup_n_f32(0.0);
+            let mut a0 = z;
+            let mut a1 = z;
+            let mut a2 = z;
+            let mut a3 = z;
+            let mut a4 = z;
+            let mut a5 = z;
+            let mut a6 = z;
+            let mut a7 = z;
+
+            for p in 0..k
+            {
+                // Une bande VL de la ligne p de B (voies inactives lues 0).
+                let bv = svld1_f32(pg, bbase.add(p * n));
+                let ap = apack.as_ptr().add(p * MR_SVE);
+                // acc_i += bv · (alpha·A[i][p]) ; `_x` : aucune réduction inter-voies,
+                // seules les voies actives sont stockées (svst1 prédiqué).
+                a0 = svmla_f32_x(pg, a0, bv, svdup_n_f32(*ap.add(0)));
+                a1 = svmla_f32_x(pg, a1, bv, svdup_n_f32(*ap.add(1)));
+                a2 = svmla_f32_x(pg, a2, bv, svdup_n_f32(*ap.add(2)));
+                a3 = svmla_f32_x(pg, a3, bv, svdup_n_f32(*ap.add(3)));
+                a4 = svmla_f32_x(pg, a4, bv, svdup_n_f32(*ap.add(4)));
+                a5 = svmla_f32_x(pg, a5, bv, svdup_n_f32(*ap.add(5)));
+                a6 = svmla_f32_x(pg, a6, bv, svdup_n_f32(*ap.add(6)));
+                a7 = svmla_f32_x(pg, a7, bv, svdup_n_f32(*ap.add(7)));
+            }
+
+            // Épilogue : C[i, bande] = acc_i + beta·C_old, seulement les `mr`
+            // lignes valides. `beta == 0` : store direct (pas de lecture de C).
+            let bv_beta = svdup_n_f32(beta);
+            macro_rules! store_row {
+                ($i:expr, $acc:expr) => {
+                    if mr > $i
+                    {
+                        let cp = cbase.add($i * n);
+                        let out = if beta == 0.0
+                        {
+                            $acc
+                        }
+                        else
+                        {
+                            svmla_f32_x(pg, $acc, svld1_f32(pg, cp), bv_beta)
+                        };
+                        svst1_f32(pg, cp, out);
+                    }
+                };
+            }
+            store_row!(0, a0);
+            store_row!(1, a1);
+            store_row!(2, a2);
+            store_row!(3, a3);
+            store_row!(4, a4);
+            store_row!(5, a5);
+            store_row!(6, a6);
+            store_row!(7, a7);
+
+            j0 += vl;
+        }
+        i0 += MR_SVE;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,6 +416,73 @@ mod tests {
             for i in 0..n
             {
                 assert!((got[i] - base[i] * -0.5).abs() <= 1e-4, "n={n} i={i}");
+            }
+        }
+    }
+
+    #[test]
+    fn sgemm_packed_matches_scalar() {
+        // Le GEMM packé SVE doit coïncider avec la référence scalaire (à l'ordre
+        // de sommation près, tolérance GEMM du repo). Couvre : lignes partielles
+        // (m % MR_SVE), bandes de colonnes partielles (n non multiple de VL, y
+        // compris n < VL), plusieurs panneaux MR + bandes VL, et les bords
+        // `k == 0` / `alpha == 0` (⇒ `C = beta·C`).
+        let shapes = [
+            (1usize, 1usize, 1usize),
+            (3, 4, 2),
+            (8, 8, 8),
+            (7, 5, 9),
+            (9, 17, 13),
+            (16, 16, 16),
+            (17, 31, 19),
+            (33, 40, 15),
+            (40, 24, 48),
+            (20, 0, 10), // k == 0 : C = beta·C
+        ];
+        let alphas = [1.0f32, -0.5, 2.0, 0.0];
+        let betas = [0.0f32, 1.0, -0.75];
+        for &(m, k, n) in &shapes
+        {
+            let a: Vec<f32> = (0..m * k).map(|t| (t as f32 * 0.017 - 0.3).sin()).collect();
+            let b: Vec<f32> = (0..k * n).map(|t| (t as f32 * 0.023 + 0.1).cos()).collect();
+            let c0: Vec<f32> = (0..m * n).map(|t| (t as f32) * 0.05 - 0.5).collect();
+            for &alpha in &alphas
+            {
+                for &beta in &betas
+                {
+                    // Référence scalaire indépendante.
+                    let mut want = c0.clone();
+                    for i in 0..m
+                    {
+                        for j in 0..n
+                        {
+                            let mut acc = 0.0f32;
+                            for p in 0..k
+                            {
+                                acc += a[i * k + p] * b[p * n + j];
+                            }
+                            want[i * n + j] = alpha * acc + beta * want[i * n + j];
+                        }
+                    }
+                    let mut got = c0.clone();
+                    sgemm_f32_sve(
+                        alpha,
+                        MatrixView::new(&a, m, k),
+                        MatrixView::new(&b, k, n),
+                        beta,
+                        MatrixViewMut::new(&mut got, m, n),
+                    );
+                    for t in 0..m * n
+                    {
+                        let tol = 1e-4 * (1.0 + want[t].abs());
+                        assert!(
+                            (got[t] - want[t]).abs() <= tol,
+                            "m={m} k={k} n={n} a={alpha} b={beta} t={t}: {} vs {}",
+                            got[t],
+                            want[t]
+                        );
+                    }
+                }
             }
         }
     }

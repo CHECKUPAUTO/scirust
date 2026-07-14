@@ -1098,34 +1098,19 @@ impl SimdBackend for SveBackend {
             *item = alpha * dot + beta * *item;
         }
     }
-    /// SGEMM par formulation rank-1 (axpy-sur-lignes), même structure que les
-    /// paliers x86/NEON mais noyaux SVE scalables (`sscal` + `saxpy`).
+    /// SGEMM **packé / register-blocked** SVE : tuile `MR×VL` de `C` maintenue
+    /// dans les registres sur tout `K` (`C` écrite une seule fois), au lieu de la
+    /// formulation rank-1 (`sscal`+`saxpy` par ligne, `C` touchée `k+1` fois).
+    /// Cf. [`crate::sve::sgemm_f32_sve`].
     fn sgemm_f32(
         &self,
         alpha: f32,
         a: crate::matrix::view::MatrixView<f32>,
         b: crate::matrix::view::MatrixView<f32>,
         beta: f32,
-        mut c: crate::matrix::view::MatrixViewMut<f32>,
+        c: crate::matrix::view::MatrixViewMut<f32>,
     ) {
-        let m = a.rows();
-        let k = a.cols();
-        for i in 0..m
-        {
-            let a_row = a.row_slice(i).expect("A row");
-            let c_row = c.row_slice_mut(i).expect("C row");
-            crate::sve::sscal_f32_sve(beta, c_row);
-            for (p, &a_ip) in a_row.iter().enumerate().take(k)
-            {
-                let s = alpha * a_ip;
-                if s == 0.0
-                {
-                    continue;
-                }
-                let b_row = b.row_slice(p).expect("B row");
-                crate::sve::saxpy_f32_sve(s, b_row, c_row);
-            }
-        }
+        crate::sve::sgemm_f32_sve(alpha, a, b, beta, c);
     }
     fn relu_f32(&self, v: &mut [f32]) {
         ScalarBackend.relu_f32(v);

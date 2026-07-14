@@ -69,7 +69,7 @@ Du bas (silicium) vers le haut (application) :
 | **Activations** | `activations` | `exp` vectorisée (range-reduction + `scalef`) → `sigmoid`/`tanh`/`GELU`/`SiLU` |
 | **Quantification** | `quant` | dot int8 `u8·i8→i32` (VNNI et ARM `i8mm` USDOT avec `nightly-simd`), `i8·i8→i32` (ARM `dotprod` SDOT avec `nightly-simd` / AVX-512BW), bf16 (natif `avx512bf16` ou élargissement) — **cross-arch** |
 | **Accélérateurs matriciels** | `amx`, `sme` | Avec `nightly-simd` : GEMM à tuiles **Intel AMX** int8 (`_tile_dpbssd`) & bf16 (`_tile_dpbf16ps`) ; **ARM SME** (sonde + référence rang-1, en attente des intrinsèques ZA) |
-| **Vecteurs scalables** | `sve` | Avec `nightly-simd` : kernels SVE `saxpy`/`sdot`/`sscal` à longueur vectorielle runtime (aarch64) |
+| **Vecteurs scalables** | `sve` | Avec `nightly-simd` : kernels SVE `saxpy`/`sdot`/`sscal` **et SGEMM packé register-blocked** (tuile `MR×VL`, C amortie sur K), longueur vectorielle runtime (aarch64) |
 | **Kernels x86 avancés** | `x86_ext` | masques `k` (axpy conditionnel), NT-stores, prefetch logiciel |
 | **Attention** | `attention`, `kv_cache`, `qkv_cache` | naïve, **flash**, **causale**, **multi-tête**, **cache KV** (`f32` **et int8** ÷4 mémoire) |
 | **Normalisations** | `norm` | RMSNorm, LayerNorm (vectorisées), RoPE |
@@ -207,7 +207,7 @@ Chaque affirmation est vérifiée mécaniquement :
 | [`quant`](src/quant.rs) | int8 (VNNI/USDOT/SDOT), bf16 mixed-precision — cross-arch x86/ARM |
 | [`amx`](src/amx.rs) | `nightly-simd` — GEMM Intel AMX à tuiles, int8/bf16, poids pré-empaquetés, `qlinear_i8` (x86) |
 | [`qtransformer`](src/qtransformer.rs) | `nightly-simd` — bloc décodeur **quantifié int8 W8A8** (projections AMX) (x86) |
-| [`sve`](src/sve.rs) | `nightly-simd` — kernels SVE scalables `saxpy`/`sdot`/`sscal` (aarch64) |
+| [`sve`](src/sve.rs) | `nightly-simd` — kernels SVE scalables `saxpy`/`sdot`/`sscal` + SGEMM packé `MR×VL` (aarch64) |
 | [`sme`](src/sme.rs) | `nightly-simd` — ARM SME, sonde + référence rang-1 (accumulateur ZA), aarch64 |
 | [`x86_ext`](src/x86_ext.rs) | masques `k`, NT-stores, prefetch (x86) |
 | [`attention`](src/attention.rs) | Attention naïve/flash/causale/multi-tête |
