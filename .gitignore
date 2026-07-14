@@ -77,3 +77,6 @@ fuzz/corpus/
 fuzz/artifacts/
 proof-certify-*.txt
 misrounds-*.txt
+
+# Personal Claude Code local settings (not shared)
+.claude/settings.local.json

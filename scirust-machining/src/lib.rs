@@ -312,6 +312,40 @@
 //!   température au cœur et épaisseur admissible.
 //! - [`hydraulic_accumulator`] — accumulateur hydropneumatique (**Boyle**) : volume
 //!   de gaz, fluide utile et volume de pré-charge.
+//! - [`clutch_engagement`] — embrayage à friction : énergie de glissement, durée de
+//!   synchronisation et échauffement adiabatique.
+//! - [`brake_thermal`] — échauffement de frein : énergie cinétique dissipée,
+//!   élévation de température du disque et puissance.
+//! - [`hydraulic_motor`] — moteur hydraulique volumétrique : couple, vitesse,
+//!   puissances et rendement global.
+//! - [`gear_pump`] — pompe à engrenages : cylindrée, débit théorique et réel.
+//! - [`torsional_vibration`] — vibration de torsion à deux disques : raideur, nœud
+//!   et fréquence propre.
+//! - [`governor_flyball`] — régulateur centrifuge (**Watt**/**Porter**) : hauteur de
+//!   cône, force centrifuge et régime d'équilibre.
+//! - [`toggle_mechanism`] — genouillère : rapport d'amplification et effort de
+//!   sortie au point mort.
+//! - [`scissor_lift`] — table élévatrice à ciseaux : effort du vérin, avantage
+//!   mécanique et hauteur.
+//! - [`belt_conveyor`] — bande transporteuse : tension effective, débit et
+//!   puissances d'entraînement/élévation.
+//! - [`screw_conveyor`] — vis sans fin : débits volumétrique et massique.
+//! - [`carburizing`] — cémentation : profondeur en √t (**Harris**) et durée de cycle.
+//! - [`weld_heat_input`] — soudage à l'arc : puissance d'arc et apport linéique
+//!   `η·U·I/v`.
+//! - [`surface_grinding`] — rectification plane : débits, épaisseur de copeau
+//!   équivalente et rapport `G`.
+//! - [`broaching`] — brochage : dents en prise et effort de coupe maximal.
+//! - [`tapping_torque`] — taraudage : couple mécaniste/empirique et puissance.
+//! - [`coil_spring_surge`] — résonance (surge) d'un ressort hélicoïdal : premier
+//!   mode fixe-fixe/fixe-libre.
+//! - [`spring_nest`] — ressorts concentriques : raideur combinée et répartition de
+//!   charge.
+//! - [`cam_pressure_angle`] — angle de pression d'une came à suiveur translatant.
+//! - [`disc_spring_stack`] — empilage de rondelles Belleville : série/parallèle,
+//!   raideur et nombre de rondelles.
+//! - [`rotating_ring_stress`] — jante mince en rotation : contrainte
+//!   circonférentielle et vitesse d'éclatement.
 //!
 //! ## Positionnement
 //!
@@ -512,6 +546,29 @@ pub mod timing_belt;
 pub mod tube_bending;
 pub mod vbelt_design;
 pub mod wire_rope;
+
+// Lot massif (vol. 25) — transmission de puissance, thermique de fabrication,
+// dynamique des machines et éléments de ressort.
+pub mod belt_conveyor;
+pub mod brake_thermal;
+pub mod broaching;
+pub mod cam_pressure_angle;
+pub mod carburizing;
+pub mod clutch_engagement;
+pub mod coil_spring_surge;
+pub mod disc_spring_stack;
+pub mod gear_pump;
+pub mod governor_flyball;
+pub mod hydraulic_motor;
+pub mod rotating_ring_stress;
+pub mod scissor_lift;
+pub mod screw_conveyor;
+pub mod spring_nest;
+pub mod surface_grinding;
+pub mod tapping_torque;
+pub mod toggle_mechanism;
+pub mod torsional_vibration;
+pub mod weld_heat_input;
 
 pub use accelerated_life::{
     BOLTZMANN_EV_K, arrhenius_acceleration_factor, derated_value, ten_degree_rule_factor,
@@ -921,3 +978,51 @@ pub use timing_belt::{belt_pitch_length_two_pulley, belt_teeth_in_mesh, timing_b
 pub use tube_bending::{minimum_bend_radius, neutral_axis_length, outer_fiber_strain};
 pub use vbelt_design::{corrected_power_per_belt, number_of_belts, vbelt_design_power};
 pub use wire_rope::{minimum_breaking_force, minimum_sheave_diameter, wire_rope_working_load};
+
+// Lot massif (vol. 25) — ré-exports à plat.
+pub use belt_conveyor::{
+    conveyor_drive_power, conveyor_effective_tension, conveyor_lift_power, conveyor_mass_flow,
+};
+pub use brake_thermal::{brake_dissipated_energy, brake_power, brake_temperature_rise};
+pub use broaching::{broaching_force, broaching_force_per_tooth, broaching_teeth_engaged};
+pub use cam_pressure_angle::{
+    cam_min_base_radius, cam_pitch_radius, cam_pressure_angle_offset_rad, cam_pressure_angle_rad,
+    cam_velocity_per_rad,
+};
+pub use carburizing::{
+    carburizing_constant_from_diffusion, carburizing_time_for_depth, case_depth_from_diffusion,
+    case_depth_rule_of_thumb,
+};
+pub use clutch_engagement::{clutch_slip_energy, clutch_slip_time, clutch_temperature_rise};
+pub use coil_spring_surge::{spring_surge_frequency_fixed_free_hz, spring_surge_frequency_hz};
+pub use disc_spring_stack::{
+    stack_combined, stack_deflection_series, stack_load_parallel, stack_stiffness,
+    stack_washer_count,
+};
+pub use gear_pump::{gearpump_actual_flow, gearpump_displacement, gearpump_theoretical_flow};
+pub use governor_flyball::{
+    GRAVITY, flyball_centrifugal_force, porter_governor_height, porter_governor_speed_rad,
+    watt_governor_height,
+};
+pub use hydraulic_motor::{
+    hydromotor_hydraulic_power, hydromotor_output_power, hydromotor_overall_efficiency,
+    hydromotor_speed, hydromotor_torque,
+};
+pub use rotating_ring_stress::{rim_hoop_stress, rim_speed_from_rpm, rotating_burst_speed_rad};
+pub use scissor_lift::{scissor_actuator_force, scissor_height, scissor_mechanical_advantage};
+pub use screw_conveyor::{screw_conveyor_mass_flow, screw_conveyor_volumetric_flow};
+pub use spring_nest::{
+    nested_spring_combined_rate, nested_spring_deflection, nested_spring_load_share_inner,
+    nested_spring_load_share_outer,
+};
+pub use surface_grinding::{
+    equivalent_chip_thickness, grinding_material_removal_rate, grinding_ratio,
+    specific_removal_rate,
+};
+pub use tapping_torque::{tapping_power, tapping_torque_cutting, tapping_torque_empirical};
+pub use toggle_mechanism::{toggle_force_ratio, toggle_output_force};
+pub use torsional_vibration::{
+    torsional_stiffness, two_disc_equivalent_inertia, two_disc_natural_frequency_hz,
+    two_disc_natural_frequency_rad, two_disc_node_position,
+};
+pub use weld_heat_input::{weld_arc_power, weld_energy_per_length, weld_heat_input};
