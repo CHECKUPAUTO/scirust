@@ -456,6 +456,33 @@
 //!   **Faraday** courant ↔ vitesse.
 //! - [`machining_cost`] — coût d'usinage par pièce : coupe, mise en train amortie
 //!   et outillage.
+//! - [`scotch_yoke`] — mécanisme à coulisse : mouvement harmonique simple pur.
+//! - [`quick_return`] — mécanisme à retour rapide : rapport aller/retour et
+//!   fraction de coupe.
+//! - [`ratchet_pawl`] — rochet à cliquet : pas angulaire, couple de maintien,
+//!   dents minimales.
+//! - [`differential_screw`] — vis différentielle : avance nette `p1−p2` et
+//!   avantage mécanique.
+//! - [`capillary_rise`] — ascension capillaire (**Jurin**) et saut de Laplace.
+//! - [`surface_tension_laplace`] — surpression de **Laplace** (goutte, bulle) et
+//!   longueur capillaire.
+//! - [`nozzle_thrust`] — tuyère : débit-masse, poussée idéale et vitesse d'éjection.
+//! - [`paris_law`] — propagation de fissure (**Paris**) : `ΔK`, `da/dN = C·ΔK^m`.
+//! - [`thermal_shock_resistance`] — paramètres de **Kingery** `R`/`R'` et `ΔT` max.
+//! - [`bimetal_strip`] — bilame thermique : courbure, rayon et flèche.
+//! - [`stress_relaxation`] — relaxation (**Maxwell**) : `σ(t)=σ0·e^{−t/τ}`.
+//! - [`ceramic_weibull`] — rupture fragile (**Weibull**) : survie, effet d'échelle.
+//! - [`curved_beam`] — poutre fortement courbe (**Winkler-Bach**) : axe neutre,
+//!   contrainte hyperbolique.
+//! - [`circular_plate`] — plaque circulaire sous pression : rigidité, flèche max.
+//! - [`taper_pin`] — goupille conique : section moyenne, cisaillement simple/double.
+//! - [`woodruff_key`] — clavette Woodruff : cisaillement et matage arbre-moyeu.
+//! - [`abbe_error`] — métrologie : erreur d'**Abbe** `e = d·tan α`.
+//! - [`gauge_temperature_correction`] — correction thermique des mesures à 20 °C
+//!   (**ISO 1**).
+//! - [`powder_compaction`] — métallurgie des poudres : densité crue, retrait de
+//!   frittage.
+//! - [`additive_manufacturing`] — impression 3D : couches, débit de dépôt, temps.
 //!
 //! ## Positionnement
 //!
@@ -748,6 +775,29 @@ pub mod smed_setup;
 pub mod stretch_forming;
 pub mod takt_time;
 pub mod worm_gear_forces;
+
+// Lot massif (vol. 29) — mécanismes, fluides/tension superficielle, rupture/
+// thermique matériaux, éléments de machine, métrologie, fabrication.
+pub mod abbe_error;
+pub mod additive_manufacturing;
+pub mod bimetal_strip;
+pub mod capillary_rise;
+pub mod ceramic_weibull;
+pub mod circular_plate;
+pub mod curved_beam;
+pub mod differential_screw;
+pub mod gauge_temperature_correction;
+pub mod nozzle_thrust;
+pub mod paris_law;
+pub mod powder_compaction;
+pub mod quick_return;
+pub mod ratchet_pawl;
+pub mod scotch_yoke;
+pub mod stress_relaxation;
+pub mod surface_tension_laplace;
+pub mod taper_pin;
+pub mod thermal_shock_resistance;
+pub mod woodruff_key;
 
 pub use accelerated_life::{
     BOLTZMANN_EV_K, arrhenius_acceleration_factor, derated_value, ten_degree_rule_factor,
@@ -1383,3 +1433,58 @@ pub use takt_time::{lean_number_of_operators, takt_required_output_rate, takt_ti
 pub use worm_gear_forces::{
     worm_axial_force, worm_normal_force, worm_separating_force, worm_tangential_force,
 };
+
+// Lot massif (vol. 29) — ré-exports à plat.
+pub use abbe_error::{abbe_error, abbe_error_small_angle, abbe_max_offset_for_error};
+pub use additive_manufacturing::{am_build_time, am_deposition_rate, am_number_of_layers};
+pub use bimetal_strip::{bimetal_curvature, bimetal_radius, bimetal_tip_deflection};
+pub use capillary_rise::{CAPILLARY_GRAVITY, capillary_height, capillary_pressure};
+pub use ceramic_weibull::{
+    ceramic_weibull_failure_probability, ceramic_weibull_size_effect,
+    ceramic_weibull_stress_for_probability, ceramic_weibull_survival_probability,
+};
+pub use circular_plate::{
+    clamped_plate_max_deflection, plate_flexural_rigidity, simply_supported_max_deflection,
+};
+pub use curved_beam::{
+    curvedbeam_neutral_axis_shift, curvedbeam_neutral_radius,
+    curvedbeam_rectangular_neutral_radius, curvedbeam_rectangular_section_integral,
+    curvedbeam_stress,
+};
+pub use differential_screw::{
+    differential_advance, differential_lead, differential_turns, diffscrew_ideal_axial_force,
+    diffscrew_mechanical_advantage,
+};
+pub use gauge_temperature_correction::{
+    GAUGETEMP_REFERENCE_TEMPERATURE_C, dimcorr_thermal_offset, dimcorr_to_reference_length,
+    gaugetemp_corrected_length, gaugetemp_differential_expansion_error,
+};
+pub use nozzle_thrust::{nozzle_exit_velocity_bernoulli, nozzle_mass_flow, nozzle_thrust};
+pub use paris_law::{
+    paris_crack_growth_rate, paris_delta_k_from_rate, paris_stress_intensity_range,
+};
+pub use powder_compaction::{
+    pm_compaction_pressure_ratio, pm_green_density_ratio, pm_green_porosity, pm_sintered_dimension,
+    pm_sintering_linear_shrinkage, pm_sintering_volume_shrinkage,
+};
+pub use quick_return::{
+    quickreturn_cutting_time_fraction, quickreturn_ratio, quickreturn_return_stroke_angle,
+    quickreturn_time_ratio_from_angles,
+};
+pub use ratchet_pawl::{
+    ratchet_holding_torque, ratchet_min_teeth_for_angle, ratchet_pitch_radius,
+    ratchet_tangential_force, ratchet_tooth_pitch_angle,
+};
+pub use scotch_yoke::{scotch_acceleration, scotch_displacement, scotch_stroke, scotch_velocity};
+pub use stress_relaxation::{
+    relaxation_remaining_stress_fraction, relaxation_stress, relaxation_time_constant,
+};
+pub use surface_tension_laplace::{
+    SURFACE_TENSION_STANDARD_GRAVITY, laplace_bubble_pressure, laplace_capillary_length,
+    laplace_droplet_pressure,
+};
+pub use taper_pin::{taperpin_double_shear_stress, taperpin_mean_diameter, taperpin_shear_stress};
+pub use thermal_shock_resistance::{
+    tsr_max_temperature_difference, tsr_parameter_r, tsr_parameter_r_prime,
+};
+pub use woodruff_key::{woodruff_bearing_stress, woodruff_shear_stress, woodruff_tangential_force};
