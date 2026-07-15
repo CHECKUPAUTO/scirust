@@ -102,6 +102,18 @@ Run `cargo test -p scirust-provenance -p scirust-gpu --features scirust-gpu/lice
 and (if used) `cargo test -p scirust-autodiff --features canary` to confirm the
 drift-guards pass against the new root.
 
+Then confirm none of the three constants is still the demo root, and **wire this
+guard into your release pipeline** so a demo-signed build can never ship:
+
+```bash
+scripts/check-production-root.sh
+# ok   EMIT_ROOT_HEX … / FAIL … still the PUBLIC DEMO root
+# exit 0 = all production · 1 = a demo root remains · 2 = a constant moved
+```
+
+It is deliberately **not** in the default PR CI (which legitimately runs on the
+demo roots); add it to the release workflow only.
+
 ---
 
 ## Step 3 — Publish the root to a timestamped, immutable venue (BEFORE distributing)
