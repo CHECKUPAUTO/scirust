@@ -304,6 +304,24 @@ train/fine-tune/generate/speculative stack rides on top unchanged.
   raises the default save cadence to 500 and exposes `SCIAGENT_SAVE` / `SCIAGENT_KEEP`.
   Makes long runs and resume disk-safe.
 
+- **v2 40k complete — tokenizer fix validated, coherence wall is data.** The resumed
+  run finished all **40 000** steps: **val 5.38** (ppl 217), **nats/char 1.02** (down
+  from v1's 1.19), and — the point of B14 — **zero `<NNN>` leaks** in 32 generated
+  samples, which now show real Rust idioms (`use crate::`, `#[cfg(test)] mod tests {
+  use super::*;`, method signatures, real source paths). But **`syn`-parse and
+  balanced-bracket rates are still 0 %**: the model produces Rust-*flavored* text, not
+  valid Rust. Root cause is unambiguous — **5.3 M tokens ≈ ~4 epochs for 304M params is
+  data-starved** (a 304M model wants 100 M–1 B+ tokens). The tooling is now correct;
+  the remaining lever is **corpus scale**.
+
+- **B18 — shuffled training windows.** The v2 runs streamed the corpus *sequentially*,
+  so consecutive steps saw consecutive (often near-duplicate) files — the cause of the
+  wild per-step loss variance (2.5↔9.9) and the noisy val curve, and a memorization
+  driver. `CudaTrainer::pretrain` now iterates a **deterministic per-epoch shuffle** of
+  the window starts (`cfg.shuffle`, default on; `SCIAGENT_SHUFFLE=0` opts out),
+  reproducible per `(start_step, epoch)`. Smoother training + less memorization, landing
+  before the next (bigger-corpus) run so both improvements compound.
+
 ## Risks / honesty
 
 - **Toolchain gate (highest risk):** if the Thor's installed CUDA can't emit sm_110,

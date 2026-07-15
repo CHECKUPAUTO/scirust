@@ -395,6 +395,12 @@ fn main() {
     // often and keep only the last few (SCIAGENT_KEEP) plus the best-val one.
     let save_interval = env_usize("SCIAGENT_SAVE", 500);
     let keep_last = env_usize("SCIAGENT_KEEP", 3);
+    // Shuffle training windows (default on; SCIAGENT_SHUFFLE=0 restores sequential
+    // streaming). Deterministic per (start_step, epoch), so runs stay reproducible.
+    let shuffle = !matches!(
+        std::env::var("SCIAGENT_SHUFFLE").as_deref(),
+        Ok("0" | "false")
+    );
     let cfg = CudaPretrainConfig {
         base_lr,
         min_lr: base_lr * 0.1,
@@ -411,12 +417,13 @@ fn main() {
         val_frac,
         eval_interval: 100,
         keep_last,
+        shuffle,
         ..Default::default()
     };
     println!(
         "seq_len {seq_len} | steps {start_step}..{total_steps} | base_lr {base_lr:.1e} | \
          eps {adam_eps:.0e} | clip {max_grad_norm} | save/{save_interval} keep {keep_last} | \
-         ckpt → {ckpt_dir}\n"
+         shuffle {shuffle} | ckpt → {ckpt_dir}\n"
     );
 
     let losses = trainer.pretrain(&tokens, &mut model, &config, &cfg);

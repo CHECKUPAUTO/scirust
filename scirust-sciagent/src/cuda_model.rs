@@ -896,20 +896,48 @@ impl CudaTrainer {
         let schedule =
             WarmupCosineSchedule::new(cfg.base_lr, cfg.min_lr, cfg.warmup_steps, cfg.total_steps);
         let mut step = cfg.start_step;
-        let mut cursor = 0usize;
+        // Shuffled window order. Streaming the corpus sequentially makes consecutive
+        // steps see consecutive (often near-duplicate) files, which spikes per-step
+        // loss variance and encourages memorizing adjacent windows — the noisy val
+        // curve of the first real runs. Iterating a *deterministic* shuffle of the
+        // window starts (re-shuffled each epoch) smooths training and improves
+        // generalization; `cfg.shuffle == false` restores the sequential stream.
+        let n_windows = train_tokens.len().saturating_sub(1) / s;
+        let mut order: Vec<usize> = (0..n_windows).collect();
+        let mut epoch: u64 = 0;
+        let reshuffle = |order: &mut [usize], epoch: u64| {
+            // Seed from start_step ⊕ epoch so a resume is deterministic yet differs
+            // from the fresh run's ordering.
+            shuffle_windows(
+                order,
+                (cfg.start_step as u64).wrapping_add(epoch.wrapping_mul(0x9E37_79B9_7F4A_7C15)),
+            );
+        };
+        if cfg.shuffle
+        {
+            reshuffle(&mut order, epoch);
+        }
+        let mut wi = 0usize;
         // Best-val tracking so retention never prunes the best checkpoint (the val
         // curve is noisy — the last checkpoint is often not the best).
         let mut best_val = f32::INFINITY;
         let mut best_step: Option<usize> = None;
         let t0 = std::time::Instant::now();
-        while step < cfg.total_steps
+        while step < cfg.total_steps && n_windows > 0
         {
-            if cursor + s + 1 > train_tokens.len()
+            if wi >= order.len()
             {
-                cursor = 0;
+                epoch += 1;
+                if cfg.shuffle
+                {
+                    reshuffle(&mut order, epoch);
+                }
+                wi = 0;
             }
-            let inputs = &train_tokens[cursor..cursor + s];
-            let targets = &train_tokens[cursor + 1..cursor + s + 1];
+            let start = order[wi] * s;
+            wi += 1;
+            let inputs = &train_tokens[start..start + s];
+            let targets = &train_tokens[start + 1..start + s + 1];
             let lr = schedule.lr_at(step);
             let loss = self.train_step(
                 inputs,
@@ -920,7 +948,6 @@ impl CudaTrainer {
                 cfg.weight_decay,
             );
             losses.push(loss);
-            cursor += s;
             step += 1;
 
             if cfg.log_interval > 0 && step % cfg.log_interval == 0
@@ -976,6 +1003,23 @@ impl CudaTrainer {
             }
         }
         losses
+    }
+}
+
+/// Deterministic in-place Fisher–Yates shuffle of `order` (an SplitMix/LCG PRNG,
+/// same generator as `PretrainDataset::shuffle`) — used to randomize the training
+/// window order each epoch. Deterministic in `seed`, so a run is reproducible.
+fn shuffle_windows(order: &mut [usize], seed: u64) {
+    let mut state = seed
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
+    for i in (1..order.len()).rev()
+    {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        let j = (state >> 33) as usize % (i + 1);
+        order.swap(i, j);
     }
 }
 
@@ -1066,6 +1110,10 @@ pub struct CudaPretrainConfig {
     /// (plus the best-val one, which is never pruned). `0` keeps everything — the old
     /// behavior, which fills the disk on a long run. Default `3`.
     pub keep_last: usize,
+    /// Shuffle the training window order (re-shuffled deterministically each epoch).
+    /// Default `true` — sequential streaming spikes per-step loss variance and
+    /// encourages memorizing adjacent near-duplicate windows. `false` = sequential.
+    pub shuffle: bool,
 }
 
 impl Default for CudaPretrainConfig {
@@ -1090,6 +1138,7 @@ impl Default for CudaPretrainConfig {
             eval_interval: 250,
             eval_windows: 32,
             keep_last: 3,
+            shuffle: true,
         }
     }
 }
