@@ -1557,24 +1557,27 @@ impl Tape {
         let n = nodes.len();
         assert!(idx < n, "backward: idx {} out of bounds ({} nodes)", idx, n);
 
-        // reset gradients
-        for i in 0..n
+        // Reset gradients in place. Each node's grad slot was allocated at its
+        // shape during the forward push (`push_with_saved`) and never resized,
+        // so we zero the existing buffers instead of reallocating `n` fresh
+        // `Tensor::zeros` on every backward call.
+        for g in grads.iter_mut()
         {
-            let (r, c) = nodes[i].shape;
-            grads[i] = Tensor::zeros(r, c);
+            g.data.fill(0.0);
         }
 
-        // seed
-        let (r, c) = nodes[idx].shape;
-        grads[idx] = Tensor::from_vec(vec![1.0; r * c], r, c);
+        // seed (slot already sized to nodes[idx].shape)
+        grads[idx].data.fill(1.0);
 
         for i in (0..=idx).rev()
         {
-            let g = grads[i].clone();
-            if g.data.iter().all(|&x| x == 0.0)
+            // Skip dead gradients before cloning — many nodes never receive one
+            // (off the backward path), so this avoids an O(size) clone for them.
+            if grads[i].data.iter().all(|&x| x == 0.0)
             {
                 continue;
             }
+            let g = grads[i].clone();
 
             match nodes[i].op
             {
