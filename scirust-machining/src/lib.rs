@@ -622,6 +622,26 @@
 //! - [`spiral_spring`] — ressort spiral plan : couple de rappel, contrainte, énergie.
 //! - [`labyrinth_seal`] — joint labyrinthe : fuite de gaz (Martin), report cinétique.
 //! - [`hydrostatic_force`] — poussée sur surface immergée : force résultante, centre de poussée.
+//! - [`strain_gauge`] — jauge de déformation : pont de Wheatstone, quart/plein pont.
+//! - [`strain_rosette`] — rosette 0/45/90 : déformations principales, orientation, cisaillement max.
+//! - [`wien_law`] — loi de déplacement de Wien : pic d'émission du corps noir, pyrométrie.
+//! - [`differential_gear`] — différentiel automobile : relation cinématique, répartition du couple.
+//! - [`harmonic_drive`] — réducteur à onde de déformation : rapport, vitesse et couple de sortie.
+//! - [`phase_fraction`] — règle des bras de levier (diagramme de phases binaire).
+//! - [`diffusion_fick`] — lois de Fick : flux, profil erfc, coefficient d'Arrhenius.
+//! - [`beam_shear_flow`] — cisaillement transverse de Jourawski VQ/(I·t), pas des connecteurs.
+//! - [`cpm_schedule`] — chemin critique (CPM) : dates au plus tôt/tard, marges.
+//! - [`pert_estimate`] — PERT : durée espérée, variance, score normal réduit.
+//! - [`taguchi_loss`] — fonction de perte de Taguchi : coefficient, perte moyenne.
+//! - [`dpmo_sigma`] — Six Sigma : DPMO, DPU, rendement de Poisson.
+//! - [`wbgt_index`] — indice WBGT de stress thermique (ISO 7243).
+//! - [`hand_arm_vibration`] — exposition main-bras HAV : A(8), dose partielle, durée limite.
+//! - [`duty_cycle_torque`] — couple efficace (RMS) d'un cycle de service, facteur de marche.
+//! - [`brazing_joint`] — joint brasé : cisaillement à recouvrement, pression capillaire.
+//! - [`metal_spinning`] — fluotournage conique : loi du sinus, amincissement.
+//! - [`arch_thrust`] — arc à trois articulations : poussée horizontale, réactions.
+//! - [`cooling_tower`] — tour de refroidissement : plage, approche, efficacité, évaporation.
+//! - [`venturi_ejector`] — éjecteur à Venturi : rapport d'entraînement, vide généré.
 //!
 //! ## Positionnement
 //!
@@ -1079,6 +1099,30 @@ pub mod set_screw;
 pub mod siphon;
 pub mod spiral_spring;
 pub mod tuned_mass_damper;
+
+// Lot massif (vol. 36) — extensométrie & instrumentation, rayonnement, transmissions
+// spéciales, métallurgie/diffusion, structure, ordonnancement de projet, qualité
+// Six Sigma, ergonomie, dimensionnement moteur, assemblage/mise en forme, thermique.
+pub mod arch_thrust;
+pub mod beam_shear_flow;
+pub mod brazing_joint;
+pub mod cooling_tower;
+pub mod cpm_schedule;
+pub mod differential_gear;
+pub mod diffusion_fick;
+pub mod dpmo_sigma;
+pub mod duty_cycle_torque;
+pub mod hand_arm_vibration;
+pub mod harmonic_drive;
+pub mod metal_spinning;
+pub mod pert_estimate;
+pub mod phase_fraction;
+pub mod strain_gauge;
+pub mod strain_rosette;
+pub mod taguchi_loss;
+pub mod venturi_ejector;
+pub mod wbgt_index;
+pub mod wien_law;
 
 pub use accelerated_life::{
     BOLTZMANN_EV_K, arrhenius_acceleration_factor, derated_value, ten_degree_rule_factor,
@@ -2166,4 +2210,75 @@ pub use spiral_spring::{
 pub use tuned_mass_damper::{
     tmd_absorber_mass, tmd_absorber_stiffness, tmd_optimal_damping_ratio,
     tmd_optimal_frequency_ratio,
+};
+
+// Lot massif (vol. 36) — ré-exports à plat.
+pub use arch_thrust::{
+    arch_axial_thrust_at_crown, arch_horizontal_thrust_point_center, arch_horizontal_thrust_udl,
+    arch_support_reaction_vertical_udl,
+};
+pub use beam_shear_flow::{
+    shearflow_fastener_spacing, shearflow_max_rectangular, shearflow_shear_flow,
+    shearflow_transverse_shear_stress,
+};
+pub use brazing_joint::{
+    brazing_capillary_gap_pressure, brazing_joint_shear_strength, brazing_required_overlap,
+    brazing_shear_area,
+};
+pub use cooling_tower::{
+    coolingtower_approach, coolingtower_effectiveness, coolingtower_evaporation_loss,
+    coolingtower_heat_rejected, coolingtower_range,
+};
+pub use cpm_schedule::{
+    CPM_CRITICALITY_TOLERANCE, cpm_early_finish, cpm_free_float, cpm_is_critical, cpm_late_start,
+    cpm_total_float,
+};
+pub use differential_gear::{
+    diffgear_case_speed, diffgear_other_wheel_speed, diffgear_wheel_speed_sum,
+    diffgear_wheel_torque,
+};
+pub use diffusion_fick::{
+    fick_diffusion_coefficient_arrhenius, fick_diffusion_length, fick_first_law_flux,
+    fick_penetration_concentration,
+};
+pub use dpmo_sigma::{dpmo_defects_per_unit, dpmo_from_defects, dpmo_yield, dpmo_yield_from_dpu};
+pub use duty_cycle_torque::{
+    dutycycle_average_power, dutycycle_duty_factor, dutycycle_peak_to_rms_ratio,
+    dutycycle_rms_torque,
+};
+pub use hand_arm_vibration::{
+    hav_combined_a8, hav_daily_exposure_a8, hav_partial_exposure, hav_time_to_limit,
+};
+pub use harmonic_drive::{
+    harmonic_drive_output_speed, harmonic_drive_output_torque, harmonic_drive_reduction_ratio,
+    harmonic_drive_tooth_difference,
+};
+pub use metal_spinning::{
+    spinning_max_half_angle_for_reduction, spinning_reduction_ratio, spinning_sine_law_thickness,
+    spinning_thickness_reduction,
+};
+pub use pert_estimate::{pert_expected_time, pert_standard_deviation, pert_variance, pert_z_score};
+pub use phase_fraction::{
+    lever_complementary_fraction, lever_phase_fraction, lever_tie_line_length,
+};
+pub use strain_gauge::{
+    straingauge_full_bridge_output, straingauge_quarter_bridge_output,
+    straingauge_resistance_change, straingauge_strain_from_resistance,
+};
+pub use strain_rosette::{
+    rosette_max_shear_strain, rosette_mean_strain, rosette_mohr_radius,
+    rosette_principal_angle_rectangular, rosette_principal_strains_rectangular,
+};
+pub use taguchi_loss::{
+    taguchi_average_loss, taguchi_loss_coefficient, taguchi_loss_nominal_best,
+    taguchi_loss_smaller_better,
+};
+pub use venturi_ejector::{
+    ejector_entrainment_ratio, ejector_mixed_mass_flow, ejector_throat_velocity,
+    ejector_vacuum_pressure,
+};
+pub use wbgt_index::{wbgt_indoor, wbgt_outdoor, wbgt_with_clothing_adjustment};
+pub use wien_law::{
+    WIEN_DISPLACEMENT_CONSTANT, WIEN_FREQUENCY_CONSTANT, wien_peak_frequency, wien_peak_wavelength,
+    wien_temperature_from_peak,
 };
