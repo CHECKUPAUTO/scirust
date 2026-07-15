@@ -582,6 +582,26 @@
 //! - [`friction_brake`] — frein à sabot : couple de freinage, puissance dissipée, temps d'arrêt.
 //! - [`shaft_sizing`] — arbre en torsion pure : puissance/couple, diamètre requis.
 //! - [`motor_starting`] — démarrage moteur : couple accélérateur, temps, courant DOL/étoile-triangle.
+//! - [`choked_flow`] — tuyère compressible : rapports critiques, débit massique bloqué.
+//! - [`duct_sizing`] — gaine HVAC : diamètre hydraulique/équivalent, vitesse, perte de charge.
+//! - [`forging_force`] — forgeage : refoulement, matriçage, contrainte d'écoulement (Hollomon).
+//! - [`rolling_force`] — laminage à plat : arc de contact, effort, couple, puissance.
+//! - [`bolt_group_shear`] — groupe de boulons excentré : cisaillement direct + torsion.
+//! - [`weld_group`] — groupe de cordons excentré : module polaire, contrainte résultante.
+//! - [`rotating_unbalance`] — balourd tournant : force centrifuge, amplitude, ISO 1940.
+//! - [`pendulum`] — pendule simple et composé : période, longueur synchrone, giration.
+//! - [`flat_belt`] — courroie plate (Euler) : rapport des tensions, puissance, tension centrifuge.
+//! - [`honing`] — rodage : angle de croisillon, vitesse périphérique, temps d'enlèvement.
+//! - [`lapping`] — rodage libre (Preston) : taux d'enlèvement, matière enlevée, pression.
+//! - [`disc_clutch`] — embrayage à disques : couple (usure/pression uniforme), effort axial.
+//! - [`centrifugal_clutch`] — embrayage centrifuge : force de patin, régime d'engagement, couple.
+//! - [`hydraulic_press`] — presse hydraulique (Pascal) : multiplication d'effort, multiplicateur.
+//! - [`magnetic_holding`] — force de maintien magnétique (traction de Maxwell).
+//! - [`vacuum_lifting`] — levage par ventouse : force de préhension, aire requise.
+//! - [`reaming`] — alésage à l'alésoir : vitesse, avance, temps d'usinage.
+//! - [`taper_turning`] — tournage conique : conicité, décalage de contre-poupée, angle de chariot.
+//! - [`gear_backlash`] — jeu de denture : jeu circonférentiel/angulaire, entraxe requis.
+//! - [`bucket_elevator`] — élévateur à godets : débit, puissance de levage et moteur.
 //!
 //! ## Positionnement
 //!
@@ -991,6 +1011,30 @@ pub mod spring_combination;
 pub mod thermal_resistance;
 pub mod turning_roughness;
 pub mod view_factor;
+
+// Lot massif (vol. 34) — écoulement compressible/HVAC, procédés de mise en forme,
+// assemblages excentrés, dynamique/vibration, embrayages & presse, manutention,
+// usinage et éléments d'engrenage.
+pub mod bolt_group_shear;
+pub mod bucket_elevator;
+pub mod centrifugal_clutch;
+pub mod choked_flow;
+pub mod disc_clutch;
+pub mod duct_sizing;
+pub mod flat_belt;
+pub mod forging_force;
+pub mod gear_backlash;
+pub mod honing;
+pub mod hydraulic_press;
+pub mod lapping;
+pub mod magnetic_holding;
+pub mod pendulum;
+pub mod reaming;
+pub mod rolling_force;
+pub mod rotating_unbalance;
+pub mod taper_turning;
+pub mod vacuum_lifting;
+pub mod weld_group;
 
 pub use accelerated_life::{
     BOLTZMANN_EV_K, arrhenius_acceleration_factor, derated_value, ten_degree_rule_factor,
@@ -1933,4 +1977,76 @@ pub use turning_roughness::{turning_feed_for_ra, turning_theoretical_ra, turning
 pub use view_factor::{
     view_factor_infinite_parallel_plates, view_factor_net_exchange, view_factor_reciprocity,
     view_factor_summation_last,
+};
+
+// Lot massif (vol. 34) — ré-exports à plat.
+pub use bolt_group_shear::{
+    boltgroup_direct_shear, boltgroup_polar_inertia, boltgroup_resultant_shear,
+    boltgroup_torsional_shear,
+};
+pub use bucket_elevator::{
+    bucket_capacity, bucket_lifting_power, bucket_motor_power, bucket_spacing_from_pitch,
+};
+pub use centrifugal_clutch::{
+    centrifugal_clutch_engagement_speed, centrifugal_clutch_net_force,
+    centrifugal_clutch_shoe_force, centrifugal_clutch_torque,
+};
+pub use choked_flow::{
+    choked_critical_pressure_ratio, choked_critical_temperature_ratio, choked_is_choked,
+    choked_mass_flow as choked_nozzle_mass_flow,
+};
+pub use disc_clutch::{
+    disc_clutch_axial_force_uniform_wear, disc_clutch_mean_radius,
+    disc_clutch_transmissible_torque_uniform_pressure,
+    disc_clutch_transmissible_torque_uniform_wear,
+};
+pub use duct_sizing::{
+    duct_friction_loss, duct_hydraulic_diameter, duct_rectangular_equivalent_diameter,
+    duct_velocity, duct_velocity_pressure,
+};
+pub use flat_belt::{
+    flatbelt_centrifugal_tension, flatbelt_power, flatbelt_slack_from_ratio, flatbelt_tension_ratio,
+};
+pub use forging_force::{forging_closed_die_force, forging_flow_stress, forging_open_die_force};
+pub use gear_backlash::{
+    gear_backlash_angular, gear_backlash_center_distance_for_backlash, gear_backlash_circular,
+    gear_backlash_from_tooth_thinning,
+};
+pub use honing::{honing_crosshatch_angle, honing_peripheral_speed, honing_stock_removal_time};
+pub use hydraulic_press::{
+    hydraulic_press_force_from_pressure, hydraulic_press_intensifier_pressure,
+    hydraulic_press_output_force, hydraulic_press_output_stroke,
+};
+pub use lapping::{
+    lapping_material_removed, lapping_pressure, lapping_removal_rate, lapping_time_for_stock,
+};
+pub use magnetic_holding::{
+    MU0_VACUUM, magnetic_flux_density_for_force, magnetic_holding_force_two_poles,
+    magnetic_maxwell_pull,
+};
+pub use pendulum::{
+    pendulum_compound_period, pendulum_equivalent_length, pendulum_radius_of_gyration,
+    pendulum_simple_period,
+};
+pub use reaming::{
+    reaming_cutting_speed, reaming_feed_rate, reaming_machining_time, reaming_spindle_speed,
+};
+pub use rolling_force::{
+    rolling_contact_length, rolling_force, rolling_power as rolling_mill_power,
+    rolling_torque_per_roll,
+};
+pub use rotating_unbalance::{
+    unbalance_centrifugal_force, unbalance_forced_amplitude, unbalance_permissible_from_grade,
+    unbalance_transmitted_force,
+};
+pub use taper_turning::{
+    taper_compound_rest_angle, taper_half_angle, taper_ratio as taper_turning_ratio,
+    taper_tailstock_offset,
+};
+pub use vacuum_lifting::{
+    vacuum_cup_area_from_diameter, vacuum_effective_lift, vacuum_lift_force, vacuum_required_area,
+};
+pub use weld_group::{
+    weldgroup_direct_shear_stress, weldgroup_polar_modulus, weldgroup_resultant_stress,
+    weldgroup_torsional_shear_stress,
 };
