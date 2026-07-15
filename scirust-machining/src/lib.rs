@@ -662,6 +662,24 @@
 //! - [`forecasting`] — prévision : lissage exponentiel, moyenne mobile, MAD.
 //! - [`ecm_machining`] — usinage électrochimique (Faraday) : débit enlevé, jeu d'équilibre.
 //! - [`thermocouple`] — thermocouple (Seebeck) : f.é.m., compensation soudure froide.
+//! - [`radiation_network`] — rayonnement : méthode du réseau de résistances (surface, espace).
+//! - [`radiation_shield`] — écrans anti-rayonnement : facteur 1/(N+1), flux réduit.
+//! - [`coulomb_damping`] — frottement sec : décroissance linéaire, bande morte, arrêt.
+//! - [`coffin_manson`] — fatigue oligocyclique : courbe déformation-durée, transition.
+//! - [`ramberg_osgood`] — loi élasto-plastique : déformation totale/élastique/plastique.
+//! - [`whole_body_vibration`] — WBV (ISO 2631) : A(8), axe dominant, somme vectorielle.
+//! - [`fmea_rpn`] — AMDEC : indice de priorité de risque RPN = S·O·D, criticité.
+//! - [`silo_pressure`] — silo (Janssen) : pression verticale/pariétale, asymptote.
+//! - [`comminution`] — broyage : lois de Bond, Rittinger, Kick, rapport de réduction.
+//! - [`mixing_power`] — agitation : puissance turbulente/laminaire, Reynolds d'agitation.
+//! - [`cyclone_separator`] — cyclone (Lapple) : diamètre de coupure, rendement, perte de charge.
+//! - [`filtration`] — filtration sur gâteau : flux de Darcy, équation de Ruth.
+//! - [`sluice_gate`] — vanne de fond : débit soutiré, veine contractée, poussée.
+//! - [`doppler`] — effet Doppler : décalage de fréquence, vélocimétrie par réflexion.
+//! - [`lighting_lumen`] — éclairagisme : méthode des lumens, indice du local, flux requis.
+//! - [`pneumatic_conveying`] — transport pneumatique dilué : taux de charge, Froude de saltation.
+//! - [`heat_exchanger_fouling`] — encrassement : résistance Rf, coefficient encrassé, propreté.
+//! - [`air_mixing`] — mélange adiabatique d'air humide : température, teneur en eau, enthalpie.
 //!
 //! ## Positionnement
 //!
@@ -1168,6 +1186,28 @@ pub mod steam_quality;
 pub mod surge_tank;
 pub mod thermocouple;
 pub mod torque_angle;
+
+// Lot massif (vol. 38) — rayonnement thermique, fatigue/plasticité & vibration,
+// qualité/risque, équipements de procédé et manutention de vrac, hydraulique,
+// acoustique, éclairagisme, thermique.
+pub mod air_mixing;
+pub mod coffin_manson;
+pub mod comminution;
+pub mod coulomb_damping;
+pub mod cyclone_separator;
+pub mod doppler;
+pub mod filtration;
+pub mod fmea_rpn;
+pub mod heat_exchanger_fouling;
+pub mod lighting_lumen;
+pub mod mixing_power;
+pub mod pneumatic_conveying;
+pub mod radiation_network;
+pub mod radiation_shield;
+pub mod ramberg_osgood;
+pub mod silo_pressure;
+pub mod sluice_gate;
+pub mod whole_body_vibration;
 
 pub use accelerated_life::{
     BOLTZMANN_EV_K, arrhenius_acceleration_factor, derated_value, ten_degree_rule_factor,
@@ -2398,4 +2438,73 @@ pub use thermocouple::{
 };
 pub use torque_angle::{
     torqueangle_axial_advance, torqueangle_combined_stiffness, torqueangle_preload_from_angle,
+};
+
+// Lot massif (vol. 38) — ré-exports à plat.
+pub use air_mixing::{
+    airmix_enthalpy, airmix_humidity_ratio, airmix_mass_flow_out, airmix_temperature,
+};
+pub use coffin_manson::{
+    coffin_elastic_strain_amplitude, coffin_plastic_strain_amplitude,
+    coffin_total_strain_amplitude, coffin_transition_reversals,
+};
+pub use comminution::{
+    comminution_bond_work, comminution_kick_energy, comminution_reduction_ratio,
+    comminution_rittinger_energy,
+};
+pub use coulomb_damping::{
+    coulomb_amplitude_after_cycles, coulomb_amplitude_loss_per_cycle, coulomb_cycles_to_stop,
+    coulomb_dead_band,
+};
+pub use cyclone_separator::{
+    cyclone_collection_efficiency, cyclone_cut_diameter, cyclone_number_of_turns,
+    cyclone_pressure_drop,
+};
+pub use doppler::{
+    doppler_observed_moving_observer, doppler_observed_moving_source, doppler_shift_reflected,
+    doppler_velocity_from_shift,
+};
+pub use filtration::{
+    filtration_cake_resistance, filtration_darcy_flux, filtration_time_constant_pressure,
+    filtration_volume_from_time,
+};
+pub use fmea_rpn::{
+    fmea_criticality, fmea_exceeds_threshold, fmea_normalized_rpn, fmea_risk_priority_number,
+};
+pub use heat_exchanger_fouling::{
+    fouling_area_oversize_factor, fouling_cleanliness_factor, fouling_fouled_overall_coefficient,
+    fouling_resistance_from_coefficients,
+};
+pub use lighting_lumen::{
+    lighting_average_illuminance, lighting_flux_required, lighting_luminaires_required,
+    lighting_room_index,
+};
+pub use mixing_power::{
+    mixing_power_laminar, mixing_power_turbulent, mixing_reynolds, mixing_tip_speed,
+};
+pub use pneumatic_conveying::{
+    pneuconvey_acceleration_pressure_drop, pneuconvey_gas_mass_flow, pneuconvey_saltation_froude,
+    pneuconvey_solids_loading_ratio,
+};
+pub use radiation_network::{
+    radnet_space_resistance, radnet_surface_resistance, radnet_two_gray_parallel_plates,
+    radnet_two_gray_surface_exchange,
+};
+pub use radiation_shield::{
+    radshield_flux_one_shield, radshield_flux_with_shields,
+    radshield_reduction_factor_equal_emissivity, radshield_two_plate_flux,
+};
+pub use ramberg_osgood::{
+    rambergosgood_elastic_strain, rambergosgood_plastic_strain, rambergosgood_secant_modulus,
+    rambergosgood_total_strain,
+};
+pub use silo_pressure::{
+    silo_asymptotic_pressure, silo_hydraulic_radius, silo_janssen_vertical_pressure,
+    silo_janssen_wall_pressure,
+};
+pub use sluice_gate::{
+    sluice_contracted_depth, sluice_discharge, sluice_discharge_coefficient, sluice_force_on_gate,
+};
+pub use whole_body_vibration::{
+    wbv_daily_exposure_a8, wbv_dominant_axis_acceleration, wbv_time_to_limit, wbv_vector_sum,
 };
