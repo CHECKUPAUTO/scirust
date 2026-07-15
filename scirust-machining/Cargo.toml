@@ -3,7 +3,7 @@ name = "scirust-machining"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "SciRust productique mécanique — cinématique de coupe (Vc/N/Vf/MRR), effort et puissance de coupe (Kienzle), durée de vie outil (Taylor), temps d'usinage, rugosité théorique et économie d'usinage (Gilbert)"
+description = "SciRust ingénierie mécanique & productique — 458 modules de calcul déterministe pur-Rust : usinage & formage, éléments de machines (engrenages, roulements, ressorts, arbres, embrayages), RDM & structure, dynamique/vibration/fatigue, mécanique des fluides & machines à fluide, thermique & énergétique, métrologie, qualité et production. Modèles d'ingénieur à limites explicites, constantes fournies par l'appelant."
 
 [dependencies]
 

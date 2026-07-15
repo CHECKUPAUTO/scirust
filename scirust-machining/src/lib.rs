@@ -712,7 +712,12 @@
 //! `scirust-tolerance` (tolérancement inertiel/statistique, ajustements ISO 286,
 //! ISO 1101 numérique), `scirust-metrology` (incertitude GUM), `scirust-fatigue`
 //! (comptage rainflow, Palmgren-Miner) et `scirust-fab` (contrôle de procédé).
-//! Elle apporte le **cœur calcul de la coupe** qui manquait.
+//! Partie du **cœur calcul de la coupe**, elle couvre désormais la chaîne
+//! complète du génie mécanique et de la productique — usinage & formage,
+//! éléments de machines, RDM & structure, dynamique/vibration/fatigue, mécanique
+//! des fluides & machines à fluide, thermique & énergétique, métrologie, qualité
+//! et production — soit plusieurs centaines de modèles d'ingénieur à limites
+//! explicites. Voir le `README.md` pour une vue d'ensemble par familles.
 //!
 //! ## Unités
 //!
