@@ -2408,13 +2408,16 @@ impl Tape {
                 },
                 Op::Softmax { input, axis } =>
                 {
-                    let av = &values[input].as_cpu();
-                    let sm = av.softmax(axis);
-                    let g_broadcast = g.broadcast_to(av.rows, av.cols);
-                    let gs = g_broadcast.hadamard(&sm);
+                    // Reuse the stored forward output softmax(input) = values[i]
+                    // instead of recomputing it — identical values, but no extra
+                    // exp pass and no softmax allocation per attention layer.
+                    let sm = values[i].as_cpu();
+                    let (rows, cols) = (sm.rows, sm.cols);
+                    let g_broadcast = g.broadcast_to(rows, cols);
+                    let gs = g_broadcast.hadamard(sm);
                     let sum_gs = gs.sum_axis(axis);
-                    let diff = gs.sub(&sm.hadamard(&sum_gs.broadcast_to(av.rows, av.cols)));
-                    grads[input] = grads[input].add(&diff);
+                    let diff = gs.sub(&sm.hadamard(&sum_gs.broadcast_to(rows, cols)));
+                    grads[input].add_assign(&diff);
                 },
                 Op::SoftmaxPortable { input } =>
                 {
@@ -3583,10 +3586,15 @@ impl<'t> Var<'t> {
         {
             return self.try_matmul_gpu(other);
         }
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
-        crate::error::check_inner_dim("matmul", a.cols, b.rows)?;
-        let out = a.matmul(&b);
+        // Compute while borrowing the operands (no clone); the borrow is dropped
+        // before `push_with_saved` takes a mutable borrow of `values`.
+        let out = {
+            let values = self.tape.values.borrow();
+            let a = values[self.idx].as_cpu();
+            let b = values[other.idx].as_cpu();
+            crate::error::check_inner_dim("matmul", a.cols, b.rows)?;
+            a.matmul(b)
+        };
         let new_idx = self.tape.push_with_saved(
             Op::MatMul(self.idx, other.idx),
             DeviceTensor::cpu(out),
@@ -3605,11 +3613,16 @@ impl<'t> Var<'t> {
     /// its allocation — used by attention's `Q·Kᵀ`.
     pub fn try_matmul_bt(self, other: Var<'t>) -> crate::error::Result<Var<'t>> {
         self.ensure_same_tape(&other, "matmul_bt")?;
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
-        crate::error::check_inner_dim("matmul_bt", a.cols, b.cols)?;
-        // A·Bᵀ via gemm_ab(ta=false, tb=true): B read transposed by stride.
-        let out = self.tape.gemm_ab(&a, &b, false, true);
+        // A·Bᵀ via gemm_ab(ta=false, tb=true): B read transposed by stride. Read
+        // the operands by reference (no clone); `gemm_ab` only touches the GPU
+        // engine, not `values`, so holding the borrow is safe.
+        let out = {
+            let values = self.tape.values.borrow();
+            let a = values[self.idx].as_cpu();
+            let b = values[other.idx].as_cpu();
+            crate::error::check_inner_dim("matmul_bt", a.cols, b.cols)?;
+            self.tape.gemm_ab(a, b, false, true)
+        };
         let new_idx = self.tape.push_with_saved(
             Op::MatMulBt(self.idx, other.idx),
             DeviceTensor::cpu(out),
@@ -3640,58 +3653,65 @@ impl<'t> Var<'t> {
         transpose_b: bool,
     ) -> crate::error::Result<Var<'t>> {
         self.ensure_same_tape(&other, "bmm2d")?;
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
-        if batch == 0 || !a.rows.is_multiple_of(batch) || !b.rows.is_multiple_of(batch)
-        {
-            return Err(crate::error::SciRustError::ShapeMismatch {
-                op: "bmm2d",
-                expected: (batch, batch),
-                got: (a.rows, b.rows),
-            });
-        }
-        let m = a.rows / batch;
-        let k = a.cols;
-        // Contracted dim is B's columns whether or not it is read transposed:
-        // transpose_b → each block is (m×k)·(k×n)ᵀ with B stored (n×k);
-        // otherwise B is (k×n) stacked as (batch·k × n).
-        let (n, b_inner) = if transpose_b
-        {
-            (b.rows / batch, b.cols)
-        }
-        else
-        {
-            (b.cols, b.rows / batch)
+        // Read the operands by reference (no clone) and run the batched GEMM
+        // while the borrow is held; `batched_gemm` is a free function that never
+        // touches the tape. The borrow drops before the mutable push below.
+        let (out, m, n) = {
+            let values = self.tape.values.borrow();
+            let a = values[self.idx].as_cpu();
+            let b = values[other.idx].as_cpu();
+            if batch == 0 || !a.rows.is_multiple_of(batch) || !b.rows.is_multiple_of(batch)
+            {
+                return Err(crate::error::SciRustError::ShapeMismatch {
+                    op: "bmm2d",
+                    expected: (batch, batch),
+                    got: (a.rows, b.rows),
+                });
+            }
+            let m = a.rows / batch;
+            let k = a.cols;
+            // Contracted dim is B's columns whether or not it is read transposed:
+            // transpose_b → each block is (m×k)·(k×n)ᵀ with B stored (n×k);
+            // otherwise B is (k×n) stacked as (batch·k × n).
+            let (n, b_inner) = if transpose_b
+            {
+                (b.rows / batch, b.cols)
+            }
+            else
+            {
+                (b.cols, b.rows / batch)
+            };
+            crate::error::check_inner_dim("bmm2d", k, b_inner)?;
+            // B[i] is read transposed (rsb=1, csb=k) when it is stored `(n×k)`,
+            // else row-major `(k×n)` (rsb=n, csb=1). A[i] is always row-major.
+            let (b_bstride, rsb, csb) = if transpose_b
+            {
+                (n * k, 1isize, k as isize)
+            }
+            else
+            {
+                (k * n, n as isize, 1isize)
+            };
+            let mut out = vec![0.0f32; batch * m * n];
+            batched_gemm(
+                batch,
+                m,
+                k,
+                n,
+                1.0,
+                &a.data,
+                m * k,
+                k as isize,
+                1,
+                &b.data,
+                b_bstride,
+                rsb,
+                csb,
+                0.0,
+                &mut out,
+            );
+            (out, m, n)
         };
-        crate::error::check_inner_dim("bmm2d", k, b_inner)?;
-        // B[i] is read transposed (rsb=1, csb=k) when it is stored `(n×k)`,
-        // else row-major `(k×n)` (rsb=n, csb=1). A[i] is always row-major.
-        let (b_bstride, rsb, csb) = if transpose_b
-        {
-            (n * k, 1isize, k as isize)
-        }
-        else
-        {
-            (k * n, n as isize, 1isize)
-        };
-        let mut out = vec![0.0f32; batch * m * n];
-        batched_gemm(
-            batch,
-            m,
-            k,
-            n,
-            1.0,
-            &a.data,
-            m * k,
-            k as isize,
-            1,
-            &b.data,
-            b_bstride,
-            rsb,
-            csb,
-            0.0,
-            &mut out,
-        );
         let new_idx = self.tape.push_with_saved(
             Op::BatchMatMul {
                 a: self.idx,
