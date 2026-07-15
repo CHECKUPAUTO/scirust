@@ -1284,8 +1284,11 @@ impl Tape {
 
     pub fn input(&self, t: Tensor) -> Var<'_> {
         t.assert_valid("Tape::input");
-        let idx = self.push_with_saved(Op::Input, DeviceTensor::cpu(t.clone()), SavedData::None);
-        self.values.borrow_mut()[idx] = DeviceTensor::cpu(t);
+        // `push_with_saved` already stores the value in `self.values`, so move
+        // `t` straight in. The old code cloned `t` into the push and then
+        // overwrote the stored clone with `t` — a full, wasted copy of every
+        // input (weights, activations) on every `input()` call.
+        let idx = self.push_with_saved(Op::Input, DeviceTensor::cpu(t), SavedData::None);
         Var { tape: self, idx }
     }
 
