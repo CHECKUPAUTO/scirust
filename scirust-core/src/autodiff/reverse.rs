@@ -720,6 +720,76 @@ impl Tensor {
             );
         }
     }
+
+    /// `f(self, broadcast(b))` computed in a **single pass**, reading `b`
+    /// directly instead of materializing a full `(rows×cols)` replicate the way
+    /// `self.op(&b.broadcast_to(rows, cols))` does. `b` must broadcast to
+    /// `self`'s shape: equal, a row `(1×cols)`, a column `(rows×1)`, or a scalar
+    /// `(1×1)`. `f` is a plain `fn` pointer (Copy) so it threads through the
+    /// per-row closures cheaply.
+    pub fn zip_broadcasted(&self, b: &Tensor, f: fn(f32, f32) -> f32) -> Tensor {
+        let (rows, cols) = (self.rows, self.cols);
+        if rows == 0 || cols == 0
+        {
+            return self.clone();
+        }
+        // Write the output directly from `self` and `b` (no full replicate of
+        // `b`, and no read-back of the output as an in-place op would). The
+        // per-row slice loops autovectorize, unlike a chained flat_map iterator.
+        let mut out = Tensor::zeros(rows, cols);
+        if b.rows == rows && b.cols == cols
+        {
+            for ((o, &x), &y) in out.data.iter_mut().zip(&self.data).zip(&b.data)
+            {
+                *o = f(x, y);
+            }
+        }
+        else if b.rows == 1 && b.cols == cols
+        {
+            // Row vector broadcast over rows: b stays hot in cache.
+            for (orow, srow) in out
+                .data
+                .chunks_exact_mut(cols)
+                .zip(self.data.chunks_exact(cols))
+            {
+                for ((o, &x), &y) in orow.iter_mut().zip(srow).zip(&b.data)
+                {
+                    *o = f(x, y);
+                }
+            }
+        }
+        else if b.rows == rows && b.cols == 1
+        {
+            // Column vector broadcast over cols.
+            for ((orow, srow), &y) in out
+                .data
+                .chunks_exact_mut(cols)
+                .zip(self.data.chunks_exact(cols))
+                .zip(&b.data)
+            {
+                for (o, &x) in orow.iter_mut().zip(srow)
+                {
+                    *o = f(x, y);
+                }
+            }
+        }
+        else if b.rows == 1 && b.cols == 1
+        {
+            let y = b.data[0];
+            for (o, &x) in out.data.iter_mut().zip(&self.data)
+            {
+                *o = f(x, y);
+            }
+        }
+        else
+        {
+            panic!(
+                "zip_broadcasted: incompatible shapes ({},{}) -> ({},{})",
+                b.rows, b.cols, rows, cols
+            );
+        }
+        out
+    }
 }
 
 impl std::ops::Index<(usize, usize)> for Tensor {
@@ -3759,7 +3829,7 @@ impl<'t> Var<'t> {
                 got: (b.rows, b.cols),
             });
         }
-        let out = a.add(&b.broadcast_to(a.rows, a.cols));
+        let out = a.zip_broadcasted(&b, |x, y| x + y);
         let new_idx = self.tape.push_with_saved(
             Op::AddBroadcast(self.idx, other.idx),
             DeviceTensor::cpu(out),
@@ -3784,7 +3854,7 @@ impl<'t> Var<'t> {
         self.ensure_same_tape(&other, "sub_broadcast").unwrap();
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
-        let out = a.sub(&b.broadcast_to(a.rows, a.cols));
+        let out = a.zip_broadcasted(&b, |x, y| x - y);
         let new_idx = self.tape.push_with_saved(
             Op::SubBroadcast(self.idx, other.idx),
             DeviceTensor::cpu(out),
@@ -3808,7 +3878,7 @@ impl<'t> Var<'t> {
                 got: (b.rows, b.cols),
             });
         }
-        let out = a.hadamard(&b.broadcast_to(a.rows, a.cols));
+        let out = a.zip_broadcasted(&b, |x, y| x * y);
         let new_idx = self.tape.push_with_saved(
             Op::MulBroadcast(self.idx, other.idx),
             DeviceTensor::cpu(out),
@@ -3827,7 +3897,7 @@ impl<'t> Var<'t> {
         self.ensure_same_tape(&other, "div_broadcast").unwrap();
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
-        let out = a.div(&b.broadcast_to(a.rows, a.cols));
+        let out = a.zip_broadcasted(&b, |x, y| x / y);
         let new_idx = self.tape.push_with_saved(
             Op::DivBroadcast(self.idx, other.idx),
             DeviceTensor::cpu(out),
