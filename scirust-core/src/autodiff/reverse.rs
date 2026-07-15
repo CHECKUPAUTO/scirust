@@ -418,6 +418,49 @@ impl Tensor {
             *a -= b;
         }
     }
+    /// Fused `self += other · s` in one pass, no temporary. Bit-identical to
+    /// `self.add_assign(&other.scale(s))` (multiply then add, no FMA) — used in
+    /// the backward pass to avoid materializing the scaled gradient.
+    pub fn add_scaled(&mut self, other: &Tensor, s: f32) {
+        assert_eq!(
+            self.shape(),
+            other.shape(),
+            "Tensor::add_scaled shape mismatch"
+        );
+        for (d, &o) in self.data.iter_mut().zip(&other.data)
+        {
+            *d += o * s;
+        }
+    }
+    /// Fused `self += a ⊙ b` in one pass, no temporary. Bit-identical to
+    /// `self.add_assign(&a.hadamard(b))` (multiply then add, no FMA) — the
+    /// dominant backward pattern (`grad += upstream ⊙ local_deriv`).
+    pub fn add_hadamard(&mut self, a: &Tensor, b: &Tensor) {
+        assert_eq!(
+            self.shape(),
+            a.shape(),
+            "Tensor::add_hadamard shape mismatch"
+        );
+        assert_eq!(a.shape(), b.shape(), "Tensor::add_hadamard shape mismatch");
+        for ((d, &x), &y) in self.data.iter_mut().zip(&a.data).zip(&b.data)
+        {
+            *d += x * y;
+        }
+    }
+    /// Fused `self -= a ⊙ b` in one pass, no temporary. Bit-identical to
+    /// `self.sub_assign(&a.hadamard(b))` (multiply then subtract, no FMA).
+    pub fn sub_hadamard(&mut self, a: &Tensor, b: &Tensor) {
+        assert_eq!(
+            self.shape(),
+            a.shape(),
+            "Tensor::sub_hadamard shape mismatch"
+        );
+        assert_eq!(a.shape(), b.shape(), "Tensor::sub_hadamard shape mismatch");
+        for ((d, &x), &y) in self.data.iter_mut().zip(&a.data).zip(&b.data)
+        {
+            *d -= x * y;
+        }
+    }
     pub fn mul(&self, other: &Tensor) -> Tensor {
         self.hadamard(other)
     }
@@ -1597,8 +1640,8 @@ impl Tape {
                 {
                     let av = &values[a].as_cpu();
                     let bv = &values[b].as_cpu();
-                    grads[a].add_assign(&g.hadamard(bv));
-                    grads[b].add_assign(&g.hadamard(av));
+                    grads[a].add_hadamard(&g, bv);
+                    grads[b].add_hadamard(&g, av);
                 },
                 Op::Div(a, b) =>
                 {
@@ -1606,8 +1649,8 @@ impl Tape {
                     let bv = &values[b].as_cpu();
                     let b_recip = bv.reciprocal();
                     let a_over_b2 = av.hadamard(&b_recip.hadamard(&b_recip));
-                    grads[a].add_assign(&g.hadamard(&b_recip));
-                    grads[b].sub_assign(&g.hadamard(&a_over_b2));
+                    grads[a].add_hadamard(&g, &b_recip);
+                    grads[b].sub_hadamard(&g, &a_over_b2);
                 },
                 Op::AddBroadcast(a, b) =>
                 {
@@ -2074,7 +2117,7 @@ impl Tape {
                 },
                 Op::Scale { input, scalar } =>
                 {
-                    grads[input].add_assign(&g.scale(scalar));
+                    grads[input].add_scaled(&g, scalar);
                 },
                 Op::Neg(a) =>
                 {
@@ -2084,25 +2127,25 @@ impl Tape {
                 {
                     // dL/dx = g * exp(x) = g * value(node_i)
                     let val = &values[i].as_cpu();
-                    grads[a].add_assign(&g.hadamard(val));
+                    grads[a].add_hadamard(&g, val);
                 },
                 Op::ExpPortable(a) =>
                 {
                     // idem Exp : depuis la sortie stockée — aucun appel libm,
                     // le nœud complet reste bit-exact inter-plates-formes.
                     let val = &values[i].as_cpu();
-                    grads[a].add_assign(&g.hadamard(val));
+                    grads[a].add_hadamard(&g, val);
                 },
                 Op::Log(a) =>
                 {
                     let av = &values[a].as_cpu();
-                    grads[a].add_assign(&g.hadamard(&av.reciprocal()));
+                    grads[a].add_hadamard(&g, &av.reciprocal());
                 },
                 Op::LnPortable(a) =>
                 {
                     // g ⊙ 1/x : division IEEE, sans libm.
                     let av = &values[a].as_cpu();
-                    grads[a].add_assign(&g.hadamard(&av.reciprocal()));
+                    grads[a].add_hadamard(&g, &av.reciprocal());
                 },
                 Op::MatMulPortable(a, b) =>
                 {
@@ -2118,7 +2161,7 @@ impl Tape {
                 {
                     let av = &values[a].as_cpu();
                     let two_sqrt = av.sqrt().scale(2.0);
-                    grads[a] = grads[a].add(&g.hadamard(&two_sqrt.reciprocal()));
+                    grads[a].add_hadamard(&g, &two_sqrt.reciprocal());
                 },
                 Op::Reciprocal(a) =>
                 {
@@ -2135,60 +2178,60 @@ impl Tape {
                     {
                         *d = if *d == 0.0 { 0.0 } else { -1.0 / *d };
                     }
-                    grads[a] = grads[a].add(&g.hadamard(&minus_one_over_x2));
+                    grads[a].add_hadamard(&g, &minus_one_over_x2);
                 },
                 Op::Sin(a) =>
                 {
                     let av = values[a].as_cpu();
-                    grads[a] = grads[a].add(&g.hadamard(&av.cos()));
+                    grads[a].add_hadamard(&g, &av.cos());
                 },
                 Op::Cos(a) =>
                 {
                     let av = values[a].as_cpu();
-                    grads[a] = grads[a].sub(&g.hadamard(&av.sin()));
+                    grads[a].sub_hadamard(&g, &av.sin());
                 },
                 Op::Tan(a) =>
                 {
                     let av = values[a].as_cpu();
                     let cos_v = av.cos();
-                    grads[a] = grads[a].add(&g.hadamard(&cos_v.hadamard(&cos_v).reciprocal()));
+                    grads[a].add_hadamard(&g, &cos_v.hadamard(&cos_v).reciprocal());
                 },
                 Op::Sinh(a) =>
                 {
                     let av = values[a].as_cpu();
-                    grads[a] = grads[a].add(&g.hadamard(&av.cosh()));
+                    grads[a].add_hadamard(&g, &av.cosh());
                 },
                 Op::Cosh(a) =>
                 {
                     let av = values[a].as_cpu();
-                    grads[a] = grads[a].add(&g.hadamard(&av.sinh()));
+                    grads[a].add_hadamard(&g, &av.sinh());
                 },
                 Op::Log10(a) =>
                 {
                     let av = values[a].as_cpu();
                     let ln10 = std::f32::consts::LN_10;
-                    grads[a] = grads[a].add(&g.hadamard(&av.reciprocal().scale(1.0 / ln10)));
+                    grads[a].add_hadamard(&g, &av.reciprocal().scale(1.0 / ln10));
                 },
                 Op::Asin(a) =>
                 {
                     let av = values[a].as_cpu();
                     let ones = Tensor::from_vec(vec![1.0f32; av.data.len()], av.rows, av.cols);
                     let denom = ones.sub(&av.hadamard(av)).sqrt();
-                    grads[a] = grads[a].add(&g.hadamard(&denom.reciprocal()));
+                    grads[a].add_hadamard(&g, &denom.reciprocal());
                 },
                 Op::Acos(a) =>
                 {
                     let av = values[a].as_cpu();
                     let ones = Tensor::from_vec(vec![1.0f32; av.data.len()], av.rows, av.cols);
                     let denom = ones.sub(&av.hadamard(av)).sqrt();
-                    grads[a] = grads[a].sub(&g.hadamard(&denom.reciprocal()));
+                    grads[a].sub_hadamard(&g, &denom.reciprocal());
                 },
                 Op::Atan(a) =>
                 {
                     let av = values[a].as_cpu();
                     let ones = Tensor::from_vec(vec![1.0f32; av.data.len()], av.rows, av.cols);
                     let denom = ones.add(&av.hadamard(av));
-                    grads[a] = grads[a].add(&g.hadamard(&denom.reciprocal()));
+                    grads[a].add_hadamard(&g, &denom.reciprocal());
                 },
                 Op::Atan2(a, b) =>
                 {
@@ -2203,14 +2246,14 @@ impl Tape {
                     }
                     let deriv_y = xv.hadamard(&denom_safe.reciprocal());
                     let deriv_x = yv.hadamard(&denom_safe.reciprocal()).neg();
-                    grads[a] = grads[a].add(&g.hadamard(&deriv_y));
-                    grads[b] = grads[b].add(&g.hadamard(&deriv_x));
+                    grads[a].add_hadamard(&g, &deriv_y);
+                    grads[b].add_hadamard(&g, &deriv_x);
                 },
                 Op::Pow { base, exp } =>
                 {
                     let av = &values[base].as_cpu();
                     let deriv = av.pow(exp - 1.0).scale(exp);
-                    grads[base] = grads[base].add(&g.hadamard(&deriv));
+                    grads[base].add_hadamard(&g, &deriv);
                 },
                 Op::ReLU(a) =>
                 {
@@ -2562,7 +2605,7 @@ impl Tape {
                             }
                         }
                     }
-                    grads[input_idx] = grads[input_idx].add(&g.hadamard(&mask));
+                    grads[input_idx].add_hadamard(&g, &mask);
                 },
                 Op::Dropout {
                     input_idx,
@@ -2717,7 +2760,7 @@ impl Tape {
                                 (a - a_mean - xnorm.data[r * cols + c] * ax_mean) / sigma;
                         }
                     }
-                    grads[input_idx] = grads[input_idx].add(&grad_x);
+                    grads[input_idx].add_assign(&grad_x);
                     grads[gamma_idx] = grads[gamma_idx].add(&g.hadamard(&xnorm).sum_axis(0));
                     grads[beta_idx] = grads[beta_idx].add(&g.sum_axis(0));
                 },
@@ -2801,7 +2844,7 @@ impl Tape {
                         }
                     }
 
-                    grads[input_idx] = grads[input_idx].add(&grad_x);
+                    grads[input_idx].add_assign(&grad_x);
                     // dL/dgamma = sum_r (g * x_norm), NOT sum_r g.
                     grads[gamma_idx] = grads[gamma_idx].add(&g.hadamard(&xnorm).sum_axis(0));
                     // dL/dbeta = sum_r g.
@@ -2847,7 +2890,7 @@ impl Tape {
                             }
                         }
                     }
-                    grads[input_idx] = grads[input_idx].add(&grad_x);
+                    grads[input_idx].add_assign(&grad_x);
                 },
                 Op::Conv2dForward {
                     input,
@@ -5232,6 +5275,54 @@ pub fn concat_rows<'t>(tape: &'t Tape, rows: &[Var<'t>]) -> Var<'t> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---------- Fused backward accumulators ---------- //
+
+    /// The fused in-place accumulators must be bit-identical to the
+    /// allocate-then-add two-step form they replace in the backward pass
+    /// (multiply then add/sub, no FMA), across sign/magnitude patterns.
+    #[test]
+    fn fused_accumulators_match_two_step_bit_for_bit() {
+        let mut rng = crate::nn::PcgEngine::new(0xC0FFEE);
+        let (r, c) = (5usize, 7usize);
+        let rand = |rng: &mut crate::nn::PcgEngine| -> Tensor {
+            Tensor::from_vec((0..r * c).map(|_| rng.float() * 8.0 - 4.0).collect(), r, c)
+        };
+        let acc = rand(&mut rng);
+        let a = rand(&mut rng);
+        let b = rand(&mut rng);
+        let s = 0.375f32;
+
+        // add_scaled == add_assign(&other.scale(s))
+        let mut fused = acc.clone();
+        fused.add_scaled(&a, s);
+        let mut two_step = acc.clone();
+        two_step.add_assign(&a.scale(s));
+        for (x, y) in fused.data.iter().zip(&two_step.data)
+        {
+            assert_eq!(x.to_bits(), y.to_bits(), "add_scaled mismatch");
+        }
+
+        // add_hadamard == add_assign(&a.hadamard(&b))
+        let mut fused = acc.clone();
+        fused.add_hadamard(&a, &b);
+        let mut two_step = acc.clone();
+        two_step.add_assign(&a.hadamard(&b));
+        for (x, y) in fused.data.iter().zip(&two_step.data)
+        {
+            assert_eq!(x.to_bits(), y.to_bits(), "add_hadamard mismatch");
+        }
+
+        // sub_hadamard == sub_assign(&a.hadamard(&b))
+        let mut fused = acc.clone();
+        fused.sub_hadamard(&a, &b);
+        let mut two_step = acc.clone();
+        two_step.sub_assign(&a.hadamard(&b));
+        for (x, y) in fused.data.iter().zip(&two_step.data)
+        {
+            assert_eq!(x.to_bits(), y.to_bits(), "sub_hadamard mismatch");
+        }
+    }
 
     // ---------- SoftmaxPortable ---------- //
 
