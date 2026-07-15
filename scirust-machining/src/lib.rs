@@ -514,6 +514,34 @@
 //! - [`plate_buckling`] — voilement de plaque comprimée : contrainte/charge
 //!   critiques.
 //! - [`shell_buckling`] — flambage de coque cylindrique : axial et pression externe.
+//! - [`induction_motor`] — moteur asynchrone triphasé : vitesse de synchronisme,
+//!   glissement, vitesse et fréquence rotoriques.
+//! - [`dc_motor`] — moteur à courant continu idéal : f.c.é.m., couple, tension, vitesse.
+//! - [`three_phase_power`] — puissances triphasées équilibrées : active, apparente,
+//!   réactive, courant de ligne.
+//! - [`motor_efficiency`] — rendement et pertes globales d'un moteur, couple à l'arbre.
+//! - [`vfd_volts_per_hertz`] — variateur V/f : rapport V/Hz, tension avec boost, flux relatif.
+//! - [`bearing_defect_frequencies`] — fréquences cinématiques de défaut de roulement
+//!   (BPFO, BPFI, BSF, FTF).
+//! - [`iso10816_vibration`] — sévérité vibratoire ISO 10816 : vitesse efficace, zones A/B/C/D.
+//! - [`order_analysis`] — analyse d'ordres : fréquence/ordre, rééchantillonnage angulaire.
+//! - [`bearing_static_safety`] — sécurité statique de roulement (ISO 76) : charge
+//!   équivalente, facteur s0, charge admissible.
+//! - [`grease_relubrication`] — regraissage : quantité de graisse, facteur n·dm,
+//!   réduction de durée de vie en température.
+//! - [`chain_polygon_effect`] — effet polygonal de chaîne : diamètre primitif,
+//!   ondulation de vitesse, vitesse moyenne.
+//! - [`hydrostatic_bearing`] — palier hydrostatique : capacité de charge, débit,
+//!   puissance de pompage, raideur.
+//! - [`conical_spring`] — ressort de compression conique : raideurs mini/maxi, hauteur bloquée.
+//! - [`wave_spring`] — ressort ondulé plat (Smalley) : raideur, flèche, effort, contrainte.
+//! - [`constant_force_spring`] — ressort à force constante : effort de déroulement,
+//!   contrainte, rayon naturel.
+//! - [`combustion_air`] — air de combustion stœchiométrique, excès d'air, O2 des fumées.
+//! - [`compressed_air_cost`] — coût de l'air comprimé et fuites : débit d'orifice,
+//!   puissance spécifique, coût/énergie annuels.
+//! - [`shear_center`] — centre de cisaillement des sections minces ouvertes (profilé en U).
+//! - [`beam_column`] — poteau-poutre : amplification P-delta, moment et flèche amplifiés.
 //!
 //! ## Positionnement
 //!
@@ -852,6 +880,29 @@ pub mod vibration_isolation;
 pub mod weld_cooling_rate;
 pub mod weld_dilution;
 pub mod weld_preheat;
+
+// Lot massif (vol. 31) — machines électriques & entraînements, surveillance
+// vibratoire des roulements, tribologie, ressorts spéciaux, énergie/fluides,
+// structure.
+pub mod beam_column;
+pub mod bearing_defect_frequencies;
+pub mod bearing_static_safety;
+pub mod chain_polygon_effect;
+pub mod combustion_air;
+pub mod compressed_air_cost;
+pub mod conical_spring;
+pub mod constant_force_spring;
+pub mod dc_motor;
+pub mod grease_relubrication;
+pub mod hydrostatic_bearing;
+pub mod induction_motor;
+pub mod iso10816_vibration;
+pub mod motor_efficiency;
+pub mod order_analysis;
+pub mod shear_center;
+pub mod three_phase_power;
+pub mod vfd_volts_per_hertz;
+pub mod wave_spring;
 
 pub use accelerated_life::{
     BOLTZMANN_EV_K, arrhenius_acceleration_factor, derated_value, ten_degree_rule_factor,
@@ -1598,4 +1649,69 @@ pub use weld_cooling_rate::{weldcool_cooling_rate, weldcool_cooling_time_thick_p
 pub use weld_dilution::{dilution_filler_fraction, dilution_ratio, weld_diluted_composition};
 pub use weld_preheat::{
     preheat_combined_thickness, preheat_from_carbon_equivalent, preheat_is_required,
+};
+
+// Lot massif (vol. 31) — ré-exports à plat.
+pub use beam_column::{
+    beam_column_amplification_factor, beam_column_amplified_deflection,
+    beam_column_amplified_moment, beam_column_load_ratio,
+};
+pub use bearing_defect_frequencies::{bearing_bpfi, bearing_bpfo, bearing_bsf, bearing_ftf};
+pub use bearing_static_safety::{
+    bearing_static_equivalent_load, bearing_static_permissible_load, bearing_static_safety_factor,
+};
+pub use chain_polygon_effect::{
+    chain_mean_speed, chain_pitch_diameter, chain_speed_ripple, chain_tooth_angle,
+};
+pub use combustion_air::{
+    COMBUSTION_AMBIENT_O2_VOLUME_PERCENT, combustion_actual_air, combustion_excess_air_from_o2,
+    combustion_stoichiometric_air_fuel_ratio,
+};
+pub use compressed_air_cost::{
+    compressed_air_annual_energy, compressed_air_leak_cost, compressed_air_leak_flow,
+    compressed_air_specific_power,
+};
+pub use conical_spring::{
+    conical_spring_max_rate, conical_spring_min_rate, conical_spring_solid_height,
+};
+pub use constant_force_spring::{
+    CONSTANT_FORCE_SPRING_FORCE_CONSTANT, constant_force_spring_force,
+    constant_force_spring_natural_radius, constant_force_spring_stress,
+};
+pub use dc_motor::{dc_back_emf, dc_speed_rad, dc_terminal_voltage, dc_torque};
+pub use grease_relubrication::{
+    grease_life_reduction_factor, grease_mean_diameter_mm, grease_quantity_grams,
+    grease_speed_factor_ndm,
+};
+pub use hydrostatic_bearing::{
+    hydrostatic_flow_rate, hydrostatic_load_capacity, hydrostatic_pumping_power,
+    hydrostatic_stiffness,
+};
+pub use induction_motor::{
+    induction_rotor_frequency, induction_rotor_speed_rpm, induction_slip,
+    induction_synchronous_speed_rpm,
+};
+pub use iso10816_vibration::{
+    VibrationZone, iso10816_peak_from_rms, iso10816_rms_from_peak,
+    iso10816_velocity_rms_from_components, iso10816_zone,
+};
+pub use motor_efficiency::{
+    motor_efficiency, motor_input_power, motor_losses, motor_output_torque,
+};
+pub use order_analysis::{
+    order_frequency, order_max_from_samples_per_rev, order_number,
+    order_samples_per_rev_for_max_order, order_shaft_frequency,
+};
+pub use shear_center::{
+    shear_center_channel_axis_inertia, shear_center_channel_offset,
+    shear_center_is_on_centroid_for_double_symmetry,
+};
+pub use three_phase_power::{
+    three_phase_active_power, three_phase_apparent_power, three_phase_line_current,
+    three_phase_reactive_power,
+};
+pub use vfd_volts_per_hertz::{vf_flux_ratio, vf_ratio, vf_voltage_for_frequency};
+pub use wave_spring::{
+    WAVE_SPRING_RATE_CONSTANT, wave_spring_deflection, wave_spring_load, wave_spring_rate,
+    wave_spring_stress,
 };
