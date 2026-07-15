@@ -11,7 +11,10 @@
 > autograd, batch normalization, convolutions, and data parallelism.
 > (A portable wgpu GEMM is wired behind the optional `wgpu` feature, tested
 > against the CPU oracle on software Vulkan — see docs/GPU.md.)
-> No C++, no Python, no FFI — just Rust from top to bottom.
+> No C++, no Python — just Rust from top to bottom. (No third-party native
+> libraries; the only FFI is a thin, optional platform layer — `libc`
+> `mlock`/`getauxval`, Windows `VirtualLock` — for pinned memory and CPU-feature
+> detection, plus optional BLAS behind the `blas` feature.)
 
 ## Why?
 
@@ -64,7 +67,7 @@ technical report ([`paper/SciRust-technical-report.md`](paper/SciRust-technical-
 ✓ SIMD CPU kernels (AVX2/SSE2/NEON) ✓ Deterministic int8 quantization
 ✓ Adam / SGD optimizers        ✓ Data parallelism (1 tape per thread)
 ✓ Lazy graph compilation       ✓ MNIST IDX reader + DataLoader
-✓ safetensors persistence      ✓ Pure Rust, no FFI
+✓ safetensors persistence      ✓ Pure Rust, no native deps (thin optional libc/OS FFI only)
 ```
 
 ## Quick start (60 seconds)

@@ -806,6 +806,12 @@ pub enum Op {
         kernel: usize,
         stride: usize,
     },
+    /// ⚠️ Misnomer: the backward for this op normalizes **per row over columns**
+    /// (LayerNorm semantics), *not* across the batch dimension as true batch
+    /// normalization does. It is currently **unreachable** — no forward
+    /// constructs it (BatchNorm layers use explicit tape ops, see
+    /// `nn::batch_norm`). Kept for compatibility; treat its gradient as
+    /// per-sample (LayerNorm-like), not batch-statistic.
     BatchNorm {
         input_idx: usize,
         gamma_idx: usize,
@@ -1575,12 +1581,17 @@ impl Tape {
                 Op::Reciprocal(a) =>
                 {
                     let av = &values[a].as_cpu();
-                    let mut denom = av.hadamard(av);
-                    for d in &mut denom.data
+                    // d/dx (1/x) = -1/x², computed exactly for x ≠ 0. Guard ONLY
+                    // the exact singularity x == 0 (return 0 there) to avoid
+                    // ±inf and 0·inf = NaN. The previous `-1/(x²+1e-10)` instead
+                    // corrupted the gradient for ALL |x| ≲ 1e-4 (≈50% error at
+                    // x=1e-5) — the common-precision range — while `Div` stayed
+                    // exact.
+                    let mut minus_one_over_x2 = av.hadamard(av); // x²
+                    for (d, &x) in minus_one_over_x2.data.iter_mut().zip(av.data.iter())
                     {
-                        *d = 1.0 / (*d + 1e-10);
+                        *d = if x == 0.0 { 0.0 } else { -1.0 / *d };
                     }
-                    let minus_one_over_x2 = denom.scale(-1.0);
                     grads[a] = grads[a].add(&g.hadamard(&minus_one_over_x2));
                 },
                 Op::Sin(a) =>
@@ -2865,13 +2876,32 @@ impl<'t> Var<'t> {
         self.try_add(other).unwrap()
     }
 
+    /// Fake-quantize with the signed int8 range `[-128, 127]` (symmetric,
+    /// `zero_point = 0` is the common case). For an asymmetric scheme use
+    /// [`Self::fake_quantize_ste_range`] with the correct `[qmin, qmax]` (e.g.
+    /// `[0, 255]` for uint8), otherwise the clamp bounds are wrong.
     pub fn fake_quantize_ste(self, scale: f32, zero_point: i32) -> Var<'t> {
+        self.fake_quantize_ste_range(scale, zero_point, -128, 127)
+    }
+
+    /// Fake-quantize (quantize→clamp→dequantize) with an explicit integer range
+    /// `[qmin, qmax]`, so both symmetric int8 (`[-128,127]`, `zp=0`) and
+    /// asymmetric uint8 (`[0,255]`, `zp≠0`) are expressible. Gradient is the
+    /// straight-through estimator.
+    pub fn fake_quantize_ste_range(
+        self,
+        scale: f32,
+        zero_point: i32,
+        qmin: i32,
+        qmax: i32,
+    ) -> Var<'t> {
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let (lo, hi) = (qmin as f32, qmax as f32);
         let mut out_data = vec![0.0f32; a.data.len()];
         for (i, &x) in a.data.iter().enumerate()
         {
             let q = (x / scale).round() + zero_point as f32;
-            let q_clamped = q.clamp(-128.0, 127.0);
+            let q_clamped = q.clamp(lo, hi);
             out_data[i] = (q_clamped - zero_point as f32) * scale;
         }
         let out = Tensor::from_vec(out_data, a.rows, a.cols);
@@ -4170,6 +4200,21 @@ impl<'t> Var<'t> {
                 expected: (expected_w_rows, expected_w_cols),
                 got: wv.shape(),
             });
+        }
+        // Guard the scalar geometry params: `stride == 0` divides by zero and
+        // `kernel > h + 2·pad` underflows `usize` (panics in debug, wraps to a
+        // huge size in release → downstream OOB/OOM). Reject on the Result path.
+        if stride == 0
+        {
+            return Err(crate::error::SciRustError::InvalidConfig(
+                "conv2d_forward: stride must be > 0".to_string(),
+            ));
+        }
+        if kernel == 0 || kernel > h + 2 * pad || kernel > w + 2 * pad
+        {
+            return Err(crate::error::SciRustError::InvalidConfig(format!(
+                "conv2d_forward: kernel size {kernel} too large for input {h}×{w} with pad {pad}"
+            )));
         }
         let h_out = (h + 2 * pad - kernel) / stride + 1;
         let w_out = (w + 2 * pad - kernel) / stride + 1;
@@ -5591,6 +5636,27 @@ mod layer_norm_backward_tests {
                 "dL/dbeta[{c}] analytic {a} vs finite-diff {num}"
             );
         }
+    }
+
+    #[test]
+    fn reciprocal_gradient_is_exact_near_zero() {
+        // Regression: backward of 1/x must be -1/x², not -1/(x²+1e-10), which is
+        // ~50% wrong at x = 1e-5 (the old code silently returned the latter).
+        let x0 = 1e-5f32;
+        let tape = Tape::new();
+        let xv = tape.input(Tensor::from_vec(vec![x0], 1, 1));
+        let loss = xv.reciprocal().sum();
+        tape.backward(loss.idx());
+        let analytic = tape.grad(xv.idx()).data[0];
+        let truth = -1.0 / (x0 * x0); // = -1e10
+        let rel = (analytic - truth).abs() / truth.abs();
+        assert!(
+            rel < 1e-3,
+            "d(1/x) at {x0}: analytic {analytic} vs truth {truth} (rel {rel})"
+        );
+        // And specifically NOT the old buggy value -1/(x²+1e-10) ≈ -5e9.
+        let buggy = -1.0 / (x0 * x0 + 1e-10);
+        assert!((analytic - buggy).abs() / buggy.abs() > 0.1);
     }
 
     // Direct guard for the specific gamma bug: with x_norm having per-row mean 0,

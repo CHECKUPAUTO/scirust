@@ -232,6 +232,15 @@ impl From<&str> for SciRustError {
     }
 }
 
+impl From<serde_json::Error> for SciRustError {
+    fn from(e: serde_json::Error) -> Self {
+        SciRustError::InvalidFormat {
+            what: "json",
+            details: e.to_string(),
+        }
+    }
+}
+
 // ================================================================== //
 //  Type Result alias                                                  //
 // ================================================================== //
@@ -271,6 +280,20 @@ pub fn check_device(op: &'static str, expected: Device, got: Device) -> Result<(
     if expected != got
     {
         Err(SciRustError::DeviceMismatch { op, expected, got })
+    }
+    else
+    {
+        Ok(())
+    }
+}
+
+/// Vérifie qu'un index est dans les bornes `[0, bound)`. Renvoie
+/// `IndexOutOfBounds` sinon — à préférer à un `panic!`/indexation directe sur
+/// les frontières publiques.
+pub fn check_index(what: &'static str, index: usize, bound: usize) -> Result<()> {
+    if index >= bound
+    {
+        Err(SciRustError::IndexOutOfBounds { what, index, bound })
     }
     else
     {

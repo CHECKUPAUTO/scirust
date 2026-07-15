@@ -34,6 +34,15 @@ pub trait Module {
     /// entraînables (utilisé par parameter_indices ensuite).
     fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t>;
 
+    /// Fallible forward. Modules whose forward can fail on a bad input shape or
+    /// configuration may override this to return a structured [`Result`] instead
+    /// of panicking. The default delegates to [`Module::forward`] (which panics
+    /// on misuse), so surfacing errors this way is opt-in per module. (This is
+    /// the `try_forward` hook referenced by `crate::error`.)
+    fn try_forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Result<Var<'t>> {
+        Ok(self.forward(tape, input))
+    }
+
     fn forward_steered<'t>(
         &mut self,
         tape: &'t Tape,

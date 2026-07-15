@@ -68,7 +68,13 @@ impl MixedPrecisionTrainer {
         Ok(self.loss_scale)
     }
 
-    /// Croissance périodique du loss scale
+    /// Croissance périodique du loss scale.
+    ///
+    /// Note: this grows on every `growth_interval`-th *total* step. Textbook
+    /// dynamic loss scaling grows only after `growth_interval` *consecutive
+    /// overflow-free* steps (resetting the counter on each overflow); callers
+    /// wanting that stricter behavior should gate this call on their own
+    /// good-step counter and skip it after an overflow.
     pub fn maybe_grow_scale(&mut self) {
         if self.step_counter.is_multiple_of(self.growth_interval)
         {
@@ -99,8 +105,20 @@ fn unscale_tensor(t: &Tensor, scale: f32) -> Tensor {
     let mut out = Tensor::zeros(t.rows, t.cols);
     for (dst, &src) in out.data.iter_mut().zip(&t.data)
     {
-        let half = half::f16::from_f32(src);
-        *dst = half.to_f32() * scale;
+        // Preserve the f16-overflow signal (the gradients came from an f16 pass,
+        // so a value outside f16 range means the scaled loss overflowed), but
+        // unscale in **f32**. The old code round-tripped every gradient through
+        // f16 *before* multiplying by the scale, needlessly discarding mantissa
+        // bits from in-range gradients.
+        let f16_overflow = src.is_finite() && half::f16::from_f32(src).is_infinite();
+        *dst = if f16_overflow
+        {
+            f32::INFINITY
+        }
+        else
+        {
+            src * scale
+        };
     }
     out
 }

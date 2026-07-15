@@ -83,6 +83,14 @@ impl SimdBackend for BlasBackend {
 
     #[inline]
     fn saxpy_f32(&self, alpha: f32, x: &[f32], y: &mut [f32]) {
+        // BLAS reads/writes `n = x.len()` elements of both operands; without
+        // these guards a shorter `y` (which ScalarBackend tolerates) would be an
+        // out-of-bounds FFI write, and `len > i32::MAX` would wrap the count.
+        assert_eq!(x.len(), y.len(), "saxpy: x and y length mismatch");
+        assert!(
+            x.len() <= i32::MAX as usize,
+            "saxpy: length exceeds i32::MAX"
+        );
         unsafe {
             blas::saxpy(x.len() as i32, alpha, x, 1, y, 1);
         }
@@ -90,6 +98,11 @@ impl SimdBackend for BlasBackend {
 
     #[inline]
     fn daxpy_f64(&self, alpha: f64, x: &[f64], y: &mut [f64]) {
+        assert_eq!(x.len(), y.len(), "daxpy: x and y length mismatch");
+        assert!(
+            x.len() <= i32::MAX as usize,
+            "daxpy: length exceeds i32::MAX"
+        );
         unsafe {
             blas::daxpy(x.len() as i32, alpha, x, 1, y, 1);
         }
@@ -97,11 +110,21 @@ impl SimdBackend for BlasBackend {
 
     #[inline]
     fn sdot_f32(&self, x: &[f32], y: &[f32]) -> f32 {
+        assert_eq!(x.len(), y.len(), "sdot: x and y length mismatch");
+        assert!(
+            x.len() <= i32::MAX as usize,
+            "sdot: length exceeds i32::MAX"
+        );
         unsafe { blas::sdot(x.len() as i32, x, 1, y, 1) }
     }
 
     #[inline]
     fn ddot_f64(&self, x: &[f64], y: &[f64]) -> f64 {
+        assert_eq!(x.len(), y.len(), "ddot: x and y length mismatch");
+        assert!(
+            x.len() <= i32::MAX as usize,
+            "ddot: length exceeds i32::MAX"
+        );
         unsafe { blas::ddot(x.len() as i32, x, 1, y, 1) }
     }
 

@@ -1,6 +1,15 @@
-//! **CROWN-IBP — certified (verified) training** (Zhang et al., *Towards Stable and
-//! Efficient Training of Verifiably Robust Neural Networks*, ICLR 2020,
-//! arXiv:1906.06316).
+//! **IBP certified (verified) training** — the interval-bound-propagation end of
+//! CROWN-IBP (Zhang et al., *Towards Stable and Efficient Training of Verifiably
+//! Robust Neural Networks*, ICLR 2020, arXiv:1906.06316).
+//!
+//! ⚠️ **Scope / honest labeling.** This implements pure **IBP** (differentiable
+//! interval-bound propagation), which is the `β = 0` / IBP end of the CROWN-IBP
+//! schedule. The bound it produces is **sound** (a valid over-approximation of
+//! the worst-case logits, so certificates it issues are never false), but it is
+//! *looser* than the full method: the **CROWN** component — per-neuron linear
+//! lower/upper relaxations with backward substitution — is **not** implemented
+//! here. Expect looser certified radii than a true CROWN-IBP; the linear
+//! relaxation is future work. (Type names are kept for API stability.)
 //!
 //! Ordinary training minimises the loss at the *concrete* inputs; a network can fit
 //! them perfectly yet flip its prediction under a tiny perturbation. CROWN-IBP

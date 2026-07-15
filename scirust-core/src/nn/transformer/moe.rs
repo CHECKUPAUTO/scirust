@@ -60,13 +60,19 @@ impl<E: Module> Module for MoELayer<E> {
             indexed_probs.sort_by(|a, b| b.1.total_cmp(&a.1));
 
             let top_k = &indexed_probs[0..self.k.min(indexed_probs.len())];
+            // Renormalize the kept experts' gate weights so they sum to 1
+            // (GShard/Mixtral convention). Without this the output is
+            // systematically down-scaled by the softmax mass of the *dropped*
+            // experts whenever k >= 2.
+            let top_sum: f32 = top_k.iter().map(|&(_, p)| p).sum();
+            let inv_sum = if top_sum > 0.0 { 1.0 / top_sum } else { 0.0 };
             let mut row_output: Option<Var> = None;
 
             for &(expert_idx, prob) in top_k
             {
                 let input_row = input.try_slice_rows(i, 1).unwrap();
                 let expert_out = self.experts[expert_idx].forward(tape, input_row);
-                let weighted = expert_out.scale(prob);
+                let weighted = expert_out.scale(prob * inv_sum);
 
                 row_output = Some(match row_output
                 {

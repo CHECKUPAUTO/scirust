@@ -253,12 +253,36 @@ fn send_state(stream: &mut TcpStream, rank: u32, bytes: &[u8]) -> std::io::Resul
     stream.flush()
 }
 
+/// Defensive cap on a peer-declared state length. The transport is
+/// unauthenticated, so a hostile or buggy peer could otherwise send a 12-byte
+/// header claiming a multi-exabyte body and make the receiver abort/OOM on the
+/// `vec![0u8; len]`. 1 GiB is far above any legitimate gradient state.
+const MAX_STATE_BYTES: usize = 1 << 30;
+
 fn recv_state(stream: &mut TcpStream) -> std::io::Result<(u32, Vec<u8>)> {
     let mut hdr = [0u8; 12];
     stream.read_exact(&mut hdr)?;
+    // `hdr` is always exactly 12 bytes, so these fixed-width slices never fail.
     let rank = u32::from_le_bytes(hdr[..4].try_into().unwrap());
-    let len = u64::from_le_bytes(hdr[4..].try_into().unwrap()) as usize;
-    let mut body = vec![0u8; len];
+    let len = u64::from_le_bytes(hdr[4..].try_into().unwrap());
+    if len > MAX_STATE_BYTES as u64
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("peer declared oversized state length {len} (cap {MAX_STATE_BYTES})"),
+        ));
+    }
+    let len = len as usize;
+    // Bounded, fallible allocation: a large-but-under-cap length fails cleanly
+    // instead of aborting the process.
+    let mut body: Vec<u8> = Vec::new();
+    body.try_reserve_exact(len).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::OutOfMemory,
+            "failed to allocate buffer for incoming state",
+        )
+    })?;
+    body.resize(len, 0u8);
     stream.read_exact(&mut body)?;
     Ok((rank, body))
 }
@@ -287,7 +311,12 @@ where
         .collect();
     if !children.is_empty()
     {
-        let listener = listener.expect("rang interne sans listener");
+        let listener = listener.ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "internal rank has children but no bound listener",
+            )
+        })?;
         // collecte les états des enfants (l'ordre de CONNEXION est libre)
         let mut pending: Vec<(u32, Vec<u8>)> = Vec::new();
         while pending.len() < children.len()
@@ -298,10 +327,17 @@ where
         // absorption DANS L'ORDRE DE L'ARBRE, quel que soit l'ordre d'arrivée
         for &child in &children
         {
+            // A peer may send an unexpected/duplicate rank; surface that as an
+            // error instead of panicking the receiving thread.
             let pos = pending
                 .iter()
                 .position(|(from, _)| *from == child as u32)
-                .expect("enfant manquant");
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("expected child rank {child} did not report in"),
+                    )
+                })?;
             let (_, bytes) = pending.swap_remove(pos);
             combine.absorb(&mut state, C::State::from_bytes(&bytes));
         }

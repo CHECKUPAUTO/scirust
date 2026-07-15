@@ -15,7 +15,6 @@ scirust-macros = { path = "../scirust-macros" }
 scirust-simd = { path = "../scirust-simd" }
 rand = "0.8"
 rand_distr = "0.4"
-ndarray = "0.16"
 blas = { version = "0.22", optional = true }
 blas-src = { version = "0.10", optional = true }
 rayon = { version = "1.8", optional = true }
@@ -33,7 +32,6 @@ libm = "0.2"
 
 [features]
 default = ["rayon"]
-gpu = []
 portable-simd = ["scirust-simd/portable-simd"]
 blas = ["dep:blas", "dep:blas-src"]
 blas-openblas = ["blas", "blas-src/openblas"]

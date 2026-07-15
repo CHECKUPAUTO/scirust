@@ -81,14 +81,25 @@ impl BatchNorm1d {
         (mean, var)
     }
 
-    fn update_running_stats(&mut self, batch_mean: &[f32], batch_var: &[f32]) {
+    fn update_running_stats(&mut self, batch_mean: &[f32], batch_var: &[f32], n: usize) {
         let alpha = self.momentum;
+        // Bessel's correction: the running variance tracks the *unbiased*
+        // estimator (÷(n-1)), matching PyTorch, while normalization above uses
+        // the biased one (÷n). `batch_var` is biased, so scale by n/(n-1).
+        let bessel = if n > 1
+        {
+            n as f32 / (n as f32 - 1.0)
+        }
+        else
+        {
+            1.0
+        };
         for j in 0..self.running_mean.cols
         {
             self.running_mean.data[j] =
                 (1.0 - alpha) * self.running_mean.data[j] + alpha * batch_mean[j];
             self.running_var.data[j] =
-                (1.0 - alpha) * self.running_var.data[j] + alpha * batch_var[j];
+                (1.0 - alpha) * self.running_var.data[j] + alpha * batch_var[j] * bessel;
         }
     }
 }
@@ -103,11 +114,21 @@ impl Module for BatchNorm1d {
         self.last_g_idx = Some(gamma_v.idx());
         self.last_b_idx = Some(beta_v.idx());
 
+        // Guard against a feature-width mismatch: without this, a wider
+        // `running_mean` (e.g. from a malformed checkpoint) or a narrower input
+        // makes `update_running_stats` index out of bounds. A clear panic beats
+        // a confusing OOB one (Module::forward cannot return a Result).
+        assert_eq!(
+            f, self.gamma.cols,
+            "BatchNorm1d '{}': input has {f} features but the layer was built for {}",
+            self.name, self.gamma.cols
+        );
+
         if self.training
         {
             let input_t = tape.value(input.idx());
             let (batch_mean, batch_var) = self.compute_batch_stats(&input_t.data, n, f);
-            self.update_running_stats(&batch_mean, &batch_var);
+            self.update_running_stats(&batch_mean, &batch_var, n);
 
             let mu = input.sum_axis(0).scale(inv_n);
             let mu_neg = mu.neg();
@@ -187,9 +208,25 @@ impl Module for BatchNorm1d {
             .get(&format!("{}.running_var", self.name))
             .ok_or_else(|| format!("missing key: {}.running_var", self.name))?;
 
-        if g.shape() != (1, self.gamma.cols)
+        // Validate *every* tensor's shape, not just gamma: an accepted but
+        // wider running_mean/var would later make forward() index out of bounds.
+        let expected = (1, self.gamma.cols);
+        for (key, t) in [
+            ("gamma", g),
+            ("beta", b),
+            ("running_mean", rm),
+            ("running_var", rv),
+        ]
         {
-            crate::bail!("gamma shape mismatch");
+            if t.shape() != expected
+            {
+                crate::bail!(
+                    "BatchNorm1d '{}': {key} shape {:?} != expected {:?}",
+                    self.name,
+                    t.shape(),
+                    expected
+                );
+            }
         }
         self.gamma = g.clone();
         self.beta = b.clone();

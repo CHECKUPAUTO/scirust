@@ -10,10 +10,24 @@
 //! upper-bounded by the **product of the layers' spectral norms** (largest
 //! singular values) when the activations are 1-Lipschitz (ReLU, etc.).
 //!
-//! Here: [`spectral_norm`] (deterministic power iteration), [`spectral_normalize`]
-//! (the 1-Lipschitz-constrained layer of GloRo), and [`GloroClassifier`] (a linear
-//! classifier with an exact-for-linear certified radius). Pure `f32`, fixed order
-//! ⇒ **bit-for-bit deterministic**.
+//! # Soundness: use an *upper* bound, not an estimate
+//!
+//! A certificate is only sound if `L` is a genuine **upper** bound. Power
+//! iteration ([`spectral_norm`]) converges to `σ_max` **from below**, so with a
+//! finite iteration count it *under*-estimates — plugging it into the radius
+//! makes the ball too large (unsound). The certified [`GloroClassifier`]
+//! therefore uses [`spectral_norm_upper_bound`] (the always-valid
+//! `√(‖W‖₁·‖W‖∞)` bound) for the radius; the power-iteration value is exposed
+//! only as a tighter *non-certified* estimate (fine for spectral normalization
+//! during training). The `√(‖W‖₁·‖W‖∞)` bound is conservative (it can be loose
+//! for well-conditioned matrices); a tighter *rigorous* a-posteriori bound is
+//! future work.
+//!
+//! Here: [`spectral_norm`] (deterministic power iteration, an estimate),
+//! [`spectral_norm_upper_bound`] (a guaranteed upper bound),
+//! [`spectral_normalize`] (the 1-Lipschitz-constrained layer of GloRo), and
+//! [`GloroClassifier`] (a linear classifier with a sound certified radius). Pure
+//! `f32`, fixed order ⇒ **bit-for-bit deterministic**.
 
 use std::f32::consts::SQRT_2;
 
@@ -61,9 +75,51 @@ pub fn spectral_norm(w: &[f32], rows: usize, cols: usize, iters: usize) -> f32 {
     sigma
 }
 
+/// A **guaranteed upper bound** on the spectral norm `‖W‖₂`, valid for *any*
+/// matrix: `‖W‖₂ ≤ √(‖W‖₁ · ‖W‖∞)`, where `‖W‖₁` is the maximum column
+/// absolute-sum and `‖W‖∞` the maximum row absolute-sum. Unlike
+/// [`spectral_norm`] (power iteration, which converges to `σ_max` *from below*
+/// and only *estimates* it), this never under-estimates — so it is the value
+/// that must back a *sound* Lipschitz certificate.
+pub fn spectral_norm_upper_bound(w: &[f32], rows: usize, cols: usize) -> f32 {
+    assert_eq!(
+        w.len(),
+        rows * cols,
+        "spectral_norm_upper_bound: size mismatch"
+    );
+    if rows == 0 || cols == 0
+    {
+        return 0.0;
+    }
+    let mut col_sums = vec![0.0f32; cols];
+    let mut max_row = 0.0f32;
+    for i in 0..rows
+    {
+        let row = &w[i * cols..(i + 1) * cols];
+        let mut row_sum = 0.0f32;
+        for (j, &wij) in row.iter().enumerate()
+        {
+            let a = wij.abs();
+            row_sum += a;
+            col_sums[j] += a;
+        }
+        if row_sum > max_row
+        {
+            max_row = row_sum;
+        }
+    }
+    let max_col = col_sums.into_iter().fold(0.0f32, f32::max);
+    (max_row * max_col).sqrt()
+}
+
 /// A **spectrally-normalized** copy of `w` (`W / ‖W‖₂`), so the result has spectral
 /// norm ≈ 1 — a 1-Lipschitz-constrained linear layer (GloRo). A zero matrix is
 /// returned unchanged.
+///
+/// Note: this divides by the power-iteration *estimate*, so the result's norm is
+/// only *approximately* 1 (it may exceed 1 slightly when the estimate has not
+/// fully converged). It is a training-time constraint, not a certified bound;
+/// certification goes through [`spectral_norm_upper_bound`].
 pub fn spectral_normalize(w: &[f32], rows: usize, cols: usize, iters: usize) -> Vec<f32> {
     let sn = spectral_norm(w, rows, cols, iters);
     if sn <= 0.0
@@ -82,20 +138,33 @@ pub struct GloroClassifier {
     w: Vec<f32>,
     num_classes: usize,
     in_features: usize,
+    /// Certified Lipschitz bound `√2·upper_bound(‖W‖₂)` — a genuine upper bound,
+    /// so the radius it produces is sound.
     lip: f32,
+    /// Tighter but *non-certified* `√2·power_iteration(‖W‖₂)`, for reference.
+    lip_estimate: f32,
 }
 
 impl GloroClassifier {
-    /// Build from the weight matrix; computes `lip = √2·‖W‖₂` once (power
-    /// iteration with `iters` steps).
+    /// Build from the weight matrix. The certified `lip = √2·upper_bound(‖W‖₂)`
+    /// uses the guaranteed [`spectral_norm_upper_bound`] so the radius is sound;
+    /// `iters` steps of power iteration give the tighter non-certified estimate
+    /// available via [`Self::lipschitz_estimate`].
     pub fn new_linear(w: Vec<f32>, num_classes: usize, in_features: usize, iters: usize) -> Self {
         assert_eq!(w.len(), num_classes * in_features, "GloRo: size mismatch");
-        let lip = SQRT_2 * spectral_norm(&w, num_classes, in_features, iters);
+        let ub = spectral_norm_upper_bound(&w, num_classes, in_features);
+        let est = spectral_norm(&w, num_classes, in_features, iters);
+        // A valid upper bound never lies below a from-below estimate.
+        debug_assert!(
+            ub + 1e-4 >= est,
+            "upper bound {ub} below power-iteration estimate {est}"
+        );
         Self {
             w,
             num_classes,
             in_features,
-            lip,
+            lip: SQRT_2 * ub,
+            lip_estimate: SQRT_2 * est,
         }
     }
 
@@ -141,9 +210,16 @@ impl GloroClassifier {
         (top, radius.max(0.0))
     }
 
-    /// The global Lipschitz bound `√2·‖W‖₂` used in the certificate.
+    /// The **certified** global Lipschitz bound `√2·upper_bound(‖W‖₂)` used in the
+    /// (sound) certificate.
     pub fn lipschitz(&self) -> f32 {
         self.lip
+    }
+
+    /// The tighter **non-certified** power-iteration estimate `√2·σ̂(W)`. Do not
+    /// use for certification — it can under-estimate the true Lipschitz constant.
+    pub fn lipschitz_estimate(&self) -> f32 {
+        self.lip_estimate
     }
 }
 
@@ -163,6 +239,23 @@ mod tests {
         // [[1,0,0],[0,2,0]] (2×3) → singular values {2,1} → 2.
         let r = vec![1.0, 0.0, 0.0, 0.0, 2.0, 0.0];
         assert!((spectral_norm(&r, 2, 3, 100) - 2.0).abs() < 1e-3);
+    }
+
+    /// The guaranteed upper bound never falls below the true spectral norm
+    /// (whereas power iteration can, from below).
+    #[test]
+    fn upper_bound_dominates_spectral_norm() {
+        let mut rng = PcgEngine::new(11);
+        for &(rows, cols) in &[(3usize, 3usize), (5, 7), (8, 4)]
+        {
+            let w: Vec<f32> = (0..rows * cols).map(|_| rng.float_signed() * 3.0).collect();
+            let ub = spectral_norm_upper_bound(&w, rows, cols);
+            let sn = spectral_norm(&w, rows, cols, 200);
+            assert!(ub + 1e-4 >= sn, "ub {ub} < spectral norm {sn}");
+        }
+        // Exact on diag(3,-5,2): ‖·‖₁ = ‖·‖∞ = 5 ⇒ √(5·5) = 5 = σ_max.
+        let d = vec![3.0, 0.0, 0.0, 0.0, -5.0, 0.0, 0.0, 0.0, 2.0];
+        assert!((spectral_norm_upper_bound(&d, 3, 3) - 5.0).abs() < 1e-4);
     }
 
     /// After spectral normalization the spectral norm is ≈ 1 (the 1-Lipschitz

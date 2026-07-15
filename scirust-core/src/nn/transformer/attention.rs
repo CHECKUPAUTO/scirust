@@ -44,6 +44,17 @@ impl MultiHeadAttention {
         );
         let d_head = d_model / n_heads;
 
+        // NOTE: this implementation always attends with `n_heads` KV heads
+        // (standard MHA); the KV projections are full-width and
+        // `repeat_kv_heads` is unused. `num_kv_heads` is accepted for API
+        // symmetry but is NOT honored here — for real grouped-query attention
+        // use `nn::nd_layers::NdMultiHeadAttention::new_gqa`. Guard against
+        // silently mis-configuring it as GQA:
+        debug_assert!(
+            num_kv_heads == 0 || num_kv_heads == n_heads,
+            "MultiHeadAttention does not implement GQA (num_kv_heads {num_kv_heads} != n_heads {n_heads}); use NdMultiHeadAttention::new_gqa"
+        );
+
         Self {
             d_model,
             n_heads,

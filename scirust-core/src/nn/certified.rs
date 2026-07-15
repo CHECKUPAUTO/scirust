@@ -1,14 +1,28 @@
+//! **Runtime value-bounds enforcement** (not a formal certificate).
+//!
+//! ⚠️ Naming honesty: despite the "certified/contract/invariant" vocabulary,
+//! this module performs a **runtime clamp** — it inspects a tensor's values and,
+//! if any fall outside `[MIN, MAX]` or are NaN/Inf, returns a scrubbed copy
+//! (clamped, with NaN/Inf replaced by 0). There is **no proof, no static
+//! guarantee, and no certificate**: it is a defensive output sanitizer, useful
+//! for keeping activations finite/bounded, nothing more. For *provable* bounds
+//! see `crown_ibp`/`ibp` (interval bounds), `lipschitz` (Lipschitz radius), or
+//! `smoothing` (randomized smoothing).
+
 use crate::autodiff::reverse::{Tape, Tensor, Var};
 use crate::nn::Module;
 use std::marker::PhantomData;
 
-/// Trait defining a mathematical contract for a module.
+/// A runtime value-bounds check for a module's output.
 pub trait Contract {
-    /// Checks the tensor for contract violations and returns a safe fallback if necessary.
+    /// Returns a sanitized copy of `t` if it violated the bounds, else `None`.
     fn validate(t: &Tensor) -> Option<Tensor>;
 }
 
-/// A contract that ensures values stay within [MIN, MAX] range.
+/// Clamps values into `[MIN, MAX]` (and scrubs NaN/Inf to 0) at runtime.
+///
+/// Note: the bounds are `i32` const generics cast to `f32`, so only **integer**
+/// bounds are expressible (e.g. `[-1, 1]` works, `[-0.5, 0.5]` cannot).
 pub struct ValueBoundedContract<const MIN_BITS: i32, const MAX_BITS: i32>;
 
 impl<const MIN_BITS: i32, const MAX_BITS: i32> Contract
@@ -44,7 +58,8 @@ impl<const MIN_BITS: i32, const MAX_BITS: i32> Contract
     }
 }
 
-/// A wrapper that enforces formal invariants on a module's execution.
+/// A wrapper that applies a runtime [`Contract`] (value-bounds sanitizer) to a
+/// module's output. Not a formal certificate — see the module note.
 pub struct CertifiedModule<M: Module, C: Contract> {
     pub inner: M,
     _contract: PhantomData<C>,

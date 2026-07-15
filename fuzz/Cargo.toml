@@ -21,6 +21,7 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 scirust-runtime = { path = "../scirust-runtime" }
 scirust-onnx = { path = "../scirust-onnx" }
+scirust-core = { path = "../scirust-core" }
 
 # Keep this crate out of any parent workspace discovery.
 [workspace]
@@ -38,6 +39,13 @@ bench = false
 [[bin]]
 name = "import_onnx_json_from_bytes"
 path = "fuzz_targets/import_onnx_json_from_bytes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "safetensors_from_bytes"
+path = "fuzz_targets/safetensors_from_bytes.rs"
 test = false
 doc = false
 bench = false

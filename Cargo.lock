@@ -2971,7 +2971,6 @@ dependencies = [
  "libm",
  "matrixmultiply",
  "nalgebra",
- "ndarray",
  "num-bigint",
  "num-rational",
  "num-traits",

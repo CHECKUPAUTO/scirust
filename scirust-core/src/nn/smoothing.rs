@@ -293,11 +293,17 @@ impl SmoothedClassifier {
         Self::argmax(&self.vote_counts(f, x, n, num_classes, rng))
     }
 
-    /// **Certify** at `x`: estimate the top class from `n` samples, lower-bound its
-    /// probability with Clopper–Pearson at confidence `1 − alpha`, and return the
-    /// certified L2 radius `σ·Φ⁻¹(pₐ)` (or abstain if `pₐ ≤ ½`). This is the
-    /// single-sample variant (selection and estimation from one batch); it is exact
-    /// for the binary case. The radius holds w.p. `≥ 1 − alpha` over the sampling.
+    /// **Single-sample certify** at `x`: estimate the top class from `n` samples
+    /// and lower-bound its probability with Clopper–Pearson at confidence
+    /// `1 − alpha`, returning the certified L2 radius `σ·Φ⁻¹(pₐ)` (or abstain if
+    /// `pₐ ≤ ½`).
+    ///
+    /// ⚠️ **Rigorous only for the binary case.** Selecting the top class and
+    /// bounding its probability from the *same* batch biases `pₐ` upward (the
+    /// class won *because* its count was high), so for `num_classes > 2` the
+    /// `1 − alpha` guarantee does **not** strictly hold. Use
+    /// [`Self::certify_cohen`] (Cohen et al.'s two-sample procedure) for a sound
+    /// multiclass certificate.
     pub fn certify<F: Fn(&[f32]) -> usize>(
         &self,
         f: &F,
@@ -310,6 +316,51 @@ impl SmoothedClassifier {
         let counts = self.vote_counts(f, x, n, num_classes, rng);
         let class = Self::argmax(&counts);
         let p_a_lower = clopper_pearson_lower(counts[class], n, alpha);
+        if p_a_lower <= 0.5
+        {
+            Certificate {
+                class,
+                radius: 0.0,
+                p_a_lower: p_a_lower as f32,
+                abstained: true,
+            }
+        }
+        else
+        {
+            let radius = self.sigma * inv_normal_cdf(p_a_lower) as f32;
+            Certificate {
+                class,
+                radius,
+                p_a_lower: p_a_lower as f32,
+                abstained: false,
+            }
+        }
+    }
+
+    /// **Cohen et al. (2019) `Certify`** — the *sound* multiclass procedure. Draw
+    /// `n0` **selection** samples to pick the candidate class, then `n`
+    /// **independent estimation** samples to Clopper–Pearson lower-bound that
+    /// class's probability. Splitting selection from estimation removes the
+    /// selection bias that makes [`Self::certify`] unsound for `num_classes > 2`.
+    /// Returns radius `σ·Φ⁻¹(pₐ)` (or abstain if `pₐ ≤ ½`); holds w.p.
+    /// `≥ 1 − alpha` over the sampling.
+    #[allow(clippy::too_many_arguments)]
+    pub fn certify_cohen<F: Fn(&[f32]) -> usize>(
+        &self,
+        f: &F,
+        x: &[f32],
+        n0: usize,
+        n: usize,
+        num_classes: usize,
+        alpha: f64,
+        rng: &mut PcgEngine,
+    ) -> Certificate {
+        // Selection pass: pick the candidate class from n0 samples.
+        let sel_counts = self.vote_counts(f, x, n0, num_classes, rng);
+        let class = Self::argmax(&sel_counts);
+        // Estimation pass: n *fresh* (independent) samples bound that class.
+        let est_counts = self.vote_counts(f, x, n, num_classes, rng);
+        let p_a_lower = clopper_pearson_lower(est_counts[class], n, alpha);
         if p_a_lower <= 0.5
         {
             Certificate {
@@ -432,6 +483,23 @@ mod tests {
         // On the boundary (d = 0): pₐ ≈ 0.5, cannot clear ½ ⇒ abstain.
         let mut rng = PcgEngine::new(3);
         let edge = smc.certify(&halfspace, &[0.0, 0.0], 5000, 2, 0.01, &mut rng);
+        assert!(edge.abstained && edge.radius == 0.0);
+    }
+
+    /// The Cohen two-sample procedure (`n0` selection + `n` estimation) also
+    /// certifies far from the boundary and abstains on it.
+    #[test]
+    fn certify_cohen_two_sample_is_sound() {
+        let halfspace = |z: &[f32]| -> usize { usize::from(z[0] > 0.0) };
+        let smc = SmoothedClassifier::new(1.0);
+
+        let mut rng = PcgEngine::new(5);
+        let far = smc.certify_cohen(&halfspace, &[2.5, 0.0], 500, 5000, 2, 0.01, &mut rng);
+        assert_eq!(far.class, 1);
+        assert!(!far.abstained && far.radius > 0.0);
+
+        let mut rng = PcgEngine::new(5);
+        let edge = smc.certify_cohen(&halfspace, &[0.0, 0.0], 500, 5000, 2, 0.01, &mut rng);
         assert!(edge.abstained && edge.radius == 0.0);
     }
 }

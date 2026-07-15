@@ -266,7 +266,7 @@ impl NdMultiHeadAttention {
     ) -> Self {
         assert!(
             d_model.is_multiple_of(n_heads),
-            "d_model must divide n_heads"
+            "d_model must be a multiple of n_heads"
         );
         assert!(
             num_kv_heads >= 1 && n_heads.is_multiple_of(num_kv_heads),
@@ -1845,8 +1845,10 @@ pub fn ssd_dual<'t>(
 }
 
 /// **Mamba-2 block** (SSD): from the input it projects the value stream `x`, the
-/// state vectors `B`/`C`, and a scalar step `Δ = softplus(·)`; the per-step scalar
-/// decay is `a_logₜ = Δₜ·A` with a learnable `A = −exp(A_raw) < 0` (contractive),
+/// state vectors `B`/`C`, and a positive scalar step `Δ = exp(·)` (a log-space
+/// stand-in for softplus, so no `log`/`softplus` op is needed); the input is
+/// discretized as `B̄ₜ = Δₜ·Bₜ` and the per-step scalar decay is `a_logₜ = Δₜ·A`
+/// with a learnable `A = −exp(A_raw) < 0` (contractive),
 /// runs the [`ssd_dual`] quadratic scan, adds a gated skip `D⊙x` and projects back.
 /// Deterministic; trainable through the N-D tape. `(seq, d_model) → (seq, d_model)`.
 pub struct NdMamba2 {
@@ -1890,10 +1892,16 @@ impl NdMamba2 {
         let neg1 = tape.input(TensorND::new(vec![-1.0f32], vec![1, 1]));
         let a_scalar = a_raw.exp().mul(neg1); // A = −exp(a_raw) < 0
         let a_log = dt.mul(a_scalar); // a_logₜ = Δₜ·A < 0  (seq,1)
-        let scan = ssd_dual(tape, xv, b, c, a_log); // (seq, d_inner)
+        // Discretize the input contribution: B̄ₜ = Δₜ·Bₜ (canonical Mamba-2 SSD,
+        // and what the crate's own v1 `selective_scan` does with `dbx = Δ·B·x`).
+        // Folding Δ into the value stream is equivalent, since the j-th input's
+        // contribution is scaled by the scalar Δⱼ. The previous code fed x raw,
+        // applying Δ only to the decay — an off-by-Δ vs. the canonical algorithm.
+        let xv_disc = xv.mul(dt); // (seq, d_inner) ⊙ (seq,1)
+        let scan = ssd_dual(tape, xv_disc, b, c, a_log); // (seq, d_inner)
         let skip = tape.input(self.d_skip.clone());
         self.d_idx = Some(skip.idx());
-        let y = scan.add(skip.mul(xv)); // gated skip D⊙x
+        let y = scan.add(skip.mul(xv)); // gated skip D⊙x on the RAW value stream
         self.out_proj.forward(tape, y) // (seq, d_model)
     }
 

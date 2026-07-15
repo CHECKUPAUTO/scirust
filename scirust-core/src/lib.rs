@@ -1,4 +1,35 @@
 #![cfg_attr(feature = "portable-simd", feature(portable_simd))]
+//! # scirust-core
+//!
+//! Pure-Rust scientific-computing / deep-learning core: tensors, reverse-mode
+//! autograd, a neural-network layer zoo, quantization, and assorted research
+//! modules. Part of the larger `scirust-*` workspace (`publish = false`).
+//!
+//! ## Two tensor/autograd stacks (know which you're on)
+//!
+//! Historically the crate grew **two** parallel compute stacks that do **not**
+//! interoperate — pick one per model:
+//!
+//! * **2-D tape** — [`autodiff::reverse`] (`Tensor`, `Tape`, `Var`): a matrix
+//!   (`rows × cols`) reverse-mode engine. Most `nn::` layers build on it.
+//! * **N-D tape** — [`autodiff::nd`] (`NdTape`, `NdVar`) over
+//!   [`tensor::TensorND`]: the n-dimensional engine used by [`nn::nd_layers`],
+//!   [`nn::nd_optim`], and the newer transformer/SSM layers.
+//!
+//! ## Backends & reproducibility
+//!
+//! [`matrix::backend::best_backend`] selects scalar / `portable-simd` / `blas`
+//! at compile time. **Note:** enabling the `blas` feature changes the
+//! floating-point accumulation order, so results are no longer bit-identical to
+//! the scalar/SIMD paths — do not combine `blas` with the bit-exact
+//! reproducibility guarantees of [`reproducible`] / [`portable_f32`].
+//!
+//! ## Security-sensitive modules — read their headers
+//!
+//! [`homomorphic`], [`dp`], [`nn::lipschitz`], [`nn::smoothing`],
+//! [`nn::crown_ibp`], and [`nn::certified`] make cryptographic / privacy /
+//! certified-robustness claims. Each module documents exactly what it does and
+//! does **not** guarantee; none is production-hardened cryptography.
 
 pub mod io;
 pub mod nn;

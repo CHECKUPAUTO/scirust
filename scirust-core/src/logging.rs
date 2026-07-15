@@ -53,7 +53,7 @@ impl TrainingLogger {
 
         let start = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs_f64();
 
         Ok(Self {
@@ -74,7 +74,7 @@ impl TrainingLogger {
 
         let start = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs_f64();
 
         Ok(Self {
@@ -97,7 +97,7 @@ impl TrainingLogger {
             {
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
-                    .unwrap()
+                    .unwrap_or_default()
                     .as_secs_f64();
                 writeln!(self.writer, "{},{},{},{}", step, tag, value, now)?;
             },
@@ -107,7 +107,7 @@ impl TrainingLogger {
                 // For simplicity, we write a human-readable event record
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
-                    .unwrap()
+                    .unwrap_or_default()
                     .as_secs_f64();
                 let wall_time = now - self.start_time;
                 // Minimal TensorBoard event: tag, step, value, wall_time

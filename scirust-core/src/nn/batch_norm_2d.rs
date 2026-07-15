@@ -55,14 +55,24 @@ impl BatchNorm2d {
         self.training = mode;
     }
 
-    fn update_running_stats(&mut self, batch_mean: &[f32], batch_var: &[f32]) {
+    fn update_running_stats(&mut self, batch_mean: &[f32], batch_var: &[f32], n: usize) {
         let alpha = self.momentum;
+        // Bessel's correction: track the unbiased variance in running_var
+        // (PyTorch convention); `batch_var` is the biased ÷n estimator.
+        let bessel = if n > 1
+        {
+            n as f32 / (n as f32 - 1.0)
+        }
+        else
+        {
+            1.0
+        };
         for j in 0..self.num_channels
         {
             self.running_mean.data[j] =
                 (1.0 - alpha) * self.running_mean.data[j] + alpha * batch_mean[j];
             self.running_var.data[j] =
-                (1.0 - alpha) * self.running_var.data[j] + alpha * batch_var[j];
+                (1.0 - alpha) * self.running_var.data[j] + alpha * batch_var[j] * bessel;
         }
     }
 }
@@ -105,7 +115,7 @@ impl Module for BatchNorm2d {
             // Running-stat update from the detached batch statistics.
             let mean_v = tape.value(mean.idx());
             let var_v = tape.value(var.idx());
-            self.update_running_stats(&mean_v.data, &var_v.data);
+            self.update_running_stats(&mean_v.data, &var_v.data, ncol);
 
             let inv_std = var.add(eps_col).sqrt().reciprocal(); // (C,1)
             let x_hat = centered.hadamard(inv_std.broadcast(c, ncol));
@@ -180,6 +190,24 @@ impl Module for BatchNorm2d {
             .get(&format!("{}.running_var", self.name))
             .ok_or_else(|| format!("missing key: {}.running_var", self.name))?;
 
+        let expected = (1, self.num_channels);
+        for (key, t) in [
+            ("gamma", g),
+            ("beta", b),
+            ("running_mean", rm),
+            ("running_var", rv),
+        ]
+        {
+            if t.shape() != expected
+            {
+                crate::bail!(
+                    "BatchNorm2d '{}': {key} shape {:?} != expected {:?}",
+                    self.name,
+                    t.shape(),
+                    expected
+                );
+            }
+        }
         self.gamma = g.clone();
         self.beta = b.clone();
         self.running_mean = rm.clone();
