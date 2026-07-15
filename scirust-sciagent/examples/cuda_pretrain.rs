@@ -36,13 +36,14 @@
 //! restart from zero, which the warmup re-absorbs). Exit code 2 means no CUDA
 //! device was found — run on the Jetson Thor.
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use scirust_sciagent::config::SciAgentConfig;
 use scirust_sciagent::cuda_model::{CudaPretrainConfig, CudaTrainer};
 use scirust_sciagent::model::SciAgentModel;
 use scirust_sciagent::train::checkpoint::{latest_checkpoint, load_checkpoint, read_meta};
-use scirust_sciagent::train::dataset::{ShardLoader, source_quality};
+use scirust_sciagent::train::dataset::{ShardLoader, content_hash, source_quality};
 
 /// A tied, vocab-256 byte-level config — small enough to iterate fast, real enough
 /// to train on an actual code tree with no tokenizer.
@@ -152,9 +153,10 @@ fn is_probably_text(bytes: &[u8]) -> bool {
 }
 
 /// Recursively read raw file bytes under `root` (deterministic order), up to `cap`
-/// bytes — **source text only**: non-source directories ([`skip_dir`]) and non-text
-/// files ([`is_probably_text`]) are skipped.
-fn read_bytes_recursive(root: &Path, out: &mut Vec<u8>, cap: usize) {
+/// bytes — **source text only**: non-source directories ([`skip_dir`]), non-text
+/// files ([`is_probably_text`]), low-quality files ([`source_quality`]), and
+/// byte-identical duplicates (`seen` content hashes) are skipped.
+fn read_bytes_recursive(root: &Path, out: &mut Vec<u8>, cap: usize, seen: &mut HashSet<u64>) {
     if out.len() >= cap
     {
         return;
@@ -165,15 +167,18 @@ fn read_bytes_recursive(root: &Path, out: &mut Vec<u8>, cap: usize) {
         {
             if is_probably_text(&b)
             {
-                // Same corpus-quality gate as collect-data: skip generated/minified/
-                // data-table files (valid UTF-8 is already established, so the str
-                // conversion is safe).
+                // Same corpus-quality + dedup gate as collect-data (valid UTF-8 is
+                // already established, so the str conversion is safe).
                 let name = root.file_name().and_then(|n| n.to_str()).unwrap_or("");
                 if let Ok(text) = std::str::from_utf8(&b)
                 {
                     if source_quality(name, text).is_err()
                     {
                         return;
+                    }
+                    if !seen.insert(content_hash(text))
+                    {
+                        return; // duplicate content
                     }
                 }
                 let take = (cap - out.len()).min(b.len());
@@ -202,7 +207,7 @@ fn read_bytes_recursive(root: &Path, out: &mut Vec<u8>, cap: usize) {
                     }
                 }
             }
-            read_bytes_recursive(&p, out, cap);
+            read_bytes_recursive(&p, out, cap, seen);
         }
     }
 }
@@ -326,7 +331,8 @@ fn main() {
             config.vocab_size
         );
         let mut bytes = Vec::new();
-        read_bytes_recursive(Path::new(&text), &mut bytes, max_tokens);
+        let mut seen = HashSet::new();
+        read_bytes_recursive(Path::new(&text), &mut bytes, max_tokens, &mut seen);
         if bytes.is_empty()
         {
             eprintln!("SCIAGENT_TEXT={text} yielded no bytes (empty or unreadable)");

@@ -322,6 +322,19 @@ train/fine-tune/generate/speculative stack rides on top unchanged.
   reproducible per `(start_step, epoch)`. Smoother training + less memorization, landing
   before the next (bigger-corpus) run so both improvements compound.
 
+- **B19 — content-level dedup (prep for the crates.io pull).** The decisive lever is
+  now **corpus scale**, and the chosen source is crates.io — which is *full* of
+  duplicated code (vendored copies, re-exports, generated bindings across crates).
+  Training on duplicates just deepens the memorization the eval already showed. A
+  shared `content_hash` (FNV-1a 64-bit) dedups by file content across the corpus walk
+  — first-seen wins over the sorted (deterministic) traversal — wired into
+  `collect-data`, `train-tokenizer` (shared `ingest_text`), and the `cuda_pretrain`
+  byte path, counted under a `"duplicate"` skip reason. It also cancels the
+  `fetch-crates` `all/`-symlink double-count for free. `fetch-crates` itself is already
+  large-pull-ready (checksum-verified, `--resume`, paginated top-N-by-downloads,
+  path-traversal-safe); dedup is the missing quality piece before scaling the corpus
+  10–100×.
+
 ## Risks / honesty
 
 - **Toolchain gate (highest risk):** if the Thor's installed CUDA can't emit sm_110,

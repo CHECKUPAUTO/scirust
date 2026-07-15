@@ -2,12 +2,12 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use clap::Parser;
 use scirust_sciagent::bpe::BpeTokenizer;
 use scirust_sciagent::train::dataset::{
-    matches_extension, parse_extensions, skip_source_dir, source_quality,
+    content_hash, matches_extension, parse_extensions, skip_source_dir, source_quality,
 };
 
 #[derive(Parser)]
@@ -53,6 +53,8 @@ struct CollectStats {
     kept: usize,
     skipped: usize,
     reasons: BTreeMap<&'static str, usize>,
+    /// Content hashes already ingested — for deduplication.
+    seen: HashSet<u64>,
 }
 
 impl CollectStats {
@@ -155,6 +157,14 @@ fn ingest_file(
             stats.skip(reason);
             return;
         }
+    }
+    // Deduplicate by content: crates.io is full of duplicated files, and this also
+    // cancels the fetch-crates `all/`-symlink double-count. First-seen wins (the walk
+    // is sorted, so it's deterministic).
+    if !stats.seen.insert(content_hash(content))
+    {
+        stats.skip("duplicate");
+        return;
     }
     let ids = tok.encode_with_special(content, true, true);
     tokens.extend(ids.iter().map(|&i| i as u32));
