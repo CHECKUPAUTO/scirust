@@ -47,6 +47,111 @@ pub trait GpuEngine: std::fmt::Debug {
 //  Tensor — 2D dense row-major                                       //
 // ================================================================== //
 
+/// `C = alpha·op(A)·op(B) + beta·C`, with `C` an `m×n` **row-major** buffer
+/// (unit column stride, row stride `n`). `A`/`B` may carry arbitrary strides
+/// (`rs*`, `cs*`) — i.e. be transposed — which lets this serve the forward
+/// matmul *and* the two transposed backward GEMMs (`g·Bᵀ`, `Aᵀ·g`).
+///
+/// It parallelizes across **row blocks of `C`** (the `m` dimension) with rayon
+/// once the problem is large enough to amortize fork/join. Splitting the output
+/// rows offsets `A` and `C` by `i0·rs` and never reorders any dot product's
+/// k-accumulation, so the result is **bit-identical** to a single `sgemm` — this
+/// is the fast, architecture-dependent path (the cross-platform bit-exact path
+/// is [`Tensor::matmul_portable`]).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn par_sgemm(
+    m: usize,
+    k: usize,
+    n: usize,
+    alpha: f32,
+    a: &[f32],
+    rsa: isize,
+    csa: isize,
+    b: &[f32],
+    rsb: isize,
+    csb: isize,
+    beta: f32,
+    c: &mut [f32],
+) {
+    debug_assert_eq!(c.len(), m * n);
+    if m == 0 || n == 0
+    {
+        return;
+    }
+
+    #[cfg(feature = "rayon")]
+    {
+        // Only parallelize past ~16M fused multiply-adds. Below this a single
+        // sgemm is already sub-millisecond and rayon's fork/join plus the extra
+        // cache pressure make row-splitting a net loss (measured regression on a
+        // 128×256×256 GEMM at a lower threshold).
+        const PAR_MIN_OPS: usize = 1 << 24;
+        let ops = m.saturating_mul(k.max(1)).saturating_mul(n);
+        let nthreads = rayon::current_num_threads();
+        if ops >= PAR_MIN_OPS && nthreads > 1 && m >= 2
+        {
+            use rayon::prelude::*;
+            // ~one block per thread, but never thinner than 8 rows.
+            let block_rows = m.div_ceil(nthreads).max(8);
+            c.par_chunks_mut(block_rows * n)
+                .enumerate()
+                .for_each(|(bi, c_block)| {
+                    let i0 = bi * block_rows;
+                    let rows = c_block.len() / n; // last block may be shorter
+                    if rows == 0
+                    {
+                        return;
+                    }
+                    // SAFETY: `a`/`b` are the shared read-only operand buffers and
+                    // `c_block` is this block's disjoint slice of `C`. Row `i0` of
+                    // op(A) begins at `a[i0·rsa]` (all strides positive, in bounds
+                    // for every call site); `C` is row-major (`n` cols, unit col
+                    // stride) so the chunk is exactly rows `i0..i0+rows`.
+                    unsafe {
+                        sgemm(
+                            rows,
+                            k,
+                            n,
+                            alpha,
+                            a.as_ptr().offset(i0 as isize * rsa),
+                            rsa,
+                            csa,
+                            b.as_ptr(),
+                            rsb,
+                            csb,
+                            beta,
+                            c_block.as_mut_ptr(),
+                            n as isize,
+                            1,
+                        );
+                    }
+                });
+            return;
+        }
+    }
+
+    // Single-threaded fallback (and the whole body without the `rayon` feature).
+    // SAFETY: shapes/strides are supplied by the caller; `C` is row-major.
+    unsafe {
+        sgemm(
+            m,
+            k,
+            n,
+            alpha,
+            a.as_ptr(),
+            rsa,
+            csa,
+            b.as_ptr(),
+            rsb,
+            csb,
+            beta,
+            c.as_mut_ptr(),
+            n as isize,
+            1,
+        );
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Tensor {
     pub rows: usize,
@@ -494,24 +599,22 @@ impl Tensor {
         {
             return out;
         }
-        unsafe {
-            sgemm(
-                self.rows,
-                self.cols,
-                other.cols,
-                1.0,
-                self.data.as_ptr(),
-                self.cols as isize,
-                1,
-                other.data.as_ptr(),
-                other.cols as isize,
-                1,
-                0.0,
-                out.data.as_mut_ptr(),
-                out.cols as isize,
-                1,
-            );
-        }
+        // Cache-blocked, rayon-parallelized GEMM (fast, architecture-dependent
+        // path — the bit-exact cross-platform path is `Tensor::matmul_portable`).
+        par_sgemm(
+            self.rows,
+            self.cols,
+            other.cols,
+            1.0,
+            &self.data,
+            self.cols as isize,
+            1,
+            &other.data,
+            other.cols as isize,
+            1,
+            0.0,
+            &mut out.data,
+        );
         out
     }
 
@@ -1009,13 +1112,49 @@ impl Tape {
         }
         else
         {
-            match (ta, tb)
+            // Feed the (possibly transposed) operands to the parallel GEMM via
+            // strides — no physical transpose is materialized (the old path
+            // allocated a full transposed copy of each `t*` operand, including
+            // the large im2col column matrix in conv's backward). Reading an
+            // operand transposed vs. pre-transposing it yields the identical
+            // packed values, so the result is bit-identical.
+            let m = if ta { a.cols } else { a.rows };
+            let k = if ta { a.rows } else { a.cols };
+            let n = if tb { b.rows } else { b.cols };
+            let b_k = if tb { b.cols } else { b.rows };
+            assert_eq!(k, b_k, "Tape::gemm_ab: inner dimension mismatch");
+            let (rsa, csa) = if ta
             {
-                (false, false) => a.matmul(b),
-                (false, true) => a.matmul(&b.transpose()),
-                (true, false) => a.transpose().matmul(b),
-                (true, true) => a.transpose().matmul(&b.transpose()),
+                (1isize, a.cols as isize)
             }
+            else
+            {
+                (a.cols as isize, 1isize)
+            };
+            let (rsb, csb) = if tb
+            {
+                (1isize, b.cols as isize)
+            }
+            else
+            {
+                (b.cols as isize, 1isize)
+            };
+            let mut out = Tensor::zeros(m, n);
+            par_sgemm(
+                m,
+                k,
+                n,
+                1.0,
+                &a.data,
+                rsa,
+                csa,
+                &b.data,
+                rsb,
+                csb,
+                0.0,
+                &mut out.data,
+            );
+            out
         }
     }
 
@@ -1397,49 +1536,41 @@ impl Tape {
                     let av = &values[a].as_cpu();
                     let bv = &values[b].as_cpu();
 
-                    // ga = g @ b.T
-                    // (M x N) @ (K x N).T -> (M x K)
+                    // ga = g @ b.T  :  (M×N) @ (K×N)ᵀ → (M×K), accumulated (β=1).
+                    // B is read transposed (rsb=1, csb=bv.cols); C=ga is row-major.
                     let ga = &mut grads[a];
-                    unsafe {
-                        sgemm(
-                            g.rows,
-                            g.cols,
-                            bv.rows,
-                            1.0,
-                            g.data.as_ptr(),
-                            g.cols as isize,
-                            1,
-                            bv.data.as_ptr(),
-                            1,
-                            bv.cols as isize,
-                            1.0,
-                            ga.data.as_mut_ptr(),
-                            ga.cols as isize,
-                            1,
-                        );
-                    }
+                    par_sgemm(
+                        g.rows,
+                        g.cols,
+                        bv.rows,
+                        1.0,
+                        &g.data,
+                        g.cols as isize,
+                        1,
+                        &bv.data,
+                        1,
+                        bv.cols as isize,
+                        1.0,
+                        &mut ga.data,
+                    );
 
-                    // gb = a.T @ g
-                    // (M x K).T @ (M x N) -> (K x N)
+                    // gb = a.T @ g  :  (M×K)ᵀ @ (M×N) → (K×N), accumulated (β=1).
+                    // A is read transposed (rsa=1, csa=av.cols); C=gb is row-major.
                     let gb = &mut grads[b];
-                    unsafe {
-                        sgemm(
-                            av.cols,
-                            av.rows,
-                            g.cols,
-                            1.0,
-                            av.data.as_ptr(),
-                            1,
-                            av.cols as isize,
-                            g.data.as_ptr(),
-                            g.cols as isize,
-                            1,
-                            1.0,
-                            gb.data.as_mut_ptr(),
-                            gb.cols as isize,
-                            1,
-                        );
-                    }
+                    par_sgemm(
+                        av.cols,
+                        av.rows,
+                        g.cols,
+                        1.0,
+                        &av.data,
+                        1,
+                        av.cols as isize,
+                        &g.data,
+                        g.cols as isize,
+                        1,
+                        1.0,
+                        &mut gb.data,
+                    );
                 },
                 Op::MatMulGpu(a, b) =>
                 {
