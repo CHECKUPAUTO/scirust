@@ -680,6 +680,19 @@
 //! - [`pneumatic_conveying`] — transport pneumatique dilué : taux de charge, Froude de saltation.
 //! - [`heat_exchanger_fouling`] — encrassement : résistance Rf, coefficient encrassé, propreté.
 //! - [`air_mixing`] — mélange adiabatique d'air humide : température, teneur en eau, enthalpie.
+//! - [`beam_on_elastic_foundation`] — poutre sur fondation élastique (Winkler) : β, flèche, moment.
+//! - [`fluid_coupling`] — accouplement hydrodynamique : glissement, rendement, couple ∝ N².
+//! - [`magnetic_coupling`] — accouplement magnétique synchrone : couple, décrochage, puissance.
+//! - [`overrunning_clutch`] — roue libre : coincement, couple, condition d'arc-boutement.
+//! - [`shock_absorber`] — amortisseur hydraulique : effort à orifice (∝ v²) ou visqueux.
+//! - [`two_dof_vibration`] — système à 2 ddl : deux pulsations propres, couplage.
+//! - [`thread_rolling`] — roulage de filet : lopin, diamètre sur flancs, effort estimé.
+//! - [`knurling`] — moletage : pas circonférentiel, nombre de crans, croissance diamétrale.
+//! - [`continuous_beam`] — poutre continue : théorème des trois moments (Clapeyron).
+//! - [`rotameter`] — débitmètre à flotteur : aire annulaire, débit à l'équilibre.
+//! - [`shear_pin`] — goupille de cisaillement / limiteur de couple : couple de rupture.
+//! - [`solenoid_actuator`] — actionneur à réluctance : force μ₀(NI)²A/(2g²), inductance.
+//! - [`voice_coil`] — actionneur à bobine mobile (Lorentz) : force BL·I, constante moteur.
 //!
 //! ## Positionnement
 //!
@@ -1208,6 +1221,23 @@ pub mod ramberg_osgood;
 pub mod silo_pressure;
 pub mod sluice_gate;
 pub mod whole_body_vibration;
+
+// Lot massif (vol. 39) — structure sur fondation, transmissions sans contact et
+// roue libre, amortissement, vibration 2 ddl, procédés par déformation, poutre
+// continue, débitmétrie, sécurité mécanique, actionneurs électromécaniques.
+pub mod beam_on_elastic_foundation;
+pub mod continuous_beam;
+pub mod fluid_coupling;
+pub mod knurling;
+pub mod magnetic_coupling;
+pub mod overrunning_clutch;
+pub mod rotameter;
+pub mod shear_pin;
+pub mod shock_absorber;
+pub mod solenoid_actuator;
+pub mod thread_rolling;
+pub mod two_dof_vibration;
+pub mod voice_coil;
 
 pub use accelerated_life::{
     BOLTZMANN_EV_K, arrhenius_acceleration_factor, derated_value, ten_degree_rule_factor,
@@ -2507,4 +2537,53 @@ pub use sluice_gate::{
 };
 pub use whole_body_vibration::{
     wbv_daily_exposure_a8, wbv_dominant_axis_acceleration, wbv_time_to_limit, wbv_vector_sum,
+};
+
+// Lot massif (vol. 39) — ré-exports à plat.
+pub use beam_on_elastic_foundation::{
+    bef_characteristic_factor, bef_characteristic_length, bef_max_deflection_point_load,
+    bef_max_moment_point_load,
+};
+pub use continuous_beam::{
+    contbeam_reaction_from_moments, contbeam_support_moment_equal_spans_udl,
+    contbeam_three_moment_point_center, contbeam_three_moment_udl,
+};
+pub use fluid_coupling::{
+    fluidcoup_efficiency, fluidcoup_output_speed, fluidcoup_slip, fluidcoup_torque,
+};
+pub use knurling::{
+    knurl_circular_pitch, knurl_diameter_growth, knurl_pre_roll_diameter, knurl_teeth_count,
+};
+pub use magnetic_coupling::{
+    magcoup_is_synchronized, magcoup_pole_pitch_angle, magcoup_torque, magcoup_transmitted_power,
+};
+pub use overrunning_clutch::{
+    freewheel_max_wedge_angle, freewheel_normal_force, freewheel_self_locking,
+    freewheel_torque_capacity,
+};
+pub use rotameter::{
+    rotameter_annular_area, rotameter_float_equilibrium_pressure_drop, rotameter_volumetric_flow,
+};
+pub use shear_pin::{
+    shearpin_breaking_force, shearpin_breaking_torque, shearpin_diameter_for_torque,
+    shearpin_shear_area,
+};
+pub use shock_absorber::{
+    shockabs_critical_damping, shockabs_energy_dissipated, shockabs_linear_damping_force,
+    shockabs_orifice_force,
+};
+pub use solenoid_actuator::{
+    SOLENOID_MU0, solenoid_ampere_turns_for_force, solenoid_flux_density, solenoid_force,
+    solenoid_inductance,
+};
+pub use thread_rolling::{
+    THREADROLL_ISO_FLANK_FACTOR, threadroll_blank_diameter, threadroll_penetration_per_revolution,
+    threadroll_pitch_diameter, threadroll_rolling_force,
+};
+pub use two_dof_vibration::{
+    twodof_coupling_factor, twodof_frequency_equation_discriminant, twodof_natural_frequencies_rad,
+};
+pub use voice_coil::{
+    voicecoil_back_emf, voicecoil_force, voicecoil_force_constant, voicecoil_motor_constant,
+    voicecoil_power_dissipation,
 };
