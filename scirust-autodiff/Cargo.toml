@@ -4,4 +4,15 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[features]
+# Opt-in, output-neutral execution-path canary in `chain()` (default OFF). When
+# off, the crate stays byte-identical and dependency-free. See the `canary`
+# module docs for the (deliberately narrow) threat model.
+canary = []
+
 [dependencies]
+
+[dev-dependencies]
+# Only used by the `canary`-gated drift-guard test to re-derive PROV_TAG; not a
+# runtime dependency and absent from any shipped build.
+sha2 = "0.10"

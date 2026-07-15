@@ -49,7 +49,77 @@ impl Dual {
 /// partial derivatives are taken one variable at a time.
 #[inline]
 fn chain(factor: f64, deriv: f64) -> f64 {
+    // Output-neutral execution-path canary (opt-in via the `canary` feature,
+    // default off). It only READS the operand bits and folds them into a
+    // per-thread accumulator; the returned value below is byte-identical whether
+    // or not the feature is enabled. Threat model is in the `canary` module docs.
+    #[cfg(feature = "canary")]
+    canary::observe(factor, deriv);
     if deriv == 0.0 { 0.0 } else { factor * deriv }
+}
+
+/// Opt-in, output-neutral **execution-path canary** (feature `canary`, default off).
+///
+/// # What it is
+/// Every nonlinear forward-mode tangent step funnels through [`chain`]. With the
+/// `canary` feature enabled, each call folds a keyed digest of the *execution
+/// path* — which guard branch was taken, plus the exponent/low bits of the
+/// operands — into a per-thread accumulator seeded by [`canary::PROV_TAG`]. A
+/// fixed "probe" computation then yields a reproducible 64-bit fingerprint that an
+/// independent reimplementation of dual-number AD would not reproduce.
+///
+/// # What it is NOT (read before relying on it)
+/// This is a **tripwire against verbatim source copying**, not anti-clone
+/// protection. It writes only a thread-local and never touches a returned value,
+/// so (a) it carries no signal in a black-box artifact, and (b) a competitor who
+/// reimplements AD from scratch — or simply builds with the feature off, the
+/// default — carries no fingerprint at all. Its marginal value over a plain source
+/// diff is small; treat it as cheap defense-in-depth, never as courtroom evidence.
+///
+/// # Neutrality
+/// The digest is derived only from operand bits and folded into a `Cell<u64>`; the
+/// arithmetic in [`chain`] is unchanged, so gradients are bit-identical with the
+/// feature on or off. The `gradients_are_bit_exact` test asserts this and passes
+/// in both build configurations.
+#[cfg(feature = "canary")]
+pub mod canary {
+    use std::cell::Cell;
+
+    /// Keyed seed, derived **offline** (never at runtime, so the crate stays
+    /// dependency-free): the first 8 bytes, little-endian, of
+    /// `SHA-256(b"SRL.canary" || demo_vendor_root || b"scirust-autodiff")`, where
+    /// `demo_vendor_root` is `scirust-license`'s public `DEMO_ROOT_HEX`. The
+    /// `prov_tag_matches_offline_derivation` test is the drift-guard that proves
+    /// it. Replace the demo root with your production vendor root before relying
+    /// on the fingerprint — the demo seed is public.
+    pub const PROV_TAG: u64 = 0x5bb6_bb08_d197_46dd;
+
+    thread_local! {
+        static CANARY: Cell<u64> = const { Cell::new(0) };
+    }
+
+    /// Fold one chain-rule step's operand bits into the per-thread accumulator.
+    /// Reads only; never influences any returned `f64`.
+    #[inline]
+    pub(crate) fn observe(factor: f64, deriv: f64) {
+        CANARY.with(|c| {
+            let h = c.get().rotate_left(7)
+                ^ PROV_TAG.wrapping_mul((deriv == 0.0) as u64 + 1)
+                ^ (factor.to_bits() >> 52)
+                ^ (deriv.to_bits() & 0xFFFF);
+            c.set(h);
+        });
+    }
+
+    /// Read the current thread's accumulated canary digest.
+    pub fn digest() -> u64 {
+        CANARY.with(|c| c.get())
+    }
+
+    /// Reset the current thread's canary accumulator to zero.
+    pub fn reset() {
+        CANARY.with(|c| c.set(0));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -697,5 +767,84 @@ mod tests {
         let f = (x + 1.0) / x;
         assert!((f.val() - 1.5).abs() < 1e-12);
         assert!((f.grad() - (-0.25)).abs() < 1e-12);
+    }
+
+    /// The `canary` feature must never perturb a returned gradient. These exact
+    /// bit patterns hold WITH and WITHOUT the feature (the canary writes only a
+    /// thread-local, never a returned value). This test runs by default as the
+    /// baseline and, under `--features canary`, re-verifies that the instrumented
+    /// build produces byte-identical gradients.
+    #[test]
+    fn gradients_are_bit_exact() {
+        // d/dx (1/x) at 2 = -0.25   (routes through Div -> chain)
+        assert_eq!(
+            derivative_1d(|x| Dual::primal(1.0) / x, 2.0).to_bits(),
+            0xbfd0_0000_0000_0000
+        );
+        // d/dx sqrt(x) at 4 = 0.25  (sqrt -> chain)
+        assert_eq!(
+            derivative_1d(|x| x.sqrt(), 4.0).to_bits(),
+            0x3fd0_0000_0000_0000
+        );
+        // d/dx ln(x) at 2 = 0.5     (ln -> chain)
+        assert_eq!(
+            derivative_1d(|x| x.ln(), 2.0).to_bits(),
+            0x3fe0_0000_0000_0000
+        );
+        // d/dx (x*x) at 3 = 6.0     (Mul, not routed through chain — baseline)
+        assert_eq!(
+            derivative_1d(|x| x * x, 3.0).to_bits(),
+            0x4018_0000_0000_0000
+        );
+    }
+}
+
+// Liveness + drift-guard checks for the opt-in canary, compiled only under the
+// feature (so the default build and its dependency graph are untouched).
+#[cfg(all(test, feature = "canary"))]
+mod canary_tests {
+    use super::*;
+
+    #[test]
+    fn digest_is_live_reproducible_and_input_sensitive() {
+        canary::reset();
+        let _ = derivative_1d(|x| x.sqrt(), 4.0);
+        let d1 = canary::digest();
+        assert_ne!(d1, 0, "canary should accumulate through chain()");
+
+        canary::reset();
+        let _ = derivative_1d(|x| x.sqrt(), 4.0);
+        assert_eq!(
+            canary::digest(),
+            d1,
+            "same computation must yield the same digest (pure function of inputs)"
+        );
+
+        canary::reset();
+        let _ = derivative_1d(|x| x.ln(), 2.0);
+        assert_ne!(
+            canary::digest(),
+            d1,
+            "a different computation must yield a different digest"
+        );
+    }
+
+    #[test]
+    fn prov_tag_matches_offline_derivation() {
+        use sha2::{Digest, Sha256};
+        // scirust-license DEMO_ROOT_HEX (the public demo vendor root).
+        const DEMO_ROOT: [u8; 32] = [
+            0x82, 0x72, 0x80, 0x23, 0xe3, 0xde, 0x72, 0x43, 0xe9, 0x82, 0xd0, 0x4a, 0xb0, 0x9a,
+            0x7a, 0xa2, 0x0a, 0x7f, 0xdb, 0x1f, 0xa1, 0x0a, 0x0d, 0xf2, 0x92, 0x00, 0x60, 0xab,
+            0xc9, 0x3a, 0x7f, 0x02,
+        ];
+        let mut h = Sha256::new();
+        h.update(b"SRL.canary");
+        h.update(DEMO_ROOT);
+        h.update(b"scirust-autodiff");
+        let digest = h.finalize();
+        let mut first8 = [0u8; 8];
+        first8.copy_from_slice(&digest[..8]);
+        assert_eq!(canary::PROV_TAG, u64::from_le_bytes(first8));
     }
 }

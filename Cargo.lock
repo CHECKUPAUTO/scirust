@@ -2880,6 +2880,9 @@ dependencies = [
 [[package]]
 name = "scirust-autodiff"
 version = "0.1.0"
+dependencies = [
+ "sha2",
+]
 
 [[package]]
 name = "scirust-automl"
