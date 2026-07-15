@@ -137,6 +137,7 @@ members = [
     "scirust-sciagent",
     "scirust-rsi",
     "scirust-license",
+    "scirust-provenance",
     "scirust-retrieval",
     "scirust-mcp",
     "scirust-discovery",

@@ -1,0 +1,21 @@
+[package]
+name = "scirust-provenance"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+description = "SciRust codegen provenance — offline Lamport/Merkle signing and public verification of transpiler-emitted artifacts (reuses scirust-license/hashsig). The signature rides in a comment so the artifact compiles byte-identically; the secret master seed never ships."
+license = "PolyForm-Noncommercial-1.0.0"
+repository = "https://github.com/Memorithm/scirust"
+
+[dependencies]
+scirust-license = { path = "../scirust-license" }
+sha2 = "0.10"
+
+# The transpiler is std-only and dependency-free by design; we depend on it only
+# in tests, to prove the sign→verify flow end-to-end on a real emitted artifact.
+[dev-dependencies]
+scirust-transpiler = { path = "../scirust-transpiler" }
+
+[[bin]]
+name = "prov"
+path = "src/bin/prov.rs"

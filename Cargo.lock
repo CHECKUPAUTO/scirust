@@ -3418,6 +3418,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-provenance"
+version = "0.1.0"
+dependencies = [
+ "scirust-license",
+ "scirust-transpiler",
+ "sha2",
+]
+
+[[package]]
 name = "scirust-reasoning"
 version = "0.1.0"
 dependencies = [
