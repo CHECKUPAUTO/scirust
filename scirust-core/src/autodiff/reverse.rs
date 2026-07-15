@@ -913,6 +913,9 @@ pub enum Op {
     MulBroadcast(usize, usize),
     DivBroadcast(usize, usize),
     MatMul(usize, usize),
+    /// `C = A · Bᵀ` (both operands row-major; B read transposed via strides, no
+    /// physical transpose). Used by attention's `Q·Kᵀ` scores.
+    MatMulBt(usize, usize),
     MatMulGpu(usize, usize),
     Scale {
         input: usize,
@@ -1671,6 +1674,47 @@ impl Tape {
                         av.cols as isize,
                         &g.data,
                         g.cols as isize,
+                        1,
+                        1.0,
+                        &mut gb.data,
+                    );
+                },
+                Op::MatMulBt(a, b) =>
+                {
+                    // C = A·Bᵀ, A=(m×k), B=(n×k), g=dC=(m×n).
+                    let av = &values[a].as_cpu();
+                    let bv = &values[b].as_cpu();
+
+                    // dA = g · B  :  (m×n)·(n×k) → (m×k), B row-major, accumulated.
+                    let ga = &mut grads[a];
+                    par_sgemm(
+                        g.rows,
+                        g.cols,
+                        bv.cols,
+                        1.0,
+                        &g.data,
+                        g.cols as isize,
+                        1,
+                        &bv.data,
+                        bv.cols as isize,
+                        1,
+                        1.0,
+                        &mut ga.data,
+                    );
+
+                    // dB = gᵀ · A  :  (n×m)·(m×k) → (n×k). g read transposed
+                    // (rsa=1, csa=g.cols); A row-major; accumulated.
+                    let gb = &mut grads[b];
+                    par_sgemm(
+                        g.cols,
+                        g.rows,
+                        av.cols,
+                        1.0,
+                        &g.data,
+                        1,
+                        g.cols as isize,
+                        &av.data,
+                        av.cols as isize,
                         1,
                         1.0,
                         &mut gb.data,
@@ -3238,6 +3282,33 @@ impl<'t> Var<'t> {
             tape: self.tape,
             idx: new_idx,
         })
+    }
+
+    /// `C = A · Bᵀ` where `self = A` (`m×k`) and `other = B` (`n×k`), giving
+    /// `C` (`m×n`). Reads `B` transposed via strides (no physical transpose is
+    /// materialized) and goes through the parallel GEMM. Semantically identical
+    /// to `self.try_matmul(other.transpose())` but avoids the transpose node and
+    /// its allocation — used by attention's `Q·Kᵀ`.
+    pub fn try_matmul_bt(self, other: Var<'t>) -> crate::error::Result<Var<'t>> {
+        self.ensure_same_tape(&other, "matmul_bt")?;
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
+        crate::error::check_inner_dim("matmul_bt", a.cols, b.cols)?;
+        // A·Bᵀ via gemm_ab(ta=false, tb=true): B read transposed by stride.
+        let out = self.tape.gemm_ab(&a, &b, false, true);
+        let new_idx = self.tape.push_with_saved(
+            Op::MatMulBt(self.idx, other.idx),
+            DeviceTensor::cpu(out),
+            SavedData::None,
+        );
+        Ok(Var {
+            tape: self.tape,
+            idx: new_idx,
+        })
+    }
+
+    pub fn matmul_bt(self, other: Var<'t>) -> Var<'t> {
+        self.try_matmul_bt(other).unwrap()
     }
 
     /// MatMul GPU-acceléré.

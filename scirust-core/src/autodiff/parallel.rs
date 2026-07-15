@@ -318,6 +318,16 @@ impl ParallelTape {
                     t_grads[a] = t_grads[a].add(&ga);
                     t_grads[b] = t_grads[b].add(&gb);
                 },
+                Op::MatMulBt(a, b) =>
+                {
+                    // C = A·Bᵀ ⇒ dA = g·B, dB = gᵀ·A.
+                    let av = &values[a];
+                    let bv = &values[b];
+                    let ga = g.matmul(bv);
+                    let gb = g.transpose().matmul(av);
+                    t_grads[a] = t_grads[a].add(&ga);
+                    t_grads[b] = t_grads[b].add(&gb);
+                },
 
                 Op::Scale { input, scalar } =>
                 {
