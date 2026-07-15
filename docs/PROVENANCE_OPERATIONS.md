@@ -189,8 +189,15 @@ cargo run -q -p scirust-provenance --bin prov -- verify generated_module.rs
 
 ## Step 5 — Disclosure & reproducibility (see LICENSING.md)
 
-- Add the **provenance/watermarking/licensing disclosure** clause (in
-  `LICENSING.md`) to your EULA, reviewed by counsel.
+- Add the **EU provenance/watermarking/licensing disclosure** clause (in
+  `LICENSING.md`) to your EULA. It is drafted for EU/French law — anchoring the
+  provenance marks in electronic rights-management information (InfoSoc Dir.
+  2001/29/EC art. 7), **preserving the non-waivable software rights** (decompilation
+  for interoperability, study/observe/test — Software Dir. 2009/24/EC arts. 5(3),
+  6, 8), and adding GDPR, consumer-law and TDM/AI-training-reservation provisions.
+  Have it reviewed by qualified **EU/French IP-IT counsel and your DPO**, publish
+  the referenced privacy notice, and provide a French-language version for French
+  consumers (Loi « Toubon »).
 - Offer a **watermark-free build** for reproducibility-sensitive users: build
   the `canary`-bearing crates with the `canary` feature **off** (the default),
   and document the ordering/label caveats in your reproducibility note. The
