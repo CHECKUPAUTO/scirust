@@ -1,5 +1,8 @@
 # Licensing SciRust
 
+_Français : [LICENSING.fr.md](LICENSING.fr.md) — required for contracts with
+consumers resident in France (Loi « Toubon »)._
+
 SciRust is source-available under the complete **PolyForm Noncommercial
 License 1.0.0** in [LICENSE.md](LICENSE.md). Preserve that file and its
 `Required Notice:` line when distributing any copy or modified version.
@@ -82,8 +85,8 @@ identifiable natural person, the vendor processes it as controller on the lawful
 basis of **performance of the contract (Art. 6(1)(b))**, limited to what is
 necessary for authenticity, entitlement and leak attribution (**data
 minimisation, Art. 5(1)(c)**). Data-subject rights (Arts. 12–22) and the full
-controller and contact details are set out in the separate privacy notice at
-`<link — to be provided>`.
+controller and contact details are set out in the separate privacy notice
+([docs/PRIVACY_NOTICE.md](docs/PRIVACY_NOTICE.md); fill in and publish it).
 
 **6. Reservation for text-and-data mining / AI training.** The copyright holder
 **expressly reserves** the rights in SciRust's source code and generated
