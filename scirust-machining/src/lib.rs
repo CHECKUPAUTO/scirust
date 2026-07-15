@@ -346,6 +346,43 @@
 //!   raideur et nombre de rondelles.
 //! - [`rotating_ring_stress`] — jante mince en rotation : contrainte
 //!   circonférentielle et vitesse d'éclatement.
+//! - [`niosh_lifting`] — ergonomie : équation **NIOSH** — poids limite recommandé
+//!   et indice de levage.
+//! - [`eoq_inventory`] — gestion de stock : quantité économique (**Wilson**),
+//!   coût total, point de commande.
+//! - [`break_even`] — seuil de rentabilité : quantité/CA d'équilibre, marge sur
+//!   coût variable et marge de sécurité.
+//! - [`machine_hour_rate`] — coût horaire machine : amortissement, énergie et
+//!   taux horaire global.
+//! - [`learning_curve`] — courbe d'apprentissage (**Wright**) : temps unitaire,
+//!   cumulé et moyen.
+//! - [`forward_kinematics_2r`] — robotique : cinématique directe d'un bras
+//!   planaire **2R** (position TCP/coude).
+//! - [`jacobian_2r`] — robotique : jacobien d'un bras **2R**, vitesse TCP et
+//!   singularités.
+//! - [`workspace_2r`] — robotique : espace de travail d'un bras **2R** (portées,
+//!   atteignabilité, aire).
+//! - [`die_casting`] — fonderie sous pression : vitesse de porte, temps de
+//!   remplissage et effort de verrouillage.
+//! - [`sand_casting_shrinkage`] — fonderie sable : surdimensionnement du modèle
+//!   (retrait, usinage, dépouille).
+//! - [`plastic_shrinkage`] — injection : retrait au moulage (dimension de cavité).
+//! - [`mold_cooling_channel`] — canaux de refroidissement : Reynolds, débit et
+//!   extraction thermique du fluide.
+//! - [`gdt_position_tolerance`] — GD&T : tolérancement de position (zone
+//!   diamétrale, bonus MMC).
+//! - [`total_runout`] — métrologie : battement total/circulaire par relevé.
+//! - [`flatness_from_readings`] — métrologie : planéité/rectitude par l'étendue
+//!   min-max.
+//! - [`cosine_error`] — métrologie : erreur cosinus d'un instrument désaligné.
+//! - [`thread_milling`] — usinage : fraisage de filet (interpolation hélicoïdale,
+//!   correction d'avance).
+//! - [`drill_point_geometry`] — usinage : géométrie de pointe de foret (longueur
+//!   de pointe, course supplémentaire).
+//! - [`tap_drill_size`] — usinage : diamètre de foret d'avant-trou de taraudage
+//!   (filet ISO).
+//! - [`countersink_depth`] — usinage : profondeur d'un lamage conique
+//!   (fraisure).
 //!
 //! ## Positionnement
 //!
@@ -569,6 +606,29 @@ pub mod tapping_torque;
 pub mod toggle_mechanism;
 pub mod torsional_vibration;
 pub mod weld_heat_input;
+
+// Lot massif (vol. 26) — économie de production, robotique planaire,
+// fonderie/injection, GD&T/métrologie et usinage étendu.
+pub mod break_even;
+pub mod cosine_error;
+pub mod countersink_depth;
+pub mod die_casting;
+pub mod drill_point_geometry;
+pub mod eoq_inventory;
+pub mod flatness_from_readings;
+pub mod forward_kinematics_2r;
+pub mod gdt_position_tolerance;
+pub mod jacobian_2r;
+pub mod learning_curve;
+pub mod machine_hour_rate;
+pub mod mold_cooling_channel;
+pub mod niosh_lifting;
+pub mod plastic_shrinkage;
+pub mod sand_casting_shrinkage;
+pub mod tap_drill_size;
+pub mod thread_milling;
+pub mod total_runout;
+pub mod workspace_2r;
 
 pub use accelerated_life::{
     BOLTZMANN_EV_K, arrhenius_acceleration_factor, derated_value, ten_degree_rule_factor,
@@ -1026,3 +1086,61 @@ pub use torsional_vibration::{
     two_disc_natural_frequency_rad, two_disc_node_position,
 };
 pub use weld_heat_input::{weld_arc_power, weld_energy_per_length, weld_heat_input};
+
+// Lot massif (vol. 26) — ré-exports à plat.
+pub use break_even::{
+    break_even_quantity, break_even_revenue, margin_contribution, margin_of_safety,
+};
+pub use cosine_error::{
+    alignment_max_angle_for_error, cosine_error, cosine_true_value_from_reading,
+};
+pub use countersink_depth::{countersink_depth, countersink_diameter_from_depth};
+pub use die_casting::{diecast_fill_time, diecast_gate_velocity, diecast_locking_force};
+pub use drill_point_geometry::{
+    drill_point_extra_travel, drill_point_length, drill_point_lip_length,
+};
+pub use eoq_inventory::{
+    eoq_economic_order_quantity, eoq_number_of_orders, inventory_reorder_point,
+    inventory_total_cost,
+};
+pub use flatness_from_readings::{
+    flatness_error, flatness_is_within, straightness_error, straightness_is_within,
+};
+pub use forward_kinematics_2r::{fk2r_elbow_position, fk2r_reach_distance, fk2r_tcp_position};
+pub use gdt_position_tolerance::{
+    gdt_position_bonus_tolerance, gdt_position_diametral_deviation, gdt_position_is_within,
+    gdt_position_total_tolerance,
+};
+pub use jacobian_2r::{jac2r_determinant, jac2r_is_singular, jac2r_jacobian, jac2r_tip_velocity};
+pub use learning_curve::{
+    learning_curve_average_time, learning_curve_cumulative_time, learning_curve_exponent,
+    learning_curve_unit_time,
+};
+pub use machine_hour_rate::{
+    machine_depreciation_per_hour, machine_hour_rate, machine_power_cost_per_hour,
+};
+pub use mold_cooling_channel::{
+    COOLANT_TURBULENT_REYNOLDS, coolant_flow_rate, coolant_is_turbulent, coolant_reynolds,
+    coolant_velocity_from_flow_rate, mold_heat_removal_rate, mold_mass_flow_for_heat_removal,
+};
+pub use niosh_lifting::{
+    LOAD_CONSTANT, lifting_index, lifting_recommended_weight_limit, niosh_asymmetry_multiplier,
+    niosh_distance_multiplier, niosh_horizontal_multiplier, niosh_vertical_multiplier,
+};
+pub use plastic_shrinkage::{
+    cavity_dimension, cavity_shrinkage_compensation, plastic_actual_part_dimension,
+    plastic_shrinkage_rate,
+};
+pub use sand_casting_shrinkage::{
+    casting_shrinkage_ratio, pattern_dimension, pattern_draft_added_dimension,
+    pattern_full_dimension, pattern_machining_allowance_added,
+};
+pub use tap_drill_size::{
+    TAP_DRILL_HEIGHT_FACTOR_ISO60, tap_drill_diameter, thread_engagement_percent,
+};
+pub use thread_milling::{
+    thread_mill_helical_revolutions, thread_mill_pass_time,
+    thread_mill_peripheral_feed_compensation, thread_mill_time,
+};
+pub use total_runout::{runout_circular, runout_is_within, tir_total_indicated_runout};
+pub use workspace_2r::{ws2r_is_reachable, ws2r_max_reach, ws2r_min_reach, ws2r_workspace_area};
