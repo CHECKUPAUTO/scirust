@@ -3149,6 +3149,7 @@ dependencies = [
  "pollster",
  "scirust-core",
  "scirust-cuda",
+ "scirust-license",
  "wgpu",
 ]
 

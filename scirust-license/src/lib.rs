@@ -32,12 +32,14 @@
 //! assert!(!ent.allows(Module::Water));
 //! ```
 
+pub mod activation;
 pub mod cli;
 pub mod gate;
 pub mod hashsig;
 pub mod license;
 pub mod module;
 
+pub use activation::{Activation, DenyReason, NodePolicy};
 pub use hashsig::{Hash, MerkleSig, MerkleSigner, verify};
 pub use license::{License, node_fingerprint};
 pub use module::Module;

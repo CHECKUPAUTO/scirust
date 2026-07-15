@@ -44,6 +44,10 @@ pub enum Module {
     /// (`scirust-retrieval`). A premium add-on, sold in the Perception and
     /// Industrie 4.0 bundles.
     Retrieval,
+    /// GPU-accelerated compute backend and kernels (`scirust-gpu`): WGSL
+    /// dispatch, fused kernels and the wgpu execution path. A premium
+    /// acceleration add-on gated independently of the CPU core.
+    Gpu,
 
     // ---- Industrial verticals (codes 50..=99) ----
     /// State estimation & sensor fusion (`scirust-estimation`).
@@ -91,7 +95,7 @@ pub enum Module {
 
 impl Module {
     /// Every module in the catalogue, in ascending `code` order.
-    pub const ALL: [Module; 32] = [
+    pub const ALL: [Module; 33] = [
         Module::Core,
         Module::TensorNetwork,
         Module::Nlp,
@@ -105,6 +109,7 @@ impl Module {
         Module::Edge,
         Module::Events,
         Module::Retrieval,
+        Module::Gpu,
         Module::Estimation,
         Module::Navigation,
         Module::Water,
@@ -145,6 +150,7 @@ impl Module {
             Module::Edge => 11,
             Module::Events => 12,
             Module::Retrieval => 13,
+            Module::Gpu => 14,
             Module::Estimation => 50,
             Module::Navigation => 51,
             Module::Water => 52,
@@ -185,6 +191,7 @@ impl Module {
             Module::Edge => "edge",
             Module::Events => "events",
             Module::Retrieval => "retrieval",
+            Module::Gpu => "gpu",
             Module::Estimation => "estimation",
             Module::Navigation => "navigation",
             Module::Water => "water",
@@ -236,6 +243,7 @@ impl Module {
             Module::Edge => "Edge and embedded deployment",
             Module::Events => "Streaming event and anomaly detection",
             Module::Retrieval => "Pure semantic (dense) retrieval, an auditable alternative to RAG",
+            Module::Gpu => "GPU-accelerated compute backend and kernels",
             Module::Estimation => "State estimation and sensor fusion",
             Module::Navigation => "Inertial and GNSS navigation",
             Module::Water => "Water-network and quality monitoring",
@@ -330,6 +338,16 @@ mod tests {
         assert_eq!(Module::Retrieval.as_str(), "retrieval");
         assert_eq!(Module::from_id("retrieval"), Some(Module::Retrieval));
         assert!(Module::ALL.contains(&Module::Retrieval));
+    }
+
+    #[test]
+    fn gpu_is_a_first_class_module() {
+        // The GPU acceleration add-on: stable code 14 in the foundation range, a
+        // round-tripping id, and present in ALL so it is gated like any other.
+        assert_eq!(Module::Gpu.code(), 14);
+        assert_eq!(Module::Gpu.as_str(), "gpu");
+        assert_eq!(Module::from_id("gpu"), Some(Module::Gpu));
+        assert!(Module::ALL.contains(&Module::Gpu));
     }
 
     /// Helper: every catalogue module including the one outside `ALL`.

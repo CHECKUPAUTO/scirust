@@ -38,6 +38,10 @@ extern crate alloc;
 #[cfg(not(feature = "std"))]
 use alloc::{format, string::String, vec, vec::Vec};
 
+/// Optional product-licensing gate for the GPU module (feature `license-gate`).
+#[cfg(feature = "license-gate")]
+pub mod license;
+
 #[cfg(feature = "wgpu")]
 mod chain;
 #[cfg(feature = "wgpu")]
@@ -86,6 +90,10 @@ pub enum BackendError {
     ShapeMismatch(String),
     /// The selected backend failed while allocating, transferring, or running.
     Execution(String),
+    /// The GPU module is licensed (feature `license-gate`) and no valid
+    /// entitlement was presented. A graceful refusal — the dispatch is simply
+    /// never armed; no computation runs and nothing is corrupted.
+    Unlicensed(String),
 }
 
 impl core::fmt::Display for BackendError {
@@ -98,6 +106,7 @@ impl core::fmt::Display for BackendError {
             },
             BackendError::ShapeMismatch(msg) => write!(f, "shape mismatch: {msg}"),
             BackendError::Execution(msg) => write!(f, "backend execution failed: {msg}"),
+            BackendError::Unlicensed(msg) => write!(f, "GPU module not licensed: {msg}"),
         }
     }
 }
