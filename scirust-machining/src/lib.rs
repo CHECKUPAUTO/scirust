@@ -602,6 +602,26 @@
 //! - [`taper_turning`] — tournage conique : conicité, décalage de contre-poupée, angle de chariot.
 //! - [`gear_backlash`] — jeu de denture : jeu circonférentiel/angulaire, entraxe requis.
 //! - [`bucket_elevator`] — élévateur à godets : débit, puissance de levage et moteur.
+//! - [`pump_specific_speed`] — vitesse spécifique de pompe : adimensionnelle, aspiration, classement.
+//! - [`hydraulic_turbine`] — turbine hydraulique : puissance, vitesse spécifique, type Pelton/Francis.
+//! - [`plastic_bending`] — flexion plastique : module plastique, facteur de forme, moment plastique.
+//! - [`rankine_column`] — flambement Rankine-Gordon (poteaux courts à moyens).
+//! - [`set_screw`] — vis de pression : effort de maintien, couple transmissible, nombre de vis.
+//! - [`kanban_sizing`] — boucle Kanban : nombre de cartes, point de recommande, stock de sécurité.
+//! - [`helmholtz_resonator`] — résonateur de Helmholtz : fréquence propre, correction d'embouchure.
+//! - [`tuned_mass_damper`] — amortisseur à masse accordée (Den Hartog) : accord et amortissement optimaux.
+//! - [`film_condensation`] — condensation en film laminaire (Nusselt) : coefficient d'échange.
+//! - [`nucleate_boiling`] — ébullition nucléée : flux de Rohsenow, flux critique de Zuber.
+//! - [`cone_clutch`] — embrayage à cône : couple, effort axial, largeur de portée.
+//! - [`crane_stability`] — stabilité au basculement : moments, facteur, charge admissible.
+//! - [`parshall_flume`] — canal jaugeur Parshall : débit en écoulement libre, noyage.
+//! - [`isentropic_flow`] — écoulement isentropique : rapports d'arrêt, section A/A*.
+//! - [`gear_planetary_torque`] — répartition des couples d'un train épicycloïdal.
+//! - [`buoyancy_stability`] — stabilité d'un corps flottant : poussée, hauteur métacentrique.
+//! - [`siphon`] — siphon : vitesse de Torricelli, débit, hauteur maximale avant cavitation.
+//! - [`spiral_spring`] — ressort spiral plan : couple de rappel, contrainte, énergie.
+//! - [`labyrinth_seal`] — joint labyrinthe : fuite de gaz (Martin), report cinétique.
+//! - [`hydrostatic_force`] — poussée sur surface immergée : force résultante, centre de poussée.
 //!
 //! ## Positionnement
 //!
@@ -1035,6 +1055,30 @@ pub mod rotating_unbalance;
 pub mod taper_turning;
 pub mod vacuum_lifting;
 pub mod weld_group;
+
+// Lot massif (vol. 35) — turbomachines & écoulement compressible, plasticité &
+// flambement, maintien/fixation, production tirée, acoustique/vibration,
+// transfert thermique diphasique, transmissions, hydrostatique.
+pub mod buoyancy_stability;
+pub mod cone_clutch;
+pub mod crane_stability;
+pub mod film_condensation;
+pub mod gear_planetary_torque;
+pub mod helmholtz_resonator;
+pub mod hydraulic_turbine;
+pub mod hydrostatic_force;
+pub mod isentropic_flow;
+pub mod kanban_sizing;
+pub mod labyrinth_seal;
+pub mod nucleate_boiling;
+pub mod parshall_flume;
+pub mod plastic_bending;
+pub mod pump_specific_speed;
+pub mod rankine_column;
+pub mod set_screw;
+pub mod siphon;
+pub mod spiral_spring;
+pub mod tuned_mass_damper;
 
 pub use accelerated_life::{
     BOLTZMANN_EV_K, arrhenius_acceleration_factor, derated_value, ten_degree_rule_factor,
@@ -2049,4 +2093,77 @@ pub use vacuum_lifting::{
 pub use weld_group::{
     weldgroup_direct_shear_stress, weldgroup_polar_modulus, weldgroup_resultant_stress,
     weldgroup_torsional_shear_stress,
+};
+
+// Lot massif (vol. 35) — ré-exports à plat.
+pub use buoyancy_stability::{
+    buoyancy_force, buoyancy_is_stable, buoyancy_metacentric_height, buoyancy_righting_moment,
+};
+pub use cone_clutch::{
+    cone_clutch_engagement_force, cone_clutch_face_width, cone_clutch_torque_uniform_pressure,
+    cone_clutch_torque_uniform_wear,
+};
+pub use crane_stability::{
+    crane_max_load_at_radius, crane_stability_factor, crane_stabilizing_moment,
+    crane_tipping_moment,
+};
+pub use film_condensation::{
+    condensation_film_reynolds, condensation_horizontal_tube_coefficient,
+    condensation_vertical_plate_coefficient,
+};
+pub use gear_planetary_torque::{
+    planetary_torque_carrier_reaction, planetary_torque_ratio_carrier_output,
+    planetary_torque_ring_from_sun, planetary_torque_tangential_force,
+};
+pub use helmholtz_resonator::{
+    helmholtz_cavity_volume_for_frequency, helmholtz_effective_length, helmholtz_resonant_frequency,
+};
+pub use hydraulic_turbine::{
+    TurbineType, turbine_available_power, turbine_hydraulic_power, turbine_specific_speed,
+    turbine_type_from_specific_speed, turbine_unit_speed,
+};
+pub use hydrostatic_force::{
+    submerged_center_of_pressure, submerged_force_on_vertical_rectangle,
+    submerged_pressure_at_depth, submerged_resultant_force,
+};
+pub use isentropic_flow::{
+    isentropic_area_ratio, isentropic_density_ratio, isentropic_pressure_ratio,
+    isentropic_temperature_ratio,
+};
+pub use kanban_sizing::{
+    kanban_card_count, kanban_max_inventory, kanban_reorder_point, kanban_safety_stock,
+};
+pub use labyrinth_seal::{
+    labyrinth_carry_over_factor, labyrinth_leakage_flow, labyrinth_pressure_drop_per_tooth,
+};
+pub use nucleate_boiling::{
+    boiling_critical_heat_flux_zuber, boiling_excess_temperature, boiling_rohsenow_heat_flux,
+};
+pub use parshall_flume::{
+    flume_head_from_free_flow, flume_parshall_free_flow, flume_submergence_ratio,
+};
+pub use plastic_bending::{
+    plastic_moment, plastic_section_modulus_rectangle, plastic_shape_factor, plastic_yield_moment,
+};
+pub use pump_specific_speed::{
+    PumpSpecificImpellerType, pump_specific_dimensional_ns_rpm, pump_specific_impeller_class,
+    pump_specific_speed, pump_specific_suction_speed,
+};
+pub use rankine_column::{
+    rankine_constant_from_euler, rankine_crippling_load, rankine_crippling_stress,
+};
+pub use set_screw::{
+    setscrew_axial_holding_force, setscrew_holding_torque_on_shaft, setscrew_required_count,
+    setscrew_seating_torque,
+};
+pub use siphon::{
+    siphon_crest_pressure, siphon_flow_rate, siphon_max_crest_height, siphon_outlet_velocity,
+};
+pub use spiral_spring::{
+    spiral_spring_active_length, spiral_spring_bending_stress, spiral_spring_stored_energy,
+    spiral_spring_torque,
+};
+pub use tuned_mass_damper::{
+    tmd_absorber_mass, tmd_absorber_stiffness, tmd_optimal_damping_ratio,
+    tmd_optimal_frequency_ratio,
 };
