@@ -483,6 +483,37 @@
 //! - [`powder_compaction`] — métallurgie des poudres : densité crue, retrait de
 //!   frittage.
 //! - [`additive_manufacturing`] — impression 3D : couches, débit de dépôt, temps.
+//! - [`ultrasonic_testing`] — CND ultrasons : longueur d'onde, profondeur de
+//!   défaut, champ proche, atténuation.
+//! - [`eddy_current`] — CND courants de Foucault : profondeur standard, déphasage.
+//! - [`radiographic_testing`] — CND radiographie : atténuation (**Beer-Lambert**),
+//!   couche de demi-atténuation, flou géométrique.
+//! - [`carbon_equivalent`] — soudabilité : équivalent carbone **IIW** et classe de
+//!   risque.
+//! - [`weld_preheat`] — préchauffage (**Séférian**) : température et nécessité.
+//! - [`weld_cooling_rate`] — refroidissement soudure (**Rosenthal**) : `t8/5`.
+//! - [`weld_dilution`] — taux de dilution et composition du dépôt.
+//! - [`vibration_isolation`] — isolation par plots : fréquence propre (flèche
+//!   statique), transmissibilité, efficacité.
+//! - [`sound_pressure_level`] — acoustique : niveaux de pression (dB), somme,
+//!   atténuation en distance.
+//! - [`sound_power_level`] — acoustique : niveau de puissance `Lw` et conversion
+//!   puissance ↔ pression.
+//! - [`noise_exposure`] — exposition au bruit (**ISO 1999**) : dose, durée admise,
+//!   `L_eq`.
+//! - [`refrigeration_cycle`] — cycle frigorifique : effet frigorifique, travail,
+//!   COP, débit réfrigérant.
+//! - [`psychrometrics`] — air humide : teneur en eau, humidité relative, enthalpie.
+//! - [`ventilation_rate`] — ventilation : renouvellement d'air (ACH), débit de
+//!   dilution.
+//! - [`gear_hobbing`] — taillage à la fraise-mère : rapport de génération, avance,
+//!   temps.
+//! - [`dividing_head`] — appareil diviseur : division simple, angulaire.
+//! - [`air_spring`] — ressort pneumatique : raideur polytropique, effort, fréquence.
+//! - [`thread_engagement`] — longueur d'engagement anti-arrachement de filet.
+//! - [`plate_buckling`] — voilement de plaque comprimée : contrainte/charge
+//!   critiques.
+//! - [`shell_buckling`] — flambage de coque cylindrique : axial et pression externe.
 //!
 //! ## Positionnement
 //!
@@ -798,6 +829,29 @@ pub mod surface_tension_laplace;
 pub mod taper_pin;
 pub mod thermal_shock_resistance;
 pub mod woodruff_key;
+
+// Lot massif (vol. 30) — CND, métallurgie du soudage, isolation/acoustique,
+// réfrigération/HVAC, fabrication d'engrenages, éléments/structure.
+pub mod air_spring;
+pub mod carbon_equivalent;
+pub mod dividing_head;
+pub mod eddy_current;
+pub mod gear_hobbing;
+pub mod noise_exposure;
+pub mod plate_buckling;
+pub mod psychrometrics;
+pub mod radiographic_testing;
+pub mod refrigeration_cycle;
+pub mod shell_buckling;
+pub mod sound_power_level;
+pub mod sound_pressure_level;
+pub mod thread_engagement;
+pub mod ultrasonic_testing;
+pub mod ventilation_rate;
+pub mod vibration_isolation;
+pub mod weld_cooling_rate;
+pub mod weld_dilution;
+pub mod weld_preheat;
 
 pub use accelerated_life::{
     BOLTZMANN_EV_K, arrhenius_acceleration_factor, derated_value, ten_degree_rule_factor,
@@ -1488,3 +1542,60 @@ pub use thermal_shock_resistance::{
     tsr_max_temperature_difference, tsr_parameter_r, tsr_parameter_r_prime,
 };
 pub use woodruff_key::{woodruff_bearing_stress, woodruff_shear_stress, woodruff_tangential_force};
+
+// Lot massif (vol. 30) — ré-exports à plat.
+pub use air_spring::{airspring_force, airspring_natural_frequency, airspring_rate};
+pub use carbon_equivalent::{
+    CE_THRESHOLD_DIFFICULT, CE_THRESHOLD_GOOD, WeldabilityClass, carbon_equivalent_iiw,
+    ce_weldability_class,
+};
+pub use dividing_head::{dividing_angular_turns, dividing_hole_count, dividing_simple_turns};
+pub use eddy_current::{
+    eddy_frequency_for_depth, eddy_phase_lag, eddy_standard_depth_of_penetration,
+};
+pub use gear_hobbing::{
+    hobbing_cutting_time, hobbing_generating_time, hobbing_table_feed, hobbing_work_rpm_from_hob,
+};
+pub use noise_exposure::{
+    noise_dose_percent, noise_equivalent_continuous_level, noise_permitted_time,
+};
+pub use plate_buckling::{
+    plate_buckling_coefficient_simply_supported, plate_buckling_slenderness, plate_critical_load,
+    plate_critical_stress,
+};
+pub use psychrometrics::{
+    psychro_humidity_ratio, psychro_partial_pressure_from_humidity,
+    psychro_partial_pressure_from_ratio, psychro_relative_humidity,
+    psychro_specific_enthalpy_moist_air,
+};
+pub use radiographic_testing::{
+    rt_geometric_unsharpness, rt_half_value_layer, rt_transmitted_intensity,
+};
+pub use refrigeration_cycle::{
+    refrig_compressor_work, refrig_cop_refrigeration, refrig_refrigerant_mass_flow,
+    refrig_refrigerating_effect,
+};
+pub use shell_buckling::{
+    shell_axial_critical_stress, shell_critical_axial_load, shell_external_pressure_critical,
+};
+pub use sound_power_level::{spl_to_swl, swl_from_power, swl_to_power, swl_to_spl};
+pub use sound_pressure_level::{
+    spl_distance_attenuation, spl_from_pressure, spl_sum_two_sources, spl_to_pressure,
+};
+pub use thread_engagement::{
+    thread_eng_length_for_full_strength, thread_eng_required_length, thread_eng_stripping_area,
+};
+pub use ultrasonic_testing::{
+    ut_attenuation_db, ut_defect_depth, ut_near_field_length, ut_wavelength,
+};
+pub use ventilation_rate::{
+    ach_air_changes_per_hour, ach_required_flow, vent_dilution_flow_for_contaminant,
+};
+pub use vibration_isolation::{
+    iso_efficiency, iso_natural_frequency_from_deflection, iso_transmissibility,
+};
+pub use weld_cooling_rate::{weldcool_cooling_rate, weldcool_cooling_time_thick_plate};
+pub use weld_dilution::{dilution_filler_fraction, dilution_ratio, weld_diluted_composition};
+pub use weld_preheat::{
+    preheat_combined_thickness, preheat_from_carbon_equivalent, preheat_is_required,
+};
