@@ -693,6 +693,18 @@
 //! - [`shear_pin`] — goupille de cisaillement / limiteur de couple : couple de rupture.
 //! - [`solenoid_actuator`] — actionneur à réluctance : force μ₀(NI)²A/(2g²), inductance.
 //! - [`voice_coil`] — actionneur à bobine mobile (Lorentz) : force BL·I, constante moteur.
+//! - [`torque_converter`] — convertisseur hydrodynamique : rapport de couple, rendement, facteur K.
+//! - [`eddy_current_brake`] — frein à courants de Foucault : couple ∝ vitesse, décélération.
+//! - [`wind_turbine`] — éolienne : puissance en v³, coefficient Cp, limite de Betz 16/27.
+//! - [`reciprocating_compressor`] — compresseur à piston : rendement volumétrique, FAD, puissance.
+//! - [`vane_pump`] — pompe à palettes : cylindrée, débit, rendement volumétrique.
+//! - [`centrifugal_fan`] — ventilateur : puissance de l'air, pressions, rendements.
+//! - [`roots_blower`] — surpresseur à lobes : débit balayé, fuites, puissance ΔP·Q.
+//! - [`peristaltic_pump`] — pompe péristaltique : volume de bolus, débit volumétrique.
+//! - [`cvt`] — transmission à variation continue : rapport, couple de sortie, plage.
+//! - [`peltier`] — réfrigération thermoélectrique : puissance froide, COP, ΔT_max.
+//! - [`thermoelectric_generator`] — générateur Seebeck : ZT, puissance max, rendement.
+//! - [`piezoelectric`] — élément piézoélectrique : charge, tension, allongement, effort bloqué.
 //!
 //! ## Positionnement
 //!
@@ -1238,6 +1250,22 @@ pub mod solenoid_actuator;
 pub mod thread_rolling;
 pub mod two_dof_vibration;
 pub mod voice_coil;
+
+// Lot massif (vol. 40) — transmissions hydrodynamiques & freinage sans contact,
+// énergie éolienne, machines à fluide (compresseur, pompes, ventilateur,
+// surpresseur), transmission continue et thermo/piézo-électricité.
+pub mod centrifugal_fan;
+pub mod cvt;
+pub mod eddy_current_brake;
+pub mod peltier;
+pub mod peristaltic_pump;
+pub mod piezoelectric;
+pub mod reciprocating_compressor;
+pub mod roots_blower;
+pub mod thermoelectric_generator;
+pub mod torque_converter;
+pub mod vane_pump;
+pub mod wind_turbine;
 
 pub use accelerated_life::{
     BOLTZMANN_EV_K, arrhenius_acceleration_factor, derated_value, ten_degree_rule_factor,
@@ -2586,4 +2614,46 @@ pub use two_dof_vibration::{
 pub use voice_coil::{
     voicecoil_back_emf, voicecoil_force, voicecoil_force_constant, voicecoil_motor_constant,
     voicecoil_power_dissipation,
+};
+
+// Lot massif (vol. 40) — ré-exports à plat.
+pub use centrifugal_fan::{
+    fan_air_power, fan_static_efficiency, fan_static_pressure, fan_total_efficiency,
+    fan_velocity_pressure,
+};
+pub use cvt::{cvt_output_speed, cvt_output_torque, cvt_ratio_spread, cvt_speed_ratio};
+pub use eddy_current_brake::{
+    eddybrake_power_dissipated, eddybrake_speed_after_time, eddybrake_time_constant,
+    eddybrake_torque,
+};
+pub use peltier::{
+    peltier_cooling_power, peltier_cop, peltier_electrical_power,
+    peltier_max_temperature_difference,
+};
+pub use peristaltic_pump::{
+    peri_displacement_per_revolution, peri_flow_from_geometry, peri_flow_rate,
+    peri_occlusion_volume,
+};
+pub use piezoelectric::{
+    piezo_actuator_displacement, piezo_blocking_force, piezo_generated_charge,
+    piezo_generated_energy, piezo_output_voltage,
+};
+pub use reciprocating_compressor::{
+    recipcomp_free_air_delivery, recipcomp_indicated_power, recipcomp_swept_volume,
+    recipcomp_volumetric_efficiency,
+};
+pub use roots_blower::{
+    roots_actual_flow, roots_power, roots_theoretical_flow, roots_volumetric_efficiency,
+};
+pub use thermoelectric_generator::{
+    teg_efficiency, teg_figure_of_merit_zt, teg_max_power, teg_open_circuit_voltage,
+};
+pub use torque_converter::{tc_capacity_factor, tc_efficiency, tc_speed_ratio, tc_torque_ratio};
+pub use vane_pump::{
+    vanepump_actual_flow, vanepump_displacement, vanepump_theoretical_flow,
+    vanepump_volumetric_efficiency,
+};
+pub use wind_turbine::{
+    windturb_available_power, windturb_betz_limit, windturb_extracted_power, windturb_swept_area,
+    windturb_tip_speed_ratio,
 };
