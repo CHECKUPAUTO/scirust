@@ -642,6 +642,26 @@
 //! - [`arch_thrust`] — arc à trois articulations : poussée horizontale, réactions.
 //! - [`cooling_tower`] — tour de refroidissement : plage, approche, efficacité, évaporation.
 //! - [`venturi_ejector`] — éjecteur à Venturi : rapport d'entraînement, vide généré.
+//! - [`gear_scuffing`] — grippage d'engrenage : température éclair de Blok, sécurité.
+//! - [`gear_wear_load`] — charge limite d'usure d'engrenage (Buckingham).
+//! - [`gear_dynamic_load`] — charge dynamique de denture (Buckingham, Barth).
+//! - [`bearing_friction`] — couple de frottement de roulement (Palmgren), puissance dissipée.
+//! - [`pv_limit`] — facteur PV des paliers lisses : pression, vitesse, PV admissible.
+//! - [`torque_angle`] — serrage à l'angle (tour-d'écrou) : précharge depuis l'angle.
+//! - [`gas_pipeline`] — écoulement de gaz : équation de Weymouth.
+//! - [`critical_insulation_radius`] — rayon critique d'isolation (cylindre/sphère).
+//! - [`degree_days`] — degrés-jours : chauffage/refroidissement, énergie déperdie.
+//! - [`reverberation_time`] — RT60 : Sabine, Eyring, aire d'absorption.
+//! - [`sound_transmission_loss`] — affaiblissement d'une paroi : loi de masse, composite.
+//! - [`optical_flat`] — verre étalon plan : franges d'interférence, écart de planéité.
+//! - [`heat_pump_cop`] — COP de pompe à chaleur : chauffage/froid, borne de Carnot.
+//! - [`boiler_efficiency`] — rendement de chaudière : méthodes directe/indirecte, purge.
+//! - [`flange_bolt`] — boulonnage de bride (ASME) : efforts, aire de boulons requise.
+//! - [`surge_tank`] — cheminée d'équilibre : oscillation en masse, aire de Thoma.
+//! - [`steam_quality`] — titre de vapeur : propriétés du mélange saturé.
+//! - [`forecasting`] — prévision : lissage exponentiel, moyenne mobile, MAD.
+//! - [`ecm_machining`] — usinage électrochimique (Faraday) : débit enlevé, jeu d'équilibre.
+//! - [`thermocouple`] — thermocouple (Seebeck) : f.é.m., compensation soudure froide.
 //!
 //! ## Positionnement
 //!
@@ -1123,6 +1143,31 @@ pub mod taguchi_loss;
 pub mod venturi_ejector;
 pub mod wbgt_index;
 pub mod wien_law;
+
+// Lot massif (vol. 37) — transmissions (grippage/usure/dynamique), tribologie,
+// fixation, réseaux de fluides, thermique du bâtiment, acoustique du bâtiment,
+// métrologie optique, énergétique, appareils à pression, production, procédés
+// spéciaux et instrumentation.
+pub mod bearing_friction;
+pub mod boiler_efficiency;
+pub mod critical_insulation_radius;
+pub mod degree_days;
+pub mod ecm_machining;
+pub mod flange_bolt;
+pub mod forecasting;
+pub mod gas_pipeline;
+pub mod gear_dynamic_load;
+pub mod gear_scuffing;
+pub mod gear_wear_load;
+pub mod heat_pump_cop;
+pub mod optical_flat;
+pub mod pv_limit;
+pub mod reverberation_time;
+pub mod sound_transmission_loss;
+pub mod steam_quality;
+pub mod surge_tank;
+pub mod thermocouple;
+pub mod torque_angle;
 
 pub use accelerated_life::{
     BOLTZMANN_EV_K, arrhenius_acceleration_factor, derated_value, ten_degree_rule_factor,
@@ -2281,4 +2326,76 @@ pub use wbgt_index::{wbgt_indoor, wbgt_outdoor, wbgt_with_clothing_adjustment};
 pub use wien_law::{
     WIEN_DISPLACEMENT_CONSTANT, WIEN_FREQUENCY_CONSTANT, wien_peak_frequency, wien_peak_wavelength,
     wien_temperature_from_peak,
+};
+
+// Lot massif (vol. 37) — ré-exports à plat.
+pub use bearing_friction::{
+    bearingfric_load_torque, bearingfric_power_loss, bearingfric_total_torque,
+    bearingfric_viscous_torque,
+};
+pub use boiler_efficiency::{
+    boiler_blowdown_rate, boiler_dry_flue_gas_loss, boiler_efficiency_direct,
+    boiler_efficiency_indirect,
+};
+pub use critical_insulation_radius::{
+    insulation_critical_radius_cylinder, insulation_critical_radius_sphere,
+    insulation_cylinder_resistance, insulation_is_below_critical,
+};
+pub use degree_days::{
+    degreeday_annual_from_daily, degreeday_cooling, degreeday_energy_demand, degreeday_heating,
+};
+pub use ecm_machining::{
+    ECM_FARADAY_CONSTANT, ecm_current_from_gap, ecm_equilibrium_gap, ecm_material_removal_rate,
+    ecm_penetration_rate,
+};
+pub use flange_bolt::{
+    flangebolt_gasket_load_operating, flangebolt_hydrostatic_end_force,
+    flangebolt_operating_bolt_load, flangebolt_required_bolt_area, flangebolt_seating_bolt_load,
+};
+pub use forecasting::{
+    forecast_exponential_smoothing, forecast_mean_absolute_deviation, forecast_moving_average,
+    forecast_tracking_signal,
+};
+pub use gas_pipeline::{
+    gaspipe_pressure_drop_squared, gaspipe_weymouth_flow, gaspipe_weymouth_transmission_factor,
+};
+pub use gear_dynamic_load::{
+    geardyn_buckingham_increment, geardyn_dynamic_load, geardyn_service_factor_load,
+    geardyn_velocity_factor_barth,
+};
+pub use gear_scuffing::{
+    gearscuff_contact_temperature, gearscuff_flash_temperature, gearscuff_safety_factor,
+};
+pub use gear_wear_load::{
+    gearwear_limiting_load, gearwear_load_stress_factor, gearwear_ratio_factor,
+};
+pub use heat_pump_cop::{
+    heatpump_carnot_cop_heating, heatpump_cop_cooling, heatpump_cop_heating, heatpump_cop_relation,
+    heatpump_second_law_efficiency,
+};
+pub use optical_flat::{
+    opticalflat_flatness_error_from_curvature, opticalflat_fringes_from_deviation,
+    opticalflat_gap_at_fringe, opticalflat_surface_deviation,
+};
+pub use pv_limit::{pv_bearing_pressure, pv_factor, pv_max_speed_for_load, pv_sliding_velocity};
+pub use reverberation_time::{
+    reverb_eyring_time, reverb_mean_absorption, reverb_sabine_time, reverb_total_absorption,
+};
+pub use sound_transmission_loss::{
+    stl_composite_transmission, stl_mass_law, stl_mass_law_field,
+    stl_transmission_coefficient_from_loss,
+};
+pub use steam_quality::{
+    steam_mixture_enthalpy, steam_property_from_quality, steam_quality_from_enthalpy,
+    steam_wetness_fraction,
+};
+pub use surge_tank::{
+    surgetank_max_surge_amplitude, surgetank_oscillation_period, surgetank_thoma_area,
+};
+pub use thermocouple::{
+    thermocouple_cold_junction_correction, thermocouple_emf_linear, thermocouple_sensitivity,
+    thermocouple_temperature_from_emf,
+};
+pub use torque_angle::{
+    torqueangle_axial_advance, torqueangle_combined_stiffness, torqueangle_preload_from_angle,
 };
