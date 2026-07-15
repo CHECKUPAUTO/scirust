@@ -23,10 +23,14 @@ use serde::{Deserialize, Serialize};
 
 pub mod atmosphere;
 pub mod beams;
+pub mod centroid;
 pub mod detect;
+pub mod lidar;
+pub mod nuc;
 pub mod optics;
 pub mod radiometry;
 pub mod turbulence;
+pub mod zernike;
 pub use atmosphere::{
     apparent_contrast, extinction, extinction_from_transmittance, extinction_from_visibility,
     optical_depth, required_delta_t, transmittance,
@@ -35,7 +39,13 @@ pub use beams::{
     RayMatrix, beam_radius, beam_radius_from_q, divergence, gouy_phase, propagate_q, q_at_waist,
     radius_from_q, radius_of_curvature, rayleigh_range,
 };
+pub use centroid::{center_of_gravity, thresholded_centroid, windowed_centroid};
 pub use detect::{TargetDetection, cfar_mask, detect_targets};
+pub use lidar::{
+    max_unambiguous_range_cw, max_unambiguous_range_pulsed, range_from_phase,
+    range_from_time_of_flight, range_resolution, time_of_flight,
+};
+pub use nuc::{apply_nuc, fixed_pattern_noise, two_point_coeffs};
 pub use optics::{
     Axis, airy_first_null, airy_psf, apply_psf, gaussian_psf, line_spread, mtf, mtf50,
     rayleigh_resolution, richardson_lucy, wiener_deconvolution,
@@ -48,6 +58,7 @@ pub use turbulence::{
     degrees_of_freedom, fried_parameter, greenwood_frequency, rytov_variance, seeing_angle,
     strehl_ratio,
 };
+pub use zernike::{astigmatism, coma, defocus, rms_wavefront_error, spherical, strehl_marechal};
 
 // ─── Image Representation ───────────────────────────────────────────────────
 

@@ -5,6 +5,37 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — radar & optronique : lot massif de 10 modules autonomes (blocs 40-49)
+Dix capacités radar et EO/IR indépendantes, chacune testée par oracles, produites en
+parallèle (agents isolés en worktree) puis intégrées et vérifiées centralement.
+**`scirust-signal` (radar) :**
+- **`cfar_variants`** — CFAR greatest-of / smallest-of / trimmed-mean (`go_cfar`,
+  `so_cfar`, `tm_cfar`) : GO supprime les fausses alarmes sur un bord de fouillis, SO
+  résout deux cibles proches, la moyenne tronquée censure un interféreur.
+- **`binary_integration`** — intégration binaire M-parmi-N (`binomial_pmf`,
+  `binomial_sf_ge`, `integrated_pfa`, `integrated_pd`, `optimal_m`) : forte réduction
+  de la probabilité de fausse alarme via la loi binomiale.
+- **`crt_prf`** — levée d'ambiguïté distance multi-PRF par le théorème des restes
+  chinois (`egcd`, `mod_inverse`, `crt_pair`, `resolve_range`, `combined_ambiguity`).
+- **`costas`** — réseaux de saut de fréquence de Costas (`welch_costas`, `is_costas`,
+  `max_coincidence`, `primitive_root`) : ambiguïté « punaise » idéale.
+- **`propagation`** — facteur de propagation à deux rayons (multitrajet sol)
+  `F = 2|sin(2π·h_a·h_c/(λR))|`, lobes d'interférence, puissance en `F⁴`, premier nul.
+- **`dbs`** — Doppler beam sharpening (`azimuth_doppler`, `doppler_gradient`,
+  `dbs_azimuth_resolution`, `sharpening_ratio`) : résolution transverse par gradient
+  Doppler dans le faisceau réel.
+**`scirust-vision` (optronique) :**
+- **`nuc`** — correction de non-uniformité deux points d'un plan focal IR
+  (`two_point_coeffs`, `apply_nuc`, `fixed_pattern_noise`).
+- **`lidar`** — télémétrie laser temps-de-vol et phase CW (`range_from_time_of_flight`,
+  `time_of_flight`, `range_resolution`, `range_from_phase`, portées non ambiguës).
+- **`centroid`** — centroïdage sous-pixel (centre de gravité pondéré, seuillé, fenêtré)
+  pour le pointage EO/IR.
+- **`zernike`** — aberrations de front d'onde de Zernike (défocalisation, astigmatisme,
+  coma, sphérique), erreur RMS, et Strehl de Maréchal `exp(−(2π·σ)²)`.
+Vérif : `scirust-signal` **317 tests**, `scirust-vision` **95 tests** (+72 oracles) ;
+`fmt` / `clippy -D warnings` propres sur les deux crates.
+
 ### Ajouté — `scirust-signal` : radar — précision de mesure, bornes de Cramér–Rao (`radar::accuracy`) — bloc 39
 Le plancher théorique de précision des estimateurs radar (retard/télémétrie,
 Doppler/vitesse, angle monopulse) : les **bornes de Cramér–Rao**, toutes en

@@ -63,8 +63,13 @@
 pub mod accuracy;
 pub mod ambiguity;
 pub mod beamform;
+pub mod binary_integration;
 pub mod cfar;
+pub mod cfar_variants;
 pub mod clutter;
+pub mod costas;
+pub mod crt_prf;
+pub mod dbs;
 pub mod detect;
 pub mod doa;
 pub mod doppler;
@@ -83,6 +88,7 @@ pub mod music;
 pub mod pda;
 pub mod polyphase;
 pub mod prf;
+pub mod propagation;
 pub mod range_equation;
 pub mod sar;
 pub mod stap;
@@ -97,11 +103,18 @@ pub use accuracy::{
 };
 pub use ambiguity::ambiguity;
 pub use beamform::{beamform_spectrum, estimate_doa, steering_vector};
+pub use binary_integration::{
+    binomial_pmf, binomial_sf_ge, integrated_pd, integrated_pfa, optimal_m,
+};
 pub use cfar::{ca_cfar, ca_cfar_alpha, os_cfar, os_cfar_alpha};
+pub use cfar_variants::{go_cfar, so_cfar, tm_cfar};
 pub use clutter::{
     erf, lognormal_cdf, lognormal_pdf, rayleigh_cdf, rayleigh_pdf, rayleigh_quantile, weibull_cdf,
     weibull_pdf, weibull_quantile,
 };
+pub use costas::{is_costas, max_coincidence, primitive_root, welch_costas};
+pub use crt_prf::{combined_ambiguity, crt_pair, egcd, mod_inverse, resolve_range};
+pub use dbs::{azimuth_doppler, dbs_azimuth_resolution, doppler_gradient, sharpening_ratio};
 pub use detect::{Detection, ca_cfar_2d, cluster_detections};
 pub use doa::{covariance, mvdr_spectrum};
 pub use doppler::{doppler_spectrum, range_doppler_map};
@@ -128,6 +141,10 @@ pub use polyphase::{frank_code, p3_code, p4_code, periodic_autocorrelation, zado
 pub use prf::{
     blind_speed, fold_range, fold_velocity, max_doppler, unambiguous_range, unambiguous_velocity,
     velocity_from_doppler,
+};
+pub use propagation::{
+    first_null_range, path_length_difference, phase_difference as multipath_phase_difference,
+    power_factor, propagation_factor,
 };
 pub use range_equation::RadarLink;
 pub use sar::{
