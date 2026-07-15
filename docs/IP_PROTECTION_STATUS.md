@@ -77,6 +77,36 @@ Full detail in **`docs/PROVENANCE_OPERATIONS.md`**.
 - Machine-readable TDM reservation file (`robots.txt` / TDM metadata) alongside
   published distributions (see `LICENSING.md` § 6).
 
+## Future idea: per-download serialization (distribution website)
+
+Vendor preference recorded for later: licensing must stay **self-hosted with no
+client-side server calls** (already true — verification is 100% offline). A future
+distribution **website** should mark **each download** with a unique serial so a
+leaked copy is traceable to the exact download/customer, while the client stays
+fully offline.
+
+This is mostly **already built** on `scirust-provenance`:
+- The provenance signature already embeds a per-artifact one-time-signature `leaf`
+  = a unique serial. Marking happens **server-side at download time**; the client
+  never contacts a server.
+- Flow per download: allocate the next `leaf` from the ledger →
+  `prov sign --seed <server seed> --leaf N` the served copy → log
+  `leaf N → (customer, timestamp, …)` → serve the marked copy. A later leak →
+  recover the `leaf` → identify the download; verifiable by anyone holding only
+  the public root, offline.
+- **Trust model preserved:** server-side marking at *distribution* and fully
+  offline *client* verification are complementary, not contradictory.
+
+To get right when building it:
+- **Leaf ledger** — each leaf signs at most one copy (reuse leaks secrets): a
+  persistent, monotonic counter. (See `docs/PROVENANCE_OPERATIONS.md` § 4.)
+- **Capacity** — `2^height` copies per seed (~1M at height 20): rotate seeds at
+  scale.
+- **Seed custody** — server-side in an HSM/KMS, never in a shipped binary; ideally
+  the `prov sign` step runs in an isolated signing service.
+
+Status: **idea only, not started** — no code, no timeline.
+
 ## How to resume
 
 The working branch `claude/scirust-plagiarism-protection-au8bhe` has been merged.
