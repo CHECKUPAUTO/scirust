@@ -542,6 +542,26 @@
 //!   puissance spécifique, coût/énergie annuels.
 //! - [`shear_center`] — centre de cisaillement des sections minces ouvertes (profilé en U).
 //! - [`beam_column`] — poteau-poutre : amplification P-delta, moment et flèche amplifiés.
+//! - [`venturi_meter`] — débitmètre à Venturi : rapport β, débit, perte de pression.
+//! - [`orifice_plate`] — débitmètre à diaphragme (ISO 5167) : β, facteur d'approche, débit.
+//! - [`pitot_tube`] — tube de Pitot : vitesse, pression dynamique/d'arrêt, débit.
+//! - [`stokes_settling`] — sédimentation d'une sphère (Stokes) : vitesse limite, Re, traînée.
+//! - [`weir_flow`] — déversoir mince : rectangulaire (Poleni), en V (Thomson), charge amont.
+//! - [`hydraulic_jump`] — ressaut hydraulique : Froude, profondeur conjuguée, perte d'énergie.
+//! - [`cavitation_number`] — cavitation et NPSH : indice σ, NPSHa, marge.
+//! - [`pump_affinity`] — lois d'affinité des pompes : débit, hauteur, puissance, roue.
+//! - [`lmtd`] — écart de température logarithmique moyen : contre/co-courant, flux U·A·F·ΔT.
+//! - [`fin_efficiency`] — ailette droite : paramètre m, rendement, efficience, flux évacué.
+//! - [`thermal_expansion`] — dilatation thermique : allongement, volume, contrainte de bridage.
+//! - [`torsion_bar`] — barre de torsion : inertie polaire, raideur, contrainte, rotation.
+//! - [`keyway_stress`] — clavette parallèle : effort tangentiel, cisaillement, matage, longueur.
+//! - [`gyroscopic_couple`] — couple gyroscopique et précession d'un rotor rapide.
+//! - [`hall_petch`] — renforcement par taille de grain (Hall-Petch) : limite d'élasticité.
+//! - [`larson_miller`] — paramètre de Larson-Miller : fluage/rupture temps-température.
+//! - [`calorific_value`] — pouvoir calorifique : PCS de Dulong, PCI, énergie dégagée.
+//! - [`valve_flow_coefficient`] — coefficient de débit de vanne (Kv/Cv) en liquide.
+//! - [`standard_atmosphere`] — atmosphère standard (troposphère ISA) : pression, température, densité.
+//! - [`centrifugal_separation`] — séparation centrifuge : RCF, vitesse de sédimentation.
 //!
 //! ## Positionnement
 //!
@@ -903,6 +923,30 @@ pub mod shear_center;
 pub mod three_phase_power;
 pub mod vfd_volts_per_hertz;
 pub mod wave_spring;
+
+// Lot massif (vol. 32) — mécanique des fluides (débitmétrie, surface libre,
+// cavitation, similitude), transfert thermique, éléments de machines,
+// métallurgie et énergie.
+pub mod calorific_value;
+pub mod cavitation_number;
+pub mod centrifugal_separation;
+pub mod fin_efficiency;
+pub mod gyroscopic_couple;
+pub mod hall_petch;
+pub mod hydraulic_jump;
+pub mod keyway_stress;
+pub mod larson_miller;
+pub mod lmtd;
+pub mod orifice_plate;
+pub mod pitot_tube;
+pub mod pump_affinity;
+pub mod standard_atmosphere;
+pub mod stokes_settling;
+pub mod thermal_expansion;
+pub mod torsion_bar;
+pub mod valve_flow_coefficient;
+pub mod venturi_meter;
+pub mod weir_flow;
 
 pub use accelerated_life::{
     BOLTZMANN_EV_K, arrhenius_acceleration_factor, derated_value, ten_degree_rule_factor,
@@ -1715,3 +1759,61 @@ pub use wave_spring::{
     WAVE_SPRING_RATE_CONSTANT, wave_spring_deflection, wave_spring_load, wave_spring_rate,
     wave_spring_stress,
 };
+
+// Lot massif (vol. 32) — ré-exports à plat.
+pub use calorific_value::{calorific_dulong_hhv, calorific_fuel_energy, calorific_lhv_from_hhv};
+pub use cavitation_number::{
+    cavitation_margin, cavitation_number, npsh_available as cavitation_npsh_available,
+};
+pub use centrifugal_separation::{
+    CENTRIFUGAL_STANDARD_GRAVITY, centrifugal_rcf, centrifugal_rcf_from_rpm,
+    centrifugal_sedimentation_velocity,
+};
+pub use fin_efficiency::{
+    fineff_effectiveness, fineff_efficiency_adiabatic_tip, fineff_heat_rate, fineff_parameter_m,
+};
+pub use gyroscopic_couple::{
+    gyroscopic_angular_momentum, gyroscopic_couple, gyroscopic_precession_rate,
+};
+pub use hall_petch::{
+    hall_petch_grain_size_for_yield, hall_petch_strengthening_coefficient,
+    hall_petch_yield_strength,
+};
+pub use hydraulic_jump::{
+    hydraulic_jump_conjugate_depth, hydraulic_jump_energy_loss, hydraulic_jump_froude,
+};
+pub use keyway_stress::{
+    keyway_bearing_stress, keyway_required_length_shear, keyway_shear_stress,
+    keyway_tangential_force,
+};
+pub use larson_miller::{
+    larson_miller_parameter_value, larson_miller_rupture_time, larson_miller_temperature_for_life,
+};
+pub use lmtd::{lmtd_counterflow, lmtd_heat_duty, lmtd_parallelflow};
+pub use orifice_plate::{
+    orifice_beta_ratio, orifice_flow_rate, orifice_velocity_of_approach_factor,
+};
+pub use pitot_tube::{
+    pitot_dynamic_pressure, pitot_stagnation_pressure, pitot_velocity, pitot_volumetric_flow,
+};
+pub use pump_affinity::{
+    pump_affinity_flow, pump_affinity_head, pump_affinity_impeller_flow, pump_affinity_power,
+};
+pub use standard_atmosphere::{
+    ISA_GAS_CONSTANT, ISA_GRAVITY, ISA_LAPSE_RATE, ISA_MOLAR_MASS_AIR, ISA_SEA_LEVEL_PRESSURE,
+    ISA_SEA_LEVEL_TEMPERATURE, ISA_TROPOPAUSE_ALTITUDE, isa_density, isa_pressure, isa_temperature,
+};
+pub use stokes_settling::{stokes_drag_force, stokes_reynolds_number, stokes_terminal_velocity};
+pub use thermal_expansion::{
+    thermal_constrained_stress, thermal_free_strain, thermal_linear_expansion,
+    thermal_volumetric_expansion,
+};
+pub use torsion_bar::{
+    torsion_bar_angle, torsion_bar_polar_inertia, torsion_bar_rate, torsion_bar_shear_stress,
+};
+pub use valve_flow_coefficient::{
+    VALVE_KV_TO_CV_FACTOR, valve_cv_from_kv, valve_flow_rate_from_kv, valve_kv_from_cv,
+    valve_kv_required, valve_pressure_drop_bar,
+};
+pub use venturi_meter::{venturi_beta_ratio, venturi_flow_rate, venturi_pressure_drop};
+pub use weir_flow::{weir_head_from_rectangular_flow, weir_rectangular_flow, weir_vnotch_flow};
