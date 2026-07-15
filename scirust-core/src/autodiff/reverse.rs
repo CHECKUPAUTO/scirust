@@ -232,9 +232,19 @@ impl Tensor {
 
     pub fn add(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.shape(), other.shape(), "Tensor::add shape mismatch");
-        let mut out = self.clone();
-        out.add_assign(other);
-        out
+        // One pass into a fresh buffer — avoids the extra memcpy that
+        // `self.clone()` + in-place would incur (~⅓ less memory traffic).
+        let data = self
+            .data
+            .iter()
+            .zip(&other.data)
+            .map(|(&a, &b)| a + b)
+            .collect();
+        Tensor {
+            rows: self.rows,
+            cols: self.cols,
+            data,
+        }
     }
     pub fn add_assign(&mut self, other: &Tensor) {
         assert_eq!(
@@ -249,9 +259,17 @@ impl Tensor {
     }
     pub fn sub(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.shape(), other.shape(), "Tensor::sub shape mismatch");
-        let mut out = self.clone();
-        out.sub_assign(other);
-        out
+        let data = self
+            .data
+            .iter()
+            .zip(&other.data)
+            .map(|(&a, &b)| a - b)
+            .collect();
+        Tensor {
+            rows: self.rows,
+            cols: self.cols,
+            data,
+        }
     }
     pub fn sub_assign(&mut self, other: &Tensor) {
         assert_eq!(
@@ -269,12 +287,17 @@ impl Tensor {
     }
     pub fn div(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.shape(), other.shape(), "Tensor::div shape mismatch");
-        let mut out = self.clone();
-        for (a, b) in out.data.iter_mut().zip(&other.data)
-        {
-            *a /= b;
+        let data = self
+            .data
+            .iter()
+            .zip(&other.data)
+            .map(|(&a, &b)| a / b)
+            .collect();
+        Tensor {
+            rows: self.rows,
+            cols: self.cols,
+            data,
         }
-        out
     }
     pub fn hadamard(&self, other: &Tensor) -> Tensor {
         assert_eq!(
@@ -282,9 +305,17 @@ impl Tensor {
             other.shape(),
             "Tensor::hadamard shape mismatch"
         );
-        let mut out = self.clone();
-        out.hadamard_assign(other);
-        out
+        let data = self
+            .data
+            .iter()
+            .zip(&other.data)
+            .map(|(&a, &b)| a * b)
+            .collect();
+        Tensor {
+            rows: self.rows,
+            cols: self.cols,
+            data,
+        }
     }
     pub fn hadamard_assign(&mut self, other: &Tensor) {
         assert_eq!(
@@ -2452,7 +2483,6 @@ impl Tape {
                     pad,
                 } =>
                 {
-                    let input_t = values[input].as_cpu().clone();
                     let weight_t = values[weight].as_cpu().clone();
                     let h_out = (h + 2 * pad - kernel) / stride + 1;
                     let w_out = (w + 2 * pad - kernel) / stride + 1;
@@ -2487,24 +2517,41 @@ impl Tape {
                             }
                             db.data[oc] = acc;
                         }
-                        grads[b_idx] = grads[b_idx].add(&db);
+                        grads[b_idx].add_assign(&db);
                     }
 
-                    // col = im2col(input) : (in_c*k*k, N)
-                    let col = crate::nn::conv_utils::im2col_raw(
-                        &input_t, batch, in_c, h, w, kernel, stride, pad,
-                    );
+                    // col = im2col(input): reuse the buffer cached by the forward
+                    // pass; recompute only if it is somehow unavailable.
+                    let col_fallback;
+                    let col: &Tensor = match &nodes[i].saved
+                    {
+                        SavedData::Im2Col(c) => c,
+                        _ =>
+                        {
+                            col_fallback = crate::nn::conv_utils::im2col_raw(
+                                values[input].as_cpu(),
+                                batch,
+                                in_c,
+                                h,
+                                w,
+                                kernel,
+                                stride,
+                                pad,
+                            );
+                            &col_fallback
+                        },
+                    };
 
                     // dW = dout @ col^T  (GPU engine if attached, else CPU)
-                    let dw = self.gemm_ab(&dout, &col, false, true);
-                    grads[weight] = grads[weight].add(&dw);
+                    let dw = self.gemm_ab(&dout, col, false, true);
+                    grads[weight].add_assign(&dw);
 
                     // dcol = W^T @ dout ; dx = col2im(dcol)
                     let dcol = self.gemm_ab(&weight_t, &dout, true, false);
                     let dx = crate::nn::conv_utils::col2im_raw(
                         &dcol, batch, in_c, h, w, kernel, stride, pad,
                     );
-                    grads[input] = grads[input].add(&dx);
+                    grads[input].add_assign(&dx);
                 },
                 Op::Conv2dTransposeForward {
                     input,
@@ -4391,6 +4438,8 @@ impl<'t> Var<'t> {
         }
 
         let b_idx = bias.map(|v| v.idx);
+        // Cache the im2col column matrix so the backward pass reuses it instead
+        // of rebuilding the identical (in_c·k·k × batch·h_out·w_out) buffer.
         let new_idx = self.tape.push_with_saved(
             Op::Conv2dForward {
                 input: self.idx,
@@ -4406,7 +4455,7 @@ impl<'t> Var<'t> {
                 pad,
             },
             DeviceTensor::cpu(out),
-            SavedData::None,
+            SavedData::Im2Col(col),
         );
         Ok(Var {
             tape: self.tape,
