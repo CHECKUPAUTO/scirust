@@ -17,7 +17,7 @@ pub use crate::autodiff::optim::{Adam, Optimizer as NnOptimizer};
 pub use crate::autodiff::reverse::{Tape, Tensor, Var};
 
 // --- Neural-network building blocks used by the quickstart / training loops. ---
-pub use crate::nn::init::{KaimingNormal, XavierUniform, Zeros};
+pub use crate::nn::init::{KaimingNormal, TruncatedNormal, XavierUniform, Zeros};
 pub use crate::nn::rng::PcgEngine;
 pub use crate::nn::{CrossEntropyLoss, Linear, Loss, Module, MseLoss, ReLU, Sequential, Sigmoid};
 

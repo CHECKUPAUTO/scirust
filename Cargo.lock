@@ -2983,6 +2983,7 @@ dependencies = [
  "scirust-autodiff",
  "scirust-macros",
  "scirust-simd",
+ "scirust-special",
  "scirust-symbolic",
  "serde",
  "serde_json",

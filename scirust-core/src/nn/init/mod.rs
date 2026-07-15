@@ -80,6 +80,82 @@ impl Initializer for SmallNormal {
     }
 }
 
+// ---------- TruncatedNormal ---------- //
+
+/// Truncated-normal initializer: samples from `N(mean, std²)` restricted to
+/// `[mean − k·std, mean + k·std]` (default `k = 2`). This is the standard
+/// ViT / BERT / timm weight init — values in the far tails, which a plain
+/// normal occasionally produces, are excluded so no weight starts pathologically
+/// large.
+///
+/// Uses the deterministic **inverse-CDF transform** (one draw per element, no
+/// rejection loop): draw a uniform in the truncated CDF interval and map it
+/// through the standard-normal quantile `√2 · erfinv`, with the CDF bounds from
+/// `erf` — both from [`scirust_special`]. The CDF math is done in `f64` for
+/// accuracy, then rounded to `f32`.
+pub struct TruncatedNormal {
+    pub mean: f32,
+    pub std: f32,
+    /// Truncation half-width in units of `std` (default `2.0`).
+    pub bound: f32,
+}
+
+impl TruncatedNormal {
+    /// Truncated normal with the conventional `±2·std` bounds.
+    pub fn new(mean: f32, std: f32) -> Self {
+        Self {
+            mean,
+            std,
+            bound: 2.0,
+        }
+    }
+
+    /// Truncated normal with an explicit truncation half-width `bound` (in units
+    /// of `std`).
+    pub fn with_bound(mean: f32, std: f32, bound: f32) -> Self {
+        Self { mean, std, bound }
+    }
+}
+
+impl Initializer for TruncatedNormal {
+    fn fill(&self, t: &mut Tensor, _fan_in: usize, _fan_out: usize, rng: &mut PcgEngine) {
+        let (mean, std, k) = (self.mean as f64, self.std as f64, self.bound.abs() as f64);
+        // Degenerate spread → every weight is the (clamped) mean.
+        if std <= 0.0 || k <= 0.0
+        {
+            for x in t.data.iter_mut()
+            {
+                *x = self.mean;
+            }
+            return;
+        }
+        let a = mean - k * std;
+        let b = mean + k * std;
+        // Standard-normal CDF Φ(x) = ½(1 + erf(x/√2)); bounds are symmetric at ±k.
+        let norm_cdf = |x: f64| 0.5 * (1.0 + scirust_special::erf(x / std::f64::consts::SQRT_2));
+        let l = norm_cdf(-k);
+        let u = norm_cdf(k);
+        let span = 2.0 * (u - l);
+        let scale = std * std::f64::consts::SQRT_2;
+        for x in t.data.iter_mut()
+        {
+            // Uniform in [2l−1, 2u−1], then the standard-normal inverse CDF.
+            let p = (2.0 * l - 1.0) + rng.float() as f64 * span;
+            let mut v = mean + scale * scirust_special::erfinv(p);
+            // Guard the ends against erfinv's boundary blow-up / rounding.
+            if v < a
+            {
+                v = a;
+            }
+            else if v > b
+            {
+                v = b;
+            }
+            *x = v as f32;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,5 +211,48 @@ mod tests {
                 "Xavier value out of bounds: {x} > {bound}"
             );
         }
+    }
+
+    #[test]
+    fn truncated_normal_stays_within_bounds() {
+        let (mean, std) = (0.5f32, 0.2f32);
+        let mut t = Tensor::zeros(200, 200);
+        let mut rng = PcgEngine::new(7);
+        TruncatedNormal::new(mean, std).fill(&mut t, 0, 0, &mut rng);
+        let (lo, hi) = (mean - 2.0 * std, mean + 2.0 * std);
+        for &x in &t.data
+        {
+            assert!(x >= lo - 1e-6 && x <= hi + 1e-6, "out of ±2σ bounds: {x}");
+        }
+    }
+
+    #[test]
+    fn truncated_normal_recovers_mean_and_reduced_std() {
+        let (mean, std) = (0.0f32, 1.0f32);
+        let mut t = Tensor::zeros(300, 300);
+        let mut rng = PcgEngine::new(11);
+        TruncatedNormal::new(mean, std).fill(&mut t, 0, 0, &mut rng);
+        let m: f32 = t.data.iter().sum::<f32>() / t.data.len() as f32;
+        let v: f32 = t.data.iter().map(|x| (x - m).powi(2)).sum::<f32>() / t.data.len() as f32;
+        // Empirical mean ≈ 0; variance of a ±2σ-truncated standard normal is
+        // ≈ 0.774 (< 1, since the tails are removed).
+        assert!(m.abs() < 0.02, "mean drifted: {m}");
+        assert!((v - 0.774).abs() < 0.05, "truncated variance off: {v}");
+    }
+
+    #[test]
+    fn truncated_normal_is_reproducible() {
+        let mut a = Tensor::zeros(16, 16);
+        let mut b = Tensor::zeros(16, 16);
+        TruncatedNormal::new(0.0, 0.02).fill(&mut a, 0, 0, &mut PcgEngine::new(3));
+        TruncatedNormal::new(0.0, 0.02).fill(&mut b, 0, 0, &mut PcgEngine::new(3));
+        assert_eq!(a.data, b.data);
+    }
+
+    #[test]
+    fn truncated_normal_zero_std_is_constant() {
+        let mut t = Tensor::zeros(4, 4);
+        TruncatedNormal::new(1.5, 0.0).fill(&mut t, 0, 0, &mut PcgEngine::new(1));
+        assert!(t.data.iter().all(|&x| x == 1.5));
     }
 }

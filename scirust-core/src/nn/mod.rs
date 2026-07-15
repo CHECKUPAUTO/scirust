@@ -71,7 +71,7 @@ pub use fused_ops::{
 pub use generative::VAE;
 pub use gnn::{GCN, GCNLayer};
 pub use im2col_hpc::im2col_hpc;
-pub use init::{Initializer, KaimingNormal, SmallNormal, XavierUniform, Zeros};
+pub use init::{Initializer, KaimingNormal, SmallNormal, TruncatedNormal, XavierUniform, Zeros};
 pub use layer_norm::LayerNorm;
 pub use linear::Linear;
 pub use loss::{CrossEntropyLoss, Loss, MseLoss, NllLoss};
