@@ -133,50 +133,35 @@ impl MultiHeadAttention {
         let d_h = self.d_head;
         let scale = 1.0 / (d_h as f32).sqrt();
 
-        let mut q_per_head: Vec<Var<'t>> = Vec::with_capacity(h_n);
-        let mut k_per_head: Vec<Var<'t>> = Vec::with_capacity(h_n);
-        let mut v_per_head: Vec<Var<'t>> = Vec::with_capacity(h_n);
-        for h in 0..h_n
-        {
-            q_per_head.push(q.try_slice_cols(h * d_h, d_h).unwrap());
-            k_per_head.push(k.try_slice_cols(h * d_h, d_h).unwrap());
-            v_per_head.push(v.try_slice_cols(h * d_h, d_h).unwrap());
-        }
-
-        let mut head_outputs: Vec<Vec<Var<'t>>> =
-            (0..h_n).map(|_| Vec::with_capacity(batch)).collect();
-        for h in 0..h_n
-        {
-            let q_h = &q_per_head[h];
-            let k_h = &k_per_head[h];
-            let v_h = &v_per_head[h];
-            for b in 0..batch
-            {
-                let q_hb = q_h.try_slice_rows(b * seq_len, seq_len).unwrap();
-                let k_hb = k_h.try_slice_rows(b * seq_len, seq_len).unwrap();
-                let v_hb = v_h.try_slice_rows(b * seq_len, seq_len).unwrap();
-
-                // scores = Q·Kᵀ without materializing Kᵀ (no transpose node).
-                let scores = q_hb.try_matmul_bt(k_hb).unwrap();
-                let scaled = scores.scale(scale);
-                let pre_softmax = if self.causal
-                {
-                    scaled.causal_mask(seq_len)
-                }
-                else
-                {
-                    scaled
-                };
-                let attn = pre_softmax.try_softmax(1).unwrap();
-                let out_hb = attn.try_matmul(v_hb).unwrap();
-                head_outputs[h].push(out_hb);
-            }
-        }
-
+        // Each head's slice `(batch·seq × d_h)` already stacks the `batch`
+        // per-sequence matrices row-wise, which is exactly `bmm2d`'s layout — so
+        // the whole head's `batch` score/context GEMMs collapse into two batched
+        // nodes (parallel over batches) instead of `batch` separate `matmul`s.
         let mut head_full: Vec<Var<'t>> = Vec::with_capacity(h_n);
-        for outputs in &head_outputs
+        for h in 0..h_n
         {
-            head_full.push(concat_rows(tape, outputs));
+            let q_h = q.try_slice_cols(h * d_h, d_h).unwrap();
+            let k_h = k.try_slice_cols(h * d_h, d_h).unwrap();
+            let v_h = v.try_slice_cols(h * d_h, d_h).unwrap();
+
+            // scores = Q·Kᵀ per batch, no transpose node → (batch·seq × seq).
+            let scores = q_h.try_bmm2d(k_h, batch, true).unwrap();
+            let scaled = scores.scale(scale);
+            // causal_mask keys off `row % seq_len`, so it masks each batch block
+            // independently on the stacked layout.
+            let pre_softmax = if self.causal
+            {
+                scaled.causal_mask(seq_len)
+            }
+            else
+            {
+                scaled
+            };
+            let attn = pre_softmax.try_softmax(1).unwrap();
+            // context = attn·V per batch → (batch·seq × d_h), already the
+            // row-stacked layout `combine_heads` expects (no concat needed).
+            let out_h = attn.try_bmm2d(v_h, batch, false).unwrap();
+            head_full.push(out_h);
         }
 
         combine_heads(tape, &head_full)
@@ -190,49 +175,30 @@ impl MultiHeadAttention {
         k: Var<'t>,
         v: Var<'t>,
         batch: usize,
-        q_seq_len: usize,
-        kv_seq_len: usize,
+        // Sequence lengths are recovered from the operand shapes by `bmm2d`
+        // (`rows / batch`); kept in the signature to document the caller's intent.
+        _q_seq_len: usize,
+        _kv_seq_len: usize,
     ) -> Var<'t> {
         let h_n = self.n_heads;
         let d_h = self.d_head;
         let scale = 1.0 / (d_h as f32).sqrt();
 
-        let mut q_per_head: Vec<Var<'t>> = Vec::with_capacity(h_n);
-        let mut k_per_head: Vec<Var<'t>> = Vec::with_capacity(h_n);
-        let mut v_per_head: Vec<Var<'t>> = Vec::with_capacity(h_n);
-        for h in 0..h_n
-        {
-            q_per_head.push(q.slice_cols(h * d_h, d_h));
-            k_per_head.push(k.slice_cols(h * d_h, d_h));
-            v_per_head.push(v.slice_cols(h * d_h, d_h));
-        }
-
-        let mut head_outputs: Vec<Vec<Var<'t>>> =
-            (0..h_n).map(|_| Vec::with_capacity(batch)).collect();
-        for h in 0..h_n
-        {
-            let q_h = q_per_head[h];
-            let k_h = k_per_head[h];
-            let v_h = v_per_head[h];
-            for b in 0..batch
-            {
-                let q_hb = q_h.slice_rows(b * q_seq_len, q_seq_len);
-                let k_hb = k_h.slice_rows(b * kv_seq_len, kv_seq_len);
-                let v_hb = v_h.slice_rows(b * kv_seq_len, kv_seq_len);
-
-                let scores = q_hb.matmul_bt(k_hb); // Q·Kᵀ, no transpose node
-                let scaled = scores.scale(scale);
-                // Cross-attention n'est jamais causal
-                let attn = scaled.softmax(1);
-                let out_hb = attn.matmul(v_hb);
-                head_outputs[h].push(out_hb);
-            }
-        }
-
+        // Same batched collapse as self-attention, but Q and K/V have different
+        // sequence lengths: scores are `(batch·q_seq × kv_seq)`, context is
+        // `(batch·q_seq × d_h)`. Cross-attention is never causal.
         let mut head_full: Vec<Var<'t>> = Vec::with_capacity(h_n);
-        for outputs in &head_outputs
+        for h in 0..h_n
         {
-            head_full.push(concat_rows(tape, outputs));
+            let q_h = q.slice_cols(h * d_h, d_h);
+            let k_h = k.slice_cols(h * d_h, d_h);
+            let v_h = v.slice_cols(h * d_h, d_h);
+
+            let scores = q_h.try_bmm2d(k_h, batch, true).unwrap(); // Q·Kᵀ per batch
+            let scaled = scores.scale(scale);
+            let attn = scaled.softmax(1);
+            let out_h = attn.try_bmm2d(v_h, batch, false).unwrap();
+            head_full.push(out_h);
         }
 
         combine_heads(tape, &head_full)
@@ -478,8 +444,15 @@ mod tests {
     /// batched-matmul rewrite of `scaled_dot_attention` can't silently change
     /// them. Covers both causal and non-causal.
     fn mha_finite_diff_case(causal: bool) {
+        mha_finite_diff_case_shaped(causal, 1, 3);
+        // batch>1 exercises the batched-attention path where each head runs
+        // `batch` independent per-sequence GEMMs through one `bmm2d` node.
+        mha_finite_diff_case_shaped(causal, 2, 3);
+    }
+
+    fn mha_finite_diff_case_shaped(causal: bool, batch: usize, seq: usize) {
         let mut rng = PcgEngine::new(7);
-        let (d_model, n_heads, batch, seq) = (4usize, 2usize, 1usize, 3usize);
+        let (d_model, n_heads) = (4usize, 2usize);
         let mut mha = MultiHeadAttention::new(
             d_model,
             n_heads,

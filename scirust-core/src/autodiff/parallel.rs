@@ -328,6 +328,56 @@ impl ParallelTape {
                     t_grads[a] = t_grads[a].add(&ga);
                     t_grads[b] = t_grads[b].add(&gb);
                 },
+                Op::BatchMatMul {
+                    a,
+                    b,
+                    batch,
+                    transpose_b,
+                } =>
+                {
+                    // Reference (per-block) backward; mirrors the batched GEMM in
+                    // `Tape::backward`. A[i]=(m×k), g[i]=(m×n) per block.
+                    let av = &values[a];
+                    let bv = &values[b];
+                    let m = av.rows / batch;
+                    let k = av.cols;
+                    let n = g.cols;
+                    let mut ga = Vec::with_capacity(av.data.len());
+                    let mut gb = Vec::with_capacity(bv.data.len());
+                    for i in 0..batch
+                    {
+                        let g_i =
+                            Tensor::from_vec(g.data[i * m * n..(i + 1) * m * n].to_vec(), m, n);
+                        let a_i =
+                            Tensor::from_vec(av.data[i * m * k..(i + 1) * m * k].to_vec(), m, k);
+                        if transpose_b
+                        {
+                            // B[i]=(n×k): dA[i]=g[i]·B[i], dB[i]=g[i]ᵀ·A[i].
+                            let b_i = Tensor::from_vec(
+                                bv.data[i * n * k..(i + 1) * n * k].to_vec(),
+                                n,
+                                k,
+                            );
+                            ga.extend_from_slice(&g_i.matmul(&b_i).data);
+                            gb.extend_from_slice(&g_i.transpose().matmul(&a_i).data);
+                        }
+                        else
+                        {
+                            // B[i]=(k×n): dA[i]=g[i]·B[i]ᵀ, dB[i]=A[i]ᵀ·g[i].
+                            let b_i = Tensor::from_vec(
+                                bv.data[i * k * n..(i + 1) * k * n].to_vec(),
+                                k,
+                                n,
+                            );
+                            ga.extend_from_slice(&g_i.matmul(&b_i.transpose()).data);
+                            gb.extend_from_slice(&a_i.transpose().matmul(&g_i).data);
+                        }
+                    }
+                    let ga = Tensor::from_vec(ga, av.rows, av.cols);
+                    let gb = Tensor::from_vec(gb, bv.rows, bv.cols);
+                    t_grads[a] = t_grads[a].add(&ga);
+                    t_grads[b] = t_grads[b].add(&gb);
+                },
 
                 Op::Scale { input, scalar } =>
                 {

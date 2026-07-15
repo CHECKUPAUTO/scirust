@@ -152,6 +152,142 @@ pub(crate) fn par_sgemm(
     }
 }
 
+/// Batched GEMM over `batch` independent blocks stacked row-wise, output
+/// `(batch·m × n)` row-major. Block `i` computes `alpha·op(A[i])·op(B[i]) +
+/// beta·C[i]`; the `*_bstride`/`rs*`/`cs*` strides let either operand be read
+/// transposed without a physical copy (attention needs `A·Bᵀ` for scores and
+/// `A·B` for context). Used by [`Op::BatchMatMul`] forward (`beta=0`) and
+/// backward (`beta=1`, accumulating into the running gradient).
+///
+/// The blocks are independent, so how they map onto rayon is chosen per block
+/// (see the gate below) — this is the crux of making batched attention a win,
+/// not a wash: cache-resident, work-heavy blocks fan out one `sgemm` per core,
+/// while large or thin blocks fall back to the row-parallel/serial path that the
+/// non-batched code already used, so nothing regresses.
+///
+/// Within a block the `k`-accumulation order is a single `sgemm`, identical to
+/// the sequential path, so the result is bit-identical whichever branch runs.
+#[allow(clippy::too_many_arguments)]
+fn batched_gemm(
+    batch: usize,
+    m: usize,
+    k: usize,
+    n: usize,
+    alpha: f32,
+    a: &[f32],
+    a_bstride: usize,
+    rsa: isize,
+    csa: isize,
+    b: &[f32],
+    b_bstride: usize,
+    rsb: isize,
+    csb: isize,
+    beta: f32,
+    c: &mut [f32],
+) {
+    debug_assert_eq!(c.len(), batch * m * n);
+    if batch == 0 || m == 0 || n == 0
+    {
+        return;
+    }
+
+    #[cfg(feature = "rayon")]
+    {
+        // Batch fan-out (one whole sgemm per core) is a win only for blocks that
+        // are both cache-resident AND big enough to amortize rayon's fork/join;
+        // otherwise the existing row-parallel path (below) is at least as good,
+        // so we gate on two block properties:
+        //
+        // * OUTPUT footprint (`m·n`): above ~1 MiB per block (long-sequence score
+        //   matrices) the cores each stream a different multi-MiB matrix and
+        //   thrash cache/bandwidth. 1<<18 f32 = 256K elems = 1 MiB keeps
+        //   `seq ≤ 512` scores batch-parallel and routes `seq ≥ 1024` to rows.
+        // * WORK per block (`m·k·n`): a small block (a `d_head = 32` head, or any
+        //   short-sequence attention) does too few FLOPs to hide the fork/join —
+        //   fanning it out measured 4–7 % *slower*. Blocks at/above 1<<22 ≈ 4 M
+        //   FLOPs (e.g. a `d_head = 64` head) turn the extra cores into an
+        //   8–21 % speedup. Below the floor we fall through to the serial/row
+        //   path, i.e. the pre-batching behaviour, so nothing regresses.
+        const OUT_ELEMS_MAX: usize = 1 << 18;
+        const MIN_BATCH_OPS: usize = 1 << 22;
+        let out_elems = m.saturating_mul(n);
+        let per_gemm = out_elems.saturating_mul(k.max(1));
+        let nthreads = rayon::current_num_threads();
+        if nthreads > 1 && batch > 1 && out_elems <= OUT_ELEMS_MAX && per_gemm >= MIN_BATCH_OPS
+        {
+            // Cache-resident, work-heavy blocks: fan the batch across the pool,
+            // one sgemm per block.
+            use rayon::prelude::*;
+            c.par_chunks_mut(m * n).enumerate().for_each(|(i, c_i)| {
+                let a_i = &a[i * a_bstride..i * a_bstride + a_bstride];
+                let b_i = &b[i * b_bstride..i * b_bstride + b_bstride];
+                // SAFETY: a_i/b_i are batch i's read-only blocks; c_i is its
+                // disjoint row-major output block (n cols, unit col stride).
+                unsafe {
+                    sgemm(
+                        m,
+                        k,
+                        n,
+                        alpha,
+                        a_i.as_ptr(),
+                        rsa,
+                        csa,
+                        b_i.as_ptr(),
+                        rsb,
+                        csb,
+                        beta,
+                        c_i.as_mut_ptr(),
+                        n as isize,
+                        1,
+                    );
+                }
+            });
+            return;
+        }
+        if nthreads > 1
+        {
+            // Large-output blocks: row-parallelize each across all cores,
+            // batches sequential — identical to the non-batched path, so long
+            // sequences never regress. `par_sgemm` self-gates tiny blocks back
+            // to a serial sgemm, so nothing is over-parallelized here.
+            for (i, c_i) in c.chunks_mut(m * n).enumerate()
+            {
+                let a_i = &a[i * a_bstride..i * a_bstride + a_bstride];
+                let b_i = &b[i * b_bstride..i * b_bstride + b_bstride];
+                par_sgemm(m, k, n, alpha, a_i, rsa, csa, b_i, rsb, csb, beta, c_i);
+            }
+            return;
+        }
+    }
+
+    // Serial fallback: no rayon, single thread, or a lone tiny block.
+    for (i, c_i) in c.chunks_mut(m * n).enumerate()
+    {
+        let a_i = &a[i * a_bstride..i * a_bstride + a_bstride];
+        let b_i = &b[i * b_bstride..i * b_bstride + b_bstride];
+        // SAFETY: disjoint row-major output block; strides address the block
+        // extents; beta selects overwrite (forward) vs accumulate (backward).
+        unsafe {
+            sgemm(
+                m,
+                k,
+                n,
+                alpha,
+                a_i.as_ptr(),
+                rsa,
+                csa,
+                b_i.as_ptr(),
+                rsb,
+                csb,
+                beta,
+                c_i.as_mut_ptr(),
+                n as isize,
+                1,
+            );
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Tensor {
     pub rows: usize,
@@ -916,6 +1052,17 @@ pub enum Op {
     /// `C = A · Bᵀ` (both operands row-major; B read transposed via strides, no
     /// physical transpose). Used by attention's `Q·Kᵀ` scores.
     MatMulBt(usize, usize),
+    /// Batched matmul over `batch` matrices stacked row-wise. `A` is
+    /// `(batch·m × k)`; if `transpose_b`, `B` is `(batch·n × k)` and each block
+    /// is `A[i]·B[i]ᵀ`, else `B` is `(batch·k × n)` and each block is `A[i]·B[i]`.
+    /// Output is `(batch·m × n)`. Batches run in parallel — this collapses
+    /// attention's `B·H` tiny per-head/batch GEMMs into `H` parallel calls.
+    BatchMatMul {
+        a: usize,
+        b: usize,
+        batch: usize,
+        transpose_b: bool,
+    },
     MatMulGpu(usize, usize),
     Scale {
         input: usize,
@@ -1719,6 +1866,119 @@ impl Tape {
                         1.0,
                         &mut gb.data,
                     );
+                },
+                Op::BatchMatMul {
+                    a,
+                    b,
+                    batch,
+                    transpose_b,
+                } =>
+                {
+                    // Per-block dims: A[i]=(m×k), C[i]=g[i]=(m×n). dA and dB are
+                    // each a batched accumulating GEMM (`batched_gemm` picks
+                    // batch- vs row-parallelism by block size, β=1).
+                    let m = values[a].as_cpu().rows / batch;
+                    let k = values[a].as_cpu().cols;
+                    let n = g.cols;
+                    if transpose_b
+                    {
+                        // C[i] = A[i]·B[i]ᵀ, B[i]=(n×k).
+                        // dA[i] = g[i]·B[i]  : (m×n)·(n×k)→(m×k), B row-major.
+                        {
+                            let bv = values[b].as_cpu();
+                            let ga = &mut grads[a];
+                            batched_gemm(
+                                batch,
+                                m,
+                                n,
+                                k,
+                                1.0,
+                                &g.data,
+                                m * n,
+                                n as isize,
+                                1,
+                                &bv.data,
+                                n * k,
+                                k as isize,
+                                1,
+                                1.0,
+                                &mut ga.data,
+                            );
+                        }
+                        // dB[i] = g[i]ᵀ·A[i] : (n×m)·(m×k)→(n×k). g read
+                        // transposed (rs=1, cs=n); A row-major.
+                        {
+                            let av = values[a].as_cpu();
+                            let gb = &mut grads[b];
+                            batched_gemm(
+                                batch,
+                                n,
+                                m,
+                                k,
+                                1.0,
+                                &g.data,
+                                m * n,
+                                1,
+                                n as isize,
+                                &av.data,
+                                m * k,
+                                k as isize,
+                                1,
+                                1.0,
+                                &mut gb.data,
+                            );
+                        }
+                    }
+                    else
+                    {
+                        // C[i] = A[i]·B[i], B[i]=(k×n).
+                        // dA[i] = g[i]·B[i]ᵀ : (m×n)·(n×k)→(m×k). B read
+                        // transposed (rs=1, cs=n); g row-major.
+                        {
+                            let bv = values[b].as_cpu();
+                            let ga = &mut grads[a];
+                            batched_gemm(
+                                batch,
+                                m,
+                                n,
+                                k,
+                                1.0,
+                                &g.data,
+                                m * n,
+                                n as isize,
+                                1,
+                                &bv.data,
+                                k * n,
+                                1,
+                                n as isize,
+                                1.0,
+                                &mut ga.data,
+                            );
+                        }
+                        // dB[i] = A[i]ᵀ·g[i] : (k×m)·(m×n)→(k×n). A read
+                        // transposed (rs=1, cs=k); g row-major.
+                        {
+                            let av = values[a].as_cpu();
+                            let gb = &mut grads[b];
+                            batched_gemm(
+                                batch,
+                                k,
+                                m,
+                                n,
+                                1.0,
+                                &av.data,
+                                m * k,
+                                1,
+                                k as isize,
+                                &g.data,
+                                m * n,
+                                n as isize,
+                                1,
+                                1.0,
+                                &mut gb.data,
+                            );
+                        }
+                    }
                 },
                 Op::MatMulGpu(a, b) =>
                 {
@@ -3309,6 +3569,93 @@ impl<'t> Var<'t> {
 
     pub fn matmul_bt(self, other: Var<'t>) -> Var<'t> {
         self.try_matmul_bt(other).unwrap()
+    }
+
+    /// Batched matmul over `batch` blocks stacked row-wise. `self = A` is
+    /// `(batch·m × k)` (block `i` is rows `i·m..(i+1)·m`); `other = B` is
+    /// `(batch·n × k)` when `transpose_b` (block `i` computes `A[i]·B[i]ᵀ`,
+    /// giving `m×n`) or `(batch·k × n)` otherwise (block `i` computes
+    /// `A[i]·B[i]`). Output is the `batch` results stacked row-wise
+    /// (`batch·m × n`). The blocks are independent and run in parallel — this is
+    /// attention's `B·H` tiny per-head/batch GEMMs collapsed into a single node
+    /// instead of `B·H` sequential `matmul` calls.
+    pub fn try_bmm2d(
+        self,
+        other: Var<'t>,
+        batch: usize,
+        transpose_b: bool,
+    ) -> crate::error::Result<Var<'t>> {
+        self.ensure_same_tape(&other, "bmm2d")?;
+        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
+        let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
+        if batch == 0 || !a.rows.is_multiple_of(batch) || !b.rows.is_multiple_of(batch)
+        {
+            return Err(crate::error::SciRustError::ShapeMismatch {
+                op: "bmm2d",
+                expected: (batch, batch),
+                got: (a.rows, b.rows),
+            });
+        }
+        let m = a.rows / batch;
+        let k = a.cols;
+        // Contracted dim is B's columns whether or not it is read transposed:
+        // transpose_b → each block is (m×k)·(k×n)ᵀ with B stored (n×k);
+        // otherwise B is (k×n) stacked as (batch·k × n).
+        let (n, b_inner) = if transpose_b
+        {
+            (b.rows / batch, b.cols)
+        }
+        else
+        {
+            (b.cols, b.rows / batch)
+        };
+        crate::error::check_inner_dim("bmm2d", k, b_inner)?;
+        // B[i] is read transposed (rsb=1, csb=k) when it is stored `(n×k)`,
+        // else row-major `(k×n)` (rsb=n, csb=1). A[i] is always row-major.
+        let (b_bstride, rsb, csb) = if transpose_b
+        {
+            (n * k, 1isize, k as isize)
+        }
+        else
+        {
+            (k * n, n as isize, 1isize)
+        };
+        let mut out = vec![0.0f32; batch * m * n];
+        batched_gemm(
+            batch,
+            m,
+            k,
+            n,
+            1.0,
+            &a.data,
+            m * k,
+            k as isize,
+            1,
+            &b.data,
+            b_bstride,
+            rsb,
+            csb,
+            0.0,
+            &mut out,
+        );
+        let new_idx = self.tape.push_with_saved(
+            Op::BatchMatMul {
+                a: self.idx,
+                b: other.idx,
+                batch,
+                transpose_b,
+            },
+            DeviceTensor::cpu(Tensor::from_vec(out, batch * m, n)),
+            SavedData::None,
+        );
+        Ok(Var {
+            tape: self.tape,
+            idx: new_idx,
+        })
+    }
+
+    pub fn bmm2d(self, other: Var<'t>, batch: usize, transpose_b: bool) -> Var<'t> {
+        self.try_bmm2d(other, batch, transpose_b).unwrap()
     }
 
     /// MatMul GPU-acceléré.
@@ -5667,6 +6014,156 @@ mod tests {
         assert!((g.data[0] - 1.0).abs() < 1e-6);
         assert!((g.data[1] - 0.0).abs() < 1e-6);
         assert!((g.data[2] - 0.0).abs() < 1e-6);
+    }
+
+    // ---------- BatchMatMul (bmm2d) ---------- //
+
+    /// A batched matmul is exactly `batch` independent per-block GEMMs. This
+    /// pins both `bmm2d` forward and backward to the reference graph that runs
+    /// each block through the existing `matmul`/`matmul_bt` nodes and stacks the
+    /// results — the same result, one node instead of `batch`.
+    fn bmm2d_matches_reference(batch: usize, m: usize, k: usize, n: usize, transpose_b: bool) {
+        let mut rng = crate::nn::PcgEngine::new(20240501);
+        let a_rows = batch * m;
+        // B is (batch·n × k) when read transposed, else (batch·k × n).
+        let (b_rows, b_cols) = if transpose_b
+        {
+            (batch * n, k)
+        }
+        else
+        {
+            (batch * k, n)
+        };
+        let a_data: Vec<f32> = (0..a_rows * k).map(|_| rng.float() * 2.0 - 1.0).collect();
+        let b_data: Vec<f32> = (0..b_rows * b_cols)
+            .map(|_| rng.float() * 2.0 - 1.0)
+            .collect();
+        // Non-uniform upstream weighting so the backward isn't degenerate.
+        let w_data: Vec<f32> = (0..batch * m * n)
+            .map(|i| ((i as f32) * 0.37).sin())
+            .collect();
+
+        // --- Batched node. ---
+        let tape = Tape::new();
+        let a = tape.input(Tensor::from_vec(a_data.clone(), a_rows, k));
+        let b = tape.input(Tensor::from_vec(b_data.clone(), b_rows, b_cols));
+        let w = tape.input(Tensor::from_vec(w_data.clone(), batch * m, n));
+        let c = a.bmm2d(b, batch, transpose_b);
+        let out = tape.value(c.idx());
+        let loss = c.hadamard(w).sum();
+        loss.backward();
+        let (ga, gb) = (tape.grad(a.idx()).data, tape.grad(b.idx()).data);
+
+        // --- Reference: per-block matmul, stacked row-wise. ---
+        let rtape = Tape::new();
+        let mut blocks: Vec<Var> = Vec::with_capacity(batch);
+        for i in 0..batch
+        {
+            let a_i = Tensor::from_vec(a_data[i * m * k..(i + 1) * m * k].to_vec(), m, k);
+            let av = rtape.input(a_i);
+            let cv = if transpose_b
+            {
+                let b_i = Tensor::from_vec(b_data[i * n * k..(i + 1) * n * k].to_vec(), n, k);
+                av.matmul_bt(rtape.input(b_i))
+            }
+            else
+            {
+                let b_i = Tensor::from_vec(b_data[i * k * n..(i + 1) * k * n].to_vec(), k, n);
+                av.matmul(rtape.input(b_i))
+            };
+            blocks.push(cv);
+        }
+        let ref_c = concat_rows(&rtape, &blocks);
+        let ref_out = rtape.value(ref_c.idx());
+
+        // Forward is bit-identical (same per-block sgemm, same k-order).
+        assert_eq!(out.rows, batch * m);
+        assert_eq!(out.cols, n);
+        for j in 0..out.data.len()
+        {
+            assert_eq!(
+                out.data[j].to_bits(),
+                ref_out.data[j].to_bits(),
+                "forward mismatch at {j} (transpose_b={transpose_b})"
+            );
+        }
+
+        // Backward: dA/dB must equal the per-block backward, block by block. A
+        // fresh tape per block gives an independent reference (`w` slices the
+        // same upstream weighting the batched loss used).
+        let mut ref_ga = Vec::with_capacity(ga.len());
+        let mut ref_gb = Vec::with_capacity(gb.len());
+        for i in 0..batch
+        {
+            let bt = Tape::new();
+            let a_i = bt.input(Tensor::from_vec(
+                a_data[i * m * k..(i + 1) * m * k].to_vec(),
+                m,
+                k,
+            ));
+            let (cv, b_i) = if transpose_b
+            {
+                let b_i = bt.input(Tensor::from_vec(
+                    b_data[i * n * k..(i + 1) * n * k].to_vec(),
+                    n,
+                    k,
+                ));
+                (a_i.matmul_bt(b_i), b_i)
+            }
+            else
+            {
+                let b_i = bt.input(Tensor::from_vec(
+                    b_data[i * k * n..(i + 1) * k * n].to_vec(),
+                    k,
+                    n,
+                ));
+                (a_i.matmul(b_i), b_i)
+            };
+            let w_i = bt.input(Tensor::from_vec(
+                w_data[i * m * n..(i + 1) * m * n].to_vec(),
+                m,
+                n,
+            ));
+            cv.hadamard(w_i).sum().backward();
+            ref_ga.extend_from_slice(&bt.grad(a_i.idx()).data);
+            ref_gb.extend_from_slice(&bt.grad(b_i.idx()).data);
+        }
+        assert_eq!(ga.len(), ref_ga.len());
+        assert_eq!(gb.len(), ref_gb.len());
+        for j in 0..ga.len()
+        {
+            assert!(
+                (ga[j] - ref_ga[j]).abs() < 1e-4,
+                "dA mismatch at {j}: {} vs {} (transpose_b={transpose_b})",
+                ga[j],
+                ref_ga[j]
+            );
+        }
+        for j in 0..gb.len()
+        {
+            assert!(
+                (gb[j] - ref_gb[j]).abs() < 1e-4,
+                "dB mismatch at {j}: {} vs {} (transpose_b={transpose_b})",
+                gb[j],
+                ref_gb[j]
+            );
+        }
+    }
+
+    #[test]
+    fn bmm2d_forward_and_backward_match_per_block_reference() {
+        // transpose_b = true is attention's Q·Kᵀ shape; false is attn·V.
+        bmm2d_matches_reference(3, 4, 5, 6, true);
+        bmm2d_matches_reference(3, 4, 5, 6, false);
+        // Non-square, single-batch, and rectangular seq/head shapes.
+        bmm2d_matches_reference(1, 7, 3, 2, true);
+        bmm2d_matches_reference(5, 2, 8, 3, false);
+        bmm2d_matches_reference(4, 6, 6, 6, true);
+        // Shapes that cross `batched_gemm`'s gate into the batch-parallel branch
+        // (out_elems=256² ≤ 1<<18, per_gemm=256·64·256 ≥ 1<<22) so the parallel
+        // path's bit-identity to the per-block reference is covered directly.
+        bmm2d_matches_reference(2, 256, 64, 256, true);
+        bmm2d_matches_reference(2, 256, 64, 256, false);
     }
 }
 
