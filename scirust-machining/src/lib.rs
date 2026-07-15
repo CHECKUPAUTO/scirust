@@ -421,6 +421,41 @@
 //!   D4) et test sous contrôle.
 //! - [`rolled_throughput_yield`] — qualité multi-étapes : FPY, RTY, rendement
 //!   normalisé et DPU.
+//! - [`takt_time`] — Lean : temps takt, cadence requise et nombre d'opérateurs.
+//! - [`line_balancing`] — équilibrage de ligne : postes minimaux, efficacité,
+//!   retard d'équilibrage et lissage.
+//! - [`littles_law`] — loi de **Little** : en-cours, débit et temps de passage.
+//! - [`johnson_scheduling`] — flow-shop 2 machines : makespan d'une séquence et
+//!   temps d'inactivité.
+//! - [`capacity_planning`] — capacité disponible/requise, utilisation et goulot.
+//! - [`smed_setup`] — SMED : temps de changement, arrêt machine et gain
+//!   interne→externe.
+//! - [`helical_gear_forces`] — engrenage hélicoïdal : efforts tangentiel, radial,
+//!   axial, normal et résultant.
+//! - [`worm_gear_forces`] — roue et vis : décomposition tangentiel/axial/séparateur
+//!   et identités vis ↔ roue.
+//! - [`internal_gear`] — engrenage intérieur : entraxe, rapport et diamètre de tête
+//!   de couronne.
+//! - [`gearbox_efficiency`] — réducteur multi-étages : rendement global, puissances
+//!   et nombre d'étages.
+//! - [`roll_bending`] — roulage 3 rouleaux : rayon cintré, retour élastique et
+//!   rayon minimal.
+//! - [`stretch_forming`] — formage par étirage : déformation vraie, effort et
+//!   épaisseur après.
+//! - [`ironing`] — repassage : réduction d'épaisseur, déformation vraie et effort.
+//! - [`blank_nesting`] — mise en bande : pas, utilisation matière, pièces et chute.
+//! - [`hydraulic_flow_velocity`] — vitesse de fluide en conduite, diamètre et
+//!   plafond de vitesse.
+//! - [`pressure_intensifier`] — multiplicateur de pression : rapport, pression et
+//!   débit de sortie.
+//! - [`air_receiver`] — réservoir d'air comprimé : volume tampon, air utile et
+//!   temps de remplissage.
+//! - [`cutting_temperature`] — température de coupe : élévation adiabatique,
+//!   interface et indice de **Cook**.
+//! - [`corrosion_rate`] — corrosion uniforme : taux de pénétration et conversion
+//!   **Faraday** courant ↔ vitesse.
+//! - [`machining_cost`] — coût d'usinage par pièce : coupe, mise en train amortie
+//!   et outillage.
 //!
 //! ## Positionnement
 //!
@@ -690,6 +725,29 @@ pub mod shot_peening;
 pub mod spot_welding;
 pub mod vbelt_length;
 pub mod waterjet_cutting;
+
+// Lot massif (vol. 28) — gestion de production, engrenages spéciaux, mise en
+// forme avancée, hydraulique de puissance, thermique de coupe/corrosion/coût.
+pub mod air_receiver;
+pub mod blank_nesting;
+pub mod capacity_planning;
+pub mod corrosion_rate;
+pub mod cutting_temperature;
+pub mod gearbox_efficiency;
+pub mod helical_gear_forces;
+pub mod hydraulic_flow_velocity;
+pub mod internal_gear;
+pub mod ironing;
+pub mod johnson_scheduling;
+pub mod line_balancing;
+pub mod littles_law;
+pub mod machining_cost;
+pub mod pressure_intensifier;
+pub mod roll_bending;
+pub mod smed_setup;
+pub mod stretch_forming;
+pub mod takt_time;
+pub mod worm_gear_forces;
 
 pub use accelerated_life::{
     BOLTZMANN_EV_K, arrhenius_acceleration_factor, derated_value, ten_degree_rule_factor,
@@ -1263,4 +1321,65 @@ pub use vbelt_length::{
 };
 pub use waterjet_cutting::{
     waterjet_cutting_speed_index, waterjet_jet_power, waterjet_jet_velocity,
+};
+
+// Lot massif (vol. 28) — ré-exports à plat.
+pub use air_receiver::{receiver_pump_up_time, receiver_usable_air, receiver_volume};
+pub use blank_nesting::{
+    nesting_material_utilization, nesting_part_area_for_utilization, nesting_parts_per_strip,
+    nesting_scrap_fraction, nesting_strip_pitch,
+};
+pub use capacity_planning::{
+    capacity_available_capacity, capacity_bottleneck_rate, capacity_required_capacity,
+    capacity_utilization,
+};
+pub use corrosion_rate::{
+    CORROSION_FARADAY, corrosion_penetration_rate, corrosion_rate_from_current, cpr_mass_loss,
+    faraday_corrosion_current,
+};
+pub use cutting_temperature::{
+    cutting_temp_cook_temperature_index, cutting_temp_cutting_temperature,
+    cutting_temp_shear_zone_temperature_rise,
+};
+pub use gearbox_efficiency::{
+    gearbox_output_power, gearbox_overall_efficiency, gearbox_power_loss, gearbox_stages_for_ratio,
+};
+pub use helical_gear_forces::{
+    helical_axial_force, helical_normal_force, helical_radial_force, helical_resultant_force,
+    helical_tangential_force,
+};
+pub use hydraulic_flow_velocity::{
+    hydvel_flow_velocity, hydvel_is_velocity_acceptable, hydvel_pipe_diameter_for_velocity,
+};
+pub use internal_gear::{
+    internal_center_distance, internal_gear_ratio, internal_ring_tip_diameter,
+};
+pub use ironing::{
+    ironing_force, ironing_reduction, ironing_true_strain, ironing_true_strain_from_reduction,
+    ironing_wall_perimeter,
+};
+pub use johnson_scheduling::{flowshop_idle_time_machine2, flowshop_makespan_two_machines};
+pub use line_balancing::{
+    balance_delay, balance_smoothness_index, line_cycle_time, line_efficiency,
+    line_theoretical_min_stations,
+};
+pub use littles_law::{little_cycle_time, little_throughput, little_wip};
+pub use machining_cost::{
+    machining_cost_per_part, machining_cost_tooling_per_part, machining_cost_total_batch,
+};
+pub use pressure_intensifier::{
+    intensifier_output_flow, intensifier_output_pressure, intensifier_pressure_ratio,
+    intensifier_required_input_pressure,
+};
+pub use roll_bending::{
+    roll_bend_minimum_radius, roll_bend_radius_from_geometry, roll_bend_springback_ratio,
+};
+pub use smed_setup::{
+    setup_downtime, setup_economic_batch_from_setup, smed_downtime_after_conversion,
+    smed_downtime_reduction_ratio, smed_total_changeover_time,
+};
+pub use stretch_forming::{stretch_force, stretch_thickness_after, stretch_true_strain};
+pub use takt_time::{lean_number_of_operators, takt_required_output_rate, takt_time};
+pub use worm_gear_forces::{
+    worm_axial_force, worm_normal_force, worm_separating_force, worm_tangential_force,
 };
