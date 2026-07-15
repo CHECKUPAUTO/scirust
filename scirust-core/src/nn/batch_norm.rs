@@ -115,13 +115,23 @@ impl Module for BatchNorm1d {
         self.last_b_idx = Some(beta_v.idx());
 
         // Guard against a feature-width mismatch: without this, a wider
-        // `running_mean` (e.g. from a malformed checkpoint) or a narrower input
-        // makes `update_running_stats` index out of bounds. A clear panic beats
-        // a confusing OOB one (Module::forward cannot return a Result).
+        // `running_mean` (e.g. from a malformed checkpoint or a direct write to
+        // the pub field) or a narrower input makes `update_running_stats` index
+        // out of bounds. A clear panic beats a confusing OOB one
+        // (Module::forward cannot return a Result). Check the input AND both
+        // running buffers against the parameter width.
         assert_eq!(
             f, self.gamma.cols,
             "BatchNorm1d '{}': input has {f} features but the layer was built for {}",
             self.name, self.gamma.cols
+        );
+        assert!(
+            self.running_mean.cols == self.gamma.cols && self.running_var.cols == self.gamma.cols,
+            "BatchNorm1d '{}': running_mean/var width ({}, {}) must match the {} features",
+            self.name,
+            self.running_mean.cols,
+            self.running_var.cols,
+            self.gamma.cols
         );
 
         if self.training

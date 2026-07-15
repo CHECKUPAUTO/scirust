@@ -56,6 +56,15 @@ impl InMemoryDataset {
     pub fn get(&self, idx: usize) -> (&[f32], &[f32]) {
         self.sample(idx)
     }
+
+    /// Fallible [`Self::sample`]: returns
+    /// [`crate::error::SciRustError::IndexOutOfBounds`] with a clear message
+    /// instead of panicking with an opaque slice-index error when `idx` is past
+    /// the end.
+    pub fn try_sample(&self, idx: usize) -> crate::error::Result<(&[f32], &[f32])> {
+        crate::error::check_index("dataset sample", idx, self.n)?;
+        Ok(self.sample(idx))
+    }
     pub fn x_features(&self) -> usize {
         self.x_dim
     }
@@ -158,6 +167,22 @@ mod tests {
         assert_eq!(ds.n, 2);
         assert_eq!(ds.sample(1).0, &[3.0, 4.0]);
         assert_eq!(ds.sample(1).1, &[0.0]);
+    }
+
+    #[test]
+    fn try_sample_reports_out_of_bounds() {
+        let ds = InMemoryDataset::new(vec![1.0, 2.0, 3.0, 4.0], vec![1.0, 0.0], 2, 1);
+        assert!(ds.try_sample(1).is_ok());
+        let err = ds.try_sample(2).unwrap_err();
+        assert_eq!(err.code(), "E_BOUNDS");
+        assert!(matches!(
+            err,
+            crate::error::SciRustError::IndexOutOfBounds {
+                index: 2,
+                bound: 2,
+                ..
+            }
+        ));
     }
 
     #[test]

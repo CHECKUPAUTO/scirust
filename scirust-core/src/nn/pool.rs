@@ -19,6 +19,13 @@ pub struct MaxPool2d {
 
 impl MaxPool2d {
     pub fn new(kernel: usize, stride: usize) -> Self {
+        // Reject degenerate geometry up front (mirrors Conv2d::new): stride == 0
+        // would divide by zero and kernel == 0 makes the window ill-defined —
+        // both would otherwise panic/underflow deep inside `max_pool2d`.
+        assert!(
+            kernel > 0 && stride > 0,
+            "MaxPool2d: kernel ({kernel}) and stride ({stride}) must both be > 0"
+        );
         Self {
             kernel,
             stride,
@@ -63,6 +70,14 @@ impl Module for MaxPool2d {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[should_panic(expected = "must both be > 0")]
+    fn maxpool_new_rejects_zero_stride() {
+        // Previously `stride == 0` slipped through and divided by zero deep in
+        // max_pool2d; the constructor now rejects it up front.
+        let _ = MaxPool2d::new(2, 0);
+    }
 
     #[test]
     fn maxpool_2x2_stride_2() {

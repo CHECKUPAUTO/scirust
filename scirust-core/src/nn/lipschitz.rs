@@ -91,15 +91,21 @@ pub fn spectral_norm_upper_bound(w: &[f32], rows: usize, cols: usize) -> f32 {
     {
         return 0.0;
     }
-    let mut col_sums = vec![0.0f32; cols];
-    let mut max_row = 0.0f32;
+    // Accumulate the row/column absolute-sums in f64 so the sums themselves are
+    // not rounded below the true values, then apply a small relative safety
+    // margin before narrowing to f32. Without this, f32 rounding of a large sum
+    // can make the returned bound land a few ulps *below* the true σ_max (e.g. a
+    // 7×7 all-ones matrix scaled by 2^23+1), which would make the certificate
+    // unsound; the margin (≫ f32 epsilon) keeps it a genuine upper bound.
+    let mut col_sums = vec![0.0f64; cols];
+    let mut max_row = 0.0f64;
     for i in 0..rows
     {
         let row = &w[i * cols..(i + 1) * cols];
-        let mut row_sum = 0.0f32;
+        let mut row_sum = 0.0f64;
         for (j, &wij) in row.iter().enumerate()
         {
-            let a = wij.abs();
+            let a = wij.abs() as f64;
             row_sum += a;
             col_sums[j] += a;
         }
@@ -108,8 +114,11 @@ pub fn spectral_norm_upper_bound(w: &[f32], rows: usize, cols: usize) -> f32 {
             max_row = row_sum;
         }
     }
-    let max_col = col_sums.into_iter().fold(0.0f32, f32::max);
-    (max_row * max_col).sqrt()
+    let max_col = col_sums.into_iter().fold(0.0f64, f64::max);
+    // 1e-6 ≫ f32 machine epsilon (~1.2e-7), so the result stays ≥ σ_max even
+    // after the round-to-nearest f32 narrowing.
+    let bound = (max_row * max_col).sqrt() * (1.0 + 1e-6);
+    bound as f32
 }
 
 /// A **spectrally-normalized** copy of `w` (`W / ‖W‖₂`), so the result has spectral
@@ -256,6 +265,21 @@ mod tests {
         // Exact on diag(3,-5,2): ‖·‖₁ = ‖·‖∞ = 5 ⇒ √(5·5) = 5 = σ_max.
         let d = vec![3.0, 0.0, 0.0, 0.0, -5.0, 0.0, 0.0, 0.0, 2.0];
         assert!((spectral_norm_upper_bound(&d, 3, 3) - 5.0).abs() < 1e-4);
+    }
+
+    /// Soundness at a large scale where naive f32 summation would round the
+    /// bound *below* σ_max: a 7×7 all-ones matrix scaled by 2²³+1 has exact
+    /// σ_max = 7·(2²³+1); the upper bound must not fall under it.
+    #[test]
+    fn upper_bound_is_sound_at_large_scale() {
+        let s = 8388609.0f32; // 2^23 + 1, exactly representable
+        let w = vec![s; 49]; // 7×7 all-ones × s (rank-1 ⇒ σ_max = 7·s exactly)
+        let sigma_max = 7.0f32 * s;
+        let ub = spectral_norm_upper_bound(&w, 7, 7);
+        assert!(
+            ub >= sigma_max,
+            "upper bound {ub} fell below true σ_max {sigma_max}"
+        );
     }
 
     /// After spectral normalization the spectral norm is ≈ 1 (the 1-Lipschitz

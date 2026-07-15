@@ -9,6 +9,13 @@ pub fn im2col_hpc(
     s: usize,
     p: usize,
 ) -> Vec<f32> {
+    // Guard the output-size geometry: s == 0 divides by zero and k > h+2p (or
+    // > w+2p) underflows usize. This returns a Vec (not a Result), so assert.
+    assert!(s > 0, "im2col_hpc: stride must be > 0");
+    assert!(
+        k > 0 && k <= h + 2 * p && k <= w + 2 * p,
+        "im2col_hpc: kernel {k} too large for input {h}×{w} with pad {p}"
+    );
     let ho = (h + 2 * p - k) / s + 1;
     let wo = (w + 2 * p - k) / s + 1;
     let n_cols = ho * wo;

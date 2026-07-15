@@ -196,6 +196,16 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 /// État sérialisable pour le transport réseau. Les encodages sont en
 /// **little-endian explicite** : les octets sont identiques sur toute
 /// plate-forme, la garantie bit-exacte traverse donc le réseau.
+///
+/// ⚠️ **Frontière de confiance.** `from_bytes` reconstruit l'état à partir
+/// d'octets fournis par un pair, sur un transport **non authentifié** (cf.
+/// l'en-tête du module). Le contenu (au-delà de la longueur, désormais bornée
+/// dans `recv_state`) n'est **pas** validé : un pair hostile peut fausser le
+/// résultat de la réduction, et pour [`ExactSum`] des mots d'accumulateur
+/// adverses peuvent faire déborder le [`crate::exact_acc::ExactAcc`] Kulisch
+/// lors de l'absorption (résultat erroné en release, `debug_assert` en debug).
+/// N'utiliser ce transport qu'entre pairs de confiance (réseau privé/authentifié
+/// en amont).
 pub trait WireState: Sized {
     fn to_bytes(&self) -> Vec<u8>;
     fn from_bytes(b: &[u8]) -> Self;

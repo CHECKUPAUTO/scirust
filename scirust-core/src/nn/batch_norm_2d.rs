@@ -86,6 +86,15 @@ impl Module for BatchNorm2d {
             0,
             "BatchNorm2d: total_features {total_features} not divisible by num_channels {c}"
         );
+        // Guard the running buffers (pub fields, so directly writable) against a
+        // channel-count mismatch, else update_running_stats indexes OOB.
+        assert!(
+            self.running_mean.cols == c && self.running_var.cols == c,
+            "BatchNorm2d '{}': running_mean/var width ({}, {}) must match num_channels {c}",
+            self.name,
+            self.running_mean.cols,
+            self.running_var.cols
+        );
         let ncol = total_features / c * n; // N * H * W  (per-channel element count)
 
         // NCHW (N, C*HW) -> channel-major (C, N*HW): each row = one channel.

@@ -1,12 +1,13 @@
 //! **Runtime value-bounds enforcement** (not a formal certificate).
 //!
 //! ⚠️ Naming honesty: despite the "certified/contract/invariant" vocabulary,
-//! this module performs a **runtime clamp** — it inspects a tensor's values and,
-//! if any fall outside `[MIN, MAX]` or are NaN/Inf, returns a scrubbed copy
-//! (clamped, with NaN/Inf replaced by 0). There is **no proof, no static
-//! guarantee, and no certificate**: it is a defensive output sanitizer, useful
-//! for keeping activations finite/bounded, nothing more. For *provable* bounds
-//! see `crown_ibp`/`ibp` (interval bounds), `lipschitz` (Lipschitz radius), or
+//! this module performs a **runtime clamp** — it inspects a tensor's values and
+//! returns a scrubbed copy where out-of-range and ±Inf values are clamped to the
+//! nearest bound (`MIN`/`MAX`) and NaN is replaced by `0` (note: `0` may itself
+//! lie outside `[MIN, MAX]`). There is **no proof, no static guarantee, and no
+//! certificate**: it is a defensive output sanitizer, useful for keeping
+//! activations finite/bounded, nothing more. For *provable* bounds see
+//! `crown_ibp`/`ibp` (interval bounds), `lipschitz` (Lipschitz radius), or
 //! `smoothing` (randomized smoothing).
 
 use crate::autodiff::reverse::{Tape, Tensor, Var};

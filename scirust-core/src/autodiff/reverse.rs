@@ -1581,16 +1581,17 @@ impl Tape {
                 Op::Reciprocal(a) =>
                 {
                     let av = &values[a].as_cpu();
-                    // d/dx (1/x) = -1/x², computed exactly for x ≠ 0. Guard ONLY
-                    // the exact singularity x == 0 (return 0 there) to avoid
-                    // ±inf and 0·inf = NaN. The previous `-1/(x²+1e-10)` instead
-                    // corrupted the gradient for ALL |x| ≲ 1e-4 (≈50% error at
-                    // x=1e-5) — the common-precision range — while `Div` stayed
-                    // exact.
+                    // d/dx (1/x) = -1/x², computed exactly for x ≠ 0. Guard on
+                    // the denominator x² == 0 (return 0 there) to avoid ±inf and
+                    // 0·inf = NaN — this covers both x == 0 AND a tiny x whose
+                    // square underflows to 0 in f32 (e.g. x ≈ 1e-23). The
+                    // previous `-1/(x²+1e-10)` instead corrupted the gradient for
+                    // ALL |x| ≲ 1e-4 (≈50% error at x=1e-5) — the common-precision
+                    // range — while `Div` stayed exact.
                     let mut minus_one_over_x2 = av.hadamard(av); // x²
-                    for (d, &x) in minus_one_over_x2.data.iter_mut().zip(av.data.iter())
+                    for d in minus_one_over_x2.data.iter_mut()
                     {
-                        *d = if x == 0.0 { 0.0 } else { -1.0 / *d };
+                        *d = if *d == 0.0 { 0.0 } else { -1.0 / *d };
                     }
                     grads[a] = grads[a].add(&g.hadamard(&minus_one_over_x2));
                 },
@@ -4112,6 +4113,14 @@ impl<'t> Var<'t> {
     }
 
     pub fn max_pool2d(self, c: usize, h: usize, w: usize, kernel: usize, stride: usize) -> Var<'t> {
+        // Guard the pooling geometry: stride == 0 divides by zero and kernel > h
+        // (or > w) underflows `usize` (→ huge out size → OOM/OOB). This method
+        // returns a Var (not a Result), so a clear panic is the best we can do.
+        assert!(stride > 0, "max_pool2d: stride must be > 0");
+        assert!(
+            kernel > 0 && kernel <= h && kernel <= w,
+            "max_pool2d: kernel {kernel} must be in 1..=min(h,w) for input {h}×{w}"
+        );
         let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
         let h_out = (h - kernel) / stride + 1;
         let w_out = (w - kernel) / stride + 1;
@@ -4332,8 +4341,26 @@ impl<'t> Var<'t> {
                 got: wv.shape(),
             });
         }
-        let h_out = (h - 1) * stride + kernel - 2 * pad + output_padding;
-        let w_out = (w - 1) * stride + kernel - 2 * pad + output_padding;
+        // Guard the transposed-conv geometry against usize underflow: h/w == 0
+        // underflows `h - 1`, and `2·pad` larger than `(h-1)·stride + kernel`
+        // underflows the subtraction (→ huge out size → OOM/OOB). Reject on the
+        // Result path (same contract as try_conv2d_forward).
+        if h == 0 || w == 0
+        {
+            return Err(crate::error::SciRustError::InvalidConfig(
+                "conv2d_transpose_forward: input h and w must be > 0".to_string(),
+            ));
+        }
+        let h_base = (h - 1) * stride + kernel;
+        let w_base = (w - 1) * stride + kernel;
+        if 2 * pad > h_base || 2 * pad > w_base
+        {
+            return Err(crate::error::SciRustError::InvalidConfig(format!(
+                "conv2d_transpose_forward: pad {pad} too large for input {h}×{w}, kernel {kernel}, stride {stride}"
+            )));
+        }
+        let h_out = h_base - 2 * pad + output_padding;
+        let w_out = w_base - 2 * pad + output_padding;
         let out_rows = batch;
         let out_cols = out_c * h_out * w_out;
         let mut out = Tensor::zeros(out_rows, out_cols);
@@ -5657,6 +5684,21 @@ mod layer_norm_backward_tests {
         // And specifically NOT the old buggy value -1/(x²+1e-10) ≈ -5e9.
         let buggy = -1.0 / (x0 * x0 + 1e-10);
         assert!((analytic - buggy).abs() / buggy.abs() > 0.1);
+    }
+
+    #[test]
+    fn reciprocal_gradient_no_nan_when_x2_underflows() {
+        // A tiny x whose square underflows to 0 in f32 (x=1e-23 → x²=0), with a
+        // zero upstream gradient, must not yield 0·(-inf)=NaN. The x²==0 guard
+        // (not just x==0) covers this. loss = sum(reciprocal(x))·0.
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![1e-23f32, 2.0], 1, 2));
+        let x_idx = x.idx();
+        let loss = x.reciprocal().scale(0.0).sum();
+        tape.backward(loss.idx());
+        let g = tape.grad(x_idx);
+        assert!(!g.data[0].is_nan(), "grad[0] = {}", g.data[0]);
+        assert!(!g.data[1].is_nan(), "grad[1] = {}", g.data[1]);
     }
 
     // Direct guard for the specific gamma bug: with x_norm having per-row mean 0,

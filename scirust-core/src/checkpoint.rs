@@ -68,7 +68,7 @@ pub fn save_checkpoint(
     opt_state: &OptimizerState,
     epoch: usize,
     step: usize,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> crate::error::Result<()> {
     let dir = dir.as_ref();
     fs::create_dir_all(dir)?;
 
@@ -86,8 +86,10 @@ pub fn save_checkpoint(
     Ok(())
 }
 
-/// Load a checkpoint from a directory.
-pub fn load_checkpoint(dir: impl AsRef<Path>) -> Result<Checkpoint, Box<dyn std::error::Error>> {
+/// Load a checkpoint from a directory. A missing/unreadable file surfaces as
+/// [`crate::error::SciRustError::IoError`]; malformed JSON as
+/// [`crate::error::SciRustError::InvalidFormat`] (via `From<serde_json::Error>`).
+pub fn load_checkpoint(dir: impl AsRef<Path>) -> crate::error::Result<Checkpoint> {
     let dir = dir.as_ref();
     let json = fs::read_to_string(dir.join("checkpoint.json"))?;
     let checkpoint: Checkpoint = serde_json::from_str(&json)?;
@@ -97,7 +99,7 @@ pub fn load_checkpoint(dir: impl AsRef<Path>) -> Result<Checkpoint, Box<dyn std:
 /// List all checkpoints in a directory, sorted by epoch.
 pub fn list_checkpoints(
     parent_dir: impl AsRef<Path>,
-) -> Result<Vec<(usize, std::path::PathBuf)>, Box<dyn std::error::Error>> {
+) -> crate::error::Result<Vec<(usize, std::path::PathBuf)>> {
     let parent = parent_dir.as_ref();
     let mut checkpoints = Vec::new();
 
@@ -159,6 +161,24 @@ mod tests {
             loaded.weights.get("fc1.weight").unwrap(),
             &vec![0.1, 0.2, 0.3]
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_rejects_malformed_json_as_invalid_format() {
+        // Exercises From<serde_json::Error> for SciRustError → InvalidFormat.
+        let dir = std::env::temp_dir().join("scirust_ckpt_test_badjson");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("checkpoint.json"), b"{ not valid json ]").unwrap();
+
+        let err = load_checkpoint(&dir).unwrap_err();
+        assert_eq!(err.code(), "E_FORMAT");
+        assert!(matches!(
+            err,
+            crate::error::SciRustError::InvalidFormat { .. }
+        ));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
