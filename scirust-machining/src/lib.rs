@@ -562,6 +562,26 @@
 //! - [`valve_flow_coefficient`] — coefficient de débit de vanne (Kv/Cv) en liquide.
 //! - [`standard_atmosphere`] — atmosphère standard (troposphère ISA) : pression, température, densité.
 //! - [`centrifugal_separation`] — séparation centrifuge : RCF, vitesse de sédimentation.
+//! - [`riser_design`] — masselotte de fonderie : méthode des modules, rendement d'alimentation.
+//! - [`thermal_resistance`] — mur composite : conduction/convection, série/parallèle, U, flux.
+//! - [`view_factor`] — rayonnement : facteurs de forme (réciprocité, fermeture), échange net.
+//! - [`faraday_corrosion`] — corrosion (loi de Faraday) : perte de masse, vitesse de pénétration.
+//! - [`beam_deflection`] — flèche de poutres (Euler-Bernoulli) : cas console et sur appuis.
+//! - [`section_modulus`] — module de flexion Z = I/c et contrainte σ = M/Z.
+//! - [`bend_allowance`] — développé de tôle pliée : facteur K, allongement, déduction de pli.
+//! - [`turning_roughness`] — rugosité théorique en tournage : Ra, Rz depuis avance/bec.
+//! - [`elastic_constants`] — relations E, G, K, ν, λ (matériau isotrope linéaire).
+//! - [`restitution`] — choc direct : coefficient de restitution, vitesses, énergie dissipée.
+//! - [`projectile_motion`] — balistique du vide : portée, hauteur, temps de vol, angle optimal.
+//! - [`spring_combination`] — association de ressorts : raideurs série/parallèle.
+//! - [`gear_lewis`] — flexion de denture (Lewis) : contrainte, effort admissible, facteur de Barth.
+//! - [`gear_contact_ratio`] — rapport de conduite d'un engrenage droit à développante.
+//! - [`bolt_torque`] — serrage de boulon : couple-tension T = K·d·F, précharge.
+//! - [`fillet_weld`] — cordon d'angle : gorge, cisaillement, effort admissible, longueur.
+//! - [`crank_effort`] — moment moteur sur vilebrequin (bielle-manivelle, obliquité).
+//! - [`friction_brake`] — frein à sabot : couple de freinage, puissance dissipée, temps d'arrêt.
+//! - [`shaft_sizing`] — arbre en torsion pure : puissance/couple, diamètre requis.
+//! - [`motor_starting`] — démarrage moteur : couple accélérateur, temps, courant DOL/étoile-triangle.
 //!
 //! ## Positionnement
 //!
@@ -947,6 +967,30 @@ pub mod torsion_bar;
 pub mod valve_flow_coefficient;
 pub mod venturi_meter;
 pub mod weir_flow;
+
+// Lot massif (vol. 33) — fonderie, transfert thermique/rayonnement, corrosion,
+// structure (poutres, sections), tôlerie, usinage, dynamique du choc/vol,
+// éléments de machines et entraînements.
+pub mod beam_deflection;
+pub mod bend_allowance;
+pub mod bolt_torque;
+pub mod crank_effort;
+pub mod elastic_constants;
+pub mod faraday_corrosion;
+pub mod fillet_weld;
+pub mod friction_brake;
+pub mod gear_contact_ratio;
+pub mod gear_lewis;
+pub mod motor_starting;
+pub mod projectile_motion;
+pub mod restitution;
+pub mod riser_design;
+pub mod section_modulus;
+pub mod shaft_sizing;
+pub mod spring_combination;
+pub mod thermal_resistance;
+pub mod turning_roughness;
+pub mod view_factor;
 
 pub use accelerated_life::{
     BOLTZMANN_EV_K, arrhenius_acceleration_factor, derated_value, ten_degree_rule_factor,
@@ -1817,3 +1861,76 @@ pub use valve_flow_coefficient::{
 };
 pub use venturi_meter::{venturi_beta_ratio, venturi_flow_rate, venturi_pressure_drop};
 pub use weir_flow::{weir_head_from_rectangular_flow, weir_rectangular_flow, weir_vnotch_flow};
+
+// Lot massif (vol. 33) — ré-exports à plat.
+pub use beam_deflection::{
+    beam_cantilever_end_load, beam_cantilever_udl, beam_simply_supported_center_load,
+    beam_simply_supported_udl,
+};
+pub use bend_allowance::{
+    bend_allowance_length, bend_deduction_length, bend_flat_length, bend_neutral_radius,
+    bend_outside_setback,
+};
+pub use bolt_torque::{
+    bolt_clamp_force_after_relaxation, bolt_preload_from_torque, bolt_preload_from_yield,
+    bolt_tightening_torque,
+};
+pub use crank_effort::{
+    crank_obliquity_ratio, crank_piston_force_to_torque, crank_turning_moment_gas,
+};
+pub use elastic_constants::{
+    elastic_bulk_modulus_from_e_nu, elastic_lame_lambda, elastic_poisson_from_e_g,
+    elastic_shear_modulus_from_e_nu, elastic_youngs_from_g_nu,
+};
+pub use faraday_corrosion::{
+    FARADAY_CONSTANT, faraday_corrosion_current_from_rate, faraday_mass_loss_rate,
+    faraday_penetration_rate,
+};
+pub use fillet_weld::{
+    fillet_weld_capacity, fillet_weld_required_length, fillet_weld_shear_stress, fillet_weld_throat,
+};
+pub use friction_brake::{
+    friction_brake_double_shoe_torque, friction_brake_heat_power, friction_brake_stopping_time,
+    friction_brake_torque,
+};
+pub use gear_contact_ratio::{
+    gear_contact_base_pitch, gear_contact_length_of_action, gear_contact_ratio,
+};
+pub use gear_lewis::{
+    gear_lewis_allowable_force, gear_lewis_bending_stress, gear_lewis_with_velocity_factor,
+};
+pub use motor_starting::{
+    motor_acceleration_torque, motor_dol_starting_current, motor_star_delta_starting_current,
+    motor_starting_time,
+};
+pub use projectile_motion::{
+    projectile_max_height, projectile_optimal_angle, projectile_range, projectile_time_of_flight,
+};
+pub use restitution::{
+    restitution_coefficient, restitution_energy_loss, restitution_final_velocity_1,
+    restitution_final_velocity_2,
+};
+pub use riser_design::{
+    riser_cooling_modulus, riser_cylinder_volume_for_modulus, riser_feeding_efficiency,
+    riser_modulus_criterion,
+};
+pub use section_modulus::{
+    section_bending_stress, section_modulus_hollow_circle, section_modulus_rectangle,
+    section_modulus_solid_circle,
+};
+pub use shaft_sizing::{
+    shaft_diameter_from_torque, shaft_power_from_torque, shaft_torque_from_diameter,
+    shaft_torque_from_power,
+};
+pub use spring_combination::{
+    spring_deflection_from_rate, spring_parallel_rate, spring_series_rate, spring_series_two,
+};
+pub use thermal_resistance::{
+    thermal_heat_rate, thermal_overall_coefficient, thermal_resistance_conduction,
+    thermal_resistance_convection, thermal_resistance_parallel, thermal_resistance_series,
+};
+pub use turning_roughness::{turning_feed_for_ra, turning_theoretical_ra, turning_theoretical_rz};
+pub use view_factor::{
+    view_factor_infinite_parallel_plates, view_factor_net_exchange, view_factor_reciprocity,
+    view_factor_summation_last,
+};
