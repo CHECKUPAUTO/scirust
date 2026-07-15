@@ -1614,13 +1614,18 @@ impl Tape {
 
         for i in (0..=idx).rev()
         {
-            // Skip dead gradients before cloning — many nodes never receive one
-            // (off the backward path), so this avoids an O(size) clone for them.
+            // Skip dead gradients — many nodes never receive one (off the
+            // backward path).
             if grads[i].data.iter().all(|&x| x == 0.0)
             {
                 continue;
             }
-            let g = grads[i].clone();
+            // Move this node's gradient out instead of cloning it. No backward
+            // arm touches its own node's slot (operands are always earlier
+            // nodes, index < i), so `grads[i]` is untouched during the match; we
+            // put it back afterwards so `Tape::grad` still sees the accumulated
+            // value. The placeholder is an empty `Vec` — no allocation.
+            let g = std::mem::replace(&mut grads[i], Tensor::zeros(0, 0));
 
             match nodes[i].op
             {
@@ -3392,6 +3397,9 @@ impl Tape {
                     grads[v] = grads[v].add(&dv_t);
                 },
             }
+            // Restore this node's gradient (moved out above) so it stays
+            // readable via `Tape::grad` after backward.
+            grads[i] = g;
         }
     }
 }
@@ -5275,6 +5283,24 @@ pub fn concat_rows<'t>(tape: &'t Tape, rows: &[Var<'t>]) -> Var<'t> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `backward` moves each node's gradient out of its slot to avoid a clone,
+    /// then restores it. This pins that every node stays readable via
+    /// `Tape::grad` afterwards — including *intermediate* (non-leaf) nodes, not
+    /// just inputs — with the correct accumulated value.
+    #[test]
+    fn backward_preserves_intermediate_node_gradients() {
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![1.0, 2.0, 3.0], 1, 3));
+        let y = x.scale(2.0); // y = 2x        (intermediate)
+        let z = y.hadamard(y); // z = y²        (intermediate)
+        z.sum().backward();
+
+        // dL/dz = 1 ; dL/dy = 2y = 4x ; dL/dx = 2·dL/dy = 8x.
+        assert_eq!(tape.grad(z.idx()).data, vec![1.0, 1.0, 1.0]);
+        assert_eq!(tape.grad(y.idx()).data, vec![4.0, 8.0, 12.0]);
+        assert_eq!(tape.grad(x.idx()).data, vec![8.0, 16.0, 24.0]);
+    }
 
     // ---------- Fused backward accumulators ---------- //
 
