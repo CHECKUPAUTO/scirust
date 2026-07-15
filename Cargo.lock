@@ -3588,6 +3588,7 @@ dependencies = [
 name = "scirust-simd"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "libc",
  "scirust-simd-macros",
 ]

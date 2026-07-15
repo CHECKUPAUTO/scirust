@@ -17,6 +17,14 @@ portable-simd = []
 nightly-simd = []
 default = []
 
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "hypercomplex_bench"
+harness = false
+required-features = ["portable-simd"]
+
 [[example]]
 name = "amx_bench"
 required-features = ["nightly-simd"]

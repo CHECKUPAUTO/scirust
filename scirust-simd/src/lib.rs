@@ -654,6 +654,12 @@ pub mod qkv_cache;
 pub mod quant;
 pub mod transformer;
 
+// Algèbres hypercomplexes register-résidentes (octonions f32x8,
+// sédénions f32x16) — construites sur std::simd, donc uniquement
+// disponibles avec la feature nightly `portable-simd`.
+#[cfg(feature = "portable-simd")]
+pub mod hypercomplex;
+
 #[cfg(all(feature = "nightly-simd", target_arch = "x86_64"))]
 pub mod amx;
 #[cfg(all(feature = "nightly-simd", target_arch = "x86_64"))]
