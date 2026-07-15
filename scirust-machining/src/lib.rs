@@ -383,6 +383,44 @@
 //!   (filet ISO).
 //! - [`countersink_depth`] — usinage : profondeur d'un lamage conique
 //!   (fraisure).
+//! - [`electroplating`] — galvanoplastie : loi de **Faraday** (masse déposée,
+//!   épaisseur, durée d'électrolyse).
+//! - [`anodizing`] — anodisation : croissance de couche d'oxyde (épaisseur,
+//!   durée, densité de courant).
+//! - [`shot_peening`] — grenaillage : couverture (Avrami) et intensité **Almen**.
+//! - [`spot_welding`] — soudage par points : chaleur de **Joule** `I²·R·t` et
+//!   densité de chaleur du noyau.
+//! - [`laser_cutting`] — découpe laser : vitesse de coupe, puissance requise et
+//!   densité de puissance.
+//! - [`waterjet_cutting`] — jet d'eau abrasif : vitesse du jet (**Bernoulli**),
+//!   indice de vitesse et puissance.
+//! - [`edm_machining`] — électroérosion : débit d'enlèvement, usure d'électrode et
+//!   surcoupe.
+//! - [`cotter_joint`] — clavette transversale : cisaillement, matage et traction.
+//! - [`knuckle_joint`] — assemblage à chape et œil : cisaillement d'axe, matage et
+//!   traction.
+//! - [`coupling_misalignment`] — désalignement d'accouplement : angle, effort de
+//!   réaction et résultante.
+//! - [`shaft_alignment`] — alignement d'arbres au comparateur (rim-and-face) :
+//!   angulaire, offset et cales.
+//! - [`gear_efficiency`] — rendement d'engrenage droit : perte par glissement,
+//!   puissance perdue/transmise.
+//! - [`retaining_ring`] — circlip : capacité axiale (matage de gorge, cisaillement
+//!   de l'anneau).
+//! - [`bearing_preload`] — précharge de roulement : flèche, rigidité effective et
+//!   effort de calage.
+//! - [`vbelt_length`] — longueur de courroie (montage ouvert/croisé) et angles
+//!   d'enroulement.
+//! - [`belt_slip`] — glissement de courroie : perte de vitesse, rapport effectif
+//!   et fluage.
+//! - [`bevel_gear_forces`] — efforts sur engrenage conique : tangentiel, radial,
+//!   axial et résultant.
+//! - [`acceptance_sampling`] — contrôle de réception : probabilité d'acceptation
+//!   (plan simple binomial) et AOQ.
+//! - [`shewhart_xbar`] — cartes de **Shewhart** X̄/R : limites de contrôle (A2, D3,
+//!   D4) et test sous contrôle.
+//! - [`rolled_throughput_yield`] — qualité multi-étapes : FPY, RTY, rendement
+//!   normalisé et DPU.
 //!
 //! ## Positionnement
 //!
@@ -629,6 +667,29 @@ pub mod tap_drill_size;
 pub mod thread_milling;
 pub mod total_runout;
 pub mod workspace_2r;
+
+// Lot massif (vol. 27) — traitement de surface, procédés d'assemblage/découpe,
+// éléments d'assemblage, alignement/transmission et qualité/SPC.
+pub mod acceptance_sampling;
+pub mod anodizing;
+pub mod bearing_preload;
+pub mod belt_slip;
+pub mod bevel_gear_forces;
+pub mod cotter_joint;
+pub mod coupling_misalignment;
+pub mod edm_machining;
+pub mod electroplating;
+pub mod gear_efficiency;
+pub mod knuckle_joint;
+pub mod laser_cutting;
+pub mod retaining_ring;
+pub mod rolled_throughput_yield;
+pub mod shaft_alignment;
+pub mod shewhart_xbar;
+pub mod shot_peening;
+pub mod spot_welding;
+pub mod vbelt_length;
+pub mod waterjet_cutting;
 
 pub use accelerated_life::{
     BOLTZMANN_EV_K, arrhenius_acceleration_factor, derated_value, ten_degree_rule_factor,
@@ -1144,3 +1205,62 @@ pub use thread_milling::{
 };
 pub use total_runout::{runout_circular, runout_is_within, tir_total_indicated_runout};
 pub use workspace_2r::{ws2r_is_reachable, ws2r_max_reach, ws2r_min_reach, ws2r_workspace_area};
+
+// Lot massif (vol. 27) — ré-exports à plat.
+pub use acceptance_sampling::{
+    average_outgoing_quality, probability_of_acceptance_binomial,
+    probability_of_rejection_binomial, sampling_binomial_coefficient, sampling_binomial_pmf,
+};
+pub use anodizing::{
+    anodizing_current_density_for_thickness, anodizing_growth_factor, anodizing_time_for_thickness,
+    oxide_sealed_thickness, oxide_thickness,
+};
+pub use bearing_preload::{axial_preload_from_offset, preload_deflection, preloaded_stiffness};
+pub use belt_slip::{
+    belt_slip_creep_from_tension, belt_slip_effective_velocity_ratio, belt_slip_speed_loss,
+};
+pub use bevel_gear_forces::{
+    bevel_axial_force, bevel_radial_force, bevel_resultant_force, bevel_separating_force,
+    bevel_tangential_force,
+};
+pub use cotter_joint::{cotter_crushing_stress, cotter_shear_stress, rod_tensile_stress};
+pub use coupling_misalignment::{
+    coupling_parallel_offset_reaction, misalign_angular_deg, misalign_combined,
+};
+pub use edm_machining::{edm_electrode_wear_ratio, edm_material_removal_rate, edm_overcut};
+pub use electroplating::{
+    FARADAY, plating_deposited_mass, plating_thickness, plating_time_for_thickness,
+};
+pub use gear_efficiency::{
+    gear_eff_output_power, gear_eff_power_loss, gear_eff_spur_efficiency,
+    mesh_sliding_factor_from_arcs, mesh_sliding_loss_fraction,
+};
+pub use knuckle_joint::{
+    knuckle_eye_crushing_stress, knuckle_fork_crushing_stress, knuckle_pin_shear_stress,
+    knuckle_rod_tensile_stress,
+};
+pub use laser_cutting::{laser_cutting_speed, laser_power_density, laser_required_power};
+pub use retaining_ring::{ring_shear_capacity, ring_thrust_capacity};
+pub use rolled_throughput_yield::{
+    rty_first_pass_yield, rty_normalized_yield, rty_rolled_throughput_yield,
+    rty_total_defects_per_unit, rty_yield_from_defects_per_unit,
+};
+pub use shaft_alignment::{
+    alignment_angular_misalignment, alignment_shim_correction, rim_parallel_offset,
+};
+pub use shewhart_xbar::{
+    rchart_center_line, rchart_lower_control_limit, rchart_upper_control_limit,
+    shewhart_process_in_control, xbar_center_line, xbar_lower_control_limit,
+    xbar_upper_control_limit,
+};
+pub use shot_peening::{
+    almen_arc_height, almen_saturation_increase_ratio, peening_coverage_from_passes,
+    peening_coverage_percent, peening_passes_for_coverage, peening_time_for_coverage,
+};
+pub use spot_welding::{joule_heat, nugget_heat_density, spot_current_from_heat};
+pub use vbelt_length::{
+    crossed_belt_length, open_belt_length, open_belt_wrap_angle_large, open_belt_wrap_angle_small,
+};
+pub use waterjet_cutting::{
+    waterjet_cutting_speed_index, waterjet_jet_power, waterjet_jet_velocity,
+};
