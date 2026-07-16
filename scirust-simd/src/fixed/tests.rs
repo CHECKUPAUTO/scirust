@@ -12,6 +12,7 @@ use super::conv::{Conv1dShape, conv1d};
 use super::layer::Linear;
 use super::linalg;
 use super::math::{reciprocal, rsqrt, sqrt};
+use super::pool::{Pool1dShape, avg_pool1d, max_pool1d};
 use super::reductions as red;
 use super::rescale::{rescale, rescale_saturating, rescale_wrapping};
 use super::simd::{FixedI16x8, FixedI32x8, FixedI64x4};
@@ -1166,6 +1167,201 @@ fn conv1d_i64_storage() {
     let y = conv1d(&x, &w, &b, shape);
     // Sommes glissantes [1+2, 2+3, 3+4] = [3,5,7], + biais 10 → [13,15,17].
     assert_eq!(y, [13i64, 15, 17].map(Q32_32::from));
+}
+
+// ------------------------------------------------------------------ //
+//  Pooling 1D                                                         //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn max_pool1d_known_small() {
+    // 1 canal, x = [1,5,3,2,8,4], fenêtre 2, stride 2 (non chevauchant) :
+    // y = [max(1,5), max(3,2), max(8,4)] = [5,3,8].
+    let x = [1i32, 5, 3, 2, 8, 4].map(Q16_16::from);
+    let shape = Pool1dShape {
+        channels: 1,
+        length: 6,
+        window: 2,
+        stride: 2,
+    };
+    let y = max_pool1d(&x, shape);
+    assert_eq!(y, [5i32, 3, 8].map(Q16_16::from));
+}
+
+#[test]
+fn avg_pool1d_known_small() {
+    // 1 canal, x = [1,3,5,7], fenêtre 2, stride 2 : y = [(1+3)/2, (5+7)/2] = [2,6].
+    let x = [1i32, 3, 5, 7].map(Q16_16::from);
+    let shape = Pool1dShape {
+        channels: 1,
+        length: 4,
+        window: 2,
+        stride: 2,
+    };
+    let y = avg_pool1d(&x, shape);
+    assert_eq!(y, [2i32, 6].map(Q16_16::from));
+}
+
+#[test]
+fn pool1d_multi_channel_overlapping_window() {
+    // 2 canaux, fenêtre chevauchante (stride < window). Sommes de fenêtre
+    // choisies multiples de `window` pour une moyenne entière exacte (la
+    // division virgule fixe calcule le quotient réel, pas une division
+    // entière : (1+4+2)/3 = 2.333…, pas 2 — ces valeurs évitent toute
+    // ambiguïté d'arrondi dans un test « connu »).
+    let x = [3i32, 6, 9, 12, /* canal 2 */ 30, 60, 90, 120].map(Q16_16::from);
+    let shape = Pool1dShape {
+        channels: 2,
+        length: 4,
+        window: 3,
+        stride: 1,
+    };
+    // length_out = (4-3)/1+1 = 2.
+    let mx = max_pool1d(&x, shape);
+    assert_eq!(mx, [9i32, 12, /* canal 2 */ 90, 120].map(Q16_16::from));
+    let avg = avg_pool1d(&x, shape);
+    // canal 1 : (3+6+9)/3=6, (6+9+12)/3=9 ; canal 2 : (30+60+90)/3=60, (60+90+120)/3=90.
+    assert_eq!(avg, [6i32, 9, 60, 90].map(Q16_16::from));
+}
+
+#[test]
+fn max_pool1d_matches_reductions_max_reference() {
+    let mut rng = Lcg(0xF00D);
+    for &(channels, length, window, stride) in
+        &[(3, 10, 3, 2), (1, 8, 8, 1), (4, 15, 4, 3), (2, 7, 2, 1)]
+    {
+        let shape = Pool1dShape {
+            channels,
+            length,
+            window,
+            stride,
+        };
+        let length_out = shape.length_out();
+        let x: Vec<Q16_16> = (0..channels * length)
+            .map(|_| Q16_16::from_raw(rng.raw_i32()))
+            .collect();
+        let got = max_pool1d(&x, shape);
+        for c in 0..channels
+        {
+            for j in 0..length_out
+            {
+                let start = c * length + j * stride;
+                let want = red::max(&x[start..start + window]).unwrap();
+                assert_eq!(got[c * length_out + j], want, "max_pool c={c} j={j}");
+            }
+        }
+    }
+}
+
+#[test]
+fn avg_pool1d_matches_sum_div_window_reference() {
+    let mut rng = Lcg(0xFACE);
+    for &(channels, length, window, stride) in
+        &[(3, 10, 3, 2), (1, 8, 8, 1), (4, 15, 4, 3), (2, 7, 2, 1)]
+    {
+        let shape = Pool1dShape {
+            channels,
+            length,
+            window,
+            stride,
+        };
+        let length_out = shape.length_out();
+        let x: Vec<Q16_16> = (0..channels * length)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 4))
+            .collect();
+        let got = avg_pool1d(&x, shape);
+        let divisor = Q16_16::from(window as i32);
+        for c in 0..channels
+        {
+            for j in 0..length_out
+            {
+                let start = c * length + j * stride;
+                let want = red::sum(&x[start..start + window])
+                    .checked_div(divisor)
+                    .unwrap();
+                assert_eq!(got[c * length_out + j], want, "avg_pool c={c} j={j}");
+            }
+        }
+    }
+}
+
+#[test]
+fn pool1d_stride_equals_window_is_disjoint_tiling() {
+    // stride == window : les fenêtres ne se chevauchent pas (pavage exact).
+    let x = [1i32, 2, 3, 4, 5, 6, 7, 8].map(Q16_16::from);
+    let shape = Pool1dShape {
+        channels: 1,
+        length: 8,
+        window: 4,
+        stride: 4,
+    };
+    assert_eq!(shape.length_out(), 2);
+    let y = max_pool1d(&x, shape);
+    assert_eq!(y, [4i32, 8].map(Q16_16::from));
+}
+
+#[test]
+#[should_panic(expected = "Pool1dShape::length_out")]
+fn pool1d_window_larger_than_length_panics() {
+    let x = [Q16_16::one(); 3];
+    let shape = Pool1dShape {
+        channels: 1,
+        length: 3,
+        window: 5,
+        stride: 1,
+    };
+    let _ = max_pool1d(&x, shape);
+}
+
+#[test]
+#[should_panic(expected = "max_pool1d")]
+fn pool1d_dim_mismatch_panics() {
+    let x = [Q16_16::one(); 5]; // annoncé 1×5
+    let shape = Pool1dShape {
+        channels: 1,
+        length: 6,
+        window: 2,
+        stride: 1,
+    };
+    let _ = max_pool1d(&x, shape);
+}
+
+#[test]
+fn pool1d_i64_storage() {
+    // Chemin de stockage i64 (Q32.32) : mêmes garanties.
+    let x = [1i64, 9, 3, 7].map(Q32_32::from);
+    let shape = Pool1dShape {
+        channels: 1,
+        length: 4,
+        window: 2,
+        stride: 2,
+    };
+    assert_eq!(max_pool1d(&x, shape), [9i64, 7].map(Q32_32::from));
+    assert_eq!(avg_pool1d(&x, shape), [5i64, 5].map(Q32_32::from));
+}
+
+#[test]
+fn pool1d_feeds_conv1d_chain() {
+    // Usage réaliste : conv1d → max_pool1d, comme dans un CNN léger.
+    let x = [1i32, 2, 3, 4, 5, 6].map(Q16_16::from); // 1 canal, longueur 6
+    let w = [1i32, -1].map(Q16_16::from); // différence discrète
+    let b = [Q16_16::zero()];
+    let conv_shape = Conv1dShape {
+        in_channels: 1,
+        length: 6,
+        out_channels: 1,
+        kernel_size: 2,
+        stride: 1,
+    };
+    let conv_out = conv1d(&x, &w, &b, conv_shape); // x[j]-x[j+1] = [-1,-1,-1,-1,-1], longueur 5
+    let pool_shape = Pool1dShape {
+        channels: 1,
+        length: conv_out.len(),
+        window: 2,
+        stride: 2,
+    };
+    let pooled = max_pool1d(&conv_out, pool_shape);
+    assert_eq!(pooled, [q16(-1.0), q16(-1.0)]);
 }
 
 // ------------------------------------------------------------------ //
