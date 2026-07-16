@@ -113,6 +113,7 @@ pub mod streaming;
 pub mod transform;
 pub mod variational;
 pub mod vst;
+pub mod vst_bench;
 
 pub use adaptive::{
     KalmanFit, kalman_smooth, kalman_smooth_auto, kalman_trend_smooth, lms_line_enhancer,
