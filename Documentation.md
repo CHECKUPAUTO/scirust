@@ -310,6 +310,17 @@ signal — appeler `remove_mains_hum_iir` explicitement quand la fréquence sect
 est connue. Le banc de qualité complet (méthodes × types de bruit × SNR) se lance
 avec `cargo run -p scirust-signal --example denoise_benchmark`.
 
+**Validation sur données réelles** : au-delà des fixtures synthétiques, le
+débruitage est éprouvé sur de l'ECG réel (MIT-BIH record 100) corrompu par du bruit
+**réel enregistré** (Noise Stress Test Database : artefact musculaire, dérive de
+ligne de base), ajouté à SNR contrôlé pour disposer d'une vérité-terrain — fixture
+attribuée (ODC-BY) dans `tests/data/ecg_mitbih.csv`, test `tests/real_data_ecg.rs`,
+tables et observations honnêtes via `cargo run -p scirust-signal --example
+denoise_real_ecg`. Résultats saillants : le détecteur VST ne se déclenche jamais à
+tort sur de l'ECG réel (bruit additif), l'ondelette retire l'artefact musculaire, et
+les limites propres aux données réelles (QRS lus comme impulsifs, dérive recouvrant
+le contenu basse-fréquence de l'ECG) sont documentées plutôt que masquées.
+
 ### 10.2 Connecteur OPC-UA (`scirust-opcua`)
 
 Connecte les PLC/SCADA industriels au pipeline SciRust :

@@ -5,6 +5,26 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — validation du débruitage sur **données réelles** (ECG MIT-BIH + bruit réel)
+Réponse au §9.4 du rapport TSHF (validation sur données réelles), avec vérité-terrain.
+- **Fixture réelle attribuée** `scirust-signal/tests/data/ecg_mitbih.csv` (ODC-BY) :
+  ECG MIT-BIH record 100 (lead II) + bruit **réel enregistré** de la Noise Stress
+  Test Database (`ma` artefact musculaire large bande, `bw` dérive de ligne de
+  base), 4096 échantillons à 360 Hz, décodés du format WFDB 212. Provenance et
+  licence en tête de fichier.
+- **Test d'intégration déterministe** `tests/real_data_ecg.rs` (bruit réel ajouté à
+  SNR contrôlé, aucun RNG) : le détecteur VST retourne **`Identity`** sur ECG réel à
+  tous les SNR et pour les deux bruits (pas de faux positif — validation de la
+  conservativité sur données réelles) ; l'ondelette retire l'artefact musculaire
+  (+0,5 à +1,1 dB) ; `denoise_auto` gagne > +2 dB à 0 dB ; garde-fou de forme de la
+  fixture (structure QRS présente).
+- **Exemple** `examples/denoise_real_ecg.rs` : tables complètes (verdict du
+  classifieur, méthode `denoise_auto`, SNR-improvement par méthode) sur les deux
+  bruits × trois SNR, avec une synthèse honnête des observations — dont les limites
+  révélées *par les données réelles* : à haut SNR les complexes QRS sont vus comme
+  impulsifs (routage prudent vers Hampel, quasi no-op) ; la dérive de ligne de base
+  recouvre le contenu basse-fréquence propre de l'ECG (détrend = gain modeste).
+
 ### Ajouté — `denoise::streaming::StreamingNlm` : non-local means causal
 - **`StreamingNlm`** : pendant causal, sample-par-sample, du non-local means batch
   (`nlm::nlm1d`), pour signaux auto-similaires (formes périodiques, transitoires
