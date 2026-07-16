@@ -450,6 +450,47 @@ jobs:
       - name: Smoke-run ONNX JSON importer fuzzer
         working-directory: fuzz
         run: cargo +nightly-2026-07-02 fuzz run import_onnx_json_from_bytes --target x86_64-unknown-linux-gnu -- -max_total_time=45 -runs=500000
+      # scirust-core targets (the ND safetensors fuzzer found a real
+      # unterminated-string panic in `skip_balanced` on its first campaign —
+      # these smoke runs keep that class of regression visible in CI).
+      - name: Smoke-run safetensors (2-D) deserializer fuzzer
+        working-directory: fuzz
+        run: cargo +nightly-2026-07-02 fuzz run safetensors_from_bytes --target x86_64-unknown-linux-gnu -- -max_total_time=45 -runs=500000
+      - name: Smoke-run safetensors (N-D) deserializer fuzzer
+        working-directory: fuzz
+        run: cargo +nightly-2026-07-02 fuzz run safetensors_nd_from_bytes --target x86_64-unknown-linux-gnu -- -max_total_time=45 -runs=500000
+      - name: Smoke-run TensorND typed-error ops fuzzer
+        working-directory: fuzz
+        run: cargo +nightly-2026-07-02 fuzz run tensor_nd_ops_from_bytes --target x86_64-unknown-linux-gnu -- -max_total_time=45 -runs=500000
+      - name: Smoke-run autodiff tape backward fuzzer
+        working-directory: fuzz
+        run: cargo +nightly-2026-07-02 fuzz run tape_backward_from_bytes --target x86_64-unknown-linux-gnu -- -max_total_time=45 -runs=500000
+
+  # The rayon parallel paths (par_sgemm, batched_gemm, im2col/col2im) document
+  # bit-identity with the serial paths. Prove it on every commit: run the
+  # fingerprint example under both builds and require identical output. Any
+  # divergence (a parallel kernel changing accumulation order) fails the job
+  # with the exact stage that diverged.
+  determinism:
+    name: Determinism fingerprint (rayon vs serial)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Fingerprint with rayon (default features)
+        run: cargo +stable run -p scirust-core --release --example determinism_fingerprint --locked > /tmp/fingerprint_rayon.txt
+      - name: Fingerprint without rayon (serial)
+        run: cargo +stable run -p scirust-core --release --no-default-features --example determinism_fingerprint --locked > /tmp/fingerprint_serial.txt
+      - name: Compare fingerprints (must be bit-identical)
+        run: |
+          diff /tmp/fingerprint_rayon.txt /tmp/fingerprint_serial.txt
+          echo "rayon and serial builds are bit-identical:"
+          cat /tmp/fingerprint_rayon.txt
 
   # Real wgpu compute path, validated against the CPU oracle on a software
   # Vulkan adapter (Mesa lavapipe) — no physical GPU required.
