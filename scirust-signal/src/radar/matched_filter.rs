@@ -4,6 +4,7 @@
 //! transmitted pulse: range resolution is set by the bandwidth, not the length.
 
 use crate::complex::Complex;
+use crate::fft::{fft, ifft};
 
 /// Full **cross-correlation** of `signal` with `replica` — the matched-filter
 /// response for that replica.
@@ -14,7 +15,61 @@ use crate::complex::Complex;
 /// index `replica.len() − 1`. For the autocorrelation (`replica == signal`)
 /// that term equals the signal energy. Returns an empty vector if either input
 /// is empty.
+///
+/// Computed via zero-padded FFT (`O((m+n)·log(m+n))`) rather than the naive
+/// `O(m·n)` double loop that direct summation requires — the difference
+/// matters for radar records, where `signal` (the received trace) can be
+/// orders of magnitude longer than `replica` (the transmitted waveform).
 pub fn cross_correlate(signal: &[Complex], replica: &[Complex]) -> Vec<Complex> {
+    if signal.is_empty() || replica.is_empty()
+    {
+        return Vec::new();
+    }
+    let (m, n) = (signal.len(), replica.len());
+    let out_len = m + n - 1;
+    let fft_len = out_len.next_power_of_two();
+
+    let mut a = vec![Complex::zero(); fft_len];
+    a[..m].copy_from_slice(signal);
+    let mut b = vec![Complex::zero(); fft_len];
+    b[..n].copy_from_slice(replica);
+
+    fft(&mut a);
+    fft(&mut b);
+    // Cross-power spectrum: FFT(signal) · conj(FFT(replica)); its inverse FFT
+    // is the circular cross-correlation (Wiener-Khinchin for correlation
+    // rather than autocorrelation).
+    for (ai, &bi) in a.iter_mut().zip(b.iter())
+    {
+        *ai *= bi.conj();
+    }
+    ifft(&mut a);
+
+    // `a[k]` now holds the circular correlation at lag `k` for `k` in
+    // `0..m` (non-negative lags) and at lag `k − fft_len` for `k` in
+    // `fft_len − (n − 1) .. fft_len` (negative lags, wrapped). Since
+    // `fft_len >= out_len = m + n − 1`, these two bands never overlap, so
+    // reading them back out into linear (non-circular) order is exact.
+    (0..out_len)
+        .map(|j| {
+            let lag = j as isize - (n as isize - 1);
+            let circ_idx = if lag >= 0
+            {
+                lag as usize
+            }
+            else
+            {
+                (fft_len as isize + lag) as usize
+            };
+            a[circ_idx]
+        })
+        .collect()
+}
+
+/// Reference O(m·n) direct-summation implementation of [`cross_correlate`],
+/// kept only to differentially test the FFT-based version above against.
+#[cfg(test)]
+fn cross_correlate_direct(signal: &[Complex], replica: &[Complex]) -> Vec<Complex> {
     if signal.is_empty() || replica.is_empty()
     {
         return Vec::new();
@@ -134,5 +189,50 @@ mod tests {
         assert!(cross_correlate(&[Complex::zero()], &[]).is_empty());
         assert!(peak_lag(&[], 1).is_none());
         assert!(peak_to_sidelobe(&[Complex::new(1.0, 0.0)], 5).is_none());
+    }
+
+    #[test]
+    fn single_sample_inputs_do_not_panic() {
+        let a = [Complex::new(2.0, -1.0)];
+        let b = [Complex::new(3.0, 0.5)];
+        let r = cross_correlate(&a, &b);
+        assert_eq!(r.len(), 1);
+        let expected = a[0] * b[0].conj();
+        assert!((r[0].re - expected.re).abs() < 1e-9);
+        assert!((r[0].im - expected.im).abs() < 1e-9);
+    }
+}
+
+/// Differential test: the FFT-based [`cross_correlate`] must match the naive
+/// O(m·n) [`cross_correlate_direct`] on arbitrary (non-power-of-two-length,
+/// unequal-length) inputs — the lag bookkeeping around the zero-padded FFT
+/// is exactly the kind of off-by-one that unit tests on "nice" sizes (powers
+/// of two, matched lengths) can miss.
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn complex_vec(
+        len: impl Into<proptest::collection::SizeRange>,
+    ) -> impl Strategy<Value = Vec<Complex>> {
+        proptest::collection::vec((-10.0f64..10.0, -10.0f64..10.0), len)
+            .prop_map(|v| v.into_iter().map(|(re, im)| Complex::new(re, im)).collect())
+    }
+
+    proptest! {
+        #[test]
+        fn fft_based_matches_direct_reference(
+            signal in complex_vec(1..37),
+            replica in complex_vec(1..23),
+        ) {
+            let fast = cross_correlate(&signal, &replica);
+            let direct = cross_correlate_direct(&signal, &replica);
+            prop_assert_eq!(fast.len(), direct.len());
+            for (f, d) in fast.iter().zip(direct.iter()) {
+                prop_assert!((f.re - d.re).abs() < 1e-6, "re mismatch: {f:?} vs {d:?}");
+                prop_assert!((f.im - d.im).abs() < 1e-6, "im mismatch: {f:?} vs {d:?}");
+            }
+        }
     }
 }
