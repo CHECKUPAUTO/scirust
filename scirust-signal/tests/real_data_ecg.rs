@@ -16,7 +16,7 @@
 //! measured tables and the documented limitations).
 
 use scirust_signal::denoise::{
-    ThresholdMode, VstKind, denoise_auto, detect_noise_model, wavelet_denoise,
+    NoiseType, ThresholdMode, VstKind, classify, denoise_auto, detect_noise_model, wavelet_denoise,
 };
 
 fn load_fixture() -> (Vec<f64>, Vec<f64>, Vec<f64>) {
@@ -122,6 +122,25 @@ fn denoise_auto_helps_at_low_snr_on_real_muscle_artifact() {
     // Length is preserved and the output is finite on real data.
     assert_eq!(auto.output.len(), ecg.len());
     assert!(auto.output.iter().all(|v| v.is_finite()));
+}
+
+#[test]
+fn qrs_complexes_are_not_mislabeled_as_impulsive_noise() {
+    // A real ECG's QRS complexes are sharp, high-crest deflections, so a naive
+    // impulsivity gate reads them as spikes and routes to a spike remover. They are a
+    // *legitimate periodic feature*, not impulsive noise: with the energy-envelope
+    // periodicity veto (detect::periodic_impulse_train) a QRS-dominated record is no
+    // longer classified Impulsive. Checked on a real ECG lightly corrupted by real
+    // baseline wander (high SNR, so the high-pass residual is QRS-dominated).
+    let (ecg, _, bw) = load_fixture();
+    let noisy = corrupt(&ecg, &bw, 12.0);
+    let p = classify(&noisy, 360.0);
+    assert_ne!(
+        p.dominant,
+        NoiseType::Impulsive,
+        "real QRS complexes were mislabeled as impulsive noise (verdict {:?})",
+        p.dominant
+    );
 }
 
 #[test]

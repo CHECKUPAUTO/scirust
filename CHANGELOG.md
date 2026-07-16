@@ -5,6 +5,25 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Modifié — classifieur robuste aux features périodiques légitimes (`detect::classify`)
+Motivé par la validation ECG réelle (#579) : les complexes QRS étaient lus comme du
+« bruit impulsif ». Le gate impulsif exige désormais l'**apériodicité** des pics.
+- **`periodic_impulse_train`** : autocorrélation (via FFT, O(n log n)) de l'enveloppe
+  d'énergie `core² − moyenne` du résidu passe-haut ; un pic normalisé > 0,30 sur les
+  lags de répétition `[8, n/3]` (≥ 3 périodes) signale un **train périodique
+  légitime** (QRS, cognement moteur, transitoire répété) → veto du verdict
+  `Impulsive`. Seuil calibré par mesure : QRS réels (record 100) ≈ 0,3–0,4 au lag du
+  rythme (~73 bpm, robuste à la variabilité cardiaque) ; impulsions apériodiques
+  (salt-and-pepper, pops d'électrode) ≈ 0,2 → toujours `Impulsive`.
+- Effet sur données réelles : un ECG dominé par ses QRS n'est plus étiqueté
+  `Impulsive` (plus de routage vers un suppresseur de pics) ; quand du vrai bruit
+  large bande/impulsif est mélangé, la périodicité est masquée et le verdict reste
+  `Impulsive` — discrimination correcte, pas binaire.
+- Fixtures de test d'impulsions rendues **apériodiques** (placement de Bernoulli) —
+  le bruit impulsif réel est apériodique, c'est un gain de réalisme ; nouveau test
+  `periodic_spike_train_is_a_legitimate_feature` + assertion sur ECG réel
+  (`qrs_complexes_are_not_mislabeled_as_impulsive_noise`). Zéro régression (467 tests).
+
 ### Ajouté — validation du débruitage sur **données réelles** (ECG MIT-BIH + bruit réel)
 Réponse au §9.4 du rapport TSHF (validation sur données réelles), avec vérité-terrain.
 - **Fixture réelle attribuée** `scirust-signal/tests/data/ecg_mitbih.csv` (ODC-BY) :

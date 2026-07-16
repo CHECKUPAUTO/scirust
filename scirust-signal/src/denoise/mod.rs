@@ -757,9 +757,15 @@ mod tests {
             .map(|i| (2.0 * PI * 4.0 * i as f64 / n as f64).sin())
             .collect();
         let mut obs: Vec<f64> = clean.iter().map(|&c| c + 0.05 * rng.gauss()).collect();
-        for i in (0..n).step_by(37)
+        // Aperiodic (Bernoulli-placed) spikes — genuine impulsive noise, which the
+        // classifier routes to the rank family (a periodic train would be treated as
+        // a legitimate signal feature; see detect::periodic_impulse_train).
+        for v in obs.iter_mut()
         {
-            obs[i] += 8.0;
+            if rng.uniform() < 1.0 / 37.0
+            {
+                *v += 8.0;
+            }
         }
         let best = denoise_best(&obs, 512.0);
         let s_raw = snr_db(&clean, &obs);

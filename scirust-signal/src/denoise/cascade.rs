@@ -217,8 +217,9 @@ mod tests {
     use super::*;
     use core::f64::consts::PI;
 
-    /// The canonical mixed-noise record: a slow sine (the signal) plus impulses
-    /// (+8 every 37th sample), a strong 50 Hz tone and a white floor, at
+    /// The canonical mixed-noise record: a slow sine (the signal) plus aperiodic
+    /// impulses (+8, Bernoulli-placed — genuine impulsive noise; a periodic train
+    /// would read as a legitimate feature), a strong 50 Hz tone and a white floor, at
     /// fs = 1000 Hz over 2048 samples.
     fn mixed_fixture() -> (Vec<f64>, Vec<f64>) {
         let n = 2048;
@@ -232,9 +233,12 @@ mod tests {
             .enumerate()
             .map(|(i, &c)| c + 1.0 * (2.0 * PI * 50.0 * i as f64 / fs).sin() + 0.2 * rng.gauss())
             .collect();
-        for i in (0..n).step_by(37)
+        for v in obs.iter_mut()
         {
-            obs[i] += 8.0;
+            if rng.uniform() < 1.0 / 37.0
+            {
+                *v += 8.0;
+            }
         }
         (clean, obs)
     }

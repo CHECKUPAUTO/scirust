@@ -9,7 +9,8 @@
 //! * **level** — a robust noise standard deviation from the finest wavelet detail
 //!   band (`σ = MAD / 0.6745`, immune to a minority of outliers);
 //! * **impulsivity** — excess kurtosis and crest factor of the high-pass residual
-//!   (heavy tails ⇒ spikes / salt-and-pepper);
+//!   (heavy tails ⇒ spikes / salt-and-pepper), *gated on aperiodicity* so a periodic
+//!   high-crest train (an ECG's QRS complexes) reads as a signal feature, not noise;
 //! * **spectral flatness** — geometric-over-arithmetic mean of the power spectrum
 //!   (≈1 ⇒ white; ≪1 ⇒ tonal or colored);
 //! * **periodicity** — prominence of the strongest spectral line over the median
@@ -52,7 +53,8 @@
 
 use super::linear::moving_average;
 use super::{estimate_noise_std_helper, pad_reflect_pow2};
-use crate::fft::fft_real;
+use crate::Complex;
+use crate::fft::{fft, fft_real, ifft};
 use serde::{Deserialize, Serialize};
 
 /// The dominant character of the noise on a signal, as judged by [`classify`].
@@ -63,6 +65,9 @@ pub enum NoiseType {
     /// Broadband, roughly-white additive noise (flat spectrum, light tails).
     Gaussian,
     /// Impulsive noise: spikes, dropouts, salt-and-pepper (heavy-tailed residual).
+    /// Only *aperiodic* spikes qualify — a **periodic** high-crest train (an ECG's
+    /// QRS complexes, an engine's knock, any repeated transient) is a legitimate
+    /// signal feature and is deliberately *not* classified Impulsive.
     Impulsive,
     /// Periodic interference: a strong tonal line such as mains hum.
     Periodic,
@@ -260,32 +265,40 @@ pub fn classify(signal: &[f64], sample_rate: f64) -> NoiseProfile {
     // Savitzky-Golay touch instead of Colored: with no broadband floor, the
     // residual's spectral slope is measured on tone-leakage skirts, not on noise,
     // and the wavelet machinery it would trigger has nothing legitimate to remove.
-    let dominant = if residual_kurtosis > 4.0 && crest_factor > 5.0
-    {
-        NoiseType::Impulsive
-    }
-    else if line_dominance > g_crit.max(0.1)
-        && res_rms > 0.05 * rms.max(1.0e-12)
-        && dominant_freq_hz > 0.0
-    {
-        NoiseType::Periodic
-    }
-    else if trend_strength > 0.45 && edge_score < 13.0
-    {
-        NoiseType::Baseline
-    }
-    else if noise_std < 0.05 * rms.max(1.0e-12)
-    {
-        NoiseType::LowNoise
-    }
-    else if spectral_slope < -0.5
-    {
-        NoiseType::Colored
-    }
-    else
-    {
-        NoiseType::Gaussian
-    };
+    // The impulsive gate additionally requires the high-crest events to be
+    // *aperiodic*: a periodic spike train (an ECG's QRS complexes, an engine's knock,
+    // any repeated transient) is a legitimate signal feature, not impulsive noise, and
+    // filtering it away as spikes would destroy signal. [`periodic_impulse_train`]
+    // vetoes the verdict for such records, which then fall through to the broadband /
+    // baseline branches. Random impulsive noise (salt-and-pepper, drop-outs, electrode
+    // pops) is aperiodic and still classified Impulsive.
+    let dominant =
+        if residual_kurtosis > 4.0 && crest_factor > 5.0 && !periodic_impulse_train(&core)
+        {
+            NoiseType::Impulsive
+        }
+        else if line_dominance > g_crit.max(0.1)
+            && res_rms > 0.05 * rms.max(1.0e-12)
+            && dominant_freq_hz > 0.0
+        {
+            NoiseType::Periodic
+        }
+        else if trend_strength > 0.45 && edge_score < 13.0
+        {
+            NoiseType::Baseline
+        }
+        else if noise_std < 0.05 * rms.max(1.0e-12)
+        {
+            NoiseType::LowNoise
+        }
+        else if spectral_slope < -0.5
+        {
+            NoiseType::Colored
+        }
+        else
+        {
+            NoiseType::Gaussian
+        };
 
     NoiseProfile {
         noise_std,
@@ -339,6 +352,64 @@ fn highpass_residual_core(signal: &[f64]) -> Vec<f64> {
         .collect();
     let trim = 12.min(n / 4);
     residual[trim..n - trim].to_vec()
+}
+
+/// Minimum repetition period (samples) the periodic-feature detector considers — a
+/// spike train tighter than this is quasi-continuous, not a train of "rare peaks".
+const PERIODIC_MIN_PERIOD: usize = 8;
+/// Normalized energy-envelope autocorrelation above which the sparse, high-crest
+/// events of the residual are judged a **legitimate periodic feature** — a
+/// repetitive transient such as an ECG QRS train — rather than random impulsive
+/// noise. Calibrated by measurement (`fixture is real ECG record 100`): a real QRS
+/// train autocorrelates at ≈ 0.3–0.4 at its beat lag (≈ 73 bpm, robust to
+/// heart-rate variability), a strictly periodic synthetic spike train far higher,
+/// while aperiodic (Bernoulli-placed) impulses stay ≈ 0.2 — so a 0.30 gate separates
+/// a periodic *signal* feature from impulsive *noise* with margin on both sides.
+const PERIODIC_IMPULSE_AUTOCORR: f64 = 0.30;
+
+/// Is the high-crest content of `core` a **periodic train** (a legitimate repetitive
+/// feature — heart beats, engine knocks, repeated transients) rather than random
+/// impulsive noise?
+///
+/// The impulse-energy envelope `core² − mean(core²)` of a periodic spike train
+/// autocorrelates strongly at its repetition lag; random impulses do not. The linear
+/// autocorrelation is computed via FFT (zero-padding to `≥ 2n` makes the circular
+/// correlation equal the linear one over lags `0..n`) and normalized by its zero-lag
+/// value; the maximum over repetition lags `[PERIODIC_MIN_PERIOD, n/3]` — at least
+/// three periods must fit — is compared to [`PERIODIC_IMPULSE_AUTOCORR`]. Used to
+/// **veto the Impulsive verdict** when the spikes are the *signal*, so a legitimate
+/// periodic feature (an ECG's QRS complexes) is not filtered away as noise.
+fn periodic_impulse_train(core: &[f64]) -> bool {
+    let n = core.len();
+    if n < 3 * PERIODIC_MIN_PERIOD
+    {
+        return false;
+    }
+    let mean_e = core.iter().map(|&x| x * x).sum::<f64>() / n as f64;
+    // Linear autocorrelation of the zero-mean energy envelope via FFT.
+    let m = (2 * n).next_power_of_two();
+    let mut buf: Vec<Complex> = core
+        .iter()
+        .map(|&x| Complex::new(x * x - mean_e, 0.0))
+        .collect();
+    buf.resize(m, Complex::new(0.0, 0.0));
+    fft(&mut buf);
+    for c in buf.iter_mut()
+    {
+        *c = Complex::new(c.mag_sq(), 0.0);
+    }
+    ifft(&mut buf);
+    let ac0 = buf[0].re;
+    if ac0 <= 0.0
+    {
+        return false;
+    }
+    let lag_max = (n / 3).max(PERIODIC_MIN_PERIOD);
+    let best = buf[PERIODIC_MIN_PERIOD..=lag_max]
+        .iter()
+        .map(|c| c.re / ac0)
+        .fold(0.0_f64, f64::max);
+    best > PERIODIC_IMPULSE_AUTOCORR
 }
 
 /// Periodogram of a (non-empty) residual core: mean-removed, reflection-padded to a
@@ -820,6 +891,37 @@ mod tests {
 
     #[test]
     fn detects_impulsive_noise() {
+        // Genuine impulsive noise is *aperiodic* (salt-and-pepper, drop-outs,
+        // electrode pops occur at random times) — placed here by a Bernoulli draw so
+        // the impulse-energy envelope has no periodic autocorrelation and the verdict
+        // is Impulsive (cf. `periodic_spike_train_is_a_legitimate_feature`, where a
+        // *periodic* train is instead recognized as signal).
+        let mut rng = Lcg::new(103);
+        let mut obs: Vec<f64> = base_sine(512)
+            .iter()
+            .map(|&c| c + 0.05 * rng.gauss())
+            .collect();
+        let mut spikes = 0;
+        for v in obs.iter_mut()
+        {
+            if rng.uniform() < 1.0 / 37.0
+            {
+                *v += 8.0;
+                spikes += 1;
+            }
+        }
+        assert!(spikes >= 6, "fixture drew too few spikes: {spikes}");
+        let p = classify(&obs, 512.0);
+        assert_eq!(p.dominant, NoiseType::Impulsive);
+    }
+
+    #[test]
+    fn periodic_spike_train_is_a_legitimate_feature() {
+        // A *periodic* high-crest train — an ECG's QRS complexes, an engine's knock,
+        // any repeated transient — is signal, not impulsive noise: the impulsive gate
+        // must be vetoed by the energy-envelope periodicity test so the feature is not
+        // filtered away. Same spikes as the aperiodic fixture above, but on a regular
+        // 37-sample grid.
         let mut rng = Lcg::new(103);
         let mut obs: Vec<f64> = base_sine(512)
             .iter()
@@ -833,7 +935,11 @@ mod tests {
             }
         }
         let p = classify(&obs, 512.0);
-        assert_eq!(p.dominant, NoiseType::Impulsive);
+        assert_ne!(
+            p.dominant,
+            NoiseType::Impulsive,
+            "a periodic spike train must not be filtered as impulsive noise"
+        );
     }
 
     #[test]

@@ -67,9 +67,14 @@ fn rank_family_wins_impulsive_noise() {
     let clean = sine(5.0);
     let mut rng = Lcg::new(11);
     let mut obs: Vec<f64> = clean.iter().map(|&c| c + 0.05 * rng.gauss()).collect();
-    for i in (0..N).step_by(37)
+    // Aperiodic (Bernoulli-placed) spikes — genuine impulsive noise (a periodic train
+    // would read as a legitimate signal feature; see detect::periodic_impulse_train).
+    for v in obs.iter_mut()
     {
-        obs[i] += 8.0;
+        if rng.uniform() < 1.0 / 37.0
+        {
+            *v += 8.0;
+        }
     }
     let hampel = snr_db(&clean, &hampel_filter(&obs, 3, 3.0));
     let linear = snr_db(&clean, &moving_average(&obs, 5));
@@ -139,9 +144,14 @@ fn cascade_beats_every_single_family_on_mixed_noise() {
         .enumerate()
         .map(|(i, &c)| c + 1.0 * (2.0 * PI * 50.0 * i as f64 / FS).sin() + 0.2 * rng.gauss())
         .collect();
-    for i in (0..N).step_by(37)
+    // Aperiodic (Bernoulli-placed) spikes — genuine impulsive noise (a periodic train
+    // would read as a legitimate signal feature; see detect::periodic_impulse_train).
+    for v in obs.iter_mut()
     {
-        obs[i] += 8.0;
+        if rng.uniform() < 1.0 / 37.0
+        {
+            *v += 8.0;
+        }
     }
     let casc = denoise_cascade(&obs, FS, 4);
     assert!(casc.stages.len() >= 2, "stages: {:?}", casc.stages);
