@@ -511,6 +511,189 @@ fn sure_threshold_normalized(detail: &[f64], sigma: f64) -> f64 {
     best_t
 }
 
+/// **Cycle spinning** — translation-invariant denoising (Coifman-Donoho 1995).
+///
+/// The decimated wavelet transform is not shift-invariant: displacing the input by
+/// a single sample changes which coefficients straddle a transient, so thresholding
+/// leaves a different pattern of pseudo-Gibbs ripples for every alignment. Cycle
+/// spinning averages the artefact away — "shift, denoise, unshift, average": for
+/// `n_shifts` evenly spaced circular shifts `s_k = ⌊k·n/n_shifts⌋` the signal is
+/// rotated left by `s_k`, denoised, rotated back right by `s_k`, and the results
+/// are averaged. Averaging over *all* `n` shifts is equivalent to denoising in the
+/// undecimated (stationary) wavelet transform; a handful of shifts (8–16) already
+/// captures most of that gain at a fraction of the cost.
+///
+/// `denoiser` must be length-preserving, as every denoiser in this module is.
+/// Repeated shift amounts (which arise when `n_shifts > signal.len()`) are
+/// deduplicated so each distinct alignment contributes exactly once. With
+/// `n_shifts <= 1` — or an input too short to rotate — this is exactly
+/// `denoiser(signal)`.
+///
+/// Choosing `n_shifts`: prefer a count that is **odd** (or otherwise does not
+/// divide `signal.len()`). When `n_shifts` divides `n` every shift is a multiple
+/// of `n/n_shifts`; on the power-of-two lengths the wavelet transform works with,
+/// such shifts are all highly even, the finest-scale coefficient alignments never
+/// change, and most of the artefact-cancelling benefit is silently lost. An odd
+/// count like 15 or 31 spreads the shifts across all dyadic alignments.
+pub fn cycle_spin(
+    signal: &[f64],
+    n_shifts: usize,
+    denoiser: impl Fn(&[f64]) -> Vec<f64>,
+) -> Vec<f64> {
+    let n = signal.len();
+    if n_shifts <= 1 || n < 2
+    {
+        return denoiser(signal);
+    }
+    // Distinct, evenly spaced shift amounts s_k = ⌊k·n/n_shifts⌋. The sequence is
+    // non-decreasing in k, so consecutive dedup removes all repeats.
+    let mut shifts: Vec<usize> = (0..n_shifts)
+        .map(|k| ((k as u128 * n as u128) / n_shifts as u128) as usize)
+        .collect();
+    shifts.dedup();
+    let mut acc = vec![0.0; n];
+    for &s in &shifts
+    {
+        // Rotate LEFT by s: rotated[i] = signal[(i + s) mod n].
+        let mut rotated = Vec::with_capacity(n);
+        rotated.extend_from_slice(&signal[s..]);
+        rotated.extend_from_slice(&signal[..s]);
+        let den = denoiser(&rotated);
+        // Rotate RIGHT by s and accumulate: output sample j came from den[(j − s) mod n].
+        for (j, a) in acc.iter_mut().enumerate()
+        {
+            *a += den[(j + n - s) % n];
+        }
+    }
+    let scale = 1.0 / shifts.len() as f64;
+    for a in acc.iter_mut()
+    {
+        *a *= scale;
+    }
+    acc
+}
+
+/// Translation-invariant wavelet denoising: [`cycle_spin`] applied to
+/// [`wavelet_denoise_with`].
+///
+/// Use this instead of the plain decimated denoiser whenever the signal contains
+/// sharp steps or isolated transients: the shift-averaging suppresses the
+/// alignment-dependent pseudo-Gibbs oscillations that the decimated transform
+/// leaves around discontinuities (Coifman-Donoho 1995), typically buying one to
+/// three dB of SNR at edges for an `n_shifts`-fold cost. An **odd** `n_shifts` of
+/// 15–31 is usually enough (see the [`cycle_spin`] note on why a divisor of the
+/// padded length wastes shifts); `n_shifts <= 1` reduces to
+/// `wavelet_denoise_with` exactly.
+pub fn wavelet_denoise_ti(
+    signal: &[f64],
+    levels: usize,
+    mode: ThresholdMode,
+    wavelet: Wavelet,
+    n_shifts: usize,
+) -> Vec<f64> {
+    cycle_spin(signal, n_shifts, |x| {
+        wavelet_denoise_with(x, levels, mode, wavelet)
+    })
+}
+
+/// Wavelet denoising with a **level-dependent noise scale** for colored noise
+/// (Johnstone-Silverman 1997).
+///
+/// Classical VisuShrink ([`wavelet_denoise_with`]) estimates a *single* noise scale
+/// from the finest detail band and applies one universal threshold everywhere. That
+/// is correct for white noise, whose power is the same at every scale — but for
+/// **colored** noise (pink, brown, AR-correlated) the noise power grows toward the
+/// coarse scales, so the finest-band σ badly *under-thresholds* the coarse bands
+/// and low-frequency noise survives. This is exactly the regime
+/// [`super::denoise_auto`] routes to wavelets. The fix (Johnstone-Silverman): make
+/// the wavelet transform whiten the noise per band and estimate a separate scale in
+/// each — `σ_j = MAD(d_j)/0.6745`, threshold `λ_j = σ_j·√(2 ln N)` with `N` the
+/// padded length. For truly white noise all the `σ_j` agree and this reduces to
+/// the classical rule (up to estimation error).
+///
+/// Caveat: the per-band MAD assumes the signal is *sparse within each band* (steps,
+/// bumps, transients). A sustained tone fills its resonant band with uniformly
+/// large coefficients, so the band median mistakes the tone for noise and the
+/// threshold wipes it out — for dense tonal content keep the global rule of
+/// [`wavelet_denoise_with`] or [`wavelet_denoise_sure`].
+pub fn wavelet_denoise_leveldep(
+    signal: &[f64],
+    levels: usize,
+    mode: ThresholdMode,
+    wavelet: Wavelet,
+) -> Vec<f64> {
+    let h = wavelet.lowpass();
+    let Some((approx, mut detail_coeffs, n)) = dwt_forward(signal, levels, &h)
+    else
+    {
+        return signal.to_vec();
+    };
+
+    let universal = (2.0 * (n as f64).ln()).sqrt();
+    for detail in detail_coeffs.iter_mut()
+    {
+        // Robust per-band noise scale: MAD is immune to the minority of large
+        // signal coefficients sharing the band with the noise.
+        let sigma_j = mad(detail) / 0.6745;
+        let thresh = sigma_j * universal;
+        for d in detail.iter_mut()
+        {
+            *d = apply_threshold(*d, thresh, mode);
+        }
+    }
+    dwt_inverse(approx, &detail_coeffs, &h, signal.len())
+}
+
+/// **BayesShrink** wavelet denoising (Chang-Yu-Vetterli 2000).
+///
+/// Instead of the one-size-fits-all universal threshold, BayesShrink models each
+/// detail band as signal + noise with a (generalized) Gaussian signal prior and
+/// picks the threshold that is near-optimal for the *estimated* signal strength of
+/// that band: with `σ²` the noise variance (MAD on the finest band) and
+/// `σ_y² = mean(d²)` the observed band variance, the signal scale is
+/// `σ_x = √(max(σ_y² − σ², 0))` and the band threshold is `t_j = σ²/σ_x` (soft
+/// shrinkage). Strong-signal bands get a small threshold and are barely touched;
+/// bands indistinguishable from pure noise (`σ_x = 0`) are zeroed outright. In
+/// practice this is markedly less aggressive than VisuShrink on dense signals
+/// while remaining fully automatic — `levels = 0` picks the depth exactly like
+/// the other wavelet denoisers here.
+pub fn wavelet_denoise_bayes(signal: &[f64], levels: usize, wavelet: Wavelet) -> Vec<f64> {
+    let h = wavelet.lowpass();
+    let Some((approx, mut detail_coeffs, _)) = dwt_forward(signal, levels, &h)
+    else
+    {
+        return signal.to_vec();
+    };
+
+    // Noise variance from the finest band (Donoho MAD estimator).
+    let sigma = mad(&detail_coeffs[0]) / 0.6745;
+    let sigma_sq = sigma * sigma;
+    for detail in detail_coeffs.iter_mut()
+    {
+        let m = detail.len() as f64;
+        let sigma_y_sq = detail.iter().map(|&d| d * d).sum::<f64>() / m.max(1.0);
+        let sigma_x = (sigma_y_sq - sigma_sq).max(0.0).sqrt();
+        if sigma_x > 0.0
+        {
+            let thresh = sigma_sq / sigma_x;
+            for d in detail.iter_mut()
+            {
+                *d = apply_threshold(*d, thresh, ThresholdMode::Soft);
+            }
+        }
+        else
+        {
+            // The band carries no detectable signal energy: kill it entirely
+            // (equivalent to an infinite threshold).
+            for d in detail.iter_mut()
+            {
+                *d = 0.0;
+            }
+        }
+    }
+    dwt_inverse(approx, &detail_coeffs, &h, signal.len())
+}
+
 /// Power spectral subtraction with over-subtraction and a spectral floor
 /// (Berouti-Schwartz-Makhoul 1979 — the power-domain refinement of Boll's
 /// spectral subtraction) for additive white noise.
@@ -799,6 +982,268 @@ mod tests {
             rms(&strong),
             rms(&mild)
         );
+    }
+
+    fn noisy_step(n: usize, edge: usize, sigma: f64, seed: u64) -> (Vec<f64>, Vec<f64>) {
+        let mut rng = Lcg::new(seed);
+        let clean: Vec<f64> = (0..n).map(|i| if i < edge { 0.0 } else { 2.0 }).collect();
+        let obs: Vec<f64> = clean.iter().map(|&c| c + sigma * rng.gauss()).collect();
+        (clean, obs)
+    }
+
+    #[test]
+    fn cycle_spin_one_shift_equals_plain_denoiser() {
+        let (_, obs) = noisy_step(256, 100, 0.3, 23);
+        let plain = wavelet_denoise(&obs, 0, ThresholdMode::Soft);
+        let spun = cycle_spin(&obs, 1, |x| wavelet_denoise(x, 0, ThresholdMode::Soft));
+        assert_eq!(
+            spun, plain,
+            "n_shifts = 1 must be exactly the plain denoiser"
+        );
+        let spun0 = cycle_spin(&obs, 0, |x| wavelet_denoise(x, 0, ThresholdMode::Soft));
+        assert_eq!(
+            spun0, plain,
+            "n_shifts = 0 must be exactly the plain denoiser"
+        );
+    }
+
+    #[test]
+    fn cycle_spin_shift_bookkeeping_and_dedupe() {
+        // With an identity denoiser the rotate-left / rotate-right pair must cancel
+        // exactly for every shift, so the average returns the input.
+        let x = [1.0, -2.0, 3.5, 0.25, -1.75];
+        let calls = core::cell::Cell::new(0usize);
+        let out = cycle_spin(&x, 5, |s| {
+            calls.set(calls.get() + 1);
+            s.to_vec()
+        });
+        assert_eq!(calls.get(), 5);
+        for (a, b) in x.iter().zip(out.iter())
+        {
+            assert!(
+                (a - b).abs() < 1.0e-12,
+                "identity round-trip broke: {a} vs {b}"
+            );
+        }
+        // n_shifts > n: the repeated shift amounts ⌊k·n/n_shifts⌋ must be
+        // deduplicated, so a length-4 signal sees exactly 4 distinct alignments.
+        let y = [1.0, 2.0, 3.0, 4.0];
+        let calls = core::cell::Cell::new(0usize);
+        let out = cycle_spin(&y, 8, |s| {
+            calls.set(calls.get() + 1);
+            s.to_vec()
+        });
+        assert_eq!(calls.get(), 4, "expected one call per distinct shift");
+        for (a, b) in y.iter().zip(out.iter())
+        {
+            assert!((a - b).abs() < 1.0e-12);
+        }
+    }
+
+    #[test]
+    fn ti_beats_plain_wavelet_on_noisy_step() {
+        // The step edges are where shift-variance artefacts live: pseudo-Gibbs
+        // ripples around each edge depend on the alignment, and averaging over
+        // shifts cancels them. Two constructive details keep the comparison
+        // honest: the signal returns to its baseline (no wrap-around seam, which
+        // the periodized transform would otherwise hand to shift 0 perfectly
+        // aligned), and the edges sit at ODD indices so the decimated Haar has no
+        // lucky dyadic alignment to hide behind. n_shifts = 31 is odd, so the
+        // shifts cover all fine-scale alignments (see the cycle_spin doc note).
+        let n = 256;
+        let mut rng = Lcg::new(29);
+        let clean: Vec<f64> = (0..n)
+            .map(|i| if (81..173).contains(&i) { 2.0 } else { 0.0 })
+            .collect();
+        let obs: Vec<f64> = clean.iter().map(|&c| c + 0.3 * rng.gauss()).collect();
+        let plain = wavelet_denoise_with(&obs, 0, ThresholdMode::Hard, Wavelet::Haar);
+        let ti = wavelet_denoise_ti(&obs, 0, ThresholdMode::Hard, Wavelet::Haar, 31);
+        let s_raw = snr_db(&clean, &obs);
+        let s_plain = snr_db(&clean, &plain);
+        let s_ti = snr_db(&clean, &ti);
+        assert!(s_plain > s_raw, "plain must beat raw to begin with");
+        assert!(
+            s_ti >= s_plain + 0.5,
+            "cycle spinning gained only {:.2} dB (plain {s_plain:.2}, TI {s_ti:.2})",
+            s_ti - s_plain
+        );
+    }
+
+    #[test]
+    fn ti_parameters_are_live() {
+        let (_, obs) = noisy_step(256, 100, 0.3, 31);
+        // n_shifts must matter: averaging 8 alignments cannot reproduce a single one.
+        let one = wavelet_denoise_ti(&obs, 0, ThresholdMode::Hard, Wavelet::Haar, 1);
+        let eight = wavelet_denoise_ti(&obs, 0, ThresholdMode::Hard, Wavelet::Haar, 8);
+        assert_ne!(one, eight, "n_shifts is ignored");
+        // With n_shifts = 1 the wrapper must equal wavelet_denoise_with for the SAME
+        // (levels, mode, wavelet) — a levels/n_shifts transposition (both usize)
+        // would compile silently and fail this equality.
+        let direct = wavelet_denoise_with(&obs, 3, ThresholdMode::Hard, Wavelet::Db4);
+        let wrapped = wavelet_denoise_ti(&obs, 3, ThresholdMode::Hard, Wavelet::Db4, 1);
+        assert_eq!(wrapped, direct, "levels/mode/wavelet not plumbed through");
+    }
+
+    #[test]
+    fn leveldep_beats_global_threshold_on_colored_noise() {
+        // AR(1) noise, x_k = 0.9·x_{k−1} + w_k: its power grows toward low
+        // frequencies, so the finest-band σ of classical VisuShrink badly
+        // under-thresholds the coarse bands. Per-level scales fix exactly that.
+        let n = 1024;
+        let mut rng = Lcg::new(41);
+        let clean: Vec<f64> = (0..n)
+            .map(|i| (2.0 * PI * 3.0 * i as f64 / n as f64).sin())
+            .collect();
+        let mut ar = 0.0;
+        let obs: Vec<f64> = clean
+            .iter()
+            .map(|&c| {
+                ar = 0.9 * ar + 0.15 * rng.gauss();
+                c + ar
+            })
+            .collect();
+        let global = wavelet_denoise_with(&obs, 5, ThresholdMode::Soft, Wavelet::Db4);
+        let leveldep = wavelet_denoise_leveldep(&obs, 5, ThresholdMode::Soft, Wavelet::Db4);
+        let s_global = snr_db(&clean, &global);
+        let s_leveldep = snr_db(&clean, &leveldep);
+        assert!(
+            s_leveldep > s_global,
+            "level-dependent {s_leveldep:.2} dB must beat global {s_global:.2} dB"
+        );
+    }
+
+    #[test]
+    fn leveldep_matches_global_convention_on_white_noise() {
+        // On truly white noise every band has the same σ, so the level-dependent
+        // rule must stay in the same league as the classical one (same family,
+        // just per-band estimation error) — and beat the raw input. The clean
+        // signal is piecewise constant: sparse in every Haar band, which is the
+        // regime the per-band MAD assumes (see the doc caveat).
+        let n = 512;
+        let mut rng = Lcg::new(43);
+        let clean: Vec<f64> = (0..n)
+            .map(|i| {
+                if i < 170
+                {
+                    0.0
+                }
+                else if i < 340
+                {
+                    1.5
+                }
+                else
+                {
+                    0.5
+                }
+            })
+            .collect();
+        let obs: Vec<f64> = clean.iter().map(|&c| c + 0.3 * rng.gauss()).collect();
+        let out = wavelet_denoise_leveldep(&obs, 5, ThresholdMode::Soft, Wavelet::Haar);
+        assert_eq!(out.len(), n);
+        assert!(snr_db(&clean, &out) > snr_db(&clean, &obs));
+    }
+
+    #[test]
+    fn bayes_beats_raw_and_tracks_universal_on_mixed_signal() {
+        // Sine + step + white noise: the mixed case both rules must handle.
+        // BayesShrink adapts per band, so it must beat the raw input and stay
+        // within 1 dB of (or better than) the universal threshold.
+        let n = 1024;
+        let mut rng = Lcg::new(59);
+        let clean: Vec<f64> = (0..n)
+            .map(|i| {
+                let t = i as f64 / n as f64;
+                (2.0 * PI * 4.0 * t).sin() + if i >= 600 { 1.5 } else { 0.0 }
+            })
+            .collect();
+        let obs: Vec<f64> = clean.iter().map(|&c| c + 0.3 * rng.gauss()).collect();
+        let bayes = wavelet_denoise_bayes(&obs, 0, Wavelet::Db4);
+        let universal = wavelet_denoise_with(&obs, 0, ThresholdMode::Soft, Wavelet::Db4);
+        let s_raw = snr_db(&clean, &obs);
+        let s_bayes = snr_db(&clean, &bayes);
+        let s_univ = snr_db(&clean, &universal);
+        assert!(
+            s_bayes > s_raw,
+            "Bayes {s_bayes:.2} dB must beat raw {s_raw:.2} dB"
+        );
+        assert!(
+            s_bayes > s_univ - 1.0,
+            "Bayes {s_bayes:.2} dB trails universal {s_univ:.2} dB by more than 1 dB"
+        );
+    }
+
+    #[test]
+    fn bayes_kills_pure_noise_bands() {
+        // On pure white noise σ_y² ≈ σ² in every band, so σ_x ≈ 0 and BayesShrink
+        // should zero (or nearly zero) the details — the output variance must be a
+        // small fraction of the input's.
+        let mut rng = Lcg::new(61);
+        let x: Vec<f64> = (0..512).map(|_| rng.gauss()).collect();
+        let out = wavelet_denoise_bayes(&x, 0, Wavelet::Haar);
+        let power = |v: &[f64]| v.iter().map(|&s| s * s).sum::<f64>() / v.len() as f64;
+        assert!(
+            power(&out) < 0.5 * power(&x),
+            "pure noise barely attenuated: {} vs {}",
+            power(&out),
+            power(&x)
+        );
+    }
+
+    #[test]
+    fn new_wavelet_denoisers_degrade_gracefully_on_short_inputs() {
+        // Module convention: degenerate inputs come back unchanged, never panic.
+        // Db4 needs 4 samples, so lengths 0..=3 must be exact pass-through.
+        for len in 0..4_usize
+        {
+            let x: Vec<f64> = (0..len).map(|i| i as f64 - 1.0).collect();
+            let ld = wavelet_denoise_leveldep(&x, 0, ThresholdMode::Soft, Wavelet::Db4);
+            assert_eq!(ld, x, "leveldep len {len}");
+            let by = wavelet_denoise_bayes(&x, 0, Wavelet::Db4);
+            assert_eq!(by, x, "bayes len {len}");
+            let ti = wavelet_denoise_ti(&x, 0, ThresholdMode::Soft, Wavelet::Db4, 8);
+            assert_eq!(ti, x, "ti len {len}");
+        }
+        // Haar transforms a length-2 input legitimately; the guarantee there is
+        // only shape and finiteness for every short length.
+        for len in 0..4_usize
+        {
+            let x: Vec<f64> = (0..len).map(|i| 1.5 * i as f64).collect();
+            for out in [
+                wavelet_denoise_leveldep(&x, 0, ThresholdMode::Hard, Wavelet::Haar),
+                wavelet_denoise_bayes(&x, 0, Wavelet::Haar),
+                wavelet_denoise_ti(&x, 0, ThresholdMode::Hard, Wavelet::Haar, 8),
+            ]
+            {
+                assert_eq!(out.len(), len);
+                assert!(out.iter().all(|v| v.is_finite()));
+            }
+        }
+        // cycle_spin itself: empty and single-sample inputs take the plain path.
+        let empty: [f64; 0] = [];
+        assert!(cycle_spin(&empty, 8, |s| s.to_vec()).is_empty());
+        assert_eq!(cycle_spin(&[7.0], 8, |s| s.to_vec()), vec![7.0]);
+    }
+
+    #[test]
+    fn new_wavelet_denoisers_preserve_constant_signals() {
+        // A constant has zero detail coefficients at every level: thresholding
+        // (any rule) must leave it untouched up to round-off.
+        let x = vec![3.5; 64];
+        for out in [
+            wavelet_denoise_leveldep(&x, 0, ThresholdMode::Soft, Wavelet::Db4),
+            wavelet_denoise_leveldep(&x, 0, ThresholdMode::Hard, Wavelet::Haar),
+            wavelet_denoise_bayes(&x, 0, Wavelet::Db4),
+            wavelet_denoise_bayes(&x, 0, Wavelet::Haar),
+            wavelet_denoise_ti(&x, 0, ThresholdMode::Soft, Wavelet::Db4, 8),
+            wavelet_denoise_ti(&x, 0, ThresholdMode::Hard, Wavelet::Haar, 8),
+        ]
+        {
+            assert_eq!(out.len(), x.len());
+            for v in out.iter()
+            {
+                assert!((v - 3.5).abs() < 1.0e-9, "constant not preserved: {v}");
+            }
+        }
     }
 
     #[test]

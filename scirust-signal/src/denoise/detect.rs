@@ -87,6 +87,20 @@ pub struct NoiseProfile {
     pub dominant: NoiseType,
 }
 
+/// One spectral line found by [`detect_lines`]: a periodogram peak of the high-pass
+/// residual that passes Fisher's g-test against the white-noise null.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct SpectralLine {
+    /// Frequency of the line in Hz (bin center of the residual periodogram).
+    pub freq_hz: f64,
+    /// Fisher's g of this line at the moment it was peeled: its peak ordinate
+    /// divided by the sum of the ordinates still standing (previous lines removed).
+    pub fisher_g: f64,
+    /// Fraction of the total residual AC power carried by the peeled peak region
+    /// (peak bin ± 2 bins), relative to the residual spectrum *before* any peeling.
+    pub power_ratio: f64,
+}
+
 /// A signal/noise decomposition with a self-check on its own validity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Separation {
@@ -167,28 +181,13 @@ pub fn classify(signal: &[f64], sample_rate: f64) -> NoiseProfile {
     // what remains once it is subtracted. So the impulsivity, periodicity, flatness
     // and color descriptors are all measured on the high-pass residual, which keeps
     // additive noise and narrowband interference while discarding the smooth signal.
-    let smooth = moving_average(signal, 9);
-    let residual: Vec<f64> = signal
-        .iter()
-        .zip(smooth.iter())
-        .map(|(s, m)| s - m)
-        .collect();
-
-    // Trim the residual borders: reflection padding at the smoother's edges can turn
-    // a large low-frequency swing into a couple of spurious residual spikes that
-    // would otherwise masquerade as impulsive noise.
-    let trim = 12.min(n / 4);
-    let core = &residual[trim..n - trim];
-    let residual_kurtosis = crate::features::kurtosis(core);
-    let crest_factor = crate::features::crest_factor(core);
-    let res_rms = std_of(core);
+    let core = highpass_residual_core(signal);
+    let residual_kurtosis = crate::features::kurtosis(&core);
+    let crest_factor = crate::features::crest_factor(&core);
+    let res_rms = std_of(&core);
 
     // Residual spectrum (mean-removed, reflection-padded) for the noise descriptors.
-    let core_mean = core.iter().sum::<f64>() / core.len() as f64;
-    let core_centered: Vec<f64> = core.iter().map(|&x| x - core_mean).collect();
-    let core_padded = pad_reflect_pow2(&core_centered);
-    let np = core_padded.len();
-    let res_psd: Vec<f64> = fft_real(&core_padded).iter().map(|c| c.mag_sq()).collect();
+    let (res_psd, np) = residual_psd(&core);
 
     let spectral_flatness = spectral_flatness_of(&res_psd[1..]);
     let spectral_slope = loglog_slope(&res_psd);
@@ -200,8 +199,7 @@ pub fn classify(signal: &[f64], sample_rate: f64) -> NoiseProfile {
     // the bin count `m`, so it is not fooled by the wide spread of white ordinates
     // the way a raw max/median prominence is.
     let line_dominance = fisher_g(&res_psd[1..]);
-    let m_bins = res_psd.len().saturating_sub(1).max(2) as f64;
-    let g_crit = 1.0 - (1.0e-4 / m_bins).powf(1.0 / (m_bins - 1.0));
+    let g_crit = fisher_g_critical(res_psd.len().saturating_sub(1));
 
     // Trend strength is, by contrast, measured on the *raw* spectrum's lowest band:
     // it is precisely the low-frequency energy the residual threw away as "signal".
@@ -280,6 +278,250 @@ fn fisher_g(psd: &[f64]) -> f64 {
     max / sum
 }
 
+/// White-noise critical value of Fisher's g over `m_bins` periodogram ordinates at a
+/// significance of 1e-4, from the leading term of Fisher's exact null distribution
+/// `P(g > x) ≈ m·(1 − x)^{m−1}`. Shared by [`classify`] and [`detect_lines`] so both
+/// call "line" at exactly the same evidence level.
+fn fisher_g_critical(m_bins: usize) -> f64 {
+    let m = m_bins.max(2) as f64;
+    1.0 - (1.0e-4 / m).powf(1.0 / (m - 1.0))
+}
+
+/// The high-pass residual all the noise descriptors are measured on: the signal
+/// minus its 9-point moving average, with the borders trimmed (reflection padding at
+/// the smoother's edges can turn a large low-frequency swing into a couple of
+/// spurious residual spikes that would otherwise masquerade as impulsive noise).
+/// Callers guarantee `signal.len() >= 8` so the trimmed core is never empty.
+fn highpass_residual_core(signal: &[f64]) -> Vec<f64> {
+    let n = signal.len();
+    let smooth = moving_average(signal, 9);
+    let residual: Vec<f64> = signal
+        .iter()
+        .zip(smooth.iter())
+        .map(|(s, m)| s - m)
+        .collect();
+    let trim = 12.min(n / 4);
+    residual[trim..n - trim].to_vec()
+}
+
+/// Periodogram of a (non-empty) residual core: mean-removed, reflection-padded to a
+/// power of two, squared-magnitude of the positive-frequency FFT bins. Returns the
+/// PSD ordinates and the padded length `np` (bin `k` sits at `k·sample_rate/np` Hz).
+fn residual_psd(core: &[f64]) -> (Vec<f64>, usize) {
+    let core_mean = core.iter().sum::<f64>() / core.len() as f64;
+    let core_centered: Vec<f64> = core.iter().map(|&x| x - core_mean).collect();
+    let core_padded = pad_reflect_pow2(&core_centered);
+    let np = core_padded.len();
+    let psd: Vec<f64> = fft_real(&core_padded).iter().map(|c| c.mag_sq()).collect();
+    (psd, np)
+}
+
+/// Detect up to `max_lines` spectral lines by **iterative peeling** of the high-pass
+/// residual periodogram — the multi-line extension of the single-line Fisher g-test
+/// [`classify`] performs (Fisher 1929, *Tests of significance in harmonic analysis*;
+/// peeling after Siegel 1980's observation that secondary lines hide under the
+/// primary's dominance).
+///
+/// The residual PSD is built exactly as in [`classify`] (9-point moving-average
+/// high-pass, trimmed borders, mean-removed, reflection-padded periodogram). Then,
+/// repeatedly: the dominant ordinate (excluding DC and bin 1, like [`classify`]) is
+/// tested with Fisher's g against the same white-noise critical value [`classify`]
+/// uses; if it passes, the line is recorded and the peak bin ± 2 bins are zeroed —
+/// the stored spectrum covers positive frequencies only, so this implicitly removes
+/// the conjugate mirror bins as well — and g is recomputed on the ordinates still
+/// standing. The loop stops at `max_lines`, or as soon as the strongest remaining
+/// ordinate no longer beats the critical value (no line without evidence).
+///
+/// Degrades gracefully: fewer than 8 samples, `max_lines = 0`, or a constant signal
+/// yield an empty vector. Feed the result to [`harmonic_stack`] to recognize a
+/// mains-hum-style harmonic family, or notch each line individually.
+pub fn detect_lines(signal: &[f64], sample_rate: f64, max_lines: usize) -> Vec<SpectralLine> {
+    let n = signal.len();
+    if n < 8 || max_lines == 0
+    {
+        return Vec::new();
+    }
+    let core = highpass_residual_core(signal);
+    let (mut psd, np) = residual_psd(&core);
+    let g_crit = fisher_g_critical(psd.len().saturating_sub(1));
+    let total_power: f64 = psd[1..].iter().sum();
+    if total_power <= 0.0
+    {
+        return Vec::new();
+    }
+
+    let mut lines = Vec::new();
+    for _ in 0..max_lines
+    {
+        let remaining: f64 = psd[1..].iter().sum();
+        if remaining <= 0.0
+        {
+            break;
+        }
+        let (bin, _) = dominant_line(&psd, 2);
+        if bin == 0 || psd[bin] <= 0.0
+        {
+            break;
+        }
+        let g = psd[bin] / remaining;
+        if g <= g_crit
+        {
+            break;
+        }
+        let lo = bin.saturating_sub(2).max(1);
+        let hi = (bin + 2).min(psd.len() - 1);
+        let peak_power: f64 = psd[lo..=hi].iter().sum();
+        lines.push(SpectralLine {
+            freq_hz: bin as f64 * sample_rate / np as f64,
+            fisher_g: g,
+            power_ratio: peak_power / total_power,
+        });
+        for p in psd[lo..=hi].iter_mut()
+        {
+            *p = 0.0;
+        }
+    }
+    lines
+}
+
+/// Highest harmonic index a [`harmonic_stack`] test will consider. Beyond ~12 the
+/// per-harmonic tolerance window (`±2 %·k·f0`) grows wide enough to swallow the
+/// spacing between multiples of `f0`, so *any* high line would match *some*
+/// fundamental — the failure mode that lets unrelated tones form spurious families.
+/// Capping `k` keeps the test to the low harmonics real interferers actually excite.
+const HARMONIC_MAX_INDEX: usize = 12;
+
+/// Relative tolerance for calling a line the `k`-th harmonic of `f0`
+/// (`|f − k·f0| ≤ HARMONIC_TOL·k·f0`), i.e. a 2 % deviation from the ideal multiple.
+const HARMONIC_TOL: f64 = 0.02;
+
+/// The harmonic index `k` of a line at `freq` relative to fundamental `f0`, or
+/// `None` when the line is not a bounded (`1 ≤ k ≤ `[`HARMONIC_MAX_INDEX`]) integer
+/// multiple within [`HARMONIC_TOL`]. Shared by [`harmonic_stack`] and the notch
+/// router so both agree on exactly which lines belong to a family.
+pub(crate) fn harmonic_index_of(freq: f64, f0: f64) -> Option<usize> {
+    if !f0.is_finite() || f0 <= 0.0 || !freq.is_finite() || freq <= 0.0
+    {
+        return None;
+    }
+    let kf = (freq / f0).round();
+    if kf < 1.0 || kf > HARMONIC_MAX_INDEX as f64
+    {
+        return None;
+    }
+    if (freq - kf * f0).abs() <= HARMONIC_TOL * kf * f0
+    {
+        Some(kf as usize)
+    }
+    else
+    {
+        None
+    }
+}
+
+/// The highest harmonic index of `f0` matched by any line — the number of harmonics
+/// [`super::remove_mains_hum_iir`] must notch to cover the whole detected family
+/// (`n_harmonics = k_max`, *not* the line count: a missing-fundamental {100, 150}
+/// stack needs 3 harmonics of `f0 = 50`, though only 2 lines were seen).
+pub(crate) fn harmonic_span(lines: &[SpectralLine], f0: f64) -> usize {
+    lines
+        .iter()
+        .filter_map(|l| harmonic_index_of(l.freq_hz, f0))
+        .max()
+        .unwrap_or(1)
+}
+
+/// Recognize a **harmonically related subset** of detected lines — the fingerprint
+/// of mains hum and of any nonlinearly distorted interferer, whose energy sits at
+/// integer multiples of one fundamental.
+///
+/// Every line's frequency is tried as a candidate fundamental `f0`, and so is its
+/// half (`f0/2` recovers a stack whose fundamental was notched out or buried — the
+/// "missing fundamental": lines at 100 and 150 Hz share `f0 = 50`). For each
+/// candidate the lines matching an integer multiple within [`HARMONIC_TOL`] are
+/// grouped by their harmonic index ([`harmonic_index_of`]); the returned count is
+/// the number of **distinct** harmonic indices hit.
+///
+/// A candidate is only accepted when it clears three guards that keep unrelated
+/// tones from forming phantom families:
+///
+/// * **at least two distinct harmonic indices** — several leakage-skirt lines all
+///   at `k = 1` around one peak are one line, not a stack;
+/// * **a low harmonic present** (`min k ≤ 2`) — a real family includes its
+///   fundamental or its octave, not only high harmonics that any small `f0` can fit;
+/// * **bounded `k`** ([`harmonic_index_of`]) — so a far-off line cannot be declared
+///   the 39th harmonic of a signal remnant.
+///
+/// Among the survivors the largest distinct-index count wins; ties prefer the
+/// **larger** fundamental, so {50, 100, 150} reports `f0 = 50` rather than the
+/// equally-consistent sub-harmonic 25. Returns `None` when no candidate relates two
+/// or more lines through a low, bounded harmonic family (e.g. unrelated tones at 50
+/// and 137 Hz, or leakage skirts around a single peak).
+pub fn harmonic_stack(lines: &[SpectralLine]) -> Option<(f64, usize)> {
+    let mut best: Option<(f64, usize)> = None;
+    for line in lines
+    {
+        for f0 in [line.freq_hz, 0.5 * line.freq_hz]
+        {
+            if !f0.is_finite() || f0 <= 0.0
+            {
+                continue;
+            }
+            // Distinct harmonic indices this candidate explains.
+            let mut indices: Vec<usize> = lines
+                .iter()
+                .filter_map(|l| harmonic_index_of(l.freq_hz, f0))
+                .collect();
+            indices.sort_unstable();
+            indices.dedup();
+            let count = indices.len();
+            let has_low = indices.first().is_some_and(|&k| k <= 2);
+            if count >= 2
+                && has_low
+                && best.is_none_or(|(bf, bc)| count > bc || (count == bc && f0 > bf))
+            {
+                best = Some((f0, count));
+            }
+        }
+    }
+    best
+}
+
+/// The dominant tone of the signal's **information** component — the strongest
+/// spectral peak of the moving-average-smoothed signal (the part this module treats
+/// as structure, not noise), returned only when it is unambiguously dominant: its
+/// Fisher-g fraction (peak bin power over the summed positive-frequency band) must
+/// exceed 0.3. That fraction stays below ~0.15 for broadband smoothed noise across
+/// record lengths but reaches 0.5–0.6 for a tone at or above 0 dB, so the test is
+/// scale-robust where a raw peak/median prominence is not. The
+/// periodic-interference router uses this to refuse to notch a line that *is* the
+/// signal's own tone rather than an interferer. Returns `None` when the smooth part
+/// has no clearly dominant line (a broadband information signal needs no protection).
+pub(crate) fn signal_dominant_freq(signal: &[f64], sample_rate: f64) -> Option<f64> {
+    let n = signal.len();
+    if n < 8
+    {
+        return None;
+    }
+    let smooth = moving_average(signal, 9);
+    let mean = smooth.iter().sum::<f64>() / n as f64;
+    let centered: Vec<f64> = smooth.iter().map(|&x| x - mean).collect();
+    let padded = pad_reflect_pow2(&centered);
+    let np = padded.len();
+    let psd: Vec<f64> = fft_real(&padded).iter().map(|c| c.mag_sq()).collect();
+    let (bin, _) = dominant_line(&psd, 2);
+    if bin == 0 || bin >= psd.len()
+    {
+        return None;
+    }
+    let band_sum: f64 = psd[2..].iter().sum();
+    if band_sum <= 0.0 || psd[bin] / band_sum < 0.3
+    {
+        return None;
+    }
+    Some(bin as f64 * sample_rate / np as f64)
+}
+
 /// Separate a signal into information and noise, then falsify the split with a
 /// residual whiteness test. See the module docs for the reasoning.
 pub fn separate(signal: &[f64], sample_rate: f64) -> Separation {
@@ -291,19 +533,12 @@ pub fn separate(signal: &[f64], sample_rate: f64) -> Separation {
         .map(|(s, e)| s - e)
         .collect();
 
-    let n = signal.len();
     let noise_std = std_of(&noise_estimate);
     let sig_pow = mean_square(&signal_estimate);
     let noise_pow = mean_square(&noise_estimate).max(1.0e-30);
     let snr_db = 10.0 * (sig_pow / noise_pow).max(1.0e-30).log10();
 
-    // Whiteness of the residual: how many autocorrelation lags stay inside the
-    // ±1.96/√N white-noise band.
-    let max_lag = (n / 4).clamp(1, 40);
-    let ac = normalized_autocorr(&noise_estimate, max_lag);
-    let band = 1.96 / (n.max(1) as f64).sqrt();
-    let within = (1..=max_lag).filter(|&l| ac[l].abs() < band).count();
-    let residual_whiteness = within as f64 / max_lag as f64;
+    let residual_whiteness = whiteness_of(&noise_estimate);
     let leaked_structure = residual_whiteness < 0.9;
 
     Separation {
@@ -321,6 +556,26 @@ pub fn separate(signal: &[f64], sample_rate: f64) -> Separation {
 // ---------------------------------------------------------------------------
 // Descriptor helpers.
 // ---------------------------------------------------------------------------
+
+/// Whether a component is dominated by a narrowband (tonal) line, judged by very low
+/// spectral flatness of its own mean-removed periodogram. Used by the cascade to
+/// tell a broadband stage that removed *noise* (flat, colored or white → accept)
+/// from one that removed a *signal tone* (a spike in the spectrum → roll back).
+pub(crate) fn is_tonal(x: &[f64], _sample_rate: f64) -> bool {
+    if x.len() < 8
+    {
+        return false;
+    }
+    let mean = x.iter().sum::<f64>() / x.len() as f64;
+    let centered: Vec<f64> = x.iter().map(|&v| v - mean).collect();
+    let padded = pad_reflect_pow2(&centered);
+    let psd: Vec<f64> = fft_real(&padded).iter().map(|c| c.mag_sq()).collect();
+    if psd.len() < 2
+    {
+        return false;
+    }
+    spectral_flatness_of(&psd[1..]) < 0.06
+}
 
 fn spectral_flatness_of(psd: &[f64]) -> f64 {
     if psd.is_empty()
@@ -403,6 +658,20 @@ fn dominant_line(psd: &[f64], low_cut: usize) -> (usize, f64) {
     (max_bin, prominence)
 }
 
+/// Whiteness of a residual in [0, 1]: the fraction of autocorrelation lags
+/// (up to `min(n/4, 40)`) that stay inside the `±1.96/√N` white-noise confidence
+/// band. 1.0 ⇒ indistinguishable from white noise. This is the single shared
+/// implementation behind [`separate`]'s self-check, the cascade's stage-progress
+/// criterion and the tournament score of [`super::denoise_best`].
+pub(crate) fn whiteness_of(residual: &[f64]) -> f64 {
+    let n = residual.len();
+    let max_lag = (n / 4).clamp(1, 40);
+    let ac = normalized_autocorr(residual, max_lag);
+    let band = 1.96 / (n.max(1) as f64).sqrt();
+    let within = (1..=max_lag).filter(|&l| ac[l].abs() < band).count();
+    within as f64 / max_lag as f64
+}
+
 fn normalized_autocorr(x: &[f64], max_lag: usize) -> Vec<f64> {
     let n = x.len();
     let mut out = vec![0.0; max_lag + 1];
@@ -429,7 +698,9 @@ fn normalized_autocorr(x: &[f64], max_lag: usize) -> Vec<f64> {
     out
 }
 
-fn std_of(x: &[f64]) -> f64 {
+/// Population standard deviation of a slice (0.0 when empty). Shared with the
+/// tournament scorer in the parent module.
+pub(crate) fn std_of(x: &[f64]) -> f64 {
     let n = x.len();
     if n == 0
     {
@@ -583,5 +854,200 @@ mod tests {
         let sep = separate(&obs, 512.0);
         // Whiteness is a well-defined number in [0,1] either way.
         assert!(sep.residual_whiteness >= 0.0 && sep.residual_whiteness <= 1.0);
+    }
+
+    /// Two tones + a slow signal + a small white floor, sized so the trimmed
+    /// residual core (n − 24 samples) is exactly 2048 and both tones sit ON a
+    /// periodogram bin (50 Hz = bin 100, 120 Hz = bin 240 at fs = 1024), which
+    /// keeps the peeling crisp and the frequency readout exact. The noise floor
+    /// matters: without it the tiny high-pass remnant of the 4 Hz *signal* would
+    /// stand alone in an otherwise empty spectrum and be reported as a third line.
+    fn two_tone_fixture(fs: f64) -> Vec<f64> {
+        let n = 2072;
+        let mut rng = Lcg::new(211);
+        (0..n)
+            .map(|i| {
+                let t = i as f64 / fs;
+                (2.0 * PI * 4.0 * t).sin()
+                    + 0.8 * (2.0 * PI * 50.0 * t).sin()
+                    + 0.8 * (2.0 * PI * 120.0 * t).sin()
+                    + 0.05 * rng.gauss()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn detect_lines_finds_two_separated_tones() {
+        let fs = 1024.0;
+        let obs = two_tone_fixture(fs);
+        let lines = detect_lines(&obs, fs, 5);
+        assert!(lines.len() >= 2, "found only {} lines", lines.len());
+        let bin = fs / 2048.0;
+        for target in [50.0, 120.0]
+        {
+            assert!(
+                lines
+                    .iter()
+                    .any(|l| (l.freq_hz - target).abs() <= 2.0 * bin),
+                "no line within 2 bins of {target} Hz: {lines:?}"
+            );
+        }
+        // And nothing but the two injected tones is reported: every line must sit
+        // on one of them (the peeler must not invent lines out of the noise floor).
+        for l in &lines
+        {
+            assert!(
+                (l.freq_hz - 50.0).abs() <= 2.0 * bin || (l.freq_hz - 120.0).abs() <= 2.0 * bin,
+                "spurious line at {} Hz",
+                l.freq_hz
+            );
+        }
+        for l in &lines
+        {
+            assert!(l.fisher_g > 0.0 && l.fisher_g <= 1.0, "g = {}", l.fisher_g);
+            assert!(
+                l.power_ratio > 0.0 && l.power_ratio <= 1.0,
+                "power_ratio = {}",
+                l.power_ratio
+            );
+        }
+        // Two isolated tones are NOT a harmonic stack (120 is not a multiple of 50).
+        assert!(harmonic_stack(&lines).is_none());
+    }
+
+    #[test]
+    fn detect_lines_parameters_are_live() {
+        let fs = 1024.0;
+        let obs = two_tone_fixture(fs);
+        // max_lines caps the peeling.
+        assert_eq!(detect_lines(&obs, fs, 1).len(), 1);
+        assert!(detect_lines(&obs, fs, 0).is_empty());
+        // sample_rate scales the reported frequencies: doubling fs doubles them.
+        let base = detect_lines(&obs, fs, 1);
+        let doubled = detect_lines(&obs, 2.0 * fs, 1);
+        assert!(
+            (doubled[0].freq_hz - 2.0 * base[0].freq_hz).abs() < 1.0e-9,
+            "{} vs {}",
+            doubled[0].freq_hz,
+            base[0].freq_hz
+        );
+    }
+
+    #[test]
+    fn detect_lines_degrades_gracefully() {
+        let empty: [f64; 0] = [];
+        assert!(detect_lines(&empty, 1000.0, 5).is_empty());
+        for len in 1..8_usize
+        {
+            let x: Vec<f64> = (0..len).map(|i| i as f64).collect();
+            assert!(detect_lines(&x, 1000.0, 5).is_empty(), "len {len}");
+        }
+        // A constant has a zero residual spectrum: no line, no panic.
+        assert!(detect_lines(&vec![3.5; 64], 1000.0, 5).is_empty());
+    }
+
+    #[test]
+    fn detect_lines_agrees_with_classify_on_a_periodic_verdict() {
+        // Whenever classify says Periodic, the peeler (same PSD, same critical
+        // value) must find at least the line classify saw, at the same frequency.
+        let n = 1024;
+        let fs = 1000.0;
+        let obs: Vec<f64> = base_sine(n)
+            .iter()
+            .enumerate()
+            .map(|(i, &c)| c + 1.0 * (2.0 * PI * 60.0 * i as f64 / fs).sin())
+            .collect();
+        let p = classify(&obs, fs);
+        assert_eq!(p.dominant, NoiseType::Periodic);
+        let lines = detect_lines(&obs, fs, 5);
+        assert!(!lines.is_empty());
+        assert!(
+            (lines[0].freq_hz - p.dominant_freq_hz).abs() < 1.0e-9,
+            "peeler {} Hz vs classify {} Hz",
+            lines[0].freq_hz,
+            p.dominant_freq_hz
+        );
+    }
+
+    #[test]
+    fn harmonic_stack_finds_fundamental_and_rejects_unrelated() {
+        let mk = |f: f64| SpectralLine {
+            freq_hz: f,
+            fisher_g: 0.3,
+            power_ratio: 0.2,
+        };
+        // A full 50/100/150 stack: f0 = 50 with all three lines matched. The
+        // sub-harmonic 25 relates the same three lines; the tie must go to the
+        // larger fundamental.
+        let (f0, count) = harmonic_stack(&[mk(50.0), mk(100.0), mk(150.0)]).unwrap();
+        assert!((f0 - 50.0).abs() < 1.0e-9, "f0 = {f0}");
+        assert_eq!(count, 3);
+        // Order must not matter.
+        let (f0, count) = harmonic_stack(&[mk(150.0), mk(50.0), mk(100.0)]).unwrap();
+        assert!((f0 - 50.0).abs() < 1.0e-9);
+        assert_eq!(count, 3);
+        // Missing fundamental: 100 and 150 only relate through the f0/2 candidate.
+        let (f0, count) = harmonic_stack(&[mk(100.0), mk(150.0)]).unwrap();
+        assert!((f0 - 50.0).abs() < 1.0e-9, "f0 = {f0}");
+        assert_eq!(count, 2);
+        // Unrelated tones: no fundamental relates 50 and 137 within 2 %.
+        assert!(harmonic_stack(&[mk(50.0), mk(137.0)]).is_none());
+        // Degenerate inputs.
+        assert!(harmonic_stack(&[]).is_none());
+        assert!(harmonic_stack(&[mk(50.0)]).is_none());
+        // The 2 % tolerance is live: 101 Hz is a near-multiple of 50 (1 % off),
+        // 103 Hz is not (3 % off).
+        assert!(harmonic_stack(&[mk(50.0), mk(101.0)]).is_some());
+        assert!(harmonic_stack(&[mk(50.0), mk(103.0)]).is_none());
+    }
+
+    #[test]
+    fn harmonic_stack_rejects_spurious_families() {
+        let mk = |f: f64| SpectralLine {
+            freq_hz: f,
+            fisher_g: 0.3,
+            power_ratio: 0.2,
+        };
+        // A low signal remnant (7 Hz) and an unrelated interferer (137 Hz): the old
+        // unbounded-k matcher paired them at f0 = 3.5 (7 = 2·3.5, 137 ≈ 39·3.5) and
+        // let the router notch the 7 Hz signal. The k ≤ 12 cap forbids k = 39.
+        assert!(harmonic_stack(&[mk(137.0), mk(50.0), mk(7.0)]).is_none());
+        // Two unrelated tones cannot be "related" through a tiny fundamental.
+        assert!(harmonic_stack(&[mk(2.0), mk(97.0), mk(151.0)]).is_none());
+        // Leakage skirts around one peak (all at k = 1) are one line, not a stack.
+        assert!(harmonic_stack(&[mk(119.1), mk(120.6), mk(122.1), mk(123.5)]).is_none());
+        // A genuine odd-harmonic family (symmetric distortion) is still recognized.
+        let (f0, count) = harmonic_stack(&[mk(50.0), mk(150.0), mk(250.0)]).unwrap();
+        assert!((f0 - 50.0).abs() < 1.0e-9, "f0 = {f0}");
+        assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn harmonic_span_covers_every_detected_line() {
+        let mk = |f: f64| SpectralLine {
+            freq_hz: f,
+            fisher_g: 0.3,
+            power_ratio: 0.2,
+        };
+        // Missing-fundamental {100, 150}: the stack count is 2 but three harmonics of
+        // f0 = 50 must be notched to reach the 150 Hz line.
+        let lines = [mk(100.0), mk(150.0)];
+        let (f0, _) = harmonic_stack(&lines).unwrap();
+        assert_eq!(harmonic_span(&lines, f0), 3);
+    }
+
+    #[test]
+    fn signal_dominant_freq_finds_a_tone_and_ignores_broadband() {
+        let n = 1024;
+        let fs = 1000.0;
+        let tone: Vec<f64> = (0..n)
+            .map(|i| (2.0 * PI * 8.0 * i as f64 / fs).sin())
+            .collect();
+        let f = signal_dominant_freq(&tone, fs).expect("a clear tone must be found");
+        assert!((f - 8.0).abs() < 3.0, "dominant {f} Hz");
+        // Broadband white noise has no dominant information tone to protect.
+        let mut rng = Lcg::new(202);
+        let noise: Vec<f64> = (0..n).map(|_| rng.gauss()).collect();
+        assert!(signal_dominant_freq(&noise, fs).is_none());
     }
 }

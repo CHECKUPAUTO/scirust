@@ -5,6 +5,62 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `scirust-signal` : refonte du filtre anti-bruit (`denoise`)
+Extension large de la boîte à outils de débruitage, produite par implémentation
+parallèle (4 agents) puis intégration et **revue adversariale** (5 axes, vérification
+à 3 réfutateurs par constat) ; les constats confirmés ont tous été corrigés avant
+fusion. **382 tests unitaires + 7 tests d'intégration + 2 doctests** au vert ;
+`fmt` / `clippy -D warnings` propres.
+
+**Nouveaux débruiteurs (`transform`, `iir`, `stft`, `streaming`) :**
+- **Ondelettes invariantes par translation** (`cycle_spin`, `wavelet_denoise_ti`,
+  Coifman-Donoho 1995) : moyennage sur décalages circulaires — supprime les artefacts
+  pseudo-Gibbs autour des transitoires.
+- **Seuils dépendants de l'échelle** (`wavelet_denoise_leveldep`, Johnstone-Silverman
+  1997) : `σ_j` estimé par bande — le bon outil pour le bruit coloré.
+- **BayesShrink** (`wavelet_denoise_bayes`, Chang-Yu-Vetterli 2000).
+- **Notch IIR à phase nulle** (`rbj_notch`, `filtfilt_sos`, `notch_iir`,
+  `remove_mains_hum_iir`, `BiquadState`) : sans ringing ni fuite spectrale, précis
+  même quand l'interféreur tombe entre deux bins FFT.
+- **Wiener à court terme (STFT)** (`stft_wiener`, `stft_wiener_dd` à SNR a priori
+  décision-dirigée Ephraim-Malah, `stft_wiener_auto`, `stft_wiener_tracked` à
+  poursuite de plancher min-statistics) : gains ré-estimés par trame pour le bruit
+  **non stationnaire**.
+- **Débruiteurs en flux** (`StreamingDenoiser` + `StreamingMovingAverage`,
+  `StreamingMedian`, `StreamingHampel`, `StreamingEma`, `StreamingKalman`) : versions
+  causales échantillon par échantillon pour l'edge/embarqué.
+
+**Sélection & pipeline (`mod`, `detect`, `cascade`) :**
+- **Cascade multi-étapes** (`denoise_cascade`, `denoise_cascade_auto`) : détecter →
+  traiter → re-détecter pour le bruit mixte (impulsions + secteur + plancher), avec
+  protection anti-boucle et **garde accepter/annuler** — une étape large bande n'est
+  validée que si ce qu'elle a retiré est de type bruit (spectre plat), sinon elle est
+  annulée (elle mangeait un ton du signal).
+- **Sélection par tournoi** (`denoise_best`) : score sans référence (blancheur du
+  résidu moins pénalité de sur/sous-débruitage) sur une présélection par famille.
+- **Détection multi-raies harmonique** (`detect_lines`, `harmonic_stack`,
+  `SpectralLine`) et `denoise_auto` v2 : épluchage de raies + notch IIR harmonique.
+- Banc de mesure `examples/denoise_benchmark.rs` (méthodes × types de bruit × SNR) et
+  garde de non-régression `tests/denoise_integration.rs`.
+
+**Corrections issues de la revue :**
+- `harmonic_stack` : indice harmonique borné (`k ≤ 12`), tolérance sur indices
+  *distincts* et fondamentale basse requise — élimine les fausses familles (un reste
+  de signal à 7 Hz et un interféreur à 137 Hz ne sont plus « harmoniques » via
+  `f0 = 3.5`).
+- Router périodique (`notch_detected_lines`) : protège le ton propre du signal
+  (`signal_dominant_freq`) plutôt que de le notcher, couvre toute la famille détectée
+  (`harmonic_span`, non le simple compte), et traite honnêtement les raies proches de
+  Nyquist (repli brick-wall).
+- Cascade : critère de progression par blancheur cumulée (auto-contradictoire)
+  remplacé par la garde accepter/annuler ci-dessus.
+- `denoise_best` périodique : retrait du rehausseur de raie (renvoyait le ton, pas le
+  signal débruité, et trompait le score).
+- Débruiteurs de rang en flux : ordre total `f64::total_cmp` — un unique NaN ne
+  corrompt plus la fenêtre triée (qui dégénérait silencieusement en taille paire).
+- `n_shifts` du cycle-spinning porté de 8 (dégénéré sur longueurs puissance de deux) à
+  **15** (impair) partout ; ajout du wrapper/catalogue `WaveletSure`.
+
 ### Ajouté — radar & optronique : lot massif de 10 modules autonomes (blocs 40-49)
 Dix capacités radar et EO/IR indépendantes, chacune testée par oracles, produites en
 parallèle (agents isolés en worktree) puis intégrées et vérifiées centralement.
