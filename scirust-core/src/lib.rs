@@ -122,4 +122,5 @@ pub mod philox;
 pub mod portable_f32;
 pub mod pruning;
 pub mod reproducible;
+pub mod stochastic_round;
 pub mod tree_allreduce;
