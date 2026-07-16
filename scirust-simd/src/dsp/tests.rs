@@ -8,7 +8,7 @@
 
 use super::fft::{Complex, Plan, fft, ifft, irfft, rfft};
 use super::{Biquad, Fir};
-use crate::fixed::{Q8_24, Q16_16, RealScalar};
+use crate::fixed::{Q8_8, Q8_24, Q16_16, RealScalar};
 
 // Petit pont scalaire ↔ f64 pour des tests génériques (comme en géométrie).
 trait Scalar: RealScalar {
@@ -583,4 +583,46 @@ fn rfft_dc_and_determinism() {
         assert_eq!(x.re.to_raw(), y.re.to_raw());
         assert_eq!(x.im.to_raw(), y.im.to_raw());
     }
+}
+
+// ------------------------------------------------------------------ //
+//  DSP sur stockage 16 bits (FixedI16) — audio embarqué               //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn dsp_filters_run_on_fixed_i16() {
+    // Les MÊMES filtres (déjà validés sur f32/f64/Q16_16/Q8_24) tournent sur le
+    // stockage i16 sans réécriture — 16 bits pour l'audio embarqué déterministe.
+    let q = |v: f64| Q8_8::try_from(v).unwrap();
+    // Biquad stable (pôles complexes de module √0.1 ≈ 0.316), coefficients Q8.8.
+    let mut bx = Biquad::<Q8_8>::new(q(0.2), q(0.4), q(0.2), q(-0.3), q(0.1));
+    let mut peak = 0.0f64;
+    for i in 0..500
+    {
+        let x = q(((i % 17) as f64) * 0.03 - 0.25);
+        let y = bx.process(x).to_f64();
+        assert!(y.is_finite());
+        peak = peak.max(y.abs());
+    }
+    assert!(peak < 4.0, "biquad i16 borné, pic = {peak}");
+
+    // FIR moyenne mobile 16 bits : réponse impulsionnelle = coefficients.
+    let mut fir = Fir::<Q8_8, 4>::new([q(0.25); 4]);
+    assert!((fir.process(Q8_8::one()).to_f64() - 0.25).abs() < 1e-2);
+    for _ in 0..3
+    {
+        assert!((fir.process(Q8_8::zero()).to_f64() - 0.25).abs() < 1e-2);
+    }
+
+    // Déterminisme bit-à-bit du chemin i16.
+    let run = || {
+        let mut b = Biquad::<Q8_8>::new(q(0.2), q(0.4), q(0.2), q(-0.3), q(0.1));
+        let mut out = [0i16; 32];
+        for (i, o) in out.iter_mut().enumerate()
+        {
+            *o = b.process(q(((i % 7) as f64) * 0.1 - 0.3)).to_raw();
+        }
+        out
+    };
+    assert_eq!(run(), run());
 }

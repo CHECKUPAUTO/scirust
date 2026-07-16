@@ -36,6 +36,14 @@ impl core::error::Error for TryFromFloatError {}
 
 // -------- entier → fixe (saturant) -------- //
 
+impl<const FRAC: u32> From<i16> for Fixed<i16, FRAC> {
+    /// Valeur entière → Q_FRAC, **saturante** si hors plage.
+    #[inline]
+    fn from(value: i16) -> Self {
+        Self::from_int_saturating(value)
+    }
+}
+
 impl<const FRAC: u32> From<i32> for Fixed<i32, FRAC> {
     /// Valeur entière → Q_FRAC, **saturante** si hors plage.
     #[inline]

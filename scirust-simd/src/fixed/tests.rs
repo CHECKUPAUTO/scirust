@@ -12,8 +12,8 @@ use super::reductions as red;
 use super::simd::{FixedI32x8, FixedI64x4};
 use super::transcendental as tr;
 use super::{
-    FixedI32, FixedI64, NumericScalar, OverflowMode, Q8_24, Q16_16, Q24_8, Q32_32, RealScalar,
-    RoundingMode,
+    FixedI16, FixedI32, FixedI64, NumericScalar, OverflowMode, Q1_15, Q8_8, Q8_24, Q16_16, Q24_8,
+    Q32_32, RealScalar, RoundingMode,
 };
 
 // LCG déterministe.
@@ -800,4 +800,98 @@ fn transcendental_saturates_without_panic() {
     assert!((tr::tanh(q16(50.0)).to_f64() - 1.0).abs() < 1e-3);
     assert!((tr::sigmoid(q16(50.0)).to_f64() - 1.0).abs() < 1e-3);
     assert!(tr::sigmoid(q16(-50.0)).to_f64() < 1e-3);
+}
+
+// ------------------------------------------------------------------ //
+//  Stockage i16 (FixedI16) — validation de la généricité             //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn fixed_i16_constants_and_layout() {
+    use core::mem::size_of;
+    assert_eq!(size_of::<Q1_15>(), size_of::<i16>());
+    assert_eq!(size_of::<Q8_8>(), size_of::<i16>());
+    // Q8.8 : 1.0 = 2^8 = 256 (représentable).
+    assert_eq!(Q8_8::one().to_raw(), 1 << 8);
+    assert_eq!(Q8_8::resolution().to_raw(), 1);
+    assert_eq!(Q8_8::resolution().to_f64(), 1.0 / 256.0);
+    // Q1.15 : échantillons dans [−1, 1). 1.0 non représentable (documenté).
+    assert_eq!(Q1_15::resolution().to_f64(), 1.0 / 32768.0);
+    assert_eq!(Q1_15::max_value().to_raw(), i16::MAX);
+    assert_eq!(Q1_15::min_value().to_f64(), -1.0);
+    assert!(Q1_15::max_value().to_f64() < 1.0);
+}
+
+#[test]
+fn fixed_i16_conversions_saturating() {
+    // Q8.8 : conversions entières saturantes.
+    assert_eq!(Q8_8::from(3).to_f64(), 3.0);
+    assert_eq!(Q8_8::from(-5).to_f64(), -5.0);
+    assert_eq!(Q8_8::from(1000), Q8_8::max_value()); // 1000 > 127.99 → sature
+    assert_eq!(Q8_8::from(-1000), Q8_8::min_value());
+    // Aller-retour flottant à la résolution.
+    for &v in &[0.0, 0.5, -0.25, 3.75, -12.5]
+    {
+        let f = Q8_8::try_from(v).unwrap();
+        assert!((f.to_f64() - v).abs() <= 1.0 / 256.0, "v={v}");
+    }
+    // Q1.15 : plage échantillon.
+    assert!((Q1_15::try_from(0.5).unwrap().to_f64() - 0.5).abs() <= 1.0 / 32768.0);
+    assert!((Q1_15::try_from(-0.75).unwrap().to_f64() + 0.75).abs() <= 1.0 / 32768.0);
+    assert!(Q1_15::try_from(1.5).is_err()); // hors plage
+}
+
+#[test]
+fn fixed_i16_multiply_uses_i32_wide_exactly() {
+    // Le produit passe par l'accumulateur i32 (élargi de i16) : exact avant
+    // arrondi. On compare à une référence i32 (troncature vers zéro).
+    let mut rng = Lcg(0xF16);
+    for _ in 0..2000
+    {
+        let ra = (rng.next() >> 49) as i16; // i16 modéré
+        let rb = (rng.next() >> 49) as i16;
+        let a = FixedI16::<8>::from_raw(ra);
+        let b = FixedI16::<8>::from_raw(rb);
+        let got = (a * b).to_raw() as i64;
+        let p = (ra as i64) * (rb as i64);
+        let expected = if p < 0 { -((-p) >> 8) } else { p >> 8 };
+        assert_eq!(got, expected as i16 as i64, "a={ra} b={rb}");
+    }
+}
+
+#[test]
+fn fixed_i16_audio_range_and_overflow() {
+    // Q1.15 : le produit de deux échantillons de [−1, 1) reste dans la plage.
+    let a = Q1_15::try_from(0.8).unwrap();
+    let b = Q1_15::try_from(-0.6).unwrap();
+    assert!(((a * b).to_f64() - (-0.48)).abs() < 2.0 / 32768.0);
+    // Overflow des opérateurs : enveloppe déterministe.
+    let max = Q8_8::max_value();
+    assert_eq!(
+        max + Q8_8::one(),
+        Q8_8::from_raw(i16::MAX.wrapping_add(1 << 8))
+    );
+    assert!(max.checked_add(Q8_8::one()).is_none());
+    assert_eq!(max.saturating_add(Q8_8::one()), max);
+    // Négation de MIN sature.
+    assert_eq!(Q1_15::min_value().saturating_neg(), Q1_15::max_value());
+}
+
+#[test]
+fn fixed_i16_is_numeric_scalar_generic() {
+    // La MÊME fonction générique (déjà utilisée pour f32/i32/i64) s'instancie
+    // sur le stockage i16 sans réécriture — c'est tout l'objet du lot.
+    assert_eq!(poly(Q8_8::try_from(2.0).unwrap()).to_f64(), 7.0); // x²+x+1 en 2 = 7
+    assert_eq!(<Q8_8 as NumericScalar>::from_i32(-4).abs().to_f64(), 4.0);
+    assert_eq!(<Q8_8 as NumericScalar>::one().to_f64(), 1.0);
+    // Déterminisme bit-à-bit d'un petit calcul.
+    let run = || {
+        let mut acc = Q8_8::zero();
+        for i in 0..20
+        {
+            acc += Q8_8::try_from((i as f64) * 0.1 - 1.0).unwrap() * Q8_8::try_from(0.5).unwrap();
+        }
+        acc.to_raw()
+    };
+    assert_eq!(run(), run());
 }

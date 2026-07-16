@@ -17,8 +17,9 @@ use core::hash::Hash;
 
 /// Entier élargi servant d'accumulateur exact (produit/dividende décalé).
 ///
-/// Implémenté pour `i64` (élargi de `i32`) et `i128` (élargi de `i64`).
-/// `Display` est requis pour le formatage décimal exact de [`super::Fixed`].
+/// Implémenté pour `i32` (élargi de `i16`), `i64` (élargi de `i32`) et `i128`
+/// (élargi de `i64`). `Display` est requis pour le formatage décimal exact de
+/// [`super::Fixed`].
 pub trait WideInt: Copy + Ord + Debug + Display {
     /// 0 élargi.
     const ZERO: Self;
@@ -78,6 +79,7 @@ macro_rules! impl_wide_int {
     };
 }
 
+impl_wide_int!(i32);
 impl_wide_int!(i64);
 impl_wide_int!(i128);
 
@@ -87,7 +89,8 @@ impl_wide_int!(i128);
 /// vérifiée / saturante, le rétrécissement depuis l'accumulateur élargi selon
 /// une politique d'overflow, et les conversions flottantes.
 ///
-/// Implémenté pour `i32` (élargi `i64`) et `i64` (élargi `i128`).
+/// Implémenté pour `i16` (élargi `i32`), `i32` (élargi `i64`) et `i64` (élargi
+/// `i128`).
 pub trait FixedStorage: Copy + Ord + Eq + Hash + Debug {
     /// Accumulateur exact pour produit/division.
     type Wide: WideInt;
@@ -250,5 +253,6 @@ macro_rules! impl_fixed_storage {
     };
 }
 
+impl_fixed_storage!(i16, i32);
 impl_fixed_storage!(i32, i64);
 impl_fixed_storage!(i64, i128);

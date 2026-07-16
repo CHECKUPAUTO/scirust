@@ -21,16 +21,22 @@
 // [`Fixed<I, FRAC>`] enveloppe un entier signé `I` ; la valeur réelle est
 // `raw / 2^FRAC`. Le type est générique sur le stockage ([`repr::FixedStorage`],
 // implémenté pour `i32` et `i64`) : **tout l'algorithme est écrit une seule
-// fois**. De nouveaux stockages (`i16`, `i128`) s'ajouteraient sans réécriture.
+// fois**. Ajouter le stockage `i16` (audio) n'a demandé que deux lignes ; un
+// `i128` (très haute précision) s'ajouterait de même, sans réécriture.
 //
 // ## Alias fournis
 //
 // | Alias | Type | Plage approximative | Résolution |
 // |---|---|---|---|
+// | [`Q1_15`]  | `FixedI16<15>` | ±1 | 3.1e-5 |
+// | [`Q8_8`]   | `FixedI16<8>`  | ±128 | 3.9e-3 |
 // | [`Q16_16`] | `FixedI32<16>` | ±32 768 | 1.5e-5 |
 // | [`Q8_24`]  | `FixedI32<24>` | ±128 | 6.0e-8 |
 // | [`Q24_8`]  | `FixedI32<8>`  | ±8.4e6 | 3.9e-3 |
 // | [`Q32_32`] | `FixedI64<32>` | ±2.1e9 | 2.3e-10 |
+//
+// [`Q1_15`] (audio 16 bits) valide la **généricité du stockage** : ajouter
+// `i16` n'a demandé que deux lignes ([`repr`]), aucun algorithme réécrit.
 //
 // ## Politiques explicites (jamais cachées)
 //
@@ -93,11 +99,26 @@ pub use simd::{FixedI32x8, FixedI64x4};
 pub use traits::{NumericScalar, RealScalar};
 pub use types::Fixed;
 
+/// Virgule fixe sur `i16` : `FixedI16<FRAC>` = `raw / 2^FRAC` (audio, embarqué).
+///
+/// Fournit l'algèbre d'anneau ([`NumericScalar`]) — donc filtres DSP, produit
+/// hypercomplexe générique, etc. Les transcendantes ([`RealScalar`]) restent
+/// réservées au stockage `i32` (précision interne Q32).
+pub type FixedI16<const FRAC: u32> = Fixed<i16, FRAC>;
 /// Virgule fixe sur `i32` : `FixedI32<FRAC>` = `raw / 2^FRAC`.
 pub type FixedI32<const FRAC: u32> = Fixed<i32, FRAC>;
 /// Virgule fixe sur `i64` : `FixedI64<FRAC>` = `raw / 2^FRAC`.
 pub type FixedI64<const FRAC: u32> = Fixed<i64, FRAC>;
 
+/// Q1.15 — format audio 16 bits canonique (échantillons dans `[−1, 1)`).
+///
+/// **Attention** : `1.0` n'est **pas** représentable (`FRAC = BITS − 1`), donc
+/// [`Fixed::one`] enveloppe vers `−1.0`. Ce format sert aux **échantillons**
+/// dans `[−1, 1)`, pas à une algèbre nécessitant l'unité (coefficients de
+/// filtre, quaternions…) — pour cela, utiliser [`Q8_8`] (`FRAC = 8`).
+pub type Q1_15 = FixedI16<15>;
+/// Q8.8 — 16 bits, plage modérée (±128), résolution 3.9e-3.
+pub type Q8_8 = FixedI16<8>;
 /// Q8.24 — 8 bits entiers, 24 fractionnaires (haute résolution, faible plage).
 pub type Q8_24 = FixedI32<24>;
 /// Q16.16 — équilibre plage/résolution le plus courant en DSP.
