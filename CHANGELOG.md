@@ -5,6 +5,23 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — validation sur données réelles n°2 : vibrations de roulement (CWRU)
+Étend la validation sur données réelles à un **domaine différent** (§9.4 du rapport
+TSHF) et éprouve la robustesse du classifieur aux features périodiques légitimes
+(#586) hors ECG.
+- **Fixture réelle attribuée** `scirust-signal/tests/data/cwru_bearing.csv` : signaux
+  accéléromètre drive-end 12 kHz du Case Western Reserve University Bearing Data
+  Center — roulement sain (record 97) et défaut de bague externe 0,007" (record 130),
+  décodés hors-ligne du format MATLAB. Provenance en tête de fichier.
+- **Test d'intégration** `tests/real_data_vibration.rs` + exemple
+  `classify_real_bearing` : le défaut de bague externe produit des impacts qui
+  **atteignent le gate impulsif** (kurtosis 5,02 > 4 ET crest 5,15 > 5) — un
+  classifieur naïf les prendrait pour du bruit impulsif et un suppresseur de pics
+  **détruirait la signature de défaut**. Le veto de périodicité de l'enveloppe
+  d'énergie (`periodic_impulse_train`) reconnaît le train d'impacts BPFO comme
+  feature répétée légitime : verdict **non-`Impulsive`**, signature préservée. Même
+  robustesse que le cas QRS ECG, sur un domaine physique totalement différent.
+
 ### Ajouté — `denoise::remove_baseline` : détrend zéro-phase préservant le signal
 Motivé par la validation ECG réelle (#579) : la dérive de ligne de base recouvre le
 contenu basse-fréquence propre de l'ECG, et le détrend Tikhonov rigide de la voie

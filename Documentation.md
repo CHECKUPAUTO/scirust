@@ -319,7 +319,11 @@ tables et observations honnêtes via `cargo run -p scirust-signal --example
 denoise_real_ecg`. Résultats saillants : le détecteur VST ne se déclenche jamais à
 tort sur de l'ECG réel (bruit additif), l'ondelette retire l'artefact musculaire, et
 les limites propres aux données réelles (QRS lus comme impulsifs, dérive recouvrant
-le contenu basse-fréquence de l'ECG) sont documentées plutôt que masquées.
+le contenu basse-fréquence de l'ECG) sont documentées plutôt que masquées. La
+validation s'étend à un **second domaine** — vibrations de roulement réelles (CWRU) :
+un défaut de bague externe atteint le gate impulsif mais reste classé non-`Impulsive`
+grâce au veto de périodicité, préservant la signature de défaut (`tests/real_data_
+vibration.rs`, exemple `classify_real_bearing`).
 
 ### 10.2 Connecteur OPC-UA (`scirust-opcua`)
 
