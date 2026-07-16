@@ -471,9 +471,10 @@ fn sure_threshold_normalized(detail: &[f64], sigma: f64) -> f64 {
     let mf = m as f64;
     let t_univ = (2.0 * mf.ln()).sqrt();
 
-    // Normalized magnitudes, ascending.
+    // Normalized magnitudes, ascending. Total order (NaN-safe): a partial_cmp
+    // comparator is inconsistent on NaN and makes modern Rust sorts panic.
     let mut a: Vec<f64> = detail.iter().map(|&d| (d / sigma).abs()).collect();
-    a.sort_by(|x, y| x.partial_cmp(y).unwrap_or(core::cmp::Ordering::Equal));
+    a.sort_by(|x, y| x.total_cmp(y));
 
     // Donoho-Johnstone sparsity test: too little energy above the noise floor
     // means SURE's variance dominates — fall back to the universal threshold.

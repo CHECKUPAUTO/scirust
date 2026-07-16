@@ -112,7 +112,9 @@ pub fn alpha_trimmed_mean(signal: &[f64], half_window: usize, alpha: f64) -> Vec
         {
             window.push(signal[mirror_index(i as isize + k, n)]);
         }
-        window.sort_by(|x, y| x.partial_cmp(y).unwrap_or(core::cmp::Ordering::Equal));
+        // Total order (NaN-safe): a partial_cmp comparator is inconsistent on NaN and
+        // makes modern Rust sorts panic; total_cmp degrades gracefully instead.
+        window.sort_by(|x, y| x.total_cmp(y));
         let lo = trim;
         let hi = win - trim;
         let kept = &window[lo..hi];

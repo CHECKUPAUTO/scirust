@@ -700,13 +700,20 @@ pub(crate) fn mirror_index(i: isize, n: usize) -> usize {
 }
 
 /// Median of a slice (clones and sorts). Returns 0.0 for an empty slice.
+///
+/// Sorts with [`f64::total_cmp`] — a *total* order. A `partial_cmp`-based comparator
+/// is inconsistent when the slice contains NaN (NaN compares "equal" to everything
+/// while the finite values still order among themselves), which modern Rust sorts
+/// detect and **panic** on; `total_cmp` orders NaN deterministically instead, so a
+/// stray NaN degrades gracefully rather than crashing the rank filters that build on
+/// this. For all-finite input the ordering is identical to `partial_cmp`.
 pub(crate) fn median(values: &[f64]) -> f64 {
     if values.is_empty()
     {
         return 0.0;
     }
     let mut v = values.to_vec();
-    v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+    v.sort_by(|a, b| a.total_cmp(b));
     let n = v.len();
     if n % 2 == 1
     {
