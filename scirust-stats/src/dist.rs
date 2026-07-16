@@ -75,6 +75,54 @@ fn invert_cdf(cdf: impl Fn(f64) -> f64, p: f64, mut lo: f64, mut hi: f64) -> f64
         hi += span;
         guard += 1;
     }
+
+    // Non-negative support (`lo == 0`): the quantile can sit many orders of
+    // magnitude below `hi` — e.g. a Gamma with `shape ≪ 1` places its p-th
+    // percentile astronomically close to 0 (for `shape = scale = 0.01`,
+    // `quantile(0.01) ≈ 1e-202`, which is perfectly representable in f64 yet
+    // unreachable by a linear bisection: that bottoms out near `hi·EPSILON`,
+    // where `cdf` is still far from `p`). Searching in **log-space** resolves
+    // the root to a *relative* precision regardless of its magnitude.
+    if lo == 0.0
+    {
+        // Shrink a lower bound `a` geometrically until `cdf(a) < p`, keeping the
+        // last bracket `b` with `cdf(b) >= p`.
+        let mut a = hi;
+        let mut b = hi;
+        guard = 0;
+        while cdf(a) >= p && a > f64::MIN_POSITIVE && guard < 400
+        {
+            b = a;
+            a *= 1e-8;
+            guard += 1;
+        }
+        if cdf(a) >= p
+        {
+            // The quantile is below the smallest positive f64: return the best
+            // representable value (a floating-point limit, not a convergence bug).
+            return a;
+        }
+        let (mut la, mut lb) = (a.ln(), b.ln());
+        for _ in 0..200
+        {
+            let m = 0.5 * (la + lb);
+            if cdf(m.exp()) < p
+            {
+                la = m;
+            }
+            else
+            {
+                lb = m;
+            }
+            if (lb - la).abs() <= 4.0 * f64::EPSILON * (1.0 + la.abs())
+            {
+                break;
+            }
+        }
+        return (0.5 * (la + lb)).exp();
+    }
+
+    // General support (may be negative): linear bisection.
     for _ in 0..128
     {
         let mid = 0.5 * (lo + hi);
@@ -670,6 +718,38 @@ mod tests {
         let extreme = Beta::new(390.121, 0.01);
         let x = extreme.quantile(0.99);
         assert!(x > 1.0 - 1e-9, "expected quantile pinned near 1.0, got {x}");
+    }
+
+    #[test]
+    // Ignored under Miri (transcendental CDF bisection; see the Beta test above).
+    #[cfg_attr(miri, ignore)]
+    fn gamma_quantile_round_trip_at_tiny_lower_tail() {
+        // Regression for a failure surfaced by this crate's property tests:
+        // `invert_cdf`'s linear bisection could not reach the lower-tail
+        // quantile of a Gamma with `shape ≪ 1`. For `Gamma(0.01, 0.01)` the
+        // 1st percentile sits ~1e-202 from 0 — representable in f64, yet linear
+        // bisection bottomed out near `hi·EPSILON`, returning an `x` whose
+        // `cdf(x) ≈ 0.74` instead of `0.01`. Log-space bisection resolves it.
+        let g = Gamma::new(0.01, 0.01);
+        for &p in &[0.01, 0.1, 0.5, 0.9, 0.99]
+        {
+            let x = g.quantile(p);
+            let p_hat = g.cdf(x);
+            assert!(close(p_hat, p, 1e-6), "p={p} x={x} p_hat={p_hat}");
+        }
+        // A range of small shapes and scales.
+        for &shape in &[0.02f64, 0.05, 0.1, 0.5]
+        {
+            for &scale in &[0.01f64, 1.0, 100.0]
+            {
+                let g = Gamma::new(shape, scale);
+                let p_hat = g.cdf(g.quantile(0.01));
+                assert!(
+                    close(p_hat, 0.01, 1e-6),
+                    "shape={shape} scale={scale} p_hat={p_hat}"
+                );
+            }
+        }
     }
 
     #[test]
