@@ -151,6 +151,30 @@ Reine-Rust-Signalverarbeitung für Schwingungsanalyse und Maschinendiagnostik:
 - **Lagerdiagnose**: BPFO, BPFI, BSF, FTF-Berechnung, Fehlerfrequenzdetektion im Hüllkurvenspektrum
 - **Ordnungsanalyse**: Ordnungsverfolgung, Winkel-Resampling, Ordnungsspektrum für drehzahlvariable rotierende Maschinen
 
+#### 8.1.1 Rauschentfernung (`scirust_signal::denoise`)
+
+Ein vollständiger Entrausch-Werkzeugkasten, organisiert in Familien, die die
+Standardliteratur abdecken, mit automatischer Erkennung des Rauschtyps:
+
+- **Linear** (gleitender Mittelwert, Gauß, Savitzky-Golay, EMA), **Rangfilter**
+  (Median, Hampel, α-getrimmt), **Wavelets** (universell / SURE / stufenabhängig /
+  Bayes / NeighBlock / translationsinvariant), **nullphasiger IIR-Notch**
+  (`notch_iir`, `remove_mains_hum_iir` — präzise auch abseits des FFT-Rasters),
+  **Kurzzeit-Wiener** (einfach / entscheidungsgesteuert / mit Rauschgrund-Verfolgung,
+  für *nichtstationäres* Rauschen), **variationell** (Tikhonov, totale Variation),
+  **adaptiv** (selbstabgestimmtes Kalman-Filter, LMS/RLS-Line-Enhancer, 1-D Non-Local Means).
+- **Drei automatische Einstiegspunkte**: `denoise_auto` (klassifizieren, dann eine
+  Familie anwenden), `denoise_best` (ein Turnier, bewertet durch einen referenzfreien
+  Score der Residuen-Weißheit), `denoise_cascade` (gemischtes Rauschen: erkennen →
+  behandeln → erneut erkennen).
+- **Echtzeit**: kausale Sample-für-Sample-Gegenstücke in `denoise::streaming`
+  hinter dem Trait `StreamingDenoiser`. **2-D-Bilder**: `scirust_vision::denoise`
+  (2-D-Median, separierbare Wavelets, Non-Local Means).
+- Bekannte Einschränkung: Ein Ton unterhalb von ~5 % von fs ist von legitimem
+  Signalinhalt nicht zu unterscheiden — `remove_mains_hum_iir` explizit aufrufen,
+  wenn die Netzfrequenz bekannt ist. Qualitäts-Benchmark:
+  `cargo run -p scirust-signal --example denoise_benchmark`.
+
 ### 8.2 OPC-UA-Konnektor (`scirust-opcua`)
 
 Verbindet industrielle PLCs/SCADA mit der SciRust-Pipeline:

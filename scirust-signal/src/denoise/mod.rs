@@ -86,6 +86,7 @@
 pub mod adaptive;
 pub mod block;
 pub mod cascade;
+pub mod collab;
 pub mod detect;
 pub mod iir;
 pub mod linear;
@@ -103,6 +104,7 @@ pub use adaptive::{
 };
 pub use block::wavelet_denoise_neighblock;
 pub use cascade::{CascadeResult, CascadeStage, denoise_cascade, denoise_cascade_auto};
+pub use collab::{collab1d, collab1d_auto};
 pub use detect::{
     NoiseProfile, NoiseType, Separation, SpectralLine, classify, detect_lines, estimate_noise_std,
     estimate_snr_db, harmonic_stack, separate,

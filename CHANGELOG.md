@@ -5,6 +5,29 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `denoise` round 3 : docs multilingues, SIMD, BM3D-1D, et programme de recherche TSHF
+- **Documentation multilingue** : la section débruitage (8.1.1) ajoutée aux six
+  traductions `Documentation_{AR,DE,ES,JA,KO,ZH}.md` (identifiants de code
+  conservés verbatim, limitation connue incluse).
+- **SIMD-isation des noyaux NLM** (1-D et 2-D) : restructuration auto-vectorisable
+  (tampon miroir précalculé → distances de patchs sur tranches contiguës,
+  accumulateurs indépendants) ; chemin scalaire de référence conservé et épinglé à
+  1e-12 relatif ; harnais de mesure `examples/denoise_kernel_timing.rs`.
+- **`denoise::collab`** : filtrage collaboratif par patchs façon BM3D 1-D
+  (Dabov et al. 2007 — groupement par similarité, Haar 2-D patch×groupe,
+  seuillage dur 2,7σ, agrégation pondérée) — `collab1d`, `collab1d_auto`.
+- **Programme de recherche TSHF** (`TSHF_RESEARCH_2026-07-16.md`) : investigation
+  sceptique des « Transformed-Scalar Hypercomplex Filters » — analyse mathématique
+  (séparabilité φ/plongement, invariance de la médiane, moyennes quasi-arithmétiques),
+  six blocs d'expériences de falsification reproductibles
+  (`examples/tshf_experiments.rs` : 1/Γ non injective ; identité gagnante sur bruit
+  additif ; biais de retransformation quantifié ; médian vectoriel battu par le
+  par-canal sur impulsions corrélées) et revue de littérature extensive
+  (Anscombe 1948 → Mäkitalo-Foi 2013, homomorphe 1968, Kolmogorov-Nagumo 1930,
+  Alfsmann-Göckler 2007). **Verdict : famille TSHF rejetée** ; sous-ensemble viable
+  identifié (module VST à inverse corrigé) avec feuille de route et critères
+  d'acceptation chiffrés.
+
 ### Ajouté/Modifié — `denoise` : raffinements du classificateur, nouvelles méthodes, débruitage 2-D
 Second lot du filtre anti-bruit : corrections mesurées du classificateur, nouvelles
 familles, et extension 2-D — implémentation parallèle (3 agents : STFT, NLM/blocs,

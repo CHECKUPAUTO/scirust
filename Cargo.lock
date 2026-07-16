@@ -3594,6 +3594,7 @@ dependencies = [
  "proptest",
  "scirust-core",
  "scirust-estimation",
+ "scirust-special",
  "serde",
 ]
 

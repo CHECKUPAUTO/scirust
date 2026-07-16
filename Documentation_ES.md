@@ -133,6 +133,32 @@ Procesamiento de señales en Rust puro para análisis vibratorio y diagnóstico 
 - **Diagnóstico de rodamientos**: BPFO, BPFI, BSF, FTF con detección de fallos en el espectro de envolvente
 - **Análisis de orden**: seguimiento de órdenes, remuestreo angular, espectro de orden para máquinas de velocidad variable
 
+#### 8.1.1 Eliminación de ruido (`scirust_signal::denoise`)
+
+Un conjunto completo de herramientas de eliminación de ruido, organizado en
+familias que cubren la literatura estándar, con detección automática del tipo de
+ruido:
+
+- **Lineales** (media móvil, gaussiano, Savitzky-Golay, EMA), **de rango**
+  (mediana, Hampel, media α-recortada), **wavelets** (universal / SURE /
+  dependiente del nivel / Bayes / NeighBlock / invariante a traslaciones),
+  **notch IIR de fase cero** (`notch_iir`, `remove_mains_hum_iir` — preciso
+  incluso fuera de la rejilla FFT), **Wiener de tiempo corto** (simple / dirigido
+  por decisión / con seguimiento del piso de ruido, para ruido *no estacionario*),
+  **variacionales** (Tikhonov, variación total), **adaptativos** (Kalman
+  autoajustado, realzadores de línea LMS/RLS, non-local means 1-D).
+- **Tres puntos de entrada automáticos**: `denoise_auto` (clasifica y luego
+  aplica una familia), `denoise_best` (un torneo juzgado por una puntuación sin
+  referencia de blancura del residuo), `denoise_cascade` (ruido mixto: detectar →
+  tratar → volver a detectar).
+- **Tiempo real**: equivalentes causales muestra a muestra en `denoise::streaming`
+  detrás del trait `StreamingDenoiser`. **Imágenes 2-D**: `scirust_vision::denoise`
+  (mediana 2-D, wavelets separables, non-local means).
+- Limitación conocida: un tono por debajo de ~5 % de fs es indistinguible del
+  contenido legítimo de la señal — llame explícitamente a `remove_mains_hum_iir`
+  cuando se conozca la frecuencia de la red eléctrica. Benchmark de calidad:
+  `cargo run -p scirust-signal --example denoise_benchmark`.
+
 ### 8.2 Conector OPC-UA (`scirust-opcua`)
 
 Conecta PLCs/SCADA industriales al pipeline de SciRust:

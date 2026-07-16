@@ -12,3 +12,4 @@ serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 proptest = "1"
+scirust-special = { path = "../scirust-special" }

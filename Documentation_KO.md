@@ -128,6 +128,15 @@ SciRust는 이제 특히 자동차 도메인에서 **산업 생산 라인 모니
 - **베어링 진단**: BPFO, BPFI, BSF, FTF 계산, 포락선 스펙트럼에서의 결함 주파수 감지
 - **차수 분석**: 차수 추적, 각도 리샘플링, 가변 속도 회전 기계를 위한 차수 스펙트럼
 
+#### 8.1.1 노이즈 제거 (`scirust_signal::denoise`)
+
+표준 문헌을 아우르는 패밀리별로 구성된 완전한 노이즈 제거 툴킷으로, 노이즈 유형 자동 감지 기능을 갖추고 있습니다:
+
+- **선형** (이동 평균, 가우시안, Savitzky-Golay, EMA), **순위 기반** (중앙값, Hampel, α-절사 평균), **웨이블릿** (universal / SURE / 레벨 의존 / Bayes / NeighBlock / 평행이동 불변), **영위상 IIR 노치** (`notch_iir`, `remove_mains_hum_iir` — FFT 그리드를 벗어나도 정밀), **단시간 Wiener** (기본 / 결정 지향 / 노이즈 플로어 추적, *비정상* 노이즈용), **변분법** (Tikhonov, 총변동), **적응형** (자동 조정 Kalman, LMS/RLS 라인 인핸서, 1-D non-local means).
+- **세 가지 자동 진입점**: `denoise_auto` (분류 후 하나의 패밀리 적용), `denoise_best` (잔차 백색성 기반의 무참조 점수로 판정하는 토너먼트), `denoise_cascade` (혼합 노이즈: 감지 → 처리 → 재감지).
+- **실시간**: `StreamingDenoiser` 트레이트 뒤에 있는 `denoise::streaming`의 인과적 샘플 단위 대응 버전. **2-D 이미지**: `scirust_vision::denoise` (2-D 중앙값, 분리 가능 웨이블릿, non-local means).
+- 알려진 제한 사항: fs의 약 5 % 미만인 톤은 정당한 신호 성분과 구별할 수 없습니다 — 전원 주파수를 알고 있는 경우 `remove_mains_hum_iir`를 명시적으로 호출하십시오. 품질 벤치마크: `cargo run -p scirust-signal --example denoise_benchmark`.
+
 ### 8.2 OPC-UA 커넥터 (`scirust-opcua`)
 
 산업용 PLC/SCADA를 SciRust 파이프라인에 연결:

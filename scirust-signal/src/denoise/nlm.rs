@@ -23,6 +23,79 @@ use super::{estimate_noise_std_helper, mirror_index};
 /// step for edge preservation): see [`nlm1d`] for the value trade-off.
 const AUTO_H_FACTOR: f64 = 0.8;
 
+/// Mirror-extended copy of `signal`: `patch_half` reflected samples on each side
+/// (`ext[t] = signal[mirror_index(t − patch_half, n)]`), so the patch of
+/// half-width `patch_half` centred at sample `c` is the **contiguous** slice
+/// `&ext[c .. c + 2·patch_half + 1]`. Folding every border index once per signal
+/// — instead of twice per element of every patch comparison — is what lets
+/// [`sum_sq_diff`] run branch- and division-free over plain slices. Handles
+/// `patch_half > n` (multiple folds) exactly like per-element [`mirror_index`].
+fn mirror_extend(signal: &[f64], patch_half: usize) -> Vec<f64> {
+    let n = signal.len();
+    let ph = patch_half as isize;
+    let mut ext = Vec::with_capacity(n + 2 * patch_half);
+    for t in 0..(n + 2 * patch_half) as isize
+    {
+        ext.push(signal[mirror_index(t - ph, n)]);
+    }
+    ext
+}
+
+/// Sum of squared differences between two equal-length contiguous slices, laid
+/// out for LLVM auto-vectorization on stable Rust: `as_chunks::<4>()` removes
+/// every bounds check from the loop body, and the **four independent partial
+/// accumulators** break the sequential floating-point dependency chain so the
+/// backend can keep the additions in SIMD lanes (SSE2/AVX on x86-64, NEON on
+/// AArch64). The remainder (≤ 3 elements) is summed scalar. Summation order
+/// therefore differs from a naive single-accumulator loop by reassociation
+/// only (≤ 1e-12 relative — pinned by unit test against
+/// [`patch_dist_reference`]); a NaN in either slice still propagates to the
+/// result, exactly as it does through the naive loop.
+fn sum_sq_diff(a: &[f64], b: &[f64]) -> f64 {
+    let (qa4, ra) = a.as_chunks::<4>();
+    let (qb4, rb) = b.as_chunks::<4>();
+    let (mut s0, mut s1, mut s2, mut s3) = (0.0, 0.0, 0.0, 0.0);
+    for (qa, qb) in qa4.iter().zip(qb4)
+    {
+        let d0 = qa[0] - qb[0];
+        let d1 = qa[1] - qb[1];
+        let d2 = qa[2] - qb[2];
+        let d3 = qa[3] - qb[3];
+        s0 += d0 * d0;
+        s1 += d1 * d1;
+        s2 += d2 * d2;
+        s3 += d3 * d3;
+    }
+    let mut tail = 0.0;
+    for (x, y) in ra.iter().zip(rb)
+    {
+        let d = x - y;
+        tail += d * d;
+    }
+    (s0 + s1) + (s2 + s3) + tail
+}
+
+/// The pre-optimization scalar patch distance — mean of `(x[i+k] − x[j+k])²`
+/// over the patch, borders mirror-reflected **per element** via
+/// [`mirror_index`], summed left to right into a single accumulator. Retained
+/// verbatim as the numerical reference the test suite pins the
+/// layout-optimized kernel of [`nlm1d`] against (identical values up to
+/// floating-point reassociation, ≤ 1e-12 relative).
+#[cfg(test)]
+fn patch_dist_reference(signal: &[f64], i: usize, j: usize, patch_half: usize) -> f64 {
+    let n = signal.len();
+    let p = patch_half as isize;
+    let mut d2 = 0.0;
+    for k in -p..=p
+    {
+        let a = signal[mirror_index(i as isize + k, n)];
+        let b = signal[mirror_index(j as isize + k, n)];
+        let diff = a - b;
+        d2 += diff * diff;
+    }
+    d2 / (2 * patch_half + 1) as f64
+}
+
 /// **1-D Non-Local Means** (Buades-Coll-Morel 2005).
 ///
 /// For each sample `i`, the patch of half-width `patch_half` centred at `i`
@@ -62,6 +135,19 @@ const AUTO_H_FACTOR: f64 = 0.8;
 /// Complexity is **O(n · search · patch)** — with the typical parameters above,
 /// a few hundred flops per sample.
 ///
+/// ## Implementation note — auto-vectorization-friendly layout
+///
+/// The patch-distance kernel is layout-optimized so LLVM auto-vectorizes it on
+/// stable Rust (explicit SIMD stays gated behind nightly in `scirust-simd`):
+/// the signal is mirror-extended **once** ([`mirror_extend`]) so every patch is
+/// a contiguous slice, and the distance is a straight-line sum of squared
+/// differences over two slices with four independent accumulators
+/// ([`sum_sq_diff`]) — no bounds checks, no branches, no per-element index
+/// folding inside the loop. Reassociating the sum can move a distance by
+/// rounding only (≤ 1e-12 relative, pinned by unit test against the retained
+/// scalar [`patch_dist_reference`]); the weight rule, its guards, and the NaN
+/// handling below are byte-for-byte unchanged.
+///
 /// ## Degradation & robustness
 ///
 /// * Empty or shorter-than-4 signals come back unchanged.
@@ -87,14 +173,19 @@ pub fn nlm1d(signal: &[f64], patch_half: usize, search_half: usize, h: f64) -> V
     }
     let noise_floor = 2.0 * sigma * sigma;
     let h_sq = h_eff * h_eff;
-    let p = patch_half as isize;
-    let patch_len = (2 * patch_half + 1) as f64;
+    let plen = 2 * patch_half + 1;
+    let patch_len = plen as f64;
+    // One mirrored-extended copy of the signal makes every patch the contiguous
+    // slice &ext[c .. c + plen], so the hot distance loop below never folds a
+    // border index — see the implementation note in the doc above.
+    let ext = mirror_extend(signal, patch_half);
 
     let mut out = vec![0.0; n];
     for (i, o) in out.iter_mut().enumerate()
     {
         let lo = i.saturating_sub(search_half);
         let hi = (i + search_half).min(n - 1);
+        let patch_i = &ext[i..i + plen];
         let mut num = 0.0;
         let mut den = 0.0;
         for j in lo..=hi
@@ -108,15 +199,7 @@ pub fn nlm1d(signal: &[f64], patch_half: usize, search_half: usize, h: f64) -> V
             }
             else
             {
-                let mut d2 = 0.0;
-                for k in -p..=p
-                {
-                    let a = signal[mirror_index(i as isize + k, n)];
-                    let b = signal[mirror_index(j as isize + k, n)];
-                    let diff = a - b;
-                    d2 += diff * diff;
-                }
-                d2 /= patch_len;
+                let d2 = sum_sq_diff(patch_i, &ext[j..j + plen]) / patch_len;
                 if d2.is_finite()
                 {
                     (-(d2 - noise_floor).max(0.0) / h_sq).exp()
@@ -256,6 +339,39 @@ mod tests {
         for v in nlm1d(&c, 3, 10, 0.5)
         {
             assert!((v - 3.5).abs() < 1.0e-12, "constant drifted to {v}");
+        }
+    }
+
+    #[test]
+    fn layout_optimized_patch_distance_matches_scalar_reference() {
+        // The vectorized kernel (mirror-extended buffer + four independent
+        // accumulators) reassociates the sum, so it may differ from the scalar
+        // reference by rounding only: ≤ 1e-12 relative, checked exhaustively on
+        // random signals over every (i, j) pair and across every border-folding
+        // regime — including patch_half > n, where the mirror folds repeatedly.
+        let mut rng = Lcg::new(211);
+        for &n in &[5usize, 17, 64, 257]
+        {
+            let signal: Vec<f64> = (0..n).map(|_| rng.gauss()).collect();
+            for &ph in &[1usize, 3, 4, 7]
+            {
+                let plen = 2 * ph + 1;
+                let ext = mirror_extend(&signal, ph);
+                assert_eq!(ext.len(), n + 2 * ph);
+                for i in 0..n
+                {
+                    for j in 0..n
+                    {
+                        let fast = sum_sq_diff(&ext[i..i + plen], &ext[j..j + plen]) / plen as f64;
+                        let reference = patch_dist_reference(&signal, i, j, ph);
+                        let tol = 1.0e-12 * reference.abs().max(1.0);
+                        assert!(
+                            (fast - reference).abs() <= tol,
+                            "n {n} ph {ph} i {i} j {j}: fast {fast} vs reference {reference}"
+                        );
+                    }
+                }
+            }
         }
     }
 

@@ -361,6 +361,132 @@ pub fn wavelet_denoise2d_auto(img: &[f64], width: usize, height: usize) -> Vec<f
 /// patches. Larger ⇒ smoother, smaller ⇒ more conservative.
 const NLM_AUTO_H_FACTOR: f64 = 0.75;
 
+/// Replicate-padded copy of `img`, `pad` pixels on each side: the padded image
+/// is `(width + 2·pad) × (height + 2·pad)` with
+/// `padded[(y + pad)·pw + (x + pad)] = img[clamp(y)·width + clamp(x)]` — the
+/// same clamp-to-border rule as the per-pixel accessor of [`nlm2d`], folded
+/// into the layout once. With `pad = patch_half + search_half`, every patch
+/// row that any candidate in any search window can touch is a contiguous
+/// in-bounds slice of one padded row, so the patch-distance hot loop runs
+/// without clamps, bounds checks, or per-element index arithmetic.
+fn pad_replicate(img: &[f64], width: usize, height: usize, pad: usize) -> Vec<f64> {
+    let (w_i, h_i) = (width as isize, height as isize);
+    let pw = width + 2 * pad;
+    let mut out = Vec::with_capacity(pw * (height + 2 * pad));
+    for y in 0..(height + 2 * pad) as isize
+    {
+        let sy = (y - pad as isize).clamp(0, h_i - 1) as usize;
+        for x in 0..pw as isize
+        {
+            let sx = (x - pad as isize).clamp(0, w_i - 1) as usize;
+            out.push(img[sy * width + sx]);
+        }
+    }
+    out
+}
+
+/// Sum of squared differences between two equal-length contiguous slices, laid
+/// out for LLVM auto-vectorization on stable Rust: `as_chunks::<4>()` removes
+/// every bounds check from the loop body, and the **four independent partial
+/// accumulators** break the sequential floating-point dependency chain so the
+/// backend can keep the additions in SIMD lanes (SSE2/AVX on x86-64, NEON on
+/// AArch64). The remainder (≤ 3 elements) is summed scalar. Summation order
+/// therefore differs from a naive single-accumulator loop by reassociation
+/// only (≤ 1e-12 relative — pinned by unit test against the retained scalar
+/// reference), and a NaN in either slice still propagates to the result.
+/// (Same kernel as the 1-D non-local means in `scirust-signal`; it is private
+/// there, so it is duplicated here — the [`median`] / [`mad`] convention.)
+fn sum_sq_diff(a: &[f64], b: &[f64]) -> f64 {
+    let (qa4, ra) = a.as_chunks::<4>();
+    let (qb4, rb) = b.as_chunks::<4>();
+    let (mut s0, mut s1, mut s2, mut s3) = (0.0, 0.0, 0.0, 0.0);
+    for (qa, qb) in qa4.iter().zip(qb4)
+    {
+        let d0 = qa[0] - qb[0];
+        let d1 = qa[1] - qb[1];
+        let d2 = qa[2] - qb[2];
+        let d3 = qa[3] - qb[3];
+        s0 += d0 * d0;
+        s1 += d1 * d1;
+        s2 += d2 * d2;
+        s3 += d3 * d3;
+    }
+    let mut tail = 0.0;
+    for (x, y) in ra.iter().zip(rb)
+    {
+        let d = x - y;
+        tail += d * d;
+    }
+    (s0 + s1) + (s2 + s3) + tail
+}
+
+/// Layout-optimized patch distance of [`nlm2d`]: mean squared pixel difference
+/// between the `(2·patch_half+1)²` patches centred at `(x, y)` and `(cx, cy)`,
+/// computed as a sum over patch rows of contiguous-slice kernels
+/// ([`sum_sq_diff`]) on the replicate-padded image. `padded` must come from
+/// [`pad_replicate`] with `pad ≥ patch_half` plus the largest centre
+/// excursion (`pad = patch_half + search_half` in [`nlm2d`]), so every row
+/// slice is in bounds and equals the clamp-per-element reads of the scalar
+/// reference bit for bit.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn patch_dist_padded(
+    padded: &[f64],
+    pw: usize,
+    pad: isize,
+    x: isize,
+    y: isize,
+    cx: isize,
+    cy: isize,
+    patch_half: usize,
+) -> f64 {
+    let ph = patch_half as isize;
+    let plen = 2 * patch_half + 1;
+    let mut d_sq = 0.0;
+    for py in -ph..=ph
+    {
+        let a0 = ((y + py + pad) as usize) * pw + (x - ph + pad) as usize;
+        let b0 = ((cy + py + pad) as usize) * pw + (cx - ph + pad) as usize;
+        d_sq += sum_sq_diff(&padded[a0..a0 + plen], &padded[b0..b0 + plen]);
+    }
+    d_sq / ((plen * plen) as f64)
+}
+
+/// The pre-optimization scalar patch distance of [`nlm2d`] — mean over the
+/// `(2·patch_half+1)²` patch of squared pixel differences, borders clamped
+/// **per element**, summed row-major into a single accumulator. Retained
+/// verbatim as the numerical reference the test suite pins
+/// [`patch_dist_padded`] against (identical values up to floating-point
+/// reassociation, ≤ 1e-12 relative).
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+fn patch_dist_reference(
+    img: &[f64],
+    width: usize,
+    height: usize,
+    x: isize,
+    y: isize,
+    cx: isize,
+    cy: isize,
+    patch_half: usize,
+) -> f64 {
+    let (w_i, h_i) = (width as isize, height as isize);
+    let pixel = |px: isize, py: isize| -> f64 {
+        img[(py.clamp(0, h_i - 1) as usize) * width + px.clamp(0, w_i - 1) as usize]
+    };
+    let ph = patch_half as isize;
+    let mut d_sq = 0.0;
+    for py in -ph..=ph
+    {
+        for px in -ph..=ph
+        {
+            let d = pixel(x + px, y + py) - pixel(cx + px, cy + py);
+            d_sq += d * d;
+        }
+    }
+    d_sq / (((2 * ph + 1) * (2 * ph + 1)) as f64)
+}
+
 /// Non-local means denoising (Buades–Coll–Morel 2005).
 ///
 /// Each output pixel is the weighted average of every pixel in its
@@ -386,6 +512,17 @@ const NLM_AUTO_H_FACTOR: f64 = 0.75;
 /// (`patch_half = 1`, `search_half = 5` is a solid default). An empty image, a
 /// `width·height` / slice-length mismatch, or an auto `h` on a noise-free
 /// (constant) image returns the input copied.
+///
+/// The patch-distance kernel is layout-optimized so LLVM auto-vectorizes it on
+/// stable Rust: the image is replicate-padded **once** by
+/// `patch_half + search_half` pixels per side ([`pad_replicate`]) so every
+/// patch row any candidate can touch is a contiguous slice, and the distance
+/// is a sum over patch rows of straight-line squared-difference kernels with
+/// four independent accumulators ([`patch_dist_padded`] / [`sum_sq_diff`]) —
+/// no clamps, no bounds checks, no branches inside the loop. Reassociating the
+/// sum moves a distance by rounding only (≤ 1e-12 relative, pinned by unit
+/// test against the retained scalar reference); the weight rule, the σ / `h`
+/// logic, and every guard are unchanged.
 pub fn nlm2d(
     img: &[f64],
     width: usize,
@@ -430,8 +567,14 @@ pub fn nlm2d(
         // Replicate borders: clamp coordinates to the image.
         img[(y.clamp(0, h_i - 1) as usize) * width + x.clamp(0, w_i - 1) as usize]
     };
-    let (ph, sh) = (patch_half as isize, search_half as isize);
-    let patch_area = ((2 * ph + 1) * (2 * ph + 1)) as f64;
+    let sh = search_half as isize;
+    // One replicate-padded copy of the image turns every patch row any search
+    // candidate can touch into a contiguous slice, so the patch-distance hot
+    // loop never clamps a coordinate — see the implementation note in the doc.
+    let pad = patch_half + search_half;
+    let pw = width + 2 * pad;
+    let padded = pad_replicate(img, width, height, pad);
+    let pad_i = pad as isize;
 
     let mut out = Vec::with_capacity(img.len());
     for y in 0..h_i
@@ -445,16 +588,7 @@ pub fn nlm2d(
                 for dx in -sh..=sh
                 {
                     let (cx, cy) = (x + dx, y + dy);
-                    let mut d_sq = 0.0;
-                    for py in -ph..=ph
-                    {
-                        for px in -ph..=ph
-                        {
-                            let d = pixel(x + px, y + py) - pixel(cx + px, cy + py);
-                            d_sq += d * d;
-                        }
-                    }
-                    d_sq /= patch_area;
+                    let d_sq = patch_dist_padded(&padded, pw, pad_i, x, y, cx, cy, patch_half);
                     let weight = (-((d_sq - two_sigma_sq).max(0.0)) / h_sq).exp();
                     weight_sum += weight;
                     acc += weight * pixel(cx, cy);
@@ -779,6 +913,48 @@ mod tests {
             for v in out
             {
                 assert!((v - 2.5).abs() < 1.0e-9, "constant not preserved: {v}");
+            }
+        }
+    }
+
+    #[test]
+    fn layout_optimized_patch_distance_matches_scalar_reference() {
+        // The padded-row kernel reassociates the patch sum (per-row unrolled
+        // accumulators instead of one row-major scalar chain), so it may differ
+        // from the clamp-per-element scalar reference by rounding only:
+        // ≤ 1e-12 relative, checked for every pixel of a random image against
+        // every candidate of its search window — including candidates whose
+        // patches hang past every border — for several (patch, search) radii.
+        let (w, h) = (13usize, 9usize);
+        let mut rng = Lcg::new(23);
+        let img: Vec<f64> = (0..w * h).map(|_| rng.gauss()).collect();
+        for &(ph, sh) in &[(1usize, 2usize), (2, 3), (3, 2)]
+        {
+            let pad = ph + sh;
+            let pw = w + 2 * pad;
+            let padded = pad_replicate(&img, w, h, pad);
+            let sh_i = sh as isize;
+            for y in 0..h as isize
+            {
+                for x in 0..w as isize
+                {
+                    for dy in -sh_i..=sh_i
+                    {
+                        for dx in -sh_i..=sh_i
+                        {
+                            let (cx, cy) = (x + dx, y + dy);
+                            let fast =
+                                patch_dist_padded(&padded, pw, pad as isize, x, y, cx, cy, ph);
+                            let reference = patch_dist_reference(&img, w, h, x, y, cx, cy, ph);
+                            let tol = 1.0e-12 * reference.abs().max(1.0);
+                            assert!(
+                                (fast - reference).abs() <= tol,
+                                "ph {ph} sh {sh} x {x} y {y} dx {dx} dy {dy}: \
+                                 fast {fast} vs reference {reference}"
+                            );
+                        }
+                    }
+                }
             }
         }
     }
