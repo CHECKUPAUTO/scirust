@@ -66,6 +66,19 @@
 //! - [`load_combination`] — combinaisons ELU/ELS (EN 1990).
 //! - [`rational_runoff`] — méthode rationnelle : débit de pointe, Kirpich.
 //!
+//! ### Béton armé — vol. 3 (Eurocode 2)
+//! - [`rc_crack_width`] — ouverture de fissure à l'ELS : espacement max, différence de déformation, wk.
+//! - [`rc_creep_deflection`] — flèche différée (fluage) : module effectif, courbure, interpolation ζ.
+//! - [`concrete_mix_design`] — formulation du béton (E/C) : Abrams/Bolomey, résistance visée, volumes absolus.
+//! - [`concrete_shrinkage`] — retrait : εcs = εcd + εca, retrait endogène, fonction temporelle, retrait gêné.
+//!
+//! ### Analyse des structures — vol. 3
+//! - [`moment_distribution`] — méthode de Cross : rigidités, facteurs de répartition, report, équilibrage.
+//! - [`fixed_end_moments`] — moments d'encastrement parfait (charges usuelles, tassement d'appui).
+//! - [`influence_line`] — lignes d'influence d'une poutre isostatique : réaction, moment, effort tranchant.
+//! - [`truss_joint`] — treillis plan, méthode des nœuds : équilibre à deux barres, contrainte, allongement, Euler.
+//! - [`column_effective_length`] — longueur de flambement : Lcr = K·L, élancement, contrainte d'Euler, λ̄.
+//!
 //! ## Positionnement
 //!
 //! Cette crate ouvre le domaine du génie civil dans SciRust (aucune crate ne le
@@ -127,6 +140,17 @@ pub mod steel_welded_connection;
 pub mod timber_compression;
 pub mod timber_connection;
 pub mod wind_load;
+
+// Vol. 3
+pub mod column_effective_length;
+pub mod concrete_mix_design;
+pub mod concrete_shrinkage;
+pub mod fixed_end_moments;
+pub mod influence_line;
+pub mod moment_distribution;
+pub mod rc_crack_width;
+pub mod rc_creep_deflection;
+pub mod truss_joint;
 
 pub use bearing_capacity::{
     geobear_allowable_bearing, geobear_bearing_factor_nc, geobear_bearing_factor_nq,
@@ -268,4 +292,40 @@ pub use timber_connection::{
 };
 pub use wind_load::{
     wind_force, wind_mean_velocity, wind_peak_velocity_pressure, wind_pressure_on_surface,
+};
+
+// Vol. 3 — ré-exports à plat.
+pub use column_effective_length::{
+    efflen_effective_length, efflen_euler_critical_stress, efflen_radius_of_gyration,
+    efflen_relative_slenderness, efflen_slenderness,
+};
+pub use concrete_mix_design::{
+    mix_aggregate_cement_ratio, mix_cement_content, mix_target_mean_strength,
+    mix_water_cement_from_strength, mix_yield_volume,
+};
+pub use concrete_shrinkage::{
+    shrink_autogenous_final, shrink_drying_time_function, shrink_notional_size,
+    shrink_restrained_stress, shrink_total_strain,
+};
+pub use fixed_end_moments::{
+    fem_point_center, fem_point_general, fem_support_settlement, fem_triangular, fem_udl,
+};
+pub use influence_line::{
+    infl_max_moment_single_load, infl_moment_at_section, infl_reaction_simple_beam,
+    infl_shear_at_section,
+};
+pub use moment_distribution::{
+    cross_balancing_moment, cross_carry_over, cross_distribution_factor, cross_stiffness_factor,
+    cross_stiffness_factor_pinned,
+};
+pub use rc_crack_width::{
+    crack_effective_reinforcement_ratio, crack_max_spacing, crack_mean_strain_difference,
+    crack_width,
+};
+pub use rc_creep_deflection::{
+    creep_curvature, creep_distribution_coefficient, creep_effective_modulus,
+    creep_interpolated_deflection, creep_total_deflection,
+};
+pub use truss_joint::{
+    truss_axial_stress, truss_elongation, truss_euler_buckling_load, truss_member_force_two_bars,
 };
