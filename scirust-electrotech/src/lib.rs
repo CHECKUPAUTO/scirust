@@ -62,6 +62,27 @@
 //! - [`flyback_converter`] — convertisseur à isolement : sortie, rapport cyclique, contrainte.
 //! - [`conductor_sag`] — flèche de ligne aérienne (parabolique, givre/vent).
 //!
+//! ### Machines, mesure & composants (vol. 3)
+//! - [`transformer_tests`] — essais à vide/court-circuit : pertes fer, réactance magnétisante, Req/Xeq, rendement à charge partielle.
+//! - [`instrument_transformer`] — transformateurs de mesure (TC/TP) : courant/tension secondaire, erreur de rapport, burden, facteur limite de précision.
+//! - [`single_phase_motor`] — moteur asynchrone monophasé (double champ) : glissements direct/inverse, vitesse de synchronisme, capacité de démarrage.
+//! - [`stepper_drive`] — commande pas à pas : angle de pas, micro-pas, vitesse, impulsions, couple utile.
+//! - [`solar_pv`] — cellule/panneau photovoltaïque : facteur de forme, rendement, champ série/parallèle, correction en température.
+//! - [`capacitor_bank`] — batterie de condensateurs : puissance réactive, capacité, gradins, résistance de décharge.
+//! - [`rc_snubber`] — amortissement RC : capacité (dv/dt), résistance, puissance dissipée, amortissement critique.
+//! - [`rectifier_smoothing`] — filtrage capacitif : ondulation crête-à-crête, facteur d'ondulation, capacité requise.
+//! - [`heatsink_thermal`] — thermique de dissipateur : Tj, Rth série, puissance max, Rth,sa requise.
+//!
+//! ### Mesure, transport & protection (vol. 3)
+//! - [`two_wattmeter`] — méthode des deux wattmètres : puissance active/réactive, angle et facteur de puissance.
+//! - [`line_parameters`] — paramètres linéiques d'une ligne aérienne : inductance/capacité linéiques, réactance, DMG triphasée.
+//! - [`corona_discharge`] — effet couronne (Peek) : densité de l'air, tension critique disruptive, perte.
+//! - [`line_voltage_regulation`] — régulation d'un départ : chute de tension, régulation %, effet Ferranti.
+//! - [`busbar`] — jeu de barres : résistance continue, densité de courant, force électrodynamique, pertes Joule.
+//! - [`insulation_testing`] — essai d'isolement : résistance en continu, indice de polarisation, DAR, correction thermique.
+//! - [`relay_coordination`] — sélectivité chronométrique : marge de discrimination, critère, rapport de réglage.
+//! - [`dc_distribution`] — distribution CC : chute deux fils, section requise, pertes, rendement, charge répartie.
+//!
 //! ## Positionnement
 //!
 //! Cette crate complète les autres briques électriques de SciRust sans les
@@ -116,6 +137,25 @@ pub mod thevenin_norton;
 pub mod transformer_three_phase;
 pub mod voltage_divider;
 pub mod wye_delta_transform;
+
+// Vol. 3
+pub mod busbar;
+pub mod capacitor_bank;
+pub mod corona_discharge;
+pub mod dc_distribution;
+pub mod heatsink_thermal;
+pub mod instrument_transformer;
+pub mod insulation_testing;
+pub mod line_parameters;
+pub mod line_voltage_regulation;
+pub mod rc_snubber;
+pub mod rectifier_smoothing;
+pub mod relay_coordination;
+pub mod single_phase_motor;
+pub mod solar_pv;
+pub mod stepper_drive;
+pub mod transformer_tests;
+pub mod two_wattmeter;
 
 pub use ac_power_single_phase::{
     ac_active_power, ac_apparent_power, ac_impedance_magnitude, ac_power_factor_from_powers,
@@ -249,4 +289,71 @@ pub use voltage_divider::{
 pub use wye_delta_transform::{
     ydelta_balanced_delta_to_wye, ydelta_balanced_wye_to_delta, ydelta_delta_to_wye,
     ydelta_wye_to_delta,
+};
+
+// Vol. 3 — ré-exports à plat.
+pub use busbar::{
+    BUSBAR_MU0, busbar_current_density, busbar_dc_resistance, busbar_power_loss,
+    busbar_short_circuit_force,
+};
+pub use capacitor_bank::{
+    capbank_capacitance_for_kvar, capbank_discharge_resistor, capbank_number_of_steps,
+    capbank_reactive_power,
+};
+pub use corona_discharge::{
+    corona_air_density_factor, corona_critical_disruptive_voltage, corona_is_active,
+    corona_peek_loss,
+};
+pub use dc_distribution::{
+    dcdist_conductor_size_for_drop, dcdist_distributed_load_drop, dcdist_efficiency,
+    dcdist_power_loss, dcdist_two_wire_drop,
+};
+pub use heatsink_thermal::{
+    heatsink_junction_temperature, heatsink_max_power_dissipation,
+    heatsink_required_sink_resistance, heatsink_total_thermal_resistance,
+};
+pub use instrument_transformer::{
+    insttr_accuracy_limit_factor, insttr_burden_impedance, insttr_ct_secondary_current,
+    insttr_ratio_error, insttr_vt_secondary_voltage,
+};
+pub use insulation_testing::{
+    instest_dielectric_absorption_ratio, instest_insulation_resistance, instest_polarization_index,
+    instest_temperature_corrected_resistance,
+};
+pub use line_parameters::{
+    VACUUM_PERMEABILITY, VACUUM_PERMITTIVITY, linep_capacitance_per_length,
+    linep_geometric_mean_distance_three_phase, linep_inductance_per_length,
+    linep_reactance_per_length,
+};
+pub use line_voltage_regulation::{
+    linreg_ferranti_rise, linreg_percent_regulation, linreg_receiving_voltage, linreg_voltage_drop,
+};
+pub use rc_snubber::{
+    snub_capacitance, snub_critical_damping_resistance, snub_power_dissipation, snub_resistance,
+};
+pub use rectifier_smoothing::{
+    smooth_average_dc_voltage, smooth_required_capacitance, smooth_ripple_factor,
+    smooth_ripple_voltage_fullwave, smooth_ripple_voltage_halfwave,
+};
+pub use relay_coordination::{
+    relaycoord_current_setting_ratio, relaycoord_discrimination_margin, relaycoord_is_selective,
+    relaycoord_required_upstream_time,
+};
+pub use single_phase_motor::{
+    spmot_backward_slip, spmot_forward_slip, spmot_starting_capacitance,
+    spmot_synchronous_speed_rpm,
+};
+pub use solar_pv::{
+    pv_array_power, pv_array_voltage, pv_efficiency, pv_fill_factor, pv_temperature_corrected_power,
+};
+pub use stepper_drive::{
+    stepdrv_holding_to_working_torque, stepdrv_pulses_for_angle, stepdrv_resolution_microstepping,
+    stepdrv_speed_rpm, stepdrv_step_angle,
+};
+pub use transformer_tests::{
+    xfmrtest_efficiency_at_load, xfmrtest_equivalent_reactance, xfmrtest_equivalent_resistance,
+    xfmrtest_iron_loss_resistance, xfmrtest_magnetizing_reactance,
+};
+pub use two_wattmeter::{
+    wattm_power_factor, wattm_power_factor_angle, wattm_reactive_power, wattm_total_active_power,
 };
