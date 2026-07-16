@@ -123,5 +123,6 @@ pub mod portable_f32;
 pub mod pruning;
 pub mod reproducible;
 pub mod stochastic_round;
+pub mod transform_autotune;
 pub mod transform_search;
 pub mod tree_allreduce;
