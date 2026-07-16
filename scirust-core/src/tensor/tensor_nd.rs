@@ -9,6 +9,7 @@
 // (pattern im2col déjà validé dans nn/.legacy/).
 
 use crate::autodiff::reverse::Tensor;
+use crate::error::{Result, SciRustError, check_axis, check_rank};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -122,17 +123,15 @@ impl TensorND {
     // ------------------------------------------------------------------
     //  Reshape
     // ------------------------------------------------------------------
-    pub fn reshape(&self, new_shape: &[usize]) -> Result<Self, String> {
+    pub fn reshape(&self, new_shape: &[usize]) -> Result<Self> {
         let new_numel: usize = new_shape.iter().product();
         if new_numel != self.numel()
         {
-            return Err(format!(
-                "reshape: cannot reshape {:?} (numel={}) into {:?} (numel={})",
-                self.shape,
-                self.numel(),
-                new_shape,
-                new_numel
-            ));
+            return Err(SciRustError::NumelMismatch {
+                op: "reshape",
+                from_shape: self.shape.clone(),
+                to_shape: new_shape.to_vec(),
+            });
         }
         Ok(Self {
             data: Arc::clone(&self.data),
@@ -145,14 +144,15 @@ impl TensorND {
         self.reshape(&[self.numel()]).unwrap()
     }
 
-    pub fn flatten_from(&self, start_axis: usize) -> Result<Self, String> {
+    pub fn flatten_from(&self, start_axis: usize) -> Result<Self> {
+        // `start_axis == ndim` est légal (préfixe = tout, suffixe = 1).
         if start_axis > self.ndim()
         {
-            return Err(format!(
-                "flatten_from: start_axis {} > ndim {}",
-                start_axis,
-                self.ndim()
-            ));
+            return Err(SciRustError::AxisOutOfBounds {
+                op: "flatten_from",
+                axis: start_axis,
+                rank: self.ndim(),
+            });
         }
         let prefix: usize = self.shape[..start_axis].iter().product();
         let suffix: usize = self.shape[start_axis..].iter().product();
@@ -171,29 +171,17 @@ impl TensorND {
     // materialise a fresh contiguous tensor, honouring any strided *input* via
     // `self.offset`. The cost is one copy per transpose — negligible next to
     // the matmuls that surround it.
-    pub fn transpose(&self, axes: &[usize]) -> Result<Self, String> {
-        if axes.len() != self.ndim()
-        {
-            return Err(format!(
-                "transpose: axes len {} != ndim {}",
-                axes.len(),
-                self.ndim()
-            ));
-        }
+    pub fn transpose(&self, axes: &[usize]) -> Result<Self> {
+        check_rank("transpose", self.ndim(), axes.len())?;
         let mut seen = vec![false; self.ndim()];
         for &a in axes
         {
-            if a >= self.ndim()
-            {
-                return Err(format!(
-                    "transpose: axis {} out of bounds (ndim {})",
-                    a,
-                    self.ndim()
-                ));
-            }
+            check_axis("transpose", a, self.ndim())?;
             if seen[a]
             {
-                return Err(format!("transpose: axis {} appears twice", a));
+                return Err(SciRustError::InvalidConfig(format!(
+                    "transpose: axis {a} appears twice"
+                )));
             }
             seen[a] = true;
         }
@@ -232,22 +220,14 @@ impl TensorND {
     // ------------------------------------------------------------------
     //  Slice sur un axe
     // ------------------------------------------------------------------
-    pub fn slice_axis(&self, axis: usize, start: usize, end: usize) -> Result<Self, String> {
-        if axis >= self.ndim()
-        {
-            return Err(format!(
-                "slice_axis: axis {} out of bounds (ndim {})",
-                axis,
-                self.ndim()
-            ));
-        }
+    pub fn slice_axis(&self, axis: usize, start: usize, end: usize) -> Result<Self> {
+        check_axis("slice_axis", axis, self.ndim())?;
         let dim = self.shape[axis];
         if start > end || end > dim
         {
-            return Err(format!(
-                "slice_axis: invalid range [{}, {}) for axis {} (dim {})",
-                start, end, axis, dim
-            ));
+            return Err(SciRustError::InvalidConfig(format!(
+                "slice_axis: invalid range [{start}, {end}) for axis {axis} (dim {dim})"
+            )));
         }
         let slice_len = end - start;
 
@@ -366,13 +346,14 @@ impl TensorND {
     /// Materialise a broadcast of `self` to `target_shape` (numpy semantics):
     /// size-1 axes and missing leading axes are replicated. Errors if `self`
     /// cannot broadcast to the target (see [`Self::can_broadcast_to`]).
-    pub fn broadcast_to(&self, target_shape: &[usize]) -> Result<Self, String> {
+    pub fn broadcast_to(&self, target_shape: &[usize]) -> Result<Self> {
         if !self.can_broadcast_to(target_shape)
         {
-            return Err(format!(
-                "cannot broadcast {:?} to {:?}",
-                self.shape, target_shape
-            ));
+            return Err(SciRustError::BroadcastIncompatible {
+                op: "broadcast_to",
+                from: self.shape.clone(),
+                to: target_shape.to_vec(),
+            });
         }
         let nd = target_shape.len();
         let off = nd - self.ndim(); // right-alignment offset
@@ -416,15 +397,8 @@ impl TensorND {
         }
     }
 
-    pub fn to_tensor_2d(&self) -> Result<Tensor, String> {
-        if self.ndim() != 2
-        {
-            return Err(format!(
-                "to_tensor_2d: expected ndim==2, got ndim=={} (shape {:?})",
-                self.ndim(),
-                self.shape
-            ));
-        }
+    pub fn to_tensor_2d(&self) -> Result<Tensor> {
+        check_rank("to_tensor_2d", 2, self.ndim())?;
         Ok(Tensor::from_vec(
             self.data.to_vec(),
             self.shape[0],

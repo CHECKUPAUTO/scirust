@@ -303,19 +303,20 @@ impl Tensor {
     }
 
     /// Checks the dense row-major representation invariant.
-    pub fn validate(&self) -> Result<(), String> {
-        let expected = self
-            .rows
-            .checked_mul(self.cols)
-            .ok_or_else(|| "Tensor dimensions overflow usize".to_string())?;
+    pub fn validate(&self) -> crate::error::Result<()> {
+        let expected = self.rows.checked_mul(self.cols).ok_or_else(|| {
+            crate::error::SciRustError::InvalidConfig(
+                "Tensor dimensions overflow usize".to_string(),
+            )
+        })?;
         if self.data.len() != expected
         {
-            return Err(format!(
+            return Err(crate::error::SciRustError::InvalidConfig(format!(
                 "Tensor data length mismatch: shape {}x{} requires {expected} elements, got {}",
                 self.rows,
                 self.cols,
                 self.data.len()
-            ));
+            )));
         }
         Ok(())
     }
@@ -1514,12 +1515,9 @@ impl Tape {
         idx
     }
 
-    pub fn try_value(&self, idx: usize) -> Result<Tensor, String> {
+    pub fn try_value(&self, idx: usize) -> crate::error::Result<Tensor> {
         let values = self.values.borrow();
-        if idx >= values.len()
-        {
-            return Err(format!("Tape::try_value: index {idx} out of bounds"));
-        }
+        crate::error::check_index("Tape::try_value", idx, values.len())?;
         Ok(values[idx].as_cpu().clone())
     }
 

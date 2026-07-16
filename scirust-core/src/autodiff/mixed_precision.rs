@@ -1,4 +1,5 @@
 use crate::autodiff::reverse::Tensor;
+use crate::error::{Result, SciRustError};
 
 /// Entraînement en précision mixte FP16/FP32 avec loss scaling dynamique.
 /// Conserve une copie master FP32 des poids et effectue les forward/backward
@@ -39,7 +40,7 @@ impl MixedPrecisionTrainer {
     }
 
     /// Après le backward: rescale les gradients, vérifie overflow, met à jour
-    pub fn after_backward(&mut self, grads: &[Tensor]) -> Result<f32, String> {
+    pub fn after_backward(&mut self, grads: &[Tensor]) -> Result<f32> {
         self.step_counter += 1;
         let mut any_overflow = false;
         let mut scaled_grads = Vec::with_capacity(grads.len());
@@ -58,10 +59,9 @@ impl MixedPrecisionTrainer {
         if any_overflow
         {
             self.loss_scale *= self.scale_backoff_factor;
-            return Err(format!(
-                "Overflow detected, loss scale reduced to {}",
-                self.loss_scale
-            ));
+            return Err(SciRustError::GradientOverflow {
+                loss_scale: self.loss_scale,
+            });
         }
 
         // Appliquer les gradients (à faire par l'optimiseur externe)
