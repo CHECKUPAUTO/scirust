@@ -78,6 +78,19 @@
 //! - [`influence_line`] — lignes d'influence d'une poutre isostatique : réaction, moment, effort tranchant.
 //! - [`truss_joint`] — treillis plan, méthode des nœuds : équilibre à deux barres, contrainte, allongement, Euler.
 //! - [`column_effective_length`] — longueur de flambement : Lcr = K·L, élancement, contrainte d'Euler, λ̄.
+//! - [`plate_buckling`] — voilement d'une plaque : contrainte critique (kσ), élancement λ̄p, réduction ρ, largeur efficace.
+//! - [`composite_beam`] — poutre mixte acier-béton (Eurocode 4) : coefficient d'équivalence, largeur efficace, moment plastique, connecteurs.
+//! - [`suspension_cable`] — câble porteur parabolique : tension horizontale/maximale, longueur développée, flèche, réactions.
+//!
+//! ### Génie parasismique — vol. 3 (Eurocode 8)
+//! - [`seismic_base_shear`] — effort tranchant à la base : forces latérales équivalentes, période approchée, répartition d'étage.
+//! - [`response_spectrum`] — spectre de réponse élastique : branches, correction d'amortissement η, déplacement spectral.
+//!
+//! ### Géotechnique & hydraulique — vol. 3
+//! - [`beam_on_elastic_foundation`] — poutre sur sol élastique (Winkler) : paramètre β, flèche/moment max, pression de contact.
+//! - [`pile_group_efficiency`] — groupe de pieux : efficacité (Converse-Labarre), capacité de groupe, rupture en bloc.
+//! - [`hydraulic_jump`] — ressaut hydraulique : Froude, hauteurs conjuguées (Bélanger), perte de charge, longueur.
+//! - [`weir_flow`] — débit sur déversoir : rectangulaire, triangulaire en V, seuil épais.
 //!
 //! ## Positionnement
 //!
@@ -142,15 +155,24 @@ pub mod timber_connection;
 pub mod wind_load;
 
 // Vol. 3
+pub mod beam_on_elastic_foundation;
 pub mod column_effective_length;
+pub mod composite_beam;
 pub mod concrete_mix_design;
 pub mod concrete_shrinkage;
 pub mod fixed_end_moments;
+pub mod hydraulic_jump;
 pub mod influence_line;
 pub mod moment_distribution;
+pub mod pile_group_efficiency;
+pub mod plate_buckling;
 pub mod rc_crack_width;
 pub mod rc_creep_deflection;
+pub mod response_spectrum;
+pub mod seismic_base_shear;
+pub mod suspension_cable;
 pub mod truss_joint;
+pub mod weir_flow;
 
 pub use bearing_capacity::{
     geobear_allowable_bearing, geobear_bearing_factor_nc, geobear_bearing_factor_nq,
@@ -295,9 +317,17 @@ pub use wind_load::{
 };
 
 // Vol. 3 — ré-exports à plat.
+pub use beam_on_elastic_foundation::{
+    boef_beta, boef_classification, boef_contact_pressure, boef_max_deflection_point_load,
+    boef_max_moment_point_load,
+};
 pub use column_effective_length::{
     efflen_effective_length, efflen_euler_critical_stress, efflen_radius_of_gyration,
     efflen_relative_slenderness, efflen_slenderness,
+};
+pub use composite_beam::{
+    comp_effective_width, comp_modular_ratio, comp_plastic_moment_full,
+    comp_shear_connector_number, comp_transformed_area,
 };
 pub use concrete_mix_design::{
     mix_aggregate_cement_ratio, mix_cement_content, mix_target_mean_strength,
@@ -310,6 +340,10 @@ pub use concrete_shrinkage::{
 pub use fixed_end_moments::{
     fem_point_center, fem_point_general, fem_support_settlement, fem_triangular, fem_udl,
 };
+pub use hydraulic_jump::{
+    jump_efficiency, jump_energy_loss, jump_froude_number, jump_length_approx,
+    jump_sequent_depth_ratio,
+};
 pub use influence_line::{
     infl_max_moment_single_load, infl_moment_at_section, infl_reaction_simple_beam,
     infl_shear_at_section,
@@ -317,6 +351,13 @@ pub use influence_line::{
 pub use moment_distribution::{
     cross_balancing_moment, cross_carry_over, cross_distribution_factor, cross_stiffness_factor,
     cross_stiffness_factor_pinned,
+};
+pub use pile_group_efficiency::{
+    pilegrp_block_capacity, pilegrp_capacity, pilegrp_converse_labarre, pilegrp_settlement_ratio,
+};
+pub use plate_buckling::{
+    platebk_critical_stress, platebk_effective_width, platebk_reduction_factor,
+    platebk_relative_slenderness,
 };
 pub use rc_crack_width::{
     crack_effective_reinforcement_ratio, crack_max_spacing, crack_mean_strain_difference,
@@ -326,6 +367,22 @@ pub use rc_creep_deflection::{
     creep_curvature, creep_distribution_coefficient, creep_effective_modulus,
     creep_interpolated_deflection, creep_total_deflection,
 };
+pub use response_spectrum::{
+    respspec_constant_displacement, respspec_constant_velocity, respspec_damping_correction,
+    respspec_elastic_plateau, respspec_spectral_displacement,
+};
+pub use seismic_base_shear::{
+    seis_base_shear, seis_design_spectrum_plateau, seis_effective_mass,
+    seis_fundamental_period_approx, seis_lateral_force_distribution,
+};
+pub use suspension_cable::{
+    suscab_horizontal_tension, suscab_length_parabolic, suscab_max_tension,
+    suscab_sag_from_tension, suscab_support_reaction_vertical,
+};
 pub use truss_joint::{
     truss_axial_stress, truss_elongation, truss_euler_buckling_load, truss_member_force_two_bars,
+};
+pub use weir_flow::{
+    weir_broad_crested_flow, weir_head_from_flow_rectangular, weir_rectangular_flow,
+    weir_triangular_flow,
 };
