@@ -63,6 +63,11 @@ name = "cnn_bench"
 harness = false
 required-features = ["portable-simd"]
 
+[[bench]]
+name = "cnn2d_bench"
+harness = false
+required-features = ["portable-simd"]
+
 [[example]]
 name = "amx_bench"
 required-features = ["nightly-simd"]
