@@ -138,6 +138,79 @@ fn safety_gate(repr: Representation, dev: &[f64], eval: &[f64]) -> Result<(), Re
     Ok(())
 }
 
+/// The reusable S3/S4 selection harness, generic over the candidate type `C`
+/// and the dataset type `D` (higher score = better).
+///
+/// This is the domain-agnostic core of the autotuner: it fits/scores each
+/// candidate on a **development** set, keeps the best, then re-scores that winner
+/// on a disjoint **held-out** set against a baseline — the same dev/held-out
+/// discipline as [`autotune_quantizer`] (which is the bundled quantization
+/// specialization), exposed so other crates can drive it with their own
+/// candidates and objective. For example `scirust-signal` uses it to select a
+/// variance-stabilizing transform for denoising, scoring by measured SNR against
+/// a clean reference.
+#[derive(Debug, Clone)]
+pub struct GenericAutotune<C> {
+    /// The dev-winning candidate, or `None` if none was feasible.
+    pub chosen: Option<C>,
+    /// The winner's score on the held-out set (`−∞` if nothing was chosen).
+    pub chosen_eval_score: f64,
+    /// The baseline's score on the held-out set.
+    pub baseline_eval_score: f64,
+    /// Whether the dev-winner beat the baseline on held-out data.
+    pub beats_baseline: bool,
+    /// Each candidate's dev score (`None` = infeasible for this objective).
+    pub dev_scores: Vec<(C, Option<f64>)>,
+}
+
+/// Run the generic dev/held-out selection (stages S3/S4) over `candidates`.
+///
+/// `score(candidate, fit_set, score_set)` fits any candidate-specific parameters
+/// on `fit_set` and returns the objective on `score_set` (higher is better),
+/// or `None` if the candidate is infeasible. Objectives with no fitted parameter
+/// (e.g. VST denoising, where the transform has no free knob beyond the
+/// candidate itself) may ignore `fit_set`. `baseline(fit_set, score_set)` scores
+/// the reference method the winner must beat.
+///
+/// Selection is on `dev` (via `score(c, dev, dev)`); the winner is then validated
+/// on `eval` (via `score(c, dev, eval)`) against `baseline(dev, eval)`.
+pub fn autotune_by<C, D>(
+    dev: &D,
+    eval: &D,
+    candidates: &[C],
+    score: impl Fn(C, &D, &D) -> Option<f64>,
+    baseline: impl Fn(&D, &D) -> f64,
+) -> GenericAutotune<C>
+where
+    C: Copy,
+{
+    let mut dev_scores = Vec::with_capacity(candidates.len());
+    let mut best: Option<(C, f64)> = None;
+    for &c in candidates
+    {
+        let s = score(c, dev, dev);
+        if let Some(v) = s
+            && best.is_none_or(|(_, b)| v > b)
+        {
+            best = Some((c, v));
+        }
+        dev_scores.push((c, s));
+    }
+    let baseline_eval_score = baseline(dev, eval);
+    let (chosen, chosen_eval_score) = match best
+    {
+        Some((c, _)) => (Some(c), score(c, dev, eval).unwrap_or(f64::NEG_INFINITY)),
+        None => (None, f64::NEG_INFINITY),
+    };
+    GenericAutotune {
+        chosen,
+        chosen_eval_score,
+        baseline_eval_score,
+        beats_baseline: chosen.is_some() && chosen_eval_score > baseline_eval_score,
+        dev_scores,
+    }
+}
+
 /// Per-candidate outcome of an autotune run.
 #[derive(Debug, Clone, Copy)]
 pub struct AutotuneVerdict {
@@ -349,5 +422,51 @@ mod tests {
         let report = autotune_quantizer(&dev, &eval, &[Representation::Log], 64);
         let expect = quantize_score(Representation::Log, &dev, &eval, 64).unwrap();
         assert_eq!(report.chosen_eval_sqnr_db, expect);
+    }
+
+    #[test]
+    fn generic_harness_selects_on_dev_and_validates_on_eval() {
+        // A toy objective over integer candidates and an f64 "dataset": the
+        // score is `-(c - d)²`, maximized at c == d. dev peaks at 3, eval at 3
+        // too, so the dev-winner generalizes and beats a fixed baseline (c = 0).
+        let dev = 3.0f64;
+        let eval = 3.0f64;
+        let cands = [0i32, 1, 2, 3, 4, 5];
+        let out = autotune_by(
+            &dev,
+            &eval,
+            &cands,
+            |c, _fit: &f64, scr: &f64| Some(-((c as f64 - *scr).powi(2))),
+            |_fit: &f64, scr: &f64| -(0.0 - *scr).powi(2),
+        );
+        assert_eq!(out.chosen, Some(3));
+        assert!(out.beats_baseline);
+        assert_eq!(out.dev_scores.len(), cands.len());
+        // Infeasible candidates (None) are never chosen.
+        let out2 = autotune_by(
+            &dev,
+            &eval,
+            &cands,
+            |c, _f: &f64, s: &f64| {
+                if c == 3
+                {
+                    None
+                }
+                else
+                {
+                    Some(-((c as f64 - *s).powi(2)))
+                }
+            },
+            |_f: &f64, s: &f64| -(0.0 - *s).powi(2),
+        );
+        assert_ne!(out2.chosen, Some(3));
+        assert!(
+            out2.dev_scores
+                .iter()
+                .find(|(c, _)| *c == 3)
+                .unwrap()
+                .1
+                .is_none()
+        );
     }
 }

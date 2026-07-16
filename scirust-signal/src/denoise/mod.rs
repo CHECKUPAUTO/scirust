@@ -96,6 +96,7 @@
 //! ```
 
 pub mod adaptive;
+pub mod autotune;
 pub mod block;
 pub mod cascade;
 pub mod collab;
@@ -117,6 +118,7 @@ pub use adaptive::{
     KalmanFit, kalman_smooth, kalman_smooth_auto, kalman_trend_smooth, lms_line_enhancer,
     rls_line_enhancer,
 };
+pub use autotune::{DenoiseCase, VstAutotuneResult, autotune_vst, default_vst_candidates};
 pub use block::wavelet_denoise_neighblock;
 pub use cascade::{CascadeResult, CascadeStage, denoise_cascade, denoise_cascade_auto};
 pub use collab::{collab1d, collab1d_auto};
