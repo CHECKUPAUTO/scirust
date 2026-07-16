@@ -3016,6 +3016,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-electrotech"
+version = "0.1.0"
+dependencies = [
+ "approx",
+]
+
+[[package]]
 name = "scirust-embedded"
 version = "0.1.0"
 

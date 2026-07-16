@@ -1,0 +1,11 @@
+[package]
+name = "scirust-electrotech"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust électrotechnique & génie électrique — calcul déterministe pur-Rust : machines (transformateur, alternateur), électronique de puissance (redresseurs, hacheurs, onduleurs), circuits AC/RLC & triphasé, dimensionnement de câbles et protections, courant de court-circuit, mise à la terre, lignes. Modèles d'ingénieur à limites explicites, constantes fournies par l'appelant."
+
+[dependencies]
+
+[dev-dependencies]
+approx = "0.5"
