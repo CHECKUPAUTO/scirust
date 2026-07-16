@@ -38,6 +38,34 @@
 //! ### Hydraulique à surface libre
 //! - [`open_channel_manning`] — canal : Manning-Strickler, rayon hydraulique, profondeur critique.
 //!
+//! ### Béton armé — vol. 2 (Eurocode 2)
+//! - [`rc_slab`] — dalle : moments sens porteur / 4 appuis, armatures minimales.
+//! - [`rc_footing`] — semelle isolée : contrainte de sol, aire, moment en console.
+//! - [`rc_torsion`] — torsion : treillis spatial, flux, armatures.
+//! - [`prestressed_concrete`] — précontrainte : pertes, effort effectif, contraintes.
+//!
+//! ### Charpente métallique — vol. 2 (Eurocode 3)
+//! - [`steel_tension_member`] — barre tendue : section brute/nette.
+//! - [`steel_beam_column`] — flexion composée : interaction linéaire et de stabilité.
+//! - [`steel_welded_connection`] — soudure d'angle : méthode directionnelle.
+//! - [`steel_base_plate`] — platine de pied : résistance d'appui, épaisseur.
+//!
+//! ### Bois — vol. 2 (Eurocode 5)
+//! - [`timber_compression`] — compression + flambement (kc).
+//! - [`timber_connection`] — assemblage par organe (Johansen).
+//!
+//! ### Géotechnique — vol. 2
+//! - [`pile_capacity`] — pieu : pointe + frottement, capacité admissible.
+//! - [`consolidation_degree`] — degré de consolidation dans le temps (Terzaghi).
+//! - [`seepage`] — écoulement (Darcy) : réseau, gradient critique, renard.
+//! - [`soil_compaction`] — compactage : Proctor, compacité, saturation.
+//!
+//! ### Actions & hydrologie — vol. 2 (Eurocodes 0/1)
+//! - [`wind_load`] — vent : vitesse, pression de pointe, force.
+//! - [`snow_load`] — neige : charge sur toiture, forme, altitude, accumulation.
+//! - [`load_combination`] — combinaisons ELU/ELS (EN 1990).
+//! - [`rational_runoff`] — méthode rationnelle : débit de pointe, Kirpich.
+//!
 //! ## Positionnement
 //!
 //! Cette crate ouvre le domaine du génie civil dans SciRust (aucune crate ne le
@@ -79,6 +107,26 @@ pub mod steel_compression;
 pub mod steel_lateral_torsional;
 pub mod steel_section_class;
 pub mod timber_bending;
+
+// Vol. 2
+pub mod consolidation_degree;
+pub mod load_combination;
+pub mod pile_capacity;
+pub mod prestressed_concrete;
+pub mod rational_runoff;
+pub mod rc_footing;
+pub mod rc_slab;
+pub mod rc_torsion;
+pub mod seepage;
+pub mod snow_load;
+pub mod soil_compaction;
+pub mod steel_base_plate;
+pub mod steel_beam_column;
+pub mod steel_tension_member;
+pub mod steel_welded_connection;
+pub mod timber_compression;
+pub mod timber_connection;
+pub mod wind_load;
 
 pub use bearing_capacity::{
     geobear_allowable_bearing, geobear_bearing_factor_nc, geobear_bearing_factor_nq,
@@ -151,4 +199,73 @@ pub use steel_section_class::{
 pub use timber_bending::{
     timber_bending_stress, timber_design_bending_strength, timber_size_factor_depth,
     timber_utilisation,
+};
+
+// Vol. 2 — ré-exports à plat.
+pub use consolidation_degree::{
+    consol_degree_high, consol_degree_low, consol_time_factor, consol_time_from_degree_low,
+};
+pub use load_combination::{
+    loadcomb_accidental, loadcomb_sls_characteristic, loadcomb_sls_quasi_permanent,
+    loadcomb_uls_fundamental,
+};
+pub use pile_capacity::{
+    pile_allowable_capacity, pile_end_bearing, pile_shaft_friction, pile_ultimate_capacity,
+};
+pub use prestressed_concrete::{
+    psc_concrete_stress_bottom, psc_effective_prestress, psc_elastic_shortening_loss,
+    psc_prestress_force, psc_relaxation_loss,
+};
+pub use rational_runoff::{
+    runoff_composite_coefficient, runoff_peak_flow, runoff_time_of_concentration_kirpich,
+    runoff_volume,
+};
+pub use rc_footing::{
+    rcfoot_cantilever_moment, rcfoot_required_area, rcfoot_soil_pressure_centric,
+    rcfoot_soil_pressure_eccentric_max,
+};
+pub use rc_slab::{
+    rcslab_effective_span, rcslab_minimum_reinforcement, rcslab_one_way_moment_udl,
+    rcslab_two_way_moment,
+};
+pub use rc_torsion::{
+    rctor_longitudinal_reinforcement, rctor_shear_flow, rctor_stirrup_area_per_spacing,
+    rctor_thin_wall_thickness,
+};
+pub use seepage::{
+    seep_critical_gradient, seep_darcy_velocity, seep_factor_of_safety_piping, seep_flow_rate,
+};
+pub use snow_load::{
+    snow_altitude_adjustment, snow_drift_load, snow_load_on_roof, snow_shape_coefficient_monopitch,
+};
+pub use soil_compaction::{
+    compact_degree_of_saturation, compact_dry_density, compact_relative_compaction,
+    compact_zero_air_voids_density,
+};
+pub use steel_base_plate::{
+    steelbase_additional_bearing_width, steelbase_bearing_strength,
+    steelbase_plate_thickness_required, steelbase_required_area,
+};
+pub use steel_beam_column::{
+    steelbc_axial_utilisation, steelbc_bending_utilisation, steelbc_linear_interaction,
+    steelbc_stability_interaction,
+};
+pub use steel_tension_member::{
+    steelten_design_resistance, steelten_gross_section_resistance, steelten_net_area,
+    steelten_net_section_resistance,
+};
+pub use steel_welded_connection::{
+    steelweld_limit_stress, steelweld_simplified_resistance_per_length, steelweld_throat,
+    steelweld_von_mises_stress,
+};
+pub use timber_compression::{
+    timbercomp_buckling_resistance, timbercomp_design_strength, timbercomp_instability_factor,
+    timbercomp_relative_slenderness,
+};
+pub use timber_connection::{
+    timberconn_capacity_thick_plate_yield, timberconn_capacity_thin_plate_single_shear,
+    timberconn_embedment_strength, timberconn_yield_moment,
+};
+pub use wind_load::{
+    wind_force, wind_mean_velocity, wind_peak_velocity_pressure, wind_pressure_on_surface,
 };
