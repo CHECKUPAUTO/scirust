@@ -95,7 +95,9 @@ where
     let r_hat_norm = norm2(&r_hat).max(1e-300);
 
     let b_norm = norm2(b).max(1e-30);
-    let mut best_x = x.clone();
+    // Best residual observed, for accurate diagnostics on failure — no
+    // partial solution is returned, consistent with every other solver in
+    // this crate (an error is signaled via `Err` alone).
     let mut best_res = norm2(&r);
 
     // Convergence initiale (b = 0, ou x0 déjà solution) : GMRES fait déjà ce
@@ -128,7 +130,6 @@ where
         if (rho_new / (r_hat_norm * r_norm)).abs() < BREAKDOWN_EPS
         {
             warn!(target: "solver", "BiCGSTAB breakdown: rho ≈ 0 at iteration {k}");
-            x.copy_from_slice(&best_x);
             return Err(SolverError::Singular {
                 row: k,
                 pivot: rho_new,
@@ -144,7 +145,6 @@ where
             if omega.abs() < BREAKDOWN_EPS
             {
                 warn!(target: "solver", "BiCGSTAB breakdown: omega ≈ 0 at iteration {k}");
-                x.copy_from_slice(&best_x);
                 return Err(SolverError::Singular {
                     row: k,
                     pivot: omega,
@@ -168,7 +168,6 @@ where
         if (r_hat_v / (r_hat_norm * v_norm)).abs() < BREAKDOWN_EPS
         {
             warn!(target: "solver", "BiCGSTAB breakdown: r_hat·v ≈ 0 at iteration {k}");
-            x.copy_from_slice(&best_x);
             return Err(SolverError::Singular {
                 row: k,
                 pivot: r_hat_v,
@@ -186,10 +185,6 @@ where
         if s_norm < best_res
         {
             best_res = s_norm;
-            for i in 0..n
-            {
-                best_x[i] = x[i] + alpha * p_hat[i];
-            }
         }
         if s_norm <= tol.abs + tol.rel * b_norm
         {
@@ -225,7 +220,6 @@ where
         if res < best_res
         {
             best_res = res;
-            best_x.copy_from_slice(&x);
         }
         if res <= tol.abs + tol.rel * b_norm
         {
@@ -397,6 +391,47 @@ mod tests {
         )
         .expect("a regular system with a tiny ‖b‖ must not be reported singular");
         assert_relative_eq!(sol.value.as_slice(), b.as_slice(), epsilon = 1e-9);
+    }
+
+    /// A `max_iter` too small to converge must report `NoConvergence` with
+    /// the true best residual observed — not silently return early or panic
+    /// (regression test for the dead best_x/rollback removal above).
+    #[test]
+    fn bicgstab_reports_no_convergence_with_accurate_residual_when_starved_of_iterations() {
+        let n = 6;
+        let mat = Matrix::from_fn(n, n, |i, j| {
+            if i == j
+            {
+                4.0
+            }
+            else if (i as isize - j as isize).abs() == 1
+            {
+                -1.0
+            }
+            else
+            {
+                0.0
+            }
+        });
+        let b: Vec<f64> = (1..=n).map(|i| i as f64).collect();
+        let result = bicgstab(
+            |x, y| y.copy_from_slice(&mat.matvec(x).unwrap()),
+            &b,
+            vec![0.0; n],
+            Tolerance::new(1e-14, 1e-14, 1),
+        );
+        match result
+        {
+            Err(SolverError::NoConvergence {
+                iterations,
+                residual,
+            }) =>
+            {
+                assert_eq!(iterations, 1);
+                assert!(residual.is_finite() && residual > 0.0);
+            },
+            other => panic!("expected NoConvergence, got {other:?}"),
+        }
     }
 }
 

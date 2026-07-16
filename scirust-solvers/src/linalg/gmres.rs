@@ -98,7 +98,9 @@ where
     let b_prec_norm = norm2(&b_prec).max(1e-30);
 
     let mut total_iters = 0usize;
-    let mut best_x = x0.clone();
+    // Best residual observed, for accurate diagnostics on failure — no
+    // partial solution is returned, consistent with every other solver in
+    // this crate (an error is signaled via `Err` alone).
     let mut best_res = f64::INFINITY;
 
     loop
@@ -118,7 +120,6 @@ where
         if beta < best_res
         {
             best_res = beta;
-            best_x.copy_from_slice(&x0);
         }
         if beta <= tol.abs + tol.rel * b_prec_norm
         {
@@ -138,7 +139,6 @@ where
                 "GMRES did not converge after {} iterations (best residual: {:.3e})",
                 tol.max_iter, best_res
             );
-            x0.copy_from_slice(&best_x);
             return Err(SolverError::NoConvergence {
                 iterations: tol.max_iter,
                 residual: best_res,
@@ -366,6 +366,48 @@ mod tests {
             Tolerance::default(),
         );
         assert!(res.is_err());
+    }
+
+    /// A `max_iter` too small to converge must report `NoConvergence` with
+    /// the true best residual observed — not silently return early or panic
+    /// (regression test for the dead best_x/rollback removal above).
+    #[test]
+    fn gmres_reports_no_convergence_with_accurate_residual_when_starved_of_iterations() {
+        let n = 6;
+        let mat = Matrix::from_fn(n, n, |i, j| {
+            if i == j
+            {
+                4.0
+            }
+            else if (i as isize - j as isize).abs() == 1
+            {
+                -1.0
+            }
+            else
+            {
+                0.0
+            }
+        });
+        let b: Vec<f64> = (1..=n).map(|i| i as f64).collect();
+        let result = gmres(
+            |x, y| y.copy_from_slice(&mat.matvec(x).unwrap()),
+            &b,
+            vec![0.0; n],
+            n,
+            Tolerance::new(1e-14, 1e-14, 1),
+        );
+        match result
+        {
+            Err(SolverError::NoConvergence {
+                iterations,
+                residual,
+            }) =>
+            {
+                assert_eq!(iterations, 1);
+                assert!(residual.is_finite() && residual > 0.0);
+            },
+            other => panic!("expected NoConvergence, got {other:?}"),
+        }
     }
 }
 

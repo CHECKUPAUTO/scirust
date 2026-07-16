@@ -6,9 +6,12 @@
 //!
 //! ## Sécurité numérique
 //! - Détection NaN/Inf après chaque itération
-//! - Backup de l'état précédent pour rollback sur divergence
+//! - Meilleur résidu observé suivi pour un diagnostic précis (champ
+//!   `residual`/`from` de l'erreur retournée) — comme tout solveur de ce
+//!   crate, un échec est signalé uniquement via `Err` : aucune solution
+//!   partielle n'est renvoyée à l'appelant
 //! - Division par zéro interceptée (pivot < 1e-30)
-//! - Dérive surveillée : si résidu croît brutalement → rollback + log
+//! - Dérive surveillée : si résidu croît brutalement → erreur + log
 
 use crate::linalg::{axpy, dot, norm2};
 use crate::{ConvergenceInfo, Solution, SolverError, SolverResult, Tolerance};
@@ -94,8 +97,8 @@ where
         });
     }
 
-    // Backup du meilleur état pour rollback
-    let mut best_x = x.clone();
+    // Meilleur résidu observé, pour un diagnostic précis en cas d'échec
+    // (aucune solution partielle n'est renvoyée — voir doc de module).
     let mut best_res = last_res;
 
     let mut ap = vec![0.0; n];
@@ -110,7 +113,7 @@ where
             {
                 warn!(
                     target: "solver",
-                    "NaN/Inf in matvec result at iteration {}, component {}: value={:.3e} — restoring backup",
+                    "NaN/Inf in matvec result at iteration {}, component {}: value={:.3e} — aborting",
                     k, i, api
                 );
                 return Err(SolverError::BackupRestored {
@@ -131,7 +134,7 @@ where
         {
             warn!(
                 target: "solver",
-                "Conjugate gradient stalled: p^T·A·p / ‖p‖² = {:.3e} at iteration {} — restoring backup",
+                "Conjugate gradient stalled: p^T·A·p / ‖p‖² = {:.3e} at iteration {} — aborting",
                 pap / p_norm_sq, k
             );
             return Err(SolverError::Singular { row: k, pivot: pap });
@@ -153,11 +156,9 @@ where
         {
             warn!(
                 target: "solver",
-                "Divergence detected at CG iteration {}: residual jumped from {:.3e} to {:.3e} — restoring backup (best was {:.3e})",
+                "Divergence detected at CG iteration {}: residual jumped from {:.3e} to {:.3e} (best was {:.3e})",
                 k, last_res, res, best_res
             );
-            // Rollback au meilleur état connu
-            x.copy_from_slice(&best_x);
             return Err(SolverError::Divergence {
                 iter: k,
                 from: best_res,
@@ -167,10 +168,8 @@ where
 
         last_res = res;
 
-        // Mettre à jour le backup si on s'améliore
         if res < best_res
         {
-            best_x.copy_from_slice(&x);
             best_res = res;
         }
 
@@ -196,10 +195,9 @@ where
         rs_old = rs_new;
     }
 
-    // Non-convergence : restaurer le backup et retourner une erreur
     warn!(
         target: "solver",
-        "CG did not converge after {} iterations (best residual: {:.3e}) — returning backup solution",
+        "CG did not converge after {} iterations (best residual: {:.3e})",
         tol.max_iter, best_res
     );
     Err(SolverError::NoConvergence {
@@ -251,6 +249,47 @@ mod tests {
         }
         // CG converge en ≤ n itérations sur matrice n×n SPD
         assert!(sol.info.iterations <= n);
+    }
+
+    /// A `max_iter` too small to converge must report `NoConvergence` with
+    /// the true best residual observed — not silently return early or panic
+    /// (regression test for the dead best_x/rollback removal above: the
+    /// residual bookkeeping must survive the cleanup unchanged).
+    #[test]
+    fn cg_reports_no_convergence_with_accurate_residual_when_starved_of_iterations() {
+        let n = 5;
+        let mat = {
+            let mut m = Matrix::zeros(n, n);
+            for i in 0..n
+            {
+                m[(i, i)] = 4.0;
+                if i > 0
+                {
+                    m[(i, i - 1)] = -1.0;
+                    m[(i - 1, i)] = -1.0;
+                }
+            }
+            m
+        };
+        let b = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let result = conjugate_gradient(
+            |x, y| y.copy_from_slice(&mat.matvec(x).unwrap()),
+            &b,
+            vec![0.0; n],
+            Tolerance::new(1e-14, 1e-14, 1),
+        );
+        match result
+        {
+            Err(SolverError::NoConvergence {
+                iterations,
+                residual,
+            }) =>
+            {
+                assert_eq!(iterations, 1);
+                assert!(residual.is_finite() && residual > 0.0);
+            },
+            other => panic!("expected NoConvergence, got {other:?}"),
+        }
     }
 
     #[test]
