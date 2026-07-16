@@ -12,6 +12,7 @@ use super::layer::Linear;
 use super::linalg;
 use super::math::{reciprocal, rsqrt, sqrt};
 use super::reductions as red;
+use super::rescale::{rescale, rescale_saturating, rescale_wrapping};
 use super::simd::{FixedI16x8, FixedI32x8, FixedI64x4};
 use super::transcendental as tr;
 use super::{
@@ -831,6 +832,112 @@ fn linear_dim_mismatch_panics() {
     let w = vec![Q16_16::one(); 6]; // annoncé 2×3
     let b = vec![Q16_16::zero(); 3]; // devrait être 2
     let _ = Linear::new(w, b, 2, 3);
+}
+
+// ------------------------------------------------------------------ //
+//  Requantification (rescale)                                         //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn rescale_finer_resolution_exact() {
+    // Q16.16 → Q24.8 : FRAC diminue (16 → 8), résolution plus grossière.
+    // Attends un arrondi vers zéro par défaut (TowardZero/Wrap).
+    let x = q16(3.5); // raw = 3*2^16 + 2^15
+    let y: Q24_8 = rescale_wrapping(x);
+    assert_eq!(y.to_f64(), 3.5);
+
+    // Q24.8 → Q16.16 : FRAC augmente (8 → 16), résolution plus fine, exact
+    // (décalage à gauche, aucune perte).
+    let a = Q24_8::try_from(7.25).unwrap();
+    let b: Q16_16 = rescale_wrapping(a);
+    assert_eq!(b.to_f64(), 7.25);
+}
+
+#[test]
+fn rescale_round_trip_within_resolution() {
+    // Aller-retour Q16.16 → Q8.24 → Q16.16 (les deux stockages i32) doit
+    // rester à moins d'une résolution Q16.16 (8.24 est plus fin, sans perte
+    // à l'aller ; le retour perd à la résolution Q16.16 uniquement).
+    let mut rng = Lcg(0xC0DE);
+    for _ in 0..500
+    {
+        let x = Q16_16::from_raw(rng.raw_i32() >> 8); // évite le débordement Q8.24
+        let up: Q8_24 = rescale_wrapping(x);
+        let back: Q16_16 = rescale_wrapping(up);
+        assert_eq!(back, x, "aller-retour 16.16→8.24→16.16 doit être exact");
+    }
+}
+
+#[test]
+fn rescale_reduce_rounding_modes() {
+    // Q16.16 raw = 3 (donc 3/2^16), rescale vers FRAC=0 (entier) : le reste
+    // est < 1/2 → TowardZero et NearestEven arrondissent tous deux vers 0.
+    let tiny = Q16_16::from_raw(3);
+    let z: FixedI32<0> = rescale(tiny, RoundingMode::TowardZero, OverflowMode::Wrap).unwrap();
+    assert_eq!(z.to_raw(), 0);
+
+    // raw = 1<<15 exactement (moitié) : NearestEven arrondit au pair (0),
+    // Ceil arrondit vers +∞ (1).
+    let half = Q16_16::from_raw(1 << 15);
+    let ne: FixedI32<0> = rescale(half, RoundingMode::NearestEven, OverflowMode::Wrap).unwrap();
+    assert_eq!(ne.to_raw(), 0);
+    let ceil: FixedI32<0> = rescale(half, RoundingMode::Ceil, OverflowMode::Wrap).unwrap();
+    assert_eq!(ceil.to_raw(), 1);
+}
+
+#[test]
+fn rescale_overflow_policies_on_coarser_integer_range() {
+    // Q8_8 (±128) → Q1_15 (±1) : FRAC augmente (8→15), la plage entière
+    // rétrécit énormément — une valeur hors [-1,1) déborde.
+    let big = Q8_8::from(5); // hors plage de Q1.15
+    assert!(rescale::<i16, 8, 15>(big, RoundingMode::TowardZero, OverflowMode::Checked).is_none());
+    let sat: Q1_15 = rescale_saturating(big);
+    assert_eq!(sat, Q1_15::max_value());
+
+    let neg_big = Q8_8::from(-5);
+    let sat_neg: Q1_15 = rescale_saturating(neg_big);
+    assert_eq!(sat_neg, Q1_15::min_value());
+
+    // Une valeur dans la plage cible passe sans encombre.
+    let small = Q8_8::try_from(0.25).unwrap();
+    let ok: Q1_15 = rescale_saturating(small);
+    assert!((ok.to_f64() - 0.25).abs() <= Q1_15::resolution().to_f64());
+}
+
+#[test]
+fn rescale_identity_same_frac() {
+    // TO == FROM : identité (les deux branches du décalage coïncident à 0).
+    let x = q16(-12.375);
+    let y: Q16_16 = rescale_wrapping(x);
+    assert_eq!(y, x);
+}
+
+#[test]
+fn rescale_i64_storage() {
+    // Chemin de stockage i64 (Q32.32 ↔ FixedI64<16>) : mêmes garanties.
+    let x = Q32_32::try_from(100.5).unwrap();
+    let y: FixedI64<16> = rescale_wrapping(x);
+    assert_eq!(y.to_f64(), 100.5);
+    let back: Q32_32 = rescale_wrapping(y);
+    assert_eq!(back, x);
+}
+
+#[test]
+fn rescale_feeds_linear_layer() {
+    // Usage réaliste : un accumulateur haute résolution (Q8.24) requantifié en
+    // Q16.16 avant d'alimenter la couche linéaire suivante (même stockage i32,
+    // requis par `FixedReducible`/`Linear`, mais résolution différente).
+    let wide = [
+        Q8_24::try_from(1.0).unwrap(),
+        Q8_24::try_from(-2.0).unwrap(),
+        Q8_24::try_from(0.5).unwrap(),
+    ];
+    let narrow: Vec<Q16_16> = wide.iter().map(|&v| rescale_wrapping(v)).collect();
+    let w = [1i32, 1, 1].map(Q16_16::from);
+    let b = [0i32].map(Q16_16::from);
+    let layer = Linear::new(w.to_vec(), b.to_vec(), 1, 3);
+    let y = layer.forward(&narrow);
+    assert_eq!(y[0].to_f64(), 1.0 - 2.0 + 0.5);
 }
 
 // ------------------------------------------------------------------ //
