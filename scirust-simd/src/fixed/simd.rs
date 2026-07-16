@@ -2,16 +2,19 @@
 //
 // # Vecteurs virgule fixe SIMD
 //
-// [`FixedI32x8`] (8 lanes `FixedI32<FRAC>`, 256 bits) et [`FixedI64x4`]
-// (4 lanes `FixedI64<FRAC>`, 256 bits) sur `std::simd`. Le stockage
-// `#[repr(transparent)]` de [`Fixed`] garantit qu'un `[FixedI32<F>; 8]` a le
-// layout d'un `[i32; 8]` : la conversion tableau ↔ vecteur passe par les bruts,
-// sans `unsafe` ni copie cachée.
+// [`FixedI16x8`] (8 lanes `FixedI16<FRAC>`, 128 bits), [`FixedI32x8`] (8 lanes
+// `FixedI32<FRAC>`, 256 bits) et [`FixedI64x4`] (4 lanes `FixedI64<FRAC>`,
+// 256 bits) sur `std::simd`. Le stockage `#[repr(transparent)]` de [`Fixed`]
+// garantit qu'un `[FixedI32<F>; 8]` a le layout d'un `[i32; 8]` : la conversion
+// tableau ↔ vecteur passe par les bruts, sans `unsafe` ni copie cachée.
 //
 // Les opérateurs `+ − * −x` sont implémentés (enveloppants, comme le scalaire).
 //
 // ## Multiplication
 //
+// * `FixedI16x8` : **entièrement vectorisée**. Le vecteur `i16x8` est élargi en
+//   `i32x8` (produit exact : `|i16·i16| ≤ 2^30 < 2^31`), décalé de `FRAC` avec
+//   arrondi **vers zéro**, puis rétréci en `i16x8`. Tout reste en registres.
 // * `FixedI32x8` : **entièrement vectorisée**. Chaque moitié `i32x4` est élargie
 //   en `i64x4` (produit exact), décalée de `FRAC` avec arrondi **vers zéro**
 //   (pour coïncider bit-à-bit avec l'opérateur scalaire), puis rétrécie en
@@ -23,7 +26,7 @@
 use core::ops::{Add, Mul, Neg, Sub};
 use std::simd::cmp::{SimdOrd, SimdPartialEq, SimdPartialOrd};
 use std::simd::num::SimdInt;
-use std::simd::{Mask, Select, i32x4, i32x8, i64x4, simd_swizzle};
+use std::simd::{Mask, Select, i16x8, i32x4, i32x8, i64x4, simd_swizzle};
 
 use super::types::Fixed;
 
@@ -42,6 +45,181 @@ fn shift_toward_zero_i64x4(v: i64x4, frac: u32) -> i64x4 {
     let sign = v >> i64x4::splat(63); // −1 (tous bits) si négatif, 0 sinon
     let bias = sign & i64x4::splat((1i64 << frac) - 1);
     (v + bias) >> i64x4::splat(frac as i64)
+}
+
+/// Applique un décalage arrondi **vers zéro** de `frac` bits à un `i32x8`,
+/// lane à lane (même sémantique que [`shift_toward_zero_i64x4`], en `i32`).
+///
+/// Sert au produit `FixedI16x8`, dont l'accumulateur exact tient sur `i32`.
+#[inline(always)]
+fn shift_toward_zero_i32x8(v: i32x8, frac: u32) -> i32x8 {
+    if frac == 0
+    {
+        return v;
+    }
+    let sign = v >> i32x8::splat(31); // −1 (tous bits) si négatif, 0 sinon
+    let bias = sign & i32x8::splat((1i32 << frac) - 1);
+    (v + bias) >> i32x8::splat(frac as i32)
+}
+
+// ================================================================== //
+//  FixedI16x8                                                         //
+// ================================================================== //
+
+/// Vecteur de 8 nombres `FixedI16<FRAC>` (128 bits).
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FixedI16x8<const FRAC: u32>(pub i16x8);
+
+impl<const FRAC: u32> FixedI16x8<FRAC> {
+    /// Depuis 8 lanes brutes.
+    #[inline(always)]
+    #[must_use]
+    pub const fn from_raw(raw: i16x8) -> Self {
+        Self(raw)
+    }
+
+    /// Depuis un tableau de scalaires virgule fixe.
+    #[inline]
+    #[must_use]
+    pub fn from_array(values: [Fixed<i16, FRAC>; 8]) -> Self {
+        Self(i16x8::from_array(values.map(|v| v.0)))
+    }
+
+    /// Vers un tableau de scalaires virgule fixe.
+    #[inline]
+    #[must_use]
+    pub fn to_array(self) -> [Fixed<i16, FRAC>; 8] {
+        self.0.to_array().map(Fixed::from_raw)
+    }
+
+    /// Toutes lanes = `value`.
+    #[inline(always)]
+    #[must_use]
+    pub fn splat(value: Fixed<i16, FRAC>) -> Self {
+        Self(i16x8::splat(value.0))
+    }
+
+    /// Vecteur nul.
+    #[inline(always)]
+    #[must_use]
+    pub fn zero() -> Self {
+        Self(i16x8::splat(0))
+    }
+
+    /// FMA lane à lane : `self·b + c` (produit virgule fixe arrondi vers zéro
+    /// puis addition exacte enveloppante).
+    #[inline]
+    #[must_use]
+    pub fn mul_add(self, b: Self, c: Self) -> Self {
+        self * b + c
+    }
+
+    /// Minimum lane à lane.
+    #[inline(always)]
+    #[must_use]
+    pub fn min(self, rhs: Self) -> Self {
+        Self(self.0.simd_min(rhs.0))
+    }
+    /// Maximum lane à lane.
+    #[inline(always)]
+    #[must_use]
+    pub fn max(self, rhs: Self) -> Self {
+        Self(self.0.simd_max(rhs.0))
+    }
+    /// Restreint à `[lo, hi]` lane à lane.
+    #[inline(always)]
+    #[must_use]
+    pub fn clamp(self, lo: Self, hi: Self) -> Self {
+        self.max(lo).min(hi)
+    }
+    /// Valeur absolue **saturante** (`MIN` ↦ `MAX`), pour coïncider avec le
+    /// scalaire.
+    #[inline]
+    #[must_use]
+    pub fn abs(self) -> Self {
+        let a = self.0.abs(); // enveloppant : MIN ↦ MIN
+        let is_min = self.0.simd_eq(i16x8::splat(i16::MIN));
+        Self(is_min.select(i16x8::splat(i16::MAX), a))
+    }
+
+    /// Masque `self == rhs` lane à lane.
+    #[inline(always)]
+    #[must_use]
+    pub fn simd_eq(self, rhs: Self) -> Mask<i16, 8> {
+        self.0.simd_eq(rhs.0)
+    }
+    /// Masque `self < rhs`.
+    #[inline(always)]
+    #[must_use]
+    pub fn simd_lt(self, rhs: Self) -> Mask<i16, 8> {
+        self.0.simd_lt(rhs.0)
+    }
+    /// Masque `self <= rhs`.
+    #[inline(always)]
+    #[must_use]
+    pub fn simd_le(self, rhs: Self) -> Mask<i16, 8> {
+        self.0.simd_le(rhs.0)
+    }
+
+    /// Sélection lane à lane : `mask ? a : b` (blend).
+    #[inline(always)]
+    #[must_use]
+    pub fn select(mask: Mask<i16, 8>, a: Self, b: Self) -> Self {
+        Self(mask.select(a.0, b.0))
+    }
+
+    /// Somme horizontale **exacte** des 8 lanes (accumulée en `i64` pour éviter
+    /// tout débordement intermédiaire), rendue en scalaire virgule fixe
+    /// enveloppant. Ordre de réduction fixe → déterministe.
+    #[inline]
+    #[must_use]
+    pub fn reduce_sum(self) -> Fixed<i16, FRAC> {
+        let mut acc: i64 = 0;
+        for lane in self.0.to_array()
+        {
+            acc += lane as i64;
+        }
+        Fixed::from_raw(acc as i16)
+    }
+}
+
+impl<const FRAC: u32> Add for FixedI16x8<FRAC> {
+    type Output = Self;
+    /// Addition enveloppante lane à lane.
+    #[inline(always)]
+    fn add(self, rhs: Self) -> Self {
+        Self(self.0 + rhs.0)
+    }
+}
+impl<const FRAC: u32> Sub for FixedI16x8<FRAC> {
+    type Output = Self;
+    /// Soustraction enveloppante lane à lane.
+    #[inline(always)]
+    fn sub(self, rhs: Self) -> Self {
+        Self(self.0 - rhs.0)
+    }
+}
+impl<const FRAC: u32> Neg for FixedI16x8<FRAC> {
+    type Output = Self;
+    /// Négation enveloppante lane à lane.
+    #[inline(always)]
+    fn neg(self) -> Self {
+        Self(i16x8::splat(0) - self.0)
+    }
+}
+impl<const FRAC: u32> Mul for FixedI16x8<FRAC> {
+    type Output = Self;
+    /// Multiplication virgule fixe vectorisée (enveloppante, arrondi vers zéro).
+    ///
+    /// Élargissement exact `i16→i32` (le produit `|i16·i16| ≤ 2^30` tient sur
+    /// `i32`), décalage arrondi vers zéro de `FRAC` bits, puis rétrécissement
+    /// (troncature) `i32→i16` — identique bit-à-bit à l'opérateur scalaire.
+    #[inline]
+    fn mul(self, rhs: Self) -> Self {
+        let wide = self.0.cast::<i32>() * rhs.0.cast::<i32>();
+        Self(shift_toward_zero_i32x8(wide, FRAC).cast::<i16>())
+    }
 }
 
 // ================================================================== //

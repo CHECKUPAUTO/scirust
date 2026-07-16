@@ -9,7 +9,7 @@
 
 use super::math::{reciprocal, rsqrt, sqrt};
 use super::reductions as red;
-use super::simd::{FixedI32x8, FixedI64x4};
+use super::simd::{FixedI16x8, FixedI32x8, FixedI64x4};
 use super::transcendental as tr;
 use super::{
     FixedI16, FixedI32, FixedI64, NumericScalar, OverflowMode, Q1_15, Q8_8, Q8_24, Q16_16, Q24_8,
@@ -311,6 +311,77 @@ fn ordering_and_minmax() {
 // ------------------------------------------------------------------ //
 //  SIMD == scalaire                                                   //
 // ------------------------------------------------------------------ //
+
+#[test]
+fn simd_i16x8_matches_scalar() {
+    // Deux formats pour exercer des `FRAC` distincts : Q8.8 (plage modérée) et
+    // Q1.15 (audio). L'égalité doit être stricte, y compris sur les cas
+    // enveloppants (le produit élargi `i16→i32` est exact, la troncature finale
+    // `i32→i16` enveloppe exactement comme le scalaire).
+    let mut rng = Lcg(0xC0FFEE);
+    for _ in 0..500
+    {
+        let a88: [Q8_8; 8] = core::array::from_fn(|_| Q8_8::from_raw(rng.next() as i16));
+        let b88: [Q8_8; 8] = core::array::from_fn(|_| Q8_8::from_raw(rng.next() as i16));
+        let va = FixedI16x8::from_array(a88);
+        let vb = FixedI16x8::from_array(b88);
+
+        let add = (va + vb).to_array();
+        let sub = (va - vb).to_array();
+        let mul = (va * vb).to_array();
+        let neg = (-va).to_array();
+        let mn = va.min(vb).to_array();
+        let mx = va.max(vb).to_array();
+        let ab = va.abs().to_array();
+        let fma = va.mul_add(vb, va).to_array();
+        for i in 0..8
+        {
+            assert_eq!(add[i], a88[i] + b88[i], "add lane {i}");
+            assert_eq!(sub[i], a88[i] - b88[i], "sub lane {i}");
+            assert_eq!(mul[i], a88[i] * b88[i], "mul lane {i}");
+            assert_eq!(neg[i], -a88[i], "neg lane {i}");
+            assert_eq!(mn[i], a88[i].min(b88[i]), "min lane {i}");
+            assert_eq!(mx[i], a88[i].max(b88[i]), "max lane {i}");
+            assert_eq!(ab[i], a88[i].abs(), "abs lane {i}");
+            assert_eq!(fma[i], a88[i] * b88[i] + a88[i], "mul_add lane {i}");
+        }
+
+        // Même produit sur Q1.15 (FRAC = 15).
+        let a15: [Q1_15; 8] = core::array::from_fn(|_| Q1_15::from_raw(rng.next() as i16));
+        let b15: [Q1_15; 8] = core::array::from_fn(|_| Q1_15::from_raw(rng.next() as i16));
+        let mul15 = (FixedI16x8::from_array(a15) * FixedI16x8::from_array(b15)).to_array();
+        for i in 0..8
+        {
+            assert_eq!(mul15[i], a15[i] * b15[i], "mul Q1.15 lane {i}");
+        }
+    }
+}
+
+#[test]
+fn simd_i16x8_select_cmp_reduce() {
+    let a = FixedI16x8::from_array(core::array::from_fn(|i| Q8_8::from(i as i16)));
+    let b = FixedI16x8::splat(Q8_8::from(3));
+    let mask = a.simd_lt(b); // lanes 0,1,2 < 3
+    let sel = FixedI16x8::select(mask, a, b).to_array();
+    for (i, &got) in sel.iter().enumerate()
+    {
+        let expected = if i < 3
+        {
+            Q8_8::from(i as i16)
+        }
+        else
+        {
+            Q8_8::from(3)
+        };
+        assert_eq!(got, expected, "select lane {i}");
+    }
+    assert!(a.simd_le(a).all(), "self ≤ self");
+    assert!(a.simd_eq(a).all(), "self == self");
+
+    // Réduction horizontale exacte : Σ 0..7 = 28 (addition virgule fixe exacte).
+    let sum = FixedI16x8::from_array(core::array::from_fn(|i| Q8_8::from(i as i16))).reduce_sum();
+    assert_eq!(sum, Q8_8::from(28), "reduce_sum");
+}
 
 #[test]
 fn simd_i32x8_matches_scalar() {
