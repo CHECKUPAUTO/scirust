@@ -5,19 +5,69 @@
 //!   z_i ← z_i - p(z_i) / Π_{j≠i} (z_i - z_j)
 //!
 //! Convergence quadratique près de racines simples ; converge globalement
-//! depuis presque tous les points de départ. Robuste sur les polynômes
-//! mal conditionnés (e.g. polynôme de Wilkinson).
+//! depuis presque tous les points de départ, sur des polynômes modérément
+//! mal conditionnés (racines entières bien séparées de degré ~5-10, voir
+//! [`tests::degree_5`]).
+//!
+//! **Limite connue** : cette implémentation travaille sur les coefficients
+//! sous forme développée (base monomiale), qui est numériquement instable
+//! pour des degrés élevés — le polynôme de Wilkinson classique (degré 20,
+//! racines 1..20) a des coefficients allant jusqu'à ~2.4×10¹⁸, et
+//! l'évaluation de Horner en `f64` y produit des annulations catastrophiques
+//! dès les premières itérations. [`durand_kerner`]/[`durand_kerner_strict`]
+//! détectent ce cas (pas non fini) et renvoient
+//! [`SolverError::NanDetected`] plutôt que des racines silencieusement
+//! fausses — mais ne le résolvent pas : un tel polynôme a besoin d'une
+//! méthode dédiée (déflation, arithmétique étendue, ou passage par la
+//! matrice compagnon avec un solveur d'eigenvalues, comme le fait LAPACK).
 
 use super::Polynomial;
 use crate::{SolverError, SolverResult};
 
-/// Trouve toutes les racines (complexes) via Durand-Kerner.
+/// Trouve toutes les racines (complexes) via Durand-Kerner. Best-effort : si
+/// `max_iter` est épuisé sans que le pas maximal descende sous `tol`, renvoie
+/// quand même la meilleure estimation courante (voir [`durand_kerner_strict`]
+/// pour une variante qui signale l'échec au lieu de le masquer).
 /// Renvoie un Vec<(re, im)> de longueur `degree`.
 pub fn durand_kerner(p: &Polynomial, max_iter: usize, tol: f64) -> SolverResult<Vec<(f64, f64)>> {
+    durand_kerner_table(p, max_iter, tol).map(|(z, _)| z)
+}
+
+/// Variante stricte de [`durand_kerner`] : renvoie
+/// [`SolverError::NoConvergence`] si le pas maximal n'est pas descendu sous
+/// `tol` après `max_iter` itérations, plutôt que de renvoyer silencieusement
+/// la meilleure estimation disponible.
+pub fn durand_kerner_strict(
+    p: &Polynomial,
+    max_iter: usize,
+    tol: f64,
+) -> SolverResult<Vec<(f64, f64)>> {
+    let (z, last_step) = durand_kerner_table(p, max_iter, tol)?;
+    if last_step < tol
+    {
+        Ok(z)
+    }
+    else
+    {
+        Err(SolverError::NoConvergence {
+            iterations: max_iter,
+            residual: last_step,
+        })
+    }
+}
+
+/// Runs Durand-Kerner and returns `(roots, last_max_step)`. A `last_max_step`
+/// of `0.0` for a degree-0 polynomial (no roots) or a first-iteration
+/// all-coincident-roots skip is treated as converged by both callers above.
+fn durand_kerner_table(
+    p: &Polynomial,
+    max_iter: usize,
+    tol: f64,
+) -> SolverResult<(Vec<(f64, f64)>, f64)> {
     let n = p.degree();
     if n == 0
     {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), 0.0));
     }
     // Normalise pour que le coefficient dominant vaille 1
     let lead = *p.coeffs.last().unwrap();
@@ -58,6 +108,7 @@ pub fn durand_kerner(p: &Polynomial, max_iter: usize, tol: f64) -> SolverResult<
         acc
     };
 
+    let mut last_max_step = f64::INFINITY;
     for _ in 0..max_iter
     {
         let mut max_step = 0.0_f64;
@@ -87,18 +138,34 @@ pub fn durand_kerner(p: &Polynomial, max_iter: usize, tol: f64) -> SolverResult<
             // step = p(z) / denom  (division complexe)
             let nr = (pz.0 * denom.0 + pz.1 * denom.1) / (dmag * dmag);
             let ni = (pz.1 * denom.0 - pz.0 * denom.1) / (dmag * dmag);
+            let step_mag = nr.hypot(ni);
+            // `f64::max` treats NaN as the *smaller* operand (IEEE 754
+            // minNum/maxNum semantics), so `max_step.max(step_mag)` would
+            // silently drop a NaN step instead of propagating it — a
+            // catastrophic-cancellation breakdown (huge coefficients, e.g.
+            // the classic degree-20 Wilkinson polynomial expanded to
+            // monomial form) would then report `last_max_step` near 0 and
+            // look "converged" while every root is NaN. Reject explicitly.
+            if !step_mag.is_finite()
+            {
+                return Err(SolverError::NanDetected {
+                    iter: i,
+                    value: step_mag,
+                });
+            }
             z[i].0 -= nr;
             z[i].1 -= ni;
-            let step_mag = nr.hypot(ni);
             max_step = max_step.max(step_mag);
         }
+        last_max_step = max_step;
         if max_step < tol
         {
-            return Ok(z);
+            return Ok((z, max_step));
         }
     }
-    // Hors-tolérance — renvoie quand même la meilleure estimation
-    Ok(z)
+    // Hors-tolérance — `durand_kerner` renvoie quand même la meilleure
+    // estimation ; `durand_kerner_strict` la rejette via `last_max_step`.
+    Ok((z, last_max_step))
 }
 
 /// Alias par défaut pour `durand_kerner` avec tolérances raisonnables.
@@ -230,5 +297,64 @@ mod tests {
         {
             assert_relative_eq!(r[i], expected as f64, epsilon = 1e-4);
         }
+    }
+
+    /// Builds `Π_{k=1}^{degree} (x - k)` in monomial form (the Wilkinson
+    /// polynomial family) — huge, ill-conditioned coefficients at higher
+    /// degree, which is exactly what breaks a monomial-basis root finder.
+    fn wilkinson_style(degree: i64) -> Polynomial {
+        let mut p = Polynomial::from_descending(vec![1.0, -1.0]);
+        for k in 2..=degree
+        {
+            let q = Polynomial::from_descending(vec![1.0, -(k as f64)]);
+            let mut new_coeffs = vec![0.0; p.coeffs.len() + q.coeffs.len() - 1];
+            for (i, &a) in p.coeffs.iter().enumerate()
+            {
+                for (j, &b) in q.coeffs.iter().enumerate()
+                {
+                    new_coeffs[i + j] += a * b;
+                }
+            }
+            p = Polynomial::new(new_coeffs);
+        }
+        p
+    }
+
+    /// Regression test for a P2 audit finding: `f64::max` treats NaN as the
+    /// *smaller* operand, so a catastrophic-cancellation breakdown used to
+    /// get silently absorbed into `max_step` and reported as "converged"
+    /// with every root equal to NaN. The classic degree-20 Wilkinson
+    /// polynomial — famous for defeating naive root-finders on its monomial
+    /// coefficients — reproduces the breakdown; it must now surface as
+    /// `NanDetected` instead of fake convergence.
+    #[test]
+    fn wilkinson_degree_20_reports_nan_instead_of_fake_convergence() {
+        let p = wilkinson_style(20);
+        let result = durand_kerner(&p, 500, 1e-6);
+        assert!(
+            matches!(result, Err(SolverError::NanDetected { .. })),
+            "expected NanDetected on the classic Wilkinson breakdown, got {result:?}"
+        );
+    }
+
+    /// `durand_kerner` stays best-effort on ordinary (non-NaN) non-convergence;
+    /// `durand_kerner_strict` reports the same case as `NoConvergence`.
+    #[test]
+    fn durand_kerner_strict_reports_non_convergence() {
+        let p = wilkinson_style(6);
+        // A single iteration is nowhere near enough to converge, but stays
+        // numerically tame (unlike degree 20): no NaN breakdown, just an
+        // ordinary "ran out of iterations" case.
+        let lenient = durand_kerner(&p, 1, 1e-12);
+        assert!(
+            lenient.is_ok(),
+            "best-effort variant must not error: {lenient:?}"
+        );
+
+        let strict = durand_kerner_strict(&p, 1, 1e-12);
+        assert!(
+            matches!(strict, Err(SolverError::NoConvergence { .. })),
+            "expected NoConvergence, got {strict:?}"
+        );
     }
 }
