@@ -51,7 +51,6 @@ members = [
     "examples/sentiment_demo",
     "scirust-macros",
     "scirust-autodiff",
-    "scirust-simd-macros",
     "scirust-simd",
     "scirust-gpu",
     "scirust-cuda",

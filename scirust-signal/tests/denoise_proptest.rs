@@ -8,9 +8,9 @@
 //! whole file stays well within a normal `cargo test` budget.
 //!
 //! Invariants covered:
-//! * every catalog denoiser preserves length and never invents non-finite values
-//!   from finite input, and never panics on adversarial input (empty, tiny,
-//!   constant, or NaN/±∞ laced);
+//! * every denoiser in the representative pool below preserves length and never
+//!   invents non-finite values from finite input, and never panics on adversarial
+//!   input (empty, tiny, constant, or NaN/±∞ laced);
 //! * streaming denoisers agree bit-for-bit with their batch counterparts on the
 //!   window interior, restore state exactly on `reset`, and recover to finite output
 //!   once a NaN has left the window;
@@ -24,10 +24,53 @@ use scirust_signal::denoise::streaming::{
     StreamingHampel, StreamingKalman, StreamingMedian, StreamingMovingAverage,
 };
 use scirust_signal::denoise::{
-    catalog, classify, filtfilt_sos, hampel_filter, median_filter, moving_average, notch_iir,
-    rbj_notch, separate,
+    ThresholdMode, Wavelet, classify, filtfilt_sos, gaussian_smooth, hampel_filter,
+    kalman_smooth_auto, median_filter, moving_average, nlm1d_auto, notch_iir, rbj_notch,
+    savitzky_golay, separate, stft_wiener_auto, tikhonov_smooth, total_variation, wavelet_denoise,
+    wavelet_denoise_bayes, wavelet_denoise_leveldep, wavelet_denoise_neighblock,
+    wavelet_denoise_sure, wavelet_denoise_ti,
 };
 use scirust_signal::filter::Biquad;
+
+/// A single pool entry: a name paired with its denoising function.
+type DenoiserEntry = (&'static str, fn(&[f64]) -> Vec<f64>);
+
+/// A representative denoiser pool spanning every family (linear, rank, transform,
+/// variational, adaptive) — one default configuration per method, mirroring the
+/// candidate shortlists used by `denoise_auto` / `denoise_best`. The invariant
+/// tests below run every entry.
+fn denoiser_pool() -> Vec<DenoiserEntry> {
+    vec![
+        ("moving_average(5)", |x| moving_average(x, 5)),
+        ("gaussian_smooth(1.5)", |x| gaussian_smooth(x, 1.5)),
+        ("savitzky_golay(2, 5)", |x| savitzky_golay(x, 2, 5)),
+        ("median_filter(3)", |x| median_filter(x, 3)),
+        ("hampel_filter(3, 3.0)", |x| hampel_filter(x, 3, 3.0)),
+        ("wavelet_denoise(auto, soft)", |x| {
+            wavelet_denoise(x, 0, ThresholdMode::Soft)
+        }),
+        ("wavelet_denoise_ti(auto, soft, db4, 15)", |x| {
+            wavelet_denoise_ti(x, 0, ThresholdMode::Soft, Wavelet::Db4, 15)
+        }),
+        ("wavelet_denoise_bayes(auto, db4)", |x| {
+            wavelet_denoise_bayes(x, 0, Wavelet::Db4)
+        }),
+        ("wavelet_denoise_sure(auto, db4)", |x| {
+            wavelet_denoise_sure(x, 0, Wavelet::Db4)
+        }),
+        ("wavelet_denoise_neighblock(auto, db4)", |x| {
+            wavelet_denoise_neighblock(x, 0, Wavelet::Db4)
+        }),
+        ("nlm1d_auto", |x| nlm1d_auto(x)),
+        ("wavelet_denoise_leveldep(auto, soft, db4)", |x| {
+            wavelet_denoise_leveldep(x, 0, ThresholdMode::Soft, Wavelet::Db4)
+        }),
+        ("total_variation(1.0, 8)", |x| total_variation(x, 1.0, 8)),
+        ("tikhonov_smooth(10.0)", |x| tikhonov_smooth(x, 10.0)),
+        ("stft_wiener_auto", |x| stft_wiener_auto(x)),
+        ("kalman_smooth_auto", |x| kalman_smooth_auto(x).output),
+    ]
+}
 
 /// A finite signal of moderate length and bounded amplitude — the domain on which
 /// the length/finiteness invariants are meaningful (unbounded input could overflow a
@@ -53,29 +96,29 @@ fn wild_signal() -> impl Strategy<Value = Vec<f64>> {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(128))]
 
-    /// Every default-catalog denoiser is length-preserving and finite-in ⇒ finite-out.
+    /// Every pooled denoiser is length-preserving and finite-in ⇒ finite-out.
     #[test]
-    fn catalog_preserves_length_and_finiteness(sig in finite_signal()) {
-        for d in catalog()
+    fn pool_preserves_length_and_finiteness(sig in finite_signal()) {
+        for (name, denoise) in denoiser_pool()
         {
-            let out = d.apply(&sig);
-            prop_assert_eq!(out.len(), sig.len(), "{} changed length", d.name());
+            let out = denoise(&sig);
+            prop_assert_eq!(out.len(), sig.len(), "{} changed length", name);
             prop_assert!(
                 out.iter().all(|v| v.is_finite()),
                 "{} produced a non-finite value on finite input",
-                d.name()
+                name
             );
         }
     }
 
-    /// No catalog denoiser panics on adversarial input, and length is still preserved
+    /// No pooled denoiser panics on adversarial input, and length is still preserved
     /// (the module-wide graceful-degradation contract).
     #[test]
-    fn catalog_never_panics_on_wild_input(sig in wild_signal()) {
-        for d in catalog()
+    fn pool_never_panics_on_wild_input(sig in wild_signal()) {
+        for (name, denoise) in denoiser_pool()
         {
-            let out = d.apply(&sig);
-            prop_assert_eq!(out.len(), sig.len(), "{} changed length", d.name());
+            let out = denoise(&sig);
+            prop_assert_eq!(out.len(), sig.len(), "{} changed length", name);
         }
     }
 

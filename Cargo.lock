@@ -2872,7 +2872,6 @@ name = "scirust-audio"
 version = "0.1.0"
 dependencies = [
  "scirust-core",
- "scirust-signal",
  "serde",
  "serde_json",
 ]
@@ -3149,7 +3148,6 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "scirust-core",
- "scirust-simd",
  "sha2",
 ]
 
@@ -3205,7 +3203,6 @@ dependencies = [
  "scirust-events-core",
  "scirust-learning",
  "scirust-pdm",
- "scirust-signal",
  "serde",
  "serde_json",
 ]
@@ -3224,7 +3221,6 @@ dependencies = [
  "scirust-nav",
  "scirust-opcua",
  "scirust-pdm",
- "scirust-signal",
  "scirust-water",
  "serde",
  "serde_json",
@@ -3613,16 +3609,6 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "libc",
- "scirust-simd-macros",
-]
-
-[[package]]
-name = "scirust-simd-macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]

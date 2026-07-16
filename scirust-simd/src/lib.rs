@@ -2,17 +2,14 @@
 //!
 //! This crate provides:
 //!
-//! * The **`#[simd]`** proc-macro attribute (re-exported from `scirust-simd-macros`)
-//!   that automatically generates architecture-specific variants of a free function
-//!   with runtime dispatch (AVX2 / SSE2 / NEON / SVE / scalar).
-//!
 //! * A generic **`simd_map`** and **`simd_zip_with`** implemented on top of
 //!   `std::simd` (nightly `portable_simd` feature).
 //!
 //! * **Stable manual SIMD kernels** for `f32`/`f64` using `core::arch` with
 //!   runtime feature detection and scalar fallback.
 //!
-//! * **ARM64 NEON intrinsics** (Pilier 4) — 4x f32 lanes on all ARM64.
+//! * **ARM64 NEON kernels** (Pilier 4) — 4x f32 lanes on all ARM64, implemented
+//!   in the `dispatch` and `gemm` modules with runtime feature detection.
 //!
 //! * **ARM SVE intrinsics** (Pilier 4) — scalable vector length on Ampere/Graviton,
 //!   available with the nightly-only `nightly-simd` feature.
@@ -67,8 +64,6 @@ macro_rules! is_x86_feature_detected {
 
 pub mod portable;
 pub use portable::simd_ops;
-
-pub use scirust_simd_macros::simd;
 
 // =============================================================================
 // Nightly portable_simd generic API
@@ -352,29 +347,6 @@ pub fn scalar_zip<T: Copy>(a: &[T], b: &[T], output: &mut [T], f: impl Fn(T, T) 
     {
         output[i] = f(a[i], b[i]);
     }
-}
-
-// =============================================================================
-// ARM64 NEON kernels (Pilier 4)
-// =============================================================================
-
-#[cfg(target_arch = "aarch64")]
-mod neon_impl {
-    #[allow(unused_imports)]
-    pub use super::neon_fns::*;
-}
-
-#[cfg(target_arch = "aarch64")]
-#[allow(unused_imports)]
-pub mod neon {
-    #[allow(unused_imports)]
-    pub use super::neon_fns::*;
-}
-
-#[cfg(target_arch = "aarch64")]
-mod neon_fns {
-    #[allow(unused_imports)]
-    pub use crate::neon::*;
 }
 
 // =============================================================================

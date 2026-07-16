@@ -271,7 +271,7 @@ fn test_lora_linear() {
 #[test]
 fn test_fem_solver() {
     let solver = FemSolver1D::new(11, 1.0);
-    let u = solver.solve_steady_heat(1.0);
+    let u = solver.solve_steady_heat(1.0).unwrap();
     assert_eq!(u.len(), 11);
     assert_eq!(u[0], 0.0);
     assert_eq!(u[10], 0.0);

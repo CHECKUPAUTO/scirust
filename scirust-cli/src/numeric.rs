@@ -927,7 +927,15 @@ pub fn run_fem_heat(args: &[String]) -> u8 {
         },
         _ => return 2,
     };
-    let u = FemSolver1D::new(nodes, length).solve_steady_heat(source);
+    let u = match FemSolver1D::new(nodes, length).solve_steady_heat(source)
+    {
+        Ok(u) => u,
+        Err(e) =>
+        {
+            eprintln!("error: {e}");
+            return 1;
+        },
+    };
     let h = length / (nodes as f64 - 1.0);
     println!("-u'' = {source}  on [0, {length}],  u(0) = u(L) = 0  ({nodes} nodes, linear FEM)");
     for (i, ui) in u.iter().enumerate()

@@ -14,7 +14,6 @@ scirust-core = { path = "../scirust-core" }
 scirust-integration = { path = "../scirust-integration" }
 scirust-opcua = { path = "../scirust-opcua" }
 scirust-mqtt = { path = "../scirust-mqtt" }
-scirust-signal = { path = "../scirust-signal" }
 scirust-pdm = { path = "../scirust-pdm" }
 scirust-func-safety = { path = "../scirust-func-safety" }
 scirust-estimation = { path = "../scirust-estimation" }

@@ -1,3 +1,19 @@
+//! Radix-2 Cooley-Tukey FFT, in **two paths** — mirroring the workspace's
+//! `softmax` / `softmax_portable` convention in `scirust-core`:
+//!
+//! * [`fft`] / [`ifft`] / [`fft_real`] — the fast default. Twiddle factors come
+//!   from the platform libm (`sin`/`cos`), so the last few ulps of the spectrum
+//!   may differ across platforms and libm implementations.
+//! * [`fft_portable`] / [`ifft_portable`] — **bit-identical across platforms**.
+//!   The twiddles go through `scirust_core::portable_f32::sincos_small_f64`
+//!   (Cody–Waite reduction + portable polynomials); every other operation —
+//!   bit-reversal, butterflies, twiddle accumulation — is basic IEEE arithmetic
+//!   in a fixed order. This is the reference path for reproducible spectral
+//!   analysis (determinism fingerprints, CI baselines).
+//!
+//! Both paths share the same in-place calling convention and the same
+//! power-of-two size contract, and agree to ~1e-9 on any given input.
+
 use core::f64::consts::PI;
 
 use crate::Complex;

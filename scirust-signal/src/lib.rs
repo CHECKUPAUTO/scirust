@@ -95,11 +95,11 @@ pub use cepstrum::{dominant_quefrency, real_cepstrum};
 /// Re-export commonly used types.
 pub use complex::Complex;
 pub use denoise::{
-    AutoResult, Denoiser, DenoiserFamily, NoiseProfile, NoiseType, Separation, Wavelet,
-    WaveletRlsRtsParams, catalog, classify, denoise_auto, estimate_noise_std, kalman_smooth,
-    kalman_smooth_auto, kalman_trend_smooth, moving_average as denoise_moving_average,
-    savitzky_golay, separate, total_variation, total_variation_exact, wavelet_denoise,
-    wavelet_denoise_sure, wavelet_denoise_with, wavelet_rls_rts_smooth, wavelet_rls_rts_smooth_1d,
+    AutoResult, NoiseProfile, NoiseType, Separation, Wavelet, WaveletRlsRtsParams, classify,
+    denoise_auto, estimate_noise_std, kalman_smooth, kalman_smooth_auto, kalman_trend_smooth,
+    moving_average as denoise_moving_average, savitzky_golay, separate, total_variation,
+    total_variation_exact, wavelet_denoise, wavelet_denoise_sure, wavelet_denoise_with,
+    wavelet_rls_rts_smooth, wavelet_rls_rts_smooth_1d,
 };
 pub use envelope::{dominant_envelope_freq, envelope_spectrum, hilbert_envelope};
 pub use features::spectral::{

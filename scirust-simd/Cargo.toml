@@ -9,7 +9,6 @@ description = "SIMD auto-vectorization primitives for SciRust"
 license-file = "../LICENSE.md"
 
 [dependencies]
-scirust-simd-macros = { path = "../scirust-simd-macros" }
 libc = "0.2"
 
 [features]

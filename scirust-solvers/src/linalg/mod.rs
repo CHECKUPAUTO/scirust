@@ -1,9 +1,9 @@
 //! Algèbre linéaire dense f64. Tout est row-major, owned.
 //!
-//! Pour les opérations de bas-niveau on s'appuie sur le backend matriciel
-//! de `scirust-core` (gemv/gemm/cholesky), mais on garde ici un type
-//! `Matrix` simple et autonome avec son propre code LU/QR pour ne pas
-//! introduire de dépendance circulaire avec `scirust-core`.
+//! Le module est entièrement autonome : le type `Matrix` et toutes les
+//! opérations (produits matrice-vecteur/matrice, LU, QR, Cholesky, SVD,
+//! solveurs itératifs) sont implémentés ici en boucles scalaires simples,
+//! sans dépendre du backend matriciel de `scirust-core`.
 
 use crate::{SolverError, SolverResult};
 use std::fmt;

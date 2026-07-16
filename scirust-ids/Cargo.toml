@@ -6,7 +6,6 @@ publish = false
 description = "SciRust Intrusion Detection System — network anomaly detection using signal processing, statistical change detection, and ML classifiers"
 
 [dependencies]
-scirust-signal = { path = "../scirust-signal" }
 scirust-pdm = { path = "../scirust-pdm" }
 scirust-events-core = { path = "../scirust-events-core" }
 scirust-learning = { path = "../scirust-learning" }
