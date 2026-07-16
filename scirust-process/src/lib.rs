@@ -64,6 +64,14 @@
 //! - [`process_economics`] — six-dixièmes, facteur de Lang, retour, annuité.
 //! - [`slurry_flow`] — transport de boues : densité, vitesse critique (Durand).
 //!
+//! ### Transfert thermique & machines — vol. 3
+//! - [`heat_exchanger_lmtd`] — échangeur (DTLM) : Q = U·A·DTLM·F, aire requise, température de sortie.
+//! - [`heat_exchanger_ntu`] — échangeur (ε-NTU) : NTU, rapport de capacités, efficacité co/contre-courant.
+//! - [`pump_sizing`] — pompe : puissance hydraulique/arbre, NPSH disponible, vitesse spécifique, affinité.
+//! - [`compressor_power`] — compression d'un gaz parfait : travail isentropique/polytropique, refoulement, multi-étagé.
+//! - [`control_valve_cv`] — vanne de régulation : coefficient Cv/Kv, autorité, caractéristique égal pourcentage.
+//! - [`orifice_meter`] — débitmètre à diaphragme : rapport β, débit massique/volumique, perte permanente.
+//!
 //! ## Positionnement
 //!
 //! Cette crate ouvre le domaine des **opérations unitaires** dans SciRust. Elle
@@ -123,6 +131,14 @@ pub mod sedimentation;
 pub mod slurry_flow;
 pub mod vapor_pressure;
 pub mod vle_raoult;
+
+// Vol. 3
+pub mod compressor_power;
+pub mod control_valve_cv;
+pub mod heat_exchanger_lmtd;
+pub mod heat_exchanger_ntu;
+pub mod orifice_meter;
+pub mod pump_sizing;
 
 pub use absorption::{
     absorp_factor, absorp_kremser_fraction_absorbed, absorp_minimum_liquid_flow, absorp_ntu_dilute,
@@ -259,4 +275,28 @@ pub use vapor_pressure::{
 pub use vle_raoult::{
     vle_bubble_pressure_binary, vle_equilibrium_ratio, vle_partial_pressure_raoult,
     vle_relative_volatility_raoult, vle_vapor_fraction_binary,
+};
+
+// Vol. 3 — ré-exports à plat.
+pub use compressor_power::{
+    cmp_discharge_temperature, cmp_isentropic_work, cmp_polytropic_work, cmp_power,
+    cmp_stage_pressure_ratio,
+};
+pub use control_valve_cv::{
+    cv_authority, cv_equal_percentage_opening, cv_flow_from_cv, cv_kv_from_cv, cv_liquid,
+};
+pub use heat_exchanger_lmtd::{
+    lmtd_duty, lmtd_log_mean, lmtd_outlet_temp_from_duty, lmtd_required_area,
+};
+pub use heat_exchanger_ntu::{
+    ntu_capacity_ratio, ntu_duty, ntu_effectiveness_counterflow, ntu_effectiveness_parallel,
+    ntu_number,
+};
+pub use orifice_meter::{
+    orif_beta_ratio, orif_differential_pressure, orif_mass_flow, orif_permanent_loss_fraction,
+    orif_volumetric_flow,
+};
+pub use pump_sizing::{
+    pump_affinity_flow, pump_hydraulic_power, pump_npsh_available, pump_shaft_power,
+    pump_specific_speed,
 };
