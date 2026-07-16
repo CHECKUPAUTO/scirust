@@ -35,6 +35,20 @@
 //! band, structure has leaked into the "noise" (the model under-fit and threw away
 //! information), and [`Separation::leaked_structure`] flags it. That test is what
 //! turns a plausible split into a checkable one.
+//!
+//! ## Known limitation: tonal interference deep inside the signal band
+//!
+//! The information/noise split is a 9-sample moving average, i.e. a *normalized*
+//! cutoff near `0.05·fs`. A tonal interferer **below** that cutoff (e.g. 50 Hz mains
+//! on a record sampled at 100 kHz) lands on the *information* side of the split,
+//! where it is indistinguishable, without priors, from a legitimate low-frequency
+//! signal component: every statistic derived from the split (smooth/residual energy
+//! ratio, leak amplitude) is a deterministic function of `f/fs` and carries no
+//! signal-vs-interference information. The automatic pipelines therefore do **not**
+//! notch tones in that region — the self-notch protection errs on the side of
+//! keeping them. When the interference frequency is known (mains hum almost always
+//! is), call [`super::remove_mains_hum_iir`] or [`super::notch_iir`] explicitly
+//! before the automatic pipeline.
 
 use super::linear::moving_average;
 use super::{estimate_noise_std_helper, pad_reflect_pow2};
@@ -220,9 +234,32 @@ pub fn classify(signal: &[f64], sample_rate: f64) -> NoiseProfile {
         0.0
     };
 
+    // Robust edge score: the step-vs-drift discriminator for the Baseline gate
+    // below (see [`step_edge_score`]). Only meaningful within the population that
+    // reaches that gate (trend_strength high): drift-dominated records measure
+    // 2–9, step/edge records 17–550.
+    let edge_score = step_edge_score(signal);
+
     // Decision tree, ordered from most to least specific. Structured disturbances
     // (spikes, tones, drift) are tested before the level-based low-noise gate, since
     // they can dominate even when the broadband σ is small.
+    //
+    // The Baseline gate is calibrated on drift-vs-signal power: a drift at equal
+    // power with the signal (0 dB) measures trend_strength ≈ 0.49 on the reference
+    // fixtures while strongly colored AR(0.9) noise stays near 0.05, so 0.45 catches
+    // the realistic drift regime the old 0.6 gate missed (0.6 required the drift to
+    // carry ~1.5× the signal's power) with a wide safety margin against colored
+    // noise. The edge-score guard keeps step/edge records — whose low-frequency
+    // energy mimics a drift — out of the detrending branch, where subtracting a
+    // "trend" would smear (at high SNR, essentially erase) their edges. When the
+    // guard vetoes, the record falls through to the broadband branches: the drift
+    // may go untreated, but the signal is never destroyed.
+    //
+    // The LowNoise gate at 5 % of the RMS routes essentially-noiseless records
+    // (three pure tones plus a weak wander measure σ̂/rms ≈ 3–4 %) to the gentle
+    // Savitzky-Golay touch instead of Colored: with no broadband floor, the
+    // residual's spectral slope is measured on tone-leakage skirts, not on noise,
+    // and the wavelet machinery it would trigger has nothing legitimate to remove.
     let dominant = if residual_kurtosis > 4.0 && crest_factor > 5.0
     {
         NoiseType::Impulsive
@@ -233,11 +270,11 @@ pub fn classify(signal: &[f64], sample_rate: f64) -> NoiseProfile {
     {
         NoiseType::Periodic
     }
-    else if trend_strength > 0.6
+    else if trend_strength > 0.45 && edge_score < 13.0
     {
         NoiseType::Baseline
     }
-    else if noise_std < 0.01 * rms.max(1.0e-12)
+    else if noise_std < 0.05 * rms.max(1.0e-12)
     {
         NoiseType::LowNoise
     }
@@ -557,6 +594,38 @@ pub fn separate(signal: &[f64], sample_rate: f64) -> Separation {
 // Descriptor helpers.
 // ---------------------------------------------------------------------------
 
+/// Robust **edge score** — the step-vs-drift discriminator behind the Baseline gate.
+///
+/// The score is `max|Δ| / (1.4826·MAD(Δ))` where `Δ` is the first difference of the
+/// median(5)-prefiltered signal: the median filter suppresses broadband noise while
+/// keeping a step's jump concentrated in one or two samples, so an edge shows up as
+/// a *single* huge derivative outlier that a max-statistic sees undiluted (a
+/// kurtosis-based test dilutes a lone spike by `1/n` and goes blind below ~30 dB
+/// SNR — measured, it missed the reference step at 10–20 dB while this score reads
+/// 17–73 there). A genuine wander differentiates into another smooth waveform:
+/// drift-dominated records measure 2–9 across the calibration fixtures.
+///
+/// The score is only meaningful **within the high-`trend_strength` population** the
+/// Baseline gate examines: on pure broadband noise the median plateaus shrink the
+/// MAD and the score idles near 14, but such records never reach the gate
+/// (`trend_strength ≈ 0`). The gate threshold of 13 sits between the drift
+/// population (≤ 9.4) and the step population (≥ 17.5).
+fn step_edge_score(signal: &[f64]) -> f64 {
+    if signal.len() < 8
+    {
+        return 0.0;
+    }
+    let smoothed = super::rank::median_filter(signal, 2);
+    let diff: Vec<f64> = smoothed.windows(2).map(|w| w[1] - w[0]).collect();
+    let dm = super::median(&diff);
+    let scale = 1.4826 * super::mad(&diff);
+    if scale <= 0.0
+    {
+        return 0.0;
+    }
+    diff.iter().map(|&d| (d - dm).abs()).fold(0.0, f64::max) / scale
+}
+
 /// Whether a component is dominated by a narrowband (tonal) line, judged by very low
 /// spectral flatness of its own mean-removed periodogram. Used by the cascade to
 /// tell a broadband stage that removed *noise* (flat, colored or white → accept)
@@ -798,6 +867,72 @@ mod tests {
             .collect();
         let p = classify(&obs, 512.0);
         assert_eq!(p.dominant, NoiseType::Baseline);
+    }
+
+    #[test]
+    fn detects_baseline_drift_at_equal_power() {
+        // The realistic regime the old 0.6 gate missed: a drift carrying the *same*
+        // power as the signal (0 dB) measures trend_strength ≈ 0.49 and must now be
+        // caught (gate 0.45), while a weak drift (amp 0.5, ts ≈ 0.20) still is not.
+        let n = 2048;
+        let fs = 1000.0;
+        let mut rng = Lcg::new(5);
+        let obs: Vec<f64> = (0..n)
+            .map(|i| {
+                let t = i as f64 / fs;
+                (2.0 * PI * 5.0 * t).sin() + 1.0 * (2.0 * PI * 0.7 * t).sin() + 0.1 * rng.gauss()
+            })
+            .collect();
+        assert_eq!(classify(&obs, fs).dominant, NoiseType::Baseline);
+    }
+
+    #[test]
+    fn colored_noise_stays_out_of_the_baseline_gate() {
+        // AR(0.9) is the strongest "legitimately low-frequency" noise the module
+        // targets; its trend_strength (~0.05) must stay far below the 0.45 gate.
+        let n = 2048;
+        let fs = 1000.0;
+        let mut rng = Lcg::new(9);
+        let mut w = 0.0;
+        let obs: Vec<f64> = (0..n)
+            .map(|i| {
+                w = 0.9 * w + 0.3 * rng.gauss();
+                (2.0 * PI * 5.0 * (i as f64 / fs)).sin() + w
+            })
+            .collect();
+        let p = classify(&obs, fs);
+        assert!(p.trend_strength < 0.45, "ts = {}", p.trend_strength);
+        assert_ne!(p.dominant, NoiseType::Baseline);
+    }
+
+    #[test]
+    fn step_edges_are_not_misread_as_drift() {
+        // A step + ramp record concentrates energy in the low band exactly like a
+        // drift (trend_strength ≈ 0.9), but its median-prefiltered derivative has a
+        // single huge outlier (edge score 17–550 vs 2–9 for genuine wanders): the
+        // edge-score guard must keep it out of the detrending branch — including at
+        // MODERATE noise levels (10–20 dB), where a kurtosis-based guard is blind
+        // because one spike dilutes by 1/n. Detrending a step record erases it
+        // (measured: −19 dB at 20 dB input before the guard).
+        let n = 2048;
+        for sigma in [0.05, 0.15, 0.45]
+        {
+            let mut rng = Lcg::new(7);
+            let obs: Vec<f64> = (0..n)
+                .map(|i| {
+                    let ramp = i as f64 / n as f64;
+                    (if i < n / 2 { 0.0 } else { 2.0 }) + ramp + sigma * rng.gauss()
+                })
+                .collect();
+            let p = classify(&obs, 1000.0);
+            assert_ne!(
+                p.dominant,
+                NoiseType::Baseline,
+                "step/ramp at σ = {sigma} must not be detrended as a baseline wander \
+                 (ts = {:.2})",
+                p.trend_strength
+            );
+        }
     }
 
     #[test]

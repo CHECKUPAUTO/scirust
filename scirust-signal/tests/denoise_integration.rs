@@ -209,6 +209,36 @@ fn streaming_median_survives_a_nan() {
 }
 
 #[test]
+fn auto_detrends_equal_power_baseline_drift() {
+    // Regression for the classifier's Baseline gate: a drift carrying the same
+    // power as the signal (0 dB) used to be classified Gaussian and left in place
+    // (measured: wiener_white gained 0.1 dB). The 0.45 gate must route it to the
+    // detrending branch, which recovers > 8 dB.
+    let clean = sine(5.0);
+    let mut rng = Lcg::new(5);
+    let obs: Vec<f64> = clean
+        .iter()
+        .enumerate()
+        .map(|(i, &c)| {
+            let t = i as f64 / FS;
+            c + 1.0 * (2.0 * PI * 0.7 * t).sin() + 0.1 * rng.gauss()
+        })
+        .collect();
+    let auto = denoise_auto(&obs, FS);
+    assert_eq!(
+        auto.profile.dominant,
+        NoiseType::Baseline,
+        "method: {}",
+        auto.method
+    );
+    let gain = snr_db(&clean, &auto.output) - snr_db(&clean, &obs);
+    assert!(
+        gain > 8.0,
+        "detrending must recover the drift ({gain:.1} dB gained)"
+    );
+}
+
+#[test]
 fn wiener_family_handles_stationary_broadband() {
     let clean = sine(4.0);
     let mut rng = Lcg::new(67);

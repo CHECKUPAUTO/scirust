@@ -5,6 +5,54 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté/Modifié — `denoise` : raffinements du classificateur, nouvelles méthodes, débruitage 2-D
+Second lot du filtre anti-bruit : corrections mesurées du classificateur, nouvelles
+familles, et extension 2-D — implémentation parallèle (3 agents : STFT, NLM/blocs,
+vision 2-D) + intégration centrale, chaque seuil calibré par sondes chiffrées.
+
+**Classificateur (`detect::classify`) — les 3 erreurs observées au banc corrigées :**
+- Porte Baseline **0,6 → 0,45** : une dérive à puissance égale au signal (0 dB,
+  ts ≈ 0,49) est maintenant détectée et détendue (+15,5 dB au banc, contre 0 avant) ;
+  l'AR(0,9) reste loin sous la porte (ts ≈ 0,05).
+- **Score d'arête robuste** (max de la dérivée médian-préfiltrée sur sa MAD) : les
+  enregistrements à marches ne sont plus « détendus » comme des dérives — leur
+  destruction au banc (jusqu'à −19 dB à 20 dB d'entrée) est éliminée ; un test de
+  kurtosis serait aveugle sous ~30 dB (dilution 1/n d'un unique pic).
+- Porte LowNoise **1 % → 5 %** du RMS : les enregistrements quasi sans plancher
+  large-bande (pente spectrale mesurée sur des jupes de fuite, pas du bruit) prennent
+  la retouche Savitzky-Golay au lieu de la machinerie ondelettes (−15,8 dB → ±0).
+- Limitation documentée : un ton sous ~5 % de fs est indiscernable d'une composante
+  légitime (toute statistique du partage lisse/résidu est une fonction pure de f/fs) —
+  appeler `remove_mains_hum_iir` explicitement.
+
+**Garde tonale de `wavelet_denoise_leveldep`** : chaque bande est criblée
+(kurtosis < −0,75 **et** σ_j > 2,5×médiane ⇒ bande remplie par un ton) ; les bandes
+flaguées empruntent le σ d'une bande fine saine et passent au seuil BayesShrink —
+un ton soutenu survit (7,3 dB → ~11 dB au lieu de 7,3 → 0,0 avant).
+
+**Nouvelles méthodes :** `nlm1d`/`nlm1d_auto` (non-local means 1-D, Buades 2005),
+`wavelet_denoise_neighblock` (seuillage par blocs, Cai-Silverman 2001),
+`stft_mmse_lsa` (Ephraim-Malah 1985, E1 par série + fraction continue),
+`stft_wiener_tracked_ms` (minimum statistics à lissage adaptatif, Martin 2001),
+`StreamingStftWiener` (Wiener court-terme **temps réel**, latence d'une trame).
+
+**Débruitage 2-D (`scirust-vision::denoise`)** : `median2d`, `wavelet_denoise2d`
+(pyramide de Mallat séparable sur les bancs de filtres 1-D désormais publics,
+round-trip exact à 1e-9), `nlm2d` — +6,2 dB PSNR ondelettes, +32 dB médiane sur
+salt-and-pepper.
+
+**Consolidation :** filtres de rang batch réécrits **sur le moteur streaming**
+(fenêtre triée incrémentale : O(w) par échantillon, équivalence batch↔streaming
+par construction, épinglée bit-à-bit contre la définition naïve) ; pas **impair**
+du cycle-spinning (le cas dégénéré n_shifts | n disparaît : +3 dB sur bord impair
+avec 8 décalages) ; `Serialize/Deserialize` sur `AutoResult`/`BestResult` ;
+sections débruitage dans `Documentation.md`/`Documentation_EN.md`/`REFERENCE.md`.
+
+Au banc : les pipelines automatiques gagnent 5 des 7 types de bruit (cascade :
+blanc +13,0 et non-stationnaire +11,7) et ne détruisent plus jamais les références
+propres ou à marches. Vérif : suite `scirust-signal` complète + `scirust-vision`
+au vert ; `fmt` / `clippy -D warnings` propres.
+
 ### Ajouté — `scirust-signal` : refonte du filtre anti-bruit (`denoise`)
 Extension large de la boîte à outils de débruitage, produite par implémentation
 parallèle (4 agents) puis intégration et **revue adversariale** (5 axes, vérification

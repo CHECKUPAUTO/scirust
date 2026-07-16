@@ -13,10 +13,10 @@
 //!    |--------|------|--------------|
 //!    | [`DenoiserFamily::Linear`] | LTI convolution (moving average, Gaussian, Savitzky-Golay, EMA) | broadband Gaussian, gentle smoothing |
 //!    | [`DenoiserFamily::Rank`] | order statistics (median, Hampel, α-trimmed mean) | impulsive / salt-and-pepper spikes |
-//!    | [`DenoiserFamily::Transform`] | Fourier / wavelet shrinkage (low-pass, notch — brick-wall *and* zero-phase IIR [`notch_iir`] — Wiener, wavelet threshold: universal / SURE / level-dependent / Bayes / translation-invariant) | tonal interference, white & colored noise |
+//!    | [`DenoiserFamily::Transform`] | Fourier / wavelet shrinkage (low-pass, notch — brick-wall *and* zero-phase IIR [`notch_iir`] — Wiener, wavelet threshold: universal / SURE / level-dependent / Bayes / block ([`wavelet_denoise_neighblock`]) / translation-invariant) | tonal interference, white & colored noise |
 //!    | [`DenoiserFamily::Transform`] × [`DenoiserFamily::Adaptive`] | short-time (block) Wiener gains re-estimated per frame ([`stft_wiener`], [`stft_wiener_dd`], [`stft_wiener_auto`], [`stft_wiener_tracked`]) | **non-stationary** broadband noise: ramps, bursts, drifting colored floors |
 //!    | [`DenoiserFamily::Variational`] | penalized least squares (Tikhonov, Total Variation) | edge-preserving smoothing, baseline drift |
-//!    | [`DenoiserFamily::Adaptive`] | model / data-driven (Kalman RTS smoother, LMS/RLS line enhancers) | non-stationary noise, drifting tones |
+//!    | [`DenoiserFamily::Adaptive`] | model / data-driven (Kalman RTS smoother, LMS/RLS line enhancers, non-local means [`nlm1d`]) | non-stationary noise, drifting tones, self-similar signals |
 //!
 //! 2. **How do we detect "any" noise on "any" signal?** By *characterizing* the
 //!    noise with a fixed feature set rather than trying to recognize it by name.
@@ -84,10 +84,12 @@
 //! ```
 
 pub mod adaptive;
+pub mod block;
 pub mod cascade;
 pub mod detect;
 pub mod iir;
 pub mod linear;
+pub mod nlm;
 pub mod pipeline;
 pub mod rank;
 pub mod stft;
@@ -99,6 +101,7 @@ pub use adaptive::{
     KalmanFit, kalman_smooth, kalman_smooth_auto, kalman_trend_smooth, lms_line_enhancer,
     rls_line_enhancer,
 };
+pub use block::wavelet_denoise_neighblock;
 pub use cascade::{CascadeResult, CascadeStage, denoise_cascade, denoise_cascade_auto};
 pub use detect::{
     NoiseProfile, NoiseType, Separation, SpectralLine, classify, detect_lines, estimate_noise_std,
@@ -106,12 +109,16 @@ pub use detect::{
 };
 pub use iir::{BiquadState, filtfilt_sos, notch_iir, rbj_notch, remove_mains_hum_iir};
 pub use linear::{exp_moving_average, gaussian_smooth, moving_average, savitzky_golay};
+pub use nlm::{nlm1d, nlm1d_auto};
 pub use pipeline::{
     WaveletRlsRtsParams, reference_noise_cancel, wavelet_rls_rts_smooth, wavelet_rls_rts_smooth_1d,
     wavelet_rls_rts_smooth_multiref,
 };
 pub use rank::{alpha_trimmed_mean, hampel_filter, impulse_mask, median_filter};
-pub use stft::{stft_wiener, stft_wiener_auto, stft_wiener_dd, stft_wiener_tracked};
+pub use stft::{
+    StreamingStftWiener, stft_mmse_lsa, stft_wiener, stft_wiener_auto, stft_wiener_dd,
+    stft_wiener_tracked, stft_wiener_tracked_ms,
+};
 pub use streaming::{
     StreamingDenoiser, StreamingEma, StreamingHampel, StreamingKalman, StreamingMedian,
     StreamingMovingAverage,
@@ -264,6 +271,18 @@ denoiser!(
     |s: &WaveletLevelDep, x: &[f64]| wavelet_denoise_leveldep(x, s.levels, s.mode, Wavelet::Db4)
 );
 denoiser!(
+    WaveletNeighBlock { levels: usize },
+    "wavelet_denoise_neighblock",
+    DenoiserFamily::Transform,
+    |s: &WaveletNeighBlock, x: &[f64]| wavelet_denoise_neighblock(x, s.levels, Wavelet::Db4)
+);
+denoiser!(
+    Nlm1dAuto {},
+    "nlm1d_auto",
+    DenoiserFamily::Adaptive,
+    |_s: &Nlm1dAuto, x: &[f64]| nlm1d_auto(x)
+);
+denoiser!(
     StftWienerAuto {},
     "stft_wiener_auto",
     DenoiserFamily::Adaptive,
@@ -312,6 +331,8 @@ pub fn catalog() -> Vec<Box<dyn Denoiser>> {
         }),
         Box::new(WaveletBayes { levels: 0 }),
         Box::new(WaveletSure { levels: 0 }),
+        Box::new(WaveletNeighBlock { levels: 0 }),
+        Box::new(Nlm1dAuto {}),
         Box::new(WaveletLevelDep {
             levels: 0,
             mode: ThresholdMode::Soft,
@@ -327,7 +348,7 @@ pub fn catalog() -> Vec<Box<dyn Denoiser>> {
 }
 
 /// Result of the automatic detect-then-denoise pipeline.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AutoResult {
     /// The noise characterization that drove the choice.
     pub profile: NoiseProfile,
@@ -488,7 +509,7 @@ pub(crate) fn notch_detected_lines(
 }
 
 /// The winner of a [`denoise_best`] tournament, with the full scoreboard.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BestResult {
     /// The winning candidate's denoised signal (same length as the input).
     pub output: Vec<f64>,
@@ -932,6 +953,15 @@ mod tests {
         let sw = StftWienerAuto {};
         assert_eq!(sw.apply(&obs), stft_wiener_auto(&obs));
         assert_eq!(sw.family(), DenoiserFamily::Adaptive);
+        let nb = WaveletNeighBlock { levels: 3 };
+        assert_eq!(
+            nb.apply(&obs),
+            wavelet_denoise_neighblock(&obs, 3, Wavelet::Db4)
+        );
+        assert_eq!(nb.family(), DenoiserFamily::Transform);
+        let nlm = Nlm1dAuto {};
+        assert_eq!(nlm.apply(&obs), nlm1d_auto(&obs));
+        assert_eq!(nlm.family(), DenoiserFamily::Adaptive);
     }
 
     #[test]

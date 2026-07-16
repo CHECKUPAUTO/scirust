@@ -260,6 +260,8 @@ Les tests `#[ignore]` sont des sondes de mesure, jamais des gates.
 | `scirust-neuro-symbolic` | datalog, CSP, SAT/SMT, KG, prob. | `Reasoner` |
 | `scirust-evo` | GA / CMA-ES / OpenES / NSGA-II seedés | `GeneticAlgorithm`, `Nsga2` |
 | `scirust-tn` | Tensor-Train (réexporte `core::tn`) | `TTLinear` |
+| `scirust-signal` | FFT, features, radar, **débruitage** (7 familles + auto/tournoi/cascade + streaming) | `denoise::{denoise_auto, denoise_best, denoise_cascade}` |
+| `scirust-vision` | optronique EO/IR + **débruitage 2-D** (médiane, ondelettes séparables, NLM) | `denoise::{median2d, wavelet_denoise2d_auto, nlm2d}` |
 
 ## 6. API SOM (référence rapide)
 

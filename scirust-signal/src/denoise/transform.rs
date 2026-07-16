@@ -154,7 +154,10 @@ pub enum ThresholdMode {
     Soft,
 }
 
-pub(crate) fn apply_threshold(x: f64, t: f64, mode: ThresholdMode) -> f64 {
+/// Apply one [`ThresholdMode`] shrinkage rule to a single coefficient. Public so
+/// downstream crates (e.g. 2-D wavelet denoising in `scirust-vision`) can reuse the
+/// exact same rule on their own transform coefficients.
+pub fn apply_threshold(x: f64, t: f64, mode: ThresholdMode) -> f64 {
     match mode
     {
         ThresholdMode::Hard =>
@@ -233,8 +236,10 @@ const DB8_H: [f64; 8] = [
 
 impl Wavelet {
     /// Orthonormal analysis low-pass filter taps. The matching high-pass is the
-    /// alternating flip `g[j] = (−1)^j · h[K−1−j]` (quadrature mirror).
-    pub(crate) fn lowpass(self) -> Vec<f64> {
+    /// alternating flip `g[j] = (−1)^j · h[K−1−j]` (quadrature mirror). Public so
+    /// downstream crates can build their own transforms (e.g. the separable 2-D DWT
+    /// of `scirust-vision`) on the exact same, identity-tested filter banks.
+    pub fn lowpass(self) -> Vec<f64> {
         match self
         {
             Wavelet::Haar => vec![1.0 / SQRT_2, 1.0 / SQRT_2],
@@ -268,8 +273,10 @@ impl Wavelet {
 
 /// One periodized analysis step: split `x` (even length ≥ filter length) into
 /// approximation and detail halves with the orthonormal filter pair derived
-/// from `h`.
-fn dwt_step(x: &[f64], h: &[f64]) -> (Vec<f64>, Vec<f64>) {
+/// from `h` (a [`Wavelet::lowpass`] tap vector). Public building block for
+/// transforms this crate does not provide itself, such as a separable 2-D DWT:
+/// perfect reconstruction with [`idwt_step`] is pinned by unit test.
+pub fn dwt_step(x: &[f64], h: &[f64]) -> (Vec<f64>, Vec<f64>) {
     let n = x.len();
     let half = n / 2;
     let k = h.len();
@@ -300,8 +307,9 @@ fn dwt_step(x: &[f64], h: &[f64]) -> (Vec<f64>, Vec<f64>) {
 }
 
 /// One periodized synthesis step — the exact transpose of [`dwt_step`], which for
-/// an orthonormal filter bank is its inverse (perfect reconstruction).
-fn idwt_step(approx: &[f64], detail: &[f64], h: &[f64]) -> Vec<f64> {
+/// an orthonormal filter bank is its inverse (perfect reconstruction). Public for
+/// the same downstream-transform reuse as [`dwt_step`].
+pub fn idwt_step(approx: &[f64], detail: &[f64], h: &[f64]) -> Vec<f64> {
     let half = approx.len();
     let n = 2 * half;
     let k = h.len();
@@ -530,12 +538,15 @@ fn sure_threshold_normalized(detail: &[f64], sigma: f64) -> f64 {
 /// `n_shifts <= 1` — or an input too short to rotate — this is exactly
 /// `denoiser(signal)`.
 ///
-/// Choosing `n_shifts`: prefer a count that is **odd** (or otherwise does not
-/// divide `signal.len()`). When `n_shifts` divides `n` every shift is a multiple
-/// of `n/n_shifts`; on the power-of-two lengths the wavelet transform works with,
-/// such shifts are all highly even, the finest-scale coefficient alignments never
-/// change, and most of the artefact-cancelling benefit is silently lost. An odd
-/// count like 15 or 31 spreads the shifts across all dyadic alignments.
+/// The shift amounts are generated with an **odd stride**: `s_k = (k·step) mod n`
+/// with `step` the largest odd number ≤ `max(1, n/n_shifts)`. On the power-of-two
+/// lengths the wavelet transform works with, naïvely even-spaced shifts
+/// `⌊k·n/n_shifts⌋` are all multiples of `n/n_shifts` — highly even numbers whose
+/// fine-scale dyadic alignments never change, silently losing most of the
+/// artefact-cancelling benefit whenever `n_shifts` divides `n`. An odd stride makes
+/// consecutive shifts alternate parity, so every dyadic alignment class is visited
+/// regardless of how `n_shifts` relates to `n`, and any `n_shifts` (even the
+/// previously degenerate 8 on a 1024-sample record) buys the full benefit.
 pub fn cycle_spin(
     signal: &[f64],
     n_shifts: usize,
@@ -546,11 +557,22 @@ pub fn cycle_spin(
     {
         return denoiser(signal);
     }
-    // Distinct, evenly spaced shift amounts s_k = ⌊k·n/n_shifts⌋. The sequence is
-    // non-decreasing in k, so consecutive dedup removes all repeats.
-    let mut shifts: Vec<usize> = (0..n_shifts)
-        .map(|k| ((k as u128 * n as u128) / n_shifts as u128) as usize)
-        .collect();
+    // Odd-stride shift set: parity alternates between consecutive shifts, so the
+    // finest-scale alignment always varies (see the doc comment). Sort + dedup
+    // collapses collisions of the modular sequence.
+    let step = {
+        let s = (n / n_shifts).max(1);
+        if s > 1 && s.is_multiple_of(2)
+        {
+            s - 1
+        }
+        else
+        {
+            s
+        }
+    };
+    let mut shifts: Vec<usize> = (0..n_shifts.min(n)).map(|k| (k * step) % n).collect();
+    shifts.sort_unstable();
     shifts.dedup();
     let mut acc = vec![0.0; n];
     for &s in &shifts
@@ -581,9 +603,10 @@ pub fn cycle_spin(
 /// sharp steps or isolated transients: the shift-averaging suppresses the
 /// alignment-dependent pseudo-Gibbs oscillations that the decimated transform
 /// leaves around discontinuities (Coifman-Donoho 1995), typically buying one to
-/// three dB of SNR at edges for an `n_shifts`-fold cost. An **odd** `n_shifts` of
-/// 15–31 is usually enough (see the [`cycle_spin`] note on why a divisor of the
-/// padded length wastes shifts); `n_shifts <= 1` reduces to
+/// three dB of SNR at edges for an `n_shifts`-fold cost. 8–16 shifts already
+/// capture most of the gain — the odd-stride shift generation of [`cycle_spin`]
+/// guarantees every count spreads across the dyadic alignment classes, so no
+/// choice of `n_shifts` is silently wasted; `n_shifts <= 1` reduces to
 /// `wavelet_denoise_with` exactly.
 pub fn wavelet_denoise_ti(
     signal: &[f64],
@@ -612,11 +635,34 @@ pub fn wavelet_denoise_ti(
 /// padded length. For truly white noise all the `σ_j` agree and this reduces to
 /// the classical rule (up to estimation error).
 ///
-/// Caveat: the per-band MAD assumes the signal is *sparse within each band* (steps,
-/// bumps, transients). A sustained tone fills its resonant band with uniformly
-/// large coefficients, so the band median mistakes the tone for noise and the
-/// threshold wipes it out — for dense tonal content keep the global rule of
-/// [`wavelet_denoise_with`] or [`wavelet_denoise_sure`].
+/// ## Tone guard
+///
+/// The per-band MAD assumes the signal is *sparse within each band* (steps, bumps,
+/// transients). A sustained tone fills its resonant band with uniformly large
+/// coefficients, so the band median would mistake the tone for noise and the
+/// threshold would wipe it out (measured: a 0.06·fs tone in σ = 0.3 white noise
+/// went from +7.3 dB SNR to 0 dB — the output was essentially zero). Each band is
+/// therefore screened before its MAD is trusted: a **tone-filled** band shows
+///
+/// * strongly *negative* excess kurtosis of its coefficients (a sinusoid-filled
+///   band is platykurtic, ≈ −1.3…−1.5; noise-dominated bands sit near 0, and
+///   AR-colored bands measured 0…+1.2), **and**
+/// * a scale far above the other bands (`σ_j > 2.5×` the cross-band median;
+///   tone bands measured 5–10×, while the legitimate coarse-band growth of
+///   AR(0.9) noise tops out near 2.1×).
+///
+/// A band failing both checks keeps its own MAD and the universal threshold. A
+/// flagged band borrows the scale of the nearest *finer* unflagged band (falling
+/// back to the cross-band median) as its honest noise level `σ_b`, and switches to
+/// the **BayesShrink** rule for that band: `t = σ_b²/σ_x` with
+/// `σ_x = √(max(mean(d²) − σ_b², 0))` — near-zero when the band is signal-dominated,
+/// so the tone passes essentially intact while its band's share of the noise is
+/// only lightly touched. (The universal threshold, even with an honest σ, soft-
+/// shrinks every surviving coefficient by `σ·√(2 ln N)` — measured on the reference
+/// tone fixture that still cost ~6 dB of the tone's energy; the Bayes rule keeps it,
+/// landing within a dB of what [`wavelet_denoise_bayes`] achieves there.) For truly
+/// white noise all σ_j agree, nothing is flagged, and the rule reduces to the
+/// classical one.
 pub fn wavelet_denoise_leveldep(
     signal: &[f64],
     levels: usize,
@@ -630,13 +676,52 @@ pub fn wavelet_denoise_leveldep(
         return signal.to_vec();
     };
 
+    // Robust per-band noise scales: MAD is immune to the *minority* of large
+    // signal coefficients sharing the band with the noise.
+    let sigmas: Vec<f64> = detail_coeffs.iter().map(|d| mad(d) / 0.6745).collect();
+    let sigma_med = super::median(&sigmas);
+
+    // Tone screen (see the doc comment): platykurtic AND scale-outlier bands are
+    // tone-filled, so their MAD measures the tone, not the noise. Bands shorter
+    // than 16 coefficients are exempt — kurtosis is too noisy there.
+    let tonal: Vec<bool> = detail_coeffs
+        .iter()
+        .zip(sigmas.iter())
+        .map(|(d, &s)| {
+            d.len() >= 16
+                && crate::features::kurtosis(d) < -0.75
+                && s > 2.5 * sigma_med.max(1.0e-300)
+        })
+        .collect();
+
     let universal = (2.0 * (n as f64).ln()).sqrt();
-    for detail in detail_coeffs.iter_mut()
+    for (j, detail) in detail_coeffs.iter_mut().enumerate()
     {
-        // Robust per-band noise scale: MAD is immune to the minority of large
-        // signal coefficients sharing the band with the noise.
-        let sigma_j = mad(detail) / 0.6745;
-        let thresh = sigma_j * universal;
+        let thresh = if tonal[j]
+        {
+            // Borrow the nearest finer unflagged band's scale — the closest honest
+            // estimate of the noise actually present at this scale — and threshold
+            // with the BayesShrink rule, which backs off where signal dominates.
+            let sigma_b = (0..j)
+                .rev()
+                .find(|&k| !tonal[k])
+                .map(|k| sigmas[k])
+                .unwrap_or(sigma_med);
+            let band_var = detail.iter().map(|&d| d * d).sum::<f64>() / detail.len().max(1) as f64;
+            let sigma_x = (band_var - sigma_b * sigma_b).max(0.0).sqrt();
+            if sigma_x > 0.0
+            {
+                sigma_b * sigma_b / sigma_x
+            }
+            else
+            {
+                sigma_b * universal
+            }
+        }
+        else
+        {
+            sigmas[j] * universal
+        };
         for d in detail.iter_mut()
         {
             *d = apply_threshold(*d, thresh, mode);
@@ -1110,6 +1195,51 @@ mod tests {
         assert!(
             s_leveldep > s_global,
             "level-dependent {s_leveldep:.2} dB must beat global {s_global:.2} dB"
+        );
+    }
+
+    #[test]
+    fn leveldep_preserves_sustained_tones() {
+        // The tone guard: a 0.06·fs tone fills its resonant Db4 bands with
+        // uniformly large, platykurtic coefficients (measured: excess kurtosis
+        // ≈ −1.3…−1.5 at 6–10× the cross-band median scale). Without the guard the
+        // per-band MAD mistook the tone for noise and the output was essentially
+        // zero (7.3 dB raw → 0.0 dB). With it, the tone must survive and the
+        // white floor still be removed: strictly better than the raw input.
+        let n = 2048;
+        let mut rng = Lcg::new(3);
+        let clean: Vec<f64> = (0..n).map(|i| (2.0 * PI * 0.06 * i as f64).sin()).collect();
+        let obs: Vec<f64> = clean.iter().map(|&c| c + 0.3 * rng.gauss()).collect();
+        let out = wavelet_denoise_leveldep(&obs, 0, ThresholdMode::Soft, Wavelet::Db4);
+        let s_raw = snr_db(&clean, &obs);
+        let s_out = snr_db(&clean, &out);
+        assert!(
+            s_out > s_raw + 1.0,
+            "tone must survive the level-dependent rule: raw {s_raw:.2} dB → {s_out:.2} dB"
+        );
+    }
+
+    #[test]
+    fn cycle_spin_odd_stride_defeats_the_dyadic_degeneracy() {
+        // n_shifts = 8 on a power-of-two record used to be near-useless: the old
+        // evenly spaced shifts ⌊k·n/8⌋ are all multiples of n/8, whose fine-scale
+        // dyadic alignments never change. The fixture's edge sits at an ODD index —
+        // the worst single alignment, where the plain decimated transform rings the
+        // most and translation invariance has real artefacts to average away (a
+        // dyadically lucky edge can legitimately tie or beat TI; an odd edge cannot).
+        // Measured margins: ti(8) beats plain by 1.9–3.6 dB across seeds.
+        let n = 1024;
+        let mut rng = Lcg::new(3);
+        let clean: Vec<f64> = (0..n).map(|i| if i < 701 { 0.0 } else { 2.0 }).collect();
+        let obs: Vec<f64> = clean.iter().map(|&c| c + 0.3 * rng.gauss()).collect();
+        let plain = wavelet_denoise(&obs, 0, ThresholdMode::Hard);
+        let ti8 = wavelet_denoise_ti(&obs, 0, ThresholdMode::Hard, Wavelet::Haar, 8);
+        let s_plain = snr_db(&clean, &plain);
+        let s_ti8 = snr_db(&clean, &ti8);
+        assert!(
+            s_ti8 > s_plain + 1.5,
+            "8 shifts on a pow2 record must now yield a real TI gain: \
+             plain {s_plain:.2} dB vs ti(8) {s_ti8:.2} dB"
         );
     }
 

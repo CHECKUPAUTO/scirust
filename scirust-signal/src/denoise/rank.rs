@@ -4,8 +4,39 @@
 //! dropouts) without smearing it across neighbours, because a single outlier cannot
 //! move a median. They are the correct tool the moment [`super::detect::classify`]
 //! reports [`super::NoiseType::Impulsive`].
+//!
+//! All four filters run on **one shared engine**: an incrementally maintained
+//! sorted window ([`super::streaming`]'s NaN-safe `total_cmp` machinery) swept over
+//! the mirrored signal. Each step removes the sample leaving the window and inserts
+//! the one entering it — `O(w)` per sample instead of the `O(w·log w)` of re-sorting
+//! every window — and, because it is the *same* code path the streaming rank filters
+//! use, the batch/streaming interior equivalence the module guarantees holds by
+//! construction rather than by test alone.
 
-use super::{mad, median, mirror_index};
+use super::streaming::{median_of_sorted, sorted_insert, sorted_remove};
+use super::{mad, mirror_index};
+
+/// Sweep an incrementally sorted window of half-width `half_window` over the
+/// mirrored signal, calling `emit(i, &sorted_window)` for every sample index. The
+/// window multiset at step `i` is exactly `{signal[mirror(i−h)], …,
+/// signal[mirror(i+h)]}` — identical to rebuilding and sorting per position, at a
+/// fraction of the cost.
+fn sorted_window_sweep(signal: &[f64], half_window: usize, mut emit: impl FnMut(usize, &[f64])) {
+    let n = signal.len();
+    let m = half_window as isize;
+    let mut window: Vec<f64> = Vec::with_capacity(2 * half_window + 1);
+    for k in -m..=m
+    {
+        sorted_insert(&mut window, signal[mirror_index(k, n)]);
+    }
+    emit(0, &window);
+    for i in 1..n
+    {
+        sorted_remove(&mut window, signal[mirror_index(i as isize - 1 - m, n)]);
+        sorted_insert(&mut window, signal[mirror_index(i as isize + m, n)]);
+        emit(i, &window);
+    }
+}
 
 /// Sliding-window median filter, half-width `half_window` (full window
 /// `2*half_window+1`). The canonical impulse remover: replaces each sample by the
@@ -16,18 +47,10 @@ pub fn median_filter(signal: &[f64], half_window: usize) -> Vec<f64> {
     {
         return signal.to_vec();
     }
-    let m = half_window as isize;
     let mut out = vec![0.0; n];
-    let mut window = Vec::with_capacity(2 * half_window + 1);
-    for (i, o) in out.iter_mut().enumerate()
-    {
-        window.clear();
-        for k in -m..=m
-        {
-            window.push(signal[mirror_index(i as isize + k, n)]);
-        }
-        *o = median(&window);
-    }
+    sorted_window_sweep(signal, half_window, |i, window| {
+        out[i] = median_of_sorted(window);
+    });
     out
 }
 
@@ -43,23 +66,15 @@ pub fn hampel_filter(signal: &[f64], half_window: usize, n_sigma: f64) -> Vec<f6
     {
         return signal.to_vec();
     }
-    let m = half_window as isize;
     let mut out = signal.to_vec();
-    let mut window = Vec::with_capacity(2 * half_window + 1);
-    for i in 0..n
-    {
-        window.clear();
-        for k in -m..=m
-        {
-            window.push(signal[mirror_index(i as isize + k, n)]);
-        }
-        let med = median(&window);
-        let scale = 1.4826 * mad(&window);
+    sorted_window_sweep(signal, half_window, |i, window| {
+        let med = median_of_sorted(window);
+        let scale = 1.4826 * mad(window);
         if scale > 0.0 && (signal[i] - med).abs() > n_sigma * scale
         {
             out[i] = med;
         }
-    }
+    });
     out
 }
 
@@ -73,19 +88,11 @@ pub fn impulse_mask(signal: &[f64], half_window: usize, n_sigma: f64) -> Vec<boo
     {
         return mask;
     }
-    let m = half_window as isize;
-    let mut window = Vec::with_capacity(2 * half_window + 1);
-    for (i, flag) in mask.iter_mut().enumerate()
-    {
-        window.clear();
-        for k in -m..=m
-        {
-            window.push(signal[mirror_index(i as isize + k, n)]);
-        }
-        let med = median(&window);
-        let scale = 1.4826 * mad(&window);
-        *flag = scale > 0.0 && (signal[i] - med).abs() > n_sigma * scale;
-    }
+    sorted_window_sweep(signal, half_window, |i, window| {
+        let med = median_of_sorted(window);
+        let scale = 1.4826 * mad(window);
+        mask[i] = scale > 0.0 && (signal[i] - med).abs() > n_sigma * scale;
+    });
     mask
 }
 
@@ -100,26 +107,13 @@ pub fn alpha_trimmed_mean(signal: &[f64], half_window: usize, alpha: f64) -> Vec
         return signal.to_vec();
     }
     let a = alpha.clamp(0.0, 0.499);
-    let m = half_window as isize;
     let win = 2 * half_window + 1;
     let trim = (a * win as f64).floor() as usize;
     let mut out = vec![0.0; n];
-    let mut window = Vec::with_capacity(win);
-    for (i, o) in out.iter_mut().enumerate()
-    {
-        window.clear();
-        for k in -m..=m
-        {
-            window.push(signal[mirror_index(i as isize + k, n)]);
-        }
-        // Total order (NaN-safe): a partial_cmp comparator is inconsistent on NaN and
-        // makes modern Rust sorts panic; total_cmp degrades gracefully instead.
-        window.sort_by(|x, y| x.total_cmp(y));
-        let lo = trim;
-        let hi = win - trim;
-        let kept = &window[lo..hi];
-        *o = kept.iter().sum::<f64>() / kept.len() as f64;
-    }
+    sorted_window_sweep(signal, half_window, |i, window| {
+        let kept = &window[trim..win - trim];
+        out[i] = kept.iter().sum::<f64>() / kept.len() as f64;
+    });
     out
 }
 
@@ -170,6 +164,36 @@ mod tests {
         }
         let flagged = mask.iter().filter(|&&b| b).count();
         assert!(flagged < 12, "too many false positives: {flagged}");
+    }
+
+    #[test]
+    fn incremental_sweep_matches_the_naive_definition_exactly() {
+        // The shared sorted-window engine must be *bit-for-bit* the per-position
+        // rebuild-and-sort definition — including on mirrored borders, duplicated
+        // values, and a NaN resident (total_cmp order end to end).
+        let mut rng = Lcg::new(23);
+        let mut sig: Vec<f64> = (0..97).map(|_| (rng.gauss() * 4.0).round() / 4.0).collect();
+        sig[41] = f64::NAN;
+        for half in [1usize, 2, 4]
+        {
+            let fast = median_filter(&sig, half);
+            let n = sig.len();
+            let m = half as isize;
+            for i in 0..n
+            {
+                let mut window: Vec<f64> = (-m..=m)
+                    .map(|k| sig[super::super::mirror_index(i as isize + k, n)])
+                    .collect();
+                window.sort_by(|a, b| a.total_cmp(b));
+                let naive = super::super::streaming::median_of_sorted(&window);
+                assert!(
+                    fast[i].to_bits() == naive.to_bits(),
+                    "half {half}, index {i}: {} vs naive {}",
+                    fast[i],
+                    naive
+                );
+            }
+        }
     }
 
     #[test]

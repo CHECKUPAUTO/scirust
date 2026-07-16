@@ -46,9 +46,10 @@
 use core::f64::consts::PI;
 use scirust_signal::denoise::{
     ThresholdMode, Wavelet, denoise_auto, denoise_best, denoise_cascade, estimate_noise_std,
-    hampel_filter, kalman_smooth_auto, median_filter, moving_average, savitzky_golay,
+    hampel_filter, kalman_smooth_auto, median_filter, moving_average, nlm1d_auto, savitzky_golay,
     stft_wiener_auto, tikhonov_smooth, total_variation, wavelet_denoise, wavelet_denoise_bayes,
-    wavelet_denoise_leveldep, wavelet_denoise_sure, wavelet_denoise_ti, wiener_white,
+    wavelet_denoise_leveldep, wavelet_denoise_neighblock, wavelet_denoise_sure, wavelet_denoise_ti,
+    wiener_white,
 };
 use std::process::ExitCode;
 
@@ -322,6 +323,10 @@ fn method_catalog() -> Vec<Method> {
         Method::fixed("wavelet_denoise_sure(0,Db4)", |x| {
             wavelet_denoise_sure(x, 0, Wavelet::Db4)
         }),
+        Method::fixed("wavelet_denoise_neighblock(0,Db4)", |x| {
+            wavelet_denoise_neighblock(x, 0, Wavelet::Db4)
+        }),
+        Method::fixed("nlm1d_auto", nlm1d_auto),
         // The noise level is re-estimated from the observation itself — never the oracle.
         Method::fixed("wiener_white(sigma_hat)", |x| {
             wiener_white(x, estimate_noise_std(x))
@@ -650,21 +655,25 @@ fn main() -> ExitCode {
          \x20 edge it on total SNR; the cascade (rank stage, then a broadband stage) tops both."
     );
     println!(
-        "- wavelet_denoise_leveldep wipes sustained tones (its per-band MAD reads a dense band\n\
-         \x20 as noise) — the documented caveat explains its large negative cells on the sine\n\
-         \x20 reference; prefer the global or Bayes rule on tonal content."
+        "- wavelet_denoise_leveldep screens each band for sustained tones (platykurtic,\n\
+         \x20 scale-outlier coefficients) and switches flagged bands to a Bayes-style\n\
+         \x20 threshold, so dense tonal content now survives the level-dependent rule\n\
+         \x20 instead of being wiped by the per-band MAD."
     );
     println!(
-        "- Baseline drift at input SNR >= 0 dB never trips the classifier's Baseline gate (the\n\
-         \x20 drift would need ~1.5x the signal power), and no fixed method here can separate a\n\
+        "- Baseline drift at 0 dB input SNR now trips the classifier's Baseline gate (0.45,\n\
+         \x20 with a diff-kurtosis guard so step edges are not detrended); weaker drifts\n\
+         \x20 (input SNR >= +10 dB) still pass under it, and no fixed method here separates a\n\
          \x20 sub-signal-band drift: detrend explicitly (fft_highpass, signal minus a stiff\n\
          \x20 tikhonov trend) when drift is visible."
     );
     println!(
-        "- On the 'step' reference at high input SNR the classifier may read the step's own\n\
-         \x20 low-frequency energy as drift and subtract a trend — the negative cells of the\n\
-         \x20 automatic pipelines. Those pipelines are tuned for noise-dominated records; on\n\
-         \x20 nearly-clean data prefer a fixed method."
+        "- Step/edge records are kept out of the detrending branch by the classifier's\n\
+         \x20 robust edge score (max of the median-prefiltered derivative over its MAD), and\n\
+         \x20 essentially-noiseless records (sigma_hat < 5% of RMS) take the gentle\n\
+         \x20 Savitzky-Golay touch instead of the wavelet machinery — the automatic pipelines\n\
+         \x20 now do no harm on nearly-clean or edgy references instead of subtracting their\n\
+         \x20 own signal as a 'trend'."
     );
     if ok
     {

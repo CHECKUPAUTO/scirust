@@ -97,7 +97,7 @@ macro_rules! impl_streaming_denoiser {
 /// incomparable). A total order is what keeps insert and [`sorted_remove`] in
 /// agreement: a NaN gets one fixed slot, so a later removal finds and deletes that
 /// exact sample instead of an unrelated one.
-fn sorted_insert(sorted: &mut Vec<f64>, x: f64) {
+pub(crate) fn sorted_insert(sorted: &mut Vec<f64>, x: f64) {
     let idx = match sorted.binary_search_by(|p| p.total_cmp(&x))
     {
         Ok(i) | Err(i) => i,
@@ -111,7 +111,7 @@ fn sorted_insert(sorted: &mut Vec<f64>, x: f64) {
 /// element (the bug a `partial_cmp`-based search has: every probe against a NaN
 /// compares "equal", so it removes a live sample and strands the NaN, silently
 /// shrinking the window). A bit-exact scan backstops the impossible miss.
-fn sorted_remove(sorted: &mut Vec<f64>, x: f64) {
+pub(crate) fn sorted_remove(sorted: &mut Vec<f64>, x: f64) {
     if let Ok(i) = sorted.binary_search_by(|p| p.total_cmp(&x))
     {
         sorted.remove(i);
@@ -125,7 +125,7 @@ fn sorted_remove(sorted: &mut Vec<f64>, x: f64) {
 
 /// Median of an already-sorted window — same odd/even convention as
 /// [`super::median`] (middle element, or the mean of the two middles).
-fn median_of_sorted(sorted: &[f64]) -> f64 {
+pub(crate) fn median_of_sorted(sorted: &[f64]) -> f64 {
     let n = sorted.len();
     if n == 0
     {

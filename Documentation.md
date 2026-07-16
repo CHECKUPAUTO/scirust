@@ -228,6 +228,50 @@ let k = kurtosis(&signal);
 let cf = crest_factor(&signal);
 ```
 
+#### 10.1.1 Filtre anti-bruit (`scirust_signal::denoise`)
+
+Boîte à outils complète de **débruitage** organisée en familles couvrant la
+littérature standard, avec détection automatique du type de bruit :
+
+| Famille | Méthodes | Efficace contre |
+|---|---|---|
+| Linéaire | moyenne mobile, gaussien, Savitzky-Golay, EMA | bruit large bande doux |
+| Rang | médiane, Hampel, moyenne α-tronquée | impulsions, salt-and-pepper |
+| Transformée | ondelettes (universel / SURE / **par niveau** / Bayes / **NeighBlock** / invariant par translation), Wiener, notch brick-wall | interférence tonale, bruit blanc et coloré |
+| Notch IIR | `notch_iir`, `remove_mains_hum_iir` (RBJ + filtfilt zéro-phase) | hum secteur 50/60 Hz, même hors-bin |
+| Wiener court-terme (STFT) | `stft_wiener`, décision-dirigé, suivi de plancher | bruit **non stationnaire** (rampes, bouffées) |
+| Variationnel | Tikhonov, variation totale | lissage préservant les fronts, dérive |
+| Adaptatif | Kalman RTS auto-réglé, rehausseurs LMS/RLS, **NLM 1-D** | bruit non stationnaire, signaux auto-similaires |
+
+Trois points d'entrée automatiques :
+
+- **`denoise_auto(signal, fs)`** — classifie le bruit (impulsif / périodique /
+  dérive / blanc / coloré) puis applique la famille adaptée ; une seule passe.
+- **`denoise_best(signal, fs)`** — tournoi de 3-4 candidats jugés par un score
+  *sans référence* (blancheur du résidu) ; robuste aux erreurs de classification.
+- **`denoise_cascade(signal, fs, max)`** — bruit *mixte* : détecter → traiter →
+  re-détecter (impulsions puis hum puis plancher large bande), avec garde-fous.
+
+Pour le temps réel/embarqué, le module `denoise::streaming` fournit les versions
+causales échantillon-par-échantillon (médiane, Hampel, moyenne, EMA, Kalman)
+derrière le trait `StreamingDenoiser`. Le débruitage **2-D image** (médiane 2-D,
+ondelettes séparables, non-local means) vit dans `scirust_vision::denoise`.
+
+```rust
+use scirust_signal::denoise::{classify, denoise_auto};
+
+let bruite: Vec<f64> = capteur_signal();
+let profil = classify(&bruite, 1000.0);       // caractérise le bruit
+let resultat = denoise_auto(&bruite, 1000.0); // le retire
+println!("bruit {:?} traité par {}", resultat.profile.dominant, resultat.method);
+```
+
+Limitation connue : une interférence tonale **au-dessous de ~5 % de fs** (hum 50 Hz
+sur un enregistrement à 100 kHz) est indiscernable d'une composante légitime du
+signal — appeler `remove_mains_hum_iir` explicitement quand la fréquence secteur
+est connue. Le banc de qualité complet (méthodes × types de bruit × SNR) se lance
+avec `cargo run -p scirust-signal --example denoise_benchmark`.
+
 ### 10.2 Connecteur OPC-UA (`scirust-opcua`)
 
 Connecte les PLC/SCADA industriels au pipeline SciRust :

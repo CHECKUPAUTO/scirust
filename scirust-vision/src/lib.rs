@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 pub mod atmosphere;
 pub mod beams;
 pub mod centroid;
+pub mod denoise;
 pub mod detect;
 pub mod lidar;
 pub mod nuc;

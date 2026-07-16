@@ -153,6 +153,29 @@ Pure-Rust signal processing for vibration analysis and machine diagnostics:
 - **Bearing diagnostics**: BPFO, BPFI, BSF, FTF calculation, fault frequency detection in envelope spectrum
 - **Order analysis**: order tracking, angle resampling, order spectrum for variable-speed rotating machinery
 
+#### 8.1.1 Noise removal (`scirust_signal::denoise`)
+
+A complete denoising toolkit organized in families covering the standard
+literature, with automatic noise-type detection:
+
+- **Linear** (moving average, Gaussian, Savitzky-Golay, EMA), **rank** (median,
+  Hampel, α-trimmed), **wavelets** (universal / SURE / level-dependent / Bayes /
+  NeighBlock / translation-invariant), **zero-phase IIR notch**
+  (`notch_iir`, `remove_mains_hum_iir` — precise even off the FFT grid),
+  **short-time Wiener** (plain / decision-directed / noise-floor-tracking, for
+  *non-stationary* noise), **variational** (Tikhonov, total variation),
+  **adaptive** (auto-tuned Kalman, LMS/RLS line enhancers, 1-D non-local means).
+- **Three automatic entry points**: `denoise_auto` (classify then apply one
+  family), `denoise_best` (a tournament judged by a reference-free residual-
+  whiteness score), `denoise_cascade` (mixed noise: detect → treat → re-detect).
+- **Real-time**: causal sample-by-sample counterparts in `denoise::streaming`
+  behind the `StreamingDenoiser` trait. **2-D images**: `scirust_vision::denoise`
+  (2-D median, separable wavelets, non-local means).
+- Known limitation: a tone below ~5 % of fs is indistinguishable from legitimate
+  signal content — call `remove_mains_hum_iir` explicitly when the mains
+  frequency is known. Quality benchmark:
+  `cargo run -p scirust-signal --example denoise_benchmark`.
+
 ### 8.2 OPC-UA Connector (`scirust-opcua`)
 
 Connects industrial PLCs/SCADA to the SciRust pipeline:
