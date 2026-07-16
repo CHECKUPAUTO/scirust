@@ -9,6 +9,10 @@
 // déterministe) et de [`super::activation`] (activations ponctuelles) en une
 // seule structure réutilisable.
 //
+// Pour une tête de classification, [`Linear::predict_class`] (`argmax` du
+// logit, tout stockage) et [`Linear::predict_proba`] (`softmax`, `i32`
+// uniquement) complètent la chaîne poids → biais → décision.
+//
 // ## Déterminisme
 //
 // `matvec` est déjà bit-à-bit reproductible (cf. [`super::linalg`]) ; l'ajout
@@ -19,6 +23,7 @@
 
 use super::reductions::FixedReducible;
 use super::traits::NumericScalar;
+use super::types::Fixed;
 
 /// Couche linéaire quantifiée `y = W·x + b` (`W` : `out_features × in_features`
 /// row-major, `b` : `out_features` éléments).
@@ -105,5 +110,37 @@ impl<T: FixedReducible> Linear<T> {
         let mut y = self.forward(x);
         super::activation::apply_inplace(&mut y, f);
         y
+    }
+
+    /// Classe prédite : indice du **premier** logit maximal de `W·x + b`.
+    ///
+    /// `argmax` suffit — pas besoin de softmax : la softmax est une fonction
+    /// strictement croissante de chaque logit (à valeur des autres fixée), donc
+    /// `argmax(softmax(z)) == argmax(z)` **toujours**. Éviter l'exponentielle
+    /// garde ce classement disponible pour tout stockage
+    /// ([`FixedReducible`] : `i32` **et** `i64`), pas seulement `i32`.
+    ///
+    /// `None` si `out_features == 0`.
+    #[must_use]
+    pub fn predict_class(&self, x: &[T]) -> Option<usize> {
+        super::reductions::argmax(&self.forward(x))
+    }
+}
+
+impl<const FRAC: u32> Linear<Fixed<i32, FRAC>> {
+    /// Probabilités de classe : `softmax(W·x + b)`, numériquement stable et
+    /// déterministe bit-à-bit (cf. [`super::transcendental::softmax_into`]).
+    ///
+    /// Réservé au stockage `i32` : la softmax passe par l'exponentielle
+    /// virgule fixe, elle-même réservée à `FixedI32<FRAC>` (précision interne
+    /// Q32, cf. [`super::traits::RealScalar`]). Pour ne classer qu'une entrée
+    /// (sans les probabilités), préférer [`Linear::predict_class`], qui
+    /// fonctionne aussi pour le stockage `i64` sans calculer d'exponentielle.
+    #[must_use]
+    pub fn predict_proba(&self, x: &[Fixed<i32, FRAC>]) -> Vec<Fixed<i32, FRAC>> {
+        let logits = self.forward(x);
+        let mut proba = vec![Fixed::zero(); logits.len()];
+        super::transcendental::softmax_into(&logits, &mut proba);
+        proba
     }
 }

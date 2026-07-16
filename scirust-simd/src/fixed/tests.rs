@@ -834,6 +834,72 @@ fn linear_dim_mismatch_panics() {
     let _ = Linear::new(w, b, 2, 3);
 }
 
+#[test]
+fn linear_predict_class_known() {
+    // 3 classes, 2 features. Choisi pour que la classe 1 gagne nettement.
+    let w = [1i32, 0, 0, 1, -1, -1].map(Q16_16::from); // 3×2
+    let b = [0i32, 5, 0].map(Q16_16::from);
+    let x = [1i32, 1].map(Q16_16::from);
+    let layer = Linear::new(w.to_vec(), b.to_vec(), 3, 2);
+    // Logits : [1, 1+5, -1-1] = [1, 6, -2] → argmax = 1.
+    assert_eq!(layer.predict_class(&x), Some(1));
+}
+
+#[test]
+fn linear_predict_class_matches_argmax_of_forward() {
+    // predict_class doit toujours coïncider avec argmax(forward(x)), y compris
+    // sur le stockage i64.
+    let mut rng = Lcg(0xACE1);
+    let (out_f, in_f) = (6, 4);
+    let w: Vec<Q32_32> = (0..out_f * in_f)
+        .map(|_| Q32_32::from_raw(rng.next() as i64))
+        .collect();
+    let b: Vec<Q32_32> = (0..out_f)
+        .map(|_| Q32_32::from_raw(rng.next() as i64))
+        .collect();
+    let x: Vec<Q32_32> = (0..in_f)
+        .map(|_| Q32_32::from_raw(rng.next() as i64))
+        .collect();
+    let layer = Linear::new(w, b, out_f, in_f);
+    let logits = layer.forward(&x);
+    assert_eq!(layer.predict_class(&x), red::argmax(&logits));
+}
+
+#[test]
+fn linear_predict_class_empty_output_is_none() {
+    let layer: Linear<Q16_16> = Linear::new(vec![], vec![], 0, 3);
+    assert_eq!(layer.predict_class(&[Q16_16::zero(); 3]), None);
+}
+
+#[test]
+fn linear_predict_proba_argmax_matches_predict_class() {
+    // Propriété centrale : argmax(softmax(z)) == argmax(z). predict_proba et
+    // predict_class doivent donc toujours désigner la même classe.
+    let mut rng = Lcg(0xB16B00B5);
+    for _ in 0..200
+    {
+        let (out_f, in_f) = (5, 3);
+        let w: Vec<Q16_16> = (0..out_f * in_f)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+            .collect();
+        let b: Vec<Q16_16> = (0..out_f)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+            .collect();
+        let x: Vec<Q16_16> = (0..in_f)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+            .collect();
+        let layer = Linear::new(w, b, out_f, in_f);
+
+        let proba = layer.predict_proba(&x);
+        // Les probabilités somment à ~1 (résolution Q16.16 près).
+        let total: f64 = proba.iter().map(|p| p.to_f64()).sum();
+        assert!((total - 1.0).abs() <= 1e-3, "Σproba = {total}");
+
+        let proba_argmax = red::argmax(&proba);
+        assert_eq!(proba_argmax, layer.predict_class(&x));
+    }
+}
+
 // ------------------------------------------------------------------ //
 //  Requantification (rescale)                                         //
 // ------------------------------------------------------------------ //
