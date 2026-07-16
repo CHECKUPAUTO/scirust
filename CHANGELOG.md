@@ -5,6 +5,23 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — validation sur données réelles n°3 : parole bruitée (VoiceBank+DEMAND)
+Troisième domaine réel (§9.4 du rapport TSHF) — **cartographie honnête d'une limite**
+du toolkit généraliste plutôt qu'un succès.
+- **Fixture réelle attribuée** `scirust-signal/tests/data/voicebank_demand.csv`
+  (CC-BY-4.0) : un énoncé VoiceBank (`p232_022`, 16 kHz) + sa version bruitée par du
+  bruit **DEMAND réel enregistré** (SNR global ~7 dB), décodé hors-ligne du parquet
+  Hugging Face. Provenance + licence en tête de fichier.
+- **Test** `tests/real_data_audio.rs` + exemple `denoise_real_speech` : sur la
+  métrique SNR de forme d'onde, le toolkit généraliste **n'améliore pas** la parole —
+  `denoise_auto` la classe `Colored` et sur-traite (ondelette par niveau agressive →
+  **−8,9 dB**, la parole non stationnaire est lissée). Constat exploitable épinglé :
+  **pour la parole, appeler `stft_wiener_auto` directement** (suivi de plancher de
+  bruit ; bien moins destructeur, −0,04 dB) plutôt que le routage auto. Note : le SNR
+  de forme d'onde est une métrique sévère pour la parole (les métriques du domaine
+  sont SNR segmental / PESQ / STOI) — « ≈ neutre » est un plancher, pas le tableau
+  complet.
+
 ### Ajouté — validation sur données réelles n°2 : vibrations de roulement (CWRU)
 Étend la validation sur données réelles à un **domaine différent** (§9.4 du rapport
 TSHF) et éprouve la robustesse du classifieur aux features périodiques légitimes
