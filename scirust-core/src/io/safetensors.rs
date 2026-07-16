@@ -335,8 +335,12 @@ fn skip_balanced(bytes: &[u8], start: usize, open: u8, close: u8) -> usize {
     {
         if bytes[i] == b'"'
         {
+            // An unterminated string consumes the rest of the buffer. Clamp:
+            // `p` then points one past the data, and `i + 1 + p + 1` would be
+            // `bytes.len() + 1` — callers slice the header with the returned
+            // index, so exceeding `len` panics on untrusted input.
             let p = find_unescaped_quote(&bytes[i + 1..]).unwrap_or(bytes.len() - i - 1);
-            i = i + 1 + p + 1;
+            i = (i + 1 + p + 1).min(bytes.len());
             continue;
         }
         if bytes[i] == open
@@ -1316,6 +1320,23 @@ mod tests {
         }
         assert_eq!(loaded["scalar"].ndim(), 0);
         assert_eq!(loaded["scalar"].numel(), 1);
+    }
+
+    // Regression (found by the `safetensors_nd_from_bytes` fuzz target): a
+    // header whose `__metadata__` value is an unterminated string made
+    // `skip_balanced` return `len + 1`, and slicing the header with it
+    // panicked. Both the N-D and 2-D deserializers share that path; all must
+    // return a clean result on this 24-byte input.
+    #[test]
+    fn deserialize_unterminated_metadata_string_does_not_panic() {
+        let hdr = br#""__metadata__":""#;
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&(hdr.len() as u64).to_le_bytes());
+        buf.extend_from_slice(hdr);
+        let _ = deserialize_state_dict_nd(&buf);
+        let _ = deserialize_state_dict(&buf);
+        let _ = deserialize_with_metadata(&buf);
+        let _ = deserialize(&buf);
     }
 
     // The N-D parser keeps the untrusted-input guards of the 2-D one: a

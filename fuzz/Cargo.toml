@@ -49,3 +49,24 @@ path = "fuzz_targets/safetensors_from_bytes.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "safetensors_nd_from_bytes"
+path = "fuzz_targets/safetensors_nd_from_bytes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tensor_nd_ops_from_bytes"
+path = "fuzz_targets/tensor_nd_ops_from_bytes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tape_backward_from_bytes"
+path = "fuzz_targets/tape_backward_from_bytes.rs"
+test = false
+doc = false
+bench = false
