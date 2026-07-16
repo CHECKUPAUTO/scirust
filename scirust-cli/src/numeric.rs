@@ -122,7 +122,15 @@ pub fn run_integrate(args: &[String]) -> u8 {
     let f = fn1(parsed, var.clone());
     let value = match method.as_str()
     {
-        "romberg" => romberg(f, a, b, 1e-10, 20),
+        "romberg" => match romberg(f, a, b, 1e-10, 20)
+        {
+            Ok(v) => v,
+            Err(e) =>
+            {
+                eprintln!("error: {e}");
+                return 2;
+            },
+        },
         "simpson" => match simpson_adaptive(f, a, b, 1e-10, 50)
         {
             Ok(v) => v,
@@ -132,7 +140,15 @@ pub fn run_integrate(args: &[String]) -> u8 {
                 return 2;
             },
         },
-        "gauss" => gauss_legendre(f, a, b, GaussOrder::Twenty),
+        "gauss" => match gauss_legendre(f, a, b, GaussOrder::Twenty)
+        {
+            Ok(v) => v,
+            Err(e) =>
+            {
+                eprintln!("error: {e}");
+                return 2;
+            },
+        },
         other =>
         {
             eprintln!("error: unknown method `{other}` (romberg|simpson|gauss)");

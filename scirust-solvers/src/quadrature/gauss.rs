@@ -4,6 +4,8 @@
 //! sur les fonctions analytiques lisses : un Gauss-20 atteint typiquement la
 //! précision machine sur les intégrales polynomiales jusqu'au degré 39.
 
+use crate::{SolverError, SolverResult};
+
 /// Ordre Gauss-Legendre disponible (nombre de points d'évaluation).
 #[derive(Debug, Clone, Copy)]
 pub enum GaussOrder {
@@ -24,7 +26,23 @@ impl GaussOrder {
 }
 
 /// Calcule ∫_a^b f(x) dx via Gauss-Legendre.
-pub fn gauss_legendre<F: Fn(f64) -> f64>(f: F, a: f64, b: f64, order: GaussOrder) -> f64 {
+///
+/// # Errors
+/// [`SolverError::InvalidInput`] si `a`/`b` n'est pas fini ;
+/// [`SolverError::NanDetected`] si `f` renvoie une valeur non finie sur un
+/// des noeuds.
+pub fn gauss_legendre<F: Fn(f64) -> f64>(
+    f: F,
+    a: f64,
+    b: f64,
+    order: GaussOrder,
+) -> SolverResult<f64> {
+    if !a.is_finite() || !b.is_finite()
+    {
+        return Err(SolverError::InvalidInput(
+            "integration bounds must be finite".into(),
+        ));
+    }
     let (nodes, weights) = order.nodes_weights();
     let half = 0.5 * (b - a);
     let mid = 0.5 * (a + b);
@@ -32,9 +50,14 @@ pub fn gauss_legendre<F: Fn(f64) -> f64>(f: F, a: f64, b: f64, order: GaussOrder
     for (x, w) in nodes.iter().zip(weights.iter())
     {
         let xx = half * x + mid;
-        acc += w * f(xx);
+        let fx = f(xx);
+        if !fx.is_finite()
+        {
+            return Err(SolverError::NanDetected { iter: 0, value: fx });
+        }
+        acc += w * fx;
     }
-    half * acc
+    Ok(half * acc)
 }
 
 // ─── Tables (Gauss-Legendre sur [-1, 1], multipliées par half pour [a,b]) ───
@@ -135,14 +158,14 @@ mod tests {
     fn gauss_polynomial_exact() {
         // Gauss-5 intègre exactement les polynômes jusqu'au degré 9
         // ∫₀¹ x⁹ dx = 1/10
-        let v = gauss_legendre(|x: f64| x.powi(9), 0.0, 1.0, GaussOrder::Five);
+        let v = gauss_legendre(|x: f64| x.powi(9), 0.0, 1.0, GaussOrder::Five).unwrap();
         assert_relative_eq!(v, 0.1, epsilon = 1e-14);
     }
 
     #[test]
     fn gauss_sin() {
         // ∫₀^π sin(x) dx = 2
-        let v = gauss_legendre(|x| x.sin(), 0.0, PI, GaussOrder::Ten);
+        let v = gauss_legendre(|x| x.sin(), 0.0, PI, GaussOrder::Ten).unwrap();
         assert_relative_eq!(v, 2.0, epsilon = 1e-12);
     }
 
@@ -151,7 +174,7 @@ mod tests {
         // ∫₋₅⁵ exp(-x²) dx ≈ √π
         // Note : Gauss-Legendre n'est pas optimal pour les fonctions à pic
         // étroit — utiliser Simpson adaptatif ou Gauss-Hermite pour ces cas.
-        let v = gauss_legendre(|x: f64| (-x * x).exp(), -5.0, 5.0, GaussOrder::Twenty);
+        let v = gauss_legendre(|x: f64| (-x * x).exp(), -5.0, 5.0, GaussOrder::Twenty).unwrap();
         assert_relative_eq!(v, PI.sqrt(), epsilon = 1e-3);
     }
 
@@ -161,13 +184,31 @@ mod tests {
         let f = |x: f64| (5.0 * x).cos() * x.exp();
         let exact = -97.611_896_711_534_43; // calculé indépendamment
         // En réalité l'intégrale est ∫₀¹ — c'est juste un nombre arbitraire pour le test
-        let v5 = gauss_legendre(f, 0.0, 1.0, GaussOrder::Five);
-        let v10 = gauss_legendre(f, 0.0, 1.0, GaussOrder::Ten);
-        let v20 = gauss_legendre(f, 0.0, 1.0, GaussOrder::Twenty);
+        let v5 = gauss_legendre(f, 0.0, 1.0, GaussOrder::Five).unwrap();
+        let v10 = gauss_legendre(f, 0.0, 1.0, GaussOrder::Ten).unwrap();
+        let v20 = gauss_legendre(f, 0.0, 1.0, GaussOrder::Twenty).unwrap();
         // On vérifie juste que les valeurs convergent (différences décroissantes)
         let _ = exact;
         let d10 = (v10 - v5).abs();
         let d20 = (v20 - v10).abs();
         assert!(d20 < d10);
+    }
+
+    #[test]
+    fn rejects_non_finite_bounds() {
+        assert!(matches!(
+            gauss_legendre(|x| x, f64::NAN, 1.0, GaussOrder::Ten),
+            Err(SolverError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            gauss_legendre(|x| x, 0.0, f64::INFINITY, GaussOrder::Ten),
+            Err(SolverError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_non_finite_integrand() {
+        let result = gauss_legendre(|_| f64::NAN, 0.0, 1.0, GaussOrder::Ten);
+        assert!(matches!(result, Err(SolverError::NanDetected { .. })));
     }
 }
