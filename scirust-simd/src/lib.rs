@@ -682,6 +682,12 @@ pub mod fixed;
 #[cfg(feature = "portable-simd")]
 pub mod geometry;
 
+// Transformed-Scalar Hypercomplex Algebra (TSHA) — cadre de recherche : algèbres
+// hypercomplexes sur représentations scalaires transformées (φ = Identity /
+// 1/Γ(x+1) / lnΓ(x+1)), au-dessus du trait NumericScalar.
+#[cfg(feature = "portable-simd")]
+pub mod transformed;
+
 #[cfg(all(feature = "nightly-simd", target_arch = "x86_64"))]
 pub mod amx;
 #[cfg(all(feature = "nightly-simd", target_arch = "x86_64"))]
