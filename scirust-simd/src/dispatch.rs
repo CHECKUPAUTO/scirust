@@ -12,6 +12,17 @@
 // This module contains architecture-specific backends using `#[target_feature]`
 // and `unsafe` intrinsics. Safety invariants for ALL `unsafe` functions:
 //
+// **Runtime feature detection is enforced by construction, not just convention**:
+// `Avx2Backend`, `Avx512Backend`, `Sse2Backend`, `NeonBackend` each carry a
+// private `()` field, so — unlike a bare marker unit struct — they cannot be
+// constructed outside this module. `runtime_backend()` is the only place that
+// builds one, and only after `detect_backend()` has confirmed the matching
+// `is_x86_feature_detected!`/`is_aarch64_feature_detected!` check. This is
+// what makes the "only called after runtime feature detection" claim below
+// actually true rather than merely intended: nothing else in the crate (or
+// outside it — these structs are `pub`) can reach one of these types without
+// going through that check.
+//
 // **AVX2/SSE2 backends (x86_64)**:
 // - Functions marked `#[target_feature(enable = "avx2")]` or `#[target_feature(enable = "sse2")]`
 //   are only called after runtime feature detection (`std::is_x86_feature_detected!`)
@@ -24,6 +35,12 @@
 // - `_mm256_storeu_ps` / `_mm_storeu_ps` / etc.: Same unaligned store guarantee.
 // - Scalar remainder loops handle non-multiple-of-vector-width lengths safely.
 // - No pointers escape; all borrows are bounded by slice lifetimes.
+//
+// **AVX-512 backend (x86_64)**: same argument as AVX2/SSE2 above, gated on
+// `is_x86_feature_detected!("avx512f")` (and `"fma"` where the kernel uses
+// `_mm512_fmadd_*`); masked remainder handling replaces the scalar tail loop
+// where the kernel uses `_mm512_maskz_*`/`_mm512_mask_*` intrinsics, with the
+// mask itself derived from the same in-bounds length check.
 //
 // **NEON backend (aarch64)**:
 // - `#[target_feature(enable = "neon")]` only used after `std::arch::is_aarch64_feature_detected!("neon")`
@@ -38,7 +55,8 @@
 // - All `unsafe` blocks are internal; public trait methods are `safe` and perform validation.
 //
 // **Soundness summary**: Each `unsafe` intrinsic call is guarded by:
-// 1. Compile-time `#[target_feature]` matching runtime detection
+// 1. Compile-time `#[target_feature]` matching runtime detection, enforced by
+//    construction (private-field backend markers) rather than caller discipline
 // 2. Loop bounds checking ensuring pointer arithmetic stays in-bounds
 // 3. Unaligned load/store intrinsics removing alignment constraints
 // 4. Valid slice references from safe Rust guaranteeing pointer validity
@@ -149,14 +167,14 @@ pub fn runtime_backend() -> &'static dyn SimdBackend {
         BackendKind::PortableSimd => &PortableSimdBackend,
 
         #[cfg(target_arch = "x86_64")]
-        BackendKind::Avx2 => &Avx2Backend,
+        BackendKind::Avx2 => &Avx2Backend(()),
         #[cfg(target_arch = "x86_64")]
-        BackendKind::Sse2 => &Sse2Backend,
+        BackendKind::Sse2 => &Sse2Backend(()),
         #[cfg(target_arch = "x86_64")]
-        BackendKind::Avx512 => &Avx512Backend,
+        BackendKind::Avx512 => &Avx512Backend(()),
 
         #[cfg(target_arch = "aarch64")]
-        BackendKind::Neon => &NeonBackend,
+        BackendKind::Neon => &NeonBackend(()),
         #[cfg(all(feature = "nightly-simd", target_arch = "aarch64"))]
         BackendKind::Sve => &SveBackend,
 
@@ -203,8 +221,13 @@ pub fn print_capabilities() {
 //  Les vraies implémentations utilisent #[target_feature(enable=...)] //
 // ------------------------------------------------------------------ //
 
+/// Marker for the AVX2 backend. The private field keeps this un-constructible
+/// outside `dispatch.rs`, so the only way to obtain one is `runtime_backend()`
+/// after it has confirmed `is_x86_feature_detected!("avx2")` — every method
+/// below calls into `#[target_feature(enable = "avx2")]` code, which is
+/// undefined behavior to run without that guarantee.
 #[cfg(target_arch = "x86_64")]
-pub struct Avx2Backend;
+pub struct Avx2Backend(());
 
 #[cfg(target_arch = "x86_64")]
 impl SimdBackend for Avx2Backend {
@@ -437,10 +460,14 @@ unsafe fn sgemm_f32_avx2(
 //  AVX-512 backend — 16-wide f32 / 8-wide f64, FMA, masked remainders //
 // =================================================================== //
 
-/// Marker for the AVX-512 backend. Only constructed after
-/// `is_x86_feature_detected!("avx512f")` succeeds (see `runtime_backend`).
+/// Marker for the AVX-512 backend. The private field keeps this
+/// un-constructible outside `dispatch.rs`, so the only way to obtain one is
+/// `runtime_backend()` after it has confirmed
+/// `is_x86_feature_detected!("avx512f")` — every method below calls into
+/// `#[target_feature(enable = "avx512f")]` code, which is undefined behavior
+/// to run without that guarantee.
 #[cfg(target_arch = "x86_64")]
-pub struct Avx512Backend;
+pub struct Avx512Backend(());
 
 #[cfg(target_arch = "x86_64")]
 impl SimdBackend for Avx512Backend {
@@ -689,8 +716,13 @@ unsafe fn sgemm_f32_avx512(
 }
 
 // SSE2 backend — real SIMD using _mm_* intrinsics (4-wide f32, 2-wide f64)
+/// Marker for the SSE2 backend. The private field keeps this
+/// un-constructible outside `dispatch.rs`, so the only way to obtain one is
+/// `runtime_backend()` after it has confirmed `is_x86_feature_detected!("sse2")`
+/// — every method below calls into `#[target_feature(enable = "sse2")]` code,
+/// which is undefined behavior to run without that guarantee.
 #[cfg(target_arch = "x86_64")]
-pub struct Sse2Backend;
+pub struct Sse2Backend(());
 
 #[cfg(target_arch = "x86_64")]
 impl SimdBackend for Sse2Backend {
@@ -903,8 +935,14 @@ unsafe fn sgemm_f32_sse2(
     }
 }
 
+/// Marker for the NEON backend. The private field keeps this
+/// un-constructible outside `dispatch.rs`, so the only way to obtain one is
+/// `runtime_backend()` after it has confirmed
+/// `is_aarch64_feature_detected!("neon")` — every method below calls into
+/// `#[target_feature(enable = "neon")]` code, which is undefined behavior to
+/// run without that guarantee.
 #[cfg(target_arch = "aarch64")]
-pub struct NeonBackend;
+pub struct NeonBackend(());
 
 #[cfg(target_arch = "aarch64")]
 impl SimdBackend for NeonBackend {
@@ -1131,22 +1169,22 @@ mod tests {
         {
             if std::is_x86_feature_detected!("avx512f") && std::is_x86_feature_detected!("fma")
             {
-                v.push((&Avx512Backend, "avx512"));
+                v.push((&Avx512Backend(()), "avx512"));
             }
             if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma")
             {
-                v.push((&Avx2Backend, "avx2"));
+                v.push((&Avx2Backend(()), "avx2"));
             }
             if std::is_x86_feature_detected!("sse2")
             {
-                v.push((&Sse2Backend, "sse2"));
+                v.push((&Sse2Backend(()), "sse2"));
             }
         }
         #[cfg(target_arch = "aarch64")]
         {
             if std::arch::is_aarch64_feature_detected!("neon")
             {
-                v.push((&NeonBackend, "neon"));
+                v.push((&NeonBackend(()), "neon"));
             }
             #[cfg(feature = "nightly-simd")]
             if std::arch::is_aarch64_feature_detected!("sve")
@@ -1474,7 +1512,7 @@ mod tests {
 
             // saxpy
             let mut got = y.clone();
-            Avx512Backend.saxpy_f32(1.5, &x, &mut got);
+            Avx512Backend(()).saxpy_f32(1.5, &x, &mut got);
             let mut want = y.clone();
             ScalarBackend.saxpy_f32(1.5, &x, &mut want);
             for t in 0..len
@@ -1483,7 +1521,7 @@ mod tests {
             }
 
             // sdot
-            let d = Avx512Backend.sdot_f32(&x, &y);
+            let d = Avx512Backend(()).sdot_f32(&x, &y);
             let dref = ScalarBackend.sdot_f32(&x, &y);
             assert!(
                 (d - dref).abs() <= 1e-3 * (1.0 + dref.abs()),
@@ -1492,7 +1530,7 @@ mod tests {
 
             // relu
             let mut r = x.clone();
-            Avx512Backend.relu_f32(&mut r);
+            Avx512Backend(()).relu_f32(&mut r);
             for t in 0..len
             {
                 assert_eq!(r[t], x[t].max(0.0), "relu len={len} t={t}");
@@ -1505,14 +1543,14 @@ mod tests {
             let x: Vec<f64> = (0..len).map(|t| (t as f64) * 0.7 - 3.0).collect();
             let y: Vec<f64> = (0..len).map(|t| (t as f64) * 0.2 + 0.5).collect();
             let mut got = y.clone();
-            Avx512Backend.daxpy_f64(-0.25, &x, &mut got);
+            Avx512Backend(()).daxpy_f64(-0.25, &x, &mut got);
             let mut want = y.clone();
             ScalarBackend.daxpy_f64(-0.25, &x, &mut want);
             for t in 0..len
             {
                 assert!((got[t] - want[t]).abs() <= 1e-9, "daxpy len={len} t={t}");
             }
-            let d = Avx512Backend.ddot_f64(&x, &y);
+            let d = Avx512Backend(()).ddot_f64(&x, &y);
             let dref = ScalarBackend.ddot_f64(&x, &y);
             assert!(
                 (d - dref).abs() <= 1e-9 * (1.0 + dref.abs()),

@@ -149,12 +149,6 @@ impl SimdBackend for PortableSimdBackend {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Avx2Backend;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Sse2Backend;
-
 #[cfg(test)]
 mod tests {
     use super::*;
