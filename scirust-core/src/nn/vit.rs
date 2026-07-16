@@ -4,6 +4,7 @@ use crate::nn::linear::Linear;
 use crate::nn::module::Module;
 use crate::nn::rng::PcgEngine;
 use crate::nn::transformer::TransformerEncoder;
+use std::collections::HashMap;
 
 /// Vision Transformer (ViT) implementation.
 pub struct ViT {
@@ -126,6 +127,94 @@ impl Module for ViT {
         self.encoder.sync(tape);
         self.head.sync(tape);
     }
+
+    fn state_dict(&self) -> HashMap<String, Tensor> {
+        let mut map = HashMap::new();
+        let p = &self.name;
+        // Patch-embedding conv and classification head have no globally-unique
+        // names, prefix manually (same convention as the TransformerBlock FFN).
+        map.insert(
+            format!("{p}.patch_embed.weight"),
+            self.patch_embed.projection.weight.clone(),
+        );
+        if let Some(b) = &self.patch_embed.projection.bias
+        {
+            map.insert(format!("{p}.patch_embed.bias"), b.clone());
+        }
+        // Encoder blocks already carry globally-unique names (enc_block_i.*).
+        for (k, v) in self.encoder.state_dict()
+        {
+            map.insert(k, v);
+        }
+        map.insert(format!("{p}.head.weight"), self.head.weight.clone());
+        map.insert(format!("{p}.head.bias"), self.head.bias.clone());
+        map
+    }
+
+    fn load_state_dict(&mut self, sd: &HashMap<String, Tensor>) -> crate::error::Result<()> {
+        let p = self.name.clone();
+
+        // Patch embedding conv.
+        let conv = &mut self.patch_embed.projection;
+        let w = sd
+            .get(&format!("{p}.patch_embed.weight"))
+            .ok_or_else(|| format!("missing key: {p}.patch_embed.weight"))?;
+        let kk = conv.kernel * conv.kernel;
+        if w.shape() != (conv.out_c, conv.in_c * kk)
+        {
+            crate::bail!(
+                "{p}.patch_embed.weight shape mismatch: expected {:?}, got {:?}",
+                (conv.out_c, conv.in_c * kk),
+                w.shape()
+            );
+        }
+        conv.weight = w.clone();
+        if conv.bias.is_some()
+        {
+            let b = sd
+                .get(&format!("{p}.patch_embed.bias"))
+                .ok_or_else(|| format!("missing key: {p}.patch_embed.bias"))?;
+            if b.shape() != (1, conv.out_c)
+            {
+                crate::bail!(
+                    "{p}.patch_embed.bias shape mismatch: expected {:?}, got {:?}",
+                    (1, conv.out_c),
+                    b.shape()
+                );
+            }
+            conv.bias = Some(b.clone());
+        }
+
+        // Encoder blocks (namespaced by their own names).
+        self.encoder.load_state_dict(sd)?;
+
+        // Classification head.
+        let hw = sd
+            .get(&format!("{p}.head.weight"))
+            .ok_or_else(|| format!("missing key: {p}.head.weight"))?;
+        let hb = sd
+            .get(&format!("{p}.head.bias"))
+            .ok_or_else(|| format!("missing key: {p}.head.bias"))?;
+        if hw.shape() != (self.head.in_features, self.head.out_features)
+        {
+            crate::bail!(
+                "{p}.head.weight shape mismatch: expected {:?}, got {:?}",
+                (self.head.in_features, self.head.out_features),
+                hw.shape()
+            );
+        }
+        if hb.shape() != (1, self.head.out_features)
+        {
+            crate::bail!(
+                "{p}.head.bias shape mismatch: expected {:?}, got {:?}",
+                (1, self.head.out_features),
+                hb.shape()
+            );
+        }
+        self.head.weight = hw.clone();
+        self.head.bias = hb.clone();
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -169,5 +258,35 @@ mod tests {
         // Gradients must flow (no zeros dead-end): backward does not panic.
         let loss = out_a.sum();
         tape.backward(loss.idx());
+    }
+
+    #[test]
+    fn vit_state_dict_round_trip() {
+        let mut rng = PcgEngine::new(1);
+        let mut vit1 = ViT::new(4, 2, 1, 3, 8, 2, 1, 16, &KaimingNormal, &Zeros, &mut rng);
+        let sd = vit1.state_dict();
+        assert!(sd.contains_key("vit.patch_embed.weight"));
+        assert!(sd.contains_key("vit.head.weight"));
+
+        let mut rng2 = PcgEngine::new(99);
+        let mut vit2 = ViT::new(4, 2, 1, 3, 8, 2, 1, 16, &Zeros, &Zeros, &mut rng2);
+        // Missing keys must be an error, not a silent skip.
+        assert!(vit2.load_state_dict(&HashMap::new()).is_err());
+        vit2.load_state_dict(&sd).unwrap();
+
+        // Compare every parameter tensor through the tape values.
+        let tape1 = Tape::new();
+        let tape2 = Tape::new();
+        let img = Tensor::from_vec((0..16).map(|i| i as f32 * 0.1).collect(), 1, 16);
+        let _ = vit1.forward(&tape1, tape1.input(img.clone()));
+        let _ = vit2.forward(&tape2, tape2.input(img));
+        let idx1 = vit1.parameter_indices();
+        let idx2 = vit2.parameter_indices();
+        assert!(!idx1.is_empty());
+        assert_eq!(idx1.len(), idx2.len());
+        for (a, b) in idx1.iter().zip(&idx2)
+        {
+            assert_eq!(tape1.value(*a).data, tape2.value(*b).data);
+        }
     }
 }

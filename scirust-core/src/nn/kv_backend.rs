@@ -240,7 +240,7 @@ mod tests {
 
     fn build_attn(d_model: usize, n_heads: usize) -> MultiHeadAttention {
         let mut rng = PcgEngine::new(0);
-        MultiHeadAttention::new(d_model, n_heads, 0, false, &KaimingNormal, &Zeros, &mut rng)
+        MultiHeadAttention::new(d_model, n_heads, false, &KaimingNormal, &Zeros, &mut rng)
     }
 
     #[test]

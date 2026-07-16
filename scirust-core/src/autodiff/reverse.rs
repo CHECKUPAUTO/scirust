@@ -4696,6 +4696,14 @@ impl<'t> Var<'t> {
         }
     }
 
+    /// Dropout « brut » au niveau tape : applique **toujours** le masque
+    /// (aucune notion de mode train/eval). Un appel direct en inférence
+    /// dégrade silencieusement les prédictions — utiliser le module
+    /// [`crate::nn::Dropout`], qui respecte `set_training(false)`.
+    #[deprecated(
+        since = "0.1.0",
+        note = "applies dropout unconditionally (no train/eval mode); use nn::Dropout, which honors set_training"
+    )]
     pub fn dropout(self, p: f32) -> Var<'t> {
         if p == 0.0
         {
@@ -6409,6 +6417,7 @@ mod l2_normalize_tests {
     // fix the RNG was reseeded to a fixed value (42) each call, so every mask on
     // every call was byte-identical — not stochastic.
     #[test]
+    #[allow(deprecated)]
     fn dropout_successive_calls_produce_different_masks() {
         let tape = Tape::new();
         tape.set_seed(1); // deterministic, but each call still advances the stream
@@ -6424,6 +6433,7 @@ mod l2_normalize_tests {
     // set_seed makes dropout reproducible: seeding two fresh tapes identically and
     // replaying the same op sequence yields byte-identical masks.
     #[test]
+    #[allow(deprecated)]
     fn dropout_is_reproducible_after_set_seed() {
         let make = || {
             let tape = Tape::new();

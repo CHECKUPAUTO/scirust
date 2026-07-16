@@ -24,8 +24,7 @@ fn main() {
     let iters = a.get(4).copied().unwrap_or(20);
 
     let mut rng = PcgEngine::new(1);
-    let mut mha =
-        MultiHeadAttention::new(d_model, n_heads, 0, true, &KaimingNormal, &Zeros, &mut rng);
+    let mut mha = MultiHeadAttention::new(d_model, n_heads, true, &KaimingNormal, &Zeros, &mut rng);
     let xd: Vec<f32> = (0..batch * seq * d_model)
         .map(|i| (i as f32 * 1e-4).sin())
         .collect();

@@ -19,6 +19,7 @@
 use crate::autodiff::reverse::{Tape, Tensor, Var};
 use crate::nn::Linear;
 use crate::nn::Module;
+use std::collections::HashMap;
 
 use crate::tn::factorize::{auto_factorize, check_factorization};
 use crate::tn::tt_decompose::{TTCores, reconstruct_matrix, tt_decompose_matrix};
@@ -204,6 +205,56 @@ impl Module for TTLinear {
         {
             self.bias = Some(tape.value(b_idx));
         }
+    }
+
+    fn state_dict(&self) -> HashMap<String, Tensor> {
+        let mut map = HashMap::new();
+        for (k, core) in self.cores.iter().enumerate()
+        {
+            map.insert(format!("core_{k}"), core.clone());
+        }
+        if let Some(b) = &self.bias
+        {
+            map.insert("bias".to_string(), b.clone());
+        }
+        map
+    }
+
+    fn load_state_dict(&mut self, sd: &HashMap<String, Tensor>) -> crate::error::Result<()> {
+        for k in 0..self.cores.len()
+        {
+            let key = format!("core_{k}");
+            let c = sd.get(&key).ok_or_else(|| format!("missing key: {key}"))?;
+            let expected = (
+                self.ranks[k] * self.in_dims[k] * self.out_dims[k],
+                self.ranks[k + 1],
+            );
+            if c.shape() != expected
+            {
+                crate::bail!(
+                    "{key} shape mismatch: expected {:?}, got {:?}",
+                    expected,
+                    c.shape()
+                );
+            }
+            self.cores[k] = c.clone();
+        }
+        if self.bias.is_some()
+        {
+            let b = sd
+                .get("bias")
+                .ok_or_else(|| "missing key: bias".to_string())?;
+            if b.shape() != (1, self.out_features)
+            {
+                crate::bail!(
+                    "bias shape mismatch: expected {:?}, got {:?}",
+                    (1, self.out_features),
+                    b.shape()
+                );
+            }
+            self.bias = Some(b.clone());
+        }
+        Ok(())
     }
 }
 
@@ -569,6 +620,61 @@ mod tests {
                     "core {k} elem {j}: analytic {a}, numeric {numeric}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn tt_state_dict_round_trip() {
+        let mut rng = crate::nn::rng::PcgEngine::new(42);
+        let mut linear = Linear::new(
+            6,
+            4,
+            &crate::nn::init::Zeros,
+            &crate::nn::init::Zeros,
+            &mut rng,
+        );
+        for i in 0..(6 * 4)
+        {
+            linear.weight.data[i] = ((i as f32) * 0.13).cos();
+        }
+        linear.bias = Tensor::from_vec(vec![0.1, -0.2, 0.3, -0.4], 1, 4);
+
+        let mut tt1 = tt_decompose(&linear, &[2, 3], &[2, 2], 100, 0.0);
+        let sd = tt1.state_dict();
+        assert_eq!(sd.len(), tt1.cores.len() + 1); // cores + bias
+
+        // Fresh module with identical TT structure but zeroed parameters.
+        let mut tt2 = tt1.clone();
+        for c in &mut tt2.cores
+        {
+            c.data.fill(0.0);
+        }
+        if let Some(b) = &mut tt2.bias
+        {
+            b.data.fill(0.0);
+        }
+
+        // Missing keys must be an error, not a silent skip.
+        assert!(tt2.load_state_dict(&HashMap::new()).is_err());
+        tt2.load_state_dict(&sd).unwrap();
+
+        // Compare every parameter tensor through the tape values.
+        let tape1 = Tape::new();
+        let tape2 = Tape::new();
+        let x = Tensor {
+            rows: 1,
+            cols: 6,
+            data: vec![0.5; 6],
+        };
+        let _ = tt1.forward(&tape1, tape1.input(x.clone()));
+        let _ = tt2.forward(&tape2, tape2.input(x));
+        let idx1 = tt1.parameter_indices();
+        let idx2 = tt2.parameter_indices();
+        assert_eq!(idx1.len(), tt1.cores.len() + 1);
+        assert_eq!(idx1.len(), idx2.len());
+        for (a, b) in idx1.iter().zip(&idx2)
+        {
+            assert_eq!(tape1.value(*a).data, tape2.value(*b).data);
         }
     }
 }

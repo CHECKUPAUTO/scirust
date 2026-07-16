@@ -116,12 +116,15 @@ impl Clone for PositionalEncoding {
 // Pas de paramètres entraînables → pas de Module impl nécessaire,
 // mais on fournit state_dict vide pour compatibilité.
 impl crate::nn::module::Module for PositionalEncoding {
-    fn forward<'t>(&mut self, _tape: &'t Tape, _input: Var<'t>) -> Var<'t> {
-        // Module::forward ne passe pas seq_len ; utiliser forward() direct
-        // avec seq_len explicite, ou forward_3d().
-        panic!(
-            "PositionalEncoding::forward() requires seq_len — use forward(tape, input, seq_len) or forward_3d()"
-        )
+    /// Via le trait `Module` (pas de `seq_len` dans la signature), l'entrée 2D
+    /// `(rows, d_model)` est traitée comme **une seule séquence** de longueur
+    /// `rows` (batch = 1) — la position de la ligne `p` est `p`. Pour des
+    /// entrées batchées, utiliser `forward(tape, input, seq_len)` ou
+    /// `forward_3d()`. (Remplace l'ancien `panic!` inconditionnel qui faisait
+    /// aborter toute `Sequential` contenant ce module.)
+    fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t> {
+        let seq_len = input.shape().0;
+        PositionalEncoding::forward(self, tape, input, seq_len)
     }
     fn parameter_indices(&self) -> Vec<usize> {
         Vec::new()

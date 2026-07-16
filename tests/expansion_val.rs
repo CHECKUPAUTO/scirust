@@ -153,7 +153,7 @@ fn test_resnet18_resnet34_constructors() {
 fn test_infer_step_with_kv_cache() {
     use scirust_core::nn::transformer::MultiHeadAttention;
     let mut rng = PcgEngine::new(42);
-    let mut mha = MultiHeadAttention::new(8, 4, 4, false, &KaimingNormal, &Zeros, &mut rng);
+    let mut mha = MultiHeadAttention::new(8, 4, false, &KaimingNormal, &Zeros, &mut rng);
     let tape = Tape::new();
     // Single token input: (1, d_model)
     let token = tape.input(Tensor::zeros(1, 8));

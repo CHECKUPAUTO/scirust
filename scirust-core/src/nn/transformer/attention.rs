@@ -12,13 +12,16 @@ use crate::tensor::tensor3d::Var3D;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
+/// Attention multi-têtes **standard** (MHA) : toutes les têtes Q ont leur
+/// propre tête KV. Cette implémentation 2D ne fait ni GQA/MQA ni RoPE — pour
+/// ces variantes, utiliser `nn::nd_layers::NdMultiHeadAttention` (`new_gqa`,
+/// RoPE/ALiBi). Les anciens champs `num_kv_heads`/`use_rope`/`rope_theta`
+/// étaient acceptés mais jamais appliqués (piège silencieux) ; ils ont été
+/// retirés.
 pub struct MultiHeadAttention {
     pub d_model: usize,
     pub n_heads: usize,
     pub d_head: usize,
-    pub num_kv_heads: usize,
-    pub use_rope: bool,
-    pub rope_theta: f32,
     pub w_q: Linear,
     pub w_k: Linear,
     pub w_v: Linear,
@@ -32,7 +35,6 @@ impl MultiHeadAttention {
     pub fn new<W: Initializer, B: Initializer>(
         d_model: usize,
         n_heads: usize,
-        num_kv_heads: usize,
         causal: bool,
         w_init: &W,
         b_init: &B,
@@ -44,31 +46,10 @@ impl MultiHeadAttention {
         );
         let d_head = d_model / n_heads;
 
-        // NOTE: this implementation always attends with `n_heads` KV heads
-        // (standard MHA); the KV projections are full-width and
-        // `repeat_kv_heads` is unused. `num_kv_heads` is accepted for API
-        // symmetry but is NOT honored here — for real grouped-query attention
-        // use `nn::nd_layers::NdMultiHeadAttention::new_gqa`. Guard against
-        // silently mis-configuring it as GQA:
-        debug_assert!(
-            num_kv_heads == 0 || num_kv_heads == n_heads,
-            "MultiHeadAttention does not implement GQA (num_kv_heads {num_kv_heads} != n_heads {n_heads}); use NdMultiHeadAttention::new_gqa"
-        );
-
         Self {
             d_model,
             n_heads,
             d_head,
-            num_kv_heads: if num_kv_heads > 0
-            {
-                num_kv_heads
-            }
-            else
-            {
-                n_heads
-            },
-            use_rope: false,
-            rope_theta: 10000.0,
             w_q: Linear::new(d_model, d_model, w_init, b_init, rng),
             w_k: Linear::new(d_model, d_model, w_init, b_init, rng),
             w_v: Linear::new(d_model, d_model, w_init, b_init, rng),
@@ -270,29 +251,6 @@ impl MultiHeadAttention {
         self.w_o.sync(tape);
     }
 
-    /// GQA: répète les têtes KV pour correspondre au nombre de têtes Q.
-    /// Si num_kv_heads == num_heads, c'est un no-op (MHA standard).
-    ///
-    /// La concaténation au niveau `Var` (tape) est fournie par `concat_rows`
-    /// (importée depuis `autodiff::reverse`). Pour le niveau `Tensor` brut,
-    /// on concatène les données manuellement.
-    #[allow(dead_code)]
-    fn repeat_kv_heads(&self, x: Tensor, _seq_len: usize, _d_head: usize) -> Tensor {
-        let repeat = self.n_heads / self.num_kv_heads;
-        if repeat <= 1
-        {
-            return x;
-        }
-        let x_data = &x.data;
-        let (rows, cols) = (x.rows, x.cols);
-        let mut out = Vec::with_capacity(x_data.len() * repeat);
-        for _ in 0..repeat
-        {
-            out.extend_from_slice(x_data);
-        }
-        Tensor::from_vec(out, rows * repeat, cols)
-    }
-
     pub fn state_dict(&self) -> HashMap<String, Tensor> {
         let mut map = HashMap::new();
         let p = &self.name;
@@ -375,9 +333,6 @@ impl Clone for MultiHeadAttention {
             d_model: self.d_model,
             n_heads: self.n_heads,
             d_head: self.d_head,
-            num_kv_heads: self.num_kv_heads,
-            use_rope: self.use_rope,
-            rope_theta: self.rope_theta,
             w_q: self.w_q.clone(),
             w_k: self.w_k.clone(),
             w_v: self.w_v.clone(),
@@ -397,20 +352,20 @@ mod tests {
     #[test]
     fn mha_construction_validates_d_h() {
         let mut rng = PcgEngine::new(0);
-        let _ = MultiHeadAttention::new(64, 4, 0, false, &KaimingNormal, &Zeros, &mut rng);
+        let _ = MultiHeadAttention::new(64, 4, false, &KaimingNormal, &Zeros, &mut rng);
     }
 
     #[test]
     #[should_panic(expected = "divisible")]
     fn mha_panics_if_d_not_divisible() {
         let mut rng = PcgEngine::new(0);
-        let _ = MultiHeadAttention::new(63, 4, 0, false, &KaimingNormal, &Zeros, &mut rng);
+        let _ = MultiHeadAttention::new(63, 4, false, &KaimingNormal, &Zeros, &mut rng);
     }
 
     #[test]
     fn mha_forward_shape() {
         let mut rng = PcgEngine::new(0);
-        let mut mha = MultiHeadAttention::new(8, 2, 0, false, &KaimingNormal, &Zeros, &mut rng);
+        let mut mha = MultiHeadAttention::new(8, 2, false, &KaimingNormal, &Zeros, &mut rng);
         let tape = Tape::new();
         let x = Tensor::from_vec((0..48).map(|x| x as f32 * 0.01).collect(), 6, 8);
         let x_var = tape.input(x);
@@ -422,7 +377,7 @@ mod tests {
     #[test]
     fn mha_gradient_flows_to_inputs() {
         let mut rng = PcgEngine::new(42);
-        let mut mha = MultiHeadAttention::new(4, 2, 0, false, &KaimingNormal, &Zeros, &mut rng);
+        let mut mha = MultiHeadAttention::new(4, 2, false, &KaimingNormal, &Zeros, &mut rng);
         let tape = Tape::new();
         let x_var = tape.input(Tensor::from_vec(
             vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
@@ -453,15 +408,8 @@ mod tests {
     fn mha_finite_diff_case_shaped(causal: bool, batch: usize, seq: usize) {
         let mut rng = PcgEngine::new(7);
         let (d_model, n_heads) = (4usize, 2usize);
-        let mut mha = MultiHeadAttention::new(
-            d_model,
-            n_heads,
-            0,
-            causal,
-            &KaimingNormal,
-            &Zeros,
-            &mut rng,
-        );
+        let mut mha =
+            MultiHeadAttention::new(d_model, n_heads, causal, &KaimingNormal, &Zeros, &mut rng);
         let n = batch * seq * d_model;
         let x0: Vec<f32> = (0..n).map(|i| (i as f32 * 0.13).sin()).collect();
         // Non-uniform output weighting so the input gradient isn't degenerate.
@@ -512,7 +460,7 @@ mod tests {
     #[test]
     fn mha_causal_mask_shape_preserved() {
         let mut rng = PcgEngine::new(0);
-        let mut mha = MultiHeadAttention::new(8, 2, 0, true, &KaimingNormal, &Zeros, &mut rng);
+        let mut mha = MultiHeadAttention::new(8, 2, true, &KaimingNormal, &Zeros, &mut rng);
         let tape = Tape::new();
         let x = tape.input(Tensor::from_vec(vec![0.1; 32], 4, 8));
         let x_3d = Var3D::from_var(x, 2, 2, 8);
@@ -523,12 +471,12 @@ mod tests {
     #[test]
     fn mha_state_dict_round_trip() {
         let mut rng = PcgEngine::new(0);
-        let mha1 = MultiHeadAttention::new(8, 2, 0, false, &KaimingNormal, &Zeros, &mut rng);
+        let mha1 = MultiHeadAttention::new(8, 2, false, &KaimingNormal, &Zeros, &mut rng);
         let sd = mha1.state_dict();
         assert_eq!(sd.len(), 8);
 
         let mut rng2 = PcgEngine::new(99);
-        let mut mha2 = MultiHeadAttention::new(8, 2, 0, false, &Zeros, &Zeros, &mut rng2);
+        let mut mha2 = MultiHeadAttention::new(8, 2, false, &Zeros, &Zeros, &mut rng2);
         mha2.load_state_dict(&sd).unwrap();
 
         assert_eq!(mha2.w_q.weight.data, mha1.w_q.weight.data);
@@ -594,15 +542,8 @@ mod tests {
         let n_heads = 2;
         let seq = 4;
         let mut rng = PcgEngine::new(123);
-        let mut attn = MultiHeadAttention::new(
-            d_model,
-            n_heads,
-            n_heads,
-            true,
-            &KaimingNormal,
-            &Zeros,
-            &mut rng,
-        );
+        let mut attn =
+            MultiHeadAttention::new(d_model, n_heads, true, &KaimingNormal, &Zeros, &mut rng);
 
         let x: Vec<f32> = (0..seq * d_model)
             .map(|i| (i as f32 * 0.13).sin())

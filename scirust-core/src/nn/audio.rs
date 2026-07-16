@@ -4,6 +4,7 @@ use crate::nn::conv2d::Conv2d;
 use crate::nn::init::Initializer;
 use crate::nn::module::Module;
 use crate::nn::rng::PcgEngine;
+use std::collections::HashMap;
 
 /// Connectionist Temporal Classification (CTC) loss. The blank symbol is the
 /// last vocabulary index (`vocab_size - 1`).
@@ -262,6 +263,68 @@ impl Module for AudioEncoder {
         self.conv1.sync(tape);
         self.conv2.sync(tape);
     }
+
+    fn state_dict(&self) -> HashMap<String, Tensor> {
+        // The convs' default names are not globally unique (both could collide
+        // for some channel configs), so prefix manually like TransformerBlock
+        // does for its unnamed FFN linears.
+        let mut map = HashMap::new();
+        map.insert("conv1.weight".to_string(), self.conv1.weight.clone());
+        if let Some(b) = &self.conv1.bias
+        {
+            map.insert("conv1.bias".to_string(), b.clone());
+        }
+        map.insert("conv2.weight".to_string(), self.conv2.weight.clone());
+        if let Some(b) = &self.conv2.bias
+        {
+            map.insert("conv2.bias".to_string(), b.clone());
+        }
+        map
+    }
+
+    fn load_state_dict(&mut self, sd: &HashMap<String, Tensor>) -> crate::error::Result<()> {
+        load_conv(&mut self.conv1, sd, "conv1")?;
+        load_conv(&mut self.conv2, sd, "conv2")?;
+        Ok(())
+    }
+}
+
+/// Load `{prefix}.weight` / `{prefix}.bias` into a sub-Conv2d, erroring on
+/// missing keys or shape mismatches (same convention as `Conv2d`).
+fn load_conv(
+    conv: &mut Conv2d,
+    sd: &HashMap<String, Tensor>,
+    prefix: &str,
+) -> crate::error::Result<()> {
+    let w = sd
+        .get(&format!("{prefix}.weight"))
+        .ok_or_else(|| format!("missing key: {prefix}.weight"))?;
+    let kk = conv.kernel * conv.kernel;
+    if w.shape() != (conv.out_c, conv.in_c * kk)
+    {
+        crate::bail!(
+            "{prefix}.weight shape mismatch: expected {:?}, got {:?}",
+            (conv.out_c, conv.in_c * kk),
+            w.shape()
+        );
+    }
+    conv.weight = w.clone();
+    if conv.bias.is_some()
+    {
+        let b = sd
+            .get(&format!("{prefix}.bias"))
+            .ok_or_else(|| format!("missing key: {prefix}.bias"))?;
+        if b.shape() != (1, conv.out_c)
+        {
+            crate::bail!(
+                "{prefix}.bias shape mismatch: expected {:?}, got {:?}",
+                (1, conv.out_c),
+                b.shape()
+            );
+        }
+        conv.bias = Some(b.clone());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -372,6 +435,41 @@ mod tests {
                 "grad elem {i}: analytic {} vs numerical {num}",
                 ana[i]
             );
+        }
+    }
+
+    #[test]
+    fn audio_encoder_state_dict_round_trip() {
+        use crate::nn::init::{KaimingNormal, Zeros};
+
+        let mut rng = PcgEngine::new(7);
+        let mut enc1 = AudioEncoder::new(1, 2, 3, &KaimingNormal, &Zeros, &mut rng);
+        // Make the biases non-trivial so the round trip is meaningful.
+        enc1.conv1.bias = Some(Tensor::from_vec(vec![0.5, -0.5], 1, 2));
+        enc1.conv2.bias = Some(Tensor::from_vec(vec![1.0, 2.0, 3.0], 1, 3));
+
+        let sd = enc1.state_dict();
+        assert_eq!(sd.len(), 4);
+
+        let mut rng2 = PcgEngine::new(99);
+        let mut enc2 = AudioEncoder::new(1, 2, 3, &Zeros, &Zeros, &mut rng2);
+        // Missing keys must be an error, not a silent skip.
+        assert!(enc2.load_state_dict(&HashMap::new()).is_err());
+        enc2.load_state_dict(&sd).unwrap();
+
+        // Compare every parameter tensor through the tape values.
+        let tape1 = Tape::new();
+        let tape2 = Tape::new();
+        let x = Tensor::from_vec(vec![0.1; 16], 1, 16); // 4x4 mono spectrogram
+        let _ = enc1.forward(&tape1, tape1.input(x.clone()));
+        let _ = enc2.forward(&tape2, tape2.input(x));
+        let idx1 = enc1.parameter_indices();
+        let idx2 = enc2.parameter_indices();
+        assert_eq!(idx1.len(), 4);
+        assert_eq!(idx1.len(), idx2.len());
+        for (a, b) in idx1.iter().zip(&idx2)
+        {
+            assert_eq!(tape1.value(*a).data, tape2.value(*b).data);
         }
     }
 }

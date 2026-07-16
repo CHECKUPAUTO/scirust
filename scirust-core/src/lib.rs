@@ -37,7 +37,15 @@ pub mod nn;
 // `scirust-core/src/simd/` and is referenced as `crate::simd::tiling::matmul_tiled_f32`
 // by `tensor/tiling.rs`; it must be declared here or the crate fails to build.
 pub mod simd;
-pub use scirust_autodiff::*;
+/// Autodiff **scalaire** (f64) de `scirust-autodiff` : nombres duaux
+/// ([`scalar_ad::Dual`]) et tape scalaire de démonstration. Namespacé pour ne
+/// plus entrer en collision avec la tape **tenseur** ([`autodiff::reverse`]) :
+/// l'ancien glob `pub use scirust_autodiff::*;` publiait un `Tape`/`Var`
+/// scalaires à la racine du crate, si bien que `scirust_core::Tape` et
+/// `scirust_core::prelude::Tape` étaient **deux types différents**.
+pub mod scalar_ad {
+    pub use scirust_autodiff::*;
+}
 pub use scirust_macros::autodiff;
 pub use scirust_simd::*;
 
