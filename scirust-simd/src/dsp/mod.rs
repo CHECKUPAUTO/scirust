@@ -17,6 +17,8 @@
 //   sans allocation, phase linéaire pour des coefficients symétriques.
 // * [`fft`] — transformée de Fourier rapide radix-2 (Cooley–Tukey) en place,
 //   avec le complexe générique [`fft::Complex`].
+// * [`window`] — fenêtres d'apodisation (Hann, Hamming, Blackman) pour
+//   réduire la fuite spectrale avant une FFT.
 //
 // ## Pourquoi la virgule fixe pour le DSP ?
 //
@@ -28,6 +30,7 @@
 pub mod biquad;
 pub mod fft;
 pub mod fir;
+pub mod window;
 
 pub use biquad::Biquad;
 pub use fft::{Complex, Plan, fft, ifft, irfft, rfft};

@@ -7,6 +7,7 @@
 // impulsionnelle, l'accord virgule fixe ↔ flottant, et le déterminisme bit-à-bit.
 
 use super::fft::{Complex, Plan, fft, ifft, irfft, rfft};
+use super::window;
 use super::{Biquad, Fir};
 use crate::fixed::{Q8_8, Q8_24, Q16_16, RealScalar};
 
@@ -625,4 +626,159 @@ fn dsp_filters_run_on_fixed_i16() {
         out
     };
     assert_eq!(run(), run());
+}
+
+// ------------------------------------------------------------------ //
+//  Fenêtres d'apodisation : Hann / Hamming / Blackman                 //
+// ------------------------------------------------------------------ //
+
+/// Valeurs connues aux extrémités (`n=0`) et au centre (`n=len/2`, `len`
+/// pair) : `cos(0)=1`, `cos(π)=−1` donnent des constantes exactes.
+fn check_window_known_values<T: Scalar + core::fmt::Debug>() {
+    let len = 8;
+    assert!((window::hann_coeff::<T>(0, len).to_f64() - 0.0).abs() < T::TOL);
+    assert!((window::hamming_coeff::<T>(0, len).to_f64() - 0.08).abs() < T::TOL);
+    assert!((window::blackman_coeff::<T>(0, len).to_f64() - 0.0).abs() < T::TOL);
+
+    let mid = len / 2;
+    assert!((window::hann_coeff::<T>(mid, len).to_f64() - 1.0).abs() < T::TOL);
+    assert!((window::hamming_coeff::<T>(mid, len).to_f64() - 1.0).abs() < T::TOL);
+    assert!((window::blackman_coeff::<T>(mid, len).to_f64() - 1.0).abs() < T::TOL);
+}
+
+#[test]
+fn window_known_values_all_scalars() {
+    check_window_known_values::<f32>();
+    check_window_known_values::<f64>();
+    check_window_known_values::<Q16_16>();
+}
+
+/// Symétrie de la convention périodique : `w[n] == w[len-n]` (car
+/// `cos(2π−θ) = cos(θ)`).
+fn check_window_symmetry<T: Scalar + core::fmt::Debug>() {
+    let len = 11; // impair : aucun n n'est son propre miroir sauf 0
+    for n in 1..len
+    {
+        let a = window::hann_coeff::<T>(n, len).to_f64();
+        let b = window::hann_coeff::<T>(len - n, len).to_f64();
+        assert!((a - b).abs() < T::TOL, "hann symétrie n={n}: {a} vs {b}");
+        let a = window::hamming_coeff::<T>(n, len).to_f64();
+        let b = window::hamming_coeff::<T>(len - n, len).to_f64();
+        assert!((a - b).abs() < T::TOL, "hamming symétrie n={n}: {a} vs {b}");
+        let a = window::blackman_coeff::<T>(n, len).to_f64();
+        let b = window::blackman_coeff::<T>(len - n, len).to_f64();
+        assert!(
+            (a - b).abs() < T::TOL,
+            "blackman symétrie n={n}: {a} vs {b}"
+        );
+    }
+}
+
+#[test]
+fn window_symmetry_all_scalars() {
+    check_window_symmetry::<f64>();
+    check_window_symmetry::<Q16_16>();
+}
+
+/// Comparaison à la définition mathématique directe en `f64`.
+fn check_window_matches_reference<T: Scalar + core::fmt::Debug>() {
+    let len = 13;
+    for n in 0..len
+    {
+        let theta = 2.0 * core::f64::consts::PI * (n as f64) / (len as f64);
+        let want_hann = 0.5 - 0.5 * theta.cos();
+        let want_hamming = 0.54 - 0.46 * theta.cos();
+        let want_blackman = 0.42 - 0.5 * theta.cos() + 0.08 * (2.0 * theta).cos();
+
+        let got_hann = window::hann_coeff::<T>(n, len).to_f64();
+        let got_hamming = window::hamming_coeff::<T>(n, len).to_f64();
+        let got_blackman = window::blackman_coeff::<T>(n, len).to_f64();
+
+        assert!(
+            (got_hann - want_hann).abs() < T::TOL,
+            "hann n={n}: {got_hann} vs {want_hann}"
+        );
+        assert!(
+            (got_hamming - want_hamming).abs() < T::TOL,
+            "hamming n={n}: {got_hamming} vs {want_hamming}"
+        );
+        assert!(
+            (got_blackman - want_blackman).abs() < T::TOL,
+            "blackman n={n}: {got_blackman} vs {want_blackman}"
+        );
+    }
+}
+
+#[test]
+fn window_matches_reference_all_scalars() {
+    check_window_matches_reference::<f32>();
+    check_window_matches_reference::<f64>();
+    check_window_matches_reference::<Q16_16>();
+    check_window_matches_reference::<Q8_24>();
+}
+
+#[test]
+fn window_vec_builders_match_coeff() {
+    let len = 16;
+    let hann_v: Vec<f64> = window::hann(len);
+    let hamming_v: Vec<f64> = window::hamming(len);
+    let blackman_v: Vec<f64> = window::blackman(len);
+    assert_eq!(hann_v.len(), len);
+    assert_eq!(hamming_v.len(), len);
+    assert_eq!(blackman_v.len(), len);
+    for n in 0..len
+    {
+        assert_eq!(hann_v[n], window::hann_coeff::<f64>(n, len));
+        assert_eq!(hamming_v[n], window::hamming_coeff::<f64>(n, len));
+        assert_eq!(blackman_v[n], window::blackman_coeff::<f64>(n, len));
+    }
+}
+
+#[test]
+fn window_apply_multiplies_elementwise() {
+    let mut signal = vec![2.0f64, 4.0, 6.0, 8.0];
+    let win = vec![0.5f64, 1.0, 0.25, 0.0];
+    window::apply(&mut signal, &win);
+    assert_eq!(signal, vec![1.0, 4.0, 1.5, 0.0]);
+}
+
+#[test]
+#[should_panic(expected = "apply")]
+fn window_apply_dim_mismatch_panics() {
+    let mut signal = vec![1.0f64, 2.0, 3.0];
+    let win = vec![1.0f64, 1.0];
+    window::apply(&mut signal, &win);
+}
+
+#[test]
+fn window_reduces_spectral_leakage_vs_rectangular() {
+    // Un ton pur non multiple de la fréquence d'échantillonnage/N fuit dans
+    // les bins voisins. La fenêtre de Hann doit réduire l'énergie captée par
+    // les bins éloignés du pic par rapport à la fenêtre rectangulaire
+    // (aucune fenêtre = boxcar implicite).
+    let n = 64;
+    let bin = 5.5; // non entier : fuite garantie sous fenêtre rectangulaire
+    let signal: Vec<f64> = (0..n)
+        .map(|i| (2.0 * core::f64::consts::PI * bin * (i as f64) / (n as f64)).sin())
+        .collect();
+
+    let spec_rect = rfft(&signal);
+    let mut windowed = signal.clone();
+    window::apply(&mut windowed, &window::hann::<f64>(n));
+    let spec_hann = rfft(&windowed);
+
+    // Énergie loin du pic (bins 0..2 et 9..fin), hors lobe principal.
+    let far_energy = |spec: &[Complex<f64>]| -> f64 {
+        spec.iter()
+            .enumerate()
+            .filter(|&(k, _)| k <= 2 || k >= 9)
+            .map(|(_, c)| c.re * c.re + c.im * c.im)
+            .sum()
+    };
+    let leak_rect = far_energy(&spec_rect);
+    let leak_hann = far_energy(&spec_hann);
+    assert!(
+        leak_hann < leak_rect,
+        "fuite Hann {leak_hann} devrait être < fuite rectangulaire {leak_rect}"
+    );
 }
