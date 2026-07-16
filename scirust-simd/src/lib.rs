@@ -667,6 +667,11 @@ pub mod transformer;
 #[cfg(feature = "portable-simd")]
 pub mod hypercomplex;
 
+// Socle de réductions SIMD (SimdScalar, sommes fast/déterministe/Kahan,
+// dot, normes, extrema) — construit sur std::simd (feature `portable-simd`).
+#[cfg(feature = "portable-simd")]
+pub mod reductions;
+
 #[cfg(all(feature = "nightly-simd", target_arch = "x86_64"))]
 pub mod amx;
 #[cfg(all(feature = "nightly-simd", target_arch = "x86_64"))]
