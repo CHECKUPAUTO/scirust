@@ -111,6 +111,7 @@ pub mod quantum;
 pub mod xai;
 
 pub mod amp;
+pub mod certified_numerics;
 pub mod distributed;
 pub mod dp;
 pub mod exact_acc;

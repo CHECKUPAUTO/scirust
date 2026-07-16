@@ -753,6 +753,24 @@ mod tests {
     }
 
     #[test]
+    // Same Miri policy as the other quantile round-trip tests.
+    #[cfg_attr(miri, ignore)]
+    fn deep_lower_tail_is_exponentially_small_and_chi_squared_shares_the_fix() {
+        // Complements the test above (the CI failure that produced the seed in
+        // proptest-regressions/dist.txt): the recovered quantile really is
+        // exponentially small — not merely nonzero — and χ²(k) = Gamma(k/2, 2)
+        // takes the same log-space path through `invert_cdf`.
+        let x = Gamma::new(0.01, 0.01).quantile(0.01);
+        assert!(
+            x > 0.0 && x < 1e-150,
+            "expected an exponentially small quantile, got {x}"
+        );
+        let c = ChiSquared::new(0.02);
+        let p_hat = c.cdf(c.quantile(0.01));
+        assert!(close(p_hat, 0.01, 1e-6), "chi2 p_hat={p_hat}");
+    }
+
+    #[test]
     // Ignored under Miri: `sample` goes through the quantile (erfinv/ln), and
     // Miri deliberately randomizes the last ULPs of transcendental float
     // intrinsics per call, so lockstep bit-identity cannot hold under the
