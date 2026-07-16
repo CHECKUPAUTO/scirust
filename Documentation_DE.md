@@ -170,6 +170,35 @@ Standardliteratur abdecken, mit automatischer Erkennung des Rauschtyps:
 - **Echtzeit**: kausale Sample-für-Sample-Gegenstücke in `denoise::streaming`
   hinter dem Trait `StreamingDenoiser`. **2-D-Bilder**: `scirust_vision::denoise`
   (2-D-Median, separierbare Wavelets, Non-Local Means).
+
+Drei Ergänzungen aus dem TSHF-Forschungsprogramm (`TSHF_RESEARCH_2026-07-16.md`):
+
+- **`denoise::vst`** — *signalabhängiges* Rauschen: varianzstabilisierende
+  Transformationen mit **bias-korrigierter** Inverse (Anscombe + exakte
+  erwartungstreue Inverse von Mäkitalo-Foi für Poisson; **GAT** für das
+  gemischte Poisson-Gauß-Sensormodell `x = gain·p + n` mit seiner exakten
+  Inversen von 2013; vorzeichenbehafteter Logarithmus + Duan-Smearing für
+  multiplikatives Rauschen; vorzeichenbehaftete Wurzel; Box-Cox). Der
+  konservative Selektor `detect_noise_model` (Default = Identität) ist als
+  bedingter Vor-/Nachschritt in `denoise_auto` eingehängt. Gemessen: +5,0 dB
+  (Poisson mit niedriger Zählrate), +4,9 dB (multiplikativ 30 %), +1,4 bis
+  +3,0 dB (gemischt Poisson-Gauß), ±0 dB im milden Regime — nie ein Verlust.
+  Dokumentierte bekannte Einschränkung: schnelle Träger (die Wurzel erzeugt
+  Harmonische, die der innere Entrauscher beschneidet; ≈ −1 dB gemessen) — die
+  VST zielt auf langsam veränderliche Intensitäten. Das **2-D-Bild**-Pendant
+  (`vst_denoise2d`) lebt in `scirust_vision::denoise`; das vollständige
+  Experimentalprotokoll (§9 des Berichts) lässt sich mit
+  `cargo run -p scirust-signal --example vst_protocol` wiederholen.
+- **`denoise::multichannel`** — Operatoren, die die Kanäle wirklich koppeln:
+  `wiener_spatial` (kanalübergreifendes Joint-Wiener-Filter, +2,5 bis +3,7 dB
+  gegenüber seiner kanalweisen Einschränkung auf korrelierten Quellen) und
+  `vector_median` (Referenz Astola 1990, beibehalten mit ihrem gemessenen
+  *ungünstigen* Urteil gegenüber dem kanalweisen Median — siehe
+  `phase2_gate_report()`).
+- **`denoise::compand`** — beschränktes weiches Clipping (`soft_clip`,
+  `soft_clip_robust`; tanh/atan/softsign) für Anzeige und robuste Features,
+  **ohne Inverse per Design**: Die Inversion sättigender Transformationen
+  verstärkt das Rauschen ×10-×100 (TSHF-Bericht, E2/E4).
 - Bekannte Einschränkung: Ein Ton unterhalb von ~5 % von fs ist von legitimem
   Signalinhalt nicht zu unterscheiden — `remove_mains_hum_iir` explizit aufrufen,
   wenn die Netzfrequenz bekannt ist. Qualitäts-Benchmark:

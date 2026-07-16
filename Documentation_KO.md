@@ -135,6 +135,12 @@ SciRust는 이제 특히 자동차 도메인에서 **산업 생산 라인 모니
 - **선형** (이동 평균, 가우시안, Savitzky-Golay, EMA), **순위 기반** (중앙값, Hampel, α-절사 평균), **웨이블릿** (universal / SURE / 레벨 의존 / Bayes / NeighBlock / 평행이동 불변), **영위상 IIR 노치** (`notch_iir`, `remove_mains_hum_iir` — FFT 그리드를 벗어나도 정밀), **단시간 Wiener** (기본 / 결정 지향 / 노이즈 플로어 추적, *비정상* 노이즈용), **변분법** (Tikhonov, 총변동), **적응형** (자동 조정 Kalman, LMS/RLS 라인 인핸서, 1-D non-local means).
 - **세 가지 자동 진입점**: `denoise_auto` (분류 후 하나의 패밀리 적용), `denoise_best` (잔차 백색성 기반의 무참조 점수로 판정하는 토너먼트), `denoise_cascade` (혼합 노이즈: 감지 → 처리 → 재감지).
 - **실시간**: `StreamingDenoiser` 트레이트 뒤에 있는 `denoise::streaming`의 인과적 샘플 단위 대응 버전. **2-D 이미지**: `scirust_vision::denoise` (2-D 중앙값, 분리 가능 웨이블릿, non-local means).
+
+TSHF 연구 프로그램(`TSHF_RESEARCH_2026-07-16.md`)에서 나온 세 가지 보완 모듈:
+
+- **`denoise::vst`** — *신호 의존적* 노이즈: **편향 보정된** 역변환을 갖춘 분산 안정화 변환 (Anscombe + Poisson용 Mäkitalo-Foi의 정확한 비편향 역변환; Poisson-가우시안 혼합 센서 모델 `x = gain·p + n`용 **GAT**와 그 2013년 정확한 역변환; 곱셈성 노이즈용 부호 있는 log + Duan smearing; 부호 있는 제곱근; Box-Cox). 보수적 선택기 `detect_noise_model`(기본값 = 항등)은 `denoise_auto`의 조건부 전/후 단계로 연결되어 있습니다. 측정 결과: +5.0 dB (저계수 Poisson), +4.9 dB (곱셈성 30 %), +1.4~+3.0 dB (Poisson-가우시안 혼합), 완만한 조건에서는 ±0 dB — 손실은 결코 없습니다. 문서화된 알려진 제한 사항: 빠른 반송파 (제곱근이 생성한 고조파를 내부 노이즈 제거기가 깎아냄; 측정치 ≈ −1 dB) — VST는 느리게 변하는 강도를 대상으로 합니다. **2-D 이미지** 대응 버전(`vst_denoise2d`)은 `scirust_vision::denoise`에 있으며, 전체 실험 프로토콜(보고서의 §9)은 `cargo run -p scirust-signal --example vst_protocol`로 재현할 수 있습니다.
+- **`denoise::multichannel`** — 채널을 실제로 결합하는 연산자: `wiener_spatial` (채널 간 조인트 Wiener, 상관된 소스에서 채널별 제한 버전 대비 +2.5~+3.7 dB) 및 `vector_median` (Astola 1990 레퍼런스, 채널별 중앙값 대비 측정된 *불리한* 판정과 함께 보존 — `phase2_gate_report()` 참조).
+- **`denoise::compand`** — 유계 소프트 클리핑 (`soft_clip`, `soft_clip_robust`; tanh/atan/softsign). 표시 및 강건한 특징용이며, **설계상 역변환이 없습니다**: 포화 변환을 역변환하면 노이즈가 ×10-×100으로 증폭됩니다 (TSHF 보고서, E2/E4).
 - 알려진 제한 사항: fs의 약 5 % 미만인 톤은 정당한 신호 성분과 구별할 수 없습니다 — 전원 주파수를 알고 있는 경우 `remove_mains_hum_iir`를 명시적으로 호출하십시오. 품질 벤치마크: `cargo run -p scirust-signal --example denoise_benchmark`.
 
 ### 8.2 OPC-UA 커넥터 (`scirust-opcua`)

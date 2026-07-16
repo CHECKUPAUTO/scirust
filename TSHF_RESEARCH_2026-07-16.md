@@ -439,3 +439,42 @@ d'acceptation obtenues :
 - **Phase 4 (SIMD des φ/φ⁻¹) — non déclenchée** : φ/φ⁻¹ sont des passes O(n) de
   fonctions élémentaires, négligeables devant le coût des débruiteurs internes.
 - **Phase 5 (GPU) — non déclenchée** : volumes inchangés depuis le rapport.
+
+## Addendum 2 — protocole §9 exécuté, extensions GAT et 2-D (2026-07-16)
+
+Le protocole expérimental du §9 est désormais rejouable
+(`cargo run --release -p scirust-signal --example vst_protocol`, blocs P1–P5
+déterministes) et ses questions ouvertes sont **mesurées** :
+
+- **§9.3, seuil de croisement (P4)** : à ×10 de dynamique de niveaux, le gain
+  VST est déjà matériel (≥ +0,5 dB) à 2 % de bruit multiplicatif (le croisement
+  est ≤ 2 %) ; à 30 % de bruit, le croisement en *dynamique de niveaux* est à
+  **≈ ×3** — et à ×2 la VST est une perte matérielle de −0,77 dB, ce qui
+  *précise et durcit* le « gain ≈ nul en régime doux ×2 » du §9.3. Conséquence
+  codée : la porte de dynamique du sélecteur `detect_noise_model` est resserrée
+  de ×2 à **×3** (constante `DETECT_MIN_RANGE`, documentée par cette mesure).
+- **Régime de porteuse (P5, limitation nouvelle)** : le gain Anscombe s'effondre
+  de +5,17 dB (porteuse à 3 cycles/4096) à **−0,93 dB (40 cycles)** — une φ
+  ponctuelle ne commute pas avec le spectre : la racine convertit une porteuse
+  rapide en pile d'harmoniques que le rétrécissement linéaire interne rogne.
+  Documenté dans la doc du module `vst` (« Known limitation: fast carriers »)
+  et épinglé par test. La VST s'adresse aux intensités *lentes*.
+- **GAT (§9.1c, le cas Starck-Murtagh)** : `VstKind::Gat { gain, sigma }` avec
+  l'inverse exact non biaisé en forme close (Mäkitalo-Foi 2013) : +1,54 à
+  +2,87 dB selon la calibration (pire cas : lecture dominante (1.3, 1.5)) ;
+  gain=1, σ=0 se réduit exactement à Anscombe. Fait notable de scalabilité : les
+  calibrations à σ/gain constant sont des re-mises à l'échelle exactes (la GAT
+  normalise le gain, chaque étage est équivariant d'échelle).
+- **Transposition 2-D (`scirust_vision::denoise`)** : `vst_denoise2d` /
+  `vst_denoise2d_auto`. Trois résultats 1-D se transposent tels quels : le
+  VisuShrink 2-D perd sous stabilisation (−0,6 dB — calibrage MAD brut
+  accidentellement adaptatif) ; la médiane 2-D est *invariante* bit à bit
+  (Prop. 2 du rapport, confirmée empiriquement) ; le meilleur partenaire mesuré
+  est **NLM 2-D** (+5,4 dB Poisson, +3,0 dB GAT — ses distances de patchs à `h`
+  global supposent exactement l'homoscédasticité que la VST restaure). Le
+  détecteur 1-D fonctionne sur images lisses en segments de lignes, avec une
+  corrélation plus serrée (la dispersion log-niveau est le facteur limitant) ;
+  les ratés échouent vers Identity (sûr).
+- **Bras ondelette (P2)** : VisuShrink ne bénéficie de la stabilisation sur
+  *aucune* fraction testée (−4,4 à −1,2 dB) — le choix `stft_wiener_auto` (1-D)
+  / `nlm2d` (2-D) comme partenaires internes est confirmé.

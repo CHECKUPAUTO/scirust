@@ -1,5 +1,6 @@
-//! 2-D image denoising — rank filtering, separable wavelet shrinkage, and
-//! non-local means.
+//! 2-D image denoising — rank filtering, separable wavelet shrinkage,
+//! non-local means, and variance-stabilized (VST) pipelines for
+//! signal-dependent noise.
 //!
 //! Images are flat row-major `&[f64]` slices with explicit `(width, height)`,
 //! matching the crate convention. Three complementary families cover the classic
@@ -22,6 +23,24 @@
 //!   so recurring structure — texture, stripes, printed patterns — is averaged
 //!   along its own repetitions instead of being smoothed away.
 //!
+//! All three assume additive, homoscedastic noise. **Signal-dependent** noise —
+//! photon-counting Poisson (`σ² = level`, low-flux/EO-IR imaging), the mixed
+//! Poisson-Gaussian CCD/CMOS model, multiplicative speckle — is handled by
+//! wrapping any of them in a variance-stabilizing transform sandwich:
+//!
+//! * [`vst_denoise2d`] — forward VST (`scirust_signal::denoise::vst`, which is
+//!   pointwise and therefore applies verbatim to a flat image buffer), any 2-D
+//!   Gaussian denoiser in the stabilized domain, then the **bias-corrected**
+//!   inverse (exact unbiased for Anscombe/GAT after Mäkitalo & Foi 2011/2013,
+//!   Duan 1983 smearing for the signed/Box-Cox transforms). The naive algebraic
+//!   inverse commits the Jensen-gap retransformation bias — measured ≈ −0.25 on
+//!   the mean of a flat λ = 4 Poisson field (pinned by test).
+//! * [`vst_denoise2d_auto`] — the zero-knob variant: conservative noise-model
+//!   detection on the flat buffer, [`VstKind::Identity`] verdict → input clone
+//!   ("does a VST help here?" — the same contract as the 1-D
+//!   `vst_denoise_auto`), otherwise the matched VST around the measured best
+//!   inner denoiser ([`nlm2d`] — see the selection table in its rustdoc).
+//!
 //! All entry points degrade gracefully rather than panic: an empty image, or a
 //! slice whose length disagrees with `width·height` (a malformed caller), comes
 //! back as an unmodified copy, and a stray NaN pixel flows through the NaN-safe
@@ -30,7 +49,9 @@
 //! [`apply_threshold`]); everything 2-D lives here.
 
 use scirust_signal::denoise::transform::{apply_threshold, dwt_step, idwt_step};
-use scirust_signal::denoise::{ThresholdMode, Wavelet};
+use scirust_signal::denoise::{
+    ThresholdMode, VstKind, Wavelet, detect_noise_model, vst_forward, vst_inverse_corrected,
+};
 
 // ─── Shared order-statistics helpers ────────────────────────────────────────
 
@@ -611,10 +632,161 @@ pub fn nlm2d(
     out
 }
 
+// ─── Variance-stabilizing transform pipelines ───────────────────────────────
+
+/// Patch half-width of the [`nlm2d`] inner denoiser of [`vst_denoise2d_auto`]
+/// (with [`VST_INNER_SEARCH_HALF`]: the module's documented solid default,
+/// `patch_half = 1`, `search_half = 5`, automatic filtering strength).
+const VST_INNER_PATCH_HALF: usize = 1;
+/// Search half-width of the [`nlm2d`] inner denoiser of [`vst_denoise2d_auto`].
+const VST_INNER_SEARCH_HALF: usize = 5;
+
+/// Run a 2-D image denoiser inside a variance-stabilizing-transform sandwich
+/// (the standard low-flux/photon-counting pipeline — Anscombe 1948; Mäkitalo &
+/// Foi, IEEE TIP 2011/2013; Starck, Murtagh & Bijaoui 1995):
+///
+/// ```text
+/// img → vst_forward(kind) → denoiser(t, width, height)
+///     → bias-corrected inverse (residuals t − filtered feed the correction)
+/// ```
+///
+/// A VST is pointwise, so the 1-D transforms of `scirust_signal::denoise::vst`
+/// apply verbatim to the flat row-major buffer; only the inner `denoiser` is
+/// 2-D. The inverse is [`vst_inverse_corrected`] — exact unbiased for
+/// [`VstKind::Anscombe`] / [`VstKind::Gat`], Duan (1983) smearing (fed with the
+/// transformed-domain residuals) for the signed and Box-Cox transforms — never
+/// the naive algebraic inverse, whose Jensen-gap retransformation bias is
+/// measured at ≈ −0.25 on the mean of a flat λ = 4 Poisson field and costs
+/// 0.7–1.0 dB SNR on the low-count blob fixture (both pinned by tests).
+///
+/// The inner `denoiser` sees an image with (approximately) unit-variance
+/// homoscedastic noise, so any Gaussian denoiser of this module fits — but the
+/// partner matters; see [`vst_denoise2d_auto`] for the measured comparison.
+/// Domain clamps (Anscombe at −3/8, Box-Cox at a positive floor) are inherited
+/// from `scirust_signal` and documented there, never silently redefined here.
+///
+/// Graceful degradation (module convention): an empty image, a
+/// `width·height` / slice-length mismatch, an image without a single finite
+/// pixel, or a `denoiser` that returns a different length than its input all
+/// come back as an unmodified copy.
+pub fn vst_denoise2d(
+    img: &[f64],
+    width: usize,
+    height: usize,
+    kind: VstKind,
+    denoiser: impl Fn(&[f64], usize, usize) -> Vec<f64>,
+) -> Vec<f64> {
+    if img.len() != width * height || img.is_empty()
+    {
+        return img.to_vec();
+    }
+    if !img.iter().any(|v| v.is_finite())
+    {
+        return img.to_vec();
+    }
+    let transformed = vst_forward(kind, img);
+    let filtered = denoiser(&transformed, width, height);
+    if filtered.len() != img.len()
+    {
+        return img.to_vec();
+    }
+    let residuals: Vec<f64> = transformed
+        .iter()
+        .zip(&filtered)
+        .map(|(t, f)| t - f)
+        .collect();
+    vst_inverse_corrected(kind, &filtered, &residuals)
+}
+
+/// The inner Gaussian denoiser of [`vst_denoise2d_auto`]: [`nlm2d`] with the
+/// module's default radii and automatic filtering strength — chosen by
+/// measurement, not assumption (see the selection table there).
+fn vst_auto_inner(img: &[f64], width: usize, height: usize) -> Vec<f64> {
+    nlm2d(
+        img,
+        width,
+        height,
+        VST_INNER_PATCH_HALF,
+        VST_INNER_SEARCH_HALF,
+        0.0,
+    )
+}
+
+/// Zero-knob VST pipeline: detect the noise model on the flat buffer and, when
+/// it is signal-dependent, run the matched VST around the measured best inner
+/// denoiser ([`nlm2d`]); a [`VstKind::Identity`] verdict returns the input
+/// **unchanged**. This entry point answers "does a VST help here?" — plain
+/// denoising is the job of the dedicated denoisers above (the same contract as
+/// the 1-D `vst_denoise_auto`).
+///
+/// ## Inner denoiser: chosen by measurement
+///
+/// SNR (dB, higher is better) on the 96×96 low-count Poisson blob fixture
+/// (λ = 2 + Gaussian blobs, peak ≈ 12; seed 7 of the test suite; seed 71
+/// matches within ±0.6 dB), each inner run identically in the raw domain
+/// ("identity") and inside the Anscombe sandwich with the naive and the
+/// corrected inverse:
+///
+/// | inner denoiser           | identity | naive VST | corrected VST |
+/// |--------------------------|----------|-----------|---------------|
+/// | [`wavelet_denoise2d_auto`] | 18.3   | 17.4      | 17.7          |
+/// | [`nlm2d`] (1, 5, auto)   | 16.8     | 21.5      | **22.2**      |
+/// | [`median2d`] (r = 2)     | 19.3     | 19.3      | 19.2          |
+///
+/// * **Non-local means is the largest beneficiary (+5.4 dB) and the best
+///   overall result**: its patch distances and single global `h` assume
+///   homoscedastic noise — exactly what the VST restores — and its σ estimate
+///   (row-difference MAD) is accurate once the noise floor is level-free.
+/// * **VisuShrink wavelet loses under the VST** (−0.6 dB vs its own raw-domain
+///   run) — the 1-D finding transposes to 2-D: its raw-domain MAD calibration
+///   on the finest diagonal band lands on a mid-range σ that acts as an
+///   accidental level-adaptive threshold, an advantage stabilization removes.
+/// * **The median is invariant**: a rank filter commutes with any monotone
+///   pointwise map, so the sandwich is algebraically a no-op up to the bias
+///   correction (the report's rank-filter auto-neutralization) — identity and
+///   naive columns are bit-identical.
+///
+/// ## What the 1-D noise-model detector does on a 2-D buffer (measured)
+///
+/// `detect_noise_model` splits the flat buffer into 32-sample windows — on a
+/// row-major image these are **row segments**, which on smooth intensity
+/// images are level-homogeneous, so the level-vs-scale regression carries
+/// over. Two measured caveats (96×96 fixtures, 8–10 seeds each):
+///
+/// * On the Poisson blob fixture (λ ∈ [2, 12]) the log-log correlation
+///   straddles the detector's conservative `|r| ≥ 0.6` gate (r ≈ 0.55–0.66;
+///   fires on 9/10 seeds) — noticeably tighter than the 1-D acceptance fixture
+///   (r ≈ 0.75–0.84), whose intensity sweeps a ×13 level range while a
+///   background-2 image caps it at ×6. A missed detection fails safe: Identity
+///   verdict → input clone.
+/// * Additive-Gaussian images never fired (0/10 seeds, zero-mean and
+///   positive-offset): zero-mean patterns trip the positivity gate, offset
+///   ones show |r| ≈ 0.1. Mixed Poisson-Gaussian CCD data (gain 1.3, σ = 1.5)
+///   also reads Identity — the read noise genuinely breaks the pure-Poisson
+///   law, and [`VstKind::Gat`] stays a manual, calibration-driven kind (use
+///   [`vst_denoise2d`] directly), exactly as in the 1-D module.
+///
+/// Graceful degradation: an empty image or a `width·height` / slice-length
+/// mismatch returns the input copied (an all-NaN image does too, via the
+/// detector's Identity verdict). Deterministic: two runs are bit-identical.
+pub fn vst_denoise2d_auto(img: &[f64], width: usize, height: usize) -> Vec<f64> {
+    if img.len() != width * height || img.is_empty()
+    {
+        return img.to_vec();
+    }
+    let kind = detect_noise_model(img);
+    if kind == VstKind::Identity
+    {
+        return img.to_vec();
+    }
+    vst_denoise2d(img, width, height, kind, vst_auto_inner)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use core::f64::consts::PI;
+    use scirust_signal::denoise::vst_inverse_naive;
 
     /// Deterministic 64-bit LCG so noise tests are reproducible without a
     /// `rand` dependency (same generator as the `scirust-signal` test util).
@@ -684,6 +856,270 @@ mod tests {
     fn add_gaussian_noise(img: &[f64], sigma: f64, seed: u64) -> Vec<f64> {
         let mut rng = Lcg::new(seed);
         img.iter().map(|&v| v + sigma * rng.gauss()).collect()
+    }
+
+    /// Signal-to-noise ratio in dB against a clean reference (the 1-D VST
+    /// suite's oracle metric).
+    fn snr_db(clean: &[f64], est: &[f64]) -> f64 {
+        let sig: f64 = clean.iter().map(|&x| x * x).sum();
+        let err: f64 = clean
+            .iter()
+            .zip(est.iter())
+            .map(|(&c, &e)| (c - e) * (c - e))
+            .sum();
+        10.0 * (sig / err.max(1.0e-30)).log10()
+    }
+
+    /// Poisson sampler — Knuth's product-of-uniforms algorithm on the shared
+    /// deterministic LCG; adequate for `λ ≲ 30` (all fixtures stay below 13).
+    fn poisson(rng: &mut Lcg, lambda: f64) -> f64 {
+        if lambda <= 0.0
+        {
+            return 0.0;
+        }
+        let l = (-lambda).exp();
+        let mut k: u64 = 0;
+        let mut p = 1.0;
+        loop
+        {
+            k += 1;
+            p *= rng.uniform();
+            if p <= l
+            {
+                break;
+            }
+        }
+        (k - 1) as f64
+    }
+
+    /// Smooth low-count intensity image: background λ = 2 plus two broad
+    /// Gaussian blobs (amplitudes 10 and 7, σ = 20 and 14 px), peak λ ≈ 12.
+    /// The blobs are wide so that the 32-pixel row segments the noise-model
+    /// detector windows on are level-homogeneous and a good share of them
+    /// sample intermediate levels — with compact blobs (σ ≈ 12/9) the
+    /// level-vs-scale correlation measured r ≈ 0.57, just under the detector's
+    /// conservative 0.6 gate; at σ = 20/14 it fires on 9/10 seeds (see the
+    /// `vst_denoise2d_auto` docs).
+    fn blob_intensity(w: usize, h: usize) -> Vec<f64> {
+        let mut img = Vec::with_capacity(w * h);
+        for y in 0..h
+        {
+            for x in 0..w
+            {
+                let (dx1, dy1) = (x as f64 - 0.35 * w as f64, y as f64 - 0.4 * h as f64);
+                let (dx2, dy2) = (x as f64 - 0.72 * w as f64, y as f64 - 0.68 * h as f64);
+                let b1 = 10.0 * (-(dx1 * dx1 + dy1 * dy1) / (2.0 * 400.0)).exp();
+                let b2 = 7.0 * (-(dx2 * dx2 + dy2 * dy2) / (2.0 * 196.0)).exp();
+                img.push(2.0 + b1 + b2);
+            }
+        }
+        img
+    }
+
+    /// `(clean intensity, Poisson counts)` blob fixture.
+    fn poisson_blob_fixture(w: usize, h: usize, seed: u64) -> (Vec<f64>, Vec<f64>) {
+        let clean = blob_intensity(w, h);
+        let mut rng = Lcg::new(seed);
+        let noisy = clean.iter().map(|&l| poisson(&mut rng, l)).collect();
+        (clean, noisy)
+    }
+
+    /// `(clean mean gain·λ, noisy)` mixed Poisson-Gaussian CCD fixture on the
+    /// blob intensity: `x = gain·p + n`, `p ~ Poisson(λ)`, `n ~ N(0, σ²)`.
+    fn gat_blob_fixture(
+        w: usize,
+        h: usize,
+        gain: f64,
+        sigma: f64,
+        seed: u64,
+    ) -> (Vec<f64>, Vec<f64>) {
+        let lambda = blob_intensity(w, h);
+        let mut rng = Lcg::new(seed);
+        let noisy: Vec<f64> = lambda
+            .iter()
+            .map(|&l| gain * poisson(&mut rng, l) + sigma * rng.gauss())
+            .collect();
+        let clean = lambda.iter().map(|&l| gain * l).collect();
+        (clean, noisy)
+    }
+
+    #[test]
+    fn vst2d_poisson_acceptance_gate_low_count_blobs() {
+        // The research report's Phase 1 acceptance criterion transposed to
+        // 2-D: on low-count Poisson blobs the corrected Anscombe sandwich
+        // around the chosen inner denoiser (nlm2d — see the selection table on
+        // `vst_denoise2d_auto`) must beat the identity pipeline (same inner,
+        // raw domain) by ≥ 1 dB, and the corrected inverse must not trail the
+        // naive algebraic one. Measured: identity 16.79/17.36, naive
+        // 21.50/21.42, corrected 22.19/22.43 dB (seeds 7/71) — stabilization
+        // gains of +5.40/+5.07 dB and a corrected-over-naive edge of
+        // +0.69/+1.01 dB.
+        for seed in [7u64, 71]
+        {
+            let (clean, noisy) = poisson_blob_fixture(96, 96, seed);
+            let identity_out = vst_auto_inner(&noisy, 96, 96);
+            let corrected = vst_denoise2d(&noisy, 96, 96, VstKind::Anscombe, vst_auto_inner);
+            // Naive-inverse variant built inline for comparison.
+            let t = vst_forward(VstKind::Anscombe, &noisy);
+            let naive = vst_inverse_naive(VstKind::Anscombe, &vst_auto_inner(&t, 96, 96));
+            let s_id = snr_db(&clean, &identity_out);
+            let s_naive = snr_db(&clean, &naive);
+            let s_corr = snr_db(&clean, &corrected);
+            assert!(
+                s_corr >= s_id + 1.0,
+                "seed {seed}: acceptance gate failed: corrected VST {s_corr:.2} dB vs \
+                 identity {s_id:.2} dB"
+            );
+            assert!(
+                s_corr >= s_naive,
+                "seed {seed}: corrected inverse {s_corr:.2} dB trails naive {s_naive:.2} dB"
+            );
+        }
+    }
+
+    #[test]
+    fn vst2d_exact_unbiased_inverse_beats_naive_on_flat_field() {
+        // Flat λ = 4 (64×64) through the strongest smoother there is (the
+        // global mean): the filtered transform approximates E[2√(X + 3/8)], so
+        // the exact unbiased inverse must recover the true intensity 4 while
+        // the naive algebraic inverse commits the Jensen-gap bias — the same
+        // oracle as the 1-D suite. Measured: corrected mean 4.0020, naive mean
+        // 3.7485 (gap ≈ 0.25).
+        let (w, h) = (64usize, 64usize);
+        let mut rng = Lcg::new(42);
+        let noisy: Vec<f64> = (0..w * h).map(|_| poisson(&mut rng, 4.0)).collect();
+        let strong = |img: &[f64], _w: usize, _h: usize| -> Vec<f64> {
+            let m = img.iter().sum::<f64>() / img.len() as f64;
+            vec![m; img.len()]
+        };
+        let corrected = vst_denoise2d(&noisy, w, h, VstKind::Anscombe, strong);
+        let t = vst_forward(VstKind::Anscombe, &noisy);
+        let naive = vst_inverse_naive(VstKind::Anscombe, &strong(&t, w, h));
+        let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
+        let (m_corr, m_naive) = (mean(&corrected), mean(&naive));
+        assert!(
+            (m_corr - 4.0).abs() <= 0.1,
+            "exact unbiased mean {m_corr:.4} not within ±0.1 of the true intensity 4"
+        );
+        assert!(
+            m_naive < m_corr - 0.15,
+            "naive mean {m_naive:.4} should sit visibly below corrected {m_corr:.4}"
+        );
+    }
+
+    #[test]
+    fn vst2d_gat_acceptance_gate_ccd_model() {
+        // Mixed Poisson-Gaussian CCD model, gain = 1.3, σ = 1.5 — the same
+        // harsh calibration as the 1-D GAT gate, on the blob image: the
+        // corrected GAT sandwich must beat the identity pipeline (same inner,
+        // raw domain). Measured: corrected 21.30/20.12 dB vs identity
+        // 18.29/17.17 dB (seeds 7/71) — +3.01/+2.95 dB, asserted with a 1 dB
+        // margin (double the report's 0.5 dB floor, ~2 dB of slack).
+        let (gain, sigma) = (1.3, 1.5);
+        let gat = VstKind::Gat { gain, sigma };
+        for seed in [7u64, 71]
+        {
+            let (clean, noisy) = gat_blob_fixture(96, 96, gain, sigma, seed);
+            let identity_out = vst_auto_inner(&noisy, 96, 96);
+            let corrected = vst_denoise2d(&noisy, 96, 96, gat, vst_auto_inner);
+            let s_id = snr_db(&clean, &identity_out);
+            let s_gat = snr_db(&clean, &corrected);
+            assert!(
+                s_gat >= s_id + 1.0,
+                "seed {seed}: corrected GAT {s_gat:.2} dB must beat identity {s_id:.2} dB \
+                 by ≥ 1 dB"
+            );
+        }
+    }
+
+    #[test]
+    fn vst2d_auto_stabilizes_poisson_and_leaves_gaussian_alone() {
+        // Poisson blob image: the detector reads the flat buffer's 32-sample
+        // row segments, the level-vs-scale regression fires Anscombe (see the
+        // `vst_denoise2d_auto` docs for the measured detection margins), and
+        // the auto pipeline is exactly the Anscombe sandwich around the
+        // documented inner. Measured: raw 8.26 dB → auto 22.19 dB (+13.9 dB).
+        let (clean, noisy) = poisson_blob_fixture(96, 96, 7);
+        assert_eq!(detect_noise_model(&noisy), VstKind::Anscombe);
+        let auto = vst_denoise2d_auto(&noisy, 96, 96);
+        assert_ne!(auto, noisy, "non-identity verdict must actually denoise");
+        assert_eq!(
+            auto,
+            vst_denoise2d(&noisy, 96, 96, VstKind::Anscombe, vst_auto_inner),
+            "auto must be exactly the Anscombe sandwich around the documented inner"
+        );
+        let (s_raw, s_auto) = (snr_db(&clean, &noisy), snr_db(&clean, &auto));
+        assert!(
+            s_auto >= s_raw + 3.0,
+            "auto {s_auto:.2} dB must improve on raw {s_raw:.2} dB by ≥ 3 dB"
+        );
+
+        // Additive Gaussian (zero-mean pattern + N(0, σ)): Identity verdict —
+        // "does a VST help here?" is answered no, and the input comes back
+        // unchanged, bit for bit.
+        let (w, h) = (96usize, 96usize);
+        let mut rng = Lcg::new(5);
+        let additive: Vec<f64> = (0..w * h)
+            .map(|i| {
+                let (x, y) = ((i % w) as f64, (i / w) as f64);
+                (2.0 * PI * x / 32.0).sin() * (2.0 * PI * y / 32.0).cos() + 0.2 * rng.gauss()
+            })
+            .collect();
+        assert_eq!(detect_noise_model(&additive), VstKind::Identity);
+        assert_eq!(vst_denoise2d_auto(&additive, w, h), additive);
+    }
+
+    #[test]
+    fn vst2d_graceful_and_deterministic() {
+        let clone_inner = |img: &[f64], _w: usize, _h: usize| img.to_vec();
+        // Empty image ⇒ empty output.
+        let empty: [f64; 0] = [];
+        assert!(vst_denoise2d(&empty, 0, 0, VstKind::Anscombe, clone_inner).is_empty());
+        assert!(vst_denoise2d_auto(&empty, 0, 0).is_empty());
+        // width·height mismatch ⇒ the input copied, by convention.
+        let bad = [1.0, 2.0, 3.0, 4.0, 5.0];
+        assert_eq!(
+            vst_denoise2d(&bad, 2, 2, VstKind::Anscombe, clone_inner),
+            bad.to_vec()
+        );
+        assert_eq!(vst_denoise2d_auto(&bad, 2, 2), bad.to_vec());
+        // All-NaN image: echoed back (nothing to denoise), never a panic.
+        // 32×32 gives the auto path enough windows to actually consult the
+        // detector, whose kept-fraction gate then fails toward Identity.
+        let nans = vec![f64::NAN; 32 * 32];
+        let out = vst_denoise2d(&nans, 32, 32, VstKind::Anscombe, vst_auto_inner);
+        assert_eq!(out.len(), nans.len());
+        assert!(out.iter().all(|v| v.is_nan()), "NaN input must be echoed");
+        let out_auto = vst_denoise2d_auto(&nans, 32, 32);
+        assert_eq!(out_auto.len(), nans.len());
+        assert!(out_auto.iter().all(|v| v.is_nan()));
+        // A length-changing denoiser degrades to the input.
+        let img: Vec<f64> = (0..64).map(|i| i as f64).collect();
+        assert_eq!(
+            vst_denoise2d(&img, 8, 8, VstKind::Anscombe, |_: &[f64], _, _| vec![
+                0.0;
+                3
+            ]),
+            img
+        );
+        // A single NaN pixel flows through without panicking (absorbed by the
+        // Anscombe domain clamp — documented in `scirust_signal`).
+        let mut one_nan: Vec<f64> = (0..16 * 16)
+            .map(|i| 4.0 + (i as f64 * 0.13).sin())
+            .collect();
+        one_nan[37] = f64::NAN;
+        assert_eq!(
+            vst_denoise2d(&one_nan, 16, 16, VstKind::Anscombe, vst_auto_inner).len(),
+            one_nan.len()
+        );
+        // Determinism: two runs are bit-identical, for both entry points.
+        let (_, noisy) = poisson_blob_fixture(96, 96, 7);
+        let a = vst_denoise2d_auto(&noisy, 96, 96);
+        let b = vst_denoise2d_auto(&noisy, 96, 96);
+        assert_eq!(a, b, "vst_denoise2d_auto must be bit-for-bit deterministic");
+        let c = vst_denoise2d(&noisy, 96, 96, VstKind::Anscombe, vst_auto_inner);
+        let d = vst_denoise2d(&noisy, 96, 96, VstKind::Anscombe, vst_auto_inner);
+        assert_eq!(c, d, "vst_denoise2d must be bit-for-bit deterministic");
     }
 
     #[test]

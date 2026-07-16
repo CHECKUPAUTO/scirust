@@ -5,6 +5,33 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `denoise` round 5 : GAT, protocole §9 rejouable, VST 2-D, docs multilingues
+Prolonge l'exécution du programme TSHF (round 4) ; chaque choix est calibré par
+mesure (addendum 2 du rapport).
+
+- **`VstKind::Gat { gain, sigma }`** : Anscombe généralisée pour le modèle capteur
+  mixte Poisson-gaussien `x = gain·p + n` (Murtagh-Starck-Bijaoui 1995), inverse
+  exact non biaisé en forme close (Mäkitalo-Foi 2013) ; gain=1, σ=0 ≡ Anscombe
+  (testé). Mesuré : +1,54 à +2,87 dB selon la calibration.
+- **`examples/vst_protocol.rs`** : le protocole §9 du rapport, rejouable et
+  déterministe (P1-P5). Réponses mesurées aux questions ouvertes : croisement de
+  matérialité ≤ 2 % de bruit à ×10 de dynamique (P4a) ; **≈ ×3 de dynamique de
+  niveaux** à 30 % de bruit — à ×2 la VST perd −0,77 dB (P4b) ; effondrement
+  porteuse +5,17 dB (3 cycles) → −0,93 dB (40 cycles) (P5).
+- **Sélecteur resserré par la mesure** : porte de dynamique de
+  `detect_noise_model` portée de ×2 à **×3** (`DETECT_MIN_RANGE`), alignée sur le
+  croisement P4b — « ne jamais dégrader ».
+- **Limitation « porteuses rapides » documentée et épinglée** : une φ ponctuelle
+  ne commute pas avec le spectre (harmoniques rognées par le débruiteur interne) ;
+  doc de module + test sentinelle.
+- **`scirust_vision::denoise::{vst_denoise2d, vst_denoise2d_auto}`** : VST 2-D
+  image ; partenaire interne mesuré = **NLM 2-D** (+5,4 dB Poisson, +3,0 dB GAT) ;
+  VisuShrink 2-D perd sous stabilisation (résultat négatif 1-D transposé) ; la
+  médiane 2-D est invariante bit à bit (Prop. 2 du rapport confirmée) ; auto
+  conservateur (verdict Identity → copie).
+- **Docs multilingues** : le bloc TSHF (vst/multichannel/compand + GAT/2-D/
+  protocole) traduit dans les six langues AR/DE/ES/JA/KO/ZH.
+
 ### Ajouté — `denoise` round 4 : exécution des recommandations du rapport TSHF
 Toutes les recommandations codables du rapport `TSHF_RESEARCH_2026-07-16.md` (§12
 et feuille de route) sont exécutées ; chaque porte d'acceptation chiffrée du

@@ -34,9 +34,27 @@
 //!
 //! Transforms provided ([`VstKind`]): the Anscombe root (F. J. Anscombe, *"The
 //! transformation of Poisson, binomial and negative-binomial data"*, Biometrika
-//! 35(3/4):246-254, 1948), the Box-Cox power family (G. E. P. Box & D. R. Cox, *"An
+//! 35(3/4):246-254, 1948), the **Generalized Anscombe Transformation** for the
+//! mixed Poisson-Gaussian CCD model (F. Murtagh, J.-L. Starck & A. Bijaoui 1995;
+//! exact unbiased inverse: M. Mäkitalo & A. Foi, *"Optimal inversion of the
+//! generalized Anscombe transformation for Poisson-Gaussian noise"*, IEEE TIP
+//! 22(1):91-103, 2013), the Box-Cox power family (G. E. P. Box & D. R. Cox, *"An
 //! analysis of transformations"*, JRSS B 26(2):211-252, 1964), and the signed
 //! logarithm / signed square root for data that may cross zero.
+//!
+//! ## Known limitation: fast carriers
+//!
+//! A VST is pointwise and nonlinear, so it does not commute with the spectrum: a
+//! *fast* sinusoidal component riding on the intensity is converted into a harmonic
+//! stack in the transformed domain, and the inner denoiser's linear shrinkage then
+//! clips those harmonics — a distortion the corrected inverse cannot undo. Measured
+//! with the [`super::stft_wiener_auto`] inner denoiser on a 40-cycle/4096-sample
+//! Poisson-Gaussian carrier: the sandwich *loses* ≈ 1 dB against the identity
+//! pipeline for every calibration probed, while the same calibrations gain +1.4 to
+//! +3.0 dB on slow intensity profiles (3 cycles; the acceptance-gate fixtures).
+//! The VST pipeline is for slowly varying intensities — photon-flux imaging,
+//! sensor drift, envelope-scale structure — not for narrowband carriers near the
+//! upper spectrum (pinned by `gat_fast_carrier_regime_is_a_measured_limitation`).
 //!
 //! ## Conservative selection
 //!
@@ -65,7 +83,7 @@
 //!   transforms a NaN is absorbed by the clamp (`f64::max` ignores NaN).
 
 use super::{mad, median, stft_wiener_auto};
-use core::f64::consts::{LN_2, SQRT_2};
+use core::f64::consts::SQRT_2;
 
 /// Domain offset of the Anscombe transform: `2·√(x + 3/8)`.
 const ANSCOMBE_OFFSET: f64 = 0.375;
@@ -87,6 +105,12 @@ const DETECT_MAX_WINDOWS: usize = 512;
 const DETECT_MIN_KEPT: f64 = 0.75;
 /// Minimum absolute Pearson correlation of (log level, log scale) to trust the fit.
 const DETECT_MIN_CORR: f64 = 0.6;
+/// Minimum level dynamic range (`max level / min level`) the detector requires.
+/// Calibrated by measurement, not convention: the `vst_protocol` example (P4b)
+/// locates the +0.5 dB materiality crossover at ≈ ×3 — at ×2 dynamic range and
+/// 30 % multiplicative noise the VST sandwich is a −0.77 dB material *loss*, so
+/// firing there would violate the "never degrade" rule the selector exists for.
+const DETECT_MIN_RANGE: f64 = 3.0;
 
 /// The variance-stabilizing transform families supported by this module.
 ///
@@ -111,6 +135,40 @@ pub enum VstKind {
     /// positive floor (manual-use kind; never returned by the selector — see the
     /// module docs for the near-zero hazard of `λ = 0`).
     BoxCox(f64),
+    /// Generalized Anscombe Transformation for **mixed Poisson-Gaussian** noise
+    /// `x = gain·p + n`, `p ~ Poisson(λ)`, `n ~ N(0, σ²)` — the CCD/CMOS sensor
+    /// model (Murtagh, Starck & Bijaoui 1995):
+    ///
+    /// ```text
+    /// φ(x) = (2/gain)·√(gain·x + (3/8)·gain² + σ²)
+    /// ```
+    ///
+    /// which stabilizes the mixture to unit variance; `gain = 1, sigma = 0` reduces
+    /// exactly to [`VstKind::Anscombe`]. The bias-corrected inverse is the
+    /// closed-form **exact unbiased GAT inverse** (Mäkitalo & Foi, IEEE TIP
+    /// 22(1):91-103, 2013), which reuses the Anscombe closed form on the normalized
+    /// count scale and subtracts the read-noise term `(σ/gain)²`.
+    ///
+    /// `gain` (detector conversion gain) and `sigma` (Gaussian read-noise std) are
+    /// **calibration inputs** — estimating them from a single record is its own
+    /// research problem (Foi et al. 2008) and out of scope, so this kind is
+    /// manual-use only and never returned by [`detect_noise_model`]. Degenerate
+    /// parameters (`gain ≤ 0`, non-finite, `sigma < 0`) degrade every function of
+    /// this module to a pass-through copy. The forward argument
+    /// `gain·x + (3/8)·gain² + σ²` is clamped at 0 (same convention as Anscombe's
+    /// domain clamp).
+    Gat {
+        /// Detector conversion gain (`> 0`).
+        gain: f64,
+        /// Gaussian read-noise standard deviation (`≥ 0`).
+        sigma: f64,
+    },
+}
+
+/// `true` when the GAT parameters are usable; degenerate parameters make every GAT
+/// path degrade to a pass-through copy (documented on [`VstKind::Gat`]).
+fn gat_params_ok(gain: f64, sigma: f64) -> bool {
+    gain.is_finite() && gain > 0.0 && sigma.is_finite() && sigma >= 0.0
 }
 
 /// Apply the forward transform `φ` of `kind` pointwise.
@@ -155,6 +213,18 @@ pub fn vst_forward(kind: VstKind, signal: &[f64]) -> Vec<f64> {
                 })
                 .collect()
         },
+        VstKind::Gat { gain, sigma } =>
+        {
+            if !gat_params_ok(gain, sigma)
+            {
+                return signal.to_vec();
+            }
+            let offset = ANSCOMBE_OFFSET * gain * gain + sigma * sigma;
+            signal
+                .iter()
+                .map(|&x| 2.0 / gain * (gain * x + offset).max(0.0).sqrt())
+                .collect()
+        },
     }
 }
 
@@ -185,6 +255,15 @@ fn inverse_naive_scalar(kind: VstKind, y: f64) -> f64 {
             {
                 (lambda * y + 1.0).max(BOXCOX_MIN).powf(1.0 / lambda)
             }
+        },
+        VstKind::Gat { gain, sigma } =>
+        {
+            if !gat_params_ok(gain, sigma)
+            {
+                return y;
+            }
+            let h = 0.5 * gain * y;
+            (h * h - ANSCOMBE_OFFSET * gain * gain - sigma * sigma) / gain
         },
     }
 }
@@ -256,6 +335,12 @@ fn smearing_sample(residuals: &[f64]) -> Vec<f64> {
 ///   itself, which strictly dominates a nonparametric correction when the model
 ///   matches — smearing would re-introduce estimation noise (and low-count Anscombe
 ///   residuals are only approximately homoscedastic, weakening its premise).
+/// * [`VstKind::Gat`] — the closed-form **exact unbiased GAT inverse** (Mäkitalo &
+///   Foi 2013): on the normalized count scale `z = x/gain` the GAT is the Anscombe
+///   transform of `z` with an extra `(σ/gain)²` inside the root, so
+///   `ẑ = A⁻¹(y) − (σ/gain)²` with `A⁻¹` the Anscombe closed form, clamped at 0,
+///   then `x̂ = gain·ẑ`. `residuals` are ignored for the same reason as Anscombe;
+///   degenerate parameters degrade to a pass-through copy.
 /// * [`VstKind::SignedLog`] / [`VstKind::SignedSqrt`] / [`VstKind::BoxCox`] — the
 ///   **Duan (1983) smearing estimate**: `x̂ᵢ = mean_j φ⁻¹(fᵢ + rⱼ)` over the
 ///   transformed-domain residual set, the standard nonparametric fix for the
@@ -272,6 +357,18 @@ pub fn vst_inverse_corrected(kind: VstKind, filtered: &[f64], residuals: &[f64])
             .iter()
             .map(|&y| anscombe_inverse_exact_unbiased(y))
             .collect(),
+        VstKind::Gat { gain, sigma } =>
+        {
+            if !gat_params_ok(gain, sigma)
+            {
+                return filtered.to_vec();
+            }
+            let read_noise = (sigma / gain) * (sigma / gain);
+            filtered
+                .iter()
+                .map(|&y| gain * (anscombe_inverse_exact_unbiased(y) - read_noise).max(0.0))
+                .collect()
+        },
         VstKind::SignedLog | VstKind::SignedSqrt | VstKind::BoxCox(_) =>
         {
             let sample = smearing_sample(residuals);
@@ -362,8 +459,10 @@ fn pearson_r(xs: &[f64], ys: &[f64]) -> Option<f64> {
 ///    — first differences cancel the local trend, and the MAD is immune to a minority
 ///    of outliers; the √2 undoes the variance doubling of differencing.
 /// 3. Keep windows with finite `m > 0` and `s > 0`; require ≥ 75 % kept **and** a
-///    level dynamic range `max(m)/min(m) ≥ 2` (without level variation no law is
-///    identifiable).
+///    level dynamic range `max(m)/min(m) ≥ 3` — without level variation no law is
+///    identifiable, and the threshold is *measured*, not conventional: the
+///    `vst_protocol` sweep (P4b) puts the +0.5 dB materiality crossover at ≈ ×3,
+///    with ×2 being a material −0.77 dB loss at 30 % multiplicative noise.
 /// 4. Fit `log s = α + β·log m` with the robust Theil-Sen slope (median of pairwise
 ///    slopes, sorted with `total_cmp`); require Pearson `|r| ≥ 0.6` on the log-log
 ///    points.
@@ -375,8 +474,9 @@ fn pearson_r(xs: &[f64], ys: &[f64]) -> Option<f64> {
 ///    [`VstKind::SignedLog`] (multiplicative; the smearing inverse is nonparametric,
 ///    so any gain is acceptable). Anything else → Identity.
 ///
-/// [`VstKind::SignedSqrt`] and [`VstKind::BoxCox`] are manual-use kinds and are never
-/// returned by this selector.
+/// [`VstKind::SignedSqrt`], [`VstKind::BoxCox`] and [`VstKind::Gat`] are manual-use
+/// kinds and are never returned by this selector (the GAT additionally needs the
+/// detector's calibration parameters, which no single record identifies reliably).
 pub fn detect_noise_model(signal: &[f64]) -> VstKind {
     let n_windows = signal.len() / DETECT_WINDOW;
     if n_windows < DETECT_MIN_WINDOWS
@@ -413,7 +513,7 @@ pub fn detect_noise_model(signal: &[f64]) -> VstKind {
         lo = lo.min(l);
         hi = hi.max(l);
     }
-    if hi - lo < LN_2
+    if hi - lo < DETECT_MIN_RANGE.ln()
     {
         return VstKind::Identity;
     }
@@ -541,6 +641,10 @@ pub fn vst_denoise_auto(signal: &[f64]) -> VstAutoResult {
         VstKind::SignedLog => ("signed_log".to_string(), "smearing_inverse"),
         VstKind::SignedSqrt => ("signed_sqrt".to_string(), "smearing_inverse"),
         VstKind::BoxCox(lambda) => (format!("box_cox({lambda})"), "smearing_inverse"),
+        VstKind::Gat { gain, sigma } => (
+            format!("gat(gain={gain}, sigma={sigma})"),
+            "exact_unbiased_inverse",
+        ),
         VstKind::Identity => unreachable!("handled above"),
     };
     let output = vst_denoise(signal, kind, stft_wiener_auto);
@@ -596,9 +700,9 @@ mod tests {
         (clean, noisy)
     }
 
-    /// `(clean, noisy)` multiplicative *selector* fixture: levels in `[2, 4.5]`
-    /// (a ×2.25 soft regime — enough for the selector, too soft for a ≥ 1 dB gate),
-    /// `x = s·(1 + 0.3·g)`.
+    /// `(clean, noisy)` multiplicative *soft-regime* fixture: levels in `[2, 4.5]`
+    /// (×2.25 — beneath the selector's measured ×3 materiality gate, where the
+    /// VST is a small loss; the selector must stay Identity here), `x = s·(1 + 0.3·g)`.
     fn multiplicative_fixture(n: usize, seed: u64) -> (Vec<f64>, Vec<f64>) {
         let clean: Vec<f64> = (0..n)
             .map(|i| 3.0 + (2.0 * PI * 3.0 * i as f64 / n as f64).sin() + 0.5 * i as f64 / n as f64)
@@ -815,9 +919,13 @@ mod tests {
         let (_, noisy_poisson) = poisson_fixture(4096, 7);
         assert_eq!(detect_noise_model(&noisy_poisson), VstKind::Anscombe);
 
-        // (c) The multiplicative fixtures (soft and strong) → SignedLog.
+        // (c) The strong multiplicative fixture (×10 levels) → SignedLog; the SOFT
+        // one (×2.25) must now stay Identity: the vst_protocol P4b sweep measured
+        // the +0.5 dB materiality crossover at ≈ ×3 dynamic range (×2 is a
+        // −0.77 dB material loss), so the DETECT_MIN_RANGE gate deliberately
+        // excludes it — firing there would violate "never degrade".
         let (_, noisy_mult) = multiplicative_fixture(4096, 9);
-        assert_eq!(detect_noise_model(&noisy_mult), VstKind::SignedLog);
+        assert_eq!(detect_noise_model(&noisy_mult), VstKind::Identity);
         let (_, noisy_strong) = strong_multiplicative_fixture(4096, 9);
         assert_eq!(detect_noise_model(&noisy_strong), VstKind::SignedLog);
 
@@ -898,5 +1006,176 @@ mod tests {
             a.output, b.output,
             "vst_denoise_auto must be bit-for-bit deterministic"
         );
+    }
+
+    /// `(clean mean gain·λ, noisy)` mixed Poisson-Gaussian fixture: the CCD model
+    /// `x = gain·p + n`, `p ~ Poisson(λᵢ)`, `n ~ N(0, σ²)`, on the same slow
+    /// low-count intensity profile as the validated Anscombe gate
+    /// ([`poisson_intensity`], 3 cycles + ramp). A *fast* carrier is deliberately
+    /// not used here — see [`gat_fast_carrier_regime_is_a_measured_limitation`].
+    fn gat_fixture(n: usize, gain: f64, sigma: f64, seed: u64) -> (Vec<f64>, Vec<f64>) {
+        let lambda = poisson_intensity(n);
+        let mut rng = Lcg::new(seed);
+        let noisy: Vec<f64> = lambda
+            .iter()
+            .map(|&l| gain * poisson(&mut rng, l) + sigma * rng.gauss())
+            .collect();
+        let clean = lambda.iter().map(|&l| gain * l).collect();
+        (clean, noisy)
+    }
+
+    #[test]
+    fn gat_reduces_to_anscombe_at_unit_gain_zero_sigma() {
+        let x = [-0.4, 0.0, 0.5, 1.0, 4.0, 13.0, 250.0];
+        let gat = VstKind::Gat {
+            gain: 1.0,
+            sigma: 0.0,
+        };
+        assert_eq!(vst_forward(gat, &x), vst_forward(VstKind::Anscombe, &x));
+        let y = vst_forward(gat, &x);
+        assert_eq!(
+            vst_inverse_corrected(gat, &y, &[]),
+            vst_inverse_corrected(VstKind::Anscombe, &y, &[])
+        );
+    }
+
+    #[test]
+    fn gat_naive_inverse_round_trips() {
+        let gat = VstKind::Gat {
+            gain: 1.4,
+            sigma: 1.2,
+        };
+        // In-domain: gain·x + 3/8·gain² + σ² ≥ 0 ⇔ x ≥ −(3/8·gain² + σ²)/gain.
+        let x = [-1.5, -0.5, 0.0, 0.7, 3.0, 12.0, 400.0];
+        for (&a, &b) in x.iter().zip(&vst_inverse_naive(gat, &vst_forward(gat, &x)))
+        {
+            assert_close(a, b);
+        }
+    }
+
+    #[test]
+    fn gat_stabilizes_mixed_poisson_gaussian_noise() {
+        // Per-level σ of the transformed mixture must be ≈ 1 across a ×6 level
+        // range — the defining property of the GAT.
+        let (gain, sigma) = (1.4, 1.2);
+        let gat = VstKind::Gat { gain, sigma };
+        let mut rng = Lcg::new(31);
+        for lambda in [2.0, 5.0, 12.0]
+        {
+            let x: Vec<f64> = (0..20000)
+                .map(|_| gain * poisson(&mut rng, lambda) + sigma * rng.gauss())
+                .collect();
+            let t = vst_forward(gat, &x);
+            let mean = t.iter().sum::<f64>() / t.len() as f64;
+            let var = t.iter().map(|&v| (v - mean) * (v - mean)).sum::<f64>() / t.len() as f64;
+            let sd = var.sqrt();
+            assert!(
+                (0.85..=1.15).contains(&sd),
+                "transformed σ at λ = {lambda} is {sd:.3}, not ≈ 1"
+            );
+        }
+    }
+
+    #[test]
+    fn gat_bias_oracle_flat_intensity() {
+        // Flat λ = 4 through the CCD model: the exact unbiased GAT inverse must
+        // recover the clean mean gain·λ; the naive inverse must be visibly worse.
+        let (gain, sigma) = (1.5, 1.0);
+        let gat = VstKind::Gat { gain, sigma };
+        let n = 8192;
+        let mut rng = Lcg::new(42);
+        let noisy: Vec<f64> = (0..n)
+            .map(|_| gain * poisson(&mut rng, 4.0) + sigma * rng.gauss())
+            .collect();
+        let t = vst_forward(gat, &noisy);
+        let smooth = moving_average(&t, 65);
+        let corrected = vst_inverse_corrected(gat, &smooth, &[]);
+        let naive = vst_inverse_naive(gat, &smooth);
+        let target = gain * 4.0;
+        let mean_of = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
+        let bias_corrected = (mean_of(&corrected) - target).abs();
+        let bias_naive = (mean_of(&naive) - target).abs();
+        assert!(
+            bias_corrected < 0.1,
+            "corrected GAT inverse bias {bias_corrected:.3} exceeds 0.1"
+        );
+        assert!(
+            bias_naive > bias_corrected + 0.05,
+            "naive bias {bias_naive:.3} should visibly exceed corrected {bias_corrected:.3}"
+        );
+    }
+
+    #[test]
+    fn gat_acceptance_gate_mixed_noise() {
+        // Same acceptance philosophy as the Anscombe gate (report §12 Phase 1),
+        // on the mixed Poisson-Gaussian model: the GAT sandwich around the same
+        // inner denoiser must beat the identity pipeline by ≥ 1 dB. (1.3, 1.5) is
+        // the harshest mix probed — the read noise nearly drowns the low-count
+        // Poisson floor; measured +1.4/+1.6/+1.4 dB over seeds 7/71/151, and
+        // +2.2 to +3.0 dB for the more Poisson-dominated calibrations.
+        let (gain, sigma) = (1.3, 1.5);
+        let gat = VstKind::Gat { gain, sigma };
+        let (clean, noisy) = gat_fixture(4096, gain, sigma, 7);
+        let identity = stft_wiener_auto(&noisy);
+        let stabilized = vst_denoise(&noisy, gat, stft_wiener_auto);
+        let s_id = snr_db(&clean, &identity);
+        let s_gat = snr_db(&clean, &stabilized);
+        assert!(
+            s_gat >= s_id + 1.0,
+            "GAT sandwich {s_gat:.2} dB must beat identity {s_id:.2} dB by ≥ 1 dB"
+        );
+    }
+
+    #[test]
+    fn gat_fast_carrier_regime_is_a_measured_limitation() {
+        // An honest negative pin (see the module docs, "Known limitation: fast
+        // carriers"). On a FAST sinusoidal intensity (40 cycles / 4096 samples)
+        // the pointwise root converts the carrier into harmonics; the inner
+        // linear shrinkage then clips those harmonics, and the sandwich measured
+        // ≈ −1 dB against the identity pipeline across every (gain, σ) probed —
+        // even quasi-pure Poisson. The pin below asserts the loss stays bounded
+        // (< 2 dB); if this test ever fails in the *positive* direction, the
+        // limitation note in the module docs should be revisited.
+        let (gain, sigma) = (1.3, 1.5);
+        let gat = VstKind::Gat { gain, sigma };
+        let n = 4096;
+        let lambda: Vec<f64> = (0..n)
+            .map(|i| 6.0 + 5.0 * (2.0 * PI * 40.0 * i as f64 / n as f64).sin())
+            .collect();
+        let mut rng = Lcg::new(7);
+        let noisy: Vec<f64> = lambda
+            .iter()
+            .map(|&l| gain * poisson(&mut rng, l) + sigma * rng.gauss())
+            .collect();
+        let clean: Vec<f64> = lambda.iter().map(|&l| gain * l).collect();
+        let s_id = snr_db(&clean, &stft_wiener_auto(&noisy));
+        let s_gat = snr_db(&clean, &vst_denoise(&noisy, gat, stft_wiener_auto));
+        assert!(
+            s_gat >= s_id - 2.0,
+            "fast-carrier loss should stay bounded: identity {s_id:.2} dB, GAT {s_gat:.2} dB"
+        );
+        assert!(
+            s_gat <= s_id + 1.0,
+            "fast-carrier regime measured as a ≈ −1 dB limitation; it now WINS \
+             ({s_gat:.2} vs {s_id:.2} dB) — revisit the module-doc limitation note"
+        );
+    }
+
+    #[test]
+    fn gat_degenerate_parameters_degrade_to_copy() {
+        let x = [0.5, 1.0, -2.0, 7.0];
+        for (gain, sigma) in [
+            (0.0, 1.0),
+            (-1.0, 1.0),
+            (f64::NAN, 1.0),
+            (1.0, -0.5),
+            (1.0, f64::NAN),
+        ]
+        {
+            let gat = VstKind::Gat { gain, sigma };
+            assert_eq!(vst_forward(gat, &x), x);
+            assert_eq!(vst_inverse_naive(gat, &x), x);
+            assert_eq!(vst_inverse_corrected(gat, &x, &[0.1, -0.1]), x);
+        }
     }
 }

@@ -261,11 +261,18 @@ Trois compléments issus du programme de recherche TSHF (`TSHF_RESEARCH_2026-07-
 
 - **`denoise::vst`** — bruit *dépendant du signal* : transformées stabilisatrices de
   variance à inverse **corrigé du biais** (Anscombe + inverse exact non biaisé de
-  Mäkitalo-Foi pour Poisson ; log signé + smearing de Duan pour le multiplicatif ;
-  racine signée ; Box-Cox). Le sélecteur conservateur `detect_noise_model` (défaut =
-  identité) est branché en pré/post-étape conditionnelle de `denoise_auto`. Mesuré :
-  +5,0 dB (Poisson faible comptage), +4,9 dB (multiplicatif 30 %), ±0 dB en régime
-  doux — jamais de perte.
+  Mäkitalo-Foi pour Poisson ; **GAT** pour le modèle capteur mixte Poisson-gaussien
+  `x = gain·p + n` avec son inverse exact 2013 ; log signé + smearing de Duan pour
+  le multiplicatif ; racine signée ; Box-Cox). Le sélecteur conservateur
+  `detect_noise_model` (défaut = identité) est branché en pré/post-étape
+  conditionnelle de `denoise_auto`. Mesuré : +5,0 dB (Poisson faible comptage),
+  +4,9 dB (multiplicatif 30 %), +1,4 à +3,0 dB (mixte Poisson-gaussien), ±0 dB en
+  régime doux — jamais de perte. Limitation connue documentée : porteuses rapides
+  (la racine crée des harmoniques que le débruiteur interne rogne ; ≈ −1 dB mesuré)
+  — la VST s'adresse aux intensités lentes. Le pendant **2-D image**
+  (`vst_denoise2d`) vit dans `scirust_vision::denoise` ; le protocole expérimental
+  complet (§9 du rapport) se rejoue avec
+  `cargo run -p scirust-signal --example vst_protocol`.
 - **`denoise::multichannel`** — opérateurs couplant réellement les canaux :
   `wiener_spatial` (Wiener joint inter-canaux, +2,5 à +3,7 dB contre sa restriction
   par canal sur sources corrélées) et `vector_median` (référence Astola 1990,

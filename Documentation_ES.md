@@ -154,6 +154,34 @@ ruido:
 - **Tiempo real**: equivalentes causales muestra a muestra en `denoise::streaming`
   detrás del trait `StreamingDenoiser`. **Imágenes 2-D**: `scirust_vision::denoise`
   (mediana 2-D, wavelets separables, non-local means).
+
+Tres complementos surgidos del programa de investigación TSHF
+(`TSHF_RESEARCH_2026-07-16.md`):
+
+- **`denoise::vst`** — ruido *dependiente de la señal*: transformadas
+  estabilizadoras de varianza con inversa **corregida de sesgo** (Anscombe +
+  inversa exacta insesgada de Mäkitalo-Foi para Poisson; **GAT** para el modelo
+  de sensor mixto Poisson-gaussiano `x = gain·p + n` con su inversa exacta de
+  2013; log con signo + smearing de Duan para el ruido multiplicativo; raíz con
+  signo; Box-Cox). El selector conservador `detect_noise_model` (por defecto =
+  identidad) se engancha como pre/post-etapa condicional de `denoise_auto`.
+  Medido: +5,0 dB (Poisson de bajo conteo), +4,9 dB (multiplicativo 30 %), de
+  +1,4 a +3,0 dB (mixto Poisson-gaussiano), ±0 dB en régimen suave — nunca una
+  pérdida. Limitación conocida documentada: portadoras rápidas (la raíz crea
+  armónicos que el eliminador de ruido interno recorta; ≈ −1 dB medido) — la
+  VST está pensada para intensidades de variación lenta. El equivalente para
+  **imágenes 2-D** (`vst_denoise2d`) vive en `scirust_vision::denoise`; el
+  protocolo experimental completo (§9 del informe) se puede reproducir con
+  `cargo run -p scirust-signal --example vst_protocol`.
+- **`denoise::multichannel`** — operadores que acoplan realmente los canales:
+  `wiener_spatial` (Wiener conjunto entre canales, de +2,5 a +3,7 dB frente a
+  su restricción por canal sobre fuentes correlacionadas) y `vector_median`
+  (referencia Astola 1990, conservada con su veredicto medido *desfavorable*
+  frente a la mediana por canal — véase `phase2_gate_report()`).
+- **`denoise::compand`** — recorte suave acotado (`soft_clip`,
+  `soft_clip_robust`; tanh/atan/softsign) para visualización y features
+  robustas, **sin inversa por diseño**: invertir las transformadas saturantes
+  amplifica el ruido ×10-×100 (informe TSHF, E2/E4).
 - Limitación conocida: un tono por debajo de ~5 % de fs es indistinguible del
   contenido legítimo de la señal — llame explícitamente a `remove_mains_hum_iir`
   cuando se conozca la frecuencia de la red eléctrica. Benchmark de calidad:
