@@ -183,6 +183,7 @@ pub fn autotune_by<C, D>(
 ) -> GenericAutotune<C>
 where
     C: Copy,
+    D: ?Sized,
 {
     let mut dev_scores = Vec::with_capacity(candidates.len());
     let mut best: Option<(C, f64)> = None;
@@ -247,46 +248,38 @@ pub fn autotune_quantizer(
     dictionary: &[Representation],
     levels: usize,
 ) -> AutotuneReport {
-    let mut verdicts = Vec::with_capacity(dictionary.len());
-    let mut best: Option<(Representation, f64)> = None;
-
-    for &repr in dictionary
-    {
-        let dev_score = match safety_gate(repr, dev, eval)
+    // The selection itself is the generic S3/S4 harness: gate on safety (S1)
+    // then measure SQNR. `None` from the score means "rejected by S1".
+    let score = move |repr: Representation, fit: &[f64], scr: &[f64]| -> Option<f64> {
+        if safety_gate(repr, dev, eval).is_err()
         {
-            Err(reason) => Err(reason),
-            Ok(()) => match quantize_score(repr, dev, dev, levels)
-            {
-                // S3 measures on the dev set (fit and score both on dev).
-                Some(s) => Ok(s),
-                None => Err(RejectReason::OutsideDomain { sample: f64::NAN }),
-            },
-        };
-        if let Ok(s) = dev_score
-            && best.is_none_or(|(_, b)| s > b)
-        {
-            best = Some((repr, s));
+            return None;
         }
-        verdicts.push(AutotuneVerdict { repr, dev_score });
-    }
-
-    let baseline_eval = baseline_score(dev, eval, levels);
-    let (chosen, chosen_eval) = match best
-    {
-        // S4: score the dev-winner on held-out data (fit on dev, eval on eval).
-        Some((repr, _)) =>
-        {
-            let s = quantize_score(repr, dev, eval, levels).unwrap_or(f64::NEG_INFINITY);
-            (Some(repr), s)
-        },
-        None => (None, f64::NEG_INFINITY),
+        quantize_score(repr, fit, scr, levels)
     };
+    let baseline = move |fit: &[f64], scr: &[f64]| baseline_score(fit, scr, levels);
+    let out = autotune_by(dev, eval, dictionary, score, baseline);
+
+    // Re-attach the concrete S1 reasons the generic harness collapses to `None`,
+    // so this entry point keeps its explanatory per-candidate verdicts.
+    let verdicts = dictionary
+        .iter()
+        .zip(&out.dev_scores)
+        .map(|(&repr, (_, s))| {
+            let dev_score = match safety_gate(repr, dev, eval)
+            {
+                Err(reason) => Err(reason),
+                Ok(()) => (*s).ok_or(RejectReason::OutsideDomain { sample: f64::NAN }),
+            };
+            AutotuneVerdict { repr, dev_score }
+        })
+        .collect();
 
     AutotuneReport {
-        chosen,
-        chosen_eval_sqnr_db: chosen_eval,
-        baseline_eval_sqnr_db: baseline_eval,
-        beats_baseline: chosen.is_some() && chosen_eval > baseline_eval,
+        chosen: out.chosen,
+        chosen_eval_sqnr_db: out.chosen_eval_score,
+        baseline_eval_sqnr_db: out.baseline_eval_score,
+        beats_baseline: out.beats_baseline,
         verdicts,
     }
 }

@@ -111,6 +111,7 @@ pub mod quantum;
 pub mod xai;
 
 pub mod amp;
+pub mod autotune_accumulate;
 pub mod certified_numerics;
 pub mod distributed;
 pub mod dp;
