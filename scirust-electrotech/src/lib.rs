@@ -38,6 +38,30 @@
 //! - [`capacitor`] — condensateur : énergie, charge, réactance, transitoire RC.
 //! - [`inductor`] — bobine : énergie, réactance, transitoire RL, f.é.m. auto-induite.
 //!
+//! ### Machines & réseau (vol. 2)
+//! - [`per_unit_system`] — système per-unit : impédance/courant de base, changement de base.
+//! - [`transformer_three_phase`] — couplages Yy/Yd/Dy/Dd, indice horaire.
+//! - [`autotransformer`] — rapport, puissance transitée/propre, économie de cuivre.
+//! - [`induction_machine_circuit`] — schéma équivalent : couple-glissement, couple max.
+//! - [`dc_machine`] — machine CC détaillée : f.c.é.m., couple, vitesse, rendement.
+//!
+//! ### Circuits (vol. 2)
+//! - [`rlc_transient`] — réponse libre RLC : amortissement, régime, pulsation amortie.
+//! - [`parallel_resonance`] — circuit bouchon : impédance dynamique, Q, bande.
+//! - [`passive_filter`] — filtre RC/RL du 1er ordre : coupure, gain, déphasage.
+//! - [`thevenin_norton`] — équivalents, courant de charge, transfert max de puissance.
+//! - [`wye_delta_transform`] — transformation étoile-triangle (Kennelly).
+//! - [`voltage_divider`] — diviseurs de tension (à vide/chargé) et de courant.
+//!
+//! ### Installations, protection & transport (vol. 2)
+//! - [`skin_effect`] — profondeur de peau, R_ac/R_dc, aire effective.
+//! - [`overcurrent_relay`] — relais à temps inverse IEC : PSM, courbes SI/VI/EI.
+//! - [`earth_fault_loop`] — schéma TN : Zs, Icc présumé, Zs max, tension de contact.
+//! - [`load_factor`] — facteurs de charge, demande, diversité, utilisation.
+//! - [`battery_pack_config`] — pack série/parallèle : tension, capacité, énergie, courant.
+//! - [`flyback_converter`] — convertisseur à isolement : sortie, rapport cyclique, contrainte.
+//! - [`conductor_sag`] — flèche de ligne aérienne (parabolique, givre/vent).
+//!
 //! ## Positionnement
 //!
 //! Cette crate complète les autres briques électriques de SciRust sans les
@@ -72,6 +96,26 @@ pub mod synchronous_generator;
 pub mod three_phase_systems;
 pub mod transformer;
 pub mod transmission_line;
+
+// Vol. 2
+pub mod autotransformer;
+pub mod battery_pack_config;
+pub mod conductor_sag;
+pub mod dc_machine;
+pub mod earth_fault_loop;
+pub mod flyback_converter;
+pub mod induction_machine_circuit;
+pub mod load_factor;
+pub mod overcurrent_relay;
+pub mod parallel_resonance;
+pub mod passive_filter;
+pub mod per_unit_system;
+pub mod rlc_transient;
+pub mod skin_effect;
+pub mod thevenin_norton;
+pub mod transformer_three_phase;
+pub mod voltage_divider;
+pub mod wye_delta_transform;
 
 pub use ac_power_single_phase::{
     ac_active_power, ac_apparent_power, ac_impedance_magnitude, ac_power_factor_from_powers,
@@ -140,4 +184,69 @@ pub use transformer::{
 pub use transmission_line::{
     line_efficiency, line_loss_three_phase, line_sending_voltage_short, line_surge_impedance,
     line_voltage_regulation,
+};
+
+// Vol. 2 — ré-exports à plat.
+pub use autotransformer::{
+    autoxfmr_copper_saving, autoxfmr_throughput_power, autoxfmr_voltage_ratio,
+    autoxfmr_winding_power,
+};
+pub use battery_pack_config::{
+    packcfg_cell_count, packcfg_continuous_current, packcfg_pack_capacity, packcfg_pack_energy,
+    packcfg_pack_voltage,
+};
+pub use conductor_sag::{
+    sag_conductor_length_parabolic, sag_parabolic, sag_tension_for_sag, sag_with_ice_wind,
+};
+pub use dc_machine::{dcm_back_emf, dcm_efficiency, dcm_speed, dcm_torque};
+pub use earth_fault_loop::{
+    earthloop_impedance, earthloop_max_impedance_for_disconnection,
+    earthloop_prospective_fault_current, earthloop_touch_voltage,
+};
+pub use flyback_converter::{
+    flyback_duty_for_output, flyback_output_voltage_ccm, flyback_reflected_voltage,
+    flyback_switch_voltage_stress,
+};
+pub use induction_machine_circuit::{
+    imc_airgap_power, imc_mechanical_power, imc_slip, imc_slip_at_max_torque, imc_torque,
+};
+pub use load_factor::{
+    loadfactor_average_load_from_energy, loadfactor_demand_factor, loadfactor_diversity_factor,
+    loadfactor_load_factor, loadfactor_utilization_factor,
+};
+pub use overcurrent_relay::{
+    ocr_iec_extremely_inverse_time, ocr_iec_standard_inverse_time, ocr_iec_very_inverse_time,
+    ocr_plug_setting_multiplier,
+};
+pub use parallel_resonance::{
+    pres_bandwidth, pres_dynamic_impedance, pres_quality_factor, pres_resonant_frequency,
+};
+pub use passive_filter::{
+    filt_first_order_gain, filt_gain_decibels, filt_phase_shift, filt_rc_cutoff_frequency,
+    filt_rl_cutoff_frequency,
+};
+pub use per_unit_system::{
+    pu_base_current, pu_base_impedance, pu_change_base_impedance, pu_per_unit_value,
+};
+pub use rlc_transient::{
+    RlcRegime, rlctr_damped_frequency, rlctr_damping_coefficient, rlctr_damping_ratio,
+    rlctr_regime, rlctr_undamped_natural_frequency,
+};
+pub use skin_effect::{
+    skin_ac_resistance_ratio_thick, skin_depth, skin_depth_from_frequency, skin_effective_area,
+};
+pub use thevenin_norton::{
+    thev_load_current, thev_maximum_power_transfer, thev_norton_current,
+    thev_power_transfer_efficiency, thev_thevenin_voltage,
+};
+pub use transformer_three_phase::{
+    xfmr3_line_voltage_ratio_dy, xfmr3_line_voltage_ratio_yd, xfmr3_line_voltage_ratio_yy,
+    xfmr3_phase_shift_degrees,
+};
+pub use voltage_divider::{
+    vdiv_current_divider, vdiv_current_divider_two_resistors, vdiv_loaded, vdiv_unloaded,
+};
+pub use wye_delta_transform::{
+    ydelta_balanced_delta_to_wye, ydelta_balanced_wye_to_delta, ydelta_delta_to_wye,
+    ydelta_wye_to_delta,
 };
