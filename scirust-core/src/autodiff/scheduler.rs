@@ -17,6 +17,20 @@
 // Tous les schedulers sont stateless et déterministes : `lr_at(step)`
 // dépend uniquement de `step`. Ça permet de reproduire un entraînement
 // exact en redémarrant à n'importe quel step (utile pour checkpointing).
+//
+// Un scheduler pilote N'IMPORTE QUELLE famille d'optimiseurs — tape
+// (`crate::autodiff::optim`), N-D (`crate::nn::nd_optim`) ou raw-slice
+// (`crate::optim`) — via `LrSchedule::drive`, qui ne demande que le
+// trait cross-famille `crate::optim::HasLearningRate` :
+//
+//   let sched = WarmupCosine::new(0.01, 0.0001, 1000, 50_000);
+//   let mut opt = NdAdam::with_lr(0.01);   // ou Adam, AdamW, RMSprop…
+//   for step in 0..n_steps {
+//       sched.drive(&mut opt, step);
+//       // ... forward / backward / opt.step ...
+//   }
+
+use crate::optim::HasLearningRate;
 
 // ================================================================== //
 //  Trait                                                              //
@@ -27,6 +41,18 @@ pub trait LrSchedule: Send + Sync {
     /// Les implémenteurs doivent garantir que cette fonction est
     /// déterministe : même `step` → même `lr`.
     fn lr_at(&self, step: usize) -> f32;
+
+    /// Pousse le learning rate du step courant dans l'optimiseur.
+    ///
+    /// Générique sur les trois familles via
+    /// [`HasLearningRate`] : optimiseurs
+    /// tape (`Sgd`, `Adam`, `AdamW` — via le blanket impl sur leur trait
+    /// `Optimizer`), N-D (`NdAdam`, `NdLion`, …) et raw-slice
+    /// (`RMSprop`, `AdamW`, `LAMB`). Équivalent cross-famille de
+    /// [`apply_schedule`](crate::autodiff::optim::apply_schedule).
+    fn drive(&self, opt: &mut dyn HasLearningRate, step: usize) {
+        opt.set_lr(self.lr_at(step));
+    }
 }
 
 // Les Box<dyn LrSchedule> peuvent eux-mêmes être schedulers
@@ -399,5 +425,49 @@ mod tests {
         let s: Box<dyn LrSchedule> = Box::new(StepLr::new(0.1, 0.5, 10));
         assert_eq!(s.lr_at(0), 0.1);
         assert_eq!(s.lr_at(10), 0.05);
+    }
+
+    /// `drive` pilote un optimiseur tape (`Adam`, via le blanket impl
+    /// `Optimizer → HasLearningRate`) et un optimiseur N-D (`NdAdam`) avec
+    /// le même scheduler : à chaque step le LR des deux suit exactement la
+    /// courbe cosinus (et décroît réellement).
+    #[test]
+    fn drive_schedules_tape_and_nd_optimizers() {
+        use crate::autodiff::optim::Adam;
+        use crate::nn::nd_optim::NdAdam;
+
+        let sched = CosineAnnealing::new(0.1, 0.001, 100);
+        let mut tape_opt = Adam::new(0.7);
+        let mut nd_opt = NdAdam::with_lr(0.7);
+
+        let mut prev = f32::INFINITY;
+        for step in [0_usize, 25, 50, 75, 100]
+        {
+            sched.drive(&mut tape_opt, step);
+            sched.drive(&mut nd_opt, step);
+
+            let expected = sched.lr_at(step);
+            assert_eq!(HasLearningRate::lr(&tape_opt), expected, "step {step}");
+            assert_eq!(HasLearningRate::lr(&nd_opt), expected, "step {step}");
+            assert!(
+                expected < prev,
+                "le LR doit décroître le long de la courbe: step {step}, \
+                 {prev} → {expected}"
+            );
+            prev = expected;
+        }
+        // Les extrémités de la courbe, pour ancrer le test.
+        assert!((HasLearningRate::lr(&nd_opt) - 0.001).abs() < 1e-6);
+    }
+
+    /// `drive` reste disponible à travers un scheduler boxé (dyn-safe).
+    #[test]
+    fn drive_works_through_boxed_scheduler() {
+        use crate::nn::nd_optim::NdAdam;
+
+        let s: Box<dyn LrSchedule> = Box::new(StepLr::new(0.1, 0.5, 10));
+        let mut opt = NdAdam::with_lr(0.9);
+        s.drive(&mut opt, 10);
+        assert_eq!(HasLearningRate::lr(&opt), 0.05);
     }
 }

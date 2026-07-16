@@ -8,7 +8,23 @@
 //! result). The optimizer holds the moment buffers aligned to that list. All
 //! arithmetic is plain `f32` in a fixed order, so a run is **bit-for-bit
 //! deterministic**.
+//!
+//! # Place in the optimizer layering
+//!
+//! This is the **N-D family**, one of the three optimizer families in
+//! scirust-core (see [`crate::optim`] for the full picture):
+//!
+//! - tape family ([`crate::autodiff::optim`]) — 2-D training on the tape;
+//! - **N-D family (this module)** — every single-gradient optimizer here
+//!   implements [`NdOptimizer`], so training code can hold a
+//!   `Box<dyn NdOptimizer>` and swap `NdAdam` for `NdLion`, `NdSoap`, …;
+//! - raw-slice family ([`crate::optim`]) — manual loops over `&[f32]`.
+//!
+//! All of them implement [`HasLearningRate`], so any
+//! [`LrSchedule`](crate::autodiff::scheduler::LrSchedule) drives any
+//! optimizer via [`drive`](crate::autodiff::scheduler::LrSchedule::drive).
 
+use crate::optim::HasLearningRate;
 use crate::tensor::tensor_nd::TensorND;
 
 /// A handle to one trainable parameter for an optimizer: a mutable view of its
@@ -18,6 +34,31 @@ pub struct NdParam<'a> {
     pub value: &'a mut TensorND,
     /// Index of this parameter's gradient in the `backward` result.
     pub grad_idx: usize,
+}
+
+// ================================================================== //
+//  NdOptimizer — the swappable N-D optimizer interface                //
+// ================================================================== //
+
+/// The common interface of the single-gradient N-D optimizers, so a training
+/// loop can hold a `Box<dyn NdOptimizer>` and swap [`NdAdam`] for [`NdLion`],
+/// [`NdSoap`], … without being rewritten. Each implementation delegates to
+/// the optimizer's inherent `step` (which stays the primary, documented API).
+///
+/// The supertrait [`HasLearningRate`] means every `NdOptimizer` can also be
+/// driven by any [`LrSchedule`](crate::autodiff::scheduler::LrSchedule)
+/// through [`drive`](crate::autodiff::scheduler::LrSchedule::drive).
+///
+/// The two-phase optimizers — [`NdSam`] (ascent/descent) and [`NdSophia`]
+/// (probe/step) — need gradients at **two** points per update and therefore
+/// cannot fit this single-gradient contract; they implement only
+/// [`HasLearningRate`].
+pub trait NdOptimizer: HasLearningRate {
+    /// One optimization step over `params`, reading each gradient from
+    /// `grads` by the parameter's `grad_idx`. Same ordering contract as
+    /// [`NdAdam::step`]: the same parameters, in the same order, on every
+    /// call.
+    fn step(&mut self, params: &mut [NdParam<'_>], grads: &[TensorND]);
 }
 
 /// Adam / **AdamW** hyper-parameters. [`Default`] is the canonical
@@ -2560,11 +2601,223 @@ impl NdGalore {
     }
 }
 
+// ================================================================== //
+//  Trait impls — HasLearningRate + NdOptimizer for the whole family   //
+// ================================================================== //
+
+/// Implements [`HasLearningRate`] through the `lr` field of the optimizer's
+/// config struct (the pattern shared by the whole family).
+macro_rules! impl_has_lr_via_cfg {
+    ($($ty:ident),* $(,)?) => {$(
+        impl HasLearningRate for $ty {
+            fn lr(&self) -> f32 {
+                self.cfg.lr
+            }
+
+            fn set_lr(&mut self, lr: f32) {
+                self.cfg.lr = lr;
+            }
+        }
+    )*};
+}
+
+impl_has_lr_via_cfg!(
+    NdAdam,
+    NdLion,
+    NdMuon,
+    NdScheduleFree,
+    NdAdEMAMix,
+    NdSoap,
+    NdLamb,
+    NdAdan,
+    NdAdafactor,
+    NdShampoo,
+    NdSam,
+    NdSophia,
+    NdProdigy,
+    NdGalore,
+);
+
+/// [`NdLookahead`] has no learning rate of its own — the slow-weight sync is
+/// governed by `k`/`alpha` — so it exposes the inner (fast) [`NdAdam`]'s.
+impl HasLearningRate for NdLookahead {
+    fn lr(&self) -> f32 {
+        self.base.cfg.lr
+    }
+
+    fn set_lr(&mut self, lr: f32) {
+        self.base.cfg.lr = lr;
+    }
+}
+
+/// Implements [`NdOptimizer`] by delegating to the inherent `step` (the
+/// `$ty::step` path resolves to the inherent method, which takes priority
+/// over the trait method).
+macro_rules! impl_nd_optimizer {
+    ($($ty:ident),* $(,)?) => {$(
+        impl NdOptimizer for $ty {
+            fn step(&mut self, params: &mut [NdParam<'_>], grads: &[TensorND]) {
+                $ty::step(self, params, grads)
+            }
+        }
+    )*};
+}
+
+impl_nd_optimizer!(
+    NdAdam,
+    NdLion,
+    NdMuon,
+    NdScheduleFree,
+    NdAdEMAMix,
+    NdSoap,
+    NdLookahead,
+    NdLamb,
+    NdAdan,
+    NdAdafactor,
+    NdShampoo,
+    NdProdigy,
+    NdGalore,
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::nn::PcgEngine;
     use std::sync::Arc;
+
+    // ---------- NdOptimizer / HasLearningRate ---------- //
+
+    /// `HasLearningRate` get/set across the N-D family, including the
+    /// delegating wrapper (`NdLookahead` forwards to its inner `NdAdam`).
+    #[test]
+    fn has_learning_rate_get_set_on_nd_family() {
+        let mut adam = NdAdam::with_lr(0.1);
+        assert_eq!(adam.lr(), 0.1);
+        adam.set_lr(0.05);
+        assert_eq!(adam.lr(), 0.05);
+
+        let mut lookahead = NdLookahead::with_lr(0.2);
+        assert_eq!(lookahead.lr(), 0.2);
+        lookahead.set_lr(0.3);
+        assert_eq!(lookahead.lr(), 0.3);
+
+        // The two-phase optimizers are schedulable too, even though they
+        // cannot implement `NdOptimizer`.
+        let mut sam = NdSam::with_rho_lr(0.05, 0.1);
+        sam.set_lr(0.01);
+        assert_eq!(sam.lr(), 0.01);
+        let mut sophia = NdSophia::with_lr_seed(0.1, 42);
+        sophia.set_lr(0.2);
+        assert_eq!(sophia.lr(), 0.2);
+    }
+
+    /// Runs `steps` iterations of the quadratic oracle through the
+    /// `NdOptimizer` **trait** (dyn-dispatched), returning the final params.
+    fn minimize_boxed(mut opt: Box<dyn NdOptimizer>, steps: usize) -> Vec<f32> {
+        let target = [2.0f32, -1.0];
+        let mut x = TensorND::new(vec![0.0, 0.0], vec![2]);
+        for _ in 0..steps
+        {
+            let gd: Vec<f32> = x
+                .data
+                .iter()
+                .zip(&target)
+                .map(|(&xi, &ti)| 2.0 * (xi - ti))
+                .collect();
+            let grads = vec![TensorND::new(gd, vec![2])];
+            let mut params = vec![NdParam {
+                value: &mut x,
+                grad_idx: 0,
+            }];
+            opt.step(&mut params, &grads);
+        }
+        x.data.to_vec()
+    }
+
+    /// The point of `NdOptimizer`: the same training loop runs unchanged
+    /// with different optimizers behind `Box<dyn NdOptimizer>`, and each
+    /// still converges on the oracle problem.
+    #[test]
+    fn boxed_nd_optimizers_are_swappable() {
+        let optimizers: Vec<(&str, Box<dyn NdOptimizer>)> = vec![
+            ("NdAdam", Box::new(NdAdam::with_lr(0.1))),
+            ("NdLion", Box::new(NdLion::with_lr(0.01))),
+            ("NdLamb", Box::new(NdLamb::with_lr(0.01))),
+        ];
+        for (name, opt) in optimizers
+        {
+            let x = minimize_boxed(opt, 600);
+            assert!(
+                (x[0] - 2.0).abs() < 0.05 && (x[1] + 1.0).abs() < 0.05,
+                "{name} behind dyn NdOptimizer did not converge: {x:?}"
+            );
+        }
+    }
+
+    /// The trait `step` is a pure delegation: dyn-dispatched NdAdam must
+    /// produce the bit-identical trajectory of the inherent `step`.
+    #[test]
+    fn trait_step_matches_inherent_step_bitwise() {
+        let via_trait = minimize_boxed(Box::new(NdAdam::with_lr(0.1)), 50);
+
+        let target = [2.0f32, -1.0];
+        let mut x = TensorND::new(vec![0.0, 0.0], vec![2]);
+        let mut opt = NdAdam::with_lr(0.1);
+        for _ in 0..50
+        {
+            let gd: Vec<f32> = x
+                .data
+                .iter()
+                .zip(&target)
+                .map(|(&xi, &ti)| 2.0 * (xi - ti))
+                .collect();
+            let grads = vec![TensorND::new(gd, vec![2])];
+            let mut params = vec![NdParam {
+                value: &mut x,
+                grad_idx: 0,
+            }];
+            opt.step(&mut params, &grads);
+        }
+
+        for (a, b) in via_trait.iter().zip(x.data.iter())
+        {
+            assert_eq!(a.to_bits(), b.to_bits(), "trait/inherent divergence");
+        }
+    }
+
+    /// A scheduler drives an `NdOptimizer` mid-training through the generic
+    /// `LrSchedule::drive`: the optimizer's lr follows the schedule curve.
+    #[test]
+    fn scheduler_drives_nd_optimizer_during_training() {
+        use crate::autodiff::scheduler::{LrSchedule, StepLr};
+
+        let sched = StepLr::new(0.1, 0.1, 20); // /10 every 20 steps
+        let target = [1.0f32];
+        let mut x = TensorND::new(vec![0.0], vec![1]);
+        let mut opt = NdAdam::with_lr(0.0);
+
+        for step in 0..40
+        {
+            sched.drive(&mut opt, step);
+            assert_eq!(opt.lr(), sched.lr_at(step), "step {step}");
+
+            let gd: Vec<f32> = x
+                .data
+                .iter()
+                .zip(&target)
+                .map(|(&xi, &ti)| 2.0 * (xi - ti))
+                .collect();
+            let grads = vec![TensorND::new(gd, vec![1])];
+            let mut params = vec![NdParam {
+                value: &mut x,
+                grad_idx: 0,
+            }];
+            opt.step(&mut params, &grads);
+        }
+
+        // The schedule actually changed the lr along the curve.
+        assert!((opt.lr() - 0.01).abs() < 1e-7, "final lr = {}", opt.lr());
+    }
 
     /// Adam minimises a quadratic `Σ(xᵢ − targetᵢ)²` (gradient `2(x − target)`),
     /// driving `x` to the target — the standard optimizer oracle.

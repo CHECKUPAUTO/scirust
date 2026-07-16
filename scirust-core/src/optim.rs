@@ -1,6 +1,68 @@
-/// Advanced optimizers for neural network training
-/// Includes: RMSprop, AdamW, LAMB, and other variants
+//! Optimizer utilities shared by every optimizer family, plus the
+//! **raw-slice optimizer family** (`RMSprop`, `AdamW`, `LAMB`).
+//!
+//! # Optimizer layering in scirust-core
+//!
+//! Three optimizer families coexist, one per training data model:
+//!
+//! | Family | Module | `step` signature | Use case |
+//! |---|---|---|---|
+//! | Tape (`Sgd`, `Adam`, `AdamW` behind [`Optimizer`](crate::autodiff::optim::Optimizer)) | [`crate::autodiff::optim`] | `step(&mut self, params: &[usize], tape: &Tape)` | 2-D training on the reverse-mode tape |
+//! | N-D (`NdAdam`, `NdLion`, … behind [`NdOptimizer`](crate::nn::nd_optim::NdOptimizer)) | [`crate::nn::nd_optim`] | `step(&mut self, params: &mut [NdParam], grads: &[TensorND])` | N-D layer training ([`nd_layers`](crate::nn::nd_layers), [`nd_decoder`](crate::nn::nd_decoder)) |
+//! | Raw-slice (`RMSprop`, `AdamW`, `LAMB` — **this module**) | `crate::optim` | `step(&mut self, param_id: &str, grad: &[f32], …)` | external/manual training loops over plain `f32` buffers |
+//!
+//! All three are unified by [`HasLearningRate`], so any
+//! [`LrSchedule`](crate::autodiff::scheduler::LrSchedule) can drive any
+//! optimizer through
+//! [`LrSchedule::drive`](crate::autodiff::scheduler::LrSchedule::drive).
+//!
+//! Note: a **tape-based `AdamW`** exists in [`crate::autodiff::optim`], so
+//! `Adam → AdamW` is a drop-in swap on the tape path. The raw-slice family in
+//! this module is kept for external/manual training loops that own their
+//! parameters as plain slices (string-keyed, no tape and no
+//! [`NdParam`](crate::nn::nd_optim::NdParam) plumbing).
+
 use std::collections::HashMap;
+
+// ================================================================== //
+//  HasLearningRate — the cross-family scheduler interface             //
+// ================================================================== //
+
+/// The one capability every optimizer family shares: a readable and
+/// writable learning rate.
+///
+/// Implemented by the tape family (via a blanket impl over
+/// [`Optimizer`](crate::autodiff::optim::Optimizer)), by the whole N-D
+/// family ([`crate::nn::nd_optim`]) and by the raw-slice family (this
+/// module), so a single [`LrSchedule`](crate::autodiff::scheduler::LrSchedule)
+/// implementation can drive any of the optimizers through
+/// [`LrSchedule::drive`](crate::autodiff::scheduler::LrSchedule::drive).
+pub trait HasLearningRate {
+    /// The current learning rate.
+    fn lr(&self) -> f32;
+
+    /// Overwrite the learning rate (what schedulers call).
+    fn set_lr(&mut self, lr: f32);
+}
+
+/// Every tape optimizer already exposes `lr`/`set_lr` through the
+/// [`Optimizer`](crate::autodiff::optim::Optimizer) trait; this blanket impl
+/// lifts them into the cross-family trait so schedulers drive tape
+/// optimizers — including downstream `Optimizer` implementations — with no
+/// extra code.
+///
+/// Note: when **both** traits are in scope, `opt.lr()` on a tape optimizer
+/// is ambiguous; disambiguate with `Optimizer::lr(&opt)` or
+/// `HasLearningRate::lr(&opt)`.
+impl<T: crate::autodiff::optim::Optimizer + ?Sized> HasLearningRate for T {
+    fn lr(&self) -> f32 {
+        crate::autodiff::optim::Optimizer::lr(self)
+    }
+
+    fn set_lr(&mut self, lr: f32) {
+        crate::autodiff::optim::Optimizer::set_lr(self, lr);
+    }
+}
 
 /// RMSprop optimizer - uses exponential moving average of squared gradients
 #[derive(Debug, Clone)]
@@ -230,6 +292,40 @@ impl LAMB {
     }
 }
 
+// ================================================================== //
+//  HasLearningRate for the raw-slice family                           //
+// ================================================================== //
+
+impl HasLearningRate for RMSprop {
+    fn lr(&self) -> f32 {
+        self.learning_rate
+    }
+
+    fn set_lr(&mut self, lr: f32) {
+        self.learning_rate = lr;
+    }
+}
+
+impl HasLearningRate for AdamW {
+    fn lr(&self) -> f32 {
+        self.learning_rate
+    }
+
+    fn set_lr(&mut self, lr: f32) {
+        self.learning_rate = lr;
+    }
+}
+
+impl HasLearningRate for LAMB {
+    fn lr(&self) -> f32 {
+        self.learning_rate
+    }
+
+    fn set_lr(&mut self, lr: f32) {
+        self.learning_rate = lr;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,6 +338,47 @@ mod tests {
         optimizer.step("param_0", &grads);
         let update = optimizer.get_update("param_0").unwrap();
         assert!(update.iter().any(|&x| x != 0.0));
+    }
+
+    /// `HasLearningRate` get/set on the raw-slice family: the shared trait
+    /// must read and write the same learning rate the optimizer steps with.
+    #[test]
+    fn has_learning_rate_on_raw_slice_family() {
+        let mut rmsprop = RMSprop::new(0.01);
+        assert_eq!(rmsprop.lr(), 0.01);
+        rmsprop.set_lr(0.2);
+        assert_eq!(rmsprop.lr(), 0.2);
+
+        let mut adamw = AdamW::new(0.001);
+        assert_eq!(adamw.lr(), 0.001);
+        adamw.set_lr(0.05);
+        assert_eq!(adamw.lr(), 0.05);
+
+        let mut lamb = LAMB::new(0.003);
+        assert_eq!(lamb.lr(), 0.003);
+        lamb.set_lr(0.1);
+        assert_eq!(lamb.lr(), 0.1);
+    }
+
+    /// The blanket impl lifts every tape `Optimizer` (here `Adam` and `Sgd`)
+    /// into `HasLearningRate`, so the same generic code can schedule all
+    /// three families.
+    #[test]
+    fn has_learning_rate_on_tape_family_via_blanket_impl() {
+        use crate::autodiff::optim::{Adam, Sgd};
+
+        fn halve(opt: &mut impl HasLearningRate) {
+            let lr = opt.lr();
+            opt.set_lr(lr / 2.0);
+        }
+
+        let mut adam = Adam::new(0.4);
+        halve(&mut adam);
+        assert_eq!(HasLearningRate::lr(&adam), 0.2);
+
+        let mut sgd = Sgd::new(0.4);
+        halve(&mut sgd);
+        assert_eq!(HasLearningRate::lr(&sgd), 0.2);
     }
 
     // Regression: the bias-correction timestep must be per-parameter. Two

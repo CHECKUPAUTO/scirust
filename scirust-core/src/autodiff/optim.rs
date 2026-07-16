@@ -12,6 +12,18 @@
 // chaque pas et ré-injecter les paramètres mis à jour. La Tape
 // accumule en effet les noeuds — voir adam_converges_on_quadratic
 // dans les tests pour le pattern complet.
+//
+// PLACE DANS L'ARCHITECTURE (les trois familles d'optimiseurs) :
+//   - Ce module : la famille *tape* (`Sgd`, `Adam`, `AdamW`), trait
+//     `Optimizer` — entraînement 2-D sur la tape reverse-mode.
+//   - `crate::nn::nd_optim` : la famille *N-D* (`NdAdam`, `NdLion`, …),
+//     trait `NdOptimizer` — entraînement des couches N-D.
+//   - `crate::optim` : la famille *raw-slice* (`RMSprop`, `AdamW`,
+//     `LAMB`) — boucles d'entraînement manuelles sur des `&[f32]`.
+// Les trois familles implémentent `crate::optim::HasLearningRate`
+// (les optimiseurs tape via un blanket impl sur `Optimizer`), ce qui
+// permet à n'importe quel `LrSchedule` de piloter n'importe quel
+// optimiseur via `LrSchedule::drive`.
 
 use crate::autodiff::reverse::{Tape, Tensor};
 use std::collections::HashMap;
@@ -241,14 +253,166 @@ impl Optimizer for Adam {
 }
 
 // ================================================================== //
+//  AdamW — Adam à weight decay découplé (Loshchilov & Hutter 2019)    //
+// ================================================================== //
+
+/// **AdamW** (Loshchilov & Hutter, *Decoupled Weight Decay
+/// Regularization*, ICLR 2019) sur la Tape : Adam dont le weight decay
+/// est **découplé** du gradient.
+///
+/// Là où `Adam::with_weight_decay` ajoute `wd·θ` au gradient (L2
+/// classique — le terme passe par les moments et se fait renormaliser
+/// par `√v̂`), AdamW retranche `lr·wd·θ` directement au paramètre :
+///
+/// ```text
+/// θ ← θ − lr·m̂/(√v̂ + ε) − lr·wd·θ
+/// ```
+///
+/// La structure est le miroir exact d'[`Adam`] (moments indexés par
+/// nœud de tape, bias correction, AMSGrad optionnel) : avec
+/// `weight_decay = 0`, la trajectoire est **bit-à-bit identique** à
+/// Adam, donc le swap `Adam → AdamW` est drop-in sur le chemin tape.
+/// Le défaut est `weight_decay = 0.01` (le défaut canonique d'AdamW).
+pub struct AdamW {
+    pub lr: f32,
+    pub beta1: f32,
+    pub beta2: f32,
+    pub epsilon: f32,
+    /// Weight decay **découplé** (retranché au paramètre, pas au gradient).
+    pub weight_decay: f32,
+    pub amsgrad: bool,
+    t: usize,                      // step counter (pour bias correction)
+    m: HashMap<usize, Tensor>,     // 1er moment (moyenne mobile gradient)
+    v: HashMap<usize, Tensor>,     // 2e moment (moyenne mobile gradient²)
+    v_max: HashMap<usize, Tensor>, // max historique du 2e moment (AMSGrad)
+}
+
+impl AdamW {
+    pub fn new(lr: f32) -> Self {
+        Self {
+            lr,
+            beta1: 0.9,
+            beta2: 0.999,
+            epsilon: 1e-8,
+            weight_decay: 0.01,
+            amsgrad: false,
+            t: 0,
+            m: HashMap::new(),
+            v: HashMap::new(),
+            v_max: HashMap::new(),
+        }
+    }
+
+    pub fn with_betas(mut self, b1: f32, b2: f32) -> Self {
+        self.beta1 = b1;
+        self.beta2 = b2;
+        self
+    }
+
+    /// Fixe le weight decay découplé (`0.0` = Adam exact).
+    pub fn with_weight_decay(mut self, wd: f32) -> Self {
+        self.weight_decay = wd;
+        self
+    }
+
+    pub fn with_epsilon(mut self, eps: f32) -> Self {
+        self.epsilon = eps;
+        self
+    }
+
+    /// Active la variante **AMSGrad** — même sémantique que
+    /// [`Adam::with_amsgrad`] : le dénominateur utilise le maximum
+    /// historique du 2e moment.
+    pub fn with_amsgrad(mut self) -> Self {
+        self.amsgrad = true;
+        self
+    }
+}
+
+impl Optimizer for AdamW {
+    fn step(&mut self, params: &[usize], tape: &Tape) {
+        self.t += 1;
+        let bc1 = 1.0 - self.beta1.powi(self.t as i32); // bias correction 1
+        let bc2 = 1.0 - self.beta2.powi(self.t as i32); // bias correction 2
+
+        for &idx in params
+        {
+            let mut value = tape.value(idx);
+            let grad = tape.grad(idx);
+            assert_eq!(
+                value.shape(),
+                grad.shape(),
+                "AdamW::step: shape mismatch param/grad (idx={})",
+                idx
+            );
+
+            let m = self
+                .m
+                .entry(idx)
+                .or_insert_with(|| Tensor::zeros(value.rows, value.cols));
+            let v = self
+                .v
+                .entry(idx)
+                .or_insert_with(|| Tensor::zeros(value.rows, value.cols));
+            let mut v_max = self.amsgrad.then(|| {
+                self.v_max
+                    .entry(idx)
+                    .or_insert_with(|| Tensor::zeros(value.rows, value.cols))
+            });
+
+            for i in 0..value.data.len()
+            {
+                // Différence avec Adam : le gradient reste brut — le weight
+                // decay ne passe PAS par les moments.
+                let g = grad.data[i];
+
+                // m = β1 m + (1−β1) g
+                m.data[i] = self.beta1 * m.data[i] + (1.0 - self.beta1) * g;
+                // v = β2 v + (1−β2) g²
+                v.data[i] = self.beta2 * v.data[i] + (1.0 - self.beta2) * g * g;
+
+                // bias correction
+                let m_hat = m.data[i] / bc1;
+                let mut v_hat = v.data[i] / bc2;
+
+                // AMSGrad : normalisation par le max historique du 2e moment.
+                if let Some(vm) = &mut v_max
+                {
+                    vm.data[i] = vm.data[i].max(v.data[i]);
+                    v_hat = vm.data[i] / bc2;
+                }
+
+                // θ ← θ − lr·m̂/(√v̂ + ε) − lr·wd·θ
+                // (decay découplé, calculé sur le θ pré-update ; à wd = 0 le
+                // terme est nul et l'update est bit-à-bit celui d'Adam)
+                let theta = value.data[i];
+                value.data[i] -= self.lr * m_hat / (v_hat.sqrt() + self.epsilon)
+                    + self.lr * self.weight_decay * theta;
+            }
+            tape.set_value(idx, value);
+        }
+    }
+
+    fn lr(&self) -> f32 {
+        self.lr
+    }
+    fn set_lr(&mut self, lr: f32) {
+        self.lr = lr;
+    }
+}
+
+// ================================================================== //
 //  apply_schedule — applique un scheduler à n'importe quel optimizer //
 // ================================================================== //
 
 /// Met à jour le learning rate de l'optimizer en fonction du scheduler
 /// et du step courant.
 ///
-/// Générique sur le type d'optimizer (Sgd, Adam, ou tout autre qui
-/// implémente le trait Optimizer).
+/// Générique sur le type d'optimizer (Sgd, Adam, AdamW, ou tout autre
+/// qui implémente le trait Optimizer). Pour piloter aussi les familles
+/// N-D (`crate::nn::nd_optim`) et raw-slice (`crate::optim`), voir le
+/// pendant cross-famille
+/// [`LrSchedule::drive`](crate::autodiff::scheduler::LrSchedule::drive).
 pub fn apply_schedule(
     scheduler: &impl crate::autodiff::scheduler::LrSchedule,
     opt: &mut dyn Optimizer,
@@ -526,6 +690,111 @@ mod tests {
             ams < adam * 0.1,
             "AMSGrad devrait faire des pas bien plus petits après le pic: \
              adam={adam}, amsgrad={ams}"
+        );
+    }
+
+    // ---------- AdamW ---------- //
+
+    /// Un pas d'entraînement `f(x) = (x − target)²` sur une tape éphémère :
+    /// renvoie la nouvelle valeur du paramètre. Factorise les trajectoires
+    /// Adam-vs-AdamW des tests ci-dessous.
+    fn quadratic_step(opt: &mut impl Optimizer, x_value: f32, target: f32) -> f32 {
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![x_value], 1, 1));
+        let target_t = tape.input(Tensor::from_vec(vec![target], 1, 1));
+        let diff = x.sub(target_t);
+        let loss = diff.hadamard(diff).sum();
+        tape.backward(loss.idx());
+        opt.step(&[x.idx()], &tape);
+        tape.value(x.idx()).data[0]
+    }
+
+    #[test]
+    fn adamw_set_lr_updates() {
+        let mut opt = AdamW::new(0.001);
+        assert_eq!(opt.lr(), 0.001);
+        opt.set_lr(0.01);
+        assert_eq!(opt.lr(), 0.01);
+    }
+
+    /// ORACLE drop-in : avec `weight_decay = 0`, AdamW doit produire une
+    /// trajectoire **bit-à-bit identique** à Adam (même arithmétique f32,
+    /// dans le même ordre) — c'est ce qui rend le swap Adam → AdamW sûr.
+    #[test]
+    fn adamw_zero_decay_is_bitwise_identical_to_adam() {
+        let lr = 0.1;
+        let target = 3.0_f32;
+
+        let mut adam = Adam::new(lr);
+        let mut adamw = AdamW::new(lr).with_weight_decay(0.0);
+        let mut x_adam = 0.0_f32;
+        let mut x_adamw = 0.0_f32;
+
+        for step in 0..50
+        {
+            x_adam = quadratic_step(&mut adam, x_adam, target);
+            x_adamw = quadratic_step(&mut adamw, x_adamw, target);
+            assert_eq!(
+                x_adam.to_bits(),
+                x_adamw.to_bits(),
+                "step {step}: adam={x_adam}, adamw={x_adamw}"
+            );
+        }
+    }
+
+    /// Avec `weight_decay > 0`, le terme découplé `−lr·wd·θ` tire les
+    /// paramètres vers 0 : le point de convergence d'AdamW doit être
+    /// strictement plus petit que celui d'Adam sur le même problème.
+    #[test]
+    fn adamw_weight_decay_shrinks_params_relative_to_adam() {
+        let lr = 0.1;
+        let target = 3.0_f32;
+        let n_steps = 300;
+
+        let mut adam = Adam::new(lr);
+        let mut adamw = AdamW::new(lr).with_weight_decay(0.5);
+        let mut x_adam = 0.0_f32;
+        let mut x_adamw = 0.0_f32;
+
+        for _ in 0..n_steps
+        {
+            x_adam = quadratic_step(&mut adam, x_adam, target);
+            x_adamw = quadratic_step(&mut adamw, x_adamw, target);
+        }
+
+        assert!(
+            (x_adam - target).abs() < 0.05,
+            "Adam n'a pas convergé: {x_adam}"
+        );
+        assert!(
+            x_adamw > 0.0 && x_adamw < x_adam - 0.1,
+            "le weight decay devrait tirer AdamW ({x_adamw}) nettement \
+             sous Adam ({x_adam})"
+        );
+    }
+
+    /// ORACLE : même sanity de convergence que `adam_converges_on_quadratic`,
+    /// avec le weight decay par défaut (0.01) — le décalage induit sur le
+    /// minimum de `(x − 3)²` est négligeable devant la tolérance.
+    #[test]
+    fn adamw_converges_on_quadratic() {
+        let lr = 0.1;
+        let n_steps = 200;
+        let target = 3.0_f32;
+
+        let mut x_value = 0.0_f32;
+        let mut opt = AdamW::new(lr);
+
+        for _ in 0..n_steps
+        {
+            x_value = quadratic_step(&mut opt, x_value, target);
+        }
+
+        assert!(
+            (x_value - target).abs() < 0.05,
+            "AdamW n'a pas convergé: x final = {}, target = {}",
+            x_value,
+            target
         );
     }
 
