@@ -135,11 +135,17 @@ pub trait RealScalar: NumericScalar {
     fn asin(self) -> Self;
     /// Arccosinus `acos(x)` (hors `[-1, 1]` : saturé à `0`/`π` en virgule fixe).
     fn acos(self) -> Self;
+    /// Constante `π` (saturée en virgule fixe si `FRAC` la rend inreprésentable).
+    fn pi() -> Self;
 }
 
 macro_rules! impl_real_scalar_float {
-    ($ty:ty) => {
+    ($ty:ty, $pi:expr) => {
         impl RealScalar for $ty {
+            #[inline(always)]
+            fn pi() -> Self {
+                $pi
+            }
             #[inline(always)]
             fn sqrt(self) -> Self {
                 <$ty>::sqrt(self)
@@ -200,8 +206,8 @@ macro_rules! impl_real_scalar_float {
     };
 }
 
-impl_real_scalar_float!(f32);
-impl_real_scalar_float!(f64);
+impl_real_scalar_float!(f32, core::f32::consts::PI);
+impl_real_scalar_float!(f64, core::f64::consts::PI);
 
 impl<const FRAC: u32> RealScalar for Fixed<i32, FRAC> {
     #[inline(always)]
@@ -269,5 +275,11 @@ impl<const FRAC: u32> RealScalar for Fixed<i32, FRAC> {
     #[inline(always)]
     fn acos(self) -> Self {
         super::transcendental::acos(self)
+    }
+    #[inline(always)]
+    fn pi() -> Self {
+        // π ≈ 3.14159 : représentable pour FRAC ≤ 29 ; sinon saturé.
+        Self::from_f64(core::f64::consts::PI, super::RoundingMode::NearestEven)
+            .unwrap_or_else(Self::max_value)
     }
 }

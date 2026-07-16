@@ -688,6 +688,12 @@ pub mod geometry;
 #[cfg(feature = "portable-simd")]
 pub mod transformed;
 
+// Traitement du signal générique (Biquad IIR, FIR) au-dessus des traits
+// NumericScalar/RealScalar : filtrage identique et déterministe en flottant et
+// en virgule fixe.
+#[cfg(feature = "portable-simd")]
+pub mod dsp;
+
 #[cfg(all(feature = "nightly-simd", target_arch = "x86_64"))]
 pub mod amx;
 #[cfg(all(feature = "nightly-simd", target_arch = "x86_64"))]
