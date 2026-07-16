@@ -40,6 +40,33 @@ pub struct Svd {
     pub v: Matrix,
 }
 
+impl Svd {
+    /// Condition number `σ_max / σ_min` in the 2-norm — how much a small
+    /// relative perturbation of `A` can be amplified in the solution of
+    /// `A·x = b`. `f64::INFINITY` if the smallest singular value is exactly
+    /// zero (singular / rank-deficient matrix), never `NaN`.
+    pub fn cond(&self) -> f64 {
+        let smax = self.s.first().copied().unwrap_or(0.0);
+        let smin = self.s.last().copied().unwrap_or(0.0);
+        if smin == 0.0
+        {
+            f64::INFINITY
+        }
+        else
+        {
+            smax / smin
+        }
+    }
+
+    /// Reciprocal condition number `1/cond()`, LAPACK-style: near `1.0` is
+    /// well-conditioned, near (or exactly) `0.0` is singular / numerically
+    /// unreliable to invert.
+    pub fn rcond(&self) -> f64 {
+        let c = self.cond();
+        if c.is_infinite() { 0.0 } else { 1.0 / c }
+    }
+}
+
 /// Calcule la SVD fine de `a`, quelle que soit sa forme `(m, n)`.
 pub fn svd(a: &Matrix) -> SolverResult<Svd> {
     let (m, n) = a.shape();
@@ -286,5 +313,41 @@ mod tests {
     #[test]
     fn rejects_empty_matrix() {
         assert!(svd(&Matrix::zeros(0, 0)).is_err());
+    }
+
+    #[test]
+    fn cond_of_identity_is_one() {
+        let s = svd(&Matrix::identity(4)).unwrap();
+        assert_relative_eq!(s.cond(), 1.0, epsilon = 1e-10);
+        assert_relative_eq!(s.rcond(), 1.0, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn cond_of_diagonal_matrix_is_ratio_of_extremes() {
+        // diag(100, 10, 1) ⇒ cond = 100/1 = 100.
+        let a = Matrix::from_row_major(3, 3, vec![100.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 1.0]);
+        let s = svd(&a).unwrap();
+        assert_relative_eq!(s.cond(), 100.0, epsilon = 1e-8);
+        assert_relative_eq!(s.rcond(), 0.01, epsilon = 1e-8);
+    }
+
+    #[test]
+    fn cond_of_rank_deficient_matrix_is_infinite() {
+        // Same rank-1 matrix as `rank_deficient_matrix_has_zero_singular_value`,
+        // but with an exactly (not just near-) zero second singular value:
+        // a diagonal matrix with a literal zero entry.
+        let a = Matrix::from_row_major(2, 2, vec![5.0, 0.0, 0.0, 0.0]);
+        let s = svd(&a).unwrap();
+        assert_eq!(s.cond(), f64::INFINITY);
+        assert_eq!(s.rcond(), 0.0);
+        assert!(!s.cond().is_nan() && !s.rcond().is_nan());
+    }
+
+    #[test]
+    fn cond_of_zero_matrix_is_infinite_not_nan() {
+        let a = Matrix::zeros(2, 2);
+        let s = svd(&a).unwrap();
+        assert_eq!(s.cond(), f64::INFINITY);
+        assert_eq!(s.rcond(), 0.0);
     }
 }
