@@ -72,11 +72,13 @@
 // * [`traits`] — [`NumericScalar`] et [`RealScalar`].
 // * [`simd`] — vecteurs [`FixedI16x8`], [`FixedI32x8`], [`FixedI64x4`].
 // * [`reductions`] — sommes, `dot`, normes, extrema, cosinus.
+// * [`linalg`] — GEMM déterministe (`matmul`, `matvec`, `transpose`).
 // * [`math`] — `sqrt`, `rsqrt`, `reciprocal` (Newton entier exact).
 // * [`transcendental`] — `exp`/`ln`/`sin`/`cos`/`tanh`/`sigmoid`/`softmax`
 //   (minimax + réduction d'argument, bornes ULP prouvées ; `FixedI32<FRAC>`).
 
 pub mod convert;
+pub mod linalg;
 pub mod math;
 pub mod ops;
 pub mod overflow;

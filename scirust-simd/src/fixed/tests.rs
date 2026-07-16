@@ -7,6 +7,7 @@
 //  * comparaison à une référence `f64` à quelques ULP pour mul/div/math ;
 //  * égalité stricte **SIMD == scalaire**.
 
+use super::linalg;
 use super::math::{reciprocal, rsqrt, sqrt};
 use super::reductions as red;
 use super::simd::{FixedI16x8, FixedI32x8, FixedI64x4};
@@ -512,6 +513,164 @@ fn reductions_simd_vs_scalar_dot() {
         acc += a[i].wrapping_mul(b[i]).to_raw() as i128;
     }
     assert_eq!(simd.to_raw() as i128, acc);
+}
+
+// ------------------------------------------------------------------ //
+//  Algèbre linéaire : GEMM déterministe                               //
+// ------------------------------------------------------------------ //
+
+/// Référence naïve : triple boucle avec opérateurs enveloppants de `Fixed`.
+/// Doit coïncider **bit-à-bit** avec `linalg::matmul` (somme enveloppante
+/// associative + arrondi de produit identique).
+fn naive_matmul<const F: u32>(
+    a: &[FixedI32<F>],
+    b: &[FixedI32<F>],
+    m: usize,
+    k: usize,
+    n: usize,
+) -> Vec<FixedI32<F>> {
+    let mut c = vec![FixedI32::<F>::from_raw(0); m * n];
+    for i in 0..m
+    {
+        for j in 0..n
+        {
+            let mut acc = FixedI32::<F>::from_raw(0);
+            for l in 0..k
+            {
+                acc += a[i * k + l] * b[l * n + j];
+            }
+            c[i * n + j] = acc;
+        }
+    }
+    c
+}
+
+#[test]
+fn transpose_roundtrip_and_known() {
+    // 2×3 connu.
+    let a = [1i32, 2, 3, 4, 5, 6].map(Q16_16::from);
+    let t = linalg::transpose(&a, 2, 3); // 3×2
+    let expected = [1i32, 4, 2, 5, 3, 6].map(Q16_16::from);
+    assert_eq!(t, expected);
+    // Double transposition = identité.
+    let tt = linalg::transpose(&t, 3, 2);
+    assert_eq!(tt, a.to_vec());
+}
+
+#[test]
+fn matmul_known_small() {
+    // A = [[1,2,3],[4,5,6]] (2×3), B = [[7,8],[9,10],[11,12]] (3×2).
+    // C = [[58,64],[139,154]].
+    let a = [1i32, 2, 3, 4, 5, 6].map(Q16_16::from);
+    let b = [7i32, 8, 9, 10, 11, 12].map(Q16_16::from);
+    let c = linalg::matmul(&a, &b, 2, 3, 2);
+    let expected = [58i32, 64, 139, 154].map(Q16_16::from);
+    assert_eq!(c, expected);
+}
+
+#[test]
+fn matvec_known_small() {
+    // A = [[1,2,3],[4,5,6]] (2×3), x = [1,0,-1] → y = [1-3, 4-6] = [-2,-2].
+    let a = [1i32, 2, 3, 4, 5, 6].map(Q16_16::from);
+    let x = [1i32, 0, -1].map(Q16_16::from);
+    let y = linalg::matvec(&a, &x, 2, 3);
+    assert_eq!(y, [(-2i32), -2].map(Q16_16::from));
+}
+
+#[test]
+fn matmul_matches_naive_bit_exact() {
+    // Égalité stricte SIMD/dot vs triple boucle enveloppante, tailles variées
+    // (dont non multiples de 8 pour couvrir le reste scalaire du dot).
+    let mut rng = Lcg(0xBEEF);
+    for &(m, k, n) in &[
+        (1, 1, 1),
+        (3, 8, 5),
+        (7, 13, 4),
+        (8, 16, 8),
+        (5, 1, 9),
+        (4, 3, 1),
+    ]
+    {
+        let a: Vec<Q16_16> = (0..m * k)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 8))
+            .collect();
+        let b: Vec<Q16_16> = (0..k * n)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 8))
+            .collect();
+        let got = linalg::matmul(&a, &b, m, k, n);
+        let want = naive_matmul(&a, &b, m, k, n);
+        assert_eq!(got, want, "matmul {m}×{k}·{k}×{n}");
+        // matvec == matmul avec n = 1.
+        let x: Vec<Q16_16> = (0..k)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 8))
+            .collect();
+        let yv = linalg::matvec(&a, &x, m, k);
+        let ym = linalg::matmul(&a, &x, m, k, 1);
+        assert_eq!(yv, ym, "matvec vs matmul(n=1) {m}×{k}");
+    }
+}
+
+#[test]
+fn matmul_float_reference() {
+    // Valeurs modérées (pas d'overflow) : le GEMM virgule fixe approche la
+    // référence f64 à quelques résolutions près (arrondi par produit).
+    let mut rng = Lcg(0x1357);
+    let (m, k, n) = (6, 10, 7);
+    let a: Vec<Q16_16> = (0..m * k)
+        .map(|_| Q16_16::try_from((rng.raw_i32() >> 20) as f64 / 8.0).unwrap())
+        .collect();
+    let b: Vec<Q16_16> = (0..k * n)
+        .map(|_| Q16_16::try_from((rng.raw_i32() >> 20) as f64 / 8.0).unwrap())
+        .collect();
+    let c = linalg::matmul(&a, &b, m, k, n);
+    for i in 0..m
+    {
+        for j in 0..n
+        {
+            let mut fref = 0.0f64;
+            for l in 0..k
+            {
+                fref += a[i * k + l].to_f64() * b[l * n + j].to_f64();
+            }
+            let got = c[i * n + j].to_f64();
+            // k produits, chacun arrondi à ≤ 1 résolution → borne k·2^-16.
+            assert!(
+                (got - fref).abs() <= (k as f64) / 65536.0,
+                "C[{i},{j}] = {got} vs {fref}"
+            );
+        }
+    }
+}
+
+#[test]
+fn matmul_zero_dims() {
+    // k = 0 : produit de matrices « vides » → C nulle m×n.
+    let a: [Q16_16; 0] = [];
+    let b: [Q16_16; 0] = [];
+    let c = linalg::matmul(&a, &b, 2, 0, 3);
+    assert_eq!(c, vec![Q16_16::zero(); 6]);
+    // m = 0 → sortie vide.
+    assert!(linalg::matmul(&a, &b, 0, 0, 3).is_empty());
+}
+
+#[test]
+fn matmul_i64_storage() {
+    // Le chemin de stockage i64 (dot scalaire, accumulation i128) donne aussi
+    // l'égalité stricte avec la référence naïve.
+    let a = [1i64, 2, 3, 4].map(Q32_32::from);
+    let b = [5i64, 6, 7, 8].map(Q32_32::from);
+    let c = linalg::matmul(&a, &b, 2, 2, 2);
+    // [[1,2],[3,4]]·[[5,6],[7,8]] = [[19,22],[43,50]].
+    let expected = [19i64, 22, 43, 50].map(Q32_32::from);
+    assert_eq!(c, expected);
+}
+
+#[test]
+#[should_panic(expected = "matmul")]
+fn matmul_dim_mismatch_panics() {
+    let a = [Q16_16::one(); 6]; // annoncé 2×3
+    let b = [Q16_16::one(); 6]; // annoncé 3×2
+    let _ = linalg::matmul(&a, &b, 2, 3, 3); // b.len()=6 ≠ 3×3=9 → panique
 }
 
 // ------------------------------------------------------------------ //
