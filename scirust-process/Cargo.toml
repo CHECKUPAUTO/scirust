@@ -1,0 +1,11 @@
+[package]
+name = "scirust-process"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust génie des procédés & génie chimique — calcul déterministe pur-Rust : bilans matière et énergie, réacteurs (CSTR, PFR, batch, cinétique, DTS), séparation (distillation McCabe-Thiele, flash, absorption, extraction, lixiviation), transfert de masse, et opérations unitaires (séchage, évaporation, cristallisation, fluidisation, lit fixe). Opérations unitaires à limites explicites, propriétés fournies par l'appelant."
+
+[dependencies]
+
+[dev-dependencies]
+approx = "0.5"

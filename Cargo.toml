@@ -149,6 +149,7 @@ members = [
     "scirust-machining",
     "scirust-electrotech",
     "scirust-civil",
+    "scirust-process",
     "scirust-tolerance",
     "scirust-sigma",
     "scirust-special",
