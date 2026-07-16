@@ -82,6 +82,7 @@
 //! - [`insulation_testing`] — essai d'isolement : résistance en continu, indice de polarisation, DAR, correction thermique.
 //! - [`relay_coordination`] — sélectivité chronométrique : marge de discrimination, critère, rapport de réglage.
 //! - [`dc_distribution`] — distribution CC : chute deux fils, section requise, pertes, rendement, charge répartie.
+//! - [`motor_protection`] — protection thermique moteur : courant de pleine charge, rotor bloqué, temps de déclenchement (I²t), facteur de service.
 //!
 //! ## Positionnement
 //!
@@ -148,6 +149,7 @@ pub mod instrument_transformer;
 pub mod insulation_testing;
 pub mod line_parameters;
 pub mod line_voltage_regulation;
+pub mod motor_protection;
 pub mod rc_snubber;
 pub mod rectifier_smoothing;
 pub mod relay_coordination;
@@ -327,6 +329,10 @@ pub use line_parameters::{
 };
 pub use line_voltage_regulation::{
     linreg_ferranti_rise, linreg_percent_regulation, linreg_receiving_voltage, linreg_voltage_drop,
+};
+pub use motor_protection::{
+    motprot_full_load_current, motprot_locked_rotor_current, motprot_overload_trip_time,
+    motprot_service_factor_current,
 };
 pub use rc_snubber::{
     snub_capacitance, snub_critical_damping_resistance, snub_power_dissipation, snub_resistance,
