@@ -3469,10 +3469,14 @@ impl<'t> Var<'t> {
 
     pub fn try_add(self, other: Var<'t>) -> crate::error::Result<Var<'t>> {
         self.ensure_same_tape(&other, "add")?;
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
-        crate::error::check_shape("add", a.shape(), b.shape())?;
-        let out = a.add(&b);
+        // Borrow the operands (no clone); drop the borrow before the mutable push.
+        let out = {
+            let values = self.tape.values.borrow();
+            let a = values[self.idx].as_cpu();
+            let b = values[other.idx].as_cpu();
+            crate::error::check_shape("add", a.shape(), b.shape())?;
+            a.add(b)
+        };
         let new_idx = self.tape.push_with_saved(
             Op::Add(self.idx, other.idx),
             DeviceTensor::cpu(out),
@@ -3545,10 +3549,13 @@ impl<'t> Var<'t> {
 
     pub fn try_sub(self, other: Var<'t>) -> crate::error::Result<Var<'t>> {
         self.ensure_same_tape(&other, "sub")?;
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
-        crate::error::check_shape("sub", a.shape(), b.shape())?;
-        let out = a.sub(&b);
+        let out = {
+            let values = self.tape.values.borrow();
+            let a = values[self.idx].as_cpu();
+            let b = values[other.idx].as_cpu();
+            crate::error::check_shape("sub", a.shape(), b.shape())?;
+            a.sub(b)
+        };
         let new_idx = self.tape.push_with_saved(
             Op::Sub(self.idx, other.idx),
             DeviceTensor::cpu(out),
@@ -3562,10 +3569,13 @@ impl<'t> Var<'t> {
 
     pub fn try_div(self, other: Var<'t>) -> crate::error::Result<Var<'t>> {
         self.ensure_same_tape(&other, "div")?;
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
-        crate::error::check_shape("div", a.shape(), b.shape())?;
-        let out = a.div(&b);
+        let out = {
+            let values = self.tape.values.borrow();
+            let a = values[self.idx].as_cpu();
+            let b = values[other.idx].as_cpu();
+            crate::error::check_shape("div", a.shape(), b.shape())?;
+            a.div(b)
+        };
         let new_idx = self.tape.push_with_saved(
             Op::Div(self.idx, other.idx),
             DeviceTensor::cpu(out),
@@ -3794,8 +3804,7 @@ impl<'t> Var<'t> {
 
     #[allow(clippy::should_implement_trait)]
     pub fn neg(self) -> Var<'t> {
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let out = a.neg();
+        let out = self.tape.values.borrow()[self.idx].as_cpu().neg();
         let new_idx =
             self.tape
                 .push_with_saved(Op::Neg(self.idx), DeviceTensor::cpu(out), SavedData::None);
@@ -3806,17 +3815,23 @@ impl<'t> Var<'t> {
     }
 
     pub fn relu(self) -> Var<'t> {
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let mut out = a.clone();
-        for x in &mut out.data
-        {
-            *x = x.max(0.0);
-        }
-        let mut mask = Tensor::zeros(a.rows, a.cols);
-        for (m, val) in mask.data.iter_mut().zip(&a.data)
-        {
-            *m = if *val > 0.0 { 1.0 } else { 0.0 };
-        }
+        // Build the output and mask from the borrowed input (no `a` clone; `out`
+        // is the one buffer we must own). Borrow drops before the mutable push.
+        let (out, mask) = {
+            let values = self.tape.values.borrow();
+            let a = values[self.idx].as_cpu();
+            let mut out = a.clone();
+            for x in &mut out.data
+            {
+                *x = x.max(0.0);
+            }
+            let mut mask = Tensor::zeros(a.rows, a.cols);
+            for (m, val) in mask.data.iter_mut().zip(&a.data)
+            {
+                *m = if *val > 0.0 { 1.0 } else { 0.0 };
+            }
+            (out, mask)
+        };
         let new_idx = self.tape.push_with_saved(
             Op::ReLU(self.idx),
             DeviceTensor::cpu(out),
@@ -3829,8 +3844,7 @@ impl<'t> Var<'t> {
     }
 
     pub fn sigmoid(self) -> Var<'t> {
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let out = a.sigmoid();
+        let out = self.tape.values.borrow()[self.idx].as_cpu().sigmoid();
         let new_idx = self.tape.push_with_saved(
             Op::Sigmoid(self.idx),
             DeviceTensor::cpu(out),
@@ -3843,8 +3857,7 @@ impl<'t> Var<'t> {
     }
 
     pub fn tanh(self) -> Var<'t> {
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let out = a.tanh();
+        let out = self.tape.values.borrow()[self.idx].as_cpu().tanh();
         let new_idx =
             self.tape
                 .push_with_saved(Op::Tanh(self.idx), DeviceTensor::cpu(out), SavedData::None);
@@ -3855,8 +3868,7 @@ impl<'t> Var<'t> {
     }
 
     pub fn sin(self) -> Var<'t> {
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let out = a.sin();
+        let out = self.tape.values.borrow()[self.idx].as_cpu().sin();
         let new_idx =
             self.tape
                 .push_with_saved(Op::Sin(self.idx), DeviceTensor::cpu(out), SavedData::None);
@@ -3867,8 +3879,7 @@ impl<'t> Var<'t> {
     }
 
     pub fn cos(self) -> Var<'t> {
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let out = a.cos();
+        let out = self.tape.values.borrow()[self.idx].as_cpu().cos();
         let new_idx =
             self.tape
                 .push_with_saved(Op::Cos(self.idx), DeviceTensor::cpu(out), SavedData::None);
@@ -3879,8 +3890,7 @@ impl<'t> Var<'t> {
     }
 
     pub fn tan(self) -> Var<'t> {
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let out = a.tan();
+        let out = self.tape.values.borrow()[self.idx].as_cpu().tan();
         let new_idx =
             self.tape
                 .push_with_saved(Op::Tan(self.idx), DeviceTensor::cpu(out), SavedData::None);
@@ -3891,8 +3901,7 @@ impl<'t> Var<'t> {
     }
 
     pub fn sinh(self) -> Var<'t> {
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let out = a.sinh();
+        let out = self.tape.values.borrow()[self.idx].as_cpu().sinh();
         let new_idx =
             self.tape
                 .push_with_saved(Op::Sinh(self.idx), DeviceTensor::cpu(out), SavedData::None);
@@ -3903,8 +3912,7 @@ impl<'t> Var<'t> {
     }
 
     pub fn cosh(self) -> Var<'t> {
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let out = a.cosh();
+        let out = self.tape.values.borrow()[self.idx].as_cpu().cosh();
         let new_idx =
             self.tape
                 .push_with_saved(Op::Cosh(self.idx), DeviceTensor::cpu(out), SavedData::None);
@@ -3915,8 +3923,7 @@ impl<'t> Var<'t> {
     }
 
     pub fn log10(self) -> Var<'t> {
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let out = a.log10();
+        let out = self.tape.values.borrow()[self.idx].as_cpu().log10();
         let new_idx =
             self.tape
                 .push_with_saved(Op::Log10(self.idx), DeviceTensor::cpu(out), SavedData::None);
@@ -3927,8 +3934,7 @@ impl<'t> Var<'t> {
     }
 
     pub fn asin(self) -> Var<'t> {
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let out = a.asin();
+        let out = self.tape.values.borrow()[self.idx].as_cpu().asin();
         let new_idx =
             self.tape
                 .push_with_saved(Op::Asin(self.idx), DeviceTensor::cpu(out), SavedData::None);
@@ -3939,8 +3945,7 @@ impl<'t> Var<'t> {
     }
 
     pub fn acos(self) -> Var<'t> {
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let out = a.acos();
+        let out = self.tape.values.borrow()[self.idx].as_cpu().acos();
         let new_idx =
             self.tape
                 .push_with_saved(Op::Acos(self.idx), DeviceTensor::cpu(out), SavedData::None);
@@ -3951,8 +3956,7 @@ impl<'t> Var<'t> {
     }
 
     pub fn atan(self) -> Var<'t> {
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let out = a.atan();
+        let out = self.tape.values.borrow()[self.idx].as_cpu().atan();
         let new_idx =
             self.tape
                 .push_with_saved(Op::Atan(self.idx), DeviceTensor::cpu(out), SavedData::None);
@@ -3979,8 +3983,7 @@ impl<'t> Var<'t> {
     }
 
     pub fn exp(self) -> Var<'t> {
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let out = a.exp();
+        let out = self.tape.values.borrow()[self.idx].as_cpu().exp();
         let new_idx =
             self.tape
                 .push_with_saved(Op::Exp(self.idx), DeviceTensor::cpu(out), SavedData::None);
@@ -3994,8 +3997,7 @@ impl<'t> Var<'t> {
     /// [`crate::portable_f32::exp_f32`], backward depuis la sortie stockée —
     /// nœud bit-exact inter-plates-formes, contrairement à [`Var::exp`].
     pub fn exp_portable(self) -> Var<'t> {
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let out = a.exp_portable();
+        let out = self.tape.values.borrow()[self.idx].as_cpu().exp_portable();
         let new_idx = self.tape.push_with_saved(
             Op::ExpPortable(self.idx),
             DeviceTensor::cpu(out),
@@ -4011,8 +4013,7 @@ impl<'t> Var<'t> {
     /// [`crate::portable_f32::ln_f32`], backward `g ⊙ 1/x` (division IEEE) —
     /// nœud bit-exact inter-plates-formes, contrairement à [`Var::log`].
     pub fn ln_portable(self) -> Var<'t> {
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let out = a.ln_portable();
+        let out = self.tape.values.borrow()[self.idx].as_cpu().ln_portable();
         let new_idx = self.tape.push_with_saved(
             Op::LnPortable(self.idx),
             DeviceTensor::cpu(out),
@@ -4046,8 +4047,7 @@ impl<'t> Var<'t> {
     }
 
     pub fn log(self) -> Var<'t> {
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let out = a.log();
+        let out = self.tape.values.borrow()[self.idx].as_cpu().log();
         let new_idx =
             self.tape
                 .push_with_saved(Op::Log(self.idx), DeviceTensor::cpu(out), SavedData::None);
@@ -4058,8 +4058,7 @@ impl<'t> Var<'t> {
     }
 
     pub fn sqrt(self) -> Var<'t> {
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let out = a.sqrt();
+        let out = self.tape.values.borrow()[self.idx].as_cpu().sqrt();
         let new_idx =
             self.tape
                 .push_with_saved(Op::Sqrt(self.idx), DeviceTensor::cpu(out), SavedData::None);
@@ -4070,8 +4069,7 @@ impl<'t> Var<'t> {
     }
 
     pub fn reciprocal(self) -> Var<'t> {
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let out = a.reciprocal();
+        let out = self.tape.values.borrow()[self.idx].as_cpu().reciprocal();
         let new_idx = self.tape.push_with_saved(
             Op::Reciprocal(self.idx),
             DeviceTensor::cpu(out),
@@ -4239,8 +4237,9 @@ impl<'t> Var<'t> {
     /// à [`Var::softmax`] dont l'exp dépend de la libm. Pour l'axe 0,
     /// transposer avant/après. Voie de référence, plus lente que `softmax`.
     pub fn softmax_portable(self) -> Var<'t> {
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let out = a.softmax_portable();
+        let out = self.tape.values.borrow()[self.idx]
+            .as_cpu()
+            .softmax_portable();
         let new_idx = self.tape.push_with_saved(
             Op::SoftmaxPortable { input: self.idx },
             DeviceTensor::cpu(out),
@@ -4279,8 +4278,7 @@ impl<'t> Var<'t> {
     }
 
     pub fn transpose(self) -> Var<'t> {
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let out = a.transpose();
+        let out = self.tape.values.borrow()[self.idx].as_cpu().transpose();
         let new_idx = self.tape.push_with_saved(
             Op::Transpose2d(self.idx),
             DeviceTensor::cpu(out),
@@ -4314,17 +4312,20 @@ impl<'t> Var<'t> {
 
     pub fn try_add_broadcast(self, other: Var<'t>) -> crate::error::Result<Var<'t>> {
         self.ensure_same_tape(&other, "add_broadcast")?;
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
-        if !((b.rows == a.rows || b.rows == 1) && (b.cols == a.cols || b.cols == 1))
-        {
-            return Err(crate::error::SciRustError::ShapeMismatch {
-                op: "add_broadcast",
-                expected: (a.rows, a.cols),
-                got: (b.rows, b.cols),
-            });
-        }
-        let out = a.zip_broadcasted(&b, |x, y| x + y);
+        let out = {
+            let values = self.tape.values.borrow();
+            let a = values[self.idx].as_cpu();
+            let b = values[other.idx].as_cpu();
+            if !((b.rows == a.rows || b.rows == 1) && (b.cols == a.cols || b.cols == 1))
+            {
+                return Err(crate::error::SciRustError::ShapeMismatch {
+                    op: "add_broadcast",
+                    expected: (a.rows, a.cols),
+                    got: (b.rows, b.cols),
+                });
+            }
+            a.zip_broadcasted(b, |x, y| x + y)
+        };
         let new_idx = self.tape.push_with_saved(
             Op::AddBroadcast(self.idx, other.idx),
             DeviceTensor::cpu(out),
@@ -4363,17 +4364,20 @@ impl<'t> Var<'t> {
 
     pub fn try_mul_broadcast(self, other: Var<'t>) -> crate::error::Result<Var<'t>> {
         self.ensure_same_tape(&other, "mul_broadcast")?;
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
-        if !((b.rows == a.rows || b.rows == 1) && (b.cols == a.cols || b.cols == 1))
-        {
-            return Err(crate::error::SciRustError::ShapeMismatch {
-                op: "mul_broadcast",
-                expected: (a.rows, a.cols),
-                got: (b.rows, b.cols),
-            });
-        }
-        let out = a.zip_broadcasted(&b, |x, y| x * y);
+        let out = {
+            let values = self.tape.values.borrow();
+            let a = values[self.idx].as_cpu();
+            let b = values[other.idx].as_cpu();
+            if !((b.rows == a.rows || b.rows == 1) && (b.cols == a.cols || b.cols == 1))
+            {
+                return Err(crate::error::SciRustError::ShapeMismatch {
+                    op: "mul_broadcast",
+                    expected: (a.rows, a.cols),
+                    got: (b.rows, b.cols),
+                });
+            }
+            a.zip_broadcasted(b, |x, y| x * y)
+        };
         let new_idx = self.tape.push_with_saved(
             Op::MulBroadcast(self.idx, other.idx),
             DeviceTensor::cpu(out),
