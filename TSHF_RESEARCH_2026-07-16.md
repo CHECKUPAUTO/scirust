@@ -396,3 +396,46 @@ critère d'acceptation chiffré et nommage honnête (Anscombe/Box-Cox, pas « TS
 `scirust-signal/examples/tshf_experiments.rs` (E1–E6, déterministes). Méthode :
 falsification d'abord — chaque bloc expérimental a été conçu pour pouvoir
 contredire l'hypothèse, et plusieurs l'ont fait.*
+
+---
+
+## Addendum — exécution des recommandations (2026-07-16, même jour)
+
+Statut de chaque élément du §12 et de la feuille de route, avec les mesures
+d'acceptation obtenues :
+
+- **Reco 1 (rejet TSHF/Γ/octonion-sédénion)** : respectée — rien de tel n'a été
+  implémenté.
+- **Reco 2 / Phase 1 — exécutée** : module `denoise::vst` (Anscombe + inverse
+  exact non biaisé de Mäkitalo-Foi en forme close ; log signé + smearing de Duan ;
+  racine signée ; Box-Cox(λ) manuel), sélecteur conservateur `detect_noise_model`
+  (défaut = identité), intégration en pré/post-étape conditionnelle de
+  `denoise_auto`. **Portes du §12 franchies** : Poisson λ∈[1,12] : +5,02 dB vs
+  identité (critère ≥ +1 dB), inverse corrigé > naïf de +3,90 dB ; multiplicatif
+  30 % fort : +4,88 dB ; régime doux : +0,04 dB (le gain ≈ nul prédit au §9.3 —
+  et aucune perte) ; biais résiduel 0,015 (naïf : 0,268 ≈ le gap de Jensen prédit
+  de 0,25). Note d'exécution : le débruiteur interne retenu est
+  `stft_wiener_auto` — l'ondelette à seuil global, pourtant la bénéficiaire
+  « classique » d'une VST, *perdait* ~1 dB après stabilisation sur signaux
+  corrélés au niveau (le calibrage MAD brut agissait comme seuil
+  accidentellement adaptatif) ; conforme au principe §11 « ne jamais dégrader ».
+- **Reco 3 — exécutée** : `denoise::compand` (`soft_clip`, `soft_clip_robust` ;
+  tanh/atan/softsign), sans inverse par conception.
+- **Reco 4 / Phase 2 — exécutée, verdict partagé** : module
+  `denoise::multichannel`, porte « battre le par-canal sur ≥ 2 fixtures » :
+  `wiener_spatial` (Wiener spatial joint ≡ widely-linear réel) **passe** —
+  +2,48 dB (4 canaux corrélés) et +3,67 dB (stéréo rang-1) contre sa restriction
+  diagonale ; `vector_median` **échoue** (0/2) — −1,81 dB sur impulsions
+  synchronisées (E5b reproduit) et −2,02 dB sur impulsions *désynchronisées* :
+  la conjecture du §12.4 (« médian vectoriel pour impulsions désynchronisées »)
+  est **falsifiée** — le médian vectoriel restitue un vecteur observé dont tout
+  le bruit de fond survit, quand la médiane scalaire moyenne ce bruit. Sa
+  préservation de corrélation inter-canaux est elle aussi inférieure (erreur
+  4,4e-3 vs 2,8e-3). Conservé comme implémentation de référence, verdict en doc ;
+  chiffres reproductibles par `phase2_gate_report()`.
+- **Phase 3 (octonion) — non déclenchée** : la condition (« un besoin démontré à
+  8 canaux couplés ») n'est pas remplie ; la Phase 2 a au contraire falsifié
+  l'opérateur joint de rang.
+- **Phase 4 (SIMD des φ/φ⁻¹) — non déclenchée** : φ/φ⁻¹ sont des passes O(n) de
+  fonctions élémentaires, négligeables devant le coût des débruiteurs internes.
+- **Phase 5 (GPU) — non déclenchée** : volumes inchangés depuis le rapport.

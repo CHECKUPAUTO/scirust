@@ -5,6 +5,40 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `denoise` round 4 : exécution des recommandations du rapport TSHF
+Toutes les recommandations codables du rapport `TSHF_RESEARCH_2026-07-16.md` (§12
+et feuille de route) sont exécutées ; chaque porte d'acceptation chiffrée du
+rapport a été mesurée avant intégration.
+
+- **`denoise::vst` (Phase 1)** : transformées stabilisatrices de variance à inverse
+  corrigé du biais — Anscombe + inverse exact non biaisé (Mäkitalo-Foi 2011, forme
+  close), log signé + smearing de Duan (1983), racine signée, Box-Cox(λ) ;
+  sélecteur conservateur `detect_noise_model` (Theil-Sen sur log σ vs log niveau,
+  défaut = identité) ; `vst_denoise` générique et `vst_denoise_auto`. Branché en
+  pré/post-étape conditionnelle de `denoise_auto`. **Portes franchies** : Poisson
+  faible comptage +5,02 dB (critère ≥ +1 dB) et l'inverse corrigé bat le naïf de
+  +3,90 dB ; multiplicatif fort +4,88 dB ; régime doux +0,04 dB (gain nul prédit,
+  jamais de perte) ; biais de retransformation 0,015 contre 0,268 (naïf) sur
+  λ = 4. Choix mesuré : débruiteur interne `stft_wiener_auto` (l'ondelette
+  VisuShrink violait « ne jamais dégrader » de −1,0 dB sur signaux corrélés au
+  niveau).
+- **`denoise::multichannel` (Phase 2)** : `wiener_spatial` — Wiener spatial joint
+  (équivalent vectoriel-réel du filtrage quaternionique widely-linear,
+  Took-Mandic) — **passe la porte** : +2,48 dB et +3,67 dB contre sa restriction
+  diagonale sur les deux fixtures corrélées ; `vector_median` (Astola 1990) —
+  **échoue la porte** (0/2) : −1,81 dB sur impulsions synchronisées (E5b du
+  rapport reproduit) et −2,02 dB même sur impulsions désynchronisées — la
+  conjecture §12.4 du rapport est falsifiée et documentée ; l'opérateur est
+  conservé comme référence avec son verdict. Rapport reproductible :
+  `phase2_gate_report()`.
+- **`denoise::compand` (reco 3)** : `soft_clip` / `soft_clip_robust`
+  (tanh/atan/softsign) — écrêtage doux borné pour affichage et features robustes,
+  sans inverse par conception (E2/E4 : amplification ×10-×100, biais de Jensen).
+- **Phases 3-5 non déclenchées** (conditions du rapport non remplies) : octonion —
+  aucun besoin démontré à 8 canaux couplés (la Phase 2 a même falsifié le médian
+  vectoriel) ; SIMD des φ/φ⁻¹ — coût O(n) négligeable devant les débruiteurs
+  internes ; GPU — volumes inchangés. Addendum ajouté au rapport.
+
 ### Ajouté — `denoise` round 3 : docs multilingues, SIMD, BM3D-1D, et programme de recherche TSHF
 - **Documentation multilingue** : la section débruitage (8.1.1) ajoutée aux six
   traductions `Documentation_{AR,DE,ES,JA,KO,ZH}.md` (identifiants de code

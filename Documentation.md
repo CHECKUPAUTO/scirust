@@ -257,6 +257,25 @@ causales échantillon-par-échantillon (médiane, Hampel, moyenne, EMA, Kalman)
 derrière le trait `StreamingDenoiser`. Le débruitage **2-D image** (médiane 2-D,
 ondelettes séparables, non-local means) vit dans `scirust_vision::denoise`.
 
+Trois compléments issus du programme de recherche TSHF (`TSHF_RESEARCH_2026-07-16.md`) :
+
+- **`denoise::vst`** — bruit *dépendant du signal* : transformées stabilisatrices de
+  variance à inverse **corrigé du biais** (Anscombe + inverse exact non biaisé de
+  Mäkitalo-Foi pour Poisson ; log signé + smearing de Duan pour le multiplicatif ;
+  racine signée ; Box-Cox). Le sélecteur conservateur `detect_noise_model` (défaut =
+  identité) est branché en pré/post-étape conditionnelle de `denoise_auto`. Mesuré :
+  +5,0 dB (Poisson faible comptage), +4,9 dB (multiplicatif 30 %), ±0 dB en régime
+  doux — jamais de perte.
+- **`denoise::multichannel`** — opérateurs couplant réellement les canaux :
+  `wiener_spatial` (Wiener joint inter-canaux, +2,5 à +3,7 dB contre sa restriction
+  par canal sur sources corrélées) et `vector_median` (référence Astola 1990,
+  conservée avec son verdict mesuré *défavorable* face à la médiane par canal —
+  voir `phase2_gate_report()`).
+- **`denoise::compand`** — écrêtage doux borné (`soft_clip`, `soft_clip_robust` ;
+  tanh/atan/softsign) pour l'affichage et les features robustes, **sans inverse par
+  conception** : l'inversion des transformées saturantes amplifie le bruit ×10-×100
+  (rapport TSHF, E2/E4).
+
 ```rust
 use scirust_signal::denoise::{classify, denoise_auto};
 

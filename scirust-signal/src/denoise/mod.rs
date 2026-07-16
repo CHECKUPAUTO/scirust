@@ -42,6 +42,17 @@
 //!   for them, with loop protection and an accept-or-roll-back guard that keeps a
 //!   broadband stage only when what it removed is noise-like, not a signal tone.
 //!
+//! **Signal-dependent noise** (photon counting, speckle, gain-dependent sensors)
+//! gets a conditional pre/post step: [`denoise_auto`] first runs the conservative
+//! [`vst::detect_noise_model`] and, when a Poisson-like or multiplicative law is
+//! identified, denoises in the matched variance-stabilized domain and returns
+//! through a **bias-corrected** inverse (module [`vst`]: Anscombe with the
+//! Mäkitalo-Foi exact unbiased inverse, signed log with Duan smearing). Operators
+//! that genuinely *couple* the channels of a multichannel record live in
+//! [`multichannel`] (spatial joint Wiener; vector median with its honestly
+//! measured negative verdict), and bounded saturating maps for display/feature
+//! use — with no inverse, by design — in [`compand`].
+//!
 //! For real-time / embedded use, where no future samples exist, the [`streaming`]
 //! module provides causal sample-by-sample counterparts (moving average, median,
 //! Hampel, EMA, Kalman) behind the [`StreamingDenoiser`] trait. The window filters
@@ -87,9 +98,11 @@ pub mod adaptive;
 pub mod block;
 pub mod cascade;
 pub mod collab;
+pub mod compand;
 pub mod detect;
 pub mod iir;
 pub mod linear;
+pub mod multichannel;
 pub mod nlm;
 pub mod pipeline;
 pub mod rank;
@@ -97,6 +110,7 @@ pub mod stft;
 pub mod streaming;
 pub mod transform;
 pub mod variational;
+pub mod vst;
 
 pub use adaptive::{
     KalmanFit, kalman_smooth, kalman_smooth_auto, kalman_trend_smooth, lms_line_enhancer,
@@ -105,12 +119,14 @@ pub use adaptive::{
 pub use block::wavelet_denoise_neighblock;
 pub use cascade::{CascadeResult, CascadeStage, denoise_cascade, denoise_cascade_auto};
 pub use collab::{collab1d, collab1d_auto};
+pub use compand::{SoftClipKind, soft_clip, soft_clip_robust};
 pub use detect::{
     NoiseProfile, NoiseType, Separation, SpectralLine, classify, detect_lines, estimate_noise_std,
     estimate_snr_db, harmonic_stack, separate,
 };
 pub use iir::{BiquadState, filtfilt_sos, notch_iir, rbj_notch, remove_mains_hum_iir};
 pub use linear::{exp_moving_average, gaussian_smooth, moving_average, savitzky_golay};
+pub use multichannel::{MultichannelGateReport, phase2_gate_report, vector_median, wiener_spatial};
 pub use nlm::{nlm1d, nlm1d_auto};
 pub use pipeline::{
     WaveletRlsRtsParams, reference_noise_cancel, wavelet_rls_rts_smooth, wavelet_rls_rts_smooth_1d,
@@ -132,6 +148,10 @@ pub use transform::{
 };
 pub use variational::{
     tikhonov_smooth, total_variation, total_variation_exact, total_variation_norm,
+};
+pub use vst::{
+    VstAutoResult, VstKind, anscombe_inverse_exact_unbiased, detect_noise_model, vst_denoise,
+    vst_denoise_auto, vst_forward, vst_inverse_corrected, vst_inverse_naive,
 };
 
 /// The family a denoiser belongs to — the taxonomy axis along which this toolkit
@@ -366,7 +386,54 @@ pub struct AutoResult {
 /// for an unrecognized or clean signal it falls back to a light Savitzky-Golay
 /// smooth. `sample_rate` is used only to report physical frequencies and to size
 /// the notch filter; pass `1.0` if you work in normalized units.
+///
+/// ## Signal-dependent noise: the conditional VST step
+///
+/// Before classifying, [`vst::detect_noise_model`] checks (conservatively —
+/// default is "no") whether the noise variance follows the signal level:
+/// Poisson-like (`σ² ∝ level`, photon counting) or multiplicative (`σ ∝ level`,
+/// speckle, sensor gain). When one of those laws is identified with high
+/// confidence, the whole pipeline runs in the matched variance-stabilized domain
+/// — forward VST, then this same detect-and-treat core on the now-homoscedastic
+/// record, then the **bias-corrected** inverse (Mäkitalo-Foi exact unbiased
+/// inverse for Anscombe, Duan smearing for the log) — and the method string
+/// reports the sandwich. On ordinary additive-noise records the detector returns
+/// `Identity` and nothing changes.
 pub fn denoise_auto(signal: &[f64], sample_rate: f64) -> AutoResult {
+    let kind = vst::detect_noise_model(signal);
+    if kind != VstKind::Identity
+    {
+        let (fwd_name, inv_name) = match kind
+        {
+            VstKind::Anscombe => ("anscombe", "exact_unbiased_inverse"),
+            VstKind::SignedLog => ("signed_log", "smearing_inverse"),
+            // The conservative detector only ever returns the two kinds above,
+            // but the sandwich is correct for any manually supplied kind too.
+            _ => ("vst", "smearing_inverse"),
+        };
+        let transformed = vst_forward(kind, signal);
+        let inner = denoise_auto_core(&transformed, sample_rate);
+        if inner.output.len() == transformed.len()
+        {
+            let residuals: Vec<f64> = transformed
+                .iter()
+                .zip(inner.output.iter())
+                .map(|(t, d)| t - d)
+                .collect();
+            let output = vst_inverse_corrected(kind, &inner.output, &residuals);
+            return AutoResult {
+                profile: inner.profile,
+                method: format!("{fwd_name} ∘ {} ∘ {inv_name}", inner.method),
+                output,
+            };
+        }
+    }
+    denoise_auto_core(signal, sample_rate)
+}
+
+/// The detect-and-treat core of [`denoise_auto`]: classify the (possibly
+/// variance-stabilized) record, apply the single family the decision tree names.
+fn denoise_auto_core(signal: &[f64], sample_rate: f64) -> AutoResult {
     let profile = detect::classify(signal, sample_rate);
     let (method, output): (String, Vec<f64>) = match profile.dominant
     {
@@ -1035,6 +1102,62 @@ mod tests {
         let c = vec![3.5; 64];
         let best = denoise_best(&c, 1000.0);
         assert_eq!(best.output, c, "a constant must survive the tournament");
+    }
+
+    #[test]
+    fn denoise_auto_applies_corrected_vst_on_poisson_noise() {
+        use super::testutil::snr_db;
+        // Low-count Poisson: intensity λ_i ∈ [1, 11], sampled with Knuth's
+        // algorithm on the deterministic LCG. The 40-cycle carrier keeps the
+        // intensity out of the classifier's trend band — a slower sine would be
+        // "detrended" away as Baseline on both arms, measuring nothing.
+        let n = 4096;
+        let mut rng = Lcg::new(7);
+        let mut poisson = |lambda: f64| -> f64 {
+            let l = (-lambda).exp();
+            let mut k = 0u32;
+            let mut p = 1.0;
+            loop
+            {
+                k += 1;
+                p *= rng.uniform();
+                if p <= l
+                {
+                    break;
+                }
+            }
+            (k - 1) as f64
+        };
+        let clean: Vec<f64> = (0..n)
+            .map(|i| 6.0 + 5.0 * (2.0 * PI * 40.0 * i as f64 / n as f64).sin())
+            .collect();
+        let obs: Vec<f64> = clean.iter().map(|&l| poisson(l)).collect();
+
+        let auto = denoise_auto(&obs, 1.0);
+        assert!(
+            auto.method.contains("anscombe") && auto.method.contains("exact_unbiased_inverse"),
+            "expected the VST sandwich in the method string, got: {}",
+            auto.method
+        );
+        // The stabilized pipeline must beat the same core run on the raw record.
+        let core = denoise_auto_core(&obs, 1.0);
+        let s_vst = snr_db(&clean, &auto.output);
+        let s_raw = snr_db(&clean, &core.output);
+        assert!(
+            s_vst >= s_raw + 0.5,
+            "VST sandwich {s_vst:.2} dB must beat the raw core {s_raw:.2} dB by ≥ 0.5 dB"
+        );
+    }
+
+    #[test]
+    fn denoise_auto_is_unchanged_on_additive_noise() {
+        // Zero-mean additive fixture: the conservative detector must return
+        // Identity, so the public entry point is byte-identical to the core.
+        let obs = noisy_sine(2048);
+        let auto = denoise_auto(&obs, 512.0);
+        let core = denoise_auto_core(&obs, 512.0);
+        assert_eq!(auto.output, core.output);
+        assert_eq!(auto.method, core.method);
     }
 
     #[test]
