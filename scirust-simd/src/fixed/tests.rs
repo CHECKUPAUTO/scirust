@@ -8,6 +8,7 @@
 //  * égalité stricte **SIMD == scalaire**.
 
 use super::activation as act;
+use super::conv::{Conv1dShape, conv1d};
 use super::layer::Linear;
 use super::linalg;
 use super::math::{reciprocal, rsqrt, sqrt};
@@ -1004,6 +1005,167 @@ fn rescale_feeds_linear_layer() {
     let layer = Linear::new(w.to_vec(), b.to_vec(), 1, 3);
     let y = layer.forward(&narrow);
     assert_eq!(y[0].to_f64(), 1.0 - 2.0 + 0.5);
+}
+
+// ------------------------------------------------------------------ //
+//  Convolution 1D (im2col + GEMM)                                     //
+// ------------------------------------------------------------------ //
+
+/// Référence naïve : triple boucle directe (canal de sortie, position,
+/// canal d'entrée × noyau), opérateurs enveloppants de `Fixed`. Doit coïncider
+/// **bit-à-bit** avec `conv1d` (même produits arrondis, même somme exacte).
+fn naive_conv1d<const F: u32>(
+    x: &[FixedI32<F>],
+    weights: &[FixedI32<F>],
+    bias: &[FixedI32<F>],
+    shape: Conv1dShape,
+) -> Vec<FixedI32<F>> {
+    let length_out = shape.length_out();
+    let mut y = vec![FixedI32::<F>::from_raw(0); shape.out_channels * length_out];
+    for co in 0..shape.out_channels
+    {
+        for j in 0..length_out
+        {
+            let mut acc = bias[co];
+            for ci in 0..shape.in_channels
+            {
+                for k in 0..shape.kernel_size
+                {
+                    let w = weights
+                        [co * (shape.in_channels * shape.kernel_size) + ci * shape.kernel_size + k];
+                    let xv = x[ci * shape.length + j * shape.stride + k];
+                    acc += w * xv;
+                }
+            }
+            y[co * length_out + j] = acc;
+        }
+    }
+    y
+}
+
+#[test]
+fn conv1d_known_small() {
+    // 1 canal d'entrée, 1 canal de sortie, noyau [1, -1], stride 1 : chaque
+    // sortie est x[j]·1 + x[j+1]·(−1) = x[j] − x[j+1] (corrélation croisée,
+    // sans retournement du noyau — convention standard des CNN).
+    // x = [1,3,6,10] → y = [1-3, 3-6, 6-10] = [-2,-3,-4] (+ biais 0).
+    let x = [1i32, 3, 6, 10].map(Q16_16::from);
+    let w = [1i32, -1].map(Q16_16::from);
+    let b = [Q16_16::zero()];
+    let shape = Conv1dShape {
+        in_channels: 1,
+        length: 4,
+        out_channels: 1,
+        kernel_size: 2,
+        stride: 1,
+    };
+    let y = conv1d(&x, &w, &b, shape);
+    assert_eq!(y, [-2i32, -3, -4].map(Q16_16::from));
+}
+
+#[test]
+fn conv1d_multi_channel_matches_naive_bit_exact() {
+    // 2 canaux d'entrée, 3 canaux de sortie, noyau de taille 3, stride 2,
+    // tailles variées : égalité stricte avec la triple boucle naïve.
+    let mut rng = Lcg(0xD00D);
+    for &(in_channels, length, out_channels, kernel_size, stride) in &[
+        (2, 10, 3, 3, 2),
+        (1, 5, 1, 5, 1),
+        (4, 20, 2, 4, 3),
+        (3, 7, 5, 2, 1),
+    ]
+    {
+        let shape = Conv1dShape {
+            in_channels,
+            length,
+            out_channels,
+            kernel_size,
+            stride,
+        };
+        let length_out = shape.length_out();
+        let x: Vec<Q16_16> = (0..in_channels * length)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+            .collect();
+        let w: Vec<Q16_16> = (0..out_channels * in_channels * kernel_size)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+            .collect();
+        let b: Vec<Q16_16> = (0..out_channels)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+            .collect();
+
+        let got = conv1d(&x, &w, &b, shape);
+        let want = naive_conv1d(&x, &w, &b, shape);
+        assert_eq!(got.len(), out_channels * length_out);
+        assert_eq!(got, want, "conv1d shape={shape:?}");
+    }
+}
+
+#[test]
+fn conv1d_stride_one_is_full_overlap() {
+    // Stride 1, noyau de taille 1 : identité canal à canal pondérée par un
+    // scalaire (pas de recouvrement de fenêtre, length_out == length).
+    let x = [2i32, 4, 6].map(Q16_16::from); // 1×3
+    let w = [q16(0.5)]; // 1×1×1
+    let b = [Q16_16::zero()];
+    let shape = Conv1dShape {
+        in_channels: 1,
+        length: 3,
+        out_channels: 1,
+        kernel_size: 1,
+        stride: 1,
+    };
+    let y = conv1d(&x, &w, &b, shape);
+    assert_eq!(y, [q16(1.0), q16(2.0), q16(3.0)]);
+}
+
+#[test]
+#[should_panic(expected = "Conv1dShape::length_out")]
+fn conv1d_kernel_larger_than_length_panics() {
+    let x = [Q16_16::one(); 3];
+    let w = [Q16_16::one(); 5];
+    let b = [Q16_16::zero()];
+    let shape = Conv1dShape {
+        in_channels: 1,
+        length: 3,
+        out_channels: 1,
+        kernel_size: 5,
+        stride: 1,
+    };
+    let _ = conv1d(&x, &w, &b, shape);
+}
+
+#[test]
+#[should_panic(expected = "conv1d")]
+fn conv1d_dim_mismatch_panics() {
+    let x = [Q16_16::one(); 4]; // annoncé 1×4
+    let w = [Q16_16::one(); 3]; // annoncé 1×1×2 → devrait être longueur 2
+    let b = [Q16_16::zero()];
+    let shape = Conv1dShape {
+        in_channels: 1,
+        length: 4,
+        out_channels: 1,
+        kernel_size: 2,
+        stride: 1,
+    };
+    let _ = conv1d(&x, &w, &b, shape);
+}
+
+#[test]
+fn conv1d_i64_storage() {
+    // Chemin de stockage i64 (Q32.32) : mêmes garanties.
+    let x = [1i64, 2, 3, 4].map(Q32_32::from); // 1×4
+    let w = [1i64, 1].map(Q32_32::from); // noyau [1,1], somme glissante
+    let b = [Q32_32::from(10i64)];
+    let shape = Conv1dShape {
+        in_channels: 1,
+        length: 4,
+        out_channels: 1,
+        kernel_size: 2,
+        stride: 1,
+    };
+    let y = conv1d(&x, &w, &b, shape);
+    // Sommes glissantes [1+2, 2+3, 3+4] = [3,5,7], + biais 10 → [13,15,17].
+    assert_eq!(y, [13i64, 15, 17].map(Q32_32::from));
 }
 
 // ------------------------------------------------------------------ //

@@ -75,12 +75,14 @@
 // * [`linalg`] — GEMM déterministe (`matmul`, `matvec`, `transpose`).
 // * [`activation`] — activations quantifiées (`relu`, `relu6`, `hardswish`…).
 // * [`layer`] — couche linéaire quantifiée [`layer::Linear`] (`W·x + b`, + activation).
+// * [`conv`] — convolution 1D quantifiée [`conv::conv1d`] (im2col + GEMM).
 // * [`rescale`] — requantification entre résolutions (`FRAC` différent, même stockage).
 // * [`math`] — `sqrt`, `rsqrt`, `reciprocal` (Newton entier exact).
 // * [`transcendental`] — `exp`/`ln`/`sin`/`cos`/`tanh`/`sigmoid`/`softmax`
 //   (minimax + réduction d'argument, bornes ULP prouvées ; `FixedI32<FRAC>`).
 
 pub mod activation;
+pub mod conv;
 pub mod convert;
 pub mod layer;
 pub mod linalg;
