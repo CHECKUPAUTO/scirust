@@ -2923,6 +2923,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-civil"
+version = "0.1.0"
+dependencies = [
+ "approx",
+]
+
+[[package]]
 name = "scirust-cli"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,11 @@
+[package]
+name = "scirust-civil"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust génie civil & structures BTP — calcul déterministe pur-Rust : béton armé (flexion, effort tranchant, poteaux, ancrage — Eurocode 2), charpente métallique (classes de section, flexion, compression, déversement, assemblages — Eurocode 3), bois (Eurocode 5), géotechnique (portance, poussée des terres, tassement, stabilité de pente, mur de soutènement) et hydraulique à surface libre. Modèles normés à limites explicites, coefficients partiels et résistances caractéristiques fournis par l'appelant."
+
+[dependencies]
+
+[dev-dependencies]
+approx = "0.5"

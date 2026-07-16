@@ -148,6 +148,7 @@ members = [
     "scirust-fatigue",
     "scirust-machining",
     "scirust-electrotech",
+    "scirust-civil",
     "scirust-tolerance",
     "scirust-sigma",
     "scirust-special",
