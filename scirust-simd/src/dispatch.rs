@@ -234,6 +234,10 @@ impl SimdBackend for Avx2Backend {
     fn name(&self) -> &'static str {
         "avx2"
     }
+    // SAFETY (all blocks below): `self: &Avx2Backend` can only exist after
+    // `runtime_backend()` confirmed `is_x86_feature_detected!("avx2")` — see
+    // the struct doc above and the module-level `## Safety` note. That's the
+    // precondition every `_avx2` free function below requires.
     fn saxpy_f32(&self, alpha: f32, x: &[f32], y: &mut [f32]) {
         unsafe { saxpy_f32_avx2(alpha, x, y) }
     }
@@ -258,6 +262,7 @@ impl SimdBackend for Avx2Backend {
         for (i, item) in y.iter_mut().enumerate().take(m)
         {
             let row = a.row_slice(i).expect("row_slice");
+            // SAFETY: see the note on `saxpy_f32` above.
             let dot = unsafe { sdot_f32_avx2(row, x) };
             *item = alpha * dot + beta * *item;
         }
@@ -270,15 +275,22 @@ impl SimdBackend for Avx2Backend {
         beta: f32,
         c: crate::matrix::view::MatrixViewMut<f32>,
     ) {
+        // SAFETY: see the note on `saxpy_f32` above.
         unsafe { sgemm_f32_avx2(alpha, a, b, beta, c) }
     }
     fn relu_f32(&self, v: &mut [f32]) {
+        // SAFETY: see the note on `saxpy_f32` above.
         unsafe { relu_f32_avx2(v) }
     }
 }
 
 // ---- AVX2 kernel free functions ----
 
+/// # Safety
+/// Caller must ensure the CPU supports AVX2 (`is_x86_feature_detected!("avx2")`).
+/// Bounds/aliasing are otherwise self-contained: every `loadu`/`storeu` offset
+/// is kept `< x.len() == y.len()` by the loop condition, and the equal-length
+/// assert above rules out the only way `x`/`y` could disagree in size.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn saxpy_f32_avx2(alpha: f32, x: &[f32], y: &mut [f32]) {
@@ -304,6 +316,8 @@ unsafe fn saxpy_f32_avx2(alpha: f32, x: &[f32], y: &mut [f32]) {
     }
 }
 
+/// # Safety
+/// Same contract as [`saxpy_f32_avx2`] (f64 lanes, AVX2 handles 4 at a time).
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn daxpy_f64_avx2(alpha: f64, x: &[f64], y: &mut [f64]) {
@@ -325,6 +339,10 @@ unsafe fn daxpy_f64_avx2(alpha: f64, x: &[f64], y: &mut [f64]) {
     }
 }
 
+/// # Safety
+/// Caller must ensure the CPU supports AVX2. Bounds/aliasing are otherwise
+/// self-contained, as in [`saxpy_f32_avx2`]; `tmp` is a stack array sized to
+/// the fixed AVX2 f32 lane count, so the horizontal-sum store can't overflow.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn sdot_f32_avx2(x: &[f32], y: &[f32]) -> f32 {
@@ -352,6 +370,8 @@ unsafe fn sdot_f32_avx2(x: &[f32], y: &[f32]) -> f32 {
     sum
 }
 
+/// # Safety
+/// Same contract as [`sdot_f32_avx2`] (f64 lanes, AVX2 handles 4 at a time).
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn ddot_f64_avx2(x: &[f64], y: &[f64]) -> f64 {
@@ -379,6 +399,10 @@ unsafe fn ddot_f64_avx2(x: &[f64], y: &[f64]) -> f64 {
     sum
 }
 
+/// # Safety
+/// Caller must ensure the CPU supports AVX2. Bounds are self-contained: every
+/// `loadu`/`storeu` offset is kept `< v.len()` by the loop condition, and the
+/// read/write in each iteration target the exact same in-place range.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn relu_f32_avx2(v: &mut [f32]) {
@@ -402,6 +426,10 @@ unsafe fn relu_f32_avx2(v: &mut [f32]) {
 
 /// In-place scale `c[j] *= beta`, vectorized (AVX2). Used by the tiled GEMM to
 /// apply `beta * C` before the rank-1 updates.
+///
+/// # Safety
+/// Caller must ensure the CPU supports AVX2. Bounds are self-contained: every
+/// `loadu`/`storeu` offset is kept `< c.len()` by the loop condition.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn scal_f32_avx2(beta: f32, c: &mut [f32]) {
@@ -427,6 +455,13 @@ unsafe fn scal_f32_avx2(beta: f32, c: &mut [f32]) {
 /// which streams `B` contiguously in row-major order (cache-friendly) and lets
 /// the inner loop reuse the FMA `saxpy` kernel. Bit-close to the scalar
 /// reference (differs only by summation order), cross-checked in tests.
+///
+/// # Safety
+/// Caller must ensure the CPU supports AVX2. The calls into `scal_f32_avx2`/
+/// `saxpy_f32_avx2` inherit that same requirement; `row_slice`/`row_slice_mut`
+/// already validate `i`/`p` against the view's own dimensions (`.expect`
+/// panics rather than indexing out of bounds), so this function's own unsafe
+/// surface is limited to the feature requirement.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn sgemm_f32_avx2(
@@ -474,6 +509,11 @@ impl SimdBackend for Avx512Backend {
     fn name(&self) -> &'static str {
         "avx512"
     }
+    // SAFETY (all blocks below): `self: &Avx512Backend` can only exist after
+    // `runtime_backend()` confirmed `is_x86_feature_detected!("avx512f")`
+    // (and `"fma"`) — see the struct doc above and the module-level
+    // `## Safety` note. That's the precondition every `_avx512` free
+    // function below requires.
     fn saxpy_f32(&self, alpha: f32, x: &[f32], y: &mut [f32]) {
         unsafe { saxpy_f32_avx512(alpha, x, y) }
     }
@@ -498,6 +538,7 @@ impl SimdBackend for Avx512Backend {
         for (i, item) in y.iter_mut().enumerate().take(m)
         {
             let row = a.row_slice(i).expect("row_slice");
+            // SAFETY: see the note on `saxpy_f32` above.
             let dot = unsafe { sdot_f32_avx512(row, x) };
             *item = alpha * dot + beta * *item;
         }
@@ -510,9 +551,11 @@ impl SimdBackend for Avx512Backend {
         beta: f32,
         c: crate::matrix::view::MatrixViewMut<f32>,
     ) {
+        // SAFETY: see the note on `saxpy_f32` above.
         unsafe { sgemm_f32_avx512(alpha, a, b, beta, c) }
     }
     fn relu_f32(&self, v: &mut [f32]) {
+        // SAFETY: see the note on `saxpy_f32` above.
         unsafe { relu_f32_avx512(v) }
     }
 }
@@ -526,6 +569,14 @@ impl SimdBackend for Avx512Backend {
 // stores leave the corresponding memory untouched. This keeps the whole kernel
 // branch-light and avoids a separate scalar epilogue.
 
+/// # Safety
+/// Caller must ensure the CPU supports AVX-512F *and* FMA
+/// (`is_x86_feature_detected!("avx512f") && is_x86_feature_detected!("fma")`
+/// — `detect_backend()` checks both before routing here, since this kernel
+/// uses `_mm512_fmadd_ps`). Bounds/aliasing are self-contained: the main loop
+/// keeps every offset `< x.len() == y.len()` (asserted above), and the masked
+/// remainder (`mask = (1u16 << r) - 1`, `r = n - i < 16`) only ever touches
+/// lanes `< r`, i.e. offsets still `< n`.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 unsafe fn saxpy_f32_avx512(alpha: f32, x: &[f32], y: &mut [f32]) {
@@ -552,6 +603,9 @@ unsafe fn saxpy_f32_avx512(alpha: f32, x: &[f32], y: &mut [f32]) {
     }
 }
 
+/// # Safety
+/// Same contract as [`saxpy_f32_avx512`] (f64 lanes: 8 per full step,
+/// `mask = (1u8 << r) - 1` for the remainder).
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 unsafe fn daxpy_f64_avx512(alpha: f64, x: &[f64], y: &mut [f64]) {
@@ -578,6 +632,9 @@ unsafe fn daxpy_f64_avx512(alpha: f64, x: &[f64], y: &mut [f64]) {
     }
 }
 
+/// # Safety
+/// Same contract as [`saxpy_f32_avx512`]; `_mm512_reduce_add_ps` operates
+/// purely on the register value `acc`, no additional memory access.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 unsafe fn sdot_f32_avx512(x: &[f32], y: &[f32]) -> f32 {
@@ -608,6 +665,8 @@ unsafe fn sdot_f32_avx512(x: &[f32], y: &[f32]) -> f32 {
     _mm512_reduce_add_ps(acc)
 }
 
+/// # Safety
+/// Same contract as [`sdot_f32_avx512`] (f64 lanes: 8 per full step).
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 unsafe fn ddot_f64_avx512(x: &[f64], y: &[f64]) -> f64 {
@@ -638,6 +697,9 @@ unsafe fn ddot_f64_avx512(x: &[f64], y: &[f64]) -> f64 {
     _mm512_reduce_add_pd(acc)
 }
 
+/// # Safety
+/// Caller must ensure the CPU supports AVX-512F. Bounds are self-contained
+/// as in [`saxpy_f32_avx512`], in place on `v` alone.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 unsafe fn relu_f32_avx512(v: &mut [f32]) {
@@ -662,6 +724,8 @@ unsafe fn relu_f32_avx512(v: &mut [f32]) {
     }
 }
 
+/// # Safety
+/// Same contract as [`relu_f32_avx512`], in place on `c` alone.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 unsafe fn scal_f32_avx512(beta: f32, c: &mut [f32]) {
@@ -686,6 +750,11 @@ unsafe fn scal_f32_avx512(beta: f32, c: &mut [f32]) {
 
 /// AVX-512 SGEMM (`C = alpha·A·B + beta·C`, row-major), same rank-1-update
 /// structure as [`sgemm_f32_avx2`] but 16 f32 lanes per FMA.
+///
+/// # Safety
+/// Same contract as [`sgemm_f32_avx2`]: caller must ensure the CPU supports
+/// AVX-512F, which the calls into `scal_f32_avx512`/`saxpy_f32_avx512`
+/// inherit.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 unsafe fn sgemm_f32_avx512(
@@ -730,6 +799,10 @@ impl SimdBackend for Sse2Backend {
         "sse2"
     }
 
+    // SAFETY (all blocks below): `self: &Sse2Backend` can only exist after
+    // `runtime_backend()` confirmed `is_x86_feature_detected!("sse2")` — see
+    // the struct doc above and the module-level `## Safety` note. That's the
+    // precondition every `_sse2` free function below requires.
     fn saxpy_f32(&self, a: f32, x: &[f32], y: &mut [f32]) {
         unsafe { saxpy_f32_sse2(a, x, y) }
     }
@@ -754,6 +827,7 @@ impl SimdBackend for Sse2Backend {
         for (i, item) in y.iter_mut().enumerate().take(m)
         {
             let row = a.row_slice(i).expect("row_slice");
+            // SAFETY: see the note on `saxpy_f32` above.
             let dot = unsafe { sdot_f32_sse2(row, x) };
             *item = alpha * dot + beta * *item;
         }
@@ -766,19 +840,30 @@ impl SimdBackend for Sse2Backend {
         b: f32,
         mc: crate::matrix::view::MatrixViewMut<f32>,
     ) {
+        // SAFETY: see the note on `saxpy_f32` above.
         unsafe { sgemm_f32_sse2(a, ma, mb, b, mc) }
     }
     fn relu_f32(&self, v: &mut [f32]) {
+        // SAFETY: see the note on `saxpy_f32` above.
         unsafe { relu_f32_sse2(v) }
     }
 }
 
 // ---- SSE2 kernel free functions (target_feature) ----
 
+/// # Safety
+/// Caller must ensure the CPU supports SSE2. Bounds/aliasing are otherwise
+/// self-contained: every `loadu`/`storeu` offset is kept `< x.len() ==
+/// y.len()` by the loop condition and the equal-length assert below (the
+/// AVX2/AVX-512 siblings of this kernel already assert this; a P1 bug found
+/// while writing this doc — SSE2 alone was missing it, meaning a caller on
+/// SSE2-only hardware with `y.len() < x.len()` would read/write past the end
+/// of `y`).
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse2")]
 unsafe fn saxpy_f32_sse2(alpha: f32, x: &[f32], y: &mut [f32]) {
     use core::arch::x86_64::*;
+    assert_eq!(x.len(), y.len(), "saxpy: x.len() != y.len()");
     let a4 = _mm_set1_ps(alpha);
     let n = x.len();
     let mut i = 0;
@@ -796,10 +881,13 @@ unsafe fn saxpy_f32_sse2(alpha: f32, x: &[f32], y: &mut [f32]) {
     }
 }
 
+/// # Safety
+/// Same contract as [`saxpy_f32_sse2`] (f64 lanes, SSE2 handles 2 at a time).
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse2")]
 unsafe fn daxpy_f64_sse2(alpha: f64, x: &[f64], y: &mut [f64]) {
     use core::arch::x86_64::*;
+    assert_eq!(x.len(), y.len(), "daxpy: x.len() != y.len()");
     let a2 = _mm_set1_pd(alpha);
     let n = x.len();
     let mut i = 0;
@@ -817,10 +905,14 @@ unsafe fn daxpy_f64_sse2(alpha: f64, x: &[f64], y: &mut [f64]) {
     }
 }
 
+/// # Safety
+/// Same contract as [`saxpy_f32_sse2`]; `tmp` is a stack array sized to the
+/// fixed SSE2 f32 lane count, so the horizontal-sum store can't overflow.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse2")]
 unsafe fn sdot_f32_sse2(x: &[f32], y: &[f32]) -> f32 {
     use core::arch::x86_64::*;
+    assert_eq!(x.len(), y.len(), "sdot: x.len() != y.len()");
     let n = x.len();
     let mut acc = _mm_setzero_ps();
     let mut i = 0;
@@ -841,10 +933,13 @@ unsafe fn sdot_f32_sse2(x: &[f32], y: &[f32]) -> f32 {
     sum
 }
 
+/// # Safety
+/// Same contract as [`sdot_f32_sse2`] (f64 lanes, SSE2 handles 2 at a time).
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse2")]
 unsafe fn ddot_f64_sse2(x: &[f64], y: &[f64]) -> f64 {
     use core::arch::x86_64::*;
+    assert_eq!(x.len(), y.len(), "ddot: x.len() != y.len()");
     let n = x.len();
     let mut acc = _mm_setzero_pd();
     let mut i = 0;
@@ -865,6 +960,10 @@ unsafe fn ddot_f64_sse2(x: &[f64], y: &[f64]) -> f64 {
     sum
 }
 
+/// # Safety
+/// Caller must ensure the CPU supports SSE2. Bounds are self-contained: every
+/// `loadu`/`storeu` offset is kept `< v.len()` by the loop condition, in
+/// place on `v` alone.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse2")]
 unsafe fn relu_f32_sse2(v: &mut [f32]) {
@@ -885,6 +984,8 @@ unsafe fn relu_f32_sse2(v: &mut [f32]) {
     }
 }
 
+/// # Safety
+/// Same contract as [`relu_f32_sse2`], in place on `c` alone.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse2")]
 unsafe fn scal_f32_sse2(beta: f32, c: &mut [f32]) {
@@ -906,6 +1007,10 @@ unsafe fn scal_f32_sse2(beta: f32, c: &mut [f32]) {
 
 /// SSE2 SGEMM (`C = alpha·A·B + beta·C`, row-major), rank-1-update formulation
 /// (4 f32 lanes). See [`sgemm_f32_avx2`] for the algorithm.
+///
+/// # Safety
+/// Same contract as [`sgemm_f32_avx2`]: caller must ensure the CPU supports
+/// SSE2, which the calls into `scal_f32_sse2`/`saxpy_f32_sse2` inherit.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse2")]
 unsafe fn sgemm_f32_sse2(
@@ -949,6 +1054,11 @@ impl SimdBackend for NeonBackend {
     fn name(&self) -> &'static str {
         "neon"
     }
+    // SAFETY (all blocks below): `self: &NeonBackend` can only exist after
+    // `runtime_backend()` confirmed `is_aarch64_feature_detected!("neon")` —
+    // see the struct doc above and the module-level `## Safety` note (also
+    // guaranteed unconditionally on every ARMv8+ CPU). That's the
+    // precondition every `_neon` free function below requires.
     fn saxpy_f32(&self, alpha: f32, x: &[f32], y: &mut [f32]) {
         unsafe { saxpy_f32_neon(alpha, x, y) }
     }
@@ -974,6 +1084,7 @@ impl SimdBackend for NeonBackend {
         for (i, item) in y.iter_mut().enumerate().take(m)
         {
             let row = a.row_slice(i).expect("row_slice");
+            // SAFETY: see the note on `saxpy_f32` above.
             let dot = unsafe { sdot_f32_neon(row, x) };
             *item = alpha * dot + beta * *item;
         }
@@ -986,6 +1097,7 @@ impl SimdBackend for NeonBackend {
         b: f32,
         mc: crate::matrix::view::MatrixViewMut<f32>,
     ) {
+        // SAFETY: see the note on `saxpy_f32` above.
         unsafe { sgemm_f32_neon(a, ma, mb, b, mc) }
     }
     fn relu_f32(&self, v: &mut [f32]) {
@@ -995,6 +1107,10 @@ impl SimdBackend for NeonBackend {
 
 // ---- NEON kernel free functions ----
 
+/// # Safety
+/// Caller must ensure the CPU supports NEON. Bounds are self-contained: every
+/// `vld1q_f32`/`vst1q_f32` offset is kept `< c.len()` by the loop condition,
+/// in place on `c` alone.
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
 unsafe fn scal_f32_neon(beta: f32, c: &mut [f32]) {
@@ -1017,6 +1133,10 @@ unsafe fn scal_f32_neon(beta: f32, c: &mut [f32]) {
 /// NEON SGEMM (`C = alpha·A·B + beta·C`, row-major), même formulation
 /// rank-1 / axpy-sur-lignes que le palier x86 — porte le gain multi-plateforme
 /// sur Jetson / Raspberry Pi / RK3588 (remplaçait un fallback scalaire).
+///
+/// # Safety
+/// Same contract as [`sgemm_f32_avx2`]: caller must ensure the CPU supports
+/// NEON, which the calls into `scal_f32_neon`/`saxpy_f32_neon` inherit.
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
 unsafe fn sgemm_f32_neon(
@@ -1045,10 +1165,19 @@ unsafe fn sgemm_f32_neon(
         }
     }
 }
+/// # Safety
+/// Caller must ensure the CPU supports NEON (unconditionally true on ARMv8+,
+/// per `is_aarch64_feature_detected!("neon")`). Bounds/aliasing are otherwise
+/// self-contained: every `vld1q_f32`/`vst1q_f32` offset is kept `< x.len() ==
+/// y.len()` by the equal-length assert below and the `chunks`/`start`
+/// bookkeeping (same P1 bug class as [`saxpy_f32_sse2`] — this assert was
+/// also missing here before this fix, so `y.len() < x.len()` would write past
+/// the end of `y`).
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
 unsafe fn saxpy_f32_neon(alpha: f32, x: &[f32], y: &mut [f32]) {
     use std::arch::aarch64::*;
+    assert_eq!(x.len(), y.len(), "saxpy: x.len() != y.len()");
     let alpha_v = vdupq_n_f32(alpha);
     let chunks = x.len() / 4;
     for c in 0..chunks
@@ -1067,10 +1196,14 @@ unsafe fn saxpy_f32_neon(alpha: f32, x: &[f32], y: &mut [f32]) {
     }
 }
 
+/// # Safety
+/// Same contract as [`saxpy_f32_neon`]; `tmp` is a stack array sized to the
+/// fixed NEON f32 lane count, so the horizontal-sum store can't overflow.
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
 unsafe fn sdot_f32_neon(x: &[f32], y: &[f32]) -> f32 {
     use std::arch::aarch64::*;
+    assert_eq!(x.len(), y.len(), "sdot: x.len() != y.len()");
     let mut acc = vdupq_n_f32(0.0);
     let n = x.len();
     let mut i = 0;
@@ -1224,6 +1357,46 @@ mod tests {
         let y = vec![1.0f32; 4];
         b.saxpy_f32(2.0, &y, &mut x);
         assert_eq!(x, vec![3.0, 4.0, 5.0, 6.0]);
+    }
+
+    /// Regression test for a bug found while writing the `# Safety` docs on
+    /// this file's unsafe kernels: `saxpy_f32_sse2`/`daxpy_f64_sse2`/
+    /// `sdot_f32_sse2`/`ddot_f64_sse2` and `saxpy_f32_neon`/`sdot_f32_neon`
+    /// were missing the `assert_eq!(x.len(), y.len())` guard their AVX2/
+    /// AVX-512 siblings already had — on SSE2-only or NEON hardware, a
+    /// mismatched-length call would silently read/write past the end of the
+    /// shorter slice instead of panicking. Every available backend must now
+    /// panic instead.
+    #[test]
+    fn saxpy_and_sdot_panic_on_length_mismatch_every_backend() {
+        let backends = available_backends();
+        for (b, name) in &backends
+        {
+            if *name == "scalar"
+            {
+                // ScalarBackend has its own (correct, pre-existing) contract;
+                // this regression is specifically about the SIMD kernels.
+                continue;
+            }
+            let x = vec![1.0f32, 2.0, 3.0];
+            let mut y_short = vec![1.0f32, 2.0];
+            let saxpy_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                b.saxpy_f32(1.0, &x, &mut y_short);
+            }));
+            assert!(
+                saxpy_result.is_err(),
+                "[{name}] saxpy_f32 must panic on x.len() != y.len(), not read/write out of bounds"
+            );
+
+            let y_short_ro = vec![1.0f32, 2.0];
+            let sdot_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                b.sdot_f32(&x, &y_short_ro)
+            }));
+            assert!(
+                sdot_result.is_err(),
+                "[{name}] sdot_f32 must panic on x.len() != y.len(), not read/write out of bounds"
+            );
+        }
     }
 
     #[test]
