@@ -14,6 +14,7 @@ use super::layer::Linear;
 use super::linalg;
 use super::math::{reciprocal, rsqrt, sqrt};
 use super::pool::{Pool1dShape, avg_pool1d, max_pool1d};
+use super::pool2d::{Pool2dShape, avg_pool2d, max_pool2d};
 use super::reductions as red;
 use super::rescale::{rescale, rescale_saturating, rescale_wrapping};
 use super::simd::{FixedI16x8, FixedI32x8, FixedI64x4};
@@ -1557,6 +1558,245 @@ fn conv2d_i64_storage() {
     };
     let y = conv2d(&x, &w, &b, shape);
     assert_eq!(y, [Q32_32::from(101i64)]); // x[0,0]=1 + biais 100
+}
+
+// ------------------------------------------------------------------ //
+//  Pooling 2D                                                         //
+// ------------------------------------------------------------------ //
+
+/// Référence naïve, indépendante de l'implémentation (pas de tampon partagé,
+/// pas d'appel à `reductions::max`/`sum`) : doit coïncider **bit-à-bit**.
+fn naive_max_pool2d<const F: u32>(x: &[FixedI32<F>], shape: Pool2dShape) -> Vec<FixedI32<F>> {
+    let height_out = shape.height_out();
+    let width_out = shape.width_out();
+    let mut y = Vec::with_capacity(shape.channels * height_out * width_out);
+    for c in 0..shape.channels
+    {
+        for oh in 0..height_out
+        {
+            for ow in 0..width_out
+            {
+                let base = c * (shape.height * shape.width);
+                let mut best = x[base + (oh * shape.stride_h) * shape.width + ow * shape.stride_w];
+                for kh in 0..shape.window_h
+                {
+                    for kw in 0..shape.window_w
+                    {
+                        let h = oh * shape.stride_h + kh;
+                        let w = ow * shape.stride_w + kw;
+                        let v = x[base + h * shape.width + w];
+                        if v > best
+                        {
+                            best = v;
+                        }
+                    }
+                }
+                y.push(best);
+            }
+        }
+    }
+    y
+}
+
+fn naive_avg_pool2d<const F: u32>(x: &[FixedI32<F>], shape: Pool2dShape) -> Vec<FixedI32<F>> {
+    let height_out = shape.height_out();
+    let width_out = shape.width_out();
+    let divisor = FixedI32::<F>::from((shape.window_h * shape.window_w) as i32);
+    let mut y = Vec::with_capacity(shape.channels * height_out * width_out);
+    for c in 0..shape.channels
+    {
+        for oh in 0..height_out
+        {
+            for ow in 0..width_out
+            {
+                let base = c * (shape.height * shape.width);
+                let mut acc = FixedI32::<F>::from_raw(0);
+                for kh in 0..shape.window_h
+                {
+                    for kw in 0..shape.window_w
+                    {
+                        let h = oh * shape.stride_h + kh;
+                        let w = ow * shape.stride_w + kw;
+                        acc += x[base + h * shape.width + w];
+                    }
+                }
+                y.push(acc.checked_div(divisor).unwrap());
+            }
+        }
+    }
+    y
+}
+
+#[test]
+fn pool2d_known_small_disjoint_tiling() {
+    // 1 canal, x = arithmétique 1..16 (4×4), fenêtre 2×2, stride (2,2)
+    // (pavage disjoint, sans chevauchement).
+    let x = (1i32..=16).map(Q16_16::from).collect::<Vec<_>>();
+    let shape = Pool2dShape {
+        channels: 1,
+        height: 4,
+        width: 4,
+        window_h: 2,
+        window_w: 2,
+        stride_h: 2,
+        stride_w: 2,
+    };
+    assert_eq!(shape.height_out(), 2);
+    assert_eq!(shape.width_out(), 2);
+    // Fenêtres : {1,2,5,6}, {3,4,7,8}, {9,10,13,14}, {11,12,15,16}.
+    let mx = max_pool2d(&x, shape);
+    assert_eq!(mx, [6i32, 8, 14, 16].map(Q16_16::from));
+    let avg = avg_pool2d(&x, shape);
+    // Sommes 14,22,46,54, ÷4 = 3.5, 5.5, 11.5, 13.5 (division réelle exacte).
+    assert_eq!(avg, [q16(3.5), q16(5.5), q16(11.5), q16(13.5)]);
+}
+
+#[test]
+fn pool2d_overlapping_window_multi_channel() {
+    // 2 canaux, fenêtre 2×2 chevauchante (stride (1,1) < fenêtre), 3×3 par
+    // canal. Sommes choisies multiples de 4 pour une moyenne entière exacte.
+    let c0 = [4i32, 8, 12, 16, 20, 24, 28, 32, 36]; // 3×3, pas constant
+    let c1 = [40i32, 80, 120, 160, 200, 240, 280, 320, 360];
+    let x: Vec<Q16_16> = c0
+        .iter()
+        .chain(c1.iter())
+        .copied()
+        .map(Q16_16::from)
+        .collect();
+    let shape = Pool2dShape {
+        channels: 2,
+        height: 3,
+        width: 3,
+        window_h: 2,
+        window_w: 2,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    assert_eq!(shape.height_out(), 2);
+    assert_eq!(shape.width_out(), 2);
+    let got_max = max_pool2d(&x, shape);
+    let want_max = naive_max_pool2d(&x, shape);
+    assert_eq!(got_max, want_max);
+    let got_avg = avg_pool2d(&x, shape);
+    let want_avg = naive_avg_pool2d(&x, shape);
+    assert_eq!(got_avg, want_avg);
+}
+
+#[test]
+fn pool2d_matches_naive_reference_varied_shapes() {
+    let mut rng = Lcg(0xFEED2D);
+    let cases = [
+        (3, 10, 8, 3, 3, 2, 2),
+        (1, 6, 6, 6, 6, 1, 1),
+        (2, 9, 7, 2, 3, 3, 2),
+        (4, 5, 5, 2, 2, 1, 1),
+    ];
+    for &(channels, height, width, window_h, window_w, stride_h, stride_w) in &cases
+    {
+        let shape = Pool2dShape {
+            channels,
+            height,
+            width,
+            window_h,
+            window_w,
+            stride_h,
+            stride_w,
+        };
+        let height_out = shape.height_out();
+        let width_out = shape.width_out();
+        let x: Vec<Q16_16> = (0..channels * height * width)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 4))
+            .collect();
+
+        let got_max = max_pool2d(&x, shape);
+        let want_max = naive_max_pool2d(&x, shape);
+        assert_eq!(got_max.len(), channels * height_out * width_out);
+        assert_eq!(got_max, want_max, "max_pool2d shape={shape:?}");
+
+        let got_avg = avg_pool2d(&x, shape);
+        let want_avg = naive_avg_pool2d(&x, shape);
+        assert_eq!(got_avg, want_avg, "avg_pool2d shape={shape:?}");
+    }
+}
+
+#[test]
+#[should_panic(expected = "Pool2dShape::height_out")]
+fn pool2d_window_taller_than_input_panics() {
+    let x = [Q16_16::one(); 9]; // 1×3×3
+    let shape = Pool2dShape {
+        channels: 1,
+        height: 3,
+        width: 3,
+        window_h: 4,
+        window_w: 1,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let _ = max_pool2d(&x, shape);
+}
+
+#[test]
+#[should_panic(expected = "avg_pool2d")]
+fn pool2d_dim_mismatch_panics() {
+    let x = [Q16_16::one(); 8]; // annoncé 1×3×3 attendu 9, fourni 8
+    let shape = Pool2dShape {
+        channels: 1,
+        height: 3,
+        width: 3,
+        window_h: 2,
+        window_w: 2,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let _ = avg_pool2d(&x, shape);
+}
+
+#[test]
+fn pool2d_i64_storage() {
+    // Chemin de stockage i64 (Q32.32) : mêmes garanties.
+    let x = [1i64, 9, 3, 7].map(Q32_32::from); // 2×2, une seule fenêtre 2×2
+    let shape = Pool2dShape {
+        channels: 1,
+        height: 2,
+        width: 2,
+        window_h: 2,
+        window_w: 2,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    assert_eq!(max_pool2d(&x, shape), [Q32_32::from(9i64)]);
+    assert_eq!(avg_pool2d(&x, shape), [Q32_32::from(5i64)]); // (1+9+3+7)/4=5
+}
+
+#[test]
+fn pool2d_feeds_conv2d_chain() {
+    // Usage réaliste : conv2d → max_pool2d, comme dans un CNN léger 2D.
+    let x = (1i32..=16).map(Q16_16::from).collect::<Vec<_>>(); // 1×4×4
+    let w = [1i32, 0, 0, -1].map(Q16_16::from); // diagonale 2×2
+    let b = [Q16_16::zero()];
+    let conv_shape = Conv2dShape {
+        in_channels: 1,
+        height: 4,
+        width: 4,
+        out_channels: 1,
+        kernel_h: 2,
+        kernel_w: 2,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    // y[oh,ow] = x[oh,ow] - x[oh+1,ow+1] = -(width+1) = -5 partout (largeur 4).
+    let conv_out = conv2d(&x, &w, &b, conv_shape); // 1×3×3, toutes valeurs = -5
+    let pool_shape = Pool2dShape {
+        channels: 1,
+        height: 3,
+        width: 3,
+        window_h: 2,
+        window_w: 2,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let pooled = max_pool2d(&conv_out, pool_shape);
+    assert_eq!(pooled, vec![q16(-5.0); 4]); // toutes les fenêtres valent -5
 }
 
 // ------------------------------------------------------------------ //
