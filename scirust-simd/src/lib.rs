@@ -677,6 +677,11 @@ pub mod reductions;
 #[cfg(feature = "portable-simd")]
 pub mod fixed;
 
+// Géométrie générique (Quaternion<T>) au-dessus des traits NumericScalar/
+// RealScalar : rotations 3D identiques en flottant et en virgule fixe.
+#[cfg(feature = "portable-simd")]
+pub mod geometry;
+
 #[cfg(all(feature = "nightly-simd", target_arch = "x86_64"))]
 pub mod amx;
 #[cfg(all(feature = "nightly-simd", target_arch = "x86_64"))]

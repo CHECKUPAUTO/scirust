@@ -44,6 +44,11 @@ name = "transcendental_bench"
 harness = false
 required-features = ["portable-simd"]
 
+[[bench]]
+name = "geometry_bench"
+harness = false
+required-features = ["portable-simd"]
+
 [[example]]
 name = "amx_bench"
 required-features = ["nightly-simd"]
