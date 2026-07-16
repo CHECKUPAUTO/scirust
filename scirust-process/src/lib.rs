@@ -71,6 +71,22 @@
 //! - [`compressor_power`] — compression d'un gaz parfait : travail isentropique/polytropique, refoulement, multi-étagé.
 //! - [`control_valve_cv`] — vanne de régulation : coefficient Cv/Kv, autorité, caractéristique égal pourcentage.
 //! - [`orifice_meter`] — débitmètre à diaphragme : rapport β, débit massique/volumique, perte permanente.
+//! - [`heat_transfer_coefficient`] — convection : Reynolds, Prandtl, Dittus-Boelter (Nu), h = Nu·k/L, résistances en série.
+//! - [`pipe_pressure_drop`] — perte de charge : Reynolds, facteur de frottement (Swamee-Jain), Darcy-Weisbach, pertes singulières.
+//! - [`cooling_tower`] — tour de refroidissement : range, approche, efficacité, évaporation, appoint, cycles de concentration.
+//!
+//! ### Séparation & réacteurs — vol. 3
+//! - [`reflux_ratio`] — taux de reflux : minimal (Underwood binaire), opératoire, pente, charges condenseur/rebouilleur.
+//! - [`reboiler_condenser`] — charges thermiques : condenseur/rebouilleur, vapeur de chauffe, eau de refroidissement, aire.
+//! - [`kremser_stages`] — absorption/stripping étagé : facteurs A/S, fraction absorbée, étages requis (Kremser).
+//!
+//! ### Opérations solide-fluide & instrumentation — vol. 3
+//! - [`cake_filtration`] — filtration sur gâteau : temps à pression constante (αc, Rm), débit, lavage, résistance du média.
+//! - [`centrifugation`] — séparation centrifuge : facteur g, vitesse de migration (Stokes), facteur Sigma, diamètre de coupure.
+//! - [`agitation_power`] — agitation : Reynolds, puissance (Np·ρ·N³·D⁵), vitesse périphérique, débit de circulation.
+//! - [`two_phase_flow`] — écoulement diphasique : paramètre de Lockhart-Martinelli, multiplicateur, modèle homogène, taux de vide.
+//! - [`psychrometry`] — air humide : humidité absolue/relative, enthalpie, point de rosée, volume spécifique.
+//! - [`process_first_order`] — dynamique du 1er ordre : réponse indicielle, FOPDT, réglage Ziegler-Nichols (PI).
 //!
 //! ## Positionnement
 //!
@@ -133,12 +149,24 @@ pub mod vapor_pressure;
 pub mod vle_raoult;
 
 // Vol. 3
+pub mod agitation_power;
+pub mod cake_filtration;
+pub mod centrifugation;
 pub mod compressor_power;
 pub mod control_valve_cv;
+pub mod cooling_tower;
 pub mod heat_exchanger_lmtd;
 pub mod heat_exchanger_ntu;
+pub mod heat_transfer_coefficient;
+pub mod kremser_stages;
 pub mod orifice_meter;
+pub mod pipe_pressure_drop;
+pub mod process_first_order;
+pub mod psychrometry;
 pub mod pump_sizing;
+pub mod reboiler_condenser;
+pub mod reflux_ratio;
+pub mod two_phase_flow;
 
 pub use absorption::{
     absorp_factor, absorp_kremser_fraction_absorbed, absorp_minimum_liquid_flow, absorp_ntu_dilute,
@@ -278,12 +306,26 @@ pub use vle_raoult::{
 };
 
 // Vol. 3 — ré-exports à plat.
+pub use agitation_power::{
+    agit_power, agit_power_number_laminar, agit_pumping_flow, agit_reynolds, agit_tip_speed,
+};
+pub use cake_filtration::{
+    filt_average_rate, filt_constant_pressure_time, filt_medium_resistance_from_intercept,
+    filt_washing_rate,
+};
+pub use centrifugation::{
+    centf_cut_diameter, centf_g_factor, centf_sigma_factor, centf_terminal_velocity,
+};
 pub use compressor_power::{
     cmp_discharge_temperature, cmp_isentropic_work, cmp_polytropic_work, cmp_power,
     cmp_stage_pressure_ratio,
 };
 pub use control_valve_cv::{
     cv_authority, cv_equal_percentage_opening, cv_flow_from_cv, cv_kv_from_cv, cv_liquid,
+};
+pub use cooling_tower::{
+    ctwr_approach, ctwr_cycles_of_concentration, ctwr_effectiveness, ctwr_evaporation_loss,
+    ctwr_makeup_water, ctwr_range,
 };
 pub use heat_exchanger_lmtd::{
     lmtd_duty, lmtd_log_mean, lmtd_outlet_temp_from_duty, lmtd_required_area,
@@ -292,11 +334,43 @@ pub use heat_exchanger_ntu::{
     ntu_capacity_ratio, ntu_duty, ntu_effectiveness_counterflow, ntu_effectiveness_parallel,
     ntu_number,
 };
+pub use heat_transfer_coefficient::{
+    htc_coefficient_from_nusselt, htc_dittus_boelter, htc_prandtl, htc_reynolds,
+    htc_wall_from_series,
+};
+pub use kremser_stages::{
+    krem_absorption_factor, krem_fraction_absorbed, krem_minimum_liquid, krem_stages_required,
+    krem_stripping_factor,
+};
 pub use orifice_meter::{
     orif_beta_ratio, orif_differential_pressure, orif_mass_flow, orif_permanent_loss_fraction,
     orif_volumetric_flow,
 };
+pub use pipe_pressure_drop::{
+    dp_darcy_weisbach, dp_equivalent_length, dp_friction_factor_laminar,
+    dp_friction_factor_swamee_jain, dp_minor_loss, dp_reynolds,
+};
+pub use process_first_order::{
+    ford_first_order_plus_deadtime, ford_step_response, ford_time_to_fraction, ford_zn_pi_gain,
+    ford_zn_pi_integral_time,
+};
+pub use psychrometry::{
+    psy_dew_point_saturation_pressure, psy_enthalpy, psy_humidity_ratio, psy_relative_humidity,
+    psy_specific_volume, psy_vapor_pressure_from_humidity,
+};
 pub use pump_sizing::{
     pump_affinity_flow, pump_hydraulic_power, pump_npsh_available, pump_shaft_power,
     pump_specific_speed,
+};
+pub use reboiler_condenser::{
+    rbc_condenser_duty, rbc_cooling_water_flow, rbc_reboiler_area, rbc_reboiler_duty,
+    rbc_steam_consumption,
+};
+pub use reflux_ratio::{
+    reflux_condenser_duty, reflux_minimum_underwood_binary, reflux_operating_from_ratio,
+    reflux_reboiler_duty, reflux_rectifying_slope,
+};
+pub use two_phase_flow::{
+    twop_homogeneous_density, twop_martinelli_parameter, twop_pressure_gradient,
+    twop_two_phase_multiplier_liquid, twop_void_fraction_homogeneous,
 };
