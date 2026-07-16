@@ -672,6 +672,11 @@ pub mod hypercomplex;
 #[cfg(feature = "portable-simd")]
 pub mod reductions;
 
+// Sous-système virgule fixe SIMD (FixedI32<F>/FixedI64<F>, FixedI32x8, …) —
+// calcul déterministe reproductible bit-à-bit ; construit sur std::simd.
+#[cfg(feature = "portable-simd")]
+pub mod fixed;
+
 #[cfg(all(feature = "nightly-simd", target_arch = "x86_64"))]
 pub mod amx;
 #[cfg(all(feature = "nightly-simd", target_arch = "x86_64"))]
