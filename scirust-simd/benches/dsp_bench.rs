@@ -10,7 +10,7 @@
 //     cargo bench -p scirust-simd --features portable-simd --bench dsp_bench
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
-use scirust_simd::dsp::{Biquad, Fir};
+use scirust_simd::dsp::{Biquad, Complex, Fir, fft};
 use scirust_simd::fixed::Q16_16;
 
 const N: usize = 1 << 14;
@@ -95,5 +95,35 @@ fn bench_fir(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(benches, bench_biquad, bench_fir);
+/// FFT de longueur 1024 (fixe vs f32). Débit en points transformés/s.
+fn bench_fft(c: &mut Criterion) {
+    const M: usize = 1 << 10;
+    let sf = signal_f32();
+    let base_f: Vec<Complex<f32>> = (0..M).map(|i| Complex::from_real(sf[i])).collect();
+    let base_x: Vec<Complex<Q16_16>> = (0..M)
+        .map(|i| Complex::from_real(Q16_16::try_from(sf[i] as f64).unwrap()))
+        .collect();
+
+    let mut g = c.benchmark_group("fft1024");
+    g.throughput(Throughput::Elements(M as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        let mut buf = base_x.clone();
+        b.iter(|| {
+            buf.copy_from_slice(&base_x);
+            fft(black_box(&mut buf));
+            buf[0]
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        let mut buf = base_f.clone();
+        b.iter(|| {
+            buf.copy_from_slice(&base_f);
+            fft(black_box(&mut buf));
+            buf[0]
+        })
+    });
+    g.finish();
+}
+
+criterion_group!(benches, bench_biquad, bench_fir, bench_fft);
 criterion_main!(benches);

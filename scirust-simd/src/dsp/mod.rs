@@ -15,6 +15,8 @@
 //   avec conception « cookbook » RBJ (passe-bas / passe-haut / passe-bande).
 // * [`Fir`] — filtre à réponse impulsionnelle finie, ligne à retard circulaire
 //   sans allocation, phase linéaire pour des coefficients symétriques.
+// * [`fft`] — transformée de Fourier rapide radix-2 (Cooley–Tukey) en place,
+//   avec le complexe générique [`fft::Complex`].
 //
 // ## Pourquoi la virgule fixe pour le DSP ?
 //
@@ -24,9 +26,11 @@
 // référence et de comparaison.
 
 pub mod biquad;
+pub mod fft;
 pub mod fir;
 
 pub use biquad::Biquad;
+pub use fft::{Complex, fft, ifft};
 pub use fir::Fir;
 
 #[cfg(test)]

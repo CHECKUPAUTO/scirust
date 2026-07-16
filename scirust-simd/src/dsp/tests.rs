@@ -6,6 +6,7 @@
 // vérifie les propriétés spectrales (gains au continu / à Nyquist), la réponse
 // impulsionnelle, l'accord virgule fixe ↔ flottant, et le déterminisme bit-à-bit.
 
+use super::fft::{Complex, fft, ifft};
 use super::{Biquad, Fir};
 use crate::fixed::{Q8_24, Q16_16, RealScalar};
 
@@ -274,5 +275,173 @@ fn fir_passthrough_and_determinism() {
     for i in 0..32
     {
         assert_eq!(a[i].to_raw(), b[i].to_raw());
+    }
+}
+
+// ------------------------------------------------------------------ //
+//  FFT radix-2                                                         //
+// ------------------------------------------------------------------ //
+
+/// Vecteur complexe depuis des échantillons réels.
+fn cvec<T: Scalar>(reals: &[f64]) -> Vec<Complex<T>> {
+    reals
+        .iter()
+        .map(|&r| Complex::from_real(T::of(r)))
+        .collect()
+}
+
+/// DFT naïve de référence (f64) : `X[k] = Σₙ x[n]·e^{−2iπkn/N}`.
+fn naive_dft(x: &[f64]) -> Vec<(f64, f64)> {
+    let n = x.len();
+    (0..n)
+        .map(|k| {
+            let (mut re, mut im) = (0.0, 0.0);
+            for (nn, &xn) in x.iter().enumerate()
+            {
+                let ang = -2.0 * std::f64::consts::PI * (k * nn) as f64 / n as f64;
+                re += xn * ang.cos();
+                im += xn * ang.sin();
+            }
+            (re, im)
+        })
+        .collect()
+}
+
+fn check_fft_vs_dft<T: Scalar>(signal: &[f64]) {
+    let n = signal.len();
+    let mut data = cvec::<T>(signal);
+    fft(&mut data);
+    let reference = naive_dft(signal);
+    // Tolérance : l'accumulation sur log₂ n étages amplifie l'arrondi fixe.
+    let tol = T::TOL * (n as f64) * 6.0 + 1e-6;
+    for (got, (re, im)) in data.iter().zip(reference.iter())
+    {
+        assert!(
+            (got.re.to_f64() - re).abs() <= tol && (got.im.to_f64() - im).abs() <= tol,
+            "FFT bin: ({}, {}) vs ({re}, {im}), tol {tol}",
+            got.re.to_f64(),
+            got.im.to_f64()
+        );
+    }
+}
+
+#[test]
+fn fft_matches_naive_dft_all_scalars() {
+    // Signal déterministe de longueur 16.
+    let sig: Vec<f64> = (0..16).map(|i| ((i * 5 % 7) as f64) * 0.1 - 0.3).collect();
+    check_fft_vs_dft::<f32>(&sig);
+    check_fft_vs_dft::<f64>(&sig);
+    check_fft_vs_dft::<Q16_16>(&sig);
+}
+
+fn check_fft_dc_and_impulse<T: Scalar>() {
+    // DC : x = [1;8] → X[0] = 8, reste ≈ 0.
+    let mut dc = cvec::<T>(&[1.0; 8]);
+    fft(&mut dc);
+    let tol = T::TOL * 32.0 + 1e-6;
+    assert!((dc[0].re.to_f64() - 8.0).abs() <= tol && dc[0].im.to_f64().abs() <= tol);
+    for c in &dc[1..]
+    {
+        assert!(
+            c.re.to_f64().abs() <= tol && c.im.to_f64().abs() <= tol,
+            "DC bin non nul"
+        );
+    }
+    // Impulsion : x = [1,0,…] → tous les bins ≈ 1.
+    let mut imp = vec![Complex::<T>::zero(); 8];
+    imp[0] = Complex::from_real(T::one());
+    fft(&mut imp);
+    for c in &imp
+    {
+        assert!(
+            (c.re.to_f64() - 1.0).abs() <= tol && c.im.to_f64().abs() <= tol,
+            "impulsion plate"
+        );
+    }
+}
+
+#[test]
+fn fft_dc_and_impulse_all_scalars() {
+    check_fft_dc_and_impulse::<f32>();
+    check_fft_dc_and_impulse::<f64>();
+    check_fft_dc_and_impulse::<Q16_16>();
+}
+
+fn check_fft_roundtrip<T: Scalar>() {
+    let sig: Vec<f64> = (0..16).map(|i| ((i * 3 % 5) as f64) * 0.15 - 0.3).collect();
+    let orig = cvec::<T>(&sig);
+    let mut data = orig.clone();
+    fft(&mut data);
+    ifft(&mut data);
+    let tol = T::TOL * 16.0 + 1e-6;
+    for (a, b) in data.iter().zip(orig.iter())
+    {
+        assert!(
+            (a.re.to_f64() - b.re.to_f64()).abs() <= tol
+                && (a.im.to_f64() - b.im.to_f64()).abs() <= tol,
+            "round-trip ifft(fft) ≠ id"
+        );
+    }
+}
+
+#[test]
+fn fft_roundtrip_all_scalars() {
+    check_fft_roundtrip::<f32>();
+    check_fft_roundtrip::<f64>();
+    check_fft_roundtrip::<Q16_16>();
+}
+
+#[test]
+fn fft_parseval_and_sinusoid() {
+    // Parseval : Σ|x|² = (1/N) Σ|X|².
+    let sig: Vec<f64> = (0..32).map(|i| (i as f64 * 0.37).sin() * 0.5).collect();
+    let energy_time: f64 = sig.iter().map(|v| v * v).sum();
+    let mut data = cvec::<f64>(&sig);
+    fft(&mut data);
+    let energy_freq: f64 = data.iter().map(|c| c.norm_sqr()).sum::<f64>() / sig.len() as f64;
+    assert!((energy_time - energy_freq).abs() < 1e-9, "Parseval");
+
+    // Sinusoïde pure à la fréquence bin m : énergie concentrée en m et N−m.
+    let n = 32;
+    let m = 4;
+    let s: Vec<f64> = (0..n)
+        .map(|i| (2.0 * std::f64::consts::PI * (m * i) as f64 / n as f64).cos())
+        .collect();
+    let mut d = cvec::<f64>(&s);
+    fft(&mut d);
+    // Bins m et N−m ≈ N/2 ; les autres ≈ 0.
+    for (k, c) in d.iter().enumerate()
+    {
+        let mag = c.norm_sqr().sqrt();
+        if k == m || k == n - m
+        {
+            assert!((mag - (n as f64 / 2.0)).abs() < 1e-6, "bin {k} = {mag}");
+        }
+        else
+        {
+            assert!(mag < 1e-6, "bin {k} devrait être nul: {mag}");
+        }
+    }
+}
+
+#[test]
+fn fft_fixed_matches_float_and_deterministic() {
+    let sig: Vec<f64> = (0..16).map(|i| ((i * 7 % 9) as f64) * 0.08 - 0.3).collect();
+    // Accord Q16.16 ↔ f64.
+    let mut df = cvec::<f64>(&sig);
+    let mut dx = cvec::<Q16_16>(&sig);
+    fft(&mut df);
+    fft(&mut dx);
+    for (a, b) in df.iter().zip(dx.iter())
+    {
+        assert!((a.re - b.re.to_f64()).abs() < 5e-3 && (a.im - b.im.to_f64()).abs() < 5e-3);
+    }
+    // Déterminisme bit-à-bit du chemin virgule fixe.
+    let mut dx2 = cvec::<Q16_16>(&sig);
+    fft(&mut dx2);
+    for (a, b) in dx.iter().zip(dx2.iter())
+    {
+        assert_eq!(a.re.to_raw(), b.re.to_raw());
+        assert_eq!(a.im.to_raw(), b.im.to_raw());
     }
 }
