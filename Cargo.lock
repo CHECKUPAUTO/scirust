@@ -3248,6 +3248,10 @@ name = "scirust-interp"
 version = "0.1.0"
 
 [[package]]
+name = "scirust-itd"
+version = "0.1.0"
+
+[[package]]
 name = "scirust-learning"
 version = "0.1.0"
 dependencies = [

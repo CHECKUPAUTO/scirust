@@ -1,0 +1,12 @@
+[package]
+name = "scirust-itd"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Deterministic 2-D field-simulation core ported from the ITD research simulator: finite-difference curl/gradient operators (finite & periodic boundaries, uniform & non-uniform rectilinear grids), 2-D trapezoidal spatial integration, a five-component structural signature (heterogeneity, localization, roughness, sign-mixing, temporal deformation), and a curvature-weighted rotational-intensity index. Pure Rust, no unsafe, no dependencies; every primitive validated against the reference implementation as an oracle."
+
+[dependencies]
+
+[[example]]
+name = "itd_scenarios"
+path = "examples/itd_scenarios.rs"

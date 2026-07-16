@@ -1,0 +1,66 @@
+# scirust-itd
+
+A deterministic **2-D field-simulation core**, ported to pure Rust from the
+*ITD* research simulator. It gives SciRust its first spatial-field / PDE-flavoured
+kernel, alongside the ODE-style plants in [`scirust-sim`](../scirust-sim) and the
+1-D quadrature/FEM in [`scirust-solvers`](../scirust-solvers).
+
+Everything here was accepted only after matching the reference implementation
+as an **oracle** — SciRust's standing discipline. The Rust operators, structural
+signature and scenario indices are checked against values produced by the
+original engine to a tight tolerance (`tests/oracle.rs`, `~1e-9` relative,
+including the published 161×161 / 401-step configuration), and the analytic
+invariants the reference asserts hold here too (`tests/analytic.rs`).
+
+## What it provides
+
+| Layer | API | Notes |
+|---|---|---|
+| **Field operators** | [`operators::gradient`] | second-order finite differences; reproduces NumPy `gradient(edge_order=2)` for uniform **and** non-uniform rectilinear axes, finite or periodic boundaries |
+| | [`operators::vorticity`] | the 2-D curl `ω = ∂v_y/∂x − ∂v_x/∂y` |
+| | [`operators::spatial_mean`] | domain integral / area (2-D trapezoidal quadrature; arithmetic mean in periodic mode) |
+| | [`operators::bounded`] | saturating map `b(x) = x / (1 + x)` |
+| **Structural signature** | [`signature::structural_metrics`] | heterogeneity, localization, roughness, sign-mixing, temporal deformation + weighted score |
+| **Simulation driver** | [`simulate`] / `simulate_canonical` | curvature-weighted rotational intensity `⟨ω²·e^{L²κ}⟩` and the structural signature, reduced to interval-integrated indices (eulerian mode) |
+| **Scenarios** | [`scenarios`] | calm (irrotational), coherent (rigid rotation), multi-vortex fields + the shared curvature weighting and reference `Config` |
+
+## Quick start
+
+```bash
+cargo run -p scirust-itd --example itd_scenarios   # reproduce the published indices
+cargo test -p scirust-itd                          # operator + scenario oracle checks
+```
+
+```rust
+use scirust_itd::{simulate_canonical, Config, Scenario, SimConfig};
+
+let r = simulate_canonical(Scenario::Coherent, &Config::default(), &SimConfig::default())?;
+println!("intensity = {:.12}", r.intensity_index);   // 4.347614838944
+# Ok::<(), scirust_itd::ItdError>(())
+```
+
+## Design
+
+- **Pure Rust, zero dependencies**, `#![forbid(unsafe_code)]`, `#![deny(missing_docs)]`.
+- **Deterministic**: no randomness, no threads; identical inputs give identical
+  numbers, and the finite-difference/quadrature summation order matches the
+  reference so the cross-language agreement stays near machine precision.
+- Only the default *eulerian* temporal-deformation mode is ported; the
+  reference's optional semi-Lagrangian `transport_compensated` mode is out of
+  scope for this crate.
+
+## Provenance & scope
+
+This is a faithful **numerical** port, not a physical claim. As the reference
+project states, its tests establish internal numerical and software
+consistency; they do **not** establish the intensity index as a validated
+physical observable, an entropy, or a universal measure of complexity. What
+transfers to SciRust is the deterministic, oracle-validated machinery.
+
+[`operators::gradient`]: https://docs.rs/scirust-itd
+[`operators::vorticity`]: https://docs.rs/scirust-itd
+[`operators::spatial_mean`]: https://docs.rs/scirust-itd
+[`operators::bounded`]: https://docs.rs/scirust-itd
+[`signature::structural_metrics`]: https://docs.rs/scirust-itd
+[`simulate`]: https://docs.rs/scirust-itd
+[`scenarios`]: https://docs.rs/scirust-itd
