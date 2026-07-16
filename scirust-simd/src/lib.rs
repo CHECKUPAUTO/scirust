@@ -48,6 +48,13 @@
 )]
 #![allow(unused_crate_dependencies)]
 #![allow(unused_features)]
+// `clippy::chunks_exact_to_as_chunks` est un lint nightly récent (default-warn)
+// qui vise le motif `chunks_exact(N)` + remainder utilisé dans les kernels SIMD
+// pré-existants (portable.rs, complex.rs). La conversion vers `as_chunks` y est
+// délicate (gestion explicite du reste, lisibilité du pairing) et sans rapport
+// avec les algèbres hypercomplexes ; on neutralise le lint au niveau crate pour
+// que `clippy --features portable-simd -- -D warnings` reste vert.
+#![allow(clippy::chunks_exact_to_as_chunks)]
 
 // Guard de compatibilité multi-architecture injecté pour ARM64 / Jetson Pipeline
 #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]

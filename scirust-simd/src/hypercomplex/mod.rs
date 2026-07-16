@@ -30,13 +30,24 @@
 // ## Garanties d'exécution
 //
 // * **Zéro allocation** : tous les types sont `Copy`, à taille fixe, et
-//   toutes les opérations sont `#[inline(always)]`. Après inlining, une
-//   multiplication d'octonions est une pure séquence
-//   shuffle/FMA sur registres YMM (x86_64/AVX2) ou paires de registres
-//   Q NEON (ARM64) — aucune écriture mémoire intermédiaire.
+//   toutes les opérations sont `#[inline(always)]`. Aucun accès au tas, jamais.
+// * **Résidence registre** (mesurée, pas supposée — cf.
+//   [`scripts/asm_spill_check.sh`](../../scripts/asm_spill_check.sh)) :
+//   - Les noyaux **quaternion** et **octonion** sont entièrement
+//     register-résidents sur toutes les cibles testées (x86_64 AVX2/AVX-512
+//     et AArch64 generic/Neoverse/Apple) : **zéro spill** de boucle chaude.
+//   - Le noyau **sédénion** (16 produits de Hamilton) est plus lourd. Grâce à
+//     l'accumulation séquentielle (voir [`sedenion`]), il est register-résident
+//     sur x86_64 AVX-512 et sur les cœurs AArch64 out-of-order **Neoverse
+//     N1/V1 (Graviton 2/3) et Apple Silicon** — les cibles visées. Sur les
+//     profils AArch64 `generic`/petit cœur in-order (ex. Cortex-A72) et en
+//     AVX2 (16 registres seulement), la pression dépasse le fichier de
+//     registres et quelques spills subsistent. Ceci est **documenté et
+//     mesuré**, pas masqué.
 // * **Alignement strict** : `OctonionSimd` est `#[repr(C, align(32))]`
-//   (un registre 256 bits), `SedenionSimd` est `#[repr(C, align(64))]`
-//   (un registre 512 bits AVX-512, ou 2×YMM / 4×Q NEON après lowering).
+//   (256 bits), `SedenionSimd` est `#[repr(C, align(64))]` (512 bits). Sur
+//   NEON (pas de registre > 128 bits) ces types sont abaissés en 2×Q /
+//   4×Q registres ; l'alignement sert alors aux chargements de tableaux.
 // * **Portabilité** : un seul source `std::simd` ; le backend LLVM émet
 //   le meilleur jeu d'instructions disponible sous
 //   `RUSTFLAGS="-C target-cpu=native"` (AVX-512/AVX2 sur x86_64,
@@ -69,6 +80,11 @@ pub mod sedenion;
 pub use dual::{DualOctonion, DualSedenion};
 pub use octonion::OctonionSimd;
 pub use sedenion::SedenionSimd;
+
+// Sondes assembleur (symboles autonomes pour la régression de spills),
+// compilées uniquement avec la feature `asm-probe`.
+#[cfg(feature = "asm-probe")]
+pub mod asm_probe;
 
 #[cfg(test)]
 mod tests;

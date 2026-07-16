@@ -14,6 +14,18 @@
 // dans tous les cas le déroulage est entièrement décidé à la compilation
 // (`-C target-cpu=native`), sans boucle ni indirection à l'exécution.
 //
+// ## Note de résidence registre (AArch64)
+//
+// Le produit sédénion développe 16 produits de Hamilton : c'est le noyau le
+// plus lourd de la pile. La forme d'**accumulation séquentielle** de `Mul`
+// (deux accumulateurs au lieu de quatre produits simultanés) le rend
+// register-résident (zéro spill de boucle chaude) sur les cœurs out-of-order
+// visés — Neoverse N1/V1 (Graviton 2/3), Apple Silicon — et sur x86_64
+// AVX-512. Sur `generic`/petit cœur in-order (Cortex-A72) et AVX2 (16
+// registres), quelques spills subsistent faute de registres. Le tout est
+// mesuré par `scripts/asm_spill_check.sh` — ne PAS affirmer « tout registre »
+// sans relancer cette preuve.
+//
 // 𝕊 n'est ni associatif, ni alternatif, et possède des diviseurs de zéro
 // (voir les tests) : c'est le prix de la 4ᵉ itération de Cayley-Dickson.
 
@@ -158,19 +170,24 @@ impl Mul for SedenionSimd {
     ///   (a, b) * (c, d) = (a·c − d̄·b,  d·a + b·c̄),   a, b, c, d ∈ 𝕆
     /// ```
     ///
-    /// Les 4 produits d'octonions s'inlinent récursivement en 16 produits
-    /// de Hamilton — la « boucle » de récursion est totalement déroulée à
-    /// la compilation. Bilan : ~64 FMA + ~64 shuffles/broadcasts en pur
-    /// registre, zéro allocation, zéro écriture cache/RAM intermédiaire.
+    /// **Accumulation séquentielle** : plutôt que de matérialiser les quatre
+    /// produits d'octonions simultanément (`a·c`, `d̄·b`, `d·a`, `b·c̄`), on
+    /// n'en garde que DEUX accumulateurs (`lo`, `hi`) et on consomme chaque
+    /// entrée au plus tôt — `a` meurt après `d·a`, `d` après `d̄·b`. Cela
+    /// réduit la pression registre sur NEON (voir `scripts/asm_spill_check.sh`),
+    /// sans changer le résultat flottant (même ordre d'opérations par
+    /// composante) ni pénaliser x86_64.
     #[inline(always)]
     fn mul(self, rhs: Self) -> Self {
         let (a, b) = self.split();
         let (c, d) = rhs.split();
 
-        // Partie basse : a·c − d̄·b   (produits 𝕆 non commutatifs — ordre strict)
-        let lo = a * c - d.conj() * b;
-        // Partie haute : d·a + b·c̄
-        let hi = d * a + b * c.conj();
+        // Deux accumulateurs d'octonions ; ordre choisi pour libérer les
+        // entrées tôt (produits 𝕆 non commutatifs — ordre des facteurs strict).
+        let lo = a * c; //                       LO ← a·c
+        let hi = d * a; //                       HI ← d·a     (a désormais mort)
+        let lo = lo - d.conj() * b; //           LO ← LO − d̄·b (d désormais mort)
+        let hi = hi + b * c.conj(); //           HI ← HI + b·c̄ (b, c morts)
 
         Self::join(lo, hi)
     }

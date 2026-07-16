@@ -16,6 +16,10 @@ libc = "0.2"
 portable-simd = []
 nightly-simd = []
 default = []
+# Compile les sondes assembleur autonomes (src/hypercomplex/asm_probe.rs)
+# utilisées par scripts/asm_spill_check.sh pour compter les spills vectoriels
+# AArch64. Hors chemin de compilation normal (build / test / clippy).
+asm-probe = ["portable-simd"]
 
 [dev-dependencies]
 criterion = "0.5"
