@@ -2984,6 +2984,7 @@ dependencies = [
  "scirust-macros",
  "scirust-simd",
  "scirust-special",
+ "scirust-stats",
  "scirust-symbolic",
  "serde",
  "serde_json",
