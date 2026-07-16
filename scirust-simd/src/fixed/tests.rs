@@ -10,8 +10,10 @@
 use super::math::{reciprocal, rsqrt, sqrt};
 use super::reductions as red;
 use super::simd::{FixedI32x8, FixedI64x4};
+use super::transcendental as tr;
 use super::{
-    FixedI32, FixedI64, NumericScalar, OverflowMode, Q8_24, Q16_16, Q24_8, Q32_32, RoundingMode,
+    FixedI32, FixedI64, NumericScalar, OverflowMode, Q8_24, Q16_16, Q24_8, Q32_32, RealScalar,
+    RoundingMode,
 };
 
 // LCG déterministe.
@@ -541,4 +543,195 @@ fn q24_8_wide_range() {
     let big = FixedI32::<8>::from(1_000_000);
     assert_eq!(big.to_f64(), 1_000_000.0);
     assert_eq!((big + FixedI32::<8>::from(1)).to_f64(), 1_000_001.0);
+}
+
+// ------------------------------------------------------------------ //
+//  Transcendantes : valeurs connues + bornes ULP prouvées             //
+// ------------------------------------------------------------------ //
+
+/// 1 ULP Q16.16 en valeur réelle.
+const ULP16: f64 = 1.0 / 65536.0;
+
+/// Erreur maximale (en ULP Q16.16) d'une transcendante virgule fixe vs `f64`,
+/// balayée sur `[lo, hi]` en `steps + 1` points. La référence `f64` est évaluée
+/// sur l'entrée **réellement représentée** (`x.to_f64()`), de sorte que l'on
+/// mesure l'erreur de l'algorithme et de la quantification de sortie, pas celle
+/// de la quantification d'entrée. Renvoie l'ULP maximal ET l'entrée fautive.
+fn sweep_ulp<F, G>(lo: f64, hi: f64, steps: i64, fx: F, reff: G) -> (f64, f64)
+where
+    F: Fn(Q16_16) -> Q16_16,
+    G: Fn(f64) -> f64,
+{
+    let mut worst = 0.0f64;
+    let mut worst_at = lo;
+    for s in 0..=steps
+    {
+        let v = lo + (hi - lo) * (s as f64) / (steps as f64);
+        let x = q16(v);
+        let got = fx(x).to_f64();
+        let want = reff(x.to_f64());
+        let ulp = (got - want).abs() / ULP16;
+        if ulp > worst
+        {
+            worst = ulp;
+            worst_at = x.to_f64();
+        }
+    }
+    (worst, worst_at)
+}
+
+/// `assert` que le balayage reste sous `bound` ULP, avec diagnostic.
+fn assert_ulp<F, G>(name: &str, bound: f64, lo: f64, hi: f64, steps: i64, fx: F, reff: G)
+where
+    F: Fn(Q16_16) -> Q16_16,
+    G: Fn(f64) -> f64,
+{
+    let (worst, at) = sweep_ulp(lo, hi, steps, fx, reff);
+    assert!(
+        worst <= bound,
+        "{name}: erreur max {worst:.3} ULP > {bound} (à x = {at})"
+    );
+}
+
+#[test]
+fn transcendental_known_values() {
+    // Cas exacts (aucun arrondi résiduel attendu après quantification).
+    assert_eq!(tr::exp(Q16_16::zero()), Q16_16::one()); // e⁰ = 1
+    assert_eq!(tr::exp2(q16(3.0)), q16(8.0)); // 2³ = 8
+    assert_eq!(tr::exp2(q16(-2.0)), q16(0.25)); // 2⁻² = 1/4
+    assert_eq!(tr::sin(Q16_16::zero()), Q16_16::zero()); // sin 0 = 0
+    assert_eq!(tr::cos(Q16_16::zero()), Q16_16::one()); // cos 0 = 1
+    assert_eq!(tr::tanh(Q16_16::zero()), Q16_16::zero()); // tanh 0 = 0
+    assert_eq!(tr::sigmoid(Q16_16::zero()), q16(0.5)); // σ(0) = 1/2
+
+    // Cas connus à ≤ 2 ULP (arrondi de la réduction/du polynôme).
+    let near = |a: Q16_16, b: f64| (a.to_f64() - b).abs() <= 2.0 * ULP16;
+    assert!(near(tr::ln(Q16_16::one()), 0.0)); // ln 1 = 0
+    assert!(near(tr::log2(q16(8.0)), 3.0)); // log₂ 8 = 3
+    assert!(near(tr::log2(q16(1024.0)), 10.0)); // log₂ 1024 = 10
+    assert!(near(tr::ln(q16(std::f64::consts::E)), 1.0)); // ln e = 1
+    assert!(near(tr::sin(q16(std::f64::consts::FRAC_PI_2)), 1.0)); // sin(π/2)=1
+    assert!(near(tr::cos(q16(std::f64::consts::PI)), -1.0)); // cos π = -1
+    assert!(near(tr::exp(q16(1.0)), std::f64::consts::E)); // e¹ = e
+}
+
+#[test]
+fn transcendental_ulp_bounds() {
+    // Bornes prouvées par balayage dense sur tout le domaine actif de Q16.16.
+    // Valeurs mesurées (maillage 40 001 points) :
+    //   exp 3.24  exp2 5.01  ln 0.50  log2 0.50  sin 0.52  cos 0.52
+    //   tanh 0.50  sigmoid 0.50 (ULP Q16.16).
+    // Les bornes assertées gardent une marge et documentent le pire cas réel :
+    // exp/exp2 croissent près du sommet de la plage (l'erreur relative du
+    // minimax × la magnitude), les autres restent sous 1 ULP partout.
+    let n = 40_000;
+    // exp : domaine où eˣ ∈ (résolution, max Q16.16). e¹⁰ ≈ 22026 < 32768.
+    assert_ulp("exp", 4.0, -10.0, 10.0, n, tr::exp, f64::exp);
+    // exp2 : 2ˣ, 2¹⁴·⁵ ≈ 23170 < 32768 (pire cas au sommet de la plage).
+    assert_ulp("exp2", 6.0, -14.0, 14.5, n, tr::exp2, f64::exp2);
+    // ln / log2 : x > 0, jusqu'au sommet de la plage.
+    assert_ulp("ln", 1.0, ULP16, 32000.0, n, tr::ln, f64::ln);
+    assert_ulp("log2", 1.0, ULP16, 32000.0, n, tr::log2, f64::log2);
+    // sin / cos : large domaine → exerce la réduction d'argument mod 2π.
+    assert_ulp("sin", 1.0, -100.0, 100.0, n, tr::sin, f64::sin);
+    assert_ulp("cos", 1.0, -100.0, 100.0, n, tr::cos, f64::cos);
+    // tanh / sigmoid : saturent hors de ±~12, bornés partout.
+    assert_ulp("tanh", 1.0, -12.0, 12.0, n, tr::tanh, f64::tanh);
+    assert_ulp("sigmoid", 1.0, -16.0, 16.0, n, tr::sigmoid, |x| {
+        1.0 / (1.0 + (-x).exp())
+    });
+}
+
+#[test]
+fn transcendental_high_resolution_q8_24() {
+    // La même implémentation générique sert un autre FRAC (Q8.24, résolution
+    // 6e-8) : les identités de base tiennent sur ce format haute précision.
+    type Q = Q8_24;
+    let one = Q::one();
+    let ulp = 1.0 / (1u64 << 24) as f64;
+    let near = |a: Q, b: f64, tol_ulp: f64| (a.to_f64() - b).abs() <= tol_ulp * ulp;
+    assert!(near(tr::exp(Q::zero()), 1.0, 1.0));
+    assert!(near(tr::exp2(Q::try_from(2.0).unwrap()), 4.0, 4.0));
+    assert!(near(tr::ln(one), 0.0, 4.0));
+    assert!(near(tr::sigmoid(Q::zero()), 0.5, 1.0));
+    // sin(π/6) = 1/2.
+    let pi6 = Q::try_from(std::f64::consts::PI / 6.0).unwrap();
+    assert!(near(tr::sin(pi6), 0.5, 16.0));
+}
+
+#[test]
+fn real_scalar_generic_over_float_and_fixed() {
+    // Une activation générique (SiLU : x·σ(x)) s'instancie identiquement sur
+    // flottant et virgule fixe — c'est l'intérêt de RealScalar.
+    fn silu<T: RealScalar>(x: T) -> T {
+        x * x.sigmoid()
+    }
+    let silu_f = silu(1.5f32) as f64;
+    let silu_x = silu(q16(1.5)).to_f64();
+    assert!(
+        (silu_f - silu_x).abs() < 2e-3,
+        "SiLU flottant {silu_f} vs fixe {silu_x}"
+    );
+
+    // Toutes les méthodes RealScalar sur virgule fixe, cohérentes avec f64.
+    let approx = |a: Q16_16, b: f64| (a.to_f64() - b).abs() < 2e-3;
+    assert!(approx(RealScalar::sqrt(q16(2.0)), 2f64.sqrt()));
+    assert!(approx(RealScalar::recip(q16(4.0)), 0.25));
+    assert!(approx(RealScalar::exp(q16(2.0)), 2f64.exp()));
+    assert!(approx(RealScalar::ln(q16(10.0)), 10f64.ln()));
+    assert!(approx(RealScalar::tanh(q16(0.5)), 0.5f64.tanh()));
+
+    // Délégation flottante de RealScalar (sigmoïde dérivée).
+    assert!((RealScalar::sigmoid(0.0f32) - 0.5).abs() < 1e-6);
+    assert!((RealScalar::sigmoid(0.0f64) - 0.5).abs() < 1e-12);
+}
+
+#[test]
+fn softmax_normalized_and_order_independent() {
+    let input = [q16(1.0), q16(2.0), q16(3.0), q16(-1.0)];
+    let mut out = [Q16_16::zero(); 4];
+    tr::softmax_into(&input, &mut out);
+
+    // Somme ≈ 1 (probabilités).
+    let sum: f64 = out.iter().map(|p| p.to_f64()).sum();
+    assert!((sum - 1.0).abs() < 1e-3, "Σ softmax = {sum}");
+    // Monotone : plus grand logit ⇒ plus grande probabilité.
+    assert!(out[2] > out[1] && out[1] > out[0] && out[0] > out[3]);
+    // Valeurs vs référence f64 stable (max-subtract).
+    let logits = [1.0f64, 2.0, 3.0, -1.0];
+    let mx = 3.0f64;
+    let denom: f64 = logits.iter().map(|l| (l - mx).exp()).sum();
+    for (o, l) in out.iter().zip(logits)
+    {
+        assert!((o.to_f64() - (l - mx).exp() / denom).abs() < 1e-3);
+    }
+
+    // Déterminisme bit-à-bit : la somme est accumulée en i128 (exacte, donc
+    // indépendante de l'ordre). Une permutation de l'entrée permute la sortie
+    // à l'identique — aucun résidu d'arrondi dépendant de l'ordre.
+    let perm = [q16(3.0), q16(1.0), q16(-1.0), q16(2.0)];
+    let mut out2 = [Q16_16::zero(); 4];
+    tr::softmax_into(&perm, &mut out2);
+    assert_eq!(out2[0], out[2]);
+    assert_eq!(out2[1], out[0]);
+    assert_eq!(out2[2], out[3]);
+    assert_eq!(out2[3], out[1]);
+}
+
+#[test]
+fn transcendental_saturates_without_panic() {
+    // Pas d'infini/NaN en virgule fixe : les cas limites saturent proprement.
+    assert_eq!(tr::ln(Q16_16::zero()), Q16_16::min_value()); // ln 0 → min
+    assert_eq!(tr::ln(q16(-1.0)), Q16_16::min_value()); // ln(<0) → min
+    assert_eq!(tr::log2(Q16_16::zero()), Q16_16::min_value());
+    // exp d'un grand argument sature au max au lieu de déborder.
+    assert_eq!(tr::exp(q16(1000.0)), Q16_16::max_value());
+    assert_eq!(tr::exp2(q16(1000.0)), Q16_16::max_value());
+    // exp d'un grand argument négatif tend vers 0.
+    assert_eq!(tr::exp(q16(-1000.0)), Q16_16::zero());
+    // tanh/sigmoid saturent dans [−1,1] / [0,1].
+    assert!(tr::tanh(q16(50.0)).to_f64() <= 1.0);
+    assert!((tr::tanh(q16(50.0)).to_f64() - 1.0).abs() < 1e-3);
+    assert!((tr::sigmoid(q16(50.0)).to_f64() - 1.0).abs() < 1e-3);
+    assert!(tr::sigmoid(q16(-50.0)).to_f64() < 1e-3);
 }

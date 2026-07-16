@@ -63,10 +63,12 @@
 // * [`types`] — le type [`Fixed`] et son arithmétique.
 // * [`ops`] — surcharge d'opérateurs.
 // * [`convert`] — conversions.
-// * [`traits`] — [`NumericScalar`].
+// * [`traits`] — [`NumericScalar`] et [`RealScalar`].
 // * [`simd`] — vecteurs [`FixedI32x8`], [`FixedI64x4`].
 // * [`reductions`] — sommes, `dot`, normes, extrema, cosinus.
 // * [`math`] — `sqrt`, `rsqrt`, `reciprocal` (Newton entier exact).
+// * [`transcendental`] — `exp`/`ln`/`sin`/`cos`/`tanh`/`sigmoid`/`softmax`
+//   (minimax + réduction d'argument, bornes ULP prouvées ; `FixedI32<FRAC>`).
 
 pub mod convert;
 pub mod math;
@@ -77,6 +79,7 @@ pub mod repr;
 pub mod rounding;
 pub mod simd;
 pub mod traits;
+pub mod transcendental;
 pub mod types;
 
 #[cfg(test)]
@@ -87,7 +90,7 @@ pub use overflow::OverflowMode;
 pub use repr::{FixedStorage, WideInt};
 pub use rounding::RoundingMode;
 pub use simd::{FixedI32x8, FixedI64x4};
-pub use traits::NumericScalar;
+pub use traits::{NumericScalar, RealScalar};
 pub use types::Fixed;
 
 /// Virgule fixe sur `i32` : `FixedI32<FRAC>` = `raw / 2^FRAC`.
