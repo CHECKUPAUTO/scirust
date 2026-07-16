@@ -30,7 +30,7 @@ pub mod fft;
 pub mod fir;
 
 pub use biquad::Biquad;
-pub use fft::{Complex, fft, ifft};
+pub use fft::{Complex, Plan, fft, ifft, irfft, rfft};
 pub use fir::Fir;
 
 #[cfg(test)]
