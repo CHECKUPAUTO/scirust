@@ -643,6 +643,72 @@ fn transcendental_ulp_bounds() {
 }
 
 #[test]
+fn inverse_trig_ulp_bounds() {
+    // Mesuré (maillage 40 001 pts) : atan 0.50, asin 0.51, acos 0.51 ULP.
+    let n = 40_000;
+    // atan : borné (±π/2). Domaine large pour exercer la réduction |x|>1.
+    assert_ulp("atan", 1.0, -128.0, 128.0, n, tr::atan, f64::atan);
+    // asin / acos : dérivée → ∞ en ±1, donc l'erreur ULP croît près des bords ;
+    // on teste [-0.999, 0.999] (le domaine exploitable) + les bords traités à
+    // part par `inverse_trig_known_values`.
+    assert_ulp("asin", 1.0, -0.999, 0.999, n, tr::asin, f64::asin);
+    assert_ulp("acos", 1.0, -0.999, 0.999, n, tr::acos, f64::acos);
+    // atan2 le long du cercle unité : angle(cosθ, sinθ) doit rendre θ.
+    let mut worst = 0.0f64;
+    for k in 0..=n
+    {
+        let theta = -std::f64::consts::PI + 2.0 * std::f64::consts::PI * (k as f64) / (n as f64);
+        let (s, c) = (theta.sin(), theta.cos());
+        let got = tr::atan2(q16(s), q16(c)).to_f64();
+        // repli d'angle pour comparer près de ±π.
+        let want = q16(s).to_f64().atan2(q16(c).to_f64());
+        let mut d = (got - want).abs();
+        if d > std::f64::consts::PI
+        {
+            d = (2.0 * std::f64::consts::PI - d).abs();
+        }
+        worst = worst.max(d / ULP16);
+    }
+    assert!(worst <= 2.0, "atan2 cercle: {worst:.3} ULP");
+}
+
+#[test]
+fn inverse_trig_known_values() {
+    use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+    let near = |a: Q16_16, b: f64| (a.to_f64() - b).abs() <= 2.0 * ULP16;
+    // atan.
+    assert_eq!(tr::atan(Q16_16::zero()), Q16_16::zero());
+    assert!(near(tr::atan(q16(1.0)), FRAC_PI_4));
+    assert!(near(tr::atan(q16(-1.0)), -FRAC_PI_4));
+    // asin / acos aux bornes (traitées par saturation du domaine).
+    assert!(near(tr::asin(Q16_16::zero()), 0.0));
+    assert!(near(tr::asin(q16(1.0)), FRAC_PI_2));
+    assert!(near(tr::asin(q16(-1.0)), -FRAC_PI_2));
+    assert!(near(tr::acos(q16(1.0)), 0.0));
+    assert!(near(tr::acos(Q16_16::zero()), FRAC_PI_2));
+    assert!(near(tr::acos(q16(-1.0)), PI));
+    assert!(near(tr::asin(q16(0.5)), (0.5f64).asin()));
+    // Hors domaine : saturation propre, sans panique.
+    assert!(near(tr::asin(q16(2.0)), FRAC_PI_2));
+    assert!(near(tr::acos(q16(-2.0)), PI));
+    // atan2 : quadrants.
+    assert!(near(tr::atan2(q16(1.0), q16(1.0)), FRAC_PI_4));
+    assert!(near(tr::atan2(q16(1.0), Q16_16::zero()), FRAC_PI_2));
+    assert!(near(tr::atan2(Q16_16::zero(), q16(-1.0)), PI));
+    assert!(near(tr::atan2(q16(-1.0), q16(-1.0)), -(PI - FRAC_PI_4)));
+    assert_eq!(tr::atan2(Q16_16::zero(), Q16_16::zero()), Q16_16::zero());
+}
+
+#[test]
+fn inverse_trig_generic_real_scalar() {
+    // atan/atan2/asin/acos exposés via RealScalar, cohérents f32/f64/fixe.
+    assert!((RealScalar::atan(1.0f32) - std::f32::consts::FRAC_PI_4).abs() < 1e-6);
+    assert!((RealScalar::atan2(1.0f64, 1.0f64) - std::f64::consts::FRAC_PI_4).abs() < 1e-12);
+    assert!((RealScalar::asin(q16(0.5)).to_f64() - 0.5f64.asin()).abs() < 2e-3);
+    assert!((RealScalar::acos(q16(0.25)).to_f64() - 0.25f64.acos()).abs() < 2e-3);
+}
+
+#[test]
 fn transcendental_high_resolution_q8_24() {
     // La même implémentation générique sert un autre FRAC (Q8.24, résolution
     // 6e-8) : les identités de base tiennent sur ce format haute précision.

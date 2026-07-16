@@ -130,5 +130,50 @@ fn bench_from_axis_angle(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(benches, bench_rotate, bench_from_axis_angle);
+/// Interpolation sphérique (slerp, via acos + sin) fixe vs f32.
+fn bench_slerp(c: &mut Criterion) {
+    let ax = Quaternion::<Q16_16>::from_axis_angle(
+        [Q16_16::zero(), Q16_16::zero(), Q16_16::one()],
+        Q16_16::try_from(0.2).unwrap(),
+    );
+    let bx = Quaternion::<Q16_16>::from_axis_angle(
+        [
+            Q16_16::try_from(0.6).unwrap(),
+            Q16_16::try_from(0.0).unwrap(),
+            Q16_16::try_from(0.8).unwrap(),
+        ],
+        Q16_16::try_from(1.5).unwrap(),
+    );
+    let af = Quaternion::<f32>::from_axis_angle([0.0, 0.0, 1.0], 0.2);
+    let bf = Quaternion::<f32>::from_axis_angle([0.6, 0.0, 0.8], 1.5);
+
+    let steps = 256u32;
+    let mut g = c.benchmark_group("slerp");
+    g.throughput(Throughput::Elements(steps as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            let mut acc = Quaternion::<Q16_16>::zero();
+            for s in 0..steps
+            {
+                let t = Q16_16::try_from(s as f64 / steps as f64).unwrap();
+                acc = acc + Quaternion::slerp(black_box(ax), black_box(bx), t);
+            }
+            acc
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| {
+            let mut acc = Quaternion::<f32>::zero();
+            for s in 0..steps
+            {
+                let t = s as f32 / steps as f32;
+                acc = acc + Quaternion::slerp(black_box(af), black_box(bf), t);
+            }
+            acc
+        })
+    });
+    g.finish();
+}
+
+criterion_group!(benches, bench_rotate, bench_from_axis_angle, bench_slerp);
 criterion_main!(benches);

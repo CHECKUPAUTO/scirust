@@ -127,6 +127,14 @@ pub trait RealScalar: NumericScalar {
     fn tanh(self) -> Self;
     /// Sigmoïde logistique `1/(1+e^{-x})`.
     fn sigmoid(self) -> Self;
+    /// Arctangente `atan(x)` ∈ `(-π/2, π/2)`.
+    fn atan(self) -> Self;
+    /// `atan2(self, x)` : angle de `(x, self)` ∈ `(-π, π]`.
+    fn atan2(self, x: Self) -> Self;
+    /// Arcsinus `asin(x)` (hors `[-1, 1]` : saturé à `±π/2` en virgule fixe).
+    fn asin(self) -> Self;
+    /// Arccosinus `acos(x)` (hors `[-1, 1]` : saturé à `0`/`π` en virgule fixe).
+    fn acos(self) -> Self;
 }
 
 macro_rules! impl_real_scalar_float {
@@ -171,6 +179,22 @@ macro_rules! impl_real_scalar_float {
             #[inline(always)]
             fn sigmoid(self) -> Self {
                 1.0 / (1.0 + (-self).exp())
+            }
+            #[inline(always)]
+            fn atan(self) -> Self {
+                <$ty>::atan(self)
+            }
+            #[inline(always)]
+            fn atan2(self, x: Self) -> Self {
+                <$ty>::atan2(self, x)
+            }
+            #[inline(always)]
+            fn asin(self) -> Self {
+                <$ty>::asin(self)
+            }
+            #[inline(always)]
+            fn acos(self) -> Self {
+                <$ty>::acos(self)
             }
         }
     };
@@ -229,5 +253,21 @@ impl<const FRAC: u32> RealScalar for Fixed<i32, FRAC> {
     #[inline(always)]
     fn sigmoid(self) -> Self {
         super::transcendental::sigmoid(self)
+    }
+    #[inline(always)]
+    fn atan(self) -> Self {
+        super::transcendental::atan(self)
+    }
+    #[inline(always)]
+    fn atan2(self, x: Self) -> Self {
+        super::transcendental::atan2(self, x)
+    }
+    #[inline(always)]
+    fn asin(self) -> Self {
+        super::transcendental::asin(self)
+    }
+    #[inline(always)]
+    fn acos(self) -> Self {
+        super::transcendental::acos(self)
     }
 }

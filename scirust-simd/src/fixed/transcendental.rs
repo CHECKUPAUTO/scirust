@@ -2,9 +2,9 @@
 //
 // # Transcendantes en virgule fixe (`FixedI32<FRAC>`)
 //
-// `exp exp2 ln log2 sin cos tanh sigmoid` pour le stockage `i32`, avec des
-// **bornes d'erreur ULP prouvées** (balayage dense sur tout le domaine actif —
-// voir `transcendental_ulp_bounds` dans le module de tests).
+// `exp exp2 ln log2 sin cos tanh sigmoid atan atan2 asin acos` pour le stockage
+// `i32`, avec des **bornes d'erreur ULP prouvées** (balayage dense sur tout le
+// domaine actif — voir `transcendental_ulp_bounds` dans le module de tests).
 //
 // Bornes mesurées en Q16.16 (ULP = 2⁻¹⁶) :
 //
@@ -13,6 +13,8 @@
 // | `ln` / `log2` | `(0, 32000]` | 0.50 ULP |
 // | `sin` / `cos` | `[-100, 100]` | 0.52 ULP |
 // | `tanh` / `sigmoid` | `[-12, 16]` | 0.50 ULP |
+// | `atan` | `[-128, 128]` | 0.50 ULP |
+// | `asin` / `acos` | `[-0.999, 0.999]` | 0.51 ULP |
 // | `exp` | `[-10, 10]` | 3.24 ULP |
 // | `exp2` | `[-14, 14.5]` | 5.01 ULP |
 //
@@ -68,12 +70,24 @@ const LOG2_C: [i64; 9] = [
 ];
 const SIN_C: [i64; 8] = [2, 4294967230, 31, -715826377, -209, 35782944, 263, -834895];
 const COS_C: [i64; 7] = [4294967296, 0, -2147483648, 0, 178956912, 0, -5899877];
+// atan(x) = x · P(x²), P minimax en u = x² sur [0, 1] (erreur ≈ 0.006 ULP).
+const ATAN_C: [i64; 8] = [
+    4294966916,
+    -1431602515,
+    857764031,
+    -602558991,
+    427038257,
+    -257288806,
+    105472057,
+    -20531903,
+];
 
 const LOG2E_Q32: i64 = 6196328019;
 const LN2_Q32: i64 = 2977044472;
 const TAU_Q32: i64 = 26986075409;
 const INV_TAU_Q32: i64 = 683565276;
 const HALF_PI_Q32: i64 = 6746518852;
+const PI_Q32: i64 = 13493037704;
 const TWO_OVER_PI_Q32: i64 = 2734261102;
 
 /// Produit Q32 arrondi au plus proche (accumulateur `i128`).
@@ -237,6 +251,135 @@ pub fn sin<const FRAC: u32>(x: Fixed<i32, FRAC>) -> Fixed<i32, FRAC> {
 #[must_use]
 pub fn cos<const FRAC: u32>(x: Fixed<i32, FRAC>) -> Fixed<i32, FRAC> {
     from_q32(sincos_core(to_q32(x)).1 as i128)
+}
+
+// ------------------------------------------------------------------ //
+//  atan / atan2 / asin / acos                                         //
+// ------------------------------------------------------------------ //
+
+/// `atan(r)` en Q32 pour `|r| ≤ 1` : `r · P(r²)` (polynôme minimax).
+#[inline]
+fn atan_unit(r_q32: i64) -> i64 {
+    let sq = mul_q(r_q32, r_q32); // r² ∈ [0, 1] Q32
+    mul_q(r_q32, poly_q(sq, &ATAN_C))
+}
+
+/// `atan(num / den)` en Q32 pour `den > 0`, sans débordement.
+///
+/// Choisit le plus petit des deux ratios (`|num|≤den` → polynôme direct ; sinon
+/// `atan(n/d) = sign·π/2 − atan(d/n)`), de sorte que l'argument du polynôme
+/// reste dans `[-1, 1]` et que le quotient Q32 tienne dans un `i64`.
+#[inline]
+fn atan_of_ratio(num: i64, den: i64) -> i64 {
+    if num.unsigned_abs() <= den as u64
+    {
+        let r = (((num as i128) << Q) / (den as i128)) as i64; // |r| ≤ 1
+        atan_unit(r)
+    }
+    else
+    {
+        let r = (((den as i128) << Q) / (num as i128)) as i64; // |r| < 1
+        let a = atan_unit(r);
+        if num >= 0
+        {
+            HALF_PI_Q32 - a
+        }
+        else
+        {
+            -HALF_PI_Q32 - a
+        }
+    }
+}
+
+/// `atan(x_q32)` en Q32.
+#[inline]
+fn atan_core(x_q32: i64) -> i64 {
+    atan_of_ratio(x_q32, ONE_Q)
+}
+
+/// `atan2(y_q32, x_q32)` en Q32, résultat dans `(-π, π]`.
+#[inline]
+fn atan2_core(y_q32: i64, x_q32: i64) -> i64 {
+    if x_q32 == 0 && y_q32 == 0
+    {
+        return 0;
+    }
+    // Angle de base dans [0, π/2] à partir des magnitudes.
+    let a = if x_q32 == 0
+    {
+        HALF_PI_Q32
+    }
+    else
+    {
+        atan_of_ratio(y_q32.unsigned_abs() as i64, x_q32.unsigned_abs() as i64)
+    };
+    // Placement par quadrant depuis les signes de (x, y).
+    match (x_q32 >= 0, y_q32 >= 0)
+    {
+        (true, true) => a,
+        (false, true) => PI_Q32 - a,
+        (false, false) => a - PI_Q32,
+        (true, false) => -a,
+    }
+}
+
+/// `√v` en Q32 pour `v ≥ 0` (racine entière de `v·2³²`).
+#[inline]
+fn sqrt_q32(v_q32: i64) -> i64 {
+    if v_q32 <= 0
+    {
+        return 0;
+    }
+    // r = ⌊√(v·2³²)⌋ ; comme v ≤ 1 (Q32), v·2³² ≤ 2⁶⁴ tient dans un i128.
+    let n = (v_q32 as i128) << Q;
+    let mut r = 1i128 << 32;
+    // Newton entier (converge en ~6 itérations pour n ≤ 2⁶⁴).
+    for _ in 0..8
+    {
+        r = (r + n / r) >> 1;
+    }
+    while r * r > n
+    {
+        r -= 1;
+    }
+    r as i64
+}
+
+/// `asin(x_q32)` en Q32 pour `x_q32 ∈ [-1, 1]` (sinon borné à ±π/2).
+#[inline]
+fn asin_core(x_q32: i64) -> i64 {
+    let x = x_q32.clamp(-ONE_Q, ONE_Q);
+    // asin(x) = atan2(x, √(1 − x²)).
+    let c = ONE_Q - mul_q(x, x); // 1 − x² ∈ [0, 1]
+    atan2_core(x, sqrt_q32(c))
+}
+
+/// `arctangente` `atan(x)`.
+#[inline]
+#[must_use]
+pub fn atan<const FRAC: u32>(x: Fixed<i32, FRAC>) -> Fixed<i32, FRAC> {
+    from_q32(atan_core(to_q32(x)) as i128)
+}
+
+/// `atan2(y, x)` : angle du point `(x, y)` dans `(-π, π]`.
+#[inline]
+#[must_use]
+pub fn atan2<const FRAC: u32>(y: Fixed<i32, FRAC>, x: Fixed<i32, FRAC>) -> Fixed<i32, FRAC> {
+    from_q32(atan2_core(to_q32(y), to_q32(x)) as i128)
+}
+
+/// `arcsinus` `asin(x)`. Hors de `[-1, 1]`, saturé à `±π/2`.
+#[inline]
+#[must_use]
+pub fn asin<const FRAC: u32>(x: Fixed<i32, FRAC>) -> Fixed<i32, FRAC> {
+    from_q32(asin_core(to_q32(x)) as i128)
+}
+
+/// `arccosinus` `acos(x) = π/2 − asin(x)`. Hors de `[-1, 1]`, saturé à `0`/`π`.
+#[inline]
+#[must_use]
+pub fn acos<const FRAC: u32>(x: Fixed<i32, FRAC>) -> Fixed<i32, FRAC> {
+    from_q32((HALF_PI_Q32 - asin_core(to_q32(x))) as i128)
 }
 
 // ------------------------------------------------------------------ //

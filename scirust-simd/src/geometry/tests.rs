@@ -342,3 +342,106 @@ fn fixed_rotation_is_bit_deterministic() {
         );
     }
 }
+
+// ------------------------------------------------------------------ //
+//  slerp / to_axis_angle (trigonométrie inverse)                      //
+// ------------------------------------------------------------------ //
+
+fn approx_quat<T: Scalar>(got: Quaternion<T>, want: [f64; 4], ctx: &str) {
+    let g = [
+        got.w.to_f64(),
+        got.x.to_f64(),
+        got.y.to_f64(),
+        got.z.to_f64(),
+    ];
+    for k in 0..4
+    {
+        assert!(
+            (g[k] - want[k]).abs() <= T::TOL * 4.0,
+            "{ctx}: composante {k} {} vs {}",
+            g[k],
+            want[k]
+        );
+    }
+}
+
+fn check_slerp<T: Scalar>() {
+    // a = identité, b = rotation de 1.4 rad autour de +z.
+    let a = Quaternion::<T>::from_axis_angle([T::of(0.0), T::of(0.0), T::of(1.0)], T::of(0.0));
+    let b = Quaternion::<T>::from_axis_angle([T::of(0.0), T::of(0.0), T::of(1.0)], T::of(1.4));
+
+    // Extrémités.
+    approx_quat(
+        Quaternion::slerp(a, b, T::of(0.0)),
+        [a.w.to_f64(), a.x.to_f64(), a.y.to_f64(), a.z.to_f64()],
+        "slerp t=0",
+    );
+    approx_quat(
+        Quaternion::slerp(a, b, T::of(1.0)),
+        [b.w.to_f64(), b.x.to_f64(), b.y.to_f64(), b.z.to_f64()],
+        "slerp t=1",
+    );
+
+    // À vitesse angulaire constante : slerp(a, b, ½) = rotation de 0.7 rad
+    // autour de +z, dont le quaternion est (cos(0.35), 0, 0, sin(0.35)).
+    let mid = Quaternion::slerp(a, b, T::of(0.5));
+    approx_quat(
+        mid,
+        [(0.35f64).cos(), 0.0, 0.0, (0.35f64).sin()],
+        "slerp milieu",
+    );
+
+    // Quasi colinéaires → repli nlerp, toujours unitaire (pas de division 0/0).
+    let close =
+        Quaternion::<T>::from_axis_angle([T::of(0.0), T::of(0.0), T::of(1.0)], T::of(0.001));
+    let s = Quaternion::slerp(a, close, T::of(0.5));
+    assert!(
+        (s.norm().to_f64() - 1.0).abs() <= T::TOL * 4.0,
+        "slerp quasi colinéaire unitaire"
+    );
+}
+
+#[test]
+fn slerp_constant_velocity_all_scalars() {
+    check_slerp::<f32>();
+    check_slerp::<f64>();
+    check_slerp::<Q16_16>();
+}
+
+fn check_axis_angle_roundtrip<T: Scalar>() {
+    // Axe unitaire (f64) + angle dans (0, π).
+    let n = (0.3f64 * 0.3 + 0.6 * 0.6 + 0.75 * 0.75).sqrt();
+    let ax = [0.3 / n, -0.6 / n, 0.75 / n];
+    let angle_in = 1.2f64;
+    let q = Quaternion::<T>::from_axis_angle(
+        [T::of(ax[0]), T::of(ax[1]), T::of(ax[2])],
+        T::of(angle_in),
+    );
+    let (axis, angle) = q.to_axis_angle();
+    assert!(
+        (angle.to_f64() - angle_in).abs() <= T::TOL * 8.0,
+        "angle {} vs {angle_in}",
+        angle.to_f64()
+    );
+    for k in 0..3
+    {
+        assert!(
+            (axis[k].to_f64() - ax[k]).abs() <= T::TOL * 8.0,
+            "axe {k}: {} vs {}",
+            axis[k].to_f64(),
+            ax[k]
+        );
+    }
+    // Rotation quasi nulle : axe conventionnel +x, pas de panique.
+    let idn = Quaternion::<T>::identity();
+    let (axis0, angle0) = idn.to_axis_angle();
+    assert!(angle0.to_f64().abs() <= T::TOL * 8.0);
+    assert!(axis0[0] == T::one(), "axe par défaut != +x");
+}
+
+#[test]
+fn to_axis_angle_inverts_from_axis_angle() {
+    check_axis_angle_roundtrip::<f32>();
+    check_axis_angle_roundtrip::<f64>();
+    check_axis_angle_roundtrip::<Q16_16>();
+}

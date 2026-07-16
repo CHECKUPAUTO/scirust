@@ -22,12 +22,14 @@
 // générique** orienté **géométrie** (rotations, orientation) : priorité à la
 // généricité et au déterminisme, pas à la vectorisation.
 //
-// ## Non couvert (lot ultérieur)
+// ## Interpolation
 //
-// `slerp` et `to_axis_angle` exigent une trigonométrie **inverse**
-// (`acos`/`atan2`) absente de [`RealScalar`]. Ils relèvent d'un lot dédié
-// « trigonométrie inverse ». En attendant, [`Quaternion::nlerp`] (interpolation
-// linéaire normalisée) couvre le besoin d'interpolation courant sans `acos`.
+// [`Quaternion::slerp`] (interpolation sphérique à vitesse angulaire constante,
+// via `acos`) et [`Quaternion::nlerp`] (linéaire normalisée, plus rapide) sont
+// toutes deux disponibles ; [`Quaternion::to_axis_angle`] réciproque
+// [`Quaternion::from_axis_angle`]. Ces trois-là reposent sur la trigonométrie
+// inverse déterministe de [`RealScalar`] (`acos`), elle-même à bornes ULP
+// prouvées en virgule fixe.
 
 use core::ops::{Add, Mul, Neg, Sub};
 
@@ -213,6 +215,70 @@ impl<T: RealScalar> Quaternion<T> {
         let one_minus_t = T::one() - t;
         let blended = a.scale(one_minus_t) + b.scale(t);
         blended.normalize()
+    }
+
+    /// Interpolation **sphérique** (slerp) entre deux quaternions unitaires,
+    /// `t ∈ [0,1]`, à **vitesse angulaire constante** le long du plus court arc.
+    ///
+    /// `slerp = (sin((1−t)Ω)·a + sin(tΩ)·b) / sin Ω`, `Ω = acos(a·b)`. Bascule
+    /// automatiquement sur [`Self::nlerp`] quand `a` et `b` sont quasi colinéaires
+    /// (`a·b > 0.9995`), où `sin Ω → 0` rendrait la division instable.
+    #[inline]
+    pub fn slerp(a: Self, b: Self, t: T) -> Self {
+        let mut d = a.dot(b);
+        // Plus court arc : aligne le signe de b sur a.
+        let mut b = b;
+        if d < T::zero()
+        {
+            b = -b;
+            d = -d;
+        }
+        // Quasi colinéaires → nlerp (évite la division par sin Ω ≈ 0).
+        let threshold = T::from_i32(9995) * T::from_i32(10000).recip();
+        if d > threshold
+        {
+            return Self::nlerp(a, b, t);
+        }
+        let omega = d.acos();
+        let inv_sin = omega.sin().recip();
+        let w1 = ((T::one() - t) * omega).sin() * inv_sin;
+        let w2 = (t * omega).sin() * inv_sin;
+        a.scale(w1) + b.scale(w2)
+    }
+
+    /// Décompose un quaternion **unitaire** en `(axe unitaire, angle)` (radians),
+    /// réciproque de [`Self::from_axis_angle`]. `angle = 2·acos(w) ∈ [0, 2π]`.
+    ///
+    /// Pour une rotation quasi nulle (`sin(angle/2) ≈ 0`, axe indéterminé),
+    /// renvoie l'axe `+x` par convention.
+    #[inline]
+    pub fn to_axis_angle(self) -> ([T; 3], T) {
+        // Borne w à [-1, 1] (robustesse aux quaternions légèrement non unitaires).
+        let one = T::one();
+        let w = if self.w > one
+        {
+            one
+        }
+        else if self.w < -one
+        {
+            -one
+        }
+        else
+        {
+            self.w
+        };
+        let angle = T::from_i32(2) * w.acos();
+        let s = (one - w * w).sqrt(); // sin(angle/2)
+        let tiny = T::from_i32(10000).recip(); // 1e-4
+        if s < tiny
+        {
+            ([one, T::zero(), T::zero()], angle)
+        }
+        else
+        {
+            let inv = s.recip();
+            ([self.x * inv, self.y * inv, self.z * inv], angle)
+        }
     }
 }
 

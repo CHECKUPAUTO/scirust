@@ -128,6 +128,13 @@ fn bench_sigmoid(c: &mut Criterion) {
         1.0 / (1.0 + (-x).exp())
     });
 }
+fn bench_atan(c: &mut Criterion) {
+    bench_unary(c, "atan", 8.0, tr::atan::<16>, f32::atan);
+}
+fn bench_acos(c: &mut Criterion) {
+    // Domaine [-1, 1] (argument valide de acos).
+    bench_unary(c, "acos", 1.0, tr::acos::<16>, f32::acos);
+}
 
 /// Softmax sur un vecteur (activation déterministe, deux passes).
 fn bench_softmax(c: &mut Criterion) {
@@ -161,6 +168,8 @@ fn bench_softmax(c: &mut Criterion) {
 
 criterion_group!(
     benches,
+    bench_atan,
+    bench_acos,
     bench_exp,
     bench_ln,
     bench_sin,
