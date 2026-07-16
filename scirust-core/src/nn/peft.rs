@@ -1,4 +1,5 @@
 use crate::autodiff::reverse::{Tape, Tensor, Var};
+use crate::error::Result;
 use crate::nn::init::{Initializer, Zeros};
 use crate::nn::linear::Linear;
 use crate::nn::module::Module;
@@ -60,11 +61,21 @@ impl LoRALinear {
 
 impl Module for LoRALinear {
     fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t> {
+        self.try_forward(tape, input).unwrap()
+    }
+
+    fn try_forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Result<Var<'t>> {
         let base_out = self.base.forward(tape, input);
         let lora_h = self.lora_a.forward(tape, input);
         let lora_out = self.lora_b.forward(tape, lora_h);
 
-        base_out.try_add(lora_out.scale(self.scale)).unwrap()
+        base_out.try_add(lora_out.scale(self.scale))
+    }
+
+    fn train(&mut self, on: bool) {
+        self.base.train(on);
+        self.lora_a.train(on);
+        self.lora_b.train(on);
     }
 
     fn parameter_indices(&self) -> Vec<usize> {

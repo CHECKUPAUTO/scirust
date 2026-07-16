@@ -1,4 +1,5 @@
 use crate::autodiff::reverse::{Tape, Tensor, Var, concat_rows};
+use crate::error::Result;
 use crate::nn::init::Initializer;
 use crate::nn::linear::Linear;
 use crate::nn::module::Module;
@@ -40,8 +41,12 @@ impl<E: Module> MoELayer<E> {
 
 impl<E: Module> Module for MoELayer<E> {
     fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t> {
+        self.try_forward(tape, input).unwrap()
+    }
+
+    fn try_forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Result<Var<'t>> {
         let gate_logits = self.gate.forward(tape, input);
-        let gate_probs = gate_logits.try_softmax(1).unwrap();
+        let gate_probs = gate_logits.try_softmax(1)?;
 
         let probs = tape.value(gate_probs.idx());
         let (rows, cols) = gate_probs.shape();
@@ -70,14 +75,14 @@ impl<E: Module> Module for MoELayer<E> {
 
             for &(expert_idx, prob) in top_k
             {
-                let input_row = input.try_slice_rows(i, 1).unwrap();
+                let input_row = input.try_slice_rows(i, 1)?;
                 let expert_out = self.experts[expert_idx].forward(tape, input_row);
                 let weighted = expert_out.scale(prob * inv_sum);
 
                 row_output = Some(match row_output
                 {
                     None => weighted,
-                    Some(acc) => acc.try_add(weighted).unwrap(),
+                    Some(acc) => acc.try_add(weighted)?,
                 });
             }
 
@@ -89,9 +94,17 @@ impl<E: Module> Module for MoELayer<E> {
 
         if row_outputs.is_empty()
         {
-            return tape.input(Tensor::zeros(rows, out_cols));
+            return Ok(tape.input(Tensor::zeros(rows, out_cols)));
         }
-        concat_rows(tape, &row_outputs)
+        Ok(concat_rows(tape, &row_outputs))
+    }
+
+    fn train(&mut self, on: bool) {
+        self.gate.train(on);
+        for expert in &mut self.experts
+        {
+            expert.train(on);
+        }
     }
 
     fn parameter_indices(&self) -> Vec<usize> {

@@ -130,6 +130,19 @@ impl Module for ResNet {
         self.fc.forward(tape, pooled)
     }
 
+    fn train(&mut self, on: bool) {
+        self.conv1.train(on);
+        self.bn1.train(on);
+        for layer in &mut self.layers
+        {
+            for block in layer
+            {
+                block.train(on);
+            }
+        }
+        self.fc.train(on);
+    }
+
     fn parameter_indices(&self) -> Vec<usize> {
         let mut v = Vec::new();
         v.extend(self.conv1.parameter_indices());
@@ -183,5 +196,30 @@ impl Module for ResNet {
             map.insert(format!("fc.{}", k), v);
         }
         map
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::nn::init::{KaimingNormal, Zeros};
+
+    #[test]
+    fn resnet_train_false_propagates_to_all_batch_norms() {
+        let mut rng = PcgEngine::new(0);
+        let mut net = ResNet::new(&[1], 2, &KaimingNormal, &Zeros, &mut rng);
+        assert!(net.bn1.training);
+        assert!(net.layers[0][0].bn1.training);
+
+        net.train(false);
+        assert!(!net.bn1.training, "bn1 doit passer en eval");
+        assert!(
+            !net.layers[0][0].bn1.training,
+            "les BN des blocs doivent passer en eval"
+        );
+        assert!(!net.layers[0][0].bn2.training);
+
+        net.train(true);
+        assert!(net.bn1.training && net.layers[0][0].bn1.training);
     }
 }

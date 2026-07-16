@@ -142,6 +142,10 @@ impl Conv2dTranspose {
 
 impl Module for Conv2dTranspose {
     fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t> {
+        self.try_forward(tape, input).unwrap()
+    }
+
+    fn try_forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> crate::error::Result<Var<'t>> {
         let (b, total_features) = input.shape();
         let (h, w) = match (self.cached_h, self.cached_w)
         {
@@ -168,21 +172,19 @@ impl Module for Conv2dTranspose {
         self.last_b_idx = bias_v.as_ref().map(|v| v.idx());
         let p = self.pad();
 
-        input
-            .try_conv2d_transpose_forward(
-                weight_v,
-                bias_v,
-                b,
-                self.in_c,
-                h,
-                w,
-                self.out_c,
-                self.kernel,
-                self.stride,
-                p,
-                self.output_padding,
-            )
-            .unwrap()
+        input.try_conv2d_transpose_forward(
+            weight_v,
+            bias_v,
+            b,
+            self.in_c,
+            h,
+            w,
+            self.out_c,
+            self.kernel,
+            self.stride,
+            p,
+            self.output_padding,
+        )
     }
 
     fn parameter_indices(&self) -> Vec<usize> {

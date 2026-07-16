@@ -16,6 +16,7 @@
 //     pour parameter_indices et sync.
 
 use crate::autodiff::reverse::{Tape, Tensor, Var};
+use crate::error::Result;
 use crate::nn::init::Initializer;
 use crate::nn::module::Module;
 use crate::nn::rng::PcgEngine;
@@ -67,11 +68,15 @@ impl Clone for Linear {
 
 impl Module for Linear {
     fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t> {
+        self.try_forward(tape, input).unwrap()
+    }
+
+    fn try_forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Result<Var<'t>> {
         let w = tape.input(self.weight.clone());
         let b = tape.input(self.bias.clone());
         self.last_w_idx = Some(w.idx());
         self.last_b_idx = Some(b.idx());
-        input.try_matmul(w).and_then(|x| x.try_add_bias(b)).unwrap()
+        input.try_matmul(w).and_then(|x| x.try_add_bias(b))
     }
 
     fn parameter_indices(&self) -> Vec<usize> {
@@ -227,6 +232,21 @@ mod tests {
         let _y = lin.forward(&tape, x);
         // Linear a 2 paramètres : weight et bias
         assert_eq!(lin.parameter_indices().len(), 2);
+    }
+
+    #[test]
+    fn linear_try_forward_shape_mismatch_returns_err() {
+        let mut rng = PcgEngine::new(42);
+        let mut lin = Linear::new(3, 5, &KaimingNormal, &Zeros, &mut rng);
+        let tape = Tape::new();
+        // 4 features en entrée alors que la couche en attend 3 : pas de panic,
+        // une erreur structurée.
+        let x = tape.input(Tensor::from_vec(vec![1.0; 8], 2, 4));
+        let res = lin.try_forward(&tape, x);
+        assert!(
+            res.is_err(),
+            "try_forward doit renvoyer Err sur un mismatch de features"
+        );
     }
 
     #[test]

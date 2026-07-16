@@ -252,6 +252,11 @@ impl Module for AudioEncoder {
         self.conv2.forward(tape, x).relu()
     }
 
+    fn train(&mut self, on: bool) {
+        self.conv1.train(on);
+        self.conv2.train(on);
+    }
+
     fn parameter_indices(&self) -> Vec<usize> {
         let mut v = Vec::new();
         v.extend(self.conv1.parameter_indices());

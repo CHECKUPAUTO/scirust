@@ -103,6 +103,10 @@ impl<M: Module, C: Contract> Module for CertifiedModule<M, C> {
         }
     }
 
+    fn train(&mut self, on: bool) {
+        self.inner.train(on);
+    }
+
     fn parameter_indices(&self) -> Vec<usize> {
         self.inner.parameter_indices()
     }

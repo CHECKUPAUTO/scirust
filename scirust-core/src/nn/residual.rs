@@ -11,6 +11,7 @@
 //   - sinon Conv2d 1×1 + BN
 
 use crate::autodiff::reverse::{Tape, Tensor, Var};
+use crate::error::Result;
 use crate::nn::batch_norm_2d::BatchNorm2d;
 use crate::nn::conv_utils::Padding;
 use crate::nn::conv2d::Conv2d;
@@ -114,6 +115,10 @@ impl ResidualBlock {
 
 impl Module for ResidualBlock {
     fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t> {
+        self.try_forward(tape, input).unwrap()
+    }
+
+    fn try_forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Result<Var<'t>> {
         // Chemin principal
         let h1 = self.conv1.forward(tape, input);
         let h1 = self.bn1.forward(tape, h1);
@@ -125,6 +130,8 @@ impl Module for ResidualBlock {
         let shortcut = if let Some(ref mut sc) = self.shortcut_conv
         {
             let s = sc.forward(tape, input);
+            // Invariant de construction : shortcut_conv et shortcut_bn sont
+            // toujours appariés (Some ensemble), l'unwrap est donc sûr.
             self.shortcut_bn.as_mut().unwrap().forward(tape, s)
         }
         else
@@ -133,8 +140,25 @@ impl Module for ResidualBlock {
         };
 
         // Residual + ReLU final
-        let out = h2.try_add(shortcut).unwrap();
-        out.relu()
+        let out = h2.try_add(shortcut)?;
+        Ok(out.relu())
+    }
+
+    fn train(&mut self, on: bool) {
+        // Propage à TOUS les enfants (convs incluses, défensivement — un futur
+        // Conv2d à état de mode serait couvert sans retoucher ce composite).
+        self.conv1.train(on);
+        self.bn1.train(on);
+        self.conv2.train(on);
+        self.bn2.train(on);
+        if let Some(ref mut sc) = self.shortcut_conv
+        {
+            sc.train(on);
+        }
+        if let Some(ref mut sb) = self.shortcut_bn
+        {
+            sb.train(on);
+        }
     }
 
     fn parameter_indices(&self) -> Vec<usize> {
@@ -293,6 +317,26 @@ mod tests {
         let g = tape.grad(x.idx());
         let max_abs: f32 = g.data.iter().map(|v| v.abs()).fold(0.0, f32::max);
         assert!(max_abs > 1e-6, "gradient is zero in ResidualBlock");
+    }
+
+    #[test]
+    fn train_false_propagates_to_child_batch_norms() {
+        let mut rng = PcgEngine::new(0);
+        // in_c != out_c → le shortcut Conv+BN existe aussi.
+        let mut block = ResidualBlock::new(1, 2, 2, &KaimingNormal, &Zeros, &mut rng);
+        assert!(block.bn1.training && block.bn2.training);
+
+        block.train(false);
+        assert!(!block.bn1.training, "bn1 doit passer en eval");
+        assert!(!block.bn2.training, "bn2 doit passer en eval");
+        assert!(
+            !block.shortcut_bn.as_ref().unwrap().training,
+            "shortcut_bn doit passer en eval"
+        );
+
+        block.train(true);
+        assert!(block.bn1.training && block.bn2.training);
+        assert!(block.shortcut_bn.as_ref().unwrap().training);
     }
 
     #[test]

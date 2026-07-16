@@ -146,6 +146,10 @@ impl Module for BatchNorm2d {
         normed.reshape(&[total_features, n]).transpose()
     }
 
+    fn train(&mut self, on: bool) {
+        self.set_training(on);
+    }
+
     fn parameter_indices(&self) -> Vec<usize> {
         let mut v = Vec::new();
         if let Some(i) = self.last_g_idx

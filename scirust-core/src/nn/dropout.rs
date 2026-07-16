@@ -7,6 +7,7 @@
 // identique à l'input. En mode eval, c'est l'identité.
 
 use crate::autodiff::reverse::{Tape, Tensor, Var};
+use crate::error::Result;
 use crate::nn::module::Module;
 use crate::nn::rng::PcgEngine;
 
@@ -52,14 +53,22 @@ impl Dropout {
 
 impl Module for Dropout {
     fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t> {
+        self.try_forward(tape, input).unwrap()
+    }
+
+    fn try_forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Result<Var<'t>> {
         if !self.training
         {
-            return input;
+            return Ok(input);
         }
         let (rows, cols) = input.shape();
         let mask = self.generate_mask(rows, cols);
         let mask_var = tape.input(mask);
-        input.try_hadamard(mask_var).unwrap()
+        input.try_hadamard(mask_var)
+    }
+
+    fn train(&mut self, on: bool) {
+        self.set_training(on);
     }
 
     fn parameter_indices(&self) -> Vec<usize> {

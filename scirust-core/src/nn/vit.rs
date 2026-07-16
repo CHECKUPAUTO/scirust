@@ -114,6 +114,13 @@ impl Module for ViT {
         self.head.forward(tape, pooled)
     }
 
+    fn train(&mut self, on: bool) {
+        // Ne propage qu'aux enfants qui implémentent Module :
+        // TransformerEncoder n'est PAS un Module, on ne peut pas lui propager.
+        self.patch_embed.projection.train(on);
+        self.head.train(on);
+    }
+
     fn parameter_indices(&self) -> Vec<usize> {
         let mut v = Vec::new();
         v.extend(self.patch_embed.projection.parameter_indices());

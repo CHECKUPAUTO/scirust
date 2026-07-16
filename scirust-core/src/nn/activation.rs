@@ -7,6 +7,7 @@
 // un Vec vide, sync() est un no-op.
 
 use crate::autodiff::reverse::{Tape, Var};
+use crate::error::Result;
 use crate::nn::module::Module;
 
 // ---------- ReLU ---------- //
@@ -90,8 +91,12 @@ impl Default for Softmax {
 }
 
 impl Module for Softmax {
-    fn forward<'t>(&mut self, _tape: &'t Tape, input: Var<'t>) -> Var<'t> {
-        input.try_softmax(self.axis).unwrap()
+    fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t> {
+        self.try_forward(tape, input).unwrap()
+    }
+
+    fn try_forward<'t>(&mut self, _tape: &'t Tape, input: Var<'t>) -> Result<Var<'t>> {
+        input.try_softmax(self.axis)
     }
 
     fn parameter_indices(&self) -> Vec<usize> {
@@ -128,8 +133,12 @@ impl Default for LogSoftmax {
 }
 
 impl Module for LogSoftmax {
-    fn forward<'t>(&mut self, _tape: &'t Tape, input: Var<'t>) -> Var<'t> {
-        input.try_log_softmax(self.axis).unwrap()
+    fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t> {
+        self.try_forward(tape, input).unwrap()
+    }
+
+    fn try_forward<'t>(&mut self, _tape: &'t Tape, input: Var<'t>) -> Result<Var<'t>> {
+        input.try_log_softmax(self.axis)
     }
 
     fn parameter_indices(&self) -> Vec<usize> {

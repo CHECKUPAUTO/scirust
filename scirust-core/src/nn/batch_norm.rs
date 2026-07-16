@@ -8,6 +8,7 @@
 // En eval : utilise running_mean/running_var avec graphe AD minimal.
 
 use crate::autodiff::reverse::{Tape, Tensor, Var};
+use crate::error::Result;
 use crate::nn::module::Module;
 use std::collections::HashMap;
 
@@ -106,6 +107,10 @@ impl BatchNorm1d {
 
 impl Module for BatchNorm1d {
     fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t> {
+        self.try_forward(tape, input).unwrap()
+    }
+
+    fn try_forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Result<Var<'t>> {
         let (n, f) = input.shape();
         let inv_n = 1.0 / n as f32;
 
@@ -142,27 +147,31 @@ impl Module for BatchNorm1d {
 
             let mu = input.sum_axis(0).scale(inv_n);
             let mu_neg = mu.neg();
-            let centered = input.try_add_broadcast(mu_neg).unwrap();
-            let centered_sq = centered.try_hadamard(centered).unwrap();
+            let centered = input.try_add_broadcast(mu_neg)?;
+            let centered_sq = centered.try_hadamard(centered)?;
             let var = centered_sq.sum_axis(0).scale(inv_n);
             let eps_t = tape.input(Tensor::from_vec(vec![self.eps; f], 1, f));
-            let std = var.try_add(eps_t).unwrap().sqrt();
+            let std = var.try_add(eps_t)?.sqrt();
             let inv_std = std.reciprocal();
-            let x_hat = centered.try_mul_broadcast(inv_std).unwrap();
-            let scaled = x_hat.try_mul_broadcast(gamma_v).unwrap();
-            scaled.try_add_broadcast(beta_v).unwrap()
+            let x_hat = centered.try_mul_broadcast(inv_std)?;
+            let scaled = x_hat.try_mul_broadcast(gamma_v)?;
+            scaled.try_add_broadcast(beta_v)
         }
         else
         {
             let rmean_v = tape.input(self.running_mean.clone());
             let rvar_v = tape.input(self.running_var.clone());
-            let centered = input.try_add_broadcast(rmean_v.neg()).unwrap();
+            let centered = input.try_add_broadcast(rmean_v.neg())?;
             let eps_t = tape.input(Tensor::from_vec(vec![self.eps; f], 1, f));
-            let std = rvar_v.try_add(eps_t).unwrap().sqrt();
-            let x_hat = centered.try_mul_broadcast(std.reciprocal()).unwrap();
-            let scaled = x_hat.try_mul_broadcast(gamma_v).unwrap();
-            scaled.try_add_broadcast(beta_v).unwrap()
+            let std = rvar_v.try_add(eps_t)?.sqrt();
+            let x_hat = centered.try_mul_broadcast(std.reciprocal())?;
+            let scaled = x_hat.try_mul_broadcast(gamma_v)?;
+            scaled.try_add_broadcast(beta_v)
         }
+    }
+
+    fn train(&mut self, on: bool) {
+        self.set_training(on);
     }
 
     fn parameter_indices(&self) -> Vec<usize> {

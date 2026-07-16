@@ -15,6 +15,7 @@
 // sync() propage à tous les sous-modules.
 
 use crate::autodiff::reverse::{Tape, Tensor, Var};
+use crate::error::Result;
 use crate::nn::module::Module;
 
 pub struct Sequential {
@@ -65,6 +66,24 @@ impl Module for Sequential {
             h = layer.forward(tape, h);
         }
         h
+    }
+
+    /// Point de composition : chaîne les `try_forward` des enfants avec `?`,
+    /// pour qu'une erreur structurée d'un sous-module remonte au lieu de panic.
+    fn try_forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Result<Var<'t>> {
+        let mut h = input;
+        for layer in self.layers.iter_mut()
+        {
+            h = layer.try_forward(tape, h)?;
+        }
+        Ok(h)
+    }
+
+    fn train(&mut self, on: bool) {
+        for layer in self.layers.iter_mut()
+        {
+            layer.train(on);
+        }
     }
 
     fn parameter_indices(&self) -> Vec<usize> {
@@ -273,6 +292,50 @@ mod tests {
             correct, 4,
             "MLP n'a pas appris XOR. Prédictions: {:?}, targets: {:?}",
             final_predictions, targets
+        );
+    }
+
+    #[test]
+    fn train_toggle_controls_dropout_through_sequential() {
+        use crate::nn::dropout::Dropout;
+
+        let mut seq = Sequential::new().add(Dropout::new(0.5, 42));
+        seq.train(false);
+
+        let data = vec![1.0f32; 1000];
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(data.clone(), 10, 100));
+        let y = seq.forward(&tape, x);
+        // En eval, Dropout est l'identité bit-à-bit.
+        assert_eq!(tape.value(y.idx()).data, data);
+
+        // Re-bascule en train : le masquage reprend.
+        seq.train(true);
+        let tape2 = Tape::new();
+        let x2 = tape2.input(Tensor::from_vec(data.clone(), 10, 100));
+        let y2 = seq.forward(&tape2, x2);
+        let v2 = tape2.value(y2.idx());
+        assert_ne!(v2.data, data, "train(true) doit ré-activer le dropout");
+        assert!(
+            v2.data.contains(&0.0),
+            "aucun élément masqué après train(true)"
+        );
+    }
+
+    #[test]
+    fn sequential_try_forward_returns_err_on_incompatible_linears() {
+        let mut rng = PcgEngine::new(42);
+        // 3 features en sortie du premier Linear, 4 attendues par le second.
+        let mut mlp = Sequential::new()
+            .add(Linear::new(2, 3, &KaimingNormal, &Zeros, &mut rng))
+            .add(Linear::new(4, 1, &KaimingNormal, &Zeros, &mut rng));
+
+        let tape = Tape::new();
+        let x = tape.input(Tensor::from_vec(vec![1.0, 2.0], 1, 2));
+        let res = mlp.try_forward(&tape, x);
+        assert!(
+            res.is_err(),
+            "try_forward doit renvoyer Err sur des dims internes incompatibles"
         );
     }
 

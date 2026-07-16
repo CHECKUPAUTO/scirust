@@ -118,6 +118,10 @@ impl Conv2d {
 
 impl Module for Conv2d {
     fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t> {
+        self.try_forward(tape, input).unwrap()
+    }
+
+    fn try_forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Result<Var<'t>> {
         let (b, total_features) = input.shape();
         let (h, w) = match (self.cached_h, self.cached_w)
         {
@@ -148,27 +152,25 @@ impl Module for Conv2d {
             padding: self.padding,
             out_c: self.out_c,
         };
-        cfg.check().expect("ConvConfig invalide");
+        cfg.check()?;
 
         let weight_v = tape.input(self.weight.clone());
         let bias_v = self.bias.as_ref().map(|t| tape.input(t.clone()));
         self.last_w_idx = Some(weight_v.idx());
         self.last_b_idx = bias_v.as_ref().map(|v| v.idx());
 
-        input
-            .try_conv2d_forward(
-                weight_v,
-                bias_v,
-                b,
-                self.in_c,
-                h,
-                w,
-                self.out_c,
-                self.kernel,
-                self.stride,
-                cfg.pad(),
-            )
-            .unwrap()
+        input.try_conv2d_forward(
+            weight_v,
+            bias_v,
+            b,
+            self.in_c,
+            h,
+            w,
+            self.out_c,
+            self.kernel,
+            self.stride,
+            cfg.pad(),
+        )
     }
 
     fn parameter_indices(&self) -> Vec<usize> {

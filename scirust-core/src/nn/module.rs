@@ -53,6 +53,15 @@ pub trait Module {
         self.forward(tape, input)
     }
 
+    /// Bascule le mode entraînement/évaluation. Défaut : no-op (couches pures).
+    /// Les composites DOIVENT propager aux enfants ; les couches à état de mode
+    /// (Dropout, BatchNorm) basculent leur champ `training`.
+    ///
+    /// Convention eval : `model.train(false)` = mode inférence (Dropout devient
+    /// l'identité, BatchNorm utilise ses running stats) ; `model.train(true)`
+    /// ré-active le mode entraînement.
+    fn train(&mut self, _on: bool) {}
+
     /// Indices des paramètres entraînables sur la dernière tape vue.
     /// Ne fonctionne que si forward a été appelé d'abord.
     fn parameter_indices(&self) -> Vec<usize>;

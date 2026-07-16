@@ -126,6 +126,12 @@ impl crate::nn::module::Module for PositionalEncoding {
         let seq_len = input.shape().0;
         PositionalEncoding::forward(self, tape, input, seq_len)
     }
+    /// Même logique que `forward` (via la fn inhérente) — les asserts restants
+    /// sont des gardes de configuration, pas des erreurs d'entrée récupérables.
+    fn try_forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> crate::error::Result<Var<'t>> {
+        let seq_len = input.shape().0;
+        Ok(PositionalEncoding::forward(self, tape, input, seq_len))
+    }
     fn parameter_indices(&self) -> Vec<usize> {
         Vec::new()
     }
