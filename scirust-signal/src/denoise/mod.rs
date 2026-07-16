@@ -128,7 +128,9 @@ pub use detect::{
     NoiseProfile, NoiseType, Separation, SpectralLine, classify, detect_lines, estimate_noise_std,
     estimate_snr_db, harmonic_stack, separate,
 };
-pub use iir::{BiquadState, filtfilt_sos, notch_iir, rbj_notch, remove_mains_hum_iir};
+pub use iir::{
+    BiquadState, filtfilt_sos, notch_iir, rbj_notch, remove_baseline, remove_mains_hum_iir,
+};
 pub use linear::{exp_moving_average, gaussian_smooth, moving_average, savitzky_golay};
 pub use multichannel::{MultichannelGateReport, phase2_gate_report, vector_median, wiener_spatial};
 pub use nlm::{nlm1d, nlm1d_auto};

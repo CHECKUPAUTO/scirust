@@ -5,6 +5,25 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `denoise::remove_baseline` : détrend zéro-phase préservant le signal
+Motivé par la validation ECG réelle (#579) : la dérive de ligne de base recouvre le
+contenu basse-fréquence propre de l'ECG, et le détrend Tikhonov rigide de la voie
+`Baseline` l'érode avec la dérive.
+- **`remove_baseline(signal, sample_rate, cutoff_hz)`** : passe-haut Butterworth
+  d'ordre 2 appliqué **aller-retour** (`filtfilt_sos`, zéro-phase → 4e ordre effectif)
+  à une coupure explicite en Hz. Contrairement au détrend Tikhonov (coupure douce et
+  implicite qui remonte dans le signal), la coupure est nette et placée sciemment :
+  pour un ECG, `cutoff_hz = 0.5` retire la dérive en préservant le segment ST (valeur
+  ANSI/AAMI EC11 / AHA). Ordre 2 volontairement doux (aux coupures normalisées très
+  basses ~0,003 qu'exige la suppression de dérive, un ordre supérieur placerait les
+  pôles pathologiquement près de `z = 1`). Dégradation gracieuse.
+- **Constat de méthodologie (données réelles)** : la métrique SNR incluant le DC est
+  *inadaptée* à l'évaluation d'une suppression de dérive — confondue par le
+  DC/baseline légitimement retiré, elle plafonne toute méthode à ~+1 dB. Mesuré
+  correctement (récupération de la morphologie sans dérive), le passe-haut
+  physiologique récupère l'ECG **> +10 dB mieux que le brut et bat le détrend
+  Tikhonov** (`tests/real_data_ecg.rs`, exemple `denoise_real_ecg`).
+
 ### Modifié — classifieur robuste aux features périodiques légitimes (`detect::classify`)
 Motivé par la validation ECG réelle (#579) : les complexes QRS étaient lus comme du
 « bruit impulsif ». Le gate impulsif exige désormais l'**apériodicité** des pics.

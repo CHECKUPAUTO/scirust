@@ -23,16 +23,20 @@
 
 use scirust_signal::denoise::{
     ThresholdMode, VstKind, denoise_auto, detect_noise_model, moving_average, nlm1d_auto,
-    savitzky_golay, stft_wiener_auto, tikhonov_smooth, wavelet_denoise,
+    remove_baseline, savitzky_golay, stft_wiener_auto, tikhonov_smooth, wavelet_denoise,
 };
 
-/// Explicit baseline-drift removal: subtract a very stiff Tikhonov trend — the same
-/// operation `denoise_auto` applies for a `Baseline` verdict, called directly here
-/// to show the toolkit *can* remove low-frequency wander even when the QRS-driven
-/// impulsive verdict masks that route in the automatic path.
-fn baseline_removal(x: &[f64]) -> Vec<f64> {
+/// Stiff Tikhonov detrend (the operation `denoise_auto` applies for a `Baseline`
+/// verdict): its soft cutoff reaches into the ECG's own low-frequency content.
+fn baseline_removal_tikhonov(x: &[f64]) -> Vec<f64> {
     let trend = tikhonov_smooth(x, 1.0e4);
     x.iter().zip(&trend).map(|(&v, &t)| v - t).collect()
+}
+
+/// Physiological zero-phase high-pass baseline removal (0.5 Hz, the ANSI/AAMI EC11 /
+/// AHA cutoff): the signal-preserving alternative to the stiff detrend.
+fn baseline_removal_highpass(x: &[f64]) -> Vec<f64> {
+    remove_baseline(x, 360.0, 0.5)
 }
 
 /// Parse the committed three-column fixture into `(ecg_mV, ma_noise_mV, bw_noise_mV)`.
@@ -97,7 +101,8 @@ fn evaluate(ecg: &[f64], noise: &[f64], noise_name: &str, fs: f64) {
             ("savitzky_golay(2,7)", savitzky_golay(&noisy, 2, 7)),
             ("moving_average(7)", moving_average(&noisy, 7)),
             ("stft_wiener_auto", stft_wiener_auto(&noisy)),
-            ("baseline_removal(tik)", baseline_removal(&noisy)),
+            ("baseline_removal(tik)", baseline_removal_tikhonov(&noisy)),
+            ("baseline_removal(hp0.5)", baseline_removal_highpass(&noisy)),
         ];
 
         println!("## target {target:.0} dB  (raw {s_raw:.2} dB)");
@@ -143,8 +148,13 @@ fn main() {
          #   denoise_auto gains +3.8 dB at 0 dB (verdict flips to Colored → level-dep wavelet + TI).\n\
          # * At high SNR the QRS complexes read as impulsive, so denoise_auto routes to a Hampel\n\
          #   near-no-op — safe (the sharp QRS is preserved) but it leaves the broadband floor.\n\
-         # * Baseline wander is genuinely hard: real nstdb drift overlaps the ECG's own low-\n\
-         #   frequency content, so a stiff detrend removes signal with the drift (modest gain).\n\
-         #   This is a known ECG-preprocessing challenge, surfaced here by real — not synthetic — data."
+         # * Baseline wander overlaps the ECG's own low-frequency content, so a stiff Tikhonov\n\
+         #   detrend removes signal with the drift. Two lessons, both from real data:\n\
+         #   (a) the DC-inclusive SNR above is the WRONG metric for baseline removal — it is\n\
+         #       confounded by the DC/baseline that is legitimately removed, so every detrend\n\
+         #       reads ~+1 dB regardless. The right target is the drift-free morphology.\n\
+         #   (b) measured that way, a physiological zero-phase high-pass (remove_baseline, 0.5 Hz,\n\
+         #       the ANSI/AAMI EC11 / AHA cutoff) recovers the drift-free ECG far better than the\n\
+         #       stiff detrend (see tests/real_data_ecg.rs::zero_phase_high_pass_removes_real_baseline_wander)."
     );
 }

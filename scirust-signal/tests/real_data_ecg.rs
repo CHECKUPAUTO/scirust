@@ -16,7 +16,8 @@
 //! measured tables and the documented limitations).
 
 use scirust_signal::denoise::{
-    NoiseType, ThresholdMode, VstKind, classify, denoise_auto, detect_noise_model, wavelet_denoise,
+    NoiseType, ThresholdMode, VstKind, classify, denoise_auto, detect_noise_model, remove_baseline,
+    tikhonov_smooth, wavelet_denoise,
 };
 
 fn load_fixture() -> (Vec<f64>, Vec<f64>, Vec<f64>) {
@@ -140,6 +141,50 @@ fn qrs_complexes_are_not_mislabeled_as_impulsive_noise() {
         NoiseType::Impulsive,
         "real QRS complexes were mislabeled as impulsive noise (verdict {:?})",
         p.dominant
+    );
+}
+
+#[test]
+fn zero_phase_high_pass_removes_real_baseline_wander() {
+    // Real baseline wander (nstdb `bw`) overlaps the ECG's own low-frequency content,
+    // so a stiff Tikhonov detrend erodes the signal along with the drift — the honest
+    // finding of the example. A physiological zero-phase high-pass (0.5 Hz, the
+    // ANSI/AAMI EC11 / AHA cutoff that preserves the ST segment) is the signal-
+    // preserving alternative. The target of baseline removal is the *drift-free*
+    // morphology, so the ground truth is the same high-pass applied to the clean ECG.
+    let (ecg, _, bw) = load_fixture();
+    let noisy = corrupt(&ecg, &bw, 0.0); // heavy drift: raw SNR 0 dB
+    let target = remove_baseline(&ecg, 360.0, 0.5); // drift-free morphology
+    let hp = remove_baseline(&noisy, 360.0, 0.5);
+
+    // How well each estimate recovers the drift-free morphology (edges trimmed).
+    let err = |est: &[f64]| -> f64 {
+        target[200..ecg.len() - 200]
+            .iter()
+            .zip(&est[200..ecg.len() - 200])
+            .map(|(&t, &e)| (t - e) * (t - e))
+            .sum::<f64>()
+    };
+    let e_raw = err(&noisy);
+    let e_hp = err(&hp);
+    let gain = 10.0 * (e_raw / e_hp.max(1.0e-30)).log10();
+    assert!(
+        gain > 10.0,
+        "high-pass recovered the drift-free ECG only {gain:.1} dB better than raw"
+    );
+
+    // And it beats the stiff Tikhonov detrend at recovering that morphology — the
+    // detrend's soft cutoff reaches into the ECG's own low-frequency content.
+    let tik: Vec<f64> = noisy
+        .iter()
+        .zip(&tikhonov_smooth(&noisy, 1.0e4))
+        .map(|(&s, &t)| s - t)
+        .collect();
+    assert!(
+        err(&hp) < err(&tik),
+        "high-pass ({:.3e}) should recover the morphology better than Tikhonov detrend ({:.3e})",
+        err(&hp),
+        err(&tik)
     );
 }
 

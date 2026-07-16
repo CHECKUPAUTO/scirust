@@ -238,7 +238,7 @@ littérature standard, avec détection automatique du type de bruit :
 | Linéaire | moyenne mobile, gaussien, Savitzky-Golay, EMA | bruit large bande doux |
 | Rang | médiane, Hampel, moyenne α-tronquée | impulsions, salt-and-pepper |
 | Transformée | ondelettes (universel / SURE / **par niveau** / Bayes / **NeighBlock** / invariant par translation), Wiener, notch brick-wall | interférence tonale, bruit blanc et coloré |
-| Notch IIR | `notch_iir`, `remove_mains_hum_iir` (RBJ + filtfilt zéro-phase) | hum secteur 50/60 Hz, même hors-bin |
+| Notch IIR | `notch_iir`, `remove_mains_hum_iir`, `remove_baseline` (RBJ/Butterworth + filtfilt zéro-phase) | hum secteur 50/60 Hz même hors-bin ; dérive de ligne de base |
 | Wiener court-terme (STFT) | `stft_wiener`, décision-dirigé, suivi de plancher | bruit **non stationnaire** (rampes, bouffées) |
 | Variationnel | Tikhonov, variation totale | lissage préservant les fronts, dérive |
 | Adaptatif | Kalman RTS auto-réglé, rehausseurs LMS/RLS, **NLM 1-D** | bruit non stationnaire, signaux auto-similaires |

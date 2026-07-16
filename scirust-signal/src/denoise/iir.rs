@@ -23,7 +23,7 @@
 //! where the backward pass is impossible, [`BiquadState`] provides the causal streaming form (at
 //! the price of the filter's group delay).
 
-use crate::filter::Biquad;
+use crate::filter::{Biquad, butter_highpass_sos};
 use core::f64::consts::PI;
 
 /// The pass-through section returned when a design request is out of its validity domain.
@@ -221,6 +221,44 @@ pub fn remove_mains_hum_iir(
         return signal.to_vec();
     }
     filtfilt_sos(&cascade, signal)
+}
+
+/// **Zero-phase baseline-wander / slow-drift removal**: a low-order Butterworth
+/// high-pass applied forward-and-backward ([`filtfilt_sos`]) at `cutoff_hz`, so the
+/// signal morphology *above* the cutoff is preserved with no phase distortion while
+/// the sub-cutoff drift is removed.
+///
+/// The contrast with a stiff global detrend (subtracting a very-low-λ Tikhonov trend,
+/// as [`super::denoise_auto`] does for a `Baseline` verdict) is the shape of the
+/// cutoff. A Tikhonov trend is a *soft, implicit* low-pass whose smooth "trend"
+/// reaches up into the signal's own low-frequency content — on an ECG it erodes the
+/// P and T waves and the DC level along with the wander. This filter has a *sharp,
+/// explicitly-placed* cutoff: for an ECG, `cutoff_hz = 0.5` removes baseline wander
+/// while preserving the ST segment — the value ANSI/AAMI EC11 and the AHA recommend
+/// for exactly this purpose (0.5 Hz diagnostic, up to 0.67 Hz for monitoring).
+///
+/// Order 2 (→ 4th-order zero-phase after the forward-backward pass) is a deliberately
+/// gentle roll-off: at the very low normalized cutoffs baseline removal needs
+/// (`0.5 Hz / 180 Hz ≈ 0.003` for a 360 Hz ECG), a higher order would place poles
+/// pathologically close to `z = 1`. [`filtfilt_sos`]'s odd reflection and
+/// steady-state initialization keep the long startup transient of such a low cutoff
+/// out of the output.
+///
+/// Degrades gracefully: fewer than 4 samples, a non-finite/non-positive `sample_rate`
+/// or `cutoff_hz`, or a cutoff at or above Nyquist return the input unchanged.
+pub fn remove_baseline(signal: &[f64], sample_rate: f64, cutoff_hz: f64) -> Vec<f64> {
+    let nyquist = 0.5 * sample_rate;
+    let valid = sample_rate.is_finite()
+        && cutoff_hz.is_finite()
+        && sample_rate > 0.0
+        && cutoff_hz > 0.0
+        && cutoff_hz < nyquist;
+    if signal.len() < 4 || !valid
+    {
+        return signal.to_vec();
+    }
+    let sos = butter_highpass_sos(2, cutoff_hz / nyquist);
+    filtfilt_sos(&sos, signal)
 }
 
 /// A biquad in causal streaming form: Direct Form II Transposed state fed one sample at a time.
@@ -557,5 +595,67 @@ mod tests {
         assert_eq!(remove_mains_hum_iir(&x, 1000.0, 50.0, 0, 3.0), x);
         assert_eq!(remove_mains_hum_iir(&x, 1000.0, -50.0, 3, 3.0), x);
         assert_eq!(remove_mains_hum_iir(&x, 1000.0, 50.0, 3, 0.0), x);
+    }
+
+    #[test]
+    fn remove_baseline_strips_drift_and_keeps_the_signal_band() {
+        // A 10 Hz "signal" riding on a strong 0.2 Hz baseline wander (3× the signal
+        // amplitude), at an ECG-like fs = 360 Hz. A 0.5 Hz high-pass must remove the
+        // sub-cutoff drift while preserving the 10 Hz morphology with zero phase shift.
+        let fs = 360.0;
+        let n = 4096;
+        let signal = tone(n, fs, 10.0, 1.0);
+        let drift = tone(n, fs, 0.2, 3.0);
+        let obs: Vec<f64> = signal.iter().zip(&drift).map(|(&s, &d)| s + d).collect();
+        let out = remove_baseline(&obs, fs, 0.5);
+        assert_eq!(out.len(), n);
+        // The drift is gone: the output recovers the signal band far better than raw.
+        // (Measured away from the filtfilt edges.)
+        let s_raw = snr_db(&signal[300..n - 300], &obs[300..n - 300]);
+        let s_out = snr_db(&signal[300..n - 300], &out[300..n - 300]);
+        assert!(
+            s_out > s_raw + 20.0,
+            "baseline removal recovered only {s_out:.1} dB vs raw {s_raw:.1} dB"
+        );
+        // The 10 Hz signal band survives: high-passing the clean signal alone barely
+        // changes it (it is well above the 0.5 Hz cutoff), and zero phase shift means
+        // no delay — so the pass-through amplitude ratio is ≈ 1.
+        let kept = remove_baseline(&signal, fs, 0.5);
+        let ratio = rms(&kept[300..n - 300]) / rms(&signal[300..n - 300]);
+        assert!(
+            (ratio - 1.0).abs() < 0.02,
+            "signal band amplitude changed by {:.1} %",
+            (ratio - 1.0) * 100.0
+        );
+        // cutoff_hz is live: a 5 Hz cutoff (above the signal) instead kills the 10 Hz
+        // tone far less than it would a lower one — but crucially removes more of it
+        // than the 0.5 Hz cutoff does, proving the parameter is honored.
+        let aggressive = remove_baseline(&signal, fs, 5.0);
+        assert!(
+            rms(&aggressive[300..n - 300]) < rms(&kept[300..n - 300]),
+            "cutoff_hz is ignored: 5 Hz and 0.5 Hz cutoffs gave the same output"
+        );
+    }
+
+    #[test]
+    fn remove_baseline_degrades_gracefully() {
+        let x = tone(64, 360.0, 10.0, 1.0);
+        // Too short, non-positive / absurd cutoff, non-finite rate → input unchanged.
+        assert_eq!(remove_baseline(&x[..3], 360.0, 0.5), x[..3].to_vec());
+        assert_eq!(remove_baseline(&x, 360.0, 0.0), x);
+        assert_eq!(remove_baseline(&x, 360.0, -1.0), x);
+        assert_eq!(remove_baseline(&x, 360.0, 180.0), x); // at Nyquist
+        assert_eq!(remove_baseline(&x, 360.0, 500.0), x); // above Nyquist
+        assert_eq!(remove_baseline(&x, 0.0, 0.5), x);
+        assert_eq!(remove_baseline(&x, f64::NAN, 0.5), x);
+        let empty: [f64; 0] = [];
+        assert!(remove_baseline(&empty, 360.0, 0.5).is_empty());
+        // A pure constant (DC) is entirely below any positive cutoff → driven to ≈ 0.
+        let c = vec![7.0; 512];
+        let out = remove_baseline(&c, 360.0, 0.5);
+        assert!(
+            out.iter().all(|v| v.is_finite()) && rms(&out[200..300]) < 1.0e-3,
+            "DC not removed by the high-pass"
+        );
     }
 }
