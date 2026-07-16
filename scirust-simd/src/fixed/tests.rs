@@ -9,6 +9,7 @@
 
 use super::activation as act;
 use super::conv::{Conv1dShape, conv1d};
+use super::conv2d::{Conv2dShape, conv2d};
 use super::layer::Linear;
 use super::linalg;
 use super::math::{reciprocal, rsqrt, sqrt};
@@ -1362,6 +1363,200 @@ fn pool1d_feeds_conv1d_chain() {
     };
     let pooled = max_pool1d(&conv_out, pool_shape);
     assert_eq!(pooled, [q16(-1.0), q16(-1.0)]);
+}
+
+// ------------------------------------------------------------------ //
+//  Convolution 2D (im2col + GEMM)                                     //
+// ------------------------------------------------------------------ //
+
+/// Référence naïve : quintuple boucle directe (canal de sortie, position `oh`,
+/// `ow`, canal d'entrée × noyau), opérateurs enveloppants de `Fixed`. Doit
+/// coïncider **bit-à-bit** avec `conv2d`.
+fn naive_conv2d<const F: u32>(
+    x: &[FixedI32<F>],
+    weights: &[FixedI32<F>],
+    bias: &[FixedI32<F>],
+    shape: Conv2dShape,
+) -> Vec<FixedI32<F>> {
+    let height_out = shape.height_out();
+    let width_out = shape.width_out();
+    let mut y = vec![FixedI32::<F>::from_raw(0); shape.out_channels * height_out * width_out];
+    for co in 0..shape.out_channels
+    {
+        for oh in 0..height_out
+        {
+            for ow in 0..width_out
+            {
+                let mut acc = bias[co];
+                for ci in 0..shape.in_channels
+                {
+                    for kh in 0..shape.kernel_h
+                    {
+                        for kw in 0..shape.kernel_w
+                        {
+                            let w_idx = co * (shape.in_channels * shape.kernel_h * shape.kernel_w)
+                                + ci * (shape.kernel_h * shape.kernel_w)
+                                + kh * shape.kernel_w
+                                + kw;
+                            let h = oh * shape.stride_h + kh;
+                            let w = ow * shape.stride_w + kw;
+                            let x_idx = ci * (shape.height * shape.width) + h * shape.width + w;
+                            acc += weights[w_idx] * x[x_idx];
+                        }
+                    }
+                }
+                y[co * (height_out * width_out) + oh * width_out + ow] = acc;
+            }
+        }
+    }
+    y
+}
+
+#[test]
+fn conv2d_known_small() {
+    // 1 canal, x = arithmétique 1..9 (3×3), noyau 2×2 [[1,0],[0,-1]], stride
+    // (1,1) : y[oh,ow] = x[oh,ow] - x[oh+1,ow+1] = -4 partout (différences
+    // constantes de la suite arithmétique), + biais 10 → 6 partout.
+    let x = [1i32, 2, 3, 4, 5, 6, 7, 8, 9].map(Q16_16::from);
+    let w = [1i32, 0, 0, -1].map(Q16_16::from);
+    let b = [Q16_16::from(10)];
+    let shape = Conv2dShape {
+        in_channels: 1,
+        height: 3,
+        width: 3,
+        out_channels: 1,
+        kernel_h: 2,
+        kernel_w: 2,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    assert_eq!(shape.height_out(), 2);
+    assert_eq!(shape.width_out(), 2);
+    let y = conv2d(&x, &w, &b, shape);
+    assert_eq!(y, [6i32, 6, 6, 6].map(Q16_16::from));
+}
+
+#[test]
+fn conv2d_pointwise_1x1_kernel() {
+    // Noyau 1×1 : combinaison linéaire canal à canal, point par point (aucun
+    // recouvrement spatial, height_out == height, width_out == width).
+    let x = [1i32, 2, 3, 4, /* canal 2 */ 10, 20, 30, 40].map(Q16_16::from);
+    let w = [q16(2.0), q16(0.5)]; // (co=0,ci=0)=2, (co=0,ci=1)=0.5
+    let b = [Q16_16::zero()];
+    let shape = Conv2dShape {
+        in_channels: 2,
+        height: 2,
+        width: 2,
+        out_channels: 1,
+        kernel_h: 1,
+        kernel_w: 1,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let y = conv2d(&x, &w, &b, shape);
+    // y[h,w] = 2·x0[h,w] + 0.5·x1[h,w].
+    assert_eq!(y, [q16(7.0), q16(14.0), q16(21.0), q16(28.0)]);
+}
+
+#[test]
+fn conv2d_multi_channel_matches_naive_bit_exact() {
+    let mut rng = Lcg(0xC0DE2D);
+    let cases = [
+        (2, 8, 8, 3, 3, 3, 2, 2),
+        (1, 5, 6, 1, 5, 5, 1, 1),
+        (3, 10, 7, 2, 3, 2, 2, 1),
+        (1, 4, 4, 1, 2, 2, 1, 1),
+    ];
+    for &(in_channels, height, width, out_channels, kernel_h, kernel_w, stride_h, stride_w) in
+        &cases
+    {
+        let shape = Conv2dShape {
+            in_channels,
+            height,
+            width,
+            out_channels,
+            kernel_h,
+            kernel_w,
+            stride_h,
+            stride_w,
+        };
+        let height_out = shape.height_out();
+        let width_out = shape.width_out();
+        let x: Vec<Q16_16> = (0..in_channels * height * width)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+            .collect();
+        let w: Vec<Q16_16> = (0..out_channels * in_channels * kernel_h * kernel_w)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+            .collect();
+        let b: Vec<Q16_16> = (0..out_channels)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+            .collect();
+
+        let got = conv2d(&x, &w, &b, shape);
+        let want = naive_conv2d(&x, &w, &b, shape);
+        assert_eq!(got.len(), out_channels * height_out * width_out);
+        assert_eq!(got, want, "conv2d shape={shape:?}");
+    }
+}
+
+#[test]
+#[should_panic(expected = "Conv2dShape::height_out")]
+fn conv2d_kernel_taller_than_input_panics() {
+    let x = [Q16_16::one(); 9]; // 1×3×3
+    let w = [Q16_16::one(); 4]; // 1×1×4×1 → hauteur de noyau 4 > 3
+    let b = [Q16_16::zero()];
+    let shape = Conv2dShape {
+        in_channels: 1,
+        height: 3,
+        width: 3,
+        out_channels: 1,
+        kernel_h: 4,
+        kernel_w: 1,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let _ = conv2d(&x, &w, &b, shape);
+}
+
+#[test]
+#[should_panic(expected = "conv2d")]
+fn conv2d_dim_mismatch_panics() {
+    let x = [Q16_16::one(); 9]; // annoncé 1×3×3
+    let w = [Q16_16::one(); 3]; // annoncé 1×1×2×2 → devrait être longueur 4
+    let b = [Q16_16::zero()];
+    let shape = Conv2dShape {
+        in_channels: 1,
+        height: 3,
+        width: 3,
+        out_channels: 1,
+        kernel_h: 2,
+        kernel_w: 2,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let _ = conv2d(&x, &w, &b, shape);
+}
+
+#[test]
+fn conv2d_i64_storage() {
+    // Chemin de stockage i64 (Q32.32) : mêmes garanties. 1 canal, 2×2, noyau
+    // 2×2 identité en (0,0) uniquement : y = x[0,0] partout où défini (une
+    // seule position de sortie ici, height_out=width_out=1).
+    let x = [1i64, 2, 3, 4].map(Q32_32::from); // 2×2
+    let w = [1i64, 0, 0, 0].map(Q32_32::from); // ne garde que x[0,0]
+    let b = [Q32_32::from(100i64)];
+    let shape = Conv2dShape {
+        in_channels: 1,
+        height: 2,
+        width: 2,
+        out_channels: 1,
+        kernel_h: 2,
+        kernel_w: 2,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let y = conv2d(&x, &w, &b, shape);
+    assert_eq!(y, [Q32_32::from(101i64)]); // x[0,0]=1 + biais 100
 }
 
 // ------------------------------------------------------------------ //

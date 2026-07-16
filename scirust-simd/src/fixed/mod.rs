@@ -76,6 +76,7 @@
 // * [`activation`] — activations quantifiées (`relu`, `relu6`, `hardswish`…).
 // * [`layer`] — couche linéaire quantifiée [`layer::Linear`] (`W·x + b`, + activation).
 // * [`conv`] — convolution 1D quantifiée [`conv::conv1d`] (im2col + GEMM).
+// * [`conv2d`] — convolution 2D quantifiée [`conv2d::conv2d`] (im2col + GEMM).
 // * [`pool`] — pooling 1D quantifié ([`pool::max_pool1d`], [`pool::avg_pool1d`]).
 // * [`rescale`] — requantification entre résolutions (`FRAC` différent, même stockage).
 // * [`math`] — `sqrt`, `rsqrt`, `reciprocal` (Newton entier exact).
@@ -84,6 +85,7 @@
 
 pub mod activation;
 pub mod conv;
+pub mod conv2d;
 pub mod convert;
 pub mod layer;
 pub mod linalg;
