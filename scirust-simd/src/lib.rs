@@ -156,6 +156,15 @@ pub mod ops {
         let n = a.len();
         let mut i = 0;
 
+        // SAFETY: `_mm256_loadu_ps`/`_mm_loadu_ps` and their `storeu` counterparts
+        // require only that the target CPU support AVX2/SSE2 (checked by
+        // `is_x86_feature_detected!` immediately above — an unconditional
+        // requirement of these intrinsics, not a per-call one) and that `K`
+        // contiguous `f32`s be readable/writable starting at the given pointer;
+        // `i + K <= n == a.len() == b.len() == out.len()` (asserted above) keeps
+        // every `a.as_ptr().add(i)` / `b.as_ptr().add(i)` / `out.as_mut_ptr().add(i)`
+        // in bounds. `out: &mut [f32]` is an exclusive borrow, so it cannot alias
+        // `a`/`b` — the compiler enforced that at the call site.
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         unsafe {
             if std::arch::is_x86_feature_detected!("avx2")
@@ -196,6 +205,10 @@ pub mod ops {
         let n = a.len();
         let mut i = 0;
 
+        // SAFETY: same argument as the AVX2/SSE2 block in `add_f32` above — feature
+        // support is checked immediately below, `i + K <= n == a.len() == b.len()
+        // == out.len()` keeps every load/store in bounds, and `out: &mut [f32]`
+        // cannot alias `a`/`b`.
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         unsafe {
             if std::arch::is_x86_feature_detected!("avx2")
@@ -252,6 +265,10 @@ pub mod ops {
         let n = a.len();
         let mut i = 0;
 
+        // SAFETY: same argument as `add_f32` above (f64 lanes: AVX2 handles 4 at a
+        // time, SSE2 handles 2). Feature support is checked immediately below,
+        // `i + K <= n == a.len() == b.len() == out.len()` keeps every load/store
+        // in bounds, and `out: &mut [f64]` cannot alias `a`/`b`.
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         unsafe {
             if std::arch::is_x86_feature_detected!("avx2")
@@ -292,6 +309,9 @@ pub mod ops {
         let n = a.len();
         let mut i = 0;
 
+        // SAFETY: same argument as `add_f64` above — feature support is checked
+        // immediately below, `i + K <= n == a.len() == b.len() == out.len()` keeps
+        // every load/store in bounds, and `out: &mut [f64]` cannot alias `a`/`b`.
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         unsafe {
             if std::arch::is_x86_feature_detected!("avx2")
@@ -455,6 +475,10 @@ fn has_sve() -> bool {
     // is advertised by HWCAP_SVE = bit 22 of AT_HWCAP.
     const AT_HWCAP: libc::c_ulong = 16;
     const HWCAP_SVE: libc::c_ulong = 1 << 22;
+    // SAFETY: `getauxval` is a pure read of the kernel-provided auxiliary
+    // vector — it takes a plain integer key (no pointers/buffers to validate)
+    // and returns 0 for an unrecognized key rather than faulting, so it is
+    // safe to call with any `c_ulong` argument.
     let hwcap = unsafe { libc::getauxval(AT_HWCAP) };
     (hwcap & HWCAP_SVE) != 0
 }
@@ -476,6 +500,13 @@ pub fn simd_add_one(data: &mut [f64]) {
     let n = data.len();
     let mut i = 0;
 
+    // SAFETY: same load/store bounds argument as `add_f32` above, but in place
+    // on a single buffer: feature support is checked immediately below, and
+    // `i + K <= n == data.len()` keeps every `data.as_ptr().add(i)` /
+    // `data.as_mut_ptr().add(i)` in bounds. The read (`loadu`) and write
+    // (`storeu`) at each step target the exact same `K` elements — no other
+    // reference to `data` exists inside this block (it's the sole `&mut`
+    // parameter), so there's no overlap with a distinct live borrow.
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     unsafe {
         if std::arch::is_x86_feature_detected!("avx2")
