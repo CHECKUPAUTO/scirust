@@ -1,6 +1,31 @@
 // scirust-core/src/autodiff/data_parallel.rs
 // Phase 4: Data Parallelism Engine — GradientAggregator & DataParallelTrainer
 
+//! Entraînement data-parallel de démonstration sur [`ParallelTape`].
+//!
+//! ## Rôle
+//!
+//! `GradientAggregator` (reduce-sum / reduce-mean) et `DataParallelTrainer`
+//! (une [`ParallelTape`] par worker, réduction dans un ordre fixe) forment
+//! le banc d'essai de la **preuve de réduction déterministe** du papier —
+//! les tests T1–T3 de `paper/PAPER_PLAN.md` (`train_batch_threaded_is_…`,
+//! `parallel_tape_training_…`, `multi_step_training_…`) vivent ici et
+//! vérifient qu'un entraînement multi-thread est bit-identique quel que
+//! soit le nombre de threads.
+//!
+//! ## Statut
+//!
+//! Code de preuve / test uniquement — **aucun consommateur de production**
+//! dans le workspace. L'API peut changer ; les noms de tests ci-dessus sont
+//! toutefois référencés par `paper/PAPER_PLAN.md`, ne les renommez pas sans
+//! mettre le plan à jour.
+//!
+//! ## Contrat de maintenance
+//!
+//! Le backward sous-jacent est le match dupliqué de
+//! [`parallel`](super::parallel) : tout nouveau `Op` doit y être ajouté
+//! aussi — voir l'en-tête de ce module.
+
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

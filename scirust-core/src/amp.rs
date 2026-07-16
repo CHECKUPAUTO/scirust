@@ -1,5 +1,14 @@
 //! Automatic Mixed Precision (AMP) training wrapper.
 //!
+//! > ⚠️ **Experimental / no consumers**: this module is not used by any
+//! > crate in the workspace. The API may change or be removed; open an
+//! > issue if you depend on it.
+//!
+//! > **Note:** a second, AMP-adjacent implementation lives at
+//! > [`crate::autodiff::mixed_precision`] (loss scaling + f16/BF16 master
+//! > weights on the autodiff tape). The two should converge — prefer that
+//! > one if it covers your use case.
+//!
 //! Provides a `MixedPrecisionEnv` that automatically casts model weights
 //! and activations between f32 and f16/BF16 for memory-efficient training.
 //!

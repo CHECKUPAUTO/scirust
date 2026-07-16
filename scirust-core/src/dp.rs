@@ -1,5 +1,9 @@
 //! Differential Privacy — DP-SGD training.
 //!
+//! > ⚠️ **Experimental / no consumers**: this module is not used by any
+//! > crate in the workspace. The API may change or be removed; open an
+//! > issue if you depend on it.
+//!
 //! Implements the differentially private stochastic gradient descent
 //! algorithm from Abadi et al. (2016):
 //! 1. Clip **per-sample** gradients to a maximum L2 norm.

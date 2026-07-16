@@ -30,6 +30,27 @@
 //! [`nn::crown_ibp`], and [`nn::certified`] make cryptographic / privacy /
 //! certified-robustness claims. Each module documents exactly what it does and
 //! does **not** guarantee; none is production-hardened cryptography.
+//!
+//! ## Experimental / orphan modules — no consumers in the workspace
+//!
+//! The following publicly exported modules have **zero consumers** outside
+//! their own tests (workspace-wide audit, 2026-07). They are kept for now,
+//! but their APIs may change or be removed — open an issue if you depend on
+//! one:
+//!
+//! * [`lazy`] — lazy 2-D op DAG compiled to a `Plan` (DCE + topo order +
+//!   pointwise fusion).
+//! * [`amp`] — AMP training wrapper; overlaps with
+//!   [`autodiff::mixed_precision`] (the two should converge).
+//! * [`dp`] — DP-SGD (also security-sensitive, see above).
+//! * [`pruning`] — magnitude / structured / lottery-ticket pruning.
+//! * [`logging`] — CSV / TensorBoard training logger.
+//!
+//! Related but distinct: [`autodiff::parallel`] and
+//! [`autodiff::data_parallel`] are **proof/test-only** (they back the
+//! deterministic-reduction claims T1–T3 of `paper/PAPER_PLAN.md`) and carry
+//! a maintenance contract — every new `Op` must be added to the duplicated
+//! backward match in `autodiff/parallel.rs`; see their module headers.
 
 pub mod io;
 pub mod nn;

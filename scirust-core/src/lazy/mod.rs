@@ -1,13 +1,32 @@
 // scirust-core/src/lazy/mod.rs
-//
-// Exécution différée — DAG d'opérations + 3 portes d'évaluation.
+
+//! Exécution différée — DAG d'opérations 2-D ([`LazyGraph`]/[`LazyTensor`])
+//! compilé en [`Plan`] immuable.
+//!
+//! > **Expérimental** : aucun consommateur dans le workspace ; API
+//! > susceptible d'être supprimée. Ouvrez une issue si vous en dépendez.
+//!
+//! Ce que le module fait réellement :
+//!
+//! * construction paresseuse d'un DAG d'ops 2-D (`Const`/`Feed` +
+//!   pointwise + `MatMul`) sans évaluation tant que personne n'appelle
+//!   [`LazyTensor::value`] (évaluation récursive avec memoïsation) ;
+//! * [`LazyTensor::compile`] → [`Plan`] : Dead Code Elimination, ordre
+//!   topologique, fusion des chaînes pointwise en une seule instruction
+//!   `PointwiseChain` ;
+//! * exécution du plan avec un buffer par nœud émis
+//!   (`Plan::execute` / `Plan::execute_with(feeds)`), pattern
+//!   compile-once-run-many.
+//!
+//! Il n'y a **pas** de gestion de durée de vie / éviction des buffers
+//! intermédiaires : tous restent vivants jusqu'à la fin de l'exécution.
 
 use crate::autodiff::reverse::{Tape, Tensor, Var};
 use std::cell::{Ref, RefCell};
 use std::rc::Rc;
 
 pub mod plan;
-pub use plan::{CachePolicy, Compiler, Plan, PlanStats};
+pub use plan::{Compiler, Plan, PlanStats};
 
 #[derive(Clone, Debug)]
 pub enum LazyOp {
@@ -206,11 +225,6 @@ impl LazyTensor {
 
     pub fn compile(&self) -> Plan {
         Compiler::new(&self.graph).compile(self.id)
-    }
-    pub fn compile_with(&self, policy: CachePolicy) -> Plan {
-        Compiler::new(&self.graph)
-            .with_cache_policy(policy)
-            .compile(self.id)
     }
 
     #[allow(clippy::should_implement_trait)]

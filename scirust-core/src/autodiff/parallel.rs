@@ -1,9 +1,36 @@
 // scirust-core/src/autodiff/parallel.rs
 // Phase 4: Data Parallelism Engine — Send + Sync tape wrapper
-//
-// ParallelTape is a Send + Sync tape that stores the computation graph
-// behind Arc<RwLock> for safe sharing across threads.
-// Gradients are stored as scalar f64 values (summed from full tensor grads).
+
+//! `ParallelTape` — tape autodiff `Send + Sync` à gradients **scalaires**.
+//!
+//! ## Rôle
+//!
+//! Cette tape stocke le graphe derrière des `Arc<RwLock<…>>` pour être
+//! partageable entre threads, et réduit chaque gradient tenseur en un seul
+//! `f64` (somme des composantes). Elle sert de support à la **preuve de
+//! réduction déterministe** du papier : les tests de
+//! [`data_parallel`](super::data_parallel) (T1–T3 de
+//! `paper/PAPER_PLAN.md`) montrent qu'un batch multi-thread est
+//! bit-identique pour 1/2/4/8 workers.
+//!
+//! ## Statut
+//!
+//! Code de preuve / test uniquement — **aucun consommateur de production**
+//! dans le workspace (seuls `data_parallel.rs`, ses tests et le bench
+//! `bin/bench_reduction_overhead.rs` s'y réfèrent). Ne l'utilisez pas pour
+//! entraîner : la tape séquentielle [`Tape`](super::reverse::Tape) reste la
+//! référence.
+//!
+//! ## Contrat de maintenance
+//!
+//! `backward` duplique intégralement le match backward de
+//! [`Tape::backward`](super::reverse::Tape::backward) : **tout nouveau
+//! `Op` doit être ajouté ici aussi** — le match est exhaustif
+//! volontairement (pas de bras `_`) pour que l'oubli soit une erreur de
+//! compilation, pas un bug silencieux. Les variantes fusionnées
+//! (`FlashAttention`, `Conv2dTransposeForward`, `TtContract`) sont
+//! délibérément des `panic!` : elles ne font pas partie du jeu d'ops
+//! data-parallel et un gradient zéro silencieux serait pire.
 
 use super::reverse::{Node, Op, SavedData, Tensor};
 use std::sync::{Arc, RwLock};

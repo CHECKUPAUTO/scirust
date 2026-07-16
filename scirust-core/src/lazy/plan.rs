@@ -10,12 +10,18 @@
 //       ▼
 //   Plan (immuable, optimisé)
 //       │  - Dead Code Elimination (DCE)
-//       │  - Operator Fusion (chaînes pointwise)
-//       │  - Lifetime analysis pour eviction des buffers
-//       │  - Topological order
+//       │  - Ordre topologique (post-order DFS)
+//       │  - Operator Fusion (chaînes pointwise → une PointwiseChain)
 //       │
 //       ▼  .execute() ou .execute_with(feeds)
 //   Tensor (résultat)
+//
+// L'exécution alloue un buffer par instruction (`Vec<Option<Tensor>>`) et
+// les garde tous vivants jusqu'à la fin — il n'y a PAS d'analyse de durée
+// de vie ni d'éviction de buffers intermédiaires. (Une ancienne version de
+// cet en-tête annonçait une "lifetime analysis" qui n'a jamais existé ;
+// l'enum `CachePolicy` qui l'accompagnait, stockée mais jamais lue par
+// `execute_with`, a été supprimée.)
 //
 // La compilation est coûteuse, l'exécution doit être bon marché. C'est
 // exactement le pattern "compile-once-run-many" du training loop.
@@ -84,20 +90,6 @@ pub enum PwOp {
 }
 
 // ================================================================== //
-//  CachePolicy — gère la durée de vie des buffers intermédiaires      //
-// ================================================================== //
-
-#[derive(Clone, Debug)]
-pub enum CachePolicy {
-    /// Garde tout en mémoire (utile pour le backward, gourmand)
-    KeepAll,
-    /// Ne garde que les feuilles (constantes, feeds) et les outputs marqués persist
-    LeavesOnly,
-    /// Garde au plus n buffers intermédiaires (LRU)
-    Lru(usize),
-}
-
-// ================================================================== //
 //  Plan — résultat de la compilation                                  //
 // ================================================================== //
 
@@ -110,7 +102,6 @@ pub struct Plan {
     pub feed_slots: HashMap<String, usize>,
     /// Optimisations appliquées (pour reporting / debug)
     pub stats: PlanStats,
-    pub cache_policy: CachePolicy,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -262,7 +253,6 @@ pub struct Compiler<'g> {
     next_buf: usize,
     /// Stats accumulées
     stats: PlanStats,
-    cache_policy: CachePolicy,
 }
 
 impl<'g> Compiler<'g> {
@@ -274,13 +264,7 @@ impl<'g> Compiler<'g> {
             instructions: Vec::new(),
             next_buf: 0,
             stats: PlanStats::default(),
-            cache_policy: CachePolicy::LeavesOnly,
         }
-    }
-
-    pub fn with_cache_policy(mut self, p: CachePolicy) -> Self {
-        self.cache_policy = p;
-        self
     }
 
     /// Pipeline complet : DCE → fusion pointwise → ordre topologique → émission.
@@ -335,7 +319,6 @@ impl<'g> Compiler<'g> {
             output_shape,
             feed_slots: self.feed_slots,
             stats: self.stats,
-            cache_policy: self.cache_policy,
         }
     }
 

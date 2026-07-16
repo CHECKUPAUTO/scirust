@@ -1,5 +1,9 @@
 //! Training metrics logging — TensorBoard-compatible event file writer.
 //!
+//! > ⚠️ **Experimental / no consumers**: this module is not used by any
+//! > crate in the workspace. The API may change or be removed; open an
+//! > issue if you depend on it.
+//!
 //! Writes scalar metrics (loss, accuracy, learning rate) in the
 //! TensorBoard event format, enabling real-time visualization.
 //!

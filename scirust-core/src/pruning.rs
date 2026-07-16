@@ -1,5 +1,9 @@
 //! Model pruning — structured and unstructured weight pruning.
 //!
+//! > ⚠️ **Experimental / no consumers**: this module is not used by any
+//! > crate in the workspace. The API may change or be removed; open an
+//! > issue if you depend on it.
+//!
 //! Supports:
 //! - **Magnitude pruning**: remove weights with smallest absolute values.
 //! - **Structured pruning**: remove entire rows/columns (neurons).
