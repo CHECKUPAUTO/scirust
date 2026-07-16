@@ -7,6 +7,7 @@
 //  * comparaison à une référence `f64` à quelques ULP pour mul/div/math ;
 //  * égalité stricte **SIMD == scalaire**.
 
+use super::activation as act;
 use super::linalg;
 use super::math::{reciprocal, rsqrt, sqrt};
 use super::reductions as red;
@@ -671,6 +672,97 @@ fn matmul_dim_mismatch_panics() {
     let a = [Q16_16::one(); 6]; // annoncé 2×3
     let b = [Q16_16::one(); 6]; // annoncé 3×2
     let _ = linalg::matmul(&a, &b, 2, 3, 3); // b.len()=6 ≠ 3×3=9 → panique
+}
+
+// ------------------------------------------------------------------ //
+//  Activations quantifiées                                            //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn activation_relu_family_exact() {
+    // relu / relu6 / clamp / hardtanh : exacts en virgule fixe (min/max/affine).
+    assert_eq!(act::relu(q16(2.5)), q16(2.5));
+    assert_eq!(act::relu(q16(-2.5)), Q16_16::zero());
+    assert_eq!(act::relu(Q16_16::zero()), Q16_16::zero());
+
+    assert_eq!(act::relu6(q16(10.0)), q16(6.0));
+    assert_eq!(act::relu6(q16(3.5)), q16(3.5));
+    assert_eq!(act::relu6(q16(-1.0)), Q16_16::zero());
+
+    assert_eq!(act::clamp(q16(5.0), q16(-2.0), q16(2.0)), q16(2.0));
+    assert_eq!(act::clamp(q16(-5.0), q16(-2.0), q16(2.0)), q16(-2.0));
+    assert_eq!(act::clamp(q16(1.0), q16(-2.0), q16(2.0)), q16(1.0));
+
+    assert_eq!(act::hardtanh(q16(4.0), q16(-1.0), q16(1.0)), q16(1.0));
+    assert_eq!(act::hardtanh(q16(-4.0), q16(-1.0), q16(1.0)), q16(-1.0));
+    assert_eq!(act::hardtanh(q16(0.25), q16(-1.0), q16(1.0)), q16(0.25));
+
+    // leaky_relu : branche positive identité, négative pentée (exacte ici).
+    assert_eq!(act::leaky_relu(q16(3.0), q16(0.5)), q16(3.0));
+    assert_eq!(act::leaky_relu(q16(-4.0), q16(0.5)), q16(-2.0));
+
+    // Même famille sur le stockage i16 (Q8.8, NumericScalar).
+    let a = Q8_8::from(10);
+    assert_eq!(act::relu6(a), Q8_8::from(6));
+    assert_eq!(act::relu(-a), Q8_8::zero());
+}
+
+#[test]
+fn activation_relu_family_over_f64() {
+    // Généricité flottante : les mêmes fonctions, exactes sur f64.
+    assert_eq!(act::relu(-2.0_f64), 0.0);
+    assert_eq!(act::relu(2.0_f64), 2.0);
+    assert_eq!(act::relu6(9.0_f64), 6.0);
+    assert_eq!(act::clamp(5.0_f64, -1.0, 1.0), 1.0);
+    assert_eq!(act::leaky_relu(-4.0_f64, 0.1), -0.4);
+}
+
+#[test]
+fn activation_hardsigmoid_hardswish() {
+    // Régions saturées (nettement au-delà de ±3, insensibles à l'arrondi de
+    // recip) : ≤ −3 → 0, ≥ 3 → 1 (hardsigmoid).
+    assert_eq!(act::hardsigmoid(q16(-4.0)), Q16_16::zero());
+    assert_eq!(act::hardsigmoid(q16(-10.0)), Q16_16::zero());
+    assert_eq!(act::hardsigmoid(q16(4.0)), Q16_16::one());
+    assert_eq!(act::hardsigmoid(q16(10.0)), Q16_16::one());
+
+    // hardswish : nulle bien sous −3, identité bien au-dessus de 3 (x·1 exact).
+    assert_eq!(act::hardswish(q16(-5.0)), Q16_16::zero());
+    assert_eq!(act::hardswish(q16(5.0)), q16(5.0));
+
+    // Zone affine : comparaison à la référence f64 à quelques résolutions
+    // (1/6 et 1/2 sont approchés par recip en virgule fixe).
+    let hs_ref = |x: f64| (x / 6.0 + 0.5).clamp(0.0, 1.0);
+    for &x in &[-2.0, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0]
+    {
+        let got = act::hardsigmoid(q16(x)).to_f64();
+        assert!(
+            (got - hs_ref(x)).abs() <= 6.0 / 65536.0,
+            "hardsigmoid({x}) = {got} vs {}",
+            hs_ref(x)
+        );
+        let gotw = act::hardswish(q16(x)).to_f64();
+        let refw = x * hs_ref(x);
+        assert!(
+            (gotw - refw).abs() <= 12.0 / 65536.0,
+            "hardswish({x}) = {gotw} vs {refw}"
+        );
+    }
+
+    // Cohérence flottante : hardsigmoid(0) = 0.5 exact sur f64.
+    assert_eq!(act::hardsigmoid(0.0_f64), 0.5);
+    assert_eq!(act::hardswish(0.0_f64), 0.0);
+}
+
+#[test]
+fn activation_apply_inplace_on_layer_output() {
+    // Applique relu à la sortie d'un GEMM (couche linéaire quantifiée).
+    let w = [1i32, -2, 3, -4, 5, -6].map(Q16_16::from); // 2×3
+    let x = [1i32, 1, 1].map(Q16_16::from);
+    let mut y = linalg::matvec(&w, &x, 2, 3); // [1-2+3, -4+5-6] = [2, -5]
+    assert_eq!(y, [q16(2.0), q16(-5.0)]);
+    act::apply_inplace(&mut y, act::relu);
+    assert_eq!(y, [q16(2.0), Q16_16::zero()]); // relu écrase le négatif
 }
 
 // ------------------------------------------------------------------ //
