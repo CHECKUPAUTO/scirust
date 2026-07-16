@@ -74,12 +74,14 @@
 // * [`reductions`] — sommes, `dot`, normes, extrema, cosinus.
 // * [`linalg`] — GEMM déterministe (`matmul`, `matvec`, `transpose`).
 // * [`activation`] — activations quantifiées (`relu`, `relu6`, `hardswish`…).
+// * [`layer`] — couche linéaire quantifiée [`layer::Linear`] (`W·x + b`, + activation).
 // * [`math`] — `sqrt`, `rsqrt`, `reciprocal` (Newton entier exact).
 // * [`transcendental`] — `exp`/`ln`/`sin`/`cos`/`tanh`/`sigmoid`/`softmax`
 //   (minimax + réduction d'argument, bornes ULP prouvées ; `FixedI32<FRAC>`).
 
 pub mod activation;
 pub mod convert;
+pub mod layer;
 pub mod linalg;
 pub mod math;
 pub mod ops;

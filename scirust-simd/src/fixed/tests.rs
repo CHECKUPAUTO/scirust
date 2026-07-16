@@ -8,6 +8,7 @@
 //  * égalité stricte **SIMD == scalaire**.
 
 use super::activation as act;
+use super::layer::Linear;
 use super::linalg;
 use super::math::{reciprocal, rsqrt, sqrt};
 use super::reductions as red;
@@ -763,6 +764,73 @@ fn activation_apply_inplace_on_layer_output() {
     assert_eq!(y, [q16(2.0), q16(-5.0)]);
     act::apply_inplace(&mut y, act::relu);
     assert_eq!(y, [q16(2.0), Q16_16::zero()]); // relu écrase le négatif
+}
+
+// ------------------------------------------------------------------ //
+//  Couche linéaire quantifiée                                         //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn linear_forward_known_small() {
+    // W = [[1,2,3],[4,5,6]] (2×3), b = [10, -1], x = [1,0,-1].
+    // W·x = [1-3, 4-6] = [-2,-2] ; +b = [8, -3].
+    let w = [1i32, 2, 3, 4, 5, 6].map(Q16_16::from);
+    let b = [10i32, -1].map(Q16_16::from);
+    let x = [1i32, 0, -1].map(Q16_16::from);
+    let layer = Linear::new(w.to_vec(), b.to_vec(), 2, 3);
+    assert_eq!(layer.out_features(), 2);
+    assert_eq!(layer.in_features(), 3);
+    let y = layer.forward(&x);
+    assert_eq!(y, [q16(8.0), q16(-3.0)]);
+}
+
+#[test]
+fn linear_forward_activated_matches_forward_then_apply() {
+    // forward_activated(f) doit coïncider exactement avec forward puis
+    // apply_inplace(f) séparément (même calcul, juste composé).
+    let mut rng = Lcg(0xFEED);
+    let (out_f, in_f) = (5, 7);
+    let w: Vec<Q16_16> = (0..out_f * in_f)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+        .collect();
+    let b: Vec<Q16_16> = (0..out_f)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+        .collect();
+    let x: Vec<Q16_16> = (0..in_f)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+        .collect();
+    let layer = Linear::new(w, b, out_f, in_f);
+
+    let mut expected = layer.forward(&x);
+    act::apply_inplace(&mut expected, act::relu);
+    let got = layer.forward_activated(&x, act::relu);
+    assert_eq!(got, expected);
+
+    // Cohérence : W·x + b sans activation == forward().
+    let plain = layer.forward(&x);
+    assert_eq!(plain.len(), out_f);
+}
+
+#[test]
+fn linear_i64_storage() {
+    // Chemin de stockage i64 (Q32.32) : mêmes garanties.
+    let w = [1i64, 2, 3, 4].map(Q32_32::from); // 2×2
+    let b = [100i64, -100].map(Q32_32::from);
+    let x = [1i64, 1].map(Q32_32::from);
+    let layer = Linear::new(w.to_vec(), b.to_vec(), 2, 2);
+    // W·x = [1+2, 3+4] = [3,7] ; +b = [103, -93].
+    assert_eq!(
+        layer.forward(&x),
+        [Q32_32::from(103i64), Q32_32::from(-93i64)]
+    );
+}
+
+#[test]
+#[should_panic(expected = "Linear::new")]
+fn linear_dim_mismatch_panics() {
+    let w = vec![Q16_16::one(); 6]; // annoncé 2×3
+    let b = vec![Q16_16::zero(); 3]; // devrait être 2
+    let _ = Linear::new(w, b, 2, 3);
 }
 
 // ------------------------------------------------------------------ //
