@@ -38,6 +38,32 @@
 //! - [`fluidization`] — fluidisation : vitesse minimale (Ergun), perte de charge, terminale.
 //! - [`packed_bed`] — lit fixe : équation d'Ergun (Kozeny-Carman + Burke-Plummer).
 //!
+//! ### Réacteurs — vol. 2
+//! - [`reaction_yield_selectivity`] — réactions multiples : rendement, sélectivité.
+//! - [`adiabatic_reactor`] — élévation de température adiabatique, droite X-T.
+//! - [`catalyst_effectiveness`] — module de Thiele, facteur d'efficacité (plaque/sphère).
+//! - [`equilibrium_conversion`] — van't Hoff, conversion à l'équilibre, ΔG°.
+//! - [`reactor_space_velocity`] — vitesse spatiale, GHSV/WHSV, temps de contact.
+//! - [`reactor_recycle`] — recyclage : conversion globale, débit, purge.
+//!
+//! ### Équilibres de phases — vol. 2
+//! - [`vapor_pressure`] — Antoine, Clausius-Clapeyron, chaleur latente.
+//! - [`vle_raoult`] — équilibre L-V idéal : K-values, bulle, volatilité relative.
+//! - [`henry_solubility`] — solubilité des gaz : loi de Henry, van't Hoff.
+//!
+//! ### Séparation — vol. 2
+//! - [`batch_distillation`] — distillation discontinue (Rayleigh).
+//! - [`packed_column_height`] — colonne à garnissage : HTU/NTU, Z = HTU·NTU.
+//! - [`distillation_efficiency`] — rendement d'étage (Murphree/global), plateaux réels.
+//! - [`membrane_separation`] — flux solution-diffusion, rejet, pression osmotique.
+//! - [`adsorption_isotherm`] — Langmuir/Freundlich, masse d'adsorbant, facteur RL.
+//!
+//! ### Opérations & ingénierie — vol. 2
+//! - [`sedimentation`] — chute entravée (Richardson-Zaki), aire d'épaississeur.
+//! - [`pinch_analysis`] — intégration énergétique : CP·ΔT, températures décalées, utilité min.
+//! - [`process_economics`] — six-dixièmes, facteur de Lang, retour, annuité.
+//! - [`slurry_flow`] — transport de boues : densité, vitesse critique (Durand).
+//!
 //! ## Positionnement
 //!
 //! Cette crate ouvre le domaine des **opérations unitaires** dans SciRust. Elle
@@ -77,6 +103,26 @@ pub mod packed_bed;
 pub mod pfr;
 pub mod reaction_kinetics;
 pub mod residence_time_distribution;
+
+// Vol. 2
+pub mod adiabatic_reactor;
+pub mod adsorption_isotherm;
+pub mod batch_distillation;
+pub mod catalyst_effectiveness;
+pub mod distillation_efficiency;
+pub mod equilibrium_conversion;
+pub mod henry_solubility;
+pub mod membrane_separation;
+pub mod packed_column_height;
+pub mod pinch_analysis;
+pub mod process_economics;
+pub mod reaction_yield_selectivity;
+pub mod reactor_recycle;
+pub mod reactor_space_velocity;
+pub mod sedimentation;
+pub mod slurry_flow;
+pub mod vapor_pressure;
+pub mod vle_raoult;
 
 pub use absorption::{
     absorp_factor, absorp_kremser_fraction_absorbed, absorp_minimum_liquid_flow, absorp_ntu_dilute,
@@ -144,4 +190,73 @@ pub use reaction_kinetics::{
 };
 pub use residence_time_distribution::{
     rtd_cumulative_cstr, rtd_exit_age_cstr, rtd_mean_residence_time, rtd_tanks_in_series_number,
+};
+
+// Vol. 2 — ré-exports à plat.
+pub use adiabatic_reactor::{
+    adiab_adiabatic_temperature, adiab_conversion_from_temperature, adiab_maximum_temperature_rise,
+    adiab_temperature_rise,
+};
+pub use adsorption_isotherm::{
+    adsorb_freundlich, adsorb_langmuir, adsorb_langmuir_linearized_loading,
+    adsorb_mass_of_adsorbent, adsorb_separation_factor,
+};
+pub use batch_distillation::{
+    bdist_average_distillate_fraction, bdist_distillate_moles, bdist_rayleigh_constant_volatility,
+    bdist_recovery, bdist_remaining_moles,
+};
+pub use catalyst_effectiveness::{
+    cateff_effectiveness_slab, cateff_effectiveness_sphere, cateff_observed_rate,
+    cateff_thiele_modulus_first_order,
+};
+pub use distillation_efficiency::{
+    deff_actual_stages, deff_column_height, deff_murphree_vapor, deff_overall_from_murphree,
+};
+pub use equilibrium_conversion::{
+    equil_conversion_first_order_reversible, equil_gibbs_from_k, equil_k_from_gibbs,
+    equil_vant_hoff,
+};
+pub use henry_solubility::{
+    henry_concentration_from_pressure, henry_dissolved_fraction, henry_partial_pressure,
+    henry_temperature_dependence,
+};
+pub use membrane_separation::{
+    memb_concentration_factor, memb_osmotic_pressure, memb_recovery, memb_rejection,
+    memb_solution_diffusion_flux,
+};
+pub use packed_column_height::{
+    htu_height_of_transfer_unit, htu_number_of_transfer_units_absorption,
+    htu_number_of_transfer_units_dilute, htu_packing_height,
+};
+pub use pinch_analysis::{
+    pinch_heat_capacity_flowrate, pinch_minimum_hot_utility, pinch_shifted_temperature_cold,
+    pinch_shifted_temperature_hot, pinch_stream_heat_duty,
+};
+pub use process_economics::{
+    econ_annual_capital_charge, econ_lang_factor_capital, econ_payback_period, econ_scale_cost,
+    econ_six_tenths_rule,
+};
+pub use reaction_yield_selectivity::{
+    yieldsel_instantaneous_selectivity, yieldsel_overall_yield, yieldsel_selectivity,
+    yieldsel_yield_from_conversion_selectivity,
+};
+pub use reactor_recycle::{
+    recy_overall_conversion_with_separation, recy_purge_fraction, recy_reactor_feed,
+    recy_recycle_ratio,
+};
+pub use reactor_space_velocity::{rsv_ghsv, rsv_space_time, rsv_space_velocity, rsv_whsv};
+pub use sedimentation::{
+    sed_hindered_settling_velocity, sed_solids_flux, sed_thickener_area,
+    sed_underflow_concentration,
+};
+pub use slurry_flow::{
+    slurry_durand_critical_velocity, slurry_mixture_density,
+    slurry_relative_excess_pressure_gradient, slurry_volume_fraction_from_mass,
+};
+pub use vapor_pressure::{
+    vp_antoine, vp_antoine_temperature, vp_clausius_clapeyron, vp_clausius_latent_heat,
+};
+pub use vle_raoult::{
+    vle_bubble_pressure_binary, vle_equilibrium_ratio, vle_partial_pressure_raoult,
+    vle_relative_volatility_raoult, vle_vapor_fraction_binary,
 };
