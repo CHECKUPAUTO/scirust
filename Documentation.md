@@ -253,8 +253,10 @@ Trois points d'entrée automatiques :
   re-détecter (impulsions puis hum puis plancher large bande), avec garde-fous.
 
 Pour le temps réel/embarqué, le module `denoise::streaming` fournit les versions
-causales échantillon-par-échantillon (médiane, Hampel, moyenne, EMA, Kalman)
-derrière le trait `StreamingDenoiser`, plus **`StreamingVst<D>`** — le pendant
+causales échantillon-par-échantillon (médiane, Hampel, moyenne, EMA, Kalman,
+**`StreamingNlm`** — non-local means causal, délai `search_half + patch_half`,
+bit-identique au batch `nlm1d` sur l'intérieur) derrière le trait
+`StreamingDenoiser`, plus **`StreamingVst<D>`** — le pendant
 causal de la VST : il enrobe n'importe quel débruiteur streaming `D` d'une
 transformée directe ponctuelle et d'un inverse corrigé du biais, pour retirer le
 bruit dépendant du signal (Poisson/multiplicatif) sur un flux, en mémoire bornée

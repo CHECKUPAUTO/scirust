@@ -26,6 +26,7 @@
 //! | [`StreamingHampel`] | [`super::rank::hampel_filter`] | `half_window` |
 //! | [`StreamingEma`] | [`super::linear::exp_moving_average`] (exact) | 0 |
 //! | [`StreamingKalman`] | forward pass of [`super::adaptive::kalman_smooth`] | 0 |
+//! | [`StreamingNlm`] | [`super::nlm::nlm1d`] | `search_half + patch_half` |
 //! | [`StreamingVst`]`<D>` | [`super::vst::vst_denoise`] around a streaming `D` | `D::delay()` |
 //!
 //! [`StreamingVst`] is the causal counterpart of the variance-stabilizing pipeline
@@ -48,6 +49,7 @@
 use std::collections::VecDeque;
 
 use super::mad;
+use super::nlm::sum_sq_diff;
 use super::vst::{
     VstKind, forward_scalar, inverse_corrected_pointwise_scalar, inverse_naive_scalar,
 };
@@ -685,6 +687,191 @@ impl<D: StreamingDenoiser> StreamingDenoiser for StreamingVst<D> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Non-local means (streaming).
+// ---------------------------------------------------------------------------
+
+/// Auto-bandwidth factor `h = 0.8·σ` when [`StreamingNlm::new`] is called with a
+/// non-positive `h` — identical to the batch [`super::nlm::nlm1d`] heuristic, so
+/// the two agree on the interior when given the same `σ`.
+const NLM_AUTO_H_FACTOR: f64 = 0.8;
+
+/// Gather the patch of half-width `patch_half` centred at buffer index `center`
+/// into `out` (length `2·patch_half + 1`), clamping indices to the buffer — the
+/// causal, replicate-border analogue of the batch's mirror extension. On the
+/// interior (a full buffer, an interior centre) no clamp fires, so `out` holds the
+/// exact contiguous window the batch kernel would compare.
+fn gather_patch(buf: &VecDeque<f64>, center: usize, patch_half: usize, out: &mut [f64]) {
+    let last = (buf.len() - 1) as isize;
+    let start = center as isize - patch_half as isize;
+    for (k, slot) in out.iter_mut().enumerate()
+    {
+        let idx = (start + k as isize).clamp(0, last) as usize;
+        *slot = buf[idx];
+    }
+}
+
+/// Causal streaming **1-D Non-Local Means** (Buades-Coll-Morel 2005) — the
+/// streaming counterpart of [`super::nlm::nlm1d`], for self-similar signals
+/// (periodic waveforms, repeated transients, piecewise-constant records) on a live
+/// stream.
+///
+/// Each output sample is the noise-compensated weighted mean of the candidate
+/// centres whose surrounding patch matches the estimated sample's patch, over a
+/// symmetric search window. A centred window of half-width `search_half` with
+/// patches of half-width `patch_half` reaches `search_half + patch_half` samples
+/// into the future, so — like every centred causal filter here — the estimate of a
+/// sample is answered that many samples late: `delay()` is `search_half +
+/// patch_half`. A ring buffer of `2·delay + 1` samples is the entire state.
+///
+/// # The noise scale is a calibration input
+///
+/// The batch filter estimates the robust noise scale `σ` from the *whole* record
+/// (a global [`super::estimate_noise_std_helper`]); a stream has no such global
+/// view, so `σ` is supplied to [`StreamingNlm::new`] — measure it once, offline, on
+/// a representative calibration capture (exactly the [`StreamingVst`] philosophy).
+/// The bandwidth follows the same rule as the batch filter: an explicit `h > 0` is
+/// used as given, and `h ≤ 0` selects `h = 0.8·σ`. A non-positive effective
+/// bandwidth (e.g. auto-`h` on a noise-free `σ = 0` calibration) makes the filter a
+/// pass-through, preserving constants exactly — just like the batch guard.
+///
+/// # Batch equivalence
+///
+/// Given the *same* `σ` the batch filter computed, once the ring buffer is full the
+/// output is **bit-for-bit** `nlm1d(signal, patch_half, search_half, h)[i − delay]`
+/// on the batch filter's interior (where its patches did not touch a mirrored
+/// border): the interior patch distances reuse the batch [`sum_sq_diff`] kernel over
+/// the identical contiguous windows, and the weight rule, its `2σ²` noise-floor
+/// compensation, the `j = i` full-weight term, and the NaN-distance→weight-0
+/// quarantine are byte-for-byte the batch's. During warm-up the same rule runs over
+/// the partial (replicate-bordered) buffer — always finite, not covered by the
+/// equivalence guarantee.
+///
+/// ```
+/// use scirust_signal::denoise::streaming::{StreamingDenoiser, StreamingNlm};
+///
+/// // σ = 0.4 calibrated offline; patch 4, search 24 (the nlm1d_auto defaults).
+/// let mut f = StreamingNlm::new(4, 24, 0.0, 0.4);
+/// assert_eq!(f.delay(), 28);
+/// let out: Vec<f64> = (0..64).map(|i| f.push((i as f64 * 0.3).sin())).collect();
+/// assert!(out.iter().all(|v| v.is_finite()));
+/// ```
+#[derive(Debug, Clone)]
+pub struct StreamingNlm {
+    patch_half: usize,
+    search_half: usize,
+    delay: usize,
+    cap: usize,
+    patch_len: f64,
+    h_sq: f64,
+    noise_floor: f64,
+    /// `true` when the effective bandwidth is non-positive: the filter is the
+    /// identity (mirrors the batch pass-through guard).
+    passthrough: bool,
+    buf: VecDeque<f64>,
+    scratch_c: Vec<f64>,
+    scratch_j: Vec<f64>,
+}
+
+impl StreamingNlm {
+    /// Patch half-width `patch_half` (patch `2·patch_half+1`), search half-width
+    /// `search_half`, bandwidth `h` (`h ≤ 0` selects `0.8·σ`), and the pre-calibrated
+    /// robust noise scale `σ` (`sigma`). `delay()` is `search_half + patch_half`.
+    pub fn new(patch_half: usize, search_half: usize, h: f64, sigma: f64) -> Self {
+        let delay = search_half + patch_half;
+        let cap = 2 * delay + 1;
+        let plen = 2 * patch_half + 1;
+        let h_eff = if h > 0.0
+        {
+            h
+        }
+        else
+        {
+            NLM_AUTO_H_FACTOR * sigma
+        };
+        let passthrough = !(h_eff.is_finite() && h_eff > 0.0);
+        Self {
+            patch_half,
+            search_half,
+            delay,
+            cap,
+            patch_len: plen as f64,
+            h_sq: h_eff * h_eff,
+            noise_floor: 2.0 * sigma * sigma,
+            passthrough,
+            buf: VecDeque::with_capacity(cap),
+            scratch_c: vec![0.0; plen],
+            scratch_j: vec![0.0; plen],
+        }
+    }
+
+    /// Feed one sample; see [`StreamingDenoiser::push`]. Returns the NLM estimate of
+    /// the sample pushed [`Self::delay`] steps earlier (best-effort during warm-up).
+    pub fn push(&mut self, x: f64) -> f64 {
+        if self.buf.len() == self.cap
+        {
+            self.buf.pop_front();
+        }
+        self.buf.push_back(x);
+        let len = self.buf.len();
+        // The estimated sample sits `delay` behind the newest (the window centre once
+        // the buffer is full); saturating during warm-up.
+        let center = (len - 1).saturating_sub(self.delay);
+        let center_val = self.buf[center];
+        if self.passthrough
+        {
+            return center_val;
+        }
+        gather_patch(&self.buf, center, self.patch_half, &mut self.scratch_c);
+        let lo = center.saturating_sub(self.search_half);
+        let hi = (center + self.search_half).min(len - 1);
+        let mut num = 0.0;
+        let mut den = 0.0;
+        for j in lo..=hi
+        {
+            let w = if j == center
+            {
+                // The reference patch always participates at full weight, so the
+                // weighted mean is well-defined (den ≥ 1) even if all else is rejected.
+                1.0
+            }
+            else
+            {
+                gather_patch(&self.buf, j, self.patch_half, &mut self.scratch_j);
+                let d2 = sum_sq_diff(&self.scratch_c, &self.scratch_j) / self.patch_len;
+                if d2.is_finite()
+                {
+                    (-(d2 - self.noise_floor).max(0.0) / self.h_sq).exp()
+                }
+                else
+                {
+                    // NaN distance ⇒ infinitely dissimilar (weight 0): the NaN is
+                    // quarantined, never poisoning a neighbour average.
+                    0.0
+                }
+            };
+            if w > 0.0
+            {
+                num += w * self.buf[j];
+                den += w;
+            }
+        }
+        num / den
+    }
+
+    /// Return to the just-constructed state (buffer cleared).
+    pub fn reset(&mut self) {
+        self.buf.clear();
+    }
+
+    /// Group delay: `search_half + patch_half`.
+    pub fn delay(&self) -> usize {
+        self.delay
+    }
+}
+
+impl_streaming_denoiser!(StreamingNlm);
+
 #[cfg(test)]
 mod tests {
     use super::super::testutil::{Lcg, snr_db};
@@ -1204,5 +1391,130 @@ mod tests {
         let mut z =
             StreamingVst::with_residual_window(VstKind::SignedLog, StreamingMedian::new(3), 0);
         assert!(run(&mut z, &obs).iter().all(|v| v.is_finite()));
+    }
+
+    // ── StreamingNlm ────────────────────────────────────────────────────────
+
+    #[test]
+    fn nlm_matches_batch_on_the_interior() {
+        use crate::denoise::estimate_noise_std_helper;
+        use crate::denoise::nlm1d;
+        let (_, obs) = noisy_sine(512, 0.4, 101);
+        // The batch filter's global σ is the calibration input the stream needs; feed
+        // it that exact value and the interior is bit-for-bit identical.
+        let sigma = estimate_noise_std_helper(&obs);
+        for (ph, sh, h) in [(3usize, 12usize, 0.0), (4, 20, 0.0), (2, 8, 0.35)]
+        {
+            let mut f = StreamingNlm::new(ph, sh, h, sigma);
+            let d = f.delay();
+            assert_eq!(d, ph + sh);
+            let out = run(&mut f, &obs);
+            let batch = nlm1d(&obs, ph, sh, h);
+            for p in (2 * d)..obs.len()
+            {
+                assert_eq!(out[p], batch[p - d], "ph {ph} sh {sh} h {h} p {p}");
+            }
+        }
+    }
+
+    #[test]
+    fn nlm_search_zero_is_a_pure_delay() {
+        // search_half = 0 leaves only the j = center candidate, so the output is the
+        // input delayed by patch_half (the reference term has weight 1).
+        let (_, obs) = noisy_sine(128, 0.3, 103);
+        let mut f = StreamingNlm::new(3, 0, 0.5, 0.3);
+        let d = f.delay();
+        assert_eq!(d, 3);
+        let out = run(&mut f, &obs);
+        for p in d..obs.len()
+        {
+            assert!(
+                (out[p] - obs[p - d]).abs() < 1.0e-12,
+                "search 0 must be a pure delay: {} vs {}",
+                out[p],
+                obs[p - d]
+            );
+        }
+    }
+
+    #[test]
+    fn nlm_improves_snr_after_delay_alignment() {
+        // On a self-similar sine the streamed NLM must beat the raw stream by a wide
+        // margin once its delay is accounted for.
+        let (clean, obs) = noisy_sine(1024, 0.4, 105);
+        let sigma = super::super::estimate_noise_std_helper(&obs);
+        let mut f = StreamingNlm::new(4, 24, 0.0, sigma);
+        let d = f.delay();
+        let out = run(&mut f, &obs);
+        let reference = &clean[..clean.len() - d];
+        let s_out = snr_db(reference, &out[d..]);
+        let s_raw = snr_db(reference, &obs[..obs.len() - d]);
+        assert!(
+            s_out > s_raw + 3.0,
+            "streamed NLM {s_out:.2} dB must beat raw {s_raw:.2} dB by ≥ 3 dB"
+        );
+    }
+
+    #[test]
+    fn nlm_reset_and_object_safety() {
+        let (_, obs) = noisy_sine(256, 0.35, 107);
+        let sigma = super::super::estimate_noise_std_helper(&obs);
+        let mut f = StreamingNlm::new(3, 12, 0.0, sigma);
+        let first = run(&mut f, &obs);
+        f.reset();
+        let second = run(&mut f, &obs);
+        assert_eq!(first, second, "StreamingNlm not reproducible after reset()");
+        // Object-safe behind the trait, and the delay is reported through it.
+        let mut boxed: Box<dyn StreamingDenoiser> = Box::new(StreamingNlm::new(3, 12, 0.0, sigma));
+        assert_eq!(boxed.delay(), 15);
+        let via_trait: Vec<f64> = obs.iter().map(|&x| boxed.push(x)).collect();
+        assert_eq!(via_trait, first);
+    }
+
+    #[test]
+    fn nlm_degrades_gracefully() {
+        // A noise-free calibration (σ = 0) with auto bandwidth is a pass-through:
+        // constants (and everything else) survive delayed but unchanged.
+        let sig: Vec<f64> = (0..64).map(|i| (i as f64 * 0.2).sin()).collect();
+        let mut pass = StreamingNlm::new(3, 10, 0.0, 0.0);
+        let d = pass.delay();
+        let out = run(&mut pass, &sig);
+        for p in d..sig.len()
+        {
+            assert!(
+                (out[p] - sig[p - d]).abs() < 1.0e-12,
+                "σ=0 must pass through"
+            );
+        }
+        // Short / warm-up inputs stay finite (through the trait object).
+        for len in 0..6usize
+        {
+            let x: Vec<f64> = (0..len).map(|i| i as f64 - 1.0).collect();
+            let mut f: Box<dyn StreamingDenoiser> = Box::new(StreamingNlm::new(2, 3, 0.5, 0.3));
+            for &v in &x
+            {
+                assert!(f.push(v).is_finite(), "len {len}: non-finite warm-up");
+            }
+        }
+        // A NaN in the stream is quarantined: every finite-input sample stays finite.
+        let (_, mut obs) = noisy_sine(200, 0.3, 111);
+        obs[80] = f64::NAN;
+        let mut f = StreamingNlm::new(3, 12, 0.0, 0.3);
+        let d = f.delay();
+        let out = run(&mut f, &obs);
+        for p in 0..obs.len()
+        {
+            // out[p] estimates obs[p − d]; if that source sample was finite, so is the
+            // estimate (its own weight-1 term participates and no NaN leaks in).
+            if p >= d && obs[p - d].is_finite()
+            {
+                assert!(
+                    out[p].is_finite(),
+                    "finite sample {} became {}",
+                    p - d,
+                    out[p]
+                );
+            }
+        }
     }
 }

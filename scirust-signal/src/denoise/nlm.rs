@@ -51,7 +51,10 @@ fn mirror_extend(signal: &[f64], patch_half: usize) -> Vec<f64> {
 /// only (≤ 1e-12 relative — pinned by unit test against
 /// [`patch_dist_reference`]); a NaN in either slice still propagates to the
 /// result, exactly as it does through the naive loop.
-fn sum_sq_diff(a: &[f64], b: &[f64]) -> f64 {
+///
+/// Shared with [`super::streaming::StreamingNlm`] so the causal filter's interior
+/// patch distances are bit-for-bit those of this batch kernel.
+pub(crate) fn sum_sq_diff(a: &[f64], b: &[f64]) -> f64 {
     let (qa4, ra) = a.as_chunks::<4>();
     let (qb4, rb) = b.as_chunks::<4>();
     let (mut s0, mut s1, mut s2, mut s3) = (0.0, 0.0, 0.0, 0.0);

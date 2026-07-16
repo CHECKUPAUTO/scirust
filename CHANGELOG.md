@@ -5,6 +5,26 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `denoise::streaming::StreamingNlm` : non-local means causal
+- **`StreamingNlm`** : pendant causal, sample-par-sample, du non-local means batch
+  (`nlm::nlm1d`), pour signaux auto-similaires (formes périodiques, transitoires
+  répétés, constant-par-morceaux) sur flux temps réel / embarqué. `delay()` =
+  `search_half + patch_half` ; état = un tampon circulaire de `2·delay+1`
+  échantillons.
+  - **Équivalence batch bit-exacte** : à σ donné (le paramètre de calibration que
+    le batch estime globalement), une fois le tampon plein, la sortie est
+    bit-pour-bit `nlm1d(signal, patch_half, search_half, h)[i − delay]` sur
+    l'intérieur du batch — le noyau `sum_sq_diff` batch est réutilisé (exposé
+    `pub(crate)`), et la règle de poids (compensation de bruit `2σ²`, terme de
+    référence à poids 1, quarantaine NaN→poids 0) est octet pour octet celle du
+    batch.
+  - σ = **paramètre de calibration** (mesuré hors-ligne sur une capture
+    représentative, comme `StreamingVst`) ; bande passante `h ≤ 0` → `0.8·σ` ;
+    bande effective non positive → pass-through (constantes préservées).
+    Dégradation gracieuse (warm-up fini, NaN quarantainé). Object-safe et
+    composable dans `StreamingVst<StreamingNlm>` (NLM causal dans le domaine
+    stabilisé).
+
 ### Ajouté — `denoise::streaming` : VST causale pour l'embarqué (`StreamingVst<D>`)
 - **`StreamingVst<D: StreamingDenoiser>`** : pendant causal, sample-par-sample, du
   pipeline VST (`vst::vst_denoise`), pour le bruit dépendant du signal sur un flux
