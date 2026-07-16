@@ -254,8 +254,18 @@ Trois points d'entrée automatiques :
 
 Pour le temps réel/embarqué, le module `denoise::streaming` fournit les versions
 causales échantillon-par-échantillon (médiane, Hampel, moyenne, EMA, Kalman)
-derrière le trait `StreamingDenoiser`. Le débruitage **2-D image** (médiane 2-D,
-ondelettes séparables, non-local means) vit dans `scirust_vision::denoise`.
+derrière le trait `StreamingDenoiser`, plus **`StreamingVst<D>`** — le pendant
+causal de la VST : il enrobe n'importe quel débruiteur streaming `D` d'une
+transformée directe ponctuelle et d'un inverse corrigé du biais, pour retirer le
+bruit dépendant du signal (Poisson/multiplicatif) sur un flux, en mémoire bornée
+`O(D + W)` et sans anticipation. Le type de transformée est un *paramètre de
+calibration* (identifié une fois hors-ligne par `detect_noise_model`) ; sur les
+noyaux à inverse ponctuel (Anscombe/GAT/identité) la sortie est **bit-identique**
+au pipeline batch `vst_denoise` sur l'intérieur, tandis que les transformées à
+smearing utilisent une **fenêtre glissante** de résidus (Duan causal). Démonstration :
+`cargo run --release -p scirust-signal --example vst_streaming_embedded`. Le
+débruitage **2-D image** (médiane 2-D, ondelettes séparables, non-local means) vit
+dans `scirust_vision::denoise`.
 
 Trois compléments issus du programme de recherche TSHF (`TSHF_RESEARCH_2026-07-16.md`) :
 

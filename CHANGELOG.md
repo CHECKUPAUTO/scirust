@@ -5,6 +5,31 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — `denoise::streaming` : VST causale pour l'embarqué (`StreamingVst<D>`)
+- **`StreamingVst<D: StreamingDenoiser>`** : pendant causal, sample-par-sample, du
+  pipeline VST (`vst::vst_denoise`), pour le bruit dépendant du signal sur un flux
+  temps réel / embarqué. Enrobe n'importe quel débruiteur streaming `D` d'une
+  transformée directe ponctuelle et d'un inverse corrigé du biais ; `delay()` =
+  celui de `D` (les étages VST n'en ajoutent aucun), mémoire `O(D + W)`,
+  arithmétique déterministe.
+  - **Noyaux à inverse ponctuel** (Identité / Anscombe / GAT) : sortie
+    **bit-identique** au batch `vst_denoise` autour du pendant batch de `D`,
+    décalée de `delay()`, sur l'intérieur (épinglé par test et par l'exemple).
+  - **Noyaux à smearing** (log signé / racine signée / Box-Cox) : inverse de Duan
+    sur une **fenêtre glissante** de résidus récents (`DEFAULT_RESIDUAL_WINDOW`,
+    configurable) — causal et localement adaptatif, `O(W)` par échantillon ;
+    résidus non finis écartés, repli sur l'inverse naïf tant qu'aucun résidu.
+  - Type de transformée = **paramètre de calibration** (identifié hors-ligne par
+    `detect_noise_model` sur un enregistrement représentatif) ; `Identity` rend
+    l'enrobage transparent. Dégradation gracieuse (paramètres dégénérés → `D` sur
+    le flux brut ; warm-up fini ; `residual_window = 0` borné à 1).
+  - Refactor `vst.rs` : helpers scalaires `forward_scalar` /
+    `inverse_corrected_pointwise_scalar` / `inverse_naive_scalar` extraits comme
+    source unique de vérité partagée batch/streaming (sorties batch inchangées).
+  - Exemple `examples/vst_streaming_embedded.rs` : flux Poisson type comptage
+    photonique, débruité en continu (8,96 → 19,16 dB), équivalence batch bit-exacte
+    vérifiée, empreinte mémoire bornée affichée.
+
 ### Ajouté — `denoise` round 5 : GAT, protocole §9 rejouable, VST 2-D, docs multilingues
 Prolonge l'exécution du programme TSHF (round 4) ; chaque choix est calibré par
 mesure (addendum 2 du rapport).

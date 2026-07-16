@@ -171,66 +171,61 @@ fn gat_params_ok(gain: f64, sigma: f64) -> bool {
     gain.is_finite() && gain > 0.0 && sigma.is_finite() && sigma >= 0.0
 }
 
+/// The scalar forward transform `φ` of `kind` — the single source of truth shared
+/// by the batch [`vst_forward`] and the causal [`super::streaming::StreamingVst`],
+/// so the two agree bit-for-bit on the pointwise map.
+///
+/// Out-of-domain inputs are clamped as documented on [`VstKind`] — Anscombe at
+/// `−3/8`, Box-Cox at `1e-12` — never silently redefined elsewhere. A Box-Cox or
+/// GAT with degenerate parameters degrades to the identity map (`φ(x) = x`).
+pub(crate) fn forward_scalar(kind: VstKind, x: f64) -> f64 {
+    match kind
+    {
+        VstKind::Identity => x,
+        VstKind::Anscombe => 2.0 * (x.max(-ANSCOMBE_OFFSET) + ANSCOMBE_OFFSET).sqrt(),
+        VstKind::SignedLog => x.signum() * x.abs().ln_1p(),
+        VstKind::SignedSqrt => x.signum() * x.abs().sqrt(),
+        VstKind::BoxCox(lambda) =>
+        {
+            if !lambda.is_finite()
+            {
+                return x;
+            }
+            let xc = x.max(BOXCOX_MIN);
+            if lambda == 0.0
+            {
+                xc.ln()
+            }
+            else
+            {
+                (xc.powf(lambda) - 1.0) / lambda
+            }
+        },
+        VstKind::Gat { gain, sigma } =>
+        {
+            if !gat_params_ok(gain, sigma)
+            {
+                return x;
+            }
+            let offset = ANSCOMBE_OFFSET * gain * gain + sigma * sigma;
+            2.0 / gain * (gain * x + offset).max(0.0).sqrt()
+        },
+    }
+}
+
 /// Apply the forward transform `φ` of `kind` pointwise.
 ///
 /// Out-of-domain inputs are clamped as documented on [`VstKind`] — Anscombe at
 /// `−3/8`, Box-Cox at `1e-12` — never silently redefined elsewhere. A Box-Cox with
 /// non-finite `λ` degrades to a copy of the input.
 pub fn vst_forward(kind: VstKind, signal: &[f64]) -> Vec<f64> {
-    match kind
-    {
-        VstKind::Identity => signal.to_vec(),
-        VstKind::Anscombe => signal
-            .iter()
-            .map(|&x| 2.0 * (x.max(-ANSCOMBE_OFFSET) + ANSCOMBE_OFFSET).sqrt())
-            .collect(),
-        VstKind::SignedLog => signal
-            .iter()
-            .map(|&x| x.signum() * x.abs().ln_1p())
-            .collect(),
-        VstKind::SignedSqrt => signal
-            .iter()
-            .map(|&x| x.signum() * x.abs().sqrt())
-            .collect(),
-        VstKind::BoxCox(lambda) =>
-        {
-            if !lambda.is_finite()
-            {
-                return signal.to_vec();
-            }
-            signal
-                .iter()
-                .map(|&x| {
-                    let xc = x.max(BOXCOX_MIN);
-                    if lambda == 0.0
-                    {
-                        xc.ln()
-                    }
-                    else
-                    {
-                        (xc.powf(lambda) - 1.0) / lambda
-                    }
-                })
-                .collect()
-        },
-        VstKind::Gat { gain, sigma } =>
-        {
-            if !gat_params_ok(gain, sigma)
-            {
-                return signal.to_vec();
-            }
-            let offset = ANSCOMBE_OFFSET * gain * gain + sigma * sigma;
-            signal
-                .iter()
-                .map(|&x| 2.0 / gain * (gain * x + offset).max(0.0).sqrt())
-                .collect()
-        },
-    }
+    signal.iter().map(|&x| forward_scalar(kind, x)).collect()
 }
 
-/// The scalar algebraic inverse `φ⁻¹` of `kind` — shared by [`vst_inverse_naive`]
-/// and the smearing estimator of [`vst_inverse_corrected`].
-fn inverse_naive_scalar(kind: VstKind, y: f64) -> f64 {
+/// The scalar algebraic inverse `φ⁻¹` of `kind` — shared by [`vst_inverse_naive`],
+/// the smearing estimator of [`vst_inverse_corrected`], and the causal
+/// [`super::streaming::StreamingVst`].
+pub(crate) fn inverse_naive_scalar(kind: VstKind, y: f64) -> f64 {
     match kind
     {
         VstKind::Identity => y,
@@ -304,6 +299,34 @@ pub fn anscombe_inverse_exact_unbiased(y: f64) -> f64 {
     (0.25 * y2 + 0.25 * sqrt_3_2 / y - 1.375 / y2 + 0.625 * sqrt_3_2 / y3 - 0.125).max(0.0)
 }
 
+/// The scalar **bias-corrected inverse for the pointwise kinds** — Identity,
+/// Anscombe (exact unbiased inverse), and GAT (exact unbiased GAT inverse) — which
+/// need no residual set. Shared by the batch [`vst_inverse_corrected`] and the
+/// causal [`super::streaming::StreamingVst`] so the two agree bit-for-bit. The
+/// smearing kinds (signed log / signed sqrt / Box-Cox) are *not* pointwise — they
+/// need the residual distribution — and fall back here to the naive inverse only as
+/// a degenerate guard; callers handle them with a smearing average instead.
+pub(crate) fn inverse_corrected_pointwise_scalar(kind: VstKind, y: f64) -> f64 {
+    match kind
+    {
+        VstKind::Identity => y,
+        VstKind::Anscombe => anscombe_inverse_exact_unbiased(y),
+        VstKind::Gat { gain, sigma } =>
+        {
+            if !gat_params_ok(gain, sigma)
+            {
+                return y;
+            }
+            let read_noise = (sigma / gain) * (sigma / gain);
+            gain * (anscombe_inverse_exact_unbiased(y) - read_noise).max(0.0)
+        },
+        VstKind::SignedLog | VstKind::SignedSqrt | VstKind::BoxCox(_) =>
+        {
+            inverse_naive_scalar(kind, y)
+        },
+    }
+}
+
 /// Compress the residual set to at most [`SMEAR_MAX_RESIDUALS`] values: non-finite
 /// residuals are dropped; a larger set is sorted (with `total_cmp`, so a stray NaN
 /// cannot panic the sort) and represented by evenly spaced midpoint order statistics
@@ -352,23 +375,10 @@ fn smearing_sample(residuals: &[f64]) -> Vec<f64> {
 pub fn vst_inverse_corrected(kind: VstKind, filtered: &[f64], residuals: &[f64]) -> Vec<f64> {
     match kind
     {
-        VstKind::Identity => filtered.to_vec(),
-        VstKind::Anscombe => filtered
+        VstKind::Identity | VstKind::Anscombe | VstKind::Gat { .. } => filtered
             .iter()
-            .map(|&y| anscombe_inverse_exact_unbiased(y))
+            .map(|&y| inverse_corrected_pointwise_scalar(kind, y))
             .collect(),
-        VstKind::Gat { gain, sigma } =>
-        {
-            if !gat_params_ok(gain, sigma)
-            {
-                return filtered.to_vec();
-            }
-            let read_noise = (sigma / gain) * (sigma / gain);
-            filtered
-                .iter()
-                .map(|&y| gain * (anscombe_inverse_exact_unbiased(y) - read_noise).max(0.0))
-                .collect()
-        },
         VstKind::SignedLog | VstKind::SignedSqrt | VstKind::BoxCox(_) =>
         {
             let sample = smearing_sample(residuals);
