@@ -16,6 +16,7 @@ use crate::nn::nd_layers::{NdEmbedding, NdLayerNorm, NdLinear, NdTransformerBloc
 use crate::nn::nd_optim::{NdAdam, NdParam};
 use crate::nn::rng::PcgEngine;
 use crate::tensor::tensor_nd::TensorND;
+use std::collections::HashMap;
 
 /// Hyper-parameters of an [`NdDecoderLM`].
 #[derive(Clone, Copy, Debug)]
@@ -195,6 +196,52 @@ impl NdDecoderLM {
     /// Maximum sequence length (size of the positional table).
     pub fn max_seq(&self) -> usize {
         self.max_seq
+    }
+
+    /// Every parameter as a named state dict, following the 2-D "prefix.key"
+    /// convention. Names are derived from the (deterministic) model topology:
+    ///
+    /// ```text
+    /// tok.table                     (vocab, d_model)
+    /// pos.table                     (max_seq, d_model)
+    /// blocks.{i}.ln1.gamma / .beta  (d_model,)
+    /// blocks.{i}.attn.w_q.weight / .bias   (idem w_k, w_v, w_o)
+    /// blocks.{i}.ln2.gamma / .beta
+    /// blocks.{i}.ffn1.weight / .bias
+    /// blocks.{i}.ffn2.weight / .bias
+    /// ln_f.gamma / ln_f.beta
+    /// head.weight / head.bias
+    /// ```
+    ///
+    /// Save with [`crate::io::safetensors::save_state_dict_nd`]; restore into a
+    /// same-config model with [`Self::load_state_dict`].
+    pub fn state_dict(&self) -> HashMap<String, TensorND> {
+        let mut map = HashMap::new();
+        self.tok.state_dict_into("tok", &mut map);
+        self.pos.state_dict_into("pos", &mut map);
+        for (i, b) in self.blocks.iter().enumerate()
+        {
+            b.state_dict_into(&format!("blocks.{i}"), &mut map);
+        }
+        self.ln_f.state_dict_into("ln_f", &mut map);
+        self.head.state_dict_into("head", &mut map);
+        map
+    }
+
+    /// Load every parameter from a state dict produced by
+    /// [`Self::state_dict`] on a model of the **same config**. Errors on a
+    /// missing key, a rank mismatch, or a shape mismatch (leaving the model
+    /// partially updated — reload a known-good dict to recover).
+    pub fn load_state_dict(&mut self, sd: &HashMap<String, TensorND>) -> crate::error::Result<()> {
+        self.tok.load_state_dict_from("tok", sd)?;
+        self.pos.load_state_dict_from("pos", sd)?;
+        for (i, b) in self.blocks.iter_mut().enumerate()
+        {
+            b.load_state_dict_from(&format!("blocks.{i}"), sd)?;
+        }
+        self.ln_f.load_state_dict_from("ln_f", sd)?;
+        self.head.load_state_dict_from("head", sd)?;
+        Ok(())
     }
 
     /// Autoregressive **greedy** decoding: append the argmax next token,
@@ -717,6 +764,109 @@ mod tests {
         let b = run();
         assert_eq!(a.shape, vec![tokens.len(), 6]);
         assert_eq!(a.data, b.data);
+    }
+
+    /// A (briefly trained) model's named `state_dict` restores into a fresh
+    /// same-config model **bit-for-bit**: every parameter identical, and the
+    /// two models produce bit-identical logits. Also locks the naming scheme
+    /// ("prefix.key", topology-derived) and the key count.
+    #[test]
+    fn nd_decoder_state_dict_round_trips_bit_identical() {
+        use crate::nn::nd_optim::NdAdam;
+
+        let cfg = tiny_cfg();
+        let mut src = NdDecoderLM::new(cfg, &mut PcgEngine::new(11));
+        // A few Adam steps so the saved params differ from any fresh init.
+        let seq = [1usize, 2, 3, 4, 2, 5];
+        let mut opt = NdAdam::with_lr(0.01);
+        for _ in 0..10
+        {
+            let t = NdTape::new();
+            let loss = src.loss(&t, &seq);
+            let grads = t.backward(loss);
+            let mut params = src.parameters();
+            opt.step(&mut params, &grads);
+        }
+
+        let sd = src.state_dict();
+        // 2 embeddings + n_layers·(ln1:2 + attn:8 + ln2:2 + ffn1:2 + ffn2:2)
+        // + ln_f:2 + head:2 keys.
+        assert_eq!(sd.len(), 2 + cfg.n_layers * 16 + 4);
+        assert!(sd.contains_key("tok.table"));
+        assert!(sd.contains_key("blocks.0.attn.w_q.weight"));
+        assert!(sd.contains_key("blocks.1.ffn2.bias"));
+        assert!(sd.contains_key("ln_f.gamma"));
+        assert!(sd.contains_key("head.bias"));
+
+        let mut dst = NdDecoderLM::new(cfg, &mut PcgEngine::new(999));
+        dst.load_state_dict(&sd).unwrap();
+
+        // Every parameter bit-identical.
+        let sd2 = dst.state_dict();
+        assert_eq!(sd2.len(), sd.len());
+        for (k, v) in &sd
+        {
+            let w = &sd2[k];
+            assert_eq!(v.shape, w.shape, "shape of {k}");
+            assert!(
+                v.data
+                    .iter()
+                    .zip(w.data.iter())
+                    .all(|(a, b)| a.to_bits() == b.to_bits()),
+                "param {k} not bit-identical after load"
+            );
+        }
+
+        // And the models are functionally identical: bit-identical logits.
+        let tokens = [0usize, 3, 1, 5, 2];
+        let (ta, tb) = (NdTape::new(), NdTape::new());
+        let la = src.forward(&ta, &tokens);
+        let lb = dst.forward(&tb, &tokens);
+        assert_eq!(ta.value(la).data, tb.value(lb).data);
+    }
+
+    /// `load_state_dict` validates its input: a missing key errors
+    /// (`InvalidConfig` naming the key), a transposed rank-2 weight errors with
+    /// the typed `ShapeMismatch`, and a wrong-rank tensor errors with
+    /// `RankMismatch`.
+    #[test]
+    fn nd_decoder_load_state_dict_rejects_missing_key_and_bad_shape() {
+        use crate::error::SciRustError;
+
+        let cfg = tiny_cfg();
+        let src = NdDecoderLM::new(cfg, &mut PcgEngine::new(11));
+        let sd = src.state_dict();
+
+        // Missing key.
+        let mut missing = sd.clone();
+        missing.remove("blocks.1.attn.w_q.weight").unwrap();
+        let mut m1 = NdDecoderLM::new(cfg, &mut PcgEngine::new(2));
+        let err = m1.load_state_dict(&missing).unwrap_err();
+        assert!(
+            format!("{err}").contains("blocks.1.attn.w_q.weight"),
+            "error should name the missing key, got: {err}"
+        );
+
+        // Wrong shape (transposed head weight): typed 2-D ShapeMismatch.
+        let mut bad_shape = sd.clone();
+        bad_shape.insert(
+            "head.weight".to_string(),
+            TensorND::zeros(&[cfg.vocab, cfg.d_model]),
+        );
+        let mut m2 = NdDecoderLM::new(cfg, &mut PcgEngine::new(3));
+        assert!(matches!(
+            m2.load_state_dict(&bad_shape).unwrap_err(),
+            SciRustError::ShapeMismatch { .. }
+        ));
+
+        // Wrong rank (gamma stored as a column instead of a vector).
+        let mut bad_rank = sd.clone();
+        bad_rank.insert("ln_f.gamma".to_string(), TensorND::zeros(&[cfg.d_model, 1]));
+        let mut m3 = NdDecoderLM::new(cfg, &mut PcgEngine::new(4));
+        assert!(matches!(
+            m3.load_state_dict(&bad_rank).unwrap_err(),
+            SciRustError::RankMismatch { .. }
+        ));
     }
 
     /// The decoder LM trains with the **N-D Adam** optimizer (via

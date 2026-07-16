@@ -18,8 +18,11 @@
 //   "__metadata__": { ... }          // optionnel
 // }
 //
-// Cette implémentation supporte F32 uniquement et les tenseurs 2D.
-// Compatible avec PyTorch/Hugging Face quand les shapes sont 2D row-major.
+// Cette implémentation supporte F32 uniquement. L'API historique
+// (`serialize`/`deserialize`, `save_state_dict`/`load_state_dict`) est typée
+// sur le `Tensor` 2D ; l'API `*_state_dict_nd` (plus bas) sérialise des
+// `TensorND` de rang quelconque (le champ JSON `shape` porte naturellement la
+// shape complète). Compatible avec PyTorch/Hugging Face pour du row-major.
 //
 // ## Limitations du parser JSON
 //
@@ -45,6 +48,7 @@
 const MAX_HEADER_SIZE: usize = 16 * 1024 * 1024;
 
 use crate::autodiff::reverse::Tensor;
+use crate::tensor::tensor_nd::TensorND;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Read, Write};
@@ -374,8 +378,53 @@ fn extract_array_field(obj: &str, name: &str) -> io::Result<Vec<i64>> {
         .map(|p| start + p)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "array non terminé"))?;
     let inner = &obj[start..end];
+    if inner.trim().is_empty()
+    {
+        // "[]" — a rank-0 (scalar) shape is legal for the N-D API.
+        return Ok(Vec::new());
+    }
     let nums: Result<Vec<i64>, _> = inner.split(',').map(|s| s.trim().parse::<i64>()).collect();
     nums.map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+
+/// Split a safetensors buffer into (JSON header, data payload), validating the
+/// `u64` header size (bounds, `MAX_HEADER_SIZE`, UTF-8).
+fn split_header(bytes: &[u8]) -> io::Result<(&str, &[u8])> {
+    if bytes.len() < 8
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "fichier trop court",
+        ));
+    }
+    let header_size_bytes: [u8; 8] = bytes[0..8].try_into().expect("header size slice");
+    let header_size_u64 = u64::from_le_bytes(header_size_bytes);
+    let header_size = usize::try_from(header_size_u64).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "header_size overflow sur cette plateforme",
+        )
+    })?;
+    if header_size > MAX_HEADER_SIZE
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "header trop grand : {} bytes (max {})",
+                header_size, MAX_HEADER_SIZE
+            ),
+        ));
+    }
+    if 8 + header_size > bytes.len()
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "header_size invalide",
+        ));
+    }
+    let header = std::str::from_utf8(&bytes[8..8 + header_size])
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    Ok((header, &bytes[8 + header_size..]))
 }
 
 // ================================================================== //
@@ -658,6 +707,234 @@ fn extract_metadata(header: &str) -> std::collections::HashMap<String, String> {
         }
     }
     meta
+}
+
+// ------------------------------------------------------------------ //
+//  save_state_dict_nd / load_state_dict_nd  (TensorND, rang N)       //
+// ------------------------------------------------------------------ //
+
+/// Serialize an N-D state dict (`name → TensorND`) plus metadata into
+/// safetensors bytes. The full N-D shape goes into the JSON `shape` field
+/// (rank 0 → `[]`); data is written contiguously row-major, keys sorted, so
+/// the output is deterministic. Round-trips bit-for-bit through
+/// [`deserialize_state_dict_nd`].
+pub fn serialize_state_dict_nd(
+    state: &HashMap<String, TensorND>,
+    metadata: &HashMap<String, String>,
+) -> Vec<u8> {
+    let meta_entries: Vec<String> = metadata
+        .iter()
+        .map(|(k, v)| format!(r#""{}":"{}""#, escape_json(k), escape_json(v)))
+        .collect();
+    let meta_json = format!(r#""__metadata__":{{{}}}"#, meta_entries.join(","));
+
+    let mut keys: Vec<&String> = state.keys().collect();
+    keys.sort();
+
+    let mut offset = 0usize;
+    let mut entries: Vec<String> = Vec::with_capacity(state.len());
+    let mut raw_data: Vec<u8> = Vec::new();
+
+    for name in keys
+    {
+        let t = state[name].to_contiguous();
+        let n_bytes = t.data.len() * 4;
+        let shape_json = t
+            .shape
+            .iter()
+            .map(|d| d.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let entry = format!(
+            r#""{}":{{"dtype":"F32","shape":[{}],"data_offsets":[{},{}]}}"#,
+            escape_json(name),
+            shape_json,
+            offset,
+            offset + n_bytes,
+        );
+        entries.push(entry);
+        offset += n_bytes;
+        for &x in t.data.iter()
+        {
+            raw_data.extend_from_slice(&x.to_le_bytes());
+        }
+    }
+
+    let header = if entries.is_empty()
+    {
+        format!("{{{meta_json}}}")
+    }
+    else
+    {
+        format!("{{{},{}}}", meta_json, entries.join(","))
+    };
+    let header_bytes = header.as_bytes();
+    let header_size = header_bytes.len() as u64;
+
+    let mut out = Vec::with_capacity(8 + header_bytes.len() + raw_data.len());
+    out.extend_from_slice(&header_size.to_le_bytes());
+    out.extend_from_slice(header_bytes);
+    out.extend_from_slice(&raw_data);
+    out
+}
+
+/// Parse a safetensors JSON header into N-D tensors: like [`parse_header`] but
+/// accepting any rank (including 0 — a scalar), with the same untrusted-input
+/// validation (F32 only, no negative dims/offsets, checked `numel` overflow,
+/// offsets in bounds and consistent with the shape).
+fn parse_header_nd(header: &str, data: &[u8]) -> io::Result<HashMap<String, TensorND>> {
+    let mut out = HashMap::new();
+    let bytes = header.as_bytes();
+    let mut i = 0;
+    while i < bytes.len()
+    {
+        if bytes[i] != b'"'
+        {
+            i += 1;
+            continue;
+        }
+        let key_start = i + 1;
+        let key_end = find_unescaped_quote(&bytes[key_start..])
+            .map(|p| key_start + p)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "string non terminée"))?;
+        let key = &header[key_start..key_end];
+        i = key_end + 1;
+
+        while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b':')
+        {
+            i += 1;
+        }
+
+        if key == "__metadata__"
+        {
+            i = skip_balanced(bytes, i, b'{', b'}');
+            continue;
+        }
+
+        if i >= bytes.len() || bytes[i] != b'{'
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("attendu '{{' après {key}"),
+            ));
+        }
+        let obj_end = skip_balanced(bytes, i, b'{', b'}');
+        let obj = &header[i..obj_end];
+        i = obj_end;
+
+        let dtype = extract_str_field(obj, "dtype")?;
+        if dtype != "F32"
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("dtype non supporté : {dtype}"),
+            ));
+        }
+        let shape = extract_array_field(obj, "shape")?;
+        let offsets = extract_array_field(obj, "data_offsets")?;
+
+        if offsets.len() != 2
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "data_offsets doit être [s, e]",
+            ));
+        }
+        // Reject negative dims/offsets from an untrusted header BEFORE casting
+        // to usize (same DoS guard as the 2-D parser).
+        if shape.iter().chain(offsets.iter()).any(|&v| v < 0)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "valeur négative dans shape / data_offsets",
+            ));
+        }
+        let dims: Vec<usize> = shape.iter().map(|&d| d as usize).collect();
+        let numel = dims
+            .iter()
+            .try_fold(1usize, |acc, &d| acc.checked_mul(d))
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "débordement du produit de shape",
+                )
+            })?;
+        let (start, end) = (offsets[0] as usize, offsets[1] as usize);
+        if end > data.len() || start > end
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "offsets hors bornes",
+            ));
+        }
+        if (end - start) % 4 != 0
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "span data_offsets non multiple de 4 octets (f32)",
+            ));
+        }
+        let n = (end - start) / 4;
+        if n != numel
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("taille data inattendue : {n} vs {numel}"),
+            ));
+        }
+
+        let mut floats = Vec::with_capacity(n);
+        for k in 0..n
+        {
+            let off = start + k * 4;
+            let float_bytes: [u8; 4] = data[off..off + 4]
+                .try_into()
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "offset data invalide"))?;
+            floats.push(f32::from_le_bytes(float_bytes));
+        }
+
+        out.insert(key.to_string(), TensorND::new(floats, dims));
+    }
+
+    Ok(out)
+}
+
+/// Deserialize safetensors bytes produced by [`serialize_state_dict_nd`] (any
+/// rank) into `(state dict, metadata)`.
+pub fn deserialize_state_dict_nd(
+    bytes: &[u8],
+) -> io::Result<(HashMap<String, TensorND>, HashMap<String, String>)> {
+    let (header, data) = split_header(bytes)?;
+    let metadata = extract_metadata(header);
+    let tensors = parse_header_nd(header, data)?;
+    Ok((tensors, metadata))
+}
+
+/// Save an N-D state dict (plus optional metadata) to a safetensors file —
+/// the N-D counterpart of [`save_state_dict`]. Pairs with
+/// `NdDecoderLM::state_dict`.
+pub fn save_state_dict_nd<P: AsRef<Path>>(
+    path: P,
+    state: &HashMap<String, TensorND>,
+    metadata: Option<HashMap<String, String>>,
+) -> io::Result<()> {
+    let meta = metadata.unwrap_or_default();
+    let bytes = serialize_state_dict_nd(state, &meta);
+    let mut f = File::create(path.as_ref())?;
+    f.write_all(&bytes)?;
+    Ok(())
+}
+
+/// Load an N-D state dict (plus metadata) from a safetensors file — the N-D
+/// counterpart of [`load_state_dict`]. Feed the result to
+/// `NdDecoderLM::load_state_dict`.
+pub fn load_state_dict_nd<P: AsRef<Path>>(
+    path: P,
+) -> io::Result<(HashMap<String, TensorND>, HashMap<String, String>)> {
+    let mut f = File::open(path.as_ref())?;
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf)?;
+    deserialize_state_dict_nd(&buf)
 }
 
 // ================================================================== //
@@ -958,5 +1235,137 @@ mod tests {
         let map = deserialize(&bytes).expect("valid buffer must deserialize");
         assert_eq!(map["w"].data, t.data);
         assert_eq!(map["w"].shape(), (2, 2));
+    }
+
+    // ---------------------------------------------------------------- //
+    //  N-D state dicts (TensorND)                                      //
+    // ---------------------------------------------------------------- //
+
+    fn bits_equal(a: &TensorND, b: &TensorND) -> bool {
+        a.shape == b.shape
+            && a.data
+                .iter()
+                .zip(b.data.iter())
+                .all(|(x, y)| x.to_bits() == y.to_bits())
+    }
+
+    /// Rank-3 and rank-4 tensors round-trip through the N-D serializer with
+    /// their full shapes and bit-identical data (awkward values included:
+    /// -0.0, subnormals).
+    #[test]
+    fn nd_state_dict_round_trip_rank3_rank4_bitexact() {
+        let mut r3: Vec<f32> = (0..24).map(|i| (i as f32 - 11.5) * 0.37).collect();
+        r3[0] = -0.0;
+        r3[1] = 1.0e-38; // subnormal
+        let r4: Vec<f32> = (0..120).map(|i| 1.0 / (i as f32 + 0.5)).collect();
+
+        let mut state = HashMap::new();
+        state.insert(
+            "conv.kernel".to_string(),
+            TensorND::new(r3.clone(), vec![2, 3, 4]),
+        );
+        state.insert(
+            "attn.qkv".to_string(),
+            TensorND::new(r4.clone(), vec![2, 3, 4, 5]),
+        );
+
+        let bytes = serialize_state_dict_nd(&state, &HashMap::new());
+        let (loaded, meta) = deserialize_state_dict_nd(&bytes).unwrap();
+        assert!(meta.is_empty());
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded["conv.kernel"].shape(), &[2, 3, 4]);
+        assert_eq!(loaded["attn.qkv"].shape(), &[2, 3, 4, 5]);
+        assert!(bits_equal(&loaded["conv.kernel"], &state["conv.kernel"]));
+        assert!(bits_equal(&loaded["attn.qkv"], &state["attn.qkv"]));
+
+        // Deterministic output (sorted keys).
+        let bytes2 = serialize_state_dict_nd(&state, &HashMap::new());
+        assert_eq!(bytes, bytes2);
+    }
+
+    /// N-D file round trip via save_state_dict_nd / load_state_dict_nd,
+    /// with metadata and mixed ranks (1, 2, 3) plus a rank-0 scalar.
+    #[test]
+    fn nd_state_dict_file_round_trip() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("test_scirust_state_dict_nd.safetensors");
+
+        let mut state = HashMap::new();
+        state.insert("gamma".to_string(), TensorND::ones(&[7]));
+        state.insert(
+            "w".to_string(),
+            TensorND::new((0..6).map(|i| i as f32).collect(), vec![2, 3]),
+        );
+        state.insert(
+            "cube".to_string(),
+            TensorND::new((0..8).map(|i| i as f32 * 0.5).collect(), vec![2, 2, 2]),
+        );
+        state.insert("scalar".to_string(), TensorND::new(vec![42.5], vec![]));
+        let mut meta = HashMap::new();
+        meta.insert("arch".to_string(), "nd_decoder".to_string());
+
+        save_state_dict_nd(&path, &state, Some(meta)).unwrap();
+        let (loaded, loaded_meta) = load_state_dict_nd(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(loaded_meta.get("arch").unwrap(), "nd_decoder");
+        assert_eq!(loaded.len(), 4);
+        for (k, v) in &state
+        {
+            assert!(bits_equal(&loaded[k], v), "tensor {k} not bit-identical");
+        }
+        assert_eq!(loaded["scalar"].ndim(), 0);
+        assert_eq!(loaded["scalar"].numel(), 1);
+    }
+
+    // The N-D parser keeps the untrusted-input guards of the 2-D one: a
+    // negative dimension is an error, not a usize::MAX cast + overflow panic.
+    #[test]
+    fn nd_deserialize_rejects_negative_shape_without_panicking() {
+        let header = r#"{"t":{"dtype":"F32","shape":[-1,4,2],"data_offsets":[0,32]}}"#;
+        let hdr = header.as_bytes();
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&(hdr.len() as u64).to_le_bytes());
+        buf.extend_from_slice(hdr);
+        buf.extend_from_slice(&[0u8; 32]);
+        assert!(deserialize_state_dict_nd(&buf).is_err());
+    }
+
+    /// End-to-end: an `NdDecoderLM` saved to a safetensors file and loaded
+    /// into a fresh same-config model restores **every** parameter
+    /// bit-for-bit — the "save a trained ND transformer" capability.
+    #[test]
+    fn nd_decoder_lm_safetensors_save_load_params_identical() {
+        use crate::nn::nd_decoder::{NdDecoderConfig, NdDecoderLM};
+
+        let cfg = NdDecoderConfig {
+            vocab: 6,
+            d_model: 16,
+            n_heads: 2,
+            d_ff: 32,
+            n_layers: 2,
+            max_seq: 8,
+        };
+        let src = NdDecoderLM::new(cfg, &mut PcgEngine::new(21));
+        let sd = src.state_dict();
+
+        let dir = std::env::temp_dir();
+        let path = dir.join("test_scirust_nd_decoder.safetensors");
+        save_state_dict_nd(&path, &sd, None).unwrap();
+        let (loaded_sd, _) = load_state_dict_nd(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        let mut dst = NdDecoderLM::new(cfg, &mut PcgEngine::new(84));
+        dst.load_state_dict(&loaded_sd).unwrap();
+
+        let sd2 = dst.state_dict();
+        assert_eq!(sd2.len(), sd.len());
+        for (k, v) in &sd
+        {
+            assert!(
+                bits_equal(&sd2[k], v),
+                "param {k} not bit-identical after file round trip"
+            );
+        }
     }
 }

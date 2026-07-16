@@ -13,9 +13,31 @@
 //! `permute`, `layernorm` (last axis), and `sum` to a scalar — enough to build
 //! a full transformer block (see `nn::nd_layers`). The shape building blocks
 //! (`broadcast_shape`, `broadcast_to`, `matmul_shape`) live on [`TensorND`].
+//!
+//! # Bridging the 2-D world (`Tensor`/`Tape`/`Var`) and the N-D world
+//!
+//! The 2-D tape and this N-D tape are **separate autograd graphs**: a node of
+//! one cannot be an operand of the other, so there is deliberately no
+//! `Var` ↔ `NdVar` conversion and gradients never flow across the bridge.
+//! **Data**, however, moves freely at the tensor level:
+//!
+//! - **values in** — [`TensorND::from_tensor_2d`] copies a 2-D [`Tensor`] into
+//!   a rank-2 [`TensorND`] (row-major, bit-for-bit), and
+//!   [`NdTape::input_from_2d`] places it on an N-D tape as a leaf in one step;
+//! - **values out** — [`TensorND::to_tensor_2d`] turns any rank-2 result
+//!   (e.g. from [`NdTape::value`]) back into a 2-D [`Tensor`]; reshape or
+//!   [`TensorND::flatten_from`] first if the value has more axes;
+//! - **grads out** — [`NdTape::backward`] returns plain [`TensorND`]s, so a
+//!   rank-2 gradient converts with the same `to_tensor_2d` and can then feed
+//!   any 2-D consumer (optimizers, [`crate::io::safetensors`], …).
+//!
+//! To differentiate through both worlds, run each side on its own tape and
+//! stitch the chain rule by hand (feed the N-D gradient in as the seed of the
+//! 2-D loss, or vice versa).
 
 use std::cell::RefCell;
 
+use crate::autodiff::reverse::Tensor;
 use crate::tensor::tensor_nd::TensorND;
 
 #[derive(Clone)]
@@ -102,6 +124,14 @@ impl NdTape {
     /// Place an input (leaf) value on the tape.
     pub fn input(&self, value: TensorND) -> NdVar<'_> {
         self.push(Op::Leaf, value)
+    }
+
+    /// Place a 2-D [`Tensor`] on the tape as a rank-2 leaf — the tape-level
+    /// convenience of the [`TensorND::from_tensor_2d`] bridge (see the module
+    /// docs on moving data between the 2-D and N-D worlds). The data is copied;
+    /// no gradient flows back to any 2-D tape.
+    pub fn input_from_2d(&self, t: &Tensor) -> NdVar<'_> {
+        self.input(TensorND::from_tensor_2d(t))
     }
 
     fn push(&self, op: Op, value: TensorND) -> NdVar<'_> {
@@ -1141,6 +1171,35 @@ fn bmm_backward(a: &TensorND, b: &TensorND, g: &TensorND) -> (TensorND, TensorND
 mod tests {
     use super::*;
     use std::sync::Arc;
+
+    /// The 2D→ND tape bridge: a 2-D `Tensor` enters as a rank-2 leaf
+    /// bit-for-bit, and after `backward` its gradient reads out as a 2-D
+    /// `Tensor` again (`loss = Σ x⊙x ⇒ ∂x = 2x`).
+    #[test]
+    fn input_from_2d_bridges_values_and_grads() {
+        let t = Tensor::from_vec(vec![1.5, -2.0, 3.25, 4.0, -0.5, 0.75], 2, 3);
+        let tape = NdTape::new();
+        let x = tape.input_from_2d(&t);
+        assert_eq!(x.shape(), vec![2, 3]);
+
+        // Value round-trips to 2-D bit-for-bit.
+        let v = tape.value(x).to_tensor_2d().unwrap();
+        assert_eq!(v.shape(), (2, 3));
+        for (a, b) in t.data.iter().zip(v.data.iter())
+        {
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
+
+        // Grad reads out as a rank-2 tensor convertible back to 2-D.
+        let loss = x.mul(x).sum();
+        let grads = tape.backward(loss);
+        let gx = grads[x.idx()].to_tensor_2d().unwrap();
+        assert_eq!(gx.shape(), (2, 3));
+        for (g, &xi) in gx.data.iter().zip(t.data.iter())
+        {
+            assert!((g - 2.0 * xi).abs() < 1e-6, "d(sum x²)/dx = 2x");
+        }
+    }
 
     /// RoPE portable ≈ RoPE libm (fréquences/rotations à quelques ulps),
     /// gradient = rotation transposée exacte (roundtrip bit-cohérent), et

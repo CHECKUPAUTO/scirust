@@ -8,9 +8,11 @@
 //! preserving determinism.
 
 use crate::autodiff::nd::{NdTape, NdVar};
+use crate::error::{Result, SciRustError};
 use crate::nn::nd_optim::NdParam;
 use crate::nn::rng::PcgEngine;
 use crate::tensor::tensor_nd::TensorND;
+use std::collections::HashMap;
 
 /// A dense layer `y = x · W + b` acting on the **last axis** of an N-D input:
 /// `(…, in) → (…, out)`. The leading axes (batch, heads, sequence, …) are
@@ -631,6 +633,185 @@ impl NdTransformerBlock {
         params.extend(self.ffn1.parameters());
         params.extend(self.ffn2.parameters());
         params
+    }
+}
+
+// ---------------------------------------------------------------------------
+//  Named state dicts for the N-D layers (serialization support)
+// ---------------------------------------------------------------------------
+//
+// The optimizer path exposes parameters positionally (`parameters()` →
+// `Vec<NdParam>`), which is useless for saving/loading a model. These methods
+// give every parameter a stable hierarchical name following the 2-D
+// "prefix.key" convention (`nn::module`): a parent passes `"{prefix}.{child}"`
+// down, leaves append their parameter name ("weight", "bias", "table",
+// "gamma", "beta"). The model topology is deterministic, so the names are too.
+
+/// Fetch `key` from a state dict and validate its shape against `expected`.
+/// Errors on a missing key ([`SciRustError::InvalidConfig`]), a rank mismatch
+/// ([`SciRustError::RankMismatch`]), or — for matching ranks — a dimension
+/// mismatch ([`SciRustError::ShapeMismatch`] for rank 2, the typed 2-D variant;
+/// [`SciRustError::InvalidConfig`] with both full shapes otherwise). Returns a
+/// contiguous copy ready to store.
+pub(crate) fn take_state_dict_param(
+    sd: &HashMap<String, TensorND>,
+    key: &str,
+    expected: &[usize],
+) -> Result<TensorND> {
+    let t = sd.get(key).ok_or_else(|| {
+        SciRustError::InvalidConfig(format!("load_state_dict: missing key: {key}"))
+    })?;
+    if t.shape.len() != expected.len()
+    {
+        return Err(SciRustError::RankMismatch {
+            op: "load_state_dict",
+            expected: expected.len(),
+            got: t.shape.len(),
+        });
+    }
+    if t.shape != expected
+    {
+        if expected.len() == 2
+        {
+            return Err(SciRustError::ShapeMismatch {
+                op: "load_state_dict",
+                expected: (expected[0], expected[1]),
+                got: (t.shape[0], t.shape[1]),
+            });
+        }
+        return Err(SciRustError::InvalidConfig(format!(
+            "load_state_dict: shape mismatch for '{key}': expected {:?}, got {:?}",
+            expected, t.shape
+        )));
+    }
+    Ok(t.to_contiguous())
+}
+
+impl NdLinear {
+    /// Insert this layer's parameters into `out`: `"{prefix}.weight"`
+    /// (`(in, out)`) and `"{prefix}.bias"` (`(1, out)`).
+    pub fn state_dict_into(&self, prefix: &str, out: &mut HashMap<String, TensorND>) {
+        out.insert(format!("{prefix}.weight"), self.weight.clone());
+        out.insert(format!("{prefix}.bias"), self.bias.clone());
+    }
+
+    /// Load the parameters stored under `prefix`. Errors on a missing key or a
+    /// rank/shape mismatch (see [`take_state_dict_param`]).
+    pub fn load_state_dict_from(
+        &mut self,
+        prefix: &str,
+        sd: &HashMap<String, TensorND>,
+    ) -> Result<()> {
+        self.weight = take_state_dict_param(
+            sd,
+            &format!("{prefix}.weight"),
+            &[self.in_features, self.out_features],
+        )?;
+        self.bias = take_state_dict_param(sd, &format!("{prefix}.bias"), &[1, self.out_features])?;
+        Ok(())
+    }
+}
+
+impl NdEmbedding {
+    /// Insert the table into `out` as `"{prefix}.table"` (`(vocab, dim)`).
+    pub fn state_dict_into(&self, prefix: &str, out: &mut HashMap<String, TensorND>) {
+        out.insert(format!("{prefix}.table"), self.table.clone());
+    }
+
+    /// Load the table stored under `prefix`. Errors on a missing key or a
+    /// rank/shape mismatch.
+    pub fn load_state_dict_from(
+        &mut self,
+        prefix: &str,
+        sd: &HashMap<String, TensorND>,
+    ) -> Result<()> {
+        let expected = self.table.shape.clone();
+        self.table = take_state_dict_param(sd, &format!("{prefix}.table"), &expected)?;
+        Ok(())
+    }
+}
+
+impl NdLayerNorm {
+    /// Insert the affine into `out`: `"{prefix}.gamma"` and `"{prefix}.beta"`
+    /// (both `(d,)`).
+    pub fn state_dict_into(&self, prefix: &str, out: &mut HashMap<String, TensorND>) {
+        out.insert(format!("{prefix}.gamma"), self.gamma.clone());
+        out.insert(format!("{prefix}.beta"), self.beta.clone());
+    }
+
+    /// Load the affine stored under `prefix`. Errors on a missing key or a
+    /// rank/shape mismatch.
+    pub fn load_state_dict_from(
+        &mut self,
+        prefix: &str,
+        sd: &HashMap<String, TensorND>,
+    ) -> Result<()> {
+        let expected = self.gamma.shape.clone();
+        self.gamma = take_state_dict_param(sd, &format!("{prefix}.gamma"), &expected)?;
+        self.beta = take_state_dict_param(sd, &format!("{prefix}.beta"), &expected)?;
+        Ok(())
+    }
+}
+
+impl NdMultiHeadAttention {
+    /// Insert the four projections into `out` under `"{prefix}.w_q"`,
+    /// `"{prefix}.w_k"`, `"{prefix}.w_v"`, `"{prefix}.w_o"` (each a
+    /// [`NdLinear`] with `.weight` / `.bias`).
+    pub fn state_dict_into(&self, prefix: &str, out: &mut HashMap<String, TensorND>) {
+        self.w_q.state_dict_into(&format!("{prefix}.w_q"), out);
+        self.w_k.state_dict_into(&format!("{prefix}.w_k"), out);
+        self.w_v.state_dict_into(&format!("{prefix}.w_v"), out);
+        self.w_o.state_dict_into(&format!("{prefix}.w_o"), out);
+    }
+
+    /// Load the four projections stored under `prefix`. Errors on a missing
+    /// key or a rank/shape mismatch.
+    pub fn load_state_dict_from(
+        &mut self,
+        prefix: &str,
+        sd: &HashMap<String, TensorND>,
+    ) -> Result<()> {
+        self.w_q
+            .load_state_dict_from(&format!("{prefix}.w_q"), sd)?;
+        self.w_k
+            .load_state_dict_from(&format!("{prefix}.w_k"), sd)?;
+        self.w_v
+            .load_state_dict_from(&format!("{prefix}.w_v"), sd)?;
+        self.w_o
+            .load_state_dict_from(&format!("{prefix}.w_o"), sd)?;
+        Ok(())
+    }
+}
+
+impl NdTransformerBlock {
+    /// Insert every parameter of the block into `out` under `"{prefix}.ln1"`,
+    /// `"{prefix}.attn"`, `"{prefix}.ln2"`, `"{prefix}.ffn1"`, `"{prefix}.ffn2"`.
+    pub fn state_dict_into(&self, prefix: &str, out: &mut HashMap<String, TensorND>) {
+        self.ln1.state_dict_into(&format!("{prefix}.ln1"), out);
+        self.attn.state_dict_into(&format!("{prefix}.attn"), out);
+        self.ln2.state_dict_into(&format!("{prefix}.ln2"), out);
+        self.ffn1.state_dict_into(&format!("{prefix}.ffn1"), out);
+        self.ffn2.state_dict_into(&format!("{prefix}.ffn2"), out);
+    }
+
+    /// Load every parameter of the block stored under `prefix`. Errors on a
+    /// missing key or a rank/shape mismatch.
+    pub fn load_state_dict_from(
+        &mut self,
+        prefix: &str,
+        sd: &HashMap<String, TensorND>,
+    ) -> Result<()> {
+        self.ln1
+            .load_state_dict_from(&format!("{prefix}.ln1"), sd)?;
+        self.attn
+            .load_state_dict_from(&format!("{prefix}.attn"), sd)?;
+        self.ln2
+            .load_state_dict_from(&format!("{prefix}.ln2"), sd)?;
+        self.ffn1
+            .load_state_dict_from(&format!("{prefix}.ffn1"), sd)?;
+        self.ffn2
+            .load_state_dict_from(&format!("{prefix}.ffn2"), sd)?;
+        Ok(())
     }
 }
 

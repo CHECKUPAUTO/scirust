@@ -581,6 +581,36 @@ mod tests {
         assert_eq!(back.data, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
     }
 
+    // The 2D↔ND bridge is bit-exact: every f32 keeps its exact bit pattern
+    // (including -0.0 and subnormals) and the ND side is contiguous row-major.
+    #[test]
+    fn tensor_2d_nd_bridge_bitexact_and_strides() {
+        let vals = vec![
+            std::f32::consts::PI,
+            -0.0,
+            1.0e-38, // subnormal
+            -2.5e7,
+            f32::MIN_POSITIVE,
+            6.0,
+        ];
+        let t2d = Tensor::from_vec(vals.clone(), 2, 3);
+        let nd = TensorND::from_tensor_2d(&t2d);
+        assert_eq!(nd.ndim(), 2);
+        assert_eq!(nd.shape(), &[2, 3]);
+        assert_eq!(nd.strides, vec![3, 1], "row-major strides");
+        assert!(nd.is_contiguous());
+
+        let back = nd.to_tensor_2d().unwrap();
+        assert_eq!(back.shape(), (2, 3));
+        for (a, b) in vals.iter().zip(back.data.iter())
+        {
+            assert_eq!(a.to_bits(), b.to_bits(), "round trip must be bit-exact");
+        }
+
+        // to_tensor_2d refuses non-rank-2 tensors (RankMismatch, not a panic).
+        assert!(TensorND::zeros(&[2, 3, 4]).to_tensor_2d().is_err());
+    }
+
     #[test]
     fn flatten_from_axis() {
         let t = TensorND::zeros(&[2, 3, 4, 5]);
