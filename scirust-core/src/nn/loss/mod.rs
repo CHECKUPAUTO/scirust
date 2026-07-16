@@ -13,11 +13,13 @@ pub mod cross_entropy;
 pub mod mse;
 pub mod nll;
 pub mod pinn;
+pub mod poisson;
 
 pub use cross_entropy::CrossEntropyLoss;
 pub use mse::MseLoss;
 pub use nll::NllLoss;
 pub use pinn::PinnLossEvaluator;
+pub use poisson::PoissonNllLoss;
 
 use crate::autodiff::reverse::{Tape, Var};
 

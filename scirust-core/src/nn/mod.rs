@@ -74,7 +74,7 @@ pub use im2col_hpc::im2col_hpc;
 pub use init::{Initializer, KaimingNormal, SmallNormal, TruncatedNormal, XavierUniform, Zeros};
 pub use layer_norm::LayerNorm;
 pub use linear::Linear;
-pub use loss::{CrossEntropyLoss, Loss, MseLoss, NllLoss};
+pub use loss::{CrossEntropyLoss, Loss, MseLoss, NllLoss, PoissonNllLoss};
 pub use module::Module;
 pub use peft::LoRALinear;
 pub use pool::MaxPool2d;
