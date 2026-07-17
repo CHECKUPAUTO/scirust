@@ -7,6 +7,7 @@
 // impulsionnelle, l'accord virgule fixe ↔ flottant, et le déterminisme bit-à-bit.
 
 use super::fft::{Complex, Plan, fft, ifft, irfft, rfft};
+use super::stft::{istft, num_frames, stft};
 use super::window;
 use super::{Biquad, Fir};
 use crate::fixed::{Q8_8, Q8_24, Q16_16, RealScalar};
@@ -781,4 +782,122 @@ fn window_reduces_spectral_leakage_vs_rectangular() {
         leak_hann < leak_rect,
         "fuite Hann {leak_hann} devrait être < fuite rectangulaire {leak_rect}"
     );
+}
+
+// ------------------------------------------------------------------ //
+//  STFT / ISTFT (spectrogramme, recouvrement-addition)                //
+// ------------------------------------------------------------------ //
+
+fn check_stft_single_frame_matches_windowed_rfft<T: Scalar + core::fmt::Debug>() {
+    // Un seul cadre (signal.len() == frame_size) : stft == rfft(signal .* fenêtre).
+    let frame_size = 8;
+    let win: Vec<T> = window::hann(frame_size);
+    let signal: Vec<T> = (0..frame_size)
+        .map(|i| T::of(((i % 5) as f64) * 0.1 - 0.2))
+        .collect();
+    let spec = stft(&signal, &win, 4);
+    let mut windowed = signal.clone();
+    window::apply(&mut windowed, &win);
+    let want = rfft(&windowed);
+    assert_eq!(spec.len(), want.len());
+    for (a, b) in spec.iter().zip(&want)
+    {
+        assert!(
+            (a.re.to_f64() - b.re.to_f64()).abs() < T::TOL,
+            "re: {:?} vs {:?}",
+            a.re,
+            b.re
+        );
+        assert!(
+            (a.im.to_f64() - b.im.to_f64()).abs() < T::TOL,
+            "im: {:?} vs {:?}",
+            a.im,
+            b.im
+        );
+    }
+}
+
+#[test]
+fn stft_single_frame_matches_windowed_rfft_all_scalars() {
+    check_stft_single_frame_matches_windowed_rfft::<f32>();
+    check_stft_single_frame_matches_windowed_rfft::<f64>();
+    check_stft_single_frame_matches_windowed_rfft::<Q16_16>();
+}
+
+#[test]
+fn stft_shape_matches_num_frames() {
+    for &(signal_len, frame_size, hop) in &[(48usize, 8usize, 4usize), (32, 16, 8), (20, 8, 8)]
+    {
+        let win: Vec<f64> = window::hann(frame_size);
+        let signal: Vec<f64> = (0..signal_len).map(|i| (i as f64) * 0.01).collect();
+        let spec = stft(&signal, &win, hop);
+        let bins = frame_size / 2 + 1;
+        let frames = num_frames(signal_len, frame_size, hop);
+        assert_eq!(
+            spec.len(),
+            frames * bins,
+            "signal_len={signal_len} frame_size={frame_size} hop={hop}"
+        );
+    }
+}
+
+fn check_stft_istft_roundtrip_cola<T: Scalar + core::fmt::Debug>() {
+    // Hann périodique + recouvrement 50 % : propriété COLA exacte (w(i) +
+    // w(i+N/2) = 1), donc reconstruction exacte (aux bords près, où les
+    // trames ne se chevauchent pas complètement).
+    let frame_size = 16;
+    let hop = frame_size / 2;
+    let win: Vec<T> = window::hann(frame_size);
+    let n = frame_size * 6;
+    let signal: Vec<T> = (0..n)
+        .map(|i| T::of(((i % 7) as f64) * 0.1 - 0.3))
+        .collect();
+
+    let spec = stft(&signal, &win, hop);
+    let recon = istft(&spec, frame_size, hop);
+    assert_eq!(
+        recon.len(),
+        (num_frames(n, frame_size, hop) - 1) * hop + frame_size
+    );
+
+    // Zone intérieure : au moins une trame de marge à chaque bord pour éviter
+    // les effets de bord (chevauchement incomplet).
+    for i in frame_size..(n - frame_size)
+    {
+        let a = signal[i].to_f64();
+        let b = recon[i].to_f64();
+        assert!(
+            (a - b).abs() < T::TOL * 20.0,
+            "istft roundtrip i={i}: {a} vs {b}"
+        );
+    }
+}
+
+#[test]
+fn stft_istft_roundtrip_cola_all_scalars() {
+    check_stft_istft_roundtrip_cola::<f32>();
+    check_stft_istft_roundtrip_cola::<f64>();
+    check_stft_istft_roundtrip_cola::<Q16_16>();
+}
+
+#[test]
+fn istft_empty_spectrogram_is_empty() {
+    let out: Vec<f64> = istft(&[], 8, 4);
+    assert!(out.is_empty());
+}
+
+#[test]
+#[should_panic(expected = "stft")]
+fn stft_non_power_of_two_frame_panics() {
+    let win = vec![1.0f64; 6]; // pas une puissance de 2
+    let signal = vec![0.0f64; 10];
+    let _ = stft(&signal, &win, 2);
+}
+
+#[test]
+#[should_panic(expected = "istft")]
+fn istft_spectrogram_not_multiple_of_bins_panics() {
+    // frame_size=8 → bins=5 ; longueur 7 n'est pas un multiple de 5.
+    let spec = vec![Complex::new(0.0f64, 0.0); 7];
+    let _ = istft(&spec, 8, 4);
 }

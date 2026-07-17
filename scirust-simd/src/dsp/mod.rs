@@ -19,6 +19,9 @@
 //   avec le complexe générique [`fft::Complex`].
 // * [`window`] — fenêtres d'apodisation (Hann, Hamming, Blackman) pour
 //   réduire la fuite spectrale avant une FFT.
+// * [`stft`] — transformée de Fourier à court terme ([`stft::stft`]/
+//   [`stft::istft`]) : spectrogramme par recouvrement-fenêtrage, reconstruction
+//   par recouvrement-addition (COLA).
 //
 // ## Pourquoi la virgule fixe pour le DSP ?
 //
@@ -30,6 +33,7 @@
 pub mod biquad;
 pub mod fft;
 pub mod fir;
+pub mod stft;
 pub mod window;
 
 pub use biquad::Biquad;
