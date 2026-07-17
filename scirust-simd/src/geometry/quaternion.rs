@@ -30,8 +30,18 @@
 // [`Quaternion::from_axis_angle`]. Ces trois-là reposent sur la trigonométrie
 // inverse déterministe de [`RealScalar`] (`acos`), elle-même à bornes ULP
 // prouvées en virgule fixe.
+//
+// ## Autres représentations d'orientation
+//
+// [`Quaternion::from_rotation_matrix`] réciproque [`Quaternion::to_rotation_matrix`]
+// (méthode de Shepperd, stable numériquement) ; [`Quaternion::from_euler`] /
+// [`Quaternion::to_euler`] convertissent vers/depuis les angles d'Euler
+// (convention Tait-Bryan aéronautique Z-Y-X : roulis/tangage/lacet). Ces
+// quatre méthodes demandent `T: RealScalar + Div<Output = T>` : leurs
+// dénominateurs ne sont pas des puissances de deux, donc `recip()` perdrait
+// trop de précision en virgule fixe (voir [`crate::dsp::mel`]).
 
-use core::ops::{Add, Mul, Neg, Sub};
+use core::ops::{Add, Div, Mul, Neg, Sub};
 
 use crate::fixed::{NumericScalar, RealScalar};
 
@@ -279,6 +289,118 @@ impl<T: RealScalar> Quaternion<T> {
             let inv = s.recip();
             ([self.x * inv, self.y * inv, self.z * inv], angle)
         }
+    }
+}
+
+impl<T: RealScalar + Div<Output = T>> Quaternion<T> {
+    /// Reconstruit le quaternion unitaire correspondant à une matrice de
+    /// rotation 3×3 (lignes), réciproque de [`Self::to_rotation_matrix`].
+    ///
+    /// Méthode de Shepperd (branche sur le plus grand parmi la trace et les
+    /// éléments diagonaux) : évite de diviser par une racine proche de zéro,
+    /// contrairement à la formule naïve à partir de la seule trace. Utilise la
+    /// division réelle (`/`), pas `recip()` : `s` n'est pas une puissance de
+    /// deux, et `x * y.recip()` perdrait trop de précision en virgule fixe
+    /// (même leçon que [`crate::dsp::mel`], dont les dénominateurs — `700`,
+    /// `2595` — ne sont pas non plus des puissances de deux).
+    #[must_use]
+    pub fn from_rotation_matrix(m: [[T; 3]; 3]) -> Self {
+        let trace = m[0][0] + m[1][1] + m[2][2];
+        let two = T::from_i32(2);
+        let four = T::from_i32(4);
+        if trace > T::zero()
+        {
+            let s = (trace + T::one()).sqrt() * two; // s = 4w
+            Self::new(
+                s / four,
+                (m[2][1] - m[1][2]) / s,
+                (m[0][2] - m[2][0]) / s,
+                (m[1][0] - m[0][1]) / s,
+            )
+        }
+        else if m[0][0] > m[1][1] && m[0][0] > m[2][2]
+        {
+            let s = (T::one() + m[0][0] - m[1][1] - m[2][2]).sqrt() * two; // s = 4x
+            Self::new(
+                (m[2][1] - m[1][2]) / s,
+                s / four,
+                (m[0][1] + m[1][0]) / s,
+                (m[0][2] + m[2][0]) / s,
+            )
+        }
+        else if m[1][1] > m[2][2]
+        {
+            let s = (T::one() + m[1][1] - m[0][0] - m[2][2]).sqrt() * two; // s = 4y
+            Self::new(
+                (m[0][2] - m[2][0]) / s,
+                (m[0][1] + m[1][0]) / s,
+                s / four,
+                (m[1][2] + m[2][1]) / s,
+            )
+        }
+        else
+        {
+            let s = (T::one() + m[2][2] - m[0][0] - m[1][1]).sqrt() * two; // s = 4z
+            Self::new(
+                (m[1][0] - m[0][1]) / s,
+                (m[0][2] + m[2][0]) / s,
+                (m[1][2] + m[2][1]) / s,
+                s / four,
+            )
+        }
+    }
+
+    /// Quaternion unitaire depuis des angles d'Euler (radians), convention
+    /// Tait-Bryan intrinsèque Z-Y-X (aéronautique : roulis `roll` autour de
+    /// `x`, tangage `pitch` autour de `y`, lacet `yaw` autour de `z`,
+    /// appliqués dans l'ordre yaw puis pitch puis roll).
+    #[must_use]
+    pub fn from_euler(roll: T, pitch: T, yaw: T) -> Self {
+        let half = T::from_i32(2).recip(); // puissance de 2 : recip() exact
+        let (sr, cr) = ((roll * half).sin(), (roll * half).cos());
+        let (sp, cp) = ((pitch * half).sin(), (pitch * half).cos());
+        let (sy, cy) = ((yaw * half).sin(), (yaw * half).cos());
+        Self::new(
+            cr * cp * cy + sr * sp * sy,
+            sr * cp * cy - cr * sp * sy,
+            cr * sp * cy + sr * cp * sy,
+            cr * cp * sy - sr * sp * cy,
+        )
+    }
+
+    /// Décompose un quaternion **unitaire** en angles d'Euler (radians),
+    /// réciproque de [`Self::from_euler`] (convention Tait-Bryan Z-Y-X).
+    ///
+    /// Au gimbal lock (`|2·(wy − zx)|` à moins de `0.001` de `1` : tangage
+    /// `±π/2`), roulis et lacet ne sont **pas** individuellement déterminés —
+    /// seule leur différence (pôle nord) ou leur somme (pôle sud) l'est.
+    /// Convention : `roll = 0`, et `yaw` porte toute l'information restante
+    /// (`from_euler(0, ±π/2, yaw)` reproduit exactement la même rotation).
+    /// Loin du gimbal lock, le seuil `0.001` protège aussi `asin` : au
+    /// voisinage de `±1`, sa dérivée diverge, donc la moindre imprécision
+    /// d'arrondi sur `sin_pitch` (flottant ou virgule fixe) y serait amplifiée
+    /// démesurément.
+    #[must_use]
+    pub fn to_euler(self) -> (T, T, T) {
+        let (w, x, y, z) = (self.w, self.x, self.y, self.z);
+        let two = T::from_i32(2);
+        let one = T::one();
+
+        let sin_pitch = two * (w * y - z * x);
+        let gimbal = T::from_i32(999) / T::from_i32(1000);
+        if sin_pitch >= gimbal
+        {
+            return (T::zero(), T::pi() / two, -(two * x.atan2(w)));
+        }
+        if sin_pitch <= -gimbal
+        {
+            return (T::zero(), -(T::pi() / two), two * x.atan2(w));
+        }
+
+        let roll = (two * (w * x + y * z)).atan2(one - two * (x * x + y * y));
+        let pitch = sin_pitch.asin();
+        let yaw = (two * (w * z + x * y)).atan2(one - two * (y * y + z * z));
+        (roll, pitch, yaw)
     }
 }
 

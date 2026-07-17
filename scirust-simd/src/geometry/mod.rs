@@ -12,7 +12,8 @@
 //
 // * [`Quaternion`] — quaternion de Hamilton générique : produit, conjugaison,
 //   norme, normalisation, inverse, construction angle-axe, rotation de vecteur,
-//   matrice de rotation, interpolation `nlerp`.
+//   matrice de rotation (aller-retour), angles d'Euler (aller-retour),
+//   interpolation `nlerp`/`slerp`.
 //
 // ## Pourquoi générique ?
 //

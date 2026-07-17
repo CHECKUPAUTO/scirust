@@ -175,5 +175,114 @@ fn bench_slerp(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(benches, bench_rotate, bench_from_axis_angle, bench_slerp);
+/// Reconstruction depuis une matrice de rotation (méthode de Shepperd, sqrt +
+/// divisions réelles) fixe vs f32.
+fn bench_from_rotation_matrix(c: &mut Criterion) {
+    let mut rng = Lcg(0xC3);
+    let angles_x: Vec<Q16_16> = (0..N)
+        .map(|_| Q16_16::try_from(rng.unit() * 3.0).unwrap())
+        .collect();
+    let mut rng = Lcg(0xC3);
+    let angles_f: Vec<f32> = (0..N).map(|_| (rng.unit() * 3.0) as f32).collect();
+    let axis_x = [
+        Q16_16::try_from(0.267).unwrap(),
+        Q16_16::try_from(0.535).unwrap(),
+        Q16_16::try_from(0.802).unwrap(),
+    ];
+    let axis_f = [0.267f32, 0.535, 0.802];
+    let mats_x: Vec<[[Q16_16; 3]; 3]> = angles_x
+        .iter()
+        .map(|&a| Quaternion::<Q16_16>::from_axis_angle(axis_x, a).to_rotation_matrix())
+        .collect();
+    let mats_f: Vec<[[f32; 3]; 3]> = angles_f
+        .iter()
+        .map(|&a| Quaternion::<f32>::from_axis_angle(axis_f, a).to_rotation_matrix())
+        .collect();
+
+    let mut g = c.benchmark_group("from_rotation_matrix");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            let mut acc = Quaternion::<Q16_16>::zero();
+            for &m in black_box(&mats_x)
+            {
+                acc = acc + Quaternion::<Q16_16>::from_rotation_matrix(m);
+            }
+            acc
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| {
+            let mut acc = Quaternion::<f32>::zero();
+            for &m in black_box(&mats_f)
+            {
+                acc = acc + Quaternion::<f32>::from_rotation_matrix(m);
+            }
+            acc
+        })
+    });
+    g.finish();
+}
+
+/// Aller-retour angles d'Euler → quaternion → angles d'Euler (`atan2`/`asin`
+/// sous le capot) fixe vs f32.
+fn bench_euler_roundtrip(c: &mut Criterion) {
+    let mut rng = Lcg(0xD4);
+    let triples_x: Vec<[Q16_16; 3]> = (0..N)
+        .map(|_| {
+            [
+                Q16_16::try_from(rng.unit()).unwrap(),
+                Q16_16::try_from(rng.unit() * 0.5).unwrap(),
+                Q16_16::try_from(rng.unit()).unwrap(),
+            ]
+        })
+        .collect();
+    let mut rng = Lcg(0xD4);
+    let triples_f: Vec<[f32; 3]> = (0..N)
+        .map(|_| {
+            [
+                rng.unit() as f32,
+                (rng.unit() * 0.5) as f32,
+                rng.unit() as f32,
+            ]
+        })
+        .collect();
+
+    let mut g = c.benchmark_group("euler_roundtrip");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            let mut acc = Quaternion::<Q16_16>::zero();
+            for &t in black_box(&triples_x)
+            {
+                let q = Quaternion::<Q16_16>::from_euler(t[0], t[1], t[2]);
+                let (r, p, y) = q.to_euler();
+                acc = acc + Quaternion::<Q16_16>::new(r, p, y, Q16_16::zero());
+            }
+            acc
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| {
+            let mut acc = Quaternion::<f32>::zero();
+            for &t in black_box(&triples_f)
+            {
+                let q = Quaternion::<f32>::from_euler(t[0], t[1], t[2]);
+                let (r, p, y) = q.to_euler();
+                acc = acc + Quaternion::<f32>::new(r, p, y, 0.0);
+            }
+            acc
+        })
+    });
+    g.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_rotate,
+    bench_from_axis_angle,
+    bench_slerp,
+    bench_from_rotation_matrix,
+    bench_euler_roundtrip
+);
 criterion_main!(benches);

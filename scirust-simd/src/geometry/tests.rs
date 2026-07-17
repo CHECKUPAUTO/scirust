@@ -445,3 +445,113 @@ fn to_axis_angle_inverts_from_axis_angle() {
     check_axis_angle_roundtrip::<f64>();
     check_axis_angle_roundtrip::<Q16_16>();
 }
+
+// ------------------------------------------------------------------ //
+//  from_rotation_matrix (réciproque de to_rotation_matrix)             //
+// ------------------------------------------------------------------ //
+
+fn check_rotation_matrix_roundtrip<T: Scalar + core::ops::Div<Output = T>>() {
+    // Axe fixe à composantes positives (évite toute ambiguïté de signe pour
+    // les petits angles) ; plusieurs angles pour couvrir chaque branche de
+    // Shepperd (trace > 0, puis chacune des trois branches diagonales).
+    let axis_raw = [0.267f64, 0.535, 0.802];
+    let n =
+        (axis_raw[0] * axis_raw[0] + axis_raw[1] * axis_raw[1] + axis_raw[2] * axis_raw[2]).sqrt();
+    let ax = [axis_raw[0] / n, axis_raw[1] / n, axis_raw[2] / n];
+
+    for &angle in &[0.3f64, 1.5, 2.2, 2.8]
+    {
+        let q = Quaternion::<T>::from_axis_angle(
+            [T::of(ax[0]), T::of(ax[1]), T::of(ax[2])],
+            T::of(angle),
+        );
+        let m = q.to_rotation_matrix();
+        let q2 = Quaternion::<T>::from_rotation_matrix(m);
+        // R ne détermine q qu'au signe global près : aligne q2 sur q avant
+        // de comparer.
+        let dot = q.w.to_f64() * q2.w.to_f64()
+            + q.x.to_f64() * q2.x.to_f64()
+            + q.y.to_f64() * q2.y.to_f64()
+            + q.z.to_f64() * q2.z.to_f64();
+        let q2 = if dot < 0.0 { -q2 } else { q2 };
+        approx_quat(
+            q2,
+            [q.w.to_f64(), q.x.to_f64(), q.y.to_f64(), q.z.to_f64()],
+            &format!("from_rotation_matrix angle={angle}"),
+        );
+    }
+}
+
+#[test]
+fn rotation_matrix_roundtrip_all_scalars() {
+    check_rotation_matrix_roundtrip::<f32>();
+    check_rotation_matrix_roundtrip::<f64>();
+    check_rotation_matrix_roundtrip::<Q16_16>();
+}
+
+// ------------------------------------------------------------------ //
+//  from_euler / to_euler (Tait-Bryan Z-Y-X)                            //
+// ------------------------------------------------------------------ //
+
+fn check_euler_roundtrip<T: Scalar + core::ops::Div<Output = T>>() {
+    for &(roll, pitch, yaw) in &[
+        (0.3f64, 0.2, 0.5),
+        (-0.7, 0.4, 1.1),
+        (0.0, 0.0, 0.0),
+        (1.0, -0.3, -0.8),
+    ]
+    {
+        let q = Quaternion::<T>::from_euler(T::of(roll), T::of(pitch), T::of(yaw));
+        let (r2, p2, y2) = q.to_euler();
+        assert!(
+            (r2.to_f64() - roll).abs() <= T::TOL * 8.0,
+            "roll {} vs {roll}",
+            r2.to_f64()
+        );
+        assert!(
+            (p2.to_f64() - pitch).abs() <= T::TOL * 8.0,
+            "pitch {} vs {pitch}",
+            p2.to_f64()
+        );
+        assert!(
+            (y2.to_f64() - yaw).abs() <= T::TOL * 8.0,
+            "yaw {} vs {yaw}",
+            y2.to_f64()
+        );
+    }
+}
+
+#[test]
+fn euler_roundtrip_all_scalars() {
+    check_euler_roundtrip::<f32>();
+    check_euler_roundtrip::<f64>();
+    check_euler_roundtrip::<Q16_16>();
+}
+
+fn check_euler_gimbal_lock<T: Scalar + core::ops::Div<Output = T>>() {
+    let half_pi = std::f64::consts::FRAC_PI_2;
+    let q = Quaternion::<T>::from_euler(T::of(0.4), T::of(half_pi), T::of(0.9));
+    let (roll2, pitch2, yaw2) = q.to_euler();
+    assert!(
+        (pitch2.to_f64() - half_pi).abs() <= T::TOL * 8.0,
+        "gimbal lock : tangage {} vs {half_pi}",
+        pitch2.to_f64()
+    );
+    // Roulis et lacet individuels ne sont pas uniques au gimbal lock, mais la
+    // rotation reconstruite doit rester la même.
+    let q2 = Quaternion::<T>::from_euler(roll2, pitch2, yaw2);
+    let v = [T::of(0.3), T::of(-0.6), T::of(0.9)];
+    let want = q.rotate_vector(v);
+    approx_vec(
+        q2.rotate_vector(v),
+        [want[0].to_f64(), want[1].to_f64(), want[2].to_f64()],
+        "gimbal lock : rotation préservée",
+    );
+}
+
+#[test]
+fn euler_gimbal_lock_all_scalars() {
+    check_euler_gimbal_lock::<f32>();
+    check_euler_gimbal_lock::<f64>();
+    check_euler_gimbal_lock::<Q16_16>();
+}
