@@ -10,6 +10,7 @@ mod canonicalize;
 mod cost;
 mod crossover;
 mod dataset;
+mod digest;
 mod experiment;
 mod fitness;
 mod generate;
@@ -24,14 +25,15 @@ mod verify;
 
 pub use active::analyze_active;
 pub use archive::{
-    ARCHIVE_SCHEMA_VERSION, ExperimentArchive, HallOfFame, HallOfFameEntry, ReplayMismatch,
-    ReplayReport, replay,
+    ARCHIVE_SCHEMA_VERSION, ArchiveVerification, ExperimentArchive, HallOfFame, HallOfFameEntry,
+    VerificationIssue, verify_archive,
 };
-pub use canonical::{canonical_bytes, program_fingerprint};
+pub use canonical::{canonical_bytes, canonical_equal, program_fingerprint};
 pub use canonicalize::prune_dead_code;
 pub use cost::{CostReport, estimate_cost};
 pub use crossover::{CrossoverOutcome, crossover};
 pub use dataset::{Dataset, DatasetError, TensorCase};
+pub use digest::{DIGEST_FORMAT_VERSION, DigestError};
 pub use experiment::{
     ExperimentError, GenerationRecord, PopulationSummary, RunOptions, run_experiment,
 };

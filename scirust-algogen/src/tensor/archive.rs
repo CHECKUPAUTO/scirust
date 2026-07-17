@@ -1,18 +1,36 @@
-//! Deterministic hall of fame, versioned archive, content digest and replay.
+//! Deterministic hall of fame, versioned archive, content-integrity digest and
+//! archive verification.
 //!
 //! An [`ExperimentArchive`] captures everything needed to reproduce and audit a
-//! run: the schema version, the crate version, the problem, the seed, the
-//! configuration (inside the problem), the generation history, a final
-//! population summary, the hall of fame, the best solution and a content digest.
-//! The digest is a SHA-256 over a canonical byte serialisation of the
-//! deterministic content only; no wall-clock time or timestamp participates in
-//! archive equality or the digest. [`replay`] recomputes fitness, costs and the
-//! digest, detecting tampering or corruption.
+//! run's stored solutions: schema and digest-format versions, the crate version,
+//! the problem, the seed, the configuration (inside the problem), the generation
+//! history, a final-population summary, the hall of fame, the best solution and
+//! a content digest.
+//!
+//! # Integrity, not authenticity
+//!
+//! The digest is an **unkeyed** SHA-256 over an explicit canonical binary
+//! encoding (see [`super::digest`]). It provides **content integrity /
+//! corruption detection**: it detects accidental corruption, truncation or stale
+//! content, and any edit to the archived content. It does **not** authenticate an
+//! archive against a party able to edit both the archive and its digest — that
+//! would require a trusted signature or MAC, which this phase deliberately does
+//! not provide. No wall-clock time or timestamp participates in archive equality
+//! or the digest.
+//!
+//! [`verify_archive`] re-derives the digest and re-evaluates every stored
+//! program, and additionally checks a set of structural invariants. It verifies
+//! the **stored solutions and summary invariants**, not the complete hidden
+//! evolutionary trajectory (the archive does not store every generation's full
+//! population), so it is honestly named "archive verification" rather than a full
+//! replay.
+
+use std::iter::once;
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
-use super::canonical::program_fingerprint;
+use super::canonical::{canonical_equal, program_fingerprint};
+use super::digest::{DIGEST_FORMAT_VERSION, archive_content_digest};
 use super::experiment::{ExperimentError, GenerationRecord, PopulationSummary};
 use super::fitness::{FitnessReport, evaluate_program};
 use super::ir::TensorProgram;
@@ -34,9 +52,10 @@ pub struct HallOfFameEntry {
 
 /// A deterministic, capacity-bounded hall of fame.
 ///
-/// Entries are deduplicated by structural fingerprint (the earliest discovery of
-/// a program is kept), ordered best-first by the same total order as ranking,
-/// and evicted deterministically down to the capacity.
+/// Entries are deduplicated by **canonical program bytes** (the authoritative
+/// identity — not by fingerprint, which could collide), keeping the earliest
+/// discovery of a program; they are ordered best-first by the same total order
+/// as ranking and evicted deterministically down to the capacity.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HallOfFame {
     entries: Vec<HallOfFameEntry>,
@@ -51,6 +70,10 @@ impl HallOfFame {
         }
     }
 
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+
     /// Consider a candidate for inclusion.
     pub fn consider(
         &mut self,
@@ -63,11 +86,13 @@ impl HallOfFame {
         {
             return;
         }
-        // Deduplicate by fingerprint, keeping the earliest discovery.
+        // Deduplicate by authoritative canonical identity, not by fingerprint:
+        // two structurally distinct programs are never collapsed even if their
+        // fingerprints collide.
         if self
             .entries
             .iter()
-            .any(|entry| entry.fingerprint == fitness.fingerprint)
+            .any(|entry| canonical_equal(&entry.program, program))
         {
             return;
         }
@@ -83,8 +108,13 @@ impl HallOfFame {
     }
 
     fn sort_and_truncate(&mut self) {
+        let programs: Vec<TensorProgram> = self
+            .entries
+            .iter()
+            .map(|entry| entry.program.clone())
+            .collect();
         let reports: Vec<FitnessReport> = self.entries.iter().map(|entry| entry.fitness).collect();
-        let order = rank(&reports);
+        let order = rank(&programs, &reports);
         let mut reordered: Vec<HallOfFameEntry> = order
             .iter()
             .map(|&index| self.entries[index].clone())
@@ -109,6 +139,7 @@ impl HallOfFame {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExperimentArchive {
     pub schema_version: u32,
+    pub digest_format_version: u32,
     pub crate_version: String,
     pub problem: TensorProblem,
     pub seed: u64,
@@ -116,14 +147,16 @@ pub struct ExperimentArchive {
     pub generations_executed: usize,
     pub history: Vec<GenerationRecord>,
     pub final_population: PopulationSummary,
+    pub hall_of_fame_capacity: usize,
     pub hall_of_fame: Vec<HallOfFameEntry>,
     pub best: HallOfFameEntry,
-    /// SHA-256 (hex) over the canonical bytes of every field above.
+    /// SHA-256 (hex) over the canonical bytes of every field above (excluding
+    /// this digest). An unkeyed content-integrity digest, not an authenticator.
     pub digest: String,
 }
 
 impl ExperimentArchive {
-    /// Build an archive, computing its content digest.
+    /// Build an archive, computing its content-integrity digest.
     #[allow(clippy::too_many_arguments)]
     pub fn build(
         problem: TensorProblem,
@@ -132,10 +165,11 @@ impl ExperimentArchive {
         generations_executed: usize,
         history: Vec<GenerationRecord>,
         final_population: PopulationSummary,
+        hall_of_fame_capacity: usize,
         hall_of_fame: Vec<HallOfFameEntry>,
         best: HallOfFameEntry,
     ) -> Result<Self, ExperimentError> {
-        let digest = compute_digest(
+        let digest = archive_content_digest(
             ARCHIVE_SCHEMA_VERSION,
             env!("CARGO_PKG_VERSION"),
             &problem,
@@ -144,12 +178,14 @@ impl ExperimentArchive {
             generations_executed,
             &history,
             &final_population,
+            hall_of_fame_capacity,
             &hall_of_fame,
             &best,
         )?;
 
         Ok(Self {
             schema_version: ARCHIVE_SCHEMA_VERSION,
+            digest_format_version: DIGEST_FORMAT_VERSION,
             crate_version: env!("CARGO_PKG_VERSION").to_string(),
             problem,
             seed,
@@ -157,6 +193,7 @@ impl ExperimentArchive {
             generations_executed,
             history,
             final_population,
+            hall_of_fame_capacity,
             hall_of_fame,
             best,
             digest,
@@ -165,7 +202,7 @@ impl ExperimentArchive {
 
     /// Recompute the content digest from the stored fields.
     pub fn recompute_digest(&self) -> Result<String, ExperimentError> {
-        compute_digest(
+        archive_content_digest(
             self.schema_version,
             &self.crate_version,
             &self.problem,
@@ -174,135 +211,285 @@ impl ExperimentArchive {
             self.generations_executed,
             &self.history,
             &self.final_population,
+            self.hall_of_fame_capacity,
             &self.hall_of_fame,
             &self.best,
         )
+        .map_err(ExperimentError::Digest)
     }
 }
 
-/// SHA-256 over a canonical JSON byte serialisation of the deterministic
-/// content. serde_json serialises structs in field order with no maps, so the
-/// bytes are canonical; the program-bearing fields additionally fix their own
-/// structure through serde. The digest field itself is excluded.
-#[allow(clippy::too_many_arguments)]
-fn compute_digest(
-    schema_version: u32,
-    crate_version: &str,
-    problem: &TensorProblem,
-    seed: u64,
-    success: bool,
-    generations_executed: usize,
-    history: &[GenerationRecord],
-    final_population: &PopulationSummary,
-    hall_of_fame: &[HallOfFameEntry],
-    best: &HallOfFameEntry,
-) -> Result<String, ExperimentError> {
-    let view = (
-        schema_version,
-        crate_version,
-        problem,
-        seed,
-        success,
-        generations_executed,
-        history,
-        final_population,
-        hall_of_fame,
-        best,
-    );
-    let bytes = serde_json::to_vec(&view)
-        .map_err(|error| ExperimentError::Serialization(error.to_string()))?;
-
-    let mut hasher = Sha256::new();
-    hasher.update(&bytes);
-    Ok(to_hex(&hasher.finalize()))
-}
-
-fn to_hex(bytes: &[u8]) -> String {
-    const DIGITS: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for &byte in bytes
-    {
-        out.push(DIGITS[(byte >> 4) as usize] as char);
-        out.push(DIGITS[(byte & 0x0f) as usize] as char);
-    }
-    out
-}
-
-/// A single replay discrepancy.
+/// A structured archive-verification issue. One variant per invariant so callers
+/// can react precisely rather than to a single generic mismatch.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum ReplayMismatch {
-    /// The recomputed content digest differs from the stored digest.
-    Digest,
-    /// A stored program's fingerprint does not match its structure.
-    Program { fingerprint: u128 },
-    /// A stored fitness does not match re-evaluation.
-    Fitness { fingerprint: u128 },
+pub enum VerificationIssue {
+    UnsupportedSchemaVersion {
+        found: u32,
+        supported: u32,
+    },
+    UnsupportedDigestVersion {
+        found: u32,
+        supported: u32,
+    },
+    DigestComputationFailed,
+    DigestMismatch,
+    ProblemInvalid,
+    SeedMismatch {
+        archive_seed: u64,
+        problem_seed: u64,
+    },
+    GenerationsHistoryLengthMismatch {
+        generations_executed: usize,
+        history_len: usize,
+    },
+    NonMonotonicHistory {
+        position: usize,
+        expected: usize,
+        found: usize,
+    },
+    PopulationSummaryInconsistent,
+    FinalSummaryMismatchesLastRecord,
+    HallOfFameCapacityExceeded {
+        capacity: usize,
+        length: usize,
+    },
+    HallOfFameProgramFingerprintMismatch {
+        index: usize,
+    },
+    HallOfFameDuplicate {
+        first: usize,
+        second: usize,
+    },
+    HallOfFameOrderInvalid,
+    BestNotInHallOfFame,
+    BestProgramFingerprintMismatch,
+    SuccessFlagInconsistent {
+        success: bool,
+        best_meets_criteria: bool,
+    },
+    ProgramFitnessMismatch {
+        fingerprint: u128,
+    },
 }
 
-/// The result of replaying an archive.
+/// The result of verifying an archive.
+///
+/// Verifies stored solutions and summary invariants, not the complete hidden
+/// evolutionary trajectory.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ReplayReport {
+pub struct ArchiveVerification {
     pub digest_ok: bool,
-    pub recomputed_digest: String,
-    pub entries_checked: usize,
-    pub mismatches: Vec<ReplayMismatch>,
+    pub recomputed_digest: Option<String>,
+    pub programs_checked: usize,
+    pub issues: Vec<VerificationIssue>,
 }
 
-impl ReplayReport {
-    /// Whether the archive is intact: digest matches and nothing mismatched.
+impl ArchiveVerification {
+    /// Whether every checked invariant holds (including the digest).
     pub fn is_intact(&self) -> bool {
-        self.digest_ok && self.mismatches.is_empty()
+        self.issues.is_empty()
     }
 }
 
-/// Replay an archive: recompute the digest and re-evaluate every stored program,
-/// reporting any tampering or corruption.
-pub fn replay(archive: &ExperimentArchive) -> Result<ReplayReport, ExperimentError> {
-    let recomputed_digest = archive.recompute_digest()?;
-    let digest_ok = recomputed_digest == archive.digest;
+/// Verify an archive: recompute the digest, re-evaluate every stored program and
+/// check structural invariants, returning a structured issue per failing check.
+pub fn verify_archive(archive: &ExperimentArchive) -> ArchiveVerification {
+    let mut issues = Vec::new();
 
-    let mut mismatches = Vec::new();
-    if !digest_ok
+    // 1. Supported schema version.
+    if archive.schema_version != ARCHIVE_SCHEMA_VERSION
     {
-        mismatches.push(ReplayMismatch::Digest);
+        issues.push(VerificationIssue::UnsupportedSchemaVersion {
+            found: archive.schema_version,
+            supported: ARCHIVE_SCHEMA_VERSION,
+        });
+    }
+    // 2. Supported digest-format version.
+    if archive.digest_format_version != DIGEST_FORMAT_VERSION
+    {
+        issues.push(VerificationIssue::UnsupportedDigestVersion {
+            found: archive.digest_format_version,
+            supported: DIGEST_FORMAT_VERSION,
+        });
     }
 
-    let dataset = archive.problem.dataset()?;
-    let limits = archive.problem.verification_limits();
-
-    let mut entries_checked = 0usize;
-    for entry in archive
-        .hall_of_fame
-        .iter()
-        .chain(std::iter::once(&archive.best))
+    // Digest recomputation and comparison.
+    let recomputed_digest = archive.recompute_digest().ok();
+    let digest_ok = match &recomputed_digest
     {
-        entries_checked += 1;
+        Some(digest) => *digest == archive.digest,
+        None => false,
+    };
+    match &recomputed_digest
+    {
+        None => issues.push(VerificationIssue::DigestComputationFailed),
+        Some(_) if !digest_ok => issues.push(VerificationIssue::DigestMismatch),
+        Some(_) =>
+        {},
+    }
 
-        // A changed program has a different fingerprint.
+    // 3. Problem validation.
+    let problem_ok = archive.problem.validate().is_ok();
+    if !problem_ok
+    {
+        issues.push(VerificationIssue::ProblemInvalid);
+    }
+
+    // 4. Seed consistency.
+    if archive.seed != archive.problem.seed
+    {
+        issues.push(VerificationIssue::SeedMismatch {
+            archive_seed: archive.seed,
+            problem_seed: archive.problem.seed,
+        });
+    }
+
+    // 5. generations_executed against history length.
+    if archive.history.len() != archive.generations_executed + 1
+    {
+        issues.push(VerificationIssue::GenerationsHistoryLengthMismatch {
+            generations_executed: archive.generations_executed,
+            history_len: archive.history.len(),
+        });
+    }
+
+    // 6. Monotonic, gap-free generation indices.
+    for (position, record) in archive.history.iter().enumerate()
+    {
+        if record.generation != position
+        {
+            issues.push(VerificationIssue::NonMonotonicHistory {
+                position,
+                expected: position,
+                found: record.generation,
+            });
+            break;
+        }
+    }
+
+    // 7. Final population summary internal consistency.
+    let summary = &archive.final_population;
+    if summary.valid + summary.invalid != summary.size || summary.distinct > summary.size
+    {
+        issues.push(VerificationIssue::PopulationSummaryInconsistent);
+    }
+    // 14. Final summary against the last recorded generation.
+    if let Some(last) = archive.history.last()
+    {
+        if summary.valid != last.valid_individuals
+            || summary.invalid != last.invalid_individuals
+            || summary.distinct != last.diversity
+            || summary.best_fingerprint != last.best_fingerprint
+        {
+            issues.push(VerificationIssue::FinalSummaryMismatchesLastRecord);
+        }
+    }
+
+    // 8. Hall-of-fame entry fingerprints against full program structure.
+    for (index, entry) in archive.hall_of_fame.iter().enumerate()
+    {
         if program_fingerprint(&entry.program) != entry.fingerprint
         {
-            mismatches.push(ReplayMismatch::Program {
-                fingerprint: entry.fingerprint,
-            });
-            continue;
+            issues.push(VerificationIssue::HallOfFameProgramFingerprintMismatch { index });
         }
+    }
 
-        // Re-evaluation must reproduce the stored fitness exactly.
-        let recomputed = evaluate_program(&entry.program, &dataset, limits);
-        if recomputed != entry.fitness
+    // 9. No accidental duplicate programs in the hall of fame.
+    for first in 0..archive.hall_of_fame.len()
+    {
+        for second in (first + 1)..archive.hall_of_fame.len()
         {
-            mismatches.push(ReplayMismatch::Fitness {
-                fingerprint: entry.fingerprint,
+            if canonical_equal(
+                &archive.hall_of_fame[first].program,
+                &archive.hall_of_fame[second].program,
+            )
+            {
+                issues.push(VerificationIssue::HallOfFameDuplicate { first, second });
+            }
+        }
+    }
+
+    // 10. Ordering and capacity policy.
+    if archive.hall_of_fame.len() > archive.hall_of_fame_capacity
+    {
+        issues.push(VerificationIssue::HallOfFameCapacityExceeded {
+            capacity: archive.hall_of_fame_capacity,
+            length: archive.hall_of_fame.len(),
+        });
+    }
+    {
+        let programs: Vec<TensorProgram> = archive
+            .hall_of_fame
+            .iter()
+            .map(|entry| entry.program.clone())
+            .collect();
+        let reports: Vec<FitnessReport> = archive
+            .hall_of_fame
+            .iter()
+            .map(|entry| entry.fitness)
+            .collect();
+        let order = rank(&programs, &reports);
+        if order != (0..archive.hall_of_fame.len()).collect::<Vec<_>>()
+        {
+            issues.push(VerificationIssue::HallOfFameOrderInvalid);
+        }
+    }
+
+    // 11. Best entry present in the hall of fame (when it retains entries).
+    if archive.hall_of_fame_capacity >= 1
+        && !archive.hall_of_fame.is_empty()
+        && !archive
+            .hall_of_fame
+            .iter()
+            .any(|entry| canonical_equal(&entry.program, &archive.best.program))
+    {
+        issues.push(VerificationIssue::BestNotInHallOfFame);
+    }
+    if program_fingerprint(&archive.best.program) != archive.best.fingerprint
+    {
+        issues.push(VerificationIssue::BestProgramFingerprintMismatch);
+    }
+
+    // 12. Success flag against the explicit success criteria.
+    if problem_ok
+    {
+        let best_meets = archive.problem.success.is_met(&archive.best.fitness);
+        if best_meets != archive.success
+        {
+            issues.push(VerificationIssue::SuccessFlagInconsistent {
+                success: archive.success,
+                best_meets_criteria: best_meets,
             });
         }
     }
 
-    Ok(ReplayReport {
+    // 13. Recompute fitness and structural costs for every archived program.
+    let mut programs_checked = 0usize;
+    if problem_ok
+    {
+        if let Ok(dataset) = archive.problem.dataset()
+        {
+            let limits = archive.problem.verification_limits();
+            for entry in archive.hall_of_fame.iter().chain(once(&archive.best))
+            {
+                programs_checked += 1;
+                let recomputed = evaluate_program(&entry.program, &dataset, limits);
+                if recomputed != entry.fitness
+                {
+                    issues.push(VerificationIssue::ProgramFitnessMismatch {
+                        fingerprint: entry.fingerprint,
+                    });
+                }
+            }
+        }
+    }
+
+    ArchiveVerification {
         digest_ok,
         recomputed_digest,
-        entries_checked,
-        mismatches,
-    })
+        programs_checked,
+        issues,
+    }
 }
 
 #[cfg(test)]
@@ -310,7 +497,7 @@ mod tests {
     use super::*;
     use crate::tensor::benchmarks;
     use crate::tensor::experiment::{RunOptions, run_experiment};
-    use crate::tensor::{TensorInstruction, TensorProgram};
+    use crate::tensor::{TensorInstruction, TensorProgram, evaluate_program};
 
     fn archive() -> ExperimentArchive {
         run_experiment(&benchmarks::relu(), RunOptions::default()).unwrap()
@@ -325,49 +512,102 @@ mod tests {
     }
 
     #[test]
-    fn digest_is_stable() {
+    fn digest_is_stable_and_survives_pretty_print_round_trip() {
         let archive = archive();
         assert_eq!(archive.digest, archive.recompute_digest().unwrap());
+
+        // Pretty vs compact JSON must not change the content digest.
+        let pretty = serde_json::to_string_pretty(&archive).unwrap();
+        let from_pretty: ExperimentArchive = serde_json::from_str(&pretty).unwrap();
+        assert_eq!(from_pretty.recompute_digest().unwrap(), archive.digest);
+
+        let compact = serde_json::to_string(&archive).unwrap();
+        let from_compact: ExperimentArchive = serde_json::from_str(&compact).unwrap();
+        assert_eq!(from_compact.digest, archive.digest);
     }
 
     #[test]
-    fn changing_one_instruction_changes_the_digest() {
-        let mut archive = archive();
+    fn changing_relevant_content_changes_the_digest() {
+        let archive = archive();
         let original = archive.recompute_digest().unwrap();
-        // Alter a single instruction of the best program.
-        archive
+
+        // A scalar in the best fitness.
+        let mut altered = archive.clone();
+        altered.best.fitness.loss += 1.0;
+        assert_ne!(original, altered.recompute_digest().unwrap());
+
+        // A program output register (isolated on a fixed two-instruction
+        // program so exactly the output field differs between the two digests).
+        let mut altered = archive.clone();
+        altered.best.program = TensorProgram::new(
+            vec![
+                TensorInstruction::Input { input: 0 },
+                TensorInstruction::Relu { src: 0 },
+            ],
+            0,
+        );
+        let output_zero = altered.recompute_digest().unwrap();
+        altered.best.program.output = 1;
+        let output_one = altered.recompute_digest().unwrap();
+        assert_ne!(output_zero, output_one);
+
+        // A single tensor element in the problem.
+        let mut altered = archive.clone();
+        altered.problem.cases[0].expected.data[0] += 1.0;
+        assert_ne!(original, altered.recompute_digest().unwrap());
+
+        // The history.
+        let mut altered = archive.clone();
+        altered.history[0].diversity += 1;
+        assert_ne!(original, altered.recompute_digest().unwrap());
+
+        // One instruction in the best program.
+        let mut altered = archive.clone();
+        altered
             .best
             .program
             .instructions
             .push(TensorInstruction::Relu { src: 0 });
-        assert_ne!(original, archive.recompute_digest().unwrap());
+        assert_ne!(original, altered.recompute_digest().unwrap());
     }
 
     #[test]
-    fn replay_accepts_an_intact_archive() {
+    fn hall_of_fame_order_change_changes_digest_when_meaningful() {
+        let mut archive = archive();
+        if archive.hall_of_fame.len() >= 2
+        {
+            let original = archive.recompute_digest().unwrap();
+            archive.hall_of_fame.swap(0, 1);
+            assert_ne!(original, archive.recompute_digest().unwrap());
+        }
+    }
+
+    #[test]
+    fn verify_accepts_an_intact_archive() {
         let archive = archive();
-        let report = replay(&archive).unwrap();
-        assert!(report.is_intact(), "mismatches: {:?}", report.mismatches);
-        assert!(report.entries_checked >= 1);
+        let report = verify_archive(&archive);
+        assert!(report.is_intact(), "issues: {:?}", report.issues);
+        assert!(report.digest_ok);
+        assert!(report.programs_checked >= 1);
     }
 
     #[test]
-    fn replay_detects_altered_fitness() {
+    fn verify_detects_altered_fitness() {
         let mut archive = archive();
         archive.best.fitness.loss += 1.0;
-        let report = replay(&archive).unwrap();
+        let report = verify_archive(&archive);
         assert!(!report.is_intact());
-        assert!(report.mismatches.contains(&ReplayMismatch::Digest));
+        assert!(report.issues.contains(&VerificationIssue::DigestMismatch));
         assert!(
             report
-                .mismatches
+                .issues
                 .iter()
-                .any(|m| matches!(m, ReplayMismatch::Fitness { .. }))
+                .any(|issue| matches!(issue, VerificationIssue::ProgramFitnessMismatch { .. }))
         );
     }
 
     #[test]
-    fn replay_detects_altered_program() {
+    fn verify_detects_altered_program() {
         let mut archive = archive();
         archive.best.program = TensorProgram::new(
             vec![
@@ -379,19 +619,33 @@ mod tests {
             ],
             1,
         );
-        let report = replay(&archive).unwrap();
+        let report = verify_archive(&archive);
         assert!(!report.is_intact());
         assert!(
             report
-                .mismatches
-                .iter()
-                .any(|m| matches!(m, ReplayMismatch::Program { .. }))
+                .issues
+                .contains(&VerificationIssue::BestProgramFingerprintMismatch)
         );
     }
 
     #[test]
-    fn hall_of_fame_deduplicates_and_evicts_deterministically() {
-        // Distinct programs with distinct fitness; capacity forces eviction.
+    fn verify_detects_history_gap() {
+        let mut archive = archive();
+        if let Some(record) = archive.history.get_mut(0)
+        {
+            record.generation = 5;
+        }
+        let report = verify_archive(&archive);
+        assert!(
+            report
+                .issues
+                .iter()
+                .any(|issue| matches!(issue, VerificationIssue::NonMonotonicHistory { .. }))
+        );
+    }
+
+    #[test]
+    fn hall_of_fame_deduplicates_by_canonical_bytes_and_evicts() {
         let dataset = benchmarks::relu().dataset().unwrap();
         let limits = benchmarks::relu().verification_limits();
 
@@ -421,16 +675,15 @@ mod tests {
         {
             let fitness = evaluate_program(program, &dataset, limits);
             hall.consider(program, fitness, generation, 0);
-            // Re-considering the same program is a no-op (dedup).
+            // Re-considering the same program is a no-op.
             hall.consider(program, fitness, generation + 100, 0);
         }
 
         assert_eq!(hall.entries().len(), 2);
-        // The best (lowest loss) is the Relu program; it must be retained.
         let relu_fp = program_fingerprint(&programs[1]);
         assert_eq!(hall.entries()[0].fingerprint, relu_fp);
 
-        // Deterministic: repeating the exact sequence yields the same hall.
+        // Deterministic across repetition.
         let mut again = HallOfFame::new(2);
         for (generation, program) in programs.iter().enumerate()
         {
@@ -438,5 +691,48 @@ mod tests {
             again.consider(program, fitness, generation, 0);
         }
         assert_eq!(hall, again);
+    }
+
+    #[test]
+    fn distinct_programs_with_equal_fingerprints_are_not_deduplicated() {
+        // Inject two distinct programs whose FitnessReport fingerprint fields are
+        // forced equal; canonical-bytes dedup must keep both.
+        let dataset = benchmarks::relu().dataset().unwrap();
+        let limits = benchmarks::relu().verification_limits();
+
+        let a = TensorProgram::new(
+            vec![
+                TensorInstruction::Input { input: 0 },
+                TensorInstruction::Scale {
+                    src: 0,
+                    factor: 1.0,
+                },
+            ],
+            1,
+        );
+        let b = TensorProgram::new(
+            vec![
+                TensorInstruction::Input { input: 0 },
+                TensorInstruction::Scale {
+                    src: 0,
+                    factor: 2.0,
+                },
+            ],
+            1,
+        );
+        let mut fitness_a = evaluate_program(&a, &dataset, limits);
+        let mut fitness_b = evaluate_program(&b, &dataset, limits);
+        // Force a fingerprint collision at the report level.
+        fitness_a.fingerprint = 0xC0FFEE;
+        fitness_b.fingerprint = 0xC0FFEE;
+
+        let mut hall = HallOfFame::new(8);
+        hall.consider(&a, fitness_a, 0, 0);
+        hall.consider(&b, fitness_b, 1, 0);
+        assert_eq!(
+            hall.entries().len(),
+            2,
+            "distinct programs must both survive"
+        );
     }
 }

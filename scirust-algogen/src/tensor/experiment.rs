@@ -10,12 +10,14 @@
 use serde::{Deserialize, Serialize};
 
 use super::archive::{ExperimentArchive, HallOfFame, HallOfFameEntry};
+use super::canonical::canonical_bytes;
 use super::cost::CostReport;
 use super::dataset::Dataset;
 use super::fitness::FitnessReport;
 use super::generate::GenerationError;
+use super::ir::TensorProgram;
 use super::population::{Population, dominates, rank};
-use super::problem::{ProblemError, SuccessCriteria, TensorProblem};
+use super::problem::{ProblemError, TensorProblem};
 use super::rng::DeterministicRng;
 use super::verify::VerificationLimits;
 
@@ -24,12 +26,18 @@ use super::verify::VerificationLimits;
 pub enum ExperimentError {
     Problem(ProblemError),
     Generation(GenerationError),
-    Serialization(String),
+    Digest(super::digest::DigestError),
 }
 
 impl From<ProblemError> for ExperimentError {
     fn from(error: ProblemError) -> Self {
         Self::Problem(error)
+    }
+}
+
+impl From<super::digest::DigestError> for ExperimentError {
+    fn from(error: super::digest::DigestError) -> Self {
+        Self::Digest(error)
     }
 }
 
@@ -62,7 +70,8 @@ pub struct GenerationRecord {
     pub invalid_individuals: usize,
     pub exact_solutions: usize,
     pub pareto_front_size: usize,
-    /// Number of structurally distinct individuals (distinct fingerprints).
+    /// Number of structurally distinct programs, by authoritative canonical
+    /// bytes (not by a collidable fingerprint).
     pub diversity: usize,
 }
 
@@ -104,6 +113,11 @@ fn evaluate(
 }
 
 /// Run a reproducible discovery experiment, returning the deterministic archive.
+///
+/// `success` is defined as: the best individual (top-ranked across all executed
+/// generations) satisfies the explicit success criteria. Early stopping happens
+/// exactly when the running best first satisfies them, so `success` is always
+/// consistent with `is_met(best)`.
 pub fn run_experiment(
     problem: &TensorProblem,
     options: RunOptions,
@@ -116,7 +130,6 @@ pub fn run_experiment(
     let mut rng = DeterministicRng::new(problem.seed);
     let mut hall = HallOfFame::new(options.hall_of_fame_capacity);
     let mut history = Vec::new();
-    let mut generation_bests: Vec<HallOfFameEntry> = Vec::new();
 
     let mut population = Population::generate(
         &evolution.generation,
@@ -127,17 +140,16 @@ pub fn run_experiment(
     .map_err(ExperimentError::Generation)?;
     let mut reports = evaluate(&population, &dataset, limits, options.parallel);
 
-    let mut generations_executed = 0usize;
-    let mut success = ingest_generation(
+    let mut best = ingest_generation(
         0,
         problem.seed,
-        &problem.success,
         &population,
         &reports,
         &mut hall,
         &mut history,
-        &mut generation_bests,
     );
+    let mut generations_executed = 0usize;
+    let mut success = problem.success.is_met(&best.fitness);
 
     if !success
     {
@@ -146,25 +158,26 @@ pub fn run_experiment(
             population = population.advance(&reports, evolution, limits, &mut rng);
             reports = evaluate(&population, &dataset, limits, options.parallel);
             generations_executed = generation;
-            success = ingest_generation(
+
+            let generation_best = ingest_generation(
                 generation,
                 problem.seed,
-                &problem.success,
                 &population,
                 &reports,
                 &mut hall,
                 &mut history,
-                &mut generation_bests,
             );
-            if success
+            best = better_of(best, generation_best);
+
+            if problem.success.is_met(&best.fitness)
             {
+                success = true;
                 break;
             }
         }
     }
 
     let final_population = summarise_population(&population, &reports);
-    let best = select_global_best(&generation_bests);
 
     ExperimentArchive::build(
         problem.clone(),
@@ -173,25 +186,23 @@ pub fn run_experiment(
         generations_executed,
         history,
         final_population,
+        options.hall_of_fame_capacity,
         hall.into_entries(),
         best,
     )
 }
 
-/// Record one generation, update the hall of fame and best tracker, and report
-/// whether the generation's best individual meets the success criteria.
-#[allow(clippy::too_many_arguments)]
+/// Record one generation and update the hall of fame; return the generation's
+/// best individual (top-ranked).
 fn ingest_generation(
     generation: usize,
     seed: u64,
-    success: &SuccessCriteria,
     population: &Population,
     reports: &[FitnessReport],
     hall: &mut HallOfFame,
     history: &mut Vec<GenerationRecord>,
-    generation_bests: &mut Vec<HallOfFameEntry>,
-) -> bool {
-    let order = rank(reports);
+) -> HallOfFameEntry {
+    let order = rank(population.programs(), reports);
     let best_index = order[0];
     let best = &reports[best_index];
 
@@ -199,14 +210,6 @@ fn ingest_generation(
     {
         hall.consider(program, *report, generation, seed);
     }
-
-    generation_bests.push(HallOfFameEntry {
-        program: population.programs()[best_index].clone(),
-        fitness: *best,
-        fingerprint: best.fingerprint,
-        generation,
-        seed,
-    });
 
     history.push(GenerationRecord {
         generation,
@@ -217,10 +220,16 @@ fn ingest_generation(
         invalid_individuals: reports.iter().filter(|report| !report.evaluated).count(),
         exact_solutions: reports.iter().filter(|report| is_exact(report)).count(),
         pareto_front_size: pareto_front_size(reports),
-        diversity: distinct_fingerprints(reports),
+        diversity: distinct_programs(population.programs()),
     });
 
-    success.is_met(best)
+    HallOfFameEntry {
+        program: population.programs()[best_index].clone(),
+        fitness: *best,
+        fingerprint: best.fingerprint,
+        generation,
+        seed,
+    }
 }
 
 fn summarise_population(population: &Population, reports: &[FitnessReport]) -> PopulationSummary {
@@ -230,22 +239,29 @@ fn summarise_population(population: &Population, reports: &[FitnessReport]) -> P
     }
     else
     {
-        reports[rank(reports)[0]].fingerprint
+        reports[rank(population.programs(), reports)[0]].fingerprint
     };
     PopulationSummary {
         size: population.len(),
         valid: reports.iter().filter(|report| report.evaluated).count(),
         invalid: reports.iter().filter(|report| !report.evaluated).count(),
-        distinct: distinct_fingerprints(reports),
+        distinct: distinct_programs(population.programs()),
         best_fingerprint,
     }
 }
 
-/// The single best individual across all generations.
-fn select_global_best(generation_bests: &[HallOfFameEntry]) -> HallOfFameEntry {
-    let reports: Vec<FitnessReport> = generation_bests.iter().map(|entry| entry.fitness).collect();
-    let order = rank(&reports);
-    generation_bests[order[0]].clone()
+/// The better of two candidate best entries under the ranking order.
+fn better_of(first: HallOfFameEntry, second: HallOfFameEntry) -> HallOfFameEntry {
+    let programs = [first.program.clone(), second.program.clone()];
+    let reports = [first.fitness, second.fitness];
+    if rank(&programs, &reports)[0] == 0
+    {
+        first
+    }
+    else
+    {
+        second
+    }
 }
 
 /// A program that solves every case exactly.
@@ -267,17 +283,18 @@ fn pareto_front_size(reports: &[FitnessReport]) -> usize {
         .count()
 }
 
-/// Number of structurally distinct programs (distinct fingerprints).
-fn distinct_fingerprints(reports: &[FitnessReport]) -> usize {
-    let mut fingerprints: Vec<u128> = reports.iter().map(|report| report.fingerprint).collect();
-    fingerprints.sort_unstable();
-    fingerprints.dedup();
-    fingerprints.len()
+/// Number of structurally distinct programs, by authoritative canonical bytes.
+fn distinct_programs(programs: &[TensorProgram]) -> usize {
+    let mut bytes: Vec<Vec<u8>> = programs.iter().map(canonical_bytes).collect();
+    bytes.sort_unstable();
+    bytes.dedup();
+    bytes.len()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tensor::SuccessCriteria;
     use crate::tensor::benchmarks;
 
     fn tuned(

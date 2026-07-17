@@ -1,11 +1,14 @@
 //! Deterministic population manager and multi-objective selection.
 //!
 //! Selection is Pareto-based across the loss and every structural cost metric.
-//! Ranking is a strict total order: individuals are sorted by non-dominated
-//! front, then lexicographically across all objectives, and finally by their
-//! population index — an explicit deterministic tie-breaker that does not rely
-//! on any sorting-stability behaviour. The whole engine is driven by a single
-//! explicitly seeded RNG stream, so a seed reproduces every generation exactly.
+//! Ranking is a strict total order over `(program, report)` pairs: individuals
+//! are sorted by non-dominated front, then lexicographically across all
+//! objectives, then by the program's authoritative **canonical bytes**, and
+//! finally — only for two structurally identical programs — by population index.
+//! Canonical bytes are consulted before the index, so ordering never depends on
+//! insertion order for distinct programs, nor on a fingerprint hash that could
+//! collide. The whole engine is driven by a single explicitly seeded RNG
+//! stream, so a seed reproduces every generation exactly.
 
 use std::cmp::Ordering;
 use std::error::Error;
@@ -13,6 +16,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use super::canonical::canonical_bytes;
 use super::crossover::{CrossoverOutcome, crossover};
 use super::dataset::Dataset;
 use super::fitness::{FitnessReport, evaluate_population};
@@ -165,7 +169,7 @@ impl Population {
             return Population::from_programs(Vec::new());
         }
 
-        let order = rank(reports);
+        let order = rank(&self.individuals, reports);
         let positions = rank_positions(&order, reports.len());
         let input_shapes = &config.generation.input_shapes;
         let elitism = config.elitism.min(size);
@@ -233,30 +237,34 @@ pub fn dominates(first: &FitnessReport, second: &FitnessReport) -> bool {
     strictly_better
 }
 
-/// Rank reports best-first as a strict total order.
+/// Rank `(program, report)` pairs best-first as a strict total order.
 ///
 /// Keys, in priority:
 /// 1. non-dominated Pareto front;
 /// 2. the lexicographic objective order;
-/// 3. the program's stable structural fingerprint — an order-independent,
-///    deterministic tie-breaker that depends only on program structure, never
-///    on insertion order, `HashMap` iteration, memory addresses, thread
-///    scheduling or wall-clock time;
-/// 4. the population index, as the ultimate tie-breaker for the rare case of two
-///    fingerprint-colliding individuals with otherwise identical objectives.
+/// 3. the program's authoritative **canonical bytes** — an order-independent,
+///    deterministic structural key that depends only on program structure,
+///    never on insertion order, a collidable fingerprint hash, `HashMap`
+///    iteration, memory addresses, thread scheduling or wall-clock time;
+/// 4. the population index, reached only for two structurally identical programs
+///    (equal canonical bytes) with otherwise equal objectives.
 ///
+/// `programs` and `reports` must have equal length and correspond element-wise.
 /// The comparator is a strict total order, so the result is independent of the
 /// underlying sort's stability.
-pub fn rank(reports: &[FitnessReport]) -> Vec<usize> {
+pub fn rank(programs: &[TensorProgram], reports: &[FitnessReport]) -> Vec<usize> {
+    debug_assert_eq!(programs.len(), reports.len());
     let count = reports.len();
     let fronts = non_dominated_fronts(reports);
+    // Precompute each program's canonical bytes once for O(n log n) comparisons.
+    let bytes: Vec<Vec<u8>> = programs.iter().map(canonical_bytes).collect();
 
     let mut order: Vec<usize> = (0..count).collect();
     order.sort_by(|&left, &right| {
         fronts[left]
             .cmp(&fronts[right])
             .then_with(|| lexicographic(&reports[left], &reports[right]))
-            .then_with(|| reports[left].fingerprint.cmp(&reports[right].fingerprint))
+            .then_with(|| bytes[left].cmp(&bytes[right]))
             .then_with(|| left.cmp(&right))
     });
     order
@@ -357,7 +365,10 @@ pub fn evolve(
             best_fitness = candidate_fitness;
         }
 
-        history.push(summarise(generation, &best_generation_fitness(&reports)));
+        history.push(summarise(
+            generation,
+            &best_generation_fitness(&population, &reports),
+        ));
     }
 
     Ok(EvolutionOutcome {
@@ -370,14 +381,14 @@ pub fn evolve(
 
 /// The best program and fitness of a population under the ranking order.
 fn best_of(population: &Population, reports: &[FitnessReport]) -> (TensorProgram, FitnessReport) {
-    let order = rank(reports);
+    let order = rank(&population.individuals, reports);
     let best = order[0];
     (population.individuals[best].clone(), reports[best])
 }
 
 /// The best fitness of a generation under the ranking order.
-fn best_generation_fitness(reports: &[FitnessReport]) -> FitnessReport {
-    let order = rank(reports);
+fn best_generation_fitness(population: &Population, reports: &[FitnessReport]) -> FitnessReport {
+    let order = rank(&population.individuals, reports);
     reports[order[0]]
 }
 
@@ -563,61 +574,136 @@ mod tests {
         assert!(!dominates(&better, &report(1.0, 10, 0, 99)));
     }
 
+    /// A distinct program whose positive `Scale` factor fixes its canonical-byte
+    /// order (for positive `f32`, the bit pattern is monotonic in value).
+    fn scaled(factor: f32) -> TensorProgram {
+        TensorProgram::new(
+            vec![
+                TensorInstruction::Input { input: 0 },
+                TensorInstruction::Scale { src: 0, factor },
+            ],
+            1,
+        )
+    }
+
     #[test]
     fn ranking_breaks_ties_under_equal_primary_objective() {
-        // Equal loss; the lower-FLOP report must rank first.
+        // Equal loss; the lower-FLOP report must rank first. Programs identical,
+        // so the objective order decides.
+        let programs = vec![scaled(1.0), scaled(1.0), scaled(1.0)];
         let reports = vec![
             report(1.0, 30, 0, 7),
             report(1.0, 10, 0, 8),
             report(1.0, 20, 0, 9),
         ];
-        assert_eq!(rank(&reports), vec![1, 2, 0]);
+        assert_eq!(rank(&programs, &reports), vec![1, 2, 0]);
+    }
+
+    /// The order of `programs` sorted by their canonical bytes.
+    fn canonical_order(programs: &[TensorProgram]) -> Vec<usize> {
+        let mut order: Vec<usize> = (0..programs.len()).collect();
+        order.sort_by(|&a, &b| canonical_bytes(&programs[a]).cmp(&canonical_bytes(&programs[b])));
+        order
     }
 
     #[test]
-    fn identical_objectives_rank_by_structural_fingerprint_then_index() {
-        // All objectives equal; distinct fingerprints decide the order,
-        // independently of the input (insertion) order.
+    fn identical_objectives_rank_by_canonical_bytes_independent_of_insertion_order() {
+        // All objectives equal; distinct programs are ordered by their canonical
+        // bytes (an authoritative structural key), independently of insertion
+        // order. The exact order is whatever the canonical bytes dictate.
+        let programs = vec![scaled(3.0), scaled(1.0), scaled(2.0)];
         let reports = vec![
             report(2.0, 5, 1, 300),
             report(2.0, 5, 1, 100),
             report(2.0, 5, 1, 200),
         ];
-        // Ascending fingerprint: 100 (idx 1), 200 (idx 2), 300 (idx 0).
-        assert_eq!(rank(&reports), vec![1, 2, 0]);
+        assert_eq!(rank(&programs, &reports), canonical_order(&programs));
 
-        // Reordering the inputs yields the same ordering of fingerprints, proving
-        // independence from insertion order.
-        let reordered = vec![
+        // Reordering the inputs yields the same programs in the same structural
+        // order (the globally sorted canonical-byte sequence).
+        let reordered = vec![scaled(2.0), scaled(3.0), scaled(1.0)];
+        let reordered_reports = vec![
             report(2.0, 5, 1, 200),
             report(2.0, 5, 1, 300),
             report(2.0, 5, 1, 100),
         ];
-        let order = rank(&reordered);
-        let fingerprints: Vec<u128> = order.iter().map(|&i| reordered[i].fingerprint).collect();
-        assert_eq!(fingerprints, vec![100, 200, 300]);
-
-        // Fingerprint collisions (identical fingerprints) fall back to index.
-        let collide = vec![
-            report(2.0, 5, 1, 42),
-            report(2.0, 5, 1, 42),
-            report(2.0, 5, 1, 42),
-        ];
-        assert_eq!(rank(&collide), vec![0, 1, 2]);
+        let order = rank(&reordered, &reordered_reports);
+        let ranked_bytes: Vec<Vec<u8>> = order
+            .iter()
+            .map(|&i| canonical_bytes(&reordered[i]))
+            .collect();
+        let mut sorted_bytes: Vec<Vec<u8>> = reordered.iter().map(canonical_bytes).collect();
+        sorted_bytes.sort();
+        assert_eq!(ranked_bytes, sorted_bytes);
     }
 
     #[test]
-    fn ranking_is_repeatable_and_order_stable() {
+    fn adversarial_equal_fingerprints_do_not_collapse_ranking() {
+        // Distinct programs whose reports carry the SAME fingerprint field and
+        // identical objectives. Ranking must still distinguish all of them by
+        // canonical bytes (not the collidable fingerprint), independently of
+        // input order.
+        let collide = 0xDEAD_BEEF_u128;
+        let programs = vec![scaled(3.0), scaled(1.0), scaled(2.0)];
+        let reports = vec![
+            report(2.0, 5, 1, collide),
+            report(2.0, 5, 1, collide),
+            report(2.0, 5, 1, collide),
+        ];
+        let order = rank(&programs, &reports);
+        // All three distinct programs are present (none collapsed) and ordered
+        // exactly by canonical bytes.
+        assert_eq!(order.len(), 3);
+        assert_eq!(order, canonical_order(&programs));
+
+        // Reordering the inputs preserves the structural order.
+        let reordered = vec![scaled(2.0), scaled(3.0), scaled(1.0)];
+        let reordered_reports = vec![
+            report(2.0, 5, 1, collide),
+            report(2.0, 5, 1, collide),
+            report(2.0, 5, 1, collide),
+        ];
+        let order = rank(&reordered, &reordered_reports);
+        let ranked_bytes: Vec<Vec<u8>> = order
+            .iter()
+            .map(|&i| canonical_bytes(&reordered[i]))
+            .collect();
+        let mut sorted_bytes: Vec<Vec<u8>> = reordered.iter().map(canonical_bytes).collect();
+        sorted_bytes.sort();
+        assert_eq!(ranked_bytes, sorted_bytes);
+    }
+
+    #[test]
+    fn structurally_identical_programs_fall_back_to_index() {
+        // Same program repeated with equal objectives: equal canonical bytes, so
+        // the population index breaks the tie.
+        let programs = vec![scaled(1.0), scaled(1.0), scaled(1.0)];
+        let reports = vec![
+            report(2.0, 5, 1, 1),
+            report(2.0, 5, 1, 2),
+            report(2.0, 5, 1, 3),
+        ];
+        assert_eq!(rank(&programs, &reports), vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn ranking_is_repeatable() {
+        let programs = vec![scaled(1.0), scaled(3.0), scaled(2.0), scaled(4.0)];
         let reports = vec![
             report(1.0, 5, 0, 11),
             report(1.0, 5, 0, 33),
             report(1.0, 5, 0, 22),
             report(0.5, 9, 2, 44),
         ];
-        assert_eq!(rank(&reports), rank(&reports));
-        // The distinct-loss individual (idx 3) is best; the rest order by
-        // fingerprint: 11 (0), 22 (2), 33 (1).
-        assert_eq!(rank(&reports), vec![3, 0, 2, 1]);
+        assert_eq!(rank(&programs, &reports), rank(&programs, &reports));
+
+        // Index 3 has the lowest loss and ranks first; the remaining three, tied
+        // on objectives, follow in canonical-byte order.
+        let order = rank(&programs, &reports);
+        assert_eq!(order[0], 3);
+        let mut rest = [0usize, 1, 2];
+        rest.sort_by(|&a, &b| canonical_bytes(&programs[a]).cmp(&canonical_bytes(&programs[b])));
+        assert_eq!(&order[1..], &rest[..]);
     }
 
     #[test]
@@ -659,7 +745,7 @@ mod tests {
         let empty = Population::from_programs(Vec::new());
         let reports = empty.evaluate(&dataset(), VerificationLimits::default());
         assert!(reports.is_empty());
-        assert!(rank(&reports).is_empty());
+        assert!(rank(empty.programs(), &reports).is_empty());
         let mut rng = DeterministicRng::new(0);
         let advanced = empty.advance(&reports, &config(), VerificationLimits::default(), &mut rng);
         assert_eq!(advanced.len(), 0);
@@ -692,7 +778,7 @@ mod tests {
         let population = Population::from_programs(vec![program.clone(), program.clone(), program]);
         let reports = population.evaluate(&dataset(), VerificationLimits::default());
         assert_eq!(reports[0], reports[1]);
-        assert_eq!(rank(&reports), vec![0, 1, 2]);
+        assert_eq!(rank(population.programs(), &reports), vec![0, 1, 2]);
     }
 
     #[test]
@@ -744,7 +830,10 @@ mod tests {
             VerificationLimits::default(),
         );
         assert_eq!(sequential, parallel);
-        assert_eq!(rank(&sequential), rank(&parallel));
+        assert_eq!(
+            rank(population.programs(), &sequential),
+            rank(population.programs(), &parallel)
+        );
     }
 
     #[test]

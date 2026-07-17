@@ -2,17 +2,22 @@
 //!
 //! Reports contain only deterministic experiment data — problem, seed, success,
 //! generations, best program, correctness, structural costs, hall of fame and
-//! (optionally) the replay result. No wall-clock timing appears here;
-//! observational benchmark data is kept separate from this deterministic view.
+//! (optionally) the archive-verification result. No wall-clock timing appears
+//! here; observational benchmark data is kept separate from this deterministic
+//! view. The digest line reports a content-integrity digest, not an
+//! authenticity guarantee.
 
 use std::fmt::Write;
 
-use super::archive::{ExperimentArchive, ReplayReport};
+use super::archive::{ArchiveVerification, ExperimentArchive};
 use super::ir::TensorInstruction;
 
-/// Render a deterministic text report. When `replay` is supplied its verdict is
-/// appended.
-pub fn text_report(archive: &ExperimentArchive, replay: Option<&ReplayReport>) -> String {
+/// Render a deterministic text report. When `verification` is supplied its
+/// verdict is appended.
+pub fn text_report(
+    archive: &ExperimentArchive,
+    verification: Option<&ArchiveVerification>,
+) -> String {
     let mut out = String::new();
 
     let _ = writeln!(out, "experiment: {}", archive.problem.id);
@@ -26,7 +31,11 @@ pub fn text_report(archive: &ExperimentArchive, replay: Option<&ReplayReport>) -
         "generations executed: {}",
         archive.generations_executed
     );
-    let _ = writeln!(out, "digest: {}", archive.digest);
+    let _ = writeln!(
+        out,
+        "content digest (SHA-256, integrity only, not authenticity): {}",
+        archive.digest
+    );
 
     let best = &archive.best;
     let _ = writeln!(out, "best (generation {}):", best.generation);
@@ -80,15 +89,15 @@ pub fn text_report(archive: &ExperimentArchive, replay: Option<&ReplayReport>) -
         );
     }
 
-    if let Some(replay) = replay
+    if let Some(verification) = verification
     {
         let _ = writeln!(
             out,
-            "replay: intact={} digest_ok={} entries_checked={} mismatches={}",
-            replay.is_intact(),
-            replay.digest_ok,
-            replay.entries_checked,
-            replay.mismatches.len()
+            "verification: intact={} digest_ok={} programs_checked={} issues={}",
+            verification.is_intact(),
+            verification.digest_ok,
+            verification.programs_checked,
+            verification.issues.len()
         );
     }
 
@@ -115,22 +124,22 @@ fn describe(instruction: &TensorInstruction) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tensor::archive::replay;
+    use crate::tensor::archive::verify_archive;
     use crate::tensor::benchmarks;
     use crate::tensor::experiment::{RunOptions, run_experiment};
 
     #[test]
     fn text_report_is_deterministic_and_mentions_key_fields() {
         let archive = run_experiment(&benchmarks::identity(), RunOptions::default()).unwrap();
-        let replay = replay(&archive).unwrap();
+        let verification = verify_archive(&archive);
 
-        let first = text_report(&archive, Some(&replay));
-        let second = text_report(&archive, Some(&replay));
+        let first = text_report(&archive, Some(&verification));
+        let second = text_report(&archive, Some(&verification));
         assert_eq!(first, second);
 
         assert!(first.contains("experiment: identity"));
-        assert!(first.contains("digest:"));
-        assert!(first.contains("replay: intact=true"));
+        assert!(first.contains("content digest"));
+        assert!(first.contains("verification: intact=true"));
     }
 
     #[test]

@@ -1,12 +1,19 @@
-//! Canonical, deterministic identity of tensor programs.
+//! Canonical byte identity and structural fingerprint of tensor programs.
 //!
-//! A program's canonical byte encoding is a fixed, platform-independent
-//! serialisation of its instructions and output register. It is used to derive
-//! a stable structural fingerprint that provides an order-independent
-//! tie-breaker for ranking and a deduplication key for the hall of fame. The
-//! encoding never depends on `HashMap` iteration, memory addresses, thread
-//! scheduling or wall-clock time, and `Scale` factors are encoded through their
-//! exact `f32` bit pattern so distinct programs always encode differently.
+//! The **identity** of a program is its [`canonical_bytes`]: a fixed,
+//! platform-independent serialisation of its instructions and output register.
+//! Two programs are the same iff their canonical bytes are equal
+//! ([`canonical_equal`]). The encoding never depends on `HashMap` iteration,
+//! memory addresses, thread scheduling or wall-clock time, and `Scale` factors
+//! are encoded through their exact `f32` bit pattern.
+//!
+//! [`program_fingerprint`] is a 128-bit FNV-1a **hash** of those bytes. It is a
+//! fast lookup hint, cache key and display identifier — not a proof of identity.
+//! FNV-1a is not collision-free, so equal fingerprints do **not** imply equal
+//! programs; callers that need identity must compare canonical bytes (or full
+//! programs). Ordering and deduplication in this crate therefore use canonical
+//! bytes as the authoritative comparison and treat the fingerprint only as a
+//! first, fast comparison level.
 
 use super::ir::{TensorInstruction, TensorProgram};
 
@@ -15,7 +22,7 @@ const FNV_OFFSET: u128 = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d;
 /// FNV-1a 128-bit prime.
 const FNV_PRIME: u128 = 0x0000_0000_0100_0000_0000_0000_0000_013B;
 
-/// The canonical byte encoding of a program.
+/// The canonical byte encoding of a program — its authoritative identity.
 pub fn canonical_bytes(program: &TensorProgram) -> Vec<u8> {
     let mut bytes = Vec::new();
     write_u64(&mut bytes, program.instructions.len() as u64);
@@ -27,10 +34,20 @@ pub fn canonical_bytes(program: &TensorProgram) -> Vec<u8> {
     bytes
 }
 
-/// A stable 128-bit structural fingerprint of a program.
+/// Whether two programs are structurally identical (equal canonical bytes).
 ///
-/// The algorithm (FNV-1a over the canonical bytes) is fixed and deterministic;
-/// it is not the standard-library `Hash`, which is not guaranteed to be stable.
+/// This is the authoritative identity check; unlike deriving equality from a
+/// fingerprint it cannot be defeated by a hash collision, and unlike `f32`
+/// `PartialEq` it compares `Scale` factors by their exact bit pattern.
+pub fn canonical_equal(left: &TensorProgram, right: &TensorProgram) -> bool {
+    canonical_bytes(left) == canonical_bytes(right)
+}
+
+/// A stable 128-bit FNV-1a **hash** of a program's canonical bytes.
+///
+/// Deterministic and fixed (not the standard-library `Hash`), but not
+/// collision-free: equal fingerprints do not prove equal programs. Use it as a
+/// fast hint or identifier, never as an identity.
 pub fn program_fingerprint(program: &TensorProgram) -> u128 {
     fnv1a_128(&canonical_bytes(program))
 }
