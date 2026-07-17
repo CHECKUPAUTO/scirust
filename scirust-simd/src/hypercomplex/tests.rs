@@ -561,3 +561,83 @@ fn dual_sedenion_norm_sqr_gradient() {
         .sum();
     assert_eq!(deriv, 2.0 * dot);
 }
+
+#[test]
+fn dual_octonion_norm_normalize_inverse_match_finite_differences() {
+    // x₀ non nul, v quelconque ; contrôle numérique indépendant contre la
+    // différence centrale (f(x₀+h·v) − f(x₀−h·v)) / 2h, même schéma que
+    // `dual_octonion_matches_finite_differences`.
+    let x0 = OctonionSimd::from_array([0.5, -0.25, 1.0, 0.75, -0.5, 0.25, -1.0, 0.5]);
+    let v = OctonionSimd::from_array([1.0, 0.5, -0.5, 0.25, 0.75, -0.25, 0.5, -1.0]);
+    let h = 1.0e-3f32;
+
+    let dual = DualOctonion::variable(x0, v);
+
+    // norm : f = ‖x‖ ∈ ℝ.
+    let (val_n, deriv_n) = dual.norm();
+    assert_eq!(val_n, x0.norm());
+    let plus_n = (x0 + v.scale(h)).norm();
+    let minus_n = (x0 - v.scale(h)).norm();
+    let fd_norm = (plus_n - minus_n) / (2.0 * h);
+    assert!(
+        (deriv_n - fd_norm).abs() < 1e-2,
+        "norm : dérivée duale {deriv_n} vs différences finies {fd_norm}"
+    );
+
+    // normalize : f = x/‖x‖ ∈ 𝕆.
+    let dual_normalize = dual.normalize();
+    assert_eq!(dual_normalize.val, x0.normalize());
+    let plus = (x0 + v.scale(h)).normalize();
+    let minus = (x0 - v.scale(h)).normalize();
+    let fd_normalize = (plus - minus).scale(1.0 / (2.0 * h));
+    let err_normalize = (dual_normalize.eps - fd_normalize).norm_sqr().sqrt();
+    assert!(err_normalize < 1e-2, "normalize : err = {err_normalize}");
+
+    // inverse : f = x⁻¹ ∈ 𝕆.
+    let dual_inverse = dual.inverse();
+    assert_eq!(dual_inverse.val, x0.inverse());
+    let plus = (x0 + v.scale(h)).inverse();
+    let minus = (x0 - v.scale(h)).inverse();
+    let fd_inverse = (plus - minus).scale(1.0 / (2.0 * h));
+    let err_inverse = (dual_inverse.eps - fd_inverse).norm_sqr().sqrt();
+    assert!(err_inverse < 1e-2, "inverse : err = {err_inverse}");
+}
+
+#[test]
+fn dual_sedenion_norm_normalize_inverse_match_finite_differences() {
+    let x0 = SedenionSimd::from_array([
+        1.0, -2.0, 3.0, 0.0, 1.0, -1.0, 2.0, 0.0, -3.0, 1.0, 0.0, 2.0, -1.0, 1.0, 0.0, -2.0,
+    ]);
+    let v = SedenionSimd::from_array([
+        2.0, 1.0, 0.0, -1.0, 1.0, 3.0, -2.0, 0.0, 1.0, -1.0, 2.0, 0.0, 1.0, -2.0, 0.0, 3.0,
+    ]);
+    let h = 1.0e-3f32;
+
+    let dual = DualSedenion::variable(x0, v);
+
+    let (val_n, deriv_n) = dual.norm();
+    assert_eq!(val_n, x0.norm());
+    let plus_n = (x0 + v.scale(h)).norm();
+    let minus_n = (x0 - v.scale(h)).norm();
+    let fd_norm = (plus_n - minus_n) / (2.0 * h);
+    assert!(
+        (deriv_n - fd_norm).abs() < 1e-2,
+        "norm : dérivée duale {deriv_n} vs différences finies {fd_norm}"
+    );
+
+    let dual_normalize = dual.normalize();
+    assert_eq!(dual_normalize.val, x0.normalize());
+    let plus = (x0 + v.scale(h)).normalize();
+    let minus = (x0 - v.scale(h)).normalize();
+    let fd_normalize = (plus - minus).scale(1.0 / (2.0 * h));
+    let err_normalize = (dual_normalize.eps - fd_normalize).norm_sqr().sqrt();
+    assert!(err_normalize < 1e-2, "normalize : err = {err_normalize}");
+
+    let dual_inverse = dual.inverse();
+    assert_eq!(dual_inverse.val, x0.inverse());
+    let plus = (x0 + v.scale(h)).inverse();
+    let minus = (x0 - v.scale(h)).inverse();
+    let fd_inverse = (plus - minus).scale(1.0 / (2.0 * h));
+    let err_inverse = (dual_inverse.eps - fd_inverse).norm_sqr().sqrt();
+    assert!(err_inverse < 1e-2, "inverse : err = {err_inverse}");
+}

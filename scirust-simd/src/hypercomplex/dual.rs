@@ -87,6 +87,48 @@ macro_rules! impl_dual {
                     .reduce_sum();
                 (value, 2.0 * dot)
             }
+
+            /// Norme duale : f = ‖v‖, f' = ⟨v, d⟩/‖v‖ (règle de dérivation en
+            /// chaîne de `√` appliquée à [`Self::norm_sqr`] : `(√u)' = u'/(2√u)`).
+            /// Indéfini pour `v = 0` (comme `1/0`).
+            #[inline(always)]
+            #[must_use]
+            pub fn norm(self) -> (f32, f32) {
+                let (n2, dn2) = self.norm_sqr();
+                let n = n2.sqrt();
+                (n, dn2 / (2.0 * n))
+            }
+
+            /// Normalisation duale : f = v/‖v‖, dérivée par la règle du
+            /// quotient (`v` vectoriel, `‖v‖` scalaire réel).
+            /// Indéfini pour `v = 0`.
+            #[inline(always)]
+            #[must_use]
+            pub fn normalize(self) -> Self {
+                let (n, dn) = self.norm();
+                let inv_n = 1.0 / n;
+                let dinv_n = -dn / (n * n); // (1/f)' = −f'/f²
+                Self {
+                    val: self.val.scale(inv_n),
+                    eps: self.eps.scale(inv_n) + self.val.scale(dinv_n),
+                }
+            }
+
+            /// Inverse dual : f(t) = v(t)⁻¹ = v̄(t)/‖v(t)‖², dérivée par la
+            /// règle du produit (`v̄(t)` vectoriel, `1/‖v(t)‖²` scalaire réel).
+            /// Indéfini pour `v = 0`.
+            #[inline(always)]
+            #[must_use]
+            pub fn inverse(self) -> Self {
+                let (n2, dn2) = self.norm_sqr();
+                let r = 1.0 / n2;
+                let dr = -dn2 / (n2 * n2); // (1/f)' = −f'/f²
+                let c = self.conj();
+                Self {
+                    val: c.val.scale(r),
+                    eps: c.eps.scale(r) + c.val.scale(dr),
+                }
+            }
         }
 
         impl Add for $dual {
