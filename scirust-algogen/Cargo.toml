@@ -11,6 +11,12 @@ scirust-evo = { path = "../scirust-evo" }
 scirust-tensor-core = { path = "../scirust-tensor-core" }
 scirust-tensor-einsum = { path = "../scirust-tensor-einsum" }
 serde = { version = "1", features = ["derive"] }
+rayon = { version = "1", optional = true }
+
+[features]
+# Optional parallel population evaluation. Results are collected back into input
+# order, so a run is bit-identical to the sequential path.
+rayon = ["dep:rayon"]
 
 [dev-dependencies]
 serde_json = "1"

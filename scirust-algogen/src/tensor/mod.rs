@@ -5,23 +5,37 @@
 
 mod active;
 mod canonicalize;
+mod cost;
 mod crossover;
+mod dataset;
+mod fitness;
 mod generate;
 mod interpreter;
 mod ir;
 mod mutate;
+mod population;
 mod rng;
 mod verify;
 
 pub use active::analyze_active;
 pub use canonicalize::prune_dead_code;
+pub use cost::{CostReport, estimate_cost};
 pub use crossover::{CrossoverOutcome, crossover};
+pub use dataset::{Dataset, DatasetError, TensorCase};
+pub use fitness::{CASE_FAILURE_PENALTY, FitnessReport, evaluate_population, evaluate_program};
 pub use generate::{GenerationConfig, GenerationError, OperatorSet, generate};
 pub use interpreter::{ExecutionError, ExecutionResult, execute_program};
 pub use ir::{TensorInstruction, TensorProgram};
 pub use mutate::{MutationKind, MutationOutcome, mutate};
+pub use population::{
+    EvolutionConfig, EvolutionError, EvolutionOutcome, GenerationStats, Population,
+    TournamentConfig, dominates, elite, evolve, rank, tournament,
+};
 pub use rng::DeterministicRng;
 pub use verify::{ProgramError, VerificationLimits, VerifiedProgram, verify_program};
+
+#[cfg(feature = "rayon")]
+pub use fitness::evaluate_population_rayon;
 
 #[cfg(test)]
 mod tests {
