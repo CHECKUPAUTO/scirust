@@ -75,6 +75,9 @@ proof-portable-f32-*/
 fuzz/target/
 fuzz/corpus/
 fuzz/artifacts/
+# scirust-hypermemory is its own nightly-only cargo workspace (excluded from the
+# main workspace) and builds into its own target dir.
+scirust-hypermemory/target/
 proof-certify-*.txt
 misrounds-*.txt
 

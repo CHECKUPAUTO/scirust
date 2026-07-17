@@ -1,0 +1,47 @@
+# This crate is a SEPARATE, self-contained cargo workspace (note the empty
+# `[workspace]` table below) and is also listed in the root Cargo.toml
+# `exclude` list. It mandates `scirust-simd/portable-simd` — the nightly
+# `feature(portable_simd)` — so it cannot join the main workspace, whose
+# stable / MSRV `--workspace` gate requires every member to build on stable
+# (portable-simd stays optional and off-by-default everywhere else). It is
+# built and tested only by the dedicated `hypermemory` CI job (nightly), and
+# locally via `cargo +nightly-2026-07-02 test` from this directory. This keeps
+# the "whole workspace builds on stable" gate intact — the same reasoning that
+# keeps `fuzz` a separate excluded workspace.
+[package]
+name = "scirust-hypermemory"
+version = "0.1.0"
+edition = "2021"
+publish = false
+rust-version = "1.89"
+description = "Deterministic associative-memory research subsystem over 16-dimensional hypercomplex (sedenion) representations with explicitly parenthesized relations, evaluated against ordinary real-vector baselines. Research-grade, auditable, falsifiable — NOT a database, vector DB, RAG, or cognitive-memory replacement."
+license-file = "../LICENSE.md"
+repository = "https://github.com/Memorithm/scirust"
+
+# Detach from parent-workspace discovery: this is its own workspace root.
+[workspace]
+
+[dependencies]
+# The representation layer. `portable-simd` is the nightly feature that exposes
+# `hypercomplex::{SedenionSimd, DualSedenion}`; the whole crate is built on it,
+# so it is a hard, always-on dependency (no point gating it — without sedenions
+# there is no crate). This crate is therefore nightly-only, which is exactly
+# why it lives outside the main (stable-buildable) workspace.
+scirust-simd = { path = "../scirust-simd", features = ["portable-simd"] }
+# SHA-256 for the content / expression digests ONLY (identity, corruption
+# detection, reproducibility). NOT a security or secrecy claim. Already present
+# in Cargo.lock (RustCrypto), used by many workspace crates, so this adds no new
+# download.
+sha2 = "0.10"
+
+[dev-dependencies]
+criterion = "0.5"
+# Independent audited exact dense index used purely as a second cross-check
+# baseline in tests and benches. `default-features = false` selects the pure,
+# deterministic retrieval core (DenseIndex / BoundedSemanticMemory) with no
+# scirust-core / scirust-graph dependency.
+scirust-retrieval = { path = "../scirust-retrieval", default-features = false }
+
+[[bench]]
+name = "hypermemory_bench"
+harness = false

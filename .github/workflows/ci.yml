@@ -167,6 +167,37 @@ jobs:
       - name: Build & test scirust-simd with portable-simd
         run: cargo +nightly-2026-07-02 test -p scirust-simd --all-targets --features portable-simd --locked
 
+  # scirust-hypermemory is a separate, nightly-only workspace (excluded from the
+  # main workspace in the root Cargo.toml): it mandates
+  # `scirust-simd/portable-simd` (nightly `feature(portable_simd)`), so it cannot
+  # take part in the stable / MSRV `--workspace` gate. Build, lint, test, and
+  # doc it here on nightly instead — the same pattern as the `fuzz` job. No
+  # `--locked`: like `fuzz`, it keeps no committed lockfile.
+  hypermemory:
+    name: Build & Test (scirust-hypermemory, nightly)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: scirust-hypermemory
+      - name: Format check
+        run: cargo +nightly-2026-07-02 fmt --manifest-path scirust-hypermemory/Cargo.toml --all -- --check
+      - name: Clippy (all targets, warnings denied)
+        run: cargo +nightly-2026-07-02 clippy --manifest-path scirust-hypermemory/Cargo.toml --all-targets --all-features -- -D warnings
+      - name: Test (unit, integration, doctests)
+        run: cargo +nightly-2026-07-02 test --manifest-path scirust-hypermemory/Cargo.toml
+      - name: Doc
+        run: cargo +nightly-2026-07-02 doc --manifest-path scirust-hypermemory/Cargo.toml --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
   # transformer-inference (attention, KV cache, norm, quantization, the
   # block/model assembly) is gated off by default — zero consumers in the
   # workspace as of 2026-07 — but it's real, tested code that must keep
