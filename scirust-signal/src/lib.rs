@@ -82,6 +82,7 @@ pub mod cepstrum;
 pub mod complex;
 pub mod denoise;
 pub mod envelope;
+pub mod error;
 pub mod features;
 pub mod fft;
 pub mod filter;
@@ -89,6 +90,8 @@ pub mod mcsa;
 pub mod order;
 pub mod radar;
 pub mod windows;
+
+pub use error::{SignalError, SignalResult};
 
 pub use bearing::{BearingFault, BearingGeometry, bpfi, bpfo, bsf, detect_bearing_faults, ftf};
 pub use cepstrum::{dominant_quefrency, real_cepstrum};

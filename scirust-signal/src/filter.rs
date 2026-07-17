@@ -6,6 +6,7 @@
 //! §7.1; Proakis & Manolakis §9.7).
 
 use crate::complex::Complex;
+use crate::error::{SignalError, SignalResult};
 use core::f64::consts::PI;
 
 /// Normalized sinc: `sin(pi*x)/(pi*x)`, with `sinc(0) = 1`.
@@ -27,13 +28,28 @@ fn sinc(x: f64) -> f64 {
 /// `window` must have length `numtaps` (see [`crate::windows`]); the DC gain
 /// is normalized to exactly `1.0`. Matches `scipy.signal.firwin(numtaps,
 /// cutoff, window=...)`.
-pub fn fir_lowpass(numtaps: usize, cutoff: f64, window: &[f64]) -> Vec<f64> {
-    assert!(numtaps > 0, "numtaps must be > 0");
-    assert_eq!(window.len(), numtaps, "window length must equal numtaps");
-    assert!(
-        cutoff > 0.0 && cutoff < 1.0,
-        "cutoff must be in (0, 1), normalized to Nyquist"
-    );
+///
+/// # Errors
+/// [`SignalError::InvalidInput`] if `numtaps == 0`, `window.len() !=
+/// numtaps`, or `cutoff` is outside `(0, 1)`.
+pub fn fir_lowpass(numtaps: usize, cutoff: f64, window: &[f64]) -> SignalResult<Vec<f64>> {
+    if numtaps == 0
+    {
+        return Err(SignalError::InvalidInput("numtaps must be > 0".into()));
+    }
+    if window.len() != numtaps
+    {
+        return Err(SignalError::InvalidInput(format!(
+            "window length must equal numtaps: got {} vs {numtaps}",
+            window.len()
+        )));
+    }
+    if !(cutoff > 0.0 && cutoff < 1.0)
+    {
+        return Err(SignalError::InvalidInput(format!(
+            "cutoff must be in (0, 1), normalized to Nyquist: got {cutoff}"
+        )));
+    }
     let alpha = (numtaps as f64 - 1.0) / 2.0;
     let mut h: Vec<f64> = (0..numtaps)
         .map(|i| {
@@ -46,7 +62,7 @@ pub fn fir_lowpass(numtaps: usize, cutoff: f64, window: &[f64]) -> Vec<f64> {
     {
         *hi /= dc_gain;
     }
-    h
+    Ok(h)
 }
 
 /// Design a windowed-sinc highpass FIR filter.
@@ -56,14 +72,34 @@ pub fn fir_lowpass(numtaps: usize, cutoff: f64, window: &[f64]) -> Vec<f64> {
 /// construction (its frequency response is forced to zero there), so it
 /// cannot be normalized to unit gain there. Matches
 /// `scipy.signal.firwin(numtaps, cutoff, window=..., pass_zero=False)`.
-pub fn fir_highpass(numtaps: usize, cutoff: f64, window: &[f64]) -> Vec<f64> {
-    assert!(numtaps > 0, "numtaps must be > 0");
-    assert_eq!(numtaps % 2, 1, "highpass FIR requires an odd numtaps");
-    assert_eq!(window.len(), numtaps, "window length must equal numtaps");
-    assert!(
-        cutoff > 0.0 && cutoff < 1.0,
-        "cutoff must be in (0, 1), normalized to Nyquist"
-    );
+///
+/// # Errors
+/// [`SignalError::InvalidInput`] if `numtaps == 0`, `numtaps` is even,
+/// `window.len() != numtaps`, or `cutoff` is outside `(0, 1)`.
+pub fn fir_highpass(numtaps: usize, cutoff: f64, window: &[f64]) -> SignalResult<Vec<f64>> {
+    if numtaps == 0
+    {
+        return Err(SignalError::InvalidInput("numtaps must be > 0".into()));
+    }
+    if numtaps % 2 != 1
+    {
+        return Err(SignalError::InvalidInput(format!(
+            "highpass FIR requires an odd numtaps: got {numtaps}"
+        )));
+    }
+    if window.len() != numtaps
+    {
+        return Err(SignalError::InvalidInput(format!(
+            "window length must equal numtaps: got {} vs {numtaps}",
+            window.len()
+        )));
+    }
+    if !(cutoff > 0.0 && cutoff < 1.0)
+    {
+        return Err(SignalError::InvalidInput(format!(
+            "cutoff must be in (0, 1), normalized to Nyquist: got {cutoff}"
+        )));
+    }
     let alpha = (numtaps as f64 - 1.0) / 2.0;
     let mut h: Vec<f64> = (0..numtaps)
         .map(|i| {
@@ -81,7 +117,7 @@ pub fn fir_highpass(numtaps: usize, cutoff: f64, window: &[f64]) -> Vec<f64> {
     {
         *hi /= scale;
     }
-    h
+    Ok(h)
 }
 
 /// Apply a linear-time-invariant filter `y[n] = sum(b*x) - sum(a[1:]*y)` via
@@ -90,9 +126,19 @@ pub fn fir_highpass(numtaps: usize, cutoff: f64, window: &[f64]) -> Vec<f64> {
 /// section. `a[0]` is implicitly `1`; pass `a = &[1.0]` for a pure FIR
 /// filter. Output has the same length as `x` (matches
 /// `scipy.signal.lfilter`).
-pub fn lfilter(b: &[f64], a: &[f64], x: &[f64]) -> Vec<f64> {
-    assert!(!b.is_empty(), "b must be non-empty");
-    assert!(!a.is_empty() && a[0] != 0.0, "a[0] must be non-zero");
+///
+/// # Errors
+/// [`SignalError::InvalidInput`] if `b` is empty, `a` is empty, or `a[0] ==
+/// 0.0`.
+pub fn lfilter(b: &[f64], a: &[f64], x: &[f64]) -> SignalResult<Vec<f64>> {
+    if b.is_empty()
+    {
+        return Err(SignalError::InvalidInput("b must be non-empty".into()));
+    }
+    if a.is_empty() || a[0] == 0.0
+    {
+        return Err(SignalError::InvalidInput("a[0] must be non-zero".into()));
+    }
     let a0 = a[0];
     let n = b.len().max(a.len());
     let bn: Vec<f64> = (0..n)
@@ -117,7 +163,7 @@ pub fn lfilter(b: &[f64], a: &[f64], x: &[f64]) -> Vec<f64> {
         }
         y.push(yi);
     }
-    y
+    Ok(y)
 }
 
 /// A single second-order IIR section (biquad), `a0` normalized to `1`.
@@ -133,7 +179,11 @@ pub struct Biquad {
 impl Biquad {
     /// Apply this section to `x` via Direct Form II Transposed.
     pub fn filter(&self, x: &[f64]) -> Vec<f64> {
+        // `b`/`a` are always 3-element arrays with `a[0] == 1.0 != 0.0`, so
+        // `lfilter`'s only failure modes (empty `b`/`a`, zero `a[0]`) can
+        // never trigger here — this call cannot actually fail.
         lfilter(&[self.b0, self.b1, self.b2], &[1.0, self.a1, self.a2], x)
+            .expect("Biquad::filter: b/a are always well-formed")
     }
 }
 
@@ -179,12 +229,21 @@ fn prod(vs: &[Complex]) -> Complex {
 /// `order` is the filter order `N`; `cutoff` is normalized to the Nyquist
 /// frequency (`1.0` = Nyquist). Matches `scipy.signal.butter(order, cutoff,
 /// btype='low', output='sos')`.
-pub fn butter_lowpass_sos(order: usize, cutoff: f64) -> Vec<Biquad> {
-    assert!(order > 0, "order must be > 0");
-    assert!(
-        cutoff > 0.0 && cutoff < 1.0,
-        "cutoff must be in (0, 1), normalized to Nyquist"
-    );
+///
+/// # Errors
+/// [`SignalError::InvalidInput`] if `order == 0` or `cutoff` is outside
+/// `(0, 1)`.
+pub fn butter_lowpass_sos(order: usize, cutoff: f64) -> SignalResult<Vec<Biquad>> {
+    if order == 0
+    {
+        return Err(SignalError::InvalidInput("order must be > 0".into()));
+    }
+    if !(cutoff > 0.0 && cutoff < 1.0)
+    {
+        return Err(SignalError::InvalidInput(format!(
+            "cutoff must be in (0, 1), normalized to Nyquist: got {cutoff}"
+        )));
+    }
     let warped = 4.0 * (PI * cutoff / 2.0).tan();
     let proto = butter_prototype_poles(order);
     let p_analog: Vec<Complex> = proto.iter().map(|&p| p * warped).collect();
@@ -201,7 +260,12 @@ pub fn butter_lowpass_sos(order: usize, cutoff: f64) -> Vec<Biquad> {
         )
         .re;
 
-    pair_into_sos(&p_digital, order, k_digital, Complex::new(-1.0, 0.0))
+    Ok(pair_into_sos(
+        &p_digital,
+        order,
+        k_digital,
+        Complex::new(-1.0, 0.0),
+    ))
 }
 
 /// Design a Butterworth highpass filter as cascaded second-order sections.
@@ -209,12 +273,21 @@ pub fn butter_lowpass_sos(order: usize, cutoff: f64) -> Vec<Biquad> {
 /// `order` is the filter order `N`; `cutoff` is normalized to the Nyquist
 /// frequency. Matches `scipy.signal.butter(order, cutoff, btype='high',
 /// output='sos')`.
-pub fn butter_highpass_sos(order: usize, cutoff: f64) -> Vec<Biquad> {
-    assert!(order > 0, "order must be > 0");
-    assert!(
-        cutoff > 0.0 && cutoff < 1.0,
-        "cutoff must be in (0, 1), normalized to Nyquist"
-    );
+///
+/// # Errors
+/// [`SignalError::InvalidInput`] if `order == 0` or `cutoff` is outside
+/// `(0, 1)`.
+pub fn butter_highpass_sos(order: usize, cutoff: f64) -> SignalResult<Vec<Biquad>> {
+    if order == 0
+    {
+        return Err(SignalError::InvalidInput("order must be > 0".into()));
+    }
+    if !(cutoff > 0.0 && cutoff < 1.0)
+    {
+        return Err(SignalError::InvalidInput(format!(
+            "cutoff must be in (0, 1), normalized to Nyquist: got {cutoff}"
+        )));
+    }
     let warped = 4.0 * (PI * cutoff / 2.0).tan();
     let proto = butter_prototype_poles(order);
     // Lowpass-to-highpass: s -> wo/s. The prototype's `order` zeros "at
@@ -239,7 +312,12 @@ pub fn butter_highpass_sos(order: usize, cutoff: f64) -> Vec<Biquad> {
     .re;
     let k_digital = k_analog * numer / denom;
 
-    pair_into_sos(&p_digital, order, k_digital, Complex::new(1.0, 0.0))
+    Ok(pair_into_sos(
+        &p_digital,
+        order,
+        k_digital,
+        Complex::new(1.0, 0.0),
+    ))
 }
 
 /// Pair digital poles into second-order (or, for the leftover real pole in
@@ -320,7 +398,7 @@ mod tests {
             -0.003894764791719022,
             0.001118295168635258,
         ];
-        let h = fir_lowpass(15, 0.3, &hamming(15));
+        let h = fir_lowpass(15, 0.3, &hamming(15)).unwrap();
         assert_eq!(h.len(), reference.len());
         for (hi, ri) in h.iter().zip(&reference)
         {
@@ -348,7 +426,7 @@ mod tests {
             0.003906643177640974,
             -0.0011217057832161284,
         ];
-        let h = fir_highpass(15, 0.3, &hamming(15));
+        let h = fir_highpass(15, 0.3, &hamming(15)).unwrap();
         assert_eq!(h.len(), reference.len());
         for (hi, ri) in h.iter().zip(&reference)
         {
@@ -358,10 +436,10 @@ mod tests {
 
     #[test]
     fn fir_lowpass_impulse_response_equals_its_own_coefficients() {
-        let h = fir_lowpass(15, 0.3, &hamming(15));
+        let h = fir_lowpass(15, 0.3, &hamming(15)).unwrap();
         let mut impulse = vec![0.0; 20];
         impulse[0] = 1.0;
-        let y = lfilter(&h, &[1.0], &impulse);
+        let y = lfilter(&h, &[1.0], &impulse).unwrap();
         for i in 0..15
         {
             assert!(close(y[i], h[i], 1e-12));
@@ -377,7 +455,7 @@ mod tests {
     #[test]
     fn lfilter_matches_scipy_reference() {
         // scipy.signal.lfilter([1.0, 0.5], [1.0, -0.9], [1,0,0,0,0])
-        let y = lfilter(&[1.0, 0.5], &[1.0, -0.9], &[1.0, 0.0, 0.0, 0.0, 0.0]);
+        let y = lfilter(&[1.0, 0.5], &[1.0, -0.9], &[1.0, 0.0, 0.0, 0.0, 0.0]).unwrap();
         let reference = [1.0, 1.4, 1.26, 1.1340000000000001, 1.0206000000000002];
         for (yi, ri) in y.iter().zip(&reference)
         {
@@ -402,7 +480,7 @@ mod tests {
             0.9696898846984233,
             0.9568987031390099,
         ];
-        let sos = butter_lowpass_sos(4, 0.3);
+        let sos = butter_lowpass_sos(4, 0.3).unwrap();
         let x = vec![1.0; 10];
         let y = sos_filter(&sos, &x);
         for (yi, ri) in y.iter().zip(&reference)
@@ -415,7 +493,7 @@ mod tests {
     fn butter_lowpass_frequency_response_is_maximally_flat() {
         // |H(0)| = 1 (unit DC gain), |H(wc)| = 1/sqrt(2) (Butterworth's
         // defining -3dB-at-cutoff property), |H(pi)| ~ 0 (Nyquist null).
-        let sos = butter_lowpass_sos(4, 0.3);
+        let sos = butter_lowpass_sos(4, 0.3).unwrap();
         let h_dc = freqz_sos_mag(&sos, 0.0);
         let h_cutoff = freqz_sos_mag(&sos, 0.3 * PI);
         let h_nyquist = freqz_sos_mag(&sos, PI);
@@ -433,7 +511,7 @@ mod tests {
         // is odd, exercising the leftover-real-pole path. Section order/
         // pairing may legitimately differ from scipy's internal heuristic,
         // so this checks the frequency response instead of raw coefficients.
-        let sos = butter_highpass_sos(3, 0.25);
+        let sos = butter_highpass_sos(3, 0.25).unwrap();
         assert_eq!(sos.len(), 2); // one biquad + one first-order section
         let h_dc = freqz_sos_mag(&sos, 0.0);
         let h_cutoff = freqz_sos_mag(&sos, 0.25 * PI);
@@ -450,7 +528,7 @@ mod tests {
     fn butter_lowpass_accurate_for_large_a_near_boundary_odd_order() {
         // Regression-style coverage for the odd-order (leftover real pole)
         // path on the lowpass side too.
-        let sos = butter_lowpass_sos(5, 0.2);
+        let sos = butter_lowpass_sos(5, 0.2).unwrap();
         assert_eq!(sos.len(), 3); // two biquads + one first-order section
         let h_dc = freqz_sos_mag(&sos, 0.0);
         let h_cutoff = freqz_sos_mag(&sos, 0.2 * PI);
@@ -475,6 +553,86 @@ mod tests {
             h *= num / den;
         }
         h.mag()
+    }
+
+    // ---- Error paths (previously `assert!`, now `SignalError::InvalidInput`) ----
+
+    #[test]
+    fn fir_lowpass_rejects_invalid_inputs() {
+        assert!(matches!(
+            fir_lowpass(0, 0.3, &[]),
+            Err(SignalError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            fir_lowpass(4, 0.3, &hamming(3)),
+            Err(SignalError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            fir_lowpass(4, 1.5, &hamming(4)),
+            Err(SignalError::InvalidInput(_))
+        ));
+        assert!(fir_lowpass(4, 0.3, &hamming(4)).is_ok());
+    }
+
+    #[test]
+    fn fir_highpass_rejects_invalid_inputs() {
+        assert!(matches!(
+            fir_highpass(0, 0.3, &[]),
+            Err(SignalError::InvalidInput(_))
+        ));
+        // Even numtaps is rejected regardless of window length.
+        assert!(matches!(
+            fir_highpass(4, 0.3, &hamming(4)),
+            Err(SignalError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            fir_highpass(5, 0.3, &hamming(3)),
+            Err(SignalError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            fir_highpass(5, 1.5, &hamming(5)),
+            Err(SignalError::InvalidInput(_))
+        ));
+        assert!(fir_highpass(5, 0.3, &hamming(5)).is_ok());
+    }
+
+    #[test]
+    fn lfilter_rejects_invalid_inputs() {
+        assert!(matches!(
+            lfilter(&[], &[1.0], &[1.0]),
+            Err(SignalError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            lfilter(&[1.0], &[], &[1.0]),
+            Err(SignalError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            lfilter(&[1.0], &[0.0], &[1.0]),
+            Err(SignalError::InvalidInput(_))
+        ));
+        assert!(lfilter(&[1.0], &[1.0], &[1.0]).is_ok());
+    }
+
+    #[test]
+    fn butter_sos_rejects_invalid_inputs() {
+        assert!(matches!(
+            butter_lowpass_sos(0, 0.3),
+            Err(SignalError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            butter_lowpass_sos(4, 1.5),
+            Err(SignalError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            butter_highpass_sos(0, 0.3),
+            Err(SignalError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            butter_highpass_sos(4, 1.5),
+            Err(SignalError::InvalidInput(_))
+        ));
+        assert!(butter_lowpass_sos(4, 0.3).is_ok());
+        assert!(butter_highpass_sos(4, 0.3).is_ok());
     }
 }
 
@@ -511,7 +669,7 @@ mod proptests {
         /// 1 to 10 (odd and even) and any cutoff away from the extremes.
         #[test]
         fn butter_lowpass_is_minus_3db_at_cutoff(order in 1usize..10, cutoff in 0.05f64..0.95) {
-            let sos = butter_lowpass_sos(order, cutoff);
+            let sos = butter_lowpass_sos(order, cutoff).unwrap();
             prop_assert_eq!(sos.len(), order.div_ceil(2));
             let h_dc = freqz_sos_mag(&sos, 0.0);
             let h_cutoff = freqz_sos_mag(&sos, cutoff * PI);
@@ -524,7 +682,7 @@ mod proptests {
 
         #[test]
         fn butter_highpass_is_minus_3db_at_cutoff(order in 1usize..10, cutoff in 0.05f64..0.95) {
-            let sos = butter_highpass_sos(order, cutoff);
+            let sos = butter_highpass_sos(order, cutoff).unwrap();
             prop_assert_eq!(sos.len(), order.div_ceil(2));
             let h_nyquist = freqz_sos_mag(&sos, PI);
             let h_cutoff = freqz_sos_mag(&sos, cutoff * PI);
@@ -546,7 +704,7 @@ mod proptests {
             order in 1usize..6,
             cutoff in 0.1f64..0.9,
         ) {
-            let sos = butter_lowpass_sos(order, cutoff);
+            let sos = butter_lowpass_sos(order, cutoff).unwrap();
             let omega = cutoff * PI;
             let n = 4000;
             let x: Vec<f64> = (0..n).map(|i| (omega * i as f64).sin()).collect();
@@ -578,7 +736,7 @@ mod proptests {
             cutoff in 0.05f64..0.95,
         ) {
             let window = crate::windows::hamming(numtaps);
-            let h = fir_lowpass(numtaps, cutoff, &window);
+            let h = fir_lowpass(numtaps, cutoff, &window).unwrap();
             for i in 0..numtaps
             {
                 prop_assert!(

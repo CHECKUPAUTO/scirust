@@ -257,7 +257,11 @@ pub fn remove_baseline(signal: &[f64], sample_rate: f64, cutoff_hz: f64) -> Vec<
     {
         return signal.to_vec();
     }
-    let sos = butter_highpass_sos(2, cutoff_hz / nyquist);
+    // order=2 is a fixed valid literal, and `valid` above already guarantees
+    // 0 < cutoff_hz < nyquist, i.e. cutoff_hz/nyquist in (0, 1) — this call
+    // cannot actually fail.
+    let sos = butter_highpass_sos(2, cutoff_hz / nyquist)
+        .expect("remove_baseline: order and cutoff are always valid here");
     filtfilt_sos(&sos, signal)
 }
 

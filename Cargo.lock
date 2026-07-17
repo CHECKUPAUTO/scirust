@@ -3596,6 +3596,7 @@ dependencies = [
  "scirust-estimation",
  "scirust-special",
  "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
