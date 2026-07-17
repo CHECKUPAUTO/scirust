@@ -293,6 +293,24 @@ fn bench_mel(c: &mut Criterion) {
     g.finish();
 }
 
+/// Ré-échantillonnage rationnel `3/2` (polyphase), fixe vs `f32`.
+fn bench_resample(c: &mut Criterion) {
+    let sf = signal_f32();
+    let sx = signal_fixed(&sf);
+    let (l, m, half_taps) = (3usize, 2usize, 8usize);
+    let out_len = sf.len() * l / m;
+
+    let mut g = c.benchmark_group("resample_3_2");
+    g.throughput(Throughput::Elements(out_len as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| scirust_simd::dsp::resample(black_box(&sx), l, m, half_taps))
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| scirust_simd::dsp::resample(black_box(&sf), l, m, half_taps))
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_biquad,
@@ -303,6 +321,7 @@ criterion_group!(
     bench_window,
     bench_kaiser,
     bench_stft,
-    bench_mel
+    bench_mel,
+    bench_resample
 );
 criterion_main!(benches);

@@ -24,6 +24,10 @@
 //   par recouvrement-addition (COLA).
 // * [`mel`] — banque de filtres mel ([`mel::MelFilterbank`]) : spectrogramme
 //   mel standard en reconnaissance vocale et classification audio.
+// * [`resample`] — ré-échantillonnage rationnel `L/M` ([`resample::resample`]),
+//   filtre passe-bas prototype (sinus cardinal fenêtré) décomposé en `L`
+//   sous-filtres polyphase : change la fréquence d'échantillonnage sans
+//   matérialiser le signal suréchantillonné.
 //
 // ## Pourquoi la virgule fixe pour le DSP ?
 //
@@ -36,12 +40,14 @@ pub mod biquad;
 pub mod fft;
 pub mod fir;
 pub mod mel;
+pub mod resample;
 pub mod stft;
 pub mod window;
 
 pub use biquad::Biquad;
 pub use fft::{Complex, Plan, fft, ifft, irfft, rfft};
 pub use fir::Fir;
+pub use resample::resample;
 
 #[cfg(test)]
 mod tests;

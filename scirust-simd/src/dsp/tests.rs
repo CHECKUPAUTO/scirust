@@ -8,9 +8,10 @@
 
 use super::fft::{Complex, Plan, fft, ifft, irfft, rfft};
 use super::mel::MelFilterbank;
+use super::resample::design_prototype;
 use super::stft::{istft, magnitude_spectrogram, num_frames, power_spectrogram, stft};
 use super::window;
-use super::{Biquad, Fir};
+use super::{Biquad, Fir, resample};
 use crate::fixed::conv2d::{Conv2dShape, conv2d};
 use crate::fixed::{Q8_8, Q8_24, Q16_16, RealScalar};
 
@@ -1276,4 +1277,147 @@ fn stft_power_spectrogram_feeds_mel_filterbank() {
 
     let frames = num_frames(n, frame_size, hop);
     assert_eq!(mel1.len(), frames * fb.n_mels());
+}
+
+// ------------------------------------------------------------------ //
+//  Ré-échantillonnage rationnel L/M, polyphase                        //
+// ------------------------------------------------------------------ //
+
+/// Référence naïve indépendante : insertion explicite de `l−1` zéros,
+/// convolution **complète** avec le prototype (aucun raccourci polyphase),
+/// puis décimation par `m`. Sert à vérifier que [`resample::resample`]
+/// (qui saute les produits nuls) calcule exactement la même somme.
+fn naive_resample_zero_stuff<T: RealScalar + core::ops::Div<Output = T>>(
+    x: &[T],
+    l: usize,
+    m: usize,
+    half_taps: usize,
+) -> Vec<T> {
+    let h = design_prototype::<T>(l, m, half_taps);
+    let center = half_taps * l;
+    let up_len = x.len() * l;
+    let mut up = vec![T::zero(); up_len];
+    for (i, &xi) in x.iter().enumerate()
+    {
+        up[i * l] = xi;
+    }
+
+    let out_len = x.len() * l / m;
+    let mut y = Vec::with_capacity(out_len);
+    for n in 0..out_len
+    {
+        let pos = n * m;
+        let mut acc = T::zero();
+        for (k, &hk) in h.iter().enumerate()
+        {
+            let idx = pos as isize + k as isize - center as isize;
+            if idx >= 0 && (idx as usize) < up.len()
+            {
+                acc = acc + hk * up[idx as usize];
+            }
+        }
+        y.push(acc);
+    }
+    y
+}
+
+#[test]
+fn resample_polyphase_matches_naive_zero_stuff_reference() {
+    let mut rng_seed = 0x5E5D_0001u64;
+    let mut next = move || {
+        rng_seed = rng_seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (rng_seed >> 40) as i64
+    };
+    let x: Vec<Q16_16> = (0..17)
+        .map(|_| Q16_16::from_raw((next() as i32) >> 10))
+        .collect();
+
+    for &(l, m, half_taps) in &[
+        (1usize, 1usize, 3usize),
+        (2, 1, 4),
+        (1, 2, 4),
+        (3, 2, 3),
+        (2, 3, 5),
+        (5, 3, 2),
+    ]
+    {
+        let got = resample::resample(&x, l, m, half_taps);
+        let want = naive_resample_zero_stuff(&x, l, m, half_taps);
+        assert_eq!(
+            got, want,
+            "l={l} m={m} half_taps={half_taps} : le raccourci polyphase doit être bit-exact"
+        );
+    }
+}
+
+#[test]
+fn resample_output_length_matches_formula() {
+    let x = vec![Q16_16::zero(); 23];
+    for &(l, m) in &[(1usize, 1usize), (2, 1), (1, 2), (3, 2), (5, 4)]
+    {
+        let y = resample::resample(&x, l, m, 4);
+        assert_eq!(y.len(), x.len() * l / m, "l={l} m={m}");
+    }
+}
+
+fn check_resample_preserves_low_frequency_sine_amplitude<T: Scalar + core::ops::Div<Output = T>>() {
+    // Sinusoïde largement sous la fréquence de coupure (~quelques cycles sur
+    // toute la fenêtre) : un ré-échantillonnage correct doit en préserver
+    // l'amplitude à la résolution du filtre près, quel que soit L/M.
+    let n = 200;
+    let amplitude = 0.6;
+    let cycles = 3.0;
+    let x: Vec<T> = (0..n)
+        .map(|i| {
+            let phase = 2.0 * std::f64::consts::PI * cycles * (i as f64) / (n as f64);
+            T::of(amplitude * phase.sin())
+        })
+        .collect();
+
+    for &(l, m) in &[(2usize, 1usize), (1, 2), (3, 2), (4, 3)]
+    {
+        let y = resample::resample(&x, l, m, 8);
+        // Amplitude crête mesurée sur le régime établi (exclut les
+        // transitoires de bord, où le filtre est zéro-complété).
+        let out_n = y.len();
+        let margin = out_n / 4;
+        let peak = y[margin..out_n - margin]
+            .iter()
+            .map(|v| v.to_f64().abs())
+            .fold(0.0, f64::max);
+        assert!(
+            (peak - amplitude).abs() <= 0.1,
+            "l={l} m={m}: amplitude crête {peak} vs attendue ~{amplitude}"
+        );
+    }
+}
+
+#[test]
+fn resample_preserves_low_frequency_sine_amplitude_all_scalars() {
+    check_resample_preserves_low_frequency_sine_amplitude::<f32>();
+    check_resample_preserves_low_frequency_sine_amplitude::<f64>();
+    check_resample_preserves_low_frequency_sine_amplitude::<Q16_16>();
+}
+
+#[test]
+#[should_panic(expected = "l doit être")]
+fn resample_rejects_zero_l() {
+    let x = vec![Q16_16::zero(); 4];
+    let _ = resample::resample(&x, 0, 1, 4);
+}
+
+#[test]
+#[should_panic(expected = "m doit être")]
+fn resample_rejects_zero_m() {
+    let x = vec![Q16_16::zero(); 4];
+    let _ = resample::resample(&x, 1, 0, 4);
+}
+
+#[test]
+#[should_panic(expected = "half_taps doit être")]
+fn resample_rejects_zero_half_taps() {
+    let x = vec![Q16_16::zero(); 4];
+    let _ = resample::resample(&x, 1, 1, 0);
 }
