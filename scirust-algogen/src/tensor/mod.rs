@@ -4,13 +4,23 @@
 //! deterministic shape inference and pre-execution resource validation.
 
 mod active;
+mod canonicalize;
+mod crossover;
+mod generate;
 mod interpreter;
 mod ir;
+mod mutate;
+mod rng;
 mod verify;
 
 pub use active::analyze_active;
+pub use canonicalize::prune_dead_code;
+pub use crossover::{CrossoverOutcome, crossover};
+pub use generate::{GenerationConfig, GenerationError, OperatorSet, generate};
 pub use interpreter::{ExecutionError, ExecutionResult, execute_program};
 pub use ir::{TensorInstruction, TensorProgram};
+pub use mutate::{MutationKind, MutationOutcome, mutate};
+pub use rng::DeterministicRng;
 pub use verify::{ProgramError, VerificationLimits, VerifiedProgram, verify_program};
 
 #[cfg(test)]
