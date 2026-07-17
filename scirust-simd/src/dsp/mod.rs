@@ -22,6 +22,8 @@
 // * [`stft`] — transformée de Fourier à court terme ([`stft::stft`]/
 //   [`stft::istft`]) : spectrogramme par recouvrement-fenêtrage, reconstruction
 //   par recouvrement-addition (COLA).
+// * [`mel`] — banque de filtres mel ([`mel::MelFilterbank`]) : spectrogramme
+//   mel standard en reconnaissance vocale et classification audio.
 //
 // ## Pourquoi la virgule fixe pour le DSP ?
 //
@@ -33,6 +35,7 @@
 pub mod biquad;
 pub mod fft;
 pub mod fir;
+pub mod mel;
 pub mod stft;
 pub mod window;
 

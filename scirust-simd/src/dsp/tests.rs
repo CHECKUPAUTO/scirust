@@ -7,6 +7,7 @@
 // impulsionnelle, l'accord virgule fixe ↔ flottant, et le déterminisme bit-à-bit.
 
 use super::fft::{Complex, Plan, fft, ifft, irfft, rfft};
+use super::mel::MelFilterbank;
 use super::stft::{istft, magnitude_spectrogram, num_frames, power_spectrogram, stft};
 use super::window;
 use super::{Biquad, Fir};
@@ -983,4 +984,141 @@ fn stft_magnitude_spectrogram_feeds_conv2d() {
     {
         assert!(v.to_f64().is_finite());
     }
+}
+
+// ------------------------------------------------------------------ //
+//  Banque de filtres mel                                              //
+// ------------------------------------------------------------------ //
+
+fn hz_to_mel_ref(hz: f64) -> f64 {
+    2595.0 * (1.0 + hz / 700.0).log10()
+}
+fn mel_to_hz_ref(mel: f64) -> f64 {
+    700.0 * (10f64.powf(mel / 2595.0) - 1.0)
+}
+
+/// Référence indépendante (en `f64` pur) de la construction de la banque de
+/// filtres, pour comparaison bit-indépendante.
+fn naive_mel_filterbank_ref(
+    n_mels: usize,
+    bins: usize,
+    sample_rate: f64,
+    f_min: f64,
+    f_max: f64,
+) -> Vec<f64> {
+    let mel_min = hz_to_mel_ref(f_min);
+    let mel_max = hz_to_mel_ref(f_max);
+    let n_points = n_mels + 2;
+    let step = (mel_max - mel_min) / ((n_points - 1) as f64);
+    let hz_points: Vec<f64> = (0..n_points)
+        .map(|i| mel_to_hz_ref(mel_min + (i as f64) * step))
+        .collect();
+    let n_fft = 2 * (bins - 1);
+    let bin_hz: Vec<f64> = (0..bins)
+        .map(|k| (k as f64) * sample_rate / (n_fft as f64))
+        .collect();
+    let mut weights = vec![0.0; n_mels * bins];
+    for m in 0..n_mels
+    {
+        let (left, center, right) = (hz_points[m], hz_points[m + 1], hz_points[m + 2]);
+        for (k, &f) in bin_hz.iter().enumerate()
+        {
+            let w = if f <= left || f >= right
+            {
+                0.0
+            }
+            else if f <= center
+            {
+                (f - left) / (center - left)
+            }
+            else
+            {
+                (right - f) / (right - center)
+            };
+            weights[m * bins + k] = w;
+        }
+    }
+    weights
+}
+
+fn check_mel_filterbank_matches_reference<
+    T: Scalar + core::ops::Div<Output = T> + core::fmt::Debug,
+>() {
+    let (n_mels, bins, sample_rate, f_min, f_max) = (10usize, 65usize, 16000.0, 0.0, 8000.0);
+    let fb = MelFilterbank::<T>::new(n_mels, bins, T::of(sample_rate), T::of(f_min), T::of(f_max));
+    assert_eq!(fb.n_mels(), n_mels);
+    assert_eq!(fb.bins(), bins);
+    let want = naive_mel_filterbank_ref(n_mels, bins, sample_rate, f_min, f_max);
+
+    // Sonde par impulsion : appliquer un spectrogramme à un seul bin non nul
+    // extrait la colonne k de la matrice de filtres — vérifie la banque
+    // entière via l'API publique (apply), sans exposer les poids internes.
+    for k in 0..bins
+    {
+        let mut onehot = vec![T::zero(); bins];
+        onehot[k] = T::one();
+        let got = fb.apply(&onehot);
+        for m in 0..n_mels
+        {
+            let g = got[m].to_f64();
+            let w = want[m * bins + k];
+            assert!(
+                (g - w).abs() < T::TOL * 4.0,
+                "mel m={m} bin={k}: {g} vs {w}"
+            );
+        }
+    }
+}
+
+#[test]
+fn mel_filterbank_matches_reference_all_scalars() {
+    check_mel_filterbank_matches_reference::<f32>();
+    check_mel_filterbank_matches_reference::<f64>();
+    check_mel_filterbank_matches_reference::<Q16_16>();
+}
+
+#[test]
+#[should_panic(expected = "MelFilterbank::new")]
+fn mel_filterbank_invalid_range_panics() {
+    let _ = MelFilterbank::<f64>::new(5, 9, 8000.0, 4000.0, 1000.0); // f_min ≥ f_max
+}
+
+#[test]
+#[should_panic(expected = "MelFilterbank::apply")]
+fn mel_apply_dim_mismatch_panics() {
+    let fb = MelFilterbank::<f64>::new(5, 9, 8000.0, 0.0, 4000.0);
+    let bad = vec![0.0f64; 8]; // pas multiple de bins()=9
+    let _ = fb.apply(&bad);
+}
+
+#[test]
+fn stft_power_spectrogram_feeds_mel_filterbank() {
+    // Pipeline concret : signal → stft → power_spectrogram → banque de
+    // filtres mel, comme en reconnaissance vocale quantifiée. Vérifie la
+    // forme et le déterminisme bit-à-bit.
+    let frame_size = 32;
+    let hop = 16;
+    let sample_rate = 8000.0;
+    let win: Vec<Q16_16> = window::hann(frame_size);
+    let n = 128;
+    let signal: Vec<Q16_16> = (0..n)
+        .map(|i| Q16_16::try_from(((i % 6) as f64) * 0.1 - 0.25).unwrap())
+        .collect();
+    let spec = stft(&signal, &win, hop);
+    let bins = frame_size / 2 + 1;
+    let power = power_spectrogram(&spec);
+
+    let fb = MelFilterbank::<Q16_16>::new(
+        8,
+        bins,
+        Q16_16::try_from(sample_rate).unwrap(),
+        Q16_16::zero(),
+        Q16_16::try_from(sample_rate / 2.0).unwrap(),
+    );
+    let mel1 = fb.apply(&power);
+    let mel2 = fb.apply(&power);
+    assert_eq!(mel1, mel2); // déterminisme bit-à-bit
+
+    let frames = num_frames(n, frame_size, hop);
+    assert_eq!(mel1.len(), frames * fb.n_mels());
 }
