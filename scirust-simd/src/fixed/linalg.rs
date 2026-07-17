@@ -20,6 +20,14 @@
 // (moindres carrés, systèmes surdéterminés). Toutes reposent sur les mêmes
 // primitives déterministes (`dot`, division réelle vérifiée) que le GEMM.
 //
+// [`jacobi_eigen`] complète ces décompositions directes par la **décomposition
+// spectrale** d'une matrice symétrique (`A = V·diag(λ)·Vᵀ`, méthode de Jacobi
+// à rotations cycliques) : contrairement aux trois précédentes, c'est un
+// algorithme **itératif** (convergence à une tolérance près, pas une formule
+// fermée), mais dont chaque rotation ne demande que racine carrée et division
+// réelle — aucune transcendante (`atan`/`sin`/`cos`) — donc généralisable à
+// **tout stockage** [`FixedReducible`], `i32` **et** `i64`.
+//
 // `qr_solve` complète plutôt qu'il ne duplique Cholesky : résoudre les
 // moindres carrés via les équations normales (`cholesky_solve` sur `AᵀA`)
 // **double** l'exposant de conditionnement du problème (`cond(AᵀA) =
@@ -621,4 +629,152 @@ where
         qtb.push(dot(&col, b));
     }
     back_substitution(&r, &qtb, n)
+}
+
+// ------------------------------------------------------------------ //
+//  Jacobi (matrices symétriques) — décomposition spectrale            //
+// ------------------------------------------------------------------ //
+
+/// Décomposition spectrale d'une matrice symétrique par la méthode de Jacobi
+/// à rotations cycliques (Golub & Van Loan, §8.4) : `A = V·diag(λ)·Vᵀ`.
+///
+/// `a` est `n × n` row-major, symétrique — seule sa partie triangulaire
+/// **inférieure** (diagonale incluse) est lue, comme [`cholesky`]. Renvoie
+/// `(eigenvalues, eigenvectors, sweeps)` :
+///
+/// * `eigenvalues` : les `n` valeurs propres, **non triées** (ordre issu de
+///   la convergence, déterministe mais sans signification particulière —
+///   `T: Ord` permet à l'appelant de les trier si besoin).
+/// * `eigenvectors` : `n × n` row-major, la **colonne** `j` est le vecteur
+///   propre unitaire associé à `eigenvalues[j]`.
+/// * `sweeps` : nombre de passes cycliques effectuées (`< max_sweeps` si
+///   convergé avant la limite, `== max_sweeps` sinon).
+///
+/// Chaque rotation annule un coefficient hors diagonale `a[p,q]` via les
+/// formules algébriques classiques (racine carrée et division réelle
+/// vérifiée uniquement — **aucune transcendante**, contrairement à une
+/// formulation par angle explicite `atan`/`sin`/`cos`) : fonctionne donc pour
+/// **tout stockage** ([`FixedReducible`], `i32` **et** `i64`), comme
+/// [`cholesky`]/[`lu_decompose`]/[`qr_decompose`].
+///
+/// `tol` est le seuil (valeur absolue) en dessous duquel un coefficient hors
+/// diagonale est jugé négligeable — la convergence exacte à zéro n'existe pas
+/// en arithmétique finie. `max_sweeps` borne le nombre de passes (garantit la
+/// terminaison ; la convergence est quadratique une fois amorcée, quelques
+/// passes suffisent typiquement en pratique).
+///
+/// `None` en cas de débordement virgule fixe pendant une rotation (résolution
+/// insuffisante de `T` pour l'échelle du problème — même caveat que
+/// [`qr_decompose`]). Panique si `a.len() != n·n`.
+#[must_use]
+pub fn jacobi_eigen<T>(
+    a: &[T],
+    n: usize,
+    tol: T,
+    max_sweeps: usize,
+) -> Option<(Vec<T>, Vec<T>, usize)>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    assert_eq!(
+        a.len(),
+        n * n,
+        "jacobi_eigen : A de longueur {} ≠ {n}×{n}",
+        a.len()
+    );
+    let mut m = a.to_vec();
+    // Symétrise explicitement depuis la partie inférieure (comme `cholesky`,
+    // la partie supérieure fournie n'est jamais lue).
+    for i in 0..n
+    {
+        for j in 0..i
+        {
+            m[j * n + i] = m[i * n + j];
+        }
+    }
+    let mut v = vec![T::ZERO; n * n];
+    for i in 0..n
+    {
+        v[i * n + i] = T::one();
+    }
+
+    let mut sweeps = 0usize;
+    while sweeps < max_sweeps
+    {
+        let mut max_off = T::ZERO;
+        for p in 0..n
+        {
+            for q in (p + 1)..n
+            {
+                let apq = m[p * n + q];
+                let apq_abs = apq.abs();
+                if apq_abs > max_off
+                {
+                    max_off = apq_abs;
+                }
+                if apq_abs <= tol
+                {
+                    continue;
+                }
+
+                let app = m[p * n + p];
+                let aqq = m[q * n + q];
+                let two_apq = apq.wrapping_add(apq);
+                let theta = (aqq - app).checked_div(two_apq)?;
+                let sign_theta = if theta < T::ZERO
+                {
+                    T::ZERO - T::one()
+                }
+                else
+                {
+                    T::one()
+                };
+                let denom = theta
+                    .abs()
+                    .wrapping_add(T::one().wrapping_add(theta.wrapping_mul(theta)).sqrt());
+                let t = sign_theta.checked_div(denom)?;
+                let c = T::one().checked_div(T::one().wrapping_add(t.wrapping_mul(t)).sqrt())?;
+                let s = t.wrapping_mul(c);
+
+                let new_app = app - t.wrapping_mul(apq);
+                let new_aqq = aqq.wrapping_add(t.wrapping_mul(apq));
+
+                for k in 0..n
+                {
+                    if k == p || k == q
+                    {
+                        continue;
+                    }
+                    let akp = m[k * n + p];
+                    let akq = m[k * n + q];
+                    let new_akp = c.wrapping_mul(akp) - s.wrapping_mul(akq);
+                    let new_akq = s.wrapping_mul(akp).wrapping_add(c.wrapping_mul(akq));
+                    m[k * n + p] = new_akp;
+                    m[p * n + k] = new_akp;
+                    m[k * n + q] = new_akq;
+                    m[q * n + k] = new_akq;
+                }
+                m[p * n + p] = new_app;
+                m[q * n + q] = new_aqq;
+                m[p * n + q] = T::ZERO;
+                m[q * n + p] = T::ZERO;
+
+                for k in 0..n
+                {
+                    let vkp = v[k * n + p];
+                    let vkq = v[k * n + q];
+                    v[k * n + p] = c.wrapping_mul(vkp) - s.wrapping_mul(vkq);
+                    v[k * n + q] = s.wrapping_mul(vkp).wrapping_add(c.wrapping_mul(vkq));
+                }
+            }
+        }
+        sweeps += 1;
+        if max_off <= tol
+        {
+            break;
+        }
+    }
+
+    let eigenvalues: Vec<T> = (0..n).map(|i| m[i * n + i]).collect();
+    Some((eigenvalues, v, sweeps))
 }

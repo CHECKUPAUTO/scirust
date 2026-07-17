@@ -1120,6 +1120,128 @@ fn qr_decompose_dim_mismatch_panics() {
 }
 
 // ------------------------------------------------------------------ //
+//  Jacobi (matrices symétriques) — décomposition spectrale            //
+// ------------------------------------------------------------------ //
+
+/// Matrice symétrique aléatoire `n×n` (pas nécessairement définie positive,
+/// contrairement à `random_spd`) : `A = B + Bᵀ`, `B` à coefficients modestes.
+fn random_symmetric(rng: &mut Lcg, n: usize) -> Vec<Q16_16> {
+    let b: Vec<Q16_16> = (0..n * n)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 12))
+        .collect();
+    let bt = linalg::transpose(&b, n, n);
+    (0..n * n).map(|i| b[i] + bt[i]).collect()
+}
+
+#[test]
+fn jacobi_eigen_reconstructs_and_is_orthonormal() {
+    let mut rng = Lcg(0xE16E_0001);
+    for &n in &[1usize, 2, 3, 4, 5]
+    {
+        let a = random_symmetric(&mut rng, n);
+        let (eigenvalues, v, sweeps) = linalg::jacobi_eigen(&a, n, q16(1e-4), 60)
+            .expect("pas de débordement pour cette échelle de données");
+        assert!(sweeps <= 60, "n={n}: sweeps={sweeps} > max_sweeps");
+
+        // Reconstruction : A ≈ V · diag(λ) · Vᵀ.
+        let mut lambda_v = vec![Q16_16::zero(); n * n];
+        for i in 0..n
+        {
+            for j in 0..n
+            {
+                lambda_v[i * n + j] = v[i * n + j] * eigenvalues[j];
+            }
+        }
+        let vt = linalg::transpose(&v, n, n);
+        let reconstructed = linalg::matmul(&lambda_v, &vt, n, n, n);
+        let tol = (n as f64) * 64.0 / 65536.0;
+        for i in 0..n * n
+        {
+            let diff = (reconstructed[i].to_f64() - a[i].to_f64()).abs();
+            assert!(
+                diff <= tol,
+                "n={n} i={i}: reconstruction {} vs {} (écart {diff} > {tol})",
+                reconstructed[i].to_f64(),
+                a[i].to_f64()
+            );
+        }
+
+        // Orthonormalité : V · Vᵀ ≈ I.
+        let vvt = linalg::matmul(&v, &vt, n, n, n);
+        for i in 0..n
+        {
+            for j in 0..n
+            {
+                let want = if i == j { 1.0 } else { 0.0 };
+                let diff = (vvt[i * n + j].to_f64() - want).abs();
+                assert!(
+                    diff <= tol,
+                    "n={n} i={i} j={j}: V·Vᵀ {} vs {want} (écart {diff} > {tol})",
+                    vvt[i * n + j].to_f64()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn jacobi_eigen_known_2x2_diagonal_converges_in_one_sweep() {
+    // Déjà diagonale : aucune rotation nécessaire, converge dès la première
+    // passe (qui sert aussi à vérifier la convergence).
+    let a = [3i32, 0, 0, 7].map(Q16_16::from);
+    let (eigenvalues, v, sweeps) = linalg::jacobi_eigen(&a, 2, q16(1e-4), 20).expect("diagonale");
+    assert_eq!(eigenvalues, [q16(3.0), q16(7.0)]);
+    assert_eq!(
+        v,
+        [Q16_16::one(), Q16_16::zero(), Q16_16::zero(), Q16_16::one()]
+    );
+    assert_eq!(sweeps, 1);
+}
+
+#[test]
+fn jacobi_eigen_n1_trivial() {
+    let a = [q16(5.0)];
+    let (eigenvalues, v, sweeps) = linalg::jacobi_eigen(&a, 1, q16(1e-4), 10).expect("n=1");
+    assert_eq!(eigenvalues, vec![q16(5.0)]);
+    assert_eq!(v, vec![Q16_16::one()]);
+    assert_eq!(sweeps, 1); // aucune paire (p,q) à n=1 : converge trivialement.
+}
+
+#[test]
+fn jacobi_eigen_only_reads_lower_triangle() {
+    // Partie supérieure incohérente (jamais lue), comme `cholesky`.
+    let a_bogus_upper = [2i32, 999, 1, 2].map(Q16_16::from);
+    let a_symmetric = [2i32, 1, 1, 2].map(Q16_16::from);
+    let (ev1, v1, _) = linalg::jacobi_eigen(&a_bogus_upper, 2, q16(1e-4), 30).unwrap();
+    let (ev2, v2, _) = linalg::jacobi_eigen(&a_symmetric, 2, q16(1e-4), 30).unwrap();
+    assert_eq!(ev1, ev2);
+    assert_eq!(v1, v2);
+}
+
+#[test]
+fn jacobi_eigen_i64_storage() {
+    // Même exemple exact que `jacobi_eigen_known_2x2_diagonal_converges_in_one_sweep`,
+    // stockage i64 (Q32_32) : aucune transcendante requise (cf. en-tête de
+    // module), donc généralisable au second stockage sans réécriture.
+    let a = [3i64, 0, 0, 7].map(Q32_32::from);
+    let (eigenvalues, v, sweeps) =
+        linalg::jacobi_eigen(&a, 2, Q32_32::zero(), 20).expect("diagonale");
+    assert_eq!(eigenvalues, [3i64, 7].map(Q32_32::from));
+    assert_eq!(
+        v,
+        [Q32_32::one(), Q32_32::zero(), Q32_32::zero(), Q32_32::one()]
+    );
+    assert_eq!(sweeps, 1);
+}
+
+#[test]
+#[should_panic(expected = "jacobi_eigen")]
+fn jacobi_eigen_dim_mismatch_panics() {
+    let a = vec![Q16_16::zero(); 5]; // annoncé 2×2 = 4 ≠ 5.
+    let _ = linalg::jacobi_eigen(&a, 2, q16(1e-4), 10);
+}
+
+// ------------------------------------------------------------------ //
 //  Activations quantifiées                                            //
 // ------------------------------------------------------------------ //
 

@@ -237,6 +237,28 @@ fn bench_linear_batch(c: &mut Criterion) {
     g.finish();
 }
 
+/// Matrice `n×n` symétrique (pas nécessairement définie positive) :
+/// `A = B + Bᵀ`, `B` à coefficients modestes.
+fn symmetric_data(seed: u64, n: usize) -> Vec<Q16_16> {
+    let b = fixed_data(seed, n * n);
+    let bt = flin::transpose(&b, n, n);
+    (0..n * n).map(|i| b[i] + bt[i]).collect()
+}
+
+/// Décomposition spectrale de Jacobi (rotations cycliques) : itérative,
+/// contrairement à Cholesky/LU/QR — le débit dépend du nombre de passes
+/// jusqu'à convergence (borné par `max_sweeps`), pas d'une formule fermée.
+fn bench_jacobi_eigen(c: &mut Criterion) {
+    let a = symmetric_data(0x10, N);
+
+    let mut g = c.benchmark_group("jacobi_eigen_48");
+    g.throughput(Throughput::Elements((N * N * N) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter(|| flin::jacobi_eigen(black_box(&a), N, Q16_16::try_from(1e-4).unwrap(), 100))
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_matmul,
@@ -245,6 +267,7 @@ criterion_group!(
     bench_lu,
     bench_qr,
     bench_matmul_bt,
-    bench_linear_batch
+    bench_linear_batch,
+    bench_jacobi_eigen
 );
 criterion_main!(benches);
