@@ -195,16 +195,35 @@ fn dot_length_mismatch_panics() {
 
 #[test]
 fn norms_known_values() {
-    // [3, 4] → L2 = 5, L1 = 7, L2² = 25.
+    // [3, 4] → L2 = 5, L1 = 7, L2² = 25, L∞ = 4.
     let v = [3.0f64, 4.0];
     assert_eq!(l2_norm_sqr(&v, ReductionMode::Fast), 25.0);
     assert_eq!(l2_norm(&v, ReductionMode::Fast), 5.0);
     assert_eq!(l1_norm(&v, ReductionMode::Fast), 7.0);
+    assert_eq!(linf_norm(&v), 4.0);
 
-    // [-3, 4] : L1 = 7, L2 = 5 (abs).
+    // [-3, 4] : L1 = 7, L2 = 5, L∞ = 4 (abs).
     let v2 = [-3.0f64, 4.0];
     assert_eq!(l1_norm(&v2, ReductionMode::Fast), 7.0);
     assert_eq!(l2_norm(&v2, ReductionMode::Fast), 5.0);
+    assert_eq!(linf_norm(&v2), 4.0);
+
+    // Le plus grand en valeur absolue peut être négatif.
+    let v3 = [1.0f64, -9.0, 2.0];
+    assert_eq!(linf_norm(&v3), 9.0);
+}
+
+#[test]
+fn linf_norm_is_absolutely_homogeneous() {
+    // Propriété métamorphique : ‖a·x‖∞ = |a|·‖x‖∞.
+    let x = real_vec(0x2, 200);
+    let base = linf_norm(&x);
+    for &a in &[2.0f64, -3.5, 0.25, -1.0]
+    {
+        let scaled: Vec<f64> = x.iter().map(|&v| a * v).collect();
+        let got = linf_norm(&scaled);
+        assert!((got - a.abs() * base).abs() < 1e-9, "a={a}");
+    }
 }
 
 #[test]
@@ -260,15 +279,19 @@ fn extrema_and_argmax() {
     assert_eq!(reduce_max(&data), Some(9.0));
     assert_eq!(reduce_min(&data), Some(-7.0));
     assert_eq!(argmax(&data), Some(8));
+    assert_eq!(argmin(&data), Some(4)); // -7.0 à l'indice 4
 
     // Max dans le corps vectoriel.
     let body_max = [1.0f64, 2.0, 8.0, 3.0, 4.0, 5.0, 6.0, 7.0];
     assert_eq!(reduce_max(&body_max), Some(8.0));
     assert_eq!(argmax(&body_max), Some(2));
+    assert_eq!(argmin(&body_max), Some(0));
 
     // Premier indice en cas d'égalité.
     let ties = [5.0f32, 1.0, 5.0, 2.0, 5.0];
     assert_eq!(argmax(&ties), Some(0));
+    let ties_min = [1.0f32, 5.0, 1.0, 2.0, 1.0];
+    assert_eq!(argmin(&ties_min), Some(0));
 }
 
 #[test]
@@ -280,8 +303,10 @@ fn empty_edge_cases() {
     assert_eq!(reduce_max(&empty), None);
     assert_eq!(reduce_min(&empty), None);
     assert_eq!(argmax(&empty), None);
+    assert_eq!(argmin(&empty), None);
     assert_eq!(l1_norm(&empty, ReductionMode::Fast), 0.0);
     assert_eq!(l2_norm(&empty, ReductionMode::Fast), 0.0);
+    assert_eq!(linf_norm(&empty), 0.0);
 }
 
 #[test]
@@ -291,5 +316,7 @@ fn single_element() {
     assert_eq!(sum_kahan(&one), 42.0);
     assert_eq!(reduce_max(&one), Some(42.0));
     assert_eq!(argmax(&one), Some(0));
+    assert_eq!(argmin(&one), Some(0));
     assert_eq!(l2_norm(&one, ReductionMode::Deterministic), 42.0);
+    assert_eq!(linf_norm(&one), 42.0);
 }

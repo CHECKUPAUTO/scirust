@@ -2,8 +2,8 @@
 //
 // # Réductions virgule fixe
 //
-// `sum`, `dot`, `l1_norm`, `l2_norm`, `cosine_similarity`, `min`, `max`,
-// `argmin`, `argmax`, génériques sur le scalaire virgule fixe via
+// `sum`, `dot`, `l1_norm`, `l2_norm`, `linf_norm`, `cosine_similarity`, `min`,
+// `max`, `argmin`, `argmax`, génériques sur le scalaire virgule fixe via
 // [`FixedReducible`].
 //
 // ## Reproductibilité (point clé)
@@ -21,6 +21,7 @@
 //   final (enveloppant). Bit-à-bit reproductible.
 // * `dot` : chaque produit arrondi vers zéro (comme `*`), puis sommé exactement.
 // * `l2_norm` : `sqrt(dot(a, a))` (voir [`super::math`]).
+// * `linf_norm` : `maxᵢ |aᵢ|`, parcours scalaire (ordre entier total).
 // * `cosine_similarity` : `dot(a,b) / (‖a‖·‖b‖)` ; `0` si une norme est nulle.
 // * `min`/`max`/`argmin`/`argmax` : parcours scalaire (ordre entier total) ;
 //   `argmin`/`argmax` renvoient le **premier** indice extrémal.
@@ -261,6 +262,18 @@ pub fn l2_norm_sqr<T: FixedReducible>(a: &[T]) -> T {
 #[must_use]
 pub fn l2_norm<T: FixedReducible>(a: &[T]) -> T {
     T::reduce_dot(a, a).sqrt()
+}
+
+/// Norme L∞ (maximum absolu) `maxᵢ |aᵢ|`, ou `T::ZERO` si `data` est vide
+/// (convention : norme du vecteur nul). Exacte, déterministe.
+#[inline]
+#[must_use]
+pub fn linf_norm<T: FixedReducible>(data: &[T]) -> T {
+    data.iter()
+        .copied()
+        .map(FixedReducible::abs)
+        .reduce(|a, b| if a >= b { a } else { b })
+        .unwrap_or(T::ZERO)
 }
 
 /// Similarité cosinus `⟨a,b⟩ / (‖a‖·‖b‖)`. Renvoie `0` si une norme est nulle.

@@ -476,14 +476,20 @@ fn reductions_exact() {
     assert_eq!(red::min(&data).unwrap().to_f64(), 0.5);
     assert_eq!(red::argmax(&data), Some(99));
     assert_eq!(red::argmin(&data), Some(0));
+    // Toutes valeurs positives : L∞ = max.
+    assert_eq!(red::linf_norm(&data).to_f64(), 50.0);
 
     // dot([1,2,3],[4,5,6]) = 32.
     let x: Vec<Q16_16> = [1.0, 2.0, 3.0].iter().map(|&v| q16(v)).collect();
     let y: Vec<Q16_16> = [4.0, 5.0, 6.0].iter().map(|&v| q16(v)).collect();
     assert_eq!(red::dot(&x, &y).to_f64(), 32.0);
-    // ‖[3,4]‖ = 5.
+    // ‖[3,4]‖ = 5, ‖[3,4]‖∞ = 4.
     let v: Vec<Q16_16> = [3.0, 4.0].iter().map(|&t| q16(t)).collect();
     assert_eq!(red::l2_norm(&v).to_f64(), 5.0);
+    assert_eq!(red::linf_norm(&v).to_f64(), 4.0);
+    // L∞ prend la valeur absolue : ‖[-9, 1, 2]‖∞ = 9.
+    let neg: Vec<Q16_16> = [-9.0, 1.0, 2.0].iter().map(|&t| q16(t)).collect();
+    assert_eq!(red::linf_norm(&neg).to_f64(), 9.0);
     // cos(x, x) ≈ 1.
     let c = red::cosine_similarity(&v, &v);
     assert!((c.to_f64() - 1.0).abs() < 1e-3, "cos={c}");

@@ -3,8 +3,8 @@
 // # Réductions SIMD — socle réutilisable
 //
 // Sommes (rapide / déterministe / Kahan compensée), produit scalaire, normes
-// L1/L2/L∞, max/min/argmax et similarité cosinus, génériques sur le scalaire
-// (`f32`, `f64`) via [`SimdReducible`] et bâties sur [`SimdScalar`].
+// L1/L2/L∞, max/min/argmax/argmin et similarité cosinus, génériques sur le
+// scalaire (`f32`, `f64`) via [`SimdReducible`] et bâties sur [`SimdScalar`].
 //
 // ## Rapide vs Déterministe
 //
@@ -324,6 +324,34 @@ pub fn l1_norm<T: SimdReducible>(a: &[T], mode: ReductionMode) -> T {
     total
 }
 
+/// Norme L∞ (maximum absolu) `maxᵢ |aᵢ|`, ou `T::ZERO` si `a` est vide
+/// (convention : norme du vecteur nul).
+#[inline]
+#[must_use]
+pub fn linf_norm<T: SimdReducible>(a: &[T]) -> T {
+    if a.is_empty()
+    {
+        return T::ZERO;
+    }
+    let mut chunks = a.chunks_exact(T::WIDTH);
+    let mut acc: Option<T::Simd> = None;
+    for chunk in chunks.by_ref()
+    {
+        let v = T::Simd::from_slice(chunk).abs();
+        acc = Some(match acc
+        {
+            Some(a) => a.simd_max(v),
+            None => v,
+        });
+    }
+    let mut best = acc.map(T::Simd::reduce_max).unwrap_or(T::ZERO);
+    for &v in chunks.remainder()
+    {
+        best = best.max(v.abs());
+    }
+    best
+}
+
 /// Similarité cosinus `⟨a, b⟩ / (‖a‖·‖b‖)`. Panique si longueurs différentes.
 /// Renvoie `0` si l'une des normes est nulle (vecteur nul → similarité indéfinie,
 /// convention pragmatique pour le routage de représentations).
@@ -420,5 +448,16 @@ pub fn reduce_min<T: SimdReducible>(data: &[T]) -> Option<T> {
 pub fn argmax<T: SimdReducible>(data: &[T]) -> Option<usize> {
     let m = reduce_max(data)?;
     // Premier indice égal au max ; repli sur 0 si aucun (ex. tout-NaN).
+    Some(data.iter().position(|&x| x == m).unwrap_or(0))
+}
+
+/// Indice du **premier** minimum, ou `None` si vide.
+///
+/// Même schéma qu'[`argmax`] : minimum SIMD puis balayage linéaire du
+/// premier indice égal.
+#[inline]
+#[must_use]
+pub fn argmin<T: SimdReducible>(data: &[T]) -> Option<usize> {
+    let m = reduce_min(data)?;
     Some(data.iter().position(|&x| x == m).unwrap_or(0))
 }

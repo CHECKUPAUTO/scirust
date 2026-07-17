@@ -16,7 +16,7 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::reductions::{
-    ReductionMode, dot, l2_norm, sum_deterministic, sum_fast, sum_kahan,
+    ReductionMode, argmin, dot, l2_norm, linf_norm, sum_deterministic, sum_fast, sum_kahan,
 };
 
 /// 65 536 éléments : le tableau f32 (256 Kio) déborde le L1/L2 → débit soutenu.
@@ -104,5 +104,37 @@ fn bench_dot_norm(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(benches, bench_sum, bench_dot_norm);
+/// `linf_norm` (max absolu, SIMD) et `argmin` (min SIMD + balayage linéaire)
+/// vs équivalents scalaires naïfs.
+fn bench_linf_argmin(c: &mut Criterion) {
+    let a = data_f32(0x701);
+
+    let mut g = c.benchmark_group("linf_norm_f32");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("scalar", "naive"), |bch| {
+        bch.iter(|| black_box(&a).iter().fold(0.0f32, |m, &x| m.max(x.abs())))
+    });
+    g.bench_function(BenchmarkId::new("simd", "fast"), |bch| {
+        bch.iter(|| linf_norm(black_box(&a)))
+    });
+    g.finish();
+
+    let mut g = c.benchmark_group("argmin_f32");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("scalar", "naive"), |bch| {
+        bch.iter(|| {
+            black_box(&a)
+                .iter()
+                .enumerate()
+                .min_by(|(_, x), (_, y)| x.total_cmp(y))
+                .map(|(i, _)| i)
+        })
+    });
+    g.bench_function(BenchmarkId::new("simd", "fast"), |bch| {
+        bch.iter(|| argmin(black_box(&a)))
+    });
+    g.finish();
+}
+
+criterion_group!(benches, bench_sum, bench_dot_norm, bench_linf_argmin);
 criterion_main!(benches);
