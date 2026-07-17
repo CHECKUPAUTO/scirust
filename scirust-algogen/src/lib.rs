@@ -4,7 +4,7 @@
 //! for sorting, searching, graph, dynamic-programming, and
 //! divide-and-conquer algorithms.
 //!
-//! # Modules (single-file crate)
+//! # Modules
 //! 1. Sorting – search space, auto-select, hybrid generation, benchmarks
 //! 2. Searching – linear / binary / jump / exponential / interpolation /
 //!    BST / AVL / hash, data-distribution adaptation
@@ -14,6 +14,8 @@
 //! 5. Divide-and-Conquer – templates, base-case selection, master theorem
 //! 6. Complexity – Big-O fitting, empirical measurement, adaptive detection
 //! 7. Comparison – head-to-head benchmarks, statistical reporting
+
+pub mod tensor;
 
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
