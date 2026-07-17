@@ -1,4 +1,4 @@
-//! The eulerian simulation driver.
+//! The simulation driver (eulerian and transport-compensated).
 //!
 //! [`simulate`] steps a time-dependent velocity field, computing at each step
 //! the vorticity, the **curvature-weighted rotational intensity**
@@ -12,9 +12,12 @@
 //!   midpoint of successive nodes;
 //! * each index is the interval sum divided by the observed duration.
 //!
-//! Only the default *eulerian* temporal-deformation mode is ported; the
-//! reference's optional semi-Lagrangian `transport_compensated` mode is out of
-//! scope for this crate.
+//! [`simulate_transport_compensated`] adds the semi-Lagrangian
+//! *transport-compensated* temporal-deformation mode (see [`crate::transport`]):
+//! before the temporal term, the previous vorticity is advected along a
+//! transport velocity to the current time, so the deformation measures genuine
+//! change rather than mere advection. This mode requires the periodic boundary
+//! convention.
 
 use crate::error::{ItdError, Result};
 use crate::field::Field2;
@@ -22,6 +25,7 @@ use crate::geometry::{BoundaryMode, Geometry};
 use crate::operators::{bounded, spatial_mean, vorticity};
 use crate::scenarios::{Config, Scenario, curvature_field};
 use crate::signature::{STRUCTURAL_LENGTH, StructuralWeights, structural_metrics};
+use crate::transport::{Interpolation, Trajectory, transport_previous_vorticity};
 
 /// Names of the five structural component indices, in reported order.
 pub const COMPONENT_NAMES: [&str; 5] = [
@@ -70,6 +74,11 @@ pub struct SimulationResult {
     pub coupled_index: f64,
     /// The five component indices, in [`COMPONENT_NAMES`] order.
     pub component_indices: [f64; 5],
+    /// Time-averaged raw (unbounded) *eulerian* temporal deformation.
+    pub temporal_deformation_eulerian_index: f64,
+    /// Time-averaged raw (unbounded) *compensated* temporal deformation, or
+    /// `None` in eulerian mode.
+    pub temporal_deformation_compensated_index: Option<f64>,
     /// Per-step intensity rate.
     pub intensity_rate: Vec<f64>,
     /// Per-step heterogeneity (raw).
@@ -80,7 +89,8 @@ pub struct SimulationResult {
     pub roughness: Vec<f64>,
     /// Per-step sign-mixing.
     pub sign_mixing: Vec<f64>,
-    /// Per-step temporal deformation (index `i` covers `[t_{i-1}, t_i]`).
+    /// Per-step active temporal deformation (compensated in transport mode;
+    /// index `i` covers `[t_{i-1}, t_i]`).
     pub temporal_deformation: Vec<f64>,
 }
 
@@ -92,6 +102,14 @@ impl SimulationResult {
             .position(|&n| n == name)
             .map(|k| self.component_indices[k])
     }
+}
+
+/// A transport-velocity closure plus the interpolation and trajectory schemes
+/// used to advect the previous vorticity in transport-compensated mode.
+struct TransportCompensation<'a> {
+    velocity: &'a dyn Fn(f64, f64, f64) -> (f64, f64),
+    interpolation: Interpolation,
+    trajectory: Trajectory,
 }
 
 /// Runs a full eulerian simulation.
@@ -110,6 +128,86 @@ pub fn simulate<VF, CF>(
     geometry: &Geometry,
     characteristic_length: f64,
     config: &SimConfig,
+) -> Result<SimulationResult>
+where
+    VF: Fn(&[f64], &[f64], f64) -> (Field2, Field2),
+    CF: Fn(&[f64], &[f64], f64) -> Field2,
+{
+    run_core(
+        name,
+        velocity,
+        curvature,
+        xc,
+        yc,
+        times,
+        geometry,
+        characteristic_length,
+        config,
+        None,
+    )
+}
+
+/// Runs a simulation with the semi-Lagrangian **transport-compensated**
+/// temporal-deformation mode. The previous vorticity is advected by
+/// `transport_velocity` (a pointwise `(x, y, t) -> (vx, vy)` field) before the
+/// temporal term. Requires [`BoundaryMode::Periodic`].
+#[allow(clippy::too_many_arguments)]
+pub fn simulate_transport_compensated<VF, CF, TVF>(
+    name: &str,
+    velocity: VF,
+    curvature: CF,
+    transport_velocity: TVF,
+    interpolation: Interpolation,
+    trajectory: Trajectory,
+    xc: &[f64],
+    yc: &[f64],
+    times: &[f64],
+    geometry: &Geometry,
+    characteristic_length: f64,
+    config: &SimConfig,
+) -> Result<SimulationResult>
+where
+    VF: Fn(&[f64], &[f64], f64) -> (Field2, Field2),
+    CF: Fn(&[f64], &[f64], f64) -> Field2,
+    TVF: Fn(f64, f64, f64) -> (f64, f64),
+{
+    if config.boundary != BoundaryMode::Periodic
+    {
+        return Err(ItdError::UnsupportedBoundary(
+            "transport compensation requires the periodic boundary mode".into(),
+        ));
+    }
+    let transport = TransportCompensation {
+        velocity: &transport_velocity,
+        interpolation,
+        trajectory,
+    };
+    run_core(
+        name,
+        velocity,
+        curvature,
+        xc,
+        yc,
+        times,
+        geometry,
+        characteristic_length,
+        config,
+        Some(&transport),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_core<VF, CF>(
+    name: &str,
+    velocity: VF,
+    curvature: CF,
+    xc: &[f64],
+    yc: &[f64],
+    times: &[f64],
+    geometry: &Geometry,
+    characteristic_length: f64,
+    config: &SimConfig,
+    transport: Option<&TransportCompensation>,
 ) -> Result<SimulationResult>
 where
     VF: Fn(&[f64], &[f64], f64) -> (Field2, Field2),
@@ -146,7 +244,11 @@ where
     let mut loc = vec![0.0; n];
     let mut rough = vec![0.0; n];
     let mut sign = vec![0.0; n];
-    let mut tdef = vec![0.0; n];
+    // Raw (unbounded) eulerian and active deformation series. In eulerian mode
+    // the active series equals the eulerian one; in transport mode it holds the
+    // compensated deformation.
+    let mut tdef_eulerian = vec![0.0; n];
+    let mut tdef_active = vec![0.0; n];
 
     let mut previous_omega: Option<Field2> = None;
     let mut previous_time = f64::NAN;
@@ -162,7 +264,9 @@ where
         intensity_rate[i] = spatial_mean(&density, geometry, config.boundary)?;
 
         let dt = if i > 0 { Some(t - previous_time) } else { None };
-        let m = structural_metrics(
+        // Eulerian metrics give the mode-independent components (heterogeneity,
+        // localization, roughness, sign-mixing) and the eulerian deformation.
+        let eulerian = structural_metrics(
             &omega,
             geometry,
             previous_omega.as_ref(),
@@ -171,11 +275,40 @@ where
             config.weights,
             config.boundary,
         )?;
-        het[i] = m.heterogeneity;
-        loc[i] = m.localization;
-        rough[i] = m.roughness;
-        sign[i] = m.sign_mixing;
-        tdef[i] = m.temporal_deformation;
+        het[i] = eulerian.heterogeneity;
+        loc[i] = eulerian.localization;
+        rough[i] = eulerian.roughness;
+        sign[i] = eulerian.sign_mixing;
+        tdef_eulerian[i] = eulerian.temporal_deformation;
+
+        tdef_active[i] = match (transport, previous_omega.as_ref(), dt)
+        {
+            (Some(tc), Some(prev), Some(_)) =>
+            {
+                let transported = transport_previous_vorticity(
+                    prev,
+                    xc,
+                    yc,
+                    previous_time,
+                    t,
+                    tc.velocity,
+                    tc.interpolation,
+                    tc.trajectory,
+                )?;
+                let compensated = structural_metrics(
+                    &omega,
+                    geometry,
+                    Some(&transported),
+                    dt,
+                    config.structural_length,
+                    config.weights,
+                    config.boundary,
+                )?;
+                compensated.temporal_deformation
+            },
+            // First step, or eulerian mode: compensated ≡ eulerian.
+            _ => eulerian.temporal_deformation,
+        };
 
         previous_omega = Some(omega);
         previous_time = t;
@@ -190,7 +323,7 @@ where
     let bounded_rough: Vec<f64> = rough.iter().map(|&v| bounded(v)).collect();
     let bounded_sign: Vec<f64> = sign.iter().map(|&v| v.clamp(0.0, 1.0)).collect();
     // Deformation at node i belongs to interval [t_{i-1}, t_i]; drop node 0.
-    let bounded_defo_iv: Vec<f64> = (0..m).map(|j| bounded(tdef[j + 1])).collect();
+    let bounded_defo_iv: Vec<f64> = (0..m).map(|j| bounded(tdef_active[j + 1])).collect();
 
     let midpoint = |a: &[f64], j: usize| 0.5 * (a[j] + a[j + 1]);
 
@@ -235,6 +368,15 @@ where
         }
         acc / duration
     };
+    // Raw deformation index over the intervals (node i+1 covers interval j).
+    let integrate_raw = |series: &[f64]| -> f64 {
+        let mut acc = 0.0;
+        for j in 0..m
+        {
+            acc += series[j + 1] * interval_dt[j];
+        }
+        acc / duration
+    };
 
     let intensity_index = integrate(&intensity_interval);
     let structure_index = integrate(&interval_structure);
@@ -247,23 +389,28 @@ where
         integrate(&component_intervals[4]),
     ];
 
+    let temporal_deformation_eulerian_index = integrate_raw(&tdef_eulerian);
+    let temporal_deformation_compensated_index = transport.map(|_| integrate_raw(&tdef_active));
+
     Ok(SimulationResult {
         name: name.to_string(),
         intensity_index,
         structure_index,
         coupled_index,
         component_indices,
+        temporal_deformation_eulerian_index,
+        temporal_deformation_compensated_index,
         intensity_rate,
         heterogeneity: het,
         localization: loc,
         roughness: rough,
         sign_mixing: sign,
-        temporal_deformation: tdef,
+        temporal_deformation: tdef_active,
     })
 }
 
 /// Runs a canonical scenario on the grid and time horizon given by `config`,
-/// using the shared [`curvature_field`] weighting.
+/// using the shared [`curvature_field`] weighting (eulerian mode).
 pub fn simulate_canonical(
     scenario: Scenario,
     config: &Config,
@@ -277,6 +424,36 @@ pub fn simulate_canonical(
         scenario.name(),
         |x, y, t| scenario.velocity(x, y, t),
         curvature_field,
+        &xc,
+        &yc,
+        &times,
+        &geometry,
+        config.characteristic_length,
+        sim,
+    )
+}
+
+/// Runs a canonical scenario in transport-compensated mode, advecting the
+/// vorticity by the scenario's own flow (its pointwise velocity). Requires
+/// `sim.boundary == BoundaryMode::Periodic`.
+pub fn simulate_canonical_transport(
+    scenario: Scenario,
+    config: &Config,
+    sim: &SimConfig,
+    interpolation: Interpolation,
+    trajectory: Trajectory,
+) -> Result<SimulationResult> {
+    let xc = config.coordinates();
+    let yc = xc.clone();
+    let times = config.times();
+    let geometry = Geometry::isotropic(config.spacing())?;
+    simulate_transport_compensated(
+        scenario.name(),
+        |x, y, t| scenario.velocity(x, y, t),
+        curvature_field,
+        |x, y, t| scenario.velocity_at(x, y, t),
+        interpolation,
+        trajectory,
         &xc,
         &yc,
         &times,

@@ -21,7 +21,9 @@ invariants the reference asserts hold here too (`tests/analytic.rs`).
 | | [`operators::spatial_mean`] | domain integral / area (2-D trapezoidal quadrature; arithmetic mean in periodic mode) |
 | | [`operators::bounded`] | saturating map `b(x) = x / (1 + x)` |
 | **Structural signature** | [`signature::structural_metrics`] | heterogeneity, localization, roughness, sign-mixing, temporal deformation + weighted score |
-| **Simulation driver** | [`simulate`] / `simulate_canonical` | curvature-weighted rotational intensity `⟨ω²·e^{L²κ}⟩` and the structural signature, reduced to interval-integrated indices (eulerian mode) |
+| **Semi-Lagrangian transport** | [`transport::transport_previous_vorticity`] | periodic advection of a field: midpoint / RK4 back-tracing × bilinear / 16-point cubic periodic interpolation (with the exact-snap short circuit) |
+| **Simulation driver** | [`simulate`] / `simulate_canonical` | curvature-weighted rotational intensity `⟨ω²·e^{L²κ}⟩` and the structural signature, reduced to interval-integrated indices |
+| | [`simulate_transport_compensated`] | the transport-compensated temporal-deformation mode (advect the previous vorticity before the temporal term; periodic boundary) |
 | **Scenarios** | [`scenarios`] | calm (irrotational), coherent (rigid rotation), multi-vortex fields + the shared curvature weighting and reference `Config` |
 
 ## Quick start
@@ -45,9 +47,11 @@ println!("intensity = {:.12}", r.intensity_index);   // 4.347614838944
 - **Deterministic**: no randomness, no threads; identical inputs give identical
   numbers, and the finite-difference/quadrature summation order matches the
   reference so the cross-language agreement stays near machine precision.
-- Only the default *eulerian* temporal-deformation mode is ported; the
-  reference's optional semi-Lagrangian `transport_compensated` mode is out of
-  scope for this crate.
+- Both temporal-deformation modes are ported: the default *eulerian* mode and
+  the semi-Lagrangian *transport-compensated* mode. Of the reference's four
+  periodic interpolations, the two exact schemes (`bilinear`, `cubic`) are
+  ported; the convex-limited `cubic_local_bounded` and discrete-sum-preserving
+  `cubic_local_sum_preserving` variants are intentionally left out of scope.
 
 ## Provenance & scope
 
@@ -62,5 +66,7 @@ transfers to SciRust is the deterministic, oracle-validated machinery.
 [`operators::spatial_mean`]: https://docs.rs/scirust-itd
 [`operators::bounded`]: https://docs.rs/scirust-itd
 [`signature::structural_metrics`]: https://docs.rs/scirust-itd
+[`transport::transport_previous_vorticity`]: https://docs.rs/scirust-itd
 [`simulate`]: https://docs.rs/scirust-itd
+[`simulate_transport_compensated`]: https://docs.rs/scirust-itd
 [`scenarios`]: https://docs.rs/scirust-itd

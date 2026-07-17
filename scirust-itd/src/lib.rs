@@ -62,10 +62,15 @@ pub mod operators;
 pub mod scenarios;
 pub mod signature;
 pub mod simulate;
+pub mod transport;
 
 pub use error::{ItdError, Result};
 pub use field::Field2;
 pub use geometry::{BoundaryMode, Geometry};
 pub use scenarios::{Config, Scenario};
 pub use signature::{StructuralMetrics, StructuralWeights, structural_metrics};
-pub use simulate::{COMPONENT_NAMES, SimConfig, SimulationResult, simulate, simulate_canonical};
+pub use simulate::{
+    COMPONENT_NAMES, SimConfig, SimulationResult, simulate, simulate_canonical,
+    simulate_canonical_transport, simulate_transport_compensated,
+};
+pub use transport::{Interpolation, Trajectory, transport_previous_vorticity};

@@ -6,7 +6,9 @@
 //! intensity, rigid rotation ⇒ constant vorticity) are covered in the unit
 //! tests inside the crate.
 
-#[allow(dead_code)]
+// Auto-generated numeric fixtures: some literals coincide with math constants
+// (e.g. 1/√2), which is not a readability problem in generated data.
+#[allow(dead_code, clippy::approx_constant)]
 mod oracle_data {
     include!("support/oracle_data.rs");
 }
@@ -14,7 +16,10 @@ mod oracle_data {
 use oracle_data as od;
 use scirust_itd::operators::{bounded, gradient, spatial_mean, vorticity};
 use scirust_itd::signature::{StructuralWeights, structural_metrics};
-use scirust_itd::{BoundaryMode, Config, Field2, Geometry, Scenario, SimConfig};
+use scirust_itd::{
+    BoundaryMode, Config, Field2, Geometry, Interpolation, Scenario, SimConfig, Trajectory,
+    simulate_canonical_transport, transport_previous_vorticity,
+};
 
 const REL: f64 = 1e-9;
 const ABS: f64 = 1e-11;
@@ -356,4 +361,150 @@ fn scenarios_full_grid() {
         },
     ];
     check_scenarios(&config, &cases, "full");
+}
+
+// --- transport (semi-Lagrangian) ----------------------------------------
+
+fn transport_velocity(x: f64, y: f64, t: f64) -> (f64, f64) {
+    (
+        0.4 * (x + 0.2 * t).cos() * y.sin(),
+        -0.4 * x.sin() * (y - 0.1 * t).cos(),
+    )
+}
+
+#[test]
+fn transport_previous_vorticity_matches() {
+    let tx = od::TX_COORDS.to_vec();
+    let ty = od::TY_COORDS.to_vec();
+    let prev = Field2::from_vec(od::TNY, od::TNX, od::TPREV.to_vec()).unwrap();
+
+    let combos = [
+        (
+            Interpolation::BilinearPeriodic,
+            Trajectory::MidpointTimeVelocity,
+            od::T_BILINEAR_MIDPOINT,
+            "bilinear/midpoint",
+        ),
+        (
+            Interpolation::BilinearPeriodic,
+            Trajectory::Rk4Backtrace,
+            od::T_BILINEAR_RK4,
+            "bilinear/rk4",
+        ),
+        (
+            Interpolation::CubicPeriodic,
+            Trajectory::MidpointTimeVelocity,
+            od::T_CUBIC_MIDPOINT,
+            "cubic/midpoint",
+        ),
+        (
+            Interpolation::CubicPeriodic,
+            Trajectory::Rk4Backtrace,
+            od::T_CUBIC_RK4,
+            "cubic/rk4",
+        ),
+    ];
+
+    for (interp, traj, want, ctx) in combos
+    {
+        let got = transport_previous_vorticity(
+            &prev,
+            &tx,
+            &ty,
+            od::T_PREV_TIME,
+            od::T_CUR_TIME,
+            transport_velocity,
+            interp,
+            traj,
+        )
+        .unwrap();
+        assert_slice_close(got.as_slice(), want, ctx);
+    }
+}
+
+#[test]
+fn transport_compensated_engine_matches() {
+    let config = Config {
+        grid_size: 41,
+        time_steps: 41,
+        ..Config::default()
+    };
+    let sim = SimConfig {
+        boundary: BoundaryMode::Periodic,
+        ..SimConfig::default()
+    };
+
+    let coherent = simulate_canonical_transport(
+        Scenario::Coherent,
+        &config,
+        &sim,
+        Interpolation::BilinearPeriodic,
+        Trajectory::MidpointTimeVelocity,
+    )
+    .unwrap();
+    assert_close(
+        coherent.intensity_index,
+        od::TC_COHERENT_INTENSITY,
+        "tc/coherent/intensity",
+    );
+    assert_close(
+        coherent.structure_index,
+        od::TC_COHERENT_STRUCTURE,
+        "tc/coherent/structure",
+    );
+    assert_close(
+        coherent.coupled_index,
+        od::TC_COHERENT_COUPLED,
+        "tc/coherent/coupled",
+    );
+    assert_close(
+        coherent.component_indices[4],
+        od::TC_COHERENT_TMP,
+        "tc/coherent/tmp",
+    );
+    assert_close(
+        coherent.temporal_deformation_eulerian_index,
+        od::TC_COHERENT_EUL_IDX,
+        "tc/coherent/eul",
+    );
+    assert_close(
+        coherent.temporal_deformation_compensated_index.unwrap(),
+        od::TC_COHERENT_COMP_IDX,
+        "tc/coherent/comp",
+    );
+
+    let multi = simulate_canonical_transport(
+        Scenario::Multi,
+        &config,
+        &sim,
+        Interpolation::CubicPeriodic,
+        Trajectory::Rk4Backtrace,
+    )
+    .unwrap();
+    assert_close(
+        multi.intensity_index,
+        od::TC_MULTI_INTENSITY,
+        "tc/multi/intensity",
+    );
+    assert_close(
+        multi.structure_index,
+        od::TC_MULTI_STRUCTURE,
+        "tc/multi/structure",
+    );
+    assert_close(
+        multi.coupled_index,
+        od::TC_MULTI_COUPLED,
+        "tc/multi/coupled",
+    );
+    assert_close(multi.component_indices[4], od::TC_MULTI_TMP, "tc/multi/tmp");
+    assert_close(
+        multi.temporal_deformation_eulerian_index,
+        od::TC_MULTI_EUL_IDX,
+        "tc/multi/eul",
+    );
+    assert_close(
+        multi.temporal_deformation_compensated_index.unwrap(),
+        od::TC_MULTI_COMP_IDX,
+        "tc/multi/comp",
+    );
 }

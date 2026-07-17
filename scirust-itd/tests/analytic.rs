@@ -3,7 +3,10 @@
 
 use scirust_itd::operators::{spatial_mean, vorticity};
 use scirust_itd::signature::structural_metrics;
-use scirust_itd::{BoundaryMode, Field2, Geometry, StructuralWeights};
+use scirust_itd::{
+    BoundaryMode, Field2, Geometry, Interpolation, StructuralWeights, Trajectory,
+    transport_previous_vorticity,
+};
 
 fn grid(n: usize, h: f64) -> (Vec<f64>, Geometry) {
     let coords: Vec<f64> = (0..n).map(|k| -1.0 + k as f64 * h).collect();
@@ -88,4 +91,81 @@ fn zero_field_has_zero_metrics() {
     .unwrap();
     assert_eq!(m.structure_score, 0.0);
     assert_eq!(m.heterogeneity, 0.0);
+}
+
+/// Zero transport velocity leaves the field unchanged: every departure point is
+/// its own grid node, so the exact-snap path returns an identical copy — for
+/// both interpolation schemes.
+#[test]
+fn zero_velocity_transport_is_identity() {
+    let nx = 8;
+    let ny = 6;
+    let hx = 0.5;
+    let hy = 0.4;
+    let xc: Vec<f64> = (0..nx).map(|k| k as f64 * hx).collect();
+    let yc: Vec<f64> = (0..ny).map(|k| k as f64 * hy).collect();
+    let prev = Field2::from_fn(ny, nx, |i, j| {
+        (0.7 * j as f64).sin() + 0.3 * (i as f64).cos()
+    });
+    let zero = |_x: f64, _y: f64, _t: f64| (0.0, 0.0);
+
+    for interp in [
+        Interpolation::BilinearPeriodic,
+        Interpolation::CubicPeriodic,
+    ]
+    {
+        let out = transport_previous_vorticity(
+            &prev,
+            &xc,
+            &yc,
+            0.0,
+            0.5,
+            zero,
+            interp,
+            Trajectory::MidpointTimeVelocity,
+        )
+        .unwrap();
+        assert_eq!(out, prev, "zero-velocity transport must be identity");
+    }
+}
+
+/// A constant velocity advecting exactly one cell per step shifts the field by
+/// one grid column: the departure points land exactly on the neighbouring
+/// nodes, so periodic sampling reproduces the shifted field to machine
+/// precision.
+#[test]
+fn integer_cell_shift_transport() {
+    let nx = 8;
+    let ny = 5;
+    let h = 0.5;
+    let dt = 1.0;
+    let xc: Vec<f64> = (0..nx).map(|k| k as f64 * h).collect();
+    let yc: Vec<f64> = (0..ny).map(|k| k as f64 * h).collect();
+    let prev = Field2::from_fn(ny, nx, |i, j| (i * nx + j) as f64);
+    // vx = h/dt advects one full cell to the left over one step.
+    let drift = move |_x: f64, _y: f64, _t: f64| (h / dt, 0.0);
+
+    let out = transport_previous_vorticity(
+        &prev,
+        &xc,
+        &yc,
+        0.0,
+        dt,
+        drift,
+        Interpolation::BilinearPeriodic,
+        Trajectory::MidpointTimeVelocity,
+    )
+    .unwrap();
+
+    for i in 0..ny
+    {
+        for j in 0..nx
+        {
+            let src = (j + nx - 1) % nx;
+            assert!(
+                (out.get(i, j) - prev.get(i, src)).abs() < 1e-12,
+                "cell ({i},{j}) not shifted"
+            );
+        }
+    }
 }

@@ -109,6 +109,74 @@ impl Scenario {
             Scenario::Multi => multi_vortex_field(xc, yc, t),
         }
     }
+
+    /// Pointwise velocity `(vx, vy)` at position `(x, y)` and time `t`. This is
+    /// the same field as [`Scenario::velocity`], sampled at an arbitrary point
+    /// rather than on the grid — used as the transport velocity for the
+    /// semi-Lagrangian, transport-compensated temporal mode.
+    pub fn velocity_at(&self, x: f64, y: f64, t: f64) -> (f64, f64) {
+        match self
+        {
+            Scenario::Calm =>
+            {
+                let a = 0.35 + 0.05 * (0.4 * t).sin();
+                (a * x, a * y)
+            },
+            Scenario::Coherent =>
+            {
+                let a = 1.0 + 0.35 * (0.6 * t).sin();
+                (-a * y, a * x)
+            },
+            Scenario::Multi => multi_vortex_velocity_at(x, y, t),
+        }
+    }
+}
+
+/// Pointwise evaluation of the four-vortex field plus background (see
+/// [`multi_vortex_field`]).
+fn multi_vortex_velocity_at(x: f64, y: f64, t: f64) -> (f64, f64) {
+    let vortex_data = [
+        (
+            -0.85 + 0.15 * (0.37 * t).cos(),
+            -0.65 + 0.12 * (0.43 * t).sin(),
+            1.30,
+            0.55,
+        ),
+        (
+            0.80 + 0.13 * (0.31 * t).sin(),
+            -0.55 + 0.14 * (0.47 * t).cos(),
+            -1.05,
+            0.48,
+        ),
+        (
+            -0.45 + 0.12 * (0.53 * t).sin(),
+            0.85 + 0.10 * (0.29 * t).cos(),
+            0.90,
+            0.62,
+        ),
+        (
+            0.75 + 0.11 * (0.41 * t).cos(),
+            0.70 + 0.13 * (0.35 * t).sin(),
+            -1.20,
+            0.52,
+        ),
+    ];
+    let background = 0.08 * (0.5 * t).sin();
+    let mut ux = 0.0;
+    let mut uy = 0.0;
+    for &(center_x, center_y, strength, width) in &vortex_data
+    {
+        let dx = x - center_x;
+        let dy = y - center_y;
+        let radius_squared = dx * dx + dy * dy;
+        let envelope = (-radius_squared / (2.0 * width * width)).exp();
+        let temporal_strength = strength * (1.0 + 0.18 * (0.7 * t + strength).sin());
+        ux += -temporal_strength * dy * envelope;
+        uy += temporal_strength * dx * envelope;
+    }
+    ux += background * (PI * y).sin();
+    uy += background * (PI * x).sin();
+    (ux, uy)
 }
 
 /// Pure expansion `vx = a(t)·x`, `vy = a(t)·y`. Its analytic curl is zero.
