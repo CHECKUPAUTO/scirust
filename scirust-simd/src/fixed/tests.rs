@@ -14,7 +14,7 @@ use super::conv2d::{Conv2dShape, conv2d, conv2d_batch};
 use super::layer::Linear;
 use super::linalg;
 use super::math::{reciprocal, rsqrt, sqrt};
-use super::norm::{layer_norm, rmsnorm};
+use super::norm::{layer_norm, rmsnorm, rope_apply};
 use super::pool::{Pool1dShape, avg_pool1d, max_pool1d};
 use super::pool2d::{Pool2dShape, avg_pool2d, max_pool2d};
 use super::reductions as red;
@@ -3623,4 +3623,119 @@ fn layer_norm_dim_mismatch_panics() {
     let gamma = vec![Q16_16::one(); 4];
     let beta = vec![Q16_16::one(); 3]; // devrait être 4
     let _ = layer_norm(&x, 1, 4, &gamma, &beta, Q16_16::zero());
+}
+
+// ------------------------------------------------------------------ //
+//  RoPE (rotary positional embedding), déterministe                   //
+// ------------------------------------------------------------------ //
+
+/// Référence f64 indépendante : mêmes conventions que `rope_apply`.
+fn rope_ref_f64(x: &[f64], rows: usize, d: usize, base: f64, pos_offset: usize) -> Vec<f64> {
+    let half = d / 2;
+    let mut y = x.to_vec();
+    for r in 0..rows
+    {
+        let pos = (pos_offset + r) as f64;
+        let row = &mut y[r * d..r * d + d];
+        for i in 0..half
+        {
+            let theta = base.powf(-2.0 * i as f64 / d as f64);
+            let angle = pos * theta;
+            let (s, c) = angle.sin_cos();
+            let a = row[2 * i];
+            let b = row[2 * i + 1];
+            row[2 * i] = a * c - b * s;
+            row[2 * i + 1] = a * s + b * c;
+        }
+    }
+    y
+}
+
+#[test]
+fn rope_matches_f64_reference() {
+    let mut rng = Lcg(0x3333_0001);
+    for &(rows, d, pos_offset) in &[(1usize, 2usize, 0usize), (5, 8, 0), (3, 16, 5)]
+    {
+        let mut x: Vec<Q16_16> = (0..rows * d)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 8))
+            .collect();
+        let base = q16(10000.0);
+        let x0 = to_f64_vec(&x);
+        rope_apply(&mut x, rows, d, base, pos_offset);
+        let want = rope_ref_f64(&x0, rows, d, base.to_f64(), pos_offset);
+        for i in 0..rows * d
+        {
+            let diff = (x[i].to_f64() - want[i]).abs();
+            assert!(
+                diff <= 1e-2,
+                "rows={rows} d={d} pos_offset={pos_offset} i={i}: {} vs {}",
+                x[i].to_f64(),
+                want[i]
+            );
+        }
+    }
+}
+
+#[test]
+fn rope_preserves_pair_norm() {
+    // Une rotation conserve la norme de chaque paire — invariant structurel,
+    // indépendant de toute référence externe.
+    let mut rng = Lcg(0x3333_0002);
+    let (rows, d) = (4usize, 8usize);
+    let mut x: Vec<Q16_16> = (0..rows * d)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 8))
+        .collect();
+    let before = to_f64_vec(&x);
+    rope_apply(&mut x, rows, d, q16(10000.0), 7);
+    for r in 0..rows
+    {
+        for i in 0..d / 2
+        {
+            let (a0, b0) = (before[r * d + 2 * i], before[r * d + 2 * i + 1]);
+            let norm0 = (a0 * a0 + b0 * b0).sqrt();
+            let (a1, b1) = (x[r * d + 2 * i].to_f64(), x[r * d + 2 * i + 1].to_f64());
+            let norm1 = (a1 * a1 + b1 * b1).sqrt();
+            assert!(
+                (norm0 - norm1).abs() <= 1e-2,
+                "r={r} i={i}: norme {norm0} → {norm1}"
+            );
+        }
+    }
+}
+
+#[test]
+fn rope_position_zero_is_identity() {
+    // La ligne à la position 0 (angle nul pour toutes les paires) doit
+    // rester inchangée.
+    let mut rng = Lcg(0x3333_0003);
+    let (rows, d) = (3usize, 8usize);
+    let x: Vec<Q16_16> = (0..rows * d)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 8))
+        .collect();
+    let mut got = x.clone();
+    rope_apply(&mut got, rows, d, q16(10000.0), 0);
+    for i in 0..d
+    {
+        let diff = (got[i].to_f64() - x[i].to_f64()).abs();
+        assert!(
+            diff <= 1e-3,
+            "position 0 : composante {i} modifiée ({} vs {})",
+            got[i].to_f64(),
+            x[i].to_f64()
+        );
+    }
+}
+
+#[test]
+#[should_panic(expected = "rope_apply")]
+fn rope_apply_dim_mismatch_panics() {
+    let mut x = vec![Q16_16::zero(); 7]; // ni 1×8 ni aucun multiple valide de 8
+    rope_apply(&mut x, 1, 8, q16(10000.0), 0);
+}
+
+#[test]
+#[should_panic(expected = "rope_apply")]
+fn rope_apply_odd_d_panics() {
+    let mut x = vec![Q16_16::zero(); 6]; // 2×3 : d=3 impair
+    rope_apply(&mut x, 2, 3, q16(10000.0), 0);
 }

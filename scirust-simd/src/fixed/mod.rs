@@ -93,9 +93,9 @@
 //   ([`attention::attention`], [`attention::causal_attention`],
 //   [`attention::multi_head_attention`]) : le pendant déterministe du module
 //   flottant [`crate::attention`], côté séquences/Transformers.
-// * [`norm`] — normalisations quantifiées ([`norm::rmsnorm`],
-//   [`norm::layer_norm`]), le pendant déterministe du module flottant
-//   [`crate::norm`].
+// * [`norm`] — normalisations et encodage positionnel quantifiés
+//   ([`norm::rmsnorm`], [`norm::layer_norm`], [`norm::rope_apply`]), le
+//   pendant déterministe du module flottant [`crate::norm`].
 
 pub mod activation;
 pub mod attention;

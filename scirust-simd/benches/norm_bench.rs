@@ -6,10 +6,10 @@
 // AVX-512 — celui-ci est gardé par la feature optionnelle
 // `transformer-inference`, non requise ici).
 //
-// Mesure le **débit** (éléments/s) de `rmsnorm`/`layer_norm` pour `Q16_16`
-// (virgule fixe, déterministe — `d` divisions réelles vérifiées par ligne,
-// cf. doc de tête de module) face à `f32`. L'objectif est de situer le coût
-// relatif, pas de « battre » le flottant.
+// Mesure le **débit** (éléments/s) de `rmsnorm`/`layer_norm`/`rope_apply` pour
+// `Q16_16` (virgule fixe, déterministe — `d` divisions réelles vérifiées par
+// ligne pour les normalisations, cf. doc de tête de module) face à `f32`.
+// L'objectif est de situer le coût relatif, pas de « battre » le flottant.
 //
 // Lancement (cible AVX2 pour éviter la sur-détection AVX-512 en VM) :
 //   RUSTFLAGS="-C target-cpu=x86-64-v3" \
@@ -17,7 +17,7 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::fixed::Q16_16;
-use scirust_simd::fixed::norm::{layer_norm, rmsnorm};
+use scirust_simd::fixed::norm::{layer_norm, rmsnorm, rope_apply};
 
 /// 32 lignes de 256 canaux : taille type d'une normalisation Transformer.
 const ROWS: usize = 32;
@@ -139,5 +139,54 @@ fn bench_layer_norm(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(benches, bench_rmsnorm, bench_layer_norm);
+/// RoPE flottante naïve (référence non déterministe), en place.
+fn naive_rope_f32(x: &mut [f32], d: usize, base: f32, pos_offset: usize) {
+    let half = d / 2;
+    for (r, row) in x.chunks_exact_mut(d).enumerate()
+    {
+        let pos = (pos_offset + r) as f32;
+        for i in 0..half
+        {
+            let theta = base.powf(-2.0 * i as f32 / d as f32);
+            let angle = pos * theta;
+            let (s, c) = angle.sin_cos();
+            let a = row[2 * i];
+            let b = row[2 * i + 1];
+            row[2 * i] = a * c - b * s;
+            row[2 * i + 1] = a * s + b * c;
+        }
+    }
+}
+
+fn bench_rope(c: &mut Criterion) {
+    let x = fixed_data(0x6, ROWS * D);
+    let base = Q16_16::try_from(10000.0).unwrap();
+    let fx = f32_data(0x6, ROWS * D);
+
+    let mut g = c.benchmark_group("rope_apply_32x256");
+    g.throughput(Throughput::Elements((ROWS * D) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter_batched(
+            || x.clone(),
+            |mut buf| {
+                rope_apply(black_box(&mut buf), ROWS, D, base, 0);
+                buf
+            },
+            criterion::BatchSize::SmallInput,
+        )
+    });
+    g.bench_function(BenchmarkId::new("f32", "naive"), |bch| {
+        bch.iter_batched(
+            || fx.clone(),
+            |mut buf| {
+                naive_rope_f32(black_box(&mut buf), D, 10000.0, 0);
+                buf
+            },
+            criterion::BatchSize::SmallInput,
+        )
+    });
+    g.finish();
+}
+
+criterion_group!(benches, bench_rmsnorm, bench_layer_norm, bench_rope);
 criterion_main!(benches);
