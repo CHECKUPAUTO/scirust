@@ -60,6 +60,7 @@ mod baseline;
 mod diagnostics;
 mod digest;
 mod error;
+mod experiments;
 mod expr;
 mod id;
 mod index;
@@ -72,6 +73,10 @@ pub use baseline::Real16Index;
 pub use diagnostics::{DEFAULT_NEAR_ZERO_THRESHOLD, ProductDiagnostics};
 pub use digest::{DOMAIN_CONCEPT, DOMAIN_EXPRESSION, Digest32, concept_digest};
 pub use error::{HypermemoryError, Result};
+pub use experiments::{
+    Lcg, OperandDistribution, StructureDiscriminationSurvey, ZeroDivisorSurvey,
+    relative_associator, survey_structure_discrimination, survey_zero_divisors,
+};
 pub use expr::{
     ExprLimits, MAX_SUPPORTED_DEPTH, MAX_SUPPORTED_SIZE, RelationId, S16Expr, S16Relation,
 };

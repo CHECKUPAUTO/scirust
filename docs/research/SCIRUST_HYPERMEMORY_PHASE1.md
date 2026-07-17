@@ -296,7 +296,11 @@ concrete measurement):
   representative corpus of relation products, the near-zero-divisor rate is high
   enough that relation codes routinely collapse toward zero, parenthesized
   relations cannot reliably encode structure. Measured by
-  `ProductDiagnostics::near_zero_divisor` frequency (benchmark / experiment).
+  `ProductDiagnostics::near_zero_divisor` frequency (the `experiments` module and
+  the `hypermemory-falsify` binary). *Result: **not triggered** for generic
+  operands — 0 near-zero divisors over 100 000 random products; collapse is a
+  structured / low-rank input risk, not a generic one. See
+  [`SCIRUST_HYPERMEMORY_F2_F6.md`](SCIRUST_HYPERMEMORY_F2_F6.md).*
 * **F3 — latency without benefit.** If the sedenion product / relation
   evaluation adds latency (benchmarks in §11) without a corresponding
   improvement in retrieval or relation discrimination, the algebra is pure cost.
@@ -314,11 +318,17 @@ concrete measurement):
   explicit stored tree (never the code) may be trusted, and any "the code
   encodes the tree" claim is falsified. Phase 1 already refuses to rely on the
   code for reconstruction, so it is robust to F6 by design; F6 would instead
-  falsify any *future* code-only shortcut.
+  falsify any *future* code-only shortcut. *Result: **not triggered** for
+  generic operands — 100% of random triples are discriminable (`min ρ ≈ 0.17`) —
+  but it fires exactly, and only, inside associative subalgebras (complex /
+  quaternion), where the associator vanishes. See
+  [`SCIRUST_HYPERMEMORY_F2_F6.md`](SCIRUST_HYPERMEMORY_F2_F6.md).*
 
 Passing Phase 1's tests does **not** refute F1–F6; it only establishes the exact
-substrate on which they are measured. F1 is, in fact, already confirmed for
-retrieval — and that is the intended, conservative outcome.
+substrate on which they are measured. F1 is confirmed for retrieval (the
+intended, conservative outcome); **F2 and F6 are now measured** and not
+triggered for generic operands, with their failure regimes mapped precisely
+(structured / low-rank inputs for F2; associative subalgebras for F6).
 
 ## 11. Benchmark protocol
 
