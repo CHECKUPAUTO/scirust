@@ -3196,6 +3196,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-hypercrypto"
+version = "0.1.0"
+dependencies = [
+ "sha2",
+]
+
+[[package]]
 name = "scirust-ids"
 version = "0.1.0"
 dependencies = [

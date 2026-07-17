@@ -1,0 +1,19 @@
+[package]
+name = "scirust-hypercrypto"
+version = "0.1.0"
+edition = "2021"
+publish = false
+rust-version = "1.89"
+description = "EXPERIMENTAL research-only structural falsification harness for the SciRust-HyperCrypto v0.1 hypercomplex keyed-permutation candidate. NOT a cipher. NOT for production. NOT a security claim. Pure Rust, no unsafe, integer-only, deterministic."
+license-file = "../LICENSE.md"
+repository = "https://github.com/Memorithm/scirust"
+
+[dependencies]
+# SHA-256 is used ONLY for deterministic research-output fingerprints and the
+# spec's GraphId. It is NOT part of any keyed construction here. Already present
+# in Cargo.lock (RustCrypto), so this adds no new download.
+sha2 = "0.10"
+
+[[bin]]
+name = "hypercrypto-falsify"
+path = "src/bin/hypercrypto-falsify.rs"
