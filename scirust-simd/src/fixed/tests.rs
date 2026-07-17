@@ -8,6 +8,7 @@
 //  * égalité stricte **SIMD == scalaire**.
 
 use super::activation as act;
+use super::attention::{attention, causal_attention, multi_head_attention};
 use super::conv::{Conv1dShape, conv1d, conv1d_batch};
 use super::conv2d::{Conv2dShape, conv2d, conv2d_batch};
 use super::layer::Linear;
@@ -3160,4 +3161,286 @@ fn fixed_i16_is_numeric_scalar_generic() {
         acc.to_raw()
     };
     assert_eq!(run(), run());
+}
+
+// ------------------------------------------------------------------ //
+//  Attention produit-scalaire mise à l'échelle (déterministe)         //
+// ------------------------------------------------------------------ //
+
+fn to_f64_vec(x: &[Q16_16]) -> Vec<f64> {
+    x.iter().map(|v| v.to_f64()).collect()
+}
+
+/// Référence f64 indépendante : `Attention(Q,K,V) = softmax(scale·Q·Kᵀ)·V`.
+fn attention_ref_f64(
+    q: &[f64],
+    s: usize,
+    d: usize,
+    k: &[f64],
+    t: usize,
+    v: &[f64],
+    scale: f64,
+) -> Vec<f64> {
+    let mut scores = vec![0.0f64; s * t];
+    for i in 0..s
+    {
+        for j in 0..t
+        {
+            let mut acc = 0.0;
+            for e in 0..d
+            {
+                acc += q[i * d + e] * k[j * d + e];
+            }
+            scores[i * t + j] = scale * acc;
+        }
+    }
+    for row in scores.chunks_exact_mut(t)
+    {
+        let m = row.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let mut sum = 0.0;
+        for x in row.iter_mut()
+        {
+            *x = (*x - m).exp();
+            sum += *x;
+        }
+        for x in row.iter_mut()
+        {
+            *x /= sum;
+        }
+    }
+    let mut out = vec![0.0f64; s * d];
+    for i in 0..s
+    {
+        for e in 0..d
+        {
+            let mut acc = 0.0;
+            for j in 0..t
+            {
+                acc += scores[i * t + j] * v[j * d + e];
+            }
+            out[i * d + e] = acc;
+        }
+    }
+    out
+}
+
+#[test]
+fn attention_matches_f64_reference() {
+    let mut rng = Lcg(0xA77E_0001);
+    for &(s, d, t) in &[(1usize, 1usize, 1usize), (3, 4, 5), (5, 6, 4)]
+    {
+        let q: Vec<Q16_16> = (0..s * d)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 12))
+            .collect();
+        let k: Vec<Q16_16> = (0..t * d)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 12))
+            .collect();
+        let v: Vec<Q16_16> = (0..t * d)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 12))
+            .collect();
+        let scale = q16(1.0 / (d as f64).sqrt());
+
+        let got = attention(&q, s, d, &k, t, &v, scale);
+        let want = attention_ref_f64(
+            &to_f64_vec(&q),
+            s,
+            d,
+            &to_f64_vec(&k),
+            t,
+            &to_f64_vec(&v),
+            scale.to_f64(),
+        );
+
+        for i in 0..s * d
+        {
+            let diff = (got[i].to_f64() - want[i]).abs();
+            assert!(
+                diff <= 1e-2,
+                "s={s} d={d} t={t} i={i}: {} vs {}",
+                got[i].to_f64(),
+                want[i]
+            );
+        }
+    }
+}
+
+#[test]
+#[should_panic(expected = "attention")]
+fn attention_dim_mismatch_panics() {
+    let q = [Q16_16::one(); 4]; // annoncé 2×2
+    let k = [Q16_16::one(); 3]; // devrait être 2×2 = 4
+    let v = [Q16_16::one(); 4];
+    let _ = attention(&q, 2, 2, &k, 2, &v, Q16_16::one());
+}
+
+/// Référence f64 indépendante pour l'attention causale : softmax sur les
+/// clés `0..=i` seulement.
+fn causal_attention_ref_f64(
+    q: &[f64],
+    s: usize,
+    d: usize,
+    k: &[f64],
+    v: &[f64],
+    scale: f64,
+) -> Vec<f64> {
+    let mut out = vec![0.0f64; s * d];
+    for i in 0..s
+    {
+        let t_eff = i + 1;
+        let mut row = vec![0.0f64; t_eff];
+        for (j, r) in row.iter_mut().enumerate()
+        {
+            let mut acc = 0.0;
+            for e in 0..d
+            {
+                acc += q[i * d + e] * k[j * d + e];
+            }
+            *r = scale * acc;
+        }
+        let m = row.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let mut sum = 0.0;
+        for r in row.iter_mut()
+        {
+            *r = (*r - m).exp();
+            sum += *r;
+        }
+        for e in 0..d
+        {
+            let mut acc = 0.0;
+            for (j, &r) in row.iter().enumerate()
+            {
+                acc += r * v[j * d + e];
+            }
+            out[i * d + e] = acc / sum;
+        }
+    }
+    out
+}
+
+#[test]
+fn causal_attention_matches_f64_reference() {
+    let mut rng = Lcg(0xA77E_0002);
+    for &(s, d) in &[(1usize, 1usize), (4, 3), (6, 5)]
+    {
+        let q: Vec<Q16_16> = (0..s * d)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 12))
+            .collect();
+        let k: Vec<Q16_16> = (0..s * d)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 12))
+            .collect();
+        let v: Vec<Q16_16> = (0..s * d)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 12))
+            .collect();
+        let scale = q16(1.0 / (d as f64).sqrt());
+
+        let got = causal_attention(&q, s, d, &k, &v, scale);
+        let want = causal_attention_ref_f64(
+            &to_f64_vec(&q),
+            s,
+            d,
+            &to_f64_vec(&k),
+            &to_f64_vec(&v),
+            scale.to_f64(),
+        );
+        for i in 0..s * d
+        {
+            let diff = (got[i].to_f64() - want[i]).abs();
+            assert!(
+                diff <= 1e-2,
+                "s={s} d={d} i={i}: {} vs {}",
+                got[i].to_f64(),
+                want[i]
+            );
+        }
+    }
+}
+
+#[test]
+fn causal_attention_first_query_is_value_row_zero() {
+    // Requête 0 ne voit que la clé 0 → softmax trivial → out[0] == v[0].
+    let (s, d) = (4usize, 3usize);
+    let mut rng = Lcg(0xA77E_0003);
+    let q: Vec<Q16_16> = (0..s * d)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+        .collect();
+    let k: Vec<Q16_16> = (0..s * d)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+        .collect();
+    let v: Vec<Q16_16> = (0..s * d)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+        .collect();
+    let out = causal_attention(&q, s, d, &k, &v, q16(0.3));
+    for e in 0..d
+    {
+        let diff = (out[e].to_f64() - v[e].to_f64()).abs();
+        assert!(diff <= 1e-3, "out[0][{e}] != v[0][{e}]");
+    }
+}
+
+#[test]
+#[should_panic(expected = "causal_attention")]
+fn causal_attention_dim_mismatch_panics() {
+    let q = [Q16_16::one(); 4]; // annoncé 2×2
+    let k = [Q16_16::one(); 3]; // devrait être 2×2 = 4
+    let v = [Q16_16::one(); 4];
+    let _ = causal_attention(&q, 2, 2, &k, &v, Q16_16::one());
+}
+
+#[test]
+fn multi_head_attention_matches_per_head() {
+    let mut rng = Lcg(0xA77E_0004);
+    for &(s, t, h, dh) in &[(3usize, 5usize, 2usize, 4usize), (6, 6, 3, 4)]
+    {
+        let dm = h * dh;
+        let q: Vec<Q16_16> = (0..s * dm)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 12))
+            .collect();
+        let k: Vec<Q16_16> = (0..t * dm)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 12))
+            .collect();
+        let v: Vec<Q16_16> = (0..t * dm)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 12))
+            .collect();
+        let scale = q16(1.0 / (dh as f64).sqrt());
+
+        let got = multi_head_attention(&q, s, t, h, dh, &k, &v, scale, false);
+
+        // Référence : chaque tête via `attention` sur ses colonnes extraites
+        // manuellement — même calcul que ce que fait `multi_head_attention`
+        // en interne, donc égalité **exacte** attendue (pas une tolérance).
+        for head in 0..h
+        {
+            let off = head * dh;
+            let qh: Vec<Q16_16> = (0..s)
+                .flat_map(|r| q[r * dm + off..r * dm + off + dh].to_vec())
+                .collect();
+            let kh: Vec<Q16_16> = (0..t)
+                .flat_map(|r| k[r * dm + off..r * dm + off + dh].to_vec())
+                .collect();
+            let vh: Vec<Q16_16> = (0..t)
+                .flat_map(|r| v[r * dm + off..r * dm + off + dh].to_vec())
+                .collect();
+            let want_h = attention(&qh, s, dh, &kh, t, &vh, scale);
+            for r in 0..s
+            {
+                for e in 0..dh
+                {
+                    assert_eq!(
+                        got[r * dm + off + e],
+                        want_h[r * dh + e],
+                        "head {head} r={r} e={e}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+#[should_panic(expected = "multi_head_attention")]
+fn multi_head_attention_causal_requires_equal_s_t_panics() {
+    let q = [Q16_16::one(); 8]; // s=2, dm=4 (h=2,dh=2)
+    let k = [Q16_16::one(); 12]; // t=3, dm=4 (t != s)
+    let v = [Q16_16::one(); 12];
+    let _ = multi_head_attention(&q, 2, 3, 2, 2, &k, &v, Q16_16::one(), true);
 }

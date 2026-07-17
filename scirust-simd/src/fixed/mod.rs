@@ -89,8 +89,13 @@
 // * [`math`] — `sqrt`, `rsqrt`, `reciprocal` (Newton entier exact).
 // * [`transcendental`] — `exp`/`ln`/`sin`/`cos`/`tanh`/`sigmoid`/`softmax`
 //   (minimax + réduction d'argument, bornes ULP prouvées ; `FixedI32<FRAC>`).
+// * [`attention`] — attention produit-scalaire quantifiée
+//   ([`attention::attention`], [`attention::causal_attention`],
+//   [`attention::multi_head_attention`]) : le pendant déterministe du module
+//   flottant [`crate::attention`], côté séquences/Transformers.
 
 pub mod activation;
+pub mod attention;
 pub mod conv;
 pub mod conv2d;
 pub mod convert;
