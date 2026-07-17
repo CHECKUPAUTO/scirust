@@ -14,8 +14,6 @@
 //! suffit très largement pour l'inférence/entraînement `f32` (dont le bruit de
 //! quantification dépasse cette borne).
 
-#![allow(clippy::missing_safety_doc)]
-
 // Constantes partagées. `LOG2_E == 1/ln2` vient de la lib standard.
 // Décomposition de ln2 en deux parties (Cephes) pour la réduction d'argument :
 // `LN2_HI = 355/512` est exact en f32, `LN2_LO` capture le reste.
@@ -34,6 +32,9 @@ const GELU_C: f32 = 0.044_715;
 //  Helpers __m512 (AVX-512) — réutilisés par le GEMM fusionné            //
 // ===================================================================== //
 
+/// # Safety
+/// Caller must ensure AVX-512F is available. No pointers involved — `x` is a
+/// register value, not memory — so this is otherwise self-contained.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 pub(crate) unsafe fn exp_ps(x: core::arch::x86_64::__m512) -> core::arch::x86_64::__m512 {
@@ -61,6 +62,8 @@ pub(crate) unsafe fn exp_ps(x: core::arch::x86_64::__m512) -> core::arch::x86_64
     _mm512_scalef_ps(p, kf)
 }
 
+/// # Safety
+/// Same contract as [`exp_ps`]: caller must ensure AVX-512F is available.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 pub(crate) unsafe fn sigmoid_ps(x: core::arch::x86_64::__m512) -> core::arch::x86_64::__m512 {
@@ -70,6 +73,8 @@ pub(crate) unsafe fn sigmoid_ps(x: core::arch::x86_64::__m512) -> core::arch::x8
     _mm512_div_ps(_mm512_set1_ps(1.0), _mm512_add_ps(_mm512_set1_ps(1.0), e))
 }
 
+/// # Safety
+/// Same contract as [`exp_ps`]: caller must ensure AVX-512F is available.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 pub(crate) unsafe fn tanh_ps(x: core::arch::x86_64::__m512) -> core::arch::x86_64::__m512 {
@@ -79,6 +84,8 @@ pub(crate) unsafe fn tanh_ps(x: core::arch::x86_64::__m512) -> core::arch::x86_6
     _mm512_fmsub_ps(_mm512_set1_ps(2.0), s, _mm512_set1_ps(1.0))
 }
 
+/// # Safety
+/// Same contract as [`exp_ps`]: caller must ensure AVX-512F is available.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 pub(crate) unsafe fn silu_ps(x: core::arch::x86_64::__m512) -> core::arch::x86_64::__m512 {
@@ -87,6 +94,8 @@ pub(crate) unsafe fn silu_ps(x: core::arch::x86_64::__m512) -> core::arch::x86_6
     _mm512_mul_ps(x, sigmoid_ps(x))
 }
 
+/// # Safety
+/// Same contract as [`exp_ps`]: caller must ensure AVX-512F is available.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 pub(crate) unsafe fn gelu_ps(x: core::arch::x86_64::__m512) -> core::arch::x86_64::__m512 {
@@ -191,6 +200,13 @@ pub fn exp_inplace(data: &mut [f32]) {
 }
 
 /// Applique un noyau `__m512 -> __m512` sur toute la tranche (épilogue masqué).
+///
+/// # Safety
+/// Caller must ensure AVX-512F is available (required both to call this
+/// function and to soundly invoke `f`, which is itself `#[target_feature(enable
+/// = "avx512f")]` at every call site in this file). Bounds are self-contained:
+/// every `loadu`/`storeu` offset is kept `< data.len()` by the loop condition
+/// and the masked remainder tail.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 unsafe fn apply_avx512(
