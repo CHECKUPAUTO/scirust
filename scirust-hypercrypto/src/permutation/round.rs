@@ -8,6 +8,7 @@
 //! and semantically significant (non-associative, non-commutative).
 
 use crate::algebra::Oct;
+use crate::algebra::OctLayers;
 use crate::algebra::word::Word;
 use crate::fixtures::RoundMaterial;
 

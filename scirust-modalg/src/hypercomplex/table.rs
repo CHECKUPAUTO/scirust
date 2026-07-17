@@ -1,18 +1,18 @@
-//! The authoritative signed octonion multiplication table (spec §8.3).
+//! The authoritative signed octonion multiplication table.
 //!
 //! Two independent representations are provided:
 //!
 //! * [`IDX`] / [`SIGN`] — the hardcoded table transcribed directly from spec
 //!   §8.3(b). This is the **authoritative** routing used by the 64-term oracle
-//!   in [`crate::algebra::octonion`].
+//!   in [`crate::hypercomplex::octonion`].
 //! * [`table_from_triples`] — an independent generator that rebuilds the table
-//!   from the seven Fano triples of spec §8.3(a). It exists ONLY as a
+//!   from the seven Fano triples of . It exists ONLY as a
 //!   differential oracle: a test asserts it equals the hardcoded table, so a
 //!   transcription typo in `IDX`/`SIGN` cannot pass silently.
 //!
 //! Row `i`, column `j` describes `e_i · e_j = SIGN[i][j] · e_{IDX[i][j]}`.
 
-/// Target basis index of `e_i · e_j` (spec §8.3(b)). Each row is a permutation
+/// Target basis index of `e_i · e_j`). Each row is a permutation
 /// of `0..8`.
 pub const IDX: [[usize; 8]; 8] = [
     [0, 1, 2, 3, 4, 5, 6, 7],
@@ -25,7 +25,7 @@ pub const IDX: [[usize; 8]; 8] = [
     [7, 3, 6, 1, 5, 4, 2, 0],
 ];
 
-/// Sign of `e_i · e_j` (spec §8.3(b)); `+1` or `-1`.
+/// Sign of `e_i · e_j`); `+1` or `-1`.
 pub const SIGN: [[i8; 8]; 8] = [
     [1, 1, 1, 1, 1, 1, 1, 1],
     [1, -1, 1, 1, -1, 1, -1, -1],
@@ -37,7 +37,7 @@ pub const SIGN: [[i8; 8]; 8] = [
     [1, 1, 1, -1, 1, -1, -1, -1],
 ];
 
-/// The seven ordered Fano triples `(a, b, c)` of spec §8.3(a). Each means the
+/// The seven ordered Fano triples `(a, b, c)` of . Each means the
 /// cyclic relations `a·b=c, b·c=a, c·a=b` (and reversing negates).
 pub const TRIPLES: [(usize, usize, usize); 7] = [
     (1, 2, 4),
@@ -50,7 +50,7 @@ pub const TRIPLES: [(usize, usize, usize); 7] = [
 ];
 
 /// Independently rebuild `(IDX, SIGN)` from [`TRIPLES`] and the rules
-/// `e_i·e_i = -e0`, `e0·e_x = e_x·e0 = e_x` (spec §8.3(a)). Used only as a
+/// `e_i·e_i = -e0`, `e0·e_x = e_x·e0 = e_x`). Used only as a
 /// differential oracle against the hardcoded [`IDX`]/[`SIGN`].
 pub fn table_from_triples() -> ([[usize; 8]; 8], [[i8; 8]; 8]) {
     // -1 sentinel marks "not yet filled" so gaps are detectable.

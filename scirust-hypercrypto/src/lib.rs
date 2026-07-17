@@ -47,8 +47,10 @@
 
 pub mod algebra;
 pub mod analysis;
+pub mod derivation;
 pub mod fixtures;
 pub mod permutation;
+pub mod test_vectors;
 
 /// Specification version this harness targets. Bump only with the spec.
 pub const SPEC_VERSION: &str = "SCIRUST-HYPERCRYPTO-V0.1";

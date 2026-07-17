@@ -4,8 +4,8 @@
 //! Its purpose is to *break* SciRust-HyperCrypto v0.1, not to endorse it.
 //!
 //! Subcommands: `controls`, `matrix-lifting`, `affinity`, `degree`,
-//! `invariants`, `zero-divisors`, `reduced-rounds`, `exhaustive-nano2`,
-//! `report`. Run `hypercrypto-falsify help` for options.
+//! `invariants`, `zero-divisors`, `weak-keys`, `differential`, `reduced-rounds`,
+//! `exhaustive-nano2`, `vectors`, `report`. Run `hypercrypto-falsify help`.
 
 use std::path::PathBuf;
 
@@ -138,8 +138,11 @@ fn main() {
         "degree" => cmd_degree(&o),
         "invariants" => cmd_section(&o, "invariants", "exp5_invariants"),
         "zero-divisors" => cmd_zero_divisors(&o),
+        "weak-keys" => cmd_weak_keys(&o),
+        "differential" => cmd_differential(&o),
         "reduced-rounds" => cmd_reduced_rounds(&o),
         "exhaustive-nano2" => cmd_exhaustive_nano2(&o),
+        "vectors" => cmd_vectors(&o),
         "report" => cmd_report(&o),
         _ => print_help(),
     }
@@ -157,8 +160,11 @@ fn print_help() {
          \x20 degree            algebraic degree by exact ANF, v0.1 vs controls (Experiment 4)\n\
          \x20 invariants        norm / conjugation invariants (Experiment 5)\n\
          \x20 zero-divisors     zero-divisor fibers and kernels (Experiment 6)\n\
+         \x20 weak-keys         characterize the GF(2)-linearizing weak-key class (Phase-2)\n\
+         \x20 differential      best single-round differential + decay by round (Phase-2)\n\
          \x20 reduced-rounds    degree/roundtrip/differential by round count\n\
          \x20 exhaustive-nano2  full 2^32 NANO-2 sweep (DISABLED unless invoked; costly)\n\
+         \x20 vectors           official HKDF-keyed test vectors + fingerprint\n\
          \x20 report            full battery + Phase-1 verdict\n\
          \n\
          options: --width nano2|nano4|mini8|mini16|full64  --fixture <id>\n\
@@ -292,6 +298,57 @@ fn cmd_zero_divisors(o: &Opts) {
             "W2 exhaustive examples + sampled kernels",
         ),
         vec![("explicit_pairs_w2", examples), ("kernel_summary", section)],
+    );
+}
+
+fn cmd_weak_keys(o: &Opts) {
+    banner("weak-keys (GF(2)-linearization class)");
+    let json = scirust_hypercrypto::analysis::differential::weak_key_report_json(
+        o.width, o.seed, o.sample,
+    );
+    println!("  characterizing the weak-key class that linearizes the round over GF(2)");
+    println!("  (structured, low-density; not a construction break) — see result file");
+    emit(
+        o,
+        "weak-keys",
+        meta("weak-keys", o, "structured class + random density"),
+        vec![("weak_key_analysis", json)],
+    );
+}
+
+fn cmd_differential(o: &Opts) {
+    banner("differential (probing)");
+    let json = scirust_hypercrypto::analysis::differential::differential_report_json(
+        o.width,
+        o.fixture,
+        o.seed,
+        o.sample.min(40_000),
+    );
+    println!("  best single-round differential + empirical decay by round — see result file");
+    println!("  (a high single-round probability at tiny widths is an expected artifact)");
+    emit(
+        o,
+        "differential",
+        meta(
+            "differential",
+            o,
+            "sampled deltas; per-delta exact at NANO-2",
+        ),
+        vec![("differential", json)],
+    );
+}
+
+fn cmd_vectors(o: &Opts) {
+    banner("vectors (official HKDF-keyed test vectors)");
+    let fp = scirust_hypercrypto::test_vectors::vectors_fingerprint();
+    let json = scirust_hypercrypto::test_vectors::vectors_json();
+    println!("  official vectors (24 rounds, HKDF-SHA-256 schedule); all round-trip");
+    println!("  vectors_fingerprint : {fp}");
+    emit(
+        o,
+        "official-vectors",
+        meta("vectors", o, "exact, reproducible"),
+        vec![("vectors", json)],
     );
 }
 

@@ -5,6 +5,7 @@
 //! If the tools fail to break Controls A or B, Phase 1 is INCONCLUSIVE because
 //! the harness is untrustworthy.
 
+use crate::algebra::OctLayers;
 use crate::algebra::word::Word;
 use crate::algebra::{Oct, Quat};
 use crate::fixtures::RoundMaterial;

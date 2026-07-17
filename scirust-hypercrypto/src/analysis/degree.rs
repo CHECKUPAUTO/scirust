@@ -9,20 +9,9 @@
 use crate::algebra::Oct;
 use crate::algebra::word::Word;
 
-/// Exact algebraic-degree result for a Boolean vector function.
-#[derive(Clone, Debug)]
-pub struct DegreeResult {
-    /// Number of input bits.
-    pub input_bits: u32,
-    /// Number of output bits.
-    pub output_bits: u32,
-    /// Maximum algebraic degree over all output bits.
-    pub max_degree: u32,
-    /// Per-output-bit degree.
-    pub per_output: Vec<u32>,
-    /// Always `true` — this path is exact.
-    pub exact: bool,
-}
+// The exact ANF / Möbius machinery is now the shared, general-purpose utility in
+// `scirust_modalg::boolean`; only the octonion-specific wrappers live here.
+pub use scirust_modalg::boolean::{DegreeResult, bitfn_degree};
 
 fn oct_to_bits<W: Word>(o: Oct<W>) -> u64 {
     let bits = W::BITS;
@@ -52,75 +41,12 @@ fn bits_to_oct<W: Word>(v: u64) -> Oct<W> {
     Oct::from_coeffs(c)
 }
 
-/// Maximum ANF degree over a single truth table (`2^n` entries as bits `0/1`).
-fn anf_degree(tt: &mut [u8], n: u32) -> u32 {
-    // in-place Möbius transform over GF(2)
-    for i in 0..n
-    {
-        let step = 1usize << i;
-        let mut base = 0usize;
-        while base < tt.len()
-        {
-            for x in base..base + step
-            {
-                tt[x + step] ^= tt[x];
-            }
-            base += step << 1;
-        }
-    }
-    // degree = max popcount of a monomial mask whose coefficient is 1
-    let mut deg = 0u32;
-    for (mask, &coeff) in tt.iter().enumerate()
-    {
-        if coeff & 1 == 1
-        {
-            deg = deg.max((mask as u32).count_ones());
-        }
-    }
-    deg
-}
-
-/// Exact ANF degree of an arbitrary Boolean vector function `f: u64 → u64` on
-/// `n` input bits and `n` output bits. Returns `None` when `n > 18` (out of
-/// exact range — no `2^64` truth table, per the spec).
-pub fn bitfn_degree(f: impl Fn(u64) -> u64, n: u32) -> Option<DegreeResult> {
-    if n > 18
-    {
-        return None;
-    }
-    let size = 1usize << n;
-    let mut outputs = vec![0u64; size];
-    for (x, out) in outputs.iter_mut().enumerate()
-    {
-        *out = f(x as u64);
-    }
-    let mut per_output = Vec::with_capacity(n as usize);
-    let mut max_degree = 0u32;
-    let mut tt = vec![0u8; size];
-    for o in 0..n
-    {
-        for (x, cell) in tt.iter_mut().enumerate()
-        {
-            *cell = ((outputs[x] >> o) & 1) as u8;
-        }
-        let d = anf_degree(&mut tt, n);
-        per_output.push(d);
-        max_degree = max_degree.max(d);
-    }
-    Some(DegreeResult {
-        input_bits: n,
-        output_bits: n,
-        max_degree,
-        per_output,
-        exact: true,
-    })
-}
-
 /// Exact ANF degree of a map `f: Oct<W> → Oct<W>`, treating the octonion as a
-/// bit-vector of width `8k`. Returns `None` when `8k > 18` (out of exact range).
+/// bit-vector of width `8k`. Returns `None` when `8k` exceeds the exact-ANF
+/// range of [`scirust_modalg::boolean::bitfn_degree`].
 pub fn octfn_degree<W: Word>(f: impl Fn(Oct<W>) -> Oct<W>) -> Option<DegreeResult> {
     let n = 8 * W::BITS;
-    bitfn_degree(|x| oct_to_bits::<W>(f(bits_to_oct::<W>(x))), n)
+    bitfn_degree(move |x| oct_to_bits::<W>(f(bits_to_oct::<W>(x))), n, n)
 }
 
 /// Build a closure computing "the R branch after `rounds` Feistel rounds, with
@@ -147,6 +73,7 @@ pub fn feistel_branch_after<W: Word>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::algebra::OctLayers;
     use crate::algebra::word::W2;
     use crate::fixtures::{Fixture, FixtureId};
     use crate::permutation::Variant;

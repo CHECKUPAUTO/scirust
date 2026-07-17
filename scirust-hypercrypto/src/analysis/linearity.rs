@@ -11,9 +11,9 @@
 //! A *failed* detection excludes only that simple model; it is NOT a claim of
 //! cryptographic nonlinearity (spec §Experiment 3).
 
+use crate::algebra::ModMatrix;
 use crate::algebra::Oct;
 use crate::algebra::word::Word;
-use crate::analysis::modmatrix::Mat8;
 use crate::analysis::util::{Coverage, oct_domain_exhaustible, sample_octs, test_points};
 
 /// Outcome of an affinity detector.
@@ -69,20 +69,21 @@ pub fn ring_affine_recover<W: Word>(
     f: impl Fn(Oct<W>) -> Oct<W>,
     seed: u64,
     sample: usize,
-) -> (AffinityResult, Mat8<W>, Oct<W>) {
+) -> (AffinityResult, ModMatrix<W>, Oct<W>) {
     let b = f(Oct::<W>::zero());
-    let mut a = Mat8::<W>::zero();
+    let mut a = ModMatrix::<W>::zeros(8, 8);
     for j in 0..8
     {
         let col = f(Oct::<W>::e(j)).sub(b); // A e_j = f(e_j) - f(0)
-        a.set_col(j, col.c);
+        a.set_col(j, &col.c);
     }
     let (points, coverage) = test_points::<W>(seed, sample);
     let mut bad = 0u64;
     let n = points.len().max(1) as u64;
     for x in &points
     {
-        let model = Oct::from_coeffs(a.matvec(&x.c)).add(b);
+        let mv: [W; 8] = a.matvec(&x.c).try_into().expect("matvec length 8");
+        let model = Oct::from_coeffs(mv).add(b);
         if model != f(*x)
         {
             bad += 1;

@@ -9,6 +9,7 @@ license-file = "../LICENSE.md"
 repository = "https://github.com/Memorithm/scirust"
 
 [dependencies]
+scirust-modalg = { path = "../scirust-modalg" }
 # SHA-256 is used ONLY for deterministic research-output fingerprints and the
 # spec's GraphId. It is NOT part of any keyed construction here. Already present
 # in Cargo.lock (RustCrypto), so this adds no new download.

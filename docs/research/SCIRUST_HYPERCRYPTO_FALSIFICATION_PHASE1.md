@@ -411,6 +411,86 @@ cryptanalysis and no production use.
 
 ---
 
+## 18. Phase-2 increment — weak-key class and differential probing
+
+Two Phase-2 experiments have been implemented and are exposed as the CLI
+subcommands `weak-keys` and `differential` (module `analysis::differential`).
+Neither changes the Phase-1 verdict; both sharpen the Phase-1 leads.
+
+### 18.1 The GF(2)-linearizing weak-key class is fully characterized
+
+Phase 1 observed that *some* keys linearize the round over `GF(2)`. This is now
+pinned down. Let `C = { octonions whose every coefficient is in {0, 2^{k-1}} }`
+(the "high-bit-only" multipliers), `|C| = 2^8 = 256`.
+
+- **Every** member of `C` yields a `GF(2)`-linear left-multiplication
+  `x ↦ a ⊗ x` (measured exhaustively/sampled at MINI-8: `256/256` linear;
+  `all-2^{k-1}` multiplier linear = true).
+- **`0` of `512`** random multipliers are `GF(2)`-linear — the class is a
+  vanishing-density structured set.
+- **Algebraic reason:** `2^{k-1}·b ≡ 2^{k-1}·(b mod 2)` keeps only the low bit,
+  and `2^{k-1} + 2^{k-1} ≡ 0 (mod 2^k)`, so every octonion output slot collapses
+  to a `GF(2)` **parity** of the routed input bits — a linear map, independent of
+  the `±1` structure constants.
+- **Consequence (key-schedule constraint, not a break):** the eventual key
+  schedule must exclude multipliers with all coefficients in `{0, 2^{k-1}}` (and,
+  more conservatively, avoid low-Hamming-weight/degenerate multipliers). Because
+  the class has density `≈ 2^{-56}` at `k = 8` (and far lower at `k = 64`), a
+  well-distributed HKDF schedule (§next) essentially never hits it, but it must
+  be excluded explicitly.
+
+### 18.2 Differential probing shows no high-probability full-round differential
+
+- **Best single-round differential** (MINI-8, sampled input differences, exact
+  per-difference output distribution at NANO-2): the most probable output
+  difference occurs with probability on the order of `10^-4` (e.g. ~244 ppm for
+  the best sampled difference) — a *single-round, tiny-width* figure, expected.
+- **Multi-round decay** (empirical, fixed input difference through the Feistel):
+  the best output-difference probability drops to the sampling floor by the first
+  measured round count and stays there through 12 rounds — i.e. no
+  differential of usable probability survives even a few rounds at these widths,
+  let alone the full 24. **No full-round differential kill criterion is
+  triggered.** This is a bounded empirical probe, not a proven trail bound; a
+  branch-and-bound trail search over an exact DDT remains future work.
+
+**Reproduce:**
+
+```bash
+cargo run -p scirust-hypercrypto --bin hypercrypto-falsify -- weak-keys --width mini8
+cargo run -p scirust-hypercrypto --bin hypercrypto-falsify -- differential --width mini8 --sample 20000
+```
+
+---
+
+## 19. Real key schedule and official test vectors
+
+The spec §10 **HKDF-SHA-256** key schedule (RFC 5869; HMAC-SHA-256 counter-mode
+expansion) is implemented in `derivation` and validated against the **RFC 4231
+HMAC** and **RFC 5869 HKDF** known-answer tests. It derives, from a 32-byte
+master key and 16-byte tweak, the per-round subkeys `K0,K1,K2` (`/ROUNDKEY`),
+round constants `RC` (`/CONSTANT`), and Even–Mansour whitening (`/WHITENING`),
+each via a domain-separated `HKDF-Expand`.
+
+Keyed by this schedule, the full v0.1 permutation (1024-bit state, two `W64`
+octonion branches, 24 rounds, whitening) produces the **official test vectors**
+(`test_vectors`, spec §15 categories: all-zero, all-one key, single-bit input,
+single-bit key, incrementing bytes, alternating bits, maximum components). Every
+vector round-trips (`P_K^{-1}(P_K(x)) = x`), and the whole set is pinned by a
+SHA-256 contract:
+
+```text
+vectors_fingerprint = 07db3cbfa4bab6f8cb68ab349075e2a7000c6327fb5ea77dd8caaed2344ceb4b
+```
+
+A committed reference copy lives at
+`scirust-hypercrypto/test_vectors/official_v0_1.json`; regenerate with
+`hypercrypto-falsify vectors`. This makes the construction "finished and
+reproducible" (a second independent implementation can now match bit-for-bit),
+without any change to the security posture — it remains an experimental research
+permutation.
+
+---
+
 ## References
 
 - Merged spec: `docs/research/SCIRUST_HYPERCRYPTO_SPEC_V0_1.md` (authoritative).

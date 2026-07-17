@@ -53,6 +53,9 @@ pub enum FixtureId {
     EvenNormZeroDiv,
     /// Deterministic pseudo-random material from the given seed.
     PseudoRandom(u64),
+    /// The **real** HKDF-SHA-256 key schedule (spec §10) from a 32-byte master
+    /// key and 16-byte tweak. Used for the official test vectors.
+    Hkdf([u8; 32], [u8; 16]),
 }
 
 impl FixtureId {
@@ -66,6 +69,10 @@ impl FixtureId {
             FixtureId::OddNorm => "odd-norm".to_string(),
             FixtureId::EvenNormZeroDiv => "even-norm-zerodiv".to_string(),
             FixtureId::PseudoRandom(s) => format!("pseudo-random-0x{s:016x}"),
+            FixtureId::Hkdf(k, _) =>
+            {
+                format!("hkdf-{:02x}{:02x}{:02x}{:02x}", k[0], k[1], k[2], k[3])
+            },
         }
     }
     /// Parse from a CLI token.
@@ -249,6 +256,10 @@ impl Fixture {
                     rc: mk(3),
                 }
             },
+            FixtureId::Hkdf(key, tweak) =>
+            {
+                crate::derivation::KeySchedule::new(&key, &tweak).round_material::<W>(r)
+            },
         }
     }
 
@@ -262,6 +273,10 @@ impl Fixture {
                 out_l: Oct::zero(),
                 out_r: Oct::zero(),
             },
+            FixtureId::Hkdf(key, tweak) =>
+            {
+                crate::derivation::KeySchedule::new(&key, &tweak).whitening::<W>()
+            },
             _ =>
             {
                 let base = match self.id
@@ -272,6 +287,8 @@ impl Fixture {
                     FixtureId::OddNorm => 0x3333,
                     FixtureId::EvenNormZeroDiv => 0x4444,
                     FixtureId::Zero => 0,
+                    // Hkdf is handled by its own arm above and never reaches here.
+                    FixtureId::Hkdf(..) => 0,
                 };
                 Whitening {
                     in_l: Self::oct_from_seed::<W>(Self::cell_seed(base, 0xFFFF_FFFF, 0)),

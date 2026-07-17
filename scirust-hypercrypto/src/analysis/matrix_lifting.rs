@@ -4,9 +4,9 @@
 //! over `Z/2^k`. We build their `8×8` matrices from basis-vector evaluations and
 //! verify `M · x == a ⊗ x` on the whole domain (`k = 2`) or a large sample.
 
+use crate::algebra::ModMatrix;
 use crate::algebra::Oct;
 use crate::algebra::word::Word;
-use crate::analysis::modmatrix::Mat8;
 use crate::analysis::util::{Coverage, test_points};
 
 /// Which side of the product a matrix represents.
@@ -26,7 +26,7 @@ pub struct LiftResult<W: Word> {
     /// Which side.
     pub side: Side,
     /// The recovered `8×8` matrix.
-    pub matrix: Mat8<W>,
+    pub matrix: ModMatrix<W>,
     /// `det mod 2^k`.
     pub det_mod: u64,
     /// Whether the matrix (and hence the map) is invertible over `Z/2^k`.
@@ -42,8 +42,8 @@ pub struct LiftResult<W: Word> {
 }
 
 /// Build the matrix of `L_a` or `R_a` from basis-vector evaluations.
-pub fn build_matrix<W: Word>(a: Oct<W>, side: Side) -> Mat8<W> {
-    let mut m = Mat8::<W>::zero();
+pub fn build_matrix<W: Word>(a: Oct<W>, side: Side) -> ModMatrix<W> {
+    let mut m = ModMatrix::<W>::zeros(8, 8);
     for j in 0..8
     {
         let ej = Oct::<W>::e(j);
@@ -52,7 +52,7 @@ pub fn build_matrix<W: Word>(a: Oct<W>, side: Side) -> Mat8<W> {
             Side::Left => a.mul(ej),  // column j of L_a is a ⊗ e_j
             Side::Right => ej.mul(a), // column j of R_a is e_j ⊗ a
         };
-        m.set_col(j, col.c);
+        m.set_col(j, &col.c);
     }
     m
 }
@@ -70,7 +70,7 @@ pub fn lift<W: Word>(a: Oct<W>, side: Side, seed: u64, sample: usize) -> LiftRes
             Side::Left => a.mul(*x),
             Side::Right => x.mul(a),
         };
-        if lifted != oracle.c
+        if lifted.as_slice() != oracle.c.as_slice()
         {
             matches = false;
             break;

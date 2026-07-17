@@ -6,7 +6,7 @@
 //!
 //! Basis `(1, i, j, k)` with `i² = j² = k² = -1`, `ij = k`, `jk = i`, `ki = j`.
 
-use super::word::Word;
+use crate::ring::Word;
 
 /// A quaternion: `c[0]` scalar, `c[1..4]` the units `i, j, k`.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -74,7 +74,7 @@ impl<W: Word> Quat<W> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::algebra::word::W8;
+    use crate::ring::W8;
 
     #[test]
     fn associative_and_units() {

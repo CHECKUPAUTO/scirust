@@ -5,6 +5,7 @@
 //! outcomes of the experiments. `CONTINUE` explicitly does NOT mean "secure".
 
 use crate::algebra::Oct;
+use crate::algebra::OctLayers;
 use crate::algebra::word::{W2, W4, W8, W16, W64, WidthTag, Word};
 use crate::analysis::degree::{feistel_branch_after, octfn_degree};
 use crate::analysis::invariants::{
@@ -554,7 +555,7 @@ pub fn degree_compare_nano2() -> Json {
         let yc = y.to_u64s();
         (0..4).fold(0u64, |acc, i| acc | (yc[i] << (2 * i)))
     };
-    let quat_deg = crate::analysis::degree::bitfn_degree(quat_bits, 8)
+    let quat_deg = crate::analysis::degree::bitfn_degree(quat_bits, 8, 8)
         .map(|d| d.max_degree)
         .unwrap_or(0);
 

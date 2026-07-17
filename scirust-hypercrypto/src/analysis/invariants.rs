@@ -174,6 +174,7 @@ pub fn associator_evenness<W: Word>(seed: u64, sample: usize) -> AssociatorResul
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::algebra::OctLayers;
     use crate::algebra::word::{W2, W8};
     use crate::fixtures::{Fixture, FixtureId};
     use crate::permutation::round::f_round;

@@ -129,6 +129,7 @@ members = [
     "scirust-vision",
     "scirust-audio",
     "scirust-graph",
+    "scirust-modalg",
     "scirust-hypercrypto",
     "scirust-algogen",
     "scirust-automl",

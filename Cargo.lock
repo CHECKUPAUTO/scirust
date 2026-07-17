@@ -3199,6 +3199,7 @@ dependencies = [
 name = "scirust-hypercrypto"
 version = "0.1.0"
 dependencies = [
+ "scirust-modalg",
  "sha2",
 ]
 
@@ -3344,6 +3345,10 @@ dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "scirust-modalg"
+version = "0.1.0"
 
 [[package]]
 name = "scirust-mqtt"
