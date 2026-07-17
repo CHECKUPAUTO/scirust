@@ -2,9 +2,10 @@
 //
 // # Transcendantes en virgule fixe (`FixedI32<FRAC>`)
 //
-// `exp exp2 ln log2 sin cos tanh sigmoid atan atan2 asin acos` pour le stockage
-// `i32`, avec des **bornes d'erreur ULP prouvées** (balayage dense sur tout le
-// domaine actif — voir `transcendental_ulp_bounds` dans le module de tests).
+// `exp exp2 ln log2 sin cos tanh sigmoid atan atan2 asin acos bessel_i0` pour
+// le stockage `i32`, avec des **bornes d'erreur ULP prouvées** (balayage dense
+// sur tout le domaine actif — voir `transcendental_ulp_bounds` /
+// `bessel_i0_ulp_bounds` dans le module de tests).
 //
 // Bornes mesurées en Q16.16 (ULP = 2⁻¹⁶) :
 //
@@ -17,11 +18,14 @@
 // | `asin` / `acos` | `[-0.999, 0.999]` | 0.51 ULP |
 // | `exp` | `[-10, 10]` | 3.24 ULP |
 // | `exp2` | `[-14, 14.5]` | 5.01 ULP |
+// | `bessel_i0` | `[0, 12]` | 132 ULP (≤ 2 ULP si `I₀(x) ≤ 1024`) |
 //
-// `exp`/`exp2` sont les seules > 1 ULP : l'erreur *relative* du minimax (≈2e-9)
-// se convertit en ULP *absolus* proportionnellement à la magnitude, donc le
-// pire cas est au sommet de la plage (≈2¹⁴·⁵). Pour `|résultat| ≤ 1024`
-// l'erreur reste ≤ 1 ULP.
+// `exp`/`exp2`/`bessel_i0` sont les seules > 1 ULP : l'erreur *relative* du
+// minimax (≈2e-9 pour `exp`/`exp2`, ≈1e-7 pour `bessel_i0`) se convertit en
+// ULP *absolus* proportionnellement à la magnitude, donc le pire cas est au
+// sommet de la plage (`eˣ`/`2ˣ`/`I₀(x)` y sont les plus grands). Pour
+// `|résultat| ≤ 1024` l'erreur reste ≤ 1 ULP (`exp`/`exp2`) ou ≤ 2 ULP
+// (`bessel_i0`).
 //
 // ## Méthode
 //
@@ -410,6 +414,76 @@ pub fn sigmoid<const FRAC: u32>(x: Fixed<i32, FRAC>) -> Fixed<i32, FRAC> {
 pub fn tanh<const FRAC: u32>(x: Fixed<i32, FRAC>) -> Fixed<i32, FRAC> {
     let s = sigmoid_core(to_q32(x).wrapping_mul(2));
     from_q32(2 * s - (ONE_Q as i128))
+}
+
+// ------------------------------------------------------------------ //
+//  bessel_i0 (fonction de Bessel modifiée, première espèce, ordre 0)   //
+// ------------------------------------------------------------------ //
+
+/// `1/6` en Q32, pour la réduction `u = x/6 − 1` de [`bessel_i0_core`].
+const INV_SIX_Q32: i64 = 715_827_883;
+
+// `g(x) = I₀(x)·e⁻ˣ` sur `x ∈ [0, 12]`, ramené à `u = x/6 − 1 ∈ [-1, 1]` puis
+// approximé par un polynôme (moindres carrés sur base de Chebyshev, converti
+// en base de puissance de `u`, coefficients figés en Q32 bas→haut). Erreur
+// mesurée par balayage dense f64 : ≤ 2.1e-8 en absolu sur `g` — cf.
+// `bessel_i0_ulp_bounds` pour la borne ULP correspondante sur `I₀` lui-même.
+// `g` est borné dans `(0, 1]` : aucun risque de dépassement pour les formats
+// virgule fixe étroits (contrairement à `I₀(x)` directement, qui croît vite).
+const BESSEL_I0_C: [i64; 21] = [
+    715_788_226,
+    -376_392_825,
+    299_189_561,
+    -267_060_324,
+    253_460_958,
+    -249_788_724,
+    252_242_846,
+    -260_744_624,
+    261_332_089,
+    -229_015_587,
+    218_606_249,
+    -285_902_485,
+    232_410_556,
+    3_625_489,
+    16_653_717,
+    -268_741_689,
+    166_669_234,
+    100_839_382,
+    -53_352_819,
+    -64_278_783,
+    34_506_419,
+];
+
+/// `I₀(x_q32)` en Q32 (`i128`) : `I₀(x) = g(x)·eˣ`, `g` par le polynôme
+/// [`BESSEL_I0_C`] (argument saturé à `[0, 12]`, `I₀` étant paire), `eˣ` par
+/// [`exp2_core`] (argument réel, non saturé). Produit calculé en `i128` avec
+/// un seul arrondi final (`from_q32`) — pas de perte intermédiaire.
+#[inline]
+fn bessel_i0_core(x_q32: i64) -> i128 {
+    let x_abs = x_q32.abs();
+    let x_dom = x_abs.min(12 * ONE_Q); // domaine du polynôme : [0, 12]
+    let u = mul_q(x_dom, INV_SIX_Q32) - ONE_Q; // u = x/6 − 1 ∈ [-1, 1]
+    let g = poly_q(u, &BESSEL_I0_C) as i128;
+    let e = exp2_core(mul_q(x_abs, LOG2E_Q32)); // eˣ, x réel (pas saturé)
+    g.saturating_mul(e) >> Q
+}
+
+/// Fonction de Bessel modifiée de première espèce, ordre 0 : `I₀(x) = (1/π)
+/// ∫₀^π e^{x·cos θ} dθ`. Paire, `I₀(0) = 1`, croissance ≈ `eˣ/√(2πx)` pour
+/// `x` grand — au cœur de la fenêtre de Kaiser
+/// ([`crate::dsp::window::kaiser`]).
+///
+/// Domaine testé/garanti : `x ∈ [0, 12]` (`I₀(12) ≈ 18949 < 32768`, la plage
+/// représentable de `Q16.16`). Au-delà, `I₀` sature vers la valeur maximale
+/// représentable de `T` (croît trop vite pour y rester). Voir
+/// `bessel_i0_ulp_bounds` dans le module de tests : erreur ULP Q16.16 ≤ 2 pour
+/// `I₀(x) ≤ 1024` (`x ≲ 8.9`), croissant ensuite avec la magnitude du résultat
+/// (même phénomène que `exp`/`exp2` : l'erreur *relative* du polynôme, ≈1e-7,
+/// se convertit en ULP *absolus* proportionnellement à la sortie).
+#[inline]
+#[must_use]
+pub fn bessel_i0<const FRAC: u32>(x: Fixed<i32, FRAC>) -> Fixed<i32, FRAC> {
+    from_q32(bessel_i0_core(to_q32(x)))
 }
 
 // ------------------------------------------------------------------ //

@@ -758,6 +758,140 @@ fn window_vec_builders_match_coeff() {
     }
 }
 
+// ------------------------------------------------------------------ //
+//  Kaiser (paramètre beta, bessel_i0)                                 //
+// ------------------------------------------------------------------ //
+
+/// Référence indépendante de `I₀`, série directe (comme
+/// `fixed::tests::i0_series_ref`, dupliquée ici pour ne pas dépendre du
+/// module de tests interne de `fixed`).
+fn i0_series_ref(x: f64) -> f64 {
+    let mut term = 1.0f64;
+    let mut total = 1.0f64;
+    for k in 1..100
+    {
+        term *= (x / (2.0 * k as f64)).powi(2);
+        total += term;
+        if term < 1e-18 * total
+        {
+            break;
+        }
+    }
+    total
+}
+
+fn kaiser_ref(n: usize, len: usize, beta: f64) -> f64 {
+    let r = 2.0 * (n as f64) / (len as f64) - 1.0;
+    i0_series_ref(beta * (1.0 - r * r).sqrt()) / i0_series_ref(beta)
+}
+
+fn check_kaiser_center_and_endpoints<T: Scalar + core::ops::Div<Output = T> + core::fmt::Debug>() {
+    let len = 16; // pair : n = len/2 tombe exactement au centre (r = 0)
+    for &beta in &[0.0f64, 4.0, 8.5]
+    {
+        let b = T::of(beta);
+        // Centre : r = 0 ⇒ I₀(beta)/I₀(beta) = 1, quel que soit beta.
+        let center = window::kaiser_coeff::<T>(len / 2, len, b).to_f64();
+        assert!(
+            (center - 1.0).abs() <= T::TOL * 4.0,
+            "kaiser centre beta={beta}: {center}"
+        );
+        // n = 0 : r = -1 ⇒ I₀(0)/I₀(beta) = 1/I₀(beta).
+        let edge = window::kaiser_coeff::<T>(0, len, b).to_f64();
+        let want_edge = 1.0 / i0_series_ref(beta);
+        assert!(
+            (edge - want_edge).abs() <= T::TOL * 20.0,
+            "kaiser bord beta={beta}: {edge} vs {want_edge}"
+        );
+    }
+}
+
+#[test]
+fn kaiser_center_and_endpoints_all_scalars() {
+    check_kaiser_center_and_endpoints::<f32>();
+    check_kaiser_center_and_endpoints::<f64>();
+    check_kaiser_center_and_endpoints::<Q16_16>();
+}
+
+fn check_kaiser_matches_reference<T: Scalar + core::ops::Div<Output = T> + core::fmt::Debug>() {
+    let len = 13;
+    for &beta in &[0.0f64, 3.0, 6.0, 8.5]
+    {
+        let b = T::of(beta);
+        for n in 0..len
+        {
+            let got = window::kaiser_coeff::<T>(n, len, b).to_f64();
+            let want = kaiser_ref(n, len, beta);
+            assert!(
+                (got - want).abs() < T::TOL * 20.0,
+                "kaiser beta={beta} n={n}: {got} vs {want}"
+            );
+        }
+    }
+}
+
+#[test]
+fn kaiser_matches_reference_all_scalars() {
+    check_kaiser_matches_reference::<f32>();
+    check_kaiser_matches_reference::<f64>();
+    check_kaiser_matches_reference::<Q16_16>();
+}
+
+#[test]
+fn kaiser_beta_zero_is_rectangular() {
+    // I₀(0) = 1 partout ⇒ arg = 0 pour tout n ⇒ coefficient = 1 partout.
+    let len = 10;
+    for n in 0..len
+    {
+        assert_eq!(window::kaiser_coeff::<f64>(n, len, 0.0), 1.0);
+    }
+}
+
+#[test]
+fn kaiser_vec_builder_matches_coeff() {
+    let len = 12;
+    let beta = 6.0;
+    let v: Vec<f64> = window::kaiser(len, beta);
+    assert_eq!(v.len(), len);
+    for (n, &vn) in v.iter().enumerate()
+    {
+        assert_eq!(vn, window::kaiser_coeff::<f64>(n, len, beta));
+    }
+}
+
+#[test]
+fn kaiser_higher_beta_reduces_leakage_further_than_hann() {
+    // Un beta élevé (lobes secondaires très atténués) doit capter moins
+    // d'énergie loin du pic qu'un beta faible, sur le même ton non entier
+    // que `window_reduces_spectral_leakage_vs_rectangular`.
+    let n = 64;
+    let bin = 5.5;
+    let signal: Vec<f64> = (0..n)
+        .map(|i| (2.0 * core::f64::consts::PI * bin * (i as f64) / (n as f64)).sin())
+        .collect();
+
+    let far_energy = |spec: &[Complex<f64>]| -> f64 {
+        spec.iter()
+            .enumerate()
+            .filter(|&(k, _)| !(2..=9).contains(&k))
+            .map(|(_, c)| c.re * c.re + c.im * c.im)
+            .sum()
+    };
+
+    let mut low = signal.clone();
+    window::apply(&mut low, &window::kaiser::<f64>(n, 2.0));
+    let energy_low_beta = far_energy(&rfft(&low));
+
+    let mut high = signal.clone();
+    window::apply(&mut high, &window::kaiser::<f64>(n, 10.0));
+    let energy_high_beta = far_energy(&rfft(&high));
+
+    assert!(
+        energy_high_beta < energy_low_beta,
+        "beta élevé devrait réduire la fuite: {energy_high_beta} vs {energy_low_beta}"
+    );
+}
+
 #[test]
 fn window_apply_multiplies_elementwise() {
     let mut signal = vec![2.0f64, 4.0, 6.0, 8.0];

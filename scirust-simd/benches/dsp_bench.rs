@@ -209,6 +209,33 @@ fn bench_window(c: &mut Criterion) {
     g.finish();
 }
 
+/// Fenêtre de Kaiser, longueur 1024, beta = 8.0 (fixe vs f32). Plus coûteuse
+/// que `hann`/`hamming`/`blackman` : deux évaluations de `bessel_i0` par
+/// coefficient (dont une, `bessel_i0(beta)`, redondante ici puisque
+/// recalculée à chaque `n` — un futur appelant sensible au débit
+/// précalculerait `I₀(beta)` une seule fois).
+fn bench_kaiser(c: &mut Criterion) {
+    const M: usize = 1 << 10;
+    let mut out_f = vec![0.0f32; M];
+    let mut out_x = vec![Q16_16::zero(); M];
+
+    let mut g = c.benchmark_group("window_kaiser1024");
+    g.throughput(Throughput::Elements(M as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            window::kaiser_into(black_box(&mut out_x), Q16_16::try_from(8.0).unwrap());
+            out_x[0]
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| {
+            window::kaiser_into(black_box(&mut out_f), 8.0f32);
+            out_f[0]
+        })
+    });
+    g.finish();
+}
+
 /// STFT (fenêtrage de Hann + rfft) sur un signal de N échantillons, trame
 /// 1024, saut 512 (fixe vs f32). Débit en échantillons d'entrée/s.
 fn bench_stft(c: &mut Criterion) {
@@ -274,6 +301,7 @@ criterion_group!(
     bench_fft_plan,
     bench_rfft,
     bench_window,
+    bench_kaiser,
     bench_stft,
     bench_mel
 );

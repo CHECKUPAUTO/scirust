@@ -3,8 +3,8 @@
 // Benchmarks criterion des transcendantes en virgule fixe (`Q16_16`), comparées
 // aux fonctions `f32` de la bibliothèque standard.
 //
-// Mesure le **débit** (éléments/s) de `exp`, `ln`, `sin`, `tanh`, `sigmoid` et de
-// `softmax_into`. Le but n'est pas de battre le flottant matériel (qui dispose
+// Mesure le **débit** (éléments/s) de `exp`, `ln`, `sin`, `tanh`, `sigmoid`,
+// `bessel_i0` et de `softmax_into`. Le but n'est pas de battre le flottant matériel (qui dispose
 // d'unités dédiées) mais de situer le coût du chemin **entièrement entier,
 // déterministe bit-à-bit** — chaque appel est une poignée de multiplications
 // `i128` et un polynôme de Horner, sans FPU ni table.
@@ -15,6 +15,7 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::fixed::Q16_16;
+use scirust_simd::fixed::RealScalar;
 use scirust_simd::fixed::transcendental as tr;
 
 const N: usize = 1 << 14;
@@ -136,6 +137,17 @@ fn bench_acos(c: &mut Criterion) {
     bench_unary(c, "acos", 1.0, tr::acos::<16>, f32::acos);
 }
 
+/// `f32::bessel_i0` n'existe pas dans `std` : passe par `RealScalar` (pas de
+/// fonction libre à référencer directement comme `f32::exp`/`f32::sin`).
+fn bessel_i0_f32(x: f32) -> f32 {
+    RealScalar::bessel_i0(x)
+}
+fn bench_bessel_i0(c: &mut Criterion) {
+    // Domaine [-8, 8) : couvre le domaine garanti [0, 12] du chemin fixe
+    // (I₀ étant paire, les valeurs négatives exercent la même normalisation).
+    bench_unary(c, "bessel_i0", 8.0, tr::bessel_i0::<16>, bessel_i0_f32);
+}
+
 /// Softmax sur un vecteur (activation déterministe, deux passes).
 fn bench_softmax(c: &mut Criterion) {
     let (fx, ff) = data(0x50F7, 4.0);
@@ -175,6 +187,7 @@ criterion_group!(
     bench_sin,
     bench_tanh,
     bench_sigmoid,
-    bench_softmax
+    bench_softmax,
+    bench_bessel_i0
 );
 criterion_main!(benches);

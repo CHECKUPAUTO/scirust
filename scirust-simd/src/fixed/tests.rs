@@ -2064,6 +2064,76 @@ fn inverse_trig_generic_real_scalar() {
     assert!((RealScalar::acos(q16(0.25)).to_f64() - 0.25f64.acos()).abs() < 2e-3);
 }
 
+// ------------------------------------------------------------------ //
+//  bessel_i0 (fonction de Bessel modifiée, ordre 0)                   //
+// ------------------------------------------------------------------ //
+
+/// Référence indépendante : somme directe de la série `I₀(x) = Σₖ
+/// (x/2)^{2k}/(k!)²`, sans lien avec le polynôme minimax de
+/// `transcendental::bessel_i0` ni la formule rationnelle d'Abramowitz &
+/// Stegun de l'impl `f32`/`f64` — validation croisée véritablement
+/// indépendante.
+fn i0_series_ref(x: f64) -> f64 {
+    let mut term = 1.0f64;
+    let mut total = 1.0f64;
+    for k in 1..100
+    {
+        term *= (x / (2.0 * k as f64)).powi(2);
+        total += term;
+        if term < 1e-18 * total
+        {
+            break;
+        }
+    }
+    total
+}
+
+#[test]
+fn bessel_i0_known_values() {
+    let near = |a: Q16_16, b: f64| (a.to_f64() - b).abs() <= 2.0 * ULP16;
+    assert!(near(tr::bessel_i0(Q16_16::zero()), 1.0)); // I₀(0) = 1
+    // I₀ est paire.
+    assert_eq!(tr::bessel_i0(q16(3.0)), tr::bessel_i0(q16(-3.0)));
+    assert_eq!(tr::bessel_i0(q16(9.0)), tr::bessel_i0(q16(-9.0)));
+}
+
+#[test]
+fn bessel_i0_ulp_bounds() {
+    // Mesuré (maillage 40 001 pts) : 131.3 ULP sur tout [0, 12] (dominé par
+    // la magnitude au sommet, I₀(12) ≈ 18949), 1.84 ULP sur [0, 8.9]
+    // (I₀(x) ≤ 1024) — même phénomène que exp/exp2, voir la doc du module.
+    let n = 40_000;
+    assert_ulp(
+        "bessel_i0",
+        135.0,
+        0.0,
+        12.0,
+        n,
+        tr::bessel_i0,
+        i0_series_ref,
+    );
+    assert_ulp(
+        "bessel_i0 (I0<=1024)",
+        2.0,
+        0.0,
+        8.9,
+        n,
+        tr::bessel_i0,
+        i0_series_ref,
+    );
+}
+
+#[test]
+fn bessel_i0_generic_real_scalar() {
+    // Exposée via RealScalar, cohérente f32/f64/virgule fixe.
+    // Impl f32/f64 : formule rationnelle d'Abramowitz & Stegun, erreur
+    // relative ≤ ~1.6e-7 (pas une identité std exacte, contrairement à
+    // atan/atan2/...).
+    assert!((RealScalar::bessel_i0(0.0f32) - 1.0).abs() < 1e-6);
+    assert!((RealScalar::bessel_i0(3.0f64) - i0_series_ref(3.0)).abs() < 1e-6);
+    assert!((RealScalar::bessel_i0(q16(5.0)).to_f64() - i0_series_ref(5.0)).abs() < 2e-3);
+}
+
 #[test]
 fn transcendental_high_resolution_q8_24() {
     // La même implémentation générique sert un autre FRAC (Q8.24, résolution
