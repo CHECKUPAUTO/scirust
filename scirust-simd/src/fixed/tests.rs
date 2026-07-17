@@ -686,6 +686,46 @@ fn matmul_dim_mismatch_panics() {
     let _ = linalg::matmul(&a, &b, 2, 3, 3); // b.len()=6 ≠ 3×3=9 → panique
 }
 
+#[test]
+fn matmul_bt_matches_matmul_with_explicit_transpose() {
+    let mut rng = Lcg(0xB7_5A51);
+    for &(m, k, n) in &[(1, 1, 1), (3, 8, 5), (7, 13, 4), (8, 16, 8), (5, 1, 9)]
+    {
+        let a: Vec<Q16_16> = (0..m * k)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 8))
+            .collect();
+        // bt joue le rôle de Bᵀ (n × k) : b (k × n) en est la transposée.
+        let bt: Vec<Q16_16> = (0..n * k)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 8))
+            .collect();
+        let b = linalg::transpose(&bt, n, k);
+        assert_eq!(
+            linalg::matmul_bt(&a, &bt, m, k, n),
+            linalg::matmul(&a, &b, m, k, n),
+            "m={m} k={k} n={n}"
+        );
+    }
+}
+
+#[test]
+fn matmul_bt_matches_naive_reference() {
+    // A = [[1,2,3],[4,5,6]] (2×3) ; Bᵀ = [[1,0,-1],[2,1,0]] (2×3, donc B 3×2).
+    // C = A·Bᵀᵀ : C[0,0] = 1-3 = -2, C[0,1] = 2+2 = 4,
+    //             C[1,0] = 4-6 = -2, C[1,1] = 8+5 = 13.
+    let a = [1i32, 2, 3, 4, 5, 6].map(Q16_16::from);
+    let bt = [1i32, 0, -1, 2, 1, 0].map(Q16_16::from);
+    let c = linalg::matmul_bt(&a, &bt, 2, 3, 2);
+    assert_eq!(c, [-2i32, 4, -2, 13].map(Q16_16::from));
+}
+
+#[test]
+#[should_panic(expected = "matmul_bt")]
+fn matmul_bt_dim_mismatch_panics() {
+    let a = [Q16_16::one(); 6]; // annoncé 2×3
+    let bt = [Q16_16::one(); 6]; // annoncé 3×3 (attendu n×k = 3×3 = 9)
+    let _ = linalg::matmul_bt(&a, &bt, 2, 3, 3);
+}
+
 // ------------------------------------------------------------------ //
 //  Décompositions : Cholesky, LU à pivot partiel, déterminant          //
 // ------------------------------------------------------------------ //
@@ -1326,6 +1366,118 @@ fn linear_predict_proba_argmax_matches_predict_class() {
         let proba_argmax = red::argmax(&proba);
         assert_eq!(proba_argmax, layer.predict_class(&x));
     }
+}
+
+// ------------------------------------------------------------------ //
+//  Couche linéaire : inférence par lot                                //
+// ------------------------------------------------------------------ //
+
+/// Concatène `batch` appels indépendants de `f` (référence non batchée).
+fn looped<T, R>(
+    x: &[T],
+    batch: usize,
+    in_features: usize,
+    mut f: impl FnMut(&[T]) -> Vec<R>,
+) -> Vec<R> {
+    let mut out = Vec::new();
+    for row in x.chunks_exact(in_features).take(batch)
+    {
+        out.extend(f(row));
+    }
+    out
+}
+
+#[test]
+fn linear_forward_batch_matches_looped_forward() {
+    let mut rng = Lcg(0xBA7C_0001);
+    let (out_f, in_f, batch) = (5, 7, 6);
+    let w: Vec<Q16_16> = (0..out_f * in_f)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+        .collect();
+    let b: Vec<Q16_16> = (0..out_f)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+        .collect();
+    let x: Vec<Q16_16> = (0..batch * in_f)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+        .collect();
+    let layer = Linear::new(w, b, out_f, in_f);
+
+    let got = layer.forward_batch(&x, batch);
+    let want = looped(&x, batch, in_f, |row| layer.forward(row));
+    assert_eq!(
+        got, want,
+        "forward_batch doit coïncider bit-à-bit avec la boucle"
+    );
+}
+
+#[test]
+fn linear_forward_batch_activated_matches_looped() {
+    let mut rng = Lcg(0xBA7C_0002);
+    let (out_f, in_f, batch) = (4, 5, 8);
+    let w: Vec<Q16_16> = (0..out_f * in_f)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+        .collect();
+    let b: Vec<Q16_16> = (0..out_f)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+        .collect();
+    let x: Vec<Q16_16> = (0..batch * in_f)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+        .collect();
+    let layer = Linear::new(w, b, out_f, in_f);
+
+    let got = layer.forward_batch_activated(&x, batch, act::relu);
+    let want = looped(&x, batch, in_f, |row| {
+        layer.forward_activated(row, act::relu)
+    });
+    assert_eq!(got, want);
+}
+
+#[test]
+fn linear_predict_class_batch_matches_looped() {
+    let mut rng = Lcg(0xBA7C_0003);
+    let (out_f, in_f, batch) = (6, 4, 10);
+    let w: Vec<Q32_32> = (0..out_f * in_f)
+        .map(|_| Q32_32::from_raw(rng.next() as i64))
+        .collect();
+    let b: Vec<Q32_32> = (0..out_f)
+        .map(|_| Q32_32::from_raw(rng.next() as i64))
+        .collect();
+    let x: Vec<Q32_32> = (0..batch * in_f)
+        .map(|_| Q32_32::from_raw(rng.next() as i64))
+        .collect();
+    let layer = Linear::new(w, b, out_f, in_f);
+
+    let got = layer.predict_class_batch(&x, batch);
+    let want = looped(&x, batch, in_f, |row| vec![layer.predict_class(row)]);
+    assert_eq!(got, want);
+}
+
+#[test]
+fn linear_predict_proba_batch_matches_looped() {
+    let mut rng = Lcg(0xBA7C_0004);
+    let (out_f, in_f, batch) = (5, 3, 12);
+    let w: Vec<Q16_16> = (0..out_f * in_f)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+        .collect();
+    let b: Vec<Q16_16> = (0..out_f)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+        .collect();
+    let x: Vec<Q16_16> = (0..batch * in_f)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+        .collect();
+    let layer = Linear::new(w, b, out_f, in_f);
+
+    let got = layer.predict_proba_batch(&x, batch);
+    let want = looped(&x, batch, in_f, |row| layer.predict_proba(row));
+    assert_eq!(got, want);
+}
+
+#[test]
+#[should_panic(expected = "Linear::forward_batch")]
+fn linear_forward_batch_dim_mismatch_panics() {
+    let layer: Linear<Q16_16> = Linear::new(vec![Q16_16::one(); 6], vec![Q16_16::zero(); 2], 2, 3);
+    let x = vec![Q16_16::zero(); 7]; // ni 1×3 ni 2×3 ni aucun multiple de 3
+    let _ = layer.forward_batch(&x, 2);
 }
 
 // ------------------------------------------------------------------ //

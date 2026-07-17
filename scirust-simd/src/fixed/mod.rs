@@ -72,12 +72,13 @@
 // * [`traits`] — [`NumericScalar`] et [`RealScalar`].
 // * [`simd`] — vecteurs [`FixedI16x8`], [`FixedI32x8`], [`FixedI64x4`].
 // * [`reductions`] — sommes, `dot`, normes, extrema, cosinus.
-// * [`linalg`] — GEMM déterministe (`matmul`, `matvec`, `transpose`) et
-//   décompositions directes (`cholesky`, `lu_decompose`/`lu_solve`,
-//   `determinant`, `qr_decompose`/`qr_solve`) pour résoudre `A·x = b` ou
-//   les moindres carrés.
+// * [`linalg`] — GEMM déterministe (`matmul`, `matmul_bt`, `matvec`,
+//   `transpose`) et décompositions directes (`cholesky`, `lu_decompose`/
+//   `lu_solve`, `determinant`, `qr_decompose`/`qr_solve`) pour résoudre
+//   `A·x = b` ou les moindres carrés.
 // * [`activation`] — activations quantifiées (`relu`, `relu6`, `hardswish`…).
-// * [`layer`] — couche linéaire quantifiée [`layer::Linear`] (`W·x + b`, + activation).
+// * [`layer`] — couche linéaire quantifiée [`layer::Linear`] (`W·x + b`, +
+//   activation), avec inférence par lot (`forward_batch` et variantes).
 // * [`conv`] — convolution 1D quantifiée [`conv::conv1d`] (im2col + GEMM).
 // * [`conv2d`] — convolution 2D quantifiée [`conv2d::conv2d`] (im2col + GEMM).
 // * [`pool`] — pooling 1D quantifié ([`pool::max_pool1d`], [`pool::avg_pool1d`]).

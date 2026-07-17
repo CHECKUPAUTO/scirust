@@ -2,12 +2,16 @@
 //
 // # Algèbre linéaire virgule fixe — GEMM et décompositions déterministes
 //
-// Produit matrice-matrice (`matmul`) et matrice-vecteur (`matvec`) sur des
-// matrices **denses row-major** de scalaires virgule fixe, construits sur le
-// produit scalaire SIMD [`super::reductions::dot`]. C'est le socle d'une
-// inférence **quantifiée** (réseaux de neurones à poids/activations entiers) :
-// la virgule fixe symétrique `Fixed<I, FRAC>` est exactement une quantification
-// symétrique d'échelle `2^-FRAC` et de zéro nul.
+// Produit matrice-matrice (`matmul`, et sa variante `matmul_bt` quand `Bᵀ`
+// est déjà disponible) et matrice-vecteur (`matvec`) sur des matrices
+// **denses row-major** de scalaires virgule fixe, construits sur le produit
+// scalaire SIMD [`super::reductions::dot`]. C'est le socle d'une inférence
+// **quantifiée** (réseaux de neurones à poids/activations entiers) : la
+// virgule fixe symétrique `Fixed<I, FRAC>` est exactement une quantification
+// symétrique d'échelle `2^-FRAC` et de zéro nul. [`super::layer::Linear`]
+// s'appuie sur `matmul_bt` pour l'inférence **par lot**
+// ([`super::layer::Linear::forward_batch`]) : la matrice de poids `out × in`
+// est déjà dans la disposition `Bᵀ` attendue, aucune transposition requise.
 //
 // Le module fournit aussi les décompositions directes classiques pour
 // résoudre `A·x = b` : [`cholesky`]/[`cholesky_solve`] (matrices symétriques
@@ -108,7 +112,8 @@ pub fn transpose<T: Copy>(a: &[T], rows: usize, cols: usize) -> Vec<T> {
 /// zéro, somme exacte). Panique si `a.len() != m·k` ou `b.len() != k·n`.
 ///
 /// La matrice de droite est transposée une fois pour rendre chaque produit
-/// scalaire contigu et **vectorisé** ([`super::reductions::dot`]).
+/// scalaire contigu et **vectorisé** ([`super::reductions::dot`]) — voir
+/// [`matmul_bt`] si l'appelant dispose déjà de `Bᵀ` (évite cette transposition).
 #[must_use]
 pub fn matmul<T: FixedReducible>(a: &[T], b: &[T], m: usize, k: usize, n: usize) -> Vec<T> {
     assert_eq!(
@@ -125,6 +130,33 @@ pub fn matmul<T: FixedReducible>(a: &[T], b: &[T], m: usize, k: usize, n: usize)
     );
     // Bᵀ (n × k) : la ligne j de Bᵀ est la colonne j de B, désormais contiguë.
     let bt = transpose(b, k, n);
+    matmul_bt(a, &bt, m, k, n)
+}
+
+/// Produit matrice-matrice `C = A · Bᵀ` (déterministe, virgule fixe), `Bᵀ`
+/// étant fourni **déjà transposé** (`bt`, `n × k` row-major : la ligne `j` de
+/// `bt` est la colonne `j` de `B`).
+///
+/// `matmul_bt(a, bt, m, k, n) == matmul(a, transpose(bt, n, k), m, k, n)`,
+/// sans le coût `O(k·n)` de cette transposition — utile quand l'appelant
+/// dispose déjà de `Bᵀ`, ce qui est le cas typique d'une matrice de poids de
+/// réseau de neurones stockée `out × in` (exactement la forme `Bᵀ` attendue
+/// pour calculer `X · Wᵀ`, cf. [`super::layer::Linear::forward_batch`]).
+/// Panique si `a.len() != m·k` ou `bt.len() != n·k`.
+#[must_use]
+pub fn matmul_bt<T: FixedReducible>(a: &[T], bt: &[T], m: usize, k: usize, n: usize) -> Vec<T> {
+    assert_eq!(
+        a.len(),
+        m * k,
+        "matmul_bt : A de longueur {} ≠ {m}×{k}",
+        a.len()
+    );
+    assert_eq!(
+        bt.len(),
+        n * k,
+        "matmul_bt : Bᵀ de longueur {} ≠ {n}×{k}",
+        bt.len()
+    );
     let mut c = Vec::with_capacity(m * n);
     for i in 0..m
     {

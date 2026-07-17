@@ -16,6 +16,7 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::fixed::Q16_16;
+use scirust_simd::fixed::layer::Linear;
 use scirust_simd::fixed::linalg as flin;
 
 /// Côté des matrices carrées ; `D³` MAC par produit, `256 Kio` par matrice f32.
@@ -190,12 +191,60 @@ fn bench_qr(c: &mut Criterion) {
     g.finish();
 }
 
+/// `matmul_bt` (Bᵀ déjà disponible) vs `matmul` (transposition interne) sur
+/// la même paire de matrices carrées — mesure le coût économisé.
+fn bench_matmul_bt(c: &mut Criterion) {
+    let a = fixed_data(0xB, D * D);
+    let bt = fixed_data(0xC, D * D);
+    let b = flin::transpose(&bt, D, D);
+
+    let mut g = c.benchmark_group("matmul_bt_128");
+    g.throughput(Throughput::Elements((D * D * D) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "matmul_bt"), |bch| {
+        bch.iter(|| flin::matmul_bt(black_box(&a), black_box(&bt), D, D, D))
+    });
+    g.bench_function(BenchmarkId::new("fixed", "matmul_avec_transpose"), |bch| {
+        bch.iter(|| flin::matmul(black_box(&a), black_box(&b), D, D, D))
+    });
+    g.finish();
+}
+
+/// `Linear::forward_batch` (un seul GEMM `matmul_bt`) vs `batch` appels de
+/// `Linear::forward` (un `matvec` chacun) — même résultat bit-à-bit
+/// (cf. tests), débit différent.
+fn bench_linear_batch(c: &mut Criterion) {
+    let (out_f, in_f, batch) = (64, 128, 32);
+    let w = fixed_data(0xD, out_f * in_f);
+    let bias = fixed_data(0xE, out_f);
+    let x = fixed_data(0xF, batch * in_f);
+    let layer = Linear::new(w, bias, out_f, in_f);
+
+    let mut g = c.benchmark_group("linear_forward_batch32");
+    g.throughput(Throughput::Elements((batch * out_f * in_f) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "batched"), |bch| {
+        bch.iter(|| layer.forward_batch(black_box(&x), batch))
+    });
+    g.bench_function(BenchmarkId::new("fixed", "looped"), |bch| {
+        bch.iter(|| {
+            let mut out = Vec::with_capacity(batch * out_f);
+            for row in black_box(&x).chunks_exact(in_f)
+            {
+                out.extend(layer.forward(row));
+            }
+            out
+        })
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_matmul,
     bench_matvec,
     bench_cholesky,
     bench_lu,
-    bench_qr
+    bench_qr,
+    bench_matmul_bt,
+    bench_linear_batch
 );
 criterion_main!(benches);
