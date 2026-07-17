@@ -51,7 +51,10 @@
 //!      `ℓ = 1` reference run, exploiting the roughness component's exact
 //!      linearity in the structural length;
 //!    - [`material`] — the material-derivative interval diagnostic splitting a
-//!      vorticity change into Eulerian, advective and material tendencies.
+//!      vorticity change into Eulerian, advective and material tendencies, plus
+//!      the reference's full `simulate_material_deformation` orchestration
+//!      (eulerian baseline + per-interval diagnostic + indices + consistency
+//!      certification).
 //!
 //! ## Provenance
 //!
@@ -88,7 +91,11 @@ pub use covariance::{
 pub use error::{ItdError, Result};
 pub use field::Field2;
 pub use geometry::{BoundaryMode, Geometry};
-pub use material::{MaterialInterval, material_vorticity_interval};
+pub use material::{
+    AdvectionSource, MaterialDeformation, MaterialInterval, interpolate_interval_series_to_nodes,
+    material_vorticity_interval, simulate_canonical_material, simulate_material_deformation,
+    simulate_material_deformation_with_advection,
+};
 pub use multiscale::{MultiscaleProfile, MultiscaleReference, derive_multiscale_profile};
 pub use scenarios::{Config, Scenario};
 pub use signature::{StructuralMetrics, StructuralWeights, structural_metrics};

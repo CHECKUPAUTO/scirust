@@ -4,7 +4,7 @@
 use scirust_itd::operators::{spatial_mean, vorticity};
 use scirust_itd::signature::structural_metrics;
 use scirust_itd::{
-    BoundaryMode, Field2, Geometry, Interpolation, StructuralWeights, Trajectory,
+    BoundaryMode, Field2, Geometry, Interpolation, Scenario, StructuralWeights, Trajectory,
     transport_previous_vorticity,
 };
 
@@ -285,4 +285,102 @@ fn multiscale_roughness_scales_linearly() {
     {
         assert!((profile.signatures[k][4] - profile.signatures[0][4]).abs() < 1e-15);
     }
+}
+
+use scirust_itd::material::{
+    AdvectionSource, interpolate_interval_series_to_nodes, simulate_material_deformation,
+    simulate_material_deformation_with_advection,
+};
+use scirust_itd::simulate::{SimConfig, simulate};
+
+/// Interval-to-node interpolation: constant extrapolation at both ends, and on a
+/// uniform grid each interior node is the mean of its two adjacent intervals. A
+/// constant series stays constant.
+#[test]
+fn interval_interpolation_properties() {
+    let times = [0.0, 1.0, 2.0, 3.0, 4.0];
+    let iv = [2.0, 4.0, 8.0, 6.0];
+    let nodes = interpolate_interval_series_to_nodes(&times, &iv).unwrap();
+    assert_eq!(nodes.len(), 5);
+    assert!(
+        (nodes[0] - iv[0]).abs() < 1e-15,
+        "left constant extrapolation"
+    );
+    assert!(
+        (nodes[4] - iv[3]).abs() < 1e-15,
+        "right constant extrapolation"
+    );
+    for k in 1..4
+    {
+        let mean = 0.5 * (iv[k - 1] + iv[k]);
+        assert!(
+            (nodes[k] - mean).abs() < 1e-15,
+            "node {k} is the adjacent mean"
+        );
+    }
+
+    let constant = [3.5; 4];
+    let nodes = interpolate_interval_series_to_nodes(&times, &constant).unwrap();
+    assert!(nodes.iter().all(|&v| (v - 3.5).abs() < 1e-15));
+}
+
+/// With a zero advection field the advective rate vanishes, the material rate
+/// equals the Eulerian rate, the consistency certification holds, and the
+/// baseline is byte-identical to a direct `simulate` run.
+#[test]
+fn material_deformation_zero_advection() {
+    let n = 9;
+    let xc: Vec<f64> = (0..n).map(|k| -1.0 + 0.25 * k as f64).collect();
+    let yc = xc.clone();
+    let times = [0.0, 0.4, 1.0, 1.5];
+    let geometry = Geometry::isotropic(0.25).unwrap();
+    let sim = SimConfig::default();
+    let velocity = |x: &[f64], y: &[f64], t: f64| Scenario::Multi.velocity(x, y, t);
+    let curvature = |x: &[f64], y: &[f64], _t: f64| Field2::from_fn(y.len(), x.len(), |_, _| 0.1);
+
+    let r = simulate_material_deformation_with_advection(
+        "multi",
+        velocity,
+        curvature,
+        |x: &[f64], y: &[f64], _t: f64| {
+            (
+                Field2::zeros(y.len(), x.len()),
+                Field2::zeros(y.len(), x.len()),
+            )
+        },
+        &xc,
+        &yc,
+        &times,
+        &geometry,
+        0.5,
+        &sim,
+    )
+    .unwrap();
+    assert_eq!(r.advection_source, AdvectionSource::AdvectionVelocityField);
+    assert!(r.advective_rate_interval.iter().all(|&v| v.abs() < 1e-15));
+    for j in 0..r.eulerian_rate_interval.len()
+    {
+        assert!(
+            (r.material_deformation_interval[j] - r.eulerian_rate_interval[j]).abs() < 1e-12,
+            "zero advection: material == eulerian at interval {j}"
+        );
+    }
+    assert!(r.eulerian_consistency_error < 1e-12);
+
+    let direct = simulate(
+        "multi", velocity, curvature, &xc, &yc, &times, &geometry, 0.5, &sim,
+    )
+    .unwrap();
+    assert_eq!(
+        r.baseline, direct,
+        "baseline must be the untouched eulerian run"
+    );
+
+    // The default-advection wrapper reports the reference default source.
+    let r = simulate_material_deformation(
+        "multi", velocity, curvature, &xc, &yc, &times, &geometry, 0.5, &sim,
+    )
+    .unwrap();
+    assert_eq!(r.advection_source, AdvectionSource::VelocityField);
+    assert!(r.eulerian_consistency_error < 1e-12);
 }

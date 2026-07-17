@@ -29,6 +29,7 @@ invariants the reference asserts hold here too (`tests/analytic.rs`).
 | **Covariance laws** | [`covariance`] | spatial-dilation (`x=o+(x'−o)/a`, `v_a=a·v`, `R_a=R/a²`) and moving-frame (Galilean `x=x'+c(t−t₀)`, `v'=v−c`; time-dependent translation `x=x'+b(t)`, `v'=v−ḃ`) coordinate and field laws |
 | **Multi-scale profile** | [`multiscale::derive_multiscale_profile`] | a whole family of structural profiles derived from **one** `ℓ=1` reference run, exploiting the roughness component's exact linearity in the structural length (`roughness_raw(ℓ)=ℓ·roughness_raw(1)`) |
 | **Material derivative** | [`material::material_vorticity_interval`] | splits a vorticity change over an interval into Eulerian `(ω₁−ω₀)/Δt`, advective `u·∇ω` and material tendencies, each reduced to an RMS-normalized rate |
+| | [`material::simulate_material_deformation`] | the full orchestration: the untouched eulerian baseline run + the per-interval material diagnostic, its duration-weighted indices, the interval→node interpolation, and the eulerian-consistency certification (advection defaults to the scenario's own flow; a separate advection field is supported) |
 
 ## Quick start
 
@@ -60,11 +61,15 @@ println!("intensity = {:.12}", r.intensity_index);   // 4.347614838944
 - The reference's **field-geometry** machinery is ported as four modules —
   orthogonal transforms (`transforms`), spatial-dilation and moving-frame
   covariance laws (`covariance`), the multi-scale structural profile
-  (`multiscale`), and the material-derivative interval diagnostic (`material`) —
-  each validated against the same oracle. The higher-level `simulate_material_
-  deformation` orchestration (a thin loop wiring `material_vorticity_interval`
-  into a full run) is intentionally left in the reference; the reusable interval
-  kernel is what transfers.
+  (`multiscale`), and the material-derivative machinery (`material`) — each
+  validated against the same oracle. The `material` module carries both the
+  interval kernel (`material_vorticity_interval`) and the reference's full
+  `simulate_material_deformation` orchestration, including its
+  eulerian-consistency certification (the diagnostic's Eulerian rate and the
+  baseline's temporal deformation are the same formula computed by two code
+  paths; their maximum discrepancy is reported and stays at machine-epsilon
+  scale). As in the reference, the diagnostic is reported alongside the
+  baseline and never injected into the structural signature.
 
 ## Provenance & scope
 
@@ -87,3 +92,4 @@ transfers to SciRust is the deterministic, oracle-validated machinery.
 [`covariance`]: https://docs.rs/scirust-itd
 [`multiscale::derive_multiscale_profile`]: https://docs.rs/scirust-itd
 [`material::material_vorticity_interval`]: https://docs.rs/scirust-itd
+[`material::simulate_material_deformation`]: https://docs.rs/scirust-itd

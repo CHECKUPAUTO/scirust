@@ -18,9 +18,13 @@ use scirust_itd::covariance::{
     galilean_source_coordinates, inverse_scale_coordinates, scale_geometry, scale_length,
     translating_frame_source_coordinates,
 };
-use scirust_itd::material::material_vorticity_interval;
+use scirust_itd::material::{
+    AdvectionSource, material_vorticity_interval, simulate_canonical_material,
+    simulate_material_deformation_with_advection,
+};
 use scirust_itd::multiscale::{MultiscaleReference, derive_multiscale_profile};
 use scirust_itd::operators::{bounded, gradient, spatial_mean, vorticity};
+use scirust_itd::scenarios::curvature_field;
 use scirust_itd::signature::{StructuralWeights, structural_metrics};
 use scirust_itd::transforms::{BilinearTransformPlan, Orthogonal2, transform_coordinates};
 use scirust_itd::{
@@ -842,4 +846,140 @@ fn material_interval_matches() {
     assert_close(res.eulerian_rate, od::MAT_EUL_RATE, "mat/eul_rate");
     assert_close(res.advective_rate, od::MAT_ADV_RATE, "mat/adv_rate");
     assert_close(res.material_rate, od::MAT_MAT_RATE, "mat/mat_rate");
+}
+
+// --- material-deformation orchestration ------------------------------------
+
+#[test]
+fn material_deformation_orchestration_matches() {
+    let config = Config {
+        grid_size: 21,
+        time_steps: 9,
+        ..Config::default()
+    };
+    let sim = SimConfig::default();
+
+    // Default advection: the scenario's own velocity field.
+    let r = simulate_canonical_material(Scenario::Multi, &config, &sim).unwrap();
+    assert_eq!(r.advection_source, AdvectionSource::VelocityField);
+    assert_slice_close(
+        &r.eulerian_rate_interval,
+        od::MD_DEFAULT_EUL_IV,
+        "md/default/eul_iv",
+    );
+    assert_slice_close(
+        &r.advective_rate_interval,
+        od::MD_DEFAULT_ADV_IV,
+        "md/default/adv_iv",
+    );
+    assert_slice_close(
+        &r.material_deformation_interval,
+        od::MD_DEFAULT_MAT_IV,
+        "md/default/mat_iv",
+    );
+    assert_slice_close(
+        &r.eulerian_rate,
+        od::MD_DEFAULT_EUL_NODAL,
+        "md/default/eul_nodal",
+    );
+    assert_slice_close(
+        &r.advective_rate,
+        od::MD_DEFAULT_ADV_NODAL,
+        "md/default/adv_nodal",
+    );
+    assert_slice_close(
+        &r.material_deformation,
+        od::MD_DEFAULT_MAT_NODAL,
+        "md/default/mat_nodal",
+    );
+    assert_close(
+        r.eulerian_rate_index,
+        od::MD_DEFAULT_EUL_IDX,
+        "md/default/eul_idx",
+    );
+    assert_close(
+        r.advective_rate_index,
+        od::MD_DEFAULT_ADV_IDX,
+        "md/default/adv_idx",
+    );
+    assert_close(
+        r.material_deformation_index,
+        od::MD_DEFAULT_MAT_IDX,
+        "md/default/mat_idx",
+    );
+    assert!(
+        r.eulerian_consistency_error < 1e-12,
+        "consistency {} not at machine-epsilon scale",
+        r.eulerian_consistency_error
+    );
+    assert_close(
+        r.baseline.intensity_index,
+        od::MD_DEFAULT_BASE_INTENSITY,
+        "md/default/base_intensity",
+    );
+    assert_close(
+        r.baseline.structure_index,
+        od::MD_DEFAULT_BASE_STRUCTURE,
+        "md/default/base_structure",
+    );
+
+    // Separate advection field: the coherent flow advects the multi run.
+    let xc = config.coordinates();
+    let yc = xc.clone();
+    let times = config.times();
+    let geometry = Geometry::isotropic(config.spacing()).unwrap();
+    let r = simulate_material_deformation_with_advection(
+        "multi",
+        |x, y, t| Scenario::Multi.velocity(x, y, t),
+        curvature_field,
+        |x, y, t| Scenario::Coherent.velocity(x, y, t),
+        &xc,
+        &yc,
+        &times,
+        &geometry,
+        config.characteristic_length,
+        &sim,
+    )
+    .unwrap();
+    assert_eq!(r.advection_source, AdvectionSource::AdvectionVelocityField);
+    assert_slice_close(
+        &r.eulerian_rate_interval,
+        od::MD_SEP_EUL_IV,
+        "md/sep/eul_iv",
+    );
+    assert_slice_close(
+        &r.advective_rate_interval,
+        od::MD_SEP_ADV_IV,
+        "md/sep/adv_iv",
+    );
+    assert_slice_close(
+        &r.material_deformation_interval,
+        od::MD_SEP_MAT_IV,
+        "md/sep/mat_iv",
+    );
+    assert_slice_close(&r.eulerian_rate, od::MD_SEP_EUL_NODAL, "md/sep/eul_nodal");
+    assert_slice_close(&r.advective_rate, od::MD_SEP_ADV_NODAL, "md/sep/adv_nodal");
+    assert_slice_close(
+        &r.material_deformation,
+        od::MD_SEP_MAT_NODAL,
+        "md/sep/mat_nodal",
+    );
+    assert_close(r.eulerian_rate_index, od::MD_SEP_EUL_IDX, "md/sep/eul_idx");
+    assert_close(r.advective_rate_index, od::MD_SEP_ADV_IDX, "md/sep/adv_idx");
+    assert_close(
+        r.material_deformation_index,
+        od::MD_SEP_MAT_IDX,
+        "md/sep/mat_idx",
+    );
+    assert!(r.eulerian_consistency_error < 1e-12);
+    assert_close(
+        r.baseline.intensity_index,
+        od::MD_SEP_BASE_INTENSITY,
+        "md/sep/base_intensity",
+    );
+    assert_close(
+        r.baseline.structure_index,
+        od::MD_SEP_BASE_STRUCTURE,
+        "md/sep/base_structure",
+    );
 }
