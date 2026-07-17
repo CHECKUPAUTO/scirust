@@ -4,26 +4,37 @@
 //! deterministic shape inference and pre-execution resource validation.
 
 mod active;
+mod archive;
 mod canonical;
 mod canonicalize;
 mod cost;
 mod crossover;
 mod dataset;
+mod experiment;
 mod fitness;
 mod generate;
 mod interpreter;
 mod ir;
 mod mutate;
 mod population;
+mod problem;
+mod report;
 mod rng;
 mod verify;
 
 pub use active::analyze_active;
+pub use archive::{
+    ARCHIVE_SCHEMA_VERSION, ExperimentArchive, HallOfFame, HallOfFameEntry, ReplayMismatch,
+    ReplayReport, replay,
+};
 pub use canonical::{canonical_bytes, program_fingerprint};
 pub use canonicalize::prune_dead_code;
 pub use cost::{CostReport, estimate_cost};
 pub use crossover::{CrossoverOutcome, crossover};
 pub use dataset::{Dataset, DatasetError, TensorCase};
+pub use experiment::{
+    ExperimentError, GenerationRecord, PopulationSummary, RunOptions, run_experiment,
+};
 pub use fitness::{CASE_FAILURE_PENALTY, FitnessReport, evaluate_population, evaluate_program};
 pub use generate::{GenerationConfig, GenerationError, OperatorSet, generate};
 pub use interpreter::{ExecutionError, ExecutionResult, execute_program};
@@ -33,6 +44,11 @@ pub use population::{
     EvolutionConfig, EvolutionError, EvolutionOutcome, GenerationStats, Population,
     TournamentConfig, dominates, elite, evolve, rank, tournament,
 };
+pub use problem::{
+    CaseFixture, ProblemError, ProblemLimits, SuccessCriteria, TensorFixture, TensorProblem,
+    benchmarks,
+};
+pub use report::{json_report, text_report};
 pub use rng::DeterministicRng;
 pub use verify::{ProgramError, VerificationLimits, VerifiedProgram, verify_program};
 
