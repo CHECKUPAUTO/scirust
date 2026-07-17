@@ -141,6 +141,12 @@ pub trait RealScalar: NumericScalar {
     /// garanti `[0, 12]` (au-delà : saturation, `I₀` croît trop vite pour
     /// rester représentable).
     fn bessel_i0(self) -> Self;
+    /// Fonction d'erreur `erf(x) = (2/√π)·∫₀ˣ e^{-t²} dt`. Impaire, `erf(0) =
+    /// 0`, `erf(x) → ±1` pour `x → ±∞` (saturé au-delà de `|x| ≈ 4` en
+    /// virgule fixe). Cœur de [`crate::fixed::activation::gelu`].
+    fn erf(self) -> Self;
+    /// Fonction d'erreur complémentaire `erfc(x) = 1 − erf(x)`.
+    fn erfc(self) -> Self;
     /// Constante `π` (saturée en virgule fixe si `FRAC` la rend inreprésentable).
     fn pi() -> Self;
 }
@@ -238,6 +244,34 @@ macro_rules! impl_real_scalar_float {
                                                     + t * (-0.01647633 + t * 0.00392377))))))))
                 }
             }
+            #[inline]
+            #[allow(clippy::excessive_precision)] // constantes f64 partagées avec l'instanciation f32
+            fn erf(self) -> Self {
+                // Abramowitz & Stegun 7.1.26 (erreur ≤ ~1.5e-7), forme directe
+                // (pas `1 - erfc`) : bien conditionnée, aucune annulation.
+                let sign = if self < 0.0 { -1.0 } else { 1.0 };
+                let ax = <$ty>::abs(self);
+                let t = 1.0 / (1.0 + 0.3275911 * ax);
+                let poly = t
+                    * (0.254829592
+                        + t * (-0.284496736
+                            + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
+                sign * (1.0 - poly * <$ty>::exp(-ax * ax))
+            }
+            #[inline]
+            #[allow(clippy::excessive_precision)]
+            fn erfc(self) -> Self {
+                // `erfc(|x|) = poly·e^{-x²}` directement (même conditionnement
+                // que `erf`, pas de soustraction) ; `erfc(-x) = 2 − erfc(x)`.
+                let ax = <$ty>::abs(self);
+                let t = 1.0 / (1.0 + 0.3275911 * ax);
+                let poly = t
+                    * (0.254829592
+                        + t * (-0.284496736
+                            + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
+                let erfc_ax = poly * <$ty>::exp(-ax * ax);
+                if self >= 0.0 { erfc_ax } else { 2.0 - erfc_ax }
+            }
         }
     };
 }
@@ -315,6 +349,14 @@ impl<const FRAC: u32> RealScalar for Fixed<i32, FRAC> {
     #[inline(always)]
     fn bessel_i0(self) -> Self {
         super::transcendental::bessel_i0(self)
+    }
+    #[inline(always)]
+    fn erf(self) -> Self {
+        super::transcendental::erf(self)
+    }
+    #[inline(always)]
+    fn erfc(self) -> Self {
+        super::transcendental::erfc(self)
     }
     #[inline(always)]
     fn pi() -> Self {

@@ -7,7 +7,7 @@
 // sortie d'une couche linéaire, elles complètent une inférence **quantifiée
 // reproductible bit-à-bit**.
 //
-// Deux familles selon les primitives requises :
+// Trois familles selon les primitives requises :
 //
 // * **Exactes** (`relu`, `relu6`, `clamp`, `hardtanh`, `leaky_relu`) : bornées
 //   aux opérations d'anneau ordonné [`NumericScalar`] — donc `f32`, `f64` **et**
@@ -18,6 +18,10 @@
 //   `FixedI32<FRAC>`. Ce sont les variantes linéaires par morceaux de la
 //   sigmoïde et de la swish (MobileNetV3), sans transcendante, donc rapides et
 //   déterministes.
+// * **Transcendantes exactes** (`gelu`) : nécessitent [`RealScalar::erf`], la
+//   fonction de répartition normale. Contrairement à `hardswish` (son
+//   approximation linéaire par morceaux), `gelu` est la forme *exacte* utilisée
+//   par BERT/GPT — plus coûteuse (un `erf`), mais sans biais d'approximation.
 //
 // Toutes sont **sans branche imprévisible côté données scientifiques** : le
 // résultat ne dépend que de la valeur d'entrée, jamais de l'ordre ou du
@@ -93,6 +97,20 @@ pub fn hardsigmoid<T: RealScalar>(x: T) -> T {
 #[must_use]
 pub fn hardswish<T: RealScalar>(x: T) -> T {
     x * hardsigmoid(x)
+}
+
+/// `GELU(x) = x·Φ(x) = 0.5·x·(1 + erf(x/√2))` — Gaussian Error Linear Unit
+/// (BERT, GPT, …), forme **exacte** (pas l'approximation `tanh` usuelle).
+///
+/// `Φ` est la fonction de répartition normale centrée réduite : contrairement
+/// à [`hardswish`] (linéaire par morceaux, sans transcendante), `gelu` utilise
+/// [`RealScalar::erf`] directement — plus coûteux, sans biais d'approximation.
+#[inline]
+#[must_use]
+pub fn gelu<T: RealScalar>(x: T) -> T {
+    let half = T::from_i32(2).recip();
+    let inv_sqrt2 = T::from_i32(2).sqrt().recip();
+    half * x * (T::one() + (x * inv_sqrt2).erf())
 }
 
 /// Applique une activation **en place** à tout un slice (sortie de couche).

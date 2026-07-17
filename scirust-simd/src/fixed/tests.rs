@@ -761,6 +761,36 @@ fn activation_hardsigmoid_hardswish() {
 }
 
 #[test]
+fn activation_gelu() {
+    // GELU(0) = 0 exact (erf(0) = 0).
+    assert_eq!(act::gelu(Q16_16::zero()), Q16_16::zero());
+    assert_eq!(act::gelu(0.0_f64), 0.0);
+
+    // Comparaison à la référence exacte 0.5·x·(1+erf(x/√2)), via la série
+    // indépendante `erf_series_ref` (définie plus bas dans ce module).
+    let gelu_ref = |x: f64| 0.5 * x * (1.0 + erf_series_ref(x / core::f64::consts::SQRT_2));
+    for &x in &[-3.0, -1.0, -0.5, 0.5, 1.0, 2.0, 3.0]
+    {
+        let want = gelu_ref(x);
+        let got = act::gelu(q16(x)).to_f64();
+        assert!(
+            (got - want).abs() <= 8.0 * ULP16,
+            "gelu({x}) = {got} vs {want}"
+        );
+        let gotf = act::gelu(x);
+        assert!(
+            (gotf - want).abs() < 1e-6,
+            "gelu_f64({x}) = {gotf} vs {want}"
+        );
+    }
+
+    // Loin à gauche : x·Φ(x) → 0 (Φ décroît plus vite que |x| ne croît).
+    assert!(act::gelu(q16(-6.0)).to_f64().abs() < 1e-2);
+    // Loin à droite : GELU(x) → x (Φ(x) → 1).
+    assert!((act::gelu(q16(6.0)).to_f64() - 6.0).abs() < 1e-2);
+}
+
+#[test]
 fn activation_apply_inplace_on_layer_output() {
     // Applique relu à la sortie d'un GEMM (couche linéaire quantifiée).
     let w = [1i32, -2, 3, -4, 5, -6].map(Q16_16::from); // 2×3
@@ -2132,6 +2162,82 @@ fn bessel_i0_generic_real_scalar() {
     assert!((RealScalar::bessel_i0(0.0f32) - 1.0).abs() < 1e-6);
     assert!((RealScalar::bessel_i0(3.0f64) - i0_series_ref(3.0)).abs() < 1e-6);
     assert!((RealScalar::bessel_i0(q16(5.0)).to_f64() - i0_series_ref(5.0)).abs() < 2e-3);
+}
+
+// ------------------------------------------------------------------ //
+//  erf / erfc (fonction d'erreur)                                    //
+// ------------------------------------------------------------------ //
+
+/// Référence indépendante : série de Maclaurin directe `erf(x) = (2/√π)·Σₙ
+/// (-1)ⁿx^{2n+1}/(n!(2n+1))`, sans lien avec le polynôme minimax de
+/// `transcendental::erf` ni la formule d'Abramowitz & Stegun de l'impl
+/// `f32`/`f64`.
+fn erf_series_ref(x: f64) -> f64 {
+    let mut term = x;
+    let mut sum = x;
+    for n in 1..300
+    {
+        let nf = n as f64;
+        term *= -x * x / nf * (2.0 * nf - 1.0) / (2.0 * nf + 1.0);
+        sum += term;
+        if term.abs() < 1e-18 * sum.abs().max(1e-300)
+        {
+            break;
+        }
+    }
+    sum * 2.0 / std::f64::consts::PI.sqrt()
+}
+
+#[test]
+fn erf_known_values() {
+    let near = |a: Q16_16, b: f64| (a.to_f64() - b).abs() <= 2.0 * ULP16;
+    assert!(near(tr::erf(Q16_16::zero()), 0.0)); // erf(0) = 0
+    assert!(near(tr::erfc(Q16_16::zero()), 1.0)); // erfc(0) = 1
+    // erf est impaire.
+    assert_eq!(tr::erf(q16(1.5)), -tr::erf(q16(-1.5)));
+    assert_eq!(tr::erf(q16(3.0)), -tr::erf(q16(-3.0)));
+}
+
+#[test]
+fn erf_ulp_bounds() {
+    // Mesuré (maillage 40 001 pts) : ≤ 0.52 ULP sur [-4.5, 4.5] — fonction
+    // bien conditionnée (sortie bornée dans [-1, 1]), contrairement à
+    // bessel_i0. Domaine borné à ±4.5, pas ±6 : au-delà, `erf_series_ref`
+    // elle-même perd sa précision par annulation catastrophique en f64
+    // (Σ de termes alternés de grande magnitude avant convergence), et cesse
+    // d'être une référence fiable — indépendamment de la justesse de
+    // `transcendental::erf`.
+    let n = 40_000;
+    assert_ulp("erf", 1.0, -4.5, 4.5, n, tr::erf, erf_series_ref);
+    assert_ulp("erfc", 1.0, -4.5, 4.5, n, tr::erfc, |x| {
+        1.0 - erf_series_ref(x)
+    });
+}
+
+#[test]
+fn erf_saturates_beyond_domain() {
+    // Au-delà du domaine ajusté ([0, 4]), erf/erfc doivent rester proches de
+    // leurs limites ±1/0 (saturation propre), sans dépendre d'une référence
+    // fragile aux grands |x| (voir `erf_ulp_bounds`).
+    for &x in &[5.0, 6.0, 8.0, 10.0]
+    {
+        let e = tr::erf(q16(x)).to_f64();
+        assert!((e - 1.0).abs() < 1e-3, "erf({x}) = {e}, attendu ≈ 1");
+        let ec = tr::erfc(q16(x)).to_f64();
+        assert!(ec.abs() < 1e-3, "erfc({x}) = {ec}, attendu ≈ 0");
+        // Impaire / symétrique.
+        assert_eq!(tr::erf(q16(-x)), -tr::erf(q16(x)));
+    }
+}
+
+#[test]
+fn erf_generic_real_scalar() {
+    // Exposée via RealScalar, cohérente f32/f64/virgule fixe. Impl f32/f64 :
+    // formule rationnelle d'Abramowitz & Stegun, erreur ≤ ~1.5e-7.
+    assert!((RealScalar::erf(0.0f32) - 0.0).abs() < 1e-6);
+    assert!((RealScalar::erf(1.0f64) - erf_series_ref(1.0)).abs() < 1e-6);
+    assert!((RealScalar::erfc(1.0f64) - (1.0 - erf_series_ref(1.0))).abs() < 1e-6);
+    assert!((RealScalar::erf(q16(2.0)).to_f64() - erf_series_ref(2.0)).abs() < 2e-3);
 }
 
 #[test]

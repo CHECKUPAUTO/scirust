@@ -2,10 +2,10 @@
 //
 // # Transcendantes en virgule fixe (`FixedI32<FRAC>`)
 //
-// `exp exp2 ln log2 sin cos tanh sigmoid atan atan2 asin acos bessel_i0` pour
-// le stockage `i32`, avec des **bornes d'erreur ULP prouvées** (balayage dense
-// sur tout le domaine actif — voir `transcendental_ulp_bounds` /
-// `bessel_i0_ulp_bounds` dans le module de tests).
+// `exp exp2 ln log2 sin cos tanh sigmoid atan atan2 asin acos bessel_i0 erf
+// erfc` pour le stockage `i32`, avec des **bornes d'erreur ULP prouvées**
+// (balayage dense sur tout le domaine actif — voir `transcendental_ulp_bounds`
+// / `bessel_i0_ulp_bounds` / `erf_ulp_bounds` dans le module de tests).
 //
 // Bornes mesurées en Q16.16 (ULP = 2⁻¹⁶) :
 //
@@ -16,6 +16,7 @@
 // | `tanh` / `sigmoid` | `[-12, 16]` | 0.50 ULP |
 // | `atan` | `[-128, 128]` | 0.50 ULP |
 // | `asin` / `acos` | `[-0.999, 0.999]` | 0.51 ULP |
+// | `erf` / `erfc` | `[-4.5, 4.5]` | 0.50 ULP |
 // | `exp` | `[-10, 10]` | 3.24 ULP |
 // | `exp2` | `[-14, 14.5]` | 5.01 ULP |
 // | `bessel_i0` | `[0, 12]` | 132 ULP (≤ 2 ULP si `I₀(x) ≤ 1024`) |
@@ -25,7 +26,9 @@
 // ULP *absolus* proportionnellement à la magnitude, donc le pire cas est au
 // sommet de la plage (`eˣ`/`2ˣ`/`I₀(x)` y sont les plus grands). Pour
 // `|résultat| ≤ 1024` l'erreur reste ≤ 1 ULP (`exp`/`exp2`) ou ≤ 2 ULP
-// (`bessel_i0`).
+// (`bessel_i0`). `erf`/`erfc` restent bien conditionnées (sortie bornée dans
+// `[-1, 1]`, pas de combinaison avec `eˣ`) : ≤ 1 ULP partout, comme
+// `sin`/`cos`/`atan`.
 //
 // ## Méthode
 //
@@ -484,6 +487,76 @@ fn bessel_i0_core(x_q32: i64) -> i128 {
 #[must_use]
 pub fn bessel_i0<const FRAC: u32>(x: Fixed<i32, FRAC>) -> Fixed<i32, FRAC> {
     from_q32(bessel_i0_core(to_q32(x)))
+}
+
+// ------------------------------------------------------------------ //
+//  erf / erfc (fonction d'erreur)                                     //
+// ------------------------------------------------------------------ //
+
+// `erf(x)` sur `x ∈ [0, 4]`, ramené à `u = x/2 − 1 ∈ [-1, 1]` puis approximé
+// par un polynôme (moindres carrés sur base de Chebyshev, degré 20, converti
+// en base de puissance de `u`, coefficients figés en Q32 bas→haut). Erreur
+// mesurée par balayage dense f64 : ≤ 0.52 ULP Q16.16/Q8.24 — cf.
+// `erf_ulp_bounds`. Contrairement à `bessel_i0`, `erf` reste borné dans
+// `[-1, 1]` : aucune combinaison avec `eˣ` n'est nécessaire, le polynôme
+// tient seul en Q32 `i64` (pas de débordement possible).
+const ERF_C: [i64; 21] = [
+    4_274_876_578,
+    177_528_012,
+    -710_112_339,
+    1_656_931_672,
+    -2_367_035_341,
+    1_798_876_738,
+    126_155_743,
+    -1_856_765_945,
+    1_750_067_221,
+    -114_967_717,
+    -1_159_211_398,
+    930_052_540,
+    102_002_508,
+    -612_039_641,
+    259_475_803,
+    197_304_778,
+    -175_892_838,
+    -30_690_111,
+    54_451_721,
+    1_253_280,
+    -7_294_047,
+];
+
+/// `erf(x_q32)` en Q32 (`i64` — `erf ∈ [-1, 1]`, jamais de débordement).
+/// Argument saturé à `[0, 4]` (`erf` étant impaire), signe réappliqué à la
+/// fin.
+#[inline]
+fn erf_core(x_q32: i64) -> i64 {
+    let x_abs = x_q32.abs();
+    let x_dom = x_abs.min(4 * ONE_Q); // domaine du polynôme : [0, 4]
+    let u = mul_q(x_dom, ONE_Q / 2) - ONE_Q; // u = x/2 − 1 ∈ [-1, 1]
+    let e = poly_q(u, &ERF_C);
+    if x_q32 < 0 { -e } else { e }
+}
+
+/// Fonction d'erreur `erf(x) = (2/√π) ∫₀ˣ e^{-t²} dt`. Impaire, `erf(0) = 0`,
+/// `erf(x) → ±1` pour `x → ±∞` — au cœur de [`crate::fixed::activation::gelu`]
+/// (`Φ(x) = (1 + erf(x/√2))/2`, la fonction de répartition normale centrée
+/// réduite).
+///
+/// Domaine du polynôme : `x ∈ [0, 4]` (`erf(4) ≈ 1 − 1.5·10⁻⁸`, indiscernable
+/// de `1` à la résolution `Q16.16`) ; erreur ULP Q16.16 ≤ 1 prouvée sur `[-4.5,
+/// 4.5]` par `erf_ulp_bounds` (fonction bien conditionnée, contrairement à
+/// `bessel_i0`). Au-delà, saturation propre vers `±1`, vérifiée jusqu'à `±10`
+/// par `erf_saturates_beyond_domain`.
+#[inline]
+#[must_use]
+pub fn erf<const FRAC: u32>(x: Fixed<i32, FRAC>) -> Fixed<i32, FRAC> {
+    from_q32(erf_core(to_q32(x)) as i128)
+}
+
+/// Fonction d'erreur complémentaire `erfc(x) = 1 − erf(x)`.
+#[inline]
+#[must_use]
+pub fn erfc<const FRAC: u32>(x: Fixed<i32, FRAC>) -> Fixed<i32, FRAC> {
+    from_q32((ONE_Q as i128) - (erf_core(to_q32(x)) as i128))
 }
 
 // ------------------------------------------------------------------ //

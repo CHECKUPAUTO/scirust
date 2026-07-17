@@ -4,10 +4,11 @@
 // aux fonctions `f32` de la bibliothèque standard.
 //
 // Mesure le **débit** (éléments/s) de `exp`, `ln`, `sin`, `tanh`, `sigmoid`,
-// `bessel_i0` et de `softmax_into`. Le but n'est pas de battre le flottant matériel (qui dispose
-// d'unités dédiées) mais de situer le coût du chemin **entièrement entier,
-// déterministe bit-à-bit** — chaque appel est une poignée de multiplications
-// `i128` et un polynôme de Horner, sans FPU ni table.
+// `bessel_i0`, `erf`/`erfc` et de `softmax_into`. Le but n'est pas de battre le
+// flottant matériel (qui dispose d'unités dédiées) mais de situer le coût du
+// chemin **entièrement entier, déterministe bit-à-bit** — chaque appel est une
+// poignée de multiplications `i128` et un polynôme de Horner, sans FPU ni
+// table.
 //
 // Lancement (cible AVX2 pour éviter la sur-détection AVX-512 en VM) :
 //   RUSTFLAGS="-C target-cpu=x86-64-v3" \
@@ -148,6 +149,20 @@ fn bench_bessel_i0(c: &mut Criterion) {
     bench_unary(c, "bessel_i0", 8.0, tr::bessel_i0::<16>, bessel_i0_f32);
 }
 
+/// `f32::erf`/`erfc` n'existent pas dans `std` : passe par `RealScalar`.
+fn erf_f32(x: f32) -> f32 {
+    RealScalar::erf(x)
+}
+fn erfc_f32(x: f32) -> f32 {
+    RealScalar::erfc(x)
+}
+fn bench_erf(c: &mut Criterion) {
+    bench_unary(c, "erf", 4.0, tr::erf::<16>, erf_f32);
+}
+fn bench_erfc(c: &mut Criterion) {
+    bench_unary(c, "erfc", 4.0, tr::erfc::<16>, erfc_f32);
+}
+
 /// Softmax sur un vecteur (activation déterministe, deux passes).
 fn bench_softmax(c: &mut Criterion) {
     let (fx, ff) = data(0x50F7, 4.0);
@@ -188,6 +203,8 @@ criterion_group!(
     bench_tanh,
     bench_sigmoid,
     bench_softmax,
-    bench_bessel_i0
+    bench_bessel_i0,
+    bench_erf,
+    bench_erfc
 );
 criterion_main!(benches);
