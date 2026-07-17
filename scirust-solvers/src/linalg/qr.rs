@@ -248,6 +248,101 @@ pub fn solve_qr_least_squares(qr: &Qr, b: &[f64]) -> SolverResult<Vec<f64>> {
     Ok(x)
 }
 
+/// Max absolute row sum — the induced ∞-norm of a matrix.
+fn row_inf_norm(m: &Matrix) -> f64 {
+    (0..m.rows())
+        .map(|i| (0..m.cols()).map(|j| m[(i, j)].abs()).sum::<f64>())
+        .fold(0.0, f64::max)
+}
+
+/// Solves the `n×n` upper-triangular system `R·x = b` by back-substitution,
+/// where `r` is a standalone triangular matrix (unlike
+/// [`solve_qr_least_squares`], this does not apply `Qᵀ` first — callers that
+/// want `A⁻¹` need `Qᵀ·b` folded in separately, but [`Qr::cond`] only ever
+/// needs `R⁻¹` itself).
+fn solve_upper_triangular(r: &Matrix, tol: f64, b: &[f64]) -> SolverResult<Vec<f64>> {
+    let n = r.rows();
+    let mut x = vec![0.0; n];
+    for i in (0..n).rev()
+    {
+        let mut s = b[i];
+        for j in (i + 1)..n
+        {
+            s -= r[(i, j)] * x[j];
+        }
+        let pivot = r[(i, i)];
+        if pivot.abs() < tol
+        {
+            return Err(SolverError::Singular { row: i, pivot });
+        }
+        x[i] = s / pivot;
+    }
+    Ok(x)
+}
+
+impl Qr {
+    /// Condition number `cond_∞(R) = ‖R‖_∞ · ‖R⁻¹‖_∞` of the `n×n`
+    /// upper-triangular factor `R` (requires `m >= n`, this crate's
+    /// least-squares convention — see [`qr_decompose`]). `R⁻¹` is formed
+    /// explicitly via `n` back-substitutions (one per identity column),
+    /// `O(n³)` total — cheaper than [`crate::linalg::lu::Lu::cond`]'s
+    /// equivalent by a constant factor, since a triangular solve needs no
+    /// forward sweep.
+    ///
+    /// This is a practical diagnostic on `R`, not an exact `cond_2(A)`: `Q`
+    /// being orthogonal means it exactly preserves the 2-norm (so
+    /// `cond_2(R) == cond_2(A)` exactly), but the ∞-norm used here for
+    /// cheapness isn't `Q`-invariant the same way. Still a useful, honest
+    /// signal of ill-conditioning for the system this decomposition solves.
+    ///
+    /// # Errors
+    /// [`SolverError::InvalidInput`] if `m < n`; anything the internal
+    /// back-substitution can return (a pivot going singular partway through
+    /// forming `R⁻¹` means `R` — and so `A` — is singular).
+    pub fn cond(&self) -> SolverResult<f64> {
+        if self.m < self.n
+        {
+            return Err(SolverError::InvalidInput(format!(
+                "cond: requires m >= n, got {}x{}",
+                self.m, self.n
+            )));
+        }
+        let r = self.r();
+        let n = self.n;
+        let max_abs = (0..n)
+            .flat_map(|i| (0..n).map(move |j| (i, j)))
+            .fold(0.0f64, |acc, (i, j)| acc.max(r[(i, j)].abs()));
+        let tol = pivot_tol(n, max_abs);
+        let r_norm = row_inf_norm(&r);
+        if r_norm == 0.0
+        {
+            // Zero R: as singular as it gets.
+            return Ok(f64::INFINITY);
+        }
+        let mut inv = Matrix::zeros(n, n);
+        let mut e = vec![0.0; n];
+        for j in 0..n
+        {
+            e.iter_mut().for_each(|x| *x = 0.0);
+            e[j] = 1.0;
+            let col = solve_upper_triangular(&r, tol, &e)?;
+            for i in 0..n
+            {
+                inv[(i, j)] = col[i];
+            }
+        }
+        Ok(r_norm * row_inf_norm(&inv))
+    }
+
+    /// Reciprocal condition number `1/cond()`, LAPACK-style: near `1.0` is
+    /// well-conditioned, near/at `0.0` is singular / numerically unreliable.
+    /// See [`Qr::cond`] for the error contract.
+    pub fn rcond(&self) -> SolverResult<f64> {
+        let c = self.cond()?;
+        Ok(if c.is_infinite() { 0.0 } else { 1.0 / c })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,6 +404,44 @@ mod tests {
         let beta = solve_qr_least_squares(&qr, &ys)?;
         assert_relative_eq!(beta[0], 2.0, epsilon = 0.05);
         assert_relative_eq!(beta[1], 1.0, epsilon = 0.1);
+        Ok(())
+    }
+
+    #[test]
+    fn cond_of_identity_is_one() -> SolverResult<()> {
+        let qr = qr_decompose(Matrix::identity(4))?;
+        assert_relative_eq!(qr.cond()?, 1.0, epsilon = 1e-9);
+        assert_relative_eq!(qr.rcond()?, 1.0, epsilon = 1e-9);
+        Ok(())
+    }
+
+    #[test]
+    fn cond_of_diagonal_matrix_matches_ratio_of_extremes() -> SolverResult<()> {
+        // diag(100, 10, 1): well-conditioned R's cond_inf equals the ratio
+        // of extreme |diagonal entries|, same as for Lu::cond on a diagonal
+        // input (see linalg::lu::tests).
+        let a = Matrix::from_row_major(3, 3, vec![100.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 1.0]);
+        let qr = qr_decompose(a)?;
+        assert_relative_eq!(qr.cond()?, 100.0, epsilon = 1e-6);
+        assert_relative_eq!(qr.rcond()?, 0.01, epsilon = 1e-6);
+        Ok(())
+    }
+
+    #[test]
+    fn cond_works_on_rectangular_overdetermined_input() -> SolverResult<()> {
+        // R is n x n regardless of m > n, so cond() must not require a
+        // square A — only m >= n (the crate's least-squares convention).
+        let xs = [0.0_f64, 1.0, 2.0, 3.0, 4.0];
+        let mut data = Vec::with_capacity(10);
+        for &x in &xs
+        {
+            data.push(x);
+            data.push(1.0);
+        }
+        let a = Matrix::from_row_major(5, 2, data);
+        let qr = qr_decompose(a)?;
+        let c = qr.cond()?;
+        assert!(c.is_finite() && c >= 1.0, "cond={c}");
         Ok(())
     }
 }
