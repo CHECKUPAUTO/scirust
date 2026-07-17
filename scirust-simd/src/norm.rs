@@ -12,8 +12,6 @@
 //! repli scalaire garanti. Toutes opèrent **par ligne** (`rows × d`, row-major)
 //! et en place. Vérifiées contre une référence scalaire dans les tests.
 
-#![allow(clippy::missing_safety_doc)]
-
 // ===================================================================== //
 //  RMSNorm                                                               //
 // ===================================================================== //
@@ -53,6 +51,11 @@ fn rmsnorm_row_scalar(row: &mut [f32], gamma: &[f32], eps: f32) {
     }
 }
 
+/// # Safety
+/// Caller must ensure AVX-512F is available and `gamma.len() >= row.len()`
+/// (checked by [`rmsnorm`]'s assert before dispatch here). `row`'s own
+/// bounds are self-contained: every `loadu`/`storeu` offset is kept
+/// `< row.len()` by the loop condition and the masked remainder tail.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 unsafe fn rmsnorm_row_avx512(row: &mut [f32], gamma: &[f32], eps: f32) {
@@ -145,6 +148,12 @@ fn layernorm_row_scalar(row: &mut [f32], gamma: &[f32], beta: &[f32], eps: f32) 
     }
 }
 
+/// # Safety
+/// Caller must ensure AVX-512F is available and `gamma.len() >= row.len()`
+/// and `beta.len() >= row.len()` (checked by [`layernorm`]'s asserts before
+/// dispatch here). `row`'s own bounds are self-contained: every
+/// `loadu`/`storeu` offset is kept `< row.len()` by the loop condition and
+/// the masked remainder tail.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 unsafe fn layernorm_row_avx512(row: &mut [f32], gamma: &[f32], beta: &[f32], eps: f32) {
