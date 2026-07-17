@@ -123,6 +123,12 @@ pub mod philox;
 pub mod portable_f32;
 pub mod pruning;
 pub mod representation_graph;
+// Depends on scirust_simd::geometry::quaternion, itself gated behind
+// portable-simd (see scirust-simd/src/lib.rs) -- gated the same way here
+// rather than force-enabling the feature crate-wide or re-deriving
+// quaternion arithmetic. CI's "portable-simd" job builds and tests this.
+#[cfg(feature = "portable-simd")]
+pub mod representation_graph_quaternion;
 pub mod reproducible;
 pub mod stochastic_round;
 pub mod transform_autotune;

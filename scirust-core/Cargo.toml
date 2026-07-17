@@ -41,3 +41,11 @@ transformer-inference = ["scirust-simd/transformer-inference"]
 blas = ["dep:blas", "dep:blas-src"]
 blas-openblas = ["blas", "blas-src/openblas"]
 blas-mkl = ["blas", "blas-src/intel-mkl"]
+
+# Depends on representation_graph_quaternion, itself gated behind
+# portable-simd (scirust_simd::geometry::quaternion) -- without this,
+# `cargo build/clippy --examples` on default features tries to build every
+# auto-discovered example and fails on this one.
+[[example]]
+name = "anee_phase_c_kernel2_quaternion"
+required-features = ["portable-simd"]

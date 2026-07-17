@@ -248,7 +248,7 @@ fn main() {
     println!("=== pre-registered kill criterion ===");
     println!(
         "  \"joint (R,A) search must reduce held-out relative error by >=20% vs. sequential\n\
-         \\   on at least 2 of 3 workload families\""
+         on at least 2 of 3 workload families\""
     );
     let survivors: Vec<&str> = results
         .iter()

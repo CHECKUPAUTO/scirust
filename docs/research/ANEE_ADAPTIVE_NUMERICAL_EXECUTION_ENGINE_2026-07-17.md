@@ -25,11 +25,16 @@ flagged as such rather than asserted.
 ## 0. Verdict
 
 > **Update, same day:** the §13 Phase C prototype below was built and benchmarked after this
-> verdict was first written. It survived its own pre-registered kill criterion (3 of 3 tested
-> workload families, see the Addendum before Appendix A) — the one candidate this report could
-> not close (§10.7) is now confirmed, narrowly, for one task. This does not change the verdict
-> below, which predates the prototype and is left as originally written; it sharpens exactly the
-> one place §14 said "unconfirmed, pending a prototype."
+> verdict was first written. It survived its own pre-registered kill criterion on its first
+> kernel (3 of 3 tested workload families, Addendum 1) — the one candidate this report could not
+> close (§10.7) was confirmed, narrowly, for one task. A second kernel (quaternion orientation
+> averaging, Addendum 2) was then tried as the honest replication check the first addendum itself
+> called for, and the **replication failed** (1 of 3 conditions, short of the pre-registered bar)
+> — a genuine, informative negative result showing the finding is conditional on the task, not
+> general. Combined, the two addenda now **actively recommend against** generalizing kernel 1's
+> win into any broader claim or tool. Neither addendum changes the verdict below, which predates
+> both prototypes and is left as originally written; together they sharpen, and then bound, the
+> one place §14 said "unconfirmed, pending a prototype." See both addenda, before Appendix A.
 
 **ANEE, as stated, does not survive falsification as a new research object — but one narrow,
 precisely-locatable piece of it survives as a genuinely open question worth a small, bounded
@@ -985,7 +990,7 @@ program to reach a "real but narrow engineering value, not a new research field"
 
 ---
 
-## Addendum (2026-07-17, same day): Phase C prototype — results
+## Addendum 1 (2026-07-17, same day): Phase C prototype — results
 
 §13's Phase C prototype was built and benchmarked the same day this report was first drafted.
 This addendum reports the outcome without altering §§0–15 above, which remain the record of
@@ -1096,6 +1101,99 @@ general planner) but to replicate on 1–2 more kernels from [CANR §9]'s canoni
 families before any claim stronger than "this specific prototype survived this specific
 benchmark" is warranted.
 
+## Addendum 2 (2026-07-17, same day): Phase C kernel 2 replication attempt — results
+
+The first addendum's own closing line named the honest next step: replicate on 1–2 more kernels
+before generalizing. This addendum reports that attempt. As with Addendum 1, §§0–15 and Addendum
+1 are left unaltered.
+
+**What was tested.** Hypercomplex orientation averaging, mirroring [ATRA]'s own X5 experiment:
+average `N=100` noisy unit-quaternion observations (isotropic Gaussian-angle noise around a
+random axis, `σ ∈ {0.2, 0.8, 1.5}` rad — [ATRA X5]'s exact three levels) of a fixed true
+orientation, over 20 trials per condition, and measure angular error in degrees. Implemented in
+`scirust-core/src/representation_graph_quaternion.rs`, using
+`scirust_simd::geometry::quaternion::Quaternion<f64>` — a real, generic, deterministic quaternion
+type already in this workspace (`slerp`/`nlerp`/`to_axis_angle`/`from_axis_angle`/`normalize`),
+not reimplemented. This module and its companion example
+(`examples/anee_phase_c_kernel2_quaternion.rs`) are gated behind the `portable-simd` feature
+(`scirust_simd::geometry` is itself feature-gated) — built and tested via `cargo test -p
+scirust-core --lib --features portable-simd` and `cargo run -p scirust-core --features
+portable-simd --example anee_phase_c_kernel2_quaternion --release`. A `required-features`
+`[[example]]` entry was added to `scirust-core/Cargo.toml` (matching `scirust-simd/Cargo.toml`'s
+own established pattern for its `transformer-inference`-gated examples) so default-feature
+`cargo build/clippy --examples` skips this example rather than failing on it.
+
+Two charts (`R`) were compared: [`Chart::Componentwise`] (ambient `ℝ⁴` mean + renormalize —
+[ATRA X5]'s "componentwise mean + renorm") and [`Chart::LogChart`] (a fixed 2-iteration
+Karcher-style tangent-space mean via log/exp maps — [ATRA X5]'s "Karcher mean"). [ATRA X5]'s
+third method (the chordal/Markley mean, requiring a symmetric eigensolver this prototype had no
+independent reason to add) was **not** replicated — an honest partial (2-of-3-method), not full,
+replication of ATRA X5's own comparison. Accumulation (`A`) reused the unmodified 5-member
+`AccumMethod` dictionary from kernel 1.
+
+**Pre-registered kill criterion: the same bar as kernel 1**, deliberately not tuned per kernel —
+joint `(Chart, A)` search must reduce mean angular error vs. sequential (always `Componentwise`,
+mirroring kernel 1's `Identity`-always-wins cost tie-break, then `A` autotuned) by ≥20% relative
+on ≥2 of the 3 tested noise levels, validated on 3 fresh held-out seeds beyond the dev/eval draw.
+
+**Result: the kill criterion is NOT MET.** Only 1 of 3 noise levels (`σ = 1.5`) shows the required
+≥20% reduction — short of the pre-registered "≥2 of 3" bar. **This is a genuine non-replication,
+reported as such, not explained away:**
+
+| σ (rad) | Sequential (plan, 3-seed mean) | Joint (plan, 3-seed mean) | Relative reduction | Criterion |
+|---|---|---|---|---|
+| 0.2 | `componentwise+NaiveF32`, 1.061° | `componentwise+NaiveF32`, 1.061° | 0.0% | not met |
+| 0.8 | `componentwise+StochasticF32`, 4.392° | `componentwise+StochasticF32`, 4.392° | 0.0% | not met |
+| 1.5 | `componentwise+NaiveF32`, 17.939° | `log-chart+StochasticF32`, 9.579° | 46.6% | MET |
+
+**The mechanism differs from kernel 1, and that difference is the interesting finding.** At
+`σ = 0.2` and `σ = 0.8`, sequential and joint search select the **identical** plan — not because
+joint search failed to explore, but because a direct chart-only ablation (holding accumulation
+fixed at `NeumaierF32`) shows `Componentwise` genuinely is as good as or better than `LogChart` at
+these noise levels (1.066° vs. 1.069° at `σ=0.2`; 4.077° vs. 4.210° at `σ=0.8` — `LogChart`
+slightly *worse* both times). Unlike kernel 1, where the sequential baseline's cost-based tie-break
+was demonstrably *myopic* to the downstream objective (§13/Addendum 1's central mechanism), here
+the cheap default (`Componentwise`) is not myopic at low/medium noise — it already is the right
+choice, so there is no exploitable `(R,A)` interaction for joint search to find. Only at `σ = 1.5`
+does `LogChart` pull ahead (13.267° vs. 10.204° in the same chart-only ablation), and **most of
+that win comes from the chart choice alone** — accumulation strategy adds a smaller further
+refinement (10.204° → 9.579–9.920° across held-out seeds), unlike kernel 1 where both axes were
+jointly essential.
+
+**Independent cross-validation of the implementation.** Three structural unit tests pass
+(zero-noise exact recovery to `<10⁻³°` for both charts; hemisphere-sign-flip robustness; log/exp
+maps verified as exact inverses to `<10⁻⁶°`), and — more importantly — the `LogChart` result at
+`σ = 1.5` (9.58–9.92° across held-out seeds) lands close to [ATRA X5]'s own, independently
+computed Karcher-mean reference value (**9.959°**, different RNG, different implementation
+language) — a reassuring consistency signal that this module's quaternion math is correct, even
+though the overall pre-registered replication claim did not survive.
+
+**What this changes about the report's conclusions.** Kernel 1 (§13 Phase C, Addendum 1) is
+unaffected on its own terms — it is a real, reproducible result for that specific task. But taken
+together with kernel 2's failure to replicate, the honest combined finding is sharper and more
+useful than either result alone: **"distribution-aware joint `(R,A)` search beats sequential
+per-axis selection" is real but conditional, not general** — it wins specifically when the
+default/cheapest choice is *objective-blind and empirically wrong* for the task at hand (kernel
+1's `Identity` always winning a cost tie-break regardless of downstream quantization behavior),
+and has nothing to offer when the default happens to already be good (kernel 2's `Componentwise`
+at low/medium noise). This yields a concrete, actionable, falsifiable heuristic that itself falls
+out of the replication attempt: **before investing in a full joint search for a new kernel, run a
+cheap single-axis ablation (exactly this addendum's "chart-only comparison" table) to check
+whether the default representation is already near-optimal for the target data regime — only
+invest in joint search where it is not.**
+
+**Updated novelty-ladder status.** With a 1-of-2-kernel replication rate (3/3 conditions on
+kernel 1; 1/3 on kernel 2, criterion not met), this report now actively **recommends against**
+generalizing the kernel-1 result into any broader claim, tool, or crate — reinforcing, with direct
+evidence rather than only caution, [CANR §12]/[ANEE §13]'s original instruction not to broaden
+scope before replication. The representation-graph-plus-distribution-aware-cache candidate's
+confirmed status is narrowed accordingly: **level 6, for kernel 1's specific task only; not
+demonstrated to generalize, and one kernel's worth of evidence now weighs against assuming it
+does by default.** No further kernel replications or scope expansion are recommended as a next
+step from this report; the boundary condition identified above (joint search only pays when the
+cheap default is objective-blind) is the more valuable and more narrowly defensible takeaway than
+either individual kernel's win/loss.
+
 ## Appendix A — Experiment index
 
 `docs/research/anee_experiments/anee_experiments.py` (pure stdlib Python 3, deterministic, fixed
@@ -1108,11 +1206,20 @@ determinism composes as a lattice meet (weakest link), not an average, across 20
 permutations per stage. All numbers quoted in §§4, 7, 8 came from this committed script's output
 on 2026-07-17.
 
-**Phase C prototype** (see the Addendum above): `scirust-core/src/representation_graph.rs`
+**Phase C prototype, kernel 1** (see Addendum 1): `scirust-core/src/representation_graph.rs`
 (library) and `scirust-core/examples/anee_phase_c_prototype.rs` (benchmark, run via
 `cargo run -p scirust-core --example anee_phase_c_prototype --release`), Rust, deterministic
 (fixed seeds), part of the `scirust-core` crate's normal `cargo test`/`cargo clippy` surface. All
-numbers quoted in the Addendum came from this committed code's output on 2026-07-17.
+numbers quoted in Addendum 1 came from this committed code's output on 2026-07-17.
+
+**Phase C prototype, kernel 2 (replication attempt)** (see Addendum 2):
+`scirust-core/src/representation_graph_quaternion.rs` (library) and
+`scirust-core/examples/anee_phase_c_kernel2_quaternion.rs` (benchmark), Rust, deterministic
+(fixed seeds), gated behind the `portable-simd` feature (`scirust_simd::geometry::quaternion` is
+itself feature-gated) — run via `cargo test -p scirust-core --lib --features portable-simd` and
+`cargo run -p scirust-core --features portable-simd --example anee_phase_c_kernel2_quaternion
+--release`. All numbers quoted in Addendum 2 came from this committed code's output on
+2026-07-17.
 
 ## Appendix B — Verified sources (this phase, not already in [TSA]/[ATRA]/[CANR] Appendix B)
 
