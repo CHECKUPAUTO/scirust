@@ -18,7 +18,9 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::fixed::Q16_16;
-use scirust_simd::fixed::conv2d::{Conv2dShape, conv2d, conv2d_batch};
+use scirust_simd::fixed::conv2d::{
+    Conv2dShape, conv2d, conv2d_batch, depthwise_conv2d, separable_conv2d,
+};
 use scirust_simd::fixed::pool2d::{Pool2dShape, avg_pool2d, max_pool2d};
 
 /// Taille de lot pour `bench_conv2d_batch`.
@@ -212,5 +214,65 @@ fn bench_conv2d_batch(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(benches, bench_conv2d, bench_pool2d, bench_conv2d_batch);
+/// Convolution séparable en profondeur (MobileNet) face à une convolution
+/// dense équivalente (`bench_conv2d` ci-dessus, mêmes dimensions) : le débit
+/// (MAC/s) est comparable, mais le **nombre total** de MAC est bien moindre
+/// (`in·kh·kw + in·out` contre `in·out·kh·kw` par pixel de sortie) — cf.
+/// en-tête de module de `fixed::conv2d`.
+fn bench_separable_conv2d(c: &mut Criterion) {
+    let shape = Conv2dShape {
+        in_channels: IN_CHANNELS,
+        height: HEIGHT,
+        width: WIDTH,
+        out_channels: IN_CHANNELS, // la phase profonde ne change pas le nombre de canaux
+        kernel_h: KERNEL,
+        kernel_w: KERNEL,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let x = fixed_data(0x4, IN_CHANNELS * HEIGHT * WIDTH);
+    let dw = fixed_data(0x5, IN_CHANNELS * KERNEL * KERNEL);
+    let db = fixed_data(0x6, IN_CHANNELS);
+    let pw = fixed_data(0x7, OUT_CHANNELS * IN_CHANNELS);
+    let pb = fixed_data(0x8, OUT_CHANNELS);
+
+    let spatial_out = shape.height_out() * shape.width_out();
+    let mac_count_dense = (OUT_CHANNELS * IN_CHANNELS * KERNEL * KERNEL * spatial_out) as u64;
+    let mac_count_separable =
+        ((IN_CHANNELS * KERNEL * KERNEL + IN_CHANNELS * OUT_CHANNELS) * spatial_out) as u64;
+
+    let mut g = c.benchmark_group("separable_conv2d");
+    g.throughput(Throughput::Elements(mac_count_separable));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter(|| {
+            separable_conv2d(
+                black_box(&x),
+                black_box(&dw),
+                black_box(&db),
+                black_box(&pw),
+                black_box(&pb),
+                shape,
+                OUT_CHANNELS,
+            )
+        })
+    });
+    g.bench_function(BenchmarkId::new("fixed", "depthwise_only"), |bch| {
+        bch.iter(|| depthwise_conv2d(black_box(&x), black_box(&dw), black_box(&db), shape))
+    });
+    g.finish();
+
+    eprintln!(
+        "séparable : {mac_count_separable} MAC vs {mac_count_dense} MAC pour une dense équivalente \
+         ({:.1}× moins)",
+        mac_count_dense as f64 / mac_count_separable as f64
+    );
+}
+
+criterion_group!(
+    benches,
+    bench_conv2d,
+    bench_pool2d,
+    bench_conv2d_batch,
+    bench_separable_conv2d
+);
 criterion_main!(benches);

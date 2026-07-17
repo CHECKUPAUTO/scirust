@@ -10,7 +10,7 @@
 use super::activation as act;
 use super::attention::{attention, causal_attention, multi_head_attention};
 use super::conv::{Conv1dShape, conv1d, conv1d_batch};
-use super::conv2d::{Conv2dShape, conv2d, conv2d_batch};
+use super::conv2d::{Conv2dShape, conv2d, conv2d_batch, depthwise_conv2d, separable_conv2d};
 use super::kv_cache::KvCache;
 use super::layer::Linear;
 use super::linalg;
@@ -2627,6 +2627,175 @@ fn conv2d_batch_dim_mismatch_panics() {
         stride_w: 1,
     };
     let _ = conv2d_batch(&x, 2, &w, &b, shape);
+}
+
+// ------------------------------------------------------------------ //
+//  Convolution séparable en profondeur (depthwise, MobileNet)          //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn depthwise_conv2d_known_small() {
+    // 2 canaux 3×3, noyaux 2×2 distincts par canal, stride (1,1).
+    // Canal 0 : x = 1..9, noyau [[1,0],[0,-1]] → y = x[oh,ow]-x[oh+1,ow+1] = -4 partout.
+    // Canal 1 : x = 10× (1..9), noyau [[1,0],[0,1]] → y = x[oh,ow]+x[oh+1,ow+1].
+    let x0 = [1i32, 2, 3, 4, 5, 6, 7, 8, 9];
+    let x1: Vec<i32> = x0.iter().map(|v| v * 10).collect();
+    let x: Vec<Q16_16> = x0
+        .iter()
+        .chain(x1.iter())
+        .copied()
+        .map(Q16_16::from)
+        .collect();
+    let w = [1i32, 0, 0, -1, /* canal 1 */ 1, 0, 0, 1].map(Q16_16::from);
+    let b = [Q16_16::zero(), Q16_16::zero()];
+    let shape = Conv2dShape {
+        in_channels: 2,
+        height: 3,
+        width: 3,
+        out_channels: 2,
+        kernel_h: 2,
+        kernel_w: 2,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let y = depthwise_conv2d(&x, &w, &b, shape);
+    // Canal 0 : -4 partout (2×2 sorties). Canal 1 : x[oh,ow]+x[oh+1,ow+1] pour
+    // x1 = 10,20,30,40,50,60,70,80,90 → (10+50,20+60,40+80,50+90) = (60,80,120,140).
+    assert_eq!(y, [-4i32, -4, -4, -4, 60, 80, 120, 140].map(Q16_16::from));
+}
+
+#[test]
+fn depthwise_conv2d_matches_block_diagonal_full_conv() {
+    // Une convolution profonde équivaut exactement à une convolution dense
+    // (`conv2d`) dont le tenseur de poids est bloc-diagonal :
+    // full[co,ci,kh,kw] = depthwise[ci,kh,kw] si co==ci, sinon 0 — vérifie
+    // depthwise_conv2d contre conv2d (déjà testée), sans référence indépendante.
+    let mut rng = Lcg(0xDEDE_2001);
+    let cases = [
+        (2usize, 8usize, 8usize, 3usize, 3usize, 2usize, 2usize),
+        (3, 10, 7, 3, 2, 2, 1),
+        (1, 5, 6, 5, 5, 1, 1),
+    ];
+    for &(channels, height, width, kernel_h, kernel_w, stride_h, stride_w) in &cases
+    {
+        let shape = Conv2dShape {
+            in_channels: channels,
+            height,
+            width,
+            out_channels: channels,
+            kernel_h,
+            kernel_w,
+            stride_h,
+            stride_w,
+        };
+        let x: Vec<Q16_16> = (0..channels * height * width)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+            .collect();
+        let depthwise_w: Vec<Q16_16> = (0..channels * kernel_h * kernel_w)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+            .collect();
+        let b: Vec<Q16_16> = (0..channels)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+            .collect();
+
+        let mut full_w = vec![Q16_16::zero(); channels * channels * kernel_h * kernel_w];
+        let kernel_size = kernel_h * kernel_w;
+        for ci in 0..channels
+        {
+            full_w[(ci * channels + ci) * kernel_size..(ci * channels + ci + 1) * kernel_size]
+                .copy_from_slice(&depthwise_w[ci * kernel_size..(ci + 1) * kernel_size]);
+        }
+
+        let got = depthwise_conv2d(&x, &depthwise_w, &b, shape);
+        let want = conv2d(&x, &full_w, &b, shape);
+        assert_eq!(got, want, "channels={channels} shape={shape:?}");
+    }
+}
+
+#[test]
+#[should_panic(expected = "depthwise_conv2d")]
+fn depthwise_conv2d_requires_out_eq_in_channels() {
+    let x = vec![Q16_16::zero(); 2 * 3 * 3];
+    let w = vec![Q16_16::zero(); 2 * 2 * 2];
+    let b = vec![Q16_16::zero(); 2];
+    let shape = Conv2dShape {
+        in_channels: 2,
+        height: 3,
+        width: 3,
+        out_channels: 3, // devrait valoir in_channels = 2
+        kernel_h: 2,
+        kernel_w: 2,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let _ = depthwise_conv2d(&x, &w, &b, shape);
+}
+
+#[test]
+#[should_panic(expected = "depthwise_conv2d")]
+fn depthwise_conv2d_weights_dim_mismatch_panics() {
+    let x = vec![Q16_16::zero(); 2 * 3 * 3];
+    let w = vec![Q16_16::zero(); 5]; // devrait être 2×2×2 = 8
+    let b = vec![Q16_16::zero(); 2];
+    let shape = Conv2dShape {
+        in_channels: 2,
+        height: 3,
+        width: 3,
+        out_channels: 2,
+        kernel_h: 2,
+        kernel_w: 2,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let _ = depthwise_conv2d(&x, &w, &b, shape);
+}
+
+#[test]
+fn separable_conv2d_matches_depthwise_then_pointwise() {
+    let mut rng = Lcg(0xDEDE_2002);
+    let (in_channels, out_channels, height, width, kernel_h, kernel_w) =
+        (3usize, 5usize, 6usize, 6usize, 3usize, 3usize);
+    let shape = Conv2dShape {
+        in_channels,
+        height,
+        width,
+        out_channels: in_channels,
+        kernel_h,
+        kernel_w,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let x: Vec<Q16_16> = (0..in_channels * height * width)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+        .collect();
+    let dw: Vec<Q16_16> = (0..in_channels * kernel_h * kernel_w)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+        .collect();
+    let db: Vec<Q16_16> = (0..in_channels)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+        .collect();
+    let pw: Vec<Q16_16> = (0..out_channels * in_channels)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+        .collect();
+    let pb: Vec<Q16_16> = (0..out_channels)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+        .collect();
+
+    let got = separable_conv2d(&x, &dw, &db, &pw, &pb, shape, out_channels);
+
+    let depthwise_out = depthwise_conv2d(&x, &dw, &db, shape);
+    let pointwise_shape = Conv2dShape {
+        in_channels,
+        height: shape.height_out(),
+        width: shape.width_out(),
+        out_channels,
+        kernel_h: 1,
+        kernel_w: 1,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let want = conv2d(&depthwise_out, &pw, &pb, pointwise_shape);
+    assert_eq!(got, want);
 }
 
 // ------------------------------------------------------------------ //

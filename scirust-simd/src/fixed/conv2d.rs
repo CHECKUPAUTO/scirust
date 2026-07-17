@@ -35,6 +35,21 @@
 // [`super::layer::Linear::forward_batch`]. [`super::pool2d`] et
 // [`super::activation`] batchent déjà gratuitement (opérations purement par
 // canal) en repliant `batch` dans l'axe `channels` de la sortie.
+//
+// ## Convolution séparable en profondeur (MobileNet)
+//
+// [`depthwise_conv2d`] applique **un noyau indépendant par canal d'entrée**
+// (aucun mélange inter-canaux, contrairement à [`conv2d`]) : `out_channels`
+// vaut nécessairement `in_channels`. Ce n'est **pas** un GEMM (chaque canal
+// est une réduction indépendante de `kernel_h·kernel_w` éléments via
+// [`super::reductions::dot`], pas de somme sur les canaux) — le coût descend
+// de `O(in·out·kh·kw)` (convolution dense) à `O(in·kh·kw)` par pixel de
+// sortie. [`separable_conv2d`] compose [`depthwise_conv2d`] avec une
+// convolution **ponctuelle** `1×1` (mélange inter-canaux, coût `O(in·out)`) :
+// c'est exactement [`conv2d`] avec `kernel_h = kernel_w = 1` — aucun code
+// neuf pour la partie ponctuelle, seul l'assemblage est nouveau. Coût total
+// `O(in·kh·kw + in·out)`, à comparer aux `O(in·out·kh·kw)` d'une convolution
+// dense équivalente — l'économie classique de MobileNet.
 
 use super::reductions::FixedReducible;
 
@@ -298,4 +313,131 @@ pub fn conv2d_batch<T: FixedReducible>(
         }
     }
     y
+}
+
+/// Convolution 2D **profonde** (depthwise), déterministe : un noyau `kernel_h
+/// × kernel_w` indépendant par canal d'entrée (cf. en-tête de module).
+///
+/// `x` : `shape.in_channels × shape.height × shape.width` ; `weights` :
+/// `shape.in_channels × shape.kernel_h × shape.kernel_w` (**un** noyau par
+/// canal — pas `out_channels × in_channels × kh × kw` comme [`conv2d`]) ;
+/// `bias` : `shape.in_channels`. Retourne `shape.in_channels ×
+/// shape.height_out() × shape.width_out()`.
+///
+/// Panique si `shape.out_channels != shape.in_channels` (une convolution
+/// profonde ne change pas le nombre de canaux), si les longueurs de slice ne
+/// correspondent pas aux dimensions annoncées, ou selon les préconditions de
+/// [`Conv2dShape::height_out`]/[`Conv2dShape::width_out`].
+#[must_use]
+pub fn depthwise_conv2d<T: FixedReducible>(
+    x: &[T],
+    weights: &[T],
+    bias: &[T],
+    shape: Conv2dShape,
+) -> Vec<T> {
+    assert_eq!(
+        shape.out_channels, shape.in_channels,
+        "depthwise_conv2d : out_channels ({}) doit égaler in_channels ({}) — un noyau par canal",
+        shape.out_channels, shape.in_channels
+    );
+    let height_out = shape.height_out();
+    let width_out = shape.width_out();
+    let kernel_size = shape.kernel_h * shape.kernel_w;
+    let channel_size = shape.height * shape.width;
+    assert_eq!(
+        x.len(),
+        shape.in_channels * channel_size,
+        "depthwise_conv2d : x de longueur {} ≠ {}×{}×{}",
+        x.len(),
+        shape.in_channels,
+        shape.height,
+        shape.width
+    );
+    assert_eq!(
+        weights.len(),
+        shape.in_channels * kernel_size,
+        "depthwise_conv2d : poids de longueur {} ≠ {}×{}×{} (un noyau par canal)",
+        weights.len(),
+        shape.in_channels,
+        shape.kernel_h,
+        shape.kernel_w
+    );
+    assert_eq!(
+        bias.len(),
+        shape.in_channels,
+        "depthwise_conv2d : biais de longueur {} ≠ {}",
+        bias.len(),
+        shape.in_channels
+    );
+
+    let spatial_out = height_out * width_out;
+    let mut y = vec![T::ZERO; shape.in_channels * spatial_out];
+    let mut window = vec![T::ZERO; kernel_size];
+    for ci in 0..shape.in_channels
+    {
+        let kernel = &weights[ci * kernel_size..(ci + 1) * kernel_size];
+        let x_ci = &x[ci * channel_size..(ci + 1) * channel_size];
+        for oh in 0..height_out
+        {
+            for ow in 0..width_out
+            {
+                let mut idx = 0;
+                for kh in 0..shape.kernel_h
+                {
+                    for kw in 0..shape.kernel_w
+                    {
+                        let h = oh * shape.stride_h + kh;
+                        let w = ow * shape.stride_w + kw;
+                        window[idx] = x_ci[h * shape.width + w];
+                        idx += 1;
+                    }
+                }
+                let acc = super::reductions::dot(kernel, &window);
+                y[ci * spatial_out + oh * width_out + ow] = acc.wrapping_add(bias[ci]);
+            }
+        }
+    }
+    y
+}
+
+/// Convolution séparable en profondeur (MobileNet), déterministe :
+/// [`depthwise_conv2d`] suivie d'une convolution ponctuelle `1×1` (mélange
+/// inter-canaux, via [`conv2d`] — cf. en-tête de module).
+///
+/// `x`/`shape` comme [`depthwise_conv2d`] (`shape.out_channels ==
+/// shape.in_channels`). `pointwise_weights` : `out_channels ×
+/// shape.in_channels × 1 × 1` (soit `out_channels × shape.in_channels`,
+/// même convention que [`conv2d`]) ; `pointwise_bias` : `out_channels`.
+/// Retourne `out_channels × shape.height_out() × shape.width_out()`.
+///
+/// Panique selon les préconditions de [`depthwise_conv2d`] et de [`conv2d`]
+/// (appliqué à la sortie profonde avec un noyau `1×1`).
+#[must_use]
+#[allow(clippy::too_many_arguments)]
+pub fn separable_conv2d<T: FixedReducible>(
+    x: &[T],
+    depthwise_weights: &[T],
+    depthwise_bias: &[T],
+    pointwise_weights: &[T],
+    pointwise_bias: &[T],
+    shape: Conv2dShape,
+    out_channels: usize,
+) -> Vec<T> {
+    let depthwise_out = depthwise_conv2d(x, depthwise_weights, depthwise_bias, shape);
+    let pointwise_shape = Conv2dShape {
+        in_channels: shape.in_channels,
+        height: shape.height_out(),
+        width: shape.width_out(),
+        out_channels,
+        kernel_h: 1,
+        kernel_w: 1,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    conv2d(
+        &depthwise_out,
+        pointwise_weights,
+        pointwise_bias,
+        pointwise_shape,
+    )
 }
