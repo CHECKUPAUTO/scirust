@@ -104,6 +104,10 @@
 //   [`attention`] et [`kv_cache`] (préremplissage par lot **et** décodage
 //   incrémental) ; le pendant déterministe du module flottant
 //   [`crate::transformer`].
+// * [`model`] — pile de blocs décodeur ([`model::TransformerModel`]) :
+//   préremplissage par lot, décodage incrémental à travers toute la pile
+//   (un cache KV par couche) et boucle de génération sur l'état caché ; le
+//   pendant déterministe du module flottant [`crate::model`].
 
 pub mod activation;
 pub mod attention;
@@ -114,6 +118,7 @@ pub mod kv_cache;
 pub mod layer;
 pub mod linalg;
 pub mod math;
+pub mod model;
 pub mod norm;
 pub mod ops;
 pub mod overflow;

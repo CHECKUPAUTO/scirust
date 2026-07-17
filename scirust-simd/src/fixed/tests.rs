@@ -15,6 +15,7 @@ use super::kv_cache::KvCache;
 use super::layer::Linear;
 use super::linalg;
 use super::math::{reciprocal, rsqrt, sqrt};
+use super::model::TransformerModel;
 use super::norm::{layer_norm, rmsnorm, rope_apply};
 use super::pool::{Pool1dShape, avg_pool1d, max_pool1d};
 use super::pool2d::{Pool2dShape, avg_pool2d, max_pool2d};
@@ -4219,4 +4220,180 @@ fn transformer_block_forward_dim_mismatch_panics() {
     let (block, _x0_f, _x0_q, s, d, _h, _dff) = build_test_block(true);
     let mut x = vec![Q16_16::zero(); s * d - 1]; // longueur incorrecte
     let _ = block.forward(&mut x, s);
+}
+
+// ------------------------------------------------------------------ //
+//  Modèle Transformer multi-couche (pile de TransformerBlock)          //
+// ------------------------------------------------------------------ //
+
+/// Construit un [`TransformerBlock`] de test (`d=8`, `h=2`, `dff=16`, causal)
+/// avec des poids décalés par `seed_base` — pour empiler plusieurs couches
+/// distinctes dans un [`TransformerModel`] (même dimension modèle, poids
+/// différents, comme des couches réellement entraînées indépendamment).
+fn build_fixed_block_seeded(seed_base: f64) -> TransformerBlock<16> {
+    let (d, dff) = (8usize, 16usize);
+    // Poids réduits d'un facteur 10 par rapport à `mk_f64` (utilisé pour le
+    // test à un seul bloc) : empilés sur plusieurs couches **et** réinjectés
+    // à travers plusieurs pas de génération (`generate_hidden`), le flux
+    // résiduel non normalisé par gain (poids non entraînés) croît sinon assez
+    // vite pour déborder la plage `Q16.16` (~±32768) après quelques passes.
+    let to_q = |v: Vec<f64>| -> Vec<Q16_16> { v.into_iter().map(|x| q16(x * 0.1)).collect() };
+    TransformerBlock::new(
+        d,
+        2,
+        dff,
+        Linear::new(
+            to_q(mk_f64(d * d, seed_base + 1.0)),
+            vec![Q16_16::zero(); d],
+            d,
+            d,
+        ),
+        Linear::new(
+            to_q(mk_f64(d * d, seed_base + 2.0)),
+            vec![Q16_16::zero(); d],
+            d,
+            d,
+        ),
+        Linear::new(
+            to_q(mk_f64(d * d, seed_base + 3.0)),
+            vec![Q16_16::zero(); d],
+            d,
+            d,
+        ),
+        Linear::new(
+            to_q(mk_f64(d * d, seed_base + 4.0)),
+            vec![Q16_16::zero(); d],
+            d,
+            d,
+        ),
+        Linear::new(
+            to_q(mk_f64(d * dff, seed_base + 5.0)),
+            to_q(mk_f64(dff, seed_base + 6.0)),
+            dff,
+            d,
+        ),
+        Linear::new(
+            to_q(mk_f64(dff * d, seed_base + 7.0)),
+            vec![Q16_16::zero(); d],
+            d,
+            dff,
+        ),
+        to_q((0..d).map(|i| 1.0 + i as f64 * 0.01).collect()),
+        to_q((0..d).map(|i| 0.9 + i as f64 * 0.02).collect()),
+        q16(1e-3),
+        q16(10000.0),
+        true,
+    )
+}
+
+#[test]
+fn transformer_model_stack_decode_matches_prefill_bit_exact() {
+    // Comme pour un bloc seul (`decode_matches_prefill_bit_exact`), décoder
+    // token par token à travers toute la pile (un cache par couche)
+    // reproduit **bit-à-bit** le préremplissage causal en bloc de toute la
+    // pile : propriété propagée sans perte depuis `fixed::transformer`, cf.
+    // en-tête de module.
+    let (s, d, n_layers) = (6usize, 8usize, 3usize);
+    let blocks: Vec<_> = (0..n_layers)
+        .map(|l| build_fixed_block_seeded(l as f64 * 10.0))
+        .collect();
+    let model = TransformerModel::new(blocks);
+    assert_eq!(model.n_layers(), n_layers);
+    assert_eq!(model.d_model(), d);
+
+    let x0: Vec<Q16_16> = (0..s * d).map(|i| q16((i as f64 * 0.05).cos())).collect();
+
+    let mut prefill = x0.clone();
+    model.prefill(&mut prefill, s).expect("rmsnorm bien défini");
+
+    let mut caches = model.new_caches(s);
+    let mut decoded = vec![Q16_16::zero(); s * d];
+    for t in 0..s
+    {
+        let mut row = x0[t * d..t * d + d].to_vec();
+        model
+            .decode_step(&mut row, t, &mut caches)
+            .expect("rmsnorm bien défini");
+        decoded[t * d..t * d + d].copy_from_slice(&row);
+    }
+
+    assert_eq!(
+        decoded, prefill,
+        "décodage empilé doit être bit-exact vis-à-vis du préremplissage"
+    );
+}
+
+#[test]
+fn transformer_model_generate_hidden_is_deterministic() {
+    let (d, n_layers) = (8usize, 2usize);
+    let blocks: Vec<_> = (0..n_layers)
+        .map(|l| build_fixed_block_seeded(l as f64 * 5.0))
+        .collect();
+    let model = TransformerModel::new(blocks);
+
+    let (prompt_len, n_new) = (3usize, 4usize);
+    let prompt: Vec<Q16_16> = (0..prompt_len * d)
+        .map(|i| q16((i as f64 * 0.1).sin()))
+        .collect();
+
+    let a = model
+        .generate_hidden(&prompt, prompt_len, n_new)
+        .expect("rmsnorm bien défini");
+    assert_eq!(a.len(), n_new * d);
+
+    // Déterministe par construction : deux exécutions identiques.
+    let b = model
+        .generate_hidden(&prompt, prompt_len, n_new)
+        .expect("rmsnorm bien défini");
+    assert_eq!(a, b, "génération non déterministe");
+}
+
+#[test]
+#[should_panic(expected = "au moins un bloc")]
+fn transformer_model_new_rejects_empty() {
+    let _: TransformerModel<16> = TransformerModel::new(Vec::new());
+}
+
+#[test]
+#[should_panic(expected = "d_model doit être homogène")]
+fn transformer_model_new_rejects_heterogeneous_d_model() {
+    let b1 = build_fixed_block_seeded(0.0); // d_model = 8
+    let (d2, dff2) = (4usize, 8usize);
+    let zero2 = vec![Q16_16::zero(); d2];
+    let b2 = TransformerBlock::new(
+        d2,
+        2,
+        dff2,
+        Linear::new(vec![Q16_16::zero(); d2 * d2], zero2.clone(), d2, d2),
+        Linear::new(vec![Q16_16::zero(); d2 * d2], zero2.clone(), d2, d2),
+        Linear::new(vec![Q16_16::zero(); d2 * d2], zero2.clone(), d2, d2),
+        Linear::new(vec![Q16_16::zero(); d2 * d2], zero2.clone(), d2, d2),
+        Linear::new(
+            vec![Q16_16::zero(); d2 * dff2],
+            vec![Q16_16::zero(); dff2],
+            dff2,
+            d2,
+        ),
+        Linear::new(vec![Q16_16::zero(); dff2 * d2], zero2.clone(), d2, dff2),
+        zero2.clone(),
+        zero2,
+        q16(1e-3),
+        q16(10000.0),
+        true,
+    );
+    let _ = TransformerModel::new(vec![b1, b2]);
+}
+
+#[test]
+#[should_panic(expected = "cache(s) fourni(s)")]
+fn transformer_model_decode_step_wrong_cache_count_panics() {
+    let blocks: Vec<_> = (0..2)
+        .map(|l| build_fixed_block_seeded(l as f64 * 5.0))
+        .collect();
+    let model = TransformerModel::new(blocks);
+    let d = model.d_model();
+    let mut caches = model.new_caches(4);
+    caches.pop(); // 1 seul cache pour 2 couches
+    let mut row = vec![Q16_16::zero(); d];
+    let _ = model.decode_step(&mut row, 0, &mut caches);
 }
