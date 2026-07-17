@@ -4,10 +4,12 @@
 //! deterministic shape inference and pre-execution resource validation.
 
 mod active;
+mod interpreter;
 mod ir;
 mod verify;
 
 pub use active::analyze_active;
+pub use interpreter::{ExecutionError, ExecutionResult, execute_program};
 pub use ir::{TensorInstruction, TensorProgram};
 pub use verify::{ProgramError, VerificationLimits, VerifiedProgram, verify_program};
 
