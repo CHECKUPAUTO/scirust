@@ -173,6 +173,64 @@ pub fn solve(a: Matrix, b: &[f64]) -> SolverResult<Vec<f64>> {
     solve_lu(&lu, b)
 }
 
+/// Max absolute row sum — the induced ∞-norm of a matrix.
+fn row_inf_norm(m: &Matrix) -> f64 {
+    (0..m.rows())
+        .map(|i| (0..m.cols()).map(|j| m[(i, j)].abs()).sum::<f64>())
+        .fold(0.0, f64::max)
+}
+
+impl Lu {
+    /// Condition number `cond_∞(A) = ‖A‖_∞ · ‖A⁻¹‖_∞`, computed by explicitly
+    /// forming `A⁻¹` via `n` triangular solves (one per column of the
+    /// identity) — `O(n³)`, the same order as the LU factorization itself.
+    /// `a` must be the original (undecomposed) matrix this `Lu` came from —
+    /// `lu_decompose` consumes its input, so the caller keeps its own
+    /// reference/clone if `cond`/`rcond` will be needed.
+    ///
+    /// # Errors
+    /// [`SolverError::DimensionMismatch`] if `a`'s shape doesn't match this
+    /// factorization; anything [`solve_lu`] can return (a pivot going
+    /// singular partway through forming `A⁻¹` means `A` itself is singular).
+    pub fn cond(&self, a: &Matrix) -> SolverResult<f64> {
+        let n = self.lu.rows();
+        if a.rows() != n || a.cols() != n
+        {
+            return Err(SolverError::DimensionMismatch {
+                expected: n,
+                got: a.rows(),
+            });
+        }
+        let a_norm = row_inf_norm(a);
+        if a_norm == 0.0
+        {
+            // Zero matrix: as singular as it gets.
+            return Ok(f64::INFINITY);
+        }
+        let mut inv = Matrix::zeros(n, n);
+        let mut e = vec![0.0; n];
+        for j in 0..n
+        {
+            e.iter_mut().for_each(|x| *x = 0.0);
+            e[j] = 1.0;
+            let col = solve_lu(self, &e)?;
+            for i in 0..n
+            {
+                inv[(i, j)] = col[i];
+            }
+        }
+        Ok(a_norm * row_inf_norm(&inv))
+    }
+
+    /// Reciprocal condition number `1/cond()`, LAPACK-style: near `1.0` is
+    /// well-conditioned, near/at `0.0` is singular / numerically unreliable
+    /// to invert. See [`Lu::cond`] for the `a` parameter and error contract.
+    pub fn rcond(&self, a: &Matrix) -> SolverResult<f64> {
+        let c = self.cond(a)?;
+        Ok(if c.is_infinite() { 0.0 } else { 1.0 / c })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,6 +306,39 @@ mod tests {
                 assert_relative_eq!(prod[(i, j)], id[(i, j)], epsilon = 1e-10);
             }
         }
+        Ok(())
+    }
+
+    #[test]
+    fn cond_of_identity_is_one() -> SolverResult<()> {
+        let a = Matrix::identity(4);
+        let lu = lu_decompose(a.clone())?;
+        assert_relative_eq!(lu.cond(&a)?, 1.0, epsilon = 1e-10);
+        assert_relative_eq!(lu.rcond(&a)?, 1.0, epsilon = 1e-10);
+        Ok(())
+    }
+
+    #[test]
+    fn cond_of_diagonal_matrix_matches_ratio_of_extremes() -> SolverResult<()> {
+        // diag(100, 10, 1): ||A||_inf = 100, ||A^-1||_inf = 1 (row 1/1=1) ->
+        // cond_inf = 100 * 1 = 100. (For a diagonal matrix cond_inf equals
+        // the ratio of extreme |entries|, same as cond_2 here.)
+        let a = Matrix::from_row_major(3, 3, vec![100.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 1.0]);
+        let lu = lu_decompose(a.clone())?;
+        assert_relative_eq!(lu.cond(&a)?, 100.0, epsilon = 1e-8);
+        assert_relative_eq!(lu.rcond(&a)?, 0.01, epsilon = 1e-8);
+        Ok(())
+    }
+
+    #[test]
+    fn cond_rejects_shape_mismatch() -> SolverResult<()> {
+        let a = Matrix::identity(3);
+        let lu = lu_decompose(a)?;
+        let wrong_shape = Matrix::identity(2);
+        assert!(matches!(
+            lu.cond(&wrong_shape),
+            Err(SolverError::DimensionMismatch { .. })
+        ));
         Ok(())
     }
 }
