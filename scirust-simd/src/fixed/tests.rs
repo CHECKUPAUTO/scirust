@@ -14,6 +14,7 @@ use super::conv2d::{Conv2dShape, conv2d, conv2d_batch};
 use super::layer::Linear;
 use super::linalg;
 use super::math::{reciprocal, rsqrt, sqrt};
+use super::norm::{layer_norm, rmsnorm};
 use super::pool::{Pool1dShape, avg_pool1d, max_pool1d};
 use super::pool2d::{Pool2dShape, avg_pool2d, max_pool2d};
 use super::reductions as red;
@@ -3443,4 +3444,183 @@ fn multi_head_attention_causal_requires_equal_s_t_panics() {
     let k = [Q16_16::one(); 12]; // t=3, dm=4 (t != s)
     let v = [Q16_16::one(); 12];
     let _ = multi_head_attention(&q, 2, 3, 2, 2, &k, &v, Q16_16::one(), true);
+}
+
+// ------------------------------------------------------------------ //
+//  RMSNorm / LayerNorm (déterministe)                                 //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn rmsnorm_known_small() {
+    // x=[1,1,1,1] : moyenne(x²)=1, rms=1 (exact) → y = x/rms · gamma = gamma.
+    let x = [1i32, 1, 1, 1].map(Q16_16::from);
+    let gamma = [2i32, 3, 4, 5].map(Q16_16::from);
+    let y = rmsnorm(&x, 1, 4, &gamma, Q16_16::zero()).unwrap();
+    assert_eq!(y, gamma);
+}
+
+fn rmsnorm_ref_f64(x: &[f64], rows: usize, d: usize, gamma: &[f64], eps: f64) -> Vec<f64> {
+    let mut y = vec![0.0f64; rows * d];
+    for r in 0..rows
+    {
+        let row = &x[r * d..r * d + d];
+        let ms: f64 = row.iter().map(|v| v * v).sum::<f64>() / d as f64;
+        let rms = (ms + eps).sqrt();
+        for i in 0..d
+        {
+            y[r * d + i] = row[i] / rms * gamma[i];
+        }
+    }
+    y
+}
+
+#[test]
+fn rmsnorm_matches_f64_reference() {
+    let mut rng = Lcg(0x2222_0001);
+    for &(rows, d) in &[(1usize, 1usize), (3, 5), (4, 8)]
+    {
+        let x: Vec<Q16_16> = (0..rows * d)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 8))
+            .collect();
+        let gamma: Vec<Q16_16> = (0..d)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+            .collect();
+        let eps = q16(1e-3);
+        let got = rmsnorm(&x, rows, d, &gamma, eps).expect("rms + eps > 0");
+        let want = rmsnorm_ref_f64(&to_f64_vec(&x), rows, d, &to_f64_vec(&gamma), eps.to_f64());
+        for i in 0..rows * d
+        {
+            let diff = (got[i].to_f64() - want[i]).abs();
+            assert!(
+                diff <= 1e-2,
+                "rows={rows} d={d} i={i}: {} vs {}",
+                got[i].to_f64(),
+                want[i]
+            );
+        }
+    }
+}
+
+#[test]
+fn rmsnorm_zero_row_and_eps_returns_none() {
+    // Ligne nulle, eps=0 → rms=0 → division indéfinie.
+    let x = [Q16_16::zero(); 4];
+    let gamma = [Q16_16::one(); 4];
+    assert!(rmsnorm(&x, 1, 4, &gamma, Q16_16::zero()).is_none());
+}
+
+#[test]
+fn rmsnorm_i64_storage() {
+    let x = [3i64, 4].map(Q32_32::from);
+    let gamma = [Q32_32::from(1i64); 2];
+    let y = rmsnorm(&x, 1, 2, &gamma, Q32_32::zero()).unwrap();
+    let rms = 12.5f64.sqrt(); // moyenne(9+16)/2 = 12.5
+    assert!((y[0].to_f64() - 3.0 / rms).abs() < 1e-6);
+    assert!((y[1].to_f64() - 4.0 / rms).abs() < 1e-6);
+}
+
+#[test]
+#[should_panic(expected = "rmsnorm")]
+fn rmsnorm_dim_mismatch_panics() {
+    let x = vec![Q16_16::one(); 5]; // annoncé 1×5
+    let gamma = vec![Q16_16::one(); 4]; // devrait être 5
+    let _ = rmsnorm(&x, 1, 5, &gamma, Q16_16::zero());
+}
+
+#[test]
+fn layer_norm_known_small() {
+    // x=[0,0,4,4] : moyenne=2, variance=4 (exact), écart-type=2 (eps=0) →
+    // y=(x-2)/2 = [-1,-1,1,1].
+    let x = [0i32, 0, 4, 4].map(Q16_16::from);
+    let gamma = [Q16_16::one(); 4];
+    let beta = [Q16_16::zero(); 4];
+    let y = layer_norm(&x, 1, 4, &gamma, &beta, Q16_16::zero()).unwrap();
+    assert_eq!(y, [-1i32, -1, 1, 1].map(Q16_16::from));
+}
+
+fn layer_norm_ref_f64(
+    x: &[f64],
+    rows: usize,
+    d: usize,
+    gamma: &[f64],
+    beta: &[f64],
+    eps: f64,
+) -> Vec<f64> {
+    let mut y = vec![0.0f64; rows * d];
+    for r in 0..rows
+    {
+        let row = &x[r * d..r * d + d];
+        let mean: f64 = row.iter().sum::<f64>() / d as f64;
+        let var: f64 = row.iter().map(|v| (v - mean) * (v - mean)).sum::<f64>() / d as f64;
+        let denom = (var + eps).sqrt();
+        for i in 0..d
+        {
+            y[r * d + i] = (row[i] - mean) / denom * gamma[i] + beta[i];
+        }
+    }
+    y
+}
+
+#[test]
+fn layer_norm_matches_f64_reference() {
+    let mut rng = Lcg(0x2222_0002);
+    for &(rows, d) in &[(1usize, 1usize), (3, 5), (4, 8)]
+    {
+        let x: Vec<Q16_16> = (0..rows * d)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 8))
+            .collect();
+        let gamma: Vec<Q16_16> = (0..d)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+            .collect();
+        let beta: Vec<Q16_16> = (0..d)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+            .collect();
+        let eps = q16(1e-3);
+        let got = layer_norm(&x, rows, d, &gamma, &beta, eps).expect("var + eps > 0");
+        let want = layer_norm_ref_f64(
+            &to_f64_vec(&x),
+            rows,
+            d,
+            &to_f64_vec(&gamma),
+            &to_f64_vec(&beta),
+            eps.to_f64(),
+        );
+        for i in 0..rows * d
+        {
+            let diff = (got[i].to_f64() - want[i]).abs();
+            assert!(
+                diff <= 1e-2,
+                "rows={rows} d={d} i={i}: {} vs {}",
+                got[i].to_f64(),
+                want[i]
+            );
+        }
+    }
+}
+
+#[test]
+fn layer_norm_zero_variance_returns_none() {
+    // Ligne constante, eps=0 → variance nulle → division indéfinie.
+    let x = [Q16_16::from(5); 4];
+    let gamma = [Q16_16::one(); 4];
+    let beta = [Q16_16::zero(); 4];
+    assert!(layer_norm(&x, 1, 4, &gamma, &beta, Q16_16::zero()).is_none());
+}
+
+#[test]
+fn layer_norm_i64_storage() {
+    let x = [0i64, 0, 4, 4].map(Q32_32::from);
+    let gamma = [Q32_32::from(1i64); 4];
+    let beta = [Q32_32::zero(); 4];
+    let y = layer_norm(&x, 1, 4, &gamma, &beta, Q32_32::zero()).unwrap();
+    assert_eq!(y, [-1i64, -1, 1, 1].map(Q32_32::from));
+}
+
+#[test]
+#[should_panic(expected = "layer_norm")]
+fn layer_norm_dim_mismatch_panics() {
+    let x = vec![Q16_16::one(); 4];
+    let gamma = vec![Q16_16::one(); 4];
+    let beta = vec![Q16_16::one(); 3]; // devrait être 4
+    let _ = layer_norm(&x, 1, 4, &gamma, &beta, Q16_16::zero());
 }

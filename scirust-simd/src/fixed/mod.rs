@@ -93,6 +93,9 @@
 //   ([`attention::attention`], [`attention::causal_attention`],
 //   [`attention::multi_head_attention`]) : le pendant déterministe du module
 //   flottant [`crate::attention`], côté séquences/Transformers.
+// * [`norm`] — normalisations quantifiées ([`norm::rmsnorm`],
+//   [`norm::layer_norm`]), le pendant déterministe du module flottant
+//   [`crate::norm`].
 
 pub mod activation;
 pub mod attention;
@@ -102,6 +105,7 @@ pub mod convert;
 pub mod layer;
 pub mod linalg;
 pub mod math;
+pub mod norm;
 pub mod ops;
 pub mod overflow;
 pub mod pool;
