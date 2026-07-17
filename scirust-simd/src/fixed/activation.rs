@@ -18,10 +18,11 @@
 //   `FixedI32<FRAC>`. Ce sont les variantes linéaires par morceaux de la
 //   sigmoïde et de la swish (MobileNetV3), sans transcendante, donc rapides et
 //   déterministes.
-// * **Transcendantes exactes** (`gelu`) : nécessitent [`RealScalar::erf`], la
-//   fonction de répartition normale. Contrairement à `hardswish` (son
-//   approximation linéaire par morceaux), `gelu` est la forme *exacte* utilisée
-//   par BERT/GPT — plus coûteuse (un `erf`), mais sans biais d'approximation.
+// * **Transcendantes exactes** (`gelu`, `silu`) : nécessitent [`RealScalar::erf`]
+//   / [`RealScalar::sigmoid`]. Contrairement à `hardswish` (son approximation
+//   linéaire par morceaux), ce sont les formes *exactes* utilisées par
+//   BERT/GPT (`gelu`) et LLaMA/PaLM (`silu`) — plus coûteuses (une
+//   transcendante), mais sans biais d'approximation.
 //
 // Toutes sont **sans branche imprévisible côté données scientifiques** : le
 // résultat ne dépend que de la valeur d'entrée, jamais de l'ordre ou du
@@ -111,6 +112,19 @@ pub fn gelu<T: RealScalar>(x: T) -> T {
     let half = T::from_i32(2).recip();
     let inv_sqrt2 = T::from_i32(2).sqrt().recip();
     half * x * (T::one() + (x * inv_sqrt2).erf())
+}
+
+/// `SiLU(x) = x·σ(x)` (Swish, `β = 1`) — porte d'activation des FFN
+/// Transformer modernes (LLaMA, PaLM…).
+///
+/// Comme [`gelu`], forme **exacte** (pas d'approximation linéaire par
+/// morceaux) : utilise directement [`RealScalar::sigmoid`], sans biais
+/// d'approximation supplémentaire au-delà de celui, borné, de la sigmoïde
+/// virgule fixe elle-même.
+#[inline]
+#[must_use]
+pub fn silu<T: RealScalar>(x: T) -> T {
+    x * x.sigmoid()
 }
 
 /// Applique une activation **en place** à tout un slice (sortie de couche).

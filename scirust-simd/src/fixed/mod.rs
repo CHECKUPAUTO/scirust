@@ -99,6 +99,11 @@
 // * [`kv_cache`] — cache clés/valeurs quantifié ([`kv_cache::KvCache`]) pour
 //   le décodage autoregressif incrémental, construit sur [`attention`] ; le
 //   pendant déterministe du module flottant [`crate::kv_cache`].
+// * [`transformer`] — bloc décodeur Transformer pre-norm complet
+//   ([`transformer::TransformerBlock`]), assemblant [`layer`], [`norm`],
+//   [`attention`] et [`kv_cache`] (préremplissage par lot **et** décodage
+//   incrémental) ; le pendant déterministe du module flottant
+//   [`crate::transformer`].
 
 pub mod activation;
 pub mod attention;
@@ -121,6 +126,7 @@ pub mod rounding;
 pub mod simd;
 pub mod traits;
 pub mod transcendental;
+pub mod transformer;
 pub mod types;
 
 #[cfg(test)]

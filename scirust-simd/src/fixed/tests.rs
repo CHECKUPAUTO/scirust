@@ -22,6 +22,7 @@ use super::reductions as red;
 use super::rescale::{rescale, rescale_saturating, rescale_wrapping};
 use super::simd::{FixedI16x8, FixedI32x8, FixedI64x4};
 use super::transcendental as tr;
+use super::transformer::{TransformerBlock, rope_apply_heads};
 use super::{
     FixedI16, FixedI32, FixedI64, NumericScalar, OverflowMode, Q1_15, Q8_8, Q8_24, Q16_16, Q24_8,
     Q32_32, RealScalar, RoundingMode,
@@ -3849,4 +3850,373 @@ fn kv_cache_decode_step_dim_mismatch_panics() {
     cache.append(&[Q16_16::zero(); 6], &[Q16_16::zero(); 6]);
     let q = vec![Q16_16::zero(); 5]; // devrait être 6
     let _ = cache.decode_step(&q, 2, 3, Q16_16::one());
+}
+
+// ------------------------------------------------------------------ //
+//  Bloc Transformer décodeur pre-norm (assemblage complet)             //
+// ------------------------------------------------------------------ //
+
+/// Génère des coefficients déterministes bornés (`[-0.5, 0.5]`), même
+/// construction que le test scalaire de [`crate::transformer`] (module
+/// flottant).
+fn mk_f64(n: usize, seed: f64) -> Vec<f64> {
+    (0..n)
+        .map(|i| ((i as f64 + seed) * 0.017).sin() * 0.5)
+        .collect()
+}
+
+/// Référence f64 indépendante de `y = W·x + b` (`W` : `out×in` row-major,
+/// même convention que [`Linear`]).
+fn linear_ref_f64(
+    x: &[f64],
+    rows: usize,
+    in_f: usize,
+    w: &[f64],
+    out_f: usize,
+    b: &[f64],
+) -> Vec<f64> {
+    let mut y = vec![0.0f64; rows * out_f];
+    for r in 0..rows
+    {
+        for o in 0..out_f
+        {
+            let mut acc = b[o];
+            for i in 0..in_f
+            {
+                acc += x[r * in_f + i] * w[o * in_f + i];
+            }
+            y[r * out_f + o] = acc;
+        }
+    }
+    y
+}
+
+/// [`rope_ref_f64`] appliquée indépendamment à chaque tête (cf.
+/// [`rope_apply_heads`]).
+fn rope_apply_heads_ref_f64(
+    x: &[f64],
+    s: usize,
+    h: usize,
+    dh: usize,
+    base: f64,
+    pos_offset: usize,
+) -> Vec<f64> {
+    let dm = h * dh;
+    let mut y = x.to_vec();
+    for head in 0..h
+    {
+        let off = head * dh;
+        let mut head_x = vec![0.0f64; s * dh];
+        for r in 0..s
+        {
+            head_x[r * dh..r * dh + dh].copy_from_slice(&x[r * dm + off..r * dm + off + dh]);
+        }
+        let head_y = rope_ref_f64(&head_x, s, dh, base, pos_offset);
+        for r in 0..s
+        {
+            y[r * dm + off..r * dm + off + dh].copy_from_slice(&head_y[r * dh..r * dh + dh]);
+        }
+    }
+    y
+}
+
+fn silu_ref_f64(x: f64) -> f64 {
+    x * (1.0 / (1.0 + (-x).exp()))
+}
+
+/// Attention causale multi-tête, référence f64 indépendante (même algorithme
+/// que [`multi_head_attention`] avec `causal = true`, écrit séparément).
+fn mha_causal_ref_f64(q: &[f64], k: &[f64], v: &[f64], s: usize, h: usize, dh: usize) -> Vec<f64> {
+    let dm = h * dh;
+    let scale = 1.0 / (dh as f64).sqrt();
+    let mut out = vec![0.0f64; s * dm];
+    for hh in 0..h
+    {
+        let off = hh * dh;
+        for i in 0..s
+        {
+            let mut row = vec![0.0f64; i + 1];
+            for (j, r) in row.iter_mut().enumerate()
+            {
+                let mut acc = 0.0;
+                for e in 0..dh
+                {
+                    acc += q[i * dm + off + e] * k[j * dm + off + e];
+                }
+                *r = scale * acc;
+            }
+            let m = row.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            let mut sum = 0.0;
+            for r in row.iter_mut()
+            {
+                *r = (*r - m).exp();
+                sum += *r;
+            }
+            for e in 0..dh
+            {
+                let mut acc = 0.0;
+                for (j, &p) in row.iter().enumerate()
+                {
+                    acc += p * v[j * dm + off + e];
+                }
+                out[i * dm + off + e] = acc / sum;
+            }
+        }
+    }
+    out
+}
+
+/// Référence f64 indépendante du bloc décodeur complet, dans le même ordre
+/// exact d'opérations que [`TransformerBlock::forward`].
+#[allow(clippy::too_many_arguments)]
+fn transformer_forward_ref_f64(
+    x0: &[f64],
+    s: usize,
+    d: usize,
+    h: usize,
+    dff: usize,
+    wq: &[f64],
+    wk: &[f64],
+    wv: &[f64],
+    wo: &[f64],
+    w1: &[f64],
+    b1: &[f64],
+    w2: &[f64],
+    norm1: &[f64],
+    norm2: &[f64],
+    eps: f64,
+    base: f64,
+) -> Vec<f64> {
+    let dh = d / h;
+    let zero_d = vec![0.0f64; d];
+    let mut x = x0.to_vec();
+
+    let hn = rmsnorm_ref_f64(&x, s, d, norm1, eps);
+    let mut q = linear_ref_f64(&hn, s, d, wq, d, &zero_d);
+    let mut k = linear_ref_f64(&hn, s, d, wk, d, &zero_d);
+    let v = linear_ref_f64(&hn, s, d, wv, d, &zero_d);
+    q = rope_apply_heads_ref_f64(&q, s, h, dh, base, 0);
+    k = rope_apply_heads_ref_f64(&k, s, h, dh, base, 0);
+    let attn = mha_causal_ref_f64(&q, &k, &v, s, h, dh);
+    let o = linear_ref_f64(&attn, s, d, wo, d, &zero_d);
+    for i in 0..s * d
+    {
+        x[i] += o[i];
+    }
+
+    let hn2 = rmsnorm_ref_f64(&x, s, d, norm2, eps);
+    let mut f1 = linear_ref_f64(&hn2, s, d, w1, dff, b1);
+    for v in f1.iter_mut()
+    {
+        *v = silu_ref_f64(*v);
+    }
+    let f2 = linear_ref_f64(&f1, s, dff, w2, d, &zero_d);
+    for i in 0..s * d
+    {
+        x[i] += f2[i];
+    }
+    x
+}
+
+/// Construit un [`TransformerBlock`] de test (`d=8`, `h=2`, `dff=16`, biais
+/// nul sauf `b1`, gains de normalisation croissants) et son vecteur d'entrée
+/// `x0`, en f64 **et** en `Q16_16` — pour comparer bloc fixe et référence f64.
+fn build_test_block(
+    causal: bool,
+) -> (
+    TransformerBlock<16>,
+    Vec<f64>,
+    Vec<Q16_16>,
+    usize,
+    usize,
+    usize,
+    usize,
+) {
+    let (s, d, h, dff) = (6usize, 8usize, 2usize, 16usize);
+    let eps = 1e-3;
+    let base = 10000.0;
+
+    let wq_f = mk_f64(d * d, 1.0);
+    let wk_f = mk_f64(d * d, 2.0);
+    let wv_f = mk_f64(d * d, 3.0);
+    let wo_f = mk_f64(d * d, 4.0);
+    let w1_f = mk_f64(d * dff, 5.0);
+    let b1_f = mk_f64(dff, 6.0);
+    let w2_f = mk_f64(dff * d, 7.0);
+    let norm1_f: Vec<f64> = (0..d).map(|i| 1.0 + i as f64 * 0.01).collect();
+    let norm2_f: Vec<f64> = (0..d).map(|i| 0.9 + i as f64 * 0.02).collect();
+    let x0_f: Vec<f64> = (0..s * d).map(|i| (i as f64 * 0.05).cos()).collect();
+
+    let to_q = |v: &[f64]| -> Vec<Q16_16> { v.iter().map(|&x| q16(x)).collect() };
+    let block = TransformerBlock::new(
+        d,
+        h,
+        dff,
+        Linear::new(to_q(&wq_f), vec![Q16_16::zero(); d], d, d),
+        Linear::new(to_q(&wk_f), vec![Q16_16::zero(); d], d, d),
+        Linear::new(to_q(&wv_f), vec![Q16_16::zero(); d], d, d),
+        Linear::new(to_q(&wo_f), vec![Q16_16::zero(); d], d, d),
+        Linear::new(to_q(&w1_f), to_q(&b1_f), dff, d),
+        Linear::new(to_q(&w2_f), vec![Q16_16::zero(); d], d, dff),
+        to_q(&norm1_f),
+        to_q(&norm2_f),
+        q16(eps),
+        q16(base),
+        causal,
+    );
+    let x0_q = to_q(&x0_f);
+    (block, x0_f, x0_q, s, d, h, dff)
+}
+
+#[test]
+fn transformer_block_matches_f64_reference() {
+    let (block, x0_f, x0_q, s, d, h, dff) = build_test_block(true);
+
+    let mut got = x0_q.clone();
+    block.forward(&mut got, s).expect("rmsnorm bien défini");
+
+    let want = transformer_forward_ref_f64(
+        &x0_f,
+        s,
+        d,
+        h,
+        dff,
+        &mk_f64(d * d, 1.0),
+        &mk_f64(d * d, 2.0),
+        &mk_f64(d * d, 3.0),
+        &mk_f64(d * d, 4.0),
+        &mk_f64(d * dff, 5.0),
+        &mk_f64(dff, 6.0),
+        &mk_f64(dff * d, 7.0),
+        &(0..d).map(|i| 1.0 + i as f64 * 0.01).collect::<Vec<_>>(),
+        &(0..d).map(|i| 0.9 + i as f64 * 0.02).collect::<Vec<_>>(),
+        1e-3,
+        10000.0,
+    );
+
+    for i in 0..s * d
+    {
+        let diff = (got[i].to_f64() - want[i]).abs();
+        let tol = 5e-2 * (1.0 + want[i].abs());
+        assert!(
+            diff <= tol,
+            "i={i}: bloc fixe {} vs référence f64 {} (écart {diff}, tolérance {tol})",
+            got[i].to_f64(),
+            want[i]
+        );
+    }
+}
+
+#[test]
+fn decode_matches_prefill_bit_exact() {
+    // Comme pour KvCache seul (`kv_cache_incremental_matches_batched_causal`),
+    // décoder un token à la fois via `forward_decode` + `KvCache` reproduit
+    // **bit-à-bit** (pas à une tolérance près) le préremplissage `forward`
+    // causal sur toute la séquence : chaque brique composée (RMSNorm, Linear,
+    // RoPE, attention via KvCache) est locale à sa ligne / sa position
+    // absolue, jamais du regroupement en lot — garantie strictement plus
+    // forte que le module flottant `crate::transformer` (tolérance `2e-3`).
+    let (block, _x0_f, x0_q, s, d, _h, _dff) = build_test_block(true);
+
+    let mut prefill = x0_q.clone();
+    block.forward(&mut prefill, s).expect("rmsnorm bien défini");
+
+    let mut cache: KvCache<16> = KvCache::new(s, d);
+    let mut decoded = vec![Q16_16::zero(); s * d];
+    for t in 0..s
+    {
+        let mut row = x0_q[t * d..t * d + d].to_vec();
+        block
+            .forward_decode(&mut row, t, &mut cache)
+            .expect("rmsnorm bien défini");
+        decoded[t * d..t * d + d].copy_from_slice(&row);
+    }
+    assert_eq!(cache.len(), s);
+
+    assert_eq!(
+        decoded, prefill,
+        "décodage incrémental doit être bit-exact vis-à-vis du préremplissage causal"
+    );
+}
+
+#[test]
+fn rope_apply_heads_matches_per_head_f64_reference() {
+    let (s, h, dh) = (4usize, 3usize, 4usize);
+    let dm = h * dh;
+    let mut rng = Lcg(0x5555_0001);
+    let mut x: Vec<Q16_16> = (0..s * dm)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 8))
+        .collect();
+    let x0 = to_f64_vec(&x);
+    rope_apply_heads(&mut x, s, h, dh, q16(10000.0), 0);
+    let want = rope_apply_heads_ref_f64(&x0, s, h, dh, 10000.0, 0);
+    for i in 0..s * dm
+    {
+        let diff = (x[i].to_f64() - want[i]).abs();
+        assert!(diff <= 1e-2, "i={i}: {} vs {}", x[i].to_f64(), want[i]);
+    }
+}
+
+#[test]
+#[should_panic(expected = "d_model")]
+fn transformer_block_new_rejects_non_divisible_heads() {
+    let d = 8;
+    let zero = vec![Q16_16::zero(); d];
+    let _ = TransformerBlock::<16>::new(
+        d,
+        3, // 8 non divisible par 3
+        16,
+        Linear::new(vec![Q16_16::zero(); d * d], zero.clone(), d, d),
+        Linear::new(vec![Q16_16::zero(); d * d], zero.clone(), d, d),
+        Linear::new(vec![Q16_16::zero(); d * d], zero.clone(), d, d),
+        Linear::new(vec![Q16_16::zero(); d * d], zero.clone(), d, d),
+        Linear::new(
+            vec![Q16_16::zero(); d * 16],
+            vec![Q16_16::zero(); 16],
+            16,
+            d,
+        ),
+        Linear::new(vec![Q16_16::zero(); 16 * d], zero.clone(), d, 16),
+        zero.clone(),
+        zero,
+        q16(1e-3),
+        q16(10000.0),
+        true,
+    );
+}
+
+#[test]
+#[should_panic(expected = "wq.in_features")]
+fn transformer_block_new_rejects_wrong_projection_shape() {
+    let d = 8;
+    let zero = vec![Q16_16::zero(); d];
+    let _ = TransformerBlock::<16>::new(
+        d,
+        2,
+        16,
+        Linear::new(vec![Q16_16::zero(); 4 * 4], vec![Q16_16::zero(); 4], 4, 4), // devrait être d×d
+        Linear::new(vec![Q16_16::zero(); d * d], zero.clone(), d, d),
+        Linear::new(vec![Q16_16::zero(); d * d], zero.clone(), d, d),
+        Linear::new(vec![Q16_16::zero(); d * d], zero.clone(), d, d),
+        Linear::new(
+            vec![Q16_16::zero(); d * 16],
+            vec![Q16_16::zero(); 16],
+            16,
+            d,
+        ),
+        Linear::new(vec![Q16_16::zero(); 16 * d], zero.clone(), d, 16),
+        zero.clone(),
+        zero,
+        q16(1e-3),
+        q16(10000.0),
+        true,
+    );
+}
+
+#[test]
+#[should_panic(expected = "TransformerBlock::forward")]
+fn transformer_block_forward_dim_mismatch_panics() {
+    let (block, _x0_f, _x0_q, s, d, _h, _dff) = build_test_block(true);
+    let mut x = vec![Q16_16::zero(); s * d - 1]; // longueur incorrecte
+    let _ = block.forward(&mut x, s);
 }
