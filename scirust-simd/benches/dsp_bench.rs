@@ -10,6 +10,9 @@
 //     cargo bench -p scirust-simd --features portable-simd --bench dsp_bench
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use scirust_simd::dsp::mel::MelFilterbank;
+use scirust_simd::dsp::stft::{power_spectrogram, stft};
+use scirust_simd::dsp::window;
 use scirust_simd::dsp::{Biquad, Complex, Fir, Plan, fft, rfft};
 use scirust_simd::fixed::Q16_16;
 
@@ -182,12 +185,96 @@ fn bench_rfft(c: &mut Criterion) {
     g.finish();
 }
 
+/// Fenêtre de Hann périodique, longueur 1024 (fixe vs f32). Débit en
+/// coefficients générés/s.
+fn bench_window(c: &mut Criterion) {
+    const M: usize = 1 << 10;
+    let mut out_f = vec![0.0f32; M];
+    let mut out_x = vec![Q16_16::zero(); M];
+
+    let mut g = c.benchmark_group("window_hann1024");
+    g.throughput(Throughput::Elements(M as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            window::hann_into(black_box(&mut out_x));
+            out_x[0]
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| {
+            window::hann_into(black_box(&mut out_f));
+            out_f[0]
+        })
+    });
+    g.finish();
+}
+
+/// STFT (fenêtrage de Hann + rfft) sur un signal de N échantillons, trame
+/// 1024, saut 512 (fixe vs f32). Débit en échantillons d'entrée/s.
+fn bench_stft(c: &mut Criterion) {
+    const FRAME: usize = 1 << 10;
+    const HOP: usize = FRAME / 2;
+    let sf = signal_f32();
+    let sx = signal_fixed(&sf);
+    let win_f: Vec<f32> = window::hann(FRAME);
+    let win_x: Vec<Q16_16> = window::hann(FRAME);
+
+    let mut g = c.benchmark_group("stft_hop512");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| stft(black_box(&sx), black_box(&win_x), HOP))
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| stft(black_box(&sf), black_box(&win_f), HOP))
+    });
+    g.finish();
+}
+
+/// Banque de filtres mel (40 bandes) appliquée à un spectrogramme de
+/// puissance précalculé (fixe vs f32). Débit en bandes mel produites/s.
+fn bench_mel(c: &mut Criterion) {
+    const FRAME: usize = 1 << 10;
+    const HOP: usize = FRAME / 2;
+    const N_MELS: usize = 40;
+    let sf = signal_f32();
+    let sx = signal_fixed(&sf);
+    let win_f: Vec<f32> = window::hann(FRAME);
+    let win_x: Vec<Q16_16> = window::hann(FRAME);
+    let bins = FRAME / 2 + 1;
+
+    let power_f = power_spectrogram(&stft(&sf, &win_f, HOP));
+    let power_x = power_spectrogram(&stft(&sx, &win_x, HOP));
+    let frames = power_f.len() / bins;
+
+    let fb_f = MelFilterbank::<f32>::new(N_MELS, bins, 16000.0, 0.0, 8000.0);
+    let fb_x = MelFilterbank::<Q16_16>::new(
+        N_MELS,
+        bins,
+        Q16_16::try_from(16000.0).unwrap(),
+        Q16_16::zero(),
+        Q16_16::try_from(8000.0).unwrap(),
+    );
+
+    let mut g = c.benchmark_group("mel40_filterbank");
+    g.throughput(Throughput::Elements((frames * N_MELS) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| fb_x.apply(black_box(&power_x)))
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| fb_f.apply(black_box(&power_f)))
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_biquad,
     bench_fir,
     bench_fft,
     bench_fft_plan,
-    bench_rfft
+    bench_rfft,
+    bench_window,
+    bench_stft,
+    bench_mel
 );
 criterion_main!(benches);
