@@ -642,11 +642,13 @@ fn check_window_known_values<T: Scalar + core::fmt::Debug>() {
     assert!((window::hann_coeff::<T>(0, len).to_f64() - 0.0).abs() < T::TOL);
     assert!((window::hamming_coeff::<T>(0, len).to_f64() - 0.08).abs() < T::TOL);
     assert!((window::blackman_coeff::<T>(0, len).to_f64() - 0.0).abs() < T::TOL);
+    assert!((window::blackman_harris_coeff::<T>(0, len).to_f64() - 0.0).abs() < T::TOL);
 
     let mid = len / 2;
     assert!((window::hann_coeff::<T>(mid, len).to_f64() - 1.0).abs() < T::TOL);
     assert!((window::hamming_coeff::<T>(mid, len).to_f64() - 1.0).abs() < T::TOL);
     assert!((window::blackman_coeff::<T>(mid, len).to_f64() - 1.0).abs() < T::TOL);
+    assert!((window::blackman_harris_coeff::<T>(mid, len).to_f64() - 1.0).abs() < T::TOL);
 }
 
 #[test]
@@ -674,6 +676,12 @@ fn check_window_symmetry<T: Scalar + core::fmt::Debug>() {
             (a - b).abs() < T::TOL,
             "blackman symétrie n={n}: {a} vs {b}"
         );
+        let a = window::blackman_harris_coeff::<T>(n, len).to_f64();
+        let b = window::blackman_harris_coeff::<T>(len - n, len).to_f64();
+        assert!(
+            (a - b).abs() < T::TOL,
+            "blackman_harris symétrie n={n}: {a} vs {b}"
+        );
     }
 }
 
@@ -692,10 +700,13 @@ fn check_window_matches_reference<T: Scalar + core::fmt::Debug>() {
         let want_hann = 0.5 - 0.5 * theta.cos();
         let want_hamming = 0.54 - 0.46 * theta.cos();
         let want_blackman = 0.42 - 0.5 * theta.cos() + 0.08 * (2.0 * theta).cos();
+        let want_blackman_harris =
+            0.36 - 0.49 * theta.cos() + 0.14 * (2.0 * theta).cos() - 0.01 * (3.0 * theta).cos();
 
         let got_hann = window::hann_coeff::<T>(n, len).to_f64();
         let got_hamming = window::hamming_coeff::<T>(n, len).to_f64();
         let got_blackman = window::blackman_coeff::<T>(n, len).to_f64();
+        let got_blackman_harris = window::blackman_harris_coeff::<T>(n, len).to_f64();
 
         assert!(
             (got_hann - want_hann).abs() < T::TOL,
@@ -708,6 +719,10 @@ fn check_window_matches_reference<T: Scalar + core::fmt::Debug>() {
         assert!(
             (got_blackman - want_blackman).abs() < T::TOL,
             "blackman n={n}: {got_blackman} vs {want_blackman}"
+        );
+        assert!(
+            (got_blackman_harris - want_blackman_harris).abs() < T::TOL,
+            "blackman_harris n={n}: {got_blackman_harris} vs {want_blackman_harris}"
         );
     }
 }
@@ -726,14 +741,20 @@ fn window_vec_builders_match_coeff() {
     let hann_v: Vec<f64> = window::hann(len);
     let hamming_v: Vec<f64> = window::hamming(len);
     let blackman_v: Vec<f64> = window::blackman(len);
+    let blackman_harris_v: Vec<f64> = window::blackman_harris(len);
     assert_eq!(hann_v.len(), len);
     assert_eq!(hamming_v.len(), len);
     assert_eq!(blackman_v.len(), len);
+    assert_eq!(blackman_harris_v.len(), len);
     for n in 0..len
     {
         assert_eq!(hann_v[n], window::hann_coeff::<f64>(n, len));
         assert_eq!(hamming_v[n], window::hamming_coeff::<f64>(n, len));
         assert_eq!(blackman_v[n], window::blackman_coeff::<f64>(n, len));
+        assert_eq!(
+            blackman_harris_v[n],
+            window::blackman_harris_coeff::<f64>(n, len)
+        );
     }
 }
 

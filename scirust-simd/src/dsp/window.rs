@@ -22,11 +22,16 @@
 // | [`hann`] | `0.5 − 0.5·cos(θ)` | étroit | modérée (~31 dB) |
 // | [`hamming`] | `0.54 − 0.46·cos(θ)` | étroit | meilleure au premier lobe (~43 dB) |
 // | [`blackman`] | `0.42 − 0.5·cos(θ) + 0.08·cos(2θ)` | plus large | excellente (~58 dB) |
+// | [`blackman_harris`] | `0.36 − 0.49·cos(θ) + 0.14·cos(2θ) − 0.01·cos(3θ)` | plus large encore | quasi optimale (~92 dB) |
 //
-// Les constantes (`0.54`, `0.46`, `0.42`, `0.08`) sont construites en ratios
-// d'entiers (`from_i32(a) * from_i32(b).recip()`), comme pour toute constante
-// générique du crate — exactes en flottant, résolues à la résolution de `T`
-// en virgule fixe.
+// Les constantes (`0.54`, `0.46`, `0.42`, `0.08`, `0.36`, `0.49`, `0.14`,
+// `0.01`) sont construites en ratios d'entiers (`from_i32(a) *
+// from_i32(b).recip()`), comme pour toute constante générique du crate —
+// exactes en flottant, résolues à la résolution de `T` en virgule fixe.
+// Celles de Blackman-Harris sont arrondies au centième (`0.35875 → 0.36`,
+// etc., toujours de somme `1`) : les coefficients théoriques ont un
+// dénominateur de `100000`, hors de la plage représentable par les formats
+// virgule fixe les plus étroits testés ici (ex. `Q8_24`, entiers `≤ 127`).
 
 use crate::fixed::RealScalar;
 
@@ -67,6 +72,19 @@ pub fn blackman_coeff<T: RealScalar>(n: usize, len: usize) -> T {
     a0 - a1 * th.cos() + a2 * (th + th).cos()
 }
 
+/// Coefficient `n` (sur `len`) de la fenêtre de Blackman-Harris (4 termes)
+/// périodique.
+#[inline]
+#[must_use]
+pub fn blackman_harris_coeff<T: RealScalar>(n: usize, len: usize) -> T {
+    let th = angle::<T>(n, len);
+    let a0 = T::from_i32(36) * T::from_i32(100).recip(); // 0.36
+    let a1 = T::from_i32(49) * T::from_i32(100).recip(); // 0.49
+    let a2 = T::from_i32(14) * T::from_i32(100).recip(); // 0.14
+    let a3 = T::from_i32(100).recip(); // 0.01
+    a0 - a1 * th.cos() + a2 * (th + th).cos() - a3 * (th + th + th).cos()
+}
+
 /// Remplit `out` avec la fenêtre de Hann périodique de longueur `out.len()`.
 #[inline]
 pub fn hann_into<T: RealScalar>(out: &mut [T]) {
@@ -98,6 +116,17 @@ pub fn blackman_into<T: RealScalar>(out: &mut [T]) {
     }
 }
 
+/// Remplit `out` avec la fenêtre de Blackman-Harris périodique de longueur
+/// `out.len()`.
+#[inline]
+pub fn blackman_harris_into<T: RealScalar>(out: &mut [T]) {
+    let len = out.len();
+    for (n, w) in out.iter_mut().enumerate()
+    {
+        *w = blackman_harris_coeff(n, len);
+    }
+}
+
 /// Fenêtre de Hann périodique de longueur `len`.
 #[must_use]
 pub fn hann<T: RealScalar>(len: usize) -> Vec<T> {
@@ -119,6 +148,14 @@ pub fn hamming<T: RealScalar>(len: usize) -> Vec<T> {
 pub fn blackman<T: RealScalar>(len: usize) -> Vec<T> {
     let mut w = vec![T::zero(); len];
     blackman_into(&mut w);
+    w
+}
+
+/// Fenêtre de Blackman-Harris (4 termes) périodique de longueur `len`.
+#[must_use]
+pub fn blackman_harris<T: RealScalar>(len: usize) -> Vec<T> {
+    let mut w = vec![T::zero(); len];
+    blackman_harris_into(&mut w);
     w
 }
 

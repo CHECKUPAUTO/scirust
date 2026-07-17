@@ -17,8 +17,8 @@
 //   sans allocation, phase linéaire pour des coefficients symétriques.
 // * [`fft`] — transformée de Fourier rapide radix-2 (Cooley–Tukey) en place,
 //   avec le complexe générique [`fft::Complex`].
-// * [`window`] — fenêtres d'apodisation (Hann, Hamming, Blackman) pour
-//   réduire la fuite spectrale avant une FFT.
+// * [`window`] — fenêtres d'apodisation (Hann, Hamming, Blackman,
+//   Blackman-Harris) pour réduire la fuite spectrale avant une FFT.
 // * [`stft`] — transformée de Fourier à court terme ([`stft::stft`]/
 //   [`stft::istft`]) : spectrogramme par recouvrement-fenêtrage, reconstruction
 //   par recouvrement-addition (COLA).
