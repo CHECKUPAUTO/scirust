@@ -28,6 +28,12 @@
 // réelle — aucune transcendante (`atan`/`sin`/`cos`) — donc généralisable à
 // **tout stockage** [`FixedReducible`], `i32` **et** `i64`.
 //
+// [`svd`] (et [`svd_solve`]) construit la **décomposition en valeurs
+// singulières** de toute matrice `m × n` par-dessus `jacobi_eigen` (appliqué à
+// `AᵀA`) : `svd_solve` complète `qr_solve` pour les systèmes de **rang
+// déficient**, où `qr_solve` échoue (pivot nul) — la pseudo-inverse de
+// Moore-Penrose donne la solution de norme minimale au lieu d'abandonner.
+//
 // `qr_solve` complète plutôt qu'il ne duplique Cholesky : résoudre les
 // moindres carrés via les équations normales (`cholesky_solve` sur `AᵀA`)
 // **double** l'exposant de conditionnement du problème (`cond(AᵀA) =
@@ -777,4 +783,128 @@ where
 
     let eigenvalues: Vec<T> = (0..n).map(|i| m[i * n + i]).collect();
     Some((eigenvalues, v, sweeps))
+}
+
+// ------------------------------------------------------------------ //
+//  SVD (via Jacobi sur AᵀA) — décomposition en valeurs singulières    //
+// ------------------------------------------------------------------ //
+
+/// `(u, sigma, vt, sweeps)` renvoyé par [`svd`] — cf. sa documentation.
+pub type SvdResult<T> = (Vec<T>, Vec<T>, Vec<T>, usize);
+
+/// Décomposition en valeurs singulières **réduite** (« thin SVD ») :
+/// `A = U·diag(σ)·Vᵀ`, `A` étant `m × n` (`m ≥ n`) row-major.
+///
+/// Calculée via [`jacobi_eigen`] sur `AᵀA` (`n × n`, symétrique semi-définie
+/// positive) : ses valeurs propres sont les `σᵢ²`, ses vecteurs propres les
+/// colonnes de `V`. `U = A·V·diag(σ)⁻¹` (colonne nulle pour un `σᵢ` négligeable
+/// — direction non déterminée par les données, cf. [`svd_solve`], qui en fait
+/// l'usage pratique). Hérite de la généricité `i32`/`i64` de `jacobi_eigen`
+/// (aucune transcendante).
+///
+/// Renvoie `(u, sigma, vt, sweeps)` ([`SvdResult`]) :
+/// * `u` : `m × n` row-major, colonnes orthonormées (sauf celles associées à
+///   un `σᵢ` négligeable, laissées nulles).
+/// * `sigma` : les `n` valeurs singulières, **triées par ordre décroissant**
+///   (contrairement à [`jacobi_eigen`], dont les valeurs propres ne sont pas
+///   triées) — convention SVD usuelle.
+/// * `vt` : `Vᵀ`, `n × n` row-major.
+/// * `sweeps` : nombre de passes Jacobi effectuées (cf. [`jacobi_eigen`]).
+///
+/// `tol`/`max_sweeps` : mêmes paramètres que [`jacobi_eigen`] (seuil de
+/// négligeabilité hors diagonale, borne du nombre de passes) ; `tol` sert
+/// aussi de seuil de négligeabilité pour une valeur singulière elle-même
+/// (colonne de `U` laissée nulle en dessous).
+///
+/// `None` en cas de débordement virgule fixe (cf. [`jacobi_eigen`]). Panique
+/// si `m < n` ou `a.len() != m·n`.
+#[must_use]
+pub fn svd<T>(a: &[T], m: usize, n: usize, tol: T, max_sweeps: usize) -> Option<SvdResult<T>>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    assert!(m >= n, "svd : m ({m}) doit être ≥ n ({n})");
+    assert_eq!(a.len(), m * n, "svd : A de longueur {} ≠ {m}×{n}", a.len());
+
+    let at = transpose(a, m, n);
+    let ata = matmul(&at, a, n, m, n);
+    let (eigenvalues, v, sweeps) = jacobi_eigen(&ata, n, tol, max_sweeps)?;
+
+    // Trie par valeur propre décroissante (T: Ord, cf. FixedReducible).
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&i, &j| eigenvalues[j].cmp(&eigenvalues[i]));
+
+    let mut v_sorted = vec![T::ZERO; n * n];
+    let mut sigma = vec![T::ZERO; n];
+    for (new_col, &old_col) in order.iter().enumerate()
+    {
+        let ev = eigenvalues[old_col];
+        sigma[new_col] = if ev <= T::ZERO { T::ZERO } else { ev.sqrt() };
+        for row in 0..n
+        {
+            v_sorted[row * n + new_col] = v[row * n + old_col];
+        }
+    }
+
+    let av = matmul(a, &v_sorted, m, n, n);
+    let mut u = vec![T::ZERO; m * n];
+    for col in 0..n
+    {
+        if sigma[col] <= tol
+        {
+            continue; // valeur singulière négligeable : colonne de U laissée nulle.
+        }
+        for row in 0..m
+        {
+            u[row * n + col] = av[row * n + col].checked_div(sigma[col])?;
+        }
+    }
+
+    let vt = transpose(&v_sorted, n, n);
+    Some((u, sigma, vt, sweeps))
+}
+
+/// Résout `min_x ‖A·x − b‖` (`A` `m × n`, `m ≥ n`, `b` de longueur `m`) via
+/// SVD : `x = V·diag(σ⁺)·Uᵀ·b`, `σᵢ⁺ = 1/σᵢ` si `σᵢ > tol`, sinon `0`.
+///
+/// Contrairement à [`qr_solve`] (qui renvoie `None` dès qu'un pivot de `R`
+/// est nul — rang déficient), `svd_solve` **traite explicitement** les
+/// directions de rang déficient (valeurs singulières `≤ tol`) en leur
+/// affectant une contribution nulle plutôt que d'échouer : le résultat est la
+/// solution de **norme minimale** parmi toutes les solutions optimales des
+/// moindres carrés (propriété classique de la pseudo-inverse de
+/// Moore-Penrose). Pour un système bien conditionné et de rang plein,
+/// coïncide avec [`qr_solve`] à la résolution de `T` près.
+///
+/// `None` en cas de débordement virgule fixe (cf. [`svd`]). Panique si
+/// `m < n`, `a.len() != m·n` ou `b.len() != m`.
+#[must_use]
+pub fn svd_solve<T>(
+    a: &[T],
+    b: &[T],
+    m: usize,
+    n: usize,
+    tol: T,
+    max_sweeps: usize,
+) -> Option<Vec<T>>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    assert_eq!(b.len(), m, "svd_solve : b de longueur {} ≠ {m}", b.len());
+    let (u, sigma, vt, _) = svd(a, m, n, tol, max_sweeps)?;
+
+    let mut d = vec![T::ZERO; n];
+    for i in 0..n
+    {
+        if sigma[i] <= tol
+        {
+            continue; // direction de rang déficient : contribution nulle (norme minimale).
+        }
+        let ui_col: Vec<T> = (0..m).map(|row| u[row * n + i]).collect();
+        let ci = dot(&ui_col, b);
+        d[i] = ci.checked_div(sigma[i])?;
+    }
+
+    let v = transpose(&vt, n, n);
+    Some(matvec(&v, &d, n, n))
 }

@@ -259,6 +259,18 @@ fn bench_jacobi_eigen(c: &mut Criterion) {
     g.finish();
 }
 
+/// Décomposition en valeurs singulières (`jacobi_eigen` sur `AᵀA`, `m > n`).
+fn bench_svd(c: &mut Criterion) {
+    let a = full_rank_data(0x11, M_QR, N);
+
+    let mut g = c.benchmark_group("svd_64x48");
+    g.throughput(Throughput::Elements((M_QR * N * N) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter(|| flin::svd(black_box(&a), M_QR, N, Q16_16::try_from(1e-4).unwrap(), 100))
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_matmul,
@@ -268,6 +280,7 @@ criterion_group!(
     bench_qr,
     bench_matmul_bt,
     bench_linear_batch,
-    bench_jacobi_eigen
+    bench_jacobi_eigen,
+    bench_svd
 );
 criterion_main!(benches);

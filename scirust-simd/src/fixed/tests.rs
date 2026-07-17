@@ -1242,6 +1242,184 @@ fn jacobi_eigen_dim_mismatch_panics() {
 }
 
 // ------------------------------------------------------------------ //
+//  SVD (via Jacobi sur AᵀA)                                           //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn svd_known_diagonal_matrix() {
+    let a = [3i32, 0, 0, 1].map(Q16_16::from);
+    let (u, sigma, vt, sweeps) = linalg::svd(&a, 2, 2, q16(1e-4), 20).expect("pas de débordement");
+    assert_eq!(sigma, [q16(3.0), q16(1.0)]);
+    assert_eq!(
+        u,
+        [Q16_16::one(), Q16_16::zero(), Q16_16::zero(), Q16_16::one()]
+    );
+    assert_eq!(
+        vt,
+        [Q16_16::one(), Q16_16::zero(), Q16_16::zero(), Q16_16::one()]
+    );
+    assert_eq!(sweeps, 1);
+}
+
+#[test]
+fn svd_reconstructs_a_and_is_orthonormal() {
+    let mut rng = Lcg(0x5F4D_0001);
+    for &(m, n) in &[(2usize, 2usize), (4, 2), (5, 3), (6, 4)]
+    {
+        let a = random_full_rank(&mut rng, m, n);
+        let (u, sigma, vt, sweeps) =
+            linalg::svd(&a, m, n, q16(1e-4), 60).expect("pas de débordement pour cette échelle");
+        assert!(sweeps <= 60, "m={m} n={n}: sweeps={sweeps} > max_sweeps");
+
+        for i in 1..n
+        {
+            assert!(
+                sigma[i - 1] >= sigma[i],
+                "m={m} n={n}: sigma non triée décroissante : {sigma:?}"
+            );
+        }
+
+        // Reconstruction : A ≈ U · diag(σ) · Vᵀ.
+        let mut u_sigma = vec![Q16_16::zero(); m * n];
+        for i in 0..m
+        {
+            for j in 0..n
+            {
+                u_sigma[i * n + j] = u[i * n + j] * sigma[j];
+            }
+        }
+        let reconstructed = linalg::matmul(&u_sigma, &vt, m, n, n);
+        let tol = ((m + n) as f64) * 256.0 / 65536.0;
+        for i in 0..m * n
+        {
+            let diff = (reconstructed[i].to_f64() - a[i].to_f64()).abs();
+            assert!(
+                diff <= tol,
+                "m={m} n={n} i={i}: reconstruction {} vs {} (écart {diff} > {tol})",
+                reconstructed[i].to_f64(),
+                a[i].to_f64()
+            );
+        }
+
+        // Orthonormalité : Uᵀ·U ≈ I_n et V·Vᵀ ≈ I_n (V = transpose(Vᵀ)).
+        let ut = linalg::transpose(&u, m, n);
+        let utu = linalg::matmul(&ut, &u, n, m, n);
+        let v = linalg::transpose(&vt, n, n);
+        let vvt = linalg::matmul(&v, &vt, n, n, n);
+        for i in 0..n
+        {
+            for j in 0..n
+            {
+                let want = if i == j { 1.0 } else { 0.0 };
+                let diff_u = (utu[i * n + j].to_f64() - want).abs();
+                assert!(
+                    diff_u <= tol,
+                    "m={m} n={n} Uᵀ·U[{i},{j}]: {} vs {want}",
+                    utu[i * n + j].to_f64()
+                );
+                let diff_v = (vvt[i * n + j].to_f64() - want).abs();
+                assert!(
+                    diff_v <= tol,
+                    "m={m} n={n} V·Vᵀ[{i},{j}]: {} vs {want}",
+                    vvt[i * n + j].to_f64()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn svd_solve_matches_qr_solve_on_full_rank_system() {
+    let mut rng = Lcg(0x5F4D_0002);
+    for &(m, n) in &[(4usize, 3usize), (6, 4)]
+    {
+        let a = random_full_rank(&mut rng, m, n);
+        let b: Vec<Q16_16> = (0..m)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 8))
+            .collect();
+        let x_qr = linalg::qr_solve(&a, &b, m, n).expect("rang plein");
+        let x_svd = linalg::svd_solve(&a, &b, m, n, q16(1e-4), 60).expect("pas de débordement");
+        let tol = (m as f64) * 256.0 / 65536.0;
+        for i in 0..n
+        {
+            let diff = (x_qr[i].to_f64() - x_svd[i].to_f64()).abs();
+            assert!(
+                diff <= tol,
+                "m={m} n={n} i={i}: qr_solve {} vs svd_solve {} (écart {diff} > {tol})",
+                x_qr[i].to_f64(),
+                x_svd[i].to_f64()
+            );
+        }
+    }
+}
+
+#[test]
+fn svd_solve_gives_minimum_norm_solution_for_rank_deficient_system() {
+    // Colonne 1 = 2× colonne 0 : rang 1 (déficient, n=2). Système consistant :
+    // b = colonne 0 exactement (x=(1,0) est une solution parmi une infinité,
+    // toutes de la forme (1,0) + t·(2,−1), (2,−1) engendrant l'espace nul).
+    let a = [1i32, 2, 2, 4, 3, 6].map(Q16_16::from);
+    let (m, n) = (3usize, 2usize);
+    let b = [q16(1.0), q16(2.0), q16(3.0)];
+
+    let x = linalg::svd_solve(&a, &b, m, n, q16(1e-3), 60)
+        .expect("svd_solve doit réussir malgré le rang déficient");
+
+    // Solution valide des moindres carrés : A·x ≈ b.
+    let ax = linalg::matvec(&a, &x, m, n);
+    for i in 0..m
+    {
+        let diff = (ax[i].to_f64() - b[i].to_f64()).abs();
+        assert!(
+            diff <= 0.05,
+            "i={i}: A·x = {} vs b = {}",
+            ax[i].to_f64(),
+            b[i].to_f64()
+        );
+    }
+
+    // Solution de **norme minimale** : orthogonale à l'espace nul (2,−1),
+    // propriété distinctive de la pseudo-inverse de Moore-Penrose.
+    let null_dot = x[0].to_f64() * 2.0 - x[1].to_f64();
+    assert!(
+        null_dot.abs() <= 0.05,
+        "x devrait être orthogonal à l'espace nul de A : produit scalaire {null_dot}"
+    );
+}
+
+#[test]
+fn svd_i64_storage() {
+    // Même exemple exact que `svd_known_diagonal_matrix`, stockage i64 (Q32_32).
+    let a = [3i64, 0, 0, 1].map(Q32_32::from);
+    let (u, sigma, vt, sweeps) =
+        linalg::svd(&a, 2, 2, Q32_32::zero(), 20).expect("pas de débordement");
+    assert_eq!(sigma, [3i64, 1].map(Q32_32::from));
+    assert_eq!(
+        u,
+        [Q32_32::one(), Q32_32::zero(), Q32_32::zero(), Q32_32::one()]
+    );
+    assert_eq!(
+        vt,
+        [Q32_32::one(), Q32_32::zero(), Q32_32::zero(), Q32_32::one()]
+    );
+    assert_eq!(sweeps, 1);
+}
+
+#[test]
+#[should_panic(expected = "svd")]
+fn svd_requires_m_ge_n() {
+    let a = vec![Q16_16::zero(); 2 * 3]; // m=2, n=3 : m<n.
+    let _ = linalg::svd(&a, 2, 3, q16(1e-4), 20);
+}
+
+#[test]
+#[should_panic(expected = "svd")]
+fn svd_dim_mismatch_panics() {
+    let a = vec![Q16_16::zero(); 5]; // annoncé 3×2 = 6 ≠ 5.
+    let _ = linalg::svd(&a, 3, 2, q16(1e-4), 20);
+}
+
+// ------------------------------------------------------------------ //
 //  Activations quantifiées                                            //
 // ------------------------------------------------------------------ //
 
