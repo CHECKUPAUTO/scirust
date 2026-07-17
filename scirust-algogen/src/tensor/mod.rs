@@ -4,6 +4,7 @@
 //! deterministic shape inference and pre-execution resource validation.
 
 mod active;
+mod canonical;
 mod canonicalize;
 mod cost;
 mod crossover;
@@ -18,6 +19,7 @@ mod rng;
 mod verify;
 
 pub use active::analyze_active;
+pub use canonical::{canonical_bytes, program_fingerprint};
 pub use canonicalize::prune_dead_code;
 pub use cost::{CostReport, estimate_cost};
 pub use crossover::{CrossoverOutcome, crossover};

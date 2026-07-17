@@ -11,6 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::canonical::program_fingerprint;
 use super::cost::{CostReport, estimate_cost};
 use super::dataset::Dataset;
 use super::interpreter::execute_program;
@@ -21,6 +22,10 @@ use super::verify::{VerificationLimits, verify_program};
 pub const CASE_FAILURE_PENALTY: f64 = 1.0e12;
 
 /// The fitness of a single program on a dataset.
+///
+/// `fingerprint` is the evaluated program's stable structural fingerprint. It
+/// participates in ranking only as an order-independent tie-breaker after every
+/// objective, never as an objective itself, and never in Pareto dominance.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct FitnessReport {
     /// Mean per-case error (mean-squared error, with penalties for failures).
@@ -35,6 +40,9 @@ pub struct FitnessReport {
     /// Whether the program could be statically verified for the dataset's
     /// input shapes. A `false` value means `cost` is the worst-case placeholder.
     pub evaluated: bool,
+
+    /// Stable structural fingerprint of the evaluated program.
+    pub fingerprint: u128,
 }
 
 /// Evaluate one program against `dataset`.
@@ -44,6 +52,7 @@ pub fn evaluate_program(
     limits: VerificationLimits,
 ) -> FitnessReport {
     let case_count = dataset.len();
+    let fingerprint = program_fingerprint(program);
 
     let verified = match verify_program(program, dataset.input_shapes(), limits)
     {
@@ -55,6 +64,7 @@ pub fn evaluate_program(
                 failed_cases: case_count,
                 cost: CostReport::unevaluable(program.instructions.len()),
                 evaluated: false,
+                fingerprint,
             };
         },
     };
@@ -94,6 +104,7 @@ pub fn evaluate_program(
         failed_cases,
         cost,
         evaluated: true,
+        fingerprint,
     }
 }
 

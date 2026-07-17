@@ -132,10 +132,33 @@ pub fn estimate_cost(program: &TensorProgram, verified: &VerifiedProgram) -> Cos
 
 /// Peak number of simultaneously live tensor elements during execution.
 ///
-/// A register becomes live when its instruction executes and stays live until
-/// its last active consumer; the output register stays live until the end. Only
-/// active instructions execute, and the sources of an active instruction are
-/// themselves active, so the sweep never touches dead registers.
+/// # Lifetime convention
+///
+/// This models the interpreter's per-operation semantics, which performs no
+/// in-place reuse and no operator fusion:
+///
+/// * a register becomes live when its instruction executes;
+/// * a destination is materialised **while its sources are still live**, so at
+///   the materialising step the sources and the new destination are counted
+///   together (the interpreter allocates a fresh output while reading its
+///   operands);
+/// * a register is released immediately **after** the step of its last active
+///   use;
+/// * the output register stays live until the final active instruction retires
+///   (until the result is observed);
+/// * a register read twice by one instruction, or used by two later
+///   instructions, is counted once and released only after its latest use;
+/// * only active instructions execute, and the sources of an active instruction
+///   are themselves active, so the sweep never touches dead registers.
+///
+/// This is the minimum working set required to execute the active dataflow. It
+/// is a lower bound on the *current* interpreter's resident set: that
+/// interpreter retains every active register in a vector until the program
+/// returns and never frees intermediates, so its actual residency equals
+/// [`CostReport::total_active_elements`]. Both metrics are reported: `peak_live`
+/// is the inherent working set; `total_active` is what today's interpreter
+/// holds. A future interpreter that dropped registers at last use would realise
+/// `peak_live`.
 fn peak_live_elements(program: &TensorProgram, verified: &VerifiedProgram) -> u64 {
     let shapes = &verified.register_shapes;
     let active = &verified.active;
@@ -309,6 +332,143 @@ mod tests {
         assert_eq!(cost.generated_intermediate_bytes, 32);
         assert_eq!(cost.dead_instructions, 0);
         assert_eq!(cost.bloat_ratio, 0.0);
+    }
+
+    #[test]
+    fn peak_live_counts_sources_with_destination_and_releases_after_last_use() {
+        // 0: In [2,2]=4  1: In [2,2]=4  2: Add(0,1) [2,2]=4  3: Relu(2) [2,2]=4
+        // At step 2 (Add), sources 0 and 1 are live together with the new result
+        // 2: 4 + 4 + 4 = 12; then 0 and 1 are released. Step 3 holds 2 and 3: 8.
+        let program = TensorProgram::new(
+            vec![
+                TensorInstruction::Input { input: 0 },
+                TensorInstruction::Input { input: 1 },
+                TensorInstruction::Add { lhs: 0, rhs: 1 },
+                TensorInstruction::Relu { src: 2 },
+            ],
+            3,
+        );
+        let v = verified(&program, &[vec![2, 2], vec![2, 2]]);
+        assert_eq!(estimate_cost(&program, &v).peak_live_elements, 12);
+    }
+
+    #[test]
+    fn peak_live_extends_lifetime_across_two_later_consumers() {
+        // Register 0 (=4) is used by both Relu (node 1) and Scale (node 3), so it
+        // stays live through node 3.
+        // step0: {0}=4; step1 Relu -> {0,1}=8; step2 Relu(1) -> {0,1,2}=12;
+        // step3 Add(2,... ) — keep 0 alive. Build so 0 feeds node 1 and node 3.
+        let program = TensorProgram::new(
+            vec![
+                TensorInstruction::Input { input: 0 },     // 0: 4
+                TensorInstruction::Relu { src: 0 },        // 1: 4 (uses 0)
+                TensorInstruction::Relu { src: 1 },        // 2: 4
+                TensorInstruction::Add { lhs: 0, rhs: 2 }, // 3: 4 (uses 0 again)
+            ],
+            3,
+        );
+        let v = verified(&program, &[vec![2, 2]]);
+        // step0 {0}=4; step1 {0,1}=8; step2 {0,1,2}=12 then release 1;
+        // step3 {0,2,3}=12 then release. Peak = 12.
+        assert_eq!(estimate_cost(&program, &v).peak_live_elements, 12);
+    }
+
+    #[test]
+    fn peak_live_counts_an_aliased_operand_once() {
+        // Add(0, 0) reads register 0 for both operands; it must be counted once.
+        let program = TensorProgram::new(
+            vec![
+                TensorInstruction::Input { input: 0 },     // 0: 4
+                TensorInstruction::Add { lhs: 0, rhs: 0 }, // 1: 4, reads 0 twice
+            ],
+            1,
+        );
+        let v = verified(&program, &[vec![2, 2]]);
+        // step0 {0}=4; step1 {0,1}=8 (0 counted once). Peak = 8.
+        assert_eq!(estimate_cost(&program, &v).peak_live_elements, 8);
+    }
+
+    #[test]
+    fn peak_live_ignores_dead_trailing_instructions() {
+        // Output is register 1; register 2 is dead trailing code.
+        let program = TensorProgram::new(
+            vec![
+                TensorInstruction::Input { input: 0 }, // 0: 4
+                TensorInstruction::Relu { src: 0 },    // 1: 4 (output)
+                TensorInstruction::Scale {
+                    src: 0,
+                    factor: 9.0,
+                }, // 2: dead
+            ],
+            1,
+        );
+        let v = verified(&program, &[vec![2, 2]]);
+        // step0 {0}=4; step1 {0,1}=8 then release. Dead node 2 not executed.
+        assert_eq!(estimate_cost(&program, &v).peak_live_elements, 8);
+    }
+
+    #[test]
+    fn peak_live_for_output_equal_to_input() {
+        // The program's output is directly an input.
+        let program = TensorProgram::new(vec![TensorInstruction::Input { input: 0 }], 0);
+        let v = verified(&program, &[vec![2, 3]]);
+        // Only the input (6 elements) is ever live.
+        assert_eq!(estimate_cost(&program, &v).peak_live_elements, 6);
+    }
+
+    #[test]
+    fn peak_live_for_scalar_and_empty_dimension_tensors() {
+        // Scalar tensor: shape [] has exactly one element.
+        let scalar = TensorProgram::new(
+            vec![
+                TensorInstruction::Input { input: 0 },
+                TensorInstruction::Scale {
+                    src: 0,
+                    factor: 2.0,
+                },
+            ],
+            1,
+        );
+        let v = verified(&scalar, &[Vec::new()]);
+        // step0 {0}=1; step1 {0,1}=2. Peak = 2.
+        assert_eq!(estimate_cost(&scalar, &v).peak_live_elements, 2);
+
+        // Zero-length dimension: shape [2,0] has zero elements.
+        let empty = TensorProgram::new(
+            vec![
+                TensorInstruction::Input { input: 0 },
+                TensorInstruction::Relu { src: 0 },
+            ],
+            1,
+        );
+        let v = verified(&empty, &[vec![2, 0]]);
+        assert_eq!(estimate_cost(&empty, &v).peak_live_elements, 0);
+        assert_eq!(estimate_cost(&empty, &v).total_active_elements, 0);
+    }
+
+    #[test]
+    fn input_reused_multiple_times_stays_counted_once() {
+        // Input 0 feeds three later ops; it is one register, counted once, and
+        // lives until its last use.
+        let program = TensorProgram::new(
+            vec![
+                TensorInstruction::Input { input: 0 }, // 0: 4
+                TensorInstruction::Relu { src: 0 },    // 1
+                TensorInstruction::Scale {
+                    src: 0,
+                    factor: 2.0,
+                }, // 2
+                TensorInstruction::Add { lhs: 1, rhs: 2 }, // 3
+                TensorInstruction::Add { lhs: 3, rhs: 0 }, // 4 (last use of 0)
+            ],
+            4,
+        );
+        let v = verified(&program, &[vec![2, 2]]);
+        // total active = 5 registers * 4 = 20; register 0 counted once throughout.
+        assert_eq!(estimate_cost(&program, &v).total_active_elements, 20);
+        // Peak: step2 holds {0,1,2}=12; step3 {0,1,2,3}=16 then release 1,2;
+        // step4 {0,3,4}=12. Peak = 16.
+        assert_eq!(estimate_cost(&program, &v).peak_live_elements, 16);
     }
 
     #[test]

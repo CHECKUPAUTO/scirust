@@ -120,7 +120,9 @@ impl Population {
         limits: VerificationLimits,
         rng: &mut DeterministicRng,
     ) -> Result<Self, GenerationError> {
-        let mut individuals = Vec::with_capacity(size);
+        // `Vec::new` rather than `with_capacity(size)`: a pathological `size`
+        // (e.g. `usize::MAX`) must not panic on an impossible reservation.
+        let mut individuals = Vec::new();
         for _ in 0..size
         {
             individuals.push(generate(config, limits, rng)?);
@@ -233,8 +235,18 @@ pub fn dominates(first: &FitnessReport, second: &FitnessReport) -> bool {
 
 /// Rank reports best-first as a strict total order.
 ///
-/// Keys, in priority: non-dominated front, then the lexicographic objective
-/// order, then the population index as an explicit final tie-breaker.
+/// Keys, in priority:
+/// 1. non-dominated Pareto front;
+/// 2. the lexicographic objective order;
+/// 3. the program's stable structural fingerprint — an order-independent,
+///    deterministic tie-breaker that depends only on program structure, never
+///    on insertion order, `HashMap` iteration, memory addresses, thread
+///    scheduling or wall-clock time;
+/// 4. the population index, as the ultimate tie-breaker for the rare case of two
+///    fingerprint-colliding individuals with otherwise identical objectives.
+///
+/// The comparator is a strict total order, so the result is independent of the
+/// underlying sort's stability.
 pub fn rank(reports: &[FitnessReport]) -> Vec<usize> {
     let count = reports.len();
     let fronts = non_dominated_fronts(reports);
@@ -244,6 +256,7 @@ pub fn rank(reports: &[FitnessReport]) -> Vec<usize> {
         fronts[left]
             .cmp(&fronts[right])
             .then_with(|| lexicographic(&reports[left], &reports[right]))
+            .then_with(|| reports[left].fingerprint.cmp(&reports[right].fingerprint))
             .then_with(|| left.cmp(&right))
     });
     order
@@ -264,9 +277,19 @@ pub fn tournament(
     rng: &mut DeterministicRng,
 ) -> usize {
     let count = rank_positions.len();
-    debug_assert!(count > 0, "tournament requires a non-empty population");
+    if count == 0
+    {
+        // A tournament over an empty population has no valid selection; return a
+        // harmless index without indexing rather than panicking. Callers must
+        // not use the result for an empty population.
+        return 0;
+    }
 
-    let size = config.size.max(1);
+    // Drawing more competitors than the population size cannot enlarge the fixed
+    // candidate pool, so the effective size is capped at `count`. This keeps the
+    // draw count bounded even for a pathological `config.size` such as
+    // `usize::MAX`.
+    let size = config.size.clamp(1, count);
     let mut best = rng.below(count);
     let mut best_position = rank_positions[best];
 
@@ -474,12 +497,12 @@ fn chance(rng: &mut DeterministicRng, probability: f64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tensor::OperatorSet;
     use crate::tensor::cost::CostReport;
     use crate::tensor::dataset::TensorCase;
+    use crate::tensor::{OperatorSet, TensorInstruction};
     use scirust_tensor_core::TensorND;
 
-    fn report(loss: f64, flops: u64, dead: usize) -> FitnessReport {
+    fn report(loss: f64, flops: u64, dead: usize, fingerprint: u128) -> FitnessReport {
         FitnessReport {
             loss,
             failed_cases: 0,
@@ -493,6 +516,7 @@ mod tests {
                 bloat_ratio: dead as f64,
             },
             evaluated: true,
+            fingerprint,
         }
     }
 
@@ -531,23 +555,69 @@ mod tests {
 
     #[test]
     fn dominance_is_strict() {
-        let better = report(1.0, 10, 0);
-        let worse = report(1.0, 20, 0);
+        let better = report(1.0, 10, 0, 1);
+        let worse = report(1.0, 20, 0, 2);
         assert!(dominates(&better, &worse));
         assert!(!dominates(&worse, &better));
-        // Equal reports do not dominate each other.
-        assert!(!dominates(&better, &report(1.0, 10, 0)));
+        // Equal objectives (fingerprint is not an objective) do not dominate.
+        assert!(!dominates(&better, &report(1.0, 10, 0, 99)));
     }
 
     #[test]
     fn ranking_breaks_ties_under_equal_primary_objective() {
         // Equal loss; the lower-FLOP report must rank first.
-        let reports = vec![report(1.0, 30, 0), report(1.0, 10, 0), report(1.0, 20, 0)];
+        let reports = vec![
+            report(1.0, 30, 0, 7),
+            report(1.0, 10, 0, 8),
+            report(1.0, 20, 0, 9),
+        ];
+        assert_eq!(rank(&reports), vec![1, 2, 0]);
+    }
+
+    #[test]
+    fn identical_objectives_rank_by_structural_fingerprint_then_index() {
+        // All objectives equal; distinct fingerprints decide the order,
+        // independently of the input (insertion) order.
+        let reports = vec![
+            report(2.0, 5, 1, 300),
+            report(2.0, 5, 1, 100),
+            report(2.0, 5, 1, 200),
+        ];
+        // Ascending fingerprint: 100 (idx 1), 200 (idx 2), 300 (idx 0).
         assert_eq!(rank(&reports), vec![1, 2, 0]);
 
-        // Fully identical reports fall back to the population index.
-        let identical = vec![report(2.0, 5, 1), report(2.0, 5, 1), report(2.0, 5, 1)];
-        assert_eq!(rank(&identical), vec![0, 1, 2]);
+        // Reordering the inputs yields the same ordering of fingerprints, proving
+        // independence from insertion order.
+        let reordered = vec![
+            report(2.0, 5, 1, 200),
+            report(2.0, 5, 1, 300),
+            report(2.0, 5, 1, 100),
+        ];
+        let order = rank(&reordered);
+        let fingerprints: Vec<u128> = order.iter().map(|&i| reordered[i].fingerprint).collect();
+        assert_eq!(fingerprints, vec![100, 200, 300]);
+
+        // Fingerprint collisions (identical fingerprints) fall back to index.
+        let collide = vec![
+            report(2.0, 5, 1, 42),
+            report(2.0, 5, 1, 42),
+            report(2.0, 5, 1, 42),
+        ];
+        assert_eq!(rank(&collide), vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn ranking_is_repeatable_and_order_stable() {
+        let reports = vec![
+            report(1.0, 5, 0, 11),
+            report(1.0, 5, 0, 33),
+            report(1.0, 5, 0, 22),
+            report(0.5, 9, 2, 44),
+        ];
+        assert_eq!(rank(&reports), rank(&reports));
+        // The distinct-loss individual (idx 3) is best; the rest order by
+        // fingerprint: 11 (0), 22 (2), 33 (1).
+        assert_eq!(rank(&reports), vec![3, 0, 2, 1]);
     }
 
     #[test]
@@ -594,12 +664,87 @@ mod tests {
         let advanced = empty.advance(&reports, &config(), VerificationLimits::default(), &mut rng);
         assert_eq!(advanced.len(), 0);
 
+        // A tournament over an empty population must not panic.
+        let _ = tournament(&[], TournamentConfig { size: 4 }, &mut rng);
+
         // Single-individual evolution runs to completion.
         let mut single = config();
         single.population_size = 1;
         single.elitism = 1;
         let outcome = evolve(&single, &dataset(), VerificationLimits::default(), 5).unwrap();
         assert_eq!(outcome.generations_run, single.generations);
+    }
+
+    #[test]
+    fn tournament_size_larger_than_population_is_bounded() {
+        // An enormous tournament size must terminate and return a valid index.
+        let positions = vec![2, 0, 1];
+        let mut rng = DeterministicRng::new(3);
+        let selected = tournament(&positions, TournamentConfig { size: usize::MAX }, &mut rng);
+        assert!(selected < positions.len());
+    }
+
+    #[test]
+    fn duplicate_individuals_are_ranked_deterministically() {
+        // Three identical programs produce identical reports (same fingerprint);
+        // ranking falls back to index and is reproducible.
+        let program = TensorProgram::new(vec![TensorInstruction::Input { input: 0 }], 0);
+        let population = Population::from_programs(vec![program.clone(), program.clone(), program]);
+        let reports = population.evaluate(&dataset(), VerificationLimits::default());
+        assert_eq!(reports[0], reports[1]);
+        assert_eq!(rank(&reports), vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn elitism_under_fully_equal_objectives_is_deterministic() {
+        // A population of identical individuals has fully equal objective vectors;
+        // advancing must still be deterministic and preserve the size.
+        let program = TensorProgram::new(vec![TensorInstruction::Input { input: 0 }], 0);
+        let population = Population::from_programs(vec![program; 8]);
+        let reports = population.evaluate(&dataset(), VerificationLimits::default());
+
+        let cfg = config();
+        let mut first = DeterministicRng::new(1);
+        let mut second = DeterministicRng::new(1);
+        let a = population.advance(&reports, &cfg, VerificationLimits::default(), &mut first);
+        let b = population.advance(&reports, &cfg, VerificationLimits::default(), &mut second);
+        assert_eq!(a, b);
+        assert_eq!(a.len(), 8);
+    }
+
+    #[test]
+    fn zero_generation_budget_runs_only_the_initial_population() {
+        let mut cfg = config();
+        cfg.generations = 0;
+        let outcome = evolve(&cfg, &dataset(), VerificationLimits::default(), 4).unwrap();
+        assert_eq!(outcome.generations_run, 0);
+        assert_eq!(outcome.history.len(), 1);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn ranking_matches_between_sequential_and_rayon_evaluation() {
+        use crate::tensor::evaluate_population_rayon;
+
+        let mut rng = DeterministicRng::new(123);
+        let cfg = config();
+        let population = Population::generate(
+            &cfg.generation,
+            cfg.population_size,
+            VerificationLimits::default(),
+            &mut rng,
+        )
+        .unwrap();
+        let dataset = dataset();
+
+        let sequential = population.evaluate(&dataset, VerificationLimits::default());
+        let parallel = evaluate_population_rayon(
+            population.programs(),
+            &dataset,
+            VerificationLimits::default(),
+        );
+        assert_eq!(sequential, parallel);
+        assert_eq!(rank(&sequential), rank(&parallel));
     }
 
     #[test]
