@@ -28,8 +28,6 @@
 //! bornés par `n` (le prédicat masque tout dépassement), donc aucune lecture ou
 //! écriture hors des slices fournies.
 
-#![allow(clippy::missing_safety_doc)]
-
 use crate::matrix::backend::{ScalarBackend, SimdBackend};
 use crate::matrix::view::{MatrixView, MatrixViewMut};
 
@@ -101,6 +99,14 @@ pub fn sscal_f32_sve(alpha: f32, x: &mut [f32]) {
 
 /// Cœur SVE de [`saxpy_f32_sve`] : boucle prédiquée, `_x` (don't-care) car le
 /// store prédiqué n'écrit que les voies actives — aucune fuite de voie inactive.
+/// # Safety
+/// Caller must ensure SVE is available
+/// (`is_aarch64_feature_detected!("sve")`). `x.len() == y.len()` is
+/// required ([`saxpy_f32_sve`] asserts this before dispatching here).
+/// Bounds are otherwise self-contained: `svwhilelt_b32_u64` builds a
+/// predicate that masks every lane at or past `n`, so `svld1_f32`/
+/// `svst1_f32` never touch memory past `x`/`y`'s end regardless of the
+/// hardware vector length.
 #[target_feature(enable = "sve")]
 unsafe fn saxpy_f32_sve_impl(alpha: f32, x: &[f32], y: &mut [f32]) {
     use core::arch::aarch64::*;
@@ -126,6 +132,11 @@ unsafe fn saxpy_f32_sve_impl(alpha: f32, x: &[f32], y: &mut [f32]) {
 /// inactives du dernier pas partiel **conservent** leur somme partielle (un `_x`
 /// les rendrait indéfinies et corromprait le `svaddv` final sur toutes les
 /// voies).
+/// # Safety
+/// Same contract as [`saxpy_f32_sve_impl`]: caller must ensure SVE is
+/// available, and `x.len() == y.len()` ([`sdot_f32_sve`] asserts this
+/// before dispatching here). Predicated load bounds are self-contained as
+/// described there.
 #[target_feature(enable = "sve")]
 unsafe fn sdot_f32_sve_impl(x: &[f32], y: &[f32]) -> f32 {
     use core::arch::aarch64::*;
@@ -148,6 +159,10 @@ unsafe fn sdot_f32_sve_impl(x: &[f32], y: &[f32]) -> f32 {
 }
 
 /// Cœur SVE de [`sscal_f32_sve`] : `_x` suffit (store prédiqué).
+/// # Safety
+/// Caller must ensure SVE is available. Bounds are self-contained
+/// (predicated load/store, as in [`saxpy_f32_sve_impl`]) — no length
+/// precondition beyond `x` itself since there's only one slice involved.
 #[target_feature(enable = "sve")]
 unsafe fn sscal_f32_sve_impl(alpha: f32, x: &mut [f32]) {
     use core::arch::aarch64::*;
@@ -203,6 +218,11 @@ pub fn sgemm_f32_sve(
 /// `C *= beta` prédiqué (cas `k == 0` ou `alpha == 0`, où `C = beta·C`).
 /// `beta == 0` écrit des zéros sans **lire** `C` (évite un `0·NaN` si `C` est
 /// non initialisé).
+/// # Safety
+/// Caller must ensure SVE is available. `c` must point to a valid,
+/// exclusively-borrowed row-major `m×n` `f32` buffer (row stride `n`),
+/// writable for the whole call. Column bounds are self-contained via the
+/// predicate (`svwhilelt_b32_u64`), which masks every lane at or past `n`.
 #[target_feature(enable = "sve")]
 unsafe fn scale_c_sve(beta: f32, m: usize, n: usize, c: *mut f32) {
     use core::arch::aarch64::*;
@@ -237,6 +257,12 @@ unsafe fn scale_c_sve(beta: f32, m: usize, n: usize, c: *mut f32) {
 /// fois (`p`-majeur, `alpha` fusionné, lignes `mr..MR_SVE` mises à zéro), puis
 /// pour chaque bande de `VL` colonnes on maintient `MR_SVE` accumulateurs sur
 /// tout `K` et on stocke la tuile (bord colonne par prédicat, `beta` fondu).
+/// # Safety
+/// Caller must ensure SVE is available. `a`/`b`/`c` are `MatrixView`s, so
+/// their bounds are already validated by construction. Row bounds beyond
+/// `MR_SVE` are handled by zero-padding `apack` (missing rows contribute
+/// zero to every accumulator); column bounds are handled by the predicate
+/// (`svwhilelt_b32_u64`), which masks every lane at or past `n`.
 #[target_feature(enable = "sve")]
 unsafe fn sgemm_f32_sve_packed(
     alpha: f32,

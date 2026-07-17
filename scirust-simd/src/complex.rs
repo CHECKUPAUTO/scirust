@@ -63,13 +63,18 @@ impl Complex<f32> {
 #[allow(dead_code)]
 #[inline]
 fn as_f32(s: &[Complex<f32>]) -> &[f32] {
-    // SAFETY : Complex<f32> est #[repr(C)] avec 2 f32 contigus
+    // SAFETY: Complex<f32> is #[repr(C)] with two contiguous f32 fields
+    // (re, im) and no padding, so a &[Complex<f32>] of length n reinterprets
+    // bit-for-bit as a &[f32] of length 2n — same base pointer, valid range,
+    // and alignment (f32's alignment divides Complex<f32>'s).
     unsafe { std::slice::from_raw_parts(s.as_ptr() as *const f32, s.len() * 2) }
 }
 
 #[allow(dead_code)]
 #[inline]
 fn as_f32_mut(s: &mut [Complex<f32>]) -> &mut [f32] {
+    // SAFETY: same layout argument as `as_f32`. Exclusive borrow of `s` is
+    // preserved (input is `&mut`, output borrows from it), so no aliasing.
     unsafe { std::slice::from_raw_parts_mut(s.as_mut_ptr() as *mut f32, s.len() * 2) }
 }
 

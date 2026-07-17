@@ -49,8 +49,6 @@
 //! `[i8; 16*64]` / `[i32; 16*16]` de taille fixe, jamais les slices utilisateur
 //! directement — le (dé)packing borne tous les accès.
 
-#![allow(clippy::missing_safety_doc)]
-
 use std::sync::OnceLock;
 
 /// Produit matriciel **int8 → i32** `C[m×n] = A[m×k]·B[k×n]` (row-major), via
@@ -114,15 +112,33 @@ pub fn amx_int8_usable() -> bool {
         {
             return false;
         }
-        // SAFETY: simple appel système sans effet mémoire côté espace utilisateur.
-        unsafe { request_amx_permission() }
+        #[cfg(target_os = "linux")]
+        {
+            // SAFETY: simple appel système sans effet mémoire côté espace utilisateur.
+            unsafe { request_amx_permission() }
+        }
+        // `request_amx_permission` speaks the Linux x86_64 syscall ABI
+        // (raw `syscall`, `arch_prctl` number). On any other OS we cannot
+        // confirm the kernel granted XTILEDATA permission, so treat AMX as
+        // unusable and fall back to the scalar reference rather than issue
+        // an invalid/OS-specific syscall.
+        #[cfg(not(target_os = "linux"))]
+        {
+            false
+        }
     })
 }
 
 /// Demande au noyau Linux la permission d'utiliser l'état AMX `XTILEDATA` via
 /// `arch_prctl(ARCH_REQ_XCOMP_PERM, XFEATURE_XTILEDATA)`. Renvoie `true` si
 /// accordée. Sans cet appel, toute instruction de tuile fauterait (`#NM`).
-#[cfg(target_arch = "x86_64")]
+///
+/// # Safety
+/// Caller must ensure this runs on Linux x86_64 (enforced by this fn's own
+/// `#[cfg(target_os = "linux")]`): the raw `syscall` instruction encodes the
+/// Linux x86_64 syscall ABI (`arch_prctl` = syscall number 158). On any
+/// other OS this would invoke an unrelated or invalid system call.
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 unsafe fn request_amx_permission() -> bool {
     const SYS_ARCH_PRCTL: i64 = 158;
     const ARCH_REQ_XCOMP_PERM: u64 = 0x1023;
@@ -180,6 +196,15 @@ const MAX_N: usize = 16; // colonnes int32/tuile
 #[cfg(target_arch = "x86_64")]
 const MAX_K: usize = 64; // octets int8/ligne
 
+/// # Safety
+/// Caller must ensure `amx_int8_usable()` returned `true` just before this
+/// call (ISA `amx-tile`+`amx-int8` detected and kernel permission granted —
+/// see [`request_amx_permission`]). Caller must ensure `a.len() == m * k`,
+/// `b.len() == k * n`, and `c.len() == m * n` ([`amx_matmul_i8`] guarantees
+/// this by construction). The tile config/load/store intrinsics only ever
+/// read/write the fixed-size local buffers (`a_panels`/`b_buf`/`c_buf`),
+/// never the caller's slices directly — those are only touched through
+/// ordinary bounds-checked Rust indexing in the packing/unpacking loops.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "amx-int8,amx-tile")]
 unsafe fn amx_matmul_i8_tiled(a: &[i8], b: &[i8], m: usize, k: usize, n: usize, c: &mut [i32]) {
@@ -379,6 +404,13 @@ pub fn amx_matmul_i8_prepacked(
     c
 }
 
+/// # Safety
+/// Same AMX-usability precondition as [`amx_matmul_i8_tiled`]: caller must
+/// ensure `amx_int8_usable()` returned `true` just before this call. Caller
+/// must additionally ensure `a.len() == m * k`, `b_packed.len() ==
+/// prepack_b_i8_len(k, n)`, and `c.len() == m * n` — all three are asserted
+/// by the public [`amx_matmul_i8_prepacked`] wrapper before it dispatches
+/// here.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "amx-int8,amx-tile")]
 unsafe fn amx_matmul_i8_prepacked_tiled(
@@ -577,8 +609,16 @@ pub fn amx_bf16_usable() -> bool {
         {
             return false;
         }
-        // SAFETY: simple appel système sans effet mémoire côté espace utilisateur.
-        unsafe { request_amx_permission() }
+        #[cfg(target_os = "linux")]
+        {
+            // SAFETY: simple appel système sans effet mémoire côté espace utilisateur.
+            unsafe { request_amx_permission() }
+        }
+        // See amx_int8_usable: request_amx_permission is Linux-only.
+        #[cfg(not(target_os = "linux"))]
+        {
+            false
+        }
     })
 }
 
@@ -587,6 +627,11 @@ pub fn amx_bf16_usable() -> bool {
 #[cfg(target_arch = "x86_64")]
 const MAX_K_BF16: usize = 32;
 
+/// # Safety
+/// Caller must ensure `amx_bf16_usable()` returned `true` just before this
+/// call (ISA `amx-tile`+`amx-bf16` detected and kernel permission granted).
+/// Caller must ensure `a.len() == m * k`, `b.len() == k * n`, and `c.len()
+/// == m * n` ([`amx_matmul_bf16`] guarantees this by construction).
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "amx-bf16,amx-tile")]
 unsafe fn amx_matmul_bf16_tiled(a: &[u16], b: &[u16], m: usize, k: usize, n: usize, c: &mut [f32]) {

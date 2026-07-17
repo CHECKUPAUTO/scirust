@@ -25,8 +25,6 @@
 //! pointeurs reste bornée par les conditions de boucle et les longueurs de
 //! slices. Les stores non-temporels sont suivis d'un `sfence` avant tout retour.
 
-#![allow(clippy::missing_safety_doc)]
-
 // ===================================================================== //
 //  Masque k AVX-512 — axpy conditionnel par voie                         //
 // ===================================================================== //
@@ -55,6 +53,11 @@ pub fn axpy_masked_f32(alpha: f32, x: &[f32], keep: &[bool], y: &mut [f32]) {
     }
 }
 
+/// # Safety
+/// Caller must ensure AVX-512F is available. `x.len() == y.len() ==
+/// keep.len()` is required ([`axpy_masked_f32`] asserts this before
+/// dispatching here); bounds are otherwise self-contained via the loop
+/// condition and the scalar remainder tail.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 unsafe fn axpy_masked_f32_avx512(alpha: f32, x: &[f32], keep: &[bool], y: &mut [f32]) {
@@ -111,6 +114,14 @@ pub fn scale_stream_f32(s: f32, data: &mut [f32]) {
     }
 }
 
+/// # Safety
+/// Caller must ensure AVX is available. `data`'s bounds are self-contained
+/// (a `&mut [f32]` is valid for its own length). The aligned
+/// `_mm256_load_ps`/`_mm256_stream_ps` calls require 32-byte-aligned
+/// addresses: the preamble loop scalar-processes elements until
+/// `ptr.add(i)` is 32-byte aligned (or `i == n`), and each aligned-loop
+/// iteration advances by exactly 8 `f32` = 32 bytes, so the invariant holds
+/// by construction for every aligned intrinsic call that follows.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx")]
 unsafe fn scale_stream_f32_avx(s: f32, data: &mut [f32]) {
@@ -161,6 +172,14 @@ pub fn axpy_prefetch_f32(alpha: f32, x: &[f32], y: &mut [f32]) {
     }
 }
 
+/// # Safety
+/// Caller must ensure AVX2 and FMA are available. `x.len() == y.len()` is
+/// required ([`axpy_prefetch_f32`] asserts this before dispatching here);
+/// bounds are otherwise self-contained via the loop condition and the
+/// scalar remainder tail. The `_mm_prefetch` calls are additionally guarded
+/// by `i + PF_AHEAD < n`, so the prefetched address is always within
+/// `x`/`y` (prefetch is a non-faulting hint regardless, but this keeps the
+/// reasoning simple).
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma")]
 unsafe fn axpy_prefetch_f32_avx2(alpha: f32, x: &[f32], y: &mut [f32]) {

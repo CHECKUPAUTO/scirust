@@ -27,8 +27,6 @@
 //! `vld1q`), donc aucune contrainte d'alignement ; l'arithmétique de pointeurs
 //! reste bornée par les conditions de boucle et les longueurs de slices.
 
-#![allow(clippy::missing_safety_doc)]
-
 // ===================================================================== //
 //  BF16 (bfloat16) — conversions round-to-nearest-even                   //
 // ===================================================================== //
@@ -117,6 +115,11 @@ pub fn dot_bf16_scalar(a: &[u16], b: &[u16]) -> f32 {
     acc
 }
 
+/// # Safety
+/// Caller must ensure AVX-512F is available. `a.len() == b.len()` is
+/// required ([`dot_bf16`] asserts this before dispatching here); bounds are
+/// otherwise self-contained via the loop condition and scalar remainder
+/// tail.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 unsafe fn dot_bf16_avx512(a: &[u16], b: &[u16]) -> f32 {
@@ -151,6 +154,13 @@ unsafe fn dot_bf16_avx512(a: &[u16], b: &[u16]) -> f32 {
 /// comme toutes les voies sont additionnées en sortie, l'agencement interne
 /// paire/voie de `dpbf16` n'affecte pas le résultat (chaque `a[k]·b[k]` est
 /// compté une fois). Bord `< 32` traité en scalaire.
+/// # Safety
+/// Caller must ensure AVX-512BF16 and AVX-512F are available. `a.len() ==
+/// b.len()` is required ([`dot_bf16`] asserts this before dispatching
+/// here); bounds are otherwise self-contained via the loop condition and
+/// scalar remainder tail. The `transmute` from `__m512i` to `__m512bh` is a
+/// same-size bit reinterpretation (both 512 bits), matching bf16's raw
+/// `u16` storage.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512bf16,avx512f")]
 unsafe fn dot_bf16_avx512bf16(a: &[u16], b: &[u16]) -> f32 {
@@ -225,6 +235,11 @@ pub fn dot_u8i8_i32_scalar(a: &[u8], b: &[i8]) -> i32 {
     acc
 }
 
+/// # Safety
+/// Caller must ensure AVX-512 VNNI, AVX-512BW, and AVX-512F are available.
+/// `a.len() == b.len()` is required ([`dot_u8i8_i32`] asserts this before
+/// dispatching here); bounds are otherwise self-contained via the loop
+/// condition and the masked remainder tail.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512vnni,avx512bw,avx512f")]
 unsafe fn dot_u8i8_i32_vnni(a: &[u8], b: &[i8]) -> i32 {
@@ -254,6 +269,11 @@ unsafe fn dot_u8i8_i32_vnni(a: &[u8], b: &[i8]) -> i32 {
 /// Chemin **`i8mm` USDOT** de [`dot_u8i8_i32`] (aarch64) : `vusdotq_s32` prend
 /// `u8` (non signé) et `i8` (signé), 4 MAC/voie → 4 accumulateurs `i32`, 16
 /// éléments/pas ; réduction horizontale + bord scalaire.
+/// # Safety
+/// Caller must ensure `i8mm` is available. `a.len() == b.len()` is
+/// required ([`dot_u8i8_i32`] asserts this before dispatching here);
+/// bounds are otherwise self-contained via the loop condition and scalar
+/// remainder tail.
 #[cfg(all(feature = "nightly-simd", target_arch = "aarch64"))]
 #[target_feature(enable = "i8mm")]
 unsafe fn dot_u8i8_i32_usdot(a: &[u8], b: &[i8]) -> i32 {
@@ -326,6 +346,11 @@ pub fn dot_i8i8_i32_scalar(a: &[i8], b: &[i8]) -> i32 {
 
 /// Chemin **`dotprod` SDOT** de [`dot_i8i8_i32`] (aarch64) : `vdotq_s32`,
 /// 4 MAC signés/voie → 4 accumulateurs `i32`, 16 éléments/pas.
+/// # Safety
+/// Caller must ensure `dotprod` is available. `a.len() == b.len()` is
+/// required ([`dot_i8i8_i32`] asserts this before dispatching here);
+/// bounds are otherwise self-contained via the loop condition and scalar
+/// remainder tail.
 #[cfg(all(feature = "nightly-simd", target_arch = "aarch64"))]
 #[target_feature(enable = "dotprod")]
 unsafe fn dot_i8i8_i32_sdot(a: &[i8], b: &[i8]) -> i32 {
@@ -351,6 +376,11 @@ unsafe fn dot_i8i8_i32_sdot(a: &[i8], b: &[i8]) -> i32 {
 /// Chemin **AVX-512BW** de [`dot_i8i8_i32`] (x86_64) : extension de signe
 /// `i8→i16` (`_mm512_cvtepi8_epi16`) puis `_mm512_madd_epi16` (produits appariés
 /// `i16·i16→i32`), 32 éléments/pas ; bord `< 32` en scalaire.
+/// # Safety
+/// Caller must ensure AVX-512BW and AVX-512F are available. `a.len() ==
+/// b.len()` is required ([`dot_i8i8_i32`] asserts this before dispatching
+/// here); bounds are otherwise self-contained via the loop condition and
+/// scalar remainder tail.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512bw,avx512f")]
 unsafe fn dot_i8i8_i32_avx512(a: &[i8], b: &[i8]) -> i32 {
