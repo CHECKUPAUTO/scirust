@@ -72,7 +72,9 @@
 // * [`traits`] — [`NumericScalar`] et [`RealScalar`].
 // * [`simd`] — vecteurs [`FixedI16x8`], [`FixedI32x8`], [`FixedI64x4`].
 // * [`reductions`] — sommes, `dot`, normes, extrema, cosinus.
-// * [`linalg`] — GEMM déterministe (`matmul`, `matvec`, `transpose`).
+// * [`linalg`] — GEMM déterministe (`matmul`, `matvec`, `transpose`) et
+//   décompositions directes (`cholesky`, `lu_decompose`/`lu_solve`,
+//   `determinant`) pour résoudre `A·x = b`.
 // * [`activation`] — activations quantifiées (`relu`, `relu6`, `hardswish`…).
 // * [`layer`] — couche linéaire quantifiée [`layer::Linear`] (`W·x + b`, + activation).
 // * [`conv`] — convolution 1D quantifiée [`conv::conv1d`] (im2col + GEMM).

@@ -687,6 +687,242 @@ fn matmul_dim_mismatch_panics() {
 }
 
 // ------------------------------------------------------------------ //
+//  Décompositions : Cholesky, LU à pivot partiel, déterminant          //
+// ------------------------------------------------------------------ //
+
+/// Matrice `n×n` symétrique définie positive aléatoire : `A = BᵀB + n·I`
+/// (`B` à coefficients modestes pour éviter tout débordement). Le terme
+/// `n·I` garantit un conditionnement raisonnable, pas seulement la
+/// définie-positivité stricte.
+fn random_spd(rng: &mut Lcg, n: usize) -> Vec<Q16_16> {
+    let b: Vec<Q16_16> = (0..n * n)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+        .collect();
+    let bt = linalg::transpose(&b, n, n);
+    let mut spd = linalg::matmul(&bt, &b, n, n, n);
+    for i in 0..n
+    {
+        spd[i * n + i] += Q16_16::from_i32(n as i32);
+    }
+    spd
+}
+
+/// Matrice `n×n` à diagonale strictement dominante (donc inversible et bien
+/// conditionnée), coefficients hors diagonale modestes.
+fn random_diag_dominant(rng: &mut Lcg, n: usize) -> Vec<Q16_16> {
+    let mut a: Vec<Q16_16> = (0..n * n)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 12))
+        .collect();
+    for i in 0..n
+    {
+        a[i * n + i] = Q16_16::from_i32(4 * n as i32);
+    }
+    a
+}
+
+/// Reconstruit `L·U` (`n×n`) à partir du buffer combiné renvoyé par
+/// [`linalg::lu_decompose`] (diagonale unité de `L` rendue explicite).
+fn lu_reconstruct(lu: &[Q16_16], n: usize) -> Vec<Q16_16> {
+    let mut l = vec![Q16_16::zero(); n * n];
+    let mut u = vec![Q16_16::zero(); n * n];
+    for i in 0..n
+    {
+        l[i * n + i] = Q16_16::one();
+        for j in 0..i
+        {
+            l[i * n + j] = lu[i * n + j];
+        }
+        for j in i..n
+        {
+            u[i * n + j] = lu[i * n + j];
+        }
+    }
+    linalg::matmul(&l, &u, n, n, n)
+}
+
+#[test]
+fn cholesky_known_exact() {
+    // A = [[4,6],[6,25]] = L·Lᵀ avec L = [[2,0],[3,4]] (3²+4²=25) : exact en
+    // entiers, aucun arrondi.
+    let a = [4i32, 6, 6, 25].map(Q16_16::from);
+    let l = linalg::cholesky(&a, 2).expect("SPD");
+    let expected = [2i32, 0, 3, 4].map(Q16_16::from);
+    assert_eq!(l, expected);
+}
+
+#[test]
+fn cholesky_rejects_indefinite() {
+    // det([[1,2],[2,1]]) = 1 - 4 = -3 < 0 : pas définie positive.
+    let a = [1i32, 2, 2, 1].map(Q16_16::from);
+    assert!(linalg::cholesky(&a, 2).is_none());
+}
+
+#[test]
+fn cholesky_rejects_zero_matrix() {
+    let a = vec![Q16_16::zero(); 9];
+    assert!(linalg::cholesky(&a, 3).is_none());
+}
+
+#[test]
+fn forward_back_substitution_known() {
+    // L = [[2,0],[3,4]], b = [4, 22] → y : 2y0=4→y0=2 ; 3·2+4y1=22→y1=4.
+    let l = [2i32, 0, 3, 4].map(Q16_16::from);
+    let b = [4i32, 22].map(Q16_16::from);
+    let y = linalg::forward_substitution(&l, &b, 2).unwrap();
+    assert_eq!(y, [2i32, 4].map(Q16_16::from));
+
+    // U = [[2,3],[0,4]], y = [2,4] → x : 4x1=4→x1=1 ; 2x0+3=2→x0=... solve
+    // back : x1 = y1/U11 = 1 ; x0 = (y0 - U01·x1)/U00 = (2-3)/2 = -0.5.
+    let u = [2i32, 3, 0, 4].map(Q16_16::from);
+    let x = linalg::back_substitution(&u, &y, 2).unwrap();
+    assert_eq!(x[1], Q16_16::one());
+    assert_eq!(x[0], q16(-0.5));
+}
+
+#[test]
+fn forward_substitution_singular_is_none() {
+    let l = [0i32, 0, 3, 4].map(Q16_16::from); // L[0,0] = 0
+    let b = [1i32, 1].map(Q16_16::from);
+    assert!(linalg::forward_substitution(&l, &b, 2).is_none());
+}
+
+#[test]
+fn cholesky_solve_matches_matvec_random_spd() {
+    let mut rng = Lcg(0xC401_5ED0);
+    for &n in &[1usize, 2, 3, 4, 6]
+    {
+        let a = random_spd(&mut rng, n);
+        let x_true: Vec<Q16_16> = (0..n)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+            .collect();
+        let b = linalg::matvec(&a, &x_true, n, n);
+        let x = linalg::cholesky_solve(&a, &b, n).expect("A construite SPD");
+        let b_check = linalg::matvec(&a, &x, n, n);
+        let tol = (n as f64) * 16.0 / 65536.0;
+        for i in 0..n
+        {
+            let diff = (b_check[i].to_f64() - b[i].to_f64()).abs();
+            assert!(diff <= tol, "n={n} i={i}: résidu {diff} > {tol}");
+        }
+    }
+}
+
+#[test]
+fn cholesky_i64_storage_known() {
+    // Même exemple exact que `cholesky_known_exact`, stockage i64 (Q32_32).
+    let a = [4i64, 6, 6, 25].map(Q32_32::from);
+    let l = linalg::cholesky(&a, 2).expect("SPD");
+    let expected = [2i64, 0, 3, 4].map(Q32_32::from);
+    assert_eq!(l, expected);
+}
+
+#[test]
+fn lu_decompose_reconstructs_permuted_a() {
+    // Nécessite un pivot dès k=0 : colonne 0 = [2,4,8], le maximum (8) est
+    // en ligne 2 → swap(0,2).
+    let a = [
+        2i32, 1, 1, //
+        4, 3, 3, //
+        8, 7, 9,
+    ]
+    .map(Q16_16::from);
+    let (lu, perm) = linalg::lu_decompose(&a, 3).expect("inversible");
+    assert_eq!(perm[0], 2, "le pivot de la colonne 0 doit être la ligne 2");
+    let recon = lu_reconstruct(&lu, 3);
+    for i in 0..3
+    {
+        for j in 0..3
+        {
+            let want = a[perm[i] * 3 + j].to_f64();
+            let got = recon[i * 3 + j].to_f64();
+            assert!(
+                (got - want).abs() <= 4.0 / 65536.0,
+                "L·U[{i},{j}]={got} vs A[perm[{i}],{j}]={want}"
+            );
+        }
+    }
+}
+
+#[test]
+fn lu_decompose_random_diag_dominant_reconstructs() {
+    let mut rng = Lcg(0x10CC_0FF5);
+    for &n in &[1usize, 2, 3, 5, 7]
+    {
+        let a = random_diag_dominant(&mut rng, n);
+        let (lu, perm) = linalg::lu_decompose(&a, n).expect("diag. dominante ⇒ inversible");
+        let recon = lu_reconstruct(&lu, n);
+        let tol = (n as f64) * 8.0 / 65536.0;
+        for i in 0..n
+        {
+            for j in 0..n
+            {
+                let want = a[perm[i] * n + j].to_f64();
+                let got = recon[i * n + j].to_f64();
+                assert!(
+                    (got - want).abs() <= tol,
+                    "n={n} L·U[{i},{j}]={got} vs {want}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn lu_decompose_detects_singular() {
+    // Ligne 1 = 2 · ligne 0 : colonnes liées, matrice singulière.
+    let a = [1i32, 2, 2, 4].map(Q16_16::from);
+    assert!(linalg::lu_decompose(&a, 2).is_none());
+}
+
+#[test]
+fn lu_solve_matches_matvec_random() {
+    let mut rng = Lcg(0x5A1E_5010);
+    for &n in &[1usize, 2, 3, 4, 6]
+    {
+        let a = random_diag_dominant(&mut rng, n);
+        let x_true: Vec<Q16_16> = (0..n)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+            .collect();
+        let b = linalg::matvec(&a, &x_true, n, n);
+        let x = linalg::lu_solve(&a, &b, n).expect("diag. dominante ⇒ inversible");
+        let b_check = linalg::matvec(&a, &x, n, n);
+        let tol = (n as f64) * 8.0 / 65536.0;
+        for i in 0..n
+        {
+            let diff = (b_check[i].to_f64() - b[i].to_f64()).abs();
+            assert!(diff <= tol, "n={n} i={i}: résidu {diff} > {tol}");
+        }
+    }
+}
+
+#[test]
+fn determinant_known_values() {
+    // Identité : déterminant 1.
+    let id3 = [
+        1i32, 0, 0, //
+        0, 1, 0, //
+        0, 0, 1,
+    ]
+    .map(Q16_16::from);
+    assert_eq!(linalg::determinant(&id3, 3), Q16_16::one());
+
+    // [[2,3],[1,5]] : pas de pivot (|2| ≥ |1| en colonne 0), facteur
+    // d'élimination 1/2 exact en Q16.16 → déterminant exact 2·5 − 3·1 = 7.
+    let a = [2i32, 3, 1, 5].map(Q16_16::from);
+    assert_eq!(linalg::determinant(&a, 2), Q16_16::from_i32(7));
+
+    // Matrice de transposition pure : un pivot ⇒ déterminant −1.
+    let swap = [0i32, 1, 1, 0].map(Q16_16::from);
+    assert_eq!(linalg::determinant(&swap, 2), -Q16_16::one());
+}
+
+#[test]
+fn determinant_zero_for_singular() {
+    let a = [1i32, 2, 2, 4].map(Q16_16::from);
+    assert_eq!(linalg::determinant(&a, 2), Q16_16::zero());
+}
+
+// ------------------------------------------------------------------ //
 //  Activations quantifiées                                            //
 // ------------------------------------------------------------------ //
 

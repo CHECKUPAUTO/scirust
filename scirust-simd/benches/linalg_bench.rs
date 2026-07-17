@@ -91,5 +91,76 @@ fn bench_matvec(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(benches, bench_matmul, bench_matvec);
+/// Côté des matrices pour les décompositions (coût cubique dominé par les
+/// divisions/`sqrt`, plus onéreuses qu'un MAC : taille réduite vs `D`).
+const N: usize = 48;
+
+/// Matrice `n×n` symétrique définie positive : `A = BᵀB + n·I`.
+fn spd_data(seed: u64, n: usize) -> Vec<Q16_16> {
+    let b = fixed_data(seed, n * n);
+    let bt = flin::transpose(&b, n, n);
+    let mut a = flin::matmul(&bt, &b, n, n, n);
+    for i in 0..n
+    {
+        a[i * n + i] += Q16_16::from(n as i32);
+    }
+    a
+}
+
+/// Matrice `n×n` à diagonale strictement dominante (inversible, bien
+/// conditionnée).
+fn diag_dominant_data(seed: u64, n: usize) -> Vec<Q16_16> {
+    let mut a = fixed_data(seed, n * n);
+    for i in 0..n
+    {
+        a[i * n + i] = Q16_16::from(4 * n as i32);
+    }
+    a
+}
+
+fn bench_cholesky(c: &mut Criterion) {
+    let a = spd_data(0x5, N);
+
+    let mut g = c.benchmark_group("cholesky_48");
+    g.throughput(Throughput::Elements((N * N * N) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter(|| flin::cholesky(black_box(&a), N))
+    });
+    g.finish();
+
+    let b = fixed_data(0x6, N);
+    let mut g = c.benchmark_group("cholesky_solve_48");
+    g.throughput(Throughput::Elements((N * N * N) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter(|| flin::cholesky_solve(black_box(&a), black_box(&b), N))
+    });
+    g.finish();
+}
+
+fn bench_lu(c: &mut Criterion) {
+    let a = diag_dominant_data(0x7, N);
+
+    let mut g = c.benchmark_group("lu_decompose_48");
+    g.throughput(Throughput::Elements((N * N * N) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter(|| flin::lu_decompose(black_box(&a), N))
+    });
+    g.finish();
+
+    let b = fixed_data(0x8, N);
+    let mut g = c.benchmark_group("lu_solve_48");
+    g.throughput(Throughput::Elements((N * N * N) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter(|| flin::lu_solve(black_box(&a), black_box(&b), N))
+    });
+    g.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_matmul,
+    bench_matvec,
+    bench_cholesky,
+    bench_lu
+);
 criterion_main!(benches);
