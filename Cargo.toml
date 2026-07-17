@@ -167,6 +167,7 @@ members = [
     "scirust-thermo",
     "scirust-sim",
     "scirust-itd",
+    "scirust-tdi",
 ]
 exclude = [
     "examples/simd_views_demo",

@@ -3794,6 +3794,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-tdi"
+version = "0.1.0"
+dependencies = [
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
 name = "scirust-tensor-compile"
 version = "0.1.0"
 dependencies = [

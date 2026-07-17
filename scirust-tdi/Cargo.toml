@@ -1,0 +1,11 @@
+[package]
+name = "scirust-tdi"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Prospective dynamic-information analysis (ported from the TDI research project): exact finite-state dynamics with rational (arbitrary-precision) probabilities, future-structure descriptors (future-block / branching-path / branching-state distributions and intervention-conditioned distribution overlap), Shannon-entropy and orbital baselines, reachability exploration, and perturbation-recovery analysis. Deterministic and exact; no unsafe."
+
+[dependencies]
+num-bigint = "0.4"
+num-integer = "0.1"
+num-traits = "0.2"
