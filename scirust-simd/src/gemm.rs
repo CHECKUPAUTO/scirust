@@ -183,6 +183,11 @@ pub fn sgemm_parallel(
 
 /// Applique `beta` sur toute la matrice C (row-major) une bonne fois pour
 /// toutes ; le noyau accumule ensuite `alpha·A·B` par-dessus.
+///
+/// # Safety
+/// Caller must ensure AVX-512F is available. `c` must point to a valid,
+/// exclusively-borrowed row-major `m×n` `f32` buffer (row stride `n`),
+/// writable for the whole call.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 unsafe fn scale_c_avx512(beta: f32, m: usize, n: usize, c: *mut f32) {
@@ -228,6 +233,11 @@ unsafe fn scale_c_avx512(beta: f32, m: usize, n: usize, c: *mut f32) {
 
 /// Pack un panneau `B[pc.., jc..]` de `kc×nc` en panneaux de `NR` colonnes,
 /// row-major par `p`, zéro-paddé à `NR` : `dst[panel*(kc*NR) + p*NR + j]`.
+///
+/// # Safety
+/// `b` must be valid for reads of `kc` rows spaced `ldb` `f32` apart, each row
+/// readable for at least `nc` columns from `b`'s base offset. `dst.len()` must
+/// be at least `nc.div_ceil(NR) * kc * NR`.
 #[cfg(target_arch = "x86_64")]
 unsafe fn pack_b(b: *const f32, ldb: usize, kc: usize, nc: usize, dst: &mut [f32]) {
     let n_panels = nc.div_ceil(NR);
@@ -255,6 +265,11 @@ unsafe fn pack_b(b: *const f32, ldb: usize, kc: usize, nc: usize, dst: &mut [f32
 /// Pack un panneau `A[ic.., pc..]` de `mc×kc` en panneaux de `MR` lignes,
 /// re-agencé par `p` (`dst[panel*(kc*MR) + p*MR + i]`), zéro-paddé à `MR`, avec
 /// `alpha` fusionné.
+///
+/// # Safety
+/// `a` must be valid for reads of `mc` rows spaced `lda` `f32` apart, each row
+/// readable for at least `kc` columns from `a`'s base offset. `dst.len()` must
+/// be at least `mc.div_ceil(MR) * kc * MR`.
 #[cfg(target_arch = "x86_64")]
 unsafe fn pack_a(alpha: f32, a: *const f32, lda: usize, mc: usize, kc: usize, dst: &mut [f32]) {
     let m_panels = mc.div_ceil(MR);
@@ -278,6 +293,12 @@ unsafe fn pack_a(alpha: f32, a: *const f32, lda: usize, mc: usize, kc: usize, ds
     }
 }
 
+/// # Safety
+/// Caller must ensure AVX-512F is available. `a`/`b`/`c` are `MatrixView`s,
+/// so their bounds are already validated by construction; the packing
+/// buffers below are sized to the worst-case panel count for `KC`/`MC`/`NC`,
+/// so every write through `pack_a`/`pack_b`/`micro_kernel_8x16` stays in
+/// bounds as long as `m`/`k`/`n` are these views' true dimensions.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 unsafe fn sgemm_tiled_avx512(
@@ -358,6 +379,13 @@ unsafe fn sgemm_tiled_avx512(
 /// sur toute la dimension `kc`, puis ajoute la tuile à `C` (déjà scalé par
 /// `beta`) avec un masque `k` sur les `nr` colonnes utiles et seulement `mr`
 /// lignes.
+///
+/// # Safety
+/// Caller must ensure AVX-512F is available. `apanel` must be valid for
+/// `kc * MR` reads, `bpanel` for `kc * NR` reads (both zero-padded panels
+/// from `pack_a`/`pack_b`). `c` must be valid for writes covering `mr` rows
+/// spaced `ldc` apart, `nr` columns each (masked so only those `nr` columns
+/// are touched). Caller must also ensure `mr <= MR` and `nr <= NR`.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 #[allow(clippy::too_many_arguments)]
@@ -398,6 +426,11 @@ unsafe fn micro_kernel_8x16(
 
 /// Applique `beta` sur toute la matrice C (row-major) — analogue NEON de
 /// [`scale_c_avx512`]. Le noyau accumule ensuite `alpha·A·B` par-dessus.
+///
+/// # Safety
+/// NEON is AArch64 baseline (no runtime detection needed). `c` must point to
+/// a valid, exclusively-borrowed row-major `m×n` `f32` buffer (row stride
+/// `n`), writable for the whole call.
 #[cfg(target_arch = "aarch64")]
 unsafe fn scale_c_neon(beta: f32, m: usize, n: usize, c: *mut f32) {
     use core::arch::aarch64::*;
@@ -433,6 +466,12 @@ unsafe fn scale_c_neon(beta: f32, m: usize, n: usize, c: *mut f32) {
 
 /// Pack un panneau `B[pc.., jc..]` de `kc×nc` en panneaux de `NR_N` colonnes,
 /// zéro-paddé à `NR_N` (analogue NEON de [`pack_b`]).
+///
+/// # Safety
+/// Same contract as [`pack_b`] with `NR_N` in place of `NR`: `b` must be
+/// valid for reads of `kc` rows spaced `ldb` `f32` apart, each row readable
+/// for at least `nc` columns from `b`'s base offset. `dst.len()` must be at
+/// least `nc.div_ceil(NR_N) * kc * NR_N`.
 #[cfg(target_arch = "aarch64")]
 unsafe fn pack_b_neon(b: *const f32, ldb: usize, kc: usize, nc: usize, dst: &mut [f32]) {
     let n_panels = nc.div_ceil(NR_N);
@@ -459,6 +498,12 @@ unsafe fn pack_b_neon(b: *const f32, ldb: usize, kc: usize, nc: usize, dst: &mut
 
 /// Pack un panneau `A[ic.., pc..]` de `mc×kc` en panneaux de `MR_N` lignes,
 /// zéro-paddé à `MR_N`, avec `alpha` fusionné (analogue NEON de [`pack_a`]).
+///
+/// # Safety
+/// Same contract as [`pack_a`] with `MR_N` in place of `MR`: `a` must be
+/// valid for reads of `mc` rows spaced `lda` `f32` apart, each row readable
+/// for at least `kc` columns from `a`'s base offset. `dst.len()` must be at
+/// least `mc.div_ceil(MR_N) * kc * MR_N`.
 #[cfg(target_arch = "aarch64")]
 unsafe fn pack_a_neon(
     alpha: f32,
@@ -491,6 +536,14 @@ unsafe fn pack_a_neon(
 
 /// SGEMM tuilé/packé NEON — même ordonnancement de blocs que
 /// [`sgemm_tiled_avx512`], tuile registre `8×8`.
+///
+/// # Safety
+/// NEON is AArch64 baseline (no runtime detection needed). `a`/`b`/`c` are
+/// `MatrixView`s, so their bounds are already validated by construction; the
+/// packing buffers below are sized to the worst-case panel count for
+/// `KC_N`/`MC_N`/`NC_N`, so every write through
+/// `pack_a_neon`/`pack_b_neon`/`micro_kernel_neon_8x8` stays in bounds as
+/// long as `m`/`k`/`n` are these views' true dimensions.
 #[cfg(target_arch = "aarch64")]
 unsafe fn sgemm_tiled_neon(
     alpha: f32,
@@ -569,6 +622,13 @@ unsafe fn sgemm_tiled_neon(
 /// pas de store masqué : la tuile est déposée dans un tampon `[f32; NR_N]` par
 /// ligne, puis les `nr` colonnes utiles des `mr` lignes sont ajoutées à `C`
 /// (déjà scalé par `beta`).
+///
+/// # Safety
+/// NEON is AArch64 baseline (no runtime detection needed). `apanel` must be
+/// valid for `kc * MR_N` reads, `bpanel` for `kc * NR_N` reads (both
+/// zero-padded panels from `pack_a_neon`/`pack_b_neon`). `c` must be valid
+/// for writes covering `mr` rows spaced `ldc` apart, `nr` columns each.
+/// Caller must also ensure `mr <= MR_N` and `nr <= NR_N`.
 #[cfg(target_arch = "aarch64")]
 #[allow(clippy::too_many_arguments)]
 unsafe fn micro_kernel_neon_8x8(
@@ -741,6 +801,10 @@ pub fn dgemm_parallel(
     });
 }
 
+/// # Safety
+/// Caller must ensure AVX-512F is available. `c` must point to a valid,
+/// exclusively-borrowed row-major `m×n` `f64` buffer (row stride `n`),
+/// writable for the whole call.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 unsafe fn scale_c_d_avx512(beta: f64, m: usize, n: usize, c: *mut f64) {
@@ -784,6 +848,10 @@ unsafe fn scale_c_d_avx512(beta: f64, m: usize, n: usize, c: *mut f64) {
     }
 }
 
+/// # Safety
+/// `b` must be valid for reads of `kc` rows spaced `ldb` `f64` apart, each
+/// row readable for at least `nc` columns from `b`'s base offset.
+/// `dst.len()` must be at least `nc.div_ceil(NR_D) * kc * NR_D`.
 #[cfg(target_arch = "x86_64")]
 unsafe fn pack_b_d(b: *const f64, ldb: usize, kc: usize, nc: usize, dst: &mut [f64]) {
     let n_panels = nc.div_ceil(NR_D);
@@ -808,6 +876,10 @@ unsafe fn pack_b_d(b: *const f64, ldb: usize, kc: usize, nc: usize, dst: &mut [f
     }
 }
 
+/// # Safety
+/// `a` must be valid for reads of `mc` rows spaced `lda` `f64` apart, each
+/// row readable for at least `kc` columns from `a`'s base offset.
+/// `dst.len()` must be at least `mc.div_ceil(MR_D) * kc * MR_D`.
 #[cfg(target_arch = "x86_64")]
 unsafe fn pack_a_d(alpha: f64, a: *const f64, lda: usize, mc: usize, kc: usize, dst: &mut [f64]) {
     let m_panels = mc.div_ceil(MR_D);
@@ -831,6 +903,13 @@ unsafe fn pack_a_d(alpha: f64, a: *const f64, lda: usize, mc: usize, kc: usize, 
     }
 }
 
+/// # Safety
+/// Caller must ensure AVX-512F is available. `a`/`b`/`c` are `MatrixView`s,
+/// so their bounds are already validated by construction; the packing
+/// buffers below are sized to the worst-case panel count for
+/// `KC_D`/`MC_D`/`NC_D`, so every write through
+/// `pack_a_d`/`pack_b_d`/`micro_kernel_dgemm` stays in bounds as long as
+/// `m`/`k`/`n` are these views' true dimensions.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 unsafe fn dgemm_tiled_avx512(
@@ -902,6 +981,13 @@ unsafe fn dgemm_tiled_avx512(
     }
 }
 
+/// # Safety
+/// Caller must ensure AVX-512F is available. `apanel` must be valid for
+/// `kc * MR_D` reads, `bpanel` for `kc * NR_D` reads (both zero-padded
+/// panels from `pack_a_d`/`pack_b_d`). `c` must be valid for writes covering
+/// `mr` rows spaced `ldc` apart, `nr` columns each (masked so only those
+/// `nr` columns are touched). Caller must also ensure `mr <= MR_D` and
+/// `nr <= NR_D`.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 #[allow(clippy::too_many_arguments)]
@@ -1033,6 +1119,10 @@ fn bias_act_epilogue_scalar(c: &mut [f32], m: usize, n: usize, bias: &[f32], act
 }
 
 /// Applique l'activation à un vecteur `__m512` de pré-activations.
+///
+/// # Safety
+/// Caller must ensure AVX-512F is available. No pointers involved — `pre` is
+/// a register value, not memory — so this is otherwise self-contained.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 #[inline]
@@ -1051,6 +1141,11 @@ unsafe fn apply_act_ps(
 }
 
 /// Épilogue AVX-512 : `c[i,j] = act(c[i,j] + bias[j])`, 16 voies + reste masqué.
+///
+/// # Safety
+/// Caller must ensure AVX-512F is available. `c.len() >= m * n` and
+/// `bias.len() >= n`: every row `i` reads/writes `c[i*n .. i*n+n]` (masked
+/// past `n`), and every column read from `bias` is `< n`.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 unsafe fn bias_act_epilogue_avx512(
