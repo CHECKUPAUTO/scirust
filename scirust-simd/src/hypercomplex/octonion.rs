@@ -107,11 +107,39 @@ impl OctonionSimd {
         (self.0 * self.0).reduce_sum()
     }
 
+    /// Norme ‖o‖ = √(Σ oᵢ²).
+    #[inline(always)]
+    #[must_use]
+    pub fn norm(self) -> f32 {
+        self.norm_sqr().sqrt()
+    }
+
     /// Multiplication par un scalaire réel.
     #[inline(always)]
     #[must_use]
     pub fn scale(self, s: f32) -> Self {
         Self(self.0 * f32x8::splat(s))
+    }
+
+    /// Octonion unitaire de même direction, `o / ‖o‖`.
+    ///
+    /// Indéfini pour `o = 0` (produit `NaN`/`inf`, comme la division réelle
+    /// par zéro).
+    #[inline(always)]
+    #[must_use]
+    pub fn normalize(self) -> Self {
+        self.scale(1.0 / self.norm())
+    }
+
+    /// Inverse `o⁻¹ = ō / ‖o‖²`, tel que `o⁻¹·o = o·o⁻¹ = 1`.
+    ///
+    /// 𝕆 est une algèbre de division normée (alternative) : `ō·o = o·ō =
+    /// ‖o‖²·1` exactement, donc tout élément non nul est inversible des
+    /// deux côtés. Indéfini pour `o = 0`.
+    #[inline(always)]
+    #[must_use]
+    pub fn inverse(self) -> Self {
+        self.conj().scale(1.0 / self.norm_sqr())
     }
 }
 

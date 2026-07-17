@@ -126,11 +126,46 @@ impl SedenionSimd {
         (self.0 * self.0).reduce_sum()
     }
 
+    /// Norme ‖s‖ = √(Σ sᵢ²).
+    #[inline(always)]
+    #[must_use]
+    pub fn norm(self) -> f32 {
+        self.norm_sqr().sqrt()
+    }
+
     /// Multiplication par un scalaire réel.
     #[inline(always)]
     #[must_use]
     pub fn scale(self, s: f32) -> Self {
         Self(self.0 * f32x16::splat(s))
+    }
+
+    /// Sédénion unitaire de même direction, `s / ‖s‖`.
+    ///
+    /// Indéfini pour `s = 0` (produit `NaN`/`inf`, comme la division réelle
+    /// par zéro).
+    #[inline(always)]
+    #[must_use]
+    pub fn normalize(self) -> Self {
+        self.scale(1.0 / self.norm())
+    }
+
+    /// Inverse `s⁻¹ = s̄ / ‖s‖²`, tel que `s⁻¹·s = s·s⁻¹ = 1`.
+    ///
+    /// L'identité `s̄·s = s·s̄ = ‖s‖²·1` tient à **tout** niveau de la
+    /// construction de Cayley-Dickson — y compris 𝕊 — donc tout sédénion
+    /// non nul est inversible des deux côtés, malgré l'existence de
+    /// diviseurs de zéro (voir le test `sedenion_zero_divisors`).
+    ///
+    /// ⚠️ Ceci ne contredit pas les diviseurs de zéro : l'argument classique
+    /// « `s` inversible et `s·t = 0` avec `t ≠ 0` sont incompatibles » repose
+    /// sur l'associativité (`s⁻¹·(s·t) = (s⁻¹·s)·t = t`), qui **échoue** sur
+    /// 𝕊. `s` peut donc être parfaitement inversible tout en admettant, pour
+    /// un `t` non nul indépendant, `s·t = 0`. Indéfini pour `s = 0`.
+    #[inline(always)]
+    #[must_use]
+    pub fn inverse(self) -> Self {
+        self.conj().scale(1.0 / self.norm_sqr())
     }
 }
 

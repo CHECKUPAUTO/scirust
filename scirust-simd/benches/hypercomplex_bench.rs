@@ -7,7 +7,9 @@
 // 1. **Temps mur + débit** (`Throughput::Elements`) : multiplication
 //    SIMD (shuffle/FMA en registres) vs deux baselines scalaires —
 //    la récursion de Cayley-Dickson sur `[f32; N]` et la double boucle
-//    « boucle par boucle » sur table de constantes de structure.
+//    « boucle par boucle » sur table de constantes de structure — ainsi que
+//    `inverse()` (conjugaison + norme au carré + division), à un seul
+//    opérande.
 //
 // 2. **Cycles par opération** (x86_64 uniquement) : mesure directe via le
 //    Time-Stamp Counter (`rdtsc`, invariant sur tout x86_64 moderne),
@@ -192,7 +194,59 @@ fn bench_sedenion_mul(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(wall_time, bench_octonion_mul, bench_sedenion_mul);
+/// `N_PAIRS` opérandes non nuls (norme au carré garantie > 0).
+fn nonzero_operands<const N: usize>(seed: u64) -> Vec<[f32; N]> {
+    let mut rng = Lcg(seed);
+    (0..N_PAIRS)
+        .map(|_| {
+            let mut a = rng.array::<N>();
+            a[0] += 2.0; // décale la composante réelle : exclut le nul
+            a
+        })
+        .collect()
+}
+
+fn bench_inverse(c: &mut Criterion) {
+    let oct: Vec<OctonionSimd> = nonzero_operands::<8>(0x11_0C7A)
+        .iter()
+        .map(|&a| OctonionSimd::from_array(a))
+        .collect();
+    let sed: Vec<SedenionSimd> = nonzero_operands::<16>(0x11_5ED0)
+        .iter()
+        .map(|&a| SedenionSimd::from_array(a))
+        .collect();
+
+    let mut group = c.benchmark_group("inverse");
+    group.throughput(Throughput::Elements(N_PAIRS as u64));
+    group.bench_function(BenchmarkId::new("octonion", "f32x8"), |b| {
+        b.iter(|| {
+            let mut acc = OctonionSimd::ZERO;
+            for &o in black_box(&oct)
+            {
+                acc = acc + o.inverse();
+            }
+            acc
+        })
+    });
+    group.bench_function(BenchmarkId::new("sedenion", "f32x16"), |b| {
+        b.iter(|| {
+            let mut acc = SedenionSimd::ZERO;
+            for &s in black_box(&sed)
+            {
+                acc = acc + s.inverse();
+            }
+            acc
+        })
+    });
+    group.finish();
+}
+
+criterion_group!(
+    wall_time,
+    bench_octonion_mul,
+    bench_sedenion_mul,
+    bench_inverse
+);
 
 // ------------------------------------------------------------------ //
 //  Groupe 2 : cycles/opération via TSC (x86_64)                       //

@@ -229,6 +229,58 @@ fn octonion_alternativity_left_and_right() {
 }
 
 // ------------------------------------------------------------------ //
+//  Octonions : norme, normalisation, inverse                          //
+// ------------------------------------------------------------------ //
+
+/// Écart maximal composante à composante entre deux tableaux `f32`.
+fn max_abs_diff<const N: usize>(a: [f32; N], b: [f32; N]) -> f32 {
+    a.iter()
+        .zip(b.iter())
+        .map(|(&x, &y)| (x - y).abs())
+        .fold(0.0f32, f32::max)
+}
+
+#[test]
+fn octonion_normalize_has_unit_norm() {
+    let mut rng = Lcg(0x0C7A);
+    for _ in 0..200
+    {
+        let o = rng.octonion();
+        if o.norm_sqr() == 0.0
+        {
+            continue;
+        }
+        let n = o.normalize().norm();
+        assert!((n - 1.0).abs() < 1e-4, "‖normalize(o)‖ = {n}");
+    }
+}
+
+#[test]
+fn octonion_inverse_is_two_sided() {
+    // 𝕆 alternatif ⇒ ō·o = o·ō = ‖o‖²·1 exactement, donc o⁻¹·o = o·o⁻¹ = 1.
+    let mut rng = Lcg(0x1_1170_ABCD);
+    for _ in 0..200
+    {
+        let o = rng.octonion();
+        if o.norm_sqr() == 0.0
+        {
+            continue;
+        }
+        let inv = o.inverse();
+        let left = (inv * o).to_array();
+        let right = (o * inv).to_array();
+        assert!(
+            max_abs_diff(left, OctonionSimd::ONE.to_array()) < 1e-3,
+            "o⁻¹·o ≠ 1 : {left:?}"
+        );
+        assert!(
+            max_abs_diff(right, OctonionSimd::ONE.to_array()) < 1e-3,
+            "o·o⁻¹ ≠ 1 : {right:?}"
+        );
+    }
+}
+
+// ------------------------------------------------------------------ //
 //  Sédénions : correction                                             //
 // ------------------------------------------------------------------ //
 
@@ -321,6 +373,73 @@ fn sedenion_zero_divisors() {
     // Corollaire : la norme n'est PAS multiplicative sur 𝕊
     // (‖x·y‖² = 0 ≠ 4 = ‖x‖²·‖y‖²) — 𝕊 n'est pas une algèbre de composition.
     assert_ne!(product.norm_sqr(), x.norm_sqr() * y.norm_sqr());
+}
+
+#[test]
+fn sedenion_zero_divisor_factors_are_still_individually_invertible() {
+    // Les DEUX facteurs du diviseur de zéro ci-dessus (x·y = 0, x,y ≠ 0)
+    // sont chacun parfaitement inversibles des deux côtés : l'identité
+    // s̄·s = s·s̄ = ‖s‖²·1 tient à tout niveau de Cayley-Dickson, y compris
+    // 𝕊. Ceci ne contredit pas l'existence du diviseur de zéro : l'argument
+    // « s inversible et s·t = 0, t ≠ 0, sont incompatibles » repose sur
+    // l'associativité (s⁻¹·(s·t) = (s⁻¹·s)·t), qui échoue sur 𝕊.
+    let x = SedenionSimd::unit(1) + SedenionSimd::unit(10);
+    let y = SedenionSimd::unit(4) - SedenionSimd::unit(15);
+    assert_eq!((x * y).to_array(), [0.0f32; 16]); // rappel du diviseur de zéro
+
+    for s in [x, y]
+    {
+        let inv = s.inverse();
+        let left = (inv * s).to_array();
+        let right = (s * inv).to_array();
+        assert!(
+            max_abs_diff(left, SedenionSimd::ONE.to_array()) < 1e-4,
+            "s⁻¹·s ≠ 1 : {left:?}"
+        );
+        assert!(
+            max_abs_diff(right, SedenionSimd::ONE.to_array()) < 1e-4,
+            "s·s⁻¹ ≠ 1 : {right:?}"
+        );
+    }
+}
+
+#[test]
+fn sedenion_normalize_has_unit_norm() {
+    let mut rng = Lcg(0x50D1);
+    for _ in 0..200
+    {
+        let s = rng.sedenion();
+        if s.norm_sqr() == 0.0
+        {
+            continue;
+        }
+        let n = s.normalize().norm();
+        assert!((n - 1.0).abs() < 1e-4, "‖normalize(s)‖ = {n}");
+    }
+}
+
+#[test]
+fn sedenion_inverse_is_two_sided_on_random_inputs() {
+    let mut rng = Lcg(0x5ED_1234);
+    for _ in 0..200
+    {
+        let s = rng.sedenion();
+        if s.norm_sqr() == 0.0
+        {
+            continue;
+        }
+        let inv = s.inverse();
+        let left = (inv * s).to_array();
+        let right = (s * inv).to_array();
+        assert!(
+            max_abs_diff(left, SedenionSimd::ONE.to_array()) < 1e-3,
+            "s⁻¹·s ≠ 1 : {left:?}"
+        );
+        assert!(
+            max_abs_diff(right, SedenionSimd::ONE.to_array()) < 1e-3,
+            "s·s⁻¹ ≠ 1 : {right:?}"
+        );
+    }
 }
 
 #[test]
