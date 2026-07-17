@@ -29,10 +29,18 @@
 //!   and (octonion) little-endian serialization.
 //! - [`boolean`] — the fast Möbius transform and exact **algebraic-normal-form
 //!   degree** of a Boolean vector function on up to a few dozen input bits.
+//! - [`numtheory`] — deterministic integer number theory: extended GCD, modular
+//!   inverse and exponentiation, the CRT, a *deterministic* Miller–Rabin
+//!   primality test exact for every `u64`, deterministic Pollard–Brent
+//!   factorization, Euler's totient, divisors, and the Jacobi symbol.
+//! - [`gf2`] — carryless `GF(2)[x]` multiplication and finite fields `GF(2^n)`
+//!   (add/multiply/power/invert) with the Rijndael `GF(2^8)` and a primitive
+//!   `GF(2^16)` built in — the exact kernel behind CRCs, LFSRs, Reed–Solomon
+//!   and AES-style diffusion.
 //!
 //! Everything is deterministic and reproducible bit-for-bit on every platform.
 //!
-//! ## Example
+//! ## Examples
 //!
 //! ```
 //! use scirust_modalg::ring::{Word, W8};
@@ -46,12 +54,34 @@
 //! let inv = m.inverse().unwrap();
 //! assert!(m.matmul(&inv).is_identity());
 //! ```
+//!
+//! ```
+//! use scirust_modalg::numtheory::{is_prime, factor, crt};
+//!
+//! // Deterministic primality and factorization over the machine integers.
+//! assert!(is_prime((1u64 << 61) - 1));            // Mersenne prime M61
+//! assert_eq!(factor(1_000_000u64), vec![(2, 6), (5, 6)]);
+//! // Chinese Remainder Theorem: the unique residue mod 105.
+//! assert_eq!(crt(&[(2, 3), (3, 5), (2, 7)]), Some((23, 105)));
+//! ```
+//!
+//! ```
+//! use scirust_modalg::gf2::Gf2Field;
+//!
+//! // The AES/Rijndael field GF(2^8): FIPS-197's worked example {57}·{83}={c1}.
+//! let f = Gf2Field::rijndael8();
+//! assert_eq!(f.mul(0x57, 0x83), 0xc1);
+//! assert_eq!(f.mul(0x53, f.inv(0x53).unwrap()), 1);
+//! ```
 
 pub mod boolean;
+pub mod gf2;
 pub mod hypercomplex;
 pub mod linalg;
+pub mod numtheory;
 pub mod ring;
 
+pub use gf2::Gf2Field;
 pub use hypercomplex::{Oct, Quat};
 pub use linalg::ModMatrix;
 pub use ring::Word;

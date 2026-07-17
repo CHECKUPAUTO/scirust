@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 rust-version = "1.89"
-description = "Exact deterministic modular integer algebra for SciRust: the rings Z/2^k, modular dense linear algebra (determinant mod 2^k, GF(2) rank, 2-adic Smith normal form, kernel/image sizes, inverse), exact integer hypercomplex numbers (octonion/quaternion), and Boolean ANF / algebraic degree. Pure Rust, no unsafe, no floating point, no OS entropy — bit-exact and platform-independent."
+description = "Exact deterministic modular integer algebra for SciRust: the rings Z/2^k, modular dense linear algebra (determinant mod 2^k, GF(2) rank, 2-adic Smith normal form, kernel/image sizes, inverse, solve, matrix power), exact integer hypercomplex numbers (octonion/quaternion), Boolean ANF / algebraic degree, deterministic integer number theory (modular inverse/exponentiation, CRT, exact-for-u64 Miller-Rabin primality, Pollard-Brent factorization, totient, Jacobi), and GF(2)[x] / GF(2^n) finite-field arithmetic. Pure Rust, no unsafe, no floating point, no OS entropy — bit-exact and platform-independent."
 license-file = "../LICENSE.md"
 repository = "https://github.com/Memorithm/scirust"
 

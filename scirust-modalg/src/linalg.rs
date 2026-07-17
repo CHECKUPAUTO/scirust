@@ -417,6 +417,113 @@ impl<W: Word> ModMatrix<W> {
         }
         Some(inv)
     }
+
+    /// The transpose (a `cols × rows` matrix).
+    pub fn transpose(&self) -> ModMatrix<W> {
+        let mut t = ModMatrix::zeros(self.cols, self.rows);
+        for r in 0..self.rows
+        {
+            for c in 0..self.cols
+            {
+                t.set(c, r, self.get(r, c));
+            }
+        }
+        t
+    }
+
+    /// Entrywise sum `self + other` in `Z/2^k`. Dimensions must match.
+    pub fn add(&self, o: &ModMatrix<W>) -> ModMatrix<W> {
+        assert_eq!(
+            (self.rows, self.cols),
+            (o.rows, o.cols),
+            "dimension mismatch"
+        );
+        let mut out = ModMatrix::zeros(self.rows, self.cols);
+        for i in 0..self.data.len()
+        {
+            out.data[i] = self.data[i].wadd(o.data[i]);
+        }
+        out
+    }
+
+    /// Entrywise difference `self − other` in `Z/2^k`. Dimensions must match.
+    pub fn sub(&self, o: &ModMatrix<W>) -> ModMatrix<W> {
+        assert_eq!(
+            (self.rows, self.cols),
+            (o.rows, o.cols),
+            "dimension mismatch"
+        );
+        let mut out = ModMatrix::zeros(self.rows, self.cols);
+        for i in 0..self.data.len()
+        {
+            out.data[i] = self.data[i].wsub(o.data[i]);
+        }
+        out
+    }
+
+    /// Scale every entry by a ring element `s`.
+    pub fn scalar_mul(&self, s: W) -> ModMatrix<W> {
+        let mut out = self.clone();
+        for v in out.data.iter_mut()
+        {
+            *v = v.wmul(s);
+        }
+        out
+    }
+
+    /// Trace (sum of the diagonal) in `Z/2^k`. Panics if not square.
+    pub fn trace(&self) -> W {
+        assert_eq!(self.rows, self.cols, "trace of a non-square matrix");
+        let mut t = W::ZERO;
+        for i in 0..self.rows
+        {
+            t = t.wadd(self.get(i, i));
+        }
+        t
+    }
+
+    /// Matrix power `self^e` by exponentiation-by-squaring (`self^0` is the
+    /// identity). Panics if not square.
+    pub fn pow(&self, mut e: u64) -> ModMatrix<W> {
+        assert_eq!(self.rows, self.cols, "power of a non-square matrix");
+        let mut acc = ModMatrix::identity(self.rows);
+        let mut base = self.clone();
+        while e > 0
+        {
+            if e & 1 == 1
+            {
+                acc = acc.matmul(&base);
+            }
+            base = base.matmul(&base);
+            e >>= 1;
+        }
+        acc
+    }
+
+    /// Solve `self · x = b` over `Z/2^k` when `self` is invertible (its
+    /// determinant is a unit), returning the unique `x`. Returns `None` when the
+    /// matrix is non-square, dimension-mismatched, or singular over `Z/2^k`.
+    pub fn solve(&self, b: &[W]) -> Option<Vec<W>> {
+        if self.rows != self.cols || b.len() != self.rows
+        {
+            return None;
+        }
+        let inv = self.inverse()?;
+        Some(inv.matvec(b))
+    }
+
+    /// The **2-adic rank**: the number of nonzero elementary divisors in the
+    /// 2-adic Smith normal form (those with valuation `< k`). This counts the
+    /// invariant factors that are not `≡ 0`, and is in general **larger** than
+    /// [`gf2_rank`](Self::gf2_rank) — an entry like `2` over `Z/2^k` is a
+    /// nonzero non-unit, so it contributes to the 2-adic rank but vanishes mod
+    /// 2. The two coincide exactly when every pivot is a unit.
+    pub fn pivot_rank_2adic(&self) -> u32 {
+        self.smith_valuations()
+            .iter()
+            .filter(|&&v| v < W::BITS)
+            .count() as u32
+    }
 }
 
 #[cfg(test)]
@@ -593,5 +700,124 @@ mod tests {
         assert_eq!(m.kernel_log2(), 4);
         assert_eq!(m.gf2_rank(), 0);
         assert!(m.inverse().is_none());
+    }
+
+    fn rand_matrix<W: Word>(n: usize, s: &mut u64) -> ModMatrix<W> {
+        let mut next = || {
+            *s ^= *s << 13;
+            *s ^= *s >> 7;
+            *s ^= *s << 17;
+            *s
+        };
+        let mut m = ModMatrix::<W>::zeros(n, n);
+        for i in 0..n
+        {
+            for j in 0..n
+            {
+                m.set(i, j, W::from_u64(next()));
+            }
+        }
+        m
+    }
+
+    #[test]
+    fn transpose_involution_and_product_rule() {
+        let mut s = 0x1357u64;
+        for _ in 0..50
+        {
+            let a = rand_matrix::<W8>(3, &mut s);
+            let b = rand_matrix::<W8>(3, &mut s);
+            // (A^T)^T = A
+            assert_eq!(a.transpose().transpose(), a);
+            // (A·B)^T = B^T·A^T
+            assert_eq!(
+                a.matmul(&b).transpose(),
+                b.transpose().matmul(&a.transpose())
+            );
+        }
+    }
+
+    #[test]
+    fn add_sub_scalar_trace() {
+        let mut s = 0x2222u64;
+        for _ in 0..50
+        {
+            let a = rand_matrix::<W8>(4, &mut s);
+            let b = rand_matrix::<W8>(4, &mut s);
+            // (A + B) − B = A
+            assert_eq!(a.add(&b).sub(&b), a);
+            // trace is additive
+            assert_eq!(a.add(&b).trace(), a.trace().wadd(b.trace()));
+            // trace(A·B) = trace(B·A)
+            assert_eq!(a.matmul(&b).trace(), b.matmul(&a).trace());
+            // scalar_mul(s) == matmul by s·I
+            let three = W8::from_u64(3);
+            let si = ModMatrix::<W8>::identity(4).scalar_mul(three);
+            assert_eq!(a.scalar_mul(three), a.matmul(&si));
+        }
+    }
+
+    #[test]
+    fn power_matches_repeated_product() {
+        let mut s = 0x3333u64;
+        let a = rand_matrix::<W8>(3, &mut s);
+        assert!(a.pow(0).is_identity());
+        assert_eq!(a.pow(1), a);
+        let mut acc = ModMatrix::<W8>::identity(3);
+        for e in 0..12u64
+        {
+            assert_eq!(a.pow(e), acc);
+            acc = acc.matmul(&a);
+        }
+    }
+
+    #[test]
+    fn solve_round_trips_against_matvec() {
+        let mut s = 0x4444u64;
+        let mut solved = 0;
+        for _ in 0..200
+        {
+            let a = rand_matrix::<W8>(4, &mut s);
+            let x: Vec<W8> = (0..4)
+                .map(|i| W8::from_u64(0x11 * (i as u64 + 1)))
+                .collect();
+            let b = a.matvec(&x);
+            match a.solve(&b)
+            {
+                Some(sol) =>
+                {
+                    assert!(a.is_unit());
+                    // unique solution of an invertible system recovers x
+                    assert_eq!(sol, x);
+                    assert_eq!(a.matvec(&sol), b);
+                    solved += 1;
+                },
+                None => assert!(!a.is_unit()),
+            }
+        }
+        assert!(solved > 0, "expected some invertible systems");
+    }
+
+    #[test]
+    fn pivot_rank_distinguishes_from_gf2_rank() {
+        // 2·I over Z/2^4: each pivot is 2 (nonzero, valuation 1 < 4), so the
+        // 2-adic rank is full (4) while the GF(2) rank is 0.
+        let mut m = ModMatrix::<W4>::zeros(4, 4);
+        for i in 0..4
+        {
+            m.set(i, i, W4::from_u64(2));
+        }
+        assert_eq!(m.pivot_rank_2adic(), 4);
+        assert_eq!(m.gf2_rank(), 0);
+
+        // invariant: the number of unit elementary divisors equals gf2_rank
+        let mut s = 0x5a5au64;
+        for _ in 0..50
+        {
+            let a = rand_matrix::<W8>(4, &mut s);
+            let unit_divisors = a.smith_valuations().iter().filter(|&&v| v == 0).count() as u32;
+            assert_eq!(unit_divisors, a.gf2_rank());
+            assert!(a.pivot_rank_2adic() >= a.gf2_rank());
+        }
     }
 }
