@@ -178,6 +178,28 @@ interpretation:
 [`docs/research/SCIRUST_HYPERMEMORY_F2_F6.md`](../docs/research/SCIRUST_HYPERMEMORY_F2_F6.md).
 This establishes *capacity*, **not** usefulness.
 
+### Relational structure discrimination ("F1 for relations")
+
+The `binding` module and the `hypermemory-relations` binary go one step further:
+do the parenthesized products discriminate a triple's **structure** (order +
+grouping) better than a plain real-vector encoding of the same 16 components?
+
+```bash
+cd scirust-hypermemory
+HYPERMEMORY_GIT_COMMIT=$(git rev-parse HEAD) \
+  cargo +nightly-2026-07-02 run --release --bin hypermemory-relations
+```
+
+Finding (deterministic): the sedenion product recovers the right structure from
+a noisy query with **~99.9%** accuracy at noise 0.1 (chance ≈ 8.3%); the
+commutative real baselines (`Sum`, `Hadamard`) sit **at chance** (order/grouping
+blind), and position-weighting caps at **~50%** (order yes, grouping no). This is
+the first place the algebra shows a **measurable, robust advantage over an
+elementary real 16-D encoding for structure** — still capacity, not proven
+usefulness (the grouping advantage is redundant with the explicit `S16Expr`
+tree, and the baselines are deliberately simple). Full results:
+[`docs/research/SCIRUST_HYPERMEMORY_RELATION_DISCRIMINATION.md`](../docs/research/SCIRUST_HYPERMEMORY_RELATION_DISCRIMINATION.md).
+
 ## Non-goals (Phase 1)
 
 HNSW / ANN, dynamic PCA, KD-trees, distributed storage, lock-free concurrency,

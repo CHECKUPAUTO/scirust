@@ -46,6 +46,10 @@ scirust-retrieval = { path = "../scirust-retrieval", default-features = false }
 name = "hypermemory-falsify"
 path = "src/bin/hypermemory-falsify.rs"
 
+[[bin]]
+name = "hypermemory-relations"
+path = "src/bin/hypermemory-relations.rs"
+
 [[bench]]
 name = "hypermemory_bench"
 harness = false

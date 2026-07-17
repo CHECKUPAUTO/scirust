@@ -57,6 +57,7 @@
 #![forbid(unsafe_code)]
 
 mod baseline;
+mod binding;
 mod diagnostics;
 mod digest;
 mod error;
@@ -70,6 +71,10 @@ mod representation;
 mod store;
 
 pub use baseline::Real16Index;
+pub use binding::{
+    Encoding, RealBinding, RetrievalAccuracy, TripleShape, cosine16, grouping_sensitivity,
+    order_sensitivity, relative_distance16, structure_retrieval,
+};
 pub use diagnostics::{DEFAULT_NEAR_ZERO_THRESHOLD, ProductDiagnostics};
 pub use digest::{DOMAIN_CONCEPT, DOMAIN_EXPRESSION, Digest32, concept_digest};
 pub use error::{HypermemoryError, Result};
