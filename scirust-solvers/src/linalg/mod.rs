@@ -22,7 +22,7 @@ pub mod rng;
 pub mod svd;
 
 pub use bicgstab::{bicgstab, bicgstab_preconditioned};
-pub use cholesky::{cholesky_decompose, solve_cholesky};
+pub use cholesky::{cholesky_decompose, cond_cholesky, rcond_cholesky, solve_cholesky};
 pub use eigen::{EigenSymmetric, eigen_symmetric};
 pub use eigen_general::{Eigenvalue, eigenvalues_general};
 pub use gmres::{gmres, gmres_preconditioned};

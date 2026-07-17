@@ -87,6 +87,58 @@ pub fn cholesky_decompose(a: Matrix) -> SolverResult<Matrix> {
     Ok(l)
 }
 
+fn row_inf_norm(m: &Matrix) -> f64 {
+    (0..m.rows())
+        .map(|i| (0..m.cols()).map(|j| m[(i, j)].abs()).sum::<f64>())
+        .fold(0.0, f64::max)
+}
+
+/// Nombre de conditionnement en norme infinie, `cond_∞(A) = ‖A‖_∞ · ‖A⁻¹‖_∞`.
+///
+/// `A` n'est pas reconstructible à partir de `L` seule (`cholesky_decompose`
+/// consomme son entrée), d'où le paramètre `a` explicite — la même matrice
+/// que celle passée à `cholesky_decompose` pour produire `l`.
+///
+/// Forme `A⁻¹` explicitement via `n` résolutions triangulaires (une par
+/// colonne de l'identité), `O(n³)` — même ordre que la factorisation
+/// elle-même. Renvoie `f64::INFINITY` (jamais `NaN`) si `A` est singulière ;
+/// `rcond_cholesky` renvoie `0.0` dans ce cas.
+pub fn cond_cholesky(l: &Matrix, a: &Matrix) -> SolverResult<f64> {
+    let n = l.rows();
+    if a.rows() != n || a.cols() != n
+    {
+        return Err(SolverError::DimensionMismatch {
+            expected: n,
+            got: a.rows(),
+        });
+    }
+    let a_norm = row_inf_norm(a);
+    if a_norm == 0.0
+    {
+        return Ok(f64::INFINITY);
+    }
+    let mut inv = Matrix::zeros(n, n);
+    let mut e = vec![0.0; n];
+    for j in 0..n
+    {
+        e.iter_mut().for_each(|x| *x = 0.0);
+        e[j] = 1.0;
+        let col = solve_cholesky(l, &e)?;
+        for i in 0..n
+        {
+            inv[(i, j)] = col[i];
+        }
+    }
+    Ok(a_norm * row_inf_norm(&inv))
+}
+
+/// Inverse du nombre de conditionnement, `1 / cond_∞(A)` — `0.0` si `A` est
+/// singulière (au lieu de `NaN`).
+pub fn rcond_cholesky(l: &Matrix, a: &Matrix) -> SolverResult<f64> {
+    let c = cond_cholesky(l, a)?;
+    Ok(if c.is_infinite() { 0.0 } else { 1.0 / c })
+}
+
 /// Résout A · x = b sachant A = L·L^T, en deux passes triangulaires.
 pub fn solve_cholesky(l: &Matrix, b: &[f64]) -> SolverResult<Vec<f64>> {
     let n = l.rows();
@@ -230,6 +282,57 @@ mod tests {
         // Pas SPD (négative)
         let a = Matrix::from_row_major(2, 2, vec![-1.0, 0.0, 0.0, -1.0]);
         assert!(matches!(cholesky_decompose(a), Err(SolverError::NotSpd)));
+    }
+
+    #[test]
+    fn cond_of_identity_is_one() -> SolverResult<()> {
+        let a = Matrix::from_row_major(
+            3,
+            3,
+            vec![
+                1.0, 0.0, 0.0, //
+                0.0, 1.0, 0.0, //
+                0.0, 0.0, 1.0,
+            ],
+        );
+        let l = cholesky_decompose(a.clone())?;
+        assert_relative_eq!(cond_cholesky(&l, &a)?, 1.0, epsilon = 1e-10);
+        assert_relative_eq!(rcond_cholesky(&l, &a)?, 1.0, epsilon = 1e-10);
+        Ok(())
+    }
+
+    #[test]
+    fn cond_of_diagonal_matrix_matches_ratio_of_extremes() -> SolverResult<()> {
+        // A diagonale SPD : cond_∞ = max(diag) / min(diag).
+        let a = Matrix::from_row_major(
+            3,
+            3,
+            vec![
+                100.0, 0.0, 0.0, //
+                0.0, 10.0, 0.0, //
+                0.0, 0.0, 1.0,
+            ],
+        );
+        let l = cholesky_decompose(a.clone())?;
+        assert_relative_eq!(cond_cholesky(&l, &a)?, 100.0, epsilon = 1e-8);
+        assert_relative_eq!(rcond_cholesky(&l, &a)?, 0.01, epsilon = 1e-8);
+        Ok(())
+    }
+
+    #[test]
+    fn cond_rejects_shape_mismatch() -> SolverResult<()> {
+        let a3 = Matrix::from_row_major(
+            3,
+            3,
+            vec![4.0, 12.0, -16.0, 12.0, 37.0, -43.0, -16.0, -43.0, 98.0],
+        );
+        let l3 = cholesky_decompose(a3)?;
+        let a2 = Matrix::from_row_major(2, 2, vec![1.0, 0.0, 0.0, 1.0]);
+        assert!(matches!(
+            cond_cholesky(&l3, &a2),
+            Err(SolverError::DimensionMismatch { .. })
+        ));
+        Ok(())
     }
 }
 
