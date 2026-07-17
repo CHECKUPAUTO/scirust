@@ -37,6 +37,7 @@ scirust-stats = { path = "../scirust-stats" }
 [features]
 default = ["rayon"]
 portable-simd = ["scirust-simd/portable-simd"]
+transformer-inference = ["scirust-simd/transformer-inference"]
 blas = ["dep:blas", "dep:blas-src"]
 blas-openblas = ["blas", "blas-src/openblas"]
 blas-mkl = ["blas", "blas-src/intel-mkl"]

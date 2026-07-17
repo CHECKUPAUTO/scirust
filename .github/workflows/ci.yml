@@ -167,6 +167,25 @@ jobs:
       - name: Build & test scirust-simd with portable-simd
         run: cargo +nightly-2026-07-02 test -p scirust-simd --all-targets --features portable-simd --locked
 
+  # transformer-inference (attention, KV cache, norm, quantization, the
+  # block/model assembly) is gated off by default — zero consumers in the
+  # workspace as of 2026-07 — but it's real, tested code that must keep
+  # building and passing on stable (it needs no nightly APIs on its own;
+  # only the amx/qtransformer combination above does).
+  transformer-inference:
+    name: Build & Test (transformer-inference, stable)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Build & test scirust-simd with transformer-inference
+        run: cargo +stable test -p scirust-simd --all-targets --features transformer-inference --locked
+
   # AMX, SVE/SME and the ARM dot-product paths use APIs that are not all
   # available at the stable MSRV. Keep their compilation and tests pinned to
   # nightly while the default scirust-simd build remains MSRV-compatible.
@@ -182,7 +201,10 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Build & test unstable architecture extensions
-        run: cargo +nightly-2026-07-02 test -p scirust-simd --all-targets --features nightly-simd --locked
+        # transformer-inference is included because amx/qtransformer (gated on
+        # nightly-simd AND transformer-inference) live under this feature —
+        # without it here they'd silently drop out of CI.
+        run: cargo +nightly-2026-07-02 test -p scirust-simd --all-targets --features nightly-simd,transformer-inference --locked
 
   # The whole workspace must also build and pass on STABLE Rust (the
   # `portable-simd` and `nightly-simd` features are optional and off by default) —
@@ -292,7 +314,10 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Check workspace for aarch64
-        run: cargo +nightly-2026-07-02 check --workspace --all-targets --features scirust-simd/nightly-simd --locked --target aarch64-unknown-linux-gnu
+        # transformer-inference is included so quant.rs's cfg(target_arch =
+        # "aarch64") paths (gated on nightly-simd AND transformer-inference)
+        # stay covered by this aarch64 type-check.
+        run: cargo +nightly-2026-07-02 check --workspace --all-targets --features scirust-simd/nightly-simd,scirust-simd/transformer-inference --locked --target aarch64-unknown-linux-gnu
       - name: Install qemu-user + aarch64 cross toolchain
         run: |
           sudo apt-get update -qq

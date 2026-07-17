@@ -262,6 +262,11 @@ pub fn softmax_backward(y: &[f32], rows: usize, d: usize, dy: &[f32], dx: &mut [
 /// `dV = Pᵀ·dO`, `dP = dO·Vᵀ`, `dScores = softmax'(P, dP)`,
 /// `dQ = scale·dScores·K`, `dK = scale·dScoresᵀ·Q`. Les produits passent par le
 /// GEMM tuilé ; le softmax backward est [`softmax_backward`].
+///
+/// Nécessite `crate::attention` (softmax par ligne) — seule fonction de ce
+/// module dépendant de la pile transformer-inference, d'où le `cfg` dédié
+/// plutôt que de gater tout le fichier.
+#[cfg(feature = "transformer-inference")]
 #[allow(clippy::too_many_arguments)]
 pub fn attention_backward(
     q: &[f32],
@@ -601,6 +606,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "transformer-inference")]
     fn attention_backward_gradcheck() {
         use crate::attention::attention;
         let (s, d, t) = (3usize, 4usize, 5usize);

@@ -14,6 +14,14 @@ libc = "0.2"
 [features]
 portable-simd = []
 nightly-simd = []
+# Transformer-inference stack (attention, KV cache, RMSNorm/LayerNorm,
+# int8/bf16 quantization, the block/model assembly) — a real, tested subsystem
+# with zero consumers anywhere in the workspace as of 2026-07. Gated off by
+# default so the ~4k LoC / ~15% of this crate's public API it represents
+# isn't compiled into every one of the ~54 workspace crates that depend on
+# scirust-core (which re-exports this crate's public API), for no benefit to
+# any of them today. Opt in with `--features transformer-inference`.
+transformer-inference = []
 default = []
 # Compile les sondes assembleur autonomes (src/hypercomplex/asm_probe.rs)
 # utilisées par scripts/asm_spill_check.sh pour compter les spills vectoriels
@@ -70,8 +78,12 @@ required-features = ["portable-simd"]
 
 [[example]]
 name = "amx_bench"
-required-features = ["nightly-simd"]
+required-features = ["nightly-simd", "transformer-inference"]
 
 [[example]]
 name = "qtransformer_bench"
-required-features = ["nightly-simd"]
+required-features = ["nightly-simd", "transformer-inference"]
+
+[[example]]
+name = "qkv_bench"
+required-features = ["transformer-inference"]

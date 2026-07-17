@@ -651,17 +651,31 @@ mod tests {
 }
 
 pub mod activations;
-pub mod attention;
 pub mod complex;
 pub mod dispatch;
 pub mod gemm;
 pub mod grad;
-pub mod kv_cache;
 pub mod matrix;
+
+// Transformer-inference stack — attention, KV cache, norm, quantization, and
+// the block/model assembly built on top of them. Zero consumers anywhere in
+// the workspace (verified 2026-07); gated behind an opt-in feature rather
+// than kept unconditional or deleted, since it's real, tested, documented
+// infrastructure (~4k LoC, 41 tests) that just hasn't been wired to a
+// consumer yet — see the `transformer-inference` feature doc in Cargo.toml.
+#[cfg(feature = "transformer-inference")]
+pub mod attention;
+#[cfg(feature = "transformer-inference")]
+pub mod kv_cache;
+#[cfg(feature = "transformer-inference")]
 pub mod model;
+#[cfg(feature = "transformer-inference")]
 pub mod norm;
+#[cfg(feature = "transformer-inference")]
 pub mod qkv_cache;
+#[cfg(feature = "transformer-inference")]
 pub mod quant;
+#[cfg(feature = "transformer-inference")]
 pub mod transformer;
 
 // Algèbres hypercomplexes register-résidentes (octonions f32x8,
@@ -697,9 +711,23 @@ pub mod transformed;
 #[cfg(feature = "portable-simd")]
 pub mod dsp;
 
-#[cfg(all(feature = "nightly-simd", target_arch = "x86_64"))]
+// Both depend on the transformer-inference stack above (attention/norm/
+// transformer for qtransformer; quant for amx's bf16 conversions).
+#[cfg(all(
+    feature = "nightly-simd",
+    feature = "transformer-inference",
+    target_arch = "x86_64"
+))]
 pub mod amx;
-#[cfg(all(feature = "nightly-simd", target_arch = "x86_64"))]
+#[cfg(all(
+    feature = "nightly-simd",
+    feature = "transformer-inference",
+    target_arch = "x86_64"
+))]
 pub mod qtransformer;
+// General-purpose x86 extensions (masked axpy, prefetch/non-temporal
+// streaming) — unrelated to transformer-inference despite a doc-comment
+// mention that quantization code used to live here before moving to `quant`;
+// stays unconditional (modulo the platform gate) like `dispatch`/`gemm`.
 #[cfg(target_arch = "x86_64")]
 pub mod x86_ext;
