@@ -39,6 +39,19 @@
 //!    coherent-vortex (rigid rotation) and multi-vortex velocity fields, the
 //!    shared curvature weighting, and the reference [`scenarios::Config`], used
 //!    both as examples and as validation fixtures.
+//! 5. **Field-geometry modules** — the reference's covariance and multi-scale
+//!    machinery:
+//!    - [`transforms`] — orthogonal (rotation / reflection) transforms of a
+//!      sampled field, with an exact node-permutation short circuit when the
+//!      transform maps grid nodes onto grid nodes, and bilinear interpolation
+//!      otherwise;
+//!    - [`covariance`] — spatial-dilation and moving-frame (Galilean and
+//!      time-dependent translation) coordinate and field laws;
+//!    - [`multiscale`] — a family of structural profiles derived from a single
+//!      `ℓ = 1` reference run, exploiting the roughness component's exact
+//!      linearity in the structural length;
+//!    - [`material`] — the material-derivative interval diagnostic splitting a
+//!      vorticity change into Eulerian, advective and material tendencies.
 //!
 //! ## Provenance
 //!
@@ -55,22 +68,33 @@
 // zipped iterators when two coordinate axes and several fields are combined.
 #![allow(clippy::needless_range_loop)]
 
+pub mod covariance;
 mod error;
 mod field;
 pub mod geometry;
+pub mod material;
+pub mod multiscale;
 pub mod operators;
 pub mod scenarios;
 pub mod signature;
 pub mod simulate;
+pub mod transforms;
 pub mod transport;
 
+pub use covariance::{
+    galilean_source_coordinates, inverse_scale_coordinates, scale_geometry, scale_length,
+    subtract_frame_velocity, translating_frame_source_coordinates,
+};
 pub use error::{ItdError, Result};
 pub use field::Field2;
 pub use geometry::{BoundaryMode, Geometry};
+pub use material::{MaterialInterval, material_vorticity_interval};
+pub use multiscale::{MultiscaleProfile, MultiscaleReference, derive_multiscale_profile};
 pub use scenarios::{Config, Scenario};
 pub use signature::{StructuralMetrics, StructuralWeights, structural_metrics};
 pub use simulate::{
     COMPONENT_NAMES, SimConfig, SimulationResult, simulate, simulate_canonical,
     simulate_canonical_transport, simulate_transport_compensated,
 };
+pub use transforms::{BilinearTransformPlan, Orthogonal2, transform_coordinates};
 pub use transport::{Interpolation, Trajectory, transport_previous_vorticity};

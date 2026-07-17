@@ -14,8 +14,15 @@ mod oracle_data {
 }
 
 use oracle_data as od;
+use scirust_itd::covariance::{
+    galilean_source_coordinates, inverse_scale_coordinates, scale_geometry, scale_length,
+    translating_frame_source_coordinates,
+};
+use scirust_itd::material::material_vorticity_interval;
+use scirust_itd::multiscale::{MultiscaleReference, derive_multiscale_profile};
 use scirust_itd::operators::{bounded, gradient, spatial_mean, vorticity};
 use scirust_itd::signature::{StructuralWeights, structural_metrics};
+use scirust_itd::transforms::{BilinearTransformPlan, Orthogonal2, transform_coordinates};
 use scirust_itd::{
     BoundaryMode, Config, Field2, Geometry, Interpolation, Scenario, SimConfig, Trajectory,
     simulate_canonical_transport, transport_previous_vorticity,
@@ -611,4 +618,228 @@ fn transport_limiter_interpolations_match() {
         (sum(od::TL_SHARP_SUMPRES_MIDPOINT) - cubic_sum).abs() < 1e-9,
         "sum-preserving must reproduce the cubic discrete sum"
     );
+}
+
+// --- geometric transforms ------------------------------------------------
+
+fn gt_field(flat: &[f64]) -> Field2 {
+    Field2::from_vec(od::GT_NY, od::GT_NX, flat.to_vec()).unwrap()
+}
+
+#[test]
+fn rotation_matrices_match() {
+    for (k, &angle) in od::GT_ROT_ANGLES.iter().enumerate()
+    {
+        let q = Orthogonal2::rotation(angle).unwrap();
+        let [[m00, m01], [m10, m11]] = q.as_array();
+        let want: &[f64] = [od::GT_ROT_0, od::GT_ROT_1, od::GT_ROT_2, od::GT_ROT_3][k];
+        assert_slice_close(&[m00, m01, m10, m11], want, &format!("rot[{k}]"));
+        assert_close(q.determinant(), 1.0, &format!("rot[{k}]/det"));
+        assert!(q.is_rotation(), "rot[{k}] should be a proper rotation");
+    }
+}
+
+#[test]
+fn transform_coordinates_match() {
+    // Flattened (row-major) target grid coordinates: x = GTX[j], y = GTY[i].
+    let mut xs = Vec::new();
+    let mut ys = Vec::new();
+    for i in 0..od::GT_NY
+    {
+        for j in 0..od::GT_NX
+        {
+            xs.push(od::GTX[j]);
+            ys.push(od::GTY[i]);
+        }
+    }
+    let q = Orthogonal2::rotation(od::GT_ANGLE).unwrap();
+    let (sx, sy) = transform_coordinates(&xs, &ys, &q).unwrap();
+    assert_slice_close(&sx, od::GT_COORD_SX, "coord/sx");
+    assert_slice_close(&sy, od::GT_COORD_SY, "coord/sy");
+}
+
+#[test]
+fn bilinear_transform_plan_generic() {
+    let q = Orthogonal2::rotation(od::GT_ANGLE).unwrap();
+    let origin = [od::GT_ORIGIN[0], od::GT_ORIGIN[1]];
+    let plan = BilinearTransformPlan::new(od::GTX, od::GTY, q, origin, 0.0).unwrap();
+    assert!(
+        !plan.uses_exact_node_map(),
+        "a generic rotation must not be node-aligned"
+    );
+    let scalar = plan.transform_scalar(&gt_field(od::GT_SCALAR)).unwrap();
+    assert_slice_close(scalar.as_slice(), od::GT_T_SCALAR, "transform/scalar");
+
+    let (tvx, tvy) = plan
+        .transform_vector(&gt_field(od::GT_VX), &gt_field(od::GT_VY))
+        .unwrap();
+    assert_slice_close(tvx.as_slice(), od::GT_T_VX, "transform/vx");
+    assert_slice_close(tvy.as_slice(), od::GT_T_VY, "transform/vy");
+}
+
+#[test]
+fn bilinear_transform_plan_exact_node_map() {
+    let q = Orthogonal2::rotation(std::f64::consts::FRAC_PI_2).unwrap();
+    let plan = BilinearTransformPlan::new(od::GT_SQ, od::GT_SQ, q, [2.0, 2.0], 0.0).unwrap();
+    assert!(
+        plan.uses_exact_node_map(),
+        "a 90-degree rotation about the centre of a square grid is node-aligned"
+    );
+    let sqf = Field2::from_vec(od::GT_SQ_N, od::GT_SQ_N, od::GT_SQF.to_vec()).unwrap();
+    let rotated = plan.transform_scalar(&sqf).unwrap();
+    assert_slice_close(rotated.as_slice(), od::GT_SQ_ROT90, "transform/sq_rot90");
+}
+
+// --- covariance (scaling + reference frames) ------------------------------
+
+#[test]
+fn spatial_scaling_matches() {
+    let origin = [od::COV_ORIGIN[0], od::COV_ORIGIN[1]];
+    let (sx, sy) = inverse_scale_coordinates(od::COV_X, od::COV_Y, od::COV_A, origin).unwrap();
+    assert_slice_close(&sx, od::COV_INV_SX, "scale/inv_sx");
+    assert_slice_close(&sy, od::COV_INV_SY, "scale/inv_sy");
+
+    assert_close(
+        scale_length(od::COV_LEN_IN, od::COV_A).unwrap(),
+        od::COV_LEN_OUT,
+        "scale/length",
+    );
+
+    let uniform = scale_geometry(&Geometry::uniform(0.5, 0.3).unwrap(), od::COV_A, origin).unwrap();
+    match uniform
+    {
+        Geometry::Uniform { dx, dy } =>
+        {
+            assert_close(dx, od::COV_SCALED_DX, "scale/dx");
+            assert_close(dy, od::COV_SCALED_DY, "scale/dy");
+        },
+        _ => panic!("expected a uniform geometry"),
+    }
+
+    let rect = scale_geometry(
+        &Geometry::rectilinear(od::COV_X.to_vec(), od::COV_Y.to_vec()).unwrap(),
+        od::COV_A,
+        origin,
+    )
+    .unwrap();
+    match rect
+    {
+        Geometry::Rectilinear { x, y } =>
+        {
+            assert_slice_close(&x, od::COV_SCALED_RX, "scale/rect_x");
+            assert_slice_close(&y, od::COV_SCALED_RY, "scale/rect_y");
+        },
+        _ => panic!("expected a rectilinear geometry"),
+    }
+}
+
+#[test]
+fn reference_frames_match() {
+    let c = [od::COV_C[0], od::COV_C[1]];
+    let (gsx, gsy) =
+        galilean_source_coordinates(od::COV_X, od::COV_Y, od::COV_T, c, od::COV_T0).unwrap();
+    assert_slice_close(&gsx, od::COV_GAL_SX, "galilean/sx");
+    assert_slice_close(&gsy, od::COV_GAL_SY, "galilean/sy");
+
+    let b = [od::COV_B[0], od::COV_B[1]];
+    let (tsx, tsy) = translating_frame_source_coordinates(od::COV_X, od::COV_Y, b).unwrap();
+    assert_slice_close(&tsx, od::COV_TRANS_SX, "translating/sx");
+    assert_slice_close(&tsy, od::COV_TRANS_SY, "translating/sy");
+}
+
+// --- multiscale profile ---------------------------------------------------
+
+#[test]
+fn multiscale_profile_matches() {
+    let weights: [f64; 5] = od::MS_WEIGHTS.try_into().unwrap();
+    let reference = MultiscaleReference {
+        intensity_rate: od::MS_INTENSITY_RATE.to_vec(),
+        heterogeneity: od::MS_HETEROGENEITY.to_vec(),
+        localization: od::MS_LOCALIZATION.to_vec(),
+        unit_roughness: od::MS_UNIT_ROUGHNESS.to_vec(),
+        sign_mixing: od::MS_SIGN_MIXING.to_vec(),
+        temporal_deformation_interval: od::MS_TDEF_INTERVAL.to_vec(),
+        interval_dt: od::MS_INTERVAL_DT.to_vec(),
+        weights,
+        intensity_index: od::MS_INTENSITY_INDEX,
+        temporal_deformation_index: od::MS_TDEF_INDEX,
+    };
+    let profile = derive_multiscale_profile(&reference, od::MS_LENGTHS).unwrap();
+
+    let flat_signatures: Vec<f64> = profile.signatures.iter().flatten().copied().collect();
+    assert_slice_close(&flat_signatures, od::MS_SIGNATURES, "ms/signatures");
+    assert_slice_close(
+        &profile.structure_indices,
+        od::MS_STRUCTURE_IDX,
+        "ms/structure",
+    );
+    assert_slice_close(&profile.coupled_indices, od::MS_COUPLED_IDX, "ms/coupled");
+    assert_slice_close(
+        &profile.raw_roughness_indices,
+        od::MS_RAW_ROUGH_IDX,
+        "ms/raw_roughness",
+    );
+    assert_close(
+        profile.intensity_index,
+        od::MS_INTENSITY_INDEX,
+        "ms/intensity",
+    );
+    assert_close(
+        profile.temporal_deformation_index,
+        od::MS_TDEF_INDEX,
+        "ms/tdef",
+    );
+
+    // The temporal-deformation signature component (index 4) is scale-independent.
+    for k in 1..profile.signatures.len()
+    {
+        assert_close(
+            profile.signatures[k][4],
+            profile.signatures[0][4],
+            "ms/tdef-scale-independent",
+        );
+    }
+}
+
+// --- material-derivative interval -----------------------------------------
+
+fn mat_field(flat: &[f64]) -> Field2 {
+    Field2::from_vec(od::MAT_NY, od::MAT_NX, flat.to_vec()).unwrap()
+}
+
+#[test]
+fn material_interval_matches() {
+    let geom = Geometry::uniform(od::MAT_DX, od::MAT_DY).unwrap();
+    let res = material_vorticity_interval(
+        &mat_field(od::MAT_PREV),
+        &mat_field(od::MAT_CUR),
+        &mat_field(od::MAT_VX),
+        &mat_field(od::MAT_VY),
+        &geom,
+        od::MAT_DT,
+        BoundaryMode::Finite,
+    )
+    .unwrap();
+
+    assert_slice_close(
+        res.temporal_tendency.as_slice(),
+        od::MAT_TEMPORAL,
+        "mat/temporal",
+    );
+    assert_slice_close(
+        res.advective_tendency.as_slice(),
+        od::MAT_ADVECTIVE,
+        "mat/advective",
+    );
+    assert_slice_close(
+        res.material_tendency.as_slice(),
+        od::MAT_MATERIAL,
+        "mat/material",
+    );
+    assert_close(res.reference_rms, od::MAT_REF_RMS, "mat/ref_rms");
+    assert_close(res.previous_rms, od::MAT_PREV_RMS, "mat/prev_rms");
+    assert_close(res.current_rms, od::MAT_CUR_RMS, "mat/cur_rms");
+    assert_close(res.eulerian_rate, od::MAT_EUL_RATE, "mat/eul_rate");
+    assert_close(res.advective_rate, od::MAT_ADV_RATE, "mat/adv_rate");
+    assert_close(res.material_rate, od::MAT_MAT_RATE, "mat/mat_rate");
 }

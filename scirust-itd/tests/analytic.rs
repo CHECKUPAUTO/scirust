@@ -169,3 +169,120 @@ fn integer_cell_shift_transport() {
         }
     }
 }
+
+// --- field-geometry modules ----------------------------------------------
+
+use scirust_itd::covariance::{
+    galilean_source_coordinates, inverse_scale_coordinates, scale_length, subtract_frame_velocity,
+};
+use scirust_itd::material::material_vorticity_interval;
+use scirust_itd::multiscale::{MultiscaleReference, derive_multiscale_profile};
+use scirust_itd::transforms::{BilinearTransformPlan, Orthogonal2};
+
+/// The identity rotation maps every node onto itself, so the plan uses the exact
+/// node permutation and returns the field byte-for-byte unchanged.
+#[test]
+fn identity_transform_is_exact_and_unchanged() {
+    let coords = vec![0.0, 1.0, 2.0, 3.0];
+    let q = Orthogonal2::rotation(0.0).unwrap();
+    let plan = BilinearTransformPlan::new(&coords, &coords, q, [0.0, 0.0], 0.0).unwrap();
+    assert!(plan.uses_exact_node_map());
+    let f = Field2::from_fn(4, 4, |i, j| (i * 4 + j) as f64 * 0.37 - 1.0);
+    assert_eq!(plan.transform_scalar(&f).unwrap(), f);
+}
+
+/// A reflection is orthogonal with determinant −1 (not a proper rotation); a
+/// shear is rejected as non-orthogonal.
+#[test]
+fn reflection_is_orthogonal_but_not_rotation() {
+    let q = Orthogonal2::new([[1.0, 0.0], [0.0, -1.0]]).unwrap();
+    assert!((q.determinant() + 1.0).abs() < 1e-15);
+    assert!(!q.is_rotation());
+    assert!(Orthogonal2::new([[1.0, 0.5], [0.0, 1.0]]).is_err());
+}
+
+/// `x = o + (x' − o)/a` inverts `x' = o + a(x − o)` exactly.
+#[test]
+fn spatial_scaling_round_trip() {
+    let xs = vec![0.1, 0.9, 1.7, 2.5];
+    let ys = vec![-0.3, 0.4, 1.2, 2.0];
+    let a = 2.3;
+    let origin = [0.5, -0.2];
+    let (sx, sy) = inverse_scale_coordinates(&xs, &ys, a, origin).unwrap();
+    for k in 0..xs.len()
+    {
+        let fwd_x = origin[0] + a * (sx[k] - origin[0]);
+        let fwd_y = origin[1] + a * (sy[k] - origin[1]);
+        assert!((fwd_x - xs[k]).abs() < 1e-12);
+        assert!((fwd_y - ys[k]).abs() < 1e-12);
+    }
+    assert!((scale_length(1.5, a).unwrap() - a * 1.5).abs() < 1e-15);
+}
+
+/// A Galilean boost evaluated at its reference time leaves coordinates fixed, and
+/// subtracting a zero frame velocity leaves the field unchanged.
+#[test]
+fn galilean_at_reference_time_is_identity() {
+    let xs = vec![0.0, 1.0, 2.0];
+    let ys = vec![0.5, 1.5, 2.5];
+    let (sx, sy) = galilean_source_coordinates(&xs, &ys, 1.0, [0.7, -0.3], 1.0).unwrap();
+    assert_eq!(sx, xs);
+    assert_eq!(sy, ys);
+    let vx = Field2::from_fn(3, 3, |i, j| (i + j) as f64);
+    let vy = Field2::from_fn(3, 3, |i, j| i as f64 - j as f64);
+    let (ux, uy) = subtract_frame_velocity(&vx, &vy, [0.0, 0.0]).unwrap();
+    assert_eq!(ux, vx);
+    assert_eq!(uy, vy);
+}
+
+/// The material tendency is, by construction, the exact sum of the Eulerian and
+/// advective tendencies at every node.
+#[test]
+fn material_tendency_is_sum_of_parts() {
+    let n = 5;
+    let geom = Geometry::isotropic(0.25).unwrap();
+    let prev = Field2::from_fn(n, n, |i, j| (0.3 * i as f64).sin() * (0.2 * j as f64).cos());
+    let cur = Field2::from_fn(n, n, |i, j| {
+        (0.3 * i as f64 + 0.1).sin() * (0.2 * j as f64).cos()
+    });
+    let vx = Field2::from_fn(n, n, |_, j| 0.2 + 0.05 * j as f64);
+    let vy = Field2::from_fn(n, n, |i, _| -0.1 + 0.05 * i as f64);
+    let r = material_vorticity_interval(&prev, &cur, &vx, &vy, &geom, 0.5, BoundaryMode::Finite)
+        .unwrap();
+    for k in 0..r.material_tendency.as_slice().len()
+    {
+        let m = r.material_tendency.as_slice()[k];
+        let t = r.temporal_tendency.as_slice()[k];
+        let a = r.advective_tendency.as_slice()[k];
+        assert!((m - (t + a)).abs() < 1e-15, "cell {k}");
+    }
+}
+
+/// The raw roughness index is exactly linear in the structural length, and the
+/// temporal-deformation signature component is scale-independent.
+#[test]
+fn multiscale_roughness_scales_linearly() {
+    let reference = MultiscaleReference {
+        intensity_rate: vec![1.0, 1.2, 0.9, 1.1],
+        heterogeneity: vec![0.2, 0.3, 0.25, 0.28],
+        localization: vec![0.5, 0.4, 0.6, 0.55],
+        unit_roughness: vec![0.7, 0.8, 0.75, 0.9],
+        sign_mixing: vec![0.1, 0.15, 0.12, 0.14],
+        temporal_deformation_interval: vec![0.3, 0.35, 0.32],
+        interval_dt: vec![0.25, 0.25, 0.25],
+        weights: [0.2, 0.2, 0.2, 0.2, 0.2],
+        intensity_index: 1.05,
+        temporal_deformation_index: 0.33,
+    };
+    let lengths = vec![1.0, 2.0, 3.0];
+    let profile = derive_multiscale_profile(&reference, &lengths).unwrap();
+    let base = profile.raw_roughness_indices[0];
+    for (k, &ell) in lengths.iter().enumerate()
+    {
+        assert!((profile.raw_roughness_indices[k] - ell * base).abs() < 1e-12);
+    }
+    for k in 1..lengths.len()
+    {
+        assert!((profile.signatures[k][4] - profile.signatures[0][4]).abs() < 1e-15);
+    }
+}

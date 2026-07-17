@@ -25,6 +25,10 @@ invariants the reference asserts hold here too (`tests/analytic.rs`).
 | **Simulation driver** | [`simulate`] / `simulate_canonical` | curvature-weighted rotational intensity `⟨ω²·e^{L²κ}⟩` and the structural signature, reduced to interval-integrated indices |
 | | [`simulate_transport_compensated`] | the transport-compensated temporal-deformation mode (advect the previous vorticity before the temporal term; periodic boundary) |
 | **Scenarios** | [`scenarios`] | calm (irrotational), coherent (rigid rotation), multi-vortex fields + the shared curvature weighting and reference `Config` |
+| **Geometric transforms** | [`transforms::BilinearTransformPlan`] | rotation / reflection covariance of a sampled field (`f_Q(x)=f(Qᵀ(x−o)+o)`, `v_Q=Q·v`), with an **exact node-permutation** short circuit when the transform maps grid nodes onto grid nodes, and bilinear interpolation otherwise |
+| **Covariance laws** | [`covariance`] | spatial-dilation (`x=o+(x'−o)/a`, `v_a=a·v`, `R_a=R/a²`) and moving-frame (Galilean `x=x'+c(t−t₀)`, `v'=v−c`; time-dependent translation `x=x'+b(t)`, `v'=v−ḃ`) coordinate and field laws |
+| **Multi-scale profile** | [`multiscale::derive_multiscale_profile`] | a whole family of structural profiles derived from **one** `ℓ=1` reference run, exploiting the roughness component's exact linearity in the structural length (`roughness_raw(ℓ)=ℓ·roughness_raw(1)`) |
+| **Material derivative** | [`material::material_vorticity_interval`] | splits a vorticity change over an interval into Eulerian `(ω₁−ω₀)/Δt`, advective `u·∇ω` and material tendencies, each reduced to an RMS-normalized rate |
 
 ## Quick start
 
@@ -53,6 +57,14 @@ println!("intensity = {:.12}", r.intensity_index);   // 4.347614838944
   `cubic`) and both limiters (the convex-limited `cubic_local_bounded` and the
   discrete-sum-preserving `cubic_local_sum_preserving`) — for both the midpoint
   and RK4 trajectory methods.
+- The reference's **field-geometry** machinery is ported as four modules —
+  orthogonal transforms (`transforms`), spatial-dilation and moving-frame
+  covariance laws (`covariance`), the multi-scale structural profile
+  (`multiscale`), and the material-derivative interval diagnostic (`material`) —
+  each validated against the same oracle. The higher-level `simulate_material_
+  deformation` orchestration (a thin loop wiring `material_vorticity_interval`
+  into a full run) is intentionally left in the reference; the reusable interval
+  kernel is what transfers.
 
 ## Provenance & scope
 
@@ -71,3 +83,7 @@ transfers to SciRust is the deterministic, oracle-validated machinery.
 [`simulate`]: https://docs.rs/scirust-itd
 [`simulate_transport_compensated`]: https://docs.rs/scirust-itd
 [`scenarios`]: https://docs.rs/scirust-itd
+[`transforms::BilinearTransformPlan`]: https://docs.rs/scirust-itd
+[`covariance`]: https://docs.rs/scirust-itd
+[`multiscale::derive_multiscale_profile`]: https://docs.rs/scirust-itd
+[`material::material_vorticity_interval`]: https://docs.rs/scirust-itd
