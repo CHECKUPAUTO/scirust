@@ -14,7 +14,7 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::fixed::Q16_16;
-use scirust_simd::geometry::Quaternion;
+use scirust_simd::geometry::{Quaternion, Transform};
 
 const N: usize = 1 << 12;
 
@@ -277,12 +277,94 @@ fn bench_euler_roundtrip(c: &mut Criterion) {
     g.finish();
 }
 
+/// Composition de `SE(3)` (produit de Hamilton + rotation d'une translation)
+/// et transformation d'un flux de points, fixe vs f32.
+fn bench_transform(c: &mut Criterion) {
+    let (fx, ff) = vectors(0xE5);
+    let ax = Quaternion::<Q16_16>::from_axis_angle(
+        [
+            Q16_16::try_from(0.267).unwrap(),
+            Q16_16::try_from(0.535).unwrap(),
+            Q16_16::try_from(0.802).unwrap(),
+        ],
+        Q16_16::try_from(0.9).unwrap(),
+    );
+    let bx = Quaternion::<Q16_16>::from_axis_angle(
+        [
+            Q16_16::try_from(0.408).unwrap(),
+            Q16_16::try_from(0.408).unwrap(),
+            Q16_16::try_from(0.816).unwrap(),
+        ],
+        Q16_16::try_from(1.6).unwrap(),
+    );
+    let tx_a = Transform::new(
+        ax,
+        [
+            Q16_16::try_from(0.2).unwrap(),
+            Q16_16::try_from(-0.4).unwrap(),
+            Q16_16::try_from(0.6).unwrap(),
+        ],
+    );
+    let tx_b = Transform::new(
+        bx,
+        [
+            Q16_16::try_from(-0.5).unwrap(),
+            Q16_16::try_from(0.3).unwrap(),
+            Q16_16::try_from(0.1).unwrap(),
+        ],
+    );
+    let af = Quaternion::<f32>::from_axis_angle([0.267, 0.535, 0.802], 0.9);
+    let bf = Quaternion::<f32>::from_axis_angle([0.408, 0.408, 0.816], 1.6);
+    let tf_a = Transform::new(af, [0.2, -0.4, 0.6]);
+    let tf_b = Transform::new(bf, [-0.5, 0.3, 0.1]);
+
+    let mut g = c.benchmark_group("transform_compose");
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| black_box(tx_a).compose(black_box(&tx_b)))
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| black_box(tf_a).compose(black_box(&tf_b)))
+    });
+    g.finish();
+
+    let mut g = c.benchmark_group("transform_point");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            let mut acc = [Q16_16::zero(); 3];
+            for &v in black_box(&fx)
+            {
+                let r = tx_a.transform_point(v);
+                acc[0] += r[0];
+                acc[1] += r[1];
+                acc[2] += r[2];
+            }
+            acc
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| {
+            let mut acc = [0.0f32; 3];
+            for &v in black_box(&ff)
+            {
+                let r = tf_a.transform_point(v);
+                acc[0] += r[0];
+                acc[1] += r[1];
+                acc[2] += r[2];
+            }
+            acc
+        })
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_rotate,
     bench_from_axis_angle,
     bench_slerp,
     bench_from_rotation_matrix,
-    bench_euler_roundtrip
+    bench_euler_roundtrip,
+    bench_transform
 );
 criterion_main!(benches);

@@ -8,7 +8,7 @@
 //    composition, angle-axe) mesurées contre une référence `f64` ;
 //  * déterminisme bit-à-bit du chemin virgule fixe.
 
-use super::Quaternion;
+use super::{Quaternion, Transform};
 use crate::fixed::{NumericScalar, Q16_16, RealScalar};
 
 // ------------------------------------------------------------------ //
@@ -554,4 +554,216 @@ fn euler_gimbal_lock_all_scalars() {
     check_euler_gimbal_lock::<f32>();
     check_euler_gimbal_lock::<f64>();
     check_euler_gimbal_lock::<Q16_16>();
+}
+
+// ------------------------------------------------------------------ //
+//  Transform (SE(3)) : composition, inverse, matrice homogène          //
+// ------------------------------------------------------------------ //
+
+fn tof<T: Scalar>(axis: [f64; 3], angle: f64, translation: [f64; 3]) -> Transform<T> {
+    let rotation = Quaternion::<T>::from_axis_angle(
+        [T::of(axis[0]), T::of(axis[1]), T::of(axis[2])],
+        T::of(angle),
+    );
+    Transform::new(
+        rotation,
+        [
+            T::of(translation[0]),
+            T::of(translation[1]),
+            T::of(translation[2]),
+        ],
+    )
+}
+
+fn check_transform_identity<T: Scalar>() {
+    let t = tof::<T>([0.267, 0.535, 0.802], 1.1, [0.3, -0.5, 0.9]);
+    let id = Transform::<T>::identity();
+    let p = [T::of(0.4), T::of(-0.2), T::of(0.6)];
+
+    approx_vec(
+        id.transform_point(p),
+        [p[0].to_f64(), p[1].to_f64(), p[2].to_f64()],
+        "identité·p",
+    );
+
+    let want = t.transform_point(p);
+    let want_f64 = [want[0].to_f64(), want[1].to_f64(), want[2].to_f64()];
+    approx_vec(t.compose(&id).transform_point(p), want_f64, "t∘id");
+    approx_vec(id.compose(&t).transform_point(p), want_f64, "id∘t");
+}
+
+#[test]
+fn transform_identity_all_scalars() {
+    check_transform_identity::<f32>();
+    check_transform_identity::<f64>();
+    check_transform_identity::<Q16_16>();
+}
+
+fn check_transform_compose_matches_sequential<T: Scalar>() {
+    let a = tof::<T>([0.267, 0.535, 0.802], 0.9, [0.2, -0.4, 0.6]);
+    let b = tof::<T>([0.408, 0.408, 0.816], 1.6, [-0.5, 0.3, 0.1]);
+    let p = [T::of(0.35), T::of(-0.75), T::of(0.2)];
+
+    let sequential = a.transform_point(b.transform_point(p));
+    let sequential_f64 = [
+        sequential[0].to_f64(),
+        sequential[1].to_f64(),
+        sequential[2].to_f64(),
+    ];
+
+    let composed = a.compose(&b).transform_point(p);
+    approx_vec(
+        composed,
+        sequential_f64,
+        "compose vs application séquentielle",
+    );
+
+    // Idem via l'opérateur Mul.
+    let composed_op = (a * b).transform_point(p);
+    approx_vec(
+        composed_op,
+        sequential_f64,
+        "Mul vs application séquentielle",
+    );
+}
+
+#[test]
+fn transform_compose_matches_sequential_application_all_scalars() {
+    check_transform_compose_matches_sequential::<f32>();
+    check_transform_compose_matches_sequential::<f64>();
+    check_transform_compose_matches_sequential::<Q16_16>();
+}
+
+fn check_transform_compose_associative<T: Scalar>() {
+    let a = tof::<T>([0.267, 0.535, 0.802], 0.5, [0.1, 0.2, 0.3]);
+    let b = tof::<T>([0.408, 0.408, 0.816], 1.1, [-0.2, 0.1, -0.3]);
+    let c = tof::<T>([0.0, 0.6, 0.8], 2.0, [0.4, -0.1, 0.2]);
+    let p = [T::of(0.2), T::of(0.5), T::of(-0.3)];
+
+    let left = a.compose(&b).compose(&c).transform_point(p);
+    let right = a.compose(&b.compose(&c)).transform_point(p);
+    approx_vec(
+        left,
+        [right[0].to_f64(), right[1].to_f64(), right[2].to_f64()],
+        "(a∘b)∘c vs a∘(b∘c)",
+    );
+}
+
+#[test]
+fn transform_compose_associative_all_scalars() {
+    check_transform_compose_associative::<f32>();
+    check_transform_compose_associative::<f64>();
+    check_transform_compose_associative::<Q16_16>();
+}
+
+fn check_transform_inverse_two_sided<T: Scalar>() {
+    let t = tof::<T>([0.267, 0.535, 0.802], 1.3, [0.4, -0.6, 0.2]);
+    let inv = t.inverse();
+    let p = [T::of(0.1), T::of(-0.4), T::of(0.7)];
+    let want = [p[0].to_f64(), p[1].to_f64(), p[2].to_f64()];
+
+    approx_vec(t.compose(&inv).transform_point(p), want, "t∘t⁻¹ = id");
+    approx_vec(inv.compose(&t).transform_point(p), want, "t⁻¹∘t = id");
+}
+
+#[test]
+fn transform_inverse_is_two_sided_all_scalars() {
+    check_transform_inverse_two_sided::<f32>();
+    check_transform_inverse_two_sided::<f64>();
+    check_transform_inverse_two_sided::<Q16_16>();
+}
+
+fn check_transform_matrix_roundtrip<T: Scalar + core::ops::Div<Output = T>>() {
+    let t = tof::<T>([0.267, 0.535, 0.802], 1.7, [0.5, -0.3, 0.8]);
+    let m = t.to_matrix();
+    let t2 = Transform::<T>::from_matrix(m);
+
+    // R ne détermine q qu'au signe global près : aligne avant de comparer
+    // (même précaution que `check_rotation_matrix_roundtrip`).
+    let dot = t.rotation.w.to_f64() * t2.rotation.w.to_f64()
+        + t.rotation.x.to_f64() * t2.rotation.x.to_f64()
+        + t.rotation.y.to_f64() * t2.rotation.y.to_f64()
+        + t.rotation.z.to_f64() * t2.rotation.z.to_f64();
+    let t2_rotation = if dot < 0.0 { -t2.rotation } else { t2.rotation };
+    approx_quat(
+        t2_rotation,
+        [
+            t.rotation.w.to_f64(),
+            t.rotation.x.to_f64(),
+            t.rotation.y.to_f64(),
+            t.rotation.z.to_f64(),
+        ],
+        "from_matrix : rotation",
+    );
+    approx_vec(
+        t2.translation,
+        [
+            t.translation[0].to_f64(),
+            t.translation[1].to_f64(),
+            t.translation[2].to_f64(),
+        ],
+        "from_matrix : translation",
+    );
+}
+
+#[test]
+fn transform_matrix_roundtrip_all_scalars() {
+    check_transform_matrix_roundtrip::<f32>();
+    check_transform_matrix_roundtrip::<f64>();
+    check_transform_matrix_roundtrip::<Q16_16>();
+}
+
+fn check_transform_matrix_matches_transform_point<T: Scalar>() {
+    let t = tof::<T>([0.267, 0.535, 0.802], 2.1, [0.6, -0.2, 0.4]);
+    let p = [T::of(0.3), T::of(0.5), T::of(-0.7)];
+    let m = t.to_matrix();
+
+    // Multiplication homogène manuelle : m · [p; 1].
+    let ph = [p[0], p[1], p[2], T::one()];
+    let mut want = [T::zero(); 3];
+    for (i, row) in m.iter().take(3).enumerate()
+    {
+        let mut acc = T::zero();
+        for (j, &mij) in row.iter().enumerate()
+        {
+            acc = acc + mij * ph[j];
+        }
+        want[i] = acc;
+    }
+
+    approx_vec(
+        t.transform_point(p),
+        [want[0].to_f64(), want[1].to_f64(), want[2].to_f64()],
+        "to_matrix vs transform_point",
+    );
+}
+
+#[test]
+fn transform_matrix_matches_transform_point_all_scalars() {
+    check_transform_matrix_matches_transform_point::<f32>();
+    check_transform_matrix_matches_transform_point::<f64>();
+    check_transform_matrix_matches_transform_point::<Q16_16>();
+}
+
+fn check_transform_vector_ignores_translation<T: Scalar>() {
+    let t = tof::<T>(
+        [0.0, 0.0, 1.0],
+        std::f64::consts::FRAC_PI_2,
+        [5.0, -3.0, 2.0],
+    );
+    let v = [T::of(1.0), T::of(0.0), T::of(0.0)];
+    // Rotation seule (90° autour de +z : x → y) ; la translation ne doit pas
+    // intervenir, contrairement à `transform_point`.
+    approx_vec(
+        t.transform_vector(v),
+        [0.0, 1.0, 0.0],
+        "transform_vector ignore la translation",
+    );
+}
+
+#[test]
+fn transform_vector_ignores_translation_all_scalars() {
+    check_transform_vector_ignores_translation::<f32>();
+    check_transform_vector_ignores_translation::<f64>();
+    check_transform_vector_ignores_translation::<Q16_16>();
 }

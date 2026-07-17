@@ -14,6 +14,8 @@
 //   norme, normalisation, inverse, construction angle-axe, rotation de vecteur,
 //   matrice de rotation (aller-retour), angles d'Euler (aller-retour),
 //   interpolation `nlerp`/`slerp`.
+// * [`Transform`] — déplacement rigide `SE(3)` (rotation + translation) :
+//   composition, inverse, matrice homogène 4×4 (aller-retour).
 //
 // ## Pourquoi générique ?
 //
@@ -21,11 +23,15 @@
 // résultat **reproductible bit-à-bit** sur toute architecture — utile pour la
 // robotique déterministe, la simulation rejouable et l'embarqué sans FPU — tout
 // en réutilisant le **même code** que `Quaternion<f32>`. C'est la validation de
-// bout en bout du trait [`RealScalar`](crate::fixed::RealScalar).
+// bout en bout du trait [`RealScalar`](crate::fixed::RealScalar). `Transform`
+// hérite de cette généricité : composer des poses `SE(3)` en virgule fixe
+// donne la même trajectoire, bit pour bit, sur toute plateforme.
 
 pub mod quaternion;
+pub mod transform;
 
 pub use quaternion::Quaternion;
+pub use transform::Transform;
 
 #[cfg(test)]
 mod tests;
