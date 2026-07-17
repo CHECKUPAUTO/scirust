@@ -32,6 +32,11 @@ is encoded to a 16-lane code by one of four `Encoding`s (module
 | `Real(Sum)` | `a + b + c` | no (commutative) | no (associative) |
 | `Real(Hadamard)` | `a ⊙ b ⊙ c` | no (commutative) | no (associative) |
 | `Real(PositionWeighted)` | `1·a + 2·b + 3·c` | yes (weights) | no (associative) |
+| `Hrr` | HRR/VSA tree: nested circular convolution with fixed L/R role vectors — `L⊛(L⊛a+R⊛b)+R⊛c` etc. | yes (roles) | yes (nesting) |
+
+`Hrr` is the **strong** baseline: a purpose-built structural encoding that, like
+the sedenion, discriminates *both* order and grouping. It is the fair opponent —
+the `Real` bindings are deliberately naive.
 
 Three deterministic metrics:
 
@@ -64,54 +69,67 @@ trials/set.
 | Real(Sum) | 0.000000 | 0.000000 |
 | Real(Hadamard) | 0.000000 | 0.000000 |
 | Real(PositionWeighted) | 0.193686 | 0.000000 |
+| Hrr | 0.657844 | 0.645989 |
 
 ### Noisy structure retrieval — nearest-neighbour accuracy (chance ≈ 0.0833)
 
 | encoding | noise 0 | noise 0.1 | noise 0.25 | noise 0.5 |
 |---|---:|---:|---:|---:|
-| Sedenion | **1.0000** | **0.9990** | **0.9901** | **0.8690** |
+| Sedenion | 1.0000 | 0.9990 | 0.9901 | 0.8690 |
 | Real(Sum) | 0.0829 | 0.0829 | 0.0829 | 0.0829 |
 | Real(Hadamard) | 0.0811 | 0.0824 | 0.0809 | 0.0834 |
 | Real(PositionWeighted) | 0.5000 | 0.5000 | 0.4969 | 0.4239 |
+| **Hrr** | **1.0000** | **1.0000** | **0.9979** | **0.9457** |
 
 ## Reading
 
 * **The sedenion product discriminates both order and grouping** (order 0.90,
-  grouping 0.66), and this translates into **near-perfect, noise-robust
-  structure retrieval** (99.9% at noise 0.1, still 87% at the aggressive noise
-  0.5).
-* **Commutative real baselines are at chance.** `Sum` and `Hadamard` collapse
-  all 12 structures over the same atoms to one code (order- and grouping-blind
-  by construction), so retrieval is exactly chance — a plain "16 real numbers,
-  no algebra" bag *cannot* recover structure.
-* **Position-weighting recovers order but not grouping.** It distinguishes the 6
-  orderings but maps the two parenthesizations of each ordering to the same code,
-  so it caps at ≈50% (it always confuses `(a·b)·c` with `a·(b·c)`).
+  grouping 0.66) → **near-perfect, noise-robust structure retrieval** (99.9% at
+  noise 0.1, 87% at the aggressive noise 0.5). Against the naive real baselines
+  this is a clear win.
+* **Naive real baselines fail by construction.** `Sum` / `Hadamard` are at chance
+  (they collapse all 12 structures to one code); `PositionWeighted` recovers
+  order but not grouping, so it caps at ≈50% (always confuses `(a·b)·c` with
+  `a·(b·c)`).
+* **But HRR — the strong baseline — matches or beats the sedenion.** HRR
+  discriminates order (0.66) and grouping (0.65) too, and its retrieval is *at
+  least as good at every noise level* and **more robust under heavy noise**
+  (noise 0.5: **HRR 0.9457 vs Sedenion 0.8690**). A purpose-built real
+  structural encoding (circular convolution + role vectors) does the job as well
+  or better — without the sedenion's zero-divisor collapse risk (F2).
 
-So the sedenion algebra provides a **genuine capacity advantage over a plain
-real-vector encoding for representing structure** — the first place in this
-program where the algebra does something a comparable real encoding does not.
+So the sedenion's structural capacity is **real but not superior**: it beats
+naive 16-real encodings, and it *loses to* an established structural method on
+its own turf. This is the honest bound the program was built to find.
 
-## Honest caveats (this is capacity, not proven usefulness)
+## Honest caveats
 
 * **The grouping advantage is redundant with Phase 1's explicit tree.** The
   `S16Expr` tree already stores grouping exactly, without the algebra. The
-  algebra's contribution is packing order + grouping into a *single fixed-width
-  16-lane code* — useful only if a fixed-width structural code is what you need.
-* **The real baselines here are deliberately simple.** Stronger real structural
-  encodings exist (e.g. HRR / VSA circular convolution with role vectors, or a
-  learned bilinear binding); this experiment does **not** claim the sedenion beats
-  those — only the elementary Sum / Hadamard / position-weighted baselines at
-  the same 16 dims.
+  algebra's only distinct contribution is packing order + grouping into a
+  *single fixed-width 16-lane code* — and HRR does that too, better.
+* **HRR uses auxiliary role vectors; the sedenion uses none.** One could argue
+  the sedenion is "cheaper" (no role vectors, binding is intrinsic to the
+  product). But cheaper *and losing* is not a winning position: HRR's two fixed
+  role vectors are a trivial cost, and it is both more accurate under noise and
+  free of zero-divisor collapse.
 * **Synthetic task.** Retrieving a structure from a 12-entry codebook over 3
-  fixed atoms is a probe, not a downstream application. Whether the advantage
-  survives a real task — and justifies the algebra's cost and its structured-input
-  collapse risks (F2) — is the next phase's burden (structured / relation-aware
-  queries, gated on beating a real baseline per F1).
+  fixed atoms is a probe, not a downstream application; a real task could shift
+  the ranking either way. But the burden of proof is now clearly on the sedenion
+  to show an advantage it did *not* show here.
 
 ## Verdict
 
-Against elementary real 16-D encodings, the sedenion parenthesized product is
-the first component in this program to show a **measurable, robust advantage for
-structure discrimination**. It establishes *capacity*; it does **not** establish
-usefulness on a real task, nor superiority over stronger structural baselines.
+Against **naive** real 16-D encodings, the sedenion parenthesized product is a
+clear structure-discrimination win (they are order/grouping-blind by
+construction). Against a **strong** structural baseline — HRR/VSA (circular
+convolution + role vectors) — it is **not**: HRR matches it at low noise and is
+**more robust under heavy noise** (0.946 vs 0.869 at noise 0.5), while carrying
+*none* of the sedenion's zero-divisor collapse risk (F2).
+
+The honest conclusion of this arc: the sedenion algebra has **real structural
+capacity but no demonstrated superiority** over established methods at the same
+16 dimensions. Combined with F1 (no retrieval advantage), the evidence so far
+**does not justify** the algebra over ordinary real-vector techniques — it
+bounds its value rather than vindicating it. That is exactly the kind of
+conservative, falsification-first result the program was designed to surface.

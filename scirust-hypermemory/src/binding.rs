@@ -75,15 +75,22 @@ pub enum Encoding {
     Sedenion,
     /// A real-vector baseline over the same 16 components.
     Real(RealBinding),
+    /// A **strong** structural baseline: HRR / VSA holographic binding — nested
+    /// circular convolution with fixed left/right role vectors. Unlike the
+    /// `Real` baselines it *is* both order- and grouping-sensitive (the roles
+    /// differ per tree position), so it is the fair opponent for the sedenion
+    /// product. See [`circular_convolution`].
+    Hrr,
 }
 
 impl Encoding {
     /// Every encoding compared by the report, in a fixed order.
-    pub const ALL: [Encoding; 4] = [
+    pub const ALL: [Encoding; 5] = [
         Encoding::Sedenion,
         Encoding::Real(RealBinding::Sum),
         Encoding::Real(RealBinding::Hadamard),
         Encoding::Real(RealBinding::PositionWeighted),
+        Encoding::Hrr,
     ];
 
     /// A short human label.
@@ -95,6 +102,7 @@ impl Encoding {
             Encoding::Real(RealBinding::Sum) => "Real(Sum)",
             Encoding::Real(RealBinding::Hadamard) => "Real(Hadamard)",
             Encoding::Real(RealBinding::PositionWeighted) => "Real(PosWeighted)",
+            Encoding::Hrr => "HRR(conv+roles)",
         }
     }
 
@@ -136,8 +144,89 @@ impl Encoding {
                 }
                 out
             },
+            Encoding::Hrr =>
+            {
+                // HRR tree encoding with fixed role vectors L (left child) and
+                // R (right child). A leaf is the atom; a node `(l·r)` is
+                // `L ⊛ enc(l) + R ⊛ enc(r)`. The two shapes bind the three atoms
+                // to *different* nested role products, so order and grouping are
+                // both preserved — the fair strong baseline for the sedenion.
+                let (l, r) = hrr_roles();
+                let (x, y, z) = (a.to_array(), b.to_array(), c.to_array());
+                match shape
+                {
+                    // (a·b)·c = L⊛(L⊛a + R⊛b) + R⊛c
+                    TripleShape::LeftAssoc =>
+                    {
+                        let inner =
+                            add16(&circular_convolution(&l, &x), &circular_convolution(&r, &y));
+                        add16(
+                            &circular_convolution(&l, &inner),
+                            &circular_convolution(&r, &z),
+                        )
+                    },
+                    // a·(b·c) = L⊛a + R⊛(L⊛b + R⊛c)
+                    TripleShape::RightAssoc =>
+                    {
+                        let inner =
+                            add16(&circular_convolution(&l, &y), &circular_convolution(&r, &z));
+                        add16(
+                            &circular_convolution(&l, &x),
+                            &circular_convolution(&r, &inner),
+                        )
+                    },
+                }
+            },
         }
     }
+}
+
+/// Fixed seed for the HRR role vectors (structural constants, shared by every
+/// HRR encode call so a codebook and its queries use the same roles).
+const HRR_ROLE_SEED: u64 = 0x4110_C0DE;
+
+/// The fixed left/right role vectors for the HRR tree encoding, drawn
+/// deterministically from [`HRR_ROLE_SEED`].
+fn hrr_roles() -> ([f32; 16], [f32; 16]) {
+    let mut rng = Lcg::new(HRR_ROLE_SEED);
+    let mut l = [0.0f32; 16];
+    let mut r = [0.0f32; 16];
+    for v in &mut l
+    {
+        *v = rng.next_f32();
+    }
+    for v in &mut r
+    {
+        *v = rng.next_f32();
+    }
+    (l, r)
+}
+
+/// Elementwise sum of two 16-lane vectors, in fixed index order.
+fn add16(a: &[f32; 16], b: &[f32; 16]) -> [f32; 16] {
+    let mut out = [0.0f32; 16];
+    for i in 0..16
+    {
+        out[i] = a[i] + b[i];
+    }
+    out
+}
+
+/// Circular convolution `(x ⊛ y)[k] = Σⱼ x[j]·y[(k − j) mod 16]`, the HRR/VSA
+/// binding operator. Computed directly in fixed index order (deterministic).
+#[must_use]
+pub fn circular_convolution(x: &[f32; 16], y: &[f32; 16]) -> [f32; 16] {
+    let mut out = [0.0f32; 16];
+    for k in 0..16
+    {
+        let mut acc = 0.0f32;
+        for j in 0..16
+        {
+            acc += x[j] * y[(k + 16 - j) % 16];
+        }
+        out[k] = acc;
+    }
+    out
 }
 
 /// Cosine similarity of two 16-lane codes in fixed index order; `0.0` if either
@@ -429,6 +518,7 @@ mod tests {
     const HAD: Encoding = Encoding::Real(RealBinding::Hadamard);
     const POS: Encoding = Encoding::Real(RealBinding::PositionWeighted);
     const SED: Encoding = Encoding::Sedenion;
+    const HRR: Encoding = Encoding::Hrr;
 
     #[test]
     fn commutative_baselines_are_order_blind() {
@@ -490,6 +580,49 @@ mod tests {
             sed.accuracy() > pos.accuracy(),
             "Sedenion ({:.3}) should beat position-weighted ({:.3}) — grouping matters",
             sed.accuracy(),
+            pos.accuracy()
+        );
+    }
+
+    #[test]
+    fn circular_convolution_is_commutative() {
+        // HRR's binding operator is commutative (multiplication in the DFT
+        // domain); the tree encoding's order/grouping sensitivity comes from the
+        // distinct role vectors, not from the operator.
+        let mut rng = Lcg::new(321);
+        let x = sample(&mut rng, OperandDistribution::DenseUniform).to_array();
+        let y = sample(&mut rng, OperandDistribution::DenseUniform).to_array();
+        // Commutative mathematically; the two summation orders differ only by
+        // f32 rounding, so compare within tolerance rather than bit-exactly.
+        let xy = circular_convolution(&x, &y);
+        let yx = circular_convolution(&y, &x);
+        assert!(relative_distance16(&xy, &yx) < 1e-5);
+    }
+
+    #[test]
+    fn hrr_is_order_and_grouping_sensitive() {
+        // The strong baseline sees both, unlike the simple real bindings.
+        assert!(order_sensitivity(HRR, 5, 1_000) > 0.0);
+        assert!(grouping_sensitivity(HRR, 5, 1_000) > 0.0);
+    }
+
+    #[test]
+    fn hrr_is_a_strong_structural_baseline() {
+        // HRR must clear structure retrieval well above chance and above the
+        // grouping-blind position-weighted baseline — otherwise it would not be
+        // a fair strong opponent.
+        let noise = 0.1;
+        let hrr = structure_retrieval(HRR, 11, 40, 100, noise);
+        let pos = structure_retrieval(POS, 11, 40, 100, noise);
+        assert!(
+            hrr.accuracy() > 0.8,
+            "HRR retrieval should be high, got {:.3}",
+            hrr.accuracy()
+        );
+        assert!(
+            hrr.accuracy() > pos.accuracy(),
+            "HRR ({:.3}) should beat position-weighted ({:.3})",
+            hrr.accuracy(),
             pos.accuracy()
         );
     }

@@ -86,24 +86,56 @@ fn main() {
         TRIALS_PER_SET,
         0.1,
     );
+    let hrr = structure_retrieval(
+        Encoding::Hrr,
+        RETRIEVAL_SEED,
+        ATOM_SETS,
+        TRIALS_PER_SET,
+        0.1,
+    );
+    let sed_hi = structure_retrieval(
+        Encoding::Sedenion,
+        RETRIEVAL_SEED,
+        ATOM_SETS,
+        TRIALS_PER_SET,
+        0.5,
+    );
+    let hrr_hi = structure_retrieval(
+        Encoding::Hrr,
+        RETRIEVAL_SEED,
+        ATOM_SETS,
+        TRIALS_PER_SET,
+        0.5,
+    );
+
     println!("Verdict (this harness):");
     println!(
-        "  At noise 0.1: Sedenion {:.4}, PositionWeighted {:.4}, Sum {:.4} (chance {:.4}).",
+        "  At noise 0.1: Sedenion {:.4}, HRR {:.4}, PositionWeighted {:.4}, Sum {:.4} (chance {:.4}).",
         sed.accuracy(),
+        hrr.accuracy(),
         pos.accuracy(),
         sum.accuracy(),
         sed.chance()
     );
     println!(
-        "  Commutative/associative real baselines are blind to order and/or grouping BY CONSTRUCTION;"
+        "  vs the naive real baselines (Sum/Hadamard/PosWeighted) the sedenion product is a clear"
     );
     println!(
-        "  the sedenion product discriminates both. This is a genuine capacity advantage over a plain"
+        "  structure-discrimination win — they are blind to order and/or grouping by construction."
     );
     println!(
-        "  16-real encoding for STRUCTURE — but the same grouping is already captured by Phase 1's"
+        "  BUT vs HRR — a purpose-built structural encoding (circular convolution + role vectors) —"
     );
     println!(
-        "  explicit expression tree without the algebra. Usefulness on a real task remains unproven."
+        "  the sedenion does NOT win: HRR matches it at low noise and is more robust at high noise"
     );
+    println!(
+        "  (noise 0.5: HRR {:.4} vs Sedenion {:.4}). So the algebra's structural capacity is real but",
+        hrr_hi.accuracy(),
+        sed_hi.accuracy()
+    );
+    println!(
+        "  NOT superior to established structural methods — and it carries the zero-divisor collapse"
+    );
+    println!("  risk (F2) that HRR does not. The relation direction is bounded, not vindicated.");
 }
