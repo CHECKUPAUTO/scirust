@@ -22,6 +22,14 @@
 // `frame_size` doit être une puissance de 2 (contrainte de [`super::fft::rfft`]).
 // `bins = frame_size/2 + 1`. La sortie de `stft` a pour forme `num_frames ×
 // bins`, row-major : la trame `f`, bin `k`, est à l'indice `f·bins + k`.
+//
+// ## Spectrogramme réel : [`power_spectrogram`] / [`magnitude_spectrogram`]
+//
+// L'entrée usuelle d'une couche convolutive (`fixed::conv2d`) en
+// reconnaissance audio est un spectrogramme **réel** (puissance ou
+// magnitude), pas le spectre complexe brut. Ces deux fonctions transforment
+// élément par élément la sortie de [`stft`] en conservant sa forme `num_frames
+// × bins` — directement enchaînables avec `fixed::conv2d`.
 
 use super::fft::{Complex, irfft, rfft};
 use crate::fixed::RealScalar;
@@ -110,4 +118,30 @@ pub fn istft<T: RealScalar>(spectrogram: &[Complex<T>], frame_size: usize, hop: 
         }
     }
     out
+}
+
+/// Spectrogramme de puissance `|X|² = re² + im²`, élément par élément.
+///
+/// Conserve la forme `num_frames × bins` de [`stft`]. Moins coûteux que
+/// [`magnitude_spectrogram`] (pas de racine carrée) et suffisant pour la
+/// plupart des pipelines de reconnaissance audio (souvent suivi d'un
+/// logarithme, non fourni ici).
+#[must_use]
+pub fn power_spectrogram<T: RealScalar>(spectrogram: &[Complex<T>]) -> Vec<T> {
+    spectrogram
+        .iter()
+        .map(|c| c.re * c.re + c.im * c.im)
+        .collect()
+}
+
+/// Spectrogramme de magnitude `|X| = √(re² + im²)`, élément par élément.
+///
+/// Conserve la forme `num_frames × bins` de [`stft`]. Voir aussi
+/// [`power_spectrogram`] (sans racine carrée, moins coûteux).
+#[must_use]
+pub fn magnitude_spectrogram<T: RealScalar>(spectrogram: &[Complex<T>]) -> Vec<T> {
+    spectrogram
+        .iter()
+        .map(|c| (c.re * c.re + c.im * c.im).sqrt())
+        .collect()
 }

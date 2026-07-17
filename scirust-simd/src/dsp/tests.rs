@@ -7,9 +7,10 @@
 // impulsionnelle, l'accord virgule fixe ↔ flottant, et le déterminisme bit-à-bit.
 
 use super::fft::{Complex, Plan, fft, ifft, irfft, rfft};
-use super::stft::{istft, num_frames, stft};
+use super::stft::{istft, magnitude_spectrogram, num_frames, power_spectrogram, stft};
 use super::window;
 use super::{Biquad, Fir};
+use crate::fixed::conv2d::{Conv2dShape, conv2d};
 use crate::fixed::{Q8_8, Q8_24, Q16_16, RealScalar};
 
 // Petit pont scalaire ↔ f64 pour des tests génériques (comme en géométrie).
@@ -900,4 +901,86 @@ fn istft_spectrogram_not_multiple_of_bins_panics() {
     // frame_size=8 → bins=5 ; longueur 7 n'est pas un multiple de 5.
     let spec = vec![Complex::new(0.0f64, 0.0); 7];
     let _ = istft(&spec, 8, 4);
+}
+
+// ------------------------------------------------------------------ //
+//  Spectrogramme réel : puissance / magnitude                         //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn power_and_magnitude_spectrogram_known_values() {
+    // Triangle 3-4-5 : |X|² = 25, |X| = 5, exact dans tous les scalaires.
+    let spec = vec![
+        Complex::new(3.0f64, 4.0),
+        Complex::new(0.0, 0.0),
+        Complex::new(-1.0, 0.0),
+    ];
+    assert_eq!(power_spectrogram(&spec), vec![25.0, 0.0, 1.0]);
+    assert_eq!(magnitude_spectrogram(&spec), vec![5.0, 0.0, 1.0]);
+}
+
+fn check_power_matches_magnitude_squared<T: Scalar + core::fmt::Debug>() {
+    let spec: Vec<Complex<T>> = (0..10)
+        .map(|i| Complex::new(T::of((i as f64) * 0.3 - 1.0), T::of((i as f64) * 0.2 - 0.5)))
+        .collect();
+    let power = power_spectrogram(&spec);
+    let mag = magnitude_spectrogram(&spec);
+    assert_eq!(power.len(), spec.len());
+    assert_eq!(mag.len(), spec.len());
+    for i in 0..power.len()
+    {
+        let want = mag[i].to_f64() * mag[i].to_f64();
+        assert!(
+            (power[i].to_f64() - want).abs() < T::TOL * 4.0,
+            "i={i}: power={} mag²={want}",
+            power[i].to_f64()
+        );
+    }
+}
+
+#[test]
+fn power_matches_magnitude_squared_all_scalars() {
+    check_power_matches_magnitude_squared::<f32>();
+    check_power_matches_magnitude_squared::<f64>();
+    check_power_matches_magnitude_squared::<Q16_16>();
+}
+
+#[test]
+fn stft_magnitude_spectrogram_feeds_conv2d() {
+    // Pipeline concret : signal → stft → spectrogramme de magnitude (« image »
+    // temps × fréquence à 1 canal) → fixed::conv2d, comme en reconnaissance
+    // audio quantifiée. Vérifie la forme et le déterminisme bit-à-bit.
+    let frame_size = 8;
+    let hop = 4;
+    let win: Vec<Q16_16> = window::hann(frame_size);
+    let n = 40;
+    let signal: Vec<Q16_16> = (0..n)
+        .map(|i| Q16_16::try_from(((i % 6) as f64) * 0.1 - 0.25).unwrap())
+        .collect();
+    let spec = stft(&signal, &win, hop);
+    let bins = frame_size / 2 + 1;
+    let frames = num_frames(n, frame_size, hop);
+    assert_eq!(spec.len(), frames * bins);
+
+    let mag = magnitude_spectrogram(&spec); // frames × bins réel, 1 canal
+    let w = [Q16_16::try_from(0.25).unwrap(); 4]; // noyau 2×2, moyenne locale
+    let b = [Q16_16::zero()];
+    let shape = Conv2dShape {
+        in_channels: 1,
+        height: frames,
+        width: bins,
+        out_channels: 1,
+        kernel_h: 2,
+        kernel_w: 2,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let out1 = conv2d(&mag, &w, &b, shape);
+    let out2 = conv2d(&mag, &w, &b, shape); // déterminisme bit-à-bit
+    assert_eq!(out1, out2);
+    assert_eq!(out1.len(), shape.height_out() * shape.width_out());
+    for v in &out1
+    {
+        assert!(v.to_f64().is_finite());
+    }
 }
