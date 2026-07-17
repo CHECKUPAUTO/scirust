@@ -43,6 +43,9 @@ use super::types::Fixed;
 pub trait FixedReducible: Copy + Ord {
     /// Zéro.
     const ZERO: Self;
+    /// Un (`1.0`) — utilisé par les décompositions de `super::linalg` pour
+    /// construire une matrice identité (ex. le bloc initial de `Q` en QR).
+    fn one() -> Self;
     /// Addition enveloppante.
     fn wrapping_add(self, other: Self) -> Self;
     /// Multiplication virgule fixe (arrondi vers zéro, enveloppante).
@@ -66,6 +69,10 @@ pub trait FixedReducible: Copy + Ord {
 impl<const FRAC: u32> FixedReducible for Fixed<i32, FRAC> {
     const ZERO: Self = Fixed::from_raw(0);
 
+    #[inline(always)]
+    fn one() -> Self {
+        Fixed::one()
+    }
     #[inline(always)]
     fn wrapping_add(self, other: Self) -> Self {
         Fixed::wrapping_add(self, other)
@@ -157,6 +164,10 @@ impl<const FRAC: u32> FixedReducible for Fixed<i32, FRAC> {
 impl<const FRAC: u32> FixedReducible for Fixed<i64, FRAC> {
     const ZERO: Self = Fixed::from_raw(0);
 
+    #[inline(always)]
+    fn one() -> Self {
+        Fixed::one()
+    }
     #[inline(always)]
     fn wrapping_add(self, other: Self) -> Self {
         Fixed::wrapping_add(self, other)

@@ -923,6 +923,158 @@ fn determinant_zero_for_singular() {
 }
 
 // ------------------------------------------------------------------ //
+//  QR (Householder) : moindres carrés                                 //
+// ------------------------------------------------------------------ //
+
+/// Matrice `m×n` (`m ≥ n`) de rang `n` garanti : les `n` premières lignes
+/// forment un bloc `n×n` à diagonale dominante (donc inversible, cf.
+/// `random_diag_dominant`), les `m−n` lignes suivantes ajoutent des
+/// coefficients modestes qui ne peuvent pas faire chuter le rang.
+fn random_full_rank(rng: &mut Lcg, m: usize, n: usize) -> Vec<Q16_16> {
+    let mut a = vec![Q16_16::zero(); m * n];
+    let top = random_diag_dominant(rng, n);
+    a[..n * n].copy_from_slice(&top);
+    for i in n..m
+    {
+        for j in 0..n
+        {
+            a[i * n + j] = Q16_16::from_raw(rng.raw_i32() >> 12);
+        }
+    }
+    a
+}
+
+#[test]
+fn qr_reconstructs_a_and_is_orthonormal() {
+    let mut rng = Lcg(0x9A0F_00D5);
+    for &(m, n) in &[(2usize, 2usize), (3, 2), (5, 3), (7, 4), (4, 4)]
+    {
+        let a = random_full_rank(&mut rng, m, n);
+        let (q, r) = linalg::qr_decompose(&a, m, n).expect("rang plein");
+        let tol = ((m + n) as f64) * 512.0 / 65536.0;
+
+        // Reconstruction : Q·R ≈ A.
+        let recon = linalg::matmul(&q, &r, m, n, n);
+        for i in 0..m
+        {
+            for j in 0..n
+            {
+                let want = a[i * n + j].to_f64();
+                let got = recon[i * n + j].to_f64();
+                assert!(
+                    (got - want).abs() <= tol,
+                    "m={m} n={n} Q·R[{i},{j}]={got} vs {want}"
+                );
+            }
+        }
+
+        // Orthonormalité : Qᵀ·Q ≈ Iₙ.
+        let qt = linalg::transpose(&q, m, n);
+        let qtq = linalg::matmul(&qt, &q, n, m, n);
+        for i in 0..n
+        {
+            for j in 0..n
+            {
+                let want = if i == j { 1.0 } else { 0.0 };
+                let got = qtq[i * n + j].to_f64();
+                assert!(
+                    (got - want).abs() <= tol,
+                    "m={m} n={n} QᵀQ[{i},{j}]={got} vs {want}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn qr_solve_recovers_exact_solution_for_consistent_system() {
+    let mut rng = Lcg(0x5057_5057);
+    for &(m, n) in &[(3usize, 2usize), (5, 3), (8, 4)]
+    {
+        let a = random_full_rank(&mut rng, m, n);
+        let x_true: Vec<Q16_16> = (0..n)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+            .collect();
+        let b = linalg::matvec(&a, &x_true, m, n);
+        let x = linalg::qr_solve(&a, &b, m, n).expect("rang plein");
+        let tol = (n as f64) * 32.0 / 65536.0;
+        for i in 0..n
+        {
+            let diff = (x[i].to_f64() - x_true[i].to_f64()).abs();
+            assert!(diff <= tol, "m={m} n={n} i={i}: {diff} > {tol}");
+        }
+    }
+}
+
+#[test]
+fn qr_solve_matches_lu_solve_on_square_system() {
+    let mut rng = Lcg(0x5A51_5A51);
+    for &n in &[1usize, 2, 3, 4, 6]
+    {
+        let a = random_diag_dominant(&mut rng, n);
+        let b: Vec<Q16_16> = (0..n)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+            .collect();
+        let x_qr = linalg::qr_solve(&a, &b, n, n).expect("diag. dominante ⇒ inversible");
+        let x_lu = linalg::lu_solve(&a, &b, n).expect("diag. dominante ⇒ inversible");
+        let tol = (n as f64) * 16.0 / 65536.0;
+        for i in 0..n
+        {
+            let diff = (x_qr[i].to_f64() - x_lu[i].to_f64()).abs();
+            assert!(
+                diff <= tol,
+                "n={n} i={i}: qr={} lu={}",
+                x_qr[i].to_f64(),
+                x_lu[i].to_f64()
+            );
+        }
+    }
+}
+
+#[test]
+fn qr_solve_residual_is_orthogonal_to_column_space() {
+    // b quelconque (pas nécessairement dans l'image de A, système
+    // surdéterminé inconsistant) : la condition d'optimalité des moindres
+    // carrés impose Aᵀ·(A·x − b) ≈ 0.
+    let mut rng = Lcg(0x0271_10DA);
+    for &(m, n) in &[(5usize, 2usize), (8, 3), (10, 4)]
+    {
+        let a = random_full_rank(&mut rng, m, n);
+        let b: Vec<Q16_16> = (0..m)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 8))
+            .collect();
+        let x = linalg::qr_solve(&a, &b, m, n).expect("rang plein");
+        let ax = linalg::matvec(&a, &x, m, n);
+        let residual: Vec<Q16_16> = (0..m).map(|i| ax[i] - b[i]).collect();
+        let at = linalg::transpose(&a, m, n);
+        let atr = linalg::matvec(&at, &residual, n, m);
+        let tol = ((m + n) as f64) * 512.0 / 65536.0;
+        for (j, &atrj) in atr.iter().enumerate()
+        {
+            assert!(
+                atrj.to_f64().abs() <= tol,
+                "m={m} n={n} j={j}: {}",
+                atrj.to_f64()
+            );
+        }
+    }
+}
+
+#[test]
+#[should_panic(expected = "qr_decompose")]
+fn qr_decompose_requires_m_ge_n() {
+    let a = vec![Q16_16::zero(); 2 * 3]; // m=2, n=3 : m<n.
+    let _ = linalg::qr_decompose(&a, 2, 3);
+}
+
+#[test]
+#[should_panic(expected = "qr_decompose")]
+fn qr_decompose_dim_mismatch_panics() {
+    let a = vec![Q16_16::zero(); 5]; // annoncé 3×2 = 6 ≠ 5.
+    let _ = linalg::qr_decompose(&a, 3, 2);
+}
+
+// ------------------------------------------------------------------ //
 //  Activations quantifiées                                            //
 // ------------------------------------------------------------------ //
 

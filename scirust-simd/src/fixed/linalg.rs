@@ -9,11 +9,18 @@
 // la virgule fixe symétrique `Fixed<I, FRAC>` est exactement une quantification
 // symétrique d'échelle `2^-FRAC` et de zéro nul.
 //
-// Le module fournit aussi les deux décompositions directes classiques pour
+// Le module fournit aussi les décompositions directes classiques pour
 // résoudre `A·x = b` : [`cholesky`]/[`cholesky_solve`] (matrices symétriques
-// définies positives) et [`lu_decompose`]/[`lu_solve`] (matrices générales,
-// pivot partiel), plus [`determinant`]. Toutes reposent sur les mêmes
+// définies positives), [`lu_decompose`]/[`lu_solve`] (matrices générales,
+// pivot partiel) plus [`determinant`], et [`qr_decompose`]/[`qr_solve`]
+// (moindres carrés, systèmes surdéterminés). Toutes reposent sur les mêmes
 // primitives déterministes (`dot`, division réelle vérifiée) que le GEMM.
+//
+// `qr_solve` complète plutôt qu'il ne duplique Cholesky : résoudre les
+// moindres carrés via les équations normales (`cholesky_solve` sur `AᵀA`)
+// **double** l'exposant de conditionnement du problème (`cond(AᵀA) =
+// cond(A)²`), alors que QR opère directement sur `A` — la voie standard
+// lorsque `A` est mal conditionnée.
 //
 // ## Reproductibilité bit-à-bit (point clé)
 //
@@ -52,13 +59,21 @@
 // stockée, jamais lue) — la partie strictement inférieure du buffer est `L`,
 // la partie triangulaire supérieure (diagonale incluse) est `U`.
 //
+// `qr_decompose` renvoie la forme **réduite** (« thin QR ») : `A` est `m × n`
+// (`m ≥ n`), `Q` est `m × n` à colonnes orthonormées, `R` est `n × n`
+// triangulaire supérieure — la partie « inutile » de la forme complète (les
+// `m − n` dernières lignes, nulles par construction) n'est jamais matérialisée.
+//
 // ## Panique
 //
 // Les fonctions **paniquent** sur incohérence dimensionnelle (longueur de slice
-// ≠ produit des dimensions annoncées) — c'est un bug d'appelant, pas une donnée.
-// En revanche, une matrice non définie positive (`cholesky`) ou singulière
-// (`lu_decompose`) renvoie `None` : c'est une propriété des **données**, pas
-// une erreur d'appel.
+// ≠ produit des dimensions annoncées, ou `m < n` pour QR) — c'est un bug
+// d'appelant, pas une donnée. En revanche, une matrice non définie positive
+// (`cholesky`) ou singulière (`lu_decompose`, `qr_solve` via un pivot nul de
+// `R`) renvoie `None` : c'est une propriété des **données**, pas une erreur
+// d'appel. `qr_decompose` elle-même existe pour **toute** matrice (aucune
+// condition d'inversibilité) — son `None` ne survient qu'en cas de
+// débordement virgule fixe pendant une réflexion.
 
 use core::ops::Sub;
 
@@ -432,4 +447,146 @@ fn permutation_is_odd(perm: &[usize]) -> bool {
         swaps += cycle_len - 1;
     }
     swaps % 2 == 1
+}
+
+// ------------------------------------------------------------------ //
+//  QR (Householder) — moindres carrés pour systèmes surdéterminés     //
+// ------------------------------------------------------------------ //
+
+/// Décomposition QR par réflexions de Householder, forme **réduite**
+/// (« thin QR ») : `A = Q·R`, `A` étant `m × n` (`m ≥ n`) row-major, `Q`
+/// `m × n` à colonnes orthonormées, `R` `n × n` triangulaire supérieure.
+///
+/// Contrairement à Cholesky/LU, la décomposition QR existe pour **toute**
+/// matrice (aucune condition de définie-positivité ou d'inversibilité) : si
+/// `A` est de rang déficient, un pivot diagonal de `R` sera nul — visible via
+/// [`back_substitution`]/[`qr_solve`], qui renverront alors `None`. Le `None`
+/// de cette fonction ne survient donc qu'en cas de débordement virgule fixe
+/// pendant une réflexion (résolution insuffisante de `T` pour l'échelle du
+/// problème). Panique si `m < n` ou `a.len() != m·n`.
+///
+/// Pour chaque colonne `k`, le vecteur de Householder utilise la convention
+/// de signe usuelle `α = −sign(x₀)·‖x‖` (`x` la sous-colonne à annuler), qui
+/// évite l'annulation catastrophique dans `v = x − α·e₁` — pertinent même en
+/// virgule fixe, où l'annulation dégrade la précision **relative** restante
+/// pour la suite du calcul (même principe que la division réelle plutôt que
+/// la réciproque isolée, cf. en-tête de module).
+#[must_use]
+pub fn qr_decompose<T>(a: &[T], m: usize, n: usize) -> Option<(Vec<T>, Vec<T>)>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    assert!(m >= n, "qr_decompose : m ({m}) doit être ≥ n ({n})");
+    assert_eq!(
+        a.len(),
+        m * n,
+        "qr_decompose : A de longueur {} ≠ {m}×{n}",
+        a.len()
+    );
+
+    let mut r = a.to_vec();
+    // vs[(k+i)·n + k] = v_k[i] pour i in 0..(m−k) ; nul <=> réflexion k = identité.
+    let mut vs = vec![T::ZERO; m * n];
+
+    for k in 0..n
+    {
+        let len = m - k;
+        let x: Vec<T> = (0..len).map(|i| r[(k + i) * n + k]).collect();
+        let norm_x = dot(&x, &x).sqrt();
+        if norm_x == T::ZERO
+        {
+            continue; // sous-colonne déjà nulle : réflexion = identité.
+        }
+        let alpha = if x[0] < T::ZERO
+        {
+            norm_x
+        }
+        else
+        {
+            T::ZERO - norm_x
+        };
+        let mut v = x;
+        v[0] = v[0] - alpha;
+        let vtv = dot(&v, &v);
+        if vtv == T::ZERO
+        {
+            continue; // x déjà aligné (bon signe) : réflexion = identité.
+        }
+        for j in k..n
+        {
+            let col: Vec<T> = (0..len).map(|i| r[(k + i) * n + j]).collect();
+            let vtcol = dot(&v, &col);
+            let scale = vtcol.wrapping_add(vtcol).checked_div(vtv)?;
+            for i in 0..len
+            {
+                r[(k + i) * n + j] = col[i] - v[i].wrapping_mul(scale);
+            }
+        }
+        // Rangs k+1..m de la colonne k : nuls par construction analytique —
+        // impose l'exactitude triangulaire plutôt que de garder un résidu
+        // d'arrondi flottant-fixe sans signification.
+        for i in 1..len
+        {
+            r[(k + i) * n + k] = T::ZERO;
+        }
+        for (i, &vi) in v.iter().enumerate()
+        {
+            vs[(k + i) * n + k] = vi;
+        }
+    }
+    r.truncate(n * n); // ne garde que les n premières lignes (les m−n dernières sont nulles).
+
+    // Q réduit : part de [Iₙ ; 0] (m×n) et applique les réflexions dans
+    // l'ordre inverse (Q = H₀·H₁·⋯·H_{n−1}, cf. en-tête de module).
+    let mut q = vec![T::ZERO; m * n];
+    for i in 0..n
+    {
+        q[i * n + i] = T::one();
+    }
+    for k in (0..n).rev()
+    {
+        let len = m - k;
+        let v: Vec<T> = (0..len).map(|i| vs[(k + i) * n + k]).collect();
+        let vtv = dot(&v, &v);
+        if vtv == T::ZERO
+        {
+            continue; // réflexion k était l'identité (cf. boucle ci-dessus).
+        }
+        for j in 0..n
+        {
+            let col: Vec<T> = (0..len).map(|i| q[(k + i) * n + j]).collect();
+            let vtcol = dot(&v, &col);
+            let scale = vtcol.wrapping_add(vtcol).checked_div(vtv)?;
+            for i in 0..len
+            {
+                q[(k + i) * n + j] = col[i] - v[i].wrapping_mul(scale);
+            }
+        }
+    }
+
+    Some((q, r))
+}
+
+/// Résout le problème des moindres carrés `min_x ‖A·x − b‖` (`A` `m × n`,
+/// `m ≥ n`, `b` de longueur `m`) via QR : `x = R⁻¹·(Qᵀ·b)`. Si `m = n` et `A`
+/// est inversible, c'est la solution exacte du système carré (à comparer à
+/// [`lu_solve`] sur le même système).
+///
+/// `None` si un pivot de `R` est nul (rang déficient) ou en cas de
+/// débordement (cf. [`qr_decompose`]). Panique si `m < n`, `a.len() != m·n`
+/// ou `b.len() != m`.
+#[must_use]
+pub fn qr_solve<T>(a: &[T], b: &[T], m: usize, n: usize) -> Option<Vec<T>>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    assert_eq!(b.len(), m, "qr_solve : b de longueur {} ≠ {m}", b.len());
+    let (q, r) = qr_decompose(a, m, n)?;
+    let mut qtb = Vec::with_capacity(n);
+    for j in 0..n
+    {
+        let col: Vec<T> = (0..m).map(|i| q[i * n + j]).collect();
+        qtb.push(dot(&col, b));
+    }
+    back_substitution(&r, &qtb, n)
 }

@@ -156,11 +156,46 @@ fn bench_lu(c: &mut Criterion) {
     g.finish();
 }
 
+/// Matrice `m×n` (`m > n`) de rang plein : bloc `n×n` à diagonale dominante
+/// surmonté de `m − n` lignes de coefficients modestes (surdétermination
+/// typique d'un système de moindres carrés).
+fn full_rank_data(seed: u64, m: usize, n: usize) -> Vec<Q16_16> {
+    let mut a = vec![Q16_16::from(0); m * n];
+    let top = diag_dominant_data(seed, n);
+    a[..n * n].copy_from_slice(&top);
+    let extra = fixed_data(seed ^ 0xA5A5, (m - n) * n);
+    a[n * n..].copy_from_slice(&extra);
+    a
+}
+
+/// `M > N` : système surdéterminé typique des moindres carrés.
+const M_QR: usize = 64;
+
+fn bench_qr(c: &mut Criterion) {
+    let a = full_rank_data(0x9, M_QR, N);
+
+    let mut g = c.benchmark_group("qr_decompose_64x48");
+    g.throughput(Throughput::Elements((M_QR * N * N) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter(|| flin::qr_decompose(black_box(&a), M_QR, N))
+    });
+    g.finish();
+
+    let b = fixed_data(0xA, M_QR);
+    let mut g = c.benchmark_group("qr_solve_64x48");
+    g.throughput(Throughput::Elements((M_QR * N * N) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter(|| flin::qr_solve(black_box(&a), black_box(&b), M_QR, N))
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_matmul,
     bench_matvec,
     bench_cholesky,
-    bench_lu
+    bench_lu,
+    bench_qr
 );
 criterion_main!(benches);
