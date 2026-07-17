@@ -8,8 +8,8 @@
 //  * égalité stricte **SIMD == scalaire**.
 
 use super::activation as act;
-use super::conv::{Conv1dShape, conv1d};
-use super::conv2d::{Conv2dShape, conv2d};
+use super::conv::{Conv1dShape, conv1d, conv1d_batch};
+use super::conv2d::{Conv2dShape, conv2d, conv2d_batch};
 use super::layer::Linear;
 use super::linalg;
 use super::math::{reciprocal, rsqrt, sqrt};
@@ -1747,6 +1747,89 @@ fn conv1d_i64_storage() {
     assert_eq!(y, [13i64, 15, 17].map(Q32_32::from));
 }
 
+#[test]
+fn conv1d_batch_matches_looped_conv1d() {
+    let mut rng = Lcg(0xBA7C_1001);
+    for &(batch, in_channels, length, out_channels, kernel_size, stride) in &[
+        (4, 2, 10, 3, 3, 2),
+        (1, 1, 5, 1, 5, 1),
+        (6, 4, 20, 2, 4, 3),
+        (3, 3, 7, 5, 2, 1),
+    ]
+    {
+        let shape = Conv1dShape {
+            in_channels,
+            length,
+            out_channels,
+            kernel_size,
+            stride,
+        };
+        let length_out = shape.length_out();
+        let x: Vec<Q16_16> = (0..batch * in_channels * length)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+            .collect();
+        let w: Vec<Q16_16> = (0..out_channels * in_channels * kernel_size)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+            .collect();
+        let b: Vec<Q16_16> = (0..out_channels)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+            .collect();
+
+        let got = conv1d_batch(&x, batch, &w, &b, shape);
+        let mut want = Vec::with_capacity(batch * out_channels * length_out);
+        for sample in x.chunks_exact(in_channels * length)
+        {
+            want.extend(conv1d(sample, &w, &b, shape));
+        }
+        assert_eq!(got, want, "batch={batch} shape={shape:?}");
+
+        // La sortie, repliée (batch·out_channels) × length_out, alimente
+        // max_pool1d/avg_pool1d **sans code supplémentaire** : vérifie que le
+        // résultat coïncide avec un pooling par échantillon (cf. doc de tête
+        // de module).
+        if length_out >= 2
+        {
+            let pool_shape = Pool1dShape {
+                channels: batch * out_channels,
+                length: length_out,
+                window: 2,
+                stride: 2,
+            };
+            let pooled_batch = max_pool1d(&got, pool_shape);
+            let mut pooled_want = Vec::new();
+            for sample_out in want.chunks_exact(out_channels * length_out)
+            {
+                pooled_want.extend(max_pool1d(
+                    sample_out,
+                    Pool1dShape {
+                        channels: out_channels,
+                        length: length_out,
+                        window: 2,
+                        stride: 2,
+                    },
+                ));
+            }
+            assert_eq!(pooled_batch, pooled_want, "pooling replié, batch={batch}");
+        }
+    }
+}
+
+#[test]
+#[should_panic(expected = "conv1d_batch")]
+fn conv1d_batch_dim_mismatch_panics() {
+    let x = vec![Q16_16::one(); 7]; // ni 2×1×3 (=6) ni aucun multiple valide
+    let w = [Q16_16::one(); 3]; // 1×1×3
+    let b = [Q16_16::zero()];
+    let shape = Conv1dShape {
+        in_channels: 1,
+        length: 3,
+        out_channels: 1,
+        kernel_size: 3,
+        stride: 1,
+    };
+    let _ = conv1d_batch(&x, 2, &w, &b, shape);
+}
+
 // ------------------------------------------------------------------ //
 //  Pooling 1D                                                         //
 // ------------------------------------------------------------------ //
@@ -2134,6 +2217,111 @@ fn conv2d_i64_storage() {
     };
     let y = conv2d(&x, &w, &b, shape);
     assert_eq!(y, [Q32_32::from(101i64)]); // x[0,0]=1 + biais 100
+}
+
+#[test]
+fn conv2d_batch_matches_looped_conv2d() {
+    let mut rng = Lcg(0xBA7C_2001);
+    let cases = [
+        (4, 2, 8, 8, 3, 3, 3, 2, 2),
+        (1, 1, 5, 6, 1, 5, 5, 1, 1),
+        (5, 3, 10, 7, 2, 3, 2, 2, 1),
+    ];
+    for &(
+        batch,
+        in_channels,
+        height,
+        width,
+        out_channels,
+        kernel_h,
+        kernel_w,
+        stride_h,
+        stride_w,
+    ) in &cases
+    {
+        let shape = Conv2dShape {
+            in_channels,
+            height,
+            width,
+            out_channels,
+            kernel_h,
+            kernel_w,
+            stride_h,
+            stride_w,
+        };
+        let height_out = shape.height_out();
+        let width_out = shape.width_out();
+        let x: Vec<Q16_16> = (0..batch * in_channels * height * width)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+            .collect();
+        let w: Vec<Q16_16> = (0..out_channels * in_channels * kernel_h * kernel_w)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+            .collect();
+        let b: Vec<Q16_16> = (0..out_channels)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+            .collect();
+
+        let got = conv2d_batch(&x, batch, &w, &b, shape);
+        let mut want = Vec::with_capacity(batch * out_channels * height_out * width_out);
+        for sample in x.chunks_exact(in_channels * height * width)
+        {
+            want.extend(conv2d(sample, &w, &b, shape));
+        }
+        assert_eq!(got, want, "batch={batch} shape={shape:?}");
+
+        // Repliée (batch·out_channels) × height_out × width_out, la sortie
+        // alimente max_pool2d sans code supplémentaire (cf. doc de tête de
+        // module) : coïncide avec un pooling par échantillon.
+        if height_out >= 2 && width_out >= 2
+        {
+            let pool_shape = Pool2dShape {
+                channels: batch * out_channels,
+                height: height_out,
+                width: width_out,
+                window_h: 2,
+                window_w: 2,
+                stride_h: 2,
+                stride_w: 2,
+            };
+            let pooled_batch = max_pool2d(&got, pool_shape);
+            let mut pooled_want = Vec::new();
+            for sample_out in want.chunks_exact(out_channels * height_out * width_out)
+            {
+                pooled_want.extend(max_pool2d(
+                    sample_out,
+                    Pool2dShape {
+                        channels: out_channels,
+                        height: height_out,
+                        width: width_out,
+                        window_h: 2,
+                        window_w: 2,
+                        stride_h: 2,
+                        stride_w: 2,
+                    },
+                ));
+            }
+            assert_eq!(pooled_batch, pooled_want, "pooling replié, batch={batch}");
+        }
+    }
+}
+
+#[test]
+#[should_panic(expected = "conv2d_batch")]
+fn conv2d_batch_dim_mismatch_panics() {
+    let x = vec![Q16_16::one(); 7]; // ni 2×1×2×2 (=8) ni aucun multiple valide
+    let w = [Q16_16::one(); 4]; // 1×1×2×2
+    let b = [Q16_16::zero()];
+    let shape = Conv2dShape {
+        in_channels: 1,
+        height: 2,
+        width: 2,
+        out_channels: 1,
+        kernel_h: 2,
+        kernel_w: 2,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let _ = conv2d_batch(&x, 2, &w, &b, shape);
 }
 
 // ------------------------------------------------------------------ //

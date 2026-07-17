@@ -18,8 +18,11 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::fixed::Q16_16;
-use scirust_simd::fixed::conv2d::{Conv2dShape, conv2d};
+use scirust_simd::fixed::conv2d::{Conv2dShape, conv2d, conv2d_batch};
 use scirust_simd::fixed::pool2d::{Pool2dShape, avg_pool2d, max_pool2d};
+
+/// Taille de lot pour `bench_conv2d_batch`.
+const BATCH: usize = 8;
 
 /// 4 canaux, 32×32 : entrée type d'une couche convolutive image/spectrogramme.
 const IN_CHANNELS: usize = 4;
@@ -164,5 +167,50 @@ fn bench_pool2d(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(benches, bench_conv2d, bench_pool2d);
+/// `conv2d_batch` (un seul GEMM sur tout le lot) vs `BATCH` appels de
+/// `conv2d` (un GEMM chacun) — même résultat bit-à-bit (cf. tests), débit
+/// différent.
+fn bench_conv2d_batch(c: &mut Criterion) {
+    let shape = Conv2dShape {
+        in_channels: IN_CHANNELS,
+        height: HEIGHT,
+        width: WIDTH,
+        out_channels: OUT_CHANNELS,
+        kernel_h: KERNEL,
+        kernel_w: KERNEL,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let x = fixed_data(0x5, BATCH * IN_CHANNELS * HEIGHT * WIDTH);
+    let w = fixed_data(0x6, OUT_CHANNELS * IN_CHANNELS * KERNEL * KERNEL);
+    let b = fixed_data(0x7, OUT_CHANNELS);
+
+    let mac_count = (BATCH
+        * OUT_CHANNELS
+        * IN_CHANNELS
+        * KERNEL
+        * KERNEL
+        * shape.height_out()
+        * shape.width_out()) as u64;
+    let mut g = c.benchmark_group("conv2d_batch8");
+    g.throughput(Throughput::Elements(mac_count));
+    g.bench_function(BenchmarkId::new("fixed", "batched"), |bch| {
+        bch.iter(|| conv2d_batch(black_box(&x), BATCH, black_box(&w), black_box(&b), shape))
+    });
+    let sample_len = IN_CHANNELS * HEIGHT * WIDTH;
+    g.bench_function(BenchmarkId::new("fixed", "looped"), |bch| {
+        bch.iter(|| {
+            let mut out =
+                Vec::with_capacity(BATCH * OUT_CHANNELS * shape.height_out() * shape.width_out());
+            for sample in black_box(&x).chunks_exact(sample_len)
+            {
+                out.extend(conv2d(sample, &w, &b, shape));
+            }
+            out
+        })
+    });
+    g.finish();
+}
+
+criterion_group!(benches, bench_conv2d, bench_pool2d, bench_conv2d_batch);
 criterion_main!(benches);

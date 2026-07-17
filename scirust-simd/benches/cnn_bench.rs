@@ -16,8 +16,11 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::fixed::Q16_16;
-use scirust_simd::fixed::conv::{Conv1dShape, conv1d};
+use scirust_simd::fixed::conv::{Conv1dShape, conv1d, conv1d_batch};
 use scirust_simd::fixed::pool::{Pool1dShape, avg_pool1d, max_pool1d};
+
+/// Taille de lot pour `bench_conv1d_batch`.
+const BATCH: usize = 8;
 
 /// 8 canaux, longueur 1024 : entrée type d'une couche convolutive audio.
 const IN_CHANNELS: usize = 8;
@@ -140,5 +143,40 @@ fn bench_pool1d(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(benches, bench_conv1d, bench_pool1d);
+/// `conv1d_batch` (un seul GEMM sur tout le lot) vs `BATCH` appels de
+/// `conv1d` (un GEMM chacun) — même résultat bit-à-bit (cf. tests), débit
+/// différent.
+fn bench_conv1d_batch(c: &mut Criterion) {
+    let shape = Conv1dShape {
+        in_channels: IN_CHANNELS,
+        length: LENGTH,
+        out_channels: OUT_CHANNELS,
+        kernel_size: KERNEL_SIZE,
+        stride: 1,
+    };
+    let x = fixed_data(0x5, BATCH * IN_CHANNELS * LENGTH);
+    let w = fixed_data(0x6, OUT_CHANNELS * IN_CHANNELS * KERNEL_SIZE);
+    let b = fixed_data(0x7, OUT_CHANNELS);
+
+    let mac_count = (BATCH * OUT_CHANNELS * IN_CHANNELS * KERNEL_SIZE * shape.length_out()) as u64;
+    let mut g = c.benchmark_group("conv1d_batch8");
+    g.throughput(Throughput::Elements(mac_count));
+    g.bench_function(BenchmarkId::new("fixed", "batched"), |bch| {
+        bch.iter(|| conv1d_batch(black_box(&x), BATCH, black_box(&w), black_box(&b), shape))
+    });
+    let sample_len = IN_CHANNELS * LENGTH;
+    g.bench_function(BenchmarkId::new("fixed", "looped"), |bch| {
+        bch.iter(|| {
+            let mut out = Vec::with_capacity(BATCH * OUT_CHANNELS * shape.length_out());
+            for sample in black_box(&x).chunks_exact(sample_len)
+            {
+                out.extend(conv1d(sample, &w, &b, shape));
+            }
+            out
+        })
+    });
+    g.finish();
+}
+
+criterion_group!(benches, bench_conv1d, bench_pool1d, bench_conv1d_batch);
 criterion_main!(benches);

@@ -26,6 +26,15 @@
 // (height_out·width_out)` : la ligne `(ci·kernel_h·kernel_w + kh·kernel_w +
 // kw)`, colonne `(oh·width_out + ow)`, vaut `x[ci, oh·stride_h + kh,
 // ow·stride_w + kw]` — exactement l'ordre attendu par `weights`.
+//
+// ## Inférence par lot
+//
+// [`conv2d_batch`] traite `batch` échantillons en un seul GEMM, résultat
+// identique bit-à-bit à `batch` appels de [`conv2d`] concaténés — même
+// principe que [`super::conv::conv1d_batch`]/
+// [`super::layer::Linear::forward_batch`]. [`super::pool2d`] et
+// [`super::activation`] batchent déjà gratuitement (opérations purement par
+// canal) en repliant `batch` dans l'axe `channels` de la sortie.
 
 use super::reductions::FixedReducible;
 
@@ -171,6 +180,121 @@ pub fn conv2d<T: FixedReducible>(x: &[T], weights: &[T], bias: &[T], shape: Conv
         {
             let idx = co * spatial_out + pos;
             y[idx] = y[idx].wrapping_add(b);
+        }
+    }
+    y
+}
+
+/// Déplie les fenêtres glissantes 2D d'un **lot** de `batch` échantillons en
+/// colonnes contiguës : forme `(in_channels·kernel_h·kernel_w) ×
+/// (batch·height_out·width_out)`, row-major, les colonnes étant groupées par
+/// échantillon — le bloc `b` coïncide exactement avec la sortie de
+/// [`im2col2d`] pour l'échantillon `b` seul.
+fn im2col2d_batch<T: Copy>(
+    x: &[T],
+    batch: usize,
+    shape: Conv2dShape,
+    height_out: usize,
+    width_out: usize,
+) -> Vec<T> {
+    let sample_len = shape.in_channels * shape.height * shape.width;
+    let spatial_out = height_out * width_out;
+    let mut col = Vec::with_capacity(
+        shape.in_channels * shape.kernel_h * shape.kernel_w * batch * spatial_out,
+    );
+    for ci in 0..shape.in_channels
+    {
+        for kh in 0..shape.kernel_h
+        {
+            for kw in 0..shape.kernel_w
+            {
+                for b in 0..batch
+                {
+                    let x_b = &x[b * sample_len..(b + 1) * sample_len];
+                    for oh in 0..height_out
+                    {
+                        for ow in 0..width_out
+                        {
+                            let h = oh * shape.stride_h + kh;
+                            let w = ow * shape.stride_w + kw;
+                            col.push(x_b[ci * (shape.height * shape.width) + h * shape.width + w]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    col
+}
+
+/// Convolution 2D **par lot** (cf. [`conv2d`]) : `x` est `batch ×
+/// shape.in_channels × shape.height × shape.width` (un échantillon par bloc,
+/// contigu) ; retourne `batch × shape.out_channels × shape.height_out() ×
+/// shape.width_out()` — même disposition sample-major que l'entrée.
+///
+/// Résultat **identique bit-à-bit** à `batch` appels de [`conv2d`] concaténés
+/// (vérifié par test), en un seul GEMM plutôt que `batch` GEMM plus petits —
+/// cf. [`super::conv::conv1d_batch`] pour le détail du raisonnement (même
+/// principe, une dimension spatiale de plus). Panique si `x.len() !=
+/// batch·in_channels·height·width`, ou selon les préconditions de [`conv2d`].
+#[must_use]
+pub fn conv2d_batch<T: FixedReducible>(
+    x: &[T],
+    batch: usize,
+    weights: &[T],
+    bias: &[T],
+    shape: Conv2dShape,
+) -> Vec<T> {
+    let height_out = shape.height_out();
+    let width_out = shape.width_out();
+    let spatial_out = height_out * width_out;
+    assert_eq!(
+        x.len(),
+        batch * shape.in_channels * shape.height * shape.width,
+        "conv2d_batch : x de longueur {} ≠ {batch}×{}×{}×{}",
+        x.len(),
+        shape.in_channels,
+        shape.height,
+        shape.width
+    );
+    assert_eq!(
+        weights.len(),
+        shape.out_channels * shape.in_channels * shape.kernel_h * shape.kernel_w,
+        "conv2d_batch : poids de longueur {} ≠ {}×{}×{}×{}",
+        weights.len(),
+        shape.out_channels,
+        shape.in_channels,
+        shape.kernel_h,
+        shape.kernel_w
+    );
+    assert_eq!(
+        bias.len(),
+        shape.out_channels,
+        "conv2d_batch : biais de longueur {} ≠ {}",
+        bias.len(),
+        shape.out_channels
+    );
+
+    let col = im2col2d_batch(x, batch, shape, height_out, width_out);
+    let y_gemm = super::linalg::matmul(
+        weights,
+        &col,
+        shape.out_channels,
+        shape.in_channels * shape.kernel_h * shape.kernel_w,
+        batch * spatial_out,
+    );
+
+    let mut y = vec![T::ZERO; batch * shape.out_channels * spatial_out];
+    for (co, &bias_co) in bias.iter().enumerate()
+    {
+        for b in 0..batch
+        {
+            let src = co * (batch * spatial_out) + b * spatial_out;
+            let dst = b * (shape.out_channels * spatial_out) + co * spatial_out;
+            for pos in 0..spatial_out
+            {
+                y[dst + pos] = y_gemm[src + pos].wrapping_add(bias_co);
+            }
         }
     }
     y

@@ -79,8 +79,10 @@
 // * [`activation`] — activations quantifiées (`relu`, `relu6`, `hardswish`…).
 // * [`layer`] — couche linéaire quantifiée [`layer::Linear`] (`W·x + b`, +
 //   activation), avec inférence par lot (`forward_batch` et variantes).
-// * [`conv`] — convolution 1D quantifiée [`conv::conv1d`] (im2col + GEMM).
-// * [`conv2d`] — convolution 2D quantifiée [`conv2d::conv2d`] (im2col + GEMM).
+// * [`conv`] — convolution 1D quantifiée [`conv::conv1d`] (im2col + GEMM),
+//   avec inférence par lot ([`conv::conv1d_batch`]).
+// * [`conv2d`] — convolution 2D quantifiée [`conv2d::conv2d`] (im2col +
+//   GEMM), avec inférence par lot ([`conv2d::conv2d_batch`]).
 // * [`pool`] — pooling 1D quantifié ([`pool::max_pool1d`], [`pool::avg_pool1d`]).
 // * [`pool2d`] — pooling 2D quantifié ([`pool2d::max_pool2d`], [`pool2d::avg_pool2d`]).
 // * [`rescale`] — requantification entre résolutions (`FRAC` différent, même stockage).
