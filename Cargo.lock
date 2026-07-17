@@ -3803,6 +3803,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-tdi-bench"
+version = "0.1.0"
+dependencies = [
+ "scirust-tdi",
+]
+
+[[package]]
 name = "scirust-tensor-compile"
 version = "0.1.0"
 dependencies = [

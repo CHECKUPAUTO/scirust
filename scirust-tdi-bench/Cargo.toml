@@ -1,0 +1,12 @@
+[package]
+name = "scirust-tdi-bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Reproducible benchmarks for the prospective dynamic-information (TDI) hypothesis: deterministic scans, counterexamples, untouched holdout evaluations, ridge models and deterministic bootstrap confidence intervals over scirust-tdi. Ported from the TDI research project."
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dependencies]
+scirust-tdi = { path = "../scirust-tdi" }
