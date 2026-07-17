@@ -508,3 +508,107 @@ fn transport_compensated_engine_matches() {
         "tc/multi/comp",
     );
 }
+
+#[test]
+fn transport_limiter_interpolations_match() {
+    let tx = od::TX_COORDS.to_vec();
+    let ty = od::TY_COORDS.to_vec();
+    let sharp = Field2::from_vec(od::TNY, od::TNX, od::TPREV_SHARP.to_vec()).unwrap();
+    let smooth = Field2::from_vec(od::TNY, od::TNX, od::TPREV.to_vec()).unwrap();
+
+    let combos = [
+        (
+            Interpolation::CubicPeriodic,
+            Trajectory::MidpointTimeVelocity,
+            "cubic/mid",
+        ),
+        (
+            Interpolation::CubicPeriodic,
+            Trajectory::Rk4Backtrace,
+            "cubic/rk4",
+        ),
+        (
+            Interpolation::CubicLocalBoundedPeriodic,
+            Trajectory::MidpointTimeVelocity,
+            "bounded/mid",
+        ),
+        (
+            Interpolation::CubicLocalBoundedPeriodic,
+            Trajectory::Rk4Backtrace,
+            "bounded/rk4",
+        ),
+        (
+            Interpolation::CubicLocalSumPreservingPeriodic,
+            Trajectory::MidpointTimeVelocity,
+            "sumpres/mid",
+        ),
+        (
+            Interpolation::CubicLocalSumPreservingPeriodic,
+            Trajectory::Rk4Backtrace,
+            "sumpres/rk4",
+        ),
+    ];
+    let sharp_want: [&[f64]; 6] = [
+        od::TL_SHARP_CUBIC_MIDPOINT,
+        od::TL_SHARP_CUBIC_RK4,
+        od::TL_SHARP_BOUNDED_MIDPOINT,
+        od::TL_SHARP_BOUNDED_RK4,
+        od::TL_SHARP_SUMPRES_MIDPOINT,
+        od::TL_SHARP_SUMPRES_RK4,
+    ];
+    let smooth_want: [&[f64]; 6] = [
+        od::TL_SMOOTH_CUBIC_MIDPOINT,
+        od::TL_SMOOTH_CUBIC_RK4,
+        od::TL_SMOOTH_BOUNDED_MIDPOINT,
+        od::TL_SMOOTH_BOUNDED_RK4,
+        od::TL_SMOOTH_SUMPRES_MIDPOINT,
+        od::TL_SMOOTH_SUMPRES_RK4,
+    ];
+
+    for (k, (interp, traj, ctx)) in combos.iter().enumerate()
+    {
+        let r = transport_previous_vorticity(
+            &sharp,
+            &tx,
+            &ty,
+            od::T_PREV_TIME,
+            od::T_CUR_TIME,
+            transport_velocity,
+            *interp,
+            *traj,
+        )
+        .unwrap();
+        assert_slice_close(r.as_slice(), sharp_want[k], &format!("sharp/{ctx}"));
+
+        let r = transport_previous_vorticity(
+            &smooth,
+            &tx,
+            &ty,
+            od::T_PREV_TIME,
+            od::T_CUR_TIME,
+            transport_velocity,
+            *interp,
+            *traj,
+        )
+        .unwrap();
+        assert_slice_close(r.as_slice(), smooth_want[k], &format!("smooth/{ctx}"));
+    }
+
+    // Property checks on the sharp field: the bounded limiter must actually
+    // differ from the unlimited cubic (the limiter activated), and the
+    // sum-preserving variant must reproduce the cubic's discrete sum.
+    let sum = |s: &[f64]| s.iter().sum::<f64>();
+    let cubic_sum = sum(od::TL_SHARP_CUBIC_MIDPOINT);
+    let bounded_differs = od::TL_SHARP_BOUNDED_MIDPOINT
+        .iter()
+        .zip(od::TL_SHARP_CUBIC_MIDPOINT.iter())
+        .any(|(a, b)| (a - b).abs() > 1e-6);
+    assert!(
+        bounded_differs,
+        "the limiter must activate on the sharp field"
+    );
+    assert!(
+        (sum(od::TL_SHARP_SUMPRES_MIDPOINT) - cubic_sum).abs() < 1e-9,
+        "sum-preserving must reproduce the cubic discrete sum"
+    );
+}

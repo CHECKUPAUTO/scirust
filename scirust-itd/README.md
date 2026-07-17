@@ -21,7 +21,7 @@ invariants the reference asserts hold here too (`tests/analytic.rs`).
 | | [`operators::spatial_mean`] | domain integral / area (2-D trapezoidal quadrature; arithmetic mean in periodic mode) |
 | | [`operators::bounded`] | saturating map `b(x) = x / (1 + x)` |
 | **Structural signature** | [`signature::structural_metrics`] | heterogeneity, localization, roughness, sign-mixing, temporal deformation + weighted score |
-| **Semi-Lagrangian transport** | [`transport::transport_previous_vorticity`] | periodic advection of a field: midpoint / RK4 back-tracing × bilinear / 16-point cubic periodic interpolation (with the exact-snap short circuit) |
+| **Semi-Lagrangian transport** | [`transport::transport_previous_vorticity`] | periodic advection of a field: midpoint / RK4 back-tracing × four periodic interpolations (bilinear, 16-point cubic, convex-limited `cubic_local_bounded`, sum-preserving `cubic_local_sum_preserving`), with the exact-snap short circuit |
 | **Simulation driver** | [`simulate`] / `simulate_canonical` | curvature-weighted rotational intensity `⟨ω²·e^{L²κ}⟩` and the structural signature, reduced to interval-integrated indices |
 | | [`simulate_transport_compensated`] | the transport-compensated temporal-deformation mode (advect the previous vorticity before the temporal term; periodic boundary) |
 | **Scenarios** | [`scenarios`] | calm (irrotational), coherent (rigid rotation), multi-vortex fields + the shared curvature weighting and reference `Config` |
@@ -48,10 +48,11 @@ println!("intensity = {:.12}", r.intensity_index);   // 4.347614838944
   numbers, and the finite-difference/quadrature summation order matches the
   reference so the cross-language agreement stays near machine precision.
 - Both temporal-deformation modes are ported: the default *eulerian* mode and
-  the semi-Lagrangian *transport-compensated* mode. Of the reference's four
-  periodic interpolations, the two exact schemes (`bilinear`, `cubic`) are
-  ported; the convex-limited `cubic_local_bounded` and discrete-sum-preserving
-  `cubic_local_sum_preserving` variants are intentionally left out of scope.
+  the semi-Lagrangian *transport-compensated* mode. All four of the reference's
+  periodic interpolations are ported — the two exact schemes (`bilinear`,
+  `cubic`) and both limiters (the convex-limited `cubic_local_bounded` and the
+  discrete-sum-preserving `cubic_local_sum_preserving`) — for both the midpoint
+  and RK4 trajectory methods.
 
 ## Provenance & scope
 
