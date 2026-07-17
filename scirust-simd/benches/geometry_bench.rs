@@ -14,7 +14,7 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::fixed::Q16_16;
-use scirust_simd::geometry::{Quaternion, Transform};
+use scirust_simd::geometry::{DualQuaternion, Quaternion, Transform};
 
 const N: usize = 1 << 12;
 
@@ -358,6 +358,106 @@ fn bench_transform(c: &mut Criterion) {
     g.finish();
 }
 
+/// Coût du quaternion dual (encodage unifié de `SE(3)`) face à `Transform` :
+/// `mul_dual`/`transform_point` sont censés rester du même ordre de grandeur
+/// (même travail, juste réparti différemment) ; `sclerp` a un coût propre
+/// (extraction de l'axe de vissage, `acos`/`sin`/`cos`) sans équivalent dans
+/// `Transform` (qui n'interpole pas).
+fn bench_dual_quaternion(c: &mut Criterion) {
+    let ax = Quaternion::<Q16_16>::from_axis_angle(
+        [
+            Q16_16::try_from(0.267).unwrap(),
+            Q16_16::try_from(0.535).unwrap(),
+            Q16_16::try_from(0.802).unwrap(),
+        ],
+        Q16_16::try_from(0.9).unwrap(),
+    );
+    let bx = Quaternion::<Q16_16>::from_axis_angle(
+        [
+            Q16_16::try_from(0.408).unwrap(),
+            Q16_16::try_from(0.408).unwrap(),
+            Q16_16::try_from(0.816).unwrap(),
+        ],
+        Q16_16::try_from(1.6).unwrap(),
+    );
+    let dqx_a = DualQuaternion::from_rotation_translation(
+        ax,
+        [
+            Q16_16::try_from(0.2).unwrap(),
+            Q16_16::try_from(-0.4).unwrap(),
+            Q16_16::try_from(0.6).unwrap(),
+        ],
+    );
+    let dqx_b = DualQuaternion::from_rotation_translation(
+        bx,
+        [
+            Q16_16::try_from(-0.5).unwrap(),
+            Q16_16::try_from(0.3).unwrap(),
+            Q16_16::try_from(0.1).unwrap(),
+        ],
+    );
+    let af = Quaternion::<f32>::from_axis_angle([0.267, 0.535, 0.802], 0.9);
+    let bf = Quaternion::<f32>::from_axis_angle([0.408, 0.408, 0.816], 1.6);
+    let dqf_a = DualQuaternion::from_rotation_translation(af, [0.2, -0.4, 0.6]);
+    let dqf_b = DualQuaternion::from_rotation_translation(bf, [-0.5, 0.3, 0.1]);
+
+    let (fx, ff) = vectors(0xE6);
+
+    let mut g = c.benchmark_group("dual_quaternion_mul");
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| black_box(dqx_a).mul_dual(black_box(dqx_b)))
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| black_box(dqf_a).mul_dual(black_box(dqf_b)))
+    });
+    g.finish();
+
+    let mut g = c.benchmark_group("dual_quaternion_transform_point");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            let mut acc = [Q16_16::zero(); 3];
+            for &v in black_box(&fx)
+            {
+                let r = dqx_a.transform_point(v);
+                acc[0] += r[0];
+                acc[1] += r[1];
+                acc[2] += r[2];
+            }
+            acc
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| {
+            let mut acc = [0.0f32; 3];
+            for &v in black_box(&ff)
+            {
+                let r = dqf_a.transform_point(v);
+                acc[0] += r[0];
+                acc[1] += r[1];
+                acc[2] += r[2];
+            }
+            acc
+        })
+    });
+    g.finish();
+
+    let mut g = c.benchmark_group("dual_quaternion_sclerp");
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            DualQuaternion::sclerp(
+                black_box(dqx_a),
+                black_box(dqx_b),
+                Q16_16::try_from(0.37).unwrap(),
+            )
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| DualQuaternion::sclerp(black_box(dqf_a), black_box(dqf_b), 0.37f32))
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_rotate,
@@ -365,6 +465,7 @@ criterion_group!(
     bench_slerp,
     bench_from_rotation_matrix,
     bench_euler_roundtrip,
-    bench_transform
+    bench_transform,
+    bench_dual_quaternion
 );
 criterion_main!(benches);

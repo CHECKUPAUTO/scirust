@@ -16,6 +16,13 @@
 //   interpolation `nlerp`/`slerp`.
 // * [`Transform`] — déplacement rigide `SE(3)` (rotation + translation) :
 //   composition, inverse, matrice homogène 4×4 (aller-retour).
+// * [`DualQuaternion`] — le même déplacement `SE(3)`, encodé en un seul
+//   quaternion dual (`qᵣ + ε·q_d`) plutôt qu'une paire ; permet
+//   [`DualQuaternion::sclerp`] (*screw linear interpolation*), la
+//   généralisation exacte de `slerp` à `SE(3)` entier (vitesse angulaire
+//   **et** linéaire constantes), là où interpoler séparément rotation et
+//   translation de deux `Transform` ne suit pas la trajectoire physique
+//   réelle si l'axe de rotation ne passe pas par l'origine.
 //
 // ## Pourquoi générique ?
 //
@@ -27,9 +34,11 @@
 // hérite de cette généricité : composer des poses `SE(3)` en virgule fixe
 // donne la même trajectoire, bit pour bit, sur toute plateforme.
 
+pub mod dual_quaternion;
 pub mod quaternion;
 pub mod transform;
 
+pub use dual_quaternion::DualQuaternion;
 pub use quaternion::Quaternion;
 pub use transform::Transform;
 

@@ -8,7 +8,7 @@
 //    composition, angle-axe) mesurées contre une référence `f64` ;
 //  * déterminisme bit-à-bit du chemin virgule fixe.
 
-use super::{Quaternion, Transform};
+use super::{DualQuaternion, Quaternion, Transform};
 use crate::fixed::{NumericScalar, Q16_16, RealScalar};
 
 // ------------------------------------------------------------------ //
@@ -766,4 +766,270 @@ fn transform_vector_ignores_translation_all_scalars() {
     check_transform_vector_ignores_translation::<f32>();
     check_transform_vector_ignores_translation::<f64>();
     check_transform_vector_ignores_translation::<Q16_16>();
+}
+
+// ------------------------------------------------------------------ //
+//  DualQuaternion : encodage unifié de SE(3), ScLERP                   //
+// ------------------------------------------------------------------ //
+
+fn check_dual_quaternion_transform_point_matches_transform<T: Scalar>() {
+    let t = tof::<T>([0.267, 0.535, 0.802], 1.2, [0.4, -0.6, 0.9]);
+    let dq = DualQuaternion::from(t);
+    let p = [T::of(0.3), T::of(-0.5), T::of(0.7)];
+
+    let want = t.transform_point(p);
+    approx_vec(
+        dq.transform_point(p),
+        [want[0].to_f64(), want[1].to_f64(), want[2].to_f64()],
+        "DualQuaternion::transform_point vs Transform::transform_point",
+    );
+}
+
+#[test]
+fn dual_quaternion_transform_point_matches_transform_all_scalars() {
+    check_dual_quaternion_transform_point_matches_transform::<f32>();
+    check_dual_quaternion_transform_point_matches_transform::<f64>();
+    check_dual_quaternion_transform_point_matches_transform::<Q16_16>();
+}
+
+fn check_dual_quaternion_roundtrip_transform<T: Scalar>() {
+    let t = tof::<T>([0.408, 0.408, 0.816], 1.7, [0.5, -0.3, 0.8]);
+    let dq = DualQuaternion::from(t);
+    let t2: Transform<T> = dq.into();
+
+    // q et −q représentent la même rotation : aligne le signe avant de comparer
+    // (même précaution que `check_transform_matrix_roundtrip`).
+    let dot = t.rotation.w.to_f64() * t2.rotation.w.to_f64()
+        + t.rotation.x.to_f64() * t2.rotation.x.to_f64()
+        + t.rotation.y.to_f64() * t2.rotation.y.to_f64()
+        + t.rotation.z.to_f64() * t2.rotation.z.to_f64();
+    let t2_rotation = if dot < 0.0 { -t2.rotation } else { t2.rotation };
+    approx_quat(
+        t2_rotation,
+        [
+            t.rotation.w.to_f64(),
+            t.rotation.x.to_f64(),
+            t.rotation.y.to_f64(),
+            t.rotation.z.to_f64(),
+        ],
+        "DualQuaternion roundtrip : rotation",
+    );
+    approx_vec(
+        t2.translation,
+        [
+            t.translation[0].to_f64(),
+            t.translation[1].to_f64(),
+            t.translation[2].to_f64(),
+        ],
+        "DualQuaternion roundtrip : translation",
+    );
+}
+
+#[test]
+fn dual_quaternion_roundtrip_transform_all_scalars() {
+    check_dual_quaternion_roundtrip_transform::<f32>();
+    check_dual_quaternion_roundtrip_transform::<f64>();
+    check_dual_quaternion_roundtrip_transform::<Q16_16>();
+}
+
+fn check_dual_quaternion_mul_matches_transform_compose<T: Scalar>() {
+    let a = tof::<T>([0.267, 0.535, 0.802], 0.9, [0.2, -0.4, 0.6]);
+    let b = tof::<T>([0.408, 0.408, 0.816], 1.6, [-0.5, 0.3, 0.1]);
+    let p = [T::of(0.35), T::of(-0.75), T::of(0.2)];
+
+    let want = a.compose(&b).transform_point(p);
+    let want_f64 = [want[0].to_f64(), want[1].to_f64(), want[2].to_f64()];
+
+    let (da, db) = (DualQuaternion::from(a), DualQuaternion::from(b));
+    approx_vec(
+        da.mul_dual(db).transform_point(p),
+        want_f64,
+        "DualQuaternion::mul_dual vs Transform::compose",
+    );
+    approx_vec(
+        (da * db).transform_point(p),
+        want_f64,
+        "DualQuaternion Mul vs Transform::compose",
+    );
+}
+
+#[test]
+fn dual_quaternion_mul_matches_transform_compose_all_scalars() {
+    check_dual_quaternion_mul_matches_transform_compose::<f32>();
+    check_dual_quaternion_mul_matches_transform_compose::<f64>();
+    check_dual_quaternion_mul_matches_transform_compose::<Q16_16>();
+}
+
+fn check_dual_quaternion_conjugate_is_inverse<T: Scalar>() {
+    let t = tof::<T>([0.267, 0.535, 0.802], 1.3, [0.4, -0.6, 0.2]);
+    let dq = DualQuaternion::from(t);
+    let inv = dq.conjugate();
+
+    let left = dq.mul_dual(inv);
+    approx_quat(left.real, [1.0, 0.0, 0.0, 0.0], "qᵣ·qᵣ⁻¹ = 1");
+    approx_quat(left.dual, [0.0, 0.0, 0.0, 0.0], "q̂·q̂⁻¹ : partie duale = 0");
+
+    let right = inv.mul_dual(dq);
+    approx_quat(right.real, [1.0, 0.0, 0.0, 0.0], "qᵣ⁻¹·qᵣ = 1");
+    approx_quat(right.dual, [0.0, 0.0, 0.0, 0.0], "q̂⁻¹·q̂ : partie duale = 0");
+}
+
+#[test]
+fn dual_quaternion_conjugate_is_inverse_all_scalars() {
+    check_dual_quaternion_conjugate_is_inverse::<f32>();
+    check_dual_quaternion_conjugate_is_inverse::<f64>();
+    check_dual_quaternion_conjugate_is_inverse::<Q16_16>();
+}
+
+fn check_sclerp_endpoints<T: Scalar + core::ops::Div<Output = T>>() {
+    let a = DualQuaternion::from(tof::<T>([0.267, 0.535, 0.802], 0.6, [0.1, 0.5, -0.3]));
+    let b = DualQuaternion::from(tof::<T>([0.0, 0.6, 0.8], 2.3, [-0.4, 0.2, 0.7]));
+    let p = [T::of(0.2), T::of(-0.4), T::of(0.6)];
+
+    let want_a = a.transform_point(p);
+    approx_vec(
+        DualQuaternion::sclerp(a, b, T::of(0.0)).transform_point(p),
+        [want_a[0].to_f64(), want_a[1].to_f64(), want_a[2].to_f64()],
+        "sclerp(a,b,0) == a",
+    );
+    let want_b = b.transform_point(p);
+    approx_vec(
+        DualQuaternion::sclerp(a, b, T::of(1.0)).transform_point(p),
+        [want_b[0].to_f64(), want_b[1].to_f64(), want_b[2].to_f64()],
+        "sclerp(a,b,1) == b",
+    );
+}
+
+#[test]
+fn sclerp_endpoints_all_scalars() {
+    check_sclerp_endpoints::<f32>();
+    check_sclerp_endpoints::<f64>();
+    check_sclerp_endpoints::<Q16_16>();
+}
+
+fn check_sclerp_reduces_to_slerp_for_pure_rotation<T: Scalar + core::ops::Div<Output = T>>() {
+    // Translation nulle des deux côtés : ScLERP doit coïncider avec `slerp`
+    // appliqué à la seule rotation (cf. en-tête de module).
+    let ra =
+        Quaternion::<T>::from_axis_angle([T::of(0.267), T::of(0.535), T::of(0.802)], T::of(0.3));
+    let rb =
+        Quaternion::<T>::from_axis_angle([T::of(0.408), T::of(0.408), T::of(0.816)], T::of(2.1));
+    let (a, b) = (
+        DualQuaternion::from_rotation_translation(ra, [T::zero(); 3]),
+        DualQuaternion::from_rotation_translation(rb, [T::zero(); 3]),
+    );
+
+    for &t in &[0.0, 0.25, 0.5, 0.75, 1.0]
+    {
+        let got = DualQuaternion::sclerp(a, b, T::of(t));
+        let want_rot = Quaternion::slerp(ra, rb, T::of(t));
+        // Aligne le signe avant de comparer (double couverture des quaternions).
+        let dot = got.real.dot(want_rot);
+        let got_rotation = if dot.to_f64() < 0.0
+        {
+            -got.real
+        }
+        else
+        {
+            got.real
+        };
+        approx_quat(
+            got_rotation,
+            [
+                want_rot.w.to_f64(),
+                want_rot.x.to_f64(),
+                want_rot.y.to_f64(),
+                want_rot.z.to_f64(),
+            ],
+            "sclerp (translation nulle) vs slerp",
+        );
+        approx_vec(
+            got.transform_point([T::zero(); 3]),
+            [0.0, 0.0, 0.0],
+            "translation reste nulle",
+        );
+    }
+}
+
+#[test]
+fn sclerp_reduces_to_slerp_for_pure_rotation_all_scalars() {
+    check_sclerp_reduces_to_slerp_for_pure_rotation::<f32>();
+    check_sclerp_reduces_to_slerp_for_pure_rotation::<f64>();
+    check_sclerp_reduces_to_slerp_for_pure_rotation::<Q16_16>();
+}
+
+fn check_sclerp_matches_screw_motion_circular_arc<T: Scalar + core::ops::Div<Output = T>>() {
+    // Exemple canonique motivant les quaternions duaux : rotation de 180°
+    // autour de l'axe vertical passant par (1,0,·) (PAS l'origine). Un point
+    // rigide initialement à l'origine doit suivre l'**arc de cercle** de
+    // rayon 1 centré sur cet axe, pas la corde en ligne droite qu'une
+    // interpolation séparée slerp(rotation) + lerp(translation) produirait.
+    let pi = std::f64::consts::PI;
+    let a = DualQuaternion::identity();
+    let rb = Quaternion::<T>::from_axis_angle([T::of(0.0), T::of(0.0), T::of(1.0)], T::of(pi));
+    // translation choisie pour que b.transform_point(origine) = (2,0,0),
+    // i.e. rotation de 180° de l'origine autour de l'axe x=1,y=0 (cf. en-tête
+    // de module pour le calcul : t = c − R(c), c = (1,0,0), R(c) = (−1,0,0)).
+    let b = DualQuaternion::from_rotation_translation(rb, [T::of(2.0), T::zero(), T::zero()]);
+
+    let origin = [T::zero(); 3];
+    let mid = DualQuaternion::sclerp(a, b, T::of(0.5)).transform_point(origin);
+    // Point correct sur l'arc de cercle (rotation de 90° autour de l'axe
+    // décalé) : (1 − cos(π/2), −sin(π/2), 0) = (1, −1, 0).
+    approx_vec(
+        mid,
+        [1.0, -1.0, 0.0],
+        "sclerp à mi-chemin : arc de cercle correct",
+    );
+
+    // Le point que produirait une interpolation NAÏVE (slerp rotation autour
+    // de l'ORIGINE + lerp translation) est (1, 0, 0) — visiblement hors de
+    // l'arc de cercle réel. Vérifie que ScLERP s'en écarte bien.
+    let naive_rotation = Quaternion::slerp(Quaternion::<T>::identity(), rb, T::of(0.5));
+    let naive_translation = [T::of(1.0), T::zero(), T::zero()]; // lerp(0, (2,0,0), 0.5)
+    let naive = naive_rotation.rotate_vector(origin);
+    let naive = [
+        naive[0] + naive_translation[0],
+        naive[1] + naive_translation[1],
+        naive[2] + naive_translation[2],
+    ];
+    let dist_naive = ((naive[0].to_f64() - 1.0).powi(2)
+        + (naive[1].to_f64() - (-1.0)).powi(2)
+        + naive[2].to_f64().powi(2))
+    .sqrt();
+    assert!(
+        dist_naive > 0.5,
+        "l'interpolation naïve devrait s'écarter visiblement de l'arc de cercle (écart {dist_naive})"
+    );
+}
+
+#[test]
+fn sclerp_matches_screw_motion_circular_arc_all_scalars() {
+    check_sclerp_matches_screw_motion_circular_arc::<f32>();
+    check_sclerp_matches_screw_motion_circular_arc::<f64>();
+    check_sclerp_matches_screw_motion_circular_arc::<Q16_16>();
+}
+
+fn check_dual_quaternion_identity_is_neutral<T: Scalar>() {
+    let t = tof::<T>([0.267, 0.535, 0.802], 1.1, [0.3, -0.5, 0.9]);
+    let dq = DualQuaternion::from(t);
+    let id = DualQuaternion::<T>::identity();
+    let p = [T::of(0.4), T::of(-0.2), T::of(0.6)];
+
+    approx_vec(
+        id.transform_point(p),
+        [p[0].to_f64(), p[1].to_f64(), p[2].to_f64()],
+        "identité·p",
+    );
+    let want = dq.transform_point(p);
+    let want_f64 = [want[0].to_f64(), want[1].to_f64(), want[2].to_f64()];
+    approx_vec(dq.mul_dual(id).transform_point(p), want_f64, "dq∘id");
+    approx_vec(id.mul_dual(dq).transform_point(p), want_f64, "id∘dq");
+}
+
+#[test]
+fn dual_quaternion_identity_is_neutral_all_scalars() {
+    check_dual_quaternion_identity_is_neutral::<f32>();
+    check_dual_quaternion_identity_is_neutral::<f64>();
+    check_dual_quaternion_identity_is_neutral::<Q16_16>();
 }
