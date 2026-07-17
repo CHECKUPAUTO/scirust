@@ -122,6 +122,7 @@ pub mod lowprec;
 pub mod philox;
 pub mod portable_f32;
 pub mod pruning;
+pub mod representation_graph;
 pub mod reproducible;
 pub mod stochastic_round;
 pub mod transform_autotune;

@@ -70,7 +70,7 @@ use std::sync::OnceLock;
 //  Énumération des backends disponibles                               //
 // ------------------------------------------------------------------ //
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BackendKind {
     Scalar,
     Sse2,

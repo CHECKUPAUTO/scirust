@@ -40,8 +40,14 @@ use crate::transform_search::{RejectReason, Representation};
 const UNIT: f64 = f64::EPSILON / 2.0;
 
 /// An `L`-level uniform quantizer over a fixed encoded range `[lo, hi]`.
+///
+/// `pub(crate)` (not private): reused as-is by
+/// `crate::representation_graph`'s Phase C prototype
+/// (`docs/research/ANEE_ADAPTIVE_NUMERICAL_EXECUTION_ENGINE_2026-07-17.md`
+/// §13), which needs the exact same quantize/dequantize step inside its own
+/// end-to-end pipeline objective rather than a re-derived copy.
 #[derive(Debug, Clone, Copy)]
-struct UniformQuantizer {
+pub(crate) struct UniformQuantizer {
     lo: f64,
     step: f64,
     levels: usize,
@@ -49,7 +55,7 @@ struct UniformQuantizer {
 
 impl UniformQuantizer {
     /// Fit the range to the encoded values `enc` (min/max), with `levels` cells.
-    fn fit(enc: &[f64], levels: usize) -> Self {
+    pub(crate) fn fit(enc: &[f64], levels: usize) -> Self {
         let mut lo = f64::INFINITY;
         let mut hi = f64::NEG_INFINITY;
         for &e in enc
@@ -66,7 +72,7 @@ impl UniformQuantizer {
     }
 
     /// Quantize-then-reconstruct one encoded value (mid-tread cell centre).
-    fn round_trip(&self, e: f64) -> f64 {
+    pub(crate) fn round_trip(&self, e: f64) -> f64 {
         let raw = ((e - self.lo) / self.step).floor();
         let idx = raw.clamp(0.0, (self.levels - 1) as f64);
         self.lo + (idx + 0.5) * self.step
