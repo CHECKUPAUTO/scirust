@@ -86,6 +86,11 @@ name = "norm_bench"
 harness = false
 required-features = ["portable-simd"]
 
+[[bench]]
+name = "kv_cache_bench"
+harness = false
+required-features = ["portable-simd"]
+
 [[example]]
 name = "amx_bench"
 required-features = ["nightly-simd", "transformer-inference"]

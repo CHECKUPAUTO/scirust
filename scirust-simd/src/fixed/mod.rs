@@ -96,12 +96,16 @@
 // * [`norm`] — normalisations et encodage positionnel quantifiés
 //   ([`norm::rmsnorm`], [`norm::layer_norm`], [`norm::rope_apply`]), le
 //   pendant déterministe du module flottant [`crate::norm`].
+// * [`kv_cache`] — cache clés/valeurs quantifié ([`kv_cache::KvCache`]) pour
+//   le décodage autoregressif incrémental, construit sur [`attention`] ; le
+//   pendant déterministe du module flottant [`crate::kv_cache`].
 
 pub mod activation;
 pub mod attention;
 pub mod conv;
 pub mod conv2d;
 pub mod convert;
+pub mod kv_cache;
 pub mod layer;
 pub mod linalg;
 pub mod math;

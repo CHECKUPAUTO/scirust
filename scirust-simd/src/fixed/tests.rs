@@ -11,6 +11,7 @@ use super::activation as act;
 use super::attention::{attention, causal_attention, multi_head_attention};
 use super::conv::{Conv1dShape, conv1d, conv1d_batch};
 use super::conv2d::{Conv2dShape, conv2d, conv2d_batch};
+use super::kv_cache::KvCache;
 use super::layer::Linear;
 use super::linalg;
 use super::math::{reciprocal, rsqrt, sqrt};
@@ -3738,4 +3739,114 @@ fn rope_apply_dim_mismatch_panics() {
 fn rope_apply_odd_d_panics() {
     let mut x = vec![Q16_16::zero(); 6]; // 2×3 : d=3 impair
     rope_apply(&mut x, 2, 3, q16(10000.0), 0);
+}
+
+// ------------------------------------------------------------------ //
+//  Cache KV (décodage autoregressif incrémental), déterministe        //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn kv_cache_incremental_matches_batched_causal() {
+    let mut rng = Lcg(0x4444_0001);
+    for &(s, h, dh) in &[(1usize, 1usize, 2usize), (4, 2, 4), (10, 3, 6)]
+    {
+        let dm = h * dh;
+        let q: Vec<Q16_16> = (0..s * dm)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 12))
+            .collect();
+        let k: Vec<Q16_16> = (0..s * dm)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 12))
+            .collect();
+        let v: Vec<Q16_16> = (0..s * dm)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 12))
+            .collect();
+        let scale = q16(1.0 / (dh as f64).sqrt());
+
+        // Référence : attention causale multi-tête en bloc.
+        let expected = multi_head_attention(&q, s, s, h, dh, &k, &v, scale, true);
+
+        // Incrémental : empile puis décode chaque token.
+        let mut cache: KvCache<16> = KvCache::new(s, dm);
+        let mut got = Vec::with_capacity(s * dm);
+        for i in 0..s
+        {
+            cache.append(&k[i * dm..i * dm + dm], &v[i * dm..i * dm + dm]);
+            got.extend(cache.decode_step(&q[i * dm..i * dm + dm], h, dh, scale));
+        }
+
+        // Bit-exact (pas une tolérance) : contrairement au flottant, la
+        // somme virgule fixe est exacte et associative — nourrir le cache
+        // incrémentalement ou calculer en bloc effectue exactement la même
+        // séquence d'opérations sur les mêmes données.
+        assert_eq!(
+            got, expected,
+            "s={s} h={h} dh={dh} : incrémental doit être bit-exact vis-à-vis du batch causal"
+        );
+    }
+}
+
+#[test]
+fn kv_cache_first_token_attends_to_itself() {
+    // Un seul token en cache → softmax trivial (un seul score) → out == v.
+    let (h, dh) = (2usize, 3usize);
+    let dm = h * dh;
+    let mut rng = Lcg(0x4444_0002);
+    let q: Vec<Q16_16> = (0..dm)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+        .collect();
+    let k: Vec<Q16_16> = (0..dm)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+        .collect();
+    let v: Vec<Q16_16> = (0..dm)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+        .collect();
+    let mut cache: KvCache<16> = KvCache::new(4, dm);
+    cache.append(&k, &v);
+    let out = cache.decode_step(&q, h, dh, q16(0.3));
+    assert_eq!(out, v);
+}
+
+#[test]
+fn kv_cache_decode_step_empty_returns_zero() {
+    let cache: KvCache<16> = KvCache::new(3, 4);
+    let q = [q16(1.0); 4];
+    let out = cache.decode_step(&q, 2, 2, q16(0.5));
+    assert_eq!(out, vec![Q16_16::zero(); 4]);
+}
+
+#[test]
+fn kv_cache_len_clear_and_capacity() {
+    let mut cache: KvCache<16> = KvCache::new(3, 4);
+    assert!(cache.is_empty());
+    assert_eq!(cache.capacity(), 3);
+    cache.append(&[Q16_16::one(); 4], &[q16(5.0); 4]);
+    assert_eq!(cache.len(), 1);
+    cache.clear();
+    assert!(cache.is_empty());
+}
+
+#[test]
+#[should_panic(expected = "KvCache::append")]
+fn kv_cache_append_dim_mismatch_panics() {
+    let mut cache: KvCache<16> = KvCache::new(4, 6);
+    let k = vec![Q16_16::zero(); 5]; // devrait être 6
+    let v = vec![Q16_16::zero(); 6];
+    cache.append(&k, &v);
+}
+
+#[test]
+#[should_panic(expected = "cache plein")]
+fn kv_cache_append_beyond_capacity_panics() {
+    let mut cache: KvCache<16> = KvCache::new(1, 2);
+    cache.append(&[Q16_16::zero(); 2], &[Q16_16::zero(); 2]);
+    cache.append(&[Q16_16::zero(); 2], &[Q16_16::zero(); 2]); // cache plein (cap=1)
+}
+
+#[test]
+#[should_panic(expected = "KvCache::decode_step")]
+fn kv_cache_decode_step_dim_mismatch_panics() {
+    let mut cache: KvCache<16> = KvCache::new(4, 6);
+    cache.append(&[Q16_16::zero(); 6], &[Q16_16::zero(); 6]);
+    let q = vec![Q16_16::zero(); 5]; // devrait être 6
+    let _ = cache.decode_step(&q, 2, 3, Q16_16::one());
 }
