@@ -59,6 +59,17 @@
 //! Cramér–Rao lower bounds on measurement precision — the `1/√SNR` floors on
 //! delay/range, Doppler/velocity, and monopulse angle that bound the estimators
 //! above and that a link budget must close to meet an accuracy spec.
+//! [`vi_cfar`] complements the fixed-strategy detectors in [`cfar`]/
+//! [`cfar_variants`] with the Variability-Index composite: a per-CUT switch
+//! among cell-averaging, greatest-of and smallest-of driven by each
+//! half-window's own variability and their mean ratio, plus a pooled
+//! trimmed-mean fallback (this crate's own extension, not classical VI-CFAR)
+//! for the case classical VI-CFAR handles worst — interferers in *both*
+//! reference half-windows at once. Built on [`crate::sliding_stats`]'s O(1)
+//! sliding moments for its streaming path; see [`vi_cfar`]'s module docs for
+//! the full mathematical contract, provenance, and exactly which parts of the
+//! switching logic are verified classical behavior versus this crate's own
+//! documented extension.
 
 pub mod accuracy;
 pub mod ambiguity;
@@ -95,6 +106,7 @@ pub mod stap;
 pub mod stepped_frequency;
 pub mod swerling;
 pub mod track;
+pub mod vi_cfar;
 pub mod waveform;
 
 pub use accuracy::{
@@ -163,4 +175,10 @@ pub use swerling::{
     albersheim_pd, albersheim_snr, single_pulse_threshold, swerling1_pd, swerling1_required_snr,
 };
 pub use track::{AlphaBeta, MultiTracker, Track, critically_damped_gains};
+pub use vi_cfar::{
+    CensoredMeanResult, CfarConfig, CfarDecision, CfarDetector, CfarError, CfarMode,
+    CfarStreamDetector, DetectorPolicy, EdgePolicy, InputValidationPolicy, RobustNoiseEstimator,
+    SwitchingThresholds, TrimmedMeanResult, censored_mean,
+    evaluate_slice as vi_cfar_evaluate_slice, mean_ratio, trimmed_mean, variability_index,
+};
 pub use waveform::{barker_code, lfm_chirp};

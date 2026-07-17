@@ -19,6 +19,10 @@
 //! - **Digital filters** — windowed-sinc FIR (lowpass/highpass), Butterworth IIR
 //!   via cascaded second-order sections, and a general direct-form-II-transposed
 //!   `lfilter`
+//! - **Sliding-window statistics** ([`sliding_stats`]) — [`sliding_stats::SlidingMoments`],
+//!   an O(1)-per-update, O(N)-space fixed-window mean and centered second moment
+//!   (population/sample variance both explicit), the primitive [`radar::vi_cfar`]'s
+//!   streaming path is built on
 //! - **Radar** — pulse-compression waveforms (linear-FM chirp, Barker phase
 //!   codes, and polyphase / CAZAC codes — Frank, P3, P4 and Zadoff-Chu — the
 //!   perfect-periodic-autocorrelation and low-probability-of-intercept waveforms
@@ -29,7 +33,11 @@
 //!   MTI clutter cancellers, CFAR detection (cell-averaging and
 //!   ordered-statistic in 1-D, plus 2-D cell-averaging CFAR over a
 //!   range-Doppler map with connected-component clustering of detections into
-//!   target centroids), array processing (ULA steering vectors,
+//!   target centroids, and [`radar::vi_cfar`]'s Variability-Index composite
+//!   detector — a per-CUT switch among cell-averaging/greatest-of/smallest-of
+//!   driven by each half-window's own variability, plus a pooled
+//!   trimmed-mean fallback for interferers in both reference half-windows at
+//!   once), array processing (ULA steering vectors,
 //!   delay-and-sum beamforming,
 //!   high-resolution MVDR/Capon DOA that resolves sub-beamwidth sources,
 //!   MUSIC subspace direction finding via a from-scratch complex-Hermitian
@@ -89,6 +97,7 @@ pub mod filter;
 pub mod mcsa;
 pub mod order;
 pub mod radar;
+pub mod sliding_stats;
 pub mod windows;
 
 pub use error::{SignalError, SignalResult};
@@ -123,19 +132,22 @@ pub use mcsa::{
 };
 pub use order::{order_spectrum, order_track, resample_constant_angle, rpm_profile, tacho_to_rpm};
 pub use radar::{
-    AlphaBeta, Detection, Imm, Imm2D, KalmanCV, KalmanLinear, MultiTracker, PdaFilter, RadarEkf,
-    RadarLink, RadarMultiTracker, RadarTrack, Track, adaptive_weights, albersheim_pd,
-    albersheim_snr, ambiguity, angle_crlb, angle_from_phase, azimuth_chirp_rate, azimuth_doppler,
-    azimuth_doppler_bandwidth, azimuth_history, azimuth_reference, azimuth_resolution, barker_code,
-    beam_voltage, beamform_spectrum, beat_frequency_to_range, bin_frequencies, binomial_pmf,
-    binomial_sf_ge, blind_speed, ca_cfar, ca_cfar_2d, ca_cfar_alpha, cadence, cluster_detections,
-    clutter_covariance, clutter_ridge_doppler, combined_ambiguity, covariance,
-    critically_damped_gains, cross_correlate, crt_pair, ct_model_2d, cv_model_2d,
-    dbs_azimuth_resolution, delay_crlb, doppler_bandwidth, doppler_crlb, doppler_gradient,
-    doppler_spectrum, egcd, erf as erf_fn, esprit_doa, estimate_doa, first_null_range,
-    focus_azimuth, fold_range, fold_velocity, frank_code, go_cfar, integrated_pd, integrated_pfa,
-    is_costas, lfm_chirp, lognormal_cdf, lognormal_pdf, max_coincidence, max_doppler, mean_doppler,
-    mod_inverse, monopulse_estimate_angle, monopulse_ratio, monopulse_slope, mti_canceller,
+    AlphaBeta, CensoredMeanResult, CfarConfig, CfarDecision, CfarDetector, CfarError, CfarMode,
+    CfarStreamDetector, Detection, DetectorPolicy, EdgePolicy, Imm, Imm2D, InputValidationPolicy,
+    KalmanCV, KalmanLinear, MultiTracker, PdaFilter, RadarEkf, RadarLink, RadarMultiTracker,
+    RadarTrack, RobustNoiseEstimator, SwitchingThresholds, Track, TrimmedMeanResult,
+    adaptive_weights, albersheim_pd, albersheim_snr, ambiguity, angle_crlb, angle_from_phase,
+    azimuth_chirp_rate, azimuth_doppler, azimuth_doppler_bandwidth, azimuth_history,
+    azimuth_reference, azimuth_resolution, barker_code, beam_voltage, beamform_spectrum,
+    beat_frequency_to_range, bin_frequencies, binomial_pmf, binomial_sf_ge, blind_speed, ca_cfar,
+    ca_cfar_2d, ca_cfar_alpha, cadence, censored_mean, cluster_detections, clutter_covariance,
+    clutter_ridge_doppler, combined_ambiguity, covariance, critically_damped_gains,
+    cross_correlate, crt_pair, ct_model_2d, cv_model_2d, dbs_azimuth_resolution, delay_crlb,
+    doppler_bandwidth, doppler_crlb, doppler_gradient, doppler_spectrum, egcd, erf as erf_fn,
+    esprit_doa, estimate_doa, first_null_range, focus_azimuth, fold_range, fold_velocity,
+    frank_code, go_cfar, integrated_pd, integrated_pfa, is_costas, lfm_chirp, lognormal_cdf,
+    lognormal_pdf, max_coincidence, max_doppler, mean_doppler, mean_ratio, mod_inverse,
+    monopulse_estimate_angle, monopulse_ratio, monopulse_slope, mti_canceller,
     multipath_phase_difference, music_spectrum, mvdr_spectrum, optimal_m, optimal_sinr, os_cfar,
     os_cfar_alpha, p3_code, p4_code, path_length_difference, peak_lag, peak_to_sidelobe,
     periodic_autocorrelation, phase_difference, phase_from_signals, power_factor, primitive_root,
@@ -145,8 +157,10 @@ pub use radar::{
     rms_duration_rect, sharpening_ratio, single_pulse_threshold, so_cfar, space_time_steering,
     spatial_frequency, spectrogram, steering_vector, stepped_range_profile,
     stepped_range_resolution, swerling1_pd, swerling1_required_snr, synthetic_aperture_length,
-    synthetic_bandwidth, tm_cfar, unambiguous_angle, unambiguous_range, unambiguous_velocity,
-    velocity_crlb, velocity_from_doppler, weibull_cdf, weibull_pdf, weibull_quantile, welch_costas,
-    wrap_phase, zadoff_chu,
+    synthetic_bandwidth, tm_cfar, trimmed_mean, unambiguous_angle, unambiguous_range,
+    unambiguous_velocity, variability_index, velocity_crlb, velocity_from_doppler,
+    vi_cfar_evaluate_slice, weibull_cdf, weibull_pdf, weibull_quantile, welch_costas, wrap_phase,
+    zadoff_chu,
 };
+pub use sliding_stats::{SampleDomain, SlidingMoments, SlidingMomentsError, SlidingUpdate};
 pub use windows::{apply_window, blackman, blackman_harris, flattop, hamming, hanning};

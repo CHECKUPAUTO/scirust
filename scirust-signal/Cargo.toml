@@ -8,9 +8,23 @@ description = "SciRust signal processing — FFT, window functions, time/frequen
 [dependencies]
 scirust-core = { path = "../scirust-core" }
 scirust-estimation = { path = "../scirust-estimation" }
+# Reused in radar::vi_cfar's production GO/SO threshold calibration: Gamma's
+# tested regularized-incomplete-gamma survival function is exactly the
+# reference-half-window survival function Q_n(m) the exact calibration
+# integral needs (see the module docs, "Threshold calibration").
+scirust-stats = { path = "../scirust-stats" }
+# Its adaptive-Simpson/Romberg quadrature (bounded, non-statistical error)
+# is what turns the GO/SO calibration integral into a deterministic
+# computation instead of Monte-Carlo sampling.
+scirust-solvers = { path = "../scirust-solvers" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 
 [dev-dependencies]
+criterion = "0.5"
 proptest = "1"
 scirust-special = { path = "../scirust-special" }
+
+[[bench]]
+name = "vi_cfar_bench"
+harness = false

@@ -3603,10 +3603,13 @@ dependencies = [
 name = "scirust-signal"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "proptest",
  "scirust-core",
  "scirust-estimation",
+ "scirust-solvers",
  "scirust-special",
+ "scirust-stats",
  "serde",
  "thiserror 2.0.18",
 ]
