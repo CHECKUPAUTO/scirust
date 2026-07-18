@@ -10,6 +10,18 @@
 //!   l'accélération AVX-512/… du forward.
 //! * **`relu_backward`**, **`silu_backward`** — dérivées élément par élément.
 //! * **`rmsnorm_backward`** — gradient par ligne de la RMSNorm.
+//! * **`conv2d_backward`** — convolution 2D **valide** (sans remplissage),
+//!   **stride 1** (première brique CNN entraînable de ce module ; une
+//!   extension à `stride > 1` suivrait le même schéma de dispersion pour
+//!   `dX`, limite documentée plutôt qu'une lacune silencieuse). `dX` est
+//!   dispersée exactement comme l'adjointe de la convolution
+//!   ([`crate::fixed::conv2d::conv2d_transpose`], son pendant virgule fixe
+//!   déterministe) ; `dW` est une corrélation croisée entre `X` et `dY` ;
+//!   `db` somme `dY` sur les positions spatiales.
+//! * **`max_pool2d_backward`**, **`avg_pool2d_backward`** — `dY` est routée
+//!   vers l'unique position maximale de chaque fenêtre (recalculée depuis
+//!   `X`, comme `relu_backward` redérive son propre routage) pour le max,
+//!   ou distribuée uniformément sur toute la fenêtre pour la moyenne.
 //!
 //! Tous les gradients sont **vérifiés par différences finies centrées**
 //! (gradcheck) dans les tests, la garantie de justesse d'un backward.
@@ -346,6 +358,229 @@ pub fn attention_backward(
     );
 }
 
+/// Backward de la convolution 2D **valide** (sans remplissage), **stride
+/// 1** : `Y = conv2d(X, W) + b` (cf. en-tête de module pour la limite au
+/// stride 1). `X` : `in_channels×height×width` ; `W` :
+/// `out_channels×in_channels×kernel_h×kernel_w` (convention PyTorch
+/// `Conv2d`, comme [`crate::fixed::conv2d::conv2d`]) ; `b`/`db` :
+/// `out_channels` ; `dY` : `out_channels×height_out×width_out`
+/// (`height_out = height − kernel_h + 1`, idem largeur).
+///
+/// `dX[ci,ih,iw] = Σ_{co,kh,kw} dY[co,oh,ow]·W[co,ci,kh,kw]` sur les
+/// positions `(oh,ow)` telles que `oh+kh=ih`, `ow+kw=iw` — dispersion
+/// identique à l'adjointe de la convolution (cf. en-tête de module).
+/// `dW[co,ci,kh,kw] = Σ_{oh,ow} X[ci,oh+kh,ow+kw]·dY[co,oh,ow]` (corrélation
+/// croisée). `db[co] = Σ_{oh,ow} dY[co,oh,ow]`.
+#[allow(clippy::too_many_arguments)]
+pub fn conv2d_backward(
+    x: &[f32],
+    in_channels: usize,
+    height: usize,
+    width: usize,
+    w: &[f32],
+    out_channels: usize,
+    kernel_h: usize,
+    kernel_w: usize,
+    dy: &[f32],
+    dx: &mut [f32],
+    dw: &mut [f32],
+    db: &mut [f32],
+) {
+    assert!(
+        height >= kernel_h && width >= kernel_w,
+        "conv2d_backward: kernel larger than input"
+    );
+    let height_out = height - kernel_h + 1;
+    let width_out = width - kernel_w + 1;
+    assert_eq!(
+        x.len(),
+        in_channels * height * width,
+        "conv2d_backward: X shape"
+    );
+    assert_eq!(
+        w.len(),
+        out_channels * in_channels * kernel_h * kernel_w,
+        "conv2d_backward: W shape"
+    );
+    assert_eq!(
+        dy.len(),
+        out_channels * height_out * width_out,
+        "conv2d_backward: dY shape"
+    );
+    assert_eq!(dx.len(), x.len(), "conv2d_backward: dX shape");
+    assert_eq!(dw.len(), w.len(), "conv2d_backward: dW shape");
+    assert_eq!(db.len(), out_channels, "conv2d_backward: db shape");
+
+    dx.fill(0.0);
+    dw.fill(0.0);
+
+    let channel_size = height * width;
+    let kernel_size = kernel_h * kernel_w;
+    let spatial_out = height_out * width_out;
+
+    for co in 0..out_channels
+    {
+        let mut b_acc = 0.0f32;
+        for oh in 0..height_out
+        {
+            for ow in 0..width_out
+            {
+                let dy_val = dy[co * spatial_out + oh * width_out + ow];
+                b_acc += dy_val;
+                for ci in 0..in_channels
+                {
+                    let x_ci = &x[ci * channel_size..(ci + 1) * channel_size];
+                    let w_co_ci = &w[(co * in_channels + ci) * kernel_size
+                        ..(co * in_channels + ci + 1) * kernel_size];
+                    let dx_ci = &mut dx[ci * channel_size..(ci + 1) * channel_size];
+                    let dw_co_ci = &mut dw[(co * in_channels + ci) * kernel_size
+                        ..(co * in_channels + ci + 1) * kernel_size];
+                    for kh in 0..kernel_h
+                    {
+                        for kw in 0..kernel_w
+                        {
+                            let ih = oh + kh;
+                            let iw = ow + kw;
+                            dx_ci[ih * width + iw] += dy_val * w_co_ci[kh * kernel_w + kw];
+                            dw_co_ci[kh * kernel_w + kw] += x_ci[ih * width + iw] * dy_val;
+                        }
+                    }
+                }
+            }
+        }
+        db[co] = b_acc;
+    }
+}
+
+/// Backward de max_pool2d (`channels×height×width`, fenêtre
+/// `window_h×window_w`, pas `stride_h×stride_w`, valide/sans remplissage) :
+/// chaque `dY[c,oh,ow]` est routée **entièrement** vers la position d'entrée
+/// qui réalise le maximum de sa fenêtre (recalculé depuis `X` — cf. en-tête
+/// de module) ; les autres positions de la fenêtre reçoivent un gradient
+/// nul. En cas d'égalité exacte, la **première** position rencontrée (ordre
+/// ligne puis colonne) reçoit le gradient (convention arbitraire mais
+/// déterministe). Fenêtres chevauchantes (`stride < window`) : `dX`
+/// **accumule** les contributions de toutes les fenêtres concernées.
+#[allow(clippy::too_many_arguments)]
+pub fn max_pool2d_backward(
+    x: &[f32],
+    channels: usize,
+    height: usize,
+    width: usize,
+    window_h: usize,
+    window_w: usize,
+    stride_h: usize,
+    stride_w: usize,
+    dy: &[f32],
+    dx: &mut [f32],
+) {
+    assert!(
+        height >= window_h && width >= window_w,
+        "max_pool2d_backward: window larger than input"
+    );
+    let height_out = (height - window_h) / stride_h + 1;
+    let width_out = (width - window_w) / stride_w + 1;
+    assert_eq!(
+        x.len(),
+        channels * height * width,
+        "max_pool2d_backward: X shape"
+    );
+    assert_eq!(
+        dy.len(),
+        channels * height_out * width_out,
+        "max_pool2d_backward: dY shape"
+    );
+    assert_eq!(dx.len(), x.len(), "max_pool2d_backward: dX shape");
+
+    dx.fill(0.0);
+    let channel_size = height * width;
+    let spatial_out = height_out * width_out;
+    for c in 0..channels
+    {
+        let x_c = &x[c * channel_size..(c + 1) * channel_size];
+        let dx_c = &mut dx[c * channel_size..(c + 1) * channel_size];
+        for oh in 0..height_out
+        {
+            for ow in 0..width_out
+            {
+                let mut best_val = f32::NEG_INFINITY;
+                let mut best_idx = 0usize;
+                for kh in 0..window_h
+                {
+                    for kw in 0..window_w
+                    {
+                        let idx = (oh * stride_h + kh) * width + (ow * stride_w + kw);
+                        if x_c[idx] > best_val
+                        {
+                            best_val = x_c[idx];
+                            best_idx = idx;
+                        }
+                    }
+                }
+                dx_c[best_idx] += dy[c * spatial_out + oh * width_out + ow];
+            }
+        }
+    }
+}
+
+/// Backward d'avg_pool2d (mêmes conventions que [`max_pool2d_backward`]) :
+/// `dY[c,oh,ow]/(window_h·window_w)` est distribuée **uniformément** sur
+/// toute la fenêtre (aucune donnée d'entrée nécessaire — contrairement au
+/// max, la moyenne ne dépend pas de quelle position a la plus grande
+/// valeur). Fenêtres chevauchantes : `dX` accumule.
+#[allow(clippy::too_many_arguments)]
+pub fn avg_pool2d_backward(
+    channels: usize,
+    height: usize,
+    width: usize,
+    window_h: usize,
+    window_w: usize,
+    stride_h: usize,
+    stride_w: usize,
+    dy: &[f32],
+    dx: &mut [f32],
+) {
+    assert!(
+        height >= window_h && width >= window_w,
+        "avg_pool2d_backward: window larger than input"
+    );
+    let height_out = (height - window_h) / stride_h + 1;
+    let width_out = (width - window_w) / stride_w + 1;
+    assert_eq!(
+        dx.len(),
+        channels * height * width,
+        "avg_pool2d_backward: dX shape"
+    );
+    assert_eq!(
+        dy.len(),
+        channels * height_out * width_out,
+        "avg_pool2d_backward: dY shape"
+    );
+
+    dx.fill(0.0);
+    let inv_window = 1.0 / (window_h * window_w) as f32;
+    let channel_size = height * width;
+    let spatial_out = height_out * width_out;
+    for c in 0..channels
+    {
+        let dx_c = &mut dx[c * channel_size..(c + 1) * channel_size];
+        for oh in 0..height_out
+        {
+            for ow in 0..width_out
+            {
+                let g = dy[c * spatial_out + oh * width_out + ow] * inv_window;
+                for kh in 0..window_h
+                {
+                    for kw in 0..window_w
+                    {
+                        dx_c[(oh * stride_h + kh) * width + (ow * stride_w + kw)] += g;
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -637,5 +872,271 @@ mod tests {
         assert_close(&dk, &gk, 3e-2, "attention dK");
         let gv = num(&v, &|vv| fwd(&q, &k, vv));
         assert_close(&dv, &gv, 3e-2, "attention dV");
+    }
+
+    // ---- Références forward CNN (indépendantes) pour le gradcheck ----
+
+    #[allow(clippy::too_many_arguments)]
+    fn conv2d_fwd(
+        x: &[f32],
+        in_channels: usize,
+        height: usize,
+        width: usize,
+        w: &[f32],
+        out_channels: usize,
+        kernel_h: usize,
+        kernel_w: usize,
+        b: &[f32],
+    ) -> Vec<f32> {
+        let height_out = height - kernel_h + 1;
+        let width_out = width - kernel_w + 1;
+        let mut y = vec![0.0f32; out_channels * height_out * width_out];
+        for co in 0..out_channels
+        {
+            for oh in 0..height_out
+            {
+                for ow in 0..width_out
+                {
+                    let mut acc = b[co];
+                    for ci in 0..in_channels
+                    {
+                        for kh in 0..kernel_h
+                        {
+                            for kw in 0..kernel_w
+                            {
+                                acc += x[ci * height * width + (oh + kh) * width + (ow + kw)]
+                                    * w[((co * in_channels + ci) * kernel_h + kh) * kernel_w + kw];
+                            }
+                        }
+                    }
+                    y[co * height_out * width_out + oh * width_out + ow] = acc;
+                }
+            }
+        }
+        y
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn max_pool2d_fwd(
+        x: &[f32],
+        channels: usize,
+        height: usize,
+        width: usize,
+        window_h: usize,
+        window_w: usize,
+        stride_h: usize,
+        stride_w: usize,
+    ) -> Vec<f32> {
+        let height_out = (height - window_h) / stride_h + 1;
+        let width_out = (width - window_w) / stride_w + 1;
+        let mut y = vec![0.0f32; channels * height_out * width_out];
+        for c in 0..channels
+        {
+            for oh in 0..height_out
+            {
+                for ow in 0..width_out
+                {
+                    let mut best = f32::NEG_INFINITY;
+                    for kh in 0..window_h
+                    {
+                        for kw in 0..window_w
+                        {
+                            let v = x[c * height * width
+                                + (oh * stride_h + kh) * width
+                                + (ow * stride_w + kw)];
+                            if v > best
+                            {
+                                best = v;
+                            }
+                        }
+                    }
+                    y[c * height_out * width_out + oh * width_out + ow] = best;
+                }
+            }
+        }
+        y
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn avg_pool2d_fwd(
+        x: &[f32],
+        channels: usize,
+        height: usize,
+        width: usize,
+        window_h: usize,
+        window_w: usize,
+        stride_h: usize,
+        stride_w: usize,
+    ) -> Vec<f32> {
+        let height_out = (height - window_h) / stride_h + 1;
+        let width_out = (width - window_w) / stride_w + 1;
+        let inv_window = 1.0 / (window_h * window_w) as f32;
+        let mut y = vec![0.0f32; channels * height_out * width_out];
+        for c in 0..channels
+        {
+            for oh in 0..height_out
+            {
+                for ow in 0..width_out
+                {
+                    let mut acc = 0.0f32;
+                    for kh in 0..window_h
+                    {
+                        for kw in 0..window_w
+                        {
+                            acc += x[c * height * width
+                                + (oh * stride_h + kh) * width
+                                + (ow * stride_w + kw)];
+                        }
+                    }
+                    y[c * height_out * width_out + oh * width_out + ow] = acc * inv_window;
+                }
+            }
+        }
+        y
+    }
+
+    #[test]
+    fn conv2d_backward_gradcheck() {
+        let (in_channels, height, width) = (2usize, 5usize, 5usize);
+        let (out_channels, kernel_h, kernel_w) = (3usize, 2usize, 3usize);
+        let height_out = height - kernel_h + 1;
+        let width_out = width - kernel_w + 1;
+
+        let x: Vec<f32> = (0..in_channels * height * width)
+            .map(|i| (i as f32 * 0.11).sin())
+            .collect();
+        let w: Vec<f32> = (0..out_channels * in_channels * kernel_h * kernel_w)
+            .map(|i| (i as f32 * 0.07).cos())
+            .collect();
+        let b: Vec<f32> = (0..out_channels).map(|i| i as f32 * 0.1 - 0.2).collect();
+        let seed: Vec<f32> = (0..out_channels * height_out * width_out)
+            .map(|i| (i as f32 * 0.3).sin() + 0.2)
+            .collect();
+
+        let mut dx = vec![0.0f32; x.len()];
+        let mut dw = vec![0.0f32; w.len()];
+        let mut db = vec![0.0f32; out_channels];
+        conv2d_backward(
+            &x,
+            in_channels,
+            height,
+            width,
+            &w,
+            out_channels,
+            kernel_h,
+            kernel_w,
+            &seed,
+            &mut dx,
+            &mut dw,
+            &mut db,
+        );
+
+        let h = 1e-3;
+        let g_x = num_grad(&x, &seed, h, |xx| {
+            conv2d_fwd(
+                xx,
+                in_channels,
+                height,
+                width,
+                &w,
+                out_channels,
+                kernel_h,
+                kernel_w,
+                &b,
+            )
+        });
+        assert_close(&dx, &g_x, 2e-2, "conv2d dX");
+        let g_w = num_grad(&w, &seed, h, |ww| {
+            conv2d_fwd(
+                &x,
+                in_channels,
+                height,
+                width,
+                ww,
+                out_channels,
+                kernel_h,
+                kernel_w,
+                &b,
+            )
+        });
+        assert_close(&dw, &g_w, 2e-2, "conv2d dW");
+        let g_b = num_grad(&b, &seed, h, |bb| {
+            conv2d_fwd(
+                &x,
+                in_channels,
+                height,
+                width,
+                &w,
+                out_channels,
+                kernel_h,
+                kernel_w,
+                bb,
+            )
+        });
+        assert_close(&db, &g_b, 2e-2, "conv2d db");
+    }
+
+    #[test]
+    fn max_pool2d_backward_gradcheck() {
+        let (channels, height, width) = (2usize, 6usize, 6usize);
+        let (window_h, window_w, stride_h, stride_w) = (2usize, 2usize, 2usize, 2usize);
+        let height_out = (height - window_h) / stride_h + 1;
+        let width_out = (width - window_w) / stride_w + 1;
+
+        // Valeurs strictement croissantes (écart 0.7, très supérieur au pas de
+        // différences finies 1e-3) : le maximum de chaque fenêtre reste
+        // toujours la même position, quelle que soit la petite perturbation —
+        // le max n'est pas différentiable près d'une égalité, cf. en-tête de
+        // fonction, ce choix évite un tel cas limite dans le gradcheck.
+        let x: Vec<f32> = (0..channels * height * width)
+            .map(|i| i as f32 * 0.7)
+            .collect();
+        let seed: Vec<f32> = (0..channels * height_out * width_out)
+            .map(|i| (i as f32 * 0.3).sin() + 0.2)
+            .collect();
+
+        let mut dx = vec![0.0f32; x.len()];
+        max_pool2d_backward(
+            &x, channels, height, width, window_h, window_w, stride_h, stride_w, &seed, &mut dx,
+        );
+
+        let h = 1e-3;
+        let g_x = num_grad(&x, &seed, h, |xx| {
+            max_pool2d_fwd(
+                xx, channels, height, width, window_h, window_w, stride_h, stride_w,
+            )
+        });
+        assert_close(&dx, &g_x, 2e-2, "max_pool2d dX");
+    }
+
+    #[test]
+    fn avg_pool2d_backward_gradcheck() {
+        let (channels, height, width) = (2usize, 6usize, 6usize);
+        let (window_h, window_w, stride_h, stride_w) = (2usize, 3usize, 2usize, 3usize);
+        let height_out = (height - window_h) / stride_h + 1;
+        let width_out = (width - window_w) / stride_w + 1;
+
+        let seed: Vec<f32> = (0..channels * height_out * width_out)
+            .map(|i| (i as f32 * 0.3).sin() + 0.2)
+            .collect();
+
+        let mut dx = vec![0.0f32; channels * height * width];
+        avg_pool2d_backward(
+            channels, height, width, window_h, window_w, stride_h, stride_w, &seed, &mut dx,
+        );
+
+        // avg_pool2d_fwd ne dépend de x que par sa forme ici (référence
+        // indépendante) : x arbitraire, seul le gradient (linéaire en x)
+        // importe pour le gradcheck.
+        let x0: Vec<f32> = (0..channels * height * width)
+            .map(|i| (i as f32 * 0.13).cos())
+            .collect();
+        let h = 1e-3;
+        let g_x = num_grad(&x0, &seed, h, |xx| {
+            avg_pool2d_fwd(
+                xx, channels, height, width, window_h, window_w, stride_h, stride_w,
+            )
+        });
+        assert_close(&dx, &g_x, 2e-2, "avg_pool2d dX");
     }
 }
