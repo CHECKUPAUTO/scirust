@@ -19,7 +19,8 @@
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::fixed::Q16_16;
 use scirust_simd::fixed::conv2d::{
-    Conv2dShape, conv2d, conv2d_batch, depthwise_conv2d, separable_conv2d,
+    Conv2dShape, Conv2dTransposeShape, conv2d, conv2d_batch, conv2d_transpose, depthwise_conv2d,
+    separable_conv2d,
 };
 use scirust_simd::fixed::pool2d::{Pool2dShape, avg_pool2d, max_pool2d};
 
@@ -268,11 +269,40 @@ fn bench_separable_conv2d(c: &mut Criterion) {
     );
 }
 
+/// Convolution transposée (déconvolution/suréchantillonnage) : coût direct
+/// (« scatter-add ») face à `conv2d` (`bench_conv2d` ci-dessus) — même nombre
+/// de MAC pour une entrée/sortie de tailles échangées, pas de GEMM ici (cf.
+/// en-tête de module de `fixed::conv2d`).
+fn bench_conv2d_transpose(c: &mut Criterion) {
+    let shape = Conv2dTransposeShape {
+        in_channels: IN_CHANNELS,
+        height: HEIGHT,
+        width: WIDTH,
+        out_channels: OUT_CHANNELS,
+        kernel_h: KERNEL,
+        kernel_w: KERNEL,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let x = fixed_data(0x9, IN_CHANNELS * HEIGHT * WIDTH);
+    let w = fixed_data(0xA, IN_CHANNELS * OUT_CHANNELS * KERNEL * KERNEL);
+    let b = fixed_data(0xB, OUT_CHANNELS);
+
+    let mac_count = (IN_CHANNELS * OUT_CHANNELS * KERNEL * KERNEL * HEIGHT * WIDTH) as u64;
+    let mut g = c.benchmark_group("conv2d_transpose");
+    g.throughput(Throughput::Elements(mac_count));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter(|| conv2d_transpose(black_box(&x), black_box(&w), black_box(&b), shape))
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_conv2d,
     bench_pool2d,
     bench_conv2d_batch,
-    bench_separable_conv2d
+    bench_separable_conv2d,
+    bench_conv2d_transpose
 );
 criterion_main!(benches);

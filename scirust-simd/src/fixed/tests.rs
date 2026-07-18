@@ -10,7 +10,10 @@
 use super::activation as act;
 use super::attention::{attention, causal_attention, multi_head_attention};
 use super::conv::{Conv1dShape, conv1d, conv1d_batch};
-use super::conv2d::{Conv2dShape, conv2d, conv2d_batch, depthwise_conv2d, separable_conv2d};
+use super::conv2d::{
+    Conv2dShape, Conv2dTransposeShape, conv2d, conv2d_batch, conv2d_transpose, depthwise_conv2d,
+    separable_conv2d,
+};
 use super::kv_cache::KvCache;
 use super::layer::Linear;
 use super::linalg;
@@ -3499,6 +3502,314 @@ fn separable_conv2d_matches_depthwise_then_pointwise() {
     };
     let want = conv2d(&depthwise_out, &pw, &pb, pointwise_shape);
     assert_eq!(got, want);
+}
+
+// ------------------------------------------------------------------ //
+//  Convolution transposée (déconvolution/suréchantillonnage)          //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn conv2d_transpose_shape_formula() {
+    let cases = [
+        (2usize, 2usize, 2usize, 2usize, 1usize, 1usize),
+        (3, 3, 3, 3, 2, 2),
+        (4, 5, 3, 2, 2, 3),
+        (1, 1, 4, 4, 1, 1),
+    ];
+    for &(height, width, kernel_h, kernel_w, stride_h, stride_w) in &cases
+    {
+        let shape = Conv2dTransposeShape {
+            in_channels: 1,
+            height,
+            width,
+            out_channels: 1,
+            kernel_h,
+            kernel_w,
+            stride_h,
+            stride_w,
+        };
+        assert_eq!(shape.height_out(), (height - 1) * stride_h + kernel_h);
+        assert_eq!(shape.width_out(), (width - 1) * stride_w + kernel_w);
+    }
+}
+
+#[test]
+#[should_panic(expected = "Conv2dTransposeShape::height_out")]
+fn conv2d_transpose_zero_stride_h_panics() {
+    let shape = Conv2dTransposeShape {
+        in_channels: 1,
+        height: 2,
+        width: 2,
+        out_channels: 1,
+        kernel_h: 2,
+        kernel_w: 2,
+        stride_h: 0,
+        stride_w: 1,
+    };
+    let _ = shape.height_out();
+}
+
+#[test]
+#[should_panic(expected = "Conv2dTransposeShape::width_out")]
+fn conv2d_transpose_zero_width_panics() {
+    let shape = Conv2dTransposeShape {
+        in_channels: 1,
+        height: 2,
+        width: 0,
+        out_channels: 1,
+        kernel_h: 2,
+        kernel_w: 2,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let _ = shape.width_out();
+}
+
+#[test]
+fn conv2d_transpose_known_small() {
+    // 1 canal, entrée 2×2 = [[1,2],[3,4]], noyau 2×2 = [[10,20],[30,40]],
+    // stride 1, biais nul : chaque élément d'entrée diffuse le noyau entier
+    // (pondéré par sa valeur) sur la sortie 3×3, les recouvrements
+    // s'additionnent — calcul à la main (cf. en-tête de module) :
+    //   [10,  40,  40 ]
+    //   [60,  200, 160]
+    //   [90,  240, 160]
+    let x = [1i32, 2, 3, 4].map(Q16_16::from);
+    let w = [10i32, 20, 30, 40].map(Q16_16::from);
+    let b = [Q16_16::zero()];
+    let shape = Conv2dTransposeShape {
+        in_channels: 1,
+        height: 2,
+        width: 2,
+        out_channels: 1,
+        kernel_h: 2,
+        kernel_w: 2,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let y = conv2d_transpose(&x, &w, &b, shape);
+    assert_eq!(
+        y,
+        [10i32, 40, 40, 60, 200, 160, 90, 240, 160].map(Q16_16::from)
+    );
+}
+
+#[test]
+fn conv2d_transpose_adds_bias_per_channel() {
+    let x = [1i32, 2, 3, 4].map(Q16_16::from);
+    let w = [10i32, 20, 30, 40].map(Q16_16::from);
+    let b = [Q16_16::from(1000i32)];
+    let shape = Conv2dTransposeShape {
+        in_channels: 1,
+        height: 2,
+        width: 2,
+        out_channels: 1,
+        kernel_h: 2,
+        kernel_w: 2,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let y = conv2d_transpose(&x, &w, &b, shape);
+    assert_eq!(
+        y,
+        [1010i32, 1040, 1040, 1060, 1200, 1160, 1090, 1240, 1160].map(Q16_16::from)
+    );
+}
+
+#[test]
+fn conv2d_transpose_stride_scatters_without_overlap() {
+    // stride == kernel : aucune fenêtre de sortie ne se recouvre — chaque
+    // bloc de sortie kernel_h×kernel_w est exactement `x[ih,iw] * noyau`,
+    // sans accumulation croisée (cas limite utile, distinct du recouvrement
+    // additif de `conv2d_transpose_known_small`).
+    let x = [1i32, 2, 3, 4].map(Q16_16::from);
+    let w = [1i32, 2, 3, 4].map(Q16_16::from);
+    let b = [Q16_16::zero()];
+    let shape = Conv2dTransposeShape {
+        in_channels: 1,
+        height: 2,
+        width: 2,
+        out_channels: 1,
+        kernel_h: 2,
+        kernel_w: 2,
+        stride_h: 2,
+        stride_w: 2,
+    };
+    let y = conv2d_transpose(&x, &w, &b, shape);
+    assert_eq!(shape.height_out(), 4);
+    assert_eq!(shape.width_out(), 4);
+    #[rustfmt::skip]
+    let want = [
+        1, 2,  2, 4,
+        3, 4,  6, 8,
+        3, 6,  4, 8,
+        9, 12, 12, 16,
+    ]
+    .map(Q16_16::from);
+    assert_eq!(y, want);
+}
+
+#[test]
+fn conv2d_transpose_is_adjoint_of_conv2d() {
+    // ⟨conv2d(x, W), g⟩ == ⟨x, conv2d_transpose(g, W)⟩ (cf. en-tête de
+    // module) : **même** tableau `W`, aucune réindexation — seuls
+    // `in_channels`/`out_channels` sont échangés dans `Conv2dTransposeShape`.
+    // Biais nuls des deux côtés (l'identité porte sur l'opérateur linéaire
+    // seul). Pas d'égalité bit-à-bit attendue : chaque multiplication
+    // virgule fixe est arrondie indépendamment, et les deux membres ne
+    // groupent pas les produits dans le même ordre (contrairement à
+    // `conv2d_batch`, qui répète littéralement le même calcul) — l'écart
+    // reste borné par le nombre de termes accumulés fois la résolution.
+    let mut rng = Lcg(0xC0FE_7001);
+    let cases = [
+        (
+            2usize, 3usize, 6usize, 6usize, 2usize, 2usize, 2usize, 2usize,
+        ),
+        (3, 2, 7, 5, 3, 3, 1, 1),
+        (1, 4, 8, 6, 2, 3, 2, 1),
+    ];
+    for &(in_channels, out_channels, height, width, kernel_h, kernel_w, stride_h, stride_w) in
+        &cases
+    {
+        let shape = Conv2dShape {
+            in_channels,
+            height,
+            width,
+            out_channels,
+            kernel_h,
+            kernel_w,
+            stride_h,
+            stride_w,
+        };
+        let height_out = shape.height_out();
+        let width_out = shape.width_out();
+        // Choisi pour que le format aller-retour retombe exactement sur
+        // (height, width), sans troncature de la division entière côté
+        // conv2d — sinon conv2d_transpose (qui ignore le remplissage
+        // manquant) reconstruirait une entrée légèrement plus grande.
+        assert_eq!((height_out - 1) * stride_h + kernel_h, height);
+        assert_eq!((width_out - 1) * stride_w + kernel_w, width);
+
+        let x: Vec<Q16_16> = (0..in_channels * height * width)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 8))
+            .collect();
+        let w: Vec<Q16_16> = (0..out_channels * in_channels * kernel_h * kernel_w)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 8))
+            .collect();
+        let g: Vec<Q16_16> = (0..out_channels * height_out * width_out)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 8))
+            .collect();
+        let zero_bias_out = vec![Q16_16::zero(); out_channels];
+        let zero_bias_in = vec![Q16_16::zero(); in_channels];
+
+        let y = conv2d(&x, &w, &zero_bias_out, shape);
+
+        let transpose_shape = Conv2dTransposeShape {
+            in_channels: out_channels,
+            height: height_out,
+            width: width_out,
+            out_channels: in_channels,
+            kernel_h,
+            kernel_w,
+            stride_h,
+            stride_w,
+        };
+        let u = conv2d_transpose(&g, &w, &zero_bias_in, transpose_shape);
+
+        let lhs = red::dot(&y, &g).to_f64();
+        let rhs = red::dot(&x, &u).to_f64();
+        // Tolérance proportionnelle au nombre de termes accumulés avant le
+        // dernier arrondi (la somme intermédiaire la plus longue des deux
+        // côtés) — mesurée empiriquement à 1-3 résolutions Q16.16
+        // (1/65536) sur ces cas, ce facteur 8 laisse une marge confortable
+        // sans masquer une vraie régression.
+        let inner_terms =
+            (in_channels * kernel_h * kernel_w).max(out_channels * kernel_h * kernel_w) as f64;
+        let tol = 8.0 * inner_terms / 65536.0;
+        assert!(
+            (lhs - rhs).abs() <= tol,
+            "adjoint mismatch shape={shape:?} lhs={lhs} rhs={rhs} tol={tol}"
+        );
+    }
+}
+
+#[test]
+fn conv2d_transpose_i64_storage() {
+    let x = [1i64, 2, 3, 4].map(Q32_32::from);
+    let w = [10i64, 20, 30, 40].map(Q32_32::from);
+    let b = [Q32_32::from(1000i64)];
+    let shape = Conv2dTransposeShape {
+        in_channels: 1,
+        height: 2,
+        width: 2,
+        out_channels: 1,
+        kernel_h: 2,
+        kernel_w: 2,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let y = conv2d_transpose(&x, &w, &b, shape);
+    assert_eq!(
+        y,
+        [1010i64, 1040, 1040, 1060, 1200, 1160, 1090, 1240, 1160].map(Q32_32::from)
+    );
+}
+
+#[test]
+#[should_panic(expected = "conv2d_transpose")]
+fn conv2d_transpose_x_dim_mismatch_panics() {
+    let x = [Q16_16::one(); 3]; // annoncé 1×2×2 = 4
+    let w = [Q16_16::one(); 4];
+    let b = [Q16_16::zero()];
+    let shape = Conv2dTransposeShape {
+        in_channels: 1,
+        height: 2,
+        width: 2,
+        out_channels: 1,
+        kernel_h: 2,
+        kernel_w: 2,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let _ = conv2d_transpose(&x, &w, &b, shape);
+}
+
+#[test]
+#[should_panic(expected = "conv2d_transpose")]
+fn conv2d_transpose_weights_dim_mismatch_panics() {
+    let x = [Q16_16::one(); 4]; // 1×2×2
+    let w = [Q16_16::one(); 3]; // devrait être 1×1×2×2 = 4
+    let b = [Q16_16::zero()];
+    let shape = Conv2dTransposeShape {
+        in_channels: 1,
+        height: 2,
+        width: 2,
+        out_channels: 1,
+        kernel_h: 2,
+        kernel_w: 2,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let _ = conv2d_transpose(&x, &w, &b, shape);
+}
+
+#[test]
+#[should_panic(expected = "conv2d_transpose")]
+fn conv2d_transpose_bias_dim_mismatch_panics() {
+    let x = [Q16_16::one(); 4];
+    let w = [Q16_16::one(); 4];
+    let b = [Q16_16::zero(); 2]; // devrait être 1
+    let shape = Conv2dTransposeShape {
+        in_channels: 1,
+        height: 2,
+        width: 2,
+        out_channels: 1,
+        kernel_h: 2,
+        kernel_w: 2,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let _ = conv2d_transpose(&x, &w, &b, shape);
 }
 
 // ------------------------------------------------------------------ //

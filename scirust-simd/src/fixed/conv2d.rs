@@ -50,6 +50,30 @@
 // neuf pour la partie ponctuelle, seul l'assemblage est nouveau. Coût total
 // `O(in·kh·kw + in·out)`, à comparer aux `O(in·out·kh·kw)` d'une convolution
 // dense équivalente — l'économie classique de MobileNet.
+//
+// ## Convolution transposée (suréchantillonnage)
+//
+// [`conv2d_transpose`] est l'opération **adjointe** de [`conv2d`] : là où
+// [`conv2d`] accumule une fenêtre glissante de l'entrée en un seul élément de
+// sortie (« gather »), [`conv2d_transpose`] diffuse chaque élément de
+// l'entrée sur une fenêtre de sortie pondérée par le noyau (« scatter-add »)
+// — l'opération centrale des décodeurs convolutifs et GAN génératifs pour
+// suréchantillonner une carte de caractéristiques.
+//
+// Formellement, en notant `M` la matrice creuse telle que `conv2d(x) = M·x`
+// (im2col plus produit par la matrice de poids), [`conv2d_transpose`] avec la
+// disposition de poids `in_channels × out_channels × kernel_h × kernel_w`
+// calcule exactement `Mᵀ·x` **en réutilisant le même tableau de poids**, sans
+// réindexation : `in_channels`/`out_channels` sont simplement inversés par
+// rapport à [`conv2d`] (convention PyTorch `ConvTranspose2d`). Cette relation
+// d'adjonction — `⟨conv2d(x, W), y⟩ = ⟨x, conv2d_transpose(y, W)⟩` pour tout
+// `x`, `y` — est la propriété vérifiée par les tests plutôt qu'une
+// réimplémentation indépendante.
+//
+// Forme de sortie (toujours sans remplissage ni `output_padding`, comme
+// [`Conv2dShape`]) : `height_out = (height − 1)·stride_h + kernel_h`,
+// symétrique de [`Conv2dShape::height_out`] (`stride` et soustraction du
+// noyau échangés — la convolution transposée agrandit au lieu de rétrécir).
 
 use super::reductions::FixedReducible;
 
@@ -440,4 +464,157 @@ pub fn separable_conv2d<T: FixedReducible>(
         pointwise_bias,
         pointwise_shape,
     )
+}
+
+/// Dimensions d'une convolution transposée 2D, sans remplissage ni
+/// `output_padding` (cf. en-tête de module et [`Conv2dShape`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Conv2dTransposeShape {
+    /// Nombre de canaux d'entrée.
+    pub in_channels: usize,
+    /// Hauteur de l'entrée (par canal).
+    pub height: usize,
+    /// Largeur de l'entrée (par canal).
+    pub width: usize,
+    /// Nombre de canaux de sortie.
+    pub out_channels: usize,
+    /// Hauteur du noyau de convolution.
+    pub kernel_h: usize,
+    /// Largeur du noyau de convolution.
+    pub kernel_w: usize,
+    /// Pas de déplacement vertical entre deux éléments d'entrée consécutifs.
+    pub stride_h: usize,
+    /// Pas de déplacement horizontal entre deux éléments d'entrée consécutifs.
+    pub stride_w: usize,
+}
+
+impl Conv2dTransposeShape {
+    /// Hauteur de sortie `(height − 1) · stride_h + kernel_h`.
+    ///
+    /// Panique si `stride_h == 0` ou `height == 0`.
+    #[must_use]
+    pub fn height_out(&self) -> usize {
+        assert!(
+            self.stride_h >= 1,
+            "Conv2dTransposeShape::height_out : stride_h doit être ≥ 1"
+        );
+        assert!(
+            self.height >= 1,
+            "Conv2dTransposeShape::height_out : hauteur doit être ≥ 1"
+        );
+        (self.height - 1) * self.stride_h + self.kernel_h
+    }
+
+    /// Largeur de sortie `(width − 1) · stride_w + kernel_w`.
+    ///
+    /// Panique si `stride_w == 0` ou `width == 0`.
+    #[must_use]
+    pub fn width_out(&self) -> usize {
+        assert!(
+            self.stride_w >= 1,
+            "Conv2dTransposeShape::width_out : stride_w doit être ≥ 1"
+        );
+        assert!(
+            self.width >= 1,
+            "Conv2dTransposeShape::width_out : largeur doit être ≥ 1"
+        );
+        (self.width - 1) * self.stride_w + self.kernel_w
+    }
+}
+
+/// Convolution transposée 2D (déconvolution/suréchantillonnage),
+/// déterministe : opération **adjointe** de [`conv2d`] (cf. en-tête de
+/// module) — chaque élément d'entrée est diffusé (« scatter-add ») sur une
+/// fenêtre de sortie pondérée par le noyau, au lieu d'accumuler une fenêtre
+/// d'entrée en un seul élément de sortie.
+///
+/// `x` : `shape.in_channels × shape.height × shape.width` ; `weights` :
+/// `shape.in_channels × shape.out_channels × shape.kernel_h × shape.kernel_w`
+/// (axes canaux **inversés** par rapport à [`conv2d`] — convention PyTorch
+/// `ConvTranspose2d`, cf. en-tête de module) ; `bias` : `shape.out_channels`.
+/// Retourne `shape.out_channels × shape.height_out() × shape.width_out()`.
+///
+/// Panique si les longueurs de slice ne correspondent pas aux dimensions
+/// annoncées, ou selon les préconditions de
+/// [`Conv2dTransposeShape::height_out`]/[`Conv2dTransposeShape::width_out`].
+#[must_use]
+pub fn conv2d_transpose<T: FixedReducible>(
+    x: &[T],
+    weights: &[T],
+    bias: &[T],
+    shape: Conv2dTransposeShape,
+) -> Vec<T> {
+    let height_out = shape.height_out();
+    let width_out = shape.width_out();
+    assert_eq!(
+        x.len(),
+        shape.in_channels * shape.height * shape.width,
+        "conv2d_transpose : x de longueur {} ≠ {}×{}×{}",
+        x.len(),
+        shape.in_channels,
+        shape.height,
+        shape.width
+    );
+    assert_eq!(
+        weights.len(),
+        shape.in_channels * shape.out_channels * shape.kernel_h * shape.kernel_w,
+        "conv2d_transpose : poids de longueur {} ≠ {}×{}×{}×{}",
+        weights.len(),
+        shape.in_channels,
+        shape.out_channels,
+        shape.kernel_h,
+        shape.kernel_w
+    );
+    assert_eq!(
+        bias.len(),
+        shape.out_channels,
+        "conv2d_transpose : biais de longueur {} ≠ {}",
+        bias.len(),
+        shape.out_channels
+    );
+
+    let channel_size = shape.height * shape.width;
+    let kernel_size = shape.kernel_h * shape.kernel_w;
+    let weights_per_in = shape.out_channels * kernel_size;
+    let spatial_out = height_out * width_out;
+    let mut y = vec![T::ZERO; shape.out_channels * spatial_out];
+
+    for ci in 0..shape.in_channels
+    {
+        let x_ci = &x[ci * channel_size..(ci + 1) * channel_size];
+        let w_ci = &weights[ci * weights_per_in..(ci + 1) * weights_per_in];
+        for ih in 0..shape.height
+        {
+            for iw in 0..shape.width
+            {
+                let xv = x_ci[ih * shape.width + iw];
+                for co in 0..shape.out_channels
+                {
+                    let w_co = &w_ci[co * kernel_size..(co + 1) * kernel_size];
+                    let y_co = &mut y[co * spatial_out..(co + 1) * spatial_out];
+                    for kh in 0..shape.kernel_h
+                    {
+                        let oh = ih * shape.stride_h + kh;
+                        for kw in 0..shape.kernel_w
+                        {
+                            let ow = iw * shape.stride_w + kw;
+                            let contrib = xv.wrapping_mul(w_co[kh * shape.kernel_w + kw]);
+                            let idx = oh * width_out + ow;
+                            y_co[idx] = y_co[idx].wrapping_add(contrib);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for (co, &b) in bias.iter().enumerate()
+    {
+        for pos in 0..spatial_out
+        {
+            let idx = co * spatial_out + pos;
+            y[idx] = y[idx].wrapping_add(b);
+        }
+    }
+    y
 }
