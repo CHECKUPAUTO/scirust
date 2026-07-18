@@ -69,6 +69,9 @@
 //! - [`bigrational`] — exact rationals over `BigInt` (`BigRational`) and
 //!   **overflow-free** exact linear algebra (`solve`, `determinant`), the
 //!   scalable counterpart of `rational` (e.g. an exact Hilbert-matrix solve).
+//! - [`lll`] — exact **LLL lattice-basis reduction** with rational Gram–Schmidt
+//!   (no floating point, no overflow) and a unimodular certificate `U` proving
+//!   the reduced basis spans the same lattice.
 //!
 //! Everything is deterministic and reproducible bit-for-bit on every platform.
 //!
@@ -203,6 +206,17 @@
 //!     .add(&BigRational::from_i128(1).div(&BigRational::from_i128(3)));
 //! assert_eq!(sum.to_string_frac(), "5/6");
 //! ```
+//!
+//! ```
+//! use scirust_modalg::lll;
+//!
+//! // The basis (100,1),(99,1) generates Z²; exact LLL finds a unit-vector basis.
+//! let res = lll::reduce_i128(&[vec![100, 1], vec![99, 1]]);
+//! for row in &res.basis {
+//!     let n2 = row[0].mul(&row[0]).add(&row[1].mul(&row[1]));
+//!     assert_eq!(n2.to_decimal(), "1"); // ‖·‖² == 1
+//! }
+//! ```
 
 pub mod bigint;
 pub mod bigrational;
@@ -212,6 +226,7 @@ pub mod crc;
 pub mod gf2;
 pub mod hypercomplex;
 pub mod linalg;
+pub mod lll;
 pub mod negacyclic;
 pub mod ntt;
 pub mod numtheory;
@@ -226,6 +241,7 @@ pub use crc::Crc;
 pub use gf2::Gf2Field;
 pub use hypercomplex::{Oct, Quat};
 pub use linalg::ModMatrix;
+pub use lll::LllResult;
 pub use negacyclic::{Montgomery, NegacyclicNtt};
 pub use ntt::Ntt;
 pub use rational::{Fraction, RatMatrix};
