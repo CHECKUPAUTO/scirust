@@ -30,6 +30,21 @@
 //!   partagée), mais réduite sur les `batch·spatial` éléments **dispersés**
 //!   de chaque canal plutôt que sur les `d` éléments contigus d'une ligne.
 //!
+//! ## Pertes — l'origine du gradient
+//!
+//! Toutes les fonctions ci-dessus **reçoivent** `dY` : aucune ne le produit à
+//! partir d'une perte réelle. **`mse_loss`**/**`mse_loss_backward`** (erreur
+//! quadratique moyenne, régression/reconstruction) et
+//! **`softmax_cross_entropy_loss`**/**`softmax_cross_entropy_backward`**
+//! (classification, par ligne) ferment la chaîne : elles calculent un scalaire
+//! de perte **et** le premier `dY` de la rétropropagation, la seule paire de
+//! fonctions de ce module qui ne prennent pas `dY` en entrée. La perte
+//! d'entropie croisée fusionne softmax + log-vraisemblance négative en une
+//! seule passe stable (`log-sum-exp`, soustraction du maximum de ligne avant
+//! `exp`) plutôt que de chaîner [`softmax_backward`] (conservée telle quelle
+//! pour [`attention_backward`]) : le gradient combiné `softmax(x) − one_hot`
+//! évite l'instabilité numérique d'une jacobienne softmax explicite.
+//!
 //! Tous les gradients sont **vérifiés par différences finies centrées**
 //! (gradcheck) dans les tests, la garantie de justesse d'un backward.
 
@@ -692,6 +707,109 @@ pub fn batch_norm_backward(
     }
 }
 
+/// Perte MSE (erreur quadratique moyenne) : `L = (1/N)·Σ_i (pred_i −
+/// target_i)²`, `N = pred.len()`. Régression/reconstruction (ex. autoencodeur
+/// bâti sur [`crate::fixed::conv2d::conv2d_transpose`] côté forward et
+/// [`conv2d_backward`] côté backward).
+pub fn mse_loss(pred: &[f32], target: &[f32]) -> f32 {
+    assert_eq!(pred.len(), target.len(), "mse_loss: shape");
+    let n = pred.len() as f32;
+    pred.iter()
+        .zip(target)
+        .map(|(&p, &t)| (p - t) * (p - t))
+        .sum::<f32>()
+        / n
+}
+
+/// Backward de [`mse_loss`] : `dpred_i = 2·(pred_i − target_i)/N`.
+pub fn mse_loss_backward(pred: &[f32], target: &[f32], dpred: &mut [f32]) {
+    assert_eq!(pred.len(), target.len(), "mse_loss_backward: shape");
+    assert_eq!(dpred.len(), pred.len(), "mse_loss_backward: dpred shape");
+    let n = pred.len() as f32;
+    for ((&p, &t), dp) in pred.iter().zip(target).zip(dpred.iter_mut())
+    {
+        *dp = 2.0 * (p - t) / n;
+    }
+}
+
+/// Perte d'entropie croisée softmax, **par ligne** (`logits` : `rows × d` ;
+/// `targets` : un indice de classe `< d` par ligne) :
+/// `L = (1/rows)·Σ_r [ log(Σ_j exp(logits[r,j] − m_r)) + m_r − logits[r,
+/// targets[r]] ]`, avec `m_r = max_j logits[r,j]` (log-sum-exp **stable**,
+/// soustraction du maximum de ligne avant `exp` — cf. en-tête de module).
+///
+/// Panique si `targets[r] ≥ d` pour une ligne (indice de classe invalide).
+pub fn softmax_cross_entropy_loss(logits: &[f32], rows: usize, d: usize, targets: &[usize]) -> f32 {
+    assert_eq!(
+        logits.len(),
+        rows * d,
+        "softmax_cross_entropy_loss: logits shape"
+    );
+    assert_eq!(
+        targets.len(),
+        rows,
+        "softmax_cross_entropy_loss: targets shape"
+    );
+    let mut total = 0.0f32;
+    for r in 0..rows
+    {
+        let row = &logits[r * d..r * d + d];
+        let t = targets[r];
+        assert!(t < d, "softmax_cross_entropy_loss: cible hors bornes");
+        let m = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let lse = row.iter().map(|&v| (v - m).exp()).sum::<f32>().ln();
+        total += lse + m - row[t];
+    }
+    total / rows as f32
+}
+
+/// Backward de [`softmax_cross_entropy_loss`] : `dlogits[r,:] =
+/// (softmax(logits[r,:]) − one_hot(targets[r])) / rows` — le gradient
+/// **combiné** softmax + entropie croisée, sans jacobienne softmax explicite
+/// (cf. en-tête de module ; à la différence de [`softmax_backward`],
+/// réservée à [`attention_backward`]).
+///
+/// Panique si `targets[r] ≥ d` pour une ligne.
+pub fn softmax_cross_entropy_backward(
+    logits: &[f32],
+    rows: usize,
+    d: usize,
+    targets: &[usize],
+    dlogits: &mut [f32],
+) {
+    assert_eq!(
+        logits.len(),
+        rows * d,
+        "softmax_cross_entropy_backward: logits shape"
+    );
+    assert_eq!(
+        targets.len(),
+        rows,
+        "softmax_cross_entropy_backward: targets shape"
+    );
+    assert_eq!(
+        dlogits.len(),
+        logits.len(),
+        "softmax_cross_entropy_backward: dlogits shape"
+    );
+    let rf = rows as f32;
+    for r in 0..rows
+    {
+        let row = &logits[r * d..r * d + d];
+        let t = targets[r];
+        assert!(t < d, "softmax_cross_entropy_backward: cible hors bornes");
+        let drow = &mut dlogits[r * d..r * d + d];
+        let m = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let sum: f32 = row.iter().map(|&v| (v - m).exp()).sum();
+        for j in 0..d
+        {
+            let softmax_j = (row[j] - m).exp() / sum;
+            let one_hot = if j == t { 1.0 } else { 0.0 };
+            drow[j] = (softmax_j - one_hot) / rf;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1343,5 +1461,36 @@ mod tests {
             batch_norm_train_fwd(&x, batch, channels, spatial, &gamma, bb, eps)
         });
         assert_close(&dbeta, &gb, 3e-2, "batch_norm dbeta");
+    }
+
+    #[test]
+    fn mse_loss_backward_gradcheck() {
+        let pred: Vec<f32> = (0..12).map(|i| (i as f32 * 0.21).sin() * 2.0).collect();
+        let target: Vec<f32> = (0..12).map(|i| (i as f32 * 0.13).cos()).collect();
+
+        let mut dpred = vec![0.0f32; pred.len()];
+        mse_loss_backward(&pred, &target, &mut dpred);
+
+        let seed = [1.0f32];
+        let g = num_grad(&pred, &seed, 1e-3, |pp| vec![mse_loss(pp, &target)]);
+        assert_close(&dpred, &g, 2e-2, "mse dpred");
+    }
+
+    #[test]
+    fn softmax_cross_entropy_backward_gradcheck() {
+        let (rows, d) = (4usize, 5usize);
+        let logits: Vec<f32> = (0..rows * d)
+            .map(|i| (i as f32 * 0.17).sin() * 3.0)
+            .collect();
+        let targets: Vec<usize> = (0..rows).map(|r| (r * 2 + 1) % d).collect();
+
+        let mut dlogits = vec![0.0f32; rows * d];
+        softmax_cross_entropy_backward(&logits, rows, d, &targets, &mut dlogits);
+
+        let seed = [1.0f32];
+        let g = num_grad(&logits, &seed, 1e-3, |ll| {
+            vec![softmax_cross_entropy_loss(ll, rows, d, &targets)]
+        });
+        assert_close(&dlogits, &g, 2e-2, "softmax_ce dlogits");
     }
 }
