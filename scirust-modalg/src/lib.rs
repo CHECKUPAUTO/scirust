@@ -59,6 +59,10 @@
 //!   `Z_q[x]/(x^n + 1)`, the core ring operation of lattice cryptography) built
 //!   on `ntt`, plus **Montgomery** reduction — reference building blocks, not a
 //!   hardened cryptosystem.
+//! - [`rational`] — exact **rational** arithmetic (`Fraction`) and rounding-free
+//!   linear algebra over `ℚ` (solve, determinant, inverse, rank), plus the
+//!   integer **Hermite normal form** with a unimodular certificate — certified
+//!   linear algebra for verification and computer-algebra settings.
 //!
 //! Everything is deterministic and reproducible bit-for-bit on every platform.
 //!
@@ -163,6 +167,17 @@
 //! let mut minus_one = vec![0; 8]; minus_one[0] = q - 1;
 //! assert_eq!(ring.mul(&hi, &x), minus_one);
 //! ```
+//!
+//! ```
+//! use scirust_modalg::rational::{Fraction, RatMatrix};
+//!
+//! // Exact solve of 2x + y = 3, x + 3y = 5 → x = 4/5, y = 7/5 (no rounding).
+//! let a = RatMatrix::from_int_rows(&[vec![2, 1], vec![1, 3]]);
+//! let b = [Fraction::from_int(3), Fraction::from_int(5)];
+//! let x = a.solve(&b).unwrap();
+//! assert_eq!(x, vec![Fraction::new(4, 5), Fraction::new(7, 5)]);
+//! assert_eq!(a.matvec(&x), b.to_vec()); // A·x == b exactly
+//! ```
 
 pub mod boolean;
 pub mod codes;
@@ -173,6 +188,7 @@ pub mod linalg;
 pub mod negacyclic;
 pub mod ntt;
 pub mod numtheory;
+pub mod rational;
 pub mod ring;
 pub mod sbox;
 
@@ -183,5 +199,6 @@ pub use hypercomplex::{Oct, Quat};
 pub use linalg::ModMatrix;
 pub use negacyclic::{Montgomery, NegacyclicNtt};
 pub use ntt::Ntt;
+pub use rational::{Fraction, RatMatrix};
 pub use ring::Word;
 pub use sbox::Sbox;
