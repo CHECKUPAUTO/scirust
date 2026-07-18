@@ -28,7 +28,9 @@
 //!   against an independent Fano-triple generator, conjugation, the modular norm,
 //!   and (octonion) little-endian serialization.
 //! - [`boolean`] — the fast Möbius transform and exact **algebraic-normal-form
-//!   degree** of a Boolean vector function on up to a few dozen input bits.
+//!   degree**, plus the fast **Walsh–Hadamard transform** and its spectral
+//!   metrics (nonlinearity, balancedness, the bent property, correlation
+//!   immunity) for Boolean functions on up to a few dozen input bits.
 //! - [`numtheory`] — deterministic integer number theory: extended GCD, modular
 //!   inverse and exponentiation, the CRT, a *deterministic* Miller–Rabin
 //!   primality test exact for every `u64`, deterministic Pollard–Brent
@@ -41,6 +43,9 @@
 //!   Berlekamp–Massey / Chien-search decoder that corrects up to `⌊nsym/2⌋`
 //!   symbol errors, composing the `gf2` field with `numtheory` (to verify the
 //!   primitive element).
+//! - [`crc`] — parameterised **cyclic redundancy checks** (the Rocksoft model)
+//!   with a streaming digest and named presets (CRC-32, CRC-32C, CRC-16
+//!   variants, CRC-8, CRC-64/XZ) that reproduce the published check values.
 //!
 //! Everything is deterministic and reproducible bit-for-bit on every platform.
 //!
@@ -91,9 +96,26 @@
 //! assert_eq!(recovered, msg);
 //! assert_eq!(corrected, 2);
 //! ```
+//!
+//! ```
+//! use scirust_modalg::crc::Crc;
+//!
+//! // The canonical CRC-32 (zlib) check value of "123456789".
+//! assert_eq!(Crc::crc32_iso_hdlc().checksum(b"123456789"), 0xCBF4_3926);
+//! ```
+//!
+//! ```
+//! use scirust_modalg::boolean::{is_bent, nonlinearity};
+//!
+//! // The 2-bit AND function is bent: maximal nonlinearity 2^1 − 2^0 = 1.
+//! let and = [0u8, 0, 0, 1]; // truth table of x0 ∧ x1
+//! assert!(is_bent(&and, 2));
+//! assert_eq!(nonlinearity(&and, 2), 1);
+//! ```
 
 pub mod boolean;
 pub mod codes;
+pub mod crc;
 pub mod gf2;
 pub mod hypercomplex;
 pub mod linalg;
@@ -101,6 +123,7 @@ pub mod numtheory;
 pub mod ring;
 
 pub use codes::ReedSolomon;
+pub use crc::Crc;
 pub use gf2::Gf2Field;
 pub use hypercomplex::{Oct, Quat};
 pub use linalg::ModMatrix;
