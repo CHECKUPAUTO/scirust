@@ -15,7 +15,8 @@ use scirust_simd::dsp::mfcc::Mfcc;
 use scirust_simd::dsp::stft::{power_spectrogram, stft};
 use scirust_simd::dsp::window;
 use scirust_simd::dsp::{
-    Biquad, BiquadCascade, Complex, Fir, Lms, Nlms, Plan, Rls, fft, fft_convolve, rfft,
+    Biquad, BiquadCascade, Complex, Fir, Lms, Nlms, Plan, Rls, fft, fft_convolve, group_delay,
+    phase, rfft, unwrap_phase,
 };
 use scirust_simd::fixed::Q16_16;
 
@@ -547,6 +548,48 @@ fn bench_adaptive(c: &mut Criterion) {
     g.finish();
 }
 
+/// Réponse en fréquence d'une cascade de Butterworth d'ordre 8 sur une
+/// grille de `M` pulsations, plus phase déballée et délai de groupe
+/// (chaîne complète du module `freqz`).
+fn bench_freqz(c: &mut Criterion) {
+    const M: usize = 512;
+    let omegas_f: Vec<f32> = (0..M)
+        .map(|i| core::f32::consts::PI * (i as f32) / (M as f32 - 1.0))
+        .collect();
+    let omegas_x: Vec<Q16_16> = omegas_f
+        .iter()
+        .map(|&w| Q16_16::try_from(w as f64).unwrap())
+        .collect();
+    let d_omega_f = omegas_f[1] - omegas_f[0];
+    let d_omega_x = omegas_x[1] - omegas_x[0];
+
+    let mut g = c.benchmark_group("freqz_butterworth_order8");
+    g.throughput(Throughput::Elements(M as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        let f = BiquadCascade::<Q16_16>::butterworth_lowpass(
+            Q16_16::try_from(8.0).unwrap(),
+            Q16_16::try_from(1.0).unwrap(),
+            8,
+        );
+        b.iter(|| {
+            let responses = f.frequency_response_grid(black_box(&omegas_x));
+            let mut phases: Vec<Q16_16> = responses.iter().map(|&h| phase(h)).collect();
+            unwrap_phase(&mut phases);
+            group_delay(&phases, d_omega_x)
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        let f = BiquadCascade::<f32>::butterworth_lowpass(8.0, 1.0, 8);
+        b.iter(|| {
+            let responses = f.frequency_response_grid(black_box(&omegas_f));
+            let mut phases: Vec<f32> = responses.iter().map(|&h| phase(h)).collect();
+            unwrap_phase(&mut phases);
+            group_delay(&phases, d_omega_f)
+        })
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_biquad,
@@ -563,6 +606,7 @@ criterion_group!(
     bench_mel,
     bench_mfcc,
     bench_resample,
-    bench_adaptive
+    bench_adaptive,
+    bench_freqz
 );
 criterion_main!(benches);

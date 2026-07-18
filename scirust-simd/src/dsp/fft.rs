@@ -20,7 +20,7 @@
 // FFT ou une meilleure fidélité, préférer un `FRAC` large. Aucune allocation
 // dans le cœur (`fft`/`ifft` opèrent en place) ; aucun `unsafe`.
 
-use core::ops::{Add, Mul, Sub};
+use core::ops::{Add, Div, Mul, Sub};
 
 use crate::fixed::{NumericScalar, RealScalar};
 
@@ -95,6 +95,27 @@ impl<T: NumericScalar> Mul for Complex<T> {
             self.re * r.re - self.im * r.im,
             self.re * r.im + self.im * r.re,
         )
+    }
+}
+
+impl<T: RealScalar> Complex<T> {
+    /// Réciproque complexe `1/z = z̄ / |z|²` (`z = 0` : saturation, cf.
+    /// [`RealScalar::recip`] — pas d'infini en virgule fixe).
+    #[inline]
+    pub fn recip(self) -> Self {
+        self.conj().scale(self.norm_sqr().recip())
+    }
+}
+
+/// Division complexe `a/b = a·b⁻¹` (cf. [`Complex::recip`]) — utilisée par
+/// [`super::freqz`] pour évaluer une fonction de transfert rationnelle
+/// `H(z) = N(z)/D(z)`.
+impl<T: RealScalar> Div for Complex<T> {
+    type Output = Self;
+    #[inline]
+    #[allow(clippy::suspicious_arithmetic_impl)] // a/b = a·b⁻¹, cf. Complex::recip.
+    fn div(self, r: Self) -> Self {
+        self * r.recip()
     }
 }
 

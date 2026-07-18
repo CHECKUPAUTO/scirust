@@ -47,6 +47,12 @@
 //   les coefficients ne sont **pas conçus a priori** mais **appris en ligne**
 //   à partir d'un signal d'erreur — identification de système, annulation
 //   d'écho, égalisation de canal.
+// * [`freqz`] — réponse en fréquence (`Biquad::frequency_response`,
+//   [`BiquadCascade::frequency_response`], [`Fir::frequency_response`]) :
+//   évaluation de `H(e^{jω})`, magnitude ([`freqz::magnitude`]/
+//   [`freqz::magnitude_db`]), phase ([`freqz::phase`]/[`freqz::unwrap_phase`])
+//   et délai de groupe ([`freqz::group_delay`]) — permet de **vérifier** ce
+//   que [`Biquad`]/[`BiquadCascade`]/[`Fir`] ont conçu.
 //
 // ## Pourquoi la virgule fixe pour le DSP ?
 //
@@ -60,6 +66,7 @@ pub mod biquad;
 pub mod fft;
 pub mod fftconv;
 pub mod fir;
+pub mod freqz;
 pub mod mel;
 pub mod mfcc;
 pub mod resample;
@@ -71,6 +78,7 @@ pub use biquad::{Biquad, BiquadCascade};
 pub use fft::{Complex, Plan, fft, ifft, irfft, rfft};
 pub use fftconv::fft_convolve;
 pub use fir::Fir;
+pub use freqz::{group_delay, magnitude, magnitude_db, phase, unwrap_phase};
 pub use mfcc::{Mfcc, dct2};
 pub use resample::resample;
 

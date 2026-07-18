@@ -15,12 +15,17 @@ use super::mfcc::{Mfcc, dct2, dct2_basis};
 use super::resample::design_prototype;
 use super::stft::{istft, magnitude_spectrogram, num_frames, power_spectrogram, stft};
 use super::window;
-use super::{Biquad, BiquadCascade, Fir, resample};
+use super::{
+    Biquad, BiquadCascade, Fir, group_delay, magnitude, magnitude_db, phase, resample, unwrap_phase,
+};
 use crate::fixed::conv2d::{Conv2dShape, conv2d};
 use crate::fixed::{Q8_8, Q8_24, Q16_16, Q32_32, RealScalar};
 
 // Petit pont scalaire ↔ f64 pour des tests génériques (comme en géométrie).
-trait Scalar: RealScalar {
+// `Div<Output = Self>` (implémenté sans condition par `Fixed<I, FRAC>` et les
+// flottants) : requis par `magnitude_db`/`group_delay`/`frequency_response_hz`
+// (division réelle non-puissance-de-deux, cf. module `freqz`).
+trait Scalar: RealScalar + core::ops::Div<Output = Self> {
     fn to_f64(self) -> f64;
     fn of(v: f64) -> Self;
     const TOL: f64;
@@ -628,6 +633,239 @@ fn fir_passthrough_and_determinism() {
     {
         assert_eq!(a[i].to_raw(), b[i].to_raw());
     }
+}
+
+// ------------------------------------------------------------------ //
+//  Réponse en fréquence (freqz) : magnitude, phase, délai de groupe    //
+// ------------------------------------------------------------------ //
+
+fn check_frequency_response_matches_gain_at<T: Scalar>() {
+    // Preuve croisée directe : `Biquad::frequency_response` (nouveau, module
+    // `freqz`) doit coïncider avec `gain_at` (référence indépendante déjà
+    // établie ci-dessus, utilisée par `biquad_frequency_response_all_scalars`)
+    // aux deux points réels du cercle unité (`ω=0` ↔ `z=1`, `ω=π` ↔ `z=−1`).
+    let (fs, f0, q) = (T::of(8.0), T::of(1.0), T::of(0.707));
+    for f in [
+        Biquad::<T>::lowpass(fs, f0, q),
+        Biquad::<T>::highpass(fs, f0, q),
+        Biquad::<T>::bandpass(fs, f0, q),
+    ]
+    {
+        let mag_dc = magnitude(f.frequency_response(T::zero())).to_f64();
+        let mag_ny = magnitude(f.frequency_response(T::pi())).to_f64();
+        assert!(
+            (mag_dc - gain_at(&f, 1.0)).abs() <= T::TOL * 4.0,
+            "DC : {mag_dc} vs {}",
+            gain_at(&f, 1.0)
+        );
+        assert!(
+            (mag_ny - gain_at(&f, -1.0)).abs() <= T::TOL * 4.0,
+            "Nyquist : {mag_ny} vs {}",
+            gain_at(&f, -1.0)
+        );
+    }
+}
+
+#[test]
+fn frequency_response_matches_gain_at_all_scalars() {
+    check_frequency_response_matches_gain_at::<f32>();
+    check_frequency_response_matches_gain_at::<f64>();
+    check_frequency_response_matches_gain_at::<Q16_16>();
+    check_frequency_response_matches_gain_at::<Q8_24>();
+}
+
+fn check_cascade_frequency_response_matches_cascade_gain_at<T: Scalar>() {
+    // Même preuve croisée que ci-dessus, contre `cascade_gain_at` (référence
+    // indépendante déjà établie pour les tests Butterworth/Chebyshev), sur
+    // toute une grille de pulsations plutôt que les deux seuls extrema.
+    let cascade = BiquadCascade::<T>::butterworth_lowpass(T::of(8.0), T::of(1.0), 4);
+    for &omega in &[0.0, 0.3, 0.7, 1.2, 2.0, core::f64::consts::PI]
+    {
+        let got = magnitude(cascade.frequency_response(T::of(omega))).to_f64();
+        let want = cascade_gain_at(&cascade, omega);
+        assert!(
+            (got - want).abs() <= T::TOL * 8.0,
+            "omega={omega}: {got} vs {want}"
+        );
+    }
+}
+
+#[test]
+fn cascade_frequency_response_matches_cascade_gain_at_all_scalars() {
+    check_cascade_frequency_response_matches_cascade_gain_at::<f32>();
+    check_cascade_frequency_response_matches_cascade_gain_at::<f64>();
+    check_cascade_frequency_response_matches_cascade_gain_at::<Q16_16>();
+    check_cascade_frequency_response_matches_cascade_gain_at::<Q8_24>();
+}
+
+fn check_frequency_response_hz_matches_normalized<T: Scalar>() {
+    let (fs, f0, q) = (T::of(8.0), T::of(1.0), T::of(0.707));
+    let f = Biquad::<T>::lowpass(fs, f0, q);
+    // ω = 2π·freq_hz/fs, ici freq_hz = 1 Hz, fs = 8 Hz ⟹ ω = π/4.
+    let omega = core::f64::consts::PI / 4.0;
+    let via_hz = f.frequency_response_hz(fs, T::of(1.0));
+    let via_omega = f.frequency_response(T::of(omega));
+    assert!((via_hz.re.to_f64() - via_omega.re.to_f64()).abs() <= T::TOL * 4.0);
+    assert!((via_hz.im.to_f64() - via_omega.im.to_f64()).abs() <= T::TOL * 4.0);
+}
+
+#[test]
+fn frequency_response_hz_matches_normalized_all_scalars() {
+    check_frequency_response_hz_matches_normalized::<f32>();
+    check_frequency_response_hz_matches_normalized::<f64>();
+    check_frequency_response_hz_matches_normalized::<Q16_16>();
+    check_frequency_response_hz_matches_normalized::<Q8_24>();
+}
+
+fn check_fir_frequency_response_matches_direct_evaluation<T: Scalar>() {
+    // Moyenne glissante 3 prises [1/3,1/3,1/3] : H(z) = (1+z⁻¹+z⁻²)/3.
+    // Continu (z=1) : gain 1 (préserve une entrée constante, somme des
+    // prises = 1). Nyquist (z=−1, z⁻¹=−1, z⁻²=1) : gain 1/3 (calcul à la
+    // main, cf. en-tête de fonction).
+    let third = T::of(1.0 / 3.0);
+    let f = Fir::<T, 3>::new([third, third, third]);
+    let mag_dc = magnitude(f.frequency_response(T::zero())).to_f64();
+    let mag_ny = magnitude(f.frequency_response(T::of(core::f64::consts::PI))).to_f64();
+    assert!((mag_dc - 1.0).abs() <= T::TOL * 4.0, "DC : {mag_dc}");
+    assert!(
+        (mag_ny - 1.0 / 3.0).abs() <= T::TOL * 4.0,
+        "Nyquist : {mag_ny}"
+    );
+}
+
+#[test]
+fn fir_frequency_response_matches_direct_evaluation_all_scalars() {
+    check_fir_frequency_response_matches_direct_evaluation::<f32>();
+    check_fir_frequency_response_matches_direct_evaluation::<f64>();
+    check_fir_frequency_response_matches_direct_evaluation::<Q16_16>();
+    check_fir_frequency_response_matches_direct_evaluation::<Q8_24>();
+}
+
+fn check_magnitude_db_known_values<T: Scalar>() {
+    assert!((magnitude_db(Complex::from_real(T::of(1.0))).to_f64()).abs() <= T::TOL * 4.0);
+    assert!((magnitude_db(Complex::from_real(T::of(10.0))).to_f64() - 20.0).abs() <= T::TOL * 20.0);
+    assert!(
+        (magnitude_db(Complex::from_real(T::of(0.1))).to_f64() - (-20.0)).abs() <= T::TOL * 20.0
+    );
+}
+
+#[test]
+fn magnitude_db_known_values_all_scalars() {
+    check_magnitude_db_known_values::<f32>();
+    check_magnitude_db_known_values::<f64>();
+    check_magnitude_db_known_values::<Q16_16>();
+    check_magnitude_db_known_values::<Q8_24>();
+}
+
+fn check_phase_known_values<T: Scalar>() {
+    let half_pi = core::f64::consts::FRAC_PI_2;
+    let pi = core::f64::consts::PI;
+    let cases = [
+        ((1.0, 0.0), 0.0),
+        ((0.0, 1.0), half_pi),
+        ((-1.0, 0.0), pi),
+        ((0.0, -1.0), -half_pi),
+    ];
+    for ((re, im), want) in cases
+    {
+        let got = phase(Complex::new(T::of(re), T::of(im))).to_f64();
+        assert!(
+            (got - want).abs() <= T::TOL * 4.0,
+            "re={re} im={im}: {got} vs {want}"
+        );
+    }
+}
+
+#[test]
+fn phase_known_values_all_scalars() {
+    check_phase_known_values::<f32>();
+    check_phase_known_values::<f64>();
+    check_phase_known_values::<Q16_16>();
+    check_phase_known_values::<Q8_24>();
+}
+
+fn check_unwrap_phase<T: Scalar>() {
+    // Phase vraie continûment croissante (pente 0,6 rad/pas, < π : chaque
+    // saut consécutif reste dans le domaine non ambigu de `unwrap_phase`),
+    // repliée manuellement dans `(−π, π]` (ce que produirait `phase` en
+    // pratique) — `unwrap_phase` doit exactement la reconstruire.
+    let n = 13;
+    let slope = 0.6;
+    let two_pi = 2.0 * core::f64::consts::PI;
+    let wrap = |x: f64| {
+        let mut w = (x + core::f64::consts::PI).rem_euclid(two_pi);
+        w -= core::f64::consts::PI;
+        w
+    };
+    let true_phase: Vec<f64> = (0..n).map(|i| slope * i as f64).collect();
+    let mut wrapped: Vec<T> = true_phase.iter().map(|&p| T::of(wrap(p))).collect();
+    unwrap_phase(&mut wrapped);
+    for i in 0..n
+    {
+        let got = wrapped[i].to_f64();
+        assert!(
+            (got - true_phase[i]).abs() <= T::TOL * 10.0,
+            "i={i}: {got} vs {}",
+            true_phase[i]
+        );
+    }
+}
+
+#[test]
+fn unwrap_phase_reconstructs_continuous_phase_all_scalars() {
+    check_unwrap_phase::<f32>();
+    check_unwrap_phase::<f64>();
+    check_unwrap_phase::<Q16_16>();
+    check_unwrap_phase::<Q8_24>();
+}
+
+fn check_fir_linear_phase_has_constant_group_delay<T: Scalar>() {
+    // Prises symétriques [1,2,3,2,1] : réponse d'amplitude réelle
+    // A(ω) = (2·cos ω + 1)² (calcul à la main, cf. en-tête de fonction) —
+    // un carré, donc **jamais négative** : la phase reste exactement
+    // linéaire (`φ(ω) = −2ω`, N=5 prises, délai = (N−1)/2 = 2) sur tout
+    // l'intervalle testé, sans le saut de π qu'un passage par un A(ω)
+    // négatif provoquerait ailleurs. Grille choisie pour éviter le zéro
+    // exact de A (ω = 2π/3).
+    let taps = [T::of(1.0), T::of(2.0), T::of(3.0), T::of(2.0), T::of(1.0)];
+    let f = Fir::<T, 5>::new(taps);
+    let n_points = 21;
+    let lo = 0.1;
+    let hi = core::f64::consts::PI - 0.1;
+    let d_omega = (hi - lo) / (n_points as f64 - 1.0);
+    let omegas: Vec<T> = (0..n_points)
+        .map(|i| T::of(lo + i as f64 * d_omega))
+        .collect();
+
+    let mut phases: Vec<T> = omegas
+        .iter()
+        .map(|&w| phase(f.frequency_response(w)))
+        .collect();
+    unwrap_phase(&mut phases);
+    let delays = group_delay(&phases, T::of(d_omega));
+
+    for (i, &delay) in delays.iter().enumerate()
+    {
+        let got = delay.to_f64();
+        assert!(
+            (got - 2.0).abs() <= T::TOL * 8.0,
+            "i={i}: délai de groupe {got} vs 2.0 attendu"
+        );
+    }
+}
+
+#[test]
+fn fir_linear_phase_has_constant_group_delay_all_scalars() {
+    check_fir_linear_phase_has_constant_group_delay::<f32>();
+    check_fir_linear_phase_has_constant_group_delay::<f64>();
+    check_fir_linear_phase_has_constant_group_delay::<Q16_16>();
+    check_fir_linear_phase_has_constant_group_delay::<Q8_24>();
+}
+
+#[test]
+#[should_panic(expected = "group_delay")]
+fn group_delay_requires_at_least_two_points() {
+    let _ = group_delay::<f64>(&[1.0], 0.1);
 }
 
 // ------------------------------------------------------------------ //
