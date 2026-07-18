@@ -6,6 +6,7 @@
 // vérifie les propriétés spectrales (gains au continu / à Nyquist), la réponse
 // impulsionnelle, l'accord virgule fixe ↔ flottant, et le déterminisme bit-à-bit.
 
+use super::adaptive::{Lms, Nlms, Rls};
 use super::biquad::butterworth_qs;
 use super::fft::{Complex, Plan, fft, ifft, irfft, rfft};
 use super::fftconv::fft_convolve;
@@ -15,7 +16,7 @@ use super::stft::{istft, magnitude_spectrogram, num_frames, power_spectrogram, s
 use super::window;
 use super::{Biquad, BiquadCascade, Fir, resample};
 use crate::fixed::conv2d::{Conv2dShape, conv2d};
-use crate::fixed::{Q8_8, Q8_24, Q16_16, RealScalar};
+use crate::fixed::{Q8_8, Q8_24, Q16_16, Q32_32, RealScalar};
 
 // Petit pont scalaire ↔ f64 pour des tests génériques (comme en géométrie).
 trait Scalar: RealScalar {
@@ -1676,4 +1677,313 @@ fn resample_rejects_zero_m() {
 fn resample_rejects_zero_half_taps() {
     let x = vec![Q16_16::zero(); 4];
     let _ = resample::resample(&x, 1, 1, 0);
+}
+
+// -------------------------------------------------------------------- //
+//  Filtres adaptatifs : Lms / Nlms / Rls                                //
+// -------------------------------------------------------------------- //
+//
+// Système à identifier, connu et fixe (référence indépendante en `f64`, pas
+// de code de la bibliothèque) : `d[n] = Σ TRUE_TAPS[k]·x[n−k]`, **sans
+// bruit** — le signal désiré est une fonction linéaire exacte de l'historique
+// d'entrée. Chaque filtre adaptatif, alimenté par un bruit d'excitation
+// persistant, doit donc converger vers `TRUE_TAPS` (pas seulement s'en
+// approcher à un plancher de bruit près).
+
+const TRUE_TAPS: [f64; 4] = [0.5, -0.3, 0.2, -0.1];
+
+fn lcg_noise(seed: &mut u64) -> f64 {
+    *seed = seed
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
+    let bits = (*seed >> 40) as u32;
+    (bits as f64 / (1u32 << 24) as f64) * 2.0 - 1.0
+}
+
+/// `d[n] = Σ TRUE_TAPS[k]·hist[k]`, `hist[0]` = échantillon le plus récent.
+fn true_fir_output(hist: &[f64; 4]) -> f64 {
+    TRUE_TAPS.iter().zip(hist).map(|(&h, &x)| h * x).sum()
+}
+
+fn push_hist(hist: &mut [f64; 4], x: f64) {
+    hist[3] = hist[2];
+    hist[2] = hist[1];
+    hist[1] = hist[0];
+    hist[0] = x;
+}
+
+fn check_lms_recovers_known_fir<T: Scalar>() {
+    let mut seed = 0xADAF_0001u64;
+    let mut hist = [0.0f64; 4];
+    let mut filt = Lms::<T, 4>::new(T::of(0.05));
+
+    for _ in 0..4000
+    {
+        let xf = lcg_noise(&mut seed);
+        push_hist(&mut hist, xf);
+        let df = true_fir_output(&hist);
+        filt.update(T::of(xf), T::of(df));
+    }
+
+    for (k, &w) in filt.weights().iter().enumerate()
+    {
+        assert!(
+            (w.to_f64() - TRUE_TAPS[k]).abs() < 0.05,
+            "Lms : poids {k} = {} attendu proche de {}",
+            w.to_f64(),
+            TRUE_TAPS[k]
+        );
+    }
+}
+
+#[test]
+fn lms_recovers_known_fir_all_scalars() {
+    check_lms_recovers_known_fir::<f32>();
+    check_lms_recovers_known_fir::<f64>();
+    check_lms_recovers_known_fir::<Q16_16>();
+}
+
+fn check_nlms_recovers_known_fir<T: Scalar + core::ops::Div<Output = T>>() {
+    let mut seed = 0xADAF_0002u64;
+    let mut hist = [0.0f64; 4];
+    let mut filt = Nlms::<T, 4>::new(T::of(0.5), T::of(1e-3));
+
+    for _ in 0..1500
+    {
+        let xf = lcg_noise(&mut seed);
+        push_hist(&mut hist, xf);
+        let df = true_fir_output(&hist);
+        filt.update(T::of(xf), T::of(df));
+    }
+
+    for (k, &w) in filt.weights().iter().enumerate()
+    {
+        assert!(
+            (w.to_f64() - TRUE_TAPS[k]).abs() < 0.03,
+            "Nlms : poids {k} = {} attendu proche de {}",
+            w.to_f64(),
+            TRUE_TAPS[k]
+        );
+    }
+}
+
+#[test]
+fn nlms_recovers_known_fir_all_scalars() {
+    check_nlms_recovers_known_fir::<f32>();
+    check_nlms_recovers_known_fir::<f64>();
+    check_nlms_recovers_known_fir::<Q16_16>();
+}
+
+fn check_rls_recovers_known_fir<T: Scalar + core::ops::Div<Output = T>>() {
+    let mut seed = 0xADAF_0003u64;
+    let mut hist = [0.0f64; 4];
+    let mut filt = Rls::<T, 4>::new(T::of(0.995), T::of(0.01));
+
+    for _ in 0..300
+    {
+        let xf = lcg_noise(&mut seed);
+        push_hist(&mut hist, xf);
+        let df = true_fir_output(&hist);
+        filt.update(T::of(xf), T::of(df));
+    }
+
+    for (k, &w) in filt.weights().iter().enumerate()
+    {
+        assert!(
+            (w.to_f64() - TRUE_TAPS[k]).abs() < 0.01,
+            "Rls : poids {k} = {} attendu proche de {}",
+            w.to_f64(),
+            TRUE_TAPS[k]
+        );
+    }
+}
+
+#[test]
+fn rls_recovers_known_fir_all_scalars() {
+    check_rls_recovers_known_fir::<f32>();
+    check_rls_recovers_known_fir::<f64>();
+    check_rls_recovers_known_fir::<Q16_16>();
+}
+
+#[test]
+fn rls_i64_storage() {
+    // NumericScalar (donc Lms/Nlms/Rls) est implémenté pour tout FixedStorage,
+    // pas seulement i32 : Q32_32 (stockage i64) doit fonctionner à l'identique.
+    let mut seed = 0xADAF_0004u64;
+    let mut hist = [0.0f64; 4];
+    let mut filt = Rls::<Q32_32, 4>::new(
+        Q32_32::try_from(0.995).unwrap(),
+        Q32_32::try_from(0.01).unwrap(),
+    );
+
+    for _ in 0..300
+    {
+        let xf = lcg_noise(&mut seed);
+        push_hist(&mut hist, xf);
+        let df = true_fir_output(&hist);
+        filt.update(Q32_32::try_from(xf).unwrap(), Q32_32::try_from(df).unwrap());
+    }
+
+    for (k, &w) in filt.weights().iter().enumerate()
+    {
+        assert!(
+            (Q32_32::to_f64(w) - TRUE_TAPS[k]).abs() < 0.01,
+            "Rls (i64) : poids {k} = {} attendu proche de {}",
+            Q32_32::to_f64(w),
+            TRUE_TAPS[k]
+        );
+    }
+}
+
+/// RLS converge en très peu d'échantillons (proche de la solution exacte des
+/// moindres carrés dès que l'excitation couvre l'espace des poids) alors que
+/// LMS/NLMS progressent par petits pas de gradient : sur la même séquence
+/// bruitée, sans bruit de mesure, l'erreur RLS doit être nettement plus
+/// faible après un nombre d'échantillons trop court pour LMS/NLMS.
+#[test]
+fn rls_converges_faster_than_lms_and_nlms_after_few_samples() {
+    let mut seed = 0xF00D_0001u64;
+    let mut hist = [0.0f64; 4];
+    let n_samples = 30;
+    let mut xs = Vec::with_capacity(n_samples);
+    let mut ds = Vec::with_capacity(n_samples);
+    for _ in 0..n_samples
+    {
+        let xf = lcg_noise(&mut seed);
+        push_hist(&mut hist, xf);
+        xs.push(xf);
+        ds.push(true_fir_output(&hist));
+    }
+
+    let mut lms = Lms::<f64, 4>::new(0.05);
+    let mut nlms = Nlms::<f64, 4>::new(0.5, 1e-3);
+    let mut rls = Rls::<f64, 4>::new(0.995, 0.01);
+    for i in 0..n_samples
+    {
+        lms.update(xs[i], ds[i]);
+        nlms.update(xs[i], ds[i]);
+        rls.update(xs[i], ds[i]);
+    }
+
+    let sq_err = |w: &[f64; 4]| -> f64 {
+        w.iter()
+            .zip(&TRUE_TAPS)
+            .map(|(a, b)| (a - b) * (a - b))
+            .sum()
+    };
+    let e_lms = sq_err(lms.weights());
+    let e_nlms = sq_err(nlms.weights());
+    let e_rls = sq_err(rls.weights());
+
+    assert!(
+        e_rls < e_lms,
+        "RLS ({e_rls}) devrait converger plus vite que LMS ({e_lms}) après {n_samples} échantillons"
+    );
+    assert!(
+        e_rls < e_nlms,
+        "RLS ({e_rls}) devrait converger plus vite que NLMS ({e_nlms}) après {n_samples} échantillons"
+    );
+}
+
+#[test]
+fn lms_zero_input_leaves_weights_at_zero() {
+    let mut filt = Lms::<Q16_16, 4>::new(Q16_16::try_from(0.1).unwrap());
+    for _ in 0..50
+    {
+        let (y, error) = filt.update(Q16_16::zero(), Q16_16::zero());
+        assert_eq!(y, Q16_16::zero());
+        assert_eq!(error, Q16_16::zero());
+    }
+    assert_eq!(filt.weights(), &[Q16_16::zero(); 4]);
+}
+
+#[test]
+fn nlms_zero_input_does_not_panic_and_leaves_weights_at_zero() {
+    // `energy + eps` reste strictement positif même à énergie nulle : pas de
+    // division par zéro, pas de NaN/saturation, poids inchangés.
+    let mut filt = Nlms::<Q16_16, 4>::new(
+        Q16_16::try_from(0.5).unwrap(),
+        Q16_16::try_from(1e-3).unwrap(),
+    );
+    for _ in 0..50
+    {
+        filt.update(Q16_16::zero(), Q16_16::zero());
+    }
+    assert_eq!(filt.weights(), &[Q16_16::zero(); 4]);
+}
+
+#[test]
+fn rls_zero_input_leaves_weights_and_covariance_unchanged() {
+    // `lambda = 1` (pas d'oubli) : sans excitation, le gain est nul et la
+    // covariance n'évolue pas (pas de « covariance windup »).
+    let lambda = Q16_16::one();
+    let delta = Q16_16::try_from(0.01).unwrap();
+    let mut filt = Rls::<Q16_16, 3>::new(lambda, delta);
+    let p0 = *filt.covariance();
+
+    for _ in 0..50
+    {
+        filt.update(Q16_16::zero(), Q16_16::zero());
+    }
+
+    assert_eq!(filt.weights(), &[Q16_16::zero(); 3]);
+    assert_eq!(*filt.covariance(), p0);
+}
+
+#[test]
+fn lms_reset_zeroes_weights_and_delay_line() {
+    let mut seed = 0x1234u64;
+    let mut hist = [0.0f64; 4];
+    let mut filt = Lms::<Q16_16, 4>::new(Q16_16::try_from(0.05).unwrap());
+    for _ in 0..200
+    {
+        let xf = lcg_noise(&mut seed);
+        push_hist(&mut hist, xf);
+        let df = true_fir_output(&hist);
+        filt.update(Q16_16::try_from(xf).unwrap(), Q16_16::try_from(df).unwrap());
+    }
+    assert_ne!(filt.weights(), &[Q16_16::zero(); 4]);
+
+    filt.reset();
+    assert_eq!(filt.weights(), &[Q16_16::zero(); 4]);
+    // Après reset, une entrée nulle doit reproduire l'état initial exact.
+    let (y, error) = filt.update(Q16_16::zero(), Q16_16::zero());
+    assert_eq!(y, Q16_16::zero());
+    assert_eq!(error, Q16_16::zero());
+}
+
+#[test]
+fn rls_reset_restores_initial_covariance() {
+    let delta = Q16_16::try_from(0.01).unwrap();
+    let mut seed = 0x5678u64;
+    let mut hist = [0.0f64; 4];
+    let mut filt = Rls::<Q16_16, 3>::new(Q16_16::try_from(0.99).unwrap(), delta);
+    let p0 = *filt.covariance();
+
+    for _ in 0..100
+    {
+        let xf = lcg_noise(&mut seed);
+        push_hist(&mut hist, xf);
+        let df = true_fir_output(&hist);
+        filt.update(Q16_16::try_from(xf).unwrap(), Q16_16::try_from(df).unwrap());
+    }
+    assert_ne!(*filt.covariance(), p0);
+
+    filt.reset();
+    assert_eq!(filt.weights(), &[Q16_16::zero(); 3]);
+    assert_eq!(*filt.covariance(), p0);
+}
+
+#[test]
+fn lms_single_tap_tracks_gain() {
+    // N=1 : un simple gain adaptatif doit converger vers TRUE_TAPS[0] quand
+    // le désiré est un multiple pur de l'entrée (pas d'historique impliqué).
+    let mut seed = 0x9ABCu64;
+    let mut filt = Lms::<f64, 1>::new(0.05);
+    for _ in 0..2000
+    {
+        let xf = lcg_noise(&mut seed);
+        filt.update(xf, 0.5 * xf);
+    }
+    assert!((filt.weights()[0] - 0.5).abs() < 0.02);
 }

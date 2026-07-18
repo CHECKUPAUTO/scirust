@@ -13,7 +13,9 @@ use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, 
 use scirust_simd::dsp::mel::MelFilterbank;
 use scirust_simd::dsp::stft::{power_spectrogram, stft};
 use scirust_simd::dsp::window;
-use scirust_simd::dsp::{Biquad, BiquadCascade, Complex, Fir, Plan, fft, fft_convolve, rfft};
+use scirust_simd::dsp::{
+    Biquad, BiquadCascade, Complex, Fir, Lms, Nlms, Plan, Rls, fft, fft_convolve, rfft,
+};
 use scirust_simd::fixed::Q16_16;
 
 const N: usize = 1 << 14;
@@ -389,6 +391,89 @@ fn bench_resample(c: &mut Criterion) {
     g.finish();
 }
 
+/// Filtres adaptatifs (LMS / NLMS / RLS), 8 poids, fixe vs `f32` : coût par
+/// échantillon — `O(N)` pour LMS/NLMS (`update` ne fait qu'un produit
+/// scalaire et une mise à jour de poids), `O(N²)` pour RLS (mise à jour de la
+/// covariance inverse `N×N`). `desired = x` (arbitraire, seul le débit
+/// compte ici — la convergence est validée dans les tests).
+fn bench_adaptive(c: &mut Criterion) {
+    const TAPS: usize = 8;
+    let sf = signal_f32();
+    let sx = signal_fixed(&sf);
+
+    let mut g = c.benchmark_group("adaptive_lms");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            let mut f = Lms::<Q16_16, TAPS>::new(Q16_16::try_from(0.01).unwrap());
+            for &x in &sx
+            {
+                black_box(f.update(x, x));
+            }
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| {
+            let mut f = Lms::<f32, TAPS>::new(0.01);
+            for &x in &sf
+            {
+                black_box(f.update(x, x));
+            }
+        })
+    });
+    g.finish();
+
+    let mut g = c.benchmark_group("adaptive_nlms");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            let mut f = Nlms::<Q16_16, TAPS>::new(
+                Q16_16::try_from(0.5).unwrap(),
+                Q16_16::try_from(1e-3).unwrap(),
+            );
+            for &x in &sx
+            {
+                black_box(f.update(x, x));
+            }
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| {
+            let mut f = Nlms::<f32, TAPS>::new(0.5, 1e-3);
+            for &x in &sf
+            {
+                black_box(f.update(x, x));
+            }
+        })
+    });
+    g.finish();
+
+    let mut g = c.benchmark_group("adaptive_rls");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            let mut f = Rls::<Q16_16, TAPS>::new(
+                Q16_16::try_from(0.995).unwrap(),
+                Q16_16::try_from(0.01).unwrap(),
+            );
+            for &x in &sx
+            {
+                black_box(f.update(x, x));
+            }
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| {
+            let mut f = Rls::<f32, TAPS>::new(0.995, 0.01);
+            for &x in &sf
+            {
+                black_box(f.update(x, x));
+            }
+        })
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_biquad,
@@ -402,6 +487,7 @@ criterion_group!(
     bench_kaiser,
     bench_stft,
     bench_mel,
-    bench_resample
+    bench_resample,
+    bench_adaptive
 );
 criterion_main!(benches);

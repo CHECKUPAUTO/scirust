@@ -35,6 +35,11 @@
 //   recouvrement-addition via `rfft`/`irfft` : `O(longueur·log(bloc))` contre
 //   `O(longueur·N)` en temps direct ([`Fir`]) pour un noyau de `N` prises —
 //   avantageux pour les noyaux longs.
+// * [`adaptive`] — filtres adaptatifs ([`adaptive::Lms`], [`adaptive::Nlms`],
+//   [`adaptive::Rls`]) : contrairement à [`Biquad`]/[`Fir`]/[`BiquadCascade`],
+//   les coefficients ne sont **pas conçus a priori** mais **appris en ligne**
+//   à partir d'un signal d'erreur — identification de système, annulation
+//   d'écho, égalisation de canal.
 //
 // ## Pourquoi la virgule fixe pour le DSP ?
 //
@@ -43,6 +48,7 @@
 // l'embarqué sans FPU. Les mêmes structures, instanciées sur `f32`, servent de
 // référence et de comparaison.
 
+pub mod adaptive;
 pub mod biquad;
 pub mod fft;
 pub mod fftconv;
@@ -52,6 +58,7 @@ pub mod resample;
 pub mod stft;
 pub mod window;
 
+pub use adaptive::{Lms, Nlms, Rls};
 pub use biquad::{Biquad, BiquadCascade};
 pub use fft::{Complex, Plan, fft, ifft, irfft, rfft};
 pub use fftconv::fft_convolve;
