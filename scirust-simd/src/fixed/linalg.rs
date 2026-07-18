@@ -34,6 +34,22 @@
 // déficient**, où `qr_solve` échoue (pivot nul) — la pseudo-inverse de
 // Moore-Penrose donne la solution de norme minimale au lieu d'abandonner.
 //
+// [`hessenberg`] et [`eigenvalues_general`] complètent [`jacobi_eigen`] pour
+// les matrices **non symétriques** : `jacobi_eigen`/`svd` supposent toutes
+// deux une matrice symétrique (ou `AᵀA`, toujours symétrique semi-définie
+// positive) — une matrice quelconque (jacobienne d'un système dynamique,
+// matrice de transition non réversible…) peut avoir des valeurs propres
+// **complexes conjuguées**, qu'aucune des deux ne peut représenter.
+// `eigenvalues_general` réduit d'abord `A` à la forme de Hessenberg
+// supérieure (similarité orthogonale, [`hessenberg`]), puis itère un
+// algorithme QR à décalage (décalage de Wilkinson, quelques itérations
+// « ad hoc » de secours toutes les 10 itérations sans progrès — technique
+// classique EISPACK/Numerical Recipes) avec déflation, jusqu'à isoler
+// chaque valeur propre (bloc `1×1`) ou paire complexe conjuguée (bloc `2×2`
+// final, résolu analytiquement par la formule quadratique sur trace/déterminant
+// — **aucune arithmétique complexe** n'est nécessaire, seul [`Eigenvalue`]
+// distingue les deux cas en sortie).
+//
 // `qr_solve` complète plutôt qu'il ne duplique Cholesky : résoudre les
 // moindres carrés via les équations normales (`cholesky_solve` sur `AᵀA`)
 // **double** l'exposant de conditionnement du problème (`cond(AᵀA) =
@@ -907,4 +923,386 @@ where
 
     let v = transpose(&vt, n, n);
     Some(matvec(&v, &d, n, n))
+}
+
+// ------------------------------------------------------------------ //
+//  Hessenberg + QR décalé — valeurs propres d'une matrice quelconque  //
+// ------------------------------------------------------------------ //
+
+/// Rotation de Givens `(c, s)` telle que `c² + s² = 1` et `−s·x + c·y = 0`
+/// (élimine `y`, `x` restant le pivot). Construite par **ratio**
+/// (`t = min(|x|,|y|) / max(|x|,|y|)`, borné dans `[−1, 1]`), jamais par
+/// `√(x² + y²)` directement : cette dernière voie **sous-déborde** en
+/// virgule fixe dès que `|x|`/`|y|` sont petits devant `1` — leur carré, lui,
+/// peut tomber sous la résolution du format (ex. `Q16.16`, résolution
+/// `1,5·10⁻⁵` : tout `x < √(1,5·10⁻⁵) ≈ 0,004` a un carré qui s'arrondit à
+/// zéro), corrompant silencieusement la rotation. Précaution nécessaire ici
+/// car [`eigenvalues_general`] applique des rotations à répétition sur des
+/// sous-diagonales qui **rétrécissent** à mesure que l'algorithme converge —
+/// contrairement à [`hessenberg`], qui n'opère qu'une fois sur les données
+/// d'entrée à leur échelle d'origine.
+fn givens<T>(x: T, y: T) -> Option<(T, T)>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    if y == T::ZERO
+    {
+        return Some((T::one(), T::ZERO));
+    }
+    if x == T::ZERO
+    {
+        return Some((T::ZERO, T::one()));
+    }
+    if y.abs() > x.abs()
+    {
+        let t = x.checked_div(y)?;
+        let u = T::one().wrapping_add(t.wrapping_mul(t)).sqrt();
+        let s = T::one().checked_div(u)?;
+        let c = s.wrapping_mul(t);
+        Some((c, s))
+    }
+    else
+    {
+        let t = y.checked_div(x)?;
+        let u = T::one().wrapping_add(t.wrapping_mul(t)).sqrt();
+        let c = T::one().checked_div(u)?;
+        let s = c.wrapping_mul(t);
+        Some((c, s))
+    }
+}
+
+/// Réduit `A` (`n × n` row-major, **quelconque** — pas nécessairement
+/// symétrique) à la forme de Hessenberg supérieure par similarité
+/// orthogonale : `H = Qᵀ·A·Q`, `H[i,j] = 0` pour `j < i − 1`. `H` a les mêmes
+/// valeurs propres que `A` (similarité), ce qui rend [`eigenvalues_general`]
+/// beaucoup moins coûteux : chaque étape QR décalée sur une matrice de
+/// Hessenberg est `O(n²)` au lieu de `O(n³)` pour une matrice dense.
+///
+/// Par réflexions de Householder, colonne par colonne, comme
+/// [`qr_decompose`] — mais appliquées **des deux côtés** (`H := Hₖ·A·Hₖ`)
+/// puisqu'il s'agit d'une similarité, pas d'une simple élimination.
+///
+/// `None` en cas de débordement virgule fixe pendant une réflexion (même
+/// caveat que [`qr_decompose`]). Panique si `a.len() != n·n`.
+#[must_use]
+pub fn hessenberg<T>(a: &[T], n: usize) -> Option<Vec<T>>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    assert_eq!(
+        a.len(),
+        n * n,
+        "hessenberg : A de longueur {} ≠ {n}×{n}",
+        a.len()
+    );
+    let mut h = a.to_vec();
+    if n < 3
+    {
+        return Some(h); // toute matrice 0×0/1×1/2×2 est déjà de Hessenberg.
+    }
+
+    for k in 0..n - 2
+    {
+        let len = n - k - 1;
+        let x: Vec<T> = (0..len).map(|i| h[(k + 1 + i) * n + k]).collect();
+        let norm_x = dot(&x, &x).sqrt();
+        if norm_x == T::ZERO
+        {
+            continue; // sous-colonne déjà nulle : réflexion = identité.
+        }
+        let alpha = if x[0] < T::ZERO
+        {
+            norm_x
+        }
+        else
+        {
+            T::ZERO - norm_x
+        };
+        let mut v = x;
+        v[0] = v[0] - alpha;
+        let vtv = dot(&v, &v);
+        if vtv == T::ZERO
+        {
+            continue; // x déjà aligné (bon signe) : réflexion = identité.
+        }
+
+        // Application à gauche : H[k+1.., ..] −= 2·v·(vᵀ·H[k+1.., ..])/vᵀv.
+        for j in 0..n
+        {
+            let col: Vec<T> = (0..len).map(|i| h[(k + 1 + i) * n + j]).collect();
+            let vtcol = dot(&v, &col);
+            let scale = vtcol.wrapping_add(vtcol).checked_div(vtv)?;
+            for i in 0..len
+            {
+                h[(k + 1 + i) * n + j] = col[i] - v[i].wrapping_mul(scale);
+            }
+        }
+        // Rangs k+2..n de la colonne k : nuls par construction analytique
+        // (mêmes précautions que qr_decompose contre le résidu d'arrondi).
+        for i in 1..len
+        {
+            h[(k + 1 + i) * n + k] = T::ZERO;
+        }
+
+        // Application à droite : H[.., k+1..] −= 2·(H[.., k+1..]·v)·vᵀ/vᵀv.
+        for i in 0..n
+        {
+            let row: Vec<T> = (0..len).map(|j| h[i * n + (k + 1 + j)]).collect();
+            let rowv = dot(&row, &v);
+            let scale = rowv.wrapping_add(rowv).checked_div(vtv)?;
+            for j in 0..len
+            {
+                h[i * n + (k + 1 + j)] = row[j] - v[j].wrapping_mul(scale);
+            }
+        }
+    }
+    Some(h)
+}
+
+/// Valeur propre d'une matrice non symétrique : réelle, ou l'une des deux
+/// composantes d'une paire complexe conjuguée (`re ± i·im`, `im` toujours
+/// stocké **positif** — la conjuguée a la même partie réelle et l'opposée de
+/// `im`). Renvoyée par [`eigenvalues_general`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Eigenvalue<T> {
+    /// Valeur propre réelle.
+    Real(T),
+    /// Une composante `(partie réelle, partie imaginaire > 0)` d'une paire
+    /// complexe conjuguée — la conjuguée `(re, −im)` est l'autre valeur
+    /// propre renvoyée pour ce même bloc `2×2`.
+    Complex(T, T),
+}
+
+/// Valeurs propres du bloc `2×2` `[[a, b], [c, d]]` par la formule quadratique
+/// sur trace/déterminant (`λ² − tr·λ + det = 0`) : réelles si le discriminant
+/// `(a−d)² + 4bc ≥ 0`, sinon la paire complexe conjuguée
+/// `tr/2 ± i·√(−discriminant)/2`. Aucune arithmétique complexe requise.
+fn eig2x2<T>(a: T, b: T, c: T, d: T) -> Option<(Eigenvalue<T>, Eigenvalue<T>)>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    let two = T::one().wrapping_add(T::one());
+    let tr = a.wrapping_add(d);
+    let diff = a - d;
+    let bc = b.wrapping_mul(c);
+    let four_bc = bc.wrapping_add(bc).wrapping_add(bc).wrapping_add(bc);
+    let disc = diff.wrapping_mul(diff).wrapping_add(four_bc);
+
+    if disc >= T::ZERO
+    {
+        let sq = disc.sqrt();
+        let e1 = tr.wrapping_add(sq).checked_div(two)?;
+        let e2 = (tr - sq).checked_div(two)?;
+        Some((Eigenvalue::Real(e1), Eigenvalue::Real(e2)))
+    }
+    else
+    {
+        let sq = (T::ZERO - disc).sqrt();
+        let re = tr.checked_div(two)?;
+        let im = sq.checked_div(two)?;
+        Some((
+            Eigenvalue::Complex(re, im),
+            Eigenvalue::Complex(re, T::ZERO - im),
+        ))
+    }
+}
+
+/// Une étape de l'algorithme QR décalé (Givens), appliquée « en place » au
+/// bloc actif `H[l..=hi, l..=hi]` d'une matrice de Hessenberg : `H_actif :=
+/// R·Q + décalage·I`, où `Q·R = H_actif − décalage·I` (`Q` produit de
+/// rotations de Givens [`givens`] éliminant chaque sous-diagonale de haut en
+/// bas — la structure de Hessenberg garantit qu'une seule rotation par
+/// colonne suffit). Préserve la forme de Hessenberg (théorème classique :
+/// `R·Q` est de Hessenberg si `Q·R` l'est).
+fn shifted_qr_step<T>(h: &mut [T], n: usize, l: usize, hi: usize, shift: T) -> Option<()>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    for i in l..=hi
+    {
+        h[i * n + i] = h[i * n + i] - shift;
+    }
+
+    let mut rotations = Vec::with_capacity(hi - l);
+    for i in l..hi
+    {
+        let x = h[i * n + i];
+        let y = h[(i + 1) * n + i];
+        let (c, s) = givens(x, y)?;
+        rotations.push((c, s));
+        for j in l..=hi
+        {
+            let t1 = h[i * n + j];
+            let t2 = h[(i + 1) * n + j];
+            h[i * n + j] = c.wrapping_mul(t1).wrapping_add(s.wrapping_mul(t2));
+            h[(i + 1) * n + j] = (T::ZERO - s)
+                .wrapping_mul(t1)
+                .wrapping_add(c.wrapping_mul(t2));
+        }
+    }
+    // Sous-diagonale de la fenêtre active : nulle par construction analytique
+    // (mêmes précautions que hessenberg/qr_decompose contre le résidu d'arrondi).
+    for i in l..hi
+    {
+        h[(i + 1) * n + i] = T::ZERO;
+    }
+
+    for (idx, i) in (l..hi).enumerate()
+    {
+        let (c, s) = rotations[idx];
+        for j in l..=hi
+        {
+            let t1 = h[j * n + i];
+            let t2 = h[j * n + (i + 1)];
+            h[j * n + i] = c.wrapping_mul(t1).wrapping_add(s.wrapping_mul(t2));
+            h[j * n + (i + 1)] = (T::ZERO - s)
+                .wrapping_mul(t1)
+                .wrapping_add(c.wrapping_mul(t2));
+        }
+    }
+
+    for i in l..=hi
+    {
+        h[i * n + i] = h[i * n + i].wrapping_add(shift);
+    }
+    Some(())
+}
+
+/// Valeurs propres d'une matrice **quelconque** `A` (`n × n` row-major, pas
+/// nécessairement symétrique) : réduction de Hessenberg ([`hessenberg`]) puis
+/// algorithme QR à décalage simple (Wilkinson) avec déflation, isolant
+/// chaque bloc `1×1` (valeur propre réelle) ou `2×2` final (paire complexe
+/// conjuguée résolue analytiquement, cf. en-tête de module) de bas en haut.
+///
+/// `tol` est le seuil (valeur absolue) en dessous duquel une sous-diagonale
+/// de Hessenberg est jugée négligeable — même convention que [`jacobi_eigen`].
+/// `max_iter` borne le nombre total d'étapes QR (garantit la terminaison) ;
+/// au-delà de 10 étapes sans déflation sur le bloc actif courant, un
+/// décalage « ad hoc » (`|H[hi,hi−1]| + |H[hi−1,hi−2]|`, technique classique
+/// EISPACK/Numerical Recipes) remplace le décalage de Wilkinson pour éviter
+/// toute stagnation cyclique (un bloc final `3×3` ou plus dont le sous-bloc
+/// `2×2` traînant a des valeurs propres complexes ne peut pas converger vers
+/// un bloc `2×2` plus petit via un unique décalage réel — le décalage
+/// « ad hoc » brise ce cycle en s'écartant délibérément de l'estimation de
+/// Wilkinson).
+///
+/// Renvoie les `n` valeurs propres ([`Eigenvalue`]), **non triées** (ordre de
+/// déflation, de bas en haut — comme [`jacobi_eigen`], `T: Ord` permet à
+/// l'appelant de les trier si besoin, en comparant par exemple les parties
+/// réelles). `None` en cas de débordement virgule fixe (cf. [`hessenberg`])
+/// ou si `max_iter` est atteint sans convergence complète. Panique si
+/// `a.len() != n·n`.
+#[must_use]
+pub fn eigenvalues_general<T>(
+    a: &[T],
+    n: usize,
+    tol: T,
+    max_iter: usize,
+) -> Option<Vec<Eigenvalue<T>>>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    assert_eq!(
+        a.len(),
+        n * n,
+        "eigenvalues_general : A de longueur {} ≠ {n}×{n}",
+        a.len()
+    );
+    if n == 0
+    {
+        return Some(Vec::new());
+    }
+
+    let mut h = hessenberg(a, n)?;
+    let mut eigenvalues = vec![Eigenvalue::Real(T::ZERO); n];
+
+    let mut nn = n;
+    let mut total_iters = 0usize;
+    let mut stall = 0usize;
+    while nn > 0
+    {
+        if nn == 1
+        {
+            eigenvalues[0] = Eigenvalue::Real(h[0]);
+            nn = 0;
+            continue;
+        }
+
+        let mut l = nn - 1;
+        while l > 0
+        {
+            if h[l * n + (l - 1)].abs() <= tol
+            {
+                h[l * n + (l - 1)] = T::ZERO;
+                break;
+            }
+            l -= 1;
+        }
+
+        if l == nn - 1
+        {
+            eigenvalues[nn - 1] = Eigenvalue::Real(h[(nn - 1) * n + (nn - 1)]);
+            nn -= 1;
+            stall = 0;
+        }
+        else if l == nn - 2
+        {
+            let (a_, b_, c_, d_) = (
+                h[l * n + l],
+                h[l * n + (nn - 1)],
+                h[(nn - 1) * n + l],
+                h[(nn - 1) * n + (nn - 1)],
+            );
+            let (e1, e2) = eig2x2(a_, b_, c_, d_)?;
+            eigenvalues[l] = e1;
+            eigenvalues[nn - 1] = e2;
+            nn -= 2;
+            stall = 0;
+        }
+        else
+        {
+            total_iters += 1;
+            if total_iters > max_iter
+            {
+                return None;
+            }
+            stall += 1;
+
+            let hi = nn - 1;
+            let shift = if stall % 11 == 10
+            {
+                // Décalage ad hoc de secours (cf. doc de fonction).
+                h[hi * n + (hi - 1)]
+                    .abs()
+                    .wrapping_add(h[(hi - 1) * n + (hi - 2)].abs())
+            }
+            else
+            {
+                let (a_, b_, c_, d_) = (
+                    h[(hi - 1) * n + (hi - 1)],
+                    h[(hi - 1) * n + hi],
+                    h[hi * n + (hi - 1)],
+                    h[hi * n + hi],
+                );
+                match eig2x2(a_, b_, c_, d_)
+                {
+                    Some((Eigenvalue::Real(e1), Eigenvalue::Real(e2))) =>
+                    {
+                        if (e1 - d_).abs() <= (e2 - d_).abs()
+                        {
+                            e1
+                        }
+                        else
+                        {
+                            e2
+                        }
+                    },
+                    _ => d_,
+                }
+            };
+            shifted_qr_step(&mut h, n, l, hi, shift)?;
+        }
+    }
+
+    Some(eigenvalues)
 }

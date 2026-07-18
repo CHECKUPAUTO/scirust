@@ -1420,6 +1420,335 @@ fn svd_dim_mismatch_panics() {
 }
 
 // ------------------------------------------------------------------ //
+//  Hessenberg + QR décalé (matrices quelconques, non symétriques)     //
+// ------------------------------------------------------------------ //
+
+/// Matrice quelconque `n×n` aléatoire (pas symétrisée, contrairement à
+/// `random_symmetric`) : coefficients modestes, évite les débordements de test.
+fn random_general(rng: &mut Lcg, n: usize) -> Vec<Q16_16> {
+    (0..n * n)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 12))
+        .collect()
+}
+
+fn eigenvalue_re_f64(e: linalg::Eigenvalue<Q16_16>) -> f64 {
+    match e
+    {
+        linalg::Eigenvalue::Real(x) => x.to_f64(),
+        linalg::Eigenvalue::Complex(re, _im) => re.to_f64(),
+    }
+}
+
+#[test]
+fn hessenberg_zero_below_first_subdiagonal() {
+    let mut rng = Lcg(0xEC33_0001);
+    for &n in &[1usize, 2, 3, 4, 5, 6]
+    {
+        let a = random_general(&mut rng, n);
+        let h = linalg::hessenberg(&a, n).expect("pas de débordement pour cette échelle");
+        for i in 0..n
+        {
+            for j in 0..n
+            {
+                if j + 1 < i
+                {
+                    assert_eq!(
+                        h[i * n + j],
+                        Q16_16::zero(),
+                        "n={n} i={i} j={j}: H[i,j] devrait être exactement nul (Hessenberg)"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn hessenberg_preserves_trace() {
+    let mut rng = Lcg(0xEC33_0002);
+    for &n in &[1usize, 2, 3, 4, 5]
+    {
+        let a = random_general(&mut rng, n);
+        let h = linalg::hessenberg(&a, n).expect("pas de débordement pour cette échelle");
+        let trace_a: f64 = (0..n).map(|i| a[i * n + i].to_f64()).sum();
+        let trace_h: f64 = (0..n).map(|i| h[i * n + i].to_f64()).sum();
+        let tol = ((n * n) as f64) * 32.0 / 65536.0;
+        assert!(
+            (trace_a - trace_h).abs() <= tol,
+            "n={n}: trace(A)={trace_a} vs trace(H)={trace_h}"
+        );
+    }
+}
+
+#[test]
+fn hessenberg_n_below_3_is_identity() {
+    // Toute matrice 0×0/1×1/2×2 est déjà de Hessenberg : réduction = copie.
+    let a2 = [q16(1.0), q16(2.0), q16(3.0), q16(4.0)];
+    assert_eq!(linalg::hessenberg(&a2, 2).unwrap(), a2.to_vec());
+    let a1 = [q16(5.0)];
+    assert_eq!(linalg::hessenberg(&a1, 1).unwrap(), a1.to_vec());
+    let a0: [Q16_16; 0] = [];
+    assert_eq!(linalg::hessenberg(&a0, 0).unwrap(), a0.to_vec());
+}
+
+#[test]
+#[should_panic(expected = "hessenberg")]
+fn hessenberg_dim_mismatch_panics() {
+    let a = vec![Q16_16::zero(); 5]; // annoncé 3×3 = 9 ≠ 5.
+    let _ = linalg::hessenberg(&a, 3);
+}
+
+#[test]
+fn eigenvalues_general_matches_jacobi_eigen_on_symmetric_matrices() {
+    // Sur une entrée symétrique, les deux algorithmes doivent s'accorder :
+    // preuve croisée indépendante de eigenvalues_general contre jacobi_eigen,
+    // déjà validé (reconstruction + orthonormalité).
+    let mut rng = Lcg(0xEC33_0003);
+    for &n in &[1usize, 2, 3, 4, 5]
+    {
+        let a = random_symmetric(&mut rng, n);
+        let (want, _, _) = linalg::jacobi_eigen(&a, n, q16(1e-4), 60).expect("pas de débordement");
+        let got = linalg::eigenvalues_general(&a, n, q16(1e-4), 200)
+            .expect("pas de débordement / convergence");
+
+        let mut want_sorted: Vec<f64> = want.iter().map(|w| w.to_f64()).collect();
+        let mut got_sorted: Vec<f64> = got.into_iter().map(eigenvalue_re_f64).collect();
+        want_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        got_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        let tol = (n as f64) * 128.0 / 65536.0;
+        for (w, g) in want_sorted.iter().zip(&got_sorted)
+        {
+            assert!(
+                (w - g).abs() <= tol,
+                "n={n}: valeurs propres non symétrique {got_sorted:?} vs Jacobi {want_sorted:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn eigenvalues_general_upper_triangular_gives_diagonal_directly() {
+    // Triangulaire supérieure : sous-diagonale de Hessenberg déjà nulle sur
+    // toute la matrice — chaque valeur propre se déflate immédiatement
+    // (bloc 1×1), sans aucune itération QR (teste la recherche de déflation
+    // seule, indépendamment de shifted_qr_step).
+    let n = 4;
+    #[rustfmt::skip]
+    let a = [
+        q16(1.0), q16(2.0), q16(3.0), q16(4.0),
+        q16(0.0), q16(5.0), q16(6.0), q16(7.0),
+        q16(0.0), q16(0.0), q16(8.0), q16(9.0),
+        q16(0.0), q16(0.0), q16(0.0), q16(10.0),
+    ];
+    let got = linalg::eigenvalues_general(&a, n, q16(1e-4), 50).expect("triangulaire : direct");
+    let mut got_sorted: Vec<f64> = got.into_iter().map(eigenvalue_re_f64).collect();
+    got_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    assert_eq!(got_sorted, vec![1.0, 5.0, 8.0, 10.0]);
+}
+
+#[test]
+fn eigenvalues_general_companion_matrix_known_real_roots() {
+    // Matrice compagnon du polynôme (x−1)(x−2)(x−3) = x³ − 6x² + 11x − 6 :
+    // ses valeurs propres sont exactement les racines {1, 2, 3}.
+    let n = 3;
+    #[rustfmt::skip]
+    let a = [
+        q16(0.0), q16(0.0), q16(6.0),
+        q16(1.0), q16(0.0), q16(-11.0),
+        q16(0.0), q16(1.0), q16(6.0),
+    ];
+    let got = linalg::eigenvalues_general(&a, n, q16(1e-4), 200).expect("compagnon : converge");
+    let mut got_sorted: Vec<f64> = got.into_iter().map(eigenvalue_re_f64).collect();
+    got_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let tol = 5e-3;
+    for (g, want) in got_sorted.iter().zip(&[1.0, 2.0, 3.0])
+    {
+        assert!((g - want).abs() <= tol, "racines {got_sorted:?} vs [1,2,3]");
+    }
+}
+
+#[test]
+fn eigenvalues_general_rotation_matrix_gives_complex_conjugate_pair() {
+    // R(θ) = [[cos θ, −sin θ], [sin θ, cos θ]] : valeurs propres cos θ ± i·sin θ.
+    let (cos_t, sin_t) = (0.5, 3f64.sqrt() / 2.0); // θ = π/3.
+    let a = [q16(cos_t), q16(-sin_t), q16(sin_t), q16(cos_t)];
+    let got = linalg::eigenvalues_general(&a, 2, q16(1e-4), 50).expect("2×2 : direct");
+    let tol = 5e-3;
+    for e in got
+    {
+        match e
+        {
+            linalg::Eigenvalue::Complex(re, im) =>
+            {
+                assert!((re.to_f64() - cos_t).abs() <= tol, "re={}", re.to_f64());
+                assert!(
+                    (im.to_f64().abs() - sin_t).abs() <= tol,
+                    "im={}",
+                    im.to_f64()
+                );
+            },
+            linalg::Eigenvalue::Real(x) =>
+            {
+                panic!(
+                    "rotation θ=π/3 : valeur propre réelle inattendue {}",
+                    x.to_f64()
+                )
+            },
+        }
+    }
+}
+
+#[test]
+fn eigenvalues_general_block_diagonal_two_rotations_no_iteration_needed() {
+    // Bloc-diagonale de deux rotations 2×2 : couplage inter-blocs nul dès le
+    // départ, donc chaque bloc se déflate directement (aucune itération QR).
+    let n = 4;
+    let (c1, s1) = (0.5, 3f64.sqrt() / 2.0); // θ₁ = π/3.
+    let (c2, s2) = (0.0, 1.0); // θ₂ = π/2.
+    #[rustfmt::skip]
+    let a = [
+        q16(c1), q16(-s1), q16(0.0), q16(0.0),
+        q16(s1), q16(c1),  q16(0.0), q16(0.0),
+        q16(0.0), q16(0.0), q16(c2), q16(-s2),
+        q16(0.0), q16(0.0), q16(s2), q16(c2),
+    ];
+    let got = linalg::eigenvalues_general(&a, n, q16(1e-4), 50).expect("bloc-diagonale : direct");
+    let mut pairs: Vec<(f64, f64)> = got
+        .into_iter()
+        .map(|e| match e
+        {
+            linalg::Eigenvalue::Complex(re, im) => (re.to_f64(), im.to_f64().abs()),
+            linalg::Eigenvalue::Real(x) =>
+            {
+                panic!("bloc rotation : réelle inattendue {}", x.to_f64())
+            },
+        })
+        .collect();
+    pairs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    let tol = 5e-3;
+    let want = {
+        let mut w = vec![(c1, s1), (c1, s1), (c2, s2), (c2, s2)];
+        w.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        w
+    };
+    for ((re, im), (wre, wim)) in pairs.iter().zip(&want)
+    {
+        assert!(
+            (re - wre).abs() <= tol && (im - wim).abs() <= tol,
+            "{pairs:?} vs {want:?}"
+        );
+    }
+}
+
+#[test]
+fn eigenvalues_general_preserves_trace_on_random_matrices() {
+    // Somme des parties réelles des n valeurs propres renvoyées = trace(A)
+    // (invariant valable que les valeurs propres soient réelles ou en paires
+    // complexes conjuguées, cf. doc de fonction) — vérifie les cas génériques
+    // nécessitant plusieurs itérations QR, pour lesquels aucune racine
+    // fermée n'est disponible.
+    let mut rng = Lcg(0xEC33_0004);
+    for &n in &[2usize, 3, 4, 5, 6]
+    {
+        let a = random_general(&mut rng, n);
+        let got = linalg::eigenvalues_general(&a, n, q16(1e-4), 300)
+            .expect("pas de débordement / convergence");
+        let sum_re: f64 = got.into_iter().map(eigenvalue_re_f64).sum();
+        let trace_a: f64 = (0..n).map(|i| a[i * n + i].to_f64()).sum();
+        // Tolérance proportionnelle à l'échelle réelle des données (l'erreur
+        // absolue accumulée sur plusieurs itérations QR dépend de l'échelle
+        // des coefficients, pas seulement de `n`) plus un plancher absolu.
+        let max_abs: f64 = a.iter().map(|x| x.to_f64().abs()).fold(0.0, f64::max);
+        let tol = (n as f64) * 1024.0 / 65536.0 + max_abs * (n as f64) * 0.1;
+        assert!(
+            (sum_re - trace_a).abs() <= tol,
+            "n={n}: Σ Re(λ) = {sum_re} vs trace(A) = {trace_a}"
+        );
+    }
+}
+
+#[test]
+fn eigenvalues_general_i64_storage() {
+    // Même exemple (triangulaire connue) que les tests ci-dessus, stockage
+    // i64 (Q32_32) : aucune transcendante requise, généralisable sans
+    // réécriture (cf. jacobi_eigen/svd).
+    let a = [3i64, 0, 0, 7].map(Q32_32::from);
+    let got = linalg::eigenvalues_general(&a, 2, Q32_32::zero(), 20).expect("diagonale");
+    let mut got_sorted: Vec<i64> = got
+        .into_iter()
+        .map(|e| match e
+        {
+            linalg::Eigenvalue::Real(x) => x.to_f64() as i64,
+            linalg::Eigenvalue::Complex(re, _) => re.to_f64() as i64,
+        })
+        .collect();
+    got_sorted.sort_unstable();
+    assert_eq!(got_sorted, vec![3, 7]);
+}
+
+#[test]
+fn eigenvalues_general_n0_and_n1_trivial() {
+    let a0: [Q16_16; 0] = [];
+    assert_eq!(
+        linalg::eigenvalues_general(&a0, 0, q16(1e-4), 10).unwrap(),
+        Vec::new()
+    );
+    let a1 = [q16(5.0)];
+    assert_eq!(
+        linalg::eigenvalues_general(&a1, 1, q16(1e-4), 10).unwrap(),
+        vec![linalg::Eigenvalue::Real(q16(5.0))]
+    );
+}
+
+#[test]
+#[should_panic(expected = "eigenvalues_general")]
+fn eigenvalues_general_dim_mismatch_panics() {
+    let a = vec![Q16_16::zero(); 5]; // annoncé 3×3 = 9 ≠ 5.
+    let _ = linalg::eigenvalues_general(&a, 3, q16(1e-4), 10);
+}
+
+#[test]
+fn eigenvalues_general_converges_on_many_random_matrices() {
+    // Robustesse du décalage de Wilkinson + décalage ad hoc de secours :
+    // aucune non-convergence/débordement sur un large échantillon de
+    // matrices aléatoires (pas seulement les cas structurés ci-dessus).
+    for seed in 0..200u64
+    {
+        let mut rng = Lcg(0xABCD_0000u64.wrapping_add(seed));
+        for &n in &[3usize, 4, 5, 6, 7, 8]
+        {
+            let a = random_general(&mut rng, n);
+            let got = linalg::eigenvalues_general(&a, n, q16(1e-4), 500);
+            assert!(
+                got.is_some(),
+                "seed={seed} n={n} : non-convergence ou débordement"
+            );
+        }
+    }
+}
+
+#[test]
+fn eigenvalues_general_converges_at_larger_scale() {
+    // À `n` plus grand, le nombre d'itérations QR nécessaires croît avec le
+    // nombre de valeurs propres à isoler une à une : `max_iter` doit croître
+    // en proportion (convention classique ~30·n, ici généreusement 100·n).
+    for seed in 0..5u64
+    {
+        let mut rng = Lcg(0xF16E_0000u64.wrapping_add(seed));
+        for &n in &[16usize, 32, 48]
+        {
+            let a = random_general(&mut rng, n);
+            let got = linalg::eigenvalues_general(&a, n, q16(1e-4), 100 * n);
+            assert!(
+                got.is_some(),
+                "seed={seed} n={n} : non-convergence ou débordement"
+            );
+        }
+    }
+}
+
+// ------------------------------------------------------------------ //
 //  Activations quantifiées                                            //
 // ------------------------------------------------------------------ //
 

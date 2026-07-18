@@ -75,8 +75,11 @@
 // * [`linalg`] — GEMM déterministe (`matmul`, `matmul_bt`, `matvec`,
 //   `transpose`) et décompositions directes (`cholesky`, `lu_decompose`/
 //   `lu_solve`, `determinant`, `qr_decompose`/`qr_solve`) pour résoudre
-//   `A·x = b` ou les moindres carrés, plus la décomposition spectrale
-//   itérative (`jacobi_eigen`) des matrices symétriques.
+//   `A·x = b` ou les moindres carrés, la décomposition spectrale itérative
+//   (`jacobi_eigen`, `svd`/`svd_solve`) des matrices symétriques, et les
+//   valeurs propres d'une matrice **quelconque** (`hessenberg` +
+//   `eigenvalues_general`, réelles ou complexes conjuguées via
+//   [`linalg::Eigenvalue`]).
 // * [`activation`] — activations quantifiées (`relu`, `relu6`, `hardswish`…).
 // * [`layer`] — couche linéaire quantifiée [`layer::Linear`] (`W·x + b`, +
 //   activation), avec inférence par lot (`forward_batch` et variantes).

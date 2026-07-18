@@ -271,6 +271,36 @@ fn bench_svd(c: &mut Criterion) {
     g.finish();
 }
 
+/// Réduction de Hessenberg (Householder, appliquée des deux côtés) : une
+/// seule fois par matrice, contrairement à `eigenvalues_general` qui itère
+/// dessus ensuite — isole le coût de la seule réduction.
+fn bench_hessenberg(c: &mut Criterion) {
+    let a = fixed_data(0x12, N * N);
+
+    let mut g = c.benchmark_group("hessenberg_48");
+    g.throughput(Throughput::Elements((N * N * N) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter(|| flin::hessenberg(black_box(&a), N))
+    });
+    g.finish();
+}
+
+/// Valeurs propres d'une matrice **quelconque** (non symétrique) :
+/// Hessenberg puis QR décalé avec déflation — à comparer à `jacobi_eigen`
+/// (réservé aux matrices symétriques, sans valeurs propres complexes).
+fn bench_eigenvalues_general(c: &mut Criterion) {
+    let a = fixed_data(0x13, N * N);
+
+    let mut g = c.benchmark_group("eigenvalues_general_48");
+    g.throughput(Throughput::Elements((N * N * N) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter(|| {
+            flin::eigenvalues_general(black_box(&a), N, Q16_16::try_from(1e-4).unwrap(), 100 * N)
+        })
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_matmul,
@@ -281,6 +311,8 @@ criterion_group!(
     bench_matmul_bt,
     bench_linear_batch,
     bench_jacobi_eigen,
-    bench_svd
+    bench_svd,
+    bench_hessenberg,
+    bench_eigenvalues_general
 );
 criterion_main!(benches);
