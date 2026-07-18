@@ -53,9 +53,10 @@
 //!   its primitive root.
 //! - [`poly`] — the univariate polynomial ring **`GF(p)[x]`** over any prime
 //!   field: long division, monic (extended) GCD, modular exponentiation,
-//!   Lagrange interpolation, the formal derivative, and an exact **Rabin
-//!   irreducibility test** — the field-generic companion to `gf2` (the `p = 2`
-//!   case), composing `numtheory`.
+//!   Lagrange interpolation, the formal derivative, an exact **Rabin
+//!   irreducibility test**, and full **factorization into irreducibles**
+//!   (deterministic Cantor–Zassenhaus) — the field-generic companion to `gf2`
+//!   (the `p = 2` case), composing `numtheory`.
 //! - [`sbox`] — exact **S-box analysis**: difference distribution table and
 //!   differential uniformity, linear approximation table and nonlinearity (via
 //!   the Walsh transform), algebraic degree, and the strict-avalanche matrix —
@@ -173,6 +174,8 @@
 //! let (q, r) = x2p1.divmod(&xp1);
 //! assert_eq!(q, xp1);
 //! assert!(r.is_zero());
+//! // Factorization: x²+1 = (x+1)² over GF(2) (one factor, multiplicity 2).
+//! assert_eq!(x2p1.factor(), vec![(xp1, 2)]);
 //! ```
 //!
 //! ```

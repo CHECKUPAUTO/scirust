@@ -1,8 +1,10 @@
 //! Exact univariate polynomials over a **prime field `GF(p)`** — the polynomial
 //! ring `GF(p)[x]` — with everything its Euclidean-domain structure gives you:
 //! long division, (extended) GCD, modular exponentiation `f^e mod g`, Lagrange
-//! interpolation, the formal derivative, and an exact **irreducibility test**
-//! (Rabin's algorithm).
+//! interpolation, the formal derivative, an exact **irreducibility test**
+//! (Rabin's algorithm), and full **factorization into irreducibles**
+//! (the Cantor–Zassenhaus pipeline: square-free → distinct-degree →
+//! equal-degree), made deterministic by seeding its splitter from the input.
 //!
 //! Coefficients are reduced residues in `[0, p)`, stored low-degree-first with
 //! no trailing zeros, so the representation is canonical and derived `==` is
@@ -388,6 +390,236 @@ impl Poly {
         // and x^(p^n) ≡ x (mod f).
         frobenius_pow(&f, n as u32) == x.rem(&f)
     }
+
+    /// The `p`-th root of a polynomial that is a perfect `p`-th power.
+    ///
+    /// Over the prime field `GF(p)` the Frobenius `c ↦ c^p` fixes every scalar,
+    /// so if `self = h(x)^p` then `h` has coefficient `self[j·p]` at degree `j`.
+    /// Only meaningful when `self` really is a `p`-th power (every nonzero term
+    /// has degree divisible by `p`).
+    fn pth_root(&self) -> Poly {
+        let p = self.p as usize;
+        let d = self.degree().unwrap_or(0);
+        let coeffs: Vec<u64> = (0..=d / p).map(|j| self.coeff(j * p)).collect();
+        Poly::raw(self.p, coeffs)
+    }
+
+    /// **Square-free factorization**: write the monic associate of `self` as a
+    /// product `∏ gᵢ^i` of pairwise-coprime square-free factors `gᵢ` and return
+    /// the `(gᵢ, i)` with `deg gᵢ ≥ 1`. Deterministic and exact in every
+    /// characteristic (the `p`-power branch is handled by a `p`-th root).
+    ///
+    /// Panics on the zero polynomial.
+    pub fn squarefree_factorization(&self) -> Vec<(Poly, usize)> {
+        assert!(!self.is_zero(), "zero polynomial has no square-free form");
+        let mut out = Vec::new();
+        sff_into(&self.make_monic(), 1, &mut out);
+        out.sort_by(|a, b| a.0.coeffs().cmp(b.0.coeffs()));
+        out
+    }
+
+    /// **Distinct-degree factorization** of a square-free monic polynomial:
+    /// returns `(g_d, d)` where `g_d` is the product of all monic irreducible
+    /// factors of degree `d`. `self` must be square-free (see
+    /// [`Poly::squarefree_factorization`]).
+    pub fn distinct_degree_factorization(&self) -> Vec<(Poly, usize)> {
+        let p = self.p;
+        let x = Poly::x(p);
+        let mut out = Vec::new();
+        let mut fstar = self.make_monic();
+        let mut xpd = x.clone(); // x^(p^d) mod fstar, starting at d = 0
+        let mut d = 1usize;
+        while fstar.degree().is_some_and(|deg| deg >= 2 * d)
+        {
+            xpd = xpd.pow_mod(p, &fstar); // raise to the p-th power → x^(p^d)
+            let g = fstar.gcd(&xpd.sub(&x));
+            if g.degree().is_some_and(|dg| dg > 0)
+            {
+                out.push((g.make_monic(), d));
+                fstar = fstar.div(&g);
+                xpd = xpd.rem(&fstar);
+            }
+            d += 1;
+        }
+        if let Some(deg) = fstar.degree()
+        {
+            if deg > 0
+            {
+                out.push((fstar.clone(), deg));
+            }
+        }
+        out
+    }
+
+    /// Factor `self` into **monic irreducible** factors with multiplicities:
+    /// returns `(qᵢ, eᵢ)` with `self = lc · ∏ qᵢ^eᵢ` where `lc` is the leading
+    /// coefficient (a field unit). The full Cantor–Zassenhaus pipeline
+    /// (square-free → distinct-degree → equal-degree), made **deterministic** by
+    /// seeding the equal-degree splitter from the input, so the factorization is
+    /// a reproducible pure function. Factors are returned in a canonical order.
+    ///
+    /// Panics on the zero polynomial. A unit (degree 0) returns an empty list.
+    pub fn factor(&self) -> Vec<(Poly, usize)> {
+        assert!(!self.is_zero(), "cannot factor the zero polynomial");
+        let mono = self.make_monic();
+        let mut result: Vec<(Poly, usize)> = Vec::new();
+        for (sqfree, mult) in mono.squarefree_factorization()
+        {
+            for (prod_d, d) in sqfree.distinct_degree_factorization()
+            {
+                for irr in equal_degree_factors(&prod_d, d)
+                {
+                    result.push((irr, mult));
+                }
+            }
+        }
+        result.sort_by(|a, b| {
+            a.0.coeffs()
+                .len()
+                .cmp(&b.0.coeffs().len())
+                .then_with(|| a.0.coeffs().cmp(b.0.coeffs()))
+                .then_with(|| a.1.cmp(&b.1))
+        });
+        result
+    }
+}
+
+/// One level of the square-free factorization recurrence (Yun's algorithm,
+/// characteristic-`p` variant): appends `(gᵢ, i·mult)` for the square-free
+/// layers of `f`, recursing into the `p`-th root when a `p`-power remains.
+fn sff_into(f: &Poly, mult: usize, out: &mut Vec<(Poly, usize)>) {
+    // A unit (or zero) has no square-free factors; also stops the p-power
+    // recursion, whose `p`-th root eventually reaches a constant.
+    if f.degree().unwrap_or(0) == 0
+    {
+        return;
+    }
+    let p = f.modulus() as usize;
+    let deriv = f.derivative();
+    if !deriv.is_zero()
+    {
+        let mut c = f.gcd(&deriv);
+        let mut w = f.div(&c);
+        let mut i = 1usize;
+        while w.degree().is_some_and(|d| d > 0)
+        {
+            let y = w.gcd(&c);
+            let z = w.div(&y);
+            if z.degree().is_some_and(|d| d > 0)
+            {
+                out.push((z.make_monic(), i * mult));
+            }
+            w = y.clone();
+            c = c.div(&y);
+            i += 1;
+        }
+        if c.degree().is_some_and(|d| d > 0)
+        {
+            sff_into(&c.pth_root(), mult * p, out);
+        }
+    }
+    else
+    {
+        // f' = 0 ⇒ f is a p-th power; recurse on its p-th root.
+        sff_into(&f.pth_root(), mult * p, out);
+    }
+}
+
+/// Split a product of `r` monic irreducibles all of degree `d` into those `r`
+/// factors (the equal-degree step of Cantor–Zassenhaus). Deterministic: the
+/// splitter stream is seeded from `g`.
+fn equal_degree_factors(g: &Poly, d: usize) -> Vec<Poly> {
+    let n = g.degree().expect("nonzero input");
+    if n == d
+    {
+        return vec![g.make_monic()];
+    }
+    let mut seed = seed_from(g);
+    // r/2 successful splits suffice; the loop bound is a generous backstop that
+    // a correct Cantor–Zassenhaus run never approaches.
+    for _ in 0..1000 * (n + 1)
+    {
+        let b = edf_random_poly(g, &mut seed);
+        let splitter = cz_splitter(&b, g, d);
+        let factor = g.gcd(&splitter);
+        let df = factor.degree().unwrap_or(0);
+        if df > 0 && df < n
+        {
+            let mut left = equal_degree_factors(&factor, d);
+            left.extend(equal_degree_factors(&g.div(&factor), d));
+            return left;
+        }
+    }
+    panic!("equal-degree splitting failed to converge");
+}
+
+/// The Cantor–Zassenhaus splitting polynomial for candidate `b` modulo `g`
+/// (a product of degree-`d` irreducibles). For odd `p` this is
+/// `b^((p^d−1)/2) − 1`; for `p = 2` it is the trace map
+/// `b + b² + b⁴ + … + b^(2^(d−1))`.
+fn cz_splitter(b: &Poly, g: &Poly, d: usize) -> Poly {
+    let p = g.modulus();
+    if p == 2
+    {
+        let mut t = Poly::zero(p);
+        let mut cur = b.rem(g);
+        for _ in 0..d
+        {
+            t = t.add(&cur).rem(g);
+            cur = cur.mul(&cur).rem(g);
+        }
+        t
+    }
+    else
+    {
+        // b^((p^d−1)/2) = ∏_{i=0}^{d−1} Frobⁱ(b^((p−1)/2)), each exponent ≤ p,
+        // so no exponent ever exceeds `u64` even when p^d does.
+        let c0 = b.pow_mod((p - 1) / 2, g);
+        let mut acc = c0.clone();
+        let mut cur = c0;
+        for _ in 1..d
+        {
+            cur = cur.pow_mod(p, g);
+            acc = acc.mul(&cur).rem(g);
+        }
+        acc.sub(&Poly::one(p))
+    }
+}
+
+/// A deterministic pseudo-random non-constant polynomial of degree `< deg(g)`.
+fn edf_random_poly(g: &Poly, seed: &mut u64) -> Poly {
+    let p = g.modulus();
+    let n = g.degree().expect("nonzero input");
+    loop
+    {
+        let coeffs: Vec<u64> = (0..n)
+            .map(|_| {
+                *seed ^= *seed << 13;
+                *seed ^= *seed >> 7;
+                *seed ^= *seed << 17;
+                *seed % p
+            })
+            .collect();
+        let b = Poly::raw(p, coeffs);
+        if b.degree().is_some_and(|d| d >= 1)
+        {
+            return b;
+        }
+    }
+}
+
+/// A deterministic seed derived from a polynomial's coefficients, so that
+/// factorization is a reproducible pure function of its input (FNV-style mix).
+fn seed_from(g: &Poly) -> u64 {
+    let mut s = 0x9e37_79b9_7f4a_7c15u64;
+    for (i, &c) in g.coeffs().iter().enumerate()
+    {
+        s = s
+            .wrapping_mul(0x1_0000_0100_01b3)
+            .wrapping_add(c ^ (i as u64));
+        s ^= s >> 29;
+    }
+    s | 1
 }
 
 /// `x^(p^k) mod f`, built by applying the Frobenius map (raising to the `p`-th
@@ -648,6 +880,127 @@ mod tests {
         // irreducible — that is exactly why GF(2)[x]/(m) is the field GF(2^8).
         let m = Poly::from_coeffs(2, &[1, 1, 0, 1, 1, 0, 0, 0, 1]);
         assert!(m.is_irreducible());
+    }
+
+    /// Reassemble `lc · ∏ qᵢ^eᵢ` from a factorization, to check it against the
+    /// original — an independent verification of `factor`.
+    fn product_of(p: u64, lc: u64, factors: &[(Poly, usize)]) -> Poly {
+        let mut acc = Poly::constant(p, lc);
+        for (q, e) in factors
+        {
+            for _ in 0..*e
+            {
+                acc = acc.mul(q);
+            }
+        }
+        acc
+    }
+
+    #[test]
+    fn factorization_reconstructs_and_factors_are_irreducible() {
+        let mut s = 0xf00d_1234u64;
+        for &p in &[2u64, 3, 5, 7, 13]
+        {
+            for _ in 0..40
+            {
+                let f = rand_poly(p, 10, &mut s);
+                if f.is_zero()
+                {
+                    continue;
+                }
+                let factors = f.factor();
+                // every returned factor is monic and irreducible
+                for (q, e) in &factors
+                {
+                    assert!(*e >= 1);
+                    assert!(q.is_monic(), "factor must be monic");
+                    assert!(
+                        q.is_irreducible(),
+                        "factor must be irreducible: {:?}",
+                        q.coeffs()
+                    );
+                }
+                // lc · ∏ qᵢ^eᵢ reconstructs f exactly
+                assert_eq!(product_of(p, f.leading_coeff(), &factors), f);
+                // determinism: same input → identical factorization
+                assert_eq!(f.factor(), factors);
+            }
+        }
+    }
+
+    #[test]
+    fn factor_x_pow_p_minus_x_splits_into_all_linears() {
+        // x^p − x = ∏_{a∈GF(p)} (x − a): every field element is a simple root.
+        for &p in &[2u64, 3, 5, 7, 11]
+        {
+            let mut c = vec![0u64; (p + 1) as usize];
+            c[p as usize] = 1; // x^p
+            c[1] = (c[1] + p - 1) % p; // − x
+            let f = Poly::from_coeffs(p, &c);
+            let factors = f.factor();
+            assert_eq!(
+                factors.len() as u64,
+                p,
+                "expected p distinct linear factors"
+            );
+            for (q, e) in &factors
+            {
+                assert_eq!(q.degree(), Some(1));
+                assert_eq!(*e, 1);
+            }
+            // the roots are exactly 0, 1, …, p−1
+            let mut roots: Vec<u64> = (0..p).filter(|&a| f.eval(a) == 0).collect();
+            roots.sort_unstable();
+            assert_eq!(roots, (0..p).collect::<Vec<_>>());
+        }
+    }
+
+    #[test]
+    fn factor_known_vectors_with_multiplicity() {
+        // (x+1)^3 over GF(2) → a single factor x+1 with multiplicity 3.
+        let f = Poly::from_coeffs(2, &[1, 1]).mul(&Poly::from_coeffs(2, &[1, 1]));
+        let f = f.mul(&Poly::from_coeffs(2, &[1, 1]));
+        assert_eq!(f.factor(), vec![(Poly::from_coeffs(2, &[1, 1]), 3)]);
+
+        // x^2 over GF(2) → x with multiplicity 2 (the p-power / p-th-root path).
+        assert_eq!(
+            Poly::from_coeffs(2, &[0, 0, 1]).factor(),
+            vec![(Poly::from_coeffs(2, &[0, 1]), 2)]
+        );
+
+        // x^2 − 1 = (x−1)(x+1) over GF(5): two distinct linear factors.
+        let f = Poly::from_coeffs(5, &[4, 0, 1]); // x² + 4 = x² − 1
+        let factors = f.factor();
+        assert_eq!(factors.len(), 2);
+        assert_eq!(product_of(5, f.leading_coeff(), &factors), f);
+
+        // A degree-2 irreducible over GF(5) factors as itself.
+        let irr = Poly::from_coeffs(5, &[2, 0, 1]); // x² + 2, irreducible
+        assert_eq!(irr.factor(), vec![(irr.clone(), 1)]);
+    }
+
+    #[test]
+    fn squarefree_factorization_reconstructs() {
+        let mut s = 0x1122_3344u64;
+        for &p in &[2u64, 3, 5, 7]
+        {
+            for _ in 0..30
+            {
+                let f = rand_poly(p, 10, &mut s);
+                if f.is_zero()
+                {
+                    continue;
+                }
+                let sff = f.squarefree_factorization();
+                // ∏ gᵢ^i == monic associate of f, and each gᵢ is square-free
+                // (gcd(gᵢ, gᵢ′) is a unit, i.e. degree 0).
+                assert_eq!(product_of(p, 1, &sff), f.make_monic());
+                for (g, _) in &sff
+                {
+                    assert_eq!(g.gcd(&g.derivative()).degree(), Some(0), "not square-free");
+                }
+            }
+        }
     }
 
     #[test]
