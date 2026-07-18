@@ -53,6 +53,12 @@
 //   [`freqz::magnitude_db`]), phase ([`freqz::phase`]/[`freqz::unwrap_phase`])
 //   et délai de groupe ([`freqz::group_delay`]) — permet de **vérifier** ce
 //   que [`Biquad`]/[`BiquadCascade`]/[`Fir`] ont conçu.
+// * [`pll`] — boucle à verrouillage de phase ([`pll::Pll`], oscillateur
+//   commandé [`pll::Nco`] + filtre de boucle proportionnel-intégral
+//   [`pll::PiLoopFilter`]) : contrairement à [`adaptive`] (erreur
+//   instantanée, pas d'état de phase), une PLL **suit** une porteuse/horloge
+//   de fréquence potentiellement variable — récupération de porteuse,
+//   démodulation FM, synthèse de fréquence.
 //
 // ## Pourquoi la virgule fixe pour le DSP ?
 //
@@ -69,6 +75,7 @@ pub mod fir;
 pub mod freqz;
 pub mod mel;
 pub mod mfcc;
+pub mod pll;
 pub mod resample;
 pub mod stft;
 pub mod window;
@@ -80,6 +87,7 @@ pub use fftconv::fft_convolve;
 pub use fir::Fir;
 pub use freqz::{group_delay, magnitude, magnitude_db, phase, unwrap_phase};
 pub use mfcc::{Mfcc, dct2};
+pub use pll::{Nco, PiLoopFilter, Pll};
 pub use resample::resample;
 
 #[cfg(test)]

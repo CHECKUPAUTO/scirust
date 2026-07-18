@@ -12,6 +12,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::dsp::mel::MelFilterbank;
 use scirust_simd::dsp::mfcc::Mfcc;
+use scirust_simd::dsp::pll::Pll;
 use scirust_simd::dsp::stft::{power_spectrogram, stft};
 use scirust_simd::dsp::window;
 use scirust_simd::dsp::{
@@ -590,6 +591,67 @@ fn bench_freqz(c: &mut Criterion) {
     g.finish();
 }
 
+/// Boucle à verrouillage de phase : traitement d'un bloc via [`Pll::process`]
+/// (entrée réelle) et [`Pll::process_quadrature`] (entrée I/Q).
+fn bench_pll(c: &mut Criterion) {
+    let sf = signal_f32();
+    let sx = signal_fixed(&sf);
+
+    let mut g = c.benchmark_group("pll_process");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            let mut p = Pll::<Q16_16>::new(
+                Q16_16::try_from(100.0).unwrap(),
+                Q16_16::try_from(10.0).unwrap(),
+                Q16_16::try_from(2.0).unwrap(),
+                Q16_16::try_from(0.707).unwrap(),
+            );
+            for &x in &sx
+            {
+                black_box(p.process(x));
+            }
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| {
+            let mut p = Pll::<f32>::new(100.0, 10.0, 2.0, 0.707);
+            for &x in &sf
+            {
+                black_box(p.process(x));
+            }
+        })
+    });
+    g.finish();
+
+    let mut g = c.benchmark_group("pll_process_quadrature");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            let mut p = Pll::<Q16_16>::new(
+                Q16_16::try_from(100.0).unwrap(),
+                Q16_16::try_from(10.0).unwrap(),
+                Q16_16::try_from(2.0).unwrap(),
+                Q16_16::try_from(0.707).unwrap(),
+            );
+            for &x in &sx
+            {
+                black_box(p.process_quadrature(x, x));
+            }
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| {
+            let mut p = Pll::<f32>::new(100.0, 10.0, 2.0, 0.707);
+            for &x in &sf
+            {
+                black_box(p.process_quadrature(x, x));
+            }
+        })
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_biquad,
@@ -607,6 +669,7 @@ criterion_group!(
     bench_mfcc,
     bench_resample,
     bench_adaptive,
-    bench_freqz
+    bench_freqz,
+    bench_pll
 );
 criterion_main!(benches);

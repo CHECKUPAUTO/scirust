@@ -12,6 +12,7 @@ use super::fft::{Complex, Plan, fft, ifft, irfft, rfft};
 use super::fftconv::fft_convolve;
 use super::mel::MelFilterbank;
 use super::mfcc::{Mfcc, dct2, dct2_basis};
+use super::pll::{Nco, PiLoopFilter, Pll};
 use super::resample::design_prototype;
 use super::stft::{istft, magnitude_spectrogram, num_frames, power_spectrogram, stft};
 use super::window;
@@ -2594,4 +2595,265 @@ fn lms_single_tap_tracks_gain() {
         filt.update(xf, 0.5 * xf);
     }
     assert!((filt.weights()[0] - 0.5).abs() < 0.02);
+}
+
+// ------------------------------------------------------------------ //
+//  PLL : Nco, PiLoopFilter, Pll                                       //
+// ------------------------------------------------------------------ //
+
+fn check_nco_known_unit_circle_points<T: Scalar>() {
+    // Incrément π/2 : la référence tourne d'un quart de tour par échantillon,
+    // (sin, cos) doit visiter exactement les quatre points cardinaux.
+    let mut nco = Nco::<T>::new(T::of(core::f64::consts::FRAC_PI_2));
+    let expected = [(0.0, 1.0), (1.0, 0.0), (0.0, -1.0), (-1.0, 0.0)];
+    for &(es, ec) in &expected
+    {
+        let (s, c) = nco.tick();
+        assert!(
+            (s.to_f64() - es).abs() < 1e-3,
+            "sin = {} attendu {es}",
+            s.to_f64()
+        );
+        assert!(
+            (c.to_f64() - ec).abs() < 1e-3,
+            "cos = {} attendu {ec}",
+            c.to_f64()
+        );
+    }
+}
+
+#[test]
+fn nco_known_unit_circle_points_all_scalars() {
+    check_nco_known_unit_circle_points::<f32>();
+    check_nco_known_unit_circle_points::<f64>();
+    check_nco_known_unit_circle_points::<Q16_16>();
+}
+
+fn check_nco_phase_stays_bounded<T: Scalar>() {
+    // 0.7 rad/échantillon ne divise pas 2π : rembobinages fréquents sur de
+    // nombreux tours, la phase doit rester dans (−π, π] à chaque pas.
+    let mut nco = Nco::<T>::new(T::of(0.7));
+    let pi = core::f64::consts::PI;
+    for _ in 0..2000
+    {
+        let _ = nco.tick();
+        let p = nco.phase().to_f64();
+        assert!(p > -pi - 1e-6 && p <= pi + 1e-6, "phase hors bornes : {p}");
+    }
+}
+
+#[test]
+fn nco_phase_stays_bounded_all_scalars() {
+    check_nco_phase_stays_bounded::<f32>();
+    check_nco_phase_stays_bounded::<f64>();
+    check_nco_phase_stays_bounded::<Q16_16>();
+}
+
+#[test]
+fn nco_set_frequency_changes_next_increment() {
+    let mut nco = Nco::<f64>::new(0.1);
+    let _ = nco.tick(); // phase = 0.1
+    nco.set_frequency(0.5);
+    let _ = nco.tick(); // phase = 0.1 + 0.5 = 0.6
+    assert!((nco.phase() - 0.6).abs() < 1e-9, "phase = {}", nco.phase());
+}
+
+fn check_pi_loop_filter_pure_integral<T: Scalar>() {
+    // Kp = 0 : la sortie est exactement l'intégrateur, qui accumule Ki·erreur.
+    let mut f = PiLoopFilter::<T>::new(T::of(0.0), T::of(1.0));
+    let mut expected = 0.0;
+    for _ in 0..10
+    {
+        let out = f.step(T::of(0.1));
+        expected += 0.1;
+        assert!(
+            (out.to_f64() - expected).abs() < 1e-2,
+            "intégrateur = {} attendu {expected}",
+            out.to_f64()
+        );
+    }
+}
+
+#[test]
+fn pi_loop_filter_pure_integral_all_scalars() {
+    check_pi_loop_filter_pure_integral::<f32>();
+    check_pi_loop_filter_pure_integral::<f64>();
+    check_pi_loop_filter_pure_integral::<Q16_16>();
+}
+
+fn check_pi_loop_filter_design_scales_with_bandwidth<T: Scalar + core::ops::Div<Output = T>>() {
+    // Une bande passante de boucle plus large doit donner des gains Kp/Ki
+    // plus grands (loi de conception, cf. en-tête de module).
+    let narrow = PiLoopFilter::<T>::design(T::of(0.5), T::of(0.707), T::of(100.0));
+    let wide = PiLoopFilter::<T>::design(T::of(5.0), T::of(0.707), T::of(100.0));
+    assert!(
+        wide.kp().to_f64() > narrow.kp().to_f64(),
+        "Kp large = {} attendu > Kp étroit = {}",
+        wide.kp().to_f64(),
+        narrow.kp().to_f64()
+    );
+    assert!(
+        wide.ki().to_f64() > narrow.ki().to_f64(),
+        "Ki large = {} attendu > Ki étroit = {}",
+        wide.ki().to_f64(),
+        narrow.ki().to_f64()
+    );
+}
+
+#[test]
+fn pi_loop_filter_design_scales_with_bandwidth_all_scalars() {
+    check_pi_loop_filter_design_scales_with_bandwidth::<f32>();
+    check_pi_loop_filter_design_scales_with_bandwidth::<f64>();
+    check_pi_loop_filter_design_scales_with_bandwidth::<Q16_16>();
+}
+
+#[test]
+fn pi_loop_filter_reset_clears_integrator() {
+    let mut f = PiLoopFilter::<f64>::new(0.0, 1.0);
+    f.step(1.0);
+    assert_ne!(f.integrator(), 0.0);
+    f.reset();
+    assert_eq!(f.integrator(), 0.0);
+}
+
+/// `sample_rate`/`center_freq`/`loop_bandwidth` en unités normalisées, comme
+/// les tests de [`Biquad`] (`sample_rate = 8.0` etc.) — l'implémentation est
+/// générique, ces valeurs ne représentent aucune fréquence audio réelle.
+const PLL_SAMPLE_RATE: f64 = 100.0;
+const PLL_CENTER_FREQ: f64 = 10.0;
+const PLL_LOOP_BW: f64 = 2.0;
+const PLL_DAMPING: f64 = 0.707;
+
+fn check_pll_process_locks_onto_frequency_offset<T: Scalar + core::ops::Div<Output = T>>() {
+    let freq_offset = 1.0; // Hz
+    let actual_freq_per_sample =
+        2.0 * core::f64::consts::PI * (PLL_CENTER_FREQ + freq_offset) / PLL_SAMPLE_RATE;
+
+    let mut pll = Pll::<T>::new(
+        T::of(PLL_SAMPLE_RATE),
+        T::of(PLL_CENTER_FREQ),
+        T::of(PLL_LOOP_BW),
+        T::of(PLL_DAMPING),
+    );
+
+    let mut n = 0usize;
+    for _ in 0..20_000
+    {
+        let true_phase = actual_freq_per_sample * n as f64;
+        let _ = pll.process(T::of(true_phase.cos()));
+        n += 1;
+    }
+
+    // Moyenne glissante sur une fenêtre finale : le détecteur de phase par
+    // produit (entrée réelle) laisse passer une ondulation résiduelle à
+    // `2ω` non filtrée séparément (cf. en-tête de module — valide seulement
+    // pour `loop_bandwidth ≪ center_freq`, ratio modeste ici pour un test
+    // rapide) ; une lecture instantanée de `frequency_estimate()` peut donc
+    // tomber sur n'importe quelle phase de cette ondulation. La moyenner sur
+    // plusieurs dizaines de périodes porteuses donne la valeur de
+    // convergence réelle.
+    let window = 500;
+    let mut sum_freq = 0.0;
+    for _ in 0..window
+    {
+        let true_phase = actual_freq_per_sample * n as f64;
+        let _ = pll.process(T::of(true_phase.cos()));
+        sum_freq += pll.frequency_estimate().to_f64();
+        n += 1;
+    }
+    let avg_freq = sum_freq / window as f64;
+    assert!(
+        (avg_freq - actual_freq_per_sample).abs() < 5e-3,
+        "fréquence estimée (moyenne) = {avg_freq} attendue proche de {actual_freq_per_sample}"
+    );
+}
+
+#[test]
+fn pll_process_locks_onto_frequency_offset_all_scalars() {
+    check_pll_process_locks_onto_frequency_offset::<f32>();
+    check_pll_process_locks_onto_frequency_offset::<f64>();
+    check_pll_process_locks_onto_frequency_offset::<Q16_16>();
+}
+
+fn check_pll_process_quadrature_locks_onto_phase_and_frequency<
+    T: Scalar + core::ops::Div<Output = T>,
+>() {
+    let freq_offset = 0.5; // Hz
+    let phase_offset = 0.3; // rad
+    let actual_freq_per_sample =
+        2.0 * core::f64::consts::PI * (PLL_CENTER_FREQ + freq_offset) / PLL_SAMPLE_RATE;
+
+    let mut pll = Pll::<T>::new(
+        T::of(PLL_SAMPLE_RATE),
+        T::of(PLL_CENTER_FREQ),
+        T::of(PLL_LOOP_BW),
+        T::of(PLL_DAMPING),
+    );
+
+    let mut last_error = 1.0f64;
+    for n in 0..20_000usize
+    {
+        let true_phase = actual_freq_per_sample * n as f64 + phase_offset;
+        let (i, q) = (true_phase.cos(), true_phase.sin());
+        last_error = pll.process_quadrature(T::of(i), T::of(q)).to_f64();
+    }
+
+    assert!(
+        last_error.abs() < 0.05,
+        "erreur de phase en régime établi = {last_error} attendue proche de 0"
+    );
+    let est = pll.frequency_estimate().to_f64();
+    assert!(
+        (est - actual_freq_per_sample).abs() < 5e-3,
+        "fréquence estimée = {est} attendue proche de {actual_freq_per_sample}"
+    );
+    // Le détecteur de phase par atan2 est exact (pas de terme battant à 2ω,
+    // contrairement à process() sur entrée réelle) : une lecture
+    // instantanée de locked() est donc pertinente ici.
+    assert!(
+        pll.locked(T::of(0.05)),
+        "PLL non verrouillée après convergence (dernière erreur = {last_error})"
+    );
+}
+
+#[test]
+fn pll_process_quadrature_locks_onto_phase_and_frequency_all_scalars() {
+    check_pll_process_quadrature_locks_onto_phase_and_frequency::<f32>();
+    check_pll_process_quadrature_locks_onto_phase_and_frequency::<f64>();
+    check_pll_process_quadrature_locks_onto_phase_and_frequency::<Q16_16>();
+}
+
+#[test]
+fn pll_not_locked_before_convergence() {
+    // Grand écart de fréquence (+5 Hz), seuil serré : après seulement 5
+    // échantillons (bien avant convergence), la PLL ne doit pas se
+    // rapporter verrouillée.
+    let freq_offset = 5.0;
+    let actual_freq_per_sample =
+        2.0 * core::f64::consts::PI * (PLL_CENTER_FREQ + freq_offset) / PLL_SAMPLE_RATE;
+    let mut pll = Pll::<f64>::new(PLL_SAMPLE_RATE, PLL_CENTER_FREQ, PLL_LOOP_BW, PLL_DAMPING);
+    for n in 0..5usize
+    {
+        let true_phase = actual_freq_per_sample * n as f64;
+        let _ = pll.process(true_phase.cos());
+    }
+    assert!(
+        !pll.locked(1e-4),
+        "verrouillée de façon inattendue trop tôt"
+    );
+}
+
+#[test]
+fn pll_reset_restores_initial_state() {
+    let mut pll = Pll::<f64>::new(PLL_SAMPLE_RATE, PLL_CENTER_FREQ, PLL_LOOP_BW, PLL_DAMPING);
+    let initial_freq = pll.frequency_estimate();
+    for n in 0..500usize
+    {
+        let true_phase = 2.0 * core::f64::consts::PI * 12.0 * n as f64 / PLL_SAMPLE_RATE;
+        let _ = pll.process(true_phase.cos());
+    }
+    assert_ne!(pll.frequency_estimate(), initial_freq);
+    pll.reset();
+    assert_eq!(pll.frequency_estimate(), initial_freq);
+    assert_eq!(pll.phase_estimate(), 0.0);
 }
