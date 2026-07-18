@@ -6,12 +6,13 @@
 // vérifie les propriétés spectrales (gains au continu / à Nyquist), la réponse
 // impulsionnelle, l'accord virgule fixe ↔ flottant, et le déterminisme bit-à-bit.
 
+use super::biquad::butterworth_qs;
 use super::fft::{Complex, Plan, fft, ifft, irfft, rfft};
 use super::mel::MelFilterbank;
 use super::resample::design_prototype;
 use super::stft::{istft, magnitude_spectrogram, num_frames, power_spectrogram, stft};
 use super::window;
-use super::{Biquad, Fir, resample};
+use super::{Biquad, BiquadCascade, Fir, resample};
 use crate::fixed::conv2d::{Conv2dShape, conv2d};
 use crate::fixed::{Q8_8, Q8_24, Q16_16, RealScalar};
 
@@ -214,6 +215,155 @@ fn biquad_fixed_is_bit_deterministic() {
             "échantillon {i} non déterministe"
         );
     }
+}
+
+// ------------------------------------------------------------------ //
+//  BiquadCascade : filtres de Butterworth d'ordre supérieur            //
+// ------------------------------------------------------------------ //
+
+/// Gain `|H(e^{jω})|` d'une cascade à la pulsation numérique `omega`
+/// (radians ; `0` = continu, `π` = Nyquist), évalué en `f64` indépendamment
+/// du scalaire du filtre — chaque section contribue par produit (cascade en
+/// série), `zⁿ` calculé par élévation directe (pas de FFT).
+fn cascade_gain_at<T: Scalar>(cascade: &BiquadCascade<T>, omega: f64) -> f64 {
+    let (cos_w, sin_w) = (omega.cos(), omega.sin());
+    // z⁻¹ = e^{−jω} = cos ω − j·sin ω.
+    let (zr, zi) = (cos_w, -sin_w);
+    let (z2r, z2i) = (zr * zr - zi * zi, 2.0 * zr * zi);
+    let mut gain = 1.0;
+    for stage in cascade.stages()
+    {
+        let (b0, b1, b2, a1, a2) = stage.coefficients();
+        let (b0, b1, b2, a1, a2) = (
+            b0.to_f64(),
+            b1.to_f64(),
+            b2.to_f64(),
+            a1.to_f64(),
+            a2.to_f64(),
+        );
+        let (numr, numi) = (b0 + b1 * zr + b2 * z2r, b1 * zi + b2 * z2i);
+        let (denr, deni) = (1.0 + a1 * zr + a2 * z2r, a1 * zi + a2 * z2i);
+        gain *= (numr * numr + numi * numi).sqrt() / (denr * denr + deni * deni).sqrt();
+    }
+    gain
+}
+
+#[test]
+fn butterworth_q_matches_known_values() {
+    // Ordre 2 : Q = 1/√2 (cas RBJ usuel).
+    let q2: Vec<f64> = butterworth_qs::<f64>(2);
+    assert_eq!(q2.len(), 1);
+    assert!((q2[0] - core::f64::consts::FRAC_1_SQRT_2).abs() <= 1e-9);
+
+    // Ordre 4 : Q₁ ≈ 0.5411961, Q₂ ≈ 1.3065630 (constantes classiques de la
+    // cascade de Butterworth du 4ᵉ ordre).
+    let q4: Vec<f64> = butterworth_qs::<f64>(4);
+    assert_eq!(q4.len(), 2);
+    assert!((q4[0] - 0.5411961).abs() <= 1e-6);
+    assert!((q4[1] - 1.3065630).abs() <= 1e-6);
+}
+
+#[test]
+#[should_panic(expected = "ordre")]
+fn butterworth_qs_rejects_odd_order() {
+    let _: Vec<f64> = butterworth_qs(3);
+}
+
+#[test]
+#[should_panic(expected = "ordre")]
+fn butterworth_qs_rejects_too_small_order() {
+    let _: Vec<f64> = butterworth_qs(0);
+}
+
+fn check_butterworth_lowpass_dc_unity_and_section_count<T: Scalar + core::ops::Div<Output = T>>() {
+    for &order in &[2usize, 4, 6]
+    {
+        let lp = BiquadCascade::<T>::butterworth_lowpass(T::of(8.0), T::of(1.0), order);
+        assert_eq!(lp.order(), order);
+        assert_eq!(lp.stages().len(), order / 2);
+        let dc = cascade_gain_at(&lp, 0.0);
+        assert!(
+            (dc - 1.0).abs() <= T::TOL * 4.0,
+            "order={order}: gain continu {dc}"
+        );
+    }
+}
+
+#[test]
+fn butterworth_lowpass_dc_unity_and_section_count_all_scalars() {
+    check_butterworth_lowpass_dc_unity_and_section_count::<f32>();
+    check_butterworth_lowpass_dc_unity_and_section_count::<f64>();
+    check_butterworth_lowpass_dc_unity_and_section_count::<Q16_16>();
+}
+
+fn check_butterworth_highpass_blocks_dc<T: Scalar + core::ops::Div<Output = T>>() {
+    for &order in &[2usize, 4, 6]
+    {
+        let hp = BiquadCascade::<T>::butterworth_highpass(T::of(8.0), T::of(1.0), order);
+        assert_eq!(hp.order(), order);
+        let dc = cascade_gain_at(&hp, 0.0);
+        assert!(
+            dc < 0.05,
+            "order={order}: gain continu {dc} devrait être ≈0"
+        );
+        let nyquist = cascade_gain_at(&hp, core::f64::consts::PI);
+        assert!(
+            (nyquist - 1.0).abs() <= T::TOL * 4.0,
+            "order={order}: gain Nyquist {nyquist} devrait être ≈1"
+        );
+    }
+}
+
+#[test]
+fn butterworth_highpass_blocks_dc_all_scalars() {
+    check_butterworth_highpass_blocks_dc::<f32>();
+    check_butterworth_highpass_blocks_dc::<f64>();
+    check_butterworth_highpass_blocks_dc::<Q16_16>();
+}
+
+#[test]
+fn butterworth_higher_order_attenuates_more_beyond_cutoff() {
+    // À fréquence de coupure et échantillonnage égaux, un ordre plus élevé
+    // doit atténuer davantage au-delà de la coupure — la raison d'être même
+    // d'une cascade (12 dB/octave par section, pas seulement une section).
+    let (fs, f0) = (
+        Q16_16::try_from(8.0).unwrap(),
+        Q16_16::try_from(1.0).unwrap(),
+    );
+    let lp2 = BiquadCascade::butterworth_lowpass(fs, f0, 2);
+    let lp4 = BiquadCascade::butterworth_lowpass(fs, f0, 4);
+    let lp6 = BiquadCascade::butterworth_lowpass(fs, f0, 6);
+
+    // Pulsation numérique à 2× la fréquence de coupure (f0/fs = 1/8 ⇒ ω =
+    // 2π·(2/8) = π/2).
+    let omega = core::f64::consts::FRAC_PI_2;
+    let g2 = cascade_gain_at(&lp2, omega);
+    let g4 = cascade_gain_at(&lp4, omega);
+    let g6 = cascade_gain_at(&lp6, omega);
+    assert!(
+        g4 < g2,
+        "ordre 4 ({g4}) devrait atténuer plus que l'ordre 2 ({g2})"
+    );
+    assert!(
+        g6 < g4,
+        "ordre 6 ({g6}) devrait atténuer plus que l'ordre 4 ({g4})"
+    );
+}
+
+#[test]
+#[should_panic(expected = "ordre")]
+fn butterworth_lowpass_rejects_odd_order() {
+    let _ = BiquadCascade::<Q16_16>::butterworth_lowpass(
+        Q16_16::try_from(8.0).unwrap(),
+        Q16_16::try_from(1.0).unwrap(),
+        3,
+    );
+}
+
+#[test]
+#[should_panic(expected = "au moins une section")]
+fn biquad_cascade_new_rejects_empty() {
+    let _: BiquadCascade<Q16_16> = BiquadCascade::new(Vec::new());
 }
 
 // ------------------------------------------------------------------ //

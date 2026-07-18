@@ -13,6 +13,9 @@
 //
 // * [`Biquad`] — section du second ordre (IIR) en forme directe II transposée,
 //   avec conception « cookbook » RBJ (passe-bas / passe-haut / passe-bande).
+//   [`biquad::BiquadCascade`] enchaîne plusieurs sections pour des filtres de
+//   Butterworth d'ordre pair quelconque ([`biquad::BiquadCascade::butterworth_lowpass`]/
+//   [`butterworth_highpass`](biquad::BiquadCascade::butterworth_highpass)).
 // * [`Fir`] — filtre à réponse impulsionnelle finie, ligne à retard circulaire
 //   sans allocation, phase linéaire pour des coefficients symétriques.
 // * [`fft`] — transformée de Fourier rapide radix-2 (Cooley–Tukey) en place,
@@ -44,7 +47,7 @@ pub mod resample;
 pub mod stft;
 pub mod window;
 
-pub use biquad::Biquad;
+pub use biquad::{Biquad, BiquadCascade};
 pub use fft::{Complex, Plan, fft, ifft, irfft, rfft};
 pub use fir::Fir;
 pub use resample::resample;

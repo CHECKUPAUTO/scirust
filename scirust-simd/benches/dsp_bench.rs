@@ -13,7 +13,7 @@ use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, 
 use scirust_simd::dsp::mel::MelFilterbank;
 use scirust_simd::dsp::stft::{power_spectrogram, stft};
 use scirust_simd::dsp::window;
-use scirust_simd::dsp::{Biquad, Complex, Fir, Plan, fft, rfft};
+use scirust_simd::dsp::{Biquad, BiquadCascade, Complex, Fir, Plan, fft, rfft};
 use scirust_simd::fixed::Q16_16;
 
 const N: usize = 1 << 14;
@@ -55,6 +55,39 @@ fn bench_biquad(c: &mut Criterion) {
     });
     g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
         let mut f = Biquad::<f32>::lowpass(8.0, 1.0, 0.707);
+        b.iter(|| {
+            f.reset();
+            f.process_block(black_box(&sf), black_box(&mut of));
+            of[0]
+        })
+    });
+    g.finish();
+}
+
+/// Cascade de Butterworth d'ordre 8 (4 sections) : coût `4×` un biquad seul,
+/// pour un rejet de bande bien plus net (48 dB/octave contre 12).
+fn bench_butterworth_cascade(c: &mut Criterion) {
+    let sf = signal_f32();
+    let sx = signal_fixed(&sf);
+    let mut of = vec![0.0f32; N];
+    let mut ox = vec![Q16_16::zero(); N];
+
+    let mut g = c.benchmark_group("butterworth_lowpass_order8");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        let mut f = BiquadCascade::<Q16_16>::butterworth_lowpass(
+            Q16_16::try_from(8.0).unwrap(),
+            Q16_16::try_from(1.0).unwrap(),
+            8,
+        );
+        b.iter(|| {
+            f.reset();
+            f.process_block(black_box(&sx), black_box(&mut ox));
+            ox[0]
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        let mut f = BiquadCascade::<f32>::butterworth_lowpass(8.0, 1.0, 8);
         b.iter(|| {
             f.reset();
             f.process_block(black_box(&sf), black_box(&mut of));
@@ -314,6 +347,7 @@ fn bench_resample(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_biquad,
+    bench_butterworth_cascade,
     bench_fir,
     bench_fft,
     bench_fft_plan,
