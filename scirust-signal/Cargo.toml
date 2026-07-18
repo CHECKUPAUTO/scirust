@@ -28,3 +28,7 @@ scirust-special = { path = "../scirust-special" }
 [[bench]]
 name = "vi_cfar_bench"
 harness = false
+
+[[bench]]
+name = "denoise_bench"
+harness = false

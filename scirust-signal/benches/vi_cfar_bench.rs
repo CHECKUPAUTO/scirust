@@ -8,9 +8,10 @@
 //   and what evaluate_slice pays on every call — see its own docs).
 //
 // `CfarDetector` (not `evaluate_slice`) is used for all per-CUT throughput
-// numbers so calibration (in particular GO/SO's ~300,000-trial Monte-Carlo
-// bisection) is paid once outside the timed region, not once per Criterion
-// iteration — see `radar::vi_cfar::CfarDetector`'s docs.
+// numbers so calibration (GO/SO's quadrature-bisection calibration, see
+// `radar::vi_cfar`'s module docs, "Threshold calibration") is paid once
+// outside the timed region, not once per Criterion iteration — see
+// `radar::vi_cfar::CfarDetector`'s docs.
 //
 // Run: cargo bench -p scirust-signal --bench vi_cfar_bench
 
