@@ -99,7 +99,9 @@
 //   convolution séparable en profondeur ([`conv2d::depthwise_conv2d`],
 //   [`conv2d::separable_conv2d`], style MobileNet). [`conv2d::conv2d_transpose`]
 //   est l'opération **adjointe** (déconvolution/suréchantillonnage), utilisée
-//   dans les décodeurs convolutifs et GAN génératifs.
+//   dans les décodeurs convolutifs et GAN génératifs. [`conv2d::dilated_conv2d`]
+//   élargit le champ réceptif sans augmenter le nombre de paramètres ni
+//   sous-échantillonner (segmentation sémantique, `WaveNet`).
 // * [`pool`] — pooling 1D quantifié ([`pool::max_pool1d`], [`pool::avg_pool1d`]).
 // * [`pool2d`] — pooling 2D quantifié ([`pool2d::max_pool2d`], [`pool2d::avg_pool2d`]).
 // * [`rescale`] — requantification entre résolutions (`FRAC` différent, même stockage).

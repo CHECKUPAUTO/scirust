@@ -11,8 +11,8 @@ use super::activation as act;
 use super::attention::{attention, causal_attention, multi_head_attention};
 use super::conv::{Conv1dShape, conv1d, conv1d_batch};
 use super::conv2d::{
-    Conv2dShape, Conv2dTransposeShape, conv2d, conv2d_batch, conv2d_transpose, depthwise_conv2d,
-    separable_conv2d,
+    Conv2dShape, Conv2dTransposeShape, DilatedConv2dShape, conv2d, conv2d_batch, conv2d_transpose,
+    depthwise_conv2d, dilated_conv2d, separable_conv2d,
 };
 use super::kv_cache::KvCache;
 use super::layer::Linear;
@@ -4187,6 +4187,267 @@ fn conv2d_transpose_bias_dim_mismatch_panics() {
         stride_w: 1,
     };
     let _ = conv2d_transpose(&x, &w, &b, shape);
+}
+
+// ------------------------------------------------------------------ //
+//  Convolution dilatée (« à trous »)                                  //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn dilated_conv2d_shape_formulas() {
+    let shape = DilatedConv2dShape {
+        in_channels: 1,
+        height: 9,
+        width: 9,
+        out_channels: 1,
+        kernel_h: 3,
+        kernel_w: 3,
+        stride_h: 1,
+        stride_w: 1,
+        dilation_h: 2,
+        dilation_w: 3,
+    };
+    assert_eq!(shape.effective_kernel_h(), 5); // 2·(3−1)+1
+    assert_eq!(shape.effective_kernel_w(), 7); // 3·(3−1)+1
+    assert_eq!(shape.height_out(), 5); // (9−5)/1+1
+    assert_eq!(shape.width_out(), 3); // (9−7)/1+1
+}
+
+#[test]
+#[should_panic(expected = "DilatedConv2dShape::height_out")]
+fn dilated_conv2d_height_smaller_than_effective_kernel_panics() {
+    let shape = DilatedConv2dShape {
+        in_channels: 1,
+        height: 3,
+        width: 3,
+        out_channels: 1,
+        kernel_h: 2,
+        kernel_w: 2,
+        stride_h: 1,
+        stride_w: 1,
+        dilation_h: 3, // noyau effectif h = 3·(2−1)+1 = 4 > hauteur 3
+        dilation_w: 1,
+    };
+    let _ = shape.height_out();
+}
+
+#[test]
+fn dilated_conv2d_known_small() {
+    // 1 canal, entrée 5×5 = 1..25 (row-major), noyau compact 2×2 = [1,2,3,4],
+    // dilation=2 (noyau effectif 3×3, prises en (0,0),(0,2),(2,0),(2,2) —
+    // celles du milieu restent à zéro), stride=1, biais nul.
+    // height_out=width_out=(5−3)/1+1=3. Calcul à la main :
+    //   [92,  102, 112]
+    //   [142, 152, 162]
+    //   [192, 202, 212]
+    let x: Vec<Q16_16> = (1..=25i32).map(Q16_16::from).collect();
+    let w = [1i32, 2, 3, 4].map(Q16_16::from);
+    let b = [Q16_16::zero()];
+    let shape = DilatedConv2dShape {
+        in_channels: 1,
+        height: 5,
+        width: 5,
+        out_channels: 1,
+        kernel_h: 2,
+        kernel_w: 2,
+        stride_h: 1,
+        stride_w: 1,
+        dilation_h: 2,
+        dilation_w: 2,
+    };
+    let y = dilated_conv2d(&x, &w, &b, shape);
+    assert_eq!(
+        y,
+        [92i32, 102, 112, 142, 152, 162, 192, 202, 212].map(Q16_16::from)
+    );
+}
+
+#[test]
+fn dilated_conv2d_dilation_one_matches_conv2d() {
+    // dilation=1 : dilated_conv2d doit coïncider bit à bit avec conv2d
+    // (dilatation neutre, cf. en-tête de module) — preuve croisée directe
+    // sans référence indépendante.
+    let mut rng = Lcg(0xD11A_0001);
+    let cases = [
+        (
+            2usize, 8usize, 8usize, 3usize, 3usize, 3usize, 1usize, 1usize,
+        ),
+        (1, 6, 5, 2, 2, 2, 2, 1),
+        (3, 7, 9, 2, 3, 2, 1, 2),
+    ];
+    for &(in_channels, height, width, out_channels, kernel_h, kernel_w, stride_h, stride_w) in
+        &cases
+    {
+        let shape2d = Conv2dShape {
+            in_channels,
+            height,
+            width,
+            out_channels,
+            kernel_h,
+            kernel_w,
+            stride_h,
+            stride_w,
+        };
+        let dshape = DilatedConv2dShape {
+            in_channels,
+            height,
+            width,
+            out_channels,
+            kernel_h,
+            kernel_w,
+            stride_h,
+            stride_w,
+            dilation_h: 1,
+            dilation_w: 1,
+        };
+        assert_eq!(dshape.height_out(), shape2d.height_out());
+        assert_eq!(dshape.width_out(), shape2d.width_out());
+
+        let x: Vec<Q16_16> = (0..in_channels * height * width)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+            .collect();
+        let w: Vec<Q16_16> = (0..out_channels * in_channels * kernel_h * kernel_w)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+            .collect();
+        let b: Vec<Q16_16> = (0..out_channels)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+            .collect();
+
+        let want = conv2d(&x, &w, &b, shape2d);
+        let got = dilated_conv2d(&x, &w, &b, dshape);
+        assert_eq!(got, want, "dilation=1 shape={dshape:?}");
+    }
+}
+
+#[test]
+fn dilated_conv2d_matches_conv2d_with_zero_inserted_kernel() {
+    // dilated_conv2d(noyau compact, dilation=d) doit coïncider bit à bit
+    // avec conv2d(noyau dilaté explicitement — d−1 zéros insérés entre
+    // chaque prise) : les zéros insérés contribuent une somme exactement
+    // nulle (addition virgule fixe exacte), cf. en-tête de module.
+    let mut rng = Lcg(0xD11A_0002);
+    #[rustfmt::skip]
+    let cases = [
+        (2usize, 3usize, 9usize, 9usize, 2usize, 2usize, 1usize, 1usize, 2usize, 2usize),
+        (1, 2, 11, 7, 3, 2, 1, 1, 2, 3),
+        (3, 1, 13, 13, 2, 3, 2, 1, 3, 2),
+    ];
+    for &(
+        in_channels,
+        out_channels,
+        height,
+        width,
+        kernel_h,
+        kernel_w,
+        stride_h,
+        stride_w,
+        dilation_h,
+        dilation_w,
+    ) in &cases
+    {
+        let dshape = DilatedConv2dShape {
+            in_channels,
+            height,
+            width,
+            out_channels,
+            kernel_h,
+            kernel_w,
+            stride_h,
+            stride_w,
+            dilation_h,
+            dilation_w,
+        };
+        let eff_kh = dshape.effective_kernel_h();
+        let eff_kw = dshape.effective_kernel_w();
+
+        let x: Vec<Q16_16> = (0..in_channels * height * width)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+            .collect();
+        let w: Vec<Q16_16> = (0..out_channels * in_channels * kernel_h * kernel_w)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+            .collect();
+        let b: Vec<Q16_16> = (0..out_channels)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 6))
+            .collect();
+
+        let mut w_expanded = vec![Q16_16::zero(); out_channels * in_channels * eff_kh * eff_kw];
+        for co in 0..out_channels
+        {
+            for ci in 0..in_channels
+            {
+                for kh in 0..kernel_h
+                {
+                    for kw in 0..kernel_w
+                    {
+                        let src = ((co * in_channels + ci) * kernel_h + kh) * kernel_w + kw;
+                        let dst = ((co * in_channels + ci) * eff_kh + kh * dilation_h) * eff_kw
+                            + kw * dilation_w;
+                        w_expanded[dst] = w[src];
+                    }
+                }
+            }
+        }
+        let shape2d = Conv2dShape {
+            in_channels,
+            height,
+            width,
+            out_channels,
+            kernel_h: eff_kh,
+            kernel_w: eff_kw,
+            stride_h,
+            stride_w,
+        };
+
+        let want = conv2d(&x, &w_expanded, &b, shape2d);
+        let got = dilated_conv2d(&x, &w, &b, dshape);
+        assert_eq!(got, want, "dshape={dshape:?}");
+    }
+}
+
+#[test]
+fn dilated_conv2d_i64_storage() {
+    // Même exemple exact que dilated_conv2d_known_small, stockage i64 (Q32_32).
+    let x: Vec<Q32_32> = (1..=25i64).map(Q32_32::from).collect();
+    let w = [1i64, 2, 3, 4].map(Q32_32::from);
+    let b = [Q32_32::zero()];
+    let shape = DilatedConv2dShape {
+        in_channels: 1,
+        height: 5,
+        width: 5,
+        out_channels: 1,
+        kernel_h: 2,
+        kernel_w: 2,
+        stride_h: 1,
+        stride_w: 1,
+        dilation_h: 2,
+        dilation_w: 2,
+    };
+    let y = dilated_conv2d(&x, &w, &b, shape);
+    assert_eq!(
+        y,
+        [92i64, 102, 112, 142, 152, 162, 192, 202, 212].map(Q32_32::from)
+    );
+}
+
+#[test]
+#[should_panic(expected = "dilated_conv2d")]
+fn dilated_conv2d_weights_dim_mismatch_panics() {
+    let x = vec![Q16_16::one(); 9]; // 1×3×3
+    let w = vec![Q16_16::one(); 3]; // devrait être 1×1×2×2 = 4
+    let b = vec![Q16_16::zero()];
+    let shape = DilatedConv2dShape {
+        in_channels: 1,
+        height: 3,
+        width: 3,
+        out_channels: 1,
+        kernel_h: 2,
+        kernel_w: 2,
+        stride_h: 1,
+        stride_w: 1,
+        dilation_h: 1,
+        dilation_w: 1,
+    };
+    let _ = dilated_conv2d(&x, &w, &b, shape);
 }
 
 // ------------------------------------------------------------------ //

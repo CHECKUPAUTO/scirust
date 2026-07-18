@@ -74,6 +74,32 @@
 // [`Conv2dShape`]) : `height_out = (height − 1)·stride_h + kernel_h`,
 // symétrique de [`Conv2dShape::height_out`] (`stride` et soustraction du
 // noyau échangés — la convolution transposée agrandit au lieu de rétrécir).
+//
+// ## Convolution dilatée (« à trous »)
+//
+// [`dilated_conv2d`] espace les prises du noyau de `dilation_h`/`dilation_w`
+// (au lieu d'être contiguës) : élargit le champ réceptif sans augmenter le
+// nombre de paramètres ni sous-échantillonner (contrairement à empiler des
+// `stride > 1`), la technique classique des réseaux à convolution dilatée
+// (segmentation sémantique, `WaveNet`). Noyau **effectif**
+// `dilation·(kernel−1) + 1` : `dilated_conv2d` avec `dilation = 1` est
+// **exactement** [`conv2d`] (même code, dilatation neutre), et avec
+// `dilation = d` est **exactement** [`conv2d`] appliqué à un noyau
+// « dilaté » où `d−1` zéros sont insérés entre chaque prise — propriété
+// vérifiée par les tests plutôt qu'une réimplémentation indépendante (les
+// zéros insérés contribuent une somme exactement nulle, l'addition virgule
+// fixe étant exacte : les deux formulations coïncident **bit à bit**).
+//
+// [`DilatedConv2dShape`] est une structure **séparée** de [`Conv2dShape`]
+// (même précédent que [`Conv2dTransposeShape`]) plutôt qu'un champ
+// `dilation` ajouté à `Conv2dShape` : `Conv2dShape` est construit par
+// littéral de structure dans plusieurs dizaines d'appels existants
+// (`conv2d`/`conv2d_batch`/`depthwise_conv2d`/`separable_conv2d`, tests,
+// bancs d'essai) — lui ajouter un champ obligatoire forcerait leur
+// modification mécanique pour une fonctionnalité qu'ils n'utilisent pas.
+// Une structure neuve, dont [`DilatedConv2dShape::height_out`]/
+// [`DilatedConv2dShape::width_out`] intègrent la taille effective du noyau,
+// n'a aucun impact sur le code existant.
 
 use super::reductions::FixedReducible;
 
@@ -608,6 +634,200 @@ pub fn conv2d_transpose<T: FixedReducible>(
         }
     }
 
+    for (co, &b) in bias.iter().enumerate()
+    {
+        for pos in 0..spatial_out
+        {
+            let idx = co * spatial_out + pos;
+            y[idx] = y[idx].wrapping_add(b);
+        }
+    }
+    y
+}
+
+/// Dimensions d'une convolution 2D **dilatée** (« à trous »), valide (sans
+/// remplissage) — structure séparée de [`Conv2dShape`] (cf. en-tête de
+/// module).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DilatedConv2dShape {
+    /// Nombre de canaux d'entrée.
+    pub in_channels: usize,
+    /// Hauteur de l'entrée (par canal).
+    pub height: usize,
+    /// Largeur de l'entrée (par canal).
+    pub width: usize,
+    /// Nombre de canaux de sortie (filtres).
+    pub out_channels: usize,
+    /// Hauteur du noyau de convolution (prises, avant dilatation).
+    pub kernel_h: usize,
+    /// Largeur du noyau de convolution (prises, avant dilatation).
+    pub kernel_w: usize,
+    /// Pas de déplacement vertical de la fenêtre glissante.
+    pub stride_h: usize,
+    /// Pas de déplacement horizontal de la fenêtre glissante.
+    pub stride_w: usize,
+    /// Espacement vertical entre deux prises consécutives du noyau
+    /// (`1` = convolution ordinaire, contiguë).
+    pub dilation_h: usize,
+    /// Espacement horizontal entre deux prises consécutives du noyau.
+    pub dilation_w: usize,
+}
+
+impl DilatedConv2dShape {
+    /// Hauteur **effective** du noyau une fois dilaté :
+    /// `dilation_h · (kernel_h − 1) + 1`.
+    #[must_use]
+    pub fn effective_kernel_h(&self) -> usize {
+        self.dilation_h * (self.kernel_h - 1) + 1
+    }
+
+    /// Largeur **effective** du noyau une fois dilaté :
+    /// `dilation_w · (kernel_w − 1) + 1`.
+    #[must_use]
+    pub fn effective_kernel_w(&self) -> usize {
+        self.dilation_w * (self.kernel_w - 1) + 1
+    }
+
+    /// Hauteur de sortie `(height − noyau_effectif_h) / stride_h + 1`.
+    ///
+    /// Panique si `stride_h == 0`, `dilation_h == 0`, ou
+    /// `height < noyau_effectif_h`.
+    #[must_use]
+    pub fn height_out(&self) -> usize {
+        assert!(
+            self.stride_h >= 1,
+            "DilatedConv2dShape::height_out : stride_h doit être ≥ 1"
+        );
+        assert!(
+            self.dilation_h >= 1,
+            "DilatedConv2dShape::height_out : dilation_h doit être ≥ 1"
+        );
+        let eff = self.effective_kernel_h();
+        assert!(
+            self.height >= eff,
+            "DilatedConv2dShape::height_out : hauteur {} < noyau effectif {eff}",
+            self.height
+        );
+        (self.height - eff) / self.stride_h + 1
+    }
+
+    /// Largeur de sortie `(width − noyau_effectif_w) / stride_w + 1`.
+    ///
+    /// Panique si `stride_w == 0`, `dilation_w == 0`, ou
+    /// `width < noyau_effectif_w`.
+    #[must_use]
+    pub fn width_out(&self) -> usize {
+        assert!(
+            self.stride_w >= 1,
+            "DilatedConv2dShape::width_out : stride_w doit être ≥ 1"
+        );
+        assert!(
+            self.dilation_w >= 1,
+            "DilatedConv2dShape::width_out : dilation_w doit être ≥ 1"
+        );
+        let eff = self.effective_kernel_w();
+        assert!(
+            self.width >= eff,
+            "DilatedConv2dShape::width_out : largeur {} < noyau effectif {eff}",
+            self.width
+        );
+        (self.width - eff) / self.stride_w + 1
+    }
+}
+
+/// Déplie les fenêtres glissantes 2D **dilatées** de `x` en colonnes
+/// contiguës — même forme que [`im2col2d`], mais chaque prise du noyau est
+/// espacée de `dilation_h`/`dilation_w` plutôt que contiguë.
+fn im2col2d_dilated<T: Copy>(
+    x: &[T],
+    shape: DilatedConv2dShape,
+    height_out: usize,
+    width_out: usize,
+) -> Vec<T> {
+    let mut col = Vec::with_capacity(
+        shape.in_channels * shape.kernel_h * shape.kernel_w * height_out * width_out,
+    );
+    for ci in 0..shape.in_channels
+    {
+        for kh in 0..shape.kernel_h
+        {
+            for kw in 0..shape.kernel_w
+            {
+                for oh in 0..height_out
+                {
+                    for ow in 0..width_out
+                    {
+                        let h = oh * shape.stride_h + kh * shape.dilation_h;
+                        let w = ow * shape.stride_w + kw * shape.dilation_w;
+                        col.push(x[ci * (shape.height * shape.width) + h * shape.width + w]);
+                    }
+                }
+            }
+        }
+    }
+    col
+}
+
+/// Convolution 2D **dilatée** (« à trous »), valide (sans remplissage),
+/// multi-canaux, déterministe (cf. en-tête de module).
+///
+/// `x` : `shape.in_channels × shape.height × shape.width` ; `weights` :
+/// `shape.out_channels × shape.in_channels × shape.kernel_h × shape.kernel_w`
+/// (même convention que [`conv2d`], compacte — pas le noyau dilaté avec ses
+/// zéros insérés) ; `bias` : `shape.out_channels`. Retourne
+/// `shape.out_channels × shape.height_out() × shape.width_out()`.
+///
+/// `dilation_h = dilation_w = 1` calcule **exactement** [`conv2d`] (même
+/// code, dilatation neutre).
+///
+/// Panique si les longueurs de slice ne correspondent pas aux dimensions
+/// annoncées, ou selon les préconditions de
+/// [`DilatedConv2dShape::height_out`]/[`DilatedConv2dShape::width_out`].
+#[must_use]
+pub fn dilated_conv2d<T: FixedReducible>(
+    x: &[T],
+    weights: &[T],
+    bias: &[T],
+    shape: DilatedConv2dShape,
+) -> Vec<T> {
+    let height_out = shape.height_out();
+    let width_out = shape.width_out();
+    assert_eq!(
+        x.len(),
+        shape.in_channels * shape.height * shape.width,
+        "dilated_conv2d : x de longueur {} ≠ {}×{}×{}",
+        x.len(),
+        shape.in_channels,
+        shape.height,
+        shape.width
+    );
+    assert_eq!(
+        weights.len(),
+        shape.out_channels * shape.in_channels * shape.kernel_h * shape.kernel_w,
+        "dilated_conv2d : poids de longueur {} ≠ {}×{}×{}×{}",
+        weights.len(),
+        shape.out_channels,
+        shape.in_channels,
+        shape.kernel_h,
+        shape.kernel_w
+    );
+    assert_eq!(
+        bias.len(),
+        shape.out_channels,
+        "dilated_conv2d : biais de longueur {} ≠ {}",
+        bias.len(),
+        shape.out_channels
+    );
+
+    let col = im2col2d_dilated(x, shape, height_out, width_out);
+    let spatial_out = height_out * width_out;
+    let mut y = super::linalg::matmul(
+        weights,
+        &col,
+        shape.out_channels,
+        shape.in_channels * shape.kernel_h * shape.kernel_w,
+        spatial_out,
+    );
     for (co, &b) in bias.iter().enumerate()
     {
         for pos in 0..spatial_out

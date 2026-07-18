@@ -19,8 +19,8 @@
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::fixed::Q16_16;
 use scirust_simd::fixed::conv2d::{
-    Conv2dShape, Conv2dTransposeShape, conv2d, conv2d_batch, conv2d_transpose, depthwise_conv2d,
-    separable_conv2d,
+    Conv2dShape, Conv2dTransposeShape, DilatedConv2dShape, conv2d, conv2d_batch, conv2d_transpose,
+    depthwise_conv2d, dilated_conv2d, separable_conv2d,
 };
 use scirust_simd::fixed::pool2d::{Pool2dShape, avg_pool2d, max_pool2d};
 
@@ -297,12 +297,45 @@ fn bench_conv2d_transpose(c: &mut Criterion) {
     g.finish();
 }
 
+/// Convolution dilatée (« à trous ») : même nombre de MAC qu'un `conv2d` de
+/// même noyau compact ([`bench_conv2d`] ci-dessus), champ réceptif élargi
+/// par la dilatation sans coût de calcul supplémentaire (cf. en-tête de
+/// module de `fixed::conv2d`).
+fn bench_dilated_conv2d(c: &mut Criterion) {
+    let shape = DilatedConv2dShape {
+        in_channels: IN_CHANNELS,
+        height: HEIGHT,
+        width: WIDTH,
+        out_channels: OUT_CHANNELS,
+        kernel_h: KERNEL,
+        kernel_w: KERNEL,
+        stride_h: 1,
+        stride_w: 1,
+        dilation_h: 2,
+        dilation_w: 2,
+    };
+    let x = fixed_data(0xC, IN_CHANNELS * HEIGHT * WIDTH);
+    let w = fixed_data(0xD, OUT_CHANNELS * IN_CHANNELS * KERNEL * KERNEL);
+    let b = fixed_data(0xE, OUT_CHANNELS);
+
+    let mac_count =
+        (OUT_CHANNELS * IN_CHANNELS * KERNEL * KERNEL * shape.height_out() * shape.width_out())
+            as u64;
+    let mut g = c.benchmark_group("dilated_conv2d");
+    g.throughput(Throughput::Elements(mac_count));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter(|| dilated_conv2d(black_box(&x), black_box(&w), black_box(&b), shape))
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_conv2d,
     bench_pool2d,
     bench_conv2d_batch,
     bench_separable_conv2d,
-    bench_conv2d_transpose
+    bench_conv2d_transpose,
+    bench_dilated_conv2d
 );
 criterion_main!(benches);
