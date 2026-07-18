@@ -63,8 +63,15 @@ derivation, or is labelled a hypothesis.
 - **zero-divisor instrumentation** ([`ProductDiagnostics`]) — every relation
   product is measured for the near-zero-divisor condition; no silent NaN;
 - **a retention interface** ([`RetentionPolicy`], [`NoForgetting`],
-  [`LinearDecay`]) over a logical `u64` tick — defined, but no automatic
-  eviction runs in Phase 1;
+  [`LinearDecay`]) over a logical `u64` tick — no automatic eviction in the
+  Phase 1 core (`S16Store` only grows via explicit `remove`);
+- **a bounded, decay-aware memory (Phase 2)** ([`S16BoundedMemory`]) — a
+  capacity-capped layer over the store + exact index: when full, it evicts the
+  lowest-retention resident (deterministic ascending-`ConceptId` tie-break),
+  `search` bumps recency at a caller-supplied tick, and `forget(now, threshold)`
+  evicts everything below a retention threshold. Behavioural parity with the
+  workspace's `scirust_retrieval::BoundedSemanticMemory` is tested head-to-head
+  in `tests/bounded_parity.rs`;
 - **a real-vector baseline** ([`Real16Index`]).
 
 Properties: pure Rust, zero FFI, `#![forbid(unsafe_code)]`, deterministic
@@ -211,6 +218,7 @@ cryptography, and reverse-mode differentiation over the store — all deferred.
 [`ConceptId`]: crate::ConceptId
 [`ConceptRecord`]: crate::ConceptRecord
 [`S16Store`]: crate::S16Store
+[`S16BoundedMemory`]: crate::S16BoundedMemory
 [`S16ExactIndex`]: crate::S16ExactIndex
 [`S16Expr`]: crate::S16Expr
 [`S16Relation`]: crate::S16Relation

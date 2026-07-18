@@ -58,6 +58,7 @@
 
 mod baseline;
 mod binding;
+mod bounded;
 mod diagnostics;
 mod digest;
 mod error;
@@ -75,6 +76,7 @@ pub use binding::{
     Encoding, RealBinding, RetrievalAccuracy, TripleShape, circular_convolution, cosine16,
     grouping_sensitivity, order_sensitivity, relative_distance16, structure_retrieval,
 };
+pub use bounded::{Insertion, S16BoundedMemory};
 pub use diagnostics::{DEFAULT_NEAR_ZERO_THRESHOLD, ProductDiagnostics};
 pub use digest::{DOMAIN_CONCEPT, DOMAIN_EXPRESSION, Digest32, concept_digest};
 pub use error::{HypermemoryError, Result};

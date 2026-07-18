@@ -353,7 +353,10 @@ are run, they are reported only alongside the exact hardware, compiler version,
 
 * **Phase 2** — deterministic retention/eviction implementing `RetentionPolicy`
   over `S16Store`; bounded memory experiments compared head-to-head with
-  `BoundedSemanticMemory`.
+  `BoundedSemanticMemory`. *(Implemented: `S16BoundedMemory` — capacity-capped,
+  lowest-retention eviction with ascending-`ConceptId` tie-break, recency bump
+  on search, threshold `forget`; behavioural parity with
+  `BoundedSemanticMemory` is tested in `tests/bounded_parity.rs`.)*
 * **Phase 3** — residual *learning* (currently stored but frozen), with F4 as
   the gate.
 * **Phase 4** — approximate indexes (HNSW / ANN) measured against this Phase 1
@@ -381,7 +384,8 @@ metric, or be rejected.
   *reference* / interning scheme is deferred.
 * Relation evaluation resolves each atom occurrence independently; there is no
   common-subexpression caching in Phase 1 (correctness over speed).
-* The retention interface is defined but no automatic forgetting runs; only
+* In the Phase 1 core (`S16Store`), the retention interface is defined but no
+  automatic forgetting runs (Phase 2's opt-in `S16BoundedMemory` adds it); only
   explicit `remove` changes residency.
 * `f32` similarity has limited dynamic range; extremely large anchors can
   overflow `norm_sqr` — this is detected (`NonFiniteRepresentation`), not
