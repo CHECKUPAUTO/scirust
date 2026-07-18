@@ -281,6 +281,120 @@ fn octonion_inverse_is_two_sided() {
 }
 
 // ------------------------------------------------------------------ //
+//  Octonions : exponentielle, logarithme, puissance                   //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn octonion_exp_zero_is_one() {
+    assert_eq!(OctonionSimd::ZERO.exp(), OctonionSimd::ONE);
+}
+
+#[test]
+fn octonion_ln_one_is_zero() {
+    let l = OctonionSimd::ONE.ln();
+    assert!(l.norm_sqr() < 1e-10, "ln(1) devrait être nul : {l:?}");
+}
+
+#[test]
+fn octonion_exp_of_pure_imaginary_quarter_turn() {
+    // exp(e1·π/2) = cos(π/2)·e0 + e1·sin(π/2) = e1 (généralise e^(iπ/2) = i).
+    let quarter = OctonionSimd::unit(1).scale(core::f32::consts::FRAC_PI_2);
+    let result = quarter.exp().to_array();
+    let expected = OctonionSimd::unit(1).to_array();
+    assert!(
+        max_abs_diff(result, expected) < 1e-4,
+        "exp(e1·π/2) = {result:?}, attendu {expected:?}"
+    );
+}
+
+#[test]
+fn octonion_ln_of_negative_real_uses_e1_branch() {
+    // ln(-3) = ln(3)·e0 + π·e1 (coupure de branche, convention documentée
+    // sur OctonionSimd::ln).
+    let neg3 = OctonionSimd::from_array([-3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+    let l = neg3.ln().to_array();
+    let mut expected = [0.0f32; 8];
+    expected[0] = 3.0f32.ln();
+    expected[1] = core::f32::consts::PI;
+    assert!(
+        max_abs_diff(l, expected) < 1e-4,
+        "ln(-3) = {l:?}, attendu {expected:?}"
+    );
+}
+
+#[test]
+fn octonion_exp_ln_round_trip_on_random_inputs() {
+    // exp(ln(o)) = o pour tout o ≠ 0 (branche principale, y compris la
+    // convention de coupure e1 pour les réels négatifs).
+    let mut rng = Lcg(0xE717_0106);
+    for _ in 0..200
+    {
+        let o = rng.octonion();
+        if o.norm_sqr() < 1e-6
+        {
+            continue;
+        }
+        let round_trip = o.ln().exp().to_array();
+        assert!(
+            max_abs_diff(round_trip, o.to_array()) < 5e-3,
+            "exp(ln(o)) ≠ o : {round_trip:?} vs {:?}",
+            o.to_array()
+        );
+    }
+}
+
+#[test]
+fn octonion_ln_exp_round_trip_on_small_inputs() {
+    // ln(exp(o)) = o seulement dans la branche principale (‖partie
+    // imaginaire‖ < π, comme pour le logarithme complexe) : composantes
+    // petites pour y rester.
+    let mut rng = Lcg(0x106_E717);
+    for _ in 0..200
+    {
+        let mut c = [0.0f32; 8];
+        for x in &mut c
+        {
+            *x = rng.next_small_int() * 0.1; // composantes dans [-0.5, 0.5]
+        }
+        let o = OctonionSimd::from_array(c);
+        let round_trip = o.exp().ln().to_array();
+        assert!(
+            max_abs_diff(round_trip, c) < 5e-3,
+            "ln(exp(o)) ≠ o : {round_trip:?} vs {c:?}"
+        );
+    }
+}
+
+#[test]
+fn octonion_powf_two_matches_squaring() {
+    // o² via powf(2) doit coïncider avec le produit direct o·o — les deux
+    // vivent dans la sous-algèbre commutative/associative engendrée par un
+    // seul élément (span{1, v̂} ≅ ℂ), où l'identité exp(2·ln(o)) = o²
+    // s'applique sans réserve.
+    let mut rng = Lcg(0x0002_090F);
+    let mut checked = 0;
+    for _ in 0..500
+    {
+        let o = rng.octonion();
+        if o.norm_sqr() < 1.0
+        {
+            continue;
+        }
+        let squared_direct = (o * o).to_array();
+        let squared_powf = o.powf(2.0).to_array();
+        let scale = squared_direct
+            .iter()
+            .fold(1.0f32, |acc, &v| acc.max(v.abs()));
+        assert!(
+            max_abs_diff(squared_direct, squared_powf) < 1e-2 * scale,
+            "o·o ≠ o^2 : {squared_direct:?} vs {squared_powf:?}"
+        );
+        checked += 1;
+    }
+    assert!(checked > 50, "trop peu d'échantillons valides testés");
+}
+
+// ------------------------------------------------------------------ //
 //  Sédénions : correction                                             //
 // ------------------------------------------------------------------ //
 
@@ -440,6 +554,124 @@ fn sedenion_inverse_is_two_sided_on_random_inputs() {
             "s·s⁻¹ ≠ 1 : {right:?}"
         );
     }
+}
+
+// ------------------------------------------------------------------ //
+//  Sédénions : exponentielle, logarithme, puissance                   //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn sedenion_exp_zero_is_one() {
+    assert_eq!(SedenionSimd::ZERO.exp(), SedenionSimd::ONE);
+}
+
+#[test]
+fn sedenion_ln_one_is_zero() {
+    let l = SedenionSimd::ONE.ln();
+    assert!(l.norm_sqr() < 1e-10, "ln(1) devrait être nul : {l:?}");
+}
+
+#[test]
+fn sedenion_exp_of_pure_imaginary_quarter_turn() {
+    let quarter = SedenionSimd::unit(1).scale(core::f32::consts::FRAC_PI_2);
+    let result = quarter.exp().to_array();
+    let expected = SedenionSimd::unit(1).to_array();
+    assert!(
+        max_abs_diff(result, expected) < 1e-4,
+        "exp(e1·π/2) = {result:?}, attendu {expected:?}"
+    );
+}
+
+#[test]
+fn sedenion_ln_of_negative_real_uses_e1_branch() {
+    let mut neg3 = [0.0f32; 16];
+    neg3[0] = -3.0;
+    let l = SedenionSimd::from_array(neg3).ln().to_array();
+    let mut expected = [0.0f32; 16];
+    expected[0] = 3.0f32.ln();
+    expected[1] = core::f32::consts::PI;
+    assert!(
+        max_abs_diff(l, expected) < 1e-4,
+        "ln(-3) = {l:?}, attendu {expected:?}"
+    );
+}
+
+#[test]
+fn sedenion_exp_ln_round_trip_on_random_inputs() {
+    let mut rng = Lcg(0x5ED_E717);
+    for _ in 0..200
+    {
+        let s = rng.sedenion();
+        if s.norm_sqr() < 1e-6
+        {
+            continue;
+        }
+        let round_trip = s.ln().exp().to_array();
+        assert!(
+            max_abs_diff(round_trip, s.to_array()) < 5e-3,
+            "exp(ln(s)) ≠ s : {round_trip:?} vs {:?}",
+            s.to_array()
+        );
+    }
+}
+
+#[test]
+fn sedenion_ln_exp_round_trip_on_small_inputs() {
+    let mut rng = Lcg(0x106_5ED7);
+    for _ in 0..200
+    {
+        let mut c = [0.0f32; 16];
+        for x in &mut c
+        {
+            *x = rng.next_small_int() * 0.1;
+        }
+        let s = SedenionSimd::from_array(c);
+        let round_trip = s.exp().ln().to_array();
+        assert!(
+            max_abs_diff(round_trip, c) < 5e-3,
+            "ln(exp(s)) ≠ s : {round_trip:?} vs {c:?}"
+        );
+    }
+}
+
+#[test]
+fn sedenion_powf_two_matches_squaring() {
+    let mut rng = Lcg(0x0020_95ED);
+    let mut checked = 0;
+    for _ in 0..500
+    {
+        let s = rng.sedenion();
+        if s.norm_sqr() < 1.0
+        {
+            continue;
+        }
+        let squared_direct = (s * s).to_array();
+        let squared_powf = s.powf(2.0).to_array();
+        let scale = squared_direct
+            .iter()
+            .fold(1.0f32, |acc, &v| acc.max(v.abs()));
+        assert!(
+            max_abs_diff(squared_direct, squared_powf) < 1e-2 * scale,
+            "s·s ≠ s^2 : {squared_direct:?} vs {squared_powf:?}"
+        );
+        checked += 1;
+    }
+    assert!(checked > 50, "trop peu d'échantillons valides testés");
+}
+
+#[test]
+fn sedenion_exp_ln_round_trip_on_zero_divisor_factor() {
+    // exp/ln ne dépendent que d'un SEUL élément (cf. en-tête de fonction) :
+    // le round-trip tient même pour x = e1 + e10, qui participe par
+    // ailleurs à un diviseur de zéro avec y = e4 − e15
+    // (`sedenion_zero_divisors`) — la pathologie de 𝕊 n'affecte pas
+    // exp/ln, qui ignorent totalement l'existence de `y`.
+    let x = SedenionSimd::unit(1) + SedenionSimd::unit(10);
+    let round_trip = x.ln().exp().to_array();
+    assert!(
+        max_abs_diff(round_trip, x.to_array()) < 5e-3,
+        "exp(ln(x)) ≠ x pour le facteur diviseur de zéro : {round_trip:?}"
+    );
 }
 
 #[test]

@@ -70,6 +70,14 @@
 // * 𝕆 est une algèbre de composition : ‖xy‖² = ‖x‖²‖y‖².
 // * 𝕊 perd l'alternativité **et** possède des diviseurs de zéro :
 //   (e₁ + e₁₀)(e₄ − e₁₅) = 0 avec les deux facteurs non nuls.
+//
+// [`OctonionSimd::exp`]/[`OctonionSimd::ln`]/[`OctonionSimd::powf`] (et leurs
+// pendants [`SedenionSimd`]) généralisent l'exponentielle complexe/
+// quaternionique : `exp(w·e₀ + v) = eʷ·(cos‖v‖·e₀ + (v/‖v‖)·sin‖v‖)`. La
+// formule ne dépend que de l'identité `v̄·v = ‖v‖²·1` (donc `v·v = −‖v‖²·1`
+// pour `v` pur), qui tient à tout niveau de Cayley-Dickson — **y compris**
+// 𝕊, malgré sa non-associativité et ses diviseurs de zéro, car la série
+// `Σ vⁿ/n!` ne met en jeu que les puissances d'un seul élément.
 
 pub mod dual;
 pub mod octonion;

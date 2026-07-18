@@ -241,11 +241,67 @@ fn bench_inverse(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_exp_log(c: &mut Criterion) {
+    let oct: Vec<OctonionSimd> = nonzero_operands::<8>(0xE7_0C7A)
+        .iter()
+        .map(|&a| OctonionSimd::from_array(a))
+        .collect();
+    let sed: Vec<SedenionSimd> = nonzero_operands::<16>(0xE7_5ED0)
+        .iter()
+        .map(|&a| SedenionSimd::from_array(a))
+        .collect();
+
+    let mut group = c.benchmark_group("exp_log");
+    group.throughput(Throughput::Elements(N_PAIRS as u64));
+    group.bench_function(BenchmarkId::new("octonion", "exp"), |b| {
+        b.iter(|| {
+            let mut acc = OctonionSimd::ZERO;
+            for &o in black_box(&oct)
+            {
+                acc = acc + o.exp();
+            }
+            acc
+        })
+    });
+    group.bench_function(BenchmarkId::new("octonion", "ln"), |b| {
+        b.iter(|| {
+            let mut acc = OctonionSimd::ZERO;
+            for &o in black_box(&oct)
+            {
+                acc = acc + o.ln();
+            }
+            acc
+        })
+    });
+    group.bench_function(BenchmarkId::new("sedenion", "exp"), |b| {
+        b.iter(|| {
+            let mut acc = SedenionSimd::ZERO;
+            for &s in black_box(&sed)
+            {
+                acc = acc + s.exp();
+            }
+            acc
+        })
+    });
+    group.bench_function(BenchmarkId::new("sedenion", "ln"), |b| {
+        b.iter(|| {
+            let mut acc = SedenionSimd::ZERO;
+            for &s in black_box(&sed)
+            {
+                acc = acc + s.ln();
+            }
+            acc
+        })
+    });
+    group.finish();
+}
+
 criterion_group!(
     wall_time,
     bench_octonion_mul,
     bench_sedenion_mul,
-    bench_inverse
+    bench_inverse,
+    bench_exp_log
 );
 
 // ------------------------------------------------------------------ //

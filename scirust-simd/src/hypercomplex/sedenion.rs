@@ -167,6 +167,89 @@ impl SedenionSimd {
     pub fn inverse(self) -> Self {
         self.conj().scale(1.0 / self.norm_sqr())
     }
+
+    /// Sépare `s = w·e₀ + v` en sa partie réelle `w` et sa partie
+    /// imaginaire pure `v` (`v₀ = 0` **exactement**, par annulation exacte
+    /// en `f32` de `s₀ − w`).
+    #[inline(always)]
+    #[must_use]
+    fn split_real_pure(self) -> (f32, Self) {
+        let w = self.to_array()[0];
+        (w, self - Self::ONE.scale(w))
+    }
+
+    /// Exponentielle `exp(s) = eʷ·(cos‖v‖·e₀ + (v/‖v‖)·sin‖v‖)`, où
+    /// `s = w·e₀ + v` (`v` : partie imaginaire pure).
+    ///
+    /// La formule ne dépend que de l'identité `v̄·v = ‖v‖²·1` (`v̄ = −v` car
+    /// `v` est pur, donc `v·v = −‖v‖²·1`), qui tient à **tout** niveau de la
+    /// construction de Cayley-Dickson — y compris 𝕊 (cf. [`Self::inverse`])
+    /// — donc malgré la non-associativité et les diviseurs de zéro : la
+    /// série entière `Σ vⁿ/n!` ne met en jeu que les puissances d'un
+    /// **seul** élément `v`, jamais un produit entre deux éléments
+    /// indépendants (là où l'associativité manquerait).
+    #[inline]
+    #[must_use]
+    pub fn exp(self) -> Self {
+        let (w, pure) = self.split_real_pure();
+        let v_norm = pure.norm();
+        let exp_w = w.exp();
+        let tiny = 1e-4; // cf. Quaternion::to_axis_angle.
+        if v_norm < tiny
+        {
+            Self::ONE.scale(exp_w)
+        }
+        else
+        {
+            Self::ONE.scale(exp_w * v_norm.cos()) + pure.scale(exp_w * v_norm.sin() / v_norm)
+        }
+    }
+
+    /// Logarithme `ln(s) = ln‖s‖·e₀ + (v/‖v‖)·acos(w/‖s‖)`, réciproque de
+    /// [`Self::exp`] restreinte à sa branche principale. Indéfini pour
+    /// `s = 0` (comme [`Self::normalize`]).
+    ///
+    /// Pour `s` quasi réel positif (`‖v‖` négligeable, `w ≥ 0`), la partie
+    /// imaginaire est prise nulle. Pour `s` quasi réel **négatif**
+    /// (`w < 0`), la direction imaginaire est indéterminée (coupure de
+    /// branche du logarithme d'un réel négatif) : convention arbitraire
+    /// mais déterministe `e₁` — même politique que l'axe par défaut de
+    /// [`crate::geometry::Quaternion::to_axis_angle`] quand l'angle est
+    /// quasi nul.
+    #[inline]
+    #[must_use]
+    pub fn ln(self) -> Self {
+        let s_norm = self.norm();
+        let (w, pure) = self.split_real_pure();
+        let ln_norm = s_norm.ln();
+        let v_norm = pure.norm();
+        let tiny = 1e-4; // cf. Quaternion::to_axis_angle.
+        if v_norm < tiny
+        {
+            if w >= 0.0
+            {
+                Self::ONE.scale(ln_norm)
+            }
+            else
+            {
+                Self::ONE.scale(ln_norm) + Self::unit(1).scale(core::f32::consts::PI)
+            }
+        }
+        else
+        {
+            let ratio = (w / s_norm).clamp(-1.0, 1.0);
+            let theta = ratio.acos();
+            Self::ONE.scale(ln_norm) + pure.scale(theta / v_norm)
+        }
+    }
+
+    /// Puissance réelle `sᵗ = exp(t·ln(s))`. Indéfini pour `s = 0` (via
+    /// [`Self::ln`]).
+    #[inline]
+    #[must_use]
+    pub fn powf(self, t: f32) -> Self {
+        self.ln().scale(t).exp()
+    }
 }
 
 impl Add for SedenionSimd {

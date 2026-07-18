@@ -141,6 +141,89 @@ impl OctonionSimd {
     pub fn inverse(self) -> Self {
         self.conj().scale(1.0 / self.norm_sqr())
     }
+
+    /// Sépare `o = w·e₀ + v` en sa partie réelle `w` et sa partie
+    /// imaginaire pure `v` (`v₀ = 0` **exactement**, par annulation exacte
+    /// en `f32` de `o₀ − w`).
+    #[inline(always)]
+    #[must_use]
+    fn split_real_pure(self) -> (f32, Self) {
+        let w = self.to_array()[0];
+        (w, self - Self::ONE.scale(w))
+    }
+
+    /// Exponentielle `exp(o) = eʷ·(cos‖v‖·e₀ + (v/‖v‖)·sin‖v‖)`, où
+    /// `o = w·e₀ + v` (`v` : partie imaginaire pure).
+    ///
+    /// Généralise l'exponentielle complexe/quaternionique : la formule ne
+    /// dépend que de l'identité `v̄·v = ‖v‖²·1` (`v̄ = −v` car `v` est pur,
+    /// donc `v·v = −‖v‖²·1`), qui tient à **tout** niveau de la
+    /// construction de Cayley-Dickson (cf. [`Self::inverse`]) — la série
+    /// entière `Σ vⁿ/n!` reste donc valide même si 𝕆 n'était pas alternative
+    /// (elle l'est), car elle ne met en jeu que les puissances d'un **seul**
+    /// élément.
+    #[inline]
+    #[must_use]
+    pub fn exp(self) -> Self {
+        let (w, pure) = self.split_real_pure();
+        let v_norm = pure.norm();
+        let exp_w = w.exp();
+        let tiny = 1e-4; // cf. Quaternion::to_axis_angle.
+        if v_norm < tiny
+        {
+            Self::ONE.scale(exp_w)
+        }
+        else
+        {
+            Self::ONE.scale(exp_w * v_norm.cos()) + pure.scale(exp_w * v_norm.sin() / v_norm)
+        }
+    }
+
+    /// Logarithme `ln(o) = ln‖o‖·e₀ + (v/‖v‖)·acos(w/‖o‖)`, réciproque de
+    /// [`Self::exp`] restreinte à sa branche principale. Indéfini pour
+    /// `o = 0` (comme [`Self::normalize`]).
+    ///
+    /// Pour `o` quasi réel positif (`‖v‖` négligeable, `w ≥ 0`), la partie
+    /// imaginaire est prise nulle. Pour `o` quasi réel **négatif**
+    /// (`w < 0`), la direction imaginaire est indéterminée (coupure de
+    /// branche du logarithme d'un réel négatif) : convention arbitraire
+    /// mais déterministe `e₁` — même politique que l'axe par défaut de
+    /// [`crate::geometry::Quaternion::to_axis_angle`] quand l'angle est
+    /// quasi nul.
+    #[inline]
+    #[must_use]
+    pub fn ln(self) -> Self {
+        let o_norm = self.norm();
+        let (w, pure) = self.split_real_pure();
+        let ln_norm = o_norm.ln();
+        let v_norm = pure.norm();
+        let tiny = 1e-4; // cf. Quaternion::to_axis_angle.
+        if v_norm < tiny
+        {
+            if w >= 0.0
+            {
+                Self::ONE.scale(ln_norm)
+            }
+            else
+            {
+                Self::ONE.scale(ln_norm) + Self::unit(1).scale(core::f32::consts::PI)
+            }
+        }
+        else
+        {
+            let ratio = (w / o_norm).clamp(-1.0, 1.0);
+            let theta = ratio.acos();
+            Self::ONE.scale(ln_norm) + pure.scale(theta / v_norm)
+        }
+    }
+
+    /// Puissance réelle `oᵗ = exp(t·ln(o))`. Indéfini pour `o = 0` (via
+    /// [`Self::ln`]).
+    #[inline]
+    #[must_use]
+    pub fn powf(self, t: f32) -> Self {
+        self.ln().scale(t).exp()
+    }
 }
 
 impl Add for OctonionSimd {
