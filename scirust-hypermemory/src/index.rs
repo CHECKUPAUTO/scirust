@@ -147,6 +147,21 @@ impl S16ExactIndex {
         self.effective.push(record.effective());
     }
 
+    /// Refresh the stored effective vector for `record`'s id (Phase 3: after a
+    /// residual-learning step). Returns whether the id was present. Only the
+    /// addressed entry changes; every other entry is untouched.
+    pub fn update_concept(&mut self, record: &ConceptRecord) -> bool {
+        if let Some(pos) = self.ids.iter().position(|&x| x == record.id())
+        {
+            self.effective[pos] = record.effective();
+            true
+        }
+        else
+        {
+            false
+        }
+    }
+
     /// Remove `id` from the index if present; returns whether it was found.
     ///
     /// Uses `swap_remove` (O(1)); results are unaffected because `search` fully

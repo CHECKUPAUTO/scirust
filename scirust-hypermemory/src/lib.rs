@@ -92,7 +92,7 @@ pub use index::{S16ExactIndex, SearchHit, SimilarityMetric};
 pub use metadata::{ConceptMetadata, LinearDecay, NoForgetting, RetentionPolicy};
 pub use record::ConceptRecord;
 pub use representation::{effective_representation, is_finite, norm_sqr_ordered};
-pub use store::{ConceptSpec, DEFAULT_RESIDUAL_BOUND, S16Store};
+pub use store::{ConceptSpec, DEFAULT_RESIDUAL_BOUND, LearnOutcome, S16Store};
 
 #[cfg(test)]
 mod layout_tests {

@@ -161,6 +161,22 @@ impl<P: RetentionPolicy> S16BoundedMemory<P> {
         Ok(hits)
     }
 
+    /// Phase 3 — one bounded residual-learning step on a resident concept,
+    /// keeping the index in lock-step and bumping the concept's recency at
+    /// `now`. Semantics and errors are those of [`S16Store::learn_residual`].
+    pub fn learn(
+        &mut self,
+        id: ConceptId,
+        target: &SedenionSimd,
+        rate: f32,
+        now: u64,
+    ) -> Result<crate::LearnOutcome> {
+        let outcome = self.store.learn_residual(id, target, rate)?;
+        self.index.update_concept(self.store.get(id)?);
+        let _ = self.store.touch(id, now);
+        Ok(outcome)
+    }
+
     /// Evict every resident whose retention score at `now` is strictly below
     /// `threshold`. Returns the evicted ids in ascending order (deterministic).
     pub fn forget(&mut self, now: u64, threshold: f32) -> Vec<ConceptId> {

@@ -49,7 +49,7 @@ derivation, or is labelled a hypothesis.
   reused slot;
 - **exact payload separation** ([`ConceptRecord`]) — the sedenion is not the
   sole source of truth; the exact byte payload, content digest, immutable
-  anchor, (frozen) residual, cached effective vector, metadata, and insertion
+  anchor, bounded residual, cached effective vector, metadata, and insertion
   sequence are all preserved;
 - **a deterministic slot/generation store** ([`S16Store`]) — insert / get /
   guarded `get_mut` / remove / contains / len / is_empty / slot-ordered
@@ -65,6 +65,13 @@ derivation, or is labelled a hypothesis.
 - **a retention interface** ([`RetentionPolicy`], [`NoForgetting`],
   [`LinearDecay`]) over a logical `u64` tick — no automatic eviction in the
   Phase 1 core (`S16Store` only grows via explicit `remove`);
+- **bounded residual learning (Phase 3)** ([`S16Store::learn_residual`],
+  `S16BoundedMemory::learn`) — one explicit, deterministic, norm-clamped step
+  moving a concept's effective vector toward a target; never autonomous.
+  **F4 not triggered** (per-record isolation is exact — see
+  `tests/f4_learning.rs`): other records stay bit-identical and other
+  concepts' rankings are unchanged under any query; the residual bound caps
+  drift from the immutable anchor;
 - **a bounded, decay-aware memory (Phase 2)** ([`S16BoundedMemory`]) — a
   capacity-capped layer over the store + exact index: when full, it evicts the
   lowest-retention resident (deterministic ascending-`ConceptId` tie-break),
@@ -212,7 +219,8 @@ established methods. Full results:
 
 HNSW / ANN, dynamic PCA, KD-trees, distributed storage, lock-free concurrency,
 GPU kernels, mmap persistence, autonomous agents, NL generation, continual
-learning, residual *learning* (the residual is stored but frozen), production
+learning, autonomous/continual learning loops (Phase 3's residual learning is
+explicit, per-step, and caller-driven only), production
 cryptography, and reverse-mode differentiation over the store — all deferred.
 
 [`ConceptId`]: crate::ConceptId

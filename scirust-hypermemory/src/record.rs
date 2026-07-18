@@ -126,6 +126,22 @@ impl ConceptRecord {
     pub(crate) fn metadata_mut(&mut self) -> &mut ConceptMetadata {
         &mut self.metadata
     }
+
+    /// Replace the residual and recompute the cached effective vector
+    /// (Phase 3 learning path). Crate-internal: only the store's validated
+    /// `learn_residual` calls this, after enforcing the residual bound.
+    ///
+    /// Transactional: if the new effective representation is not computable
+    /// (zero norm or non-finite), the record is left **unchanged** and the
+    /// typed error is returned. The id, payload, content digest, anchor,
+    /// metadata, and sequence are never touched — per-record isolation is
+    /// what makes the F4 criterion provable.
+    pub(crate) fn set_residual(&mut self, residual: SedenionSimd) -> Result<()> {
+        let effective = effective_representation(&self.anchor, &residual)?;
+        self.residual = residual;
+        self.effective = effective;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

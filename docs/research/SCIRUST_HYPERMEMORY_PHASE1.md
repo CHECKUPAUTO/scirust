@@ -358,7 +358,16 @@ are run, they are reported only alongside the exact hardware, compiler version,
   on search, threshold `forget`; behavioural parity with
   `BoundedSemanticMemory` is tested in `tests/bounded_parity.rs`.)*
 * **Phase 3** — residual *learning* (currently stored but frozen), with F4 as
-  the gate.
+  the gate. *(Implemented: `S16Store::learn_residual` /
+  `S16BoundedMemory::learn` — one explicit, deterministic, norm-clamped step
+  `new_residual = clamp_norm(residual + rate·(normalize(target) − effective),
+  residual_bound)`; never autonomous. **F4 is not triggered**: per-record
+  isolation makes every other record's effective vector bit-identical after a
+  step, and the relative ranking of all other concepts is unchanged for any
+  query — both tested exactly in `tests/f4_learning.rs`. Measured dynamics:
+  under the clamp the iteration converges to a fixed point that can sit
+  slightly below a transient similarity peak; the residual bound caps total
+  drift from the immutable anchor.)*
 * **Phase 4** — approximate indexes (HNSW / ANN) measured against this Phase 1
   exact oracle for recall.
 * **Phase 5** — structured / relation-aware queries, measured against the

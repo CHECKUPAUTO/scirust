@@ -21,8 +21,9 @@ pub const DEFAULT_RESIDUAL_BOUND: f32 = 1.0;
 
 /// Everything needed to insert one concept.
 ///
-/// Build with [`ConceptSpec::new`] (residual defaults to the zero sedenion —
-/// Phase 1 keeps learning disabled) and optionally [`ConceptSpec::with_residual`].
+/// Build with [`ConceptSpec::new`] (residual defaults to the zero sedenion) and
+/// optionally [`ConceptSpec::with_residual`]. After insertion the residual can
+/// evolve only through explicit [`S16Store::learn_residual`] steps (Phase 3).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ConceptSpec {
     /// The exact byte payload (the source of truth).
@@ -56,6 +57,25 @@ impl ConceptSpec {
         self.residual = residual;
         self
     }
+}
+
+/// Instrumentation returned by one [`S16Store::learn_residual`] step —
+/// exactly what the F4 falsification criterion needs to observe.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[must_use = "the outcome carries the F4 instrumentation for this step"]
+pub struct LearnOutcome {
+    /// Cosine similarity of the effective vector to the normalized target
+    /// before the step.
+    pub similarity_before: f32,
+    /// Cosine similarity after the step.
+    pub similarity_after: f32,
+    /// Whether the residual-norm clamp engaged (drift capped at the bound).
+    pub clamped: bool,
+}
+
+/// Cosine of two sedenions via the shared fixed index-order primitive.
+fn cosine_ordered(a: &SedenionSimd, b: &SedenionSimd) -> f32 {
+    crate::binding::cosine16(&a.to_array(), &b.to_array())
 }
 
 /// One physical slot in the store.
@@ -323,6 +343,92 @@ impl S16Store {
     pub fn touch(&mut self, id: ConceptId, now: u64) -> Result<()> {
         self.get_mut(id)?.record_access(now);
         Ok(())
+    }
+
+    /// Phase 3 — one bounded, deterministic residual-learning step.
+    ///
+    /// Nudges the concept's residual so its **effective** vector moves toward
+    /// the (normalized) `target`:
+    ///
+    /// ```text
+    /// delta        = normalize(target) − effective
+    /// new_residual = clamp_norm(residual + rate·delta, residual_bound)
+    /// ```
+    ///
+    /// Rules (all deterministic, all typed errors, record untouched on any
+    /// failure):
+    ///
+    /// * `rate` must be finite and in `[0, 1]`, else
+    ///   [`HypermemoryError::InvalidRepresentation`];
+    /// * `target` must be finite with non-zero norm (it is normalized with the
+    ///   same fixed index-order arithmetic as every other path);
+    /// * the updated residual is **norm-clamped** to the store's residual bound
+    ///   (drift from the immutable anchor is capped for the record's lifetime);
+    /// * the new effective vector must be computable, else the update is
+    ///   rejected and the old state kept.
+    ///
+    /// Returns a [`LearnOutcome`] with the cosine similarity of the effective
+    /// vector to the normalized target before and after, and whether the clamp
+    /// engaged — the instrumentation the F4 falsification criterion needs.
+    ///
+    /// **F4 by construction:** this touches only the addressed record; every
+    /// other record's effective vector is bit-identical afterwards, so the
+    /// relative ranking of all *other* concepts under any query is unchanged
+    /// (their scores and the id tie-break are untouched). Tested in
+    /// `tests/f4_learning.rs`. Learning never runs autonomously — each step is
+    /// an explicit caller decision.
+    pub fn learn_residual(
+        &mut self,
+        id: ConceptId,
+        target: &SedenionSimd,
+        rate: f32,
+    ) -> Result<LearnOutcome> {
+        if !(rate.is_finite() && (0.0..=1.0).contains(&rate))
+        {
+            return Err(HypermemoryError::InvalidRepresentation {
+                reason: "learning rate must be finite and within [0, 1]",
+            });
+        }
+        let goal =
+            SedenionSimd::from_array(crate::representation::normalize_array(&target.to_array())?);
+
+        let idx = self.resolve(id)?;
+        let record = match &mut self.slots[idx]
+        {
+            Slot::Occupied { record, .. } => record,
+            _ =>
+            {
+                return Err(HypermemoryError::InvariantViolation {
+                    detail: "resolved slot was not occupied",
+                });
+            },
+        };
+
+        let before = cosine_ordered(&record.effective(), &goal);
+        let delta = goal - record.effective();
+        let raw = record.residual() + delta.scale(rate);
+        crate::representation::validate_finite(&raw)?;
+
+        // Norm-clamp to the residual bound (squared comparison, one sqrt).
+        let raw_norm_sqr = crate::representation::norm_sqr_ordered(&raw);
+        let bound_sqr = self.residual_bound * self.residual_bound;
+        let (new_residual, clamped) = if raw_norm_sqr > bound_sqr
+        {
+            let scale = self.residual_bound / raw_norm_sqr.sqrt();
+            (raw.scale(scale), true)
+        }
+        else
+        {
+            (raw, false)
+        };
+
+        record.set_residual(new_residual)?;
+        let after = cosine_ordered(&record.effective(), &goal);
+        Ok(LearnOutcome {
+            similarity_before: before,
+            similarity_after: after,
+            clamped,
+        })
     }
 
     /// Whether `id` currently resolves to a live record.
