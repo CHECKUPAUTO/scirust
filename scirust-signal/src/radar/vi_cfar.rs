@@ -701,16 +701,39 @@ fn censored_mean_alpha(n_ref: usize, trim_low: usize, trim_high: usize, pfa: f64
     bisect_decreasing(pfa_of, pfa)
 }
 
+/// Relative convergence tolerance for [`bisect_decreasing`]/
+/// [`bisect_decreasing_fallible`]: once the bracket `[lo, hi]` is this
+/// narrow relative to `hi`, `mid` can no longer move (it rounds back to
+/// `lo` or `hi`, since there is no representable `f64` strictly between two
+/// values this close), so further iterations are a no-op that still costs a
+/// full `pfa_of` call. `1e-12` is deliberately a little looser than full
+/// `f64` relative precision (`~2.2e-16`) — comfortably beyond what any
+/// practical detection design needs from a threshold factor, and already
+/// matched to [`pfa_so_exact`]'s own truncation-bound acceptance criterion
+/// (`< 1e-12`), so bisection does not chase precision the calibration's own
+/// other error source has already given up past.
+const BISECTION_REL_TOL: f64 = 1.0e-12;
+/// Hard cap on bisection iterations — reached only if the convergence check
+/// above somehow never triggers (it always has in this module's testing);
+/// kept as a safety bound, not the normal exit path.
+const BISECTION_MAX_ITERS: usize = 100;
+
 /// Shared bisection for a strictly-decreasing-in-`alpha`, `P_fa(0) = 1`
-/// false-alarm function: brackets by doubling, then bisects.
+/// false-alarm function: brackets by doubling, then bisects to
+/// [`BISECTION_REL_TOL`] (or [`BISECTION_MAX_ITERS`], whichever comes
+/// first).
 fn bisect_decreasing(pfa_of: impl Fn(f64) -> f64, pfa: f64) -> f64 {
     let (mut lo, mut hi) = (0.0_f64, 1.0_f64);
     while pfa_of(hi) > pfa && hi < 1.0e12
     {
         hi *= 2.0;
     }
-    for _ in 0..100
+    for _ in 0..BISECTION_MAX_ITERS
     {
+        if hi - lo <= BISECTION_REL_TOL * hi.max(1.0)
+        {
+            break;
+        }
         let mid = 0.5 * (lo + hi);
         if pfa_of(mid) > pfa
         {
@@ -735,8 +758,12 @@ fn bisect_decreasing_fallible(
     {
         hi *= 2.0;
     }
-    for _ in 0..100
+    for _ in 0..BISECTION_MAX_ITERS
     {
+        if hi - lo <= BISECTION_REL_TOL * hi.max(1.0)
+        {
+            break;
+        }
         let mid = 0.5 * (lo + hi);
         if pfa_of(mid)? > pfa
         {
@@ -773,6 +800,21 @@ const TRUNCATION_MARGIN_STD_DEVS: f64 = 50.0;
 fn truncation_bound(n: f64) -> f64 {
     n + TRUNCATION_MARGIN_STD_DEVS * n.sqrt() + 50.0
 }
+
+/// Absolute tolerance target for [`pfa_so_exact`]'s quadrature — the
+/// dominant cost in exact GO/SO calibration, since [`bisect_decreasing_fallible`]
+/// re-evaluates it roughly [`BISECTION_MAX_ITERS`] times. `1e-9` resolves a
+/// probability to nine significant digits, far beyond what any practical
+/// `P_fa` design specifies (radar `P_fa` specs rarely go below `1e-6`, and
+/// never need the *calibration constant* known to better than that);
+/// looser than the truncation bound's own `< 1e-12` acceptance criterion, so
+/// quadrature error — not truncation error — is now the larger of the two,
+/// but both stay negligible relative to any real use of `alpha`. Achieving
+/// the previously-used `1e-13` over the wide interval `[0, M_trunc]` this
+/// quadrature spans costs many more adaptive subdivisions — each another
+/// [`gamma_survival`] (special-function) evaluation — for digits of `alpha`
+/// no downstream use reads.
+const QUADRATURE_TOLERANCE: f64 = 1.0e-9;
 
 /// Exact `P_fa` for smallest-of over two independent `n`-cell halves
 /// (`M = min(S1, S2)`, `S1, S2 ~ Gamma(n,1)` i.i.d.), under the i.i.d.
@@ -829,7 +871,7 @@ fn pfa_so_exact(n: f64, alpha: f64) -> Result<f64, CfarError> {
         },
         0.0,
         m_trunc,
-        1.0e-13,
+        QUADRATURE_TOLERANCE,
         50,
     )
     .map_err(|e| CfarError::ExactCalibrationFailed(e.to_string()))?;
@@ -891,36 +933,57 @@ fn exact_go_so_alpha(reference_cells: usize, pfa: f64, take_max: bool) -> Result
 }
 
 /// The four threshold factors this detector can need, computed once (not
-/// per-CUT) from a validated [`CfarConfig`].
+/// per-CUT) from a validated [`CfarConfig`] — `None` for whichever of the
+/// four [`DetectorPolicy`] never selects that isn't needed at all: forcing
+/// e.g. [`DetectorPolicy::Ca`] means [`decide`] can never read `go`/`so`/
+/// `robust`, so [`CalibratedThresholds::compute`] does not pay GO/SO's
+/// quadrature-bisection cost (the dominant cost in calibration — see the
+/// module docs, "Threshold calibration") to produce a value nothing uses.
+/// Only [`DetectorPolicy::ClassicalViCfar`] can route to any of the four at
+/// runtime, so it alone needs all four calibrated up front.
 #[derive(Debug, Clone, Copy)]
 struct CalibratedThresholds {
-    ca: f64,
-    go: f64,
-    so: f64,
-    robust: f64,
+    ca: Option<f64>,
+    go: Option<f64>,
+    so: Option<f64>,
+    robust: Option<f64>,
 }
 
 impl CalibratedThresholds {
     fn compute(config: &CfarConfig) -> Result<Self, CfarError> {
         let n_ref = 2 * config.reference_cells;
-        let (trim_low, trim_high) = config.robust_estimator.trim_counts();
-        let robust = match config.robust_estimator
+        let (need_ca, need_go, need_so, need_robust) = match config.detector
         {
-            RobustNoiseEstimator::TrimmedMean { .. } =>
-            {
-                trimmed_mean_alpha(n_ref, trim_low, trim_high, config.pfa)
-            },
-            RobustNoiseEstimator::CensoredMean { .. } =>
-            {
-                censored_mean_alpha(n_ref, trim_low, trim_high, config.pfa)
-            },
+            DetectorPolicy::Ca => (true, false, false, false),
+            DetectorPolicy::Go => (false, true, false, false),
+            DetectorPolicy::So => (false, false, true, false),
+            DetectorPolicy::AlwaysRobust => (false, false, false, true),
+            DetectorPolicy::ClassicalViCfar(_) => (true, true, true, true),
         };
-        Ok(Self {
-            ca: super::cfar::ca_cfar_alpha(n_ref, config.pfa),
-            go: exact_go_so_alpha(config.reference_cells, config.pfa, true)?,
-            so: exact_go_so_alpha(config.reference_cells, config.pfa, false)?,
-            robust,
-        })
+
+        let ca = need_ca.then(|| super::cfar::ca_cfar_alpha(n_ref, config.pfa));
+        let go = need_go
+            .then(|| exact_go_so_alpha(config.reference_cells, config.pfa, true))
+            .transpose()?;
+        let so = need_so
+            .then(|| exact_go_so_alpha(config.reference_cells, config.pfa, false))
+            .transpose()?;
+        let robust = need_robust.then(|| {
+            let (trim_low, trim_high) = config.robust_estimator.trim_counts();
+            match config.robust_estimator
+            {
+                RobustNoiseEstimator::TrimmedMean { .. } =>
+                {
+                    trimmed_mean_alpha(n_ref, trim_low, trim_high, config.pfa)
+                },
+                RobustNoiseEstimator::CensoredMean { .. } =>
+                {
+                    censored_mean_alpha(n_ref, trim_low, trim_high, config.pfa)
+                },
+            }
+        });
+
+        Ok(Self { ca, go, so, robust })
     }
 }
 
@@ -1107,29 +1170,51 @@ fn decide(
         CfarMode::Ca =>
         {
             let noise = 0.5 * (lagging.mean + leading.mean);
-            (noise, alphas.ca * noise)
+            let alpha = alphas.ca.expect(
+                "CfarMode::Ca is only ever selected when config.detector needs alphas.ca \
+                 (Ca, or ClassicalViCfar which computes all four) — see CalibratedThresholds::compute",
+            );
+            (noise, alpha * noise)
         },
         CfarMode::Go =>
         {
             let noise = lagging.mean.max(leading.mean);
-            (noise, alphas.go * noise)
+            let alpha = alphas.go.expect(
+                "CfarMode::Go is only ever selected when config.detector needs alphas.go \
+                 (Go, or ClassicalViCfar which computes all four) — see CalibratedThresholds::compute",
+            );
+            (noise, alpha * noise)
         },
         CfarMode::So =>
         {
             let noise = lagging.mean.min(leading.mean);
-            (noise, alphas.so * noise)
+            let alpha = alphas.so.expect(
+                "CfarMode::So is only ever selected when config.detector needs alphas.so \
+                 (So, or ClassicalViCfar which computes all four) — see CalibratedThresholds::compute",
+            );
+            (noise, alpha * noise)
         },
         CfarMode::RobustTrimmed =>
         {
             let (trim_low, trim_high) = config.robust_estimator.trim_counts();
             let result = trimmed_mean(scratch, trim_low, trim_high)?;
-            (result.estimate, alphas.robust * result.estimate)
+            let alpha = alphas.robust.expect(
+                "a robust CfarMode is only ever selected when config.detector needs \
+                 alphas.robust (AlwaysRobust, or ClassicalViCfar which computes all four) — \
+                 see CalibratedThresholds::compute",
+            );
+            (result.estimate, alpha * result.estimate)
         },
         CfarMode::RobustCensored =>
         {
             let (trim_low, trim_high) = config.robust_estimator.trim_counts();
             let result = censored_mean(scratch, trim_low, trim_high)?;
-            (result.estimate, alphas.robust * result.estimate)
+            let alpha = alphas.robust.expect(
+                "a robust CfarMode is only ever selected when config.detector needs \
+                 alphas.robust (AlwaysRobust, or ClassicalViCfar which computes all four) — \
+                 see CalibratedThresholds::compute",
+            );
+            (result.estimate, alpha * result.estimate)
         },
     };
 
