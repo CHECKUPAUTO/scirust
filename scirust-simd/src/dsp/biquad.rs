@@ -48,6 +48,37 @@
 // Butterworth sur le cercle unité, répercuté section par section (`n = 2` ↦
 // `Q₁ = 1/(2·cos(π/4)) = 1/√2`, le cas RBJ usuel). Réservé aux ordres **pairs**
 // (un ordre impair exigerait une section du premier ordre, hors périmètre ici).
+//
+// ## Filtres de Chebyshev de type I — [`BiquadCascade::chebyshev1_lowpass`]/[`chebyshev1_highpass`](BiquadCascade::chebyshev1_highpass)
+//
+// Le Butterworth est **maximalement plat** en bande passante mais sa coupure
+// est progressive. Chebyshev de type I accepte une **ondulation contrôlée**
+// (`ripple_db`) en bande passante en échange d'une coupure bien plus raide à
+// ordre égal — le compromis classique lorsque la platitude importe moins que
+// la sélectivité. Ses pôles ne sont plus sur le cercle unité mais sur une
+// **ellipse** : pour `ε = √(10^{ripple_db/10} − 1)` et `a = asinh(1/ε)/n`,
+// le pôle `k` (`k = 1..n/2`, ordre pair comme Butterworth) a pour partie
+// réelle `−sinh(a)·sin(θₖ)` et imaginaire `cosh(a)·cos(θₖ)`
+// (`θₖ = (2k−1)π/(2n)`, même angle que Butterworth). `sinh`/`cosh`/`asinh`
+// ne sont pas des méthodes de [`RealScalar`] : ils se déduisent localement
+// de `exp`/`ln`/`sqrt` (déjà génériques et éprouvés), sans élargir le trait
+// pour un seul usage.
+//
+// Chaque paire de pôles conjugués donne une section de fréquence propre
+// `ωₙₖ = |pôleₖ|` et de facteur de qualité `Qₖ = ωₙₖ/(2·|Re(pôleₖ)|)` —
+// contrairement à Butterworth, `ωₙₖ` **varie** d'une section à l'autre (les
+// pôles ne sont pas à rayon unité), donc chaque section doit être
+// **dénormalisée** par son propre `ωₙₖ` avant l'appel RBJ. Passe-bas :
+// `cutoff·ωₙₖ` (mise à l'échelle directe). Passe-haut : la substitution
+// analogique classique `s → 1/s` (passe-bas → passe-haut) préserve `Qₖ`
+// mais **inverse** la fréquence propre (`ωₙₖ → 1/ωₙₖ`, démonstration dans le
+// commentaire de [`chebyshev1_pole_params`]) — d'où `cutoff/ωₙₖ`, une
+// division réelle (`/`), jamais `.recip()` mis en cache.
+//
+// Pour un ordre **pair**, la réponse touche le plancher d'ondulation
+// (`−ripple_db`) **exactement** au continu **et** à la coupure (les deux
+// sont des extrema du polynôme de Chebyshev sous-jacent) — propriété exacte
+// exploitée par les tests plutôt qu'une tolérance ad hoc.
 
 use core::ops::Div;
 
@@ -209,6 +240,57 @@ pub(crate) fn butterworth_qs<T: RealScalar + Div<Output = T>>(order: usize) -> V
         .collect()
 }
 
+/// `(ωₙₖ, Qₖ)` des `order/2` sections du prototype Chebyshev de type I
+/// normalisé (coupure `= 1`), `k = 1..order/2` (cf. en-tête de module pour la
+/// dérivation). `ripple_db` est l'ondulation crête-à-plancher en bande
+/// passante (typiquement `0,1` à `3` dB).
+///
+/// Dérivation de l'inversion de fréquence propre en passe-haut (`s → 1/s`) :
+/// une section passe-bas normalisée `H(s) = ωₙ²/(s² + (ωₙ/Q)·s + ωₙ²)`
+/// devient, en substituant `s → 1/s` puis en multipliant haut et bas par
+/// `s²` puis en divisant par `ωₙ²` :
+/// `H(s) = s² / (s² + (1/(Q·ωₙ))·s + (1/ωₙ)²)` — une section passe-haut de
+/// même `Q` mais de fréquence propre `1/ωₙ`.
+///
+/// Panique si `order < 2` ou `order` est impair (mêmes conditions que
+/// [`butterworth_qs`]).
+pub(crate) fn chebyshev1_pole_params<T: RealScalar + Div<Output = T>>(
+    order: usize,
+    ripple_db: T,
+) -> Vec<(T, T)> {
+    assert!(order >= 2, "chebyshev1 : ordre {order} doit être ≥ 2");
+    assert_eq!(
+        order % 2,
+        0,
+        "chebyshev1 : ordre {order} doit être pair (une section du premier ordre serait nécessaire pour un ordre impair)"
+    );
+    let one = T::one();
+    let two = T::from_i32(2);
+    let ten = T::from_i32(10);
+    let n_sections = order / 2;
+    let order_t = T::from_i32(order as i32);
+
+    // ε = √(10^{ripple_db/10} − 1), 10^x = e^{x·ln 10}.
+    let epsilon = ((ripple_db / ten * ten.ln()).exp() - one).sqrt();
+    // a = asinh(1/ε)/n, asinh(x) = ln(x + √(x²+1)).
+    let inv_eps = one / epsilon;
+    let a = (inv_eps + (inv_eps * inv_eps + one).sqrt()).ln() / order_t;
+    let half = two.recip(); // puissance de deux : recip() exact.
+    let sinh_a = (a.exp() - (-a).exp()) * half;
+    let cosh_a = (a.exp() + (-a).exp()) * half;
+
+    (1..=n_sections)
+        .map(|k| {
+            let theta = T::from_i32((2 * k - 1) as i32) * T::pi() / (two * order_t);
+            let sigma = sinh_a * theta.sin(); // |Re(pôle)|, pôle = −sigma ± j·omega.
+            let omega = cosh_a * theta.cos();
+            let wn = (sigma * sigma + omega * omega).sqrt();
+            let q = wn / (two * sigma);
+            (wn, q)
+        })
+        .collect()
+}
+
 /// Cascade de [`Biquad`] : filtre d'ordre pair `2·n` (`n` sections du second
 /// ordre enchaînées), générique sur le scalaire comme [`Biquad`].
 #[derive(Debug, Clone, PartialEq)]
@@ -307,5 +389,73 @@ impl<T: RealScalar + Div<Output = T>> BiquadCascade<T> {
             .map(|q| Biquad::highpass(sample_rate, cutoff, q))
             .collect();
         Self::new(stages)
+    }
+
+    /// Filtre de Chebyshev de type I **passe-bas**, ordre pair `order`, à
+    /// `cutoff` (Hz), échantillonné à `sample_rate` (Hz), ondulation
+    /// `ripple_db` (dB, crête-à-plancher) en bande passante : coupure plus
+    /// raide que Butterworth au même ordre, au prix d'une ondulation
+    /// contrôlée plutôt qu'une platitude maximale (cf. en-tête de module).
+    /// Chaque section est dénormalisée par sa propre fréquence propre
+    /// (`cutoff·ωₙₖ`, cf. [`chebyshev1_pole_params`]), puis le gain global de
+    /// la cascade est corrigé (cf. [`apply_ripple_floor_gain`]).
+    ///
+    /// Panique si `order < 2` ou `order` est impair.
+    #[must_use]
+    pub fn chebyshev1_lowpass(sample_rate: T, cutoff: T, order: usize, ripple_db: T) -> Self {
+        let mut stages: Vec<Biquad<T>> = chebyshev1_pole_params::<T>(order, ripple_db)
+            .into_iter()
+            .map(|(wn, q)| Biquad::lowpass(sample_rate, cutoff * wn, q))
+            .collect();
+        apply_ripple_floor_gain(&mut stages, ripple_db);
+        Self::new(stages)
+    }
+
+    /// Filtre de Chebyshev de type I **passe-haut**, ordre pair `order` —
+    /// mêmes pôles prototypes que [`Self::chebyshev1_lowpass`], mais chaque
+    /// section est dénormalisée par l'**inverse** de sa fréquence propre
+    /// (`cutoff/ωₙₖ`, substitution `s → 1/s`, cf.
+    /// [`chebyshev1_pole_params`]) et utilise [`Biquad::highpass`], puis le
+    /// gain global est corrigé (cf. [`apply_ripple_floor_gain`]).
+    ///
+    /// Panique si `order < 2` ou `order` est impair.
+    #[must_use]
+    pub fn chebyshev1_highpass(sample_rate: T, cutoff: T, order: usize, ripple_db: T) -> Self {
+        let mut stages: Vec<Biquad<T>> = chebyshev1_pole_params::<T>(order, ripple_db)
+            .into_iter()
+            .map(|(wn, q)| Biquad::highpass(sample_rate, cutoff / wn, q))
+            .collect();
+        apply_ripple_floor_gain(&mut stages, ripple_db);
+        Self::new(stages)
+    }
+}
+
+/// Corrige le gain global d'une cascade de Chebyshev de type I (ordre pair).
+///
+/// [`Biquad::lowpass`]/[`highpass`](Biquad::highpass) normalisent **chacun**
+/// leur propre section à gain unité à leur extremum de référence (continu
+/// pour passe-bas, haute fréquence pour passe-haut — cf. leur documentation)
+/// : le produit de `n/2` sections ainsi normalisées a donc **toujours** un
+/// gain de cet extremum égal à `1` (`1 × 1 × ⋯ × 1`), quels que soient les
+/// pôles. Or un filtre de Chebyshev d'ordre **pair** a un gain exactement
+/// `−ripple_db` (pas `0` dB) à cet extremum — les deux polynômes de
+/// Chebyshev sous-jacents y valent `±1` (un extremum), donnant
+/// `|H|² = 1/(1+ε²)`. Puisque les sections normalisées et la cascade
+/// correctement mise à l'échelle ont le **même dénominateur** (mêmes pôles),
+/// elles ne diffèrent que d'une **constante multiplicative** — reporter
+/// cette constante (`10^{−ripple_db/20}`) sur la **première** section (peu
+/// importe laquelle, un produit en cascade) corrige le gain global sans
+/// toucher à la forme de l'ondulation.
+fn apply_ripple_floor_gain<T: RealScalar + Div<Output = T>>(
+    stages: &mut [Biquad<T>],
+    ripple_db: T,
+) {
+    let two = T::from_i32(2);
+    let ten = T::from_i32(10);
+    let floor = (-ripple_db / (two * ten) * ten.ln()).exp(); // 10^{−ripple_db/20}.
+    if let Some(first) = stages.first_mut()
+    {
+        let (b0, b1, b2, a1, a2) = first.coefficients();
+        *first = Biquad::new(b0 * floor, b1 * floor, b2 * floor, a1, a2);
     }
 }

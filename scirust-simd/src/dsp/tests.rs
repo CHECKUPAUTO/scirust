@@ -7,7 +7,7 @@
 // impulsionnelle, l'accord virgule fixe ↔ flottant, et le déterminisme bit-à-bit.
 
 use super::adaptive::{Lms, Nlms, Rls};
-use super::biquad::butterworth_qs;
+use super::biquad::{butterworth_qs, chebyshev1_pole_params};
 use super::fft::{Complex, Plan, fft, ifft, irfft, rfft};
 use super::fftconv::fft_convolve;
 use super::mel::MelFilterbank;
@@ -366,6 +366,200 @@ fn butterworth_lowpass_rejects_odd_order() {
 #[should_panic(expected = "au moins une section")]
 fn biquad_cascade_new_rejects_empty() {
     let _: BiquadCascade<Q16_16> = BiquadCascade::new(Vec::new());
+}
+
+// ------------------------------------------------------------------ //
+//  BiquadCascade : filtres de Chebyshev de type I                     //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn chebyshev1_pole_params_section_count_and_positivity() {
+    for &order in &[2usize, 4, 6]
+    {
+        let params: Vec<(f64, f64)> = chebyshev1_pole_params(order, 1.0);
+        assert_eq!(params.len(), order / 2);
+        for &(wn, q) in &params
+        {
+            assert!(wn > 0.0, "order={order}: ωₙ={wn} devrait être positive");
+            assert!(q > 0.0, "order={order}: Q={q} devrait être positif");
+        }
+    }
+}
+
+#[test]
+#[should_panic(expected = "ordre")]
+fn chebyshev1_pole_params_rejects_odd_order() {
+    let _: Vec<(f64, f64)> = chebyshev1_pole_params(3, 1.0);
+}
+
+#[test]
+#[should_panic(expected = "ordre")]
+fn chebyshev1_pole_params_rejects_too_small_order() {
+    let _: Vec<(f64, f64)> = chebyshev1_pole_params(0, 1.0);
+}
+
+fn check_chebyshev1_lowpass_dc_at_ripple_floor<T: Scalar + core::ops::Div<Output = T>>() {
+    // Ordre pair : le continu touche exactement le plancher d'ondulation
+    // −ripple_db (extremum du polynôme de Chebyshev sous-jacent en `ω=0`,
+    // cf. en-tête de module) — propriété exacte, pas une simple tendance.
+    for &order in &[2usize, 4, 6]
+    {
+        let ripple_db = 1.0;
+        let lp =
+            BiquadCascade::<T>::chebyshev1_lowpass(T::of(8.0), T::of(1.0), order, T::of(ripple_db));
+        assert_eq!(lp.order(), order);
+        assert_eq!(lp.stages().len(), order / 2);
+        let want_floor = 10f64.powf(-ripple_db / 20.0);
+        let dc = cascade_gain_at(&lp, 0.0);
+        assert!(
+            (dc - want_floor).abs() <= T::TOL * 16.0,
+            "order={order}: gain continu {dc} vs plancher {want_floor}"
+        );
+    }
+}
+
+#[test]
+fn chebyshev1_lowpass_dc_at_ripple_floor_all_scalars() {
+    check_chebyshev1_lowpass_dc_at_ripple_floor::<f32>();
+    check_chebyshev1_lowpass_dc_at_ripple_floor::<f64>();
+    check_chebyshev1_lowpass_dc_at_ripple_floor::<Q16_16>();
+}
+
+/// `Tₙ(x)` (polynôme de Chebyshev de première espèce) par récurrence
+/// `T₀=1, T₁=x, Tₖ₊₁=2x·Tₖ−Tₖ₋₁` — référence indépendante du filtre
+/// numérique, pour comparer la réponse de [`BiquadCascade::chebyshev1_lowpass`]
+/// à la formule analytique `|H(jΩ)|² = 1/(1+ε²·Tₙ²(Ω))`.
+fn chebyshev_tn(n: usize, x: f64) -> f64 {
+    let mut t0 = 1.0;
+    let mut t1 = x;
+    if n == 0
+    {
+        return t0;
+    }
+    for _ in 1..n
+    {
+        let t2 = 2.0 * x * t1 - t0;
+        t0 = t1;
+        t1 = t2;
+    }
+    t1
+}
+
+#[test]
+fn chebyshev1_lowpass_matches_analytic_ripple_shape() {
+    // Contrairement à Butterworth (descente monotone), l'ondulation de
+    // Chebyshev oscille dans la bande passante — comparée ici point par
+    // point à la formule analytique |H(jΩ)|² = 1/(1+ε²·Tₙ²(Ω)) (référence
+    // indépendante, cf. chebyshev_tn). Coupure basse par rapport à
+    // l'échantillonnage (`cutoff/fs = 1/32`) pour limiter la distorsion de
+    // fréquence propre au « cookbook » RBJ (chaque section est bilinéaire-
+    // transformée indépendamment à sa propre fréquence, sans prédistorsion
+    // — approximation d'autant plus fidèle que `cutoff/fs` est petit ;
+    // Butterworth partage cette même limitation mais elle n'apparaît que
+    // pour une comparaison point par point comme celle-ci, jamais testée
+    // jusqu'ici puisqu'aucune section n'a de fréquence propre différente de
+    // la coupure nominale).
+    let ripple_db = 1.0;
+    let epsilon = (10f64.powf(ripple_db / 10.0) - 1.0).sqrt();
+    let (fs, f0, order) = (32.0, 1.0, 6usize);
+    let lp = BiquadCascade::<f64>::chebyshev1_lowpass(fs, f0, order, ripple_db);
+    let cutoff_omega = 2.0 * core::f64::consts::PI * f0 / fs;
+    let mut saw_near_unity = false;
+    for i in 0..=20
+    {
+        let big_omega = (i as f64) / 20.0; // Ω normalisé ∈ [0, 1].
+        let tn = chebyshev_tn(order, big_omega);
+        let want = 1.0 / (1.0 + epsilon * epsilon * tn * tn).sqrt();
+        let got = cascade_gain_at(&lp, cutoff_omega * big_omega);
+        assert!(
+            (got - want).abs() <= 0.02,
+            "Ω={big_omega}: gain {got} vs analytique {want}"
+        );
+        if got >= 0.99
+        {
+            saw_near_unity = true;
+        }
+    }
+    assert!(
+        saw_near_unity,
+        "la bande passante devrait toucher ~0 dB à au moins un point (ondulation, pas descente monotone)"
+    );
+}
+
+#[test]
+fn chebyshev1_lowpass_steeper_than_butterworth_same_order() {
+    // À ordre égal, Chebyshev doit atténuer davantage que Butterworth
+    // au-delà de la coupure — la raison d'être du compromis ondulation
+    // contre raideur (cf. en-tête de module).
+    let (fs, f0, order) = (8.0, 1.0, 4);
+    let cheb = BiquadCascade::<f64>::chebyshev1_lowpass(fs, f0, order, 1.0);
+    let butter = BiquadCascade::<f64>::butterworth_lowpass(fs, f0, order);
+    let omega = core::f64::consts::FRAC_PI_2; // 2× la coupure.
+    let g_cheb = cascade_gain_at(&cheb, omega);
+    let g_butter = cascade_gain_at(&butter, omega);
+    assert!(
+        g_cheb < g_butter,
+        "Chebyshev ({g_cheb}) devrait atténuer plus que Butterworth ({g_butter}) au même ordre"
+    );
+}
+
+fn check_chebyshev1_highpass_dc_blocked_and_nyquist_at_ripple_floor<
+    T: Scalar + core::ops::Div<Output = T>,
+>() {
+    // Passe-haut : le continu est fortement atténué (côté « coupure lointaine »
+    // du prototype), et Nyquist touche le plancher d'ondulation (image de
+    // `ω=0` du passe-bas par la substitution `s → 1/s`, cf. en-tête de module).
+    for &order in &[2usize, 4, 6]
+    {
+        let ripple_db = 1.0;
+        let hp = BiquadCascade::<T>::chebyshev1_highpass(
+            T::of(8.0),
+            T::of(1.0),
+            order,
+            T::of(ripple_db),
+        );
+        assert_eq!(hp.order(), order);
+        let dc = cascade_gain_at(&hp, 0.0);
+        assert!(
+            dc < 0.05,
+            "order={order}: gain continu {dc} devrait être ≈0"
+        );
+        let want_floor = 10f64.powf(-ripple_db / 20.0);
+        let nyquist = cascade_gain_at(&hp, core::f64::consts::PI);
+        assert!(
+            (nyquist - want_floor).abs() <= T::TOL * 16.0,
+            "order={order}: gain Nyquist {nyquist} vs plancher {want_floor}"
+        );
+    }
+}
+
+#[test]
+fn chebyshev1_highpass_dc_blocked_and_nyquist_at_ripple_floor_all_scalars() {
+    check_chebyshev1_highpass_dc_blocked_and_nyquist_at_ripple_floor::<f32>();
+    check_chebyshev1_highpass_dc_blocked_and_nyquist_at_ripple_floor::<f64>();
+    check_chebyshev1_highpass_dc_blocked_and_nyquist_at_ripple_floor::<Q16_16>();
+}
+
+#[test]
+#[should_panic(expected = "ordre")]
+fn chebyshev1_lowpass_rejects_odd_order() {
+    let _ = BiquadCascade::<Q16_16>::chebyshev1_lowpass(
+        Q16_16::try_from(8.0).unwrap(),
+        Q16_16::try_from(1.0).unwrap(),
+        3,
+        Q16_16::try_from(1.0).unwrap(),
+    );
+}
+
+#[test]
+#[should_panic(expected = "ordre")]
+fn chebyshev1_highpass_rejects_too_small_order() {
+    let _ = BiquadCascade::<Q16_16>::chebyshev1_highpass(
+        Q16_16::try_from(8.0).unwrap(),
+        Q16_16::try_from(1.0).unwrap(),
+        0,
+        Q16_16::try_from(1.0).unwrap(),
+    );
 }
 
 // ------------------------------------------------------------------ //

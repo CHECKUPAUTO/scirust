@@ -13,9 +13,12 @@
 //
 // * [`Biquad`] — section du second ordre (IIR) en forme directe II transposée,
 //   avec conception « cookbook » RBJ (passe-bas / passe-haut / passe-bande).
-//   [`biquad::BiquadCascade`] enchaîne plusieurs sections pour des filtres de
-//   Butterworth d'ordre pair quelconque ([`biquad::BiquadCascade::butterworth_lowpass`]/
-//   [`butterworth_highpass`](biquad::BiquadCascade::butterworth_highpass)).
+//   [`biquad::BiquadCascade`] enchaîne plusieurs sections pour des filtres
+//   d'ordre pair quelconque : Butterworth ([`biquad::BiquadCascade::butterworth_lowpass`]/
+//   [`butterworth_highpass`](biquad::BiquadCascade::butterworth_highpass), platitude
+//   maximale) ou Chebyshev de type I ([`biquad::BiquadCascade::chebyshev1_lowpass`]/
+//   [`chebyshev1_highpass`](biquad::BiquadCascade::chebyshev1_highpass), ondulation
+//   contrôlée contre une coupure plus raide au même ordre).
 // * [`Fir`] — filtre à réponse impulsionnelle finie, ligne à retard circulaire
 //   sans allocation, phase linéaire pour des coefficients symétriques.
 // * [`fft`] — transformée de Fourier rapide radix-2 (Cooley–Tukey) en place,
