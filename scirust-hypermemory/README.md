@@ -79,6 +79,27 @@ derivation, or is labelled a hypothesis.
   evicts everything below a retention threshold. Behavioural parity with the
   workspace's `scirust_retrieval::BoundedSemanticMemory` is tested head-to-head
   in `tests/bounded_parity.rs`;
+- **cleanup denoising** ([`S16ExactIndex::denoise`] → [`Denoised`],
+  `S16BoundedMemory::denoise`) — the VSA "cleanup memory" component: a noisy
+  code snaps to the **exact stored** prototype (never an interpolation, so
+  cleanup is idempotent), gated by an acceptance threshold so uncorrelated
+  input is *rejected* (measured: 200/200 at cosine 0.8), with typed errors on
+  invalid input. Measured deterministic payoff (`tests/denoise.rs`): at heavy
+  noise (0.5 on unit-norm atoms) structure-retrieval accuracy recovers from
+  **0.29 without cleanup to 0.94 with it**; recognition accuracy degrades
+  gracefully with noise (1.0 / 1.0 / 0.73 / 0.23 at amplitudes
+  0.1 / 0.25 / 0.5 / 1.0 over 64 concepts);
+- **observation fusion via SciRust's noise toolkit** (feature
+  `signal-denoise`, on by default: [`FusionStrategy`], [`fuse_observations`],
+  `S16ExactIndex::denoise_observations`) — repeated noisy observations of a
+  code are pre-filtered per lane with `scirust-signal::denoise` (Kalman-RTS
+  smoothing; Hampel impulse rejection) before the cleanup snap. Measured
+  deterministic results (`tests/observe_fusion.rs`): under heavy broadband
+  noise (amplitude 1.0, 16 observations) recognition rises from **0.19
+  single-shot to 1.00 fused**; under impulsive corruption (15% ±4 spikes) the
+  toolkit's Hampel+Kalman reaches **0.81 vs 0.05 for the naive mean** (~17×) —
+  and the harness honestly notes the mean is already near-optimal for pure
+  zero-mean broadband noise;
 - **a deterministic approximate index (Phase 4)** ([`S16IvfIndex`]) — IVF with
   RNG-free Lloyd clustering; `nprobe = nlist` reproduces the exact oracle
   **bit-for-bit**, recall@k is monotone in `nprobe` (measured deterministic
@@ -233,6 +254,10 @@ cryptography, and reverse-mode differentiation over the store — all deferred.
 [`S16Store`]: crate::S16Store
 [`S16BoundedMemory`]: crate::S16BoundedMemory
 [`S16IvfIndex`]: crate::S16IvfIndex
+[`S16ExactIndex::denoise`]: crate::S16ExactIndex::denoise
+[`Denoised`]: crate::Denoised
+[`FusionStrategy`]: crate::FusionStrategy
+[`fuse_observations`]: crate::fuse_observations
 [`S16ExactIndex`]: crate::S16ExactIndex
 [`S16Expr`]: crate::S16Expr
 [`S16Relation`]: crate::S16Relation

@@ -34,6 +34,17 @@ scirust-simd = { path = "../scirust-simd", features = ["portable-simd"] }
 # download.
 sha2 = "0.10"
 
+# SciRust's dedicated noise-processing toolkit (scirust-signal::denoise:
+# Kalman-RTS smoothing, Hampel impulse rejection, and much more). Used by the
+# observation-fusion front-end that pre-filters repeated noisy observations of
+# a code before the cleanup-memory snap. Optional (default-on) because it pulls
+# scirust-core transitively; disable `signal-denoise` for a slim build.
+scirust-signal = { path = "../scirust-signal", optional = true }
+
+[features]
+default = ["signal-denoise"]
+signal-denoise = ["dep:scirust-signal"]
+
 [dev-dependencies]
 criterion = "0.5"
 # Independent audited exact dense index used purely as a second cross-check

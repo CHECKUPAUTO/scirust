@@ -177,6 +177,24 @@ impl<P: RetentionPolicy> S16BoundedMemory<P> {
         Ok(outcome)
     }
 
+    /// Cleanup/denoising against the resident concepts, bumping the recency of
+    /// the recognized concept at `now`. Semantics and errors are those of
+    /// [`crate::S16ExactIndex::denoise`]; a rejected (below-threshold) input
+    /// touches nothing.
+    pub fn denoise(
+        &mut self,
+        noisy: &SedenionSimd,
+        threshold: f32,
+        now: u64,
+    ) -> Result<Option<crate::Denoised>> {
+        let outcome = self.index.denoise(noisy, threshold)?;
+        if let Some(d) = &outcome
+        {
+            let _ = self.store.touch(d.id, now);
+        }
+        Ok(outcome)
+    }
+
     /// Evict every resident whose retention score at `now` is strictly below
     /// `threshold`. Returns the evicted ids in ascending order (deterministic).
     pub fn forget(&mut self, now: u64, threshold: f32) -> Vec<ConceptId> {

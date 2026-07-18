@@ -14,7 +14,7 @@ use core::cmp::Ordering;
 
 use scirust_simd::hypercomplex::SedenionSimd;
 
-use crate::error::Result;
+use crate::error::{HypermemoryError, Result};
 use crate::id::ConceptId;
 use crate::record::ConceptRecord;
 use crate::representation::normalize_array;
@@ -89,6 +89,20 @@ pub struct SearchHit {
     /// The matched concept.
     pub id: ConceptId,
     /// The metric score (cosine similarity or squared distance).
+    pub score: f32,
+}
+
+/// The result of one accepted cleanup/denoising step: the recognized concept,
+/// its **exact stored** effective code (the denoised vector — a stored
+/// prototype, never an interpolation), and the score that justified accepting
+/// it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Denoised {
+    /// The concept the noisy input was recognized as.
+    pub id: ConceptId,
+    /// The stored effective vector (unit norm) — the denoised code.
+    pub code: SedenionSimd,
+    /// The metric score of the noisy input against `code`.
     pub score: f32,
 }
 
@@ -234,6 +248,74 @@ impl S16ExactIndex {
         });
         hits.truncate(k);
         Ok(hits)
+    }
+
+    /// Cleanup/denoising: snap a noisy vector to the **nearest stored
+    /// prototype**, if it is convincing enough.
+    ///
+    /// This is the standard denoising component of vector-symbolic
+    /// constructions ("cleanup memory"): after noise, perturbation, or a
+    /// composition step, a code is recognized by nearest-neighbour against the
+    /// stored concepts and replaced by the *exact stored* effective vector —
+    /// never an interpolation, so repeated cleanup is idempotent.
+    ///
+    /// `threshold` is expressed in the active metric and the match is accepted
+    /// iff its score is **at least as good as** `threshold` under that metric's
+    /// ordering (cosine: `score ≥ threshold`; squared Euclidean:
+    /// `score ≤ threshold`). A below-threshold best match returns `Ok(None)` —
+    /// garbage is *rejected*, not silently snapped to an arbitrary concept.
+    ///
+    /// Errors: a non-finite `threshold` or an invalid noisy input (zero /
+    /// non-finite) is a typed error. An empty index returns `Ok(None)`.
+    /// Ties between equally-good prototypes resolve to the smallest
+    /// [`ConceptId`], as everywhere else.
+    #[must_use = "the outcome says whether the input was recognized"]
+    pub fn denoise(&self, noisy: &SedenionSimd, threshold: f32) -> Result<Option<Denoised>> {
+        if !threshold.is_finite()
+        {
+            return Err(HypermemoryError::InvalidRepresentation {
+                reason: "denoise threshold must be finite",
+            });
+        }
+        let q = normalize_array(&noisy.to_array())?;
+        let mut best: Option<(f32, usize)> = None;
+        for (pos, v) in self.effective.iter().enumerate()
+        {
+            let score = self.metric.score(&q, &v.to_array());
+            best = match best
+            {
+                None => Some((score, pos)),
+                Some((bs, bp)) =>
+                {
+                    let better = self.metric.rank_cmp(score, bs).is_lt()
+                        || (self.metric.rank_cmp(score, bs).is_eq()
+                            && self.ids[pos] < self.ids[bp]);
+                    if better
+                    {
+                        Some((score, pos))
+                    }
+                    else
+                    {
+                        Some((bs, bp))
+                    }
+                },
+            };
+        }
+        let Some((score, pos)) = best
+        else
+        {
+            return Ok(None);
+        };
+        // Accept iff the score is at least as good as the threshold.
+        if self.metric.rank_cmp(score, threshold).is_gt()
+        {
+            return Ok(None);
+        }
+        Ok(Some(Denoised {
+            id: self.ids[pos],
+            code: self.effective[pos],
+            score,
+        }))
     }
 }
 
