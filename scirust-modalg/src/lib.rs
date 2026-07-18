@@ -51,6 +51,10 @@
 //!   FFT) and the `O(n log n)` exact integer **convolution** / polynomial
 //!   multiplication it enables, composing `numtheory` to validate the prime and
 //!   its primitive root.
+//! - [`sbox`] — exact **S-box analysis**: difference distribution table and
+//!   differential uniformity, linear approximation table and nonlinearity (via
+//!   the Walsh transform), algebraic degree, and the strict-avalanche matrix —
+//!   composing `boolean` for cryptographic S-box design and audit.
 //!
 //! Everything is deterministic and reproducible bit-for-bit on every platform.
 //!
@@ -133,6 +137,16 @@
 //! let ntt = Ntt::new_default();
 //! assert_eq!(ntt.convolve(&[1, 2, 3], &[1, 1]), vec![1, 3, 5, 3]);
 //! ```
+//!
+//! ```
+//! use scirust_modalg::sbox::Sbox;
+//!
+//! // An S-box's differential uniformity — a small linear box has the worst
+//! // possible value (every difference propagates deterministically).
+//! let identity = Sbox::from_fn(4, 4, |x| x);
+//! assert_eq!(identity.differential_uniformity(), 16); // 2^4
+//! assert_eq!(identity.nonlinearity(), 0);             // affine
+//! ```
 
 pub mod boolean;
 pub mod codes;
@@ -143,6 +157,7 @@ pub mod linalg;
 pub mod ntt;
 pub mod numtheory;
 pub mod ring;
+pub mod sbox;
 
 pub use codes::ReedSolomon;
 pub use crc::Crc;
@@ -151,3 +166,4 @@ pub use hypercomplex::{Oct, Quat};
 pub use linalg::ModMatrix;
 pub use ntt::Ntt;
 pub use ring::Word;
+pub use sbox::Sbox;
