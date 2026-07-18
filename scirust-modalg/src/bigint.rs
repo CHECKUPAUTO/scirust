@@ -10,8 +10,20 @@
 //! Truncated division matches Rust's `/` and `%` on machine integers (quotient
 //! rounds toward zero, the remainder takes the dividend's sign), so results
 //! agree bit-for-bit with `i128` wherever both are defined.
+//!
+//! [`BigInt::mul_ntt`] is an alternative, asymptotically faster `O(n log n)`
+//! multiplication built on the crate's [`crate::ntt`] (three NTT primes plus CRT
+//! reconstruction); it returns exactly the same value as the schoolbook
+//! [`BigInt::mul`].
 
+use crate::ntt::Ntt;
+use crate::numtheory::{inv_mod, mulmod};
 use core::cmp::Ordering;
+
+/// The three NTT-friendly primes whose product (~2^90) bounds any base-2^16
+/// convolution coefficient, and their primitive roots (used by `mul_ntt`).
+const NTT_PRIMES: [u64; 3] = [998_244_353, 754_974_721, 469_762_049];
+const NTT_GENS: [u64; 3] = [3, 11, 3];
 
 // ---- magnitude helpers (little-endian base-2^32 limbs, no high-zero limbs) ---
 
@@ -182,6 +194,52 @@ fn mag_divmod_small(a: &[u32], d: u32) -> (Vec<u32>, u32) {
     (out, rem as u32)
 }
 
+/// Split base-2^32 limbs into base-2^16 digits (each `< 2^16`).
+fn mag_to_base16(m: &[u32]) -> Vec<u64> {
+    let mut d = Vec::with_capacity(m.len() * 2);
+    for &limb in m
+    {
+        d.push((limb & 0xFFFF) as u64);
+        d.push((limb >> 16) as u64);
+    }
+    d
+}
+
+/// Recombine base-2^16 digits (each `< 2^16`) into base-2^32 limbs.
+fn mag_from_base16(d: &[u64]) -> Vec<u32> {
+    let mut m = Vec::with_capacity(d.len().div_ceil(2));
+    let mut i = 0;
+    while i < d.len()
+    {
+        let lo = d[i] as u32;
+        let hi = *d.get(i + 1).unwrap_or(&0) as u32;
+        m.push(lo | (hi << 16));
+        i += 2;
+    }
+    mag_trim(&mut m);
+    m
+}
+
+/// Garner's CRT: reconstruct the unique value (`< ∏ primes`, which fits `u128`
+/// for the three `mul_ntt` primes) congruent to each `residues[k]` mod
+/// `primes[k]`.
+fn crt_garner(residues: &[u64], primes: &[u64]) -> u128 {
+    let mut x = residues[0] as u128;
+    let mut m = primes[0] as u128;
+    for k in 1..primes.len()
+    {
+        let p = primes[k];
+        let pw = p as u128;
+        let x_mod = (x % pw) as u64;
+        let diff = (residues[k] + p - x_mod) % p;
+        let minv = inv_mod((m % pw) as u64, p).expect("prime modulus");
+        let t = mulmod(diff, minv, p) as u128;
+        x += m * t;
+        m *= pw;
+    }
+    x
+}
+
 /// An arbitrary-precision signed integer.
 #[derive(Clone, Debug)]
 pub struct BigInt {
@@ -335,6 +393,42 @@ impl BigInt {
             return Self::zero();
         }
         Self::from_parts(self.sign * o.sign, mag_mul(&self.mag, &o.mag))
+    }
+
+    /// Product `self · other` via the number-theoretic transform: the magnitudes
+    /// are split into base-2^16 digits, convolved modulo three NTT primes with
+    /// [`crate::ntt`], and each coefficient is CRT-reconstructed before carry
+    /// propagation. `O(n log n)` in the digit count — asymptotically faster than
+    /// the schoolbook [`mul`](Self::mul) for large operands, returning exactly
+    /// the same value.
+    pub fn mul_ntt(&self, o: &BigInt) -> Self {
+        if self.sign == 0 || o.sign == 0
+        {
+            return Self::zero();
+        }
+        let da = mag_to_base16(&self.mag);
+        let db = mag_to_base16(&o.mag);
+        let result_len = da.len() + db.len() - 1;
+        // convolve the digit vectors modulo each NTT prime
+        let convs: Vec<Vec<u64>> = (0..NTT_PRIMES.len())
+            .map(|i| Ntt::new(NTT_PRIMES[i], NTT_GENS[i]).convolve(&da, &db))
+            .collect();
+        // CRT each coefficient to its exact value, then carry-propagate base 2^16
+        let mut out16: Vec<u64> = Vec::with_capacity(result_len + 8);
+        let mut carry: u128 = 0;
+        for k in 0..result_len
+        {
+            let residues = [convs[0][k], convs[1][k], convs[2][k]];
+            let total = crt_garner(&residues, &NTT_PRIMES) + carry;
+            out16.push((total & 0xFFFF) as u64);
+            carry = total >> 16;
+        }
+        while carry != 0
+        {
+            out16.push((carry & 0xFFFF) as u64);
+            carry >>= 16;
+        }
+        Self::from_parts(self.sign * o.sign, mag_from_base16(&out16))
     }
 
     /// Truncated division: returns `(quotient, remainder)` with
@@ -563,5 +657,39 @@ mod tests {
         assert!(d.rem(&g).is_zero());
         // small sanity: gcd(48, 36) = 12
         assert_eq!(big(48).gcd(&big(36)), big(12));
+    }
+
+    /// Build a pseudo-random BigInt with roughly `limbs` 32-bit limbs.
+    fn random_bigint(limbs: usize, s: &mut u64) -> BigInt {
+        let base = big(1i128 << 32);
+        let mut x = BigInt::zero();
+        for _ in 0..limbs
+        {
+            x = x.mul(&base).add(&big((xorshift(s) & 0xFFFF_FFFF) as i128));
+        }
+        if xorshift(s) & 1 == 1 { x.neg() } else { x }
+    }
+
+    #[test]
+    fn ntt_mul_matches_schoolbook() {
+        let mut s = 0x0117_7000u64;
+        for _ in 0..300
+        {
+            let la = 1 + (xorshift(&mut s) % 40) as usize;
+            let lb = 1 + (xorshift(&mut s) % 40) as usize;
+            let a = random_bigint(la, &mut s);
+            let b = random_bigint(lb, &mut s);
+            assert_eq!(a.mul_ntt(&b), a.mul(&b), "ntt mul mismatch");
+        }
+        // signs and zero
+        assert_eq!(
+            big(-123456789).mul_ntt(&big(987654321)),
+            big(-123456789).mul(&big(987654321))
+        );
+        assert_eq!(big(0).mul_ntt(&big(42)), BigInt::zero());
+        // large operands, well beyond i128, exercise the transform path
+        let a = big(2).pow(4000);
+        let b = big(3).pow(2500);
+        assert_eq!(a.mul_ntt(&b), a.mul(&b));
     }
 }
