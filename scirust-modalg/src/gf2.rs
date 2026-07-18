@@ -92,9 +92,17 @@ impl Gf2Field {
     }
 
     /// `GF(2^8)` with the AES/Rijndael polynomial `x^8 + x^4 + x^3 + x + 1`
-    /// (`0x11B`).
+    /// (`0x11B`). Note this polynomial is irreducible but **not** primitive:
+    /// `x` (`0x02`) does not generate the multiplicative group.
     pub const fn rijndael8() -> Self {
         Self::new(8, 0x11B)
+    }
+
+    /// `GF(2^8)` with the primitive polynomial `x^8 + x^4 + x^3 + x^2 + 1`
+    /// (`0x11D`), for which `x` (`0x02`) generates the multiplicative group.
+    /// This is the field used by QR-code and CD Reed–Solomon codes.
+    pub const fn primitive8() -> Self {
+        Self::new(8, 0x11D)
     }
 
     /// `GF(2^16)` with the primitive polynomial
@@ -337,6 +345,31 @@ mod tests {
             // distributivity over XOR
             assert_eq!(f.mul(a, f.add(b, c)), f.add(f.mul(a, b), f.mul(a, c)));
         }
+    }
+
+    #[test]
+    fn primitive8_generator_full_order() {
+        let f = Gf2Field::primitive8();
+        // it is a field: every nonzero element inverts
+        for a in 1u64..256
+        {
+            assert_eq!(f.mul(a, f.inv(a).unwrap()), 1);
+        }
+        // x (=2) is a generator: order exactly 255 (3·5·17)
+        assert_eq!(f.pow(2, 255), 1);
+        for &d in &[1u64, 3, 5, 15, 17, 51, 85]
+        {
+            assert_ne!(f.pow(2, d), 1, "x had order dividing {d}, not primitive");
+        }
+        // the 255 powers of x enumerate every nonzero element exactly once
+        let mut seen = std::collections::BTreeSet::new();
+        let mut acc = 1u64;
+        for _ in 0..255
+        {
+            seen.insert(acc);
+            acc = f.mul(acc, 2);
+        }
+        assert_eq!(seen.len(), 255);
     }
 
     #[test]

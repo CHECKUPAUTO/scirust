@@ -37,6 +37,10 @@
 //!   (add/multiply/power/invert) with the Rijndael `GF(2^8)` and a primitive
 //!   `GF(2^16)` built in — the exact kernel behind CRCs, LFSRs, Reed–Solomon
 //!   and AES-style diffusion.
+//! - [`codes`] — systematic **Reed–Solomon** codes over `GF(2^n)`: a syndrome /
+//!   Berlekamp–Massey / Chien-search decoder that corrects up to `⌊nsym/2⌋`
+//!   symbol errors, composing the `gf2` field with `numtheory` (to verify the
+//!   primitive element).
 //!
 //! Everything is deterministic and reproducible bit-for-bit on every platform.
 //!
@@ -73,14 +77,30 @@
 //! assert_eq!(f.mul(0x57, 0x83), 0xc1);
 //! assert_eq!(f.mul(0x53, f.inv(0x53).unwrap()), 1);
 //! ```
+//!
+//! ```
+//! use scirust_modalg::codes::ReedSolomon;
+//!
+//! // RS(255, 251): 4 parity bytes correct up to 2 corrupted symbols.
+//! let rs = ReedSolomon::qr(4);
+//! let msg: Vec<u8> = (1..=20).collect();
+//! let mut received = rs.encode_bytes(&msg);
+//! received[3] ^= 0x5a; // corrupt two symbols in transit
+//! received[11] ^= 0xff;
+//! let (recovered, corrected) = rs.decode_bytes(&received).unwrap();
+//! assert_eq!(recovered, msg);
+//! assert_eq!(corrected, 2);
+//! ```
 
 pub mod boolean;
+pub mod codes;
 pub mod gf2;
 pub mod hypercomplex;
 pub mod linalg;
 pub mod numtheory;
 pub mod ring;
 
+pub use codes::ReedSolomon;
 pub use gf2::Gf2Field;
 pub use hypercomplex::{Oct, Quat};
 pub use linalg::ModMatrix;
