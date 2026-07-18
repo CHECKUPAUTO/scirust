@@ -118,9 +118,9 @@ binary measures the crate's own operations and prints an honest comparison:
 cargo run --release -p scirust-modalg --bin modalg-bench
 ```
 
-For example, `BigInt::mul_ntt` only beats the schoolbook `mul` past ~16k–32k
-limbs (~10⁶ bits), because of its large constant (three NTT primes, `u128`
-modular multiply, per-coefficient CRT) — the benchmark reports this rather than
+For example, `BigInt::mul_ntt` only beats the schoolbook `mul` past ~2k–4k
+limbs (~10⁵ bits), because of its constant factor (three NTT primes, `u128`
+modular arithmetic) — the benchmark reports the real crossover rather than
 pretending the NTT path is always faster.
 
 Choose `scirust-modalg` when bit-exact reproducibility and zero unsafe/deps

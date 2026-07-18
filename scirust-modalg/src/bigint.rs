@@ -194,50 +194,45 @@ fn mag_divmod_small(a: &[u32], d: u32) -> (Vec<u32>, u32) {
     (out, rem as u32)
 }
 
-/// Split base-2^32 limbs into base-2^16 digits (each `< 2^16`).
-fn mag_to_base16(m: &[u32]) -> Vec<u64> {
-    let mut d = Vec::with_capacity(m.len() * 2);
-    for &limb in m
-    {
-        d.push((limb & 0xFFFF) as u64);
-        d.push((limb >> 16) as u64);
-    }
-    d
+/// Largest `min(len_a, len_b)` in base-2^32 limbs for which a convolution
+/// coefficient (`< min_len · 2^64`) stays below the three NTT primes' product
+/// (`≈ 2^88.2`), so base-2^32 digits reconstruct exactly by CRT. `2^23 · 2^64 =
+/// 2^87` leaves a comfortable margin; beyond it, `mul_ntt` falls back to
+/// schoolbook `mul` (always correct).
+const NTT_LIMB_LIMIT: usize = 1 << 23;
+
+/// Precomputed Chinese-remainder constants for the three `mul_ntt` primes,
+/// so no modular inverse is needed per coefficient.
+struct Crt3 {
+    inv1: u64, // p0^{-1} mod p1
+    inv2: u64, // (p0·p1)^{-1} mod p2
+    m01: u128, // p0·p1
 }
 
-/// Recombine base-2^16 digits (each `< 2^16`) into base-2^32 limbs.
-fn mag_from_base16(d: &[u64]) -> Vec<u32> {
-    let mut m = Vec::with_capacity(d.len().div_ceil(2));
-    let mut i = 0;
-    while i < d.len()
-    {
-        let lo = d[i] as u32;
-        let hi = *d.get(i + 1).unwrap_or(&0) as u32;
-        m.push(lo | (hi << 16));
-        i += 2;
+impl Crt3 {
+    fn new() -> Self {
+        let [p0, p1, p2] = NTT_PRIMES;
+        Crt3 {
+            inv1: inv_mod(p0 % p1, p1).expect("prime modulus"),
+            inv2: inv_mod(((p0 as u128 * p1 as u128) % p2 as u128) as u64, p2)
+                .expect("prime modulus"),
+            m01: p0 as u128 * p1 as u128,
+        }
     }
-    mag_trim(&mut m);
-    m
-}
 
-/// Garner's CRT: reconstruct the unique value (`< ∏ primes`, which fits `u128`
-/// for the three `mul_ntt` primes) congruent to each `residues[k]` mod
-/// `primes[k]`.
-fn crt_garner(residues: &[u64], primes: &[u64]) -> u128 {
-    let mut x = residues[0] as u128;
-    let mut m = primes[0] as u128;
-    for k in 1..primes.len()
-    {
-        let p = primes[k];
-        let pw = p as u128;
-        let x_mod = (x % pw) as u64;
-        let diff = (residues[k] + p - x_mod) % p;
-        let minv = inv_mod((m % pw) as u64, p).expect("prime modulus");
-        let t = mulmod(diff, minv, p) as u128;
-        x += m * t;
-        m *= pw;
+    /// Reconstruct the exact value (`< ∏ primes`) from its three residues via
+    /// Garner's algorithm with the precomputed inverses.
+    #[inline]
+    fn reconstruct(&self, r0: u64, r1: u64, r2: u64) -> u128 {
+        let [p0, p1, p2] = NTT_PRIMES;
+        // x = r0 + p0·t1, t1 = (r1 − r0)·inv1 mod p1
+        let t1 = mulmod((r1 + p1 - r0 % p1) % p1, self.inv1, p1);
+        let x = r0 as u128 + p0 as u128 * t1 as u128; // < p0·p1
+        // x += p0·p1·t2, t2 = (r2 − x)·inv2 mod p2
+        let x_mod = (x % p2 as u128) as u64;
+        let t2 = mulmod((r2 + p2 - x_mod) % p2, self.inv2, p2);
+        x + self.m01 * t2 as u128 // < p0·p1·p2
     }
-    x
 }
 
 /// An arbitrary-precision signed integer.
@@ -395,40 +390,47 @@ impl BigInt {
         Self::from_parts(self.sign * o.sign, mag_mul(&self.mag, &o.mag))
     }
 
-    /// Product `self · other` via the number-theoretic transform: the magnitudes
-    /// are split into base-2^16 digits, convolved modulo three NTT primes with
-    /// [`crate::ntt`], and each coefficient is CRT-reconstructed before carry
-    /// propagation. `O(n log n)` in the digit count — asymptotically faster than
-    /// the schoolbook [`mul`](Self::mul) for large operands, returning exactly
-    /// the same value.
+    /// Product `self · other` via the number-theoretic transform: the base-2^32
+    /// limbs are convolved directly modulo three NTT primes with [`crate::ntt`],
+    /// each coefficient is CRT-reconstructed (with precomputed inverses) and
+    /// carry-propagated. `O(n log n)` in the limb count — asymptotically faster
+    /// than the schoolbook [`mul`](Self::mul) for large operands, returning
+    /// exactly the same value.
+    ///
+    /// For operands so large that the three-prime CRT could overflow
+    /// (`min(len_a, len_b) > 2^23` limbs, i.e. numbers past ~256 Mbit) this
+    /// transparently falls back to schoolbook `mul`, which is always correct.
     pub fn mul_ntt(&self, o: &BigInt) -> Self {
         if self.sign == 0 || o.sign == 0
         {
             return Self::zero();
         }
-        let da = mag_to_base16(&self.mag);
-        let db = mag_to_base16(&o.mag);
+        if self.mag.len().min(o.mag.len()) > NTT_LIMB_LIMIT
+        {
+            return self.mul(o);
+        }
+        // base-2^32 limbs are the transform digits directly (no splitting)
+        let da: Vec<u64> = self.mag.iter().map(|&x| x as u64).collect();
+        let db: Vec<u64> = o.mag.iter().map(|&x| x as u64).collect();
         let result_len = da.len() + db.len() - 1;
-        // convolve the digit vectors modulo each NTT prime
         let convs: Vec<Vec<u64>> = (0..NTT_PRIMES.len())
             .map(|i| Ntt::new(NTT_PRIMES[i], NTT_GENS[i]).convolve(&da, &db))
             .collect();
-        // CRT each coefficient to its exact value, then carry-propagate base 2^16
-        let mut out16: Vec<u64> = Vec::with_capacity(result_len + 8);
+        let crt = Crt3::new();
+        let mut out: Vec<u32> = Vec::with_capacity(result_len + 4);
         let mut carry: u128 = 0;
         for k in 0..result_len
         {
-            let residues = [convs[0][k], convs[1][k], convs[2][k]];
-            let total = crt_garner(&residues, &NTT_PRIMES) + carry;
-            out16.push((total & 0xFFFF) as u64);
-            carry = total >> 16;
+            let total = crt.reconstruct(convs[0][k], convs[1][k], convs[2][k]) + carry;
+            out.push((total & 0xFFFF_FFFF) as u32);
+            carry = total >> 32;
         }
         while carry != 0
         {
-            out16.push((carry & 0xFFFF) as u64);
-            carry >>= 16;
+            out.push((carry & 0xFFFF_FFFF) as u32);
+            carry >>= 32;
         }
-        Self::from_parts(self.sign * o.sign, mag_from_base16(&out16))
+        Self::from_parts(self.sign * o.sign, out)
     }
 
     /// Truncated division: returns `(quotient, remainder)` with

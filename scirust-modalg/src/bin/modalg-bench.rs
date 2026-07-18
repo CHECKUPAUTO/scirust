@@ -67,10 +67,10 @@ fn bench_bigint_mul() {
         println!("  {limbs:>6}  {ts:>12.2?}  {tn:>12.2?}  {speedup:>7.2}x");
     }
     println!(
-        "  schoolbook is O(n²), mul_ntt is O(n log n). mul_ntt carries a large\n  \
-         constant (three NTT primes, u128 mulmod, per-coefficient CRT), so it only\n  \
-         wins for very large operands — the crossover is around ~16k–32k limbs\n  \
-         (~10^6 bits); below that, schoolbook is faster.\n"
+        "  schoolbook is O(n²), mul_ntt is O(n log n). mul_ntt still carries a\n  \
+         constant (three NTT primes, u128 modular arithmetic), so schoolbook wins\n  \
+         for small operands; the crossover is around ~2k–4k limbs (~10^5 bits),\n  \
+         above which mul_ntt pulls ahead (e.g. ~10x by 32k limbs).\n"
     );
 }
 
