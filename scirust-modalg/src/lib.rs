@@ -55,6 +55,10 @@
 //!   differential uniformity, linear approximation table and nonlinearity (via
 //!   the Walsh transform), algebraic degree, and the strict-avalanche matrix —
 //!   composing `boolean` for cryptographic S-box design and audit.
+//! - [`negacyclic`] — exact **negacyclic convolution** (multiplication in
+//!   `Z_q[x]/(x^n + 1)`, the core ring operation of lattice cryptography) built
+//!   on `ntt`, plus **Montgomery** reduction — reference building blocks, not a
+//!   hardened cryptosystem.
 //!
 //! Everything is deterministic and reproducible bit-for-bit on every platform.
 //!
@@ -147,6 +151,18 @@
 //! assert_eq!(identity.differential_uniformity(), 16); // 2^4
 //! assert_eq!(identity.nonlinearity(), 0);             // affine
 //! ```
+//!
+//! ```
+//! use scirust_modalg::negacyclic::NegacyclicNtt;
+//!
+//! // Multiply in Z_q[x]/(x^n + 1): x^{n-1}·x = x^n ≡ −1 = q−1.
+//! let ring = NegacyclicNtt::falcon(8);
+//! let q = ring.modulus();
+//! let mut hi = vec![0; 8]; hi[7] = 1; // x^7
+//! let mut x = vec![0; 8]; x[1] = 1;   // x
+//! let mut minus_one = vec![0; 8]; minus_one[0] = q - 1;
+//! assert_eq!(ring.mul(&hi, &x), minus_one);
+//! ```
 
 pub mod boolean;
 pub mod codes;
@@ -154,6 +170,7 @@ pub mod crc;
 pub mod gf2;
 pub mod hypercomplex;
 pub mod linalg;
+pub mod negacyclic;
 pub mod ntt;
 pub mod numtheory;
 pub mod ring;
@@ -164,6 +181,7 @@ pub use crc::Crc;
 pub use gf2::Gf2Field;
 pub use hypercomplex::{Oct, Quat};
 pub use linalg::ModMatrix;
+pub use negacyclic::{Montgomery, NegacyclicNtt};
 pub use ntt::Ntt;
 pub use ring::Word;
 pub use sbox::Sbox;
