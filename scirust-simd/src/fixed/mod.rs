@@ -81,7 +81,10 @@
 //   `eigenvalues_general`, réelles ou complexes conjuguées via
 //   [`linalg::Eigenvalue`]), et les **racines d'un polynôme**
 //   (`companion_matrix`/`poly_roots`, valeurs propres de sa matrice
-//   compagnon).
+//   compagnon), et l'**exponentielle de matrice** (`matrix_exp`, mise à
+//   l'échelle et carrés répétés — fonctionne pour toute matrice, y compris
+//   antisymétrique, l'application exponentielle `so(3) → SO(3)` de
+//   [`crate::geometry::Quaternion`]).
 // * [`activation`] — activations quantifiées (`relu`, `relu6`, `hardswish`…).
 // * [`layer`] — couche linéaire quantifiée [`layer::Linear`] (`W·x + b`, +
 //   activation), avec inférence par lot (`forward_batch` et variantes).

@@ -59,6 +59,20 @@
 // (anneau + une division réelle par le coefficient dominant) suivi d'un
 // simple appel à [`eigenvalues_general`], déjà éprouvé.
 //
+// [`matrix_exp`] calcule l'**exponentielle de matrice** `e^A` (`A`
+// quelconque, `n × n`) par la méthode standard « mise à l'échelle et carrés
+// répétés » (scaling and squaring, Higham) : approximant de Padé diagonal
+// `[3/3]` de `A/2ˢ` (`s` choisi pour rendre `A/2ˢ` petite en norme), puis `s`
+// mises au carré successives (`e^A = (e^{A/2ˢ})^{2ˢ}`). Contrairement à une
+// approche par décomposition spectrale (`e^A = V·diag(eλ)·V⁻¹`), elle ne
+// nécessite **aucun vecteur propre** — inexistants pour une matrice non
+// symétrique quelconque dans ce module ([`eigenvalues_general`] ne renvoie
+// que les valeurs propres) — donc fonctionne pour **toute** matrice, y
+// compris antisymétrique (générateur infinitésimal `so(3)` d'une rotation :
+// `e^{θ·K} =` la matrice de rotation de [`crate::geometry::Quaternion::to_rotation_matrix`]
+// pour le même axe/angle, l'application exponentielle classique de l'algèbre
+// de Lie `so(3)` vers le groupe `SO(3)`).
+//
 // `qr_solve` complète plutôt qu'il ne duplique Cholesky : résoudre les
 // moindres carrés via les équations normales (`cholesky_solve` sur `AᵀA`)
 // **double** l'exposant de conditionnement du problème (`cond(AᵀA) =
@@ -1378,4 +1392,122 @@ where
     let companion = companion_matrix(coeffs);
     let n = coeffs.len() - 1;
     eigenvalues_general(&companion, n, tol, max_iter)
+}
+
+// ------------------------------------------------------------------ //
+//  Exponentielle de matrice (mise à l'échelle et carrés répétés)      //
+// ------------------------------------------------------------------ //
+
+/// Petit entier littéral `n` construit par additions répétées depuis
+/// `T::one()` — [`FixedReducible`] n'a pas de conversion directe depuis
+/// `i32` (contrairement à [`super::NumericScalar::from_i32`]), et `n` reste
+/// ici assez petit (`≤ 120`, coefficients de Padé) pour que le coût soit
+/// négligeable.
+fn small_int<T: FixedReducible>(n: u32) -> T {
+    let mut acc = T::ZERO;
+    for _ in 0..n
+    {
+        acc = acc.wrapping_add(T::one());
+    }
+    acc
+}
+
+/// Exponentielle de la matrice `A` (`n × n` row-major, **quelconque** — pas
+/// nécessairement symétrique) : `e^A`, par mise à l'échelle et carrés
+/// répétés (cf. en-tête de module). `None` en cas de débordement virgule
+/// fixe (division vérifiée, système linéaire singulier de l'approximant de
+/// Padé — ce dernier cas ne devrait pas se produire en pratique pour une
+/// matrice mise à l'échelle). Panique si `a.len() != n·n`.
+///
+/// L'approximant de Padé diagonal `[3/3]` (coefficients `1`, `1/2`, `1/10`,
+/// `1/120`, cf. Higham 2005) est mis à l'échelle : `s` (le nombre de mises
+/// au carré) est choisi pour que `‖A/2ˢ‖₁` (norme `L1` sur **tous** les
+/// coefficients, [`FixedReducible::reduce_l1`] — une borne supérieure sûre,
+/// bien que pessimiste, des normes matricielles usuelles) descende sous
+/// `1/2`, seuil généreux compensant la précision limitée de la virgule
+/// fixe (l'approximant de Padé lui-même n'a besoin que d'une norme d'ordre
+/// `1`, cf. Higham, mais rester très en dessous améliore la précision
+/// effective à `FRAC` fixé).
+#[must_use]
+pub fn matrix_exp<T>(a: &[T], n: usize) -> Option<Vec<T>>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    assert_eq!(
+        a.len(),
+        n * n,
+        "matrix_exp : A de longueur {} ≠ {n}×{n}",
+        a.len()
+    );
+    if n == 0
+    {
+        return Some(Vec::new());
+    }
+
+    // Choix de l'échelle : divise par deux (exact, puissance de deux) tant
+    // que la norme dépasse le seuil.
+    let two = small_int::<T>(2);
+    let threshold = T::one().checked_div(two)?; // 1/2.
+    let mut scaled_norm = T::reduce_l1(a);
+    let mut s: u32 = 0;
+    while scaled_norm > threshold
+    {
+        scaled_norm = scaled_norm.checked_div(two)?;
+        s += 1;
+        if s > 60
+        {
+            return None; // échelle d'entrée déraisonnable pour la précision de T.
+        }
+    }
+    let mut x = a.to_vec();
+    for _ in 0..s
+    {
+        for xi in &mut x
+        {
+            *xi = xi.checked_div(two)?;
+        }
+    }
+
+    // Approximant de Padé diagonal [3/3] de X = A/2ˢ.
+    let c1 = T::one().checked_div(two)?;
+    let c2 = T::one().checked_div(small_int::<T>(10))?;
+    let c3 = T::one().checked_div(small_int::<T>(120))?;
+
+    let x2 = matmul(&x, &x, n, n, n);
+    let x3 = matmul(&x2, &x, n, n, n);
+
+    let mut num = vec![T::ZERO; n * n];
+    let mut den = vec![T::ZERO; n * n];
+    for i in 0..n
+    {
+        num[i * n + i] = T::one();
+        den[i * n + i] = T::one();
+    }
+    for k in 0..n * n
+    {
+        let t1 = c1.wrapping_mul(x[k]);
+        let t2 = c2.wrapping_mul(x2[k]);
+        let t3 = c3.wrapping_mul(x3[k]);
+        num[k] = num[k].wrapping_add(t1).wrapping_add(t2).wrapping_add(t3);
+        den[k] = (den[k] - t1).wrapping_add(t2) - t3;
+    }
+
+    // Résout D·R = N (R = D⁻¹·N), colonne par colonne.
+    let mut r = vec![T::ZERO; n * n];
+    for col in 0..n
+    {
+        let b: Vec<T> = (0..n).map(|row| num[row * n + col]).collect();
+        let x_col = lu_solve(&den, &b, n)?;
+        for (row, &v) in x_col.iter().enumerate()
+        {
+            r[row * n + col] = v;
+        }
+    }
+
+    // e^A = (e^{A/2ˢ})^{2ˢ} : s mises au carré successives.
+    for _ in 0..s
+    {
+        r = matmul(&r, &r, n, n, n);
+    }
+    Some(r)
 }

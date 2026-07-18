@@ -315,6 +315,18 @@ fn bench_poly_roots(c: &mut Criterion) {
     g.finish();
 }
 
+/// Exponentielle de matrice (mise à l'échelle et carrés répétés, Padé `[3/3]`).
+fn bench_matrix_exp(c: &mut Criterion) {
+    let a = fixed_data(0x15, N * N);
+
+    let mut g = c.benchmark_group("matrix_exp_48");
+    g.throughput(Throughput::Elements((N * N * N) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter(|| flin::matrix_exp(black_box(&a), N))
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_matmul,
@@ -328,6 +340,7 @@ criterion_group!(
     bench_svd,
     bench_hessenberg,
     bench_eigenvalues_general,
-    bench_poly_roots
+    bench_poly_roots,
+    bench_matrix_exp
 );
 criterion_main!(benches);

@@ -28,6 +28,7 @@ use super::{
     FixedI16, FixedI32, FixedI64, NumericScalar, OverflowMode, Q1_15, Q8_8, Q8_24, Q16_16, Q24_8,
     Q32_32, RealScalar, RoundingMode,
 };
+use crate::geometry::Quaternion;
 
 // LCG déterministe.
 struct Lcg(u64);
@@ -1951,6 +1952,174 @@ fn poly_roots_converges_at_larger_degree() {
             );
         }
     }
+}
+
+// ------------------------------------------------------------------ //
+//  Exponentielle de matrice (mise à l'échelle et carrés répétés)      //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn matrix_exp_zero_is_identity() {
+    for &n in &[1usize, 2, 3, 5]
+    {
+        let a = vec![Q16_16::zero(); n * n];
+        let got = linalg::matrix_exp(&a, n).expect("zéro : pas de débordement");
+        for i in 0..n
+        {
+            for j in 0..n
+            {
+                let want = if i == j { 1.0 } else { 0.0 };
+                let diff = (got[i * n + j].to_f64() - want).abs();
+                assert!(
+                    diff <= 1e-3,
+                    "n={n} [{i},{j}] = {} vs {want}",
+                    got[i * n + j].to_f64()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn matrix_exp_diagonal_matches_scalar_exp() {
+    #[rustfmt::skip]
+    let a = [
+        q16(0.3), q16(0.0), q16(0.0),
+        q16(0.0), q16(-0.5), q16(0.0),
+        q16(0.0), q16(0.0), q16(0.2),
+    ];
+    let got = linalg::matrix_exp(&a, 3).expect("diagonale : pas de débordement");
+    let want = [0.3f64.exp(), (-0.5f64).exp(), 0.2f64.exp()];
+    for i in 0..3
+    {
+        let diff = (got[i * 3 + i].to_f64() - want[i]).abs();
+        assert!(
+            diff <= 5e-3,
+            "diag[{i}] = {} vs {}",
+            got[i * 3 + i].to_f64(),
+            want[i]
+        );
+        for j in 0..3
+        {
+            if i != j
+            {
+                assert!(
+                    got[i * 3 + j].to_f64().abs() <= 5e-3,
+                    "hors-diagonale [{i},{j}] = {}",
+                    got[i * 3 + j].to_f64()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn matrix_exp_so3_generator_matches_rotation_matrix() {
+    // e^{θ·K} = matrice de rotation de Quaternion::from_axis_angle (même
+    // axe/angle) : application exponentielle classique so(3) → SO(3).
+    let theta = 0.6; // rad, modéré (bien approximé par le Padé [3/3]).
+    #[rustfmt::skip]
+    let k = [
+        q16(0.0), q16(-1.0), q16(0.0),
+        q16(1.0), q16(0.0), q16(0.0),
+        q16(0.0), q16(0.0), q16(0.0),
+    ];
+    let theta_k: Vec<Q16_16> = k.iter().map(|&x| x * q16(theta)).collect();
+    let got = linalg::matrix_exp(&theta_k, 3).expect("so(3) : pas de débordement");
+
+    let quat =
+        Quaternion::from_axis_angle([Q16_16::zero(), Q16_16::zero(), Q16_16::one()], q16(theta));
+    let want = quat.to_rotation_matrix();
+    for i in 0..3
+    {
+        for j in 0..3
+        {
+            let diff = (got[i * 3 + j].to_f64() - want[i][j].to_f64()).abs();
+            assert!(
+                diff <= 1e-2,
+                "R[{i},{j}] = {} vs {}",
+                got[i * 3 + j].to_f64(),
+                want[i][j].to_f64()
+            );
+        }
+    }
+}
+
+#[test]
+fn matrix_exp_inverse_is_negative_exp() {
+    let a = [q16(0.2), q16(0.1), q16(-0.15), q16(0.05)];
+    let neg_a: Vec<Q16_16> = a.iter().map(|&x| Q16_16::zero() - x).collect();
+    let ea = linalg::matrix_exp(&a, 2).expect("A : pas de débordement");
+    let ena = linalg::matrix_exp(&neg_a, 2).expect("-A : pas de débordement");
+    let prod = linalg::matmul(&ea, &ena, 2, 2, 2);
+    for i in 0..2
+    {
+        for j in 0..2
+        {
+            let want = if i == j { 1.0 } else { 0.0 };
+            let diff = (prod[i * 2 + j].to_f64() - want).abs();
+            assert!(
+                diff <= 1e-2,
+                "prod[{i},{j}] = {} vs {want}",
+                prod[i * 2 + j].to_f64()
+            );
+        }
+    }
+}
+
+#[test]
+fn matrix_exp_commuting_doubling() {
+    // e^A · e^A = e^{2A} (A commute avec elle-même).
+    let a = [q16(0.15), q16(-0.1), q16(0.2), q16(0.05)];
+    let two_a: Vec<Q16_16> = a.iter().map(|&x| x + x).collect();
+    let ea = linalg::matrix_exp(&a, 2).expect("A : pas de débordement");
+    let e2a_direct = linalg::matrix_exp(&two_a, 2).expect("2A : pas de débordement");
+    let e2a_squared = linalg::matmul(&ea, &ea, 2, 2, 2);
+    for i in 0..4
+    {
+        let diff = (e2a_direct[i].to_f64() - e2a_squared[i].to_f64()).abs();
+        assert!(
+            diff <= 1e-2,
+            "i={i}: {} vs {}",
+            e2a_direct[i].to_f64(),
+            e2a_squared[i].to_f64()
+        );
+    }
+}
+
+#[test]
+fn matrix_exp_i64_storage() {
+    let a = [
+        Q32_32::try_from(0.1).unwrap(),
+        Q32_32::zero(),
+        Q32_32::zero(),
+        Q32_32::try_from(0.2).unwrap(),
+    ];
+    let got = linalg::matrix_exp(&a, 2).expect("i64 : pas de débordement");
+    let want = [0.1f64.exp(), 0.2f64.exp()];
+    for i in 0..2
+    {
+        let diff = (Q32_32::to_f64(got[i * 2 + i]) - want[i]).abs();
+        assert!(
+            diff <= 5e-3,
+            "diag[{i}] = {} vs {}",
+            Q32_32::to_f64(got[i * 2 + i]),
+            want[i]
+        );
+    }
+}
+
+#[test]
+fn matrix_exp_n0_trivial() {
+    let a: [Q16_16; 0] = [];
+    assert_eq!(linalg::matrix_exp(&a, 0).unwrap(), Vec::new());
+}
+
+#[test]
+#[should_panic(expected = "matrix_exp")]
+fn matrix_exp_dim_mismatch_panics() {
+    let a = vec![Q16_16::zero(); 5]; // annoncé 3×3 = 9 ≠ 5.
+    let _ = linalg::matrix_exp(&a, 3);
 }
 
 // ------------------------------------------------------------------ //
