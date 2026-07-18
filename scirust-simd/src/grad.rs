@@ -22,6 +22,13 @@
 //!   vers l'unique position maximale de chaque fenêtre (recalculée depuis
 //!   `X`, comme `relu_backward` redérive son propre routage) pour le max,
 //!   ou distribuée uniformément sur toute la fenêtre pour la moyenne.
+//! * **`batch_norm_backward`** — BatchNorm **entraînement** : la
+//!   moyenne/variance de chaque canal sont recalculées sur le lot courant,
+//!   à la différence de [`crate::fixed::norm::batch_norm`] (inférence,
+//!   statistiques figées `running_mean`/`running_var`). Même forme
+//!   fermée que `layernorm_backward` (réduction à travers une statistique
+//!   partagée), mais réduite sur les `batch·spatial` éléments **dispersés**
+//!   de chaque canal plutôt que sur les `d` éléments contigus d'une ligne.
 //!
 //! Tous les gradients sont **vérifiés par différences finies centrées**
 //! (gradcheck) dans les tests, la garantie de justesse d'un backward.
@@ -578,6 +585,110 @@ pub fn avg_pool2d_backward(
                 }
             }
         }
+    }
+}
+
+/// Backward de BatchNorm **entraînement** (cf. en-tête de module pour la
+/// distinction avec [`crate::fixed::norm::batch_norm`], inférence) :
+/// `y[b,c,s] = (x[b,c,s] − μ_c)/√(σ²_c+eps)·γ_c + β_c`, où `μ_c`/`σ²_c`
+/// (variance **biaisée**) sont la moyenne/variance du canal `c` sur les
+/// `N = batch·spatial` éléments `x[:,c,:]`. `x`/`dy`/`dx` :
+/// `batch × channels × spatial` (même convention que
+/// [`crate::fixed::norm::batch_norm_batched`]) ; `gamma`/`dgamma`/`dbeta` :
+/// `channels`. Produit `dx` et **accumule** `dgamma`, `dbeta` (mets-les à
+/// zéro avant si tu ne veux pas d'accumulation).
+///
+/// Soit `x̂ = (x − μ_c)/σ_c` et `dŷ = dY·γ_c`. Par canal :
+/// `dβ_c += Σ dY`, `dγ_c += Σ dY·x̂`, et
+/// `dx = (1/(N·σ_c))·[ N·dŷ − Σ dŷ − x̂·Σ dŷ·x̂ ]` — les sommes portant sur
+/// les `N` positions `(b,s)` du canal, exactement comme dans
+/// `layernorm_backward` (jamais simplifié en `Σ(x−μ)=0` : cette somme est
+/// calculée naïvement pour ne pas masquer une éventuelle erreur ailleurs
+/// dans la formule).
+#[allow(clippy::too_many_arguments)]
+pub fn batch_norm_backward(
+    x: &[f32],
+    batch: usize,
+    channels: usize,
+    spatial: usize,
+    gamma: &[f32],
+    eps: f32,
+    dy: &[f32],
+    dx: &mut [f32],
+    dgamma: &mut [f32],
+    dbeta: &mut [f32],
+) {
+    let sample_len = channels * spatial;
+    assert_eq!(x.len(), batch * sample_len, "batch_norm_backward: X shape");
+    assert_eq!(gamma.len(), channels, "batch_norm_backward: gamma shape");
+    assert_eq!(dy.len(), x.len(), "batch_norm_backward: dY shape");
+    assert_eq!(dx.len(), x.len(), "batch_norm_backward: dX shape");
+    assert_eq!(dgamma.len(), channels, "batch_norm_backward: dgamma shape");
+    assert_eq!(dbeta.len(), channels, "batch_norm_backward: dbeta shape");
+
+    let n = (batch * spatial) as f32;
+    for c in 0..channels
+    {
+        // Passe 1 : moyenne puis variance (biaisée) du canal sur `N` éléments.
+        let mut mean = 0.0f32;
+        for b in 0..batch
+        {
+            let start = b * sample_len + c * spatial;
+            mean += x[start..start + spatial].iter().sum::<f32>();
+        }
+        mean /= n;
+
+        let mut var = 0.0f32;
+        for b in 0..batch
+        {
+            let start = b * sample_len + c * spatial;
+            var += x[start..start + spatial]
+                .iter()
+                .map(|&v| (v - mean) * (v - mean))
+                .sum::<f32>();
+        }
+        var /= n;
+        let sigma = (var + eps).sqrt();
+        let inv = 1.0 / sigma;
+        let g = gamma[c];
+
+        // Passe 2 : sommes de réduction (dŷ = dY·γ_c, x̂ = (x−μ_c)·inv).
+        let mut sum_dyh = 0.0f32;
+        let mut sum_dyh_xh = 0.0f32;
+        for b in 0..batch
+        {
+            let start = b * sample_len + c * spatial;
+            let xr = &x[start..start + spatial];
+            let dyr = &dy[start..start + spatial];
+            for s in 0..spatial
+            {
+                let xh = (xr[s] - mean) * inv;
+                let dyh = dyr[s] * g;
+                sum_dyh += dyh;
+                sum_dyh_xh += dyh * xh;
+            }
+        }
+
+        // Passe 3 : dx, et accumulation de dgamma/dbeta.
+        let mut dgamma_c = 0.0f32;
+        let mut dbeta_c = 0.0f32;
+        for b in 0..batch
+        {
+            let start = b * sample_len + c * spatial;
+            let xr = &x[start..start + spatial];
+            let dyr = &dy[start..start + spatial];
+            let dxr = &mut dx[start..start + spatial];
+            for s in 0..spatial
+            {
+                let xh = (xr[s] - mean) * inv;
+                let dyh = dyr[s] * g;
+                dxr[s] = inv / n * (n * dyh - sum_dyh - xh * sum_dyh_xh);
+                dgamma_c += dyr[s] * xh;
+                dbeta_c += dyr[s];
+            }
+        }
+        dgamma[c] += dgamma_c;
+        dbeta[c] += dbeta_c;
     }
 }
 
@@ -1138,5 +1249,99 @@ mod tests {
             )
         });
         assert_close(&dx, &g_x, 2e-2, "avg_pool2d dX");
+    }
+
+    // ---- Référence forward BatchNorm entraînement (indépendante) ----
+
+    #[allow(clippy::too_many_arguments)]
+    fn batch_norm_train_fwd(
+        x: &[f32],
+        batch: usize,
+        channels: usize,
+        spatial: usize,
+        gamma: &[f32],
+        beta: &[f32],
+        eps: f32,
+    ) -> Vec<f32> {
+        let sample_len = channels * spatial;
+        let n = (batch * spatial) as f32;
+        let mut y = vec![0.0f32; batch * sample_len];
+        for c in 0..channels
+        {
+            let mut mean = 0.0f32;
+            for b in 0..batch
+            {
+                let start = b * sample_len + c * spatial;
+                mean += x[start..start + spatial].iter().sum::<f32>();
+            }
+            mean /= n;
+
+            let mut var = 0.0f32;
+            for b in 0..batch
+            {
+                let start = b * sample_len + c * spatial;
+                var += x[start..start + spatial]
+                    .iter()
+                    .map(|&v| (v - mean) * (v - mean))
+                    .sum::<f32>();
+            }
+            var /= n;
+            let inv = 1.0 / (var + eps).sqrt();
+
+            for b in 0..batch
+            {
+                let start = b * sample_len + c * spatial;
+                for s in 0..spatial
+                {
+                    y[start + s] = (x[start + s] - mean) * inv * gamma[c] + beta[c];
+                }
+            }
+        }
+        y
+    }
+
+    #[test]
+    fn batch_norm_backward_gradcheck() {
+        let (batch, channels, spatial) = (3usize, 2usize, 4usize);
+        let sample_len = channels * spatial;
+        let x: Vec<f32> = (0..batch * sample_len)
+            .map(|i| (i as f32 * 0.13).sin() * 2.0 + 0.5)
+            .collect();
+        let gamma: Vec<f32> = (0..channels).map(|i| 0.6 + i as f32 * 0.2).collect();
+        let beta: Vec<f32> = (0..channels).map(|i| i as f32 * 0.1 - 0.1).collect();
+        let eps = 1e-5f32;
+        let seed: Vec<f32> = (0..batch * sample_len)
+            .map(|i| (i as f32 * 0.19).cos() + 0.2)
+            .collect();
+
+        let mut dx = vec![0.0f32; batch * sample_len];
+        let mut dgamma = vec![0.0f32; channels];
+        let mut dbeta = vec![0.0f32; channels];
+        batch_norm_backward(
+            &x,
+            batch,
+            channels,
+            spatial,
+            &gamma,
+            eps,
+            &seed,
+            &mut dx,
+            &mut dgamma,
+            &mut dbeta,
+        );
+
+        let h = 1e-3;
+        let gx = num_grad(&x, &seed, h, |xx| {
+            batch_norm_train_fwd(xx, batch, channels, spatial, &gamma, &beta, eps)
+        });
+        assert_close(&dx, &gx, 3e-2, "batch_norm dX");
+        let gg = num_grad(&gamma, &seed, h, |gg| {
+            batch_norm_train_fwd(&x, batch, channels, spatial, gg, &beta, eps)
+        });
+        assert_close(&dgamma, &gg, 3e-2, "batch_norm dgamma");
+        let gb = num_grad(&beta, &seed, h, |bb| {
+            batch_norm_train_fwd(&x, batch, channels, spatial, &gamma, bb, eps)
+        });
+        assert_close(&dbeta, &gb, 3e-2, "batch_norm dbeta");
     }
 }
