@@ -34,6 +34,17 @@
 // déficient**, où `qr_solve` échoue (pivot nul) — la pseudo-inverse de
 // Moore-Penrose donne la solution de norme minimale au lieu d'abandonner.
 //
+// [`generalized_eig_symmetric`] résout le **problème aux valeurs propres
+// généralisé** `A·x = λ·B·x` (`A` symétrique, `B` symétrique définie
+// positive) — analyse modale/vibratoire, blanchiment ACP/ADL, stabilité en
+// automatique. Réduction classique (Cholesky, `B = L·Lᵀ`) au problème
+// standard `C·y = λ·y` avec `C = L⁻¹·A·L⁻ᵀ` (symétrique, congruence de `A`) :
+// `jacobi_eigen` fournit alors directement les valeurs propres **et** les
+// vecteurs propres `y`, reprojetés dans la base d'origine par `x = L⁻ᵀ·y`.
+// Aucun nouveau risque numérique — assemblage par [`cholesky`] et
+// [`matmul`]/[`forward_substitution`], déjà éprouvés, puis un simple appel à
+// [`jacobi_eigen`].
+//
 // [`hessenberg`] et [`eigenvalues_general`] complètent [`jacobi_eigen`] pour
 // les matrices **non symétriques** : `jacobi_eigen`/`svd` supposent toutes
 // deux une matrice symétrique (ou `AᵀA`, toujours symétrique semi-définie
@@ -946,6 +957,95 @@ where
 
     let v = transpose(&vt, n, n);
     Some(matvec(&v, &d, n, n))
+}
+
+// ------------------------------------------------------------------ //
+//  Problème aux valeurs propres généralisé (A·x = λ·B·x)              //
+// ------------------------------------------------------------------ //
+
+/// Résout le problème aux valeurs propres **généralisé** symétrique-défini
+/// `A·x = λ·B·x` (`A` symétrique — seule sa partie triangulaire inférieure
+/// est lue, comme [`jacobi_eigen`] — et `B` symétrique **définie positive**,
+/// cf. en-tête de module).
+///
+/// Réduction de Cholesky au problème standard (`B = L·Lᵀ`, `y = Lᵀ·x`) :
+/// `A·x = λ·B·x` devient `L⁻¹·A·L⁻ᵀ·y = λ·y`, résolu par [`jacobi_eigen`] sur
+/// `C = L⁻¹·A·L⁻ᵀ` (symétrique par congruence de `A`). Les vecteurs propres
+/// `x` sont reprojetés par `x = L⁻ᵀ·y` : comme `Cᵀ = C` et que `jacobi_eigen`
+/// renvoie des `y` orthonormés (`yᵢᵀ·yⱼ = δᵢⱼ`), les `x` obtenus sont
+/// **B-orthonormés** (`xᵢᵀ·B·xⱼ = δᵢⱼ`) plutôt qu'orthonormés au sens usuel —
+/// propriété caractéristique du problème généralisé, vérifiée par test.
+///
+/// `L⁻¹` est explicitée colonne par colonne (`n` substitutions avant,
+/// `L·L⁻¹ = I`) — la même technique que [`qr_solve`]/[`svd_solve`] pour un
+/// second membre à plusieurs colonnes.
+///
+/// Renvoie `(valeurs_propres, vecteurs_propres, sweeps)` — `vecteurs_propres`
+/// est `n × n` row-major, colonne `i` = vecteur propre de `valeurs_propres[i]`
+/// (même convention que [`jacobi_eigen`]) ; `sweeps`, le nombre de passes
+/// Jacobi effectuées.
+///
+/// `None` si `B` n'est pas définie positive ([`cholesky`]), ou en cas de
+/// débordement virgule fixe pendant une substitution ou une rotation de
+/// Jacobi. Panique si `a.len() != n·n` ou `b.len() != n·n`.
+#[must_use]
+pub fn generalized_eig_symmetric<T>(
+    a: &[T],
+    b: &[T],
+    n: usize,
+    tol: T,
+    max_sweeps: usize,
+) -> Option<(Vec<T>, Vec<T>, usize)>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    assert_eq!(
+        a.len(),
+        n * n,
+        "generalized_eig_symmetric : A de longueur {} ≠ {n}×{n}",
+        a.len()
+    );
+    assert_eq!(
+        b.len(),
+        n * n,
+        "generalized_eig_symmetric : B de longueur {} ≠ {n}×{n}",
+        b.len()
+    );
+
+    let l = cholesky(b, n)?;
+
+    // Symétrise explicitement depuis la partie inférieure (comme
+    // `jacobi_eigen`) : le GEMM ci-dessous lit la matrice complète, alors que
+    // la convention documentée n'exige que le triangle inférieur en entrée.
+    let mut a_sym = a.to_vec();
+    for i in 0..n
+    {
+        for j in 0..i
+        {
+            a_sym[j * n + i] = a_sym[i * n + j];
+        }
+    }
+
+    let mut l_inv = vec![T::ZERO; n * n];
+    for j in 0..n
+    {
+        let mut e_j = vec![T::ZERO; n];
+        e_j[j] = T::one();
+        let col = forward_substitution(&l, &e_j, n)?;
+        for i in 0..n
+        {
+            l_inv[i * n + j] = col[i];
+        }
+    }
+    let l_inv_t = transpose(&l_inv, n, n);
+
+    let za = matmul(&l_inv, &a_sym, n, n, n);
+    let c = matmul(&za, &l_inv_t, n, n, n);
+
+    let (eigenvalues, y, sweeps) = jacobi_eigen(&c, n, tol, max_sweeps)?;
+    let x = matmul(&l_inv_t, &y, n, n, n);
+
+    Some((eigenvalues, x, sweeps))
 }
 
 // ------------------------------------------------------------------ //

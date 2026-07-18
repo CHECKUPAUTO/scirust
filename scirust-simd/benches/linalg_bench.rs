@@ -327,6 +327,29 @@ fn bench_matrix_exp(c: &mut Criterion) {
     g.finish();
 }
 
+/// Problème aux valeurs propres généralisé `A·x = λ·B·x` : réduction de
+/// Cholesky (`B`) puis `jacobi_eigen` — coût dominé par ce dernier, la
+/// réduction n'ajoutant que `n` substitutions triangulaires et deux GEMM.
+fn bench_generalized_eig_symmetric(c: &mut Criterion) {
+    let a = symmetric_data(0x16, N);
+    let b = spd_data(0x17, N);
+
+    let mut g = c.benchmark_group("generalized_eig_symmetric_48");
+    g.throughput(Throughput::Elements((N * N * N) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter(|| {
+            flin::generalized_eig_symmetric(
+                black_box(&a),
+                black_box(&b),
+                N,
+                Q16_16::try_from(1e-4).unwrap(),
+                100,
+            )
+        })
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_matmul,
@@ -341,6 +364,7 @@ criterion_group!(
     bench_hessenberg,
     bench_eigenvalues_general,
     bench_poly_roots,
-    bench_matrix_exp
+    bench_matrix_exp,
+    bench_generalized_eig_symmetric
 );
 criterion_main!(benches);

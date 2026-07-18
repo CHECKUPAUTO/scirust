@@ -1424,6 +1424,154 @@ fn svd_dim_mismatch_panics() {
 }
 
 // ------------------------------------------------------------------ //
+//  Problème aux valeurs propres généralisé (A·x = λ·B·x)              //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn generalized_eig_symmetric_matches_jacobi_eigen_when_b_is_identity() {
+    // B = I : la réduction de Cholesky est triviale (L = I), le problème
+    // généralisé coïncide donc **bit à bit** avec jacobi_eigen(A) direct —
+    // preuve croisée indépendante, sans référence séparée.
+    let mut rng = Lcg(0x6E16_0001);
+    for &n in &[1usize, 2, 3, 4, 5]
+    {
+        let a = random_symmetric(&mut rng, n);
+        let mut b = vec![Q16_16::zero(); n * n];
+        for i in 0..n
+        {
+            b[i * n + i] = Q16_16::one();
+        }
+        let (ev_want, v_want, sweeps_want) =
+            linalg::jacobi_eigen(&a, n, q16(1e-4), 60).expect("pas de débordement");
+        let (ev_got, v_got, sweeps_got) =
+            linalg::generalized_eig_symmetric(&a, &b, n, q16(1e-4), 60)
+                .expect("pas de débordement");
+        assert_eq!(ev_got, ev_want, "n={n}: valeurs propres");
+        assert_eq!(v_got, v_want, "n={n}: vecteurs propres");
+        assert_eq!(sweeps_got, sweeps_want, "n={n}: sweeps");
+    }
+}
+
+#[test]
+fn generalized_eig_symmetric_known_diagonal_case() {
+    // A, B diagonales : λᵢ = aᵢᵢ/bᵢᵢ, vecteur propre eᵢ/√bᵢᵢ (calcul à la
+    // main, cf. en-tête de fonction pour la B-orthonormalité) — A = diag(6,2),
+    // B = diag(4,1) ⟹ λ = (1.5, 2.0), vecteurs (0.5,0) et (0,1).
+    let a = [6i32, 0, 0, 2].map(Q16_16::from);
+    let b = [4i32, 0, 0, 1].map(Q16_16::from);
+    let (eigenvalues, x, sweeps) =
+        linalg::generalized_eig_symmetric(&a, &b, 2, q16(1e-4), 20).expect("pas de débordement");
+    assert_eq!(eigenvalues, [q16(1.5), q16(2.0)]);
+    assert_eq!(x, [q16(0.5), q16(0.0), q16(0.0), q16(1.0)]);
+    assert_eq!(sweeps, 1); // déjà diagonale : aucune rotation nécessaire.
+}
+
+#[test]
+fn generalized_eig_symmetric_solves_the_eigenvalue_equation_and_is_b_orthonormal() {
+    // Propriété caractéristique (cf. en-tête de fonction), vérifiée sur des
+    // A/B aléatoires plutôt qu'une référence indépendante réimplémentée :
+    //  * A·xᵢ ≈ λᵢ·B·xᵢ pour chaque vecteur propre (l'équation elle-même) ;
+    //  * Xᵀ·B·X ≈ I (B-orthonormalité, pas l'orthonormalité usuelle).
+    let mut rng = Lcg(0x6E16_0002);
+    for &n in &[2usize, 3, 4, 5, 6]
+    {
+        let a = random_symmetric(&mut rng, n);
+        let b = random_spd(&mut rng, n);
+        let (eigenvalues, x, sweeps) = linalg::generalized_eig_symmetric(&a, &b, n, q16(1e-4), 80)
+            .expect("pas de débordement pour cette échelle");
+        assert!(sweeps <= 80, "n={n}: sweeps={sweeps} > max_sweeps");
+
+        let tol = (n * n) as f64 * 32.0 / 65536.0;
+
+        // A·X et B·X·diag(λ) (colonne par colonne).
+        let ax = linalg::matmul(&a, &x, n, n, n);
+        let bx = linalg::matmul(&b, &x, n, n, n);
+        for i in 0..n
+        {
+            for j in 0..n
+            {
+                let want = bx[i * n + j].to_f64() * eigenvalues[j].to_f64();
+                let got = ax[i * n + j].to_f64();
+                assert!(
+                    (got - want).abs() <= tol,
+                    "n={n} i={i} j={j}: A·X = {got} vs B·X·diag(λ) = {want} (écart > {tol})"
+                );
+            }
+        }
+
+        // Xᵀ·B·X ≈ I.
+        let xt = linalg::transpose(&x, n, n);
+        let xtb = linalg::matmul(&xt, &b, n, n, n);
+        let xtbx = linalg::matmul(&xtb, &x, n, n, n);
+        for i in 0..n
+        {
+            for j in 0..n
+            {
+                let want = if i == j { 1.0 } else { 0.0 };
+                let got = xtbx[i * n + j].to_f64();
+                assert!(
+                    (got - want).abs() <= tol,
+                    "n={n} i={i} j={j}: Xᵀ·B·X = {got} vs {want}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn generalized_eig_symmetric_i64_storage() {
+    // Même exemple exact que `generalized_eig_symmetric_known_diagonal_case`,
+    // stockage i64 (Q32_32).
+    let a = [6i64, 0, 0, 2].map(Q32_32::from);
+    let b = [4i64, 0, 0, 1].map(Q32_32::from);
+    let (eigenvalues, x, sweeps) = linalg::generalized_eig_symmetric(&a, &b, 2, Q32_32::zero(), 20)
+        .expect("pas de débordement");
+    assert_eq!(
+        eigenvalues,
+        [Q32_32::try_from(1.5).unwrap(), Q32_32::from(2i64)]
+    );
+    assert_eq!(
+        x,
+        [
+            Q32_32::try_from(0.5).unwrap(),
+            Q32_32::zero(),
+            Q32_32::zero(),
+            Q32_32::one()
+        ]
+    );
+    assert_eq!(sweeps, 1);
+}
+
+#[test]
+fn generalized_eig_symmetric_returns_none_for_non_spd_b() {
+    // B non définie positive (mineur principal négatif) : cholesky(B)
+    // échoue, generalized_eig_symmetric doit donc renvoyer None plutôt que
+    // paniquer ou produire un résultat incohérent.
+    let a = [Q16_16::one(); 4];
+    let b = [-1i32, 0, 0, -1].map(Q16_16::from);
+    assert_eq!(
+        linalg::generalized_eig_symmetric(&a, &b, 2, q16(1e-4), 20),
+        None
+    );
+}
+
+#[test]
+#[should_panic(expected = "generalized_eig_symmetric")]
+fn generalized_eig_symmetric_a_dim_mismatch_panics() {
+    let a = vec![Q16_16::zero(); 5]; // annoncé 2×2 = 4 ≠ 5.
+    let b = vec![Q16_16::zero(); 4];
+    let _ = linalg::generalized_eig_symmetric(&a, &b, 2, q16(1e-4), 20);
+}
+
+#[test]
+#[should_panic(expected = "generalized_eig_symmetric")]
+fn generalized_eig_symmetric_b_dim_mismatch_panics() {
+    let a = vec![Q16_16::zero(); 4];
+    let b = vec![Q16_16::zero(); 5]; // annoncé 2×2 = 4 ≠ 5.
+    let _ = linalg::generalized_eig_symmetric(&a, &b, 2, q16(1e-4), 20);
+}
+
+// ------------------------------------------------------------------ //
 //  Hessenberg + QR décalé (matrices quelconques, non symétriques)     //
 // ------------------------------------------------------------------ //
 
