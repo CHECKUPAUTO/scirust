@@ -178,7 +178,8 @@ pub use track::{AlphaBeta, MultiTracker, Track, critically_damped_gains};
 pub use vi_cfar::{
     CensoredMeanResult, CfarConfig, CfarDecision, CfarDetector, CfarError, CfarMode,
     CfarStreamDetector, DetectorPolicy, EdgePolicy, InputValidationPolicy, RobustNoiseEstimator,
-    SwitchingThresholds, TrimmedMeanResult, censored_mean,
+    SwitchingThresholds, TrimmedMeanResult, calibrate_k_mr, calibrate_k_vi, censored_mean,
     evaluate_slice as vi_cfar_evaluate_slice, mean_ratio, trimmed_mean, variability_index,
+    vi_cfar_2d,
 };
 pub use waveform::{barker_code, lfm_chirp};

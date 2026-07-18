@@ -161,6 +161,14 @@
 //! `k_vi = 6.72, k_mr = 2.064` cited elsewhere for an unstated design point —
 //! confirming these are context/`N`-dependent design parameters, not universal
 //! constants, so this module refuses to silently pick one as "the" default.
+//! [`calibrate_k_mr`] (exact, via the `F(2n,2n)` distribution `MR` follows
+//! under the switch's null case) and [`calibrate_k_vi`] (Monte Carlo, seeded
+//! and deterministic — `VI` has no equivalently simple exact distribution)
+//! give a starting point for the `α` half of that design point from first
+//! principles instead of copying a published pair verbatim; they do not
+//! calibrate `β` (the missed-non-homogeneity rate), which is inherently
+//! specific to an assumed interferer/target model this module does not
+//! invent — see those functions' own docs.
 //!
 //! # Threshold calibration
 //!
@@ -216,6 +224,30 @@
 //! `chi_square_gof` check — see that file), not derived analytically. Do not
 //! read "CFAR" applied to the *composite* detector as a proven invariance
 //! claim.
+//!
+//! **Model scope**: every calibration above — CA, GO, SO, RobustTrimmed,
+//! RobustCensored, and the composite switch built from them — targets one
+//! specific clutter model: i.i.d. unit-mean-exponential power (equivalently,
+//! Rayleigh-amplitude clutter, [`super::clutter`]'s baseline case). This is
+//! the classical calm-sea/thermal-noise model, not a claim about every
+//! clutter environment. Real sea clutter at low grazing angles and high
+//! range resolution is well documented to be spikier — heavier-tailed —
+//! than this (Weibull-amplitude with shape `< 2`, or log-normal, both
+//! already modeled in [`super::clutter`]). `tests/vi_cfar_non_rayleigh_clutter.rs`
+//! *measures* (does not merely assert) what happens then: every mode's
+//! observed `P_fa` rises to roughly 3-5x the design target under
+//! moderately-to-severely spiky synthetic clutter parameterized from ranges
+//! commonly cited for real X-band sea clutter (that file has no recorded
+//! sensor data to validate against — see its own docs for why). The ranking
+//! across modes there is not what "robust beats classical" would predict:
+//! GO holds up best, and `RobustTrimmed`/`RobustCensored` — calibrated via
+//! the same exponential-order-statistics argument as CA/GO/SO — degrade
+//! *worst*, since discarding/censoring cells raises estimator variance
+//! without correcting a wrong-distribution-family mismatch trimming was
+//! never designed to fix. Do not read any mode's calibration here as
+//! validated for non-Rayleigh clutter; a deployment against real spiky
+//! clutter needs its own calibration against the actual clutter model in
+//! force, not this module's exponential-power constants.
 //!
 //! # Robust double-contamination strategy
 //!
@@ -988,6 +1020,137 @@ impl CalibratedThresholds {
 }
 
 // ============================================================================
+// Design-point calibration helpers (k_vi, k_mr)
+// ============================================================================
+//
+// The module docs, "Switching structure," document that this module refuses
+// to pick a default `k_vi`/`k_mr` because the published design points
+// disagree and are context-dependent (each pins a *pair* of classification
+// error rates, `alpha` = P(a homogeneous half-window is misclassified as
+// non-homogeneous) and `beta` = P(a non-homogeneous half-window is missed),
+// under a *specific assumed interferer strength* neither this module nor
+// its literature survey can generalize). What these two functions calibrate
+// is the *one* piece of that design point which does not depend on any
+// interferer-strength assumption: `alpha` alone, under the switch's own
+// null case of a genuinely homogeneous half-window. That is a strictly
+// narrower, but honestly deliverable, service — a starting point for
+// `alpha`, not a substitute for choosing `beta` against a real target/
+// interferer model, which remains the caller's own domain-specific choice.
+
+/// Exact `k_mr` for a target false-non-homogeneity rate `alpha`: `P(MR >
+/// k_mr) = alpha` under the switch's null case (both reference half-windows
+/// homogeneous, i.i.d. unit-mean-exponential power matching the CUT).
+///
+/// Derivation: `MR = mean_a / mean_b = A / B` where `A = reference_cells *
+/// mean_a ~ Gamma(reference_cells, 1)` (a sum of `reference_cells` i.i.d.
+/// `Exp(1)` samples), independently for `B`. `2 * Gamma(k, 1) ~ chi²(2k)`
+/// (a standard identity — `Gamma(k, 1)` in shape-scale form *is*
+/// `chi²(2k)/2`), and the ratio of two independent `chi²(k1)/k1` and
+/// `chi²(k2)/k2` terms is `F(k1, k2)` by definition, so
+///
+/// ```text
+/// MR = A / B = (2A / 2n) / (2B / 2n) ~ F(2n, 2n),  n = reference_cells
+/// ```
+///
+/// `k_mr` solving `P(MR > k_mr) = alpha` is then exactly `F(2n,2n)`'s
+/// `(1 - alpha)` quantile — [`scirust_stats::FisherF`]'s already-tested
+/// quantile function, not a bisection or Monte Carlo of this module's own
+/// devising.
+///
+/// This calibrates only `alpha`; see this section's own docs above for why
+/// `beta` (the missed-non-homogeneity rate) is not calibrated here.
+pub fn calibrate_k_mr(reference_cells: usize, alpha: f64) -> Result<f64, CfarError> {
+    if reference_cells < 2
+    {
+        return Err(CfarError::TooFewReferenceCells(reference_cells));
+    }
+    if !(alpha.is_finite() && alpha > 0.0 && alpha < 1.0)
+    {
+        return Err(CfarError::ExactCalibrationFailed(format!(
+            "alpha must satisfy 0 < alpha < 1, got {alpha}"
+        )));
+    }
+    let n = reference_cells as f64;
+    let f_dist = scirust_stats::FisherF::new(2.0 * n, 2.0 * n);
+    Ok(f_dist.quantile(1.0 - alpha))
+}
+
+/// A small, self-contained, deterministic LCG (no OS/clock entropy) for
+/// [`calibrate_k_vi`]'s Monte Carlo trials — the same generator family used
+/// throughout this crate's own tests and benchmarks, kept private to this
+/// function rather than reused from `#[cfg(test)]`-only code.
+struct DesignPointRng(u64);
+
+impl DesignPointRng {
+    fn unit_exponential(&mut self) -> f64 {
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        let uniform01 = ((self.0 >> 11) as f64 + 1.0) / ((1u64 << 53) as f64 + 1.0);
+        -uniform01.ln()
+    }
+}
+
+/// Monte-Carlo-calibrates `k_vi` for a target false-non-homogeneity rate
+/// `alpha`: `P(VI > k_vi) = alpha` under the switch's own null case (a
+/// homogeneous reference half-window, i.i.d. unit-mean-exponential power).
+///
+/// Unlike [`calibrate_k_mr`], `VI`'s distribution under this model has no
+/// simple closed form: `VI = 1 + s²/mean²` mixes the sample mean and a
+/// quadratic form in the deviations from it, and for *exponential* — not
+/// Gaussian — samples that quadratic form does not decouple into an exact
+/// distribution independent of the mean the way Cochran's theorem gives for
+/// Gaussian samples (which is what let [`calibrate_k_mr`] be exact above:
+/// `MR` needed no such decoupling, only the ratio of two whole half-window
+/// sums). This is therefore a deterministic, seeded Monte Carlo estimate,
+/// not an exact calibration, and is documented as such — precision improves
+/// with `trials` at the usual `O(1/√trials)` Monte-Carlo rate; `seed` makes
+/// a given call exactly reproducible.
+///
+/// This calibrates only `alpha`; see this section's own docs above for why
+/// `beta` (the missed-non-homogeneity rate) is not calibrated here.
+pub fn calibrate_k_vi(
+    reference_cells: usize,
+    alpha: f64,
+    trials: usize,
+    seed: u64,
+) -> Result<f64, CfarError> {
+    if reference_cells < 2
+    {
+        return Err(CfarError::TooFewReferenceCells(reference_cells));
+    }
+    if !(alpha.is_finite() && alpha > 0.0 && alpha < 1.0)
+    {
+        return Err(CfarError::ExactCalibrationFailed(format!(
+            "alpha must satisfy 0 < alpha < 1, got {alpha}"
+        )));
+    }
+    if trials == 0
+    {
+        return Err(CfarError::ExactCalibrationFailed(
+            "trials must be at least 1".to_string(),
+        ));
+    }
+    let mut rng = DesignPointRng(seed);
+    let n = reference_cells as f64;
+    let vi_samples: Vec<f64> = (0..trials)
+        .map(|_| {
+            let cells: Vec<f64> = (0..reference_cells)
+                .map(|_| rng.unit_exponential())
+                .collect();
+            let mean = cells.iter().sum::<f64>() / n;
+            let sample_variance =
+                cells.iter().map(|&x| (x - mean) * (x - mean)).sum::<f64>() / (n - 1.0);
+            variability_index(mean, sample_variance)
+        })
+        .collect();
+    let pfa_of =
+        |k: f64| -> f64 { vi_samples.iter().filter(|&&vi| vi > k).count() as f64 / trials as f64 };
+    Ok(bisect_decreasing(pfa_of, alpha))
+}
+
+// ============================================================================
 // Robust trimmed-mean primitive
 // ============================================================================
 
@@ -1347,6 +1510,66 @@ impl CfarDetector {
         }
         Ok(decisions)
     }
+}
+
+// ============================================================================
+// 2-D range-Doppler API
+// ============================================================================
+
+/// Applies the 1-D VI-CFAR switch independently along the range axis, once
+/// per Doppler bin, over a range-Doppler power map (`power[range][doppler]`
+/// — the same `power[range][doppler]` layout [`super::detect::ca_cfar_2d`]
+/// uses).
+///
+/// This is the classical *per-Doppler-bin range-CFAR* pattern — not a
+/// genuinely 2-D (range × Doppler) reference window the way
+/// [`super::detect::ca_cfar_2d`]'s square training region is. Extending
+/// this module's switch (the VI/MR non-homogeneity classification, the
+/// double-contamination robust fallback) to a truly 2-D reference geometry
+/// would need its own independently-derived and independently-verified
+/// theory — out of scope here, and not attempted by guessing. Reusing the
+/// already-calibrated, already-tested 1-D [`CfarDetector`] column-by-column
+/// instead keeps every `P_fa`/switching guarantee documented above intact:
+/// each Doppler bin's range profile is exactly the 1-D problem
+/// [`evaluate_slice`] already solves, run `cols` times against one
+/// detector calibrated once (not once per column — see [`CfarDetector`]'s
+/// own docs on why that matters).
+///
+/// `config` is validated and calibrated exactly once via
+/// [`CfarDetector::new`], which is where an invalid config surfaces as a
+/// [`CfarError`]. Shape problems in `power` itself (empty, zero-width, or
+/// ragged rows) are not configuration errors and are handled the same way
+/// [`super::detect::ca_cfar_2d`] handles them: silently, by returning an
+/// all-`false` mask of the input's own shape (or an empty map, if `power`
+/// itself is empty) rather than an error, since a malformed *measurement*
+/// is a different kind of problem than a malformed *configuration*.
+pub fn vi_cfar_2d(power: &[Vec<f64>], config: &CfarConfig) -> Result<Vec<Vec<bool>>, CfarError> {
+    let rows = power.len();
+    if rows == 0
+    {
+        return Ok(Vec::new());
+    }
+    let cols = power[0].len();
+    let mut det = vec![vec![false; cols]; rows];
+    if cols == 0 || power.iter().any(|row| row.len() != cols)
+    {
+        return Ok(det);
+    }
+
+    let mut detector = CfarDetector::new(*config)?;
+    let mut column = vec![0.0_f64; rows];
+    for d in 0..cols
+    {
+        for (r, row) in power.iter().enumerate()
+        {
+            column[r] = row[d];
+        }
+        for decision in detector.evaluate(&column)?
+        {
+            det[decision.cut_index][d] = decision.detected;
+        }
+    }
+    Ok(det)
 }
 
 // ============================================================================
@@ -1866,6 +2089,133 @@ mod tests {
         }
     }
 
+    // ---- Design-point calibration helpers (k_vi, k_mr) ----------------------
+
+    #[test]
+    fn calibrate_k_mr_holds_its_design_alpha_empirically() {
+        // Independent empirical check of the F(2n,2n) derivation: draw two
+        // fresh, independent i.i.d.-Exp(1) half-windows per trial (a
+        // *different* RNG than calibrate_k_vi's own DesignPointRng, using
+        // the module's other private LCG), and confirm the observed
+        // exceedance rate of the calibrated k_mr matches the target alpha.
+        for &(n, alpha) in &[(8usize, 0.05), (16, 0.02), (32, 0.1)]
+        {
+            let k_mr = calibrate_k_mr(n, alpha).unwrap();
+            let trials = 200_000;
+            let mut rng = CalibrationRng(0x4b5f_4d52_5f43_4845 ^ (n as u64));
+            let exceed = (0..trials)
+                .filter(|_| {
+                    let a: f64 = (0..n).map(|_| rng.unit_exponential()).sum();
+                    let b: f64 = (0..n).map(|_| rng.unit_exponential()).sum();
+                    (a / b) > k_mr
+                })
+                .count() as f64
+                / trials as f64;
+            let se = (alpha * (1.0 - alpha) / trials as f64).sqrt();
+            assert!(
+                (exceed - alpha).abs() < 4.0 * se,
+                "n={n}, alpha={alpha}: k_mr={k_mr}, observed exceedance={exceed}, target={alpha}, 4*SE={}",
+                4.0 * se
+            );
+        }
+    }
+
+    #[test]
+    fn calibrate_k_mr_matches_its_own_boundary_expectations() {
+        // At n=1 boundary excluded by TooFewReferenceCells; check the
+        // monotonicity any quantile function must have: a smaller alpha
+        // (rarer false-non-homogeneity) demands a larger k_mr.
+        let loose = calibrate_k_mr(16, 0.2).unwrap();
+        let tight = calibrate_k_mr(16, 0.01).unwrap();
+        assert!(
+            tight > loose,
+            "smaller alpha should require a larger k_mr: tight={tight} vs loose={loose}"
+        );
+        // k_mr must be > 1: MR=1 (equal means) can never itself count as
+        // "too imbalanced", for any alpha < 1.
+        assert!(loose > 1.0 && tight > 1.0);
+    }
+
+    #[test]
+    fn calibrate_k_mr_rejects_invalid_input() {
+        assert!(matches!(
+            calibrate_k_mr(1, 0.05),
+            Err(CfarError::TooFewReferenceCells(1))
+        ));
+        assert!(matches!(
+            calibrate_k_mr(16, 0.0),
+            Err(CfarError::ExactCalibrationFailed(_))
+        ));
+        assert!(matches!(
+            calibrate_k_mr(16, 1.0),
+            Err(CfarError::ExactCalibrationFailed(_))
+        ));
+        assert!(matches!(
+            calibrate_k_mr(16, f64::NAN),
+            Err(CfarError::ExactCalibrationFailed(_))
+        ));
+    }
+
+    #[test]
+    fn calibrate_k_vi_holds_its_design_alpha_empirically() {
+        // Independent empirical check, using yet another RNG/seed than the
+        // one calibrate_k_vi uses internally, matching this module's
+        // established convention of cross-checking every calibration
+        // against a materially independent generator.
+        for &(n, alpha) in &[(8usize, 0.05), (16, 0.02)]
+        {
+            let k_vi = calibrate_k_vi(n, alpha, 300_000, 0x4b5f_5649_5f43_414c).unwrap();
+            let trials = 200_000;
+            let mut rng = CalibrationRng(0x5645_5249_4659_4b56 ^ (n as u64));
+            let exceed = (0..trials)
+                .filter(|_| {
+                    let cells: Vec<f64> = (0..n).map(|_| rng.unit_exponential()).collect();
+                    let mean = cells.iter().sum::<f64>() / n as f64;
+                    let sample_variance =
+                        cells.iter().map(|&x| (x - mean) * (x - mean)).sum::<f64>()
+                            / (n as f64 - 1.0);
+                    variability_index(mean, sample_variance) > k_vi
+                })
+                .count() as f64
+                / trials as f64;
+            let se = (alpha * (1.0 - alpha) / trials as f64).sqrt();
+            assert!(
+                (exceed - alpha).abs() < 4.0 * se,
+                "n={n}, alpha={alpha}: k_vi={k_vi}, observed exceedance={exceed}, target={alpha}, 4*SE={}",
+                4.0 * se
+            );
+        }
+    }
+
+    #[test]
+    fn calibrate_k_vi_rejects_invalid_input() {
+        assert!(matches!(
+            calibrate_k_vi(1, 0.05, 1000, 0),
+            Err(CfarError::TooFewReferenceCells(1))
+        ));
+        assert!(matches!(
+            calibrate_k_vi(16, 0.0, 1000, 0),
+            Err(CfarError::ExactCalibrationFailed(_))
+        ));
+        assert!(matches!(
+            calibrate_k_vi(16, 0.05, 0, 0),
+            Err(CfarError::ExactCalibrationFailed(_))
+        ));
+    }
+
+    #[test]
+    fn calibrate_k_vi_is_deterministic() {
+        let a = calibrate_k_vi(16, 0.05, 5_000, 0x1234).unwrap();
+        let b = calibrate_k_vi(16, 0.05, 5_000, 0x1234).unwrap();
+        assert_eq!(a.to_bits(), b.to_bits());
+        let c = calibrate_k_vi(16, 0.05, 5_000, 0x5678).unwrap();
+        assert_ne!(
+            a.to_bits(),
+            c.to_bits(),
+            "a different seed should (almost surely) differ"
+        );
+    }
+
     #[test]
     fn trimmed_mean_alpha_with_no_trim_matches_ca_cfar_alpha() {
         let (n_ref, pfa) = (32, 0.01);
@@ -2344,6 +2694,107 @@ mod tests {
             at_cut.detected,
             "trimming 3 interferers should still detect the weak target"
         );
+    }
+
+    // ---- 2-D range-Doppler API -----------------------------------------------
+
+    #[test]
+    #[allow(clippy::needless_range_loop)] // 2-D indexing by (range, doppler) reads clearer explicit
+    fn vi_cfar_2d_matches_per_column_evaluate_slice() {
+        // Cross-check against the already-verified 1-D path: build a
+        // range-Doppler map with a few embedded targets, run `vi_cfar_2d`,
+        // and independently run `evaluate_slice` on each column extracted
+        // by hand -- every `detected` flag must agree exactly.
+        let (rows, cols) = (80, 5);
+        let mut power = vec![vec![1.0_f64; cols]; rows];
+        power[30][1] = 40.0; // isolated target in column 1
+        power[50][3] = 60.0; // isolated target in column 3
+        let config = vi_cfar_config(16, 2, 6.0, 2.0);
+
+        let det = vi_cfar_2d(&power, &config).unwrap();
+        assert_eq!(det.len(), rows);
+        for d in 0..cols
+        {
+            let column: Vec<f64> = (0..rows).map(|r| power[r][d]).collect();
+            let decisions = evaluate_slice(&column, &config).unwrap();
+            for decision in &decisions
+            {
+                assert_eq!(
+                    det[decision.cut_index][d], decision.detected,
+                    "column {d}, range {}: 2-D vs 1-D disagree",
+                    decision.cut_index
+                );
+            }
+            // Every range outside the evaluated (edge-excluded) interior
+            // must stay `false` -- `vi_cfar_2d` never flags a cell
+            // `evaluate_slice` itself would not have evaluated.
+            let evaluated: std::collections::HashSet<usize> =
+                decisions.iter().map(|dd| dd.cut_index).collect();
+            for r in 0..rows
+            {
+                if !evaluated.contains(&r)
+                {
+                    assert!(
+                        !det[r][d],
+                        "column {d}, range {r}: flagged without a full window"
+                    );
+                }
+            }
+        }
+        assert!(det[30][1], "target at (30, 1) should be detected");
+        assert!(det[50][3], "target at (50, 3) should be detected");
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)] // 2-D indexing by (range, doppler) reads clearer explicit
+    fn vi_cfar_2d_detects_only_the_embedded_target() {
+        let (rows, cols) = (60, 3);
+        let mut power = vec![vec![1.0_f64; cols]; rows];
+        power[25][1] = 50.0;
+        let config = vi_cfar_config(16, 2, 6.0, 2.0);
+        let det = vi_cfar_2d(&power, &config).unwrap();
+        for r in 0..rows
+        {
+            for c in 0..cols
+            {
+                let expect_detected = (r, c) == (25, 1);
+                assert_eq!(
+                    det[r][c], expect_detected,
+                    "unexpected detection state at ({r}, {c})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn vi_cfar_2d_empty_map_returns_empty() {
+        let config = vi_cfar_config(16, 2, 6.0, 2.0);
+        let det = vi_cfar_2d(&[], &config).unwrap();
+        assert!(det.is_empty());
+    }
+
+    #[test]
+    fn vi_cfar_2d_ragged_rows_return_an_all_false_mask() {
+        // Matches `ca_cfar_2d`'s convention: a shape problem in the
+        // *measurement* is not a configuration error, so it is reported by
+        // an all-`false` mask (sized from the first row), not `Err`.
+        let power = vec![vec![1.0; 5], vec![1.0; 4], vec![1.0; 5]];
+        let config = vi_cfar_config(16, 2, 6.0, 2.0);
+        let det = vi_cfar_2d(&power, &config).unwrap();
+        assert_eq!(det.len(), 3);
+        assert!(
+            det.iter()
+                .all(|row| row.len() == 5 && row.iter().all(|&d| !d))
+        );
+    }
+
+    #[test]
+    fn vi_cfar_2d_propagates_a_calibration_error() {
+        let mut config = vi_cfar_config(16, 2, 6.0, 2.0);
+        config.reference_cells = 1; // invalid: TooFewReferenceCells
+        let power = vec![vec![1.0; 4]; 4];
+        let err = vi_cfar_2d(&power, &config).unwrap_err();
+        assert!(matches!(err, CfarError::TooFewReferenceCells(1)));
     }
 
     // ---- Streaming API ------------------------------------------------------
