@@ -173,6 +173,177 @@ impl ReedSolomon {
         Some((cw[..k].to_vec(), v))
     }
 
+    /// **Erasure** decoding: reconstruct a codeword in which the symbols at the
+    /// (known, distinct) `erasures` positions have been lost. Because the
+    /// positions are known, no error search is needed — up to `nsym` erasures
+    /// are filled by solving the Vandermonde syndrome system directly, so an
+    /// `RS(n, k)` code recovers **twice** as many erasures as it can errors.
+    ///
+    /// Returns the full `n`-symbol corrected codeword, or `None` if there are
+    /// more than `nsym` erasures or the non-erased symbols are themselves
+    /// inconsistent (i.e. contained an undeclared error — caught by a final
+    /// syndrome recheck). This is the RAID-6 / storage reconstruction path.
+    pub fn decode_erasures(&self, received: &[u64], erasures: &[usize]) -> Option<Vec<u64>> {
+        let n = received.len();
+        assert!(n > self.nsym, "codeword shorter than the parity length");
+        let mut eras = erasures.to_vec();
+        eras.sort_unstable();
+        eras.dedup();
+        if eras.len() > self.nsym || eras.last().is_some_and(|&u| u >= n)
+        {
+            return None;
+        }
+        let mut cw = received.to_vec();
+        for &u in &eras
+        {
+            cw[u] = 0;
+        }
+        let synd = self.syndromes(&cw);
+        if eras.is_empty()
+        {
+            return synd.iter().all(|&s| s == 0).then_some(cw);
+        }
+
+        let f = &self.field;
+        let e = eras.len();
+        let locators: Vec<u64> = eras
+            .iter()
+            .map(|&u| f.pow(self.alpha, (n - 1 - u) as u64))
+            .collect();
+        // Σ_l Y_l · X_l^j = S_j (j = 1 … e): an e×e Vandermonde system.
+        let mut a = vec![vec![0u64; e]; e];
+        let mut rhs = vec![0u64; e];
+        for (row, r) in a.iter_mut().enumerate()
+        {
+            let j = (row + 1) as u64;
+            for (col, cell) in r.iter_mut().enumerate()
+            {
+                *cell = f.pow(locators[col], j);
+            }
+            rhs[row] = synd[row];
+        }
+        let vals = gf_solve(f, a, rhs)?;
+        for (idx, &u) in eras.iter().enumerate()
+        {
+            cw[u] ^= vals[idx];
+        }
+        // consistency: undeclared errors leave a nonzero syndrome.
+        if self.syndromes(&cw).iter().any(|&s| s != 0)
+        {
+            return None;
+        }
+        Some(cw)
+    }
+
+    /// Combined **errors-and-erasures** decoding: correct `t` unknown errors and
+    /// fill `e` known `erasures` simultaneously, valid whenever `2·t + e ≤
+    /// nsym`. Uses Forney-modified syndromes so Berlekamp–Massey locates only the
+    /// unknown errors, then solves one linear system for every errata magnitude.
+    ///
+    /// Returns `(corrected codeword, number of errors corrected)`, or `None`
+    /// when the errata exceed the code's capacity (a final syndrome recheck
+    /// rejects any miscorrection).
+    pub fn decode_errors_and_erasures(
+        &self,
+        received: &[u64],
+        erasures: &[usize],
+    ) -> Option<(Vec<u64>, usize)> {
+        let n = received.len();
+        assert!(n > self.nsym, "codeword shorter than the parity length");
+        let mut eras = erasures.to_vec();
+        eras.sort_unstable();
+        eras.dedup();
+        if eras.len() > self.nsym || eras.last().is_some_and(|&u| u >= n)
+        {
+            return None;
+        }
+        let mut cw = received.to_vec();
+        for &u in &eras
+        {
+            cw[u] = 0;
+        }
+        let e = eras.len();
+        let synd = self.syndromes(&cw);
+        if synd.iter().all(|&s| s == 0)
+        {
+            return Some((cw, 0));
+        }
+
+        let f = &self.field;
+        // erasure locator Γ(x) = ∏_{u∈eras} (1 + X_u·x), low-endian
+        let mut gamma = vec![1u64];
+        for &u in &eras
+        {
+            let x = f.pow(self.alpha, (n - 1 - u) as u64);
+            gamma = poly_mul(f, &gamma, &[1, x]);
+        }
+        // modified syndromes Ξ(x) = Γ(x)·S(x) mod x^nsym; BM on the tail
+        // ξ_e … ξ_{nsym-1} sees only the unknown errors.
+        let mut xi = poly_mul(f, &gamma, &synd);
+        xi.truncate(self.nsym);
+        let tail = if e < xi.len()
+        {
+            xi[e..].to_vec()
+        }
+        else
+        {
+            Vec::new()
+        };
+        let (lambda, t) = self.error_locator(&tail);
+        if 2 * t + e > self.nsym
+        {
+            return None;
+        }
+        let err_positions = if t > 0
+        {
+            self.error_positions(&lambda, n)
+        }
+        else
+        {
+            Vec::new()
+        };
+        if err_positions.len() != t
+        {
+            return None;
+        }
+
+        // all errata positions = erasures ∪ error positions
+        let mut positions = eras.clone();
+        for &p in &err_positions
+        {
+            if !positions.contains(&p)
+            {
+                positions.push(p);
+            }
+        }
+        let m = positions.len();
+        let locators: Vec<u64> = positions
+            .iter()
+            .map(|&u| f.pow(self.alpha, (n - 1 - u) as u64))
+            .collect();
+        let mut a = vec![vec![0u64; m]; m];
+        let mut rhs = vec![0u64; m];
+        for (row, r) in a.iter_mut().enumerate()
+        {
+            let j = (row + 1) as u64;
+            for (col, cell) in r.iter_mut().enumerate()
+            {
+                *cell = f.pow(locators[col], j);
+            }
+            rhs[row] = synd[row];
+        }
+        let vals = gf_solve(f, a, rhs)?;
+        for (idx, &u) in positions.iter().enumerate()
+        {
+            cw[u] ^= vals[idx];
+        }
+        if self.syndromes(&cw).iter().any(|&s| s != 0)
+        {
+            return None;
+        }
+        Some((cw, t))
+    }
+
     /// `GF(2^8)` byte convenience for [`encode`](Self::encode). Panics unless the
     /// field has degree ≤ 8 (so every symbol fits in a byte).
     pub fn encode_bytes(&self, msg: &[u8]) -> Vec<u8> {
@@ -512,6 +683,109 @@ mod tests {
             }
             let (dec, _errs) = rs.decode(&corrupt).unwrap();
             assert_eq!(dec, msg);
+        }
+    }
+
+    #[test]
+    fn erasures_recovered_up_to_nsym() {
+        let mut s = 0xe7a5u64;
+        for &nsym in &[4usize, 6, 8, 10, 16]
+        {
+            let rs = ReedSolomon::qr(nsym);
+            let k = 40usize;
+            for _ in 0..30
+            {
+                let msg: Vec<u8> = (0..k).map(|_| (xorshift(&mut s) & 0xff) as u8).collect();
+                let cw: Vec<u64> = rs.encode_bytes(&msg).iter().map(|&b| b as u64).collect();
+                let n = cw.len();
+                // up to nsym erasures (twice the error-correction capacity)
+                for e in 0..=nsym
+                {
+                    let mut received = cw.clone();
+                    let mut positions = Vec::new();
+                    while positions.len() < e
+                    {
+                        let p = (xorshift(&mut s) as usize) % n;
+                        if !positions.contains(&p)
+                        {
+                            positions.push(p);
+                        }
+                    }
+                    for &p in &positions
+                    {
+                        received[p] = xorshift(&mut s) & 0xff; // lost symbol (any value)
+                    }
+                    let fixed = rs
+                        .decode_erasures(&received, &positions)
+                        .expect("erasures fillable");
+                    assert_eq!(fixed, cw, "nsym={nsym} e={e}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn erasures_beyond_capacity_or_with_hidden_error() {
+        let rs = ReedSolomon::qr(4);
+        let msg: Vec<u8> = (1..=30u8).collect();
+        let cw: Vec<u64> = rs.encode_bytes(&msg).iter().map(|&b| b as u64).collect();
+        // nsym + 1 erasures cannot be filled
+        let too_many: Vec<usize> = (0..=rs.parity_len()).collect();
+        assert_eq!(rs.decode_erasures(&cw, &too_many), None);
+        // an undeclared error among the non-erased symbols is detected, never
+        // silently returned as a wrong codeword
+        let mut received = cw.clone();
+        received[0] = 0; // erased
+        received[10] ^= 0x7f; // hidden error at a non-erased position
+        match rs.decode_erasures(&received, &[0])
+        {
+            None =>
+            {},
+            Some(fixed) => assert_eq!(fixed, cw, "must never return a wrong codeword"),
+        }
+    }
+
+    #[test]
+    fn combined_errors_and_erasures() {
+        // 2·t + e ≤ nsym must always decode.
+        let mut s = 0xc0ffeeu64;
+        for &nsym in &[6usize, 8, 10, 16]
+        {
+            let rs = ReedSolomon::qr(nsym);
+            let k = 40usize;
+            for _ in 0..40
+            {
+                let msg: Vec<u8> = (0..k).map(|_| (xorshift(&mut s) & 0xff) as u8).collect();
+                let cw: Vec<u64> = rs.encode_bytes(&msg).iter().map(|&b| b as u64).collect();
+                let n = cw.len();
+                // pick e erasures then t errors with 2t + e ≤ nsym
+                let e = (xorshift(&mut s) as usize) % (nsym + 1);
+                let t = (nsym - e) / 2;
+                let mut chosen = Vec::new();
+                while chosen.len() < e + t
+                {
+                    let p = (xorshift(&mut s) as usize) % n;
+                    if !chosen.contains(&p)
+                    {
+                        chosen.push(p);
+                    }
+                }
+                let (erased, errored) = chosen.split_at(e);
+                let mut received = cw.clone();
+                for &p in erased
+                {
+                    received[p] = xorshift(&mut s) & 0xff;
+                }
+                for &p in errored
+                {
+                    received[p] ^= (xorshift(&mut s) & 0xff) | 1;
+                }
+                let (fixed, terr) = rs
+                    .decode_errors_and_erasures(&received, erased)
+                    .expect("within 2t+e ≤ nsym must decode");
+                assert_eq!(fixed, cw, "nsym={nsym} e={e} t={t}");
+                assert_eq!(terr, t, "reported error count nsym={nsym} e={e} t={t}");
+            }
         }
     }
 }

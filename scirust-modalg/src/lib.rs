@@ -41,8 +41,9 @@
 //!   and AES-style diffusion.
 //! - [`codes`] — systematic **Reed–Solomon** codes over `GF(2^n)`: a syndrome /
 //!   Berlekamp–Massey / Chien-search decoder that corrects up to `⌊nsym/2⌋`
-//!   symbol errors, composing the `gf2` field with `numtheory` (to verify the
-//!   primitive element).
+//!   symbol errors, plus **erasure** and combined **errors-and-erasures**
+//!   decoding (up to `nsym` known-position losses — the RAID-6 path), composing
+//!   the `gf2` field with `numtheory` (to verify the primitive element).
 //! - [`crc`] — parameterised **cyclic redundancy checks** (the Rocksoft model)
 //!   with a streaming digest and named presets (CRC-32, CRC-32C, CRC-16
 //!   variants, CRC-8, CRC-64/XZ) that reproduce the published check values.
@@ -99,6 +100,14 @@
 //! let (recovered, corrected) = rs.decode_bytes(&received).unwrap();
 //! assert_eq!(recovered, msg);
 //! assert_eq!(corrected, 2);
+//!
+//! // Erasure decoding (RAID-6 style): nsym parity symbols recover nsym
+//! // known-position losses — twice the error-correction capacity.
+//! let codeword: Vec<u64> = rs.encode_bytes(&msg).iter().map(|&b| b as u64).collect();
+//! let mut lossy = codeword.clone();
+//! lossy[2] = 0; lossy[5] = 0; lossy[9] = 0; lossy[14] = 0; // 4 lost symbols
+//! let filled = rs.decode_erasures(&lossy, &[2, 5, 9, 14]).unwrap();
+//! assert_eq!(filled, codeword);
 //! ```
 //!
 //! ```
