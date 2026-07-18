@@ -9,4 +9,5 @@ description = "Reproducible benchmarks for the prospective dynamic-information (
 unsafe_code = "forbid"
 
 [dependencies]
+scirust-bench-schema = { path = "../scirust-bench-schema" }
 scirust-tdi = { path = "../scirust-tdi" }

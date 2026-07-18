@@ -706,6 +706,108 @@ fn main() -> Result<(), String> {
         full_brier_ci,
     );
 
+    // CANR §9 records (`scirust-bench-schema`): the same holdout metrics and
+    // paired-bootstrap gains, machine-readable. Seeds are the real generator
+    // inputs — holdout rows carry the test-stream seed base, CI rows carry
+    // the bootstrap seed that produced the interval.
+    let mut bench_records: Vec<scirust_bench_schema::BenchRecord> = Vec::new();
+    for (model, metrics) in [
+        ("entropy_only", entropy),
+        ("orbit_baseline", orbit),
+        ("entropy+orbit", entropy_orbit),
+        ("tdi_return_profile", tdi),
+        ("entropy+tdi", combined),
+        ("orbit+tdi", orbit_tdi),
+        ("entropy+orbit+tdi", full),
+    ]
+    {
+        for (metric, value) in [
+            ("auprc", metrics.average_precision),
+            ("brier", metrics.brier),
+            ("accuracy", metrics.accuracy),
+            ("balanced_accuracy", metrics.balanced_accuracy),
+        ]
+        {
+            bench_records.push(scirust_bench_schema::BenchRecord::new(
+                "tdi_holdout/width3",
+                format!(
+                    "holdout/seeds={TEST_SEED_OFFSET}..{}",
+                    TEST_SEED_OFFSET + TEST_SYSTEMS
+                ),
+                model,
+                TEST_SEED_OFFSET,
+                metric,
+                value,
+            ));
+        }
+    }
+    let ci95 = |interval: ConfidenceInterval| scirust_bench_schema::ConfidenceInterval {
+        lo: interval.lower,
+        hi: interval.upper,
+        level: 0.95,
+    };
+    for (metric, value, interval) in [
+        (
+            "auprc_gain_tdi_vs_entropy",
+            tdi.average_precision - entropy.average_precision,
+            tdi_auprc_ci,
+        ),
+        (
+            "brier_improvement_tdi_vs_entropy",
+            entropy.brier - tdi.brier,
+            tdi_brier_ci,
+        ),
+        (
+            "auprc_gain_combined_vs_entropy",
+            combined.average_precision - entropy.average_precision,
+            combined_auprc_ci,
+        ),
+        (
+            "brier_improvement_combined_vs_entropy",
+            entropy.brier - combined.brier,
+            combined_brier_ci,
+        ),
+        (
+            "auprc_gain_orbit_tdi_vs_orbit",
+            orbit_tdi.average_precision - orbit.average_precision,
+            orbit_tdi_auprc_ci,
+        ),
+        (
+            "brier_improvement_orbit_tdi_vs_orbit",
+            orbit.brier - orbit_tdi.brier,
+            orbit_tdi_brier_ci,
+        ),
+        (
+            "auprc_gain_full_vs_entropy_orbit",
+            full.average_precision - entropy_orbit.average_precision,
+            full_auprc_ci,
+        ),
+        (
+            "brier_improvement_full_vs_entropy_orbit",
+            entropy_orbit.brier - full.brier,
+            full_brier_ci,
+        ),
+    ]
+    {
+        bench_records.push(
+            scirust_bench_schema::BenchRecord::new(
+                "tdi_holdout/width3",
+                format!("paired_bootstrap/replicates={BOOTSTRAP_REPLICATES}"),
+                "paired_bootstrap",
+                BOOTSTRAP_SEED,
+                metric,
+                value,
+            )
+            .with_ci(ci95(interval)),
+        );
+    }
+    println!();
+    println!(
+        "=== bench-schema JSONL ({} records, scirust-bench-schema) ===",
+        bench_records.len()
+    );
+    print!("{}", scirust_bench_schema::to_jsonl(&bench_records));
+
     let observed_tdi_gain = tdi.average_precision - entropy.average_precision;
 
     let tdi_success =

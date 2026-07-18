@@ -3831,6 +3831,7 @@ dependencies = [
 name = "scirust-tdi-bench"
 version = "0.1.0"
 dependencies = [
+ "scirust-bench-schema",
  "scirust-tdi",
 ]
 

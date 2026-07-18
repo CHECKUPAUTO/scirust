@@ -56,7 +56,7 @@ use crate::autotune_accumulate::{AccumMethod, accumulate};
 use crate::certified_numerics::{CertifiedMonotone, Interval, UlpBound, sum_expansion};
 use crate::transform_autotune::{GenericAutotune, UniformQuantizer, autotune_by};
 use crate::transform_search::Representation;
-use scirust_simd::dispatch::BackendKind;
+use scirust_simd::dispatch::{BackendKind, detect_backend};
 use std::collections::HashMap;
 
 /// Unit roundoff of `f64` (the invalid-region threshold uses `κ_rt·u ≥ ½`,
@@ -300,7 +300,30 @@ pub fn pipeline_relative_error_with_levels(
     score_on: &[f64],
     levels: usize,
 ) -> Option<f64> {
-    let r = plan.representation;
+    let reconstructed = reconstruct_with_levels(plan.representation, fit, score_on, levels)?;
+    let total = accumulate(plan.accumulation, &reconstructed) as f64;
+    let exact = sum_expansion(score_on);
+    if exact == 0.0
+    {
+        return None;
+    }
+    Some(((total - exact) / exact).abs())
+}
+
+/// The reconstruction stage of the pipeline — encode (gated) → fit quantizer
+/// on `fit` → round-trip → decode → narrow to `f32` — **without** the final
+/// accumulation. This is [`pipeline_relative_error_with_levels`] minus its
+/// last step, extracted so an execution-regime experiment (Phase D's D6) can
+/// compose the identical reconstruction with a *chunked* accumulation; the
+/// split is a pure refactor (the pipeline functions delegate here), enforced
+/// bitwise by a test below.
+pub fn reconstruct_with_levels(
+    representation: RepresentationChoice,
+    fit: &[f64],
+    score_on: &[f64],
+    levels: usize,
+) -> Option<Vec<f32>> {
+    let r = representation;
     let mut lo = f64::INFINITY;
     let mut hi = f64::NEG_INFINITY;
     let mut enc_fit = Vec::with_capacity(fit.len());
@@ -324,18 +347,12 @@ pub fn pipeline_relative_error_with_levels(
     }
 
     let q = UniformQuantizer::fit(&enc_fit, levels);
-    let reconstructed: Vec<f32> = enc_score
-        .iter()
-        .map(|&e| r.decode(q.round_trip(e)) as f32)
-        .collect();
-
-    let total = accumulate(plan.accumulation, &reconstructed) as f64;
-    let exact = sum_expansion(score_on);
-    if exact == 0.0
-    {
-        return None;
-    }
-    Some(((total - exact) / exact).abs())
+    Some(
+        enc_score
+            .iter()
+            .map(|&e| r.decode(q.round_trip(e)) as f32)
+            .collect(),
+    )
 }
 
 /// Outcome of one search approach: the chosen plan, its held-out relative
@@ -535,6 +552,109 @@ pub fn joint_search_with_levels(
 }
 
 // ---------------------------------------------------------------------------
+// The guarded ablation-first decision rule (Addendum 3, validated 13/15)
+// ---------------------------------------------------------------------------
+
+/// The Addendum-3 gap threshold: predict "joint search pays" when the cheap
+/// R-axis ablation improves on the default by at least this fraction. The
+/// 15-cell dose-response test validated this value prospectively (13/15,
+/// with both misses at the noise floor — hence the guard below).
+pub const ABLATION_GAP_THRESHOLD: f64 = 0.20;
+
+/// Verdict of the guarded ablation-first predictor ([`ablation_first_advice`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AblationAdvice {
+    /// The default plan's error is already at or below the caller's floor:
+    /// relative gaps down there are noise (the dose-response run's only two
+    /// mispredictions were exactly this case) — do not invest in joint
+    /// search.
+    AtErrorFloor {
+        /// Held-out-free (dev-only) relative error of the default plan.
+        default_error: f64,
+    },
+    /// The R-axis ablation gap meets the threshold: joint (R, A) search is
+    /// predicted to pay.
+    JointSearchPays {
+        /// The ablation gap `1 − best_R / default`.
+        gap: f64,
+        /// Dev relative error of the default plan.
+        default_error: f64,
+    },
+    /// The default representation is near-optimal on the R axis: joint
+    /// search is predicted not to pay — run [`sequential_baseline`] (or
+    /// keep the default) instead.
+    DefaultAdequate {
+        /// The ablation gap `1 − best_R / default`.
+        gap: f64,
+        /// Dev relative error of the default plan.
+        default_error: f64,
+    },
+}
+
+/// **The validated decision rule of this research line** (ANEE Addendum 3,
+/// avenue 1): before paying for a joint `(R, A)` search, run a cheap
+/// single-axis ablation on dev data only — score every representation in
+/// `r_dict` with accumulation held fixed at [`AccumMethod::NeumaierF32`],
+/// and compare the best against the [`RepresentationChoice::Identity`]
+/// default. Joint search pays *exactly where the default representation is
+/// objective-blind and wrong* (gap ≥ [`ABLATION_GAP_THRESHOLD`]).
+///
+/// `error_floor` is the **mandatory guard** the dose-response test added:
+/// when the default's error already meets the caller's accuracy target,
+/// relative gaps are noise-floor artifacts — both of the 15-cell run's
+/// mispredictions were false "pays" of that type, and the guard removes
+/// exactly that failure class. Pass the application's actual accuracy
+/// target (a relative error); pass `0.0` to disable the guard and
+/// reproduce the unguarded 13/15 predictor.
+///
+/// Returns `None` when the default plan itself cannot be scored on `dev`
+/// (zero exact sum — relative error undefined).
+pub fn ablation_first_advice(
+    dev: &[f64],
+    r_dict: &[RepresentationChoice],
+    levels: usize,
+    error_floor: f64,
+) -> Option<AblationAdvice> {
+    let err = |r: RepresentationChoice| {
+        pipeline_relative_error_with_levels(
+            Plan {
+                representation: r,
+                accumulation: AccumMethod::NeumaierF32,
+            },
+            dev,
+            dev,
+            levels,
+        )
+    };
+    let default_error = err(RepresentationChoice::Identity)?;
+    if default_error <= error_floor
+    {
+        return Some(AblationAdvice::AtErrorFloor { default_error });
+    }
+    if default_error == 0.0
+    {
+        // Exactly zero error with a zero floor: nothing to improve.
+        return Some(AblationAdvice::DefaultAdequate {
+            gap: 0.0,
+            default_error,
+        });
+    }
+    let best = r_dict
+        .iter()
+        .filter_map(|&r| err(r))
+        .fold(default_error, f64::min);
+    let gap = 1.0 - best / default_error;
+    if gap >= ABLATION_GAP_THRESHOLD
+    {
+        Some(AblationAdvice::JointSearchPays { gap, default_error })
+    }
+    else
+    {
+        Some(AblationAdvice::DefaultAdequate { gap, default_error })
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Distribution summary and the distribution-aware plan cache
 // ---------------------------------------------------------------------------
 
@@ -660,6 +780,18 @@ impl PlanCache {
                 history: vec![held_out_relative_error],
             });
     }
+}
+
+/// The hardware component (ANEE's `H` axis) of [`PlanCache`] keys, as the
+/// **single sanctioned source**. Decision, documented per the Phase D
+/// pre-registration's E2: [`BackendKind`] stays the key *type* — it is
+/// `Copy + Eq + Hash` and allocation-free, which a registry label string is
+/// not — while `crate::compute_capability` remains the *reporting* view.
+/// The two cannot drift: the registry's CPU entry is seeded from the same
+/// [`detect_backend`] call this function returns, and a test in this module
+/// pins `current_hardware_key().label()` to the registry's `cpu-simd` entry.
+pub fn current_hardware_key() -> BackendKind {
+    detect_backend()
 }
 
 #[cfg(test)]
@@ -863,6 +995,85 @@ mod tests {
         assert_eq!(
             pipeline_relative_error(plan, &dev, &eval),
             pipeline_relative_error_with_levels(plan, &dev, &eval, 64)
+        );
+    }
+
+    #[test]
+    fn reconstruct_then_accumulate_is_bitwise_the_pipeline() {
+        // The Phase D refactor contract: extracting the reconstruction stage
+        // must not change the pipeline's output by a single bit, including
+        // for composed representations. (D6 relies on composing the same
+        // reconstruction with a different accumulation regime.)
+        let dev = wide_range(5, 2048);
+        let eval = wide_range(6, 2048);
+        for &r in &[
+            RepresentationChoice::Identity,
+            RepresentationChoice::Certified(Representation::Log),
+            RepresentationChoice::Composed(Representation::Power(0.5), Representation::Log),
+        ]
+        {
+            let plan = Plan {
+                representation: r,
+                accumulation: AccumMethod::NeumaierF32,
+            };
+            let via_pipeline = pipeline_relative_error_with_levels(plan, &dev, &eval, 64);
+            let via_parts = reconstruct_with_levels(r, &dev, &eval, 64).map(|rec| {
+                let total = accumulate(plan.accumulation, &rec) as f64;
+                let exact = crate::certified_numerics::sum_expansion(&eval);
+                ((total - exact) / exact).abs()
+            });
+            assert_eq!(via_pipeline, via_parts, "split diverged for {r:?}");
+        }
+    }
+
+    #[test]
+    fn ablation_advice_reproduces_the_guarded_dose_response_predictor() {
+        let r_dict = default_representation_dictionary();
+
+        // Wide-range at L = 8: the dose-response run's clearest "pays" cell
+        // (ablation gap ≈ 97%) — with a small floor the advice must be
+        // JointSearchPays with a large gap.
+        let wide = wide_range(1, 4096);
+        match ablation_first_advice(&wide, &r_dict, 8, 1e-9).expect("scorable")
+        {
+            AblationAdvice::JointSearchPays { gap, .. } =>
+            {
+                assert!(gap >= ABLATION_GAP_THRESHOLD, "gap {gap} below threshold")
+            },
+            other => panic!("expected JointSearchPays, got {other:?}"),
+        }
+
+        // Same batch, but the caller's accuracy target is loose (10%): the
+        // default already meets it, so the guard must fire and veto the
+        // search regardless of the gap — this is exactly the failure class
+        // the unguarded 15-cell run exhibited (its 2 misses were false
+        // "pays" at the floor).
+        let benign_batch = benign(1, 4096);
+        let unguarded = ablation_first_advice(&benign_batch, &r_dict, 64, 0.0).expect("scorable");
+        let guarded = ablation_first_advice(&benign_batch, &r_dict, 64, 1e-2).expect("scorable");
+        assert!(
+            matches!(guarded, AblationAdvice::AtErrorFloor { default_error } if default_error <= 1e-2),
+            "guard must fire on benign data with a 1% target: {guarded:?}"
+        );
+        assert!(
+            !matches!(unguarded, AblationAdvice::AtErrorFloor { .. }),
+            "with a zero floor the guard must never fire: {unguarded:?}"
+        );
+    }
+
+    #[test]
+    fn current_hardware_key_matches_the_capability_registry_seed() {
+        // E2's anti-divergence pin: the H-axis cache key and the unified
+        // capability registry must report the same CPU tier, forever.
+        let key = current_hardware_key();
+        let caps = crate::compute_capability::compute_capabilities();
+        assert!(
+            caps.iter().any(|c| {
+                c.domain == crate::compute_capability::ComputeDomain::CpuSimd
+                    && c.label == key.label()
+                    && c.available == Some(true)
+            }),
+            "registry CPU entry must match current_hardware_key() = {key:?}: {caps:?}"
         );
     }
 }

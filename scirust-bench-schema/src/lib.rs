@@ -32,7 +32,20 @@
 //! declaration order below), via [`to_jsonl`] / [`write_jsonl`] /
 //! [`parse_jsonl`]. Adopters at introduction time:
 //! `scirust-signal::denoise::vst_bench` (`BenchTable::to_bench_records`) and
-//! `scirust-core`'s `anee_phase_c_dose_response` example.
+//! `scirust-core`'s `anee_phase_c_dose_response` example. Phase D added
+//! `scirust-tdi-bench`'s `tdi-holdout` (holdout metrics + paired-bootstrap
+//! gains, exercising the `ci` field) and the Phase D experiment binaries.
+//!
+//! ## Migrating criterion targets
+//!
+//! Criterion owns its own timing loop, so timing rows are converted **after**
+//! a run rather than emitted during it: `cargo bench`, then feed each
+//! `target/criterion/<group>/<bench>/new/estimates.json` through
+//! [`criterion_estimate_to_record`]. Criterion knows nothing about the
+//! *data* behind a benchmark — every criterion target in this workspace pins
+//! its inputs to a deterministic seeded generator (e.g. `vi_cfar_bench`'s
+//! LCG) precisely so timings are comparable, and that pinned seed is what
+//! the converter's mandatory `seed` argument is for.
 
 use serde::{Deserialize, Serialize};
 use std::io::Write;
@@ -160,6 +173,49 @@ pub fn parse_jsonl(s: &str) -> Result<Vec<BenchRecord>, serde_json::Error> {
         .collect()
 }
 
+/// Convert one criterion `estimates.json` (the layout criterion 0.5 writes
+/// under `target/criterion/<group>/<bench>/new/estimates.json`) into a
+/// [`BenchRecord`] carrying the mean wall time in nanoseconds
+/// (metric `"mean_wall_time_ns"`), with criterion's confidence interval
+/// attached when present.
+///
+/// `kernel`/`dataset`/`method` name the benchmark the way the adopting
+/// harness wants it keyed; `seed` is the **data-generation** seed the bench
+/// pins (criterion cannot know it — see the crate docs, "Migrating
+/// criterion targets").
+pub fn criterion_estimate_to_record(
+    estimates_json: &str,
+    kernel: impl Into<String>,
+    dataset: impl Into<String>,
+    method: impl Into<String>,
+    seed: u64,
+) -> Result<BenchRecord, String> {
+    let v: serde_json::Value =
+        serde_json::from_str(estimates_json).map_err(|e| format!("estimates.json: {e}"))?;
+    let mean = v.get("mean").ok_or("estimates.json has no `mean` block")?;
+    let point = mean
+        .get("point_estimate")
+        .and_then(serde_json::Value::as_f64)
+        .ok_or("mean.point_estimate missing or not a number")?;
+    let mut record = BenchRecord::new(kernel, dataset, method, seed, "mean_wall_time_ns", point);
+    if let Some(interval) = mean.get("confidence_interval")
+        && let (Some(lo), Some(hi), Some(level)) = (
+            interval
+                .get("lower_bound")
+                .and_then(serde_json::Value::as_f64),
+            interval
+                .get("upper_bound")
+                .and_then(serde_json::Value::as_f64),
+            interval
+                .get("confidence_level")
+                .and_then(serde_json::Value::as_f64),
+        )
+    {
+        record = record.with_ci(ConfidenceInterval { lo, hi, level });
+    }
+    Ok(record)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,5 +290,51 @@ mod tests {
         let text = format!("{}\n\n{}\n", sample().to_json_row(), sample().to_json_row());
         assert_eq!(parse_jsonl(&text).unwrap().len(), 2);
         assert!(parse_jsonl("not json\n").is_err());
+    }
+
+    /// Fixture mirroring the estimates.json layout criterion 0.5 writes
+    /// (extra blocks present, `slope` null — both must be tolerated).
+    const CRITERION_ESTIMATES_FIXTURE: &str = r#"{
+        "mean": {
+            "confidence_interval": {
+                "confidence_level": 0.95,
+                "lower_bound": 118.21,
+                "upper_bound": 121.93
+            },
+            "point_estimate": 120.03,
+            "standard_error": 0.94
+        },
+        "median": {
+            "confidence_interval": {
+                "confidence_level": 0.95,
+                "lower_bound": 117.4,
+                "upper_bound": 119.9
+            },
+            "point_estimate": 118.6,
+            "standard_error": 0.6
+        },
+        "median_abs_dev": null,
+        "slope": null,
+        "std_dev": null
+    }"#;
+
+    #[test]
+    fn criterion_estimates_convert_with_mean_and_ci() {
+        let r = criterion_estimate_to_record(
+            CRITERION_ESTIMATES_FIXTURE,
+            "vi_cfar/classical",
+            "homogeneous/window=32",
+            "CfarDetector::detect",
+            0x5EED,
+        )
+        .expect("fixture must convert");
+        assert_eq!(r.metric, "mean_wall_time_ns");
+        assert_eq!(r.value, 120.03);
+        assert_eq!(r.seed, 0x5EED);
+        let ci = r.ci.expect("criterion CI must carry over");
+        assert_eq!((ci.lo, ci.hi, ci.level), (118.21, 121.93, 0.95));
+
+        assert!(criterion_estimate_to_record("{}", "k", "d", "m", 0).is_err());
+        assert!(criterion_estimate_to_record("not json", "k", "d", "m", 0).is_err());
     }
 }
