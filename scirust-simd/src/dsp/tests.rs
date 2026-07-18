@@ -15,6 +15,7 @@ use super::mfcc::{Mfcc, dct2, dct2_basis};
 use super::pll::{Nco, PiLoopFilter, Pll};
 use super::resample::design_prototype;
 use super::stft::{istft, magnitude_spectrogram, num_frames, power_spectrogram, stft};
+use super::timing::{SymbolTimingLoop, gardner_ted, mueller_muller_ted};
 use super::window;
 use super::{
     Biquad, BiquadCascade, Fir, group_delay, magnitude, magnitude_db, phase, resample, unwrap_phase,
@@ -2856,4 +2857,131 @@ fn pll_reset_restores_initial_state() {
     pll.reset();
     assert_eq!(pll.frequency_estimate(), initial_freq);
     assert_eq!(pll.phase_estimate(), 0.0);
+}
+
+// ------------------------------------------------------------------ //
+//  Récupération d'horloge symbole : gardner_ted, mueller_muller_ted,   //
+//  SymbolTimingLoop                                                    //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn gardner_ted_known_value() {
+    // (late − early)·punctual = (2 − 0)·1 = 2.
+    assert_eq!(gardner_ted(0.0, 1.0, 2.0), 2.0);
+    // Symétrique nul quand early == late (aucune erreur de timing).
+    assert_eq!(gardner_ted(1.0, 3.0, 1.0), 0.0);
+}
+
+#[test]
+fn mueller_muller_ted_known_value() {
+    // prev_decision·curr_symbol − curr_decision·prev_symbol, avec
+    // prev_symbol=2, curr_symbol=3, prev_decision=4, curr_decision=5 :
+    // 4·3 − 5·2 = 12 − 10 = 2.
+    assert_eq!(
+        mueller_muller_ted(2.0, 3.0, 4.0, 5.0),
+        4.0 * 3.0 - 5.0 * 2.0
+    );
+    // Décisions identiques et symboles égaux ⇒ erreur nulle.
+    assert_eq!(mueller_muller_ted(1.0, 1.0, 1.0, 1.0), 0.0);
+}
+
+#[test]
+#[should_panic(expected = "samples_per_symbol")]
+fn symbol_timing_loop_rejects_too_small_sps() {
+    let _ = SymbolTimingLoop::<f64, 8>::new_with_filter(1, PiLoopFilter::new(0.1, 0.01));
+}
+
+#[test]
+#[should_panic(expected = "tampon N")]
+fn symbol_timing_loop_rejects_undersized_buffer() {
+    // sps=8 exige N ≥ 10 ; N=8 doit paniquer.
+    let _ = SymbolTimingLoop::<f64, 8>::new_with_filter(8, PiLoopFilter::new(0.1, 0.01));
+}
+
+/// Signal synthétique : onde triangulaire passant exactement par les valeurs
+/// de `symbols` (interpolation linéaire entre symboles consécutifs) tous les
+/// `sps` échantillons, échantillonnée à la position continue `n + mu_true`
+/// (décalage sous-échantillon **fixe et connu** par rapport à la grille
+/// symbole idéale) — signal de contrôle indépendant de l'implémentation de
+/// [`SymbolTimingLoop`].
+fn linear_symbol_signal(symbols: &[f64], sps: usize, mu_true: f64, n: usize) -> f64 {
+    let pos = n as f64 + mu_true;
+    let symbol_pos = pos / sps as f64;
+    let k = symbol_pos.floor();
+    let frac = symbol_pos - k;
+    let k = k as usize;
+    let s0 = symbols[k % symbols.len()];
+    let s1 = symbols[(k + 1) % symbols.len()];
+    s0 + (s1 - s0) * frac
+}
+
+fn check_symbol_timing_loop_locks_onto_known_offset<T: Scalar + core::ops::Div<Output = T>>() {
+    let mut lcg = 0xBEEF_5A17u64;
+    let mut next_bit = || {
+        lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1);
+        if (lcg >> 40) & 1 == 0 { -1.0 } else { 1.0 }
+    };
+    let symbols: Vec<f64> = (0..64).map(|_| next_bit()).collect();
+
+    const SPS: usize = 8;
+    let mu_true = 0.3;
+
+    let mut loop_ = SymbolTimingLoop::<T, 16>::new(SPS, T::of(0.01), T::of(0.707));
+
+    let n_samples = 20_000usize;
+    let mut outputs: Vec<f64> = Vec::new();
+    for n in 0..n_samples
+    {
+        let x = linear_symbol_signal(&symbols, SPS, mu_true, n);
+        if let Some(y) = loop_.step(T::of(x))
+        {
+            outputs.push(y.to_f64());
+        }
+    }
+
+    // En régime établi, chaque symbole émis doit être proche de ±1 (verrou
+    // sur la grille symbole) — on ne vérifie que la fin de la trajectoire
+    // (après acquisition), avec une tolérance large : Gardner ne corrige
+    // pas le gain, seul le timing.
+    let tail = &outputs[outputs.len() - 20..];
+    for &y in tail
+    {
+        assert!(
+            y.abs() > 0.6,
+            "symbole en régime établi trop proche de 0 (timing non verrouillé) : {y}"
+        );
+    }
+
+    // Le nombre de symboles émis doit être proche de n_samples/SPS (aucun
+    // strobe manqué ni dupliqué de façon significative).
+    let expected_count = n_samples / SPS;
+    let ratio = outputs.len() as f64 / expected_count as f64;
+    assert!(
+        (0.9..1.1).contains(&ratio),
+        "nombre de symboles émis = {} attendu proche de {expected_count}",
+        outputs.len()
+    );
+}
+
+#[test]
+fn symbol_timing_loop_locks_onto_known_offset_all_scalars() {
+    check_symbol_timing_loop_locks_onto_known_offset::<f32>();
+    check_symbol_timing_loop_locks_onto_known_offset::<f64>();
+    check_symbol_timing_loop_locks_onto_known_offset::<Q16_16>();
+}
+
+#[test]
+fn symbol_timing_loop_reset_restores_initial_state() {
+    let mut loop_ = SymbolTimingLoop::<f64, 16>::new(8, 0.01, 0.707);
+    let initial_est = loop_.samples_per_symbol_estimate();
+    let symbols = [1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0];
+    for n in 0..500usize
+    {
+        let x = linear_symbol_signal(&symbols, 8, 0.2, n);
+        let _ = loop_.step(x);
+    }
+    assert_ne!(loop_.samples_per_symbol_estimate(), initial_est);
+    loop_.reset();
+    assert_eq!(loop_.samples_per_symbol_estimate(), initial_est);
+    assert_eq!(loop_.mu(), 0.0);
 }

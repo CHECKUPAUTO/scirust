@@ -14,6 +14,7 @@ use scirust_simd::dsp::mel::MelFilterbank;
 use scirust_simd::dsp::mfcc::Mfcc;
 use scirust_simd::dsp::pll::Pll;
 use scirust_simd::dsp::stft::{power_spectrogram, stft};
+use scirust_simd::dsp::timing::SymbolTimingLoop;
 use scirust_simd::dsp::window;
 use scirust_simd::dsp::{
     Biquad, BiquadCascade, Complex, Fir, Lms, Nlms, Plan, Rls, fft, fft_convolve, group_delay,
@@ -652,6 +653,40 @@ fn bench_pll(c: &mut Criterion) {
     g.finish();
 }
 
+/// Récupération d'horloge symbole (détecteur de Gardner) : traitement d'un
+/// bloc échantillonné à `SPS = 8` échantillons/symbole.
+fn bench_symbol_timing(c: &mut Criterion) {
+    const SPS: usize = 8;
+    let sf = signal_f32();
+    let sx = signal_fixed(&sf);
+
+    let mut g = c.benchmark_group("symbol_timing_loop");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            let mut t = SymbolTimingLoop::<Q16_16, 16>::new(
+                SPS,
+                Q16_16::try_from(0.01).unwrap(),
+                Q16_16::try_from(0.707).unwrap(),
+            );
+            for &x in &sx
+            {
+                black_box(t.step(x));
+            }
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| {
+            let mut t = SymbolTimingLoop::<f32, 16>::new(SPS, 0.01, 0.707);
+            for &x in &sf
+            {
+                black_box(t.step(x));
+            }
+        })
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_biquad,
@@ -670,6 +705,7 @@ criterion_group!(
     bench_resample,
     bench_adaptive,
     bench_freqz,
-    bench_pll
+    bench_pll,
+    bench_symbol_timing
 );
 criterion_main!(benches);

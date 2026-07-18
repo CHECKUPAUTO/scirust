@@ -59,6 +59,12 @@
 //   instantanée, pas d'état de phase), une PLL **suit** une porteuse/horloge
 //   de fréquence potentiellement variable — récupération de porteuse,
 //   démodulation FM, synthèse de fréquence.
+// * [`timing`] — récupération d'horloge **symbole** ([`timing::SymbolTimingLoop`],
+//   détecteur de Gardner [`timing::gardner_ted`]) : le pendant « instant de
+//   décision fractionnaire dans un flux échantillonné » de [`pll`] (porteuse
+//   continue) — les deux boucles indépendantes de toute chaîne de réception
+//   numérique. [`timing::mueller_muller_ted`] (piloté par décision) est
+//   fourni comme brique indépendante pour un synchroniseur personnalisé.
 //
 // ## Pourquoi la virgule fixe pour le DSP ?
 //
@@ -78,6 +84,7 @@ pub mod mfcc;
 pub mod pll;
 pub mod resample;
 pub mod stft;
+pub mod timing;
 pub mod window;
 
 pub use adaptive::{Lms, Nlms, Rls};
@@ -89,6 +96,7 @@ pub use freqz::{group_delay, magnitude, magnitude_db, phase, unwrap_phase};
 pub use mfcc::{Mfcc, dct2};
 pub use pll::{Nco, PiLoopFilter, Pll};
 pub use resample::resample;
+pub use timing::{SymbolTimingLoop, gardner_ted, mueller_muller_ted};
 
 #[cfg(test)]
 mod tests;
