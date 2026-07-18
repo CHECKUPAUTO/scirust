@@ -23,8 +23,26 @@ impl WgpuEngine {
     /// Acquire a GPU device and compile the GEMM pipeline. Returns `None` if no
     /// adapter is available (e.g. no Vulkan driver) — callers then keep the
     /// CPU-only tape rather than getting a fake engine.
+    ///
+    /// Either way, the outcome is recorded in
+    /// `scirust_core::compute_capability` (the unified capability registry):
+    /// the adapter request *is* the probe, so `available` flips from unprobed
+    /// to `Some(true)` (with the adapter name) or `Some(false)` here.
     pub fn new() -> Option<Self> {
-        WgpuContext::new().ok().map(|ctx| Self { ctx })
+        let engine = WgpuContext::new().ok().map(|ctx| Self { ctx });
+        scirust_core::compute_capability::register_capability(
+            scirust_core::compute_capability::Capability {
+                domain: scirust_core::compute_capability::ComputeDomain::GpuPortable,
+                label: "wgpu".to_string(),
+                compiled: true,
+                available: Some(engine.is_some()),
+                detail: engine.as_ref().map_or_else(
+                    || "no adapter available".to_string(),
+                    |e| e.adapter_name().to_string(),
+                ),
+            },
+        );
+        engine
     }
 
     /// Name of the underlying adapter (e.g. `"llvmpipe (LLVM 20, 256 bits)"`).

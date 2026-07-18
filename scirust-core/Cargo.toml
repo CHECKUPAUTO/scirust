@@ -33,6 +33,10 @@ libm = "0.2"
 # Statistics for the A/B benchmark harness (Welch t-test, robust quantiles).
 # Leaf crate — does not depend on scirust-core, so no dependency cycle.
 scirust-stats = { path = "../scirust-stats" }
+# CANR §9 benchmark-record schema (leaf crate, no cycle): the ANEE Phase C
+# examples emit their measurements as shared BenchRecords (JSONL) in addition
+# to their human-readable tables.
+scirust-bench-schema = { path = "../scirust-bench-schema" }
 
 [features]
 default = ["rayon"]

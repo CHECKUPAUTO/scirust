@@ -276,6 +276,61 @@ impl RawComputeBackend for CudaBackend {
     }
 }
 
+/// Announce this crate's compute paths to `scirust-core`'s unified
+/// capability registry (`scirust_core::compute_capability`) — the read-side
+/// view unifying the workspace's three dispatch abstractions (CPU SIMD /
+/// portable GPU / CUDA; see that module's docs for the map).
+///
+/// Only available under the `wgpu` feature, because that is the feature under
+/// which this crate depends on `scirust-core` at all (the dependency
+/// direction is `scirust-gpu → scirust-core`, never the reverse). What it
+/// registers, honestly:
+///
+/// * `gpu-portable/wgpu` — compiled in; `available` stays unprobed (`None`)
+///   unless something already probed it (an earlier [`WgpuEngine::new`] call
+///   records its real adapter outcome, and this function never overwrites a
+///   probe with an unprobed announcement);
+/// * `cuda/cuda-bf16` — with the `cuda` feature, **probed here** by
+///   attempting `scirust_cuda::CudaChain::new()` (a dynamic-load + device
+///   open attempt — the honest test); without the feature, registered as not
+///   compiled in.
+#[cfg(feature = "wgpu")]
+pub fn register_compute_capabilities() {
+    use scirust_core::compute_capability::{Capability, ComputeDomain, register_capability};
+
+    let already_probed = scirust_core::compute_capability::compute_capabilities()
+        .iter()
+        .any(|c| c.domain == ComputeDomain::GpuPortable && c.label == "wgpu");
+    if !already_probed
+    {
+        register_capability(Capability {
+            domain: ComputeDomain::GpuPortable,
+            label: "wgpu".to_string(),
+            compiled: true,
+            available: None,
+            detail: "compiled in; not yet probed (WgpuEngine::new records the real outcome)"
+                .to_string(),
+        });
+    }
+
+    #[cfg(feature = "cuda")]
+    register_capability(Capability {
+        domain: ComputeDomain::Cuda,
+        label: "cuda-bf16".to_string(),
+        compiled: true,
+        available: Some(scirust_cuda::CudaChain::new().is_some()),
+        detail: "probe = CudaChain::new() (dynamic CUDA load + device open)".to_string(),
+    });
+    #[cfg(not(feature = "cuda"))]
+    register_capability(Capability {
+        domain: ComputeDomain::Cuda,
+        label: "cuda-bf16".to_string(),
+        compiled: false,
+        available: Some(false),
+        detail: "feature `cuda` not enabled in this build".to_string(),
+    });
+}
+
 /// Transparent hardware dispatcher.
 pub enum GpuAccelerator {
     Cpu(CpuBackend),
@@ -396,5 +451,33 @@ mod tests {
         let a = [1.0, 2.0, 3.0, 4.0];
         let id = [1.0, 0.0, 0.0, 1.0];
         assert_eq!(cpu.matmul(&a, &id, 2, 2, 2).unwrap(), a.to_vec());
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn register_compute_capabilities_announces_into_the_unified_registry() {
+        use scirust_core::compute_capability::{ComputeDomain, compute_capabilities};
+        register_compute_capabilities();
+        let caps = compute_capabilities();
+        // The CPU tier is auto-seeded by scirust-core; this crate's announce
+        // adds a gpu-portable/wgpu entry and a cuda verdict (compiled-out or
+        // probed, depending on features). Idempotent by upsert.
+        assert!(
+            caps.iter()
+                .any(|c| c.domain == ComputeDomain::GpuPortable && c.label == "wgpu"),
+            "wgpu path must be announced: {caps:?}"
+        );
+        assert!(
+            caps.iter()
+                .any(|c| c.domain == ComputeDomain::Cuda && c.label == "cuda-bf16"),
+            "cuda verdict must be announced: {caps:?}"
+        );
+        assert!(
+            caps.iter()
+                .any(|c| c.domain == ComputeDomain::CpuSimd && c.available == Some(true)),
+            "CPU tier must be present from core's seeding: {caps:?}"
+        );
+        register_compute_capabilities(); // second call must not duplicate
+        assert_eq!(compute_capabilities().len(), caps.len());
     }
 }

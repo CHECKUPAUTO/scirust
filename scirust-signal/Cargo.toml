@@ -17,6 +17,9 @@ scirust-stats = { path = "../scirust-stats" }
 # is what turns the GO/SO calibration integral into a deterministic
 # computation instead of Monte-Carlo sampling.
 scirust-solvers = { path = "../scirust-solvers" }
+# CANR §9 benchmark-record schema, enforced as a type (see that crate's docs):
+# vst_bench emits its table as shared BenchRecords in addition to CSV/Markdown.
+scirust-bench-schema = { path = "../scirust-bench-schema" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 

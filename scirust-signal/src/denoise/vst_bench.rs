@@ -218,6 +218,38 @@ impl BenchTable {
             .iter()
             .find(|r| r.noise.name() == noise && r.denoiser == denoiser)
     }
+
+    /// Emit the table as shared [`scirust_bench_schema::BenchRecord`]s — the
+    /// CANR §9 row shape, enforced as a type (see that crate's docs for why a
+    /// type rather than a convention). Two records per cell: the chosen VST's
+    /// held-out SNR and the direct-denoise baseline's, both measured on the
+    /// held-out record generated from `eval_seed` (the caller passes the same
+    /// value it gave [`vst_benchmark`] — the seed is what makes the row
+    /// reproducible, which is why the schema refuses to exist without one).
+    pub fn to_bench_records(&self, eval_seed: u64) -> Vec<scirust_bench_schema::BenchRecord> {
+        let mut out = Vec::with_capacity(self.rows.len() * 2);
+        for r in &self.rows
+        {
+            let kernel = format!("vst_denoise/{}", r.denoiser.name());
+            out.push(scirust_bench_schema::BenchRecord::new(
+                kernel.clone(),
+                r.noise.name(),
+                r.chosen.map_or("none".to_string(), kind_name),
+                eval_seed,
+                "snr_db",
+                r.eval_snr_db,
+            ));
+            out.push(scirust_bench_schema::BenchRecord::new(
+                kernel,
+                r.noise.name(),
+                "direct",
+                eval_seed,
+                "snr_db",
+                r.baseline_snr_db,
+            ));
+        }
+        out
+    }
 }
 
 /// Short stable label for a [`VstKind`].
@@ -306,6 +338,25 @@ mod tests {
             );
             assert!(r.eval_snr_db.is_finite() && r.baseline_snr_db.is_finite());
         }
+    }
+
+    #[test]
+    fn bench_records_carry_the_full_table_and_round_trip_as_jsonl() {
+        let table = vst_benchmark_default();
+        // Two records per cell (chosen VST + direct baseline), seed = the
+        // eval seed vst_benchmark_default passed to vst_benchmark.
+        let records = table.to_bench_records(2);
+        assert_eq!(records.len(), table.rows.len() * 2);
+        assert!(records.iter().all(|r| r.seed == 2 && r.metric == "snr_db"));
+        assert!(
+            records
+                .iter()
+                .any(|r| r.method == "direct" && r.kernel == "vst_denoise/wiener_global")
+        );
+        // The shared JSONL interchange must round-trip losslessly.
+        let text = scirust_bench_schema::to_jsonl(&records);
+        let back = scirust_bench_schema::parse_jsonl(&text).expect("jsonl parses");
+        assert_eq!(back, records);
     }
 
     #[test]

@@ -171,6 +171,7 @@ members = [
     "scirust-itd",
     "scirust-tdi",
     "scirust-tdi-bench",
+    "scirust-bench-schema",
 ]
 exclude = [
     "examples/simd_views_demo",

@@ -141,6 +141,7 @@ fn main() {
     println!("P1 (decisive): predictor/outcome agreement >= 12/15 cells\n");
 
     let mut cells: Vec<Cell> = Vec::new();
+    let mut records: Vec<scirust_bench_schema::BenchRecord> = Vec::new();
 
     for (family, make) in families
     {
@@ -159,18 +160,52 @@ fn main() {
             let joint = joint_search_with_levels(&dev, &eval, &r_dict, &a_dict, levels)
                 .expect("joint must find a plan");
             let fresh_seeds = [13u64, 14, 15];
-            let mean_of = |plan: Plan| -> f64 {
+            // Per-seed held-out errors are both the mean's inputs and the
+            // shared BenchRecords emitted at the end (one record per seed —
+            // the schema's mandatory `seed` field is the actual seed that
+            // generated that measurement, never a stand-in).
+            let per_seed_of = |plan: Plan| -> Vec<(u64, f64)> {
                 fresh_seeds
                     .iter()
                     .map(|&s| {
-                        pipeline_relative_error_with_levels(plan, &dev, &make(s, 8192), levels)
-                            .unwrap_or(f64::NAN)
+                        (
+                            s,
+                            pipeline_relative_error_with_levels(plan, &dev, &make(s, 8192), levels)
+                                .unwrap_or(f64::NAN),
+                        )
                     })
-                    .sum::<f64>()
-                    / fresh_seeds.len() as f64
+                    .collect()
             };
-            let seq_mean = mean_of(seq.plan);
-            let joint_mean = mean_of(joint.plan);
+            let seq_per_seed = per_seed_of(seq.plan);
+            let joint_per_seed = per_seed_of(joint.plan);
+            let mean =
+                |xs: &[(u64, f64)]| xs.iter().map(|&(_, e)| e).sum::<f64>() / xs.len() as f64;
+            let seq_mean = mean(&seq_per_seed);
+            let joint_mean = mean(&joint_per_seed);
+            for (report, per_seed, approach) in [
+                (&seq, &seq_per_seed, "sequential"),
+                (&joint, &joint_per_seed, "joint"),
+            ]
+            {
+                for &(s, e) in per_seed.iter()
+                {
+                    records.push(
+                        scirust_bench_schema::BenchRecord::new(
+                            "anee_phase_c_pipeline",
+                            format!("{family}/L={levels}"),
+                            format!("{approach}:{}", plan_label(report.plan)),
+                            s,
+                            "held_out_relative_error",
+                            e,
+                        )
+                        .with_cert(scirust_bench_schema::Certificate {
+                            description: "kappa_rt round-trip bound (CANR §3.2)".into(),
+                            bound_ulps: Some(report.certificate.ulps),
+                            determinism: None,
+                        }),
+                    );
+                }
+            }
             let reduction = 1.0 - joint_mean / seq_mean;
             let actual_pays = joint_mean <= 0.8 * seq_mean;
 
@@ -268,4 +303,13 @@ fn main() {
         "  P4 benign reduction < 20% for L >= 64: {}",
         if benign_ok { "held" } else { "FAILED" }
     );
+
+    // Machine-readable emission: the same measurements as shared CANR §9
+    // records (scirust-bench-schema), one line per (cell, approach, fresh
+    // seed) — pipe through `grep '^{'` to extract just the JSONL stream.
+    println!(
+        "\n=== bench-schema JSONL ({} records, scirust-bench-schema) ===",
+        records.len()
+    );
+    print!("{}", scirust_bench_schema::to_jsonl(&records));
 }

@@ -1,0 +1,16 @@
+[package]
+name = "scirust-bench-schema"
+version = "0.1.0"
+edition = "2024"
+publish = false
+rust-version = "1.89"
+description = "Shared benchmark-result record schema (CANR §9), enforced as a type rather than a convention. Leaf crate: depends only on serde, so any harness in the workspace can import it without cycles."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+# `float_roundtrip` is required, not optional, for this crate's purpose:
+# serde_json's default fast float parsing may be off by 1 ULP, which would
+# silently break the bit-exact record round-trip this workspace's determinism
+# discipline expects of a benchmark artifact (caught by this crate's own
+# round-trip test on vst_bench's real table).
+serde_json = { version = "1", features = ["float_roundtrip"] }
