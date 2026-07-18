@@ -33,6 +33,7 @@ optimized SIMD/hardware library instead — see [Positioning](#positioning).
 | [`numtheory`] | Extended GCD, modular inverse/exponentiation, CRT, integer sqrt, **deterministic** Miller–Rabin primality (exact for every `u64`), **deterministic** Pollard–Brent factorization, Euler's totient, divisors, Jacobi symbol. |
 | [`gf2`] | Carryless `GF(2)[x]` multiply / divide / gcd, and finite fields `GF(2^n)` (add/mul/pow/inv) with the AES/Rijndael `GF(2^8)`, a primitive `GF(2^8)` and a `GF(2^16)`. |
 | [`poly`] | The univariate polynomial ring **`GF(p)[x]`** over any prime field: long division, monic (extended) GCD, modular exponentiation, Lagrange interpolation, the formal derivative, an exact **Rabin irreducibility test**, and full **factorization into irreducibles** (deterministic Cantor–Zassenhaus) — the field-generic companion to `gf2` (the `p = 2` case). |
+| [`extfield`] | Finite **extension fields `GF(p^k)`** as `GF(p)[x]/(m)`: add/sub/mul/pow/inverse and the Frobenius map, with an automatic irreducible-modulus search. Generalises `gf2` — `GF(2^8)` with the AES modulus reproduces `gf2::Gf2Field::rijndael8` exactly. |
 | [`boolean`] | Fast Möbius transform + exact **algebraic-normal-form degree**, and the fast **Walsh–Hadamard transform** with nonlinearity / balancedness / bent / correlation-immunity. |
 | [`linalg`] | Dense `ModMatrix` over `Z/2^k`: determinant mod `2^k`, `GF(2)` rank (kept distinct from ring rank), **2-adic Smith normal form** → exact kernel/image sizes, inverse, solve, matrix power, 2-adic pivot rank. |
 | [`hypercomplex`] | Exact integer **octonions** and **quaternions** over any `Word`, with an authoritative multiplication oracle cross-checked against a Fano-triple generator. |
@@ -81,6 +82,7 @@ vector**, not just self-consistency:
 - the AES S-box vs its textbook DU/nonlinearity/degree; LAT vs a brute-force LAT;
 - negacyclic multiply vs an `O(n²)` reference; `mul_ntt` vs schoolbook `mul`;
 - `GF(p)[x]` division reconstructed (`a = q·b + r`), Bézout (`u·a + v·b = g`), the product rule (`(fg)' = f'g + fg'`), Rabin irreducibility vs an exhaustive root search (plus the AES modulus `x⁸+x⁴+x³+x+1`), and factorization reconstructed (`∏ qᵢ^eᵢ = f`, each `qᵢ` irreducible; `x^p − x` splits into all `p` linear factors);
+- `GF(p^k)` field axioms on random elements, `a^(p^k−1) = 1` and `a^(p^k) = a` (Lagrange + Frobenius), and `GF(2^8)` products/inverses matching the packed `gf2::Gf2Field::rijndael8`;
 - LLL output verified LLL-reduced with a unimodular certificate (`U·A = reduced`, `det U = ±1`) and preserved lattice volume;
 - `BigInt` arithmetic vs `i128` over thousands of random cases.
 
@@ -142,6 +144,7 @@ matter more than speed; choose an optimized library otherwise.
 [`sbox`]: src/sbox.rs
 [`ntt`]: src/ntt.rs
 [`poly`]: src/poly.rs
+[`extfield`]: src/extfield.rs
 [`negacyclic`]: src/negacyclic.rs
 [`lll`]: src/lll.rs
 [`rational`]: src/rational.rs

@@ -57,6 +57,10 @@
 //!   irreducibility test**, and full **factorization into irreducibles**
 //!   (deterministic Cantor–Zassenhaus) — the field-generic companion to `gf2`
 //!   (the `p = 2` case), composing `numtheory`.
+//! - [`extfield`] — finite **extension fields `GF(p^k)`** as `GF(p)[x]/(m)` for
+//!   a monic irreducible `m`: add/sub/mul/pow/inverse and the Frobenius map,
+//!   with an automatic modulus search. Generalises `gf2` — `GF(2^8)` with the
+//!   AES modulus reproduces `gf2::Gf2Field::rijndael8` exactly. Composes `poly`.
 //! - [`sbox`] — exact **S-box analysis**: difference distribution table and
 //!   differential uniformity, linear approximation table and nonlinearity (via
 //!   the Walsh transform), algebraic degree, and the strict-avalanche matrix —
@@ -179,6 +183,19 @@
 //! ```
 //!
 //! ```
+//! use scirust_modalg::extfield::ExtField;
+//!
+//! // GF(2^8) via the AES modulus: FIPS-197's worked example {57}·{83} = {c1}.
+//! let f = ExtField::new(scirust_modalg::poly::Poly::from_coeffs(
+//!     2, &[1, 1, 0, 1, 1, 0, 0, 0, 1],
+//! ));
+//! let byte = |b: u8| f.element(&(0..8).map(|i| ((b >> i) & 1) as u64).collect::<Vec<_>>());
+//! let prod = f.mul(&byte(0x57), &byte(0x83));
+//! let as_byte = (0..8).fold(0u8, |acc, i| acc | ((prod.coeff(i) as u8) << i));
+//! assert_eq!(as_byte, 0xc1);
+//! ```
+//!
+//! ```
 //! use scirust_modalg::sbox::Sbox;
 //!
 //! // An S-box's differential uniformity — a small linear box has the worst
@@ -246,6 +263,7 @@ pub mod bigrational;
 pub mod boolean;
 pub mod codes;
 pub mod crc;
+pub mod extfield;
 pub mod gf2;
 pub mod hypercomplex;
 pub mod linalg;
@@ -262,6 +280,7 @@ pub use bigint::BigInt;
 pub use bigrational::BigRational;
 pub use codes::ReedSolomon;
 pub use crc::Crc;
+pub use extfield::ExtField;
 pub use gf2::Gf2Field;
 pub use hypercomplex::{Oct, Quat};
 pub use linalg::ModMatrix;
