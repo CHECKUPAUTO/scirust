@@ -2503,6 +2503,249 @@ fn matrix_exp_dim_mismatch_panics() {
 }
 
 // ------------------------------------------------------------------ //
+//  Racine carrée et logarithme de matrice                             //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn matrix_sqrt_identity_is_identity() {
+    for &n in &[1usize, 2, 3, 5]
+    {
+        let mut a = vec![Q16_16::zero(); n * n];
+        for i in 0..n
+        {
+            a[i * n + i] = Q16_16::one();
+        }
+        let got = linalg::matrix_sqrt(&a, n, q16(1e-4), 50).expect("identité : convergence");
+        for i in 0..n
+        {
+            for j in 0..n
+            {
+                let want = if i == j { 1.0 } else { 0.0 };
+                let diff = (got[i * n + j].to_f64() - want).abs();
+                assert!(
+                    diff <= 1e-3,
+                    "n={n} [{i},{j}] = {} vs {want}",
+                    got[i * n + j].to_f64()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn matrix_sqrt_diagonal_matches_scalar_sqrt() {
+    #[rustfmt::skip]
+    let a = [
+        q16(4.0), q16(0.0), q16(0.0),
+        q16(0.0), q16(9.0), q16(0.0),
+        q16(0.0), q16(0.0), q16(0.25),
+    ];
+    let got = linalg::matrix_sqrt(&a, 3, q16(1e-4), 50).expect("diagonale : convergence");
+    let want = [2.0f64, 3.0, 0.5];
+    for i in 0..3
+    {
+        let diff = (got[i * 3 + i].to_f64() - want[i]).abs();
+        assert!(
+            diff <= 5e-3,
+            "diag[{i}] = {} vs {}",
+            got[i * 3 + i].to_f64(),
+            want[i]
+        );
+        for j in 0..3
+        {
+            if i != j
+            {
+                assert!(
+                    got[i * 3 + j].to_f64().abs() <= 5e-3,
+                    "hors-diagonale [{i},{j}] = {}",
+                    got[i * 3 + j].to_f64()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn matrix_sqrt_squares_back_to_original() {
+    // A symétrique définie positive (det = 2.75 > 0, trace > 0).
+    let a = [q16(2.0), q16(0.5), q16(0.5), q16(1.5)];
+    let root = linalg::matrix_sqrt(&a, 2, q16(1e-5), 50).expect("SDP : convergence");
+    let squared = linalg::matmul(&root, &root, 2, 2, 2);
+    for i in 0..4
+    {
+        let diff = (squared[i].to_f64() - a[i].to_f64()).abs();
+        assert!(
+            diff <= 1e-2,
+            "i={i}: (√A)² = {} vs A = {}",
+            squared[i].to_f64(),
+            a[i].to_f64()
+        );
+    }
+}
+
+#[test]
+fn matrix_sqrt_i64_storage() {
+    let a = [
+        Q32_32::try_from(4.0).unwrap(),
+        Q32_32::zero(),
+        Q32_32::zero(),
+        Q32_32::try_from(0.25).unwrap(),
+    ];
+    let got =
+        linalg::matrix_sqrt(&a, 2, Q32_32::try_from(1e-6).unwrap(), 50).expect("i64 : convergence");
+    let want = [2.0f64, 0.5];
+    for i in 0..2
+    {
+        let diff = (Q32_32::to_f64(got[i * 2 + i]) - want[i]).abs();
+        assert!(
+            diff <= 5e-3,
+            "diag[{i}] = {} vs {}",
+            Q32_32::to_f64(got[i * 2 + i]),
+            want[i]
+        );
+    }
+}
+
+#[test]
+fn matrix_sqrt_n0_trivial() {
+    let a: [Q16_16; 0] = [];
+    assert_eq!(
+        linalg::matrix_sqrt(&a, 0, q16(1e-4), 50).unwrap(),
+        Vec::new()
+    );
+}
+
+#[test]
+#[should_panic(expected = "matrix_sqrt")]
+fn matrix_sqrt_dim_mismatch_panics() {
+    let a = vec![Q16_16::zero(); 5]; // annoncé 3×3 = 9 ≠ 5.
+    let _ = linalg::matrix_sqrt(&a, 3, q16(1e-4), 50);
+}
+
+#[test]
+fn matrix_log_identity_is_zero() {
+    for &n in &[1usize, 2, 3]
+    {
+        let mut a = vec![Q16_16::zero(); n * n];
+        for i in 0..n
+        {
+            a[i * n + i] = Q16_16::one();
+        }
+        let got = linalg::matrix_log(&a, n, q16(1e-4), 50).expect("identité : convergence");
+        for &v in &got
+        {
+            assert!(v.to_f64().abs() <= 1e-3, "log(I) ≠ 0 : {}", v.to_f64());
+        }
+    }
+}
+
+#[test]
+fn matrix_log_diagonal_matches_scalar_ln() {
+    #[rustfmt::skip]
+    let a = [
+        q16(2.0), q16(0.0), q16(0.0),
+        q16(0.0), q16(0.5), q16(0.0),
+        q16(0.0), q16(0.0), q16(4.0),
+    ];
+    let got = linalg::matrix_log(&a, 3, q16(1e-4), 50).expect("diagonale : convergence");
+    let want = [2.0f64.ln(), 0.5f64.ln(), 4.0f64.ln()];
+    for i in 0..3
+    {
+        let diff = (got[i * 3 + i].to_f64() - want[i]).abs();
+        assert!(
+            diff <= 5e-3,
+            "diag[{i}] = {} vs {}",
+            got[i * 3 + i].to_f64(),
+            want[i]
+        );
+        for j in 0..3
+        {
+            if i != j
+            {
+                assert!(
+                    got[i * 3 + j].to_f64().abs() <= 5e-3,
+                    "hors-diagonale [{i},{j}] = {}",
+                    got[i * 3 + j].to_f64()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn matrix_log_exp_round_trip() {
+    // exp(log(A)) ≈ A pour A symétrique définie positive.
+    let a = [q16(2.0), q16(0.5), q16(0.5), q16(1.5)];
+    let log_a = linalg::matrix_log(&a, 2, q16(1e-5), 50).expect("SDP : convergence log");
+    let round_trip = linalg::matrix_exp(&log_a, 2).expect("pas de débordement exp");
+    for i in 0..4
+    {
+        let diff = (round_trip[i].to_f64() - a[i].to_f64()).abs();
+        assert!(
+            diff <= 1e-2,
+            "i={i}: exp(log(A)) = {} vs A = {}",
+            round_trip[i].to_f64(),
+            a[i].to_f64()
+        );
+    }
+}
+
+#[test]
+fn matrix_log_n0_trivial() {
+    let a: [Q16_16; 0] = [];
+    assert_eq!(
+        linalg::matrix_log(&a, 0, q16(1e-4), 50).unwrap(),
+        Vec::new()
+    );
+}
+
+#[test]
+#[should_panic(expected = "matrix_log")]
+fn matrix_log_dim_mismatch_panics() {
+    let a = vec![Q16_16::zero(); 5]; // annoncé 3×3 = 9 ≠ 5.
+    let _ = linalg::matrix_log(&a, 3, q16(1e-4), 50);
+}
+
+#[test]
+fn matrix_pow_real_half_matches_sqrt() {
+    let a = [q16(2.0), q16(0.5), q16(0.5), q16(1.5)];
+    let via_pow = linalg::matrix_pow_real(&a, 2, q16(0.5), q16(1e-5), 50)
+        .expect("SDP : convergence pow(0.5)");
+    let via_sqrt = linalg::matrix_sqrt(&a, 2, q16(1e-5), 50).expect("SDP : convergence sqrt");
+    for i in 0..4
+    {
+        let diff = (via_pow[i].to_f64() - via_sqrt[i].to_f64()).abs();
+        assert!(
+            diff <= 1e-2,
+            "i={i}: A^0.5 = {} vs √A = {}",
+            via_pow[i].to_f64(),
+            via_sqrt[i].to_f64()
+        );
+    }
+}
+
+#[test]
+fn matrix_pow_real_two_matches_matmul() {
+    let a = [q16(2.0), q16(0.5), q16(0.5), q16(1.5)];
+    let via_pow =
+        linalg::matrix_pow_real(&a, 2, q16(2.0), q16(1e-5), 50).expect("SDP : convergence pow(2)");
+    let via_matmul = linalg::matmul(&a, &a, 2, 2, 2);
+    for i in 0..4
+    {
+        let diff = (via_pow[i].to_f64() - via_matmul[i].to_f64()).abs();
+        // Tolérance plus large qu'ailleurs : la chaîne log → ×p → exp
+        // cumule trois sources d'erreur virgule fixe (mesuré : ~2.5e-2 pour
+        // ce A, calibré ici avec une marge).
+        assert!(
+            diff <= 3e-2,
+            "i={i}: A^2 = {} vs A·A = {}",
+            via_pow[i].to_f64(),
+            via_matmul[i].to_f64()
+        );
+    }
+}
+
+// ------------------------------------------------------------------ //
 //  Activations quantifiées                                            //
 // ------------------------------------------------------------------ //
 

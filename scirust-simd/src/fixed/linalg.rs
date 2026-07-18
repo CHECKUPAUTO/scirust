@@ -1777,3 +1777,231 @@ where
     }
     Some(r)
 }
+
+// ------------------------------------------------------------------ //
+//  Racine carrée et logarithme de matrice                             //
+// ------------------------------------------------------------------ //
+//
+// Complètent [`matrix_exp`] par ses deux réciproques/apparentées, comme
+// [`crate::hypercomplex::OctonionSimd::exp`]/`ln`/`powf` le font pour les
+// algèbres de Cayley-Dickson — même trio, algèbre matricielle plutôt
+// qu'hypercomplexe.
+//
+// [`matrix_sqrt`] restreint son entrée aux matrices **symétriques définies
+// positives** (SDP) : seul cas où une racine carrée réelle existe et est
+// unique de façon simple (valeurs propres réelles strictement positives,
+// racine carrée principale bien définie) — même restriction que
+// [`generalized_eig_symmetric`] impose à `B`. Itération de Denman-Beavers
+// (`Y₀ = A, Z₀ = I`, puis `Yₖ₊₁ = (Yₖ + Zₖ⁻¹)/2`, `Zₖ₊₁ = (Zₖ + Yₖ⁻¹)/2`) :
+// `Yₖ → √A`, `Zₖ → (√A)⁻¹`, convergence quadratique. Chaque inversion de
+// matrice **quelconque** passe par [`lu_solve`] colonne par colonne — même
+// technique que la résolution `D·R = N` de [`matrix_exp`].
+//
+// [`matrix_log`] utilise la mise à l'échelle **inverse** de Higham : racines
+// carrées itérées de `A` jusqu'à approcher l'identité (`‖Aᵏ − I‖₁` sous un
+// seuil interne généreux, même philosophie que le seuil `1/2` de
+// [`matrix_exp`]), puis une série tronquée à l'ordre 4 de `log(I + X)` sur le
+// petit écart `X` restant, et enfin `log(A) = 2ˢ·log(A^(1/2ˢ))` — une simple
+// **mise à l'échelle scalaire** (par une puissance de deux, exacte), à la
+// différence des `s` mises au **carré** de [`matrix_exp`].
+
+/// Inverse `A⁻¹` d'une matrice quelconque (`n × n` row-major), colonne par
+/// colonne via [`lu_solve`] — même technique que la résolution `D·R = N` de
+/// [`matrix_exp`]. `None` si `A` est singulière.
+fn invert<T>(a: &[T], n: usize) -> Option<Vec<T>>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    let mut inv = vec![T::ZERO; n * n];
+    for col in 0..n
+    {
+        let mut e_col = vec![T::ZERO; n];
+        e_col[col] = T::one();
+        let x_col = lu_solve(a, &e_col, n)?;
+        for (row, &v) in x_col.iter().enumerate()
+        {
+            inv[row * n + col] = v;
+        }
+    }
+    Some(inv)
+}
+
+/// Racine carrée de matrice `√A` (`n × n` row-major, **symétrique définie
+/// positive**, cf. en-tête de section), par itération de Denman-Beavers.
+///
+/// Convergence testée par [`FixedReducible::reduce_l1`] de `Yₖ₊₁ − Yₖ` sous
+/// `tol`, plafonnée par `max_iters` : renvoie le dernier itéré si `max_iters`
+/// est atteint sans convergence (meilleur effort borné, même convention que
+/// [`jacobi_eigen`]) plutôt que `None`. `None` uniquement si une inversion
+/// intermédiaire échoue (matrice mal conditionnée pour la précision de `T`)
+/// ou en cas de débordement virgule fixe. Panique si `a.len() != n·n`.
+#[must_use]
+pub fn matrix_sqrt<T>(a: &[T], n: usize, tol: T, max_iters: usize) -> Option<Vec<T>>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    assert_eq!(
+        a.len(),
+        n * n,
+        "matrix_sqrt : A de longueur {} ≠ {n}×{n}",
+        a.len()
+    );
+    if n == 0
+    {
+        return Some(Vec::new());
+    }
+    let two = small_int::<T>(2);
+
+    let mut y = a.to_vec();
+    let mut z = vec![T::ZERO; n * n];
+    for i in 0..n
+    {
+        z[i * n + i] = T::one();
+    }
+
+    for _ in 0..max_iters
+    {
+        let y_inv = invert(&y, n)?;
+        let z_inv = invert(&z, n)?;
+        let mut y_next = vec![T::ZERO; n * n];
+        let mut z_next = vec![T::ZERO; n * n];
+        for k in 0..n * n
+        {
+            y_next[k] = y[k].wrapping_add(z_inv[k]).checked_div(two)?;
+            z_next[k] = z[k].wrapping_add(y_inv[k]).checked_div(two)?;
+        }
+        let diff: Vec<T> = y_next.iter().zip(&y).map(|(&a, &b)| a - b).collect();
+        let converged = T::reduce_l1(&diff) < tol;
+        y = y_next;
+        z = z_next;
+        if converged
+        {
+            break;
+        }
+    }
+    Some(y)
+}
+
+/// Logarithme de matrice `log(A)` (`n × n` row-major, réciproque de
+/// [`matrix_exp`] sur sa branche principale — `A` **symétrique définie
+/// positive**, même restriction que [`matrix_sqrt`] qu'il appelle en
+/// interne), par mise à l'échelle inverse (cf. en-tête de section).
+///
+/// `max_sqrt_iters` borne à la fois le nombre de racines carrées itérées
+/// (mise à l'échelle externe) et `max_iters` de chaque appel interne à
+/// [`matrix_sqrt`] (convergence testée avec la même tolérance `tol`).
+/// `None` si l'entrée ne s'approche pas de l'identité en `max_sqrt_iters`
+/// racines carrées, si une racine carrée intermédiaire échoue, ou en cas de
+/// débordement virgule fixe. Panique si `a.len() != n·n`.
+#[must_use]
+pub fn matrix_log<T>(a: &[T], n: usize, tol: T, max_sqrt_iters: usize) -> Option<Vec<T>>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    assert_eq!(
+        a.len(),
+        n * n,
+        "matrix_log : A de longueur {} ≠ {n}×{n}",
+        a.len()
+    );
+    if n == 0
+    {
+        return Some(Vec::new());
+    }
+
+    let mut identity = vec![T::ZERO; n * n];
+    for i in 0..n
+    {
+        identity[i * n + i] = T::one();
+    }
+
+    // Seuil interne « assez proche de l'identité » — même seuil `1/2` que
+    // matrix_exp (cf. en-tête de section) : chaque mise à l'échelle externe
+    // ici est un **doublement scalaire** du logarithme final (pas une mise
+    // au carré), donc amplifie directement toute erreur résiduelle de la
+    // série par `2ˢ` — un seuil trop strict (donc plus de racines carrées,
+    // `s` plus grand) dégraderait la précision effective plus qu'il ne
+    // l'améliorerait. La série est poussée à l'ordre 6 (plutôt que 4) pour
+    // rester précise à ce seuil plus généreux, avec `s` typiquement petit
+    // (2-3), donc une amplification `2ˢ` modeste.
+    let two = small_int::<T>(2);
+    let closeness_threshold = T::one().checked_div(two)?;
+
+    let mut x = a.to_vec();
+    let mut s: u32 = 0;
+    loop
+    {
+        let diff: Vec<T> = x.iter().zip(&identity).map(|(&xi, &ii)| xi - ii).collect();
+        if T::reduce_l1(&diff) < closeness_threshold
+        {
+            break;
+        }
+        if s as usize >= max_sqrt_iters
+        {
+            return None; // pas assez proche de l'identité après max_sqrt_iters racines carrées.
+        }
+        x = matrix_sqrt(&x, n, tol, max_sqrt_iters)?;
+        s += 1;
+    }
+
+    // Série tronquée log(I + X) = X − X²/2 + X³/3 − X⁴/4 + X⁵/5 − X⁶/6,
+    // X = x − I (proche de la matrice nulle par construction du seuil
+    // ci-dessus).
+    let xm: Vec<T> = x.iter().zip(&identity).map(|(&xi, &ii)| xi - ii).collect();
+    let x2 = matmul(&xm, &xm, n, n, n);
+    let x3 = matmul(&x2, &xm, n, n, n);
+    let x4 = matmul(&x3, &xm, n, n, n);
+    let x5 = matmul(&x4, &xm, n, n, n);
+    let x6 = matmul(&x5, &xm, n, n, n);
+
+    let three = small_int::<T>(3);
+    let four = small_int::<T>(4);
+    let five = small_int::<T>(5);
+    let six = small_int::<T>(6);
+    let c2 = T::one().checked_div(two)?;
+    let c3 = T::one().checked_div(three)?;
+    let c4 = T::one().checked_div(four)?;
+    let c5 = T::one().checked_div(five)?;
+    let c6 = T::one().checked_div(six)?;
+
+    let mut log_x = vec![T::ZERO; n * n];
+    for k in 0..n * n
+    {
+        let t1 = xm[k];
+        let t2 = c2.wrapping_mul(x2[k]);
+        let t3 = c3.wrapping_mul(x3[k]);
+        let t4 = c4.wrapping_mul(x4[k]);
+        let t5 = c5.wrapping_mul(x5[k]);
+        let t6 = c6.wrapping_mul(x6[k]);
+        log_x[k] = ((t1 - t2).wrapping_add(t3) - t4).wrapping_add(t5) - t6;
+    }
+
+    // log(A) = 2ˢ·log(A^(1/2ˢ)) : mise à l'échelle scalaire (puissance de
+    // deux exacte), pas une nouvelle mise au carré (à la différence de
+    // matrix_exp, cf. en-tête de section).
+    for _ in 0..s
+    {
+        for v in log_x.iter_mut()
+        {
+            *v = v.wrapping_add(*v);
+        }
+    }
+    Some(log_x)
+}
+
+/// Puissance réelle de matrice `Aᵖ = exp(p·log(A))` (`n × n` row-major, `A`
+/// **symétrique définie positive**, même restriction que [`matrix_log`] qu'il
+/// appelle en interne). `p` quelconque (négatif, fractionnaire…) — généralise
+/// l'exposant entier de [`matmul`] itéré.
+///
+/// `None` selon les préconditions de [`matrix_log`]/[`matrix_exp`]. Panique
+/// si `a.len() != n·n`.
+#[must_use]
+pub fn matrix_pow_real<T>(a: &[T], n: usize, p: T, tol: T, max_iters: usize) -> Option<Vec<T>>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    let log_a = matrix_log(a, n, tol, max_iters)?;
+    let scaled: Vec<T> = log_a.iter().map(|&v| v.wrapping_mul(p)).collect();
+    matrix_exp(&scaled, n)
+}

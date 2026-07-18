@@ -384,6 +384,42 @@ fn bench_generalized_eig_symmetric(c: &mut Criterion) {
     g.finish();
 }
 
+/// Racine carrée/logarithme de matrice, à une taille bien plus petite que
+/// `N` (48) : contrairement aux autres décompositions de ce fichier
+/// (passe unique), Denman-Beavers **inverse une matrice complète** deux
+/// fois par itération (colonne par colonne via [`flin::lu_solve`]), et
+/// `matrix_log` enchaîne plusieurs `matrix_sqrt` — coût qui grimpe bien
+/// plus vite avec `n` ; `N_SQRT` garde le bench sous une seconde.
+const N_SQRT: usize = 8;
+
+/// Racine carrée de matrice (Denman-Beavers), sur `A` symétrique définie
+/// positive.
+fn bench_matrix_sqrt(c: &mut Criterion) {
+    let a = spd_data(0x18, N_SQRT);
+    let tol = Q16_16::try_from(1e-4).unwrap();
+
+    let mut g = c.benchmark_group("matrix_sqrt_8");
+    g.throughput(Throughput::Elements((N_SQRT * N_SQRT * N_SQRT) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter(|| flin::matrix_sqrt(black_box(&a), N_SQRT, tol, 50))
+    });
+    g.finish();
+}
+
+/// Logarithme de matrice (mise à l'échelle inverse + racines carrées
+/// itérées), sur `A` symétrique définie positive.
+fn bench_matrix_log(c: &mut Criterion) {
+    let a = spd_data(0x19, N_SQRT);
+    let tol = Q16_16::try_from(1e-4).unwrap();
+
+    let mut g = c.benchmark_group("matrix_log_8");
+    g.throughput(Throughput::Elements((N_SQRT * N_SQRT * N_SQRT) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter(|| flin::matrix_log(black_box(&a), N_SQRT, tol, 50))
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_matmul,
@@ -400,6 +436,8 @@ criterion_group!(
     bench_eigenvector_real,
     bench_poly_roots,
     bench_matrix_exp,
-    bench_generalized_eig_symmetric
+    bench_generalized_eig_symmetric,
+    bench_matrix_sqrt,
+    bench_matrix_log
 );
 criterion_main!(benches);

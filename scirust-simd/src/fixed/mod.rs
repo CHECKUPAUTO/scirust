@@ -88,7 +88,11 @@
 //   compagnon), et l'**exponentielle de matrice** (`matrix_exp`, mise à
 //   l'échelle et carrés répétés — fonctionne pour toute matrice, y compris
 //   antisymétrique, l'application exponentielle `so(3) → SO(3)` de
-//   [`crate::geometry::Quaternion`]).
+//   [`crate::geometry::Quaternion`]). `matrix_sqrt` (Denman-Beavers) et
+//   `matrix_log`/`matrix_pow_real` (mise à l'échelle inverse de Higham)
+//   complètent ce trio pour les matrices **symétriques définies
+//   positives** — le pendant matriciel de
+//   [`crate::hypercomplex::OctonionSimd::exp`]/`ln`/`powf`.
 // * [`activation`] — activations quantifiées (`relu`, `relu6`, `hardswish`…).
 // * [`layer`] — couche linéaire quantifiée [`layer::Linear`] (`W·x + b`, +
 //   activation), avec inférence par lot (`forward_batch` et variantes).
