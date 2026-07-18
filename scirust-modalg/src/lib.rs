@@ -46,6 +46,10 @@
 //! - [`crc`] — parameterised **cyclic redundancy checks** (the Rocksoft model)
 //!   with a streaming digest and named presets (CRC-32, CRC-32C, CRC-16
 //!   variants, CRC-8, CRC-64/XZ) that reproduce the published check values.
+//! - [`ntt`] — the exact **number-theoretic transform** over `Z/p` (an integer
+//!   FFT) and the `O(n log n)` exact integer **convolution** / polynomial
+//!   multiplication it enables, composing `numtheory` to validate the prime and
+//!   its primitive root.
 //!
 //! Everything is deterministic and reproducible bit-for-bit on every platform.
 //!
@@ -112,6 +116,14 @@
 //! assert!(is_bent(&and, 2));
 //! assert_eq!(nonlinearity(&and, 2), 1);
 //! ```
+//!
+//! ```
+//! use scirust_modalg::ntt::Ntt;
+//!
+//! // Exact O(n log n) polynomial multiplication: (1 + 2x + 3x²)(1 + x) over Z.
+//! let ntt = Ntt::new_default();
+//! assert_eq!(ntt.convolve(&[1, 2, 3], &[1, 1]), vec![1, 3, 5, 3]);
+//! ```
 
 pub mod boolean;
 pub mod codes;
@@ -119,6 +131,7 @@ pub mod crc;
 pub mod gf2;
 pub mod hypercomplex;
 pub mod linalg;
+pub mod ntt;
 pub mod numtheory;
 pub mod ring;
 
@@ -127,4 +140,5 @@ pub use crc::Crc;
 pub use gf2::Gf2Field;
 pub use hypercomplex::{Oct, Quat};
 pub use linalg::ModMatrix;
+pub use ntt::Ntt;
 pub use ring::Word;
