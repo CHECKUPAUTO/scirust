@@ -31,6 +31,10 @@
 //   filtre passe-bas prototype (sinus cardinal fenêtré) décomposé en `L`
 //   sous-filtres polyphase : change la fréquence d'échantillonnage sans
 //   matérialiser le signal suréchantillonné.
+// * [`fftconv`] — convolution linéaire rapide ([`fftconv::fft_convolve`]),
+//   recouvrement-addition via `rfft`/`irfft` : `O(longueur·log(bloc))` contre
+//   `O(longueur·N)` en temps direct ([`Fir`]) pour un noyau de `N` prises —
+//   avantageux pour les noyaux longs.
 //
 // ## Pourquoi la virgule fixe pour le DSP ?
 //
@@ -41,6 +45,7 @@
 
 pub mod biquad;
 pub mod fft;
+pub mod fftconv;
 pub mod fir;
 pub mod mel;
 pub mod resample;
@@ -49,6 +54,7 @@ pub mod window;
 
 pub use biquad::{Biquad, BiquadCascade};
 pub use fft::{Complex, Plan, fft, ifft, irfft, rfft};
+pub use fftconv::fft_convolve;
 pub use fir::Fir;
 pub use resample::resample;
 

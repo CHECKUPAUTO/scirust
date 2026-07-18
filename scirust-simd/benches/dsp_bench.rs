@@ -13,7 +13,7 @@ use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, 
 use scirust_simd::dsp::mel::MelFilterbank;
 use scirust_simd::dsp::stft::{power_spectrogram, stft};
 use scirust_simd::dsp::window;
-use scirust_simd::dsp::{Biquad, BiquadCascade, Complex, Fir, Plan, fft, rfft};
+use scirust_simd::dsp::{Biquad, BiquadCascade, Complex, Fir, Plan, fft, fft_convolve, rfft};
 use scirust_simd::fixed::Q16_16;
 
 const N: usize = 1 << 14;
@@ -126,6 +126,51 @@ fn bench_fir(c: &mut Criterion) {
             f.reset();
             f.process_block(black_box(&sf), black_box(&mut of));
             of[0]
+        })
+    });
+    g.finish();
+}
+
+/// Noyau **long** (256 prises) : `fft_convolve` (recouvrement-addition) face
+/// à la convolution en temps direct (`Fir`) — l'avantage classique de la
+/// convolution rapide n'apparaît que pour de longs noyaux (cf. en-tête de
+/// module de `fftconv`).
+fn bench_fft_convolve_long_kernel(c: &mut Criterion) {
+    const KERNEL_LEN: usize = 256;
+    const FFT_SIZE: usize = 1024;
+    let sf = signal_f32();
+    let sx = signal_fixed(&sf);
+    let taps_f: [f32; KERNEL_LEN] = core::array::from_fn(|i| ((i as f32 * 0.037).sin()) * 0.01);
+    let mut taps_x = [Q16_16::zero(); KERNEL_LEN];
+    for (t, &f) in taps_x.iter_mut().zip(taps_f.iter())
+    {
+        *t = Q16_16::try_from(f as f64).unwrap();
+    }
+
+    let mut g = c.benchmark_group("convolve_kernel256");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("fixed", "fft_convolve"), |b| {
+        b.iter(|| fft_convolve(black_box(&sx), black_box(&taps_x), FFT_SIZE))
+    });
+    g.bench_function(BenchmarkId::new("f32", "fft_convolve"), |b| {
+        b.iter(|| fft_convolve(black_box(&sf), black_box(&taps_f), FFT_SIZE))
+    });
+    g.bench_function(BenchmarkId::new("fixed", "fir_direct"), |b| {
+        let mut f = Fir::<Q16_16, KERNEL_LEN>::new(taps_x);
+        let mut out = vec![Q16_16::zero(); N];
+        b.iter(|| {
+            f.reset();
+            f.process_block(black_box(&sx), black_box(&mut out));
+            out[0]
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "fir_direct"), |b| {
+        let mut f = Fir::<f32, KERNEL_LEN>::new(taps_f);
+        let mut out = vec![0.0f32; N];
+        b.iter(|| {
+            f.reset();
+            f.process_block(black_box(&sf), black_box(&mut out));
+            out[0]
         })
     });
     g.finish();
@@ -349,6 +394,7 @@ criterion_group!(
     bench_biquad,
     bench_butterworth_cascade,
     bench_fir,
+    bench_fft_convolve_long_kernel,
     bench_fft,
     bench_fft_plan,
     bench_rfft,

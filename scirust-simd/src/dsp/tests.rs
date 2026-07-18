@@ -8,6 +8,7 @@
 
 use super::biquad::butterworth_qs;
 use super::fft::{Complex, Plan, fft, ifft, irfft, rfft};
+use super::fftconv::fft_convolve;
 use super::mel::MelFilterbank;
 use super::resample::design_prototype;
 use super::stft::{istft, magnitude_spectrogram, num_frames, power_spectrogram, stft};
@@ -738,6 +739,111 @@ fn rfft_dc_and_determinism() {
         assert_eq!(x.re.to_raw(), y.re.to_raw());
         assert_eq!(x.im.to_raw(), y.im.to_raw());
     }
+}
+
+// ------------------------------------------------------------------ //
+//  Convolution rapide (recouvrement-addition), via rfft/irfft         //
+// ------------------------------------------------------------------ //
+
+/// Référence naïve indépendante : convolution linéaire complète en temps
+/// direct (double boucle), longueur `signal.len() + kernel.len() - 1`.
+fn naive_convolve(signal: &[f64], kernel: &[f64]) -> Vec<f64> {
+    let out_len = signal.len() + kernel.len() - 1;
+    let mut out = vec![0.0f64; out_len];
+    for (i, &s) in signal.iter().enumerate()
+    {
+        for (k, &h) in kernel.iter().enumerate()
+        {
+            out[i + k] += s * h;
+        }
+    }
+    out
+}
+
+fn check_fft_convolve_matches_naive<T: Scalar>() {
+    let cases = [
+        (20usize, 5usize, 32usize),
+        (50, 13, 64),
+        (17, 17, 64), // signal et noyau de même longueur
+        (100, 3, 16), // noyau très court face à un bloc large
+    ];
+    for &(sig_len, ker_len, fft_size) in &cases
+    {
+        let sig_f: Vec<f64> = (0..sig_len)
+            .map(|i| ((i * 7 % 11) as f64) * 0.05 - 0.25)
+            .collect();
+        let ker_f: Vec<f64> = (0..ker_len)
+            .map(|i| ((i * 3 % 5) as f64) * 0.1 - 0.2)
+            .collect();
+        let sig: Vec<T> = sig_f.iter().map(|&v| T::of(v)).collect();
+        let ker: Vec<T> = ker_f.iter().map(|&v| T::of(v)).collect();
+
+        let got = fft_convolve(&sig, &ker, fft_size);
+        let want = naive_convolve(&sig_f, &ker_f);
+        assert_eq!(got.len(), sig_len + ker_len - 1);
+        assert_eq!(want.len(), got.len());
+
+        let tol = T::TOL * (fft_size as f64) * 8.0 + 1e-6;
+        for (i, (&g, &w)) in got.iter().zip(&want).enumerate()
+        {
+            assert!(
+                (g.to_f64() - w).abs() <= tol,
+                "sig_len={sig_len} ker_len={ker_len} fft_size={fft_size} i={i}: {} vs {} (tol {tol})",
+                g.to_f64(),
+                w
+            );
+        }
+    }
+}
+
+#[test]
+fn fft_convolve_matches_naive_all_scalars() {
+    check_fft_convolve_matches_naive::<f32>();
+    check_fft_convolve_matches_naive::<f64>();
+    check_fft_convolve_matches_naive::<Q16_16>();
+}
+
+#[test]
+fn fft_convolve_impulse_kernel_is_identity() {
+    let sig: Vec<Q16_16> = (0..10)
+        .map(|i| Q16_16::try_from(((i % 5) as f64) * 0.1 - 0.2).unwrap())
+        .collect();
+    let ker = [Q16_16::one()];
+    let got = fft_convolve(&sig, &ker, 16);
+    assert_eq!(got.len(), sig.len());
+    for (g, s) in got.iter().zip(&sig)
+    {
+        assert!(
+            (g.to_f64() - s.to_f64()).abs() <= 1e-2,
+            "{} vs {}",
+            g.to_f64(),
+            s.to_f64()
+        );
+    }
+}
+
+#[test]
+#[should_panic(expected = "puissance de deux")]
+fn fft_convolve_rejects_non_power_of_two_fft_size() {
+    let sig = [Q16_16::one(); 10];
+    let ker = [Q16_16::one(); 3];
+    let _ = fft_convolve(&sig, &ker, 20);
+}
+
+#[test]
+#[should_panic(expected = "noyau vide")]
+fn fft_convolve_rejects_empty_kernel() {
+    let sig = [Q16_16::one(); 10];
+    let ker: [Q16_16; 0] = [];
+    let _ = fft_convolve(&sig, &ker, 16);
+}
+
+#[test]
+#[should_panic(expected = "fft_size")]
+fn fft_convolve_rejects_fft_size_too_small() {
+    let sig = [Q16_16::one(); 10];
+    let ker = [Q16_16::one(); 16];
+    let _ = fft_convolve(&sig, &ker, 16); // devrait être > kernel.len()
 }
 
 // ------------------------------------------------------------------ //
