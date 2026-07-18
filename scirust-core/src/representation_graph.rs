@@ -63,51 +63,74 @@ use std::collections::HashMap;
 /// [CANR §3.3]).
 const UNIT: f64 = f64::EPSILON / 2.0;
 
-/// Fixed quantizer level count for this prototype (deliberately not a
-/// searched axis — see module docs).
+/// Default quantizer level count for this prototype (deliberately not a
+/// *searched* axis — see module docs). The dose-response experiment (ANEE
+/// Addendum 3) varies it as an environmental parameter through the
+/// `*_with_levels` entry points; the parameterless functions keep this
+/// default so kernel 1's published results remain reproducible unchanged.
 const QUANT_LEVELS: usize = 64;
 
 // ---------------------------------------------------------------------------
 // The representation graph's node type
 // ---------------------------------------------------------------------------
 
-/// A representation candidate for this prototype's search graph: either no
-/// transform at all, or one of [`Representation`]'s certified pairs.
+/// A representation candidate for this prototype's search graph: no
+/// transform at all, one of [`Representation`]'s certified pairs, or — the
+/// two-hop graph experiment (ANEE Addendum 3) — a *composition* of two
+/// certified pairs applied in sequence.
 ///
 /// Modeled as its own [`CertifiedMonotone`] implementation — Identity's
 /// `kappa_rt` is exactly `1.0` everywhere (the identity map's condition
 /// number, `|x / (x·1)| = 1`) — so the existing certificate-gate *pattern*
 /// from `transform_search.rs` applies unchanged to a dictionary that
 /// includes "no transform" as a first-class, reachable member, without
-/// modifying [`Representation`] itself (ANEE §4's representation graph, at
-/// the scope of a single hop from a hub node: every conversion here goes
-/// through `f64` as the hub, exactly as [`crate::transform_search`]
-/// already assumes).
+/// modifying [`Representation`] itself. Single hops go through `f64` as the
+/// hub exactly as [`crate::transform_search`] already assumes;
+/// [`RepresentationChoice::Composed`] is the first member that actually
+/// *exercises the graph structure* of ANEE §4 (a two-edge path) rather than
+/// a flat dictionary — its condition number is the **exact product** of the
+/// hops' condition numbers per Proposition ANEE-2 (the elasticity chain
+/// rule, validated to Decimal prec-60 by experiment Z3), used here in real
+/// code for the first time.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RepresentationChoice {
     /// No transform: store/accumulate directly in `f64`/`f32`.
     Identity,
     /// One of [`Representation`]'s certified monotone pairs.
     Certified(Representation),
+    /// Two certified pairs applied in sequence: `Composed(a, b)` encodes
+    /// `x ↦ b(a(x))` and decodes `y ↦ a⁻¹(b⁻¹(y))`. Both hops are strictly
+    /// monotone, so the composition is too. `domain()` reports the *first*
+    /// hop's interval as an over-approximation — [`Self::encode`] is the
+    /// authoritative membership test (it returns `None` whenever the
+    /// intermediate value leaves the second hop's domain), and the pipeline
+    /// gate uses `encode`, not `domain`, for exactly this reason. The
+    /// default [`CertifiedMonotone::roundtrip_bound`] under-counts one
+    /// intermediate rounding per extra hop (it charges `B_ENC` once);
+    /// certificates are not the decision variable in these experiments
+    /// (held-out error is), so this is documented rather than patched.
+    Composed(Representation, Representation),
 }
 
 impl RepresentationChoice {
-    /// Human-readable name.
-    pub fn name(self) -> &'static str {
+    /// Human-readable name (owned: composed names are built dynamically).
+    pub fn name(self) -> String {
         match self
         {
-            RepresentationChoice::Identity => "identity",
-            RepresentationChoice::Certified(r) => r.name(),
+            RepresentationChoice::Identity => "identity".to_string(),
+            RepresentationChoice::Certified(r) => r.name().to_string(),
+            RepresentationChoice::Composed(a, b) => format!("{}->{}", a.name(), b.name()),
         }
     }
 
     /// Relative encode+decode cost proxy, reusing [`Representation::cost`];
-    /// `0` for the no-op identity.
+    /// `0` for the no-op identity, the sum of hops for a composition.
     pub fn cost(self) -> u32 {
         match self
         {
             RepresentationChoice::Identity => 0,
             RepresentationChoice::Certified(r) => r.cost(),
+            RepresentationChoice::Composed(a, b) => a.cost() + b.cost(),
         }
     }
 }
@@ -119,6 +142,9 @@ impl CertifiedMonotone for RepresentationChoice {
             // Matches this prototype's task: positive sensor-style readings.
             RepresentationChoice::Identity => Interval::new(0.0, f64::MAX),
             RepresentationChoice::Certified(r) => r.domain(),
+            // Over-approximation (see the variant's docs): encode() is the
+            // authoritative membership test for compositions.
+            RepresentationChoice::Composed(a, _) => a.domain(),
         }
     }
 
@@ -127,6 +153,7 @@ impl CertifiedMonotone for RepresentationChoice {
         {
             RepresentationChoice::Identity => self.domain().contains(x).then_some(x),
             RepresentationChoice::Certified(r) => r.encode(x),
+            RepresentationChoice::Composed(a, b) => a.encode(x).and_then(|y| b.encode(y)),
         }
     }
 
@@ -135,6 +162,7 @@ impl CertifiedMonotone for RepresentationChoice {
         {
             RepresentationChoice::Identity => y,
             RepresentationChoice::Certified(r) => r.decode(y),
+            RepresentationChoice::Composed(a, b) => a.decode(b.decode(y)),
         }
     }
 
@@ -143,6 +171,13 @@ impl CertifiedMonotone for RepresentationChoice {
         {
             RepresentationChoice::Identity => 1.0,
             RepresentationChoice::Certified(r) => r.kappa_rt(x),
+            // Exact multiplicative composition (Proposition ANEE-2 / Z3):
+            // kappa of the second hop is evaluated at the first hop's image.
+            RepresentationChoice::Composed(a, b) => match a.encode(x)
+            {
+                Some(y) => a.kappa_rt(x) * b.kappa_rt(y),
+                None => f64::INFINITY,
+            },
         }
     }
 
@@ -151,6 +186,17 @@ impl CertifiedMonotone for RepresentationChoice {
         {
             RepresentationChoice::Identity => 1.0,
             RepresentationChoice::Certified(r) => r.kappa_rt_sup(iv),
+            // Sound bound: product of per-hop sups >= sup of the pointwise
+            // product. Every dictionary member is strictly increasing, so
+            // the first hop maps the interval to an interval endpoint-wise.
+            RepresentationChoice::Composed(a, b) => match (a.encode(iv.lo), a.encode(iv.hi))
+            {
+                (Some(ya), Some(yb)) =>
+                {
+                    a.kappa_rt_sup(iv) * b.kappa_rt_sup(Interval::new(ya.min(yb), ya.max(yb)))
+                },
+                _ => f64::INFINITY,
+            },
         }
     }
 }
@@ -170,6 +216,44 @@ pub fn default_representation_dictionary() -> Vec<RepresentationChoice> {
         RepresentationChoice::Certified(Representation::Power(0.5)),
         RepresentationChoice::Certified(Representation::Anscombe),
     ]
+}
+
+/// Every ordered two-hop composition this prototype's graph experiment
+/// considers: first hop from the positive-domain singles, second hop from
+/// those plus [`Representation::SignedLog`] (the one dictionary member whose
+/// domain is all of ℝ — first-hop outputs can be negative, e.g. `log x < 0`
+/// for `x < 1`, so it is only reachable as a *second* hop on this task).
+///
+/// Deliberately unfiltered: pairs whose intermediate values leave the second
+/// hop's domain are rejected per-workload by the pipeline's encode-based
+/// gate, and pairs that are affine-equivalent to a single hop (e.g.
+/// `power(λ)` then `log` = `λ·log`, an affine image of `log`) are expected
+/// to *tie* their single-hop equivalent under the affine-invariant uniform
+/// quantizer — both facts are part of what the two-hop experiment is
+/// honestly measuring, not noise to be pre-cleaned away.
+pub fn two_hop_dictionary() -> Vec<RepresentationChoice> {
+    let firsts = [
+        Representation::Log,
+        Representation::Log1p,
+        Representation::Power(0.5),
+        Representation::Anscombe,
+    ];
+    let seconds = [
+        Representation::Log,
+        Representation::Log1p,
+        Representation::SignedLog,
+        Representation::Power(0.5),
+        Representation::Anscombe,
+    ];
+    let mut out = Vec::new();
+    for &a in &firsts
+    {
+        for &b in &seconds
+        {
+            out.push(RepresentationChoice::Composed(a, b));
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -200,16 +284,36 @@ pub struct Plan {
 /// `dev.iter().chain(eval)` combined-support convention
 /// `transform_autotune::safety_gate` already established.
 pub fn pipeline_relative_error(plan: Plan, fit: &[f64], score_on: &[f64]) -> Option<f64> {
+    pipeline_relative_error_with_levels(plan, fit, score_on, QUANT_LEVELS)
+}
+
+/// [`pipeline_relative_error`] with the quantizer level count as an explicit
+/// parameter — the environmental knob the dose-response experiment (ANEE
+/// Addendum 3) varies. The gate is *encode-based* (a sample is admissible
+/// iff `encode` succeeds), which coincides with the previous interval-domain
+/// check for every single-hop member and is the only correct test for
+/// [`RepresentationChoice::Composed`] (whose true domain is the preimage of
+/// the second hop's domain under the first hop).
+pub fn pipeline_relative_error_with_levels(
+    plan: Plan,
+    fit: &[f64],
+    score_on: &[f64],
+    levels: usize,
+) -> Option<f64> {
     let r = plan.representation;
-    let domain = r.domain();
     let mut lo = f64::INFINITY;
     let mut hi = f64::NEG_INFINITY;
-    for &x in fit.iter().chain(score_on)
+    let mut enc_fit = Vec::with_capacity(fit.len());
+    for &x in fit
     {
-        if !domain.contains(x)
-        {
-            return None;
-        }
+        enc_fit.push(r.encode(x)?);
+        lo = lo.min(x);
+        hi = hi.max(x);
+    }
+    let mut enc_score = Vec::with_capacity(score_on.len());
+    for &x in score_on
+    {
+        enc_score.push(r.encode(x)?);
         lo = lo.min(x);
         hi = hi.max(x);
     }
@@ -219,19 +323,10 @@ pub fn pipeline_relative_error(plan: Plan, fit: &[f64], score_on: &[f64]) -> Opt
         return None; // invalid region, CANR Sec.3.3.
     }
 
-    let enc_fit: Vec<f64> = fit
+    let q = UniformQuantizer::fit(&enc_fit, levels);
+    let reconstructed: Vec<f32> = enc_score
         .iter()
-        .map(|&x| r.encode(x).expect("gated above"))
-        .collect();
-    let q = UniformQuantizer::fit(&enc_fit, QUANT_LEVELS);
-
-    let reconstructed: Vec<f32> = score_on
-        .iter()
-        .map(|&x| {
-            let e = r.encode(x).expect("gated above");
-            let qe = q.round_trip(e);
-            r.decode(qe) as f32
-        })
+        .map(|&e| r.decode(q.round_trip(e)) as f32)
         .collect();
 
     let total = accumulate(plan.accumulation, &reconstructed) as f64;
@@ -274,6 +369,22 @@ pub fn sequential_baseline(
     r_dict: &[RepresentationChoice],
     a_dict: &[AccumMethod],
 ) -> Option<PlanSearchReport> {
+    sequential_baseline_with_levels(dev, eval, r_dict, a_dict, QUANT_LEVELS)
+}
+
+/// [`sequential_baseline`] with the quantizer level count as an explicit
+/// parameter. The S1 gate checks encodability of the dev support's
+/// endpoints — equivalent to the previous interval-domain check for single
+/// hops (every member is strictly increasing with an interval domain, so
+/// endpoint admissibility implies full-support admissibility), and correct
+/// for compositions.
+pub fn sequential_baseline_with_levels(
+    dev: &[f64],
+    eval: &[f64],
+    r_dict: &[RepresentationChoice],
+    a_dict: &[AccumMethod],
+    levels: usize,
+) -> Option<PlanSearchReport> {
     let mut lo = f64::INFINITY;
     let mut hi = f64::NEG_INFINITY;
     for &x in dev
@@ -289,7 +400,7 @@ pub fn sequential_baseline(
     let mut chosen_r: Option<RepresentationChoice> = None;
     for &r in r_dict
     {
-        if !r.domain().contains(lo) || !r.domain().contains(hi)
+        if r.encode(lo).is_none() || r.encode(hi).is_none()
         {
             continue;
         }
@@ -311,24 +422,26 @@ pub fn sequential_baseline(
 
     // S3/S4: A search with R held fixed, via the existing generic harness.
     let score = move |a: AccumMethod, fit: &[f64], scr: &[f64]| -> Option<f64> {
-        pipeline_relative_error(
+        pipeline_relative_error_with_levels(
             Plan {
                 representation: r,
                 accumulation: a,
             },
             fit,
             scr,
+            levels,
         )
         .map(|e| -e)
     };
     let baseline = move |fit: &[f64], scr: &[f64]| -> f64 {
-        pipeline_relative_error(
+        pipeline_relative_error_with_levels(
             Plan {
                 representation: r,
                 accumulation: AccumMethod::NaiveF32,
             },
             fit,
             scr,
+            levels,
         )
         .map(|e| -e)
         .unwrap_or(f64::NEG_INFINITY)
@@ -366,6 +479,17 @@ pub fn joint_search(
     r_dict: &[RepresentationChoice],
     a_dict: &[AccumMethod],
 ) -> Option<PlanSearchReport> {
+    joint_search_with_levels(dev, eval, r_dict, a_dict, QUANT_LEVELS)
+}
+
+/// [`joint_search`] with the quantizer level count as an explicit parameter.
+pub fn joint_search_with_levels(
+    dev: &[f64],
+    eval: &[f64],
+    r_dict: &[RepresentationChoice],
+    a_dict: &[AccumMethod],
+    levels: usize,
+) -> Option<PlanSearchReport> {
     let candidates: Vec<Plan> = r_dict
         .iter()
         .flat_map(|&r| {
@@ -375,16 +499,18 @@ pub fn joint_search(
             })
         })
         .collect();
-    let score =
-        |plan: Plan, fit: &[f64], scr: &[f64]| pipeline_relative_error(plan, fit, scr).map(|e| -e);
-    let baseline = |fit: &[f64], scr: &[f64]| -> f64 {
-        pipeline_relative_error(
+    let score = move |plan: Plan, fit: &[f64], scr: &[f64]| {
+        pipeline_relative_error_with_levels(plan, fit, scr, levels).map(|e| -e)
+    };
+    let baseline = move |fit: &[f64], scr: &[f64]| -> f64 {
+        pipeline_relative_error_with_levels(
             Plan {
                 representation: RepresentationChoice::Identity,
                 accumulation: AccumMethod::NaiveF32,
             },
             fit,
             scr,
+            levels,
         )
         .map(|e| -e)
         .unwrap_or(f64::NEG_INFINITY)
@@ -662,5 +788,81 @@ mod tests {
         cache.insert("k", dist, hw, plan, 0.018, UlpBound { ulps: 4.0 });
         let entry = cache.get("k", dist, hw).expect("must be present");
         assert_eq!(entry.history, vec![0.02, 0.018]);
+    }
+
+    #[test]
+    fn composed_kappa_is_the_exact_product_of_hops() {
+        // Z3 in Rust: for power(0.5) then log, the composed map is
+        // phi(x) = ln(x^0.5) = 0.5 ln x, whose kappa_rt is
+        // |phi/(x phi')| = |0.5 ln x / (x * 0.5/x)| = |ln x| exactly.
+        // Proposition ANEE-2 says the product kappa_A(x)*kappa_B(A(x)) must
+        // equal this EXACTLY (elasticity chain rule), not to first order.
+        let c = RepresentationChoice::Composed(Representation::Power(0.5), Representation::Log);
+        for &x in &[1e-9f64, 0.3, 2.5, 1e4, 1e9]
+        {
+            let expected = x.ln().abs();
+            let got = c.kappa_rt(x);
+            assert!(
+                (got - expected).abs() <= expected.abs() * 1e-12 + 1e-12,
+                "kappa product at x={x}: got {got}, expected |ln x| = {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn composed_encode_decode_round_trips() {
+        let c = RepresentationChoice::Composed(Representation::Power(0.5), Representation::Log1p);
+        for &x in &[1e-6, 0.5, 1.0, 42.0, 1e6]
+        {
+            let y = c.encode(x).expect("in domain");
+            let back = c.decode(y);
+            assert!(
+                ((back - x) / x).abs() < 1e-12,
+                "round trip at x={x}: got {back}"
+            );
+        }
+    }
+
+    #[test]
+    fn composed_gate_rejects_out_of_domain_intermediates() {
+        // log(0.5) < 0, and Anscombe's domain is [0, inf): the composition
+        // log-then-anscombe must be rejected on data crossing 1 — by encode
+        // (the authoritative test), and therefore by the pipeline.
+        let c = RepresentationChoice::Composed(Representation::Log, Representation::Anscombe);
+        assert!(c.encode(0.5).is_none(), "negative intermediate must reject");
+        assert!(c.encode(2.0).is_some(), "positive intermediate is fine");
+        let plan = Plan {
+            representation: c,
+            accumulation: AccumMethod::NaiveF32,
+        };
+        let data = vec![0.5, 2.0, 3.0];
+        assert!(pipeline_relative_error(plan, &data, &data).is_none());
+    }
+
+    #[test]
+    fn two_hop_dictionary_is_complete_and_all_composed() {
+        let d = two_hop_dictionary();
+        assert_eq!(d.len(), 20); // 4 firsts x 5 seconds
+        assert!(
+            d.iter()
+                .all(|r| matches!(r, RepresentationChoice::Composed(_, _)))
+        );
+    }
+
+    #[test]
+    fn with_levels_at_default_matches_parameterless_entry_points() {
+        // Guard: kernel 1's published numbers must remain reproducible — the
+        // parameterless functions and _with_levels(.., 64) must agree bit-
+        // for-bit on identical inputs.
+        let dev = wide_range(3, 2048);
+        let eval = wide_range(4, 2048);
+        let plan = Plan {
+            representation: RepresentationChoice::Certified(Representation::Power(0.5)),
+            accumulation: AccumMethod::PairwiseF32,
+        };
+        assert_eq!(
+            pipeline_relative_error(plan, &dev, &eval),
+            pipeline_relative_error_with_levels(plan, &dev, &eval, 64)
+        );
     }
 }

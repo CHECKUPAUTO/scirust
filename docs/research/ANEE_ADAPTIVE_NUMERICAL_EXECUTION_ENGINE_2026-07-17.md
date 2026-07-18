@@ -32,9 +32,16 @@ flagged as such rather than asserted.
 > called for, and the **replication failed** (1 of 3 conditions, short of the pre-registered bar)
 > — a genuine, informative negative result showing the finding is conditional on the task, not
 > general. Combined, the two addenda now **actively recommend against** generalizing kernel 1's
-> win into any broader claim or tool. Neither addendum changes the verdict below, which predates
-> both prototypes and is left as originally written; together they sharpen, and then bound, the
-> one place §14 said "unconfirmed, pending a prototype." See both addenda, before Appendix A.
+> win into any broader claim or tool. A third round (Addendum 3) then attacked two of this
+> report's *own* remaining products: the Addendum-2 boundary heuristic **survived a prospective
+> dose-response test (13/15 cells)** and is now a validated decision rule — with a mandatory
+> absolute-error-floor guard learned from its two noise-floor failures — while the §4
+> "representation graph," tested for the first time *as a graph* (two-hop paths), had its wins
+> **deflated by a labeled post-hoc diagnostic to dictionary densification**: composition
+> generates useful new dictionary members (with certificates via the exact κ product law, now
+> unit-tested in code), but path structure per se showed no irreplaceable value. None of the
+> addenda changes the verdict below, which predates all three and is left as originally written.
+> See the three addenda, before Appendix A.
 
 **ANEE, as stated, does not survive falsification as a new research object — but one narrow,
 precisely-locatable piece of it survives as a genuinely open question worth a small, bounded
@@ -1194,6 +1201,109 @@ step from this report; the boundary condition identified above (joint search onl
 cheap default is objective-blind) is the more valuable and more narrowly defensible takeaway than
 either individual kernel's win/loss.
 
+## Addendum 3 (2026-07-17, same day): two self-falsification attempts on our own claims — results
+
+After Addenda 1–2, two of this report's *own* products remained untested: the Addendum-2
+boundary heuristic ("run a cheap single-axis ablation first; only invest in joint search where
+the cheap default is objective-blind and empirically wrong") had never been tested
+*prospectively*, and the §4 "representation graph" had been formalized (Proposition ANEE-2,
+validated by Z3) but its actual *graph structure* — multi-hop paths — had never been exercised:
+both Phase C kernels searched flat, single-hop dictionaries. This addendum attacks both. As
+before, all prior text is left unaltered; both protocols and criteria were written into the
+committed benchmark sources before any run.
+
+### Avenue 1 — dose-response test of the Addendum-2 heuristic
+
+**Protocol** (`examples/anee_phase_c_dose_response.rs`): kernel 1's quantizer level count —
+fixed at 64 in all published results — becomes an environmental dose knob,
+`L ∈ {8, 16, 64, 256, 1024}`, across kernel 1's three workload families = 15 cells. Per cell,
+*first* the cheap prospective predictor (dev data only: the R-axis-only ablation gap at fixed
+Neumaier accumulation; predict "joint pays" iff gap ≥ 20%), *then* the outcome (kernel 1's
+exact sequential-vs-joint protocol, 3 fresh held-out seeds, 20% bar). **P1 (decisive,
+pre-registered): predictor/outcome agreement in ≥ 12 of 15 cells, else the heuristic is
+falsified as a decision rule.** Three secondary, descriptive predictions (P2–P4) were also
+pre-registered.
+
+**Result: P1 MET — 13/15 agreement. The heuristic survives as a decision rule, with a sharp,
+newly-learned caveat.** Both disagreements are *false positives at the noise floor* (benign,
+L = 256 and L = 1024): the dev-only ablation showed large relative gaps (79.7%, 37.4%) on
+absolute errors already down at 10⁻⁶–10⁻⁵, joint search chased them, and its picks *lost* on
+held-out data (−87.8%, −34.2%). The predictor produced **zero false negatives** — it never
+missed a real win in any of the 13 cells where joint search genuinely paid. Practical
+refinement that follows directly: **the ablation gap must be guarded by an absolute-error
+floor** — ignore relative gaps when the default's absolute error already meets the target;
+relative improvement over an already-negligible error is noise, and chasing it is actively
+harmful (the joint picks at those two cells were *worse* than the default).
+
+**Secondary predictions: 1 held, 2 failed — both failures are author-model errors, reported as
+such.** P3 (wide-range reduction ≥ 20% at every L) held: 94.5–99.8% across the full range,
+confirming that for heavy-tailed data uniform quantization stays wrong at every tested level
+count, exactly as high-resolution quantization theory predicts (the uniform-vs-companded gap is
+roughly level-independent). P2 (stagnation-prone reduction decreasing in L) **failed** — the
+reduction stays at 79.6–99.6% across all L with no downward trend. The author's model error:
+assuming quantization error stops dominating for bimodal 6-decade data somewhere below L = 1024;
+in fact the small-value mode is crushed by a uniform quantizer at *every* tested L, the default
+stays empirically wrong throughout, and — consistently — the *primary* heuristic classified all
+five of those cells correctly (PAYS/PAYS); only the dose-response *shape* prediction was wrong.
+P4 (benign reduction < 20% for L ≥ 64) **failed at L = 64 by construction — a pre-registration
+authoring error**: kernel 1 had *already published* 23.1% at exactly that cell (Addendum 1),
+and P4 as written contradicted a known data point. At the two genuinely new cells (L = 256,
+1024) the prediction held (reductions negative). Recorded as a specification mistake by the
+author, not as evidence about the heuristic.
+
+### Avenue 2 — is the "representation graph" really a graph?
+
+**Protocol** (`examples/anee_phase_c_two_hop.rs`): `RepresentationChoice` gained a
+`Composed(a, b)` variant — encode `x ↦ b(a(x))`, condition number computed by the **exact
+product law of Proposition ANEE-2** (the elasticity chain rule, validated at Decimal prec-60 by
+Z3, and now additionally unit-tested in Rust: `composed_kappa_is_the_exact_product_of_hops`
+verifies κ(power(½)∘log) ≡ |ln x| to 10⁻¹²) — its first executable use. All 20 ordered two-hop
+compositions of the dictionary compete against the 5 single hops on 6 cells (3 families ×
+L ∈ {8, 64}), same selection + 3-fresh-seed protocol. **Pre-registered criterion (existential):
+the graph structure earns its name iff ≥ 1 cell shows a two-hop win (pairs winner ≥ 20% better
+than singles winner); zero wins ⇒ the "graph" is a flat dictionary wearing a graph's name.
+Author's declared prior, stated in the committed source before running: zero wins expected.**
+
+**Result: criterion MET — 2 of 6 cells are two-hop wins — and the author's declared prior was
+therefore falsified.** Wide-range L = 8: `anscombe∘anscombe` beats the best single
+(`power(½)`) by 87.8%; wide-range L = 64: `power(½)∘power(½)` beats it by 42.6%. The composed
+encode gate worked as designed throughout (16–17 of 20 compositions admitted per cell; e.g.
+log-then-Anscombe correctly rejected on data crossing 1, where the intermediate goes negative).
+
+**Post-hoc diagnostic (explicitly labeled as such in the committed source; added after the
+pre-registered run) — the wins are dictionary densification, not path structure.** Both winning
+compositions are, mathematically, just *stronger companders the single dictionary lacked*:
+`power(½)∘power(½)` **is** `power(¼)`, and `anscombe∘anscombe` behaves like a fourth-root-type
+curve. Re-running the *flat singles* search with `power(¼)` and `power(⅛)` added: at L = 64 the
+densified flat dictionary reproduces the two-hop winner's error **bit-for-bit** (7.1251×10⁻⁴ —
+confirming the `power(¼)` identity computationally), and at L = 8 it *beats* the two-hop winner
+(8.67×10⁻³ vs. 9.68×10⁻³). **Refined conclusion, both layers reported: the pre-registered
+existential claim survived (composition demonstrably reaches better plans than the base
+dictionary), but the mechanism is that composition acts as a *generator of new dictionary
+members* — a flat dictionary enriched with the same generated curves does as well or better.
+Path search over a representation graph has, on all evidence in this program, no demonstrated
+value beyond that generative role.**
+
+### What Addendum 3 changes
+
+1. **The Addendum-2 heuristic is promoted from "derived observation" to "prospectively
+   validated decision rule (13/15), with a mandatory absolute-error-floor guard"** — its two
+   observed failures are both of one type (chasing relative gaps at the noise floor), and the
+   guard eliminates exactly that type. Zero false negatives observed.
+2. **§4's "representation graph" framing is deflated, by our own experiment, to "compositional
+   closure as dictionary generator."** The recommendation for any future work changes
+   accordingly: enrich the flat dictionary with composition-generated members (e.g. a λ-grid of
+   powers, generated companders with certificates via the exact κ product law — which is
+   precisely what the `Composed` variant provides), and do **not** build shortest-path
+   machinery, for which no evidence of need exists after direct testing.
+3. **Three author predictions failed this round** (P2's regime model, P4's specification against
+   known data, avenue 2's zero-win prior) and are recorded as such. The program's protocol —
+   criteria locked in committed sources before running — is what made these failures visible
+   and cheap rather than silent.
+4. No scope expansion: no new crates, no planner, no further kernels. The operational takeaway
+   for SciRust is one selector policy (guarded ablation-first) and one dictionary-enrichment
+   mechanism (certified composition), both already implemented in `representation_graph.rs`.
+
 ## Appendix A — Experiment index
 
 `docs/research/anee_experiments/anee_experiments.py` (pure stdlib Python 3, deterministic, fixed
@@ -1220,6 +1330,18 @@ itself feature-gated) — run via `cargo test -p scirust-core --lib --features p
 `cargo run -p scirust-core --features portable-simd --example anee_phase_c_kernel2_quaternion
 --release`. All numbers quoted in Addendum 2 came from this committed code's output on
 2026-07-17.
+
+**Addendum 3 self-falsification benchmarks** (see Addendum 3):
+`scirust-core/examples/anee_phase_c_dose_response.rs` (avenue 1 — prospective dose-response
+test of the Addendum-2 heuristic over quantizer levels L ∈ {8, 16, 64, 256, 1024}) and
+`scirust-core/examples/anee_phase_c_two_hop.rs` (avenue 2 — two-hop compositions vs. the flat
+single-hop dictionary, including the labeled post-hoc densified-singles diagnostic), both
+running against `representation_graph.rs`'s `*_with_levels` entry points and the new
+`RepresentationChoice::Composed` variant (exact κ product law per Proposition ANEE-2, unit
+test `composed_kappa_is_the_exact_product_of_hops`). Rust, deterministic (fixed seeds), default
+features — `cargo run -p scirust-core --example anee_phase_c_dose_response --release` and
+`cargo run -p scirust-core --example anee_phase_c_two_hop --release`. All numbers quoted in
+Addendum 3 came from this committed code's output on 2026-07-17.
 
 ## Appendix B — Verified sources (this phase, not already in [TSA]/[ATRA]/[CANR] Appendix B)
 
