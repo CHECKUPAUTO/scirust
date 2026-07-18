@@ -301,6 +301,40 @@ fn bench_eigenvalues_general(c: &mut Criterion) {
     g.finish();
 }
 
+/// Vecteur propre réel par itération inverse (`eigenvector_real`) : réutilise
+/// `lu_solve` à chaque itération — coût dominé par le nombre d'itérations
+/// nécessaires à la convergence (borné par `max_iter`), pas une formule
+/// fermée. La valeur propre ciblée est calculée une fois, hors mesure, par
+/// `eigenvalues_general` (déjà benchée séparément ci-dessus).
+fn bench_eigenvector_real(c: &mut Criterion) {
+    let a = fixed_data(0x18, N * N);
+    let eigenvalues = flin::eigenvalues_general(&a, N, Q16_16::try_from(1e-4).unwrap(), 100 * N)
+        .expect("pas de débordement / convergence");
+    let lambda = eigenvalues
+        .iter()
+        .find_map(|&e| match e
+        {
+            flin::Eigenvalue::Real(x) => Some(x),
+            flin::Eigenvalue::Complex(_, _) => None,
+        })
+        .expect("au moins une valeur propre réelle pour cette échelle");
+
+    let mut g = c.benchmark_group("eigenvector_real_48");
+    g.throughput(Throughput::Elements((N * N) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter(|| {
+            flin::eigenvector_real(
+                black_box(&a),
+                N,
+                lambda,
+                Q16_16::try_from(1e-5).unwrap(),
+                50,
+            )
+        })
+    });
+    g.finish();
+}
+
 /// Racines d'un polynôme de degré 48 (coefficients bornés, aucune racine
 /// connue à l'avance) : matrice compagnon + `eigenvalues_general`.
 fn bench_poly_roots(c: &mut Criterion) {
@@ -363,6 +397,7 @@ criterion_group!(
     bench_svd,
     bench_hessenberg,
     bench_eigenvalues_general,
+    bench_eigenvector_real,
     bench_poly_roots,
     bench_matrix_exp,
     bench_generalized_eig_symmetric

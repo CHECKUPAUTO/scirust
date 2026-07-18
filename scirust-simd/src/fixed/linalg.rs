@@ -61,6 +61,20 @@
 // — **aucune arithmétique complexe** n'est nécessaire, seul [`Eigenvalue`]
 // distingue les deux cas en sortie).
 //
+// [`eigenvector_real`]/[`eigenvectors_general`] complètent `eigenvalues_general`
+// par la récupération de **vecteurs propres**, restreinte aux valeurs propres
+// **réelles** (une paire complexe conjuguée demanderait une arithmétique
+// complexe non encore générique sur ce chemin virgule fixe — limite
+// documentée plutôt qu'une tentative fragile). Méthode : **itération inverse**
+// (« inverse iteration »), qui réutilise directement [`lu_solve`] déjà
+// éprouvé — `(A − λI)` légèrement décalée est presque singulière près d'une
+// valeur propre, et résoudre `(A − λI)·xₖ₊₁ = xₖ` itérativement amplifie la
+// composante du vecteur propre recherché. Aucun nouveau risque numérique
+// majeur (contrairement à l'accumulation de la transformation orthogonale à
+// travers Hessenberg + QR décalé, qui exigerait ensuite une substitution sur
+// la forme de Schur réelle avec ses blocs `2×2` complexes — approche
+// délibérément évitée ici).
+//
 // [`companion_matrix`]/[`poly_roots`] exploitent `eigenvalues_general` pour
 // trouver les **racines d'un polynôme** : les valeurs propres de la matrice
 // compagnon d'un polynôme sont exactement ses racines (fait classique,
@@ -1428,6 +1442,158 @@ where
     }
 
     Some(eigenvalues)
+}
+
+// ------------------------------------------------------------------ //
+//  Vecteurs propres (itération inverse) — complète eigenvalues_general //
+// ------------------------------------------------------------------ //
+
+/// Normalise `v` à norme L2 unité (en place). `None` si `v` est nul.
+///
+/// En **deux temps** (comme un `nrm2` robuste — même précaution que le
+/// calcul de rotation de Givens de [`eigenvalues_general`]) : `v` est
+/// d'abord mis à l'échelle par sa plus grande composante en valeur absolue,
+/// avant de calculer `dot(v, v)`. [`eigenvector_real`] peut produire des
+/// composantes de magnitude bien supérieure à `1` après une résolution
+/// contre une matrice presque singulière (l'amplification recherchée par
+/// l'itération inverse) — élever une telle composante au carré **avant**
+/// mise à l'échelle dépasserait la plage représentable de `T`, même si la
+/// composante elle-même est représentable.
+fn normalize_l2<T: FixedReducible + Sub<Output = T>>(v: &mut [T]) -> Option<()> {
+    let mut max_abs = T::ZERO;
+    for &x in v.iter()
+    {
+        let a = x.abs();
+        if a > max_abs
+        {
+            max_abs = a;
+        }
+    }
+    if max_abs == T::ZERO
+    {
+        return None;
+    }
+    for x in v.iter_mut()
+    {
+        *x = x.checked_div(max_abs)?;
+    }
+
+    let norm = dot(v, v).sqrt();
+    if norm == T::ZERO
+    {
+        return None;
+    }
+    for x in v.iter_mut()
+    {
+        *x = x.checked_div(norm)?;
+    }
+    Some(())
+}
+
+/// Vecteur propre associé à une valeur propre **réelle** déjà connue
+/// (typiquement issue de [`eigenvalues_general`]), par **itération inverse**
+/// (« inverse iteration », méthode standard) : `(A − λI)` est presque
+/// singulière lorsque `eigenvalue` est proche de la vraie valeur propre —
+/// résoudre `(A − λI)·xₖ₊₁ = xₖ` (via [`lu_solve`], déjà éprouvé),
+/// normaliser, répéter, amplifie à chaque étape la composante du vecteur
+/// propre recherché (seule direction où `(A − λI)` est presque nulle).
+///
+/// `eigenvalue` est légèrement décalé avant de construire le système : un
+/// décalage **exactement nul** rendrait `(A − λI)` singulière par
+/// construction (`lu_decompose` échouerait sur un pivot nul). Le décalage
+/// (`1/1000` d'une unité) est délibérément petit devant l'écart typique
+/// entre valeurs propres distinctes — l'itération converge vers le vecteur
+/// propre de la valeur propre la **plus proche** de `eigenvalue` (propriété
+/// classique de l'itération inverse, exploitée par les tests : `eigenvalue`
+/// n'a pas besoin d'être exact, seulement suffisamment proche).
+///
+/// Le vecteur initial est `(1, …, 1)` normalisé ; chaque itération est
+/// réalignée en signe sur la précédente (l'itération inverse ne fixe le
+/// vecteur qu'à un signe près) avant de tester la convergence (écart
+/// composante par composante `≤ tol`) — arrêt anticipé, `max_iter` ne borne
+/// que le pire cas.
+///
+/// `None` si `(1, …, 1)` est nul (`n = 0`), si `(A − λI)` décalée reste
+/// singulière (rarissime, décalage non nul), ou en cas de débordement
+/// virgule fixe. Panique si `a.len() != n·n`.
+#[must_use]
+pub fn eigenvector_real<T: FixedReducible + Sub<Output = T>>(
+    a: &[T],
+    n: usize,
+    eigenvalue: T,
+    tol: T,
+    max_iter: usize,
+) -> Option<Vec<T>> {
+    assert_eq!(
+        a.len(),
+        n * n,
+        "eigenvector_real : A de longueur {} ≠ {n}×{n}",
+        a.len()
+    );
+
+    let eps = small_int::<T>(1).checked_div(small_int::<T>(1000))?;
+    let shifted_eigenvalue = eigenvalue.wrapping_add(eps);
+    let mut shifted = a.to_vec();
+    for i in 0..n
+    {
+        shifted[i * n + i] = shifted[i * n + i] - shifted_eigenvalue;
+    }
+
+    let mut v = vec![T::one(); n];
+    normalize_l2(&mut v)?;
+
+    for _ in 0..max_iter
+    {
+        let mut x = lu_solve(&shifted, &v, n)?;
+        normalize_l2(&mut x)?;
+        if dot(&x, &v) < T::ZERO
+        {
+            for xi in x.iter_mut()
+            {
+                *xi = T::ZERO - *xi;
+            }
+        }
+        let mut max_diff = T::ZERO;
+        for i in 0..n
+        {
+            let d = (x[i] - v[i]).abs();
+            if d > max_diff
+            {
+                max_diff = d;
+            }
+        }
+        v = x;
+        if max_diff <= tol
+        {
+            break;
+        }
+    }
+    Some(v)
+}
+
+/// Vecteurs propres pour toutes les valeurs propres **réelles** de
+/// `eigenvalues` (telles que renvoyées par [`eigenvalues_general`]), via
+/// [`eigenvector_real`] — `None` à l'indice `i` si `eigenvalues[i]` est une
+/// paire complexe conjuguée (la récupération de vecteurs propres complexes
+/// demanderait une arithmétique complexe non encore générique sur ce chemin
+/// virgule fixe — limite documentée, cf. [`eigenvector_real`]) ou si
+/// l'itération inverse échoue pour cette valeur.
+#[must_use]
+pub fn eigenvectors_general<T: FixedReducible + Sub<Output = T>>(
+    a: &[T],
+    n: usize,
+    eigenvalues: &[Eigenvalue<T>],
+    tol: T,
+    max_iter: usize,
+) -> Vec<Option<Vec<T>>> {
+    eigenvalues
+        .iter()
+        .map(|&ev| match ev
+        {
+            Eigenvalue::Real(lambda) => eigenvector_real(a, n, lambda, tol, max_iter),
+            Eigenvalue::Complex(_, _) => None,
+        })
+        .collect()
 }
 
 // ------------------------------------------------------------------ //

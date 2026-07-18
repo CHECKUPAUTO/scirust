@@ -1901,6 +1901,235 @@ fn eigenvalues_general_converges_at_larger_scale() {
 }
 
 // ------------------------------------------------------------------ //
+//  Vecteurs propres réels (itération inverse)                        //
+// ------------------------------------------------------------------ //
+
+/// Matrice `n×n` à valeurs propres RÉELLES connues et distinctes
+/// (`eigenvalues`) : `A = P·diag(eigenvalues)·P⁻¹` pour `P` aléatoire
+/// générique (coefficients modestes, diagonale légèrement renforcée pour
+/// garantir l'inversibilité **sans** rendre `P` quasi diagonale) — les
+/// colonnes de `P` sont alors exactement les vecteurs propres de `A`
+/// (`A·P = P·D` ⟹ `A·pᵢ = λᵢ·pᵢ`), référence indépendante de la
+/// construction pour [`linalg::eigenvector_real`].
+///
+/// Délibérément **pas** [`random_diag_dominant`] : une `P` quasi diagonale
+/// rendrait `A` elle-même quasi diagonale, ce qui déclenche une déflation
+/// immédiate (1×1) de `eigenvalues_general` dès la réduction de Hessenberg —
+/// avant toute itération QR de raffinement — sur la base d'une
+/// sous-diagonale déjà petite par construction plutôt que par convergence,
+/// avec une précision dégradée sur la valeur propre lue. Une `P` générique
+/// (coefficients comparables) évite ce cas limite.
+fn matrix_with_known_real_eigenvectors(
+    rng: &mut Lcg,
+    n: usize,
+    eigenvalues: &[Q16_16],
+) -> (Vec<Q16_16>, Vec<Q16_16>) {
+    assert_eq!(eigenvalues.len(), n);
+    let mut p: Vec<Q16_16> = (0..n * n)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 8))
+        .collect();
+    for i in 0..n
+    {
+        p[i * n + i] += Q16_16::from_i32(3);
+    }
+    let mut p_inv = vec![Q16_16::zero(); n * n];
+    for j in 0..n
+    {
+        let mut e_j = vec![Q16_16::zero(); n];
+        e_j[j] = Q16_16::one();
+        let col = linalg::lu_solve(&p, &e_j, n).expect("P inversible");
+        for i in 0..n
+        {
+            p_inv[i * n + j] = col[i];
+        }
+    }
+    let mut d = vec![Q16_16::zero(); n * n];
+    for i in 0..n
+    {
+        d[i * n + i] = eigenvalues[i];
+    }
+    let pd = linalg::matmul(&p, &d, n, n, n);
+    let a = linalg::matmul(&pd, &p_inv, n, n, n);
+    (a, p)
+}
+
+/// Aligne `got` sur `want` à un signe près (l'itération inverse ne fixe un
+/// vecteur propre qu'à un scalaire près) et renvoie l'écart max composante
+/// par composante.
+fn signed_max_diff(got: &[Q16_16], want: &[f64]) -> f64 {
+    let dot_sign: f64 = got.iter().zip(want).map(|(&g, &w)| g.to_f64() * w).sum();
+    let sign = if dot_sign < 0.0 { -1.0 } else { 1.0 };
+    got.iter()
+        .zip(want)
+        .map(|(&g, &w)| (g.to_f64() - sign * w).abs())
+        .fold(0.0, f64::max)
+}
+
+#[test]
+fn eigenvector_real_matches_known_construction() {
+    let mut rng = Lcg(0xE164_0001);
+    let n = 3;
+    let eigenvalues = [q16(2.0), q16(5.0), q16(9.0)]; // bien séparées
+    let (a, p) = matrix_with_known_real_eigenvectors(&mut rng, n, &eigenvalues);
+
+    for k in 0..n
+    {
+        let lambda = eigenvalues[k];
+        let got = linalg::eigenvector_real(&a, n, lambda, q16(1e-5), 50)
+            .expect("itération inverse converge");
+
+        // Propriété directe, indépendante de la construction P : A·v ≈ λ·v.
+        let av = linalg::matvec(&a, &got, n, n);
+        for i in 0..n
+        {
+            let diff = (av[i].to_f64() - lambda.to_f64() * got[i].to_f64()).abs();
+            assert!(
+                diff <= 5e-3,
+                "k={k} i={i}: A·v={} vs λ·v={}",
+                av[i].to_f64(),
+                lambda.to_f64() * got[i].to_f64()
+            );
+        }
+
+        // Direction : colonne k de P, normalisée, à un signe près.
+        let mut want: Vec<f64> = (0..n).map(|i| p[i * n + k].to_f64()).collect();
+        let norm: f64 = want.iter().map(|x| x * x).sum::<f64>().sqrt();
+        for x in want.iter_mut()
+        {
+            *x /= norm;
+        }
+        let diff = signed_max_diff(&got, &want);
+        assert!(diff <= 5e-3, "k={k}: écart de direction {diff}");
+    }
+}
+
+#[test]
+fn eigenvector_real_converges_from_approximate_eigenvalue() {
+    // L'itération inverse converge vers le vecteur propre de la valeur
+    // propre la PLUS PROCHE de l'estimation fournie (propriété classique de
+    // la méthode, cf. en-tête de fonction) : un eigenvalue légèrement
+    // perturbé doit encore donner le bon vecteur, tant que la perturbation
+    // reste petite devant l'écart aux autres valeurs propres (2,0/9,0 ici).
+    let mut rng = Lcg(0xE164_0002);
+    let n = 3;
+    let eigenvalues = [q16(2.0), q16(5.0), q16(9.0)];
+    let (a, p) = matrix_with_known_real_eigenvectors(&mut rng, n, &eigenvalues);
+
+    let got = linalg::eigenvector_real(&a, n, q16(5.1), q16(1e-5), 50)
+        .expect("converge malgré l'approximation");
+
+    let mut want: Vec<f64> = (0..n).map(|i| p[i * n + 1].to_f64()).collect();
+    let norm: f64 = want.iter().map(|x| x * x).sum::<f64>().sqrt();
+    for x in want.iter_mut()
+    {
+        *x /= norm;
+    }
+    let diff = signed_max_diff(&got, &want);
+    assert!(diff <= 1e-2, "écart de direction {diff}");
+}
+
+#[test]
+fn eigenvector_real_matches_jacobi_eigen_known_2x2() {
+    // A = [[2,1],[1,2]] : valeurs propres 3 et 1 (A=[[a,b],[b,a]] ⟹ λ=a±b,
+    // calcul à la main), vecteurs propres (1,1)/√2 et (1,−1)/√2 — comparé
+    // ici à jacobi_eigen (déjà validé), pas à la solution analytique
+    // directement, preuve croisée entre les deux algorithmes.
+    let a = [q16(2.0), q16(1.0), q16(1.0), q16(2.0)];
+    let (eigenvalues, v, _) = linalg::jacobi_eigen(&a, 2, q16(1e-4), 20).expect("2×2 direct");
+
+    for k in 0..2
+    {
+        let lambda = eigenvalues[k];
+        let got = linalg::eigenvector_real(&a, 2, lambda, q16(1e-6), 30)
+            .expect("itération inverse converge");
+        let want: Vec<f64> = (0..2).map(|i| v[i * 2 + k].to_f64()).collect();
+        let diff = signed_max_diff(&got, &want);
+        assert!(diff <= 1e-3, "k={k}: écart de direction {diff}");
+    }
+}
+
+#[test]
+fn eigenvectors_general_matches_eigenvalue_equation() {
+    let mut rng = Lcg(0xE164_0004);
+    let n = 4;
+    let eigenvalues_known = [q16(2.0), q16(5.0), q16(9.0), q16(13.0)];
+    let (a, _p) = matrix_with_known_real_eigenvectors(&mut rng, n, &eigenvalues_known);
+
+    let eigenvalues = linalg::eigenvalues_general(&a, n, q16(1e-4), 200)
+        .expect("pas de débordement / convergence");
+    let vectors = linalg::eigenvectors_general(&a, n, &eigenvalues, q16(1e-5), 50);
+
+    assert_eq!(vectors.len(), n);
+    for (i, (ev, v)) in eigenvalues.iter().zip(&vectors).enumerate()
+    {
+        let linalg::Eigenvalue::Real(lambda) = *ev
+        else
+        {
+            panic!(
+                "i={i}: valeur propre complexe inattendue pour une matrice à spectre réel connu"
+            );
+        };
+        let v = v
+            .as_ref()
+            .unwrap_or_else(|| panic!("i={i}: itération inverse doit converger"));
+        let av = linalg::matvec(&a, v, n, n);
+        for j in 0..n
+        {
+            let diff = (av[j].to_f64() - lambda.to_f64() * v[j].to_f64()).abs();
+            assert!(
+                diff <= 1e-2,
+                "i={i} j={j}: A·v={} vs λ·v={}",
+                av[j].to_f64(),
+                lambda.to_f64() * v[j].to_f64()
+            );
+        }
+    }
+}
+
+#[test]
+fn eigenvectors_general_returns_none_for_complex_eigenvalues() {
+    // Rotation 90° : valeurs propres ±i, purement complexes — aucune valeur
+    // propre réelle, donc aucun vecteur propre réel à récupérer.
+    let n = 2;
+    let a = [q16(0.0), q16(-1.0), q16(1.0), q16(0.0)];
+    let eigenvalues = linalg::eigenvalues_general(&a, n, q16(1e-4), 50).expect("2×2 direct");
+    assert!(
+        eigenvalues
+            .iter()
+            .all(|e| matches!(e, linalg::Eigenvalue::Complex(_, _)))
+    );
+
+    let vectors = linalg::eigenvectors_general(&a, n, &eigenvalues, q16(1e-5), 50);
+    assert_eq!(vectors, vec![None, None]);
+}
+
+#[test]
+fn eigenvector_real_i64_storage() {
+    // Diagonale : valeurs propres = coefficients diagonaux, vecteur propre
+    // de 7 = base canonique (0,1) à un signe près (calcul immédiat).
+    let a = [3i64, 0, 0, 7].map(Q32_32::from);
+    let got =
+        linalg::eigenvector_real(&a, 2, Q32_32::from(7i64), Q32_32::zero(), 20).expect("converge");
+    assert!(
+        got[0].to_f64().abs() <= 1e-4,
+        "composante 0 : {}",
+        got[0].to_f64()
+    );
+    assert!(
+        (got[1].to_f64().abs() - 1.0).abs() <= 1e-4,
+        "composante 1 : {}",
+        got[1].to_f64()
+    );
+}
+
+#[test]
+#[should_panic(expected = "eigenvector_real")]
+fn eigenvector_real_dim_mismatch_panics() {
+    let a = vec![Q16_16::zero(); 5]; // annoncé 3×3 = 9 ≠ 5.
+    let _ = linalg::eigenvector_real(&a, 3, Q16_16::zero(), q16(1e-4), 10);
+}
+
+// ------------------------------------------------------------------ //
 //  Racines de polynôme (matrice compagnon + eigenvalues_general)      //
 // ------------------------------------------------------------------ //
 

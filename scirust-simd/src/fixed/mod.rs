@@ -81,7 +81,9 @@
 //   (`generalized_eig_symmetric`, réduction de Cholesky puis `jacobi_eigen`),
 //   les valeurs propres d'une matrice **quelconque** (`hessenberg` +
 //   `eigenvalues_general`, réelles ou complexes conjuguées via
-//   [`linalg::Eigenvalue`]), et les **racines d'un polynôme**
+//   [`linalg::Eigenvalue`]), leurs **vecteurs propres réels** par itération
+//   inverse (`linalg::eigenvector_real`/`linalg::eigenvectors_general`), et
+//   les **racines d'un polynôme**
 //   (`companion_matrix`/`poly_roots`, valeurs propres de sa matrice
 //   compagnon), et l'**exponentielle de matrice** (`matrix_exp`, mise à
 //   l'échelle et carrés répétés — fonctionne pour toute matrice, y compris
