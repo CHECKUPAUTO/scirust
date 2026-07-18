@@ -66,6 +66,9 @@
 //! - [`bigint`] — arbitrary-precision signed integers (`BigInt`): decimal I/O,
 //!   comparison, `+ − ×`, truncated `divmod`, `pow`, and `gcd`, lifting the
 //!   crate's exactness above the `i128` ceiling.
+//! - [`bigrational`] — exact rationals over `BigInt` (`BigRational`) and
+//!   **overflow-free** exact linear algebra (`solve`, `determinant`), the
+//!   scalable counterpart of `rational` (e.g. an exact Hilbert-matrix solve).
 //!
 //! Everything is deterministic and reproducible bit-for-bit on every platform.
 //!
@@ -191,8 +194,18 @@
 //!     "340282366920938463463374607431768211456"
 //! );
 //! ```
+//!
+//! ```
+//! use scirust_modalg::bigrational::BigRational;
+//!
+//! // Exact rationals with no overflow ceiling: 1/2 + 1/3 = 5/6.
+//! let sum = BigRational::from_i128(1).div(&BigRational::from_i128(2))
+//!     .add(&BigRational::from_i128(1).div(&BigRational::from_i128(3)));
+//! assert_eq!(sum.to_string_frac(), "5/6");
+//! ```
 
 pub mod bigint;
+pub mod bigrational;
 pub mod boolean;
 pub mod codes;
 pub mod crc;
@@ -207,6 +220,7 @@ pub mod ring;
 pub mod sbox;
 
 pub use bigint::BigInt;
+pub use bigrational::BigRational;
 pub use codes::ReedSolomon;
 pub use crc::Crc;
 pub use gf2::Gf2Field;
