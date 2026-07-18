@@ -301,6 +301,20 @@ fn bench_eigenvalues_general(c: &mut Criterion) {
     g.finish();
 }
 
+/// Racines d'un polynôme de degré 48 (coefficients bornés, aucune racine
+/// connue à l'avance) : matrice compagnon + `eigenvalues_general`.
+fn bench_poly_roots(c: &mut Criterion) {
+    let mut coeffs = fixed_data(0x14, N + 1);
+    coeffs[0] = Q16_16::one(); // coefficient dominant non nul (forme monique directe).
+
+    let mut g = c.benchmark_group("poly_roots_deg48");
+    g.throughput(Throughput::Elements((N * N * N) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter(|| flin::poly_roots(black_box(&coeffs), Q16_16::try_from(1e-4).unwrap(), 100 * N))
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_matmul,
@@ -313,6 +327,7 @@ criterion_group!(
     bench_jacobi_eigen,
     bench_svd,
     bench_hessenberg,
-    bench_eigenvalues_general
+    bench_eigenvalues_general,
+    bench_poly_roots
 );
 criterion_main!(benches);

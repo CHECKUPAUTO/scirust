@@ -50,6 +50,15 @@
 // — **aucune arithmétique complexe** n'est nécessaire, seul [`Eigenvalue`]
 // distingue les deux cas en sortie).
 //
+// [`companion_matrix`]/[`poly_roots`] exploitent `eigenvalues_general` pour
+// trouver les **racines d'un polynôme** : les valeurs propres de la matrice
+// compagnon d'un polynôme sont exactement ses racines (fait classique,
+// méthode standard de LAPACK/MATLAB `roots`) — bien plus robuste qu'une
+// méthode itérative directe (Durand-Kerner) sur un polynôme mal conditionné,
+// et **zéro nouveau risque numérique** : assemblage de la matrice compagnon
+// (anneau + une division réelle par le coefficient dominant) suivi d'un
+// simple appel à [`eigenvalues_general`], déjà éprouvé.
+//
 // `qr_solve` complète plutôt qu'il ne duplique Cholesky : résoudre les
 // moindres carrés via les équations normales (`cholesky_solve` sur `AᵀA`)
 // **double** l'exposant de conditionnement du problème (`cond(AᵀA) =
@@ -109,7 +118,7 @@
 // condition d'inversibilité) — son `None` ne survient qu'en cas de
 // débordement virgule fixe pendant une réflexion.
 
-use core::ops::Sub;
+use core::ops::{Div, Sub};
 
 use super::reductions::{FixedReducible, dot};
 
@@ -1305,4 +1314,68 @@ where
     }
 
     Some(eigenvalues)
+}
+
+// ------------------------------------------------------------------ //
+//  Racines de polynôme (matrice compagnon + eigenvalues_general)      //
+// ------------------------------------------------------------------ //
+
+/// Matrice compagnon (`n × n` row-major) du polynôme de coefficients
+/// `coeffs` (degré le plus haut en premier : `[aₙ, aₙ₋₁, …, a₀]`, `n + 1`
+/// coefficients pour un polynôme de degré `n`, monique ou non — normalisé en
+/// interne par le coefficient dominant `aₙ`, via l'opérateur `/` comme
+/// partout ailleurs dans le module, pas `.recip()` mis en cache).
+///
+/// Convention standard (forme de Frobenius) : dernière colonne
+/// `= −(aᵢ/aₙ)`, sous-diagonale `= 1`. Ses valeurs propres sont exactement
+/// les racines du polynôme ([`poly_roots`]).
+///
+/// Panique si `coeffs.len() < 2` (degré doit être `≥ 1`) ou si le
+/// coefficient dominant `coeffs[0]` est nul (degré surestimé).
+#[must_use]
+pub fn companion_matrix<T>(coeffs: &[T]) -> Vec<T>
+where
+    T: FixedReducible + Sub<Output = T> + Div<Output = T>,
+{
+    assert!(
+        coeffs.len() >= 2,
+        "companion_matrix : degré doit être ≥ 1 (au moins 2 coefficients)"
+    );
+    let n = coeffs.len() - 1;
+    let leading = coeffs[0];
+    assert!(
+        leading != T::ZERO,
+        "companion_matrix : coefficient dominant nul (degré surestimé)"
+    );
+
+    let mut m = vec![T::ZERO; n * n];
+    for i in 0..n
+    {
+        let ci = coeffs[n - i] / leading; // a_i / a_n (coefficient monique de x^i)
+        m[i * n + (n - 1)] = T::ZERO - ci;
+    }
+    for i in 0..n - 1
+    {
+        m[(i + 1) * n + i] = T::one();
+    }
+    m
+}
+
+/// Racines (réelles ou paires complexes conjuguées, [`Eigenvalue`]) du
+/// polynôme de coefficients `coeffs` (degré le plus haut en premier, cf.
+/// [`companion_matrix`]) : valeurs propres de la matrice compagnon
+/// ([`eigenvalues_general`]).
+///
+/// `tol`/`max_iter` : mêmes paramètres que [`eigenvalues_general`]. `None`
+/// en cas de débordement virgule fixe ou de non-convergence (cf.
+/// [`eigenvalues_general`]). Panique dans les mêmes conditions que
+/// [`companion_matrix`].
+#[must_use]
+pub fn poly_roots<T>(coeffs: &[T], tol: T, max_iter: usize) -> Option<Vec<Eigenvalue<T>>>
+where
+    T: FixedReducible + Sub<Output = T> + Div<Output = T>,
+{
+    let companion = companion_matrix(coeffs);
+    let n = coeffs.len() - 1;
+    eigenvalues_general(&companion, n, tol, max_iter)
 }

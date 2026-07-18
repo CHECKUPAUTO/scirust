@@ -1749,6 +1749,211 @@ fn eigenvalues_general_converges_at_larger_scale() {
 }
 
 // ------------------------------------------------------------------ //
+//  Racines de polynôme (matrice compagnon + eigenvalues_general)      //
+// ------------------------------------------------------------------ //
+
+fn sorted_real_parts(roots: Vec<linalg::Eigenvalue<Q16_16>>) -> Vec<f64> {
+    let mut v: Vec<f64> = roots.into_iter().map(eigenvalue_re_f64).collect();
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    v
+}
+
+#[test]
+fn companion_matrix_known_cubic_example() {
+    // (x−1)(x−2)(x−3) = x³ − 6x² + 11x − 6 : même exemple que
+    // eigenvalues_general_companion_matrix_known_real_roots, construit ici
+    // via companion_matrix plutôt qu'à la main — preuve croisée directe.
+    let coeffs = [q16(1.0), q16(-6.0), q16(11.0), q16(-6.0)];
+    let got = linalg::companion_matrix(&coeffs);
+    #[rustfmt::skip]
+    let want = [
+        q16(0.0), q16(0.0), q16(6.0),
+        q16(1.0), q16(0.0), q16(-11.0),
+        q16(0.0), q16(1.0), q16(6.0),
+    ];
+    assert_eq!(got, want);
+}
+
+#[test]
+fn poly_roots_quadratic_known_real_roots() {
+    // x² − 5x + 6 = (x−2)(x−3).
+    let coeffs = [q16(1.0), q16(-5.0), q16(6.0)];
+    let got = linalg::poly_roots(&coeffs, q16(1e-4), 50).expect("quadratique : converge");
+    let got = sorted_real_parts(got);
+    for (g, want) in got.iter().zip(&[2.0, 3.0])
+    {
+        assert!((g - want).abs() <= 5e-3, "racines {got:?} vs [2,3]");
+    }
+}
+
+#[test]
+fn poly_roots_cubic_known_real_roots() {
+    // (x−1)(x−2)(x−3) = x³ − 6x² + 11x − 6.
+    let coeffs = [q16(1.0), q16(-6.0), q16(11.0), q16(-6.0)];
+    let got = linalg::poly_roots(&coeffs, q16(1e-4), 200).expect("cubique : converge");
+    let got = sorted_real_parts(got);
+    for (g, want) in got.iter().zip(&[1.0, 2.0, 3.0])
+    {
+        assert!((g - want).abs() <= 5e-3, "racines {got:?} vs [1,2,3]");
+    }
+}
+
+#[test]
+fn poly_roots_quintic_well_separated_real_roots() {
+    // (x−1)(x−2)(x−3)(x−4)(x−5) = x⁵ − 15x⁴ + 85x³ − 225x² + 274x − 120 :
+    // degré plus élevé, racines réelles bien séparées — plusieurs itérations
+    // QR nécessaires, aucune racine fermée disponible autrement.
+    let coeffs = [
+        q16(1.0),
+        q16(-15.0),
+        q16(85.0),
+        q16(-225.0),
+        q16(274.0),
+        q16(-120.0),
+    ];
+    let got = linalg::poly_roots(&coeffs, q16(1e-4), 1000).expect("quintique : converge");
+    let got = sorted_real_parts(got);
+    for (g, want) in got.iter().zip(&[1.0, 2.0, 3.0, 4.0, 5.0])
+    {
+        assert!((g - want).abs() <= 5e-2, "racines {got:?} vs [1,2,3,4,5]");
+    }
+}
+
+#[test]
+fn poly_roots_complex_conjugate_pair() {
+    // x² + 1 = 0 : racines ±i.
+    let coeffs = [q16(1.0), q16(0.0), q16(1.0)];
+    let got = linalg::poly_roots(&coeffs, q16(1e-4), 50).expect("x²+1 : direct");
+    let tol = 5e-3;
+    for e in got
+    {
+        match e
+        {
+            linalg::Eigenvalue::Complex(re, im) =>
+            {
+                assert!(re.to_f64().abs() <= tol, "re={}", re.to_f64());
+                assert!((im.to_f64().abs() - 1.0).abs() <= tol, "im={}", im.to_f64());
+            },
+            linalg::Eigenvalue::Real(x) =>
+            {
+                panic!("x²+1 : racine réelle inattendue {}", x.to_f64())
+            },
+        }
+    }
+}
+
+#[test]
+fn poly_roots_non_monic_leading_coefficient() {
+    // 2x² − 10x + 12 = 2·(x−2)·(x−3) : mêmes racines que la forme monique,
+    // le coefficient dominant non unitaire doit être normalisé correctement.
+    let coeffs = [q16(2.0), q16(-10.0), q16(12.0)];
+    let got = linalg::poly_roots(&coeffs, q16(1e-4), 50).expect("non monique : converge");
+    let got = sorted_real_parts(got);
+    for (g, want) in got.iter().zip(&[2.0, 3.0])
+    {
+        assert!((g - want).abs() <= 5e-3, "racines {got:?} vs [2,3]");
+    }
+}
+
+#[test]
+fn poly_roots_repeated_root() {
+    // (x−2)² = x² − 4x + 4 : racine double, cas potentiellement délicat pour
+    // une itération QR (valeurs propres confondues).
+    let coeffs = [q16(1.0), q16(-4.0), q16(4.0)];
+    let got = linalg::poly_roots(&coeffs, q16(1e-4), 100).expect("racine double : converge");
+    let got = sorted_real_parts(got);
+    for &g in &got
+    {
+        assert!((g - 2.0).abs() <= 1e-2, "racines {got:?} vs [2,2]");
+    }
+}
+
+#[test]
+fn poly_roots_linear_degree_one() {
+    // 3x − 6 = 0 : racine unique x = 2 (bloc 1×1 direct, aucune itération).
+    let coeffs = [q16(3.0), q16(-6.0)];
+    let got = linalg::poly_roots(&coeffs, q16(1e-4), 10).expect("linéaire : direct");
+    assert_eq!(got.len(), 1);
+    match got[0]
+    {
+        linalg::Eigenvalue::Real(x) => assert!((x.to_f64() - 2.0).abs() <= 1e-3),
+        other => panic!("linéaire : racine complexe inattendue {other:?}"),
+    }
+}
+
+#[test]
+fn poly_roots_i64_storage() {
+    // Même exemple que poly_roots_quadratic_known_real_roots, stockage i64
+    // (Q32_32) : aucune transcendante requise, généralisable sans réécriture
+    // (cf. jacobi_eigen/svd/eigenvalues_general).
+    let coeffs = [
+        Q32_32::try_from(1.0).unwrap(),
+        Q32_32::try_from(-5.0).unwrap(),
+        Q32_32::try_from(6.0).unwrap(),
+    ];
+    let got = linalg::poly_roots(&coeffs, Q32_32::zero(), 50).expect("quadratique i64 : converge");
+    let mut got_f64: Vec<f64> = got
+        .into_iter()
+        .map(|e| match e
+        {
+            linalg::Eigenvalue::Real(x) => Q32_32::to_f64(x),
+            linalg::Eigenvalue::Complex(re, _) => Q32_32::to_f64(re),
+        })
+        .collect();
+    got_f64.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    for (g, want) in got_f64.iter().zip(&[2.0, 3.0])
+    {
+        assert!((g - want).abs() <= 5e-3, "racines {got_f64:?} vs [2,3]");
+    }
+}
+
+#[test]
+#[should_panic(expected = "companion_matrix")]
+fn companion_matrix_rejects_too_few_coefficients() {
+    let coeffs = [q16(5.0)]; // un seul coefficient : degré 0, non supporté.
+    let _ = linalg::companion_matrix(&coeffs);
+}
+
+#[test]
+#[should_panic(expected = "companion_matrix")]
+fn companion_matrix_rejects_zero_leading_coefficient() {
+    let coeffs = [Q16_16::zero(), q16(1.0), q16(2.0)];
+    let _ = linalg::companion_matrix(&coeffs);
+}
+
+#[test]
+#[should_panic(expected = "companion_matrix")]
+fn poly_roots_rejects_too_few_coefficients() {
+    let coeffs = [q16(5.0)];
+    let _ = linalg::poly_roots(&coeffs, q16(1e-4), 10);
+}
+
+#[test]
+fn poly_roots_converges_at_larger_degree() {
+    // Comme eigenvalues_general_converges_at_larger_scale : robustesse à un
+    // degré plus élevé (coefficients aléatoires modestes, pas de racine
+    // connue à l'avance — seule la convergence est vérifiée ici).
+    for seed in 0..5u64
+    {
+        let mut rng = Lcg(0x9012_0000u64.wrapping_add(seed));
+        for &degree in &[8usize, 16, 24]
+        {
+            let mut coeffs = vec![Q16_16::zero(); degree + 1];
+            coeffs[0] = Q16_16::one(); // coefficient dominant non nul (forme monique directe).
+            for c in coeffs.iter_mut().skip(1)
+            {
+                *c = Q16_16::from_raw(rng.raw_i32() >> 12);
+            }
+            let got = linalg::poly_roots(&coeffs, q16(1e-4), 100 * degree);
+            assert!(
+                got.is_some(),
+                "seed={seed} degree={degree} : non-convergence ou débordement"
+            );
+        }
+    }
+}
+
+// ------------------------------------------------------------------ //
 //  Activations quantifiées                                            //
 // ------------------------------------------------------------------ //
 

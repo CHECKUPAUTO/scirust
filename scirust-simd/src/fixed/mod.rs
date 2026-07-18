@@ -76,10 +76,12 @@
 //   `transpose`) et décompositions directes (`cholesky`, `lu_decompose`/
 //   `lu_solve`, `determinant`, `qr_decompose`/`qr_solve`) pour résoudre
 //   `A·x = b` ou les moindres carrés, la décomposition spectrale itérative
-//   (`jacobi_eigen`, `svd`/`svd_solve`) des matrices symétriques, et les
+//   (`jacobi_eigen`, `svd`/`svd_solve`) des matrices symétriques, les
 //   valeurs propres d'une matrice **quelconque** (`hessenberg` +
 //   `eigenvalues_general`, réelles ou complexes conjuguées via
-//   [`linalg::Eigenvalue`]).
+//   [`linalg::Eigenvalue`]), et les **racines d'un polynôme**
+//   (`companion_matrix`/`poly_roots`, valeurs propres de sa matrice
+//   compagnon).
 // * [`activation`] — activations quantifiées (`relu`, `relu6`, `hardswish`…).
 // * [`layer`] — couche linéaire quantifiée [`layer::Linear`] (`W·x + b`, +
 //   activation), avec inférence par lot (`forward_batch` et variantes).
