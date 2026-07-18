@@ -63,6 +63,9 @@
 //!   linear algebra over `ℚ` (solve, determinant, inverse, rank), plus the
 //!   integer **Hermite normal form** with a unimodular certificate — certified
 //!   linear algebra for verification and computer-algebra settings.
+//! - [`bigint`] — arbitrary-precision signed integers (`BigInt`): decimal I/O,
+//!   comparison, `+ − ×`, truncated `divmod`, `pow`, and `gcd`, lifting the
+//!   crate's exactness above the `i128` ceiling.
 //!
 //! Everything is deterministic and reproducible bit-for-bit on every platform.
 //!
@@ -178,7 +181,18 @@
 //! assert_eq!(x, vec![Fraction::new(4, 5), Fraction::new(7, 5)]);
 //! assert_eq!(a.matvec(&x), b.to_vec()); // A·x == b exactly
 //! ```
+//!
+//! ```
+//! use scirust_modalg::bigint::BigInt;
+//!
+//! // Arbitrary precision: 2^128 is exact, far beyond i128.
+//! assert_eq!(
+//!     BigInt::from_i128(2).pow(128).to_decimal(),
+//!     "340282366920938463463374607431768211456"
+//! );
+//! ```
 
+pub mod bigint;
 pub mod boolean;
 pub mod codes;
 pub mod crc;
@@ -192,6 +206,7 @@ pub mod rational;
 pub mod ring;
 pub mod sbox;
 
+pub use bigint::BigInt;
 pub use codes::ReedSolomon;
 pub use crc::Crc;
 pub use gf2::Gf2Field;
