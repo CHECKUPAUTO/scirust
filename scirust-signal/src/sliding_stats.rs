@@ -97,6 +97,18 @@
 //! estimators in [`crate::radar::vi_cfar`] need the raw values, not only their
 //! moments. This is *not* O(1) space, and this module does not claim it is.
 //!
+//! # Compile-time vs. runtime capacity
+//!
+//! [`SlidingMoments<N>`] fixes `N` at compile time (a stack-allocated
+//! `[f64; N]`, zero heap allocation). [`SlidingMomentsDyn`] runs the
+//! identical recurrences and numerical-health policy below over a
+//! `Box<[f64]>` sized at construction instead, for callers whose window size
+//! is only known at runtime (e.g. read from a configuration value rather
+//! than fixed as a `const`) — at the cost of one heap allocation up front;
+//! neither type's `push` allocates. Both delegate to the same private core,
+//! so this module has exactly one implementation of the algorithm below, not
+//! two that could silently drift apart.
+//!
 //! # Numerical-health policy
 //!
 //! `M2` is mathematically non-negative. In floating point, the O(1) recurrences
@@ -184,13 +196,43 @@ pub struct SlidingUpdate {
 /// tight bound.
 const TOLERANCE_ULPS: f64 = 64.0;
 
-/// Fixed-capacity `N`, O(1)-update online mean and centered second moment.
-///
-/// See the module documentation for the mathematical contract, the two update
-/// recurrences (warm-up vs. full window), and the numerical-health policy.
+/// Backing storage for a [`SlidingMoments`]/[`SlidingMomentsDyn`] circular
+/// buffer: a compile-time-sized array (stack, zero allocation) or a
+/// runtime-sized boxed slice (one heap allocation at construction, none
+/// after). [`Core`] implements the update recurrences and numerical-health
+/// policy exactly once, over either.
+trait MomentBuffer: Clone + std::fmt::Debug {
+    fn as_slice(&self) -> &[f64];
+    fn as_mut_slice(&mut self) -> &mut [f64];
+}
+
+impl<const N: usize> MomentBuffer for [f64; N] {
+    fn as_slice(&self) -> &[f64] {
+        self
+    }
+    fn as_mut_slice(&mut self) -> &mut [f64] {
+        self
+    }
+}
+
+impl MomentBuffer for Box<[f64]> {
+    fn as_slice(&self) -> &[f64] {
+        self
+    }
+    fn as_mut_slice(&mut self) -> &mut [f64] {
+        self
+    }
+}
+
+/// The shared implementation behind both [`SlidingMoments<N>`] and
+/// [`SlidingMomentsDyn`] — see the module documentation for the
+/// mathematical contract, the two update recurrences (warm-up vs. full
+/// window), and the numerical-health policy. Generic only over where the
+/// circular buffer's `N` slots live ([`MomentBuffer`]); every method below
+/// is exactly the same code regardless.
 #[derive(Debug, Clone)]
-pub struct SlidingMoments<const N: usize> {
-    buffer: [f64; N],
+struct Core<B: MomentBuffer> {
+    buffer: B,
     len: usize,
     /// Index of the next slot to write — during warm-up this is also `len`;
     /// once full it is also the index of the oldest remaining sample.
@@ -200,25 +242,16 @@ pub struct SlidingMoments<const N: usize> {
     domain: SampleDomain,
 }
 
-impl<const N: usize> SlidingMoments<N> {
-    /// A window accepting any finite `f64`. Fails if `N == 0`.
-    pub fn new() -> Result<Self, SlidingMomentsError> {
-        Self::with_domain(SampleDomain::Real)
-    }
-
-    /// A window restricted to finite, non-negative samples (power/energy
-    /// domain). Fails if `N == 0`.
-    pub fn new_non_negative() -> Result<Self, SlidingMomentsError> {
-        Self::with_domain(SampleDomain::NonNegative)
-    }
-
-    fn with_domain(domain: SampleDomain) -> Result<Self, SlidingMomentsError> {
-        if N == 0
+impl<B: MomentBuffer> Core<B> {
+    /// `buffer` must already be zeroed and sized to the intended capacity.
+    /// Fails if that capacity is `0`.
+    fn new(buffer: B, domain: SampleDomain) -> Result<Self, SlidingMomentsError> {
+        if buffer.as_slice().is_empty()
         {
-            return Err(SlidingMomentsError::InvalidWindowSize(N));
+            return Err(SlidingMomentsError::InvalidWindowSize(0));
         }
         Ok(Self {
-            buffer: [0.0; N],
+            buffer,
             len: 0,
             head: 0,
             mean: 0.0,
@@ -227,54 +260,39 @@ impl<const N: usize> SlidingMoments<N> {
         })
     }
 
-    /// This estimator's input-domain policy.
-    pub fn domain(&self) -> SampleDomain {
+    fn domain(&self) -> SampleDomain {
         self.domain
     }
 
-    /// Number of valid samples currently held, `0..=N`.
-    pub fn len(&self) -> usize {
+    fn len(&self) -> usize {
         self.len
     }
 
-    /// `true` if no sample has been pushed yet.
-    pub fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool {
         self.len == 0
     }
 
-    /// The fixed window capacity `N`.
-    pub fn capacity(&self) -> usize {
-        N
+    fn capacity(&self) -> usize {
+        self.buffer.as_slice().len()
     }
 
-    /// `true` once `N` samples have been pushed (further pushes replace the
-    /// oldest sample rather than growing the window).
-    pub fn is_full(&self) -> bool {
-        self.len == N
+    fn is_full(&self) -> bool {
+        self.len == self.capacity()
     }
 
-    /// The current window contents, in a fixed but otherwise unspecified
-    /// deterministic order (physical circular-buffer order). `O(1)`, no
-    /// allocation — used by the two-pass oracle in tests and by robust
-    /// estimators that need the raw values rather than just the moments.
-    pub fn as_slice(&self) -> &[f64] {
-        &self.buffer[..self.len]
+    fn as_slice(&self) -> &[f64] {
+        &self.buffer.as_slice()[..self.len]
     }
 
-    /// The current mean, or `None` if empty.
-    pub fn mean(&self) -> Option<f64> {
+    fn mean(&self) -> Option<f64> {
         (self.len > 0).then_some(self.mean)
     }
 
-    /// The current centered second moment `M2 = Σ(xᵢ − μ)²`, or `None` if
-    /// empty. `M2` for a single sample is `0.0` (zero deviation from itself).
-    pub fn m2(&self) -> Option<f64> {
+    fn m2(&self) -> Option<f64> {
         (self.len > 0).then_some(self.m2)
     }
 
-    /// Population variance `M2 / len` — the current window treated as the
-    /// entire population. `None` if empty. `Some(0.0)` for a single sample.
-    pub fn population_variance(&self) -> Option<f64> {
+    fn population_variance(&self) -> Option<f64> {
         // `.then(||...)` (lazy) rather than `.then_some(...)`: the arm must
         // not evaluate when `len == 0`, both to avoid a wasted 0.0/0.0 and on
         // general principle (see `sample_variance`, where the analogous eager
@@ -282,9 +300,7 @@ impl<const N: usize> SlidingMoments<N> {
         (self.len > 0).then(|| self.m2 / self.len as f64)
     }
 
-    /// Unbiased sample variance `M2 / (len − 1)`. `None` for fewer than two
-    /// samples (undefined).
-    pub fn sample_variance(&self) -> Option<f64> {
+    fn sample_variance(&self) -> Option<f64> {
         (self.len > 1).then(|| self.m2 / (self.len - 1) as f64)
     }
 
@@ -303,10 +319,11 @@ impl<const N: usize> SlidingMoments<N> {
     /// Push one sample. `O(1)`. Rejects non-finite values always, and
     /// negative values under [`SampleDomain::NonNegative`], *before* touching
     /// any state (a rejected push leaves `self` completely unchanged).
-    pub fn push(&mut self, value: f64) -> Result<SlidingUpdate, SlidingMomentsError> {
+    fn push(&mut self, value: f64) -> Result<SlidingUpdate, SlidingMomentsError> {
         self.validate(value)?;
+        let capacity = self.buffer.as_slice().len();
 
-        let evicted = if self.len < N
+        let evicted = if self.len < capacity
         {
             // Warm-up: Welford's online recurrence (see module docs).
             let delta = value - self.mean;
@@ -318,15 +335,15 @@ impl<const N: usize> SlidingMoments<N> {
         else
         {
             // Full window: derived replacement recurrence (see module docs).
-            let old = self.buffer[self.head];
+            let old = self.buffer.as_slice()[self.head];
             let mean_old = self.mean;
-            self.mean += (value - old) / N as f64;
+            self.mean += (value - old) / capacity as f64;
             self.m2 += (value - old) * (value + old - self.mean - mean_old);
             Some(old)
         };
 
-        self.buffer[self.head] = value;
-        self.head = (self.head + 1) % N;
+        self.buffer.as_mut_slice()[self.head] = value;
+        self.head = (self.head + 1) % capacity;
 
         let recomputed = self.repair_if_degraded()?;
 
@@ -344,7 +361,7 @@ impl<const N: usize> SlidingMoments<N> {
     /// [`SlidingMomentsError::NumericalIntegrity`] if the recomputed state is
     /// still non-finite or `M2` is still negative (only reachable from
     /// sustained magnitudes near `f64::MAX`).
-    pub fn recompute(&mut self) -> Result<(), SlidingMomentsError> {
+    fn recompute(&mut self) -> Result<(), SlidingMomentsError> {
         self.recompute_exact();
         if !self.mean.is_finite() || !self.m2.is_finite() || self.m2 < 0.0
         {
@@ -363,7 +380,7 @@ impl<const N: usize> SlidingMoments<N> {
             self.m2 = 0.0;
             return;
         }
-        let data = &self.buffer[..self.len];
+        let data = &self.buffer.as_slice()[..self.len];
         let n = self.len as f64;
         let mean = data.iter().sum::<f64>() / n;
         let m2 = data.iter().map(|&x| (x - mean) * (x - mean)).sum();
@@ -399,12 +416,235 @@ impl<const N: usize> SlidingMoments<N> {
     }
 
     /// Discard all samples, returning to the just-constructed state.
-    pub fn clear(&mut self) {
-        self.buffer = [0.0; N];
+    fn clear(&mut self) {
+        self.buffer.as_mut_slice().fill(0.0);
         self.len = 0;
         self.head = 0;
         self.mean = 0.0;
         self.m2 = 0.0;
+    }
+}
+
+/// Fixed-capacity `N`, O(1)-update online mean and centered second moment.
+///
+/// See the module documentation for the mathematical contract, the two update
+/// recurrences (warm-up vs. full window), and the numerical-health policy.
+/// Backed by a stack-allocated `[f64; N]` — zero heap allocation. For a
+/// window size only known at runtime, see [`SlidingMomentsDyn`], which runs
+/// the identical algorithm over a heap-allocated buffer instead.
+#[derive(Debug, Clone)]
+pub struct SlidingMoments<const N: usize> {
+    core: Core<[f64; N]>,
+}
+
+impl<const N: usize> SlidingMoments<N> {
+    /// A window accepting any finite `f64`. Fails if `N == 0`.
+    pub fn new() -> Result<Self, SlidingMomentsError> {
+        Self::with_domain(SampleDomain::Real)
+    }
+
+    /// A window restricted to finite, non-negative samples (power/energy
+    /// domain). Fails if `N == 0`.
+    pub fn new_non_negative() -> Result<Self, SlidingMomentsError> {
+        Self::with_domain(SampleDomain::NonNegative)
+    }
+
+    fn with_domain(domain: SampleDomain) -> Result<Self, SlidingMomentsError> {
+        Ok(Self {
+            core: Core::new([0.0; N], domain)?,
+        })
+    }
+
+    /// This estimator's input-domain policy.
+    pub fn domain(&self) -> SampleDomain {
+        self.core.domain()
+    }
+
+    /// Number of valid samples currently held, `0..=N`.
+    pub fn len(&self) -> usize {
+        self.core.len()
+    }
+
+    /// `true` if no sample has been pushed yet.
+    pub fn is_empty(&self) -> bool {
+        self.core.is_empty()
+    }
+
+    /// The fixed window capacity `N`.
+    pub fn capacity(&self) -> usize {
+        N
+    }
+
+    /// `true` once `N` samples have been pushed (further pushes replace the
+    /// oldest sample rather than growing the window).
+    pub fn is_full(&self) -> bool {
+        self.core.is_full()
+    }
+
+    /// The current window contents, in a fixed but otherwise unspecified
+    /// deterministic order (physical circular-buffer order). `O(1)`, no
+    /// allocation — used by the two-pass oracle in tests and by robust
+    /// estimators that need the raw values rather than just the moments.
+    pub fn as_slice(&self) -> &[f64] {
+        self.core.as_slice()
+    }
+
+    /// The current mean, or `None` if empty.
+    pub fn mean(&self) -> Option<f64> {
+        self.core.mean()
+    }
+
+    /// The current centered second moment `M2 = Σ(xᵢ − μ)²`, or `None` if
+    /// empty. `M2` for a single sample is `0.0` (zero deviation from itself).
+    pub fn m2(&self) -> Option<f64> {
+        self.core.m2()
+    }
+
+    /// Population variance `M2 / len` — the current window treated as the
+    /// entire population. `None` if empty. `Some(0.0)` for a single sample.
+    pub fn population_variance(&self) -> Option<f64> {
+        self.core.population_variance()
+    }
+
+    /// Unbiased sample variance `M2 / (len − 1)`. `None` for fewer than two
+    /// samples (undefined).
+    pub fn sample_variance(&self) -> Option<f64> {
+        self.core.sample_variance()
+    }
+
+    /// Push one sample. `O(1)`. Rejects non-finite values always, and
+    /// negative values under [`SampleDomain::NonNegative`], *before* touching
+    /// any state (a rejected push leaves `self` completely unchanged).
+    pub fn push(&mut self, value: f64) -> Result<SlidingUpdate, SlidingMomentsError> {
+        self.core.push(value)
+    }
+
+    /// Force an exact recomputation of `mean` and `M2` from the retained
+    /// circular buffer (two passes; see module docs). `O(len)`. Returns
+    /// [`SlidingMomentsError::NumericalIntegrity`] if the recomputed state is
+    /// still non-finite or `M2` is still negative (only reachable from
+    /// sustained magnitudes near `f64::MAX`).
+    pub fn recompute(&mut self) -> Result<(), SlidingMomentsError> {
+        self.core.recompute()
+    }
+
+    /// Discard all samples, returning to the just-constructed state.
+    pub fn clear(&mut self) {
+        self.core.clear()
+    }
+}
+
+/// Runtime-capacity, O(1)-update online mean and centered second moment —
+/// the identical algorithm and numerical-health policy as [`SlidingMoments`]
+/// (see the module docs), for callers whose window size is only known at
+/// runtime rather than at compile time (e.g. a radar reference-cell count
+/// read from a configuration value, as
+/// [`crate::radar::vi_cfar::CfarStreamDetector`] needs). Backed by a
+/// `Box<[f64]>` allocated once at construction — [`SlidingMomentsDyn::push`]
+/// itself never allocates.
+///
+/// Prefer [`SlidingMoments<N>`] when `N` is known at compile time: it avoids
+/// the heap allocation entirely.
+#[derive(Debug, Clone)]
+pub struct SlidingMomentsDyn {
+    core: Core<Box<[f64]>>,
+}
+
+impl SlidingMomentsDyn {
+    /// A window of runtime `capacity`, accepting any finite `f64`. Fails if
+    /// `capacity == 0`.
+    pub fn new(capacity: usize) -> Result<Self, SlidingMomentsError> {
+        Self::with_domain(capacity, SampleDomain::Real)
+    }
+
+    /// A window of runtime `capacity`, restricted to finite, non-negative
+    /// samples (power/energy domain). Fails if `capacity == 0`.
+    pub fn new_non_negative(capacity: usize) -> Result<Self, SlidingMomentsError> {
+        Self::with_domain(capacity, SampleDomain::NonNegative)
+    }
+
+    fn with_domain(capacity: usize, domain: SampleDomain) -> Result<Self, SlidingMomentsError> {
+        Ok(Self {
+            core: Core::new(vec![0.0; capacity].into_boxed_slice(), domain)?,
+        })
+    }
+
+    /// This estimator's input-domain policy.
+    pub fn domain(&self) -> SampleDomain {
+        self.core.domain()
+    }
+
+    /// Number of valid samples currently held, `0..=capacity()`.
+    pub fn len(&self) -> usize {
+        self.core.len()
+    }
+
+    /// `true` if no sample has been pushed yet.
+    pub fn is_empty(&self) -> bool {
+        self.core.is_empty()
+    }
+
+    /// The window capacity fixed at construction.
+    pub fn capacity(&self) -> usize {
+        self.core.capacity()
+    }
+
+    /// `true` once `capacity()` samples have been pushed (further pushes
+    /// replace the oldest sample rather than growing the window).
+    pub fn is_full(&self) -> bool {
+        self.core.is_full()
+    }
+
+    /// The current window contents, in a fixed but otherwise unspecified
+    /// deterministic order (physical circular-buffer order). `O(1)`, no
+    /// allocation.
+    pub fn as_slice(&self) -> &[f64] {
+        self.core.as_slice()
+    }
+
+    /// The current mean, or `None` if empty.
+    pub fn mean(&self) -> Option<f64> {
+        self.core.mean()
+    }
+
+    /// The current centered second moment `M2 = Σ(xᵢ − μ)²`, or `None` if
+    /// empty. `M2` for a single sample is `0.0` (zero deviation from itself).
+    pub fn m2(&self) -> Option<f64> {
+        self.core.m2()
+    }
+
+    /// Population variance `M2 / len`. `None` if empty. `Some(0.0)` for a
+    /// single sample.
+    pub fn population_variance(&self) -> Option<f64> {
+        self.core.population_variance()
+    }
+
+    /// Unbiased sample variance `M2 / (len − 1)`. `None` for fewer than two
+    /// samples (undefined).
+    pub fn sample_variance(&self) -> Option<f64> {
+        self.core.sample_variance()
+    }
+
+    /// Push one sample. `O(1)`, no allocation. Rejects non-finite values
+    /// always, and negative values under [`SampleDomain::NonNegative`],
+    /// *before* touching any state (a rejected push leaves `self` completely
+    /// unchanged).
+    pub fn push(&mut self, value: f64) -> Result<SlidingUpdate, SlidingMomentsError> {
+        self.core.push(value)
+    }
+
+    /// Force an exact recomputation of `mean` and `M2` from the retained
+    /// buffer (two passes; see module docs). `O(len)`. Returns
+    /// [`SlidingMomentsError::NumericalIntegrity`] if the recomputed state is
+    /// still non-finite or `M2` is still negative (only reachable from
+    /// sustained magnitudes near `f64::MAX`).
+    pub fn recompute(&mut self) -> Result<(), SlidingMomentsError> {
+        self.core.recompute()
+    }
+
+    /// Discard all samples, returning to the just-constructed state.
+    pub fn clear(&mut self) {
+        self.core.clear()
     }
 }
 
@@ -465,7 +705,62 @@ mod tests {
         );
     }
 
-    fn assert_matches_oracle<const N: usize>(sm: &SlidingMoments<N>) {
+    /// Lets the oracle cross-check below drive either backing store through
+    /// the identical assertions, since [`SlidingMoments<N>`] and
+    /// [`SlidingMomentsDyn`] share no public trait of their own (only the
+    /// private [`Core`] they both delegate to).
+    trait MomentsLike {
+        fn is_empty(&self) -> bool;
+        fn as_slice(&self) -> &[f64];
+        fn mean(&self) -> Option<f64>;
+        fn m2(&self) -> Option<f64>;
+        fn population_variance(&self) -> Option<f64>;
+        fn sample_variance(&self) -> Option<f64>;
+    }
+
+    impl<const N: usize> MomentsLike for SlidingMoments<N> {
+        fn is_empty(&self) -> bool {
+            SlidingMoments::is_empty(self)
+        }
+        fn as_slice(&self) -> &[f64] {
+            SlidingMoments::as_slice(self)
+        }
+        fn mean(&self) -> Option<f64> {
+            SlidingMoments::mean(self)
+        }
+        fn m2(&self) -> Option<f64> {
+            SlidingMoments::m2(self)
+        }
+        fn population_variance(&self) -> Option<f64> {
+            SlidingMoments::population_variance(self)
+        }
+        fn sample_variance(&self) -> Option<f64> {
+            SlidingMoments::sample_variance(self)
+        }
+    }
+
+    impl MomentsLike for SlidingMomentsDyn {
+        fn is_empty(&self) -> bool {
+            SlidingMomentsDyn::is_empty(self)
+        }
+        fn as_slice(&self) -> &[f64] {
+            SlidingMomentsDyn::as_slice(self)
+        }
+        fn mean(&self) -> Option<f64> {
+            SlidingMomentsDyn::mean(self)
+        }
+        fn m2(&self) -> Option<f64> {
+            SlidingMomentsDyn::m2(self)
+        }
+        fn population_variance(&self) -> Option<f64> {
+            SlidingMomentsDyn::population_variance(self)
+        }
+        fn sample_variance(&self) -> Option<f64> {
+            SlidingMomentsDyn::sample_variance(self)
+        }
+    }
+
+    fn assert_matches_oracle(sm: &impl MomentsLike) {
         if sm.is_empty()
         {
             assert_eq!(sm.mean(), None);
@@ -573,7 +868,7 @@ mod tests {
             sm.push(x).unwrap();
         }
         let good_m2 = sm.m2().unwrap();
-        sm.m2 = -1.0; // simulate a corrupted running statistic
+        sm.core.m2 = -1.0; // simulate a corrupted running statistic
         sm.recompute().unwrap();
         assert_close(
             sm.m2().unwrap(),
@@ -826,5 +1121,131 @@ mod tests {
         drive::<7>();
         drive::<13>();
         drive::<31>();
+    }
+
+    // ---- SlidingMomentsDyn --------------------------------------------------
+    //
+    // `SlidingMomentsDyn` shares `Core<B>` with `SlidingMoments<N>` (see the
+    // module docs, "Compile-time vs. runtime capacity"), so these are a
+    // lighter cross-check of the storage abstraction itself, not a second
+    // full re-verification of the algorithm — that already happened above.
+
+    #[test]
+    fn dyn_rejects_zero_capacity() {
+        assert_eq!(
+            SlidingMomentsDyn::new(0).unwrap_err(),
+            SlidingMomentsError::InvalidWindowSize(0)
+        );
+    }
+
+    #[test]
+    fn dyn_matches_oracle_through_warmup_and_wraparound() {
+        let mut sm = SlidingMomentsDyn::new(7).unwrap();
+        for i in 0..40
+        {
+            sm.push(((i * 31 + 5) % 89) as f64).unwrap();
+            assert_matches_oracle(&sm);
+        }
+        assert!(sm.is_full());
+        assert_eq!(sm.capacity(), 7);
+    }
+
+    #[test]
+    fn dyn_numerical_integrity_error_on_sustained_extreme_magnitude() {
+        // Same construction as the const-generic version's equivalent test.
+        let huge = 0.9 * f64::MAX;
+        let mut sm = SlidingMomentsDyn::new(2).unwrap();
+        sm.push(huge).unwrap();
+        let err = sm.push(1.0).unwrap_err();
+        assert!(matches!(err, SlidingMomentsError::NumericalIntegrity(_)));
+    }
+
+    #[test]
+    fn dyn_recompute_repairs_a_genuine_soft_tolerance_breach() {
+        let mut sm = SlidingMomentsDyn::new(4).unwrap();
+        for x in [3.0, 5.0, 2.0, 9.0]
+        {
+            sm.push(x).unwrap();
+        }
+        let good_m2 = sm.m2().unwrap();
+        sm.core.m2 = -1.0;
+        sm.recompute().unwrap();
+        assert_close(
+            sm.m2().unwrap(),
+            good_m2,
+            "m2 after repairing a corrupted state",
+        );
+        assert!(sm.m2().unwrap() >= 0.0);
+    }
+
+    #[test]
+    fn dyn_negative_input_rejected_in_non_negative_mode() {
+        let mut sm = SlidingMomentsDyn::new_non_negative(4).unwrap();
+        assert_eq!(sm.domain(), SampleDomain::NonNegative);
+        assert_eq!(
+            sm.push(-0.001),
+            Err(SlidingMomentsError::NegativeSample(-0.001))
+        );
+        assert_eq!(sm.len(), 0, "a rejected push must not mutate state");
+        assert!(sm.push(0.0).is_ok(), "zero is not negative");
+    }
+
+    #[test]
+    fn dyn_nan_is_always_rejected() {
+        let mut sm = SlidingMomentsDyn::new(4).unwrap();
+        let err = sm.push(f64::NAN).unwrap_err();
+        assert!(matches!(err, SlidingMomentsError::NonFiniteSample(x) if x.is_nan()));
+        assert_eq!(sm.len(), 0);
+    }
+
+    #[test]
+    fn dyn_clear_returns_to_the_constructed_state() {
+        let mut sm = SlidingMomentsDyn::new(5).unwrap();
+        for x in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+        {
+            sm.push(x).unwrap();
+        }
+        assert!(sm.is_full());
+        sm.clear();
+        assert_eq!(sm.len(), 0);
+        assert!(!sm.is_full());
+        assert_eq!(sm.mean(), None);
+        assert_eq!(sm.as_slice(), &[] as &[f64]);
+        sm.push(9.0).unwrap();
+        assert_eq!(sm.mean(), Some(9.0));
+    }
+
+    #[test]
+    fn dyn_matches_const_generic_bit_for_bit_on_the_same_stream() {
+        // Same algorithm, different backing store (`Box<[f64]>` vs
+        // `[f64; N]`) — drive both through an identical stream and check
+        // every observable output agrees exactly, not just approximately:
+        // since both funnel through the same `Core<B>` logic, any divergence
+        // here would mean the storage abstraction itself broke something.
+        const N: usize = 11;
+        let mut fixed = SlidingMoments::<N>::new().unwrap();
+        let mut dynamic = SlidingMomentsDyn::new(N).unwrap();
+        struct Lcg(u64);
+        impl Lcg {
+            fn next(&mut self) -> f64 {
+                self.0 = self
+                    .0
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                ((self.0 >> 11) as f64) / ((1u64 << 53) as f64) * 50.0 - 25.0
+            }
+        }
+        let mut rng = Lcg(0xD1CE);
+        for _ in 0..2000
+        {
+            let x = rng.next();
+            let uf = fixed.push(x).unwrap();
+            let ud = dynamic.push(x).unwrap();
+            assert_eq!(uf.len, ud.len);
+            assert_eq!(uf.mean.to_bits(), ud.mean.to_bits());
+            assert_eq!(uf.m2.to_bits(), ud.m2.to_bits());
+            assert_eq!(uf.evicted, ud.evicted);
+            assert_eq!(uf.recomputed, ud.recomputed);
+        }
     }
 }

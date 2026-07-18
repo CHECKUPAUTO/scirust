@@ -162,5 +162,7 @@ pub use radar::{
     vi_cfar_evaluate_slice, weibull_cdf, weibull_pdf, weibull_quantile, welch_costas, wrap_phase,
     zadoff_chu,
 };
-pub use sliding_stats::{SampleDomain, SlidingMoments, SlidingMomentsError, SlidingUpdate};
+pub use sliding_stats::{
+    SampleDomain, SlidingMoments, SlidingMomentsDyn, SlidingMomentsError, SlidingUpdate,
+};
 pub use windows::{apply_window, blackman, blackman_harris, flattop, hamming, hanning};

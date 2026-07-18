@@ -39,11 +39,13 @@
 //! `VI = 1 + [1/(n-1)]·Σ(xᵢ-x̄)²/x̄²` — the `n-1` divisor is the unbiased
 //! sample variance, not `n`. [`variability_index`] is convention-agnostic
 //! (it just computes `1 + variance/mean²`); this module calls it with
-//! [`SlidingMoments::sample_variance`]/the sample-variance form of its own
-//! internal half-window statistics specifically because of that citation.
-//! Callers who want the population-variance form for their own purposes can
-//! call [`variability_index`] with [`SlidingMoments::population_variance`]
-//! instead — both are available from the underlying
+//! [`crate::sliding_stats::SlidingMoments::sample_variance`]/the
+//! sample-variance form of its own internal half-window statistics
+//! specifically because of that citation. Callers who want the
+//! population-variance form for their own purposes can call
+//! [`variability_index`] with
+//! [`crate::sliding_stats::SlidingMoments::population_variance`] instead —
+//! both are available from the underlying
 //! [`crate::sliding_stats`] primitive, and this module does not hide that
 //! choice.
 //!
@@ -247,8 +249,8 @@
 //! statistics are recomputed directly from the slice (matching this crate's
 //! existing [`super::cfar`]/[`super::cfar_variants`] convention), not
 //! incrementally. [`CfarStreamDetector::push`] is `O(1)` amortized per sample
-//! for the CA/GO/SO path (backed by [`SlidingMoments`], whose `push` is O(1))
-//! and `O(reference_cells · log(reference_cells))`-ish... in practice
+//! for the CA/GO/SO path (backed by [`crate::sliding_stats::SlidingMoments`],
+//! whose `push` is O(1)) and `O(reference_cells · log(reference_cells))`-ish... in practice
 //! `O(reference_cells)` for the `sort_unstable` call, only when
 //! [`CfarMode::RobustTrimmed`] is actually selected for that sample. Storage
 //! is `O(reference_cells)` (two `SlidingMoments` windows plus one scratch
@@ -258,16 +260,17 @@ use thiserror::Error;
 
 use scirust_stats::Distribution;
 
-use crate::sliding_stats::{SampleDomain, SlidingMoments, SlidingMomentsError};
+use crate::sliding_stats::{SampleDomain, SlidingMomentsDyn, SlidingMomentsError};
 
 // ============================================================================
 // Pure math: Variability Index and Mean Ratio
 // ============================================================================
 
 /// `VI = 1 + variance/mean²`. Convention-agnostic: pass
-/// [`SlidingMoments::sample_variance`] or
-/// [`SlidingMoments::population_variance`] depending which convention you
-/// need (see the module docs for which one this module's own detector uses,
+/// [`crate::sliding_stats::SlidingMoments::sample_variance`] or
+/// [`crate::sliding_stats::SlidingMoments::population_variance`] depending
+/// which convention you need (see the module docs for which one this
+/// module's own detector uses,
 /// and why).
 ///
 /// `mean == 0.0` is an explicit, defined case, not left to fall out of
@@ -477,15 +480,8 @@ pub enum CfarError {
          rejects negative power samples"
     )]
     NegativeSample { index: usize, value: f64 },
-    /// [`CfarStreamDetector::new`]'s compile-time `TRAIN` does not match
-    /// `config.reference_cells`.
-    #[error(
-        "streaming detector window mismatch: configured reference_cells={configured}, \
-         but the streaming detector's compile-time window is {expected}"
-    )]
-    StreamingWindowMismatch { configured: usize, expected: usize },
-    /// A [`SlidingMoments`] instance backing a streaming detector reported a
-    /// numerical-integrity failure.
+    /// A [`SlidingMomentsDyn`] instance backing a streaming detector reported
+    /// a numerical-integrity failure.
     #[error("sliding-moments numerical integrity failure: {0}")]
     SlidingMoments(#[from] SlidingMomentsError),
     /// The exact GO/SO/CensoredMean quadrature-based calibration failed:
@@ -1038,7 +1034,8 @@ pub fn censored_mean(
 
 /// A reference half-window's mean and sample variance — the only summary a
 /// CUT decision needs, regardless of whether it was computed by direct
-/// summation over a slice or read off a [`SlidingMoments`].
+/// summation over a slice or read off a
+/// [`crate::sliding_stats::SlidingMoments`].
 #[derive(Debug, Clone, Copy)]
 struct HalfWindowStats {
     mean: f64,
@@ -1271,18 +1268,19 @@ impl CfarDetector {
 // Streaming API
 // ============================================================================
 
-/// Streaming VI-CFAR over a compile-time-fixed reference-window size `TRAIN`.
+/// Streaming VI-CFAR over a reference-window size set at construction time
+/// from [`CfarConfig::reference_cells`] — no compile-time parameter needed.
 ///
-/// Backed by two [`SlidingMoments<TRAIN>`] (lagging/leading half-windows,
-/// `O(1)` per push) plus a small FIFO delay line (`to_lagging`) that lets a
-/// value already consumed by `leading` be released into `lagging` exactly
-/// `2 * guard_cells + TRAIN + 1` pushes later — see "Derivation" below.
-/// Reusing the const-generic [`SlidingMoments`] directly (rather than a
-/// second, runtime-sized reimplementation of the same recurrences) means
-/// `TRAIN` must be known at compile time for this streaming type —
-/// [`CfarConfig::reference_cells`] is validated to equal it at construction.
-/// The finite-slice API ([`evaluate_slice`]) has no such restriction and
-/// should be preferred when the window size is only known at runtime.
+/// Backed by two [`SlidingMomentsDyn`] (lagging/leading half-windows, `O(1)`
+/// per push after construction) plus a small FIFO delay line (`to_lagging`)
+/// that lets a value already consumed by `leading` be released into
+/// `lagging` exactly `2 * guard_cells + reference_cells + 1` pushes later —
+/// see "Derivation" below, which still calls the reference-window size
+/// `TRAIN` as a mathematical symbol (the derivation doesn't care whether it
+/// is a `const` or a runtime value). [`SlidingMomentsDyn`] runs the exact
+/// same recurrences as the compile-time-sized `SlidingMoments<N>` (see
+/// `crate::sliding_stats`'s module docs) over a `Box<[f64]>` allocated once
+/// here at construction — [`push`](Self::push) itself never allocates.
 ///
 /// # Latency
 ///
@@ -1325,9 +1323,8 @@ impl CfarDetector {
 /// ```
 /// use scirust_signal::radar::vi_cfar::{CfarConfig, CfarStreamDetector, DetectorPolicy, EdgePolicy, InputValidationPolicy, RobustNoiseEstimator};
 ///
-/// const TRAIN: usize = 8;
 /// let config = CfarConfig {
-///     reference_cells: TRAIN,
+///     reference_cells: 8,
 ///     guard_cells: 2,
 ///     pfa: 0.01,
 ///     edge_policy: EdgePolicy::Exclude,
@@ -1335,7 +1332,7 @@ impl CfarDetector {
 ///     detector: DetectorPolicy::Ca,
 ///     robust_estimator: RobustNoiseEstimator::TrimmedMean { trim_low: 1, trim_high: 1 },
 /// };
-/// let mut detector = CfarStreamDetector::<TRAIN>::new(config).unwrap();
+/// let mut detector = CfarStreamDetector::new(config).unwrap();
 ///
 /// let mut samples = vec![1.0_f64; 60];
 /// samples[30] = 50.0; // an isolated target
@@ -1354,51 +1351,44 @@ impl CfarDetector {
 /// assert!(saw_the_target);
 /// ```
 #[derive(Debug)]
-pub struct CfarStreamDetector<const TRAIN: usize> {
+pub struct CfarStreamDetector {
     config: CfarConfig,
     alphas: CalibratedThresholds,
-    lagging: SlidingMoments<TRAIN>,
-    leading: SlidingMoments<TRAIN>,
+    lagging: SlidingMomentsDyn,
+    leading: SlidingMomentsDyn,
     /// FIFO delay line; see the type-level "Derivation" docs. Capacity
-    /// reserved once at construction (`2*guard+TRAIN+2`, one more than its
-    /// steady-state cap to hold the momentary overflow before each pop) and
-    /// never reallocated after that.
+    /// reserved once at construction (`2*guard+reference_cells+2`, one more
+    /// than its steady-state cap to hold the momentary overflow before each
+    /// pop) and never reallocated after that.
     to_lagging: std::collections::VecDeque<f64>,
     /// Absolute index of the next pushed sample.
     next_index: usize,
     scratch: Vec<f64>,
 }
 
-impl<const TRAIN: usize> CfarStreamDetector<TRAIN> {
-    /// Construct a streaming detector. `config.reference_cells` must equal
-    /// `TRAIN`.
+impl CfarStreamDetector {
+    /// Construct a streaming detector sized from `config.reference_cells`.
     pub fn new(config: CfarConfig) -> Result<Self, CfarError> {
         config.validate()?;
-        if config.reference_cells != TRAIN
-        {
-            return Err(CfarError::StreamingWindowMismatch {
-                configured: config.reference_cells,
-                expected: TRAIN,
-            });
-        }
+        let reference_cells = config.reference_cells;
         let domain = match config.input_validation
         {
             InputValidationPolicy::RejectNegative => SampleDomain::NonNegative,
             InputValidationPolicy::AllowNegative => SampleDomain::Real,
         };
-        let new_moments = || -> Result<SlidingMoments<TRAIN>, SlidingMomentsError> {
+        let new_moments = || -> Result<SlidingMomentsDyn, SlidingMomentsError> {
             match domain
             {
-                SampleDomain::NonNegative => SlidingMoments::new_non_negative(),
-                SampleDomain::Real => SlidingMoments::new(),
+                SampleDomain::NonNegative => SlidingMomentsDyn::new_non_negative(reference_cells),
+                SampleDomain::Real => SlidingMomentsDyn::new(reference_cells),
             }
         };
         let lagging = new_moments()?;
         let leading = new_moments()?;
         let alphas = CalibratedThresholds::compute(&config)?;
-        let cap = 2 * config.guard_cells + TRAIN + 1;
+        let cap = 2 * config.guard_cells + reference_cells + 1;
         let to_lagging = std::collections::VecDeque::with_capacity(cap + 1);
-        let scratch = vec![0.0_f64; 2 * TRAIN];
+        let scratch = vec![0.0_f64; 2 * reference_cells];
         Ok(Self {
             config,
             alphas,
@@ -1418,14 +1408,15 @@ impl<const TRAIN: usize> CfarStreamDetector<TRAIN> {
         let idx = self.next_index;
         self.config.validate_sample(idx, value)?;
         self.next_index += 1;
+        let reference_cells = self.config.reference_cells;
 
-        if self.lagging.len() < TRAIN
+        if self.lagging.len() < reference_cells
         {
             self.lagging.push(value)?;
             return Ok(None);
         }
 
-        let cap = 2 * self.config.guard_cells + TRAIN + 1;
+        let cap = 2 * self.config.guard_cells + reference_cells + 1;
         self.to_lagging.push_back(value);
         if self.to_lagging.len() > cap
         {
@@ -1442,27 +1433,27 @@ impl<const TRAIN: usize> CfarStreamDetector<TRAIN> {
             return Ok(None);
         }
 
-        let cut_index = idx - self.config.guard_cells - TRAIN;
+        let cut_index = idx - self.config.guard_cells - reference_cells;
         let cut_power = self.to_lagging[self.config.guard_cells];
         let lagging = HalfWindowStats {
             mean: self.lagging.mean().expect("lagging is full at this point"),
             sample_variance: self
                 .lagging
                 .sample_variance()
-                .expect("lagging is full (TRAIN >= 2)"),
+                .expect("lagging is full (reference_cells >= 2, enforced by CfarConfig::validate)"),
         };
         let leading = HalfWindowStats {
             mean: self.leading.mean().expect("leading is full at this point"),
             sample_variance: self
                 .leading
                 .sample_variance()
-                .expect("leading is full (TRAIN >= 2)"),
+                .expect("leading is full (reference_cells >= 2, enforced by CfarConfig::validate)"),
         };
         // Only [`CfarMode::RobustTrimmed`] reads `scratch`, but populating it
-        // is cheap (two O(TRAIN) copies) relative to the rest of this
-        // function, and keeps `decide` identical for both APIs.
-        self.scratch[..TRAIN].copy_from_slice(self.lagging.as_slice());
-        self.scratch[TRAIN..].copy_from_slice(self.leading.as_slice());
+        // is cheap (two O(reference_cells) copies) relative to the rest of
+        // this function, and keeps `decide` identical for both APIs.
+        self.scratch[..reference_cells].copy_from_slice(self.lagging.as_slice());
+        self.scratch[reference_cells..].copy_from_slice(self.leading.as_slice());
         let decision = decide(
             cut_index,
             cut_power,
@@ -2274,12 +2265,12 @@ mod tests {
 
     #[test]
     fn streaming_matches_finite_slice_on_interior_points() {
-        const TRAIN: usize = 8;
+        let reference_cells = 8;
         let guard = 2;
         let mut power = vec![1.0_f64; 100];
         power[50] = 40.0;
         let config = CfarConfig {
-            reference_cells: TRAIN,
+            reference_cells,
             guard_cells: guard,
             pfa: 0.01,
             edge_policy: EdgePolicy::Exclude,
@@ -2293,7 +2284,7 @@ mod tests {
         let finite = evaluate_slice(&power, &config).unwrap();
 
         let mut streamed = Vec::new();
-        let mut detector = CfarStreamDetector::<TRAIN>::new(config).unwrap();
+        let mut detector = CfarStreamDetector::new(config).unwrap();
         for &x in &power
         {
             if let Some(d) = detector.push(x).unwrap()
@@ -2314,11 +2305,11 @@ mod tests {
 
     #[test]
     fn streaming_zero_guard_matches_finite_slice() {
-        const TRAIN: usize = 6;
+        let reference_cells = 6;
         let mut power = vec![1.0_f64; 60];
         power[30] = 25.0;
         let config = CfarConfig {
-            reference_cells: TRAIN,
+            reference_cells,
             guard_cells: 0,
             pfa: 0.02,
             edge_policy: EdgePolicy::Exclude,
@@ -2331,7 +2322,7 @@ mod tests {
         };
         let finite = evaluate_slice(&power, &config).unwrap();
         let mut streamed = Vec::new();
-        let mut detector = CfarStreamDetector::<TRAIN>::new(config).unwrap();
+        let mut detector = CfarStreamDetector::new(config).unwrap();
         for &x in &power
         {
             if let Some(d) = detector.push(x).unwrap()
@@ -2349,10 +2340,10 @@ mod tests {
 
     #[test]
     fn streaming_latency_contract() {
-        const TRAIN: usize = 4;
+        let reference_cells = 4;
         let guard = 1;
         let config = CfarConfig {
-            reference_cells: TRAIN,
+            reference_cells,
             guard_cells: guard,
             pfa: 0.05,
             edge_policy: EdgePolicy::Exclude,
@@ -2363,15 +2354,15 @@ mod tests {
                 trim_high: 0,
             },
         };
-        let mut detector = CfarStreamDetector::<TRAIN>::new(config).unwrap();
-        let expected_first_output_push = 2 * TRAIN + 2 * guard; // 0-based index of the push that first returns Some
+        let mut detector = CfarStreamDetector::new(config).unwrap();
+        let expected_first_output_push = 2 * reference_cells + 2 * guard; // 0-based index of the push that first returns Some
         let mut first_output_push = None;
         for i in 0..40
         {
             if let Some(d) = detector.push(1.0 + (i as f64) * 0.0).unwrap()
             {
                 first_output_push = Some(i);
-                assert_eq!(d.cut_index, i - guard - TRAIN);
+                assert_eq!(d.cut_index, i - guard - reference_cells);
                 break;
             }
         }
@@ -2379,25 +2370,39 @@ mod tests {
     }
 
     #[test]
-    fn streaming_rejects_window_size_mismatch() {
-        let mut config = default_config();
-        config.reference_cells = 8;
-        let err = CfarStreamDetector::<4>::new(config).unwrap_err();
-        assert_eq!(
-            err,
-            CfarError::StreamingWindowMismatch {
-                configured: 8,
-                expected: 4
+    fn streaming_reference_cells_is_runtime_configurable() {
+        // The fix for this crate's earlier documented limitation ("TRAIN
+        // must be a compile-time constant"): `CfarStreamDetector` is no
+        // longer generic at all, so a caller can build detectors sized from
+        // values only known at runtime (here, deliberately routed through a
+        // `Vec` rather than a `const`) without triggering a distinct
+        // monomorphization per size.
+        let runtime_sizes: Vec<usize> = vec![3, 5, 9, 20];
+        for reference_cells in runtime_sizes
+        {
+            let mut config = default_config();
+            config.reference_cells = reference_cells;
+            let mut detector = CfarStreamDetector::new(config).unwrap();
+            let mut saw_output = false;
+            for i in 0..(4 * reference_cells + 10)
+            {
+                if detector.push(1.0 + (i as f64) * 0.01).unwrap().is_some()
+                {
+                    saw_output = true;
+                }
             }
-        );
+            assert!(
+                saw_output,
+                "reference_cells={reference_cells} should have produced output"
+            );
+        }
     }
 
     #[test]
     fn streaming_propagates_non_finite_rejection() {
-        const TRAIN: usize = 4;
         let mut config = default_config();
-        config.reference_cells = TRAIN;
-        let mut detector = CfarStreamDetector::<TRAIN>::new(config).unwrap();
+        config.reference_cells = 4;
+        let mut detector = CfarStreamDetector::new(config).unwrap();
         let err = detector.push(f64::NAN).unwrap_err();
         assert!(matches!(err, CfarError::NonFiniteSample { index: 0, .. }));
     }
