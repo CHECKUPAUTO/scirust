@@ -11,6 +11,7 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::dsp::mel::MelFilterbank;
+use scirust_simd::dsp::mfcc::Mfcc;
 use scirust_simd::dsp::stft::{power_spectrogram, stft};
 use scirust_simd::dsp::window;
 use scirust_simd::dsp::{
@@ -407,6 +408,44 @@ fn bench_mel(c: &mut Criterion) {
     g.finish();
 }
 
+/// MFCC (13 coefficients sur 40 bandes mel) : banque mel + `ln` + DCT-II
+/// tronquée, fixe vs `f32`.
+fn bench_mfcc(c: &mut Criterion) {
+    const FRAME: usize = 1 << 10;
+    const HOP: usize = FRAME / 2;
+    const N_MELS: usize = 40;
+    const N_COEFFS: usize = 13;
+    let sf = signal_f32();
+    let sx = signal_fixed(&sf);
+    let win_f: Vec<f32> = window::hann(FRAME);
+    let win_x: Vec<Q16_16> = window::hann(FRAME);
+    let bins = FRAME / 2 + 1;
+
+    let power_f = power_spectrogram(&stft(&sf, &win_f, HOP));
+    let power_x = power_spectrogram(&stft(&sx, &win_x, HOP));
+    let frames = power_f.len() / bins;
+
+    let mfcc_f = Mfcc::<f32>::new(N_MELS, N_COEFFS, bins, 16000.0, 0.0, 8000.0);
+    let mfcc_x = Mfcc::<Q16_16>::new(
+        N_MELS,
+        N_COEFFS,
+        bins,
+        Q16_16::try_from(16000.0).unwrap(),
+        Q16_16::zero(),
+        Q16_16::try_from(8000.0).unwrap(),
+    );
+
+    let mut g = c.benchmark_group("mfcc13_over_mel40");
+    g.throughput(Throughput::Elements((frames * N_COEFFS) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| mfcc_x.apply(black_box(&power_x)))
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| mfcc_f.apply(black_box(&power_f)))
+    });
+    g.finish();
+}
+
 /// Ré-échantillonnage rationnel `3/2` (polyphase), fixe vs `f32`.
 fn bench_resample(c: &mut Criterion) {
     let sf = signal_f32();
@@ -522,6 +561,7 @@ criterion_group!(
     bench_kaiser,
     bench_stft,
     bench_mel,
+    bench_mfcc,
     bench_resample,
     bench_adaptive
 );

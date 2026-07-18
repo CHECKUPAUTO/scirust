@@ -11,6 +11,7 @@ use super::biquad::{butterworth_qs, chebyshev1_pole_params};
 use super::fft::{Complex, Plan, fft, ifft, irfft, rfft};
 use super::fftconv::fft_convolve;
 use super::mel::MelFilterbank;
+use super::mfcc::{Mfcc, dct2, dct2_basis};
 use super::resample::design_prototype;
 use super::stft::{istft, magnitude_spectrogram, num_frames, power_spectrogram, stft};
 use super::window;
@@ -1728,6 +1729,181 @@ fn stft_power_spectrogram_feeds_mel_filterbank() {
 
     let frames = num_frames(n, frame_size, hop);
     assert_eq!(mel1.len(), frames * fb.n_mels());
+}
+
+// ------------------------------------------------------------------ //
+//  MFCC : DCT-II orthonormée + coefficients cepstraux sur l'échelle mel //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn dct2_basis_is_orthonormal() {
+    // Base ortho DCT-II : C·Cᵀ = I (transformée orthogonale). Vérifie la
+    // matrice `n × n` complète (`dct2_basis(n, n)`) plutôt que de passer par
+    // `dct2` sur un vecteur, pour isoler la propriété structurelle.
+    let n = 8;
+    let basis: Vec<f64> = dct2_basis(n, n);
+    for i in 0..n
+    {
+        for j in 0..n
+        {
+            let dot: f64 = (0..n).map(|k| basis[i * n + k] * basis[j * n + k]).sum();
+            let want = if i == j { 1.0 } else { 0.0 };
+            assert!(
+                (dot - want).abs() <= 1e-9,
+                "i={i} j={j}: produit scalaire des lignes {dot} vs {want}"
+            );
+        }
+    }
+}
+
+fn check_dct2_known_2point_values<T: Scalar + core::ops::Div<Output = T>>() {
+    // N=2 : X₀ = √(1/2)·(a+b), X₁ = √(2/2)·(a−b) — dérivation fermée simple,
+    // vérifiée indépendamment (cf. en-tête de module pour la formule générale).
+    let x = [T::of(1.0), T::of(3.0)];
+    let got = dct2(&x);
+    assert_eq!(got.len(), 2);
+    let want0 = (1.0f64 / 2.0).sqrt() * 4.0;
+    let want1 = (1.0f64 / 2.0).sqrt() * (-2.0);
+    assert!((got[0].to_f64() - want0).abs() <= T::TOL * 4.0);
+    assert!((got[1].to_f64() - want1).abs() <= T::TOL * 4.0);
+}
+
+#[test]
+fn dct2_known_2point_values_all_scalars() {
+    check_dct2_known_2point_values::<f32>();
+    check_dct2_known_2point_values::<f64>();
+    check_dct2_known_2point_values::<Q16_16>();
+}
+
+#[test]
+#[should_panic(expected = "dct2")]
+fn dct2_rejects_empty_input() {
+    let x: [f64; 0] = [];
+    let _ = dct2(&x);
+}
+
+fn check_mfcc_truncated_matches_full_dct2<T: Scalar + core::ops::Div<Output = T>>() {
+    // Mfcc précalcule une base DCT-II TRONQUÉE (n_coeffs premières lignes) —
+    // preuve croisée directe : avec n_coeffs = n_mels, le résultat doit
+    // coïncider avec le calcul indépendant banque-mel → ln → dct2 complet
+    // (même principe que les preuves « raccourci vs calcul explicite »
+    // utilisées ailleurs dans le crate, ex. depthwise_conv2d vs conv2d).
+    let (n_mels, bins, sample_rate, f_min, f_max) = (10usize, 65usize, 16000.0, 0.0, 8000.0);
+    let mfcc = Mfcc::<T>::new(
+        n_mels,
+        n_mels,
+        bins,
+        T::of(sample_rate),
+        T::of(f_min),
+        T::of(f_max),
+    );
+    let fb = MelFilterbank::<T>::new(n_mels, bins, T::of(sample_rate), T::of(f_min), T::of(f_max));
+
+    let mut rng_seed = 0xABC1_2345u64;
+    let mut next = move || {
+        rng_seed = rng_seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        ((rng_seed >> 40) as f64 / (1u64 << 24) as f64) * 0.5 // valeurs positives modestes
+    };
+    let spectrogram: Vec<T> = (0..bins * 3).map(|_| T::of(next())).collect();
+
+    let got = mfcc.apply(&spectrogram);
+    let mel = fb.apply(&spectrogram);
+    let frames = mel.len() / n_mels;
+    let mut want = Vec::with_capacity(frames * n_mels);
+    for f in 0..frames
+    {
+        let log_mel: Vec<T> = mel[f * n_mels..(f + 1) * n_mels]
+            .iter()
+            .map(|&e| e.ln())
+            .collect();
+        want.extend(dct2(&log_mel));
+    }
+
+    assert_eq!(got.len(), want.len());
+    for (i, (&g, &w)) in got.iter().zip(&want).enumerate()
+    {
+        let diff = (g.to_f64() - w.to_f64()).abs();
+        assert!(
+            diff <= T::TOL * 8.0,
+            "i={i}: {} vs {} (écart {diff})",
+            g.to_f64(),
+            w.to_f64()
+        );
+    }
+}
+
+#[test]
+fn mfcc_truncated_matches_full_dct2_all_scalars() {
+    check_mfcc_truncated_matches_full_dct2::<f32>();
+    check_mfcc_truncated_matches_full_dct2::<f64>();
+    check_mfcc_truncated_matches_full_dct2::<Q16_16>();
+}
+
+#[test]
+fn mfcc_shape_and_truncation() {
+    let (n_mels, n_coeffs, bins) = (12usize, 5usize, 33usize);
+    let mfcc = Mfcc::<f64>::new(n_mels, n_coeffs, bins, 16000.0, 0.0, 8000.0);
+    assert_eq!(mfcc.n_mels(), n_mels);
+    assert_eq!(mfcc.n_coeffs(), n_coeffs);
+    assert_eq!(mfcc.bins(), bins);
+    let spectrogram = vec![0.3f64; bins * 4];
+    let out = mfcc.apply(&spectrogram);
+    assert_eq!(out.len(), 4 * n_coeffs);
+}
+
+#[test]
+#[should_panic(expected = "n_coeffs")]
+fn mfcc_new_rejects_zero_n_coeffs() {
+    let _ = Mfcc::<f64>::new(10, 0, 33, 16000.0, 0.0, 8000.0);
+}
+
+#[test]
+#[should_panic(expected = "n_coeffs")]
+fn mfcc_new_rejects_n_coeffs_exceeding_n_mels() {
+    let _ = Mfcc::<f64>::new(10, 11, 33, 16000.0, 0.0, 8000.0);
+}
+
+#[test]
+#[should_panic(expected = "MelFilterbank::apply")]
+fn mfcc_apply_dim_mismatch_panics() {
+    let mfcc = Mfcc::<f64>::new(10, 5, 33, 16000.0, 0.0, 8000.0);
+    let bad = vec![0.0f64; 32]; // pas multiple de bins()=33
+    let _ = mfcc.apply(&bad);
+}
+
+#[test]
+fn stft_mel_feeds_mfcc() {
+    // Pipeline complet : signal → stft → power_spectrogram → MFCC, comme en
+    // reconnaissance vocale quantifiée. Vérifie la forme et le déterminisme
+    // bit-à-bit.
+    let frame_size = 32;
+    let hop = 16;
+    let sample_rate = 8000.0;
+    let win: Vec<Q16_16> = window::hann(frame_size);
+    let n = 128;
+    let signal: Vec<Q16_16> = (0..n)
+        .map(|i| Q16_16::try_from(((i % 6) as f64) * 0.1 - 0.25).unwrap())
+        .collect();
+    let spec = stft(&signal, &win, hop);
+    let bins = frame_size / 2 + 1;
+    let power = power_spectrogram(&spec);
+
+    let mfcc = Mfcc::<Q16_16>::new(
+        8,
+        5,
+        bins,
+        Q16_16::try_from(sample_rate).unwrap(),
+        Q16_16::zero(),
+        Q16_16::try_from(sample_rate / 2.0).unwrap(),
+    );
+    let out1 = mfcc.apply(&power);
+    let out2 = mfcc.apply(&power);
+    assert_eq!(out1, out2); // déterminisme bit-à-bit
+
+    let frames = num_frames(n, frame_size, hop);
+    assert_eq!(out1.len(), frames * mfcc.n_coeffs());
 }
 
 // ------------------------------------------------------------------ //

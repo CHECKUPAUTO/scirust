@@ -30,6 +30,10 @@
 //   par recouvrement-addition (COLA).
 // * [`mel`] — banque de filtres mel ([`mel::MelFilterbank`]) : spectrogramme
 //   mel standard en reconnaissance vocale et classification audio.
+// * [`mfcc`] — coefficients cepstraux sur l'échelle mel ([`mfcc::Mfcc`],
+//   [`mfcc::dct2`]) : dernière étape standard au-dessus de [`mel`]
+//   (`ln` des énergies mel, puis DCT-II tronquée aux coefficients les plus
+//   bas — l'enveloppe spectrale, information clé en reconnaissance vocale).
 // * [`resample`] — ré-échantillonnage rationnel `L/M` ([`resample::resample`]),
 //   filtre passe-bas prototype (sinus cardinal fenêtré) décomposé en `L`
 //   sous-filtres polyphase : change la fréquence d'échantillonnage sans
@@ -57,6 +61,7 @@ pub mod fft;
 pub mod fftconv;
 pub mod fir;
 pub mod mel;
+pub mod mfcc;
 pub mod resample;
 pub mod stft;
 pub mod window;
@@ -66,6 +71,7 @@ pub use biquad::{Biquad, BiquadCascade};
 pub use fft::{Complex, Plan, fft, ifft, irfft, rfft};
 pub use fftconv::fft_convolve;
 pub use fir::Fir;
+pub use mfcc::{Mfcc, dct2};
 pub use resample::resample;
 
 #[cfg(test)]
