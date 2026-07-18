@@ -32,6 +32,7 @@ optimized SIMD/hardware library instead — see [Positioning](#positioning).
 | [`ring`] | The finite rings `Z/2^k` as sealed `Word` types (`W2 … W64`), explicit wrapping arithmetic only, 2-adic valuation, unit test, modular inverse of odd elements. |
 | [`numtheory`] | Extended GCD, modular inverse/exponentiation, CRT, integer sqrt, **deterministic** Miller–Rabin primality (exact for every `u64`), **deterministic** Pollard–Brent factorization, Euler's totient, divisors, Jacobi symbol. |
 | [`gf2`] | Carryless `GF(2)[x]` multiply / divide / gcd, and finite fields `GF(2^n)` (add/mul/pow/inv) with the AES/Rijndael `GF(2^8)`, a primitive `GF(2^8)` and a `GF(2^16)`. |
+| [`poly`] | The univariate polynomial ring **`GF(p)[x]`** over any prime field: long division, monic (extended) GCD, modular exponentiation, Lagrange interpolation, the formal derivative, and an exact **Rabin irreducibility test** — the field-generic companion to `gf2` (the `p = 2` case). |
 | [`boolean`] | Fast Möbius transform + exact **algebraic-normal-form degree**, and the fast **Walsh–Hadamard transform** with nonlinearity / balancedness / bent / correlation-immunity. |
 | [`linalg`] | Dense `ModMatrix` over `Z/2^k`: determinant mod `2^k`, `GF(2)` rank (kept distinct from ring rank), **2-adic Smith normal form** → exact kernel/image sizes, inverse, solve, matrix power, 2-adic pivot rank. |
 | [`hypercomplex`] | Exact integer **octonions** and **quaternions** over any `Word`, with an authoritative multiplication oracle cross-checked against a Fano-triple generator. |
@@ -65,8 +66,9 @@ Each foundation brick composes into a higher-level capability targeting a distin
 ```
 
 Concretely: `codes` builds on `gf2` + `numtheory`; `ntt` composes `numtheory`;
-`negacyclic` and `bigint::mul_ntt` build on `ntt`; `sbox` builds on `boolean`;
-`bigrational` and `lll` build on `bigint`.
+`poly` (the field-generic `GF(p)[x]`) composes `numtheory`; `negacyclic` and
+`bigint::mul_ntt` build on `ntt`; `sbox` builds on `boolean`; `bigrational` and
+`lll` build on `bigint`.
 
 ## Testing discipline
 
@@ -78,6 +80,7 @@ vector**, not just self-consistency:
 - CRCs vs the published `"123456789"` catalogue check values;
 - the AES S-box vs its textbook DU/nonlinearity/degree; LAT vs a brute-force LAT;
 - negacyclic multiply vs an `O(n²)` reference; `mul_ntt` vs schoolbook `mul`;
+- `GF(p)[x]` division reconstructed (`a = q·b + r`), Bézout (`u·a + v·b = g`), the product rule (`(fg)' = f'g + fg'`), and Rabin irreducibility vs an exhaustive root search (plus the AES modulus `x⁸+x⁴+x³+x+1`);
 - LLL output verified LLL-reduced with a unimodular certificate (`U·A = reduced`, `det U = ±1`) and preserved lattice volume;
 - `BigInt` arithmetic vs `i128` over thousands of random cases.
 
@@ -138,6 +141,7 @@ matter more than speed; choose an optimized library otherwise.
 [`crc`]: src/crc.rs
 [`sbox`]: src/sbox.rs
 [`ntt`]: src/ntt.rs
+[`poly`]: src/poly.rs
 [`negacyclic`]: src/negacyclic.rs
 [`lll`]: src/lll.rs
 [`rational`]: src/rational.rs

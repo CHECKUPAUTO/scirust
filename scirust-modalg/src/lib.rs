@@ -51,6 +51,11 @@
 //!   FFT) and the `O(n log n)` exact integer **convolution** / polynomial
 //!   multiplication it enables, composing `numtheory` to validate the prime and
 //!   its primitive root.
+//! - [`poly`] — the univariate polynomial ring **`GF(p)[x]`** over any prime
+//!   field: long division, monic (extended) GCD, modular exponentiation,
+//!   Lagrange interpolation, the formal derivative, and an exact **Rabin
+//!   irreducibility test** — the field-generic companion to `gf2` (the `p = 2`
+//!   case), composing `numtheory`.
 //! - [`sbox`] — exact **S-box analysis**: difference distribution table and
 //!   differential uniformity, linear approximation table and nonlinearity (via
 //!   the Walsh transform), algebraic degree, and the strict-avalanche matrix —
@@ -156,6 +161,21 @@
 //! ```
 //!
 //! ```
+//! use scirust_modalg::poly::Poly;
+//!
+//! // In GF(2)[x], the AES reduction polynomial x⁸+x⁴+x³+x+1 is irreducible —
+//! // exactly why GF(2)[x] modulo it is the field GF(2^8).
+//! let m = Poly::from_coeffs(2, &[1, 1, 0, 1, 1, 0, 0, 0, 1]);
+//! assert!(m.is_irreducible());
+//! // Long division is exact: (x²+1) = (x+1)·(x+1) over GF(2).
+//! let x2p1 = Poly::from_coeffs(2, &[1, 0, 1]);
+//! let xp1 = Poly::from_coeffs(2, &[1, 1]);
+//! let (q, r) = x2p1.divmod(&xp1);
+//! assert_eq!(q, xp1);
+//! assert!(r.is_zero());
+//! ```
+//!
+//! ```
 //! use scirust_modalg::sbox::Sbox;
 //!
 //! // An S-box's differential uniformity — a small linear box has the worst
@@ -230,6 +250,7 @@ pub mod lll;
 pub mod negacyclic;
 pub mod ntt;
 pub mod numtheory;
+pub mod poly;
 pub mod rational;
 pub mod ring;
 pub mod sbox;
@@ -244,6 +265,7 @@ pub use linalg::ModMatrix;
 pub use lll::LllResult;
 pub use negacyclic::{Montgomery, NegacyclicNtt};
 pub use ntt::Ntt;
+pub use poly::Poly;
 pub use rational::{Fraction, RatMatrix};
 pub use ring::Word;
 pub use sbox::Sbox;
