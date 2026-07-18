@@ -15,7 +15,15 @@
 // * [`rope_apply`] : rotation des paires `(x[2i], x[2i+1])` par un angle
 //   dépendant de la position (rotary positional embedding).
 //
-// `rmsnorm`/`layer_norm` sont génériques sur `T: FixedReducible +
+// [`batch_norm`]/[`batch_norm_batched`] complètent ce module côté CNN
+// ([`super::conv2d`]/[`super::pool2d`]) plutôt que Transformer : même forme
+// `(x − μ)/√(σ² + eps)·γ + β`, mais `μ`/`σ²` (« running mean/var ») sont
+// **précalculées à l'entraînement** et figées à l'inférence — un paramètre
+// **par canal**, pas une statistique recalculée par ligne comme
+// `layer_norm`. S'insère dans la chaîne `conv2d → batch_norm → activation`
+// (avant [`super::pool2d`]).
+//
+// `rmsnorm`/`layer_norm`/`batch_norm` sont génériques sur `T: FixedReducible +
 // NumericScalar` — donc sur les deux stockages `i32`/`i64` (aucune
 // transcendante Q32 requise, juste `sqrt` et des divisions, disponibles pour
 // tout stockage). `rope_apply` est **réservé au stockage `i32`** : les angles
@@ -24,18 +32,22 @@
 //
 // ## Division réelle, pas réciproque isolée
 //
-// Chaque élément de sortie de `rmsnorm`/`layer_norm` divise par l'écart-type
-// (ou la racine de la moyenne des carrés) via une division réelle **vérifiée**
-// ([`FixedReducible::checked_div`]), jamais une réciproque isolée calculée
-// une fois puis multipliée `d` fois : `d` divisions exactes (chacune à
-// ≤ 0.5 ULP par l'accumulateur élargi) valent mieux qu'une réciproque
-// quantifiée une seule fois et réutilisée, qui introduirait un biais commun
-// à tous les canaux (même leçon que `dsp::mel`, les décompositions de
-// `fixed::linalg`, `fixed::attention`).
+// Chaque élément de sortie de `rmsnorm`/`layer_norm`/`batch_norm` divise par
+// l'écart-type (ou la racine de la moyenne des carrés) via une division
+// réelle **vérifiée** ([`FixedReducible::checked_div`]), jamais une
+// réciproque isolée calculée une fois puis multipliée `d` fois : `d`
+// divisions exactes (chacune à ≤ 0.5 ULP par l'accumulateur élargi) valent
+// mieux qu'une réciproque quantifiée une seule fois et réutilisée, qui
+// introduirait un biais commun à tous les canaux (même leçon que `dsp::mel`,
+// les décompositions de `fixed::linalg`, `fixed::attention`). `batch_norm`
+// calcule néanmoins `√(σ² + eps)` **une seule fois par canal** (pas par
+// position spatiale) : la racine ne dépend que du canal, la recalculer à
+// chaque position serait un travail redondant, pas une économie de précision
+// — la division elle-même, elle, reste individuelle à chaque élément.
 //
 // `None` si un écart-type (ou une racine quadratique moyenne) plus `eps` vaut
-// zéro pour une ligne (normalisation indéfinie) ou si une division déborde —
-// propriété des **données**, pas un bug d'appelant.
+// zéro pour une ligne/un canal (normalisation indéfinie) ou si une division
+// déborde — propriété des **données**, pas un bug d'appelant.
 
 use super::reductions::{FixedReducible, dot, sum};
 use super::traits::{NumericScalar, RealScalar};
@@ -135,6 +147,135 @@ where
         {
             y[r * d + i] = c.checked_div(denom)? * gamma[i] + beta[i];
         }
+    }
+    Some(y)
+}
+
+// ------------------------------------------------------------------ //
+//  BatchNorm (inférence) — chaîne CNN                                 //
+// ------------------------------------------------------------------ //
+
+/// Normalisation par lot (BatchNorm), **inférence** : `y[c,:] = (x[c,:] −
+/// running_mean[c]) / √(running_var[c] + eps) · gamma[c] + beta[c]`.
+///
+/// `x`/sortie sont `channels × spatial` row-major (même convention que
+/// [`super::conv2d`]/[`super::pool2d`] — `spatial = height·width` pour des
+/// données 2D, `spatial = length` pour du 1D, `spatial = 1` après un
+/// aplatissement global) ; `running_mean`/`running_var`/`gamma`/`beta` ont
+/// `channels` éléments (statistiques figées à l'entraînement, **pas**
+/// recalculées ici — à la différence de [`layer_norm`], cf. en-tête de
+/// module).
+///
+/// `None` si `running_var[c] + eps ≤ 0` pour un canal (racine indéfinie), ou
+/// en cas de débordement d'une division. Panique si les longueurs de slice
+/// ne correspondent pas aux dimensions annoncées.
+#[must_use]
+#[allow(clippy::too_many_arguments)]
+pub fn batch_norm<T>(
+    x: &[T],
+    channels: usize,
+    spatial: usize,
+    running_mean: &[T],
+    running_var: &[T],
+    gamma: &[T],
+    beta: &[T],
+    eps: T,
+) -> Option<Vec<T>>
+where
+    T: FixedReducible + NumericScalar,
+{
+    assert_eq!(
+        x.len(),
+        channels * spatial,
+        "batch_norm : x de longueur {} ≠ {channels}×{spatial}",
+        x.len()
+    );
+    assert_eq!(
+        running_mean.len(),
+        channels,
+        "batch_norm : running_mean de longueur {} ≠ {channels}",
+        running_mean.len()
+    );
+    assert_eq!(
+        running_var.len(),
+        channels,
+        "batch_norm : running_var de longueur {} ≠ {channels}",
+        running_var.len()
+    );
+    assert_eq!(
+        gamma.len(),
+        channels,
+        "batch_norm : gamma de longueur {} ≠ {channels}",
+        gamma.len()
+    );
+    assert_eq!(
+        beta.len(),
+        channels,
+        "batch_norm : beta de longueur {} ≠ {channels}",
+        beta.len()
+    );
+
+    let mut y = vec![T::ZERO; channels * spatial];
+    for c in 0..channels
+    {
+        let denom = (running_var[c] + eps).sqrt();
+        let (mean, g, b) = (running_mean[c], gamma[c], beta[c]);
+        let row = &x[c * spatial..(c + 1) * spatial];
+        let out_row = &mut y[c * spatial..(c + 1) * spatial];
+        for (o, &xi) in out_row.iter_mut().zip(row)
+        {
+            *o = (xi - mean).checked_div(denom)? * g + b;
+        }
+    }
+    Some(y)
+}
+
+/// [`batch_norm`] **par lot** : `x` est `batch × channels × spatial` (un
+/// échantillon par bloc, contigu), les statistiques et le gain/décalage
+/// restant **partagés** entre tous les échantillons du lot (propriété de
+/// BatchNorm — contrairement à [`super::conv2d::conv2d_batch`], ce n'est pas
+/// un GEMM à fusionner, juste `batch` applications indépendantes de
+/// [`batch_norm`]). Résultat **identique bit-à-bit** à `batch` appels de
+/// [`batch_norm`] concaténés (vérifié par test).
+///
+/// Panique si `x.len() != batch·channels·spatial`, ou selon les
+/// préconditions de [`batch_norm`].
+#[must_use]
+#[allow(clippy::too_many_arguments)]
+pub fn batch_norm_batched<T>(
+    x: &[T],
+    batch: usize,
+    channels: usize,
+    spatial: usize,
+    running_mean: &[T],
+    running_var: &[T],
+    gamma: &[T],
+    beta: &[T],
+    eps: T,
+) -> Option<Vec<T>>
+where
+    T: FixedReducible + NumericScalar,
+{
+    let sample_len = channels * spatial;
+    assert_eq!(
+        x.len(),
+        batch * sample_len,
+        "batch_norm_batched : x de longueur {} ≠ {batch}×{channels}×{spatial}",
+        x.len()
+    );
+    let mut y = Vec::with_capacity(batch * sample_len);
+    for sample in x.chunks_exact(sample_len)
+    {
+        y.extend(batch_norm(
+            sample,
+            channels,
+            spatial,
+            running_mean,
+            running_var,
+            gamma,
+            beta,
+            eps,
+        )?);
     }
     Some(y)
 }

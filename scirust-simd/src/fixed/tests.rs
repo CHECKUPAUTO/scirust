@@ -19,7 +19,7 @@ use super::layer::Linear;
 use super::linalg;
 use super::math::{reciprocal, rsqrt, sqrt};
 use super::model::TransformerModel;
-use super::norm::{layer_norm, rmsnorm, rope_apply};
+use super::norm::{batch_norm, batch_norm_batched, layer_norm, rmsnorm, rope_apply};
 use super::pool::{Pool1dShape, avg_pool1d, max_pool1d};
 use super::pool2d::{Pool2dShape, avg_pool2d, max_pool2d};
 use super::reductions as red;
@@ -5486,6 +5486,235 @@ fn layer_norm_dim_mismatch_panics() {
     let gamma = vec![Q16_16::one(); 4];
     let beta = vec![Q16_16::one(); 3]; // devrait être 4
     let _ = layer_norm(&x, 1, 4, &gamma, &beta, Q16_16::zero());
+}
+
+// ------------------------------------------------------------------ //
+//  BatchNorm (inférence), déterministe                                //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn batch_norm_known_small() {
+    // 1 canal, spatial=4 : x=[0,0,4,4], running_mean=2, running_var=4
+    // (exact, eps=0), gamma=1, beta=0 → y=(x-2)/2 = [-1,-1,1,1] — même calcul
+    // que layer_norm_known_small, mais statistiques fournies plutôt que
+    // recalculées.
+    let x = [0i32, 0, 4, 4].map(Q16_16::from);
+    let mean = [Q16_16::from(2)];
+    let var = [Q16_16::from(4)];
+    let gamma = [Q16_16::one()];
+    let beta = [Q16_16::zero()];
+    let y = batch_norm(&x, 1, 4, &mean, &var, &gamma, &beta, Q16_16::zero()).unwrap();
+    assert_eq!(y, [-1i32, -1, 1, 1].map(Q16_16::from));
+}
+
+#[test]
+fn batch_norm_known_two_channels() {
+    // Canal 0 : x=[0,4], mean=2,var=4,gamma=1,beta=0 → y=(x-2)/2=[-1,1].
+    // Canal 1 : x=[1,3], mean=2,var=1,gamma=10,beta=100 →
+    // y=((x-2)/1)·10+100 = [90,110] — statistiques/gain/décalage
+    // indépendants par canal (calcul à la main).
+    let x = [0i32, 4, 1, 3].map(Q16_16::from);
+    let mean = [2i32, 2].map(Q16_16::from);
+    let var = [4i32, 1].map(Q16_16::from);
+    let gamma = [1i32, 10].map(Q16_16::from);
+    let beta = [0i32, 100].map(Q16_16::from);
+    let y = batch_norm(&x, 2, 2, &mean, &var, &gamma, &beta, Q16_16::zero()).unwrap();
+    assert_eq!(y, [-1i32, 1, 90, 110].map(Q16_16::from));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn batch_norm_ref_f64(
+    x: &[f64],
+    channels: usize,
+    spatial: usize,
+    mean: &[f64],
+    var: &[f64],
+    gamma: &[f64],
+    beta: &[f64],
+    eps: f64,
+) -> Vec<f64> {
+    let mut y = vec![0.0f64; channels * spatial];
+    for c in 0..channels
+    {
+        let denom = (var[c] + eps).sqrt();
+        for s in 0..spatial
+        {
+            let xi = x[c * spatial + s];
+            y[c * spatial + s] = (xi - mean[c]) / denom * gamma[c] + beta[c];
+        }
+    }
+    y
+}
+
+#[test]
+fn batch_norm_matches_f64_reference() {
+    let mut rng = Lcg(0x2222_0003);
+    for &(channels, spatial) in &[(1usize, 1usize), (3, 5), (4, 8)]
+    {
+        let x: Vec<Q16_16> = (0..channels * spatial)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 8))
+            .collect();
+        let mean: Vec<Q16_16> = (0..channels)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+            .collect();
+        // Variance strictement positive (garantit var+eps > 0).
+        let var: Vec<Q16_16> = (0..channels)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 8).abs() + q16(0.1))
+            .collect();
+        let gamma: Vec<Q16_16> = (0..channels)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+            .collect();
+        let beta: Vec<Q16_16> = (0..channels)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+            .collect();
+        let eps = q16(1e-3);
+        let got = batch_norm(&x, channels, spatial, &mean, &var, &gamma, &beta, eps)
+            .expect("var + eps > 0");
+        let want = batch_norm_ref_f64(
+            &to_f64_vec(&x),
+            channels,
+            spatial,
+            &to_f64_vec(&mean),
+            &to_f64_vec(&var),
+            &to_f64_vec(&gamma),
+            &to_f64_vec(&beta),
+            eps.to_f64(),
+        );
+        for i in 0..channels * spatial
+        {
+            let diff = (got[i].to_f64() - want[i]).abs();
+            assert!(
+                diff <= 1e-2,
+                "channels={channels} spatial={spatial} i={i}: {} vs {}",
+                got[i].to_f64(),
+                want[i]
+            );
+        }
+    }
+}
+
+#[test]
+fn batch_norm_zero_variance_plus_eps_returns_none() {
+    let x = [Q16_16::one(); 4];
+    let mean = [Q16_16::zero()];
+    let var = [Q16_16::zero()];
+    let gamma = [Q16_16::one()];
+    let beta = [Q16_16::zero()];
+    assert!(batch_norm(&x, 1, 4, &mean, &var, &gamma, &beta, Q16_16::zero()).is_none());
+}
+
+#[test]
+fn batch_norm_i64_storage() {
+    let x = [0i64, 0, 4, 4].map(Q32_32::from);
+    let mean = [Q32_32::from(2i64)];
+    let var = [Q32_32::from(4i64)];
+    let gamma = [Q32_32::from(1i64)];
+    let beta = [Q32_32::zero()];
+    let y = batch_norm(&x, 1, 4, &mean, &var, &gamma, &beta, Q32_32::zero()).unwrap();
+    assert_eq!(y, [-1i64, -1, 1, 1].map(Q32_32::from));
+}
+
+#[test]
+#[should_panic(expected = "batch_norm")]
+fn batch_norm_dim_mismatch_panics() {
+    let x = vec![Q16_16::one(); 8]; // 2×4
+    let mean = vec![Q16_16::zero(); 2];
+    let var = vec![Q16_16::one(); 2];
+    let gamma = vec![Q16_16::one(); 3]; // devrait être 2
+    let beta = vec![Q16_16::zero(); 2];
+    let _ = batch_norm(&x, 2, 4, &mean, &var, &gamma, &beta, Q16_16::zero());
+}
+
+#[test]
+fn batch_norm_batched_matches_looped_batch_norm() {
+    let mut rng = Lcg(0x2222_0004);
+    let (batch, channels, spatial) = (5usize, 3usize, 6usize);
+    let x: Vec<Q16_16> = (0..batch * channels * spatial)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 8))
+        .collect();
+    let mean: Vec<Q16_16> = (0..channels)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+        .collect();
+    let var: Vec<Q16_16> = (0..channels)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 8).abs() + q16(0.1))
+        .collect();
+    let gamma: Vec<Q16_16> = (0..channels)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+        .collect();
+    let beta: Vec<Q16_16> = (0..channels)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+        .collect();
+    let eps = q16(1e-3);
+
+    let got = batch_norm_batched(
+        &x, batch, channels, spatial, &mean, &var, &gamma, &beta, eps,
+    )
+    .expect("var + eps > 0");
+    let mut want = Vec::with_capacity(batch * channels * spatial);
+    for sample in x.chunks_exact(channels * spatial)
+    {
+        want.extend(
+            batch_norm(sample, channels, spatial, &mean, &var, &gamma, &beta, eps).unwrap(),
+        );
+    }
+    assert_eq!(got, want);
+}
+
+#[test]
+#[should_panic(expected = "batch_norm_batched")]
+fn batch_norm_batched_dim_mismatch_panics() {
+    let x = vec![Q16_16::one(); 7]; // ni 2×2×2=8 ni aucun multiple valide
+    let mean = vec![Q16_16::zero(); 2];
+    let var = vec![Q16_16::one(); 2];
+    let gamma = vec![Q16_16::one(); 2];
+    let beta = vec![Q16_16::zero(); 2];
+    let _ = batch_norm_batched(&x, 2, 2, 2, &mean, &var, &gamma, &beta, Q16_16::zero());
+}
+
+#[test]
+fn batch_norm_composes_with_conv2d_output() {
+    // Chaîne conv2d → batch_norm (cf. en-tête de module norm.rs) : vérifie
+    // que les dimensions s'enchaînent (out_channels de conv2d = channels de
+    // batch_norm) — la correction de batch_norm elle-même est déjà couverte
+    // par batch_norm_matches_f64_reference.
+    let shape = Conv2dShape {
+        in_channels: 2,
+        height: 5,
+        width: 5,
+        out_channels: 3,
+        kernel_h: 3,
+        kernel_w: 3,
+        stride_h: 1,
+        stride_w: 1,
+    };
+    let mut rng = Lcg(0x2222_0005);
+    let x: Vec<Q16_16> = (0..shape.in_channels * shape.height * shape.width)
+        .map(|_| Q16_16::from_raw(rng.raw_i32() >> 8))
+        .collect();
+    let w: Vec<Q16_16> =
+        (0..shape.out_channels * shape.in_channels * shape.kernel_h * shape.kernel_w)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 8))
+            .collect();
+    let b = vec![Q16_16::zero(); shape.out_channels];
+    let conv_out = conv2d(&x, &w, &b, shape);
+
+    let spatial = shape.height_out() * shape.width_out();
+    let mean = vec![Q16_16::zero(); shape.out_channels];
+    let var = vec![Q16_16::one(); shape.out_channels];
+    let gamma = vec![Q16_16::one(); shape.out_channels];
+    let beta = vec![Q16_16::zero(); shape.out_channels];
+    let normalized = batch_norm(
+        &conv_out,
+        shape.out_channels,
+        spatial,
+        &mean,
+        &var,
+        &gamma,
+        &beta,
+        Q16_16::zero(),
+    )
+    .expect("var + eps > 0");
+    assert_eq!(normalized.len(), conv_out.len());
 }
 
 // ------------------------------------------------------------------ //

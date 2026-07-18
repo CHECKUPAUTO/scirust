@@ -112,7 +112,10 @@
 //   flottant [`crate::attention`], côté séquences/Transformers.
 // * [`norm`] — normalisations et encodage positionnel quantifiés
 //   ([`norm::rmsnorm`], [`norm::layer_norm`], [`norm::rope_apply`]), le
-//   pendant déterministe du module flottant [`crate::norm`].
+//   pendant déterministe du module flottant [`crate::norm`], et
+//   [`norm::batch_norm`]/[`norm::batch_norm_batched`] (BatchNorm,
+//   inférence) côté CNN, statistiques figées par canal plutôt que
+//   recalculées par ligne.
 // * [`kv_cache`] — cache clés/valeurs quantifié ([`kv_cache::KvCache`]) pour
 //   le décodage autoregressif incrémental, construit sur [`attention`] ; le
 //   pendant déterministe du module flottant [`crate::kv_cache`].

@@ -17,11 +17,16 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::fixed::Q16_16;
-use scirust_simd::fixed::norm::{layer_norm, rmsnorm, rope_apply};
+use scirust_simd::fixed::norm::{batch_norm, layer_norm, rmsnorm, rope_apply};
 
 /// 32 lignes de 256 canaux : taille type d'une normalisation Transformer.
 const ROWS: usize = 32;
 const D: usize = 256;
+
+/// 32 canaux, 8×8 spatial : taille type d'une carte de caractéristiques CNN
+/// après quelques convolutions/poolings.
+const CHANNELS: usize = 32;
+const SPATIAL: usize = 64;
 
 struct Lcg(u64);
 impl Lcg {
@@ -139,6 +144,77 @@ fn bench_layer_norm(c: &mut Criterion) {
     g.finish();
 }
 
+/// BatchNorm flottante naïve (référence non déterministe, inférence :
+/// statistiques déjà fournies, comme `batch_norm`).
+#[allow(clippy::too_many_arguments)]
+fn naive_batch_norm_f32(
+    x: &[f32],
+    channels: usize,
+    spatial: usize,
+    mean: &[f32],
+    var: &[f32],
+    gamma: &[f32],
+    beta: &[f32],
+    eps: f32,
+) -> Vec<f32> {
+    let mut y = vec![0.0f32; channels * spatial];
+    for c in 0..channels
+    {
+        let denom = (var[c] + eps).sqrt();
+        for s in 0..spatial
+        {
+            y[c * spatial + s] = (x[c * spatial + s] - mean[c]) / denom * gamma[c] + beta[c];
+        }
+    }
+    y
+}
+
+fn bench_batch_norm(c: &mut Criterion) {
+    let x = fixed_data(0x7, CHANNELS * SPATIAL);
+    let mean = fixed_data(0x8, CHANNELS);
+    let var = fixed_data(0x9, CHANNELS);
+    let gamma = fixed_data(0xA, CHANNELS);
+    let beta = fixed_data(0xB, CHANNELS);
+    let eps = Q16_16::try_from(1e-3).unwrap();
+    let fx = f32_data(0x7, CHANNELS * SPATIAL);
+    let fmean = f32_data(0x8, CHANNELS);
+    let fvar = f32_data(0x9, CHANNELS);
+    let fgamma = f32_data(0xA, CHANNELS);
+    let fbeta = f32_data(0xB, CHANNELS);
+
+    let mut g = c.benchmark_group("batch_norm_32x64");
+    g.throughput(Throughput::Elements((CHANNELS * SPATIAL) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter(|| {
+            batch_norm(
+                black_box(&x),
+                CHANNELS,
+                SPATIAL,
+                black_box(&mean),
+                black_box(&var),
+                black_box(&gamma),
+                black_box(&beta),
+                eps,
+            )
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "naive"), |bch| {
+        bch.iter(|| {
+            naive_batch_norm_f32(
+                black_box(&fx),
+                CHANNELS,
+                SPATIAL,
+                black_box(&fmean),
+                black_box(&fvar),
+                black_box(&fgamma),
+                black_box(&fbeta),
+                1e-3,
+            )
+        })
+    });
+    g.finish();
+}
+
 /// RoPE flottante naïve (référence non déterministe), en place.
 fn naive_rope_f32(x: &mut [f32], d: usize, base: f32, pos_offset: usize) {
     let half = d / 2;
@@ -188,5 +264,11 @@ fn bench_rope(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(benches, bench_rmsnorm, bench_layer_norm, bench_rope);
+criterion_group!(
+    benches,
+    bench_rmsnorm,
+    bench_layer_norm,
+    bench_batch_norm,
+    bench_rope
+);
 criterion_main!(benches);
