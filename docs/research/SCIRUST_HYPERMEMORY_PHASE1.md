@@ -369,7 +369,19 @@ are run, they are reported only alongside the exact hardware, compiler version,
   slightly below a transient similarity peak; the residual bound caps total
   drift from the immutable anchor.)*
 * **Phase 4** — approximate indexes (HNSW / ANN) measured against this Phase 1
-  exact oracle for recall.
+  exact oracle for recall. *(First instance implemented: `S16IvfIndex`, a
+  deterministic IVF index — Lloyd clustering with no RNG (seeding = first
+  `nlist` vectors in slot order, ties → lowest centroid index, fixed
+  index-order reductions), exact scoring inside probed lists with the oracle's
+  tie-break. Pinned properties: `nprobe = nlist` reproduces the oracle
+  **bit-for-bit**; recall@k is monotone non-decreasing in `nprobe` (nested
+  candidate sets); builds/searches bit-reproducible. Measured deterministic
+  profile (2 000 concepts, `nlist = 32`, 24 seeded queries): recall@10 =
+  0.283 / 0.433 / 0.654 / 0.854 / 0.996 / 1.0 at `nprobe` = 1/2/4/8/16/32 —
+  see `tests/phase4_recall.rs`. Honest note: at 16 dimensions the exhaustive
+  scan is already fast; the value here is the oracle-measured pattern, not a
+  production speedup. Randomized HNSW remains out of scope under the
+  determinism contract.)*
 * **Phase 5** — structured / relation-aware queries, measured against the
   `Real16` baseline for F1.
 

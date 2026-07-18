@@ -79,6 +79,11 @@ derivation, or is labelled a hypothesis.
   evicts everything below a retention threshold. Behavioural parity with the
   workspace's `scirust_retrieval::BoundedSemanticMemory` is tested head-to-head
   in `tests/bounded_parity.rs`;
+- **a deterministic approximate index (Phase 4)** ([`S16IvfIndex`]) — IVF with
+  RNG-free Lloyd clustering; `nprobe = nlist` reproduces the exact oracle
+  **bit-for-bit**, recall@k is monotone in `nprobe` (measured deterministic
+  profile in `tests/phase4_recall.rs`); randomized HNSW stays out of scope
+  under the determinism contract;
 - **a real-vector baseline** ([`Real16Index`]).
 
 Properties: pure Rust, zero FFI, `#![forbid(unsafe_code)]`, deterministic
@@ -227,6 +232,7 @@ cryptography, and reverse-mode differentiation over the store — all deferred.
 [`ConceptRecord`]: crate::ConceptRecord
 [`S16Store`]: crate::S16Store
 [`S16BoundedMemory`]: crate::S16BoundedMemory
+[`S16IvfIndex`]: crate::S16IvfIndex
 [`S16ExactIndex`]: crate::S16ExactIndex
 [`S16Expr`]: crate::S16Expr
 [`S16Relation`]: crate::S16Relation

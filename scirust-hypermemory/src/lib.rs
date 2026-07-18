@@ -66,6 +66,7 @@ mod experiments;
 mod expr;
 mod id;
 mod index;
+mod ivf;
 mod metadata;
 mod record;
 mod representation;
@@ -89,6 +90,7 @@ pub use expr::{
 };
 pub use id::ConceptId;
 pub use index::{S16ExactIndex, SearchHit, SimilarityMetric};
+pub use ivf::S16IvfIndex;
 pub use metadata::{ConceptMetadata, LinearDecay, NoForgetting, RetentionPolicy};
 pub use record::ConceptRecord;
 pub use representation::{effective_representation, is_finite, norm_sqr_ordered};
