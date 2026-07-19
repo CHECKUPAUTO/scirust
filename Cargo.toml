@@ -98,6 +98,7 @@ members = [
     "scirust-som/crates/visualizer",
     "examples/industrial_monitor",
     "scirust-signal",
+    "scirust-cayley-filter",
     "scirust-trader",
     "scirust-opcua",
     "scirust-mqtt",
