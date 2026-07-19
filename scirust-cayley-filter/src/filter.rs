@@ -51,11 +51,28 @@ impl CayleyFilter {
     /// Evaluates signal preservation and noise rejection separately.
     #[must_use]
     pub fn evaluate(&self, signal: &Sedenion, noise: &Sedenion) -> FilterEvaluation {
-        let observation = add(signal, noise);
-
         let filtered_signal = self.apply(signal);
         let filtered_noise = self.apply(noise);
-        let filtered_observation = self.apply(&observation);
+
+        FilterEvaluation::from_linear_outputs(signal, noise, filtered_signal, filtered_noise)
+    }
+
+    /// Returns the underlying multiplication operator.
+    #[must_use]
+    pub const fn operator(&self) -> &LeftMultiplicationOperator {
+        &self.operator
+    }
+}
+
+impl FilterEvaluation {
+    /// Builds an evaluation from separate outputs of a linear filter.
+    pub(crate) fn from_linear_outputs(
+        signal: &Sedenion,
+        noise: &Sedenion,
+        filtered_signal: Sedenion,
+        filtered_noise: Sedenion,
+    ) -> Self {
+        let filtered_observation = add(&filtered_signal, &filtered_noise);
 
         let input_signal_energy = squared_norm(signal);
         let input_noise_energy = squared_norm(noise);
@@ -73,7 +90,7 @@ impl CayleyFilter {
             output_snr_db: power_ratio_db(output_signal_energy, output_noise_energy),
         };
 
-        FilterEvaluation {
+        Self {
             filtered_signal,
             filtered_noise,
             filtered_observation,
@@ -81,14 +98,6 @@ impl CayleyFilter {
         }
     }
 
-    /// Returns the underlying multiplication operator.
-    #[must_use]
-    pub const fn operator(&self) -> &LeftMultiplicationOperator {
-        &self.operator
-    }
-}
-
-impl FilterEvaluation {
     #[must_use]
     pub const fn filtered_signal(&self) -> &Sedenion {
         &self.filtered_signal
