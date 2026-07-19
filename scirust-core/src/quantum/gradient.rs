@@ -56,6 +56,36 @@ pub fn parameter_shift_gradient(
     observable: &Observable,
     parameter: ParameterId,
 ) -> QuantumResult<f32> {
+    Ok(parameter_shift_gradients(
+        circuit,
+        values,
+        core::slice::from_ref(observable),
+        parameter,
+    )?[0])
+}
+
+/// Exact parameter-shift derivatives for multiple observables.
+///
+/// For each occurrence of `parameter`, the positively and negatively shifted
+/// circuits are each executed once. Every observable is then evaluated on
+/// those two states in slice order, so adding observables does not multiply the
+/// number of shifted circuit executions. Contributions from reused symbolic
+/// parameters are accumulated in deterministic occurrence and observable
+/// order.
+pub fn parameter_shift_gradients(
+    circuit: &Circuit,
+    values: &ParameterValues,
+    observables: &[Observable],
+    parameter: ParameterId,
+) -> QuantumResult<Vec<f32>> {
+    if observables.is_empty()
+    {
+        return Err(QuantumError::InvalidObservableCount {
+            minimum: 1,
+            maximum: None,
+            actual: 0,
+        });
+    }
     if values.get(parameter).is_none()
     {
         return Err(QuantumError::UnboundParameter {
@@ -64,27 +94,30 @@ pub fn parameter_shift_gradient(
     }
     let occurrences = circuit.parameter_occurrences(parameter)?;
     let shift = core::f32::consts::FRAC_PI_2;
-    let mut gradient = 0.0f32;
+    let mut gradients = vec![0.0f32; observables.len()];
     for operation_index in occurrences
     {
-        let upper = circuit
+        let upper_state = circuit
             .bind_with_occurrence_shift(values, operation_index, shift)?
-            .execute_dense()?
-            .expectation(observable)?;
-        let lower = circuit
+            .execute_dense()?;
+        let lower_state = circuit
             .bind_with_occurrence_shift(values, operation_index, -shift)?
-            .execute_dense()?
-            .expectation(observable)?;
-        gradient += 0.5 * (upper - lower);
+            .execute_dense()?;
+        for (observable_index, observable) in observables.iter().enumerate()
+        {
+            let upper = upper_state.expectation(observable)?;
+            let lower = lower_state.expectation(observable)?;
+            gradients[observable_index] += 0.5 * (upper - lower);
+        }
     }
-    if gradient.is_finite()
+    if gradients.iter().all(|gradient| gradient.is_finite())
     {
-        Ok(gradient)
+        Ok(gradients)
     }
     else
     {
         Err(QuantumError::NumericalFailure {
-            operation: "parameter-shift gradient",
+            operation: "multi-observable parameter-shift gradient",
         })
     }
 }
@@ -116,6 +149,38 @@ mod tests {
         assert!((shifted - expected_gradient).abs() <= ANALYTIC_TOLERANCE);
         assert!((finite - expected_gradient).abs() <= FINITE_DIFFERENCE_TOLERANCE);
         assert!((shifted - finite).abs() <= FINITE_DIFFERENCE_TOLERANCE);
+    }
+
+    #[test]
+    fn multi_observable_shift_preserves_order_and_rejects_empty_input() {
+        let parameter = ParameterId(12);
+        let mut circuit = Circuit::new(1).unwrap();
+        circuit
+            .push(Operation::Ry {
+                target: 0,
+                parameter: Parameter::Symbol(parameter),
+            })
+            .unwrap();
+        let theta = 0.37f32;
+        let values = ParameterValues::new().with(parameter, theta).unwrap();
+        let observables = [Observable::z(0), Observable::x(0)];
+        let gradients =
+            parameter_shift_gradients(&circuit, &values, &observables, parameter).unwrap();
+        assert_eq!(gradients.len(), 2);
+        assert!((gradients[0] + theta.sin()).abs() <= ANALYTIC_TOLERANCE);
+        assert!((gradients[1] - theta.cos()).abs() <= ANALYTIC_TOLERANCE);
+        assert_eq!(
+            parameter_shift_gradient(&circuit, &values, &observables[0], parameter).unwrap(),
+            gradients[0]
+        );
+        assert_eq!(
+            parameter_shift_gradients(&circuit, &values, &[], parameter),
+            Err(QuantumError::InvalidObservableCount {
+                minimum: 1,
+                maximum: None,
+                actual: 0,
+            })
+        );
     }
 
     #[test]

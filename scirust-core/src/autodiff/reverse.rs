@@ -1075,9 +1075,9 @@ pub enum SavedData {
         input: Tensor,
         weight: Tensor,
     },
-    /// Immutable circuit structure and tensor-to-symbol mapping used by the
-    /// dense quantum expectation node's parameter-shift backward.
-    QuantumExpectation(crate::quantum::QuantumLayer),
+    /// Immutable circuit, observables, and tensor-to-symbol mapping used by the
+    /// dense quantum expectations node's parameter-shift backward.
+    QuantumExpectations(crate::quantum::QuantumLayer),
 }
 
 // ================================================================== //
@@ -1087,8 +1087,8 @@ pub enum SavedData {
 #[derive(Debug, Clone, Copy)]
 pub enum Op {
     Input,
-    /// One exact dense expectation from single-row feature and parameter tensors.
-    QuantumExpectation {
+    /// Batched exact dense expectations with one shared parameter row.
+    QuantumExpectations {
         features: usize,
         parameters: usize,
     },
@@ -1637,56 +1637,71 @@ impl Tape {
             {
                 Op::Input =>
                 {},
-                Op::QuantumExpectation {
+                Op::QuantumExpectations {
                     features,
                     parameters,
                 } =>
                 {
                     let layer = match &nodes[i].saved
                     {
-                        SavedData::QuantumExpectation(layer) => layer,
-                        _ => panic!("QuantumExpectation node is missing its layer metadata"),
+                        SavedData::QuantumExpectations(layer) => layer,
+                        _ => panic!("QuantumExpectations node is missing its layer metadata"),
                     };
                     let feature_values = values[features].as_cpu();
                     let parameter_values = values[parameters].as_cpu();
-                    let mut bindings = crate::quantum::ParameterValues::new();
-                    for (&id, &value) in layer.input_parameters().iter().zip(&feature_values.data)
+                    let feature_count = layer.input_parameters().len();
+                    let observable_count = layer.observables().len();
+
+                    // Fixed accumulation order: sample, encoded parameters in
+                    // feature-column order, then shared parameters in column
+                    // order; each parameter's observable contributions are
+                    // accumulated in output-column order. Nothing is averaged.
+                    for sample in 0..feature_values.rows
                     {
-                        bindings
-                            .insert(id, value)
-                            .expect("validated quantum feature became non-finite");
-                    }
-                    for (&id, &value) in layer
-                        .trainable_parameters()
-                        .iter()
-                        .zip(&parameter_values.data)
-                    {
-                        bindings
-                            .insert(id, value)
-                            .expect("validated quantum parameter became non-finite");
-                    }
-                    let upstream = g.data[0];
-                    for (column, &id) in layer.input_parameters().iter().enumerate()
-                    {
-                        let derivative = crate::quantum::parameter_shift_gradient(
-                            layer.circuit(),
-                            &bindings,
-                            layer.observable(),
-                            id,
-                        )
-                        .expect("validated quantum layer failed during backward");
-                        grads[features].data[column] += upstream * derivative;
-                    }
-                    for (column, &id) in layer.trainable_parameters().iter().enumerate()
-                    {
-                        let derivative = crate::quantum::parameter_shift_gradient(
-                            layer.circuit(),
-                            &bindings,
-                            layer.observable(),
-                            id,
-                        )
-                        .expect("validated quantum layer failed during backward");
-                        grads[parameters].data[column] += upstream * derivative;
+                        let mut bindings = crate::quantum::ParameterValues::new();
+                        for (column, &id) in layer.input_parameters().iter().enumerate()
+                        {
+                            bindings
+                                .insert(id, feature_values.data[sample * feature_count + column])
+                                .expect("validated quantum feature became non-finite");
+                        }
+                        for (column, &id) in layer.trainable_parameters().iter().enumerate()
+                        {
+                            bindings
+                                .insert(id, parameter_values.data[column])
+                                .expect("validated quantum parameter became non-finite");
+                        }
+
+                        for (column, &id) in layer.input_parameters().iter().enumerate()
+                        {
+                            let derivatives = crate::quantum::parameter_shift_gradients(
+                                layer.circuit(),
+                                &bindings,
+                                layer.observables(),
+                                id,
+                            )
+                            .expect("validated quantum layer failed during backward");
+                            for (observable, &derivative) in derivatives.iter().enumerate()
+                            {
+                                grads[features].data[sample * feature_count + column] +=
+                                    g.data[sample * observable_count + observable] * derivative;
+                            }
+                        }
+                        for (column, &id) in layer.trainable_parameters().iter().enumerate()
+                        {
+                            let derivatives = crate::quantum::parameter_shift_gradients(
+                                layer.circuit(),
+                                &bindings,
+                                layer.observables(),
+                                id,
+                            )
+                            .expect("validated quantum layer failed during backward");
+                            for (observable, &derivative) in derivatives.iter().enumerate()
+                            {
+                                grads[parameters].data[column] +=
+                                    g.data[sample * observable_count + observable] * derivative;
+                            }
+                        }
                     }
                 },
                 Op::Add(a, b) =>
@@ -3674,50 +3689,117 @@ impl<'t> Var<'t> {
         })
     }
 
-    /// Evaluates one exact quantum expectation and records parameter-shift
-    /// metadata for reverse-mode differentiation.
+    /// Compatibility wrapper for a single-row, single-observable quantum node.
     pub fn try_quantum_expectation(
         self,
         parameters: Var<'t>,
         layer: &crate::quantum::QuantumLayer,
     ) -> crate::quantum::QuantumResult<Var<'t>> {
-        self.ensure_same_tape(&parameters, "quantum expectation")
-            .map_err(|_| crate::quantum::QuantumError::InvalidParameterMapping {
-                reason: "variables belong to different autodiff tapes",
-            })?;
-        let features_value = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let parameters_value = self.tape.values.borrow()[parameters.idx].as_cpu().clone();
-        if features_value.rows != 1
-            || features_value.cols != layer.input_parameters().len()
-            || parameters_value.rows != 1
-            || parameters_value.cols != layer.trainable_parameters().len()
+        if layer.observables().len() != 1
         {
-            return Err(crate::quantum::QuantumError::InvalidParameterMapping {
-                reason: "quantum tensors must be single-row and match their parameter mappings",
+            return Err(crate::quantum::QuantumError::InvalidObservableCount {
+                minimum: 1,
+                maximum: Some(1),
+                actual: layer.observables().len(),
             });
         }
-        let mut bindings = crate::quantum::ParameterValues::new();
-        for (&id, &value) in layer.input_parameters().iter().zip(&features_value.data)
+        let (actual_rows, actual_cols) = self.shape();
+        if actual_rows != 1
         {
-            bindings.insert(id, value)?;
+            return Err(crate::quantum::QuantumError::InvalidTensorShape {
+                tensor: "classical_features",
+                expected_rows: Some(1),
+                expected_cols: Some(layer.input_parameters().len()),
+                actual_rows,
+                actual_cols,
+            });
         }
-        for (&id, &value) in layer
-            .trainable_parameters()
-            .iter()
-            .zip(&parameters_value.data)
-        {
-            bindings.insert(id, value)?;
-        }
-        let bound = layer.circuit().bind(&bindings)?;
-        let state = bound.execute_dense()?;
-        let output = Tensor::from_vec(vec![state.expectation(layer.observable())?], 1, 1);
+        self.try_quantum_expectations(parameters, layer)
+    }
+
+    /// Evaluates deterministic batched exact expectations and records one
+    /// generalized parameter-shift node for reverse-mode differentiation.
+    pub fn try_quantum_expectations(
+        self,
+        parameters: Var<'t>,
+        layer: &crate::quantum::QuantumLayer,
+    ) -> crate::quantum::QuantumResult<Var<'t>> {
+        self.ensure_same_tape(&parameters, "quantum expectations")
+            .map_err(|_| crate::quantum::QuantumError::MismatchedAutodiffTapes)?;
+
+        let output = {
+            let values = self.tape.values.borrow();
+            let features_value = values[self.idx].as_cpu();
+            let parameters_value = values[parameters.idx].as_cpu();
+            let batch = features_value.rows;
+            let feature_count = layer.input_parameters().len();
+            let parameter_count = layer.trainable_parameters().len();
+            let observable_count = layer.observables().len();
+
+            if observable_count == 0
+            {
+                return Err(crate::quantum::QuantumError::InvalidObservableCount {
+                    minimum: 1,
+                    maximum: None,
+                    actual: 0,
+                });
+            }
+            if batch == 0
+            {
+                return Err(crate::quantum::QuantumError::InvalidBatchSize {
+                    minimum: 1,
+                    actual: 0,
+                });
+            }
+            if features_value.cols != feature_count
+            {
+                return Err(crate::quantum::QuantumError::InvalidTensorShape {
+                    tensor: "classical_features",
+                    expected_rows: None,
+                    expected_cols: Some(feature_count),
+                    actual_rows: features_value.rows,
+                    actual_cols: features_value.cols,
+                });
+            }
+            if parameters_value.rows != 1 || parameters_value.cols != parameter_count
+            {
+                return Err(crate::quantum::QuantumError::InvalidTensorShape {
+                    tensor: "quantum_parameters",
+                    expected_rows: Some(1),
+                    expected_cols: Some(parameter_count),
+                    actual_rows: parameters_value.rows,
+                    actual_cols: parameters_value.cols,
+                });
+            }
+
+            let mut output_data = Vec::with_capacity(batch * observable_count);
+            for sample in 0..batch
+            {
+                let mut bindings = crate::quantum::ParameterValues::new();
+                for (column, &id) in layer.input_parameters().iter().enumerate()
+                {
+                    bindings.insert(id, features_value.data[sample * feature_count + column])?;
+                }
+                for (column, &id) in layer.trainable_parameters().iter().enumerate()
+                {
+                    bindings.insert(id, parameters_value.data[column])?;
+                }
+                let state = layer.circuit().bind(&bindings)?.execute_dense()?;
+                for observable in layer.observables()
+                {
+                    output_data.push(state.expectation(observable)?);
+                }
+            }
+            Tensor::from_vec(output_data, batch, observable_count)
+        };
+
         let idx = self.tape.push_with_saved(
-            Op::QuantumExpectation {
+            Op::QuantumExpectations {
                 features: self.idx,
                 parameters: parameters.idx,
             },
             DeviceTensor::cpu(output),
-            SavedData::QuantumExpectation(layer.clone()),
+            SavedData::QuantumExpectations(layer.clone()),
         );
         Ok(Var {
             tape: self.tape,
