@@ -5,8 +5,12 @@
 
 #![forbid(unsafe_code)]
 
+pub mod operator;
 pub mod scalar;
 
+pub use operator::{
+    LeftMultiplicationOperator, Matrix16, left_multiplication_matrix, matrix_vector_mul,
+};
 pub use scalar::{
     SEDENION_DIMENSION, Sedenion, basis_vector, conjugate, sedenion_mul, squared_norm,
 };
