@@ -18,8 +18,9 @@ capabilities. It makes no claim of quantum advantage.
   `Rx`, `Ry`, and `Rz`.
 - SciRust reverse-mode integration for one sample and one expectation output,
   including gradients to encoded classical inputs and quantum parameters.
-- A deterministic optimizer-backed hybrid example at
-  `scirust-core/examples/quantum_hybrid_classifier.rs`.
+- A deterministic optimizer-backed two-sample hybrid binary-classifier example
+  at `scirust-core/examples/quantum_hybrid_classifier.rs`; the layer itself is
+  still single-sample and the example performs the deterministic sample loop.
 
 ## Partially implemented
 
