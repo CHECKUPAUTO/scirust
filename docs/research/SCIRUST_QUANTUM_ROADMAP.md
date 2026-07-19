@@ -16,11 +16,15 @@ capabilities. It makes no claim of quantum advantage.
 - Deterministic seeded shot sampling, separate from exact expectations.
 - Central finite difference as a validation oracle and parameter-shift for
   `Rx`, `Ry`, and `Rz`.
-- SciRust reverse-mode integration for one sample and one expectation output,
-  including gradients to encoded classical inputs and quantum parameters.
+- Deterministic SciRust reverse-mode integration for batched, ordered
+  multi-observable expectations: features are `[batch, inputs]`, one
+  `[1, parameters]` row is shared across the batch, and row-major outputs are
+  `[batch, observables]`. Parameter-shift gradients reach encoded classical
+  inputs and sum shared-parameter contributions across samples without
+  implicit batch averaging.
 - A deterministic optimizer-backed two-sample hybrid binary-classifier example
-  at `scirust-core/examples/quantum_hybrid_classifier.rs`; the layer itself is
-  still single-sample and the example performs the deterministic sample loop.
+  at `scirust-core/examples/quantum_hybrid_classifier.rs`; it continues to use
+  the backward-compatible single-sample, single-observable layer API.
 
 ## Partially implemented
 
@@ -36,8 +40,7 @@ capabilities. It makes no claim of quantum advantage.
 ## Designed, not implemented
 
 - Complex MPS tensors and complex truncated SVD, with explicit truncation error.
-- Batched hybrid layers, multiple observable outputs, adjoint differentiation,
-  and differentiable shot-estimation policies.
+- Adjoint differentiation and differentiable shot-estimation policies.
 - Circuit serialization and OpenQASM 3/QIR lowering.
 
 ## Future work
