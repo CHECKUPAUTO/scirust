@@ -2853,10 +2853,14 @@ dependencies = [
 name = "scirust-algogen"
 version = "0.1.0"
 dependencies = [
+ "rayon",
  "scirust-core",
  "scirust-evo",
+ "scirust-tensor-core",
+ "scirust-tensor-einsum",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
