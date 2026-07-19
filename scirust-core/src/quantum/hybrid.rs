@@ -14,9 +14,9 @@ use std::collections::BTreeSet;
 /// [`Self::forward_batch`] accepts features shaped `batch x input_parameter_count`
 /// and one shared quantum-parameter row shaped `1 x trainable_parameter_count`.
 /// It returns `batch x observable_count` in row-major `output[sample, observable]`
-/// order. Backward uses parameter shift for `Rx`, `Ry`, and `Rz`, including
-/// encoded inputs, so gradients can reach classical layers before this
-/// operation.
+/// order. Backward uses exact dense adjoint differentiation for symbolic
+/// `Rx`, `Ry`, and `Rz`, including encoded inputs, so gradients can reach
+/// classical layers before this operation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct QuantumLayer {
     circuit: Circuit,
@@ -193,8 +193,9 @@ impl QuantumLayer {
 mod tests {
     use super::*;
     use crate::autodiff::reverse::{Tape, Tensor};
-    use crate::quantum::gradient::expectation_value;
+    use crate::quantum::gradient::{expectation_value, parameter_shift_gradients};
     use crate::quantum::ir::{Operation, Parameter, ParameterValues};
+    use crate::quantum::observable::{Pauli, PauliTerm};
 
     const FEATURES: [f32; 3] = [-0.71, 0.13, 1.04];
     const THETA: f32 = -0.27;
@@ -528,6 +529,148 @@ mod tests {
         let expected = -(0.6f32 * 0.4 + 0.2).sin() * 0.6;
         assert!((tape.grad(weight.idx()).data[0] - expected).abs() < 7.0e-5);
         assert!(tape.grad(weight.idx()).data[0].abs() > 0.1);
+    }
+
+    #[test]
+    fn complex_entangled_autograd_matches_parameter_shift_reference() {
+        let input_alpha = ParameterId(20);
+        let input_beta = ParameterId(7);
+        let trainable_gamma = ParameterId(31);
+
+        let mut circuit = Circuit::new(2).unwrap();
+        circuit
+            .push(Operation::H { target: 0 })
+            .unwrap()
+            .push(Operation::S { target: 0 })
+            .unwrap()
+            .push(Operation::Rx {
+                target: 1,
+                parameter: Parameter::Symbol(input_alpha),
+            })
+            .unwrap()
+            .push(Operation::Cnot {
+                control: 0,
+                target: 1,
+            })
+            .unwrap()
+            .push(Operation::Ry {
+                target: 0,
+                parameter: Parameter::Symbol(input_beta),
+            })
+            .unwrap()
+            .push(Operation::Rz {
+                target: 1,
+                parameter: Parameter::Symbol(trainable_gamma),
+            })
+            .unwrap()
+            .push(Operation::PhaseShift {
+                target: 0,
+                parameter: Parameter::Fixed(0.29),
+            })
+            .unwrap()
+            .push(Operation::Cz {
+                control: 0,
+                target: 1,
+            })
+            .unwrap();
+
+        let observables = vec![
+            Observable::y(0),
+            Observable::new(vec![
+                PauliTerm::new(0, Pauli::X),
+                PauliTerm::new(1, Pauli::Z),
+            ])
+            .unwrap(),
+            Observable::z(1),
+        ];
+
+        let layer = QuantumLayer::new_multi(
+            circuit,
+            observables,
+            vec![input_alpha, input_beta],
+            vec![trainable_gamma],
+        )
+        .unwrap();
+
+        let feature_data = vec![0.17, -0.42, -0.63, 0.28];
+        let gamma = 0.36f32;
+        let upstream_data = vec![0.7, -1.1, 0.4, -0.3, 0.8, 1.2];
+
+        let tape = Tape::new();
+        let features = tape.input(Tensor::from_vec(feature_data.clone(), 2, 2));
+        let parameters = tape.input(Tensor::from_vec(vec![gamma], 1, 1));
+        let output = layer.forward_batch(features, parameters).unwrap();
+        let upstream = tape.input(Tensor::from_vec(upstream_data.clone(), 2, 3));
+        output.hadamard(upstream).sum().backward();
+
+        let actual_features = tape.grad(features.idx()).data;
+        let actual_parameters = tape.grad(parameters.idx()).data;
+
+        let mut expected_features = vec![0.0f32; 4];
+        let mut expected_gamma = 0.0f32;
+        let mut max_error = 0.0f32;
+
+        for sample in 0..2
+        {
+            let mut bindings = ParameterValues::new();
+            bindings
+                .insert(input_alpha, feature_data[sample * 2])
+                .unwrap();
+            bindings
+                .insert(input_beta, feature_data[sample * 2 + 1])
+                .unwrap();
+            bindings.insert(trainable_gamma, gamma).unwrap();
+
+            for (feature_column, parameter) in [input_alpha, input_beta].into_iter().enumerate()
+            {
+                let derivatives = parameter_shift_gradients(
+                    layer.circuit(),
+                    &bindings,
+                    layer.observables(),
+                    parameter,
+                )
+                .unwrap();
+
+                for (observable, derivative) in derivatives.into_iter().enumerate()
+                {
+                    expected_features[sample * 2 + feature_column] +=
+                        upstream_data[sample * 3 + observable] * derivative;
+                }
+            }
+
+            let derivatives = parameter_shift_gradients(
+                layer.circuit(),
+                &bindings,
+                layer.observables(),
+                trainable_gamma,
+            )
+            .unwrap();
+
+            for (observable, derivative) in derivatives.into_iter().enumerate()
+            {
+                expected_gamma += upstream_data[sample * 3 + observable] * derivative;
+            }
+        }
+
+        for (&actual, &expected) in actual_features.iter().zip(&expected_features)
+        {
+            let error = (actual - expected).abs();
+            max_error = max_error.max(error);
+            assert!(
+                error <= 2.0e-4,
+                "feature adjoint={actual}, parameter-shift={expected}, error={error}"
+            );
+        }
+
+        let parameter_error = (actual_parameters[0] - expected_gamma).abs();
+        max_error = max_error.max(parameter_error);
+        assert!(
+            parameter_error <= 2.0e-4,
+            "parameter adjoint={}, parameter-shift={expected_gamma}, error={parameter_error}",
+            actual_parameters[0]
+        );
+
+        eprintln!("quantum complex-entangled autograd max parameter-shift error: {max_error:.9e}");
     }
 
     #[test]

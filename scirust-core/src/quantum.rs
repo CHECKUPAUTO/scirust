@@ -35,7 +35,8 @@ pub use complex::Complex32;
 pub use dense::DenseStateVector;
 pub use error::{QuantumError, QuantumResult};
 pub use gradient::{
-    finite_difference_gradient, parameter_shift_gradient, parameter_shift_gradients,
+    adjoint_gradient, adjoint_gradients, adjoint_jacobian, finite_difference_gradient,
+    parameter_shift_gradient, parameter_shift_gradients,
 };
 pub use hybrid::QuantumLayer;
 pub use ir::{

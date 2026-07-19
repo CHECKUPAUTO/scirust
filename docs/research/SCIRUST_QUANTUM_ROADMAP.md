@@ -14,12 +14,18 @@ capabilities. It makes no claim of quantum advantage.
 - Pauli products and exact real expectation values with residual-imaginary
   validation.
 - Deterministic seeded shot sampling, separate from exact expectations.
-- Central finite difference as a validation oracle and parameter-shift for
-  `Rx`, `Ry`, and `Rz`.
+- Central finite difference as a numerical validation oracle and
+  parameter-shift as an independent exact validation oracle for `Rx`, `Ry`,
+  and `Rz`.
+- Exact dense adjoint differentiation for every symbolic `Rx`, `Ry`, and `Rz`
+  occurrence. One dense backward execution and one reverse circuit traversal
+  replace the two shifted executions previously required per parameter
+  occurrence. Reused symbolic parameters accumulate deterministically in
+  ascending circuit-operation order.
 - Deterministic SciRust reverse-mode integration for batched, ordered
   multi-observable expectations: features are `[batch, inputs]`, one
   `[1, parameters]` row is shared across the batch, and row-major outputs are
-  `[batch, observables]`. Parameter-shift gradients reach encoded classical
+  `[batch, observables]`. Exact adjoint gradients reach encoded classical
   inputs and sum shared-parameter contributions across samples without
   implicit batch averaging.
 - A deterministic optimizer-backed two-sample hybrid binary-classifier example
@@ -45,11 +51,14 @@ capabilities. It makes no claim of quantum advantage.
   overhead. The backend applies an explicit allocation ceiling.
 - The backend trait and capabilities describe only the dense CPU features that
   actually exist today.
+- Dense adjoint differentiation retains exponential `2^n` state memory and
+  stores one adjoint state per ordered observable during the reverse sweep.
+  It does not apply to the real-amplitude MPS simulator.
 
 ## Designed, not implemented
 
 - Complex MPS tensors and complex truncated SVD, with explicit truncation error.
-- Adjoint differentiation and differentiable shot-estimation policies.
+- Differentiable shot-estimation policies.
 - Circuit serialization and OpenQASM 3/QIR lowering.
 
 ## Future work

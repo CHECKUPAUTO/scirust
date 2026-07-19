@@ -1076,7 +1076,7 @@ pub enum SavedData {
         weight: Tensor,
     },
     /// Immutable circuit, observables, and tensor-to-symbol mapping used by the
-    /// dense quantum expectations node's parameter-shift backward.
+    /// dense quantum expectations node's exact adjoint backward.
     QuantumExpectations(crate::quantum::QuantumLayer),
 }
 
@@ -1656,6 +1656,9 @@ impl Tape {
                     // feature-column order, then shared parameters in column
                     // order; each parameter's observable contributions are
                     // accumulated in output-column order. Nothing is averaged.
+                    //
+                    // One exact adjoint Jacobian is constructed per sample for
+                    // all mapped parameters and all ordered observables.
                     for sample in 0..feature_values.rows
                     {
                         let mut bindings = crate::quantum::ParameterValues::new();
@@ -1672,30 +1675,30 @@ impl Tape {
                                 .expect("validated quantum parameter became non-finite");
                         }
 
+                        let jacobian = crate::quantum::adjoint_jacobian(
+                            layer.circuit(),
+                            &bindings,
+                            layer.observables(),
+                        )
+                        .expect("validated quantum layer failed during adjoint backward");
+
                         for (column, &id) in layer.input_parameters().iter().enumerate()
                         {
-                            let derivatives = crate::quantum::parameter_shift_gradients(
-                                layer.circuit(),
-                                &bindings,
-                                layer.observables(),
-                                id,
-                            )
-                            .expect("validated quantum layer failed during backward");
+                            let derivatives = jacobian
+                                .get(&id)
+                                .expect("adjoint Jacobian omitted a feature parameter");
                             for (observable, &derivative) in derivatives.iter().enumerate()
                             {
                                 grads[features].data[sample * feature_count + column] +=
                                     g.data[sample * observable_count + observable] * derivative;
                             }
                         }
+
                         for (column, &id) in layer.trainable_parameters().iter().enumerate()
                         {
-                            let derivatives = crate::quantum::parameter_shift_gradients(
-                                layer.circuit(),
-                                &bindings,
-                                layer.observables(),
-                                id,
-                            )
-                            .expect("validated quantum layer failed during backward");
+                            let derivatives = jacobian
+                                .get(&id)
+                                .expect("adjoint Jacobian omitted a shared parameter");
                             for (observable, &derivative) in derivatives.iter().enumerate()
                             {
                                 grads[parameters].data[column] +=
@@ -3718,7 +3721,7 @@ impl<'t> Var<'t> {
     }
 
     /// Evaluates deterministic batched exact expectations and records one
-    /// generalized parameter-shift node for reverse-mode differentiation.
+    /// exact dense-adjoint node for reverse-mode differentiation.
     pub fn try_quantum_expectations(
         self,
         parameters: Var<'t>,
