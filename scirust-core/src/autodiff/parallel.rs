@@ -168,6 +168,10 @@ impl ParallelTape {
             {
                 Op::Input =>
                 {},
+                Op::QuantumExpectation { .. } =>
+                {
+                    panic!("ParallelTape does not support quantum expectation nodes")
+                },
 
                 Op::Add(a, b) =>
                 {

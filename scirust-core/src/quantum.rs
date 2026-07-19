@@ -18,6 +18,29 @@
 
 use crate::tn::ops::svd::truncated_svd;
 
+pub mod backend;
+pub mod complex;
+pub mod complex_gates;
+pub mod dense;
+pub mod error;
+pub mod gradient;
+pub mod hybrid;
+pub mod ir;
+pub mod observable;
+
+pub use backend::{
+    BackendCapabilities, DenseBackend, ExecutionRequest, QuantumBackend, QuantumExecutionResult,
+};
+pub use complex::Complex32;
+pub use dense::DenseStateVector;
+pub use error::{QuantumError, QuantumResult};
+pub use gradient::{finite_difference_gradient, parameter_shift_gradient};
+pub use hybrid::QuantumLayer;
+pub use ir::{
+    BoundCircuit, BoundOperation, Circuit, Operation, Parameter, ParameterId, ParameterValues,
+};
+pub use observable::{Observable, Pauli, PauliTerm};
+
 /// A rank-3 MPS tensor `A[l, p, r]` (left bond × physical × right bond) stored as a
 /// flat row-major `Vec<f32>` of length `dl · dp · dr`.
 #[derive(Debug, Clone)]
