@@ -42,6 +42,8 @@ pub enum QuantumError {
     InvalidStateDimension { expected: usize, actual: usize },
     /// A parameter binding contains an ID not present in the circuit.
     UnknownParameter { parameter: u32 },
+    /// Feature/parameter tensors do not map one-to-one onto circuit symbols.
+    InvalidParameterMapping { reason: &'static str },
 }
 
 impl fmt::Display for QuantumError {
@@ -103,6 +105,13 @@ impl fmt::Display for QuantumError {
                 write!(
                     formatter,
                     "parameter {parameter} is not used by the circuit"
+                )
+            },
+            Self::InvalidParameterMapping { reason } =>
+            {
+                write!(
+                    formatter,
+                    "invalid quantum-layer parameter mapping: {reason}"
                 )
             },
         }

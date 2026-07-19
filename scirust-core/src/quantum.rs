@@ -24,6 +24,7 @@ pub mod complex_gates;
 pub mod dense;
 pub mod error;
 pub mod gradient;
+pub mod hybrid;
 pub mod ir;
 pub mod observable;
 
@@ -34,6 +35,7 @@ pub use complex::Complex32;
 pub use dense::DenseStateVector;
 pub use error::{QuantumError, QuantumResult};
 pub use gradient::{finite_difference_gradient, parameter_shift_gradient};
+pub use hybrid::QuantumLayer;
 pub use ir::{
     BoundCircuit, BoundOperation, Circuit, Operation, Parameter, ParameterId, ParameterValues,
 };
