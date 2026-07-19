@@ -950,7 +950,7 @@ impl CudaTrainer {
             losses.push(loss);
             step += 1;
 
-            if cfg.log_interval > 0 && step % cfg.log_interval == 0
+            if cfg.log_interval > 0 && step.is_multiple_of(cfg.log_interval)
             {
                 let done = (step - cfg.start_step) * s;
                 let secs = t0.elapsed().as_secs_f64().max(1e-9);
@@ -962,12 +962,14 @@ impl CudaTrainer {
                     "[cuda step {step:>6}] loss {loss:>9.4} | lr {lr:.3e} | gnorm {gnorm:>7.2} | {tps:>8.0} tok/s"
                 );
             }
-            if cfg.eval_interval > 0 && !val_tokens.is_empty() && step % cfg.eval_interval == 0
+            if cfg.eval_interval > 0
+                && !val_tokens.is_empty()
+                && step.is_multiple_of(cfg.eval_interval)
             {
                 let val = self.eval_loss(val_tokens, s, cfg.eval_windows);
                 println!("            └─ held-out val loss {val:>9.4}");
             }
-            if cfg.save_interval > 0 && step % cfg.save_interval == 0
+            if cfg.save_interval > 0 && step.is_multiple_of(cfg.save_interval)
             {
                 self.sync_to_model(model);
                 let dir = std::path::Path::new(&cfg.checkpoint_dir).join(format!("step_{step}"));
