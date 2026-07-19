@@ -23,8 +23,17 @@ capabilities. It makes no claim of quantum advantage.
   inputs and sum shared-parameter contributions across samples without
   implicit batch averaging.
 - A deterministic optimizer-backed two-sample hybrid binary-classifier example
-  at `scirust-core/examples/quantum_hybrid_classifier.rs`; it continues to use
-  the backward-compatible single-sample, single-observable layer API.
+  at `scirust-core/examples/quantum_hybrid_classifier.rs`; this compatibility
+  example continues to use the backward-compatible single-sample,
+  single-observable layer API.
+- A deterministic four-class hybrid classifier at
+  `scirust-core/examples/quantum_multifeature_classifier.rs`: one four-row full
+  batch supplies two raw classical features to a trainable `2 × 2` classical
+  encoder, then one `forward_batch` call per epoch evaluates two ordered
+  observables with two shared trainable quantum parameters. Deterministic
+  nearest-codeword decoding uses the two observable values directly, and
+  reverse-mode gradients reach both the classical encoder and quantum
+  parameters.
 
 ## Partially implemented
 
