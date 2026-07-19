@@ -277,6 +277,64 @@ train/fine-tune/generate/speculative stack rides on top unchanged.
   Together with B14 this is the *fix corpus + tokenizer* half of the endorsed plan;
   the payoff lands on the **re-tokenise → retrain** (step 6).
 
+- **v2 retrain — the fixes paid off (step 6, in progress).** Re-tokenised the same
+  ~5.3 M-token corpus with the v2 tokenizer and retrained the 304M model from scratch.
+  By step ~22 000 (interrupted by a machine power-off) **held-out val had fallen to
+  5.46–6.17** — already **below the v1 run's best of 6.42 at step 20 000**, and still
+  declining, with no `<NNN>` leaks in the tokeniser. Same size corpus, so the gain is
+  purely the reversible tokenizer + corpus filter + a longer schedule. Resumable from
+  `checkpoints/bpe350m_v2/step_21900`. It is noisy (small 2 % val tail + unshuffled,
+  near-duplicate windows) and only ~2 epochs in, so the next real lever is a **bigger
+  corpus**, not more epochs.
+
+- **B16 — clean resume-to-target (`SCIAGENT_TOTAL_STEPS`).** The harness computed the
+  step target *additively* (`start_step + STEPS`), so resuming a 40 k-step run naively
+  overshot and re-ran a full fresh-run warmup. Added `SCIAGENT_TOTAL_STEPS` (absolute
+  target) so resuming to the original target is `SCIAGENT_TOTAL_STEPS=40000` — no
+  arithmetic, no overshoot — and based warmup on the *actual* remaining run so a resume
+  re-warms briefly (cushioning the AdamW-moment reset) instead of ramping a full
+  warmup. `SCIAGENT_WARMUP` overrides it. Backward compatible (unset ⇒ old behavior).
+
+- **B17 — checkpoint retention (disk-safe long runs).** The first v2 retrain saved a
+  full ~1.2 GB fp32 checkpoint **every 100 steps and never pruned** — hundreds of GB by
+  step 22k, on a disk-constrained Thor (a likely contributor to the power-off).
+  `CudaTrainer::pretrain` now keeps only the most recent `keep_last` `step_N/` dirs
+  **plus the best-val checkpoint** (tracked across saves, since the val curve is noisy
+  and the last step is rarely the best), pruning the rest each save. `cuda_pretrain`
+  raises the default save cadence to 500 and exposes `SCIAGENT_SAVE` / `SCIAGENT_KEEP`.
+  Makes long runs and resume disk-safe.
+
+- **v2 40k complete — tokenizer fix validated, coherence wall is data.** The resumed
+  run finished all **40 000** steps: **val 5.38** (ppl 217), **nats/char 1.02** (down
+  from v1's 1.19), and — the point of B14 — **zero `<NNN>` leaks** in 32 generated
+  samples, which now show real Rust idioms (`use crate::`, `#[cfg(test)] mod tests {
+  use super::*;`, method signatures, real source paths). But **`syn`-parse and
+  balanced-bracket rates are still 0 %**: the model produces Rust-*flavored* text, not
+  valid Rust. Root cause is unambiguous — **5.3 M tokens ≈ ~4 epochs for 304M params is
+  data-starved** (a 304M model wants 100 M–1 B+ tokens). The tooling is now correct;
+  the remaining lever is **corpus scale**.
+
+- **B18 — shuffled training windows.** The v2 runs streamed the corpus *sequentially*,
+  so consecutive steps saw consecutive (often near-duplicate) files — the cause of the
+  wild per-step loss variance (2.5↔9.9) and the noisy val curve, and a memorization
+  driver. `CudaTrainer::pretrain` now iterates a **deterministic per-epoch shuffle** of
+  the window starts (`cfg.shuffle`, default on; `SCIAGENT_SHUFFLE=0` opts out),
+  reproducible per `(start_step, epoch)`. Smoother training + less memorization, landing
+  before the next (bigger-corpus) run so both improvements compound.
+
+- **B19 — content-level dedup (prep for the crates.io pull).** The decisive lever is
+  now **corpus scale**, and the chosen source is crates.io — which is *full* of
+  duplicated code (vendored copies, re-exports, generated bindings across crates).
+  Training on duplicates just deepens the memorization the eval already showed. A
+  shared `content_hash` (FNV-1a 64-bit) dedups by file content across the corpus walk
+  — first-seen wins over the sorted (deterministic) traversal — wired into
+  `collect-data`, `train-tokenizer` (shared `ingest_text`), and the `cuda_pretrain`
+  byte path, counted under a `"duplicate"` skip reason. It also cancels the
+  `fetch-crates` `all/`-symlink double-count for free. `fetch-crates` itself is already
+  large-pull-ready (checksum-verified, `--resume`, paginated top-N-by-downloads,
+  path-traversal-safe); dedup is the missing quality piece before scaling the corpus
+  10–100×.
+
 ## Risks / honesty
 
 - **Toolchain gate (highest risk):** if the Thor's installed CUDA can't emit sm_110,

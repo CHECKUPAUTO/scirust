@@ -220,6 +220,22 @@ pub fn skip_source_dir(name: &str) -> bool {
     )
 }
 
+/// FNV-1a 64-bit hash of `content` — a fast, deterministic fingerprint for corpus
+/// **deduplication**. Not cryptographic, but over millions of files a 64-bit
+/// collision is astronomically unlikely, and a collision merely drops one file. A
+/// crates.io pull is full of duplicated code (vendored copies, re-exports, generated
+/// bindings across crates) — deduping it is the biggest quality lever there, and it
+/// also cancels the `fetch-crates` `all/`-symlink double-count for free.
+pub fn content_hash(content: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for &b in content.as_bytes()
+    {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
 /// Heuristic corpus-quality gate: does `content` (from a file named `name`) look
 /// like human-written **source**, or low-value bulk — generated code, lockfiles,
 /// minified blobs, numeric/string **data tables** — that dilutes a code model?
@@ -391,6 +407,21 @@ mod tests {
             source_quality("lib.rs", real).is_ok(),
             "real Rust must pass"
         );
+    }
+
+    #[test]
+    fn content_hash_dedups() {
+        // Deterministic, and distinguishes different content.
+        assert_eq!(content_hash("fn main() {}"), content_hash("fn main() {}"));
+        assert_ne!(content_hash("fn a() {}"), content_hash("fn b() {}"));
+        // Dedup use: a set of hashes drops repeats regardless of order.
+        let files = ["a", "b", "a", "c", "b", "a"];
+        let mut seen = std::collections::HashSet::new();
+        let kept = files
+            .iter()
+            .filter(|f| seen.insert(content_hash(f)))
+            .count();
+        assert_eq!(kept, 3, "only distinct contents kept");
     }
 
     #[test]

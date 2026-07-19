@@ -1,11 +1,11 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
 use scirust_sciagent::bpe::BpeTrainer;
 use scirust_sciagent::train::dataset::{
-    matches_extension, parse_extensions, skip_source_dir, source_quality,
+    content_hash, matches_extension, parse_extensions, skip_source_dir, source_quality,
 };
 
 #[derive(Parser)]
@@ -58,6 +58,7 @@ fn main() {
     );
     let mut all_texts: Vec<String> = Vec::new();
     let mut skipped: BTreeMap<&'static str, usize> = BTreeMap::new();
+    let mut seen: HashSet<u64> = HashSet::new();
 
     for path in &args.input
     {
@@ -67,19 +68,19 @@ fn main() {
             if let Ok(content) = fs::read_to_string(p)
             {
                 let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                match (filter, source_quality(name, &content))
-                {
-                    (true, Err(reason)) =>
-                    {
-                        *skipped.entry(reason).or_insert(0) += 1;
-                    },
-                    _ => all_texts.push(content),
-                }
+                ingest_text(
+                    name,
+                    content,
+                    filter,
+                    &mut seen,
+                    &mut skipped,
+                    &mut all_texts,
+                );
             }
         }
         else if p.is_dir() && args.recursive
         {
-            collect_dir(p, &exts, filter, &mut all_texts, &mut skipped);
+            collect_dir(p, &exts, filter, &mut seen, &mut all_texts, &mut skipped);
         }
     }
 
@@ -104,10 +105,37 @@ fn main() {
     );
 }
 
+/// Quality-filter, deduplicate, and (if kept) push one file's text — the shared
+/// gate for train-tokenizer, mirroring collect-data so both see the same corpus.
+fn ingest_text(
+    name: &str,
+    content: String,
+    filter: bool,
+    seen: &mut HashSet<u64>,
+    skipped: &mut BTreeMap<&'static str, usize>,
+    texts: &mut Vec<String>,
+) {
+    if filter
+    {
+        if let Err(reason) = source_quality(name, &content)
+        {
+            *skipped.entry(reason).or_insert(0) += 1;
+            return;
+        }
+    }
+    if !seen.insert(content_hash(&content))
+    {
+        *skipped.entry("duplicate").or_insert(0) += 1;
+        return;
+    }
+    texts.push(content);
+}
+
 fn collect_dir(
     dir: &Path,
     exts: &[String],
     filter: bool,
+    seen: &mut HashSet<u64>,
     texts: &mut Vec<String>,
     skipped: &mut BTreeMap<&'static str, usize>,
 ) {
@@ -128,21 +156,14 @@ fn collect_dir(
                         continue;
                     }
                 }
-                collect_dir(&path, exts, filter, texts, skipped);
+                collect_dir(&path, exts, filter, seen, texts, skipped);
             }
             else if matches_extension(&path, exts)
             {
                 if let Ok(content) = fs::read_to_string(&path)
                 {
                     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                    match (filter, source_quality(name, &content))
-                    {
-                        (true, Err(reason)) =>
-                        {
-                            *skipped.entry(reason).or_insert(0) += 1;
-                        },
-                        _ => texts.push(content),
-                    }
+                    ingest_text(name, content, filter, seen, skipped, texts);
                 }
             }
         }

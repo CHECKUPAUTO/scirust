@@ -36,13 +36,14 @@
 //! restart from zero, which the warmup re-absorbs). Exit code 2 means no CUDA
 //! device was found — run on the Jetson Thor.
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use scirust_sciagent::config::SciAgentConfig;
 use scirust_sciagent::cuda_model::{CudaPretrainConfig, CudaTrainer};
 use scirust_sciagent::model::SciAgentModel;
 use scirust_sciagent::train::checkpoint::{latest_checkpoint, load_checkpoint, read_meta};
-use scirust_sciagent::train::dataset::{ShardLoader, source_quality};
+use scirust_sciagent::train::dataset::{ShardLoader, content_hash, source_quality};
 
 /// A tied, vocab-256 byte-level config — small enough to iterate fast, real enough
 /// to train on an actual code tree with no tokenizer.
@@ -152,9 +153,10 @@ fn is_probably_text(bytes: &[u8]) -> bool {
 }
 
 /// Recursively read raw file bytes under `root` (deterministic order), up to `cap`
-/// bytes — **source text only**: non-source directories ([`skip_dir`]) and non-text
-/// files ([`is_probably_text`]) are skipped.
-fn read_bytes_recursive(root: &Path, out: &mut Vec<u8>, cap: usize) {
+/// bytes — **source text only**: non-source directories ([`skip_dir`]), non-text
+/// files ([`is_probably_text`]), low-quality files ([`source_quality`]), and
+/// byte-identical duplicates (`seen` content hashes) are skipped.
+fn read_bytes_recursive(root: &Path, out: &mut Vec<u8>, cap: usize, seen: &mut HashSet<u64>) {
     if out.len() >= cap
     {
         return;
@@ -165,15 +167,18 @@ fn read_bytes_recursive(root: &Path, out: &mut Vec<u8>, cap: usize) {
         {
             if is_probably_text(&b)
             {
-                // Same corpus-quality gate as collect-data: skip generated/minified/
-                // data-table files (valid UTF-8 is already established, so the str
-                // conversion is safe).
+                // Same corpus-quality + dedup gate as collect-data (valid UTF-8 is
+                // already established, so the str conversion is safe).
                 let name = root.file_name().and_then(|n| n.to_str()).unwrap_or("");
                 if let Ok(text) = std::str::from_utf8(&b)
                 {
                     if source_quality(name, text).is_err()
                     {
                         return;
+                    }
+                    if !seen.insert(content_hash(text))
+                    {
+                        return; // duplicate content
                     }
                 }
                 let take = (cap - out.len()).min(b.len());
@@ -202,7 +207,7 @@ fn read_bytes_recursive(root: &Path, out: &mut Vec<u8>, cap: usize) {
                     }
                 }
             }
-            read_bytes_recursive(&p, out, cap);
+            read_bytes_recursive(&p, out, cap, seen);
         }
     }
 }
@@ -326,7 +331,8 @@ fn main() {
             config.vocab_size
         );
         let mut bytes = Vec::new();
-        read_bytes_recursive(Path::new(&text), &mut bytes, max_tokens);
+        let mut seen = HashSet::new();
+        read_bytes_recursive(Path::new(&text), &mut bytes, max_tokens, &mut seen);
         if bytes.is_empty()
         {
             eprintln!("SCIAGENT_TEXT={text} yielded no bytes (empty or unreadable)");
@@ -350,7 +356,23 @@ fn main() {
         toks
     };
 
-    let total_steps = start_step + env_usize("SCIAGENT_STEPS", 300);
+    // Total-step target. `SCIAGENT_TOTAL_STEPS` sets it ABSOLUTELY — so resuming an
+    // interrupted run to its original target is just `SCIAGENT_TOTAL_STEPS=40000`
+    // (no arithmetic, no overshoot from the additive default). Otherwise it stays
+    // additive (`start_step + STEPS`), the historical behavior. Warmup is 10% of the
+    // ACTUAL remaining run either way, so a short resume re-warms briefly (cushioning
+    // the AdamW-moment reset) rather than re-ramping a full fresh-run warmup.
+    let steps_env = env_usize("SCIAGENT_STEPS", 300);
+    let total_steps = std::env::var("SCIAGENT_TOTAL_STEPS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|&t| t > start_step)
+        .unwrap_or(start_step + steps_env);
+    let run_len = total_steps.saturating_sub(start_step).max(1);
+    let warmup_extra = std::env::var("SCIAGENT_WARMUP")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or((run_len / 10).max(1));
     // LR must key off model *size*, not vocab: a 270M byte-level model (vocab 256)
     // diverges at the 3e-3 that suits a tiny demo. Small trunks (d_model ≤ 256) can
     // take the hot 3e-3; anything larger gets the standard 3e-4 (with warmup+cosine).
@@ -374,26 +396,40 @@ fn main() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(0.02f32);
+    // Checkpoint cadence + retention. Saving every 100 steps and never pruning fills
+    // the disk on a long run (each 350M checkpoint is ~1.2 GB fp32) — so save less
+    // often and keep only the last few (SCIAGENT_KEEP) plus the best-val one.
+    let save_interval = env_usize("SCIAGENT_SAVE", 500);
+    let keep_last = env_usize("SCIAGENT_KEEP", 3);
+    // Shuffle training windows (default on; SCIAGENT_SHUFFLE=0 restores sequential
+    // streaming). Deterministic per (start_step, epoch), so runs stay reproducible.
+    let shuffle = !matches!(
+        std::env::var("SCIAGENT_SHUFFLE").as_deref(),
+        Ok("0" | "false")
+    );
     let cfg = CudaPretrainConfig {
         base_lr,
         min_lr: base_lr * 0.1,
-        warmup_steps: start_step + (env_usize("SCIAGENT_STEPS", 300) / 10).max(1),
+        warmup_steps: start_step + warmup_extra,
         total_steps,
         start_step,
         seq_len,
         weight_decay: 0.0,
         adam_eps,
         log_interval: 25,
-        save_interval: 100,
+        save_interval,
         checkpoint_dir: ckpt_dir.clone(),
         max_grad_norm,
         val_frac,
         eval_interval: 100,
+        keep_last,
+        shuffle,
         ..Default::default()
     };
     println!(
         "seq_len {seq_len} | steps {start_step}..{total_steps} | base_lr {base_lr:.1e} | \
-         eps {adam_eps:.0e} | clip {max_grad_norm} | ckpt → {ckpt_dir}\n"
+         eps {adam_eps:.0e} | clip {max_grad_norm} | save/{save_interval} keep {keep_last} | \
+         shuffle {shuffle} | ckpt → {ckpt_dir}\n"
     );
 
     let losses = trainer.pretrain(&tokens, &mut model, &config, &cfg);

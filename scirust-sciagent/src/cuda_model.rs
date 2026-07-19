@@ -896,16 +896,48 @@ impl CudaTrainer {
         let schedule =
             WarmupCosineSchedule::new(cfg.base_lr, cfg.min_lr, cfg.warmup_steps, cfg.total_steps);
         let mut step = cfg.start_step;
-        let mut cursor = 0usize;
-        let t0 = std::time::Instant::now();
-        while step < cfg.total_steps
+        // Shuffled window order. Streaming the corpus sequentially makes consecutive
+        // steps see consecutive (often near-duplicate) files, which spikes per-step
+        // loss variance and encourages memorizing adjacent windows — the noisy val
+        // curve of the first real runs. Iterating a *deterministic* shuffle of the
+        // window starts (re-shuffled each epoch) smooths training and improves
+        // generalization; `cfg.shuffle == false` restores the sequential stream.
+        let n_windows = train_tokens.len().saturating_sub(1) / s;
+        let mut order: Vec<usize> = (0..n_windows).collect();
+        let mut epoch: u64 = 0;
+        let reshuffle = |order: &mut [usize], epoch: u64| {
+            // Seed from start_step ⊕ epoch so a resume is deterministic yet differs
+            // from the fresh run's ordering.
+            shuffle_windows(
+                order,
+                (cfg.start_step as u64).wrapping_add(epoch.wrapping_mul(0x9E37_79B9_7F4A_7C15)),
+            );
+        };
+        if cfg.shuffle
         {
-            if cursor + s + 1 > train_tokens.len()
+            reshuffle(&mut order, epoch);
+        }
+        let mut wi = 0usize;
+        // Best-val tracking so retention never prunes the best checkpoint (the val
+        // curve is noisy — the last checkpoint is often not the best).
+        let mut best_val = f32::INFINITY;
+        let mut best_step: Option<usize> = None;
+        let t0 = std::time::Instant::now();
+        while step < cfg.total_steps && n_windows > 0
+        {
+            if wi >= order.len()
             {
-                cursor = 0;
+                epoch += 1;
+                if cfg.shuffle
+                {
+                    reshuffle(&mut order, epoch);
+                }
+                wi = 0;
             }
-            let inputs = &train_tokens[cursor..cursor + s];
-            let targets = &train_tokens[cursor + 1..cursor + s + 1];
+            let start = order[wi] * s;
+            wi += 1;
+            let inputs = &train_tokens[start..start + s];
+            let targets = &train_tokens[start + 1..start + s + 1];
             let lr = schedule.lr_at(step);
             let loss = self.train_step(
                 inputs,
@@ -916,10 +948,9 @@ impl CudaTrainer {
                 cfg.weight_decay,
             );
             losses.push(loss);
-            cursor += s;
             step += 1;
 
-            if cfg.log_interval > 0 && step % cfg.log_interval == 0
+            if cfg.log_interval > 0 && step.is_multiple_of(cfg.log_interval)
             {
                 let done = (step - cfg.start_step) * s;
                 let secs = t0.elapsed().as_secs_f64().max(1e-9);
@@ -931,12 +962,14 @@ impl CudaTrainer {
                     "[cuda step {step:>6}] loss {loss:>9.4} | lr {lr:.3e} | gnorm {gnorm:>7.2} | {tps:>8.0} tok/s"
                 );
             }
-            if cfg.eval_interval > 0 && !val_tokens.is_empty() && step % cfg.eval_interval == 0
+            if cfg.eval_interval > 0
+                && !val_tokens.is_empty()
+                && step.is_multiple_of(cfg.eval_interval)
             {
                 let val = self.eval_loss(val_tokens, s, cfg.eval_windows);
                 println!("            └─ held-out val loss {val:>9.4}");
             }
-            if cfg.save_interval > 0 && step % cfg.save_interval == 0
+            if cfg.save_interval > 0 && step.is_multiple_of(cfg.save_interval)
             {
                 self.sync_to_model(model);
                 let dir = std::path::Path::new(&cfg.checkpoint_dir).join(format!("step_{step}"));
@@ -948,12 +981,91 @@ impl CudaTrainer {
                 };
                 match save_checkpoint(model, &meta, &dir)
                 {
-                    Ok(()) => println!("  checkpoint → {}", dir.display()),
+                    Ok(()) =>
+                    {
+                        println!("  checkpoint → {}", dir.display());
+                        // Score this checkpoint on the held-out split and remember the
+                        // best, so pruning never deletes the best model.
+                        if !val_tokens.is_empty()
+                        {
+                            let v = self.eval_loss(val_tokens, s, cfg.eval_windows);
+                            if v < best_val
+                            {
+                                best_val = v;
+                                best_step = Some(step);
+                                println!("    (best val {v:.4} @ step {step} → protected)");
+                            }
+                        }
+                        // Retention: keep only the last `keep_last` checkpoints plus the
+                        // best-val one, so a long run doesn't fill the disk.
+                        prune_checkpoints(&cfg.checkpoint_dir, cfg.keep_last, best_step);
+                    },
                     Err(e) => eprintln!("  checkpoint at step {step} failed: {e}"),
                 }
             }
         }
         losses
+    }
+}
+
+/// Deterministic in-place Fisher–Yates shuffle of `order` (an SplitMix/LCG PRNG,
+/// same generator as `PretrainDataset::shuffle`) — used to randomize the training
+/// window order each epoch. Deterministic in `seed`, so a run is reproducible.
+fn shuffle_windows(order: &mut [usize], seed: u64) {
+    let mut state = seed
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
+    for i in (1..order.len()).rev()
+    {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        let j = (state >> 33) as usize % (i + 1);
+        order.swap(i, j);
+    }
+}
+
+/// Delete old `step_N/` checkpoints under `dir`, keeping only the most recent
+/// `keep_last` (by numeric step) plus `protect` (the best-val step, if any).
+/// `keep_last == 0` disables pruning (keep everything). Best-effort — I/O errors on
+/// individual removals are ignored so a failed delete never aborts training.
+fn prune_checkpoints(dir: &str, keep_last: usize, protect: Option<usize>) {
+    if keep_last == 0
+    {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir)
+    else
+    {
+        return;
+    };
+    let mut steps: Vec<(u64, std::path::PathBuf)> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().ok().is_some_and(|t| t.is_dir()))
+        .filter_map(|e| {
+            let p = e.path();
+            let n = p
+                .file_name()?
+                .to_str()?
+                .strip_prefix("step_")?
+                .parse::<u64>()
+                .ok()?;
+            Some((n, p))
+        })
+        .collect();
+    steps.sort_by_key(|(n, _)| *n);
+    let cutoff = steps.len().saturating_sub(keep_last);
+    for (i, (n, p)) in steps.iter().enumerate()
+    {
+        if i >= cutoff
+        {
+            continue; // among the last `keep_last`
+        }
+        if protect == Some(*n as usize)
+        {
+            continue; // the best-val checkpoint
+        }
+        let _ = std::fs::remove_dir_all(p);
     }
 }
 
@@ -996,6 +1108,14 @@ pub struct CudaPretrainConfig {
     pub eval_interval: usize,
     /// Max validation windows averaged per eval (bounds eval cost). Default `32`.
     pub eval_windows: usize,
+    /// Checkpoint retention: keep only the most recent `keep_last` `step_N/` dirs
+    /// (plus the best-val one, which is never pruned). `0` keeps everything — the old
+    /// behavior, which fills the disk on a long run. Default `3`.
+    pub keep_last: usize,
+    /// Shuffle the training window order (re-shuffled deterministically each epoch).
+    /// Default `true` — sequential streaming spikes per-step loss variance and
+    /// encourages memorizing adjacent near-duplicate windows. `false` = sequential.
+    pub shuffle: bool,
 }
 
 impl Default for CudaPretrainConfig {
@@ -1019,6 +1139,8 @@ impl Default for CudaPretrainConfig {
             val_frac: 0.02,
             eval_interval: 250,
             eval_windows: 32,
+            keep_last: 3,
+            shuffle: true,
         }
     }
 }
