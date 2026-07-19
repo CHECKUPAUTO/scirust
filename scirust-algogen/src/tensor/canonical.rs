@@ -6,6 +6,9 @@
 //! ([`canonical_equal`]). The encoding never depends on `HashMap` iteration,
 //! memory addresses, thread scheduling or wall-clock time, and `Scale` factors
 //! are encoded through their exact `f32` bit pattern.
+//! Every `usize` is widened losslessly to a fixed-width little-endian `u128`, so
+//! the representation cannot truncate on targets whose pointer width exceeds
+//! 64 bits.
 //!
 //! [`program_fingerprint`] is a 128-bit FNV-1a **hash** of those bytes. It is a
 //! fast lookup hint, cache key and display identifier — not a proof of identity.
@@ -25,12 +28,12 @@ const FNV_PRIME: u128 = 0x0000_0000_0100_0000_0000_0000_0000_013B;
 /// The canonical byte encoding of a program — its authoritative identity.
 pub fn canonical_bytes(program: &TensorProgram) -> Vec<u8> {
     let mut bytes = Vec::new();
-    write_u64(&mut bytes, program.instructions.len() as u64);
+    write_usize(&mut bytes, program.instructions.len());
     for instruction in &program.instructions
     {
         write_instruction(&mut bytes, instruction);
     }
-    write_u64(&mut bytes, program.output as u64);
+    write_usize(&mut bytes, program.output);
     bytes
 }
 
@@ -58,41 +61,41 @@ fn write_instruction(bytes: &mut Vec<u8>, instruction: &TensorInstruction) {
         TensorInstruction::Input { input } =>
         {
             bytes.push(0);
-            write_u64(bytes, input as u64);
+            write_usize(bytes, input);
         },
         TensorInstruction::Add { lhs, rhs } =>
         {
             bytes.push(1);
-            write_u64(bytes, lhs as u64);
-            write_u64(bytes, rhs as u64);
+            write_usize(bytes, lhs);
+            write_usize(bytes, rhs);
         },
         TensorInstruction::MatMul { lhs, rhs } =>
         {
             bytes.push(2);
-            write_u64(bytes, lhs as u64);
-            write_u64(bytes, rhs as u64);
+            write_usize(bytes, lhs);
+            write_usize(bytes, rhs);
         },
         TensorInstruction::Transpose2d { src } =>
         {
             bytes.push(3);
-            write_u64(bytes, src as u64);
+            write_usize(bytes, src);
         },
         TensorInstruction::Relu { src } =>
         {
             bytes.push(4);
-            write_u64(bytes, src as u64);
+            write_usize(bytes, src);
         },
         TensorInstruction::Scale { src, factor } =>
         {
             bytes.push(5);
-            write_u64(bytes, src as u64);
+            write_usize(bytes, src);
             write_u32(bytes, factor.to_bits());
         },
     }
 }
 
-fn write_u64(bytes: &mut Vec<u8>, value: u64) {
-    bytes.extend_from_slice(&value.to_le_bytes());
+fn write_usize(bytes: &mut Vec<u8>, value: usize) {
+    bytes.extend_from_slice(&(value as u128).to_le_bytes());
 }
 
 fn write_u32(bytes: &mut Vec<u8>, value: u32) {
@@ -158,5 +161,17 @@ mod tests {
         );
         let scale = program(1.0, 1);
         assert_ne!(program_fingerprint(&relu), program_fingerprint(&scale));
+    }
+
+    #[test]
+    fn usize_fields_use_fixed_width_little_endian_without_truncation() {
+        let program = TensorProgram::new(
+            vec![TensorInstruction::Input { input: usize::MAX }],
+            usize::MAX,
+        );
+        let bytes = canonical_bytes(&program);
+        assert_eq!(&bytes[..16], &(1u128).to_le_bytes());
+        assert_eq!(&bytes[17..33], &(usize::MAX as u128).to_le_bytes());
+        assert_eq!(&bytes[33..49], &(usize::MAX as u128).to_le_bytes());
     }
 }

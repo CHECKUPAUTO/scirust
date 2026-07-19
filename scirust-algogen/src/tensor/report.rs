@@ -23,6 +23,11 @@ pub fn text_report(
     let _ = writeln!(out, "experiment: {}", archive.problem.id);
     let _ = writeln!(out, "  {}", archive.problem.description);
     let _ = writeln!(out, "schema version: {}", archive.schema_version);
+    let _ = writeln!(
+        out,
+        "digest format version: {}",
+        archive.digest_format_version
+    );
     let _ = writeln!(out, "crate version: {}", archive.crate_version);
     let _ = writeln!(out, "seed: {}", archive.seed);
     let _ = writeln!(out, "success: {}", archive.success);

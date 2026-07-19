@@ -159,6 +159,7 @@ pub enum ProblemError {
     MalformedFixture(String),
     InputShapeMismatch,
     InvalidPopulation(String),
+    InvalidNumericConfiguration(String),
     NoSuccessCriteria,
 }
 
@@ -237,6 +238,44 @@ impl TensorProblem {
         {
             return Err(ProblemError::InvalidPopulation(
                 "elitism must not exceed population_size".to_string(),
+            ));
+        }
+        let generation_scale = self.evolution.generation.scale_magnitude;
+        let mutation_scale = self.evolution.scale_magnitude;
+        if !generation_scale.is_finite() || generation_scale < 0.0
+        {
+            return Err(ProblemError::InvalidNumericConfiguration(
+                "generation scale_magnitude must be finite and non-negative".to_string(),
+            ));
+        }
+        if !mutation_scale.is_finite() || mutation_scale < 0.0
+        {
+            return Err(ProblemError::InvalidNumericConfiguration(
+                "mutation scale_magnitude must be finite and non-negative".to_string(),
+            ));
+        }
+        for (name, probability) in [
+            (
+                "crossover_probability",
+                self.evolution.crossover_probability,
+            ),
+            ("mutation_probability", self.evolution.mutation_probability),
+        ]
+        {
+            if !probability.is_finite() || !(0.0..=1.0).contains(&probability)
+            {
+                return Err(ProblemError::InvalidNumericConfiguration(format!(
+                    "{name} must be finite and in [0, 1]"
+                )));
+            }
+        }
+        if self
+            .success
+            .max_loss
+            .is_some_and(|value| !value.is_finite())
+        {
+            return Err(ProblemError::InvalidNumericConfiguration(
+                "success max_loss must be finite".to_string(),
             ));
         }
         if !self.success.has_any()
@@ -668,6 +707,23 @@ mod tests {
         assert!(matches!(
             zero_pop.validate(),
             Err(ProblemError::InvalidPopulation(_))
+        ));
+
+        for probability in [f64::NAN, f64::INFINITY, -0.1, 1.1]
+        {
+            let mut invalid = benchmarks::identity();
+            invalid.evolution.mutation_probability = probability;
+            assert!(matches!(
+                invalid.validate(),
+                Err(ProblemError::InvalidNumericConfiguration(_))
+            ));
+        }
+
+        let mut invalid_loss = benchmarks::identity();
+        invalid_loss.success.max_loss = Some(f64::from_bits(0x7ff8_0000_0000_0001));
+        assert!(matches!(
+            invalid_loss.validate(),
+            Err(ProblemError::InvalidNumericConfiguration(_))
         ));
     }
 

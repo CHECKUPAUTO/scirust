@@ -25,15 +25,16 @@ mod verify;
 
 pub use active::analyze_active;
 pub use archive::{
-    ARCHIVE_SCHEMA_VERSION, ArchiveVerification, ExperimentArchive, HallOfFame, HallOfFameEntry,
-    VerificationIssue, verify_archive,
+    ARCHIVE_SCHEMA_VERSION, ArchiveEntryLocation, ArchiveVerification, ExperimentArchive,
+    ExperimentReplay, ExperimentReplayMismatch, HallOfFame, HallOfFameEntry, VerificationIssue,
+    replay_experiment, verify_archive,
 };
 pub use canonical::{canonical_bytes, canonical_equal, program_fingerprint};
 pub use canonicalize::prune_dead_code;
 pub use cost::{CostReport, estimate_cost};
 pub use crossover::{CrossoverOutcome, crossover};
 pub use dataset::{Dataset, DatasetError, TensorCase};
-pub use digest::{DIGEST_FORMAT_VERSION, DigestError};
+pub use digest::{DIGEST_FORMAT_VERSION, DIGEST_MAGIC, DigestError};
 pub use experiment::{
     ExperimentError, GenerationRecord, PopulationSummary, RunOptions, run_experiment,
 };

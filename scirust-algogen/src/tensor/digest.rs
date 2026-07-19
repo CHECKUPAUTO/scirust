@@ -4,8 +4,9 @@
 //! encoding produced here — never over JSON. The encoding is fully specified so
 //! it is stable and reproducible across builds and platforms:
 //!
-//! * a [`DIGEST_FORMAT_VERSION`] independent of the archive schema version leads
-//!   the stream, so any encoding change is versioned;
+//! * explicit [`DIGEST_MAGIC`] domain-separates the stream, followed by a
+//!   [`DIGEST_FORMAT_VERSION`] independent of the archive schema version, so any
+//!   encoding change is versioned;
 //! * every composite type is prefixed with a distinct domain-separation tag;
 //! * integers are fixed-width little-endian; `usize` is converted to `u64`
 //!   through a checked conversion;
@@ -21,6 +22,10 @@
 //! both the archive and its digest; authenticity would require a trusted
 //! signature or MAC (not provided here).
 
+use std::error::Error;
+use std::fmt;
+
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::archive::HallOfFameEntry;
@@ -33,7 +38,10 @@ use super::population::{EvolutionConfig, TournamentConfig};
 use super::problem::{CaseFixture, ProblemLimits, SuccessCriteria, TensorFixture, TensorProblem};
 
 /// Version of the canonical digest encoding. Bump when the encoding changes.
-pub const DIGEST_FORMAT_VERSION: u32 = 1;
+pub const DIGEST_FORMAT_VERSION: u32 = 2;
+
+/// Domain-separation prefix at the start of every canonical archive stream.
+pub const DIGEST_MAGIC: &[u8] = b"SCIRUST-TENSOR-ARCHIVE\0";
 
 // Domain-separation tags for composite types.
 const TAG_ARCHIVE: u8 = 0x01;
@@ -55,13 +63,33 @@ const TAG_PROGRAM: u8 = 0x10;
 const TAG_INSTRUCTION: u8 = 0x11;
 
 /// A failure while producing the canonical encoding.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DigestError {
     /// A non-finite float appeared in a field required to be finite.
     NonFiniteFloat,
     /// A `usize` value did not fit into `u64` (only possible on exotic targets).
     LengthOverflow,
+    /// The archive requests a canonical encoding this implementation does not
+    /// understand. Unknown formats must never be interpreted as the current
+    /// format.
+    UnsupportedFormat { found: u32, supported: u32 },
 }
+
+impl fmt::Display for DigestError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self
+        {
+            Self::NonFiniteFloat => write!(formatter, "a finite archive float was required"),
+            Self::LengthOverflow => write!(formatter, "an archive usize does not fit in u64"),
+            Self::UnsupportedFormat { found, supported } => write!(
+                formatter,
+                "unsupported digest format {found}; this implementation supports {supported}"
+            ),
+        }
+    }
+}
+
+impl Error for DigestError {}
 
 /// A deterministic canonical byte encoder.
 struct CanonicalEncoder {
@@ -94,7 +122,7 @@ impl CanonicalEncoder {
     }
 
     fn usize(&mut self, value: usize) -> Result<(), DigestError> {
-        let value = u64::try_from(value).map_err(|_| DigestError::LengthOverflow)?;
+        let value = checked_u64(value as u128)?;
         self.u64(value);
         Ok(())
     }
@@ -135,12 +163,10 @@ impl CanonicalEncoder {
         }
         Ok(())
     }
+}
 
-    fn digest_hex(&self) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(&self.bytes);
-        to_hex(&hasher.finalize())
-    }
+fn checked_u64(value: u128) -> Result<u64, DigestError> {
+    u64::try_from(value).map_err(|_| DigestError::LengthOverflow)
 }
 
 fn to_hex(bytes: &[u8]) -> String {
@@ -154,10 +180,11 @@ fn to_hex(bytes: &[u8]) -> String {
     out
 }
 
-/// Compute the content-integrity digest (hex SHA-256) of the deterministic
-/// archive fields. The digest field itself is excluded.
+/// Encode every deterministic archive field exactly once, excluding only the
+/// stored digest itself.
 #[allow(clippy::too_many_arguments)]
-pub fn archive_content_digest(
+pub(crate) fn archive_canonical_bytes(
+    digest_format_version: u32,
     schema_version: u32,
     crate_version: &str,
     problem: &TensorProblem,
@@ -169,11 +196,20 @@ pub fn archive_content_digest(
     hall_of_fame_capacity: usize,
     hall_of_fame: &[HallOfFameEntry],
     best: &HallOfFameEntry,
-) -> Result<String, DigestError> {
+) -> Result<Vec<u8>, DigestError> {
+    if digest_format_version != DIGEST_FORMAT_VERSION
+    {
+        return Err(DigestError::UnsupportedFormat {
+            found: digest_format_version,
+            supported: DIGEST_FORMAT_VERSION,
+        });
+    }
+
     let mut encoder = CanonicalEncoder::new();
 
+    encoder.bytes.extend_from_slice(DIGEST_MAGIC);
     encoder.tag(TAG_ARCHIVE);
-    encoder.u32(DIGEST_FORMAT_VERSION);
+    encoder.u32(digest_format_version);
     encoder.u32(schema_version);
     encoder.str(crate_version)?;
     encode_problem(&mut encoder, problem)?;
@@ -198,7 +234,43 @@ pub fn archive_content_digest(
 
     encode_hof_entry(&mut encoder, best)?;
 
-    Ok(encoder.digest_hex())
+    Ok(encoder.bytes)
+}
+
+/// Compute the hexadecimal SHA-256 content digest over explicit canonical
+/// archive bytes. The stored digest itself is excluded from those bytes.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn archive_content_digest(
+    digest_format_version: u32,
+    schema_version: u32,
+    crate_version: &str,
+    problem: &TensorProblem,
+    seed: u64,
+    success: bool,
+    generations_executed: usize,
+    history: &[GenerationRecord],
+    final_population: &PopulationSummary,
+    hall_of_fame_capacity: usize,
+    hall_of_fame: &[HallOfFameEntry],
+    best: &HallOfFameEntry,
+) -> Result<String, DigestError> {
+    let bytes = archive_canonical_bytes(
+        digest_format_version,
+        schema_version,
+        crate_version,
+        problem,
+        seed,
+        success,
+        generations_executed,
+        history,
+        final_population,
+        hall_of_fame_capacity,
+        hall_of_fame,
+        best,
+    )?;
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    Ok(to_hex(&hasher.finalize()))
 }
 
 fn encode_problem(
@@ -496,10 +568,48 @@ mod tests {
     }
 
     #[test]
+    fn integers_are_little_endian() {
+        let mut encoder = CanonicalEncoder::new();
+        encoder.u32(0x0102_0304);
+        encoder.u64(0x0102_0304_0506_0708);
+        assert_eq!(
+            encoder.bytes,
+            vec![
+                0x04, 0x03, 0x02, 0x01, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01,
+            ]
+        );
+    }
+
+    #[test]
+    fn finite_subnormals_are_encoded_by_exact_bits() {
+        let value = f32::from_bits(1);
+        let mut encoder = CanonicalEncoder::new();
+        encoder.f32(value).unwrap();
+        assert_eq!(encoder.bytes, value.to_bits().to_le_bytes());
+    }
+
+    #[test]
     fn non_finite_floats_are_rejected() {
         let mut encoder = CanonicalEncoder::new();
         assert_eq!(encoder.f32(f32::NAN), Err(DigestError::NonFiniteFloat));
+        assert_eq!(
+            encoder.f32(f32::from_bits(0x7fc0_0001)),
+            Err(DigestError::NonFiniteFloat)
+        );
+        assert_eq!(
+            encoder.f32(f32::from_bits(0xffc0_1234)),
+            Err(DigestError::NonFiniteFloat)
+        );
         assert_eq!(encoder.f64(f64::INFINITY), Err(DigestError::NonFiniteFloat));
+    }
+
+    #[test]
+    fn checked_u64_accepts_the_limit_and_rejects_the_next_value() {
+        assert_eq!(checked_u64(u64::MAX as u128), Ok(u64::MAX));
+        assert_eq!(
+            checked_u64(u64::MAX as u128 + 1),
+            Err(DigestError::LengthOverflow)
+        );
     }
 
     /// A fixed program exercising every instruction variant and a signed factor.
@@ -528,9 +638,11 @@ mod tests {
         let mut encoder = CanonicalEncoder::new();
         encoder.u32(DIGEST_FORMAT_VERSION);
         encode_program(&mut encoder, &known_answer_program()).unwrap();
+        let mut hasher = Sha256::new();
+        hasher.update(&encoder.bytes);
         assert_eq!(
-            encoder.digest_hex(),
-            "6225b4a90c4becd095d4913f25fbd05a07eb0fd628bbb9728faeefdb5db1d090"
+            to_hex(&hasher.finalize()),
+            "6b3cf6e0e87657ebbc42f61d1d70f4515755cf454be6f77fe952ae8f7c9ff80f"
         );
     }
 

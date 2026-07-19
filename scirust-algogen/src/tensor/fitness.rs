@@ -23,9 +23,9 @@ pub const CASE_FAILURE_PENALTY: f64 = 1.0e12;
 
 /// The fitness of a single program on a dataset.
 ///
-/// `fingerprint` is the evaluated program's stable structural fingerprint. It
-/// participates in ranking only as an order-independent tie-breaker after every
-/// objective, never as an objective itself, and never in Pareto dominance.
+/// `fingerprint` is the evaluated program's compact probabilistic structural
+/// identifier. It is never structural identity and does not participate in
+/// ranking or Pareto dominance; ranking uses complete canonical program bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct FitnessReport {
     /// Mean per-case error (mean-squared error, with penalties for failures).
