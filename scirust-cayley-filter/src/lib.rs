@@ -14,6 +14,7 @@ pub mod operator;
 pub mod optimizer;
 pub mod projector;
 pub mod scalar;
+pub mod search;
 pub mod soft;
 pub mod subspace;
 
@@ -32,5 +33,6 @@ pub use projector::{CayleyProjector, ProjectorError};
 pub use scalar::{
     SEDENION_DIMENSION, Sedenion, basis_vector, conjugate, sedenion_mul, squared_norm,
 };
+pub use search::{SparseMultiplierCandidate, rank_two_term_multipliers};
 pub use soft::{SoftCayleyFilter, SoftFilterError};
 pub use subspace::{NoiseSubspaceProjector, SubspaceProjectionError};
