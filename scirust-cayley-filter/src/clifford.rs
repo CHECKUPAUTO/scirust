@@ -450,7 +450,44 @@ mod tests {
     use super::rank_two_term_clifford_projectors;
     use super::{CliffordProjectorError, SplitCliffordProjector, score_clifford_projector};
     use crate::MultiplierCase;
-    use crate::{SEDENION_DIMENSION, basis_vector, matrix_vector_mul};
+    use crate::{
+        CayleyProjector, NoiseSubspaceProjector, SEDENION_DIMENSION, analyze_matrix, basis_vector,
+        left_multiplication_matrix, matrix_vector_mul,
+    };
+
+    #[test]
+    fn cayley_kernel_and_clifford_projectors_are_equivalent() {
+        let mut multiplier = [0.0; SEDENION_DIMENSION];
+        multiplier[1] = 1.0;
+        multiplier[10] = 1.0;
+
+        let matrix = left_multiplication_matrix(multiplier);
+        let analysis = analyze_matrix(&matrix, 1.0e-12).unwrap();
+        let subspace = NoiseSubspaceProjector::new(analysis.kernel_basis(), 1.0e-12).unwrap();
+
+        let clifford =
+            SplitCliffordProjector::from_orthonormal_basis(subspace.orthonormal_basis()).unwrap();
+
+        let cayley = CayleyProjector::new(multiplier, 1.0e-12).unwrap();
+
+        assert_eq!(clifford.rejected_dimension(), 4);
+        assert_eq!(cayley.rejected_dimension(), 4);
+
+        for index in 0..SEDENION_DIMENSION
+        {
+            let input = basis_vector(index).unwrap();
+            let left = clifford.apply(&input);
+            let right = cayley.apply(&input);
+
+            let error = left
+                .iter()
+                .zip(right)
+                .map(|(a, b)| (a - b) * (a - b))
+                .sum::<f64>();
+
+            assert!(error < 1.0e-20);
+        }
+    }
 
     #[test]
     fn canonical_projector_rejects_expected_subspace() {
