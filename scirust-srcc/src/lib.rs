@@ -5,12 +5,28 @@
 
 #![forbid(unsafe_code)]
 
+mod closure;
+
+pub use closure::{SrccClosure, SrccClosureError};
+
 use core::fmt;
 
 pub const SRCC_DIMENSION: usize = 16;
 
 pub type Vector16 = [f64; SRCC_DIMENSION];
 pub type LinearMap16 = [[f64; SRCC_DIMENSION]; SRCC_DIMENSION];
+
+#[must_use]
+pub fn basis_vector(index: usize) -> Option<Vector16> {
+    if index >= SRCC_DIMENSION
+    {
+        return None;
+    }
+
+    let mut vector = [0.0; SRCC_DIMENSION];
+    vector[index] = 1.0;
+    Some(vector)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SrccConfig {
