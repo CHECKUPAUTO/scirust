@@ -1,7 +1,7 @@
 use scirust_cayley_filter::{
     CayleyProjector, MultiplierCase, MultiplierScore, SPECTRAL_COMPLEX_BINS, Sedenion,
-    SoftCayleyFilter, SpectralBlockFilter, rank_zero_divisor_two_term_multipliers,
-    score_multiplier, squared_norm,
+    SoftCayleyFilter, SpectralBlockFilter, development_gate,
+    rank_zero_divisor_two_term_multipliers, score_multiplier, squared_norm,
 };
 use scirust_signal::Complex;
 use scirust_signal::denoise::{classify, denoise_auto, stft_wiener_auto};
@@ -291,6 +291,8 @@ fn main() -> Result<(), String> {
 
     let selected = select_sparse_seed(&train_cases, &dev_cases)?;
 
+    let decision = development_gate(&selected.dev_score)?;
+
     let soft = SoftCayleyFilter::new(selected.multiplier, RELATIVE_SCALE)
         .map_err(|error| error.to_string())?;
 
@@ -304,8 +306,23 @@ fn main() -> Result<(), String> {
     let test_clean = &clean[dev_end..];
     let test_noisy = &noisy[dev_end..];
 
-    let soft_output = soft_filter.apply(test_noisy);
-    let hard_output = hard_filter.apply(test_noisy);
+    let soft_output = if decision.uses_cayley()
+    {
+        soft_filter.apply(test_noisy)
+    }
+    else
+    {
+        test_noisy.to_vec()
+    };
+
+    let hard_output = if decision.uses_cayley()
+    {
+        hard_filter.apply(test_noisy)
+    }
+    else
+    {
+        test_noisy.to_vec()
+    };
 
     let stft_output = stft_wiener_auto(test_noisy);
     let auto_result = denoise_auto(test_noisy, SAMPLE_RATE);
@@ -345,18 +362,19 @@ fn main() -> Result<(), String> {
         hard.rejected_dimension(),
     );
 
+    println!("development_gate={decision:?}");
     println!("auto_method={}", auto_result.method);
     println!("method,mse,snr_db,snr_improvement_db");
 
     print_metrics("noisy_input", metrics(test_clean, test_noisy, test_noisy));
 
     print_metrics(
-        "cayley_soft_spectral",
+        "gated_cayley_soft_spectral",
         metrics(test_clean, test_noisy, &soft_output),
     );
 
     print_metrics(
-        "cayley_hard_spectral",
+        "gated_cayley_hard_spectral",
         metrics(test_clean, test_noisy, &hard_output),
     );
 

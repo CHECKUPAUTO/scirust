@@ -1,6 +1,7 @@
 use scirust_cayley_filter::{
     CayleyProjector, MultiplierCase, MultiplierScore, Sedenion, SoftCayleyFilter,
-    TemporalBlockFilter, rank_zero_divisor_two_term_multipliers, score_multiplier,
+    TemporalBlockFilter, development_gate, rank_zero_divisor_two_term_multipliers,
+    score_multiplier,
 };
 use scirust_signal::denoise::{classify, denoise_auto, stft_wiener_auto};
 
@@ -199,6 +200,8 @@ fn main() -> Result<(), String> {
 
     let selected = select_sparse_seed(&train_cases, &dev_cases)?;
 
+    let decision = development_gate(&selected.dev_score)?;
+
     let soft = SoftCayleyFilter::new(selected.multiplier, RELATIVE_SCALE)
         .map_err(|error| error.to_string())?;
 
@@ -208,9 +211,23 @@ fn main() -> Result<(), String> {
     let test_clean = &clean[dev_end..];
     let test_noisy = &noisy[dev_end..];
 
-    let soft_output = TemporalBlockFilter::from_soft(&soft).apply(test_noisy);
+    let soft_output = if decision.uses_cayley()
+    {
+        TemporalBlockFilter::from_soft(&soft).apply(test_noisy)
+    }
+    else
+    {
+        test_noisy.to_vec()
+    };
 
-    let hard_output = TemporalBlockFilter::from_hard(&hard).apply(test_noisy);
+    let hard_output = if decision.uses_cayley()
+    {
+        TemporalBlockFilter::from_hard(&hard).apply(test_noisy)
+    }
+    else
+    {
+        test_noisy.to_vec()
+    };
 
     let stft_output = stft_wiener_auto(test_noisy);
     let auto_result = denoise_auto(test_noisy, SAMPLE_RATE);
@@ -241,18 +258,19 @@ fn main() -> Result<(), String> {
         hard.rejected_dimension(),
     );
 
+    println!("development_gate={decision:?}");
     println!("auto_method={}", auto_result.method);
     println!("method,mse,snr_db,snr_improvement_db");
 
     print_metrics("noisy_input", metrics(test_clean, test_noisy, test_noisy));
 
     print_metrics(
-        "cayley_soft_temporal",
+        "gated_cayley_soft_temporal",
         metrics(test_clean, test_noisy, &soft_output),
     );
 
     print_metrics(
-        "cayley_hard_temporal",
+        "gated_cayley_hard_temporal",
         metrics(test_clean, test_noisy, &hard_output),
     );
 
