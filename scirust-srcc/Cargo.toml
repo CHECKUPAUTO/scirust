@@ -1,0 +1,14 @@
+[package]
+name = "scirust-srcc"
+version = "0.1.0"
+edition = "2021"
+publish = false
+rust-version = "1.89"
+authors = ["SciRust Team"]
+description = "Deterministic resonant-consensus closure and projection"
+license-file = "../LICENSE.md"
+
+[features]
+default = []
+
+[dependencies]
