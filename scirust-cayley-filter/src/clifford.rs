@@ -8,6 +8,7 @@ use crate::scalar::{SEDENION_DIMENSION, Sedenion};
 pub enum CliffordProjectorError {
     InvalidRejectedDimension,
     InvalidDirection,
+    InvalidOrthonormalBasis,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -31,6 +32,7 @@ impl SplitCliffordProjector {
                 identity - 2.0 * unit[r] * unit[c]
             })
         });
+
         let projection = core::array::from_fn(|r| {
             core::array::from_fn(|c| {
                 let identity = if r == c { 1.0 } else { 0.0 };
@@ -41,6 +43,47 @@ impl SplitCliffordProjector {
             involution,
             projection,
             rejected_dimension: 1,
+        })
+    }
+
+    pub fn from_orthonormal_basis(basis: &[Sedenion]) -> Result<Self, CliffordProjectorError> {
+        if basis.is_empty() || basis.len() > SEDENION_DIMENSION
+        {
+            return Err(CliffordProjectorError::InvalidRejectedDimension);
+        }
+
+        for (i, u) in basis.iter().enumerate()
+        {
+            let norm = u.iter().map(|x| x * x).sum::<f64>();
+            if !norm.is_finite() || (norm - 1.0).abs() > 1.0e-12
+            {
+                return Err(CliffordProjectorError::InvalidOrthonormalBasis);
+            }
+            for v in &basis[..i]
+            {
+                let dot = u.iter().zip(v).map(|(a, b)| a * b).sum::<f64>();
+                if dot.abs() > 1.0e-12
+                {
+                    return Err(CliffordProjectorError::InvalidOrthonormalBasis);
+                }
+            }
+        }
+
+        let projection = core::array::from_fn(|r| {
+            core::array::from_fn(|c| {
+                let identity = if r == c { 1.0 } else { 0.0 };
+                basis.iter().fold(identity, |value, u| value - u[r] * u[c])
+            })
+        });
+
+        let involution = core::array::from_fn(|r| {
+            core::array::from_fn(|c| 2.0 * projection[r][c] - if r == c { 1.0 } else { 0.0 })
+        });
+
+        Ok(Self {
+            involution,
+            projection,
+            rejected_dimension: basis.len(),
         })
     }
 
@@ -151,6 +194,28 @@ mod tests {
     }
 
     #[test]
+    fn oriented_subspace_is_removed_and_complement_preserved() {
+        let basis = [
+            basis_vector(2).unwrap(),
+            basis_vector(5).unwrap(),
+            basis_vector(9).unwrap(),
+            basis_vector(14).unwrap(),
+        ];
+        let projector = SplitCliffordProjector::from_orthonormal_basis(&basis).unwrap();
+
+        assert_eq!(projector.rejected_dimension(), 4);
+
+        for direction in basis
+        {
+            assert_eq!(projector.apply(&direction), [0.0; SEDENION_DIMENSION]);
+        }
+
+        let signal = basis_vector(7).unwrap();
+        assert_eq!(projector.apply(&signal), signal);
+        assert_eq!(projector.apply(&projector.apply(&signal)), signal);
+    }
+
+    #[test]
     fn oriented_projector_removes_its_direction() {
         let direction = [1.0; SEDENION_DIMENSION];
         let projector = SplitCliffordProjector::from_direction(direction).unwrap();
@@ -160,6 +225,15 @@ mod tests {
                 .apply(&direction)
                 .iter()
                 .all(|x| x.abs() < 1.0e-12)
+        );
+    }
+
+    #[test]
+    fn non_orthonormal_basis_is_rejected() {
+        let u = basis_vector(2).unwrap();
+        assert_eq!(
+            SplitCliffordProjector::from_orthonormal_basis(&[u, u]),
+            Err(CliffordProjectorError::InvalidOrthonormalBasis)
         );
     }
 
