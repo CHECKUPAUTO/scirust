@@ -10,6 +10,7 @@ use crate::operator::{Matrix16, left_multiplication_matrix, matrix_vector_mul};
 use crate::optimizer::{MultiplierCase, MultiplierScore};
 use crate::scalar::{SEDENION_DIMENSION, Sedenion, squared_norm};
 use crate::search::zero_divisor_two_term_directions;
+use crate::selection::{DevelopmentGateDecision, development_gate};
 
 /// Failure while constructing a Cayley projector.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -150,6 +151,23 @@ pub struct HardCayleyProjectorCandidate {
     pub score: MultiplierScore,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct SelectedHardCayleyProjector {
+    pub first_index: usize,
+    pub second_index: usize,
+    pub second_sign: i8,
+    pub projector: CayleyProjector,
+    pub train_score: MultiplierScore,
+    pub dev_score: MultiplierScore,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HardCayleySelectionResult {
+    pub selected: SelectedHardCayleyProjector,
+    pub candidates: Vec<SelectedHardCayleyProjector>,
+    pub decision: DevelopmentGateDecision,
+}
+
 pub fn rank_hard_zero_divisor_projectors(
     cases: &[MultiplierCase],
     distortion_weight: f64,
@@ -186,6 +204,66 @@ pub fn rank_hard_zero_divisor_projectors(
     });
 
     Ok(candidates)
+}
+
+pub fn select_hard_cayley_train_dev(
+    train: &[MultiplierCase],
+    dev: &[MultiplierCase],
+    top_k: usize,
+    distortion_weight: f64,
+    analysis_tolerance: f64,
+    relative_threshold: f64,
+) -> Result<HardCayleySelectionResult, String> {
+    if top_k == 0
+    {
+        return Err("top_k must be strictly positive".into());
+    }
+
+    let ranked = rank_hard_zero_divisor_projectors(
+        train,
+        distortion_weight,
+        analysis_tolerance,
+        relative_threshold,
+    )?;
+
+    let mut candidates = Vec::with_capacity(top_k.min(ranked.len()));
+
+    for candidate in ranked.into_iter().take(top_k)
+    {
+        let dev_score = score_cayley_projector(dev, &candidate.projector, distortion_weight)?;
+
+        candidates.push(SelectedHardCayleyProjector {
+            first_index: candidate.first_index,
+            second_index: candidate.second_index,
+            second_sign: candidate.second_sign,
+            projector: candidate.projector,
+            train_score: candidate.score,
+            dev_score,
+        });
+    }
+
+    candidates.sort_by(|a, b| {
+        a.dev_score
+            .loss
+            .total_cmp(&b.dev_score.loss)
+            .then_with(|| a.train_score.loss.total_cmp(&b.train_score.loss))
+            .then_with(|| a.first_index.cmp(&b.first_index))
+            .then_with(|| a.second_index.cmp(&b.second_index))
+            .then_with(|| a.second_sign.cmp(&b.second_sign))
+    });
+
+    let selected = candidates
+        .first()
+        .cloned()
+        .ok_or_else(|| "no hard Cayley candidate was produced".to_string())?;
+
+    let decision = development_gate(&selected.dev_score)?;
+
+    Ok(HardCayleySelectionResult {
+        selected,
+        candidates,
+        decision,
+    })
 }
 
 const ENERGY_FLOOR: f64 = 1.0e-30;
@@ -280,6 +358,53 @@ mod tests {
         assert!(projector.rejected_dimension() > 0);
         assert!(squared_norm(evaluation.filtered_noise()) < 1.0e-20);
         assert!(squared_distance(evaluation.filtered_signal(), &signal) < 1.0e-20);
+    }
+
+    #[test]
+    fn train_dev_recovers_kernel_under_contamination() {
+        let mut multiplier = ZERO;
+        multiplier[1] = 1.0;
+        multiplier[10] = 1.0;
+
+        let matrix = crate::left_multiplication_matrix(multiplier);
+        let analysis = crate::analyze_matrix(&matrix, THRESHOLD).unwrap();
+        let signal = basis_vector(0).unwrap();
+
+        let truth = CayleyProjector::new(multiplier, THRESHOLD).unwrap();
+        let off_kernel = (1..SEDENION_DIMENSION)
+            .map(|index| basis_vector(index).unwrap())
+            .map(|axis| truth.apply(&axis))
+            .find(|vector| squared_norm(vector) > 1.0e-12)
+            .unwrap();
+
+        let mut contaminated = analysis.kernel_basis()[0];
+        for index in 0..SEDENION_DIMENSION
+        {
+            contaminated[index] += 0.01 * off_kernel[index];
+        }
+
+        let train = [MultiplierCase::new(signal, contaminated)];
+        let dev: Vec<_> = analysis
+            .kernel_basis()
+            .iter()
+            .copied()
+            .map(|noise| MultiplierCase::new(signal, noise))
+            .collect();
+
+        let result =
+            super::select_hard_cayley_train_dev(&train, &dev, 84, 10.0, THRESHOLD, THRESHOLD)
+                .unwrap();
+
+        assert_eq!(
+            (
+                result.selected.first_index,
+                result.selected.second_index,
+                result.selected.second_sign,
+            ),
+            (1, 10, 1),
+        );
+        assert_eq!(result.decision, crate::DevelopmentGateDecision::Cayley,);
+        assert!(result.selected.dev_score.loss < 1.0e-20);
     }
 
     #[test]

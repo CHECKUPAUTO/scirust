@@ -42,8 +42,9 @@ pub use optimizer::{
     score_multiplier,
 };
 pub use projector::{
-    CayleyProjector, HardCayleyProjectorCandidate, ProjectorError,
-    rank_hard_zero_divisor_projectors, score_cayley_projector,
+    CayleyProjector, HardCayleyProjectorCandidate, HardCayleySelectionResult, ProjectorError,
+    SelectedHardCayleyProjector, rank_hard_zero_divisor_projectors, score_cayley_projector,
+    select_hard_cayley_train_dev,
 };
 pub use scalar::{
     SEDENION_DIMENSION, Sedenion, basis_vector, conjugate, sedenion_mul, squared_norm,
