@@ -17,6 +17,7 @@ pub mod scalar;
 pub mod search;
 pub mod selection;
 pub mod soft;
+pub mod spectral;
 pub mod subspace;
 pub mod temporal;
 
@@ -42,4 +43,5 @@ pub use subspace::{NoiseSubspaceProjector, SubspaceProjectionError};
 pub use selection::{
     MultiplierSelectionResult, SelectedMultiplierCandidate, select_multiplier_train_dev,
 };
+pub use spectral::{SPECTRAL_COMPLEX_BINS, SpectralBlockFilter};
 pub use temporal::{TEMPORAL_BLOCK_SIZE, TemporalBlockFilter};
