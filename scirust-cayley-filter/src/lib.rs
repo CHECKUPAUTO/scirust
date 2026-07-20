@@ -25,7 +25,7 @@ pub mod temporal;
 pub use analysis::{AnalysisError, MatrixAnalysis, analyze_matrix, kernel_residual_norm};
 pub use autotune::{CayleyAutotuneResult, CayleyCase, autotune_threshold};
 pub use baseline::{IdentityFilter, NoiseDirectionProjector, ProjectionError};
-pub use clifford::{CliffordProjectorError, SplitCliffordProjector};
+pub use clifford::{CliffordProjectorError, SplitCliffordProjector, score_clifford_projector};
 pub use filter::{CayleyFilter, FilterEvaluation, FilterMetrics};
 pub use operator::{
     LeftMultiplicationOperator, Matrix16, left_multiplication_matrix, matrix_vector_mul,

@@ -2,7 +2,8 @@
 
 use crate::filter::FilterEvaluation;
 use crate::operator::{Matrix16, matrix_vector_mul};
-use crate::scalar::{SEDENION_DIMENSION, Sedenion};
+use crate::optimizer::{MultiplierCase, MultiplierScore};
+use crate::scalar::{SEDENION_DIMENSION, Sedenion, squared_norm};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CliffordProjectorError {
@@ -150,9 +151,54 @@ impl SplitCliffordProjector {
     }
 }
 
+const ENERGY_FLOOR: f64 = 1.0e-30;
+
+pub fn score_clifford_projector(
+    cases: &[MultiplierCase],
+    projector: &SplitCliffordProjector,
+    distortion_weight: f64,
+) -> Result<MultiplierScore, String> {
+    if cases.is_empty()
+    {
+        return Err("at least one case is required".into());
+    }
+    if !distortion_weight.is_finite() || distortion_weight < 0.0
+    {
+        return Err("distortion weight must be finite and non-negative".into());
+    }
+
+    let mut noise = 0.0;
+    let mut distortion = 0.0;
+
+    for case in cases
+    {
+        let filtered_signal = projector.apply(&case.signal);
+        let filtered_noise = projector.apply(&case.noise);
+        noise += squared_norm(&filtered_noise) / squared_norm(&case.noise).max(ENERGY_FLOOR);
+        distortion += squared_distance(&case.signal, &filtered_signal)
+            / squared_norm(&case.signal).max(ENERGY_FLOOR);
+    }
+
+    let count = cases.len() as f64;
+    let mean_noise_ratio = noise / count;
+    let mean_distortion_ratio = distortion / count;
+
+    Ok(MultiplierScore {
+        loss: mean_noise_ratio + distortion_weight * mean_distortion_ratio,
+        mean_noise_ratio,
+        mean_distortion_ratio,
+        rejected_dimension: projector.rejected_dimension(),
+    })
+}
+
+fn squared_distance(left: &Sedenion, right: &Sedenion) -> f64 {
+    left.iter().zip(right).map(|(a, b)| (a - b) * (a - b)).sum()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{CliffordProjectorError, SplitCliffordProjector};
+    use super::{CliffordProjectorError, SplitCliffordProjector, score_clifford_projector};
+    use crate::MultiplierCase;
     use crate::{SEDENION_DIMENSION, basis_vector, matrix_vector_mul};
 
     #[test]
@@ -243,6 +289,15 @@ mod tests {
             SplitCliffordProjector::from_direction([0.0; SEDENION_DIMENSION]),
             Err(CliffordProjectorError::InvalidDirection)
         );
+    }
+
+    #[test]
+    fn score_rewards_exact_noise_rejection() {
+        let p = SplitCliffordProjector::canonical(4).unwrap();
+        let case = MultiplierCase::new(basis_vector(7).unwrap(), basis_vector(2).unwrap());
+        let score = score_clifford_projector(&[case], &p, 1.0).unwrap();
+        assert_eq!(score.loss, 0.0);
+        assert_eq!(score.rejected_dimension, 4);
     }
 
     #[test]
