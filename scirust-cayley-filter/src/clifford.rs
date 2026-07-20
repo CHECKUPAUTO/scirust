@@ -260,7 +260,7 @@ pub fn rank_two_term_nullity_four_clifford_projectors(
                 let mut basis = Vec::with_capacity(NULLITY);
                 basis.push(direction.map(|x| x / 2.0_f64.sqrt()));
 
-                for index in 0..SEDENION_DIMENSION
+                for index in 1..SEDENION_DIMENSION
                 {
                     if index != first_index && index != second_index
                     {
@@ -590,6 +590,21 @@ mod tests {
 
         assert_eq!(result.decision, super::CliffordGateDecision::Identity);
         assert_eq!(result.selected.dev_score.loss, 1.0);
+    }
+
+    #[test]
+    fn matched_nullity_four_candidates_preserve_scalar_axis() {
+        let case = MultiplierCase::new(basis_vector(0).unwrap(), basis_vector(4).unwrap());
+
+        let ranked = super::rank_zero_divisor_matched_nullity_four_clifford_projectors(
+            &[case],
+            10.0,
+            1.0e-12,
+        )
+        .unwrap();
+
+        let scalar = basis_vector(0).unwrap();
+        assert!(ranked.iter().all(|c| c.projector.apply(&scalar) == scalar));
     }
 
     #[test]
