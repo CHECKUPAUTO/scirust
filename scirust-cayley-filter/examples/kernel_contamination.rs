@@ -2,7 +2,7 @@ use scirust_cayley_filter::{
     CayleyProjector, MultiplierCase, NoiseSubspaceProjector, SEDENION_DIMENSION, Sedenion,
     analyze_matrix, basis_vector, fit_clifford_noise_subspace, left_multiplication_matrix,
     rank_hard_zero_divisor_projectors, score_cayley_projector, score_clifford_projector,
-    squared_norm,
+    select_hard_cayley_train_dev, squared_norm,
 };
 
 const TOLERANCE: f64 = 1.0e-12;
@@ -54,7 +54,7 @@ fn main() {
 
     println!(
         "epsilon,cayley_i,cayley_j,cayley_sign,\
-cayley_train,cayley_test,clifford_train,clifford_test"
+cayley_train,cayley_test,gated_i,gated_j,gated_sign,gated_test,clifford_train,clifford_test"
     );
 
     for epsilon in [0.0, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0]
@@ -71,18 +71,27 @@ cayley_train,cayley_test,clifford_train,clifford_test"
         let selected = &cayley[0];
         let cayley_test = score_cayley_projector(&test, &selected.projector, WEIGHT).unwrap();
 
+        let gated =
+            select_hard_cayley_train_dev(&train, &test, 84, WEIGHT, TOLERANCE, TOLERANCE).unwrap();
+
+        let gated_test = score_cayley_projector(&test, &gated.selected.projector, WEIGHT).unwrap();
+
         let clifford = fit_clifford_noise_subspace(&train, 4, TOLERANCE).unwrap();
 
         let clifford_train = score_clifford_projector(&train, &clifford, WEIGHT).unwrap();
         let clifford_test = score_clifford_projector(&test, &clifford, WEIGHT).unwrap();
 
         println!(
-            "{epsilon},{},{},{},{},{},{},{}",
+            "{epsilon},{},{},{},{},{},{},{},{},{},{},{}",
             selected.first_index,
             selected.second_index,
             selected.second_sign,
             selected.score.loss,
             cayley_test.loss,
+            gated.selected.first_index,
+            gated.selected.second_index,
+            gated.selected.second_sign,
+            gated_test.loss,
             clifford_train.loss,
             clifford_test.loss,
         );
@@ -92,6 +101,16 @@ cayley_train,cayley_test,clifford_train,clifford_test"
         let expected = 1.0 - 1.0 / (4.0 * (1.0 + epsilon * epsilon));
 
         assert!((clifford_test.loss - expected).abs() < 1.0e-12);
+
+        assert_eq!(
+            (
+                gated.selected.first_index,
+                gated.selected.second_index,
+                gated.selected.second_sign,
+            ),
+            (1, 10, 1),
+        );
+        assert!(gated_test.loss < 1.0e-20);
 
         assert!(selected.score.loss.is_finite());
         assert!(cayley_test.loss.is_finite());
