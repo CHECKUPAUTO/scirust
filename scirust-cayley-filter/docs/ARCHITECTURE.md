@@ -1,16 +1,26 @@
-# CayleyFilter architecture
+# Architecture CayleyFilter
 
-## Responsibilities
+## Couches
 
-- `scirust-simd` provides existing hypercomplex and SIMD primitives.
-- `scirust-cayley-filter` provides operator construction, kernel analysis,
-  filtering experiments, diagnostics, and falsification.
-- `scirust-signal` will host integration benchmarks against established
-  denoising methods.
+- `scalar` : oracle sédénion `f64` ;
+- `operator` : matrice réelle 16 × 16 ;
+- `analysis` : rang, noyau et résidus ;
+- `projector` / `soft` : filtres SVD ;
+- `search` : diviseurs de zéro vérifiés ;
+- `selection` : train, dev et porte de sécurité ;
+- `temporal` / `spectral` : adaptations des signaux.
 
-## Validation rule
+## Invariants
 
-The scalar `f64` implementation is the initial numerical oracle.
+- Rust pur, sans `unsafe` ;
+- résultats déterministes ;
+- aucune sélection sur les données de test ;
+- activation uniquement si `dev_loss < 1.0` ;
+- sinon, sortie identité.
 
-An optimized implementation is accepted only after demonstrating bounded
-numerical error against this oracle on deterministic test vectors.
+## Validation
+
+Les noyaux Cayley fonctionnent sur les sous-espaces synthétiques alignés.
+
+Sur VoiceBank, MIT-BIH ECG et CWRU, la porte sélectionne `Identity` afin de
+préserver le signal ou la signature diagnostique.
