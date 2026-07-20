@@ -29,7 +29,8 @@ pub use clifford::{
     CliffordGateDecision, CliffordProjectorCandidate, CliffordProjectorError,
     CliffordSelectionResult, SelectedCliffordCandidate, SplitCliffordProjector,
     rank_two_term_clifford_projectors, rank_two_term_nullity_four_clifford_projectors,
-    score_clifford_projector, select_clifford_train_dev,
+    rank_zero_divisor_matched_nullity_four_clifford_projectors, score_clifford_projector,
+    select_clifford_train_dev,
 };
 pub use filter::{CayleyFilter, FilterEvaluation, FilterMetrics};
 pub use operator::{

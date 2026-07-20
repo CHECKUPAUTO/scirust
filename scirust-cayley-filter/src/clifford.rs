@@ -4,6 +4,7 @@ use crate::filter::FilterEvaluation;
 use crate::operator::{Matrix16, matrix_vector_mul};
 use crate::optimizer::{MultiplierCase, MultiplierScore};
 use crate::scalar::{SEDENION_DIMENSION, Sedenion, squared_norm};
+use crate::search::zero_divisor_two_term_directions;
 use crate::selection::{DevelopmentGateDecision, development_gate};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -301,6 +302,25 @@ pub fn rank_two_term_nullity_four_clifford_projectors(
     Ok(candidates)
 }
 
+pub fn rank_zero_divisor_matched_nullity_four_clifford_projectors(
+    cases: &[MultiplierCase],
+    distortion_weight: f64,
+    analysis_tolerance: f64,
+) -> Result<Vec<CliffordProjectorCandidate>, String> {
+    let directions = zero_divisor_two_term_directions(analysis_tolerance)?;
+    let mut candidates = rank_two_term_nullity_four_clifford_projectors(cases, distortion_weight)?;
+
+    candidates.retain(|candidate| {
+        directions.iter().any(|direction| {
+            direction.first_index == candidate.first_index
+                && direction.second_index == candidate.second_index
+                && direction.second_sign == candidate.second_sign
+        })
+    });
+
+    Ok(candidates)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CliffordGateDecision {
     Identity,
@@ -570,6 +590,21 @@ mod tests {
 
         assert_eq!(result.decision, super::CliffordGateDecision::Identity);
         assert_eq!(result.selected.dev_score.loss, 1.0);
+    }
+
+    #[test]
+    fn matched_nullity_four_search_contains_84_candidates() {
+        let case = MultiplierCase::new(basis_vector(7).unwrap(), basis_vector(2).unwrap());
+
+        let ranked = super::rank_zero_divisor_matched_nullity_four_clifford_projectors(
+            &[case],
+            10.0,
+            1.0e-12,
+        )
+        .unwrap();
+
+        assert_eq!(ranked.len(), 84);
+        assert!(ranked.iter().all(|c| c.projector.rejected_dimension() == 4));
     }
 
     #[test]
