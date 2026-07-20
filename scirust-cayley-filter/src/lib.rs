@@ -40,7 +40,10 @@ pub use optimizer::{
     MultiplierCase, MultiplierOptimizationResult, MultiplierScore, optimize_multiplier,
     score_multiplier,
 };
-pub use projector::{CayleyProjector, ProjectorError};
+pub use projector::{
+    CayleyProjector, HardCayleyProjectorCandidate, ProjectorError,
+    rank_hard_zero_divisor_projectors, score_cayley_projector,
+};
 pub use scalar::{
     SEDENION_DIMENSION, Sedenion, basis_vector, conjugate, sedenion_mul, squared_norm,
 };

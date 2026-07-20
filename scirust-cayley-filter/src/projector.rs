@@ -7,7 +7,9 @@ use scirust_solvers::linalg::svd;
 
 use crate::filter::FilterEvaluation;
 use crate::operator::{Matrix16, left_multiplication_matrix, matrix_vector_mul};
-use crate::scalar::{SEDENION_DIMENSION, Sedenion};
+use crate::optimizer::{MultiplierCase, MultiplierScore};
+use crate::scalar::{SEDENION_DIMENSION, Sedenion, squared_norm};
+use crate::search::zero_divisor_two_term_directions;
 
 /// Failure while constructing a Cayley projector.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -138,9 +140,104 @@ impl CayleyProjector {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct HardCayleyProjectorCandidate {
+    pub multiplier: Sedenion,
+    pub first_index: usize,
+    pub second_index: usize,
+    pub second_sign: i8,
+    pub projector: CayleyProjector,
+    pub score: MultiplierScore,
+}
+
+pub fn rank_hard_zero_divisor_projectors(
+    cases: &[MultiplierCase],
+    distortion_weight: f64,
+    analysis_tolerance: f64,
+    relative_threshold: f64,
+) -> Result<Vec<HardCayleyProjectorCandidate>, String> {
+    let directions = zero_divisor_two_term_directions(analysis_tolerance)?;
+    let mut candidates = Vec::with_capacity(directions.len());
+
+    for direction in directions
+    {
+        let projector = CayleyProjector::new(direction.multiplier, relative_threshold)
+            .map_err(|error| error.to_string())?;
+
+        let score = score_cayley_projector(cases, &projector, distortion_weight)?;
+
+        candidates.push(HardCayleyProjectorCandidate {
+            multiplier: direction.multiplier,
+            first_index: direction.first_index,
+            second_index: direction.second_index,
+            second_sign: direction.second_sign,
+            projector,
+            score,
+        });
+    }
+
+    candidates.sort_by(|a, b| {
+        a.score
+            .loss
+            .total_cmp(&b.score.loss)
+            .then_with(|| a.first_index.cmp(&b.first_index))
+            .then_with(|| a.second_index.cmp(&b.second_index))
+            .then_with(|| a.second_sign.cmp(&b.second_sign))
+    });
+
+    Ok(candidates)
+}
+
+const ENERGY_FLOOR: f64 = 1.0e-30;
+
+pub fn score_cayley_projector(
+    cases: &[MultiplierCase],
+    projector: &CayleyProjector,
+    distortion_weight: f64,
+) -> Result<MultiplierScore, String> {
+    if cases.is_empty()
+    {
+        return Err("at least one case is required".into());
+    }
+    if !distortion_weight.is_finite() || distortion_weight < 0.0
+    {
+        return Err("distortion weight must be finite and non-negative".into());
+    }
+
+    let mut noise = 0.0;
+    let mut distortion = 0.0;
+
+    for case in cases
+    {
+        let filtered_signal = projector.apply(&case.signal);
+        let filtered_noise = projector.apply(&case.noise);
+
+        noise += squared_norm(&filtered_noise) / squared_norm(&case.noise).max(ENERGY_FLOOR);
+
+        distortion += case
+            .signal
+            .iter()
+            .zip(filtered_signal)
+            .fold(0.0, |sum, (input, output)| sum + (input - output).powi(2))
+            / squared_norm(&case.signal).max(ENERGY_FLOOR);
+    }
+
+    let count = cases.len() as f64;
+    let mean_noise_ratio = noise / count;
+    let mean_distortion_ratio = distortion / count;
+
+    Ok(MultiplierScore {
+        loss: mean_noise_ratio + distortion_weight * mean_distortion_ratio,
+        mean_noise_ratio,
+        mean_distortion_ratio,
+        rejected_dimension: projector.rejected_dimension(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{CayleyProjector, ProjectorError};
+    use super::{CayleyProjector, ProjectorError, score_cayley_projector};
+    use crate::optimizer::MultiplierCase;
     use crate::scalar::{SEDENION_DIMENSION, Sedenion, basis_vector, squared_norm};
 
     const ZERO: Sedenion = [0.0; SEDENION_DIMENSION];
@@ -183,6 +280,35 @@ mod tests {
         assert!(projector.rejected_dimension() > 0);
         assert!(squared_norm(evaluation.filtered_noise()) < 1.0e-20);
         assert!(squared_distance(evaluation.filtered_signal(), &signal) < 1.0e-20);
+    }
+
+    #[test]
+    fn hard_zero_divisor_ranking_contains_84_candidates() {
+        let case = MultiplierCase::new(basis_vector(7).unwrap(), basis_vector(2).unwrap());
+
+        let ranked =
+            super::rank_hard_zero_divisor_projectors(&[case], 10.0, 1.0e-12, 1.0e-12).unwrap();
+
+        assert_eq!(ranked.len(), 84);
+        assert!(ranked.iter().all(|c| c.projector.rejected_dimension() == 4));
+    }
+
+    #[test]
+    fn exact_kernel_receives_zero_projector_loss() {
+        let mut multiplier = ZERO;
+        multiplier[1] = 1.0;
+        multiplier[10] = 1.0;
+
+        let mut noise = ZERO;
+        noise[4] = 1.0;
+        noise[15] = -1.0;
+
+        let case = MultiplierCase::new(basis_vector(0).unwrap(), noise);
+        let projector = CayleyProjector::new(multiplier, THRESHOLD).unwrap();
+        let score = score_cayley_projector(&[case], &projector, 10.0).unwrap();
+
+        assert!(score.loss < 1.0e-20);
+        assert_eq!(score.rejected_dimension, 4);
     }
 
     #[test]
