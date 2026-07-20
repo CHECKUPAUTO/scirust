@@ -7,6 +7,7 @@ use crate::scalar::{SEDENION_DIMENSION, Sedenion};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CliffordProjectorError {
     InvalidRejectedDimension,
+    InvalidDirection,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -17,6 +18,32 @@ pub struct SplitCliffordProjector {
 }
 
 impl SplitCliffordProjector {
+    pub fn from_direction(direction: Sedenion) -> Result<Self, CliffordProjectorError> {
+        let norm = direction.iter().map(|x| x * x).sum::<f64>().sqrt();
+        if !norm.is_finite() || norm == 0.0
+        {
+            return Err(CliffordProjectorError::InvalidDirection);
+        }
+        let unit = direction.map(|x| x / norm);
+        let involution = core::array::from_fn(|r| {
+            core::array::from_fn(|c| {
+                let identity = if r == c { 1.0 } else { 0.0 };
+                identity - 2.0 * unit[r] * unit[c]
+            })
+        });
+        let projection = core::array::from_fn(|r| {
+            core::array::from_fn(|c| {
+                let identity = if r == c { 1.0 } else { 0.0 };
+                identity - unit[r] * unit[c]
+            })
+        });
+        Ok(Self {
+            involution,
+            projection,
+            rejected_dimension: 1,
+        })
+    }
+
     pub fn canonical(rejected_dimension: usize) -> Result<Self, CliffordProjectorError> {
         if rejected_dimension > SEDENION_DIMENSION
         {
@@ -121,6 +148,27 @@ mod tests {
                 input
             );
         }
+    }
+
+    #[test]
+    fn oriented_projector_removes_its_direction() {
+        let direction = [1.0; SEDENION_DIMENSION];
+        let projector = SplitCliffordProjector::from_direction(direction).unwrap();
+        assert_eq!(projector.rejected_dimension(), 1);
+        assert!(
+            projector
+                .apply(&direction)
+                .iter()
+                .all(|x| x.abs() < 1.0e-12)
+        );
+    }
+
+    #[test]
+    fn invalid_direction_is_rejected() {
+        assert_eq!(
+            SplitCliffordProjector::from_direction([0.0; SEDENION_DIMENSION]),
+            Err(CliffordProjectorError::InvalidDirection)
+        );
     }
 
     #[test]
