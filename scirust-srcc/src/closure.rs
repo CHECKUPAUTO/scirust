@@ -369,6 +369,29 @@ mod tests {
     }
 
     #[test]
+    fn consensus_closure_grows_across_rounds() {
+        let seeds = [basis_vector(1).unwrap()];
+
+        let mut first = [[0.0; SRCC_DIMENSION]; SRCC_DIMENSION];
+        first[2][1] = 1.0;
+        first[3][2] = 1.0;
+
+        let mut second = [[0.0; SRCC_DIMENSION]; SRCC_DIMENSION];
+        second[2][1] = -2.0;
+        second[3][2] = 3.0;
+
+        let closure = SrccClosure::build(&seeds, &[first, second], SrccConfig::default()).unwrap();
+
+        assert_eq!(closure.dimension(), 3);
+        assert_eq!(closure.rounds(), 2);
+        assert_eq!(closure.accepted_per_round(), &[1, 1]);
+
+        assert!(dot(&closure.basis()[1], &basis_vector(2).unwrap(),).abs() > 1.0 - 1.0e-12);
+
+        assert!(dot(&closure.basis()[2], &basis_vector(3).unwrap(),).abs() > 1.0 - 1.0e-12);
+    }
+
+    #[test]
     fn unsupported_direction_is_rejected() {
         let seeds = [basis_vector(1).unwrap()];
         let transports = [transport(1, 3, 1.0)];
