@@ -6,8 +6,10 @@
 #![forbid(unsafe_code)]
 
 mod closure;
+mod projector;
 
 pub use closure::{SrccClosure, SrccClosureError};
+pub use projector::SrccProjector;
 
 use core::fmt;
 
