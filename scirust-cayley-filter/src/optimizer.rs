@@ -92,7 +92,10 @@ pub fn score_multiplier(
     })
 }
 
-/// Optimizes all 16 multiplier coordinates with deterministic Nelder-Mead.
+/// Optimizes the 15 scale-independent multiplier coordinates.
+///
+/// The coordinate of largest absolute value in `initial` is selected
+/// deterministically as the gauge pivot and fixed to `1`.
 pub fn optimize_multiplier(
     cases: &[MultiplierCase],
     initial: Sedenion,
@@ -106,18 +109,32 @@ pub fn optimize_multiplier(
         return Err("initial step must be finite and positive".into());
     }
 
-    score_multiplier(cases, &initial, relative_scale, distortion_weight)?;
+    let normalized_initial = normalize_multiplier(&initial)
+        .ok_or_else(|| "initial multiplier must be finite and non-zero".to_string())?;
+
+    score_multiplier(
+        cases,
+        &normalized_initial,
+        relative_scale,
+        distortion_weight,
+    )?;
+
+    let pivot = largest_absolute_coordinate(&normalized_initial);
+    let initial_coordinates = gauge_coordinates(&normalized_initial, pivot);
 
     let objective = |candidate: &[f64]| {
-        score_multiplier(cases, candidate, relative_scale, distortion_weight)
+        multiplier_from_gauge(candidate, pivot)
+            .and_then(|multiplier| {
+                score_multiplier(cases, &multiplier, relative_scale, distortion_weight).ok()
+            })
             .map_or(INVALID_LOSS, |score| score.loss)
     };
 
-    let solution = nelder_mead(objective, initial.to_vec(), initial_step, tolerance)
+    let solution = nelder_mead(objective, initial_coordinates, initial_step, tolerance)
         .map_err(|error| error.to_string())?;
 
-    let multiplier = normalize_multiplier(&solution.value)
-        .ok_or_else(|| "optimizer returned an invalid multiplier".to_string())?;
+    let multiplier = multiplier_from_gauge(&solution.value, pivot)
+        .ok_or_else(|| "optimizer returned invalid gauge coordinates".to_string())?;
 
     let score = score_multiplier(cases, &multiplier, relative_scale, distortion_weight)?;
 
@@ -129,6 +146,59 @@ pub fn optimize_multiplier(
     })
 }
 
+fn largest_absolute_coordinate(multiplier: &Sedenion) -> usize {
+    let mut best_index = 0;
+    let mut best_value = multiplier[0].abs();
+
+    for (index, value) in multiplier.iter().enumerate().skip(1)
+    {
+        let absolute = value.abs();
+
+        if absolute > best_value
+        {
+            best_index = index;
+            best_value = absolute;
+        }
+    }
+
+    best_index
+}
+
+fn gauge_coordinates(multiplier: &Sedenion, pivot: usize) -> Vec<f64> {
+    let pivot_value = multiplier[pivot];
+
+    multiplier
+        .iter()
+        .enumerate()
+        .filter_map(|(index, value)| (index != pivot).then_some(value / pivot_value))
+        .collect()
+}
+
+fn multiplier_from_gauge(coordinates: &[f64], pivot: usize) -> Option<Sedenion> {
+    if pivot >= SEDENION_DIMENSION
+        || coordinates.len() != SEDENION_DIMENSION - 1
+        || coordinates.iter().any(|value| !value.is_finite())
+    {
+        return None;
+    }
+
+    let mut multiplier = [0.0; SEDENION_DIMENSION];
+    multiplier[pivot] = 1.0;
+
+    let mut source = 0;
+
+    for (index, value) in multiplier.iter_mut().enumerate()
+    {
+        if index != pivot
+        {
+            *value = coordinates[source];
+            source += 1;
+        }
+    }
+
+    normalize_multiplier(&multiplier)
+}
+
 fn normalize_multiplier(values: &[f64]) -> Option<Sedenion> {
     if values.len() != SEDENION_DIMENSION || values.iter().any(|value| !value.is_finite())
     {
@@ -136,7 +206,7 @@ fn normalize_multiplier(values: &[f64]) -> Option<Sedenion> {
     }
 
     let norm = values.iter().map(|value| value * value).sum::<f64>().sqrt();
-    if norm <= 1.0e-15
+    if !norm.is_finite() || norm <= 1.0e-15
     {
         return None;
     }
@@ -153,7 +223,10 @@ fn squared_distance(left: &Sedenion, right: &Sedenion) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{MultiplierCase, optimize_multiplier, score_multiplier};
+    use super::{
+        MultiplierCase, gauge_coordinates, largest_absolute_coordinate, multiplier_from_gauge,
+        normalize_multiplier, optimize_multiplier, score_multiplier,
+    };
     use crate::scalar::{SEDENION_DIMENSION, Sedenion, basis_vector};
     use scirust_solvers::Tolerance;
 
@@ -269,5 +342,33 @@ mod tests {
         );
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn gauge_round_trip_preserves_multiplier_direction() {
+        let initial = [
+            2.0, -1.0, 0.5, 0.0, 0.25, -0.75, 0.0, 0.0, 0.125, 0.0, 1.0, 0.0, -0.5, 0.0, 0.0, 0.25,
+        ];
+
+        let expected = normalize_multiplier(&initial).expect("valid multiplier");
+
+        let pivot = largest_absolute_coordinate(&expected);
+        let coordinates = gauge_coordinates(&expected, pivot);
+        let reconstructed =
+            multiplier_from_gauge(&coordinates, pivot).expect("valid gauge coordinates");
+
+        for (left, right) in expected.iter().zip(reconstructed.iter())
+        {
+            assert!((left - right).abs() < 1.0e-14);
+        }
+    }
+
+    #[test]
+    fn gauge_pivot_ties_select_first_coordinate() {
+        let multiplier = [
+            1.0, -1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        ];
+
+        assert_eq!(largest_absolute_coordinate(&multiplier), 0);
     }
 }
