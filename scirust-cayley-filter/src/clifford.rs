@@ -239,6 +239,68 @@ pub fn rank_two_term_clifford_projectors(
     Ok(candidates)
 }
 
+pub fn rank_two_term_nullity_four_clifford_projectors(
+    cases: &[MultiplierCase],
+    distortion_weight: f64,
+) -> Result<Vec<CliffordProjectorCandidate>, String> {
+    const NULLITY: usize = 4;
+    let mut candidates = Vec::with_capacity(240);
+
+    for first_index in 0..SEDENION_DIMENSION
+    {
+        for second_index in (first_index + 1)..SEDENION_DIMENSION
+        {
+            for second_sign in [-1_i8, 1_i8]
+            {
+                let mut direction = [0.0; SEDENION_DIMENSION];
+                direction[first_index] = 1.0;
+                direction[second_index] = f64::from(second_sign);
+
+                let mut basis = Vec::with_capacity(NULLITY);
+                basis.push(direction.map(|x| x / 2.0_f64.sqrt()));
+
+                for index in 0..SEDENION_DIMENSION
+                {
+                    if index != first_index && index != second_index
+                    {
+                        let mut axis = [0.0; SEDENION_DIMENSION];
+                        axis[index] = 1.0;
+                        basis.push(axis);
+                        if basis.len() == NULLITY
+                        {
+                            break;
+                        }
+                    }
+                }
+
+                let projector = SplitCliffordProjector::from_orthonormal_basis(&basis)
+                    .map_err(|_| "invalid nullity-four Clifford basis".to_string())?;
+                let score = score_clifford_projector(cases, &projector, distortion_weight)?;
+
+                candidates.push(CliffordProjectorCandidate {
+                    direction,
+                    first_index,
+                    second_index,
+                    second_sign,
+                    projector,
+                    score,
+                });
+            }
+        }
+    }
+
+    candidates.sort_by(|a, b| {
+        a.score
+            .loss
+            .total_cmp(&b.score.loss)
+            .then_with(|| a.first_index.cmp(&b.first_index))
+            .then_with(|| a.second_index.cmp(&b.second_index))
+            .then_with(|| a.second_sign.cmp(&b.second_sign))
+    });
+
+    Ok(candidates)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CliffordGateDecision {
     Identity,
@@ -508,6 +570,15 @@ mod tests {
 
         assert_eq!(result.decision, super::CliffordGateDecision::Identity);
         assert_eq!(result.selected.dev_score.loss, 1.0);
+    }
+
+    #[test]
+    fn nullity_four_search_contains_240_candidates() {
+        let case = MultiplierCase::new(basis_vector(7).unwrap(), basis_vector(2).unwrap());
+        let ranked = super::rank_two_term_nullity_four_clifford_projectors(&[case], 10.0).unwrap();
+
+        assert_eq!(ranked.len(), 240);
+        assert!(ranked.iter().all(|c| c.projector.rejected_dimension() == 4));
     }
 
     #[test]
