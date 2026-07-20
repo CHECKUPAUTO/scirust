@@ -9,6 +9,7 @@ pub mod analysis;
 pub mod baseline;
 pub mod filter;
 pub mod operator;
+pub mod projector;
 pub mod scalar;
 
 pub use analysis::{AnalysisError, MatrixAnalysis, analyze_matrix, kernel_residual_norm};
@@ -17,6 +18,7 @@ pub use filter::{CayleyFilter, FilterEvaluation, FilterMetrics};
 pub use operator::{
     LeftMultiplicationOperator, Matrix16, left_multiplication_matrix, matrix_vector_mul,
 };
+pub use projector::{CayleyProjector, ProjectorError};
 pub use scalar::{
     SEDENION_DIMENSION, Sedenion, basis_vector, conjugate, sedenion_mul, squared_norm,
 };
