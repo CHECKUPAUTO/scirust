@@ -2938,6 +2938,7 @@ name = "scirust-cayley-filter"
 version = "0.1.0"
 dependencies = [
  "scirust-core",
+ "scirust-signal",
  "scirust-solvers",
 ]
 

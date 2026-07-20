@@ -12,6 +12,7 @@ license-file = "../LICENSE.md"
 default = []
 
 [dependencies]
+scirust-signal = { path = "../scirust-signal" }
 scirust-core = { path = "../scirust-core" }
 scirust-solvers = { path = "../scirust-solvers" }
 
