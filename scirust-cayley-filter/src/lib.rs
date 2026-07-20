@@ -18,6 +18,7 @@ pub mod search;
 pub mod selection;
 pub mod soft;
 pub mod subspace;
+pub mod temporal;
 
 pub use analysis::{AnalysisError, MatrixAnalysis, analyze_matrix, kernel_residual_norm};
 pub use autotune::{CayleyAutotuneResult, CayleyCase, autotune_threshold};
@@ -41,3 +42,4 @@ pub use subspace::{NoiseSubspaceProjector, SubspaceProjectionError};
 pub use selection::{
     MultiplierSelectionResult, SelectedMultiplierCandidate, select_multiplier_train_dev,
 };
+pub use temporal::{TEMPORAL_BLOCK_SIZE, TemporalBlockFilter};
