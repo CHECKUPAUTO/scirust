@@ -11,6 +11,7 @@ pub enum CliffordProjectorError {
     InvalidRejectedDimension,
     InvalidDirection,
     InvalidOrthonormalBasis,
+    InvalidRotation,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -87,6 +88,38 @@ impl SplitCliffordProjector {
             projection,
             rejected_dimension: basis.len(),
         })
+    }
+
+    pub fn rotated_canonical(
+        rejected_dimension: usize,
+        rejected_index: usize,
+        kept_index: usize,
+        slope: i8,
+    ) -> Result<Self, CliffordProjectorError> {
+        if rejected_dimension == 0
+            || rejected_dimension >= SEDENION_DIMENSION
+            || rejected_index >= rejected_dimension
+            || kept_index < rejected_dimension
+            || kept_index >= SEDENION_DIMENSION
+            || slope == 0
+        {
+            return Err(CliffordProjectorError::InvalidRotation);
+        }
+
+        let mut basis = Vec::with_capacity(rejected_dimension);
+        for index in 0..rejected_dimension
+        {
+            let mut vector = [0.0; SEDENION_DIMENSION];
+            vector[index] = 1.0;
+            basis.push(vector);
+        }
+
+        let slope = f64::from(slope);
+        let norm = (1.0 + slope * slope).sqrt();
+        basis[rejected_index][rejected_index] = 1.0 / norm;
+        basis[rejected_index][kept_index] = slope / norm;
+
+        Self::from_orthonormal_basis(&basis)
     }
 
     pub fn canonical(rejected_dimension: usize) -> Result<Self, CliffordProjectorError> {
@@ -398,6 +431,18 @@ mod tests {
     }
 
     #[test]
+    fn rotated_nullity_four_removes_target_direction() {
+        let p = SplitCliffordProjector::rotated_canonical(4, 0, 4, 1).unwrap();
+        let mut noise = [0.0; SEDENION_DIMENSION];
+        noise[0] = 1.0;
+        noise[4] = 1.0;
+        assert_eq!(p.rejected_dimension(), 4);
+        assert!(p.apply(&noise).iter().all(|x| x.abs() < 1.0e-12));
+        let signal = basis_vector(7).unwrap();
+        assert_eq!(p.apply(&signal), signal);
+    }
+
+    #[test]
     fn oriented_projector_removes_its_direction() {
         let direction = [1.0; SEDENION_DIMENSION];
         let projector = SplitCliffordProjector::from_direction(direction).unwrap();
@@ -480,6 +525,12 @@ mod tests {
         let score = score_clifford_projector(std::slice::from_ref(&case), &p, 1.0).unwrap();
         assert_eq!(score.loss, 0.0);
         assert_eq!(score.rejected_dimension, 4);
+    }
+
+    #[test]
+    fn invalid_rotation_is_rejected() {
+        let error = SplitCliffordProjector::rotated_canonical(4, 4, 5, 1).unwrap_err();
+        assert_eq!(error, CliffordProjectorError::InvalidRotation);
     }
 
     #[test]
