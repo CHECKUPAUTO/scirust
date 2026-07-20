@@ -38,6 +38,7 @@ pub use scalar::{
 };
 pub use search::{
     SparseMultiplierCandidate, rank_imaginary_two_term_multipliers, rank_two_term_multipliers,
+    rank_zero_divisor_two_term_multipliers,
 };
 pub use soft::{SoftCayleyFilter, SoftFilterError};
 pub use subspace::{NoiseSubspaceProjector, SubspaceProjectionError};

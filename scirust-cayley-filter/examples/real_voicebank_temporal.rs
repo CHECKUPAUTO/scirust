@@ -1,6 +1,6 @@
 use scirust_cayley_filter::{
     CayleyProjector, MultiplierCase, MultiplierScore, Sedenion, SoftCayleyFilter,
-    TemporalBlockFilter, rank_imaginary_two_term_multipliers, score_multiplier,
+    TemporalBlockFilter, rank_zero_divisor_two_term_multipliers, score_multiplier,
 };
 use scirust_signal::denoise::{classify, denoise_auto, stft_wiener_auto};
 
@@ -102,7 +102,8 @@ fn select_sparse_seed(
     train: &[MultiplierCase],
     dev: &[MultiplierCase],
 ) -> Result<SelectedSeed, String> {
-    let ranked = rank_imaginary_two_term_multipliers(train, RELATIVE_SCALE, DISTORTION_WEIGHT)?;
+    let ranked =
+        rank_zero_divisor_two_term_multipliers(train, RELATIVE_SCALE, DISTORTION_WEIGHT, 1.0e-12)?;
 
     let mut best: Option<SelectedSeed> = None;
 
