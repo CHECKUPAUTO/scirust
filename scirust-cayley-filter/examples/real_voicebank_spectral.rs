@@ -1,17 +1,26 @@
 use scirust_cayley_filter::{
-    CayleyProjector, MultiplierCase, MultiplierScore, Sedenion, SoftCayleyFilter,
-    TemporalBlockFilter, rank_imaginary_two_term_multipliers, score_multiplier,
+    CayleyProjector, MultiplierCase, MultiplierScore, SPECTRAL_COMPLEX_BINS, Sedenion,
+    SoftCayleyFilter, SpectralBlockFilter, rank_imaginary_two_term_multipliers, score_multiplier,
+    squared_norm,
 };
+use scirust_signal::Complex;
 use scirust_signal::denoise::{classify, denoise_auto, stft_wiener_auto};
+use scirust_signal::fft::fft;
+use scirust_signal::windows::hanning;
 
 const SAMPLE_RATE: f64 = 16_000.0;
-const BLOCK_SIZE: usize = 16;
 const TRAIN_SAMPLES: usize = 4_096;
 const DEV_SAMPLES: usize = 4_096;
+
+const FRAME_LEN: usize = 256;
+const HOP: usize = 64;
+
 const TOP_K: usize = 16;
 const RELATIVE_SCALE: f64 = 5.0e-2;
 const DISTORTION_WEIGHT: f64 = 10.0;
-const ENERGY_FLOOR: f64 = 1.0e-30;
+
+const CASE_ENERGY_FLOOR: f64 = 1.0e-24;
+const METRIC_ENERGY_FLOOR: f64 = 1.0e-30;
 
 #[derive(Clone, Debug)]
 struct SelectedSeed {
@@ -59,43 +68,130 @@ fn load_fixture() -> Result<(Vec<f64>, Vec<f64>), String> {
 
     if clean.len() != noisy.len() || clean.is_empty()
     {
-        return Err("invalid clean/noisy fixture lengths".into());
-    }
-
-    if clean.len() % BLOCK_SIZE != 0
-    {
-        return Err("fixture length is not divisible by 16".into());
+        return Err("invalid fixture dimensions".into());
     }
 
     Ok((clean, noisy))
 }
 
-fn make_cases(clean: &[f64], noisy: &[f64]) -> Result<Vec<MultiplierCase>, String> {
-    if clean.len() != noisy.len() || !clean.len().is_multiple_of(BLOCK_SIZE)
+fn mirror_index(index: isize, length: usize) -> usize {
+    if length <= 1
     {
-        return Err("invalid block-aligned slices".into());
+        return 0;
     }
 
-    let (clean_blocks, clean_remainder) = clean.as_chunks::<BLOCK_SIZE>();
-    let (noisy_blocks, noisy_remainder) = noisy.as_chunks::<BLOCK_SIZE>();
+    let period = 2 * (length - 1);
+    let mut wrapped = index % period as isize;
 
-    if !clean_remainder.is_empty() || !noisy_remainder.is_empty()
+    if wrapped < 0
     {
-        return Err("unexpected incomplete block".into());
+        wrapped += period as isize;
     }
 
-    Ok(clean_blocks
-        .iter()
-        .zip(noisy_blocks)
-        .map(|(clean_block, noisy_block)| {
-            let signal = *clean_block;
+    let wrapped = wrapped as usize;
 
-            let noise: Sedenion =
-                core::array::from_fn(|index| noisy_block[index] - clean_block[index]);
+    if wrapped < length
+    {
+        wrapped
+    }
+    else
+    {
+        period - wrapped
+    }
+}
 
-            MultiplierCase::new(signal, noise)
+fn spectral_cases(clean: &[f64], noisy: &[f64]) -> Result<Vec<MultiplierCase>, String> {
+    if clean.len() != noisy.len() || clean.len() < 2
+    {
+        return Err("invalid clean/noisy split".into());
+    }
+
+    let frame_len = FRAME_LEN.max(4).next_power_of_two();
+    let hop = HOP.clamp(1, frame_len / 2);
+    let window = hanning(frame_len);
+
+    let padded_len = clean.len() + 2 * frame_len;
+
+    let clean_padded: Vec<f64> = (0..padded_len)
+        .map(|index| {
+            let source = mirror_index(index as isize - frame_len as isize, clean.len());
+
+            clean[source]
         })
-        .collect())
+        .collect();
+
+    let noise_padded: Vec<f64> = (0..padded_len)
+        .map(|index| {
+            let source = mirror_index(index as isize - frame_len as isize, clean.len());
+
+            noisy[source] - clean[source]
+        })
+        .collect();
+
+    let mut cases = Vec::new();
+    let mut offset = 0;
+
+    while offset + frame_len <= padded_len
+    {
+        let mut signal_spectrum: Vec<Complex> = (0..frame_len)
+            .map(|index| Complex::new(window[index] * clean_padded[offset + index], 0.0))
+            .collect();
+
+        let mut noise_spectrum: Vec<Complex> = (0..frame_len)
+            .map(|index| Complex::new(window[index] * noise_padded[offset + index], 0.0))
+            .collect();
+
+        fft(&mut signal_spectrum);
+        fft(&mut noise_spectrum);
+
+        let nyquist = frame_len / 2;
+        let mut first_bin = 1;
+
+        while first_bin + SPECTRAL_COMPLEX_BINS <= nyquist
+        {
+            let signal: Sedenion = core::array::from_fn(|coordinate| {
+                let bin = first_bin + coordinate / 2;
+
+                if coordinate.is_multiple_of(2)
+                {
+                    signal_spectrum[bin].re
+                }
+                else
+                {
+                    signal_spectrum[bin].im
+                }
+            });
+
+            let noise: Sedenion = core::array::from_fn(|coordinate| {
+                let bin = first_bin + coordinate / 2;
+
+                if coordinate.is_multiple_of(2)
+                {
+                    noise_spectrum[bin].re
+                }
+                else
+                {
+                    noise_spectrum[bin].im
+                }
+            });
+
+            if squared_norm(&signal) > CASE_ENERGY_FLOOR && squared_norm(&noise) > CASE_ENERGY_FLOOR
+            {
+                cases.push(MultiplierCase::new(signal, noise));
+            }
+
+            first_bin += SPECTRAL_COMPLEX_BINS;
+        }
+
+        offset += hop;
+    }
+
+    if cases.is_empty()
+    {
+        return Err("no usable spectral cases generated".into());
+    }
+
+    Ok(cases)
 }
 
 fn select_sparse_seed(
@@ -137,7 +233,7 @@ fn select_sparse_seed(
         }
     }
 
-    best.ok_or_else(|| "no sparse multiplier selected".into())
+    best.ok_or_else(|| "no multiplier selected".into())
 }
 
 fn metrics(clean: &[f64], noisy: &[f64], estimate: &[f64]) -> Metrics {
@@ -161,14 +257,10 @@ fn metrics(clean: &[f64], noisy: &[f64], estimate: &[f64]) -> Metrics {
         })
         .sum::<f64>();
 
-    let snr_db = 10.0 * (signal_energy / output_error.max(ENERGY_FLOOR)).log10();
-
-    let improvement_db = 10.0 * (input_error / output_error.max(ENERGY_FLOOR)).log10();
-
     Metrics {
         mse: output_error / clean.len() as f64,
-        snr_db,
-        improvement_db,
+        snr_db: 10.0 * (signal_energy / output_error.max(METRIC_ENERGY_FLOOR)).log10(),
+        improvement_db: 10.0 * (input_error / output_error.max(METRIC_ENERGY_FLOOR)).log10(),
     }
 }
 
@@ -186,12 +278,12 @@ fn main() -> Result<(), String> {
 
     if dev_end >= clean.len()
     {
-        return Err("fixture is too short for train/dev/test split".into());
+        return Err("fixture too short for split".into());
     }
 
-    let train_cases = make_cases(&clean[..TRAIN_SAMPLES], &noisy[..TRAIN_SAMPLES])?;
+    let train_cases = spectral_cases(&clean[..TRAIN_SAMPLES], &noisy[..TRAIN_SAMPLES])?;
 
-    let dev_cases = make_cases(
+    let dev_cases = spectral_cases(
         &clean[TRAIN_SAMPLES..dev_end],
         &noisy[TRAIN_SAMPLES..dev_end],
     )?;
@@ -204,12 +296,15 @@ fn main() -> Result<(), String> {
     let hard = CayleyProjector::new(selected.multiplier, RELATIVE_SCALE)
         .map_err(|error| error.to_string())?;
 
+    let soft_filter = SpectralBlockFilter::from_soft(&soft, FRAME_LEN, HOP);
+
+    let hard_filter = SpectralBlockFilter::from_hard(&hard, FRAME_LEN, HOP);
+
     let test_clean = &clean[dev_end..];
     let test_noisy = &noisy[dev_end..];
 
-    let soft_output = TemporalBlockFilter::from_soft(&soft).apply(test_noisy);
-
-    let hard_output = TemporalBlockFilter::from_hard(&hard).apply(test_noisy);
+    let soft_output = soft_filter.apply(test_noisy);
+    let hard_output = hard_filter.apply(test_noisy);
 
     let stft_output = stft_wiener_auto(test_noisy);
     let auto_result = denoise_auto(test_noisy, SAMPLE_RATE);
@@ -221,6 +316,15 @@ fn main() -> Result<(), String> {
         TRAIN_SAMPLES,
         DEV_SAMPLES,
         test_clean.len(),
+    );
+
+    println!(
+        "frame_len={},hop={},groups_per_frame={},train_cases={},dev_cases={}",
+        soft_filter.frame_len(),
+        soft_filter.hop(),
+        soft_filter.groups_per_frame(),
+        train_cases.len(),
+        dev_cases.len(),
     );
 
     println!(
@@ -246,12 +350,12 @@ fn main() -> Result<(), String> {
     print_metrics("noisy_input", metrics(test_clean, test_noisy, test_noisy));
 
     print_metrics(
-        "cayley_soft_temporal",
+        "cayley_soft_spectral",
         metrics(test_clean, test_noisy, &soft_output),
     );
 
     print_metrics(
-        "cayley_hard_temporal",
+        "cayley_hard_spectral",
         metrics(test_clean, test_noisy, &hard_output),
     );
 

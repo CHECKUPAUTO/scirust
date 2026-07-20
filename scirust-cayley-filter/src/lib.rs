@@ -36,7 +36,9 @@ pub use projector::{CayleyProjector, ProjectorError};
 pub use scalar::{
     SEDENION_DIMENSION, Sedenion, basis_vector, conjugate, sedenion_mul, squared_norm,
 };
-pub use search::{SparseMultiplierCandidate, rank_two_term_multipliers};
+pub use search::{
+    SparseMultiplierCandidate, rank_imaginary_two_term_multipliers, rank_two_term_multipliers,
+};
 pub use soft::{SoftCayleyFilter, SoftFilterError};
 pub use subspace::{NoiseSubspaceProjector, SubspaceProjectionError};
 

@@ -14,7 +14,7 @@ pub struct SparseMultiplierCandidate {
 }
 
 /// Exhaustively ranks every scale-independent two-term direction
-/// `e_i ± e_j`.
+/// `e_i ± e_j`, including directions containing the real unit `e0`.
 ///
 /// The result contains exactly:
 ///
@@ -31,9 +31,38 @@ pub fn rank_two_term_multipliers(
     relative_scale: f64,
     distortion_weight: f64,
 ) -> Result<Vec<SparseMultiplierCandidate>, String> {
-    let mut candidates = Vec::with_capacity(SEDENION_DIMENSION * (SEDENION_DIMENSION - 1));
+    rank_two_term_multipliers_from(cases, relative_scale, distortion_weight, 0)
+}
 
-    for first_index in 0..SEDENION_DIMENSION
+/// Exhaustively ranks purely imaginary two-term directions
+/// `e_i ± e_j`, with `1 ≤ i < j ≤ 15`.
+///
+/// Excluding `e0` prevents ordinary full-rank multipliers such as
+/// `e0 - e1` from winning through near-isotropic attenuation rather
+/// than through a structured Cayley kernel.
+///
+/// The result contains exactly:
+///
+/// `2 × C(15, 2) = 210` candidates.
+pub fn rank_imaginary_two_term_multipliers(
+    cases: &[MultiplierCase],
+    relative_scale: f64,
+    distortion_weight: f64,
+) -> Result<Vec<SparseMultiplierCandidate>, String> {
+    rank_two_term_multipliers_from(cases, relative_scale, distortion_weight, 1)
+}
+
+fn rank_two_term_multipliers_from(
+    cases: &[MultiplierCase],
+    relative_scale: f64,
+    distortion_weight: f64,
+    first_allowed_index: usize,
+) -> Result<Vec<SparseMultiplierCandidate>, String> {
+    let direction_count = SEDENION_DIMENSION - first_allowed_index;
+
+    let mut candidates = Vec::with_capacity(direction_count * direction_count.saturating_sub(1));
+
+    for first_index in first_allowed_index..SEDENION_DIMENSION
     {
         for second_index in (first_index + 1)..SEDENION_DIMENSION
         {
@@ -72,7 +101,7 @@ pub fn rank_two_term_multipliers(
 
 #[cfg(test)]
 mod tests {
-    use super::rank_two_term_multipliers;
+    use super::{rank_imaginary_two_term_multipliers, rank_two_term_multipliers};
     use crate::optimizer::MultiplierCase;
     use crate::scalar::{SEDENION_DIMENSION, Sedenion, basis_vector};
 
@@ -99,6 +128,23 @@ mod tests {
     }
 
     #[test]
+    fn imaginary_search_contains_210_candidates() {
+        let case = known_case();
+
+        let candidates =
+            rank_imaginary_two_term_multipliers(std::slice::from_ref(&case), 1.0e-6, 10.0)
+                .expect("search succeeds");
+
+        assert_eq!(candidates.len(), 210);
+
+        assert!(candidates.iter().all(|candidate| {
+            candidate.first_index >= 1
+                && candidate.second_index >= 1
+                && candidate.multiplier[0] == 0.0
+        }));
+    }
+
+    #[test]
     fn search_is_deterministic() {
         let case = known_case();
 
@@ -106,6 +152,19 @@ mod tests {
             .expect("first search succeeds");
 
         let second = rank_two_term_multipliers(std::slice::from_ref(&case), 1.0e-6, 10.0)
+            .expect("second search succeeds");
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn imaginary_search_is_deterministic() {
+        let case = known_case();
+
+        let first = rank_imaginary_two_term_multipliers(std::slice::from_ref(&case), 1.0e-6, 10.0)
+            .expect("first search succeeds");
+
+        let second = rank_imaginary_two_term_multipliers(std::slice::from_ref(&case), 1.0e-6, 10.0)
             .expect("second search succeeds");
 
         assert_eq!(first, second);
@@ -123,5 +182,23 @@ mod tests {
         assert!(best.score.loss < 1.0e-10);
         assert!(best.score.mean_noise_ratio < 1.0e-16);
         assert!(best.score.mean_distortion_ratio < 1.0e-10);
+    }
+
+    #[test]
+    fn imaginary_search_finds_exact_annihilator() {
+        let case = known_case();
+
+        let candidates =
+            rank_imaginary_two_term_multipliers(std::slice::from_ref(&case), 1.0e-6, 10.0)
+                .expect("search succeeds");
+
+        let best = candidates.first().expect("candidate exists");
+
+        assert!(best.first_index >= 1);
+        assert_eq!(best.multiplier[0], 0.0);
+        assert!(best.score.loss < 1.0e-10);
+        assert!(best.score.mean_noise_ratio < 1.0e-16);
+        assert!(best.score.mean_distortion_ratio < 1.0e-10);
+        assert_eq!(best.score.rejected_dimension, 4);
     }
 }
