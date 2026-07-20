@@ -4,7 +4,7 @@ use scirust_solvers::Tolerance;
 
 use crate::optimizer::{MultiplierCase, MultiplierScore, optimize_multiplier, score_multiplier};
 use crate::scalar::Sedenion;
-use crate::search::rank_two_term_multipliers;
+use crate::search::{rank_two_term_multipliers, rank_zero_divisor_two_term_multipliers};
 
 /// Development loss of the identity baseline under the normalized score.
 ///
@@ -185,9 +185,81 @@ pub fn select_multiplier_train_dev(
     })
 }
 
+/// Ranks genuine sparse zero divisors on `train`, evaluates the best
+/// `top_k` candidates on `dev`, then applies the identity safety gate.
+///
+/// No continuous refinement is performed: the selected multiplier
+/// therefore remains inside the verified zero-divisor family.
+pub fn select_zero_divisor_train_dev(
+    train: &[MultiplierCase],
+    dev: &[MultiplierCase],
+    top_k: usize,
+    relative_scale: f64,
+    distortion_weight: f64,
+    analysis_tolerance: f64,
+) -> Result<MultiplierSelectionResult, String> {
+    if top_k == 0
+    {
+        return Err("top_k must be strictly positive".into());
+    }
+
+    let ranked = rank_zero_divisor_two_term_multipliers(
+        train,
+        relative_scale,
+        distortion_weight,
+        analysis_tolerance,
+    )?;
+
+    let mut candidates = Vec::with_capacity(top_k.min(ranked.len()));
+
+    for (seed_rank, seed) in ranked.into_iter().take(top_k).enumerate()
+    {
+        let dev_score = score_multiplier(dev, &seed.multiplier, relative_scale, distortion_weight)?;
+
+        candidates.push(SelectedMultiplierCandidate {
+            seed_rank,
+            seed_first_index: seed.first_index,
+            seed_second_index: seed.second_index,
+            seed_second_sign: seed.second_sign,
+            seed_multiplier: seed.multiplier,
+            multiplier: seed.multiplier,
+            train_score: seed.score,
+            dev_score,
+            refinement_used: false,
+            refinement_error: None,
+            iterations: None,
+            residual: None,
+        });
+    }
+
+    candidates.sort_by(|left, right| {
+        left.dev_score
+            .loss
+            .total_cmp(&right.dev_score.loss)
+            .then_with(|| left.train_score.loss.total_cmp(&right.train_score.loss))
+            .then_with(|| left.seed_rank.cmp(&right.seed_rank))
+    });
+
+    let selected = candidates
+        .first()
+        .cloned()
+        .ok_or_else(|| "no zero-divisor multiplier candidate was produced".to_string())?;
+
+    let decision = development_gate(&selected.dev_score)?;
+
+    Ok(MultiplierSelectionResult {
+        selected,
+        candidates,
+        decision,
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{DevelopmentGateDecision, development_gate, select_multiplier_train_dev};
+    use super::{
+        DevelopmentGateDecision, development_gate, select_multiplier_train_dev,
+        select_zero_divisor_train_dev,
+    };
     use crate::optimizer::{MultiplierCase, MultiplierScore};
     use crate::scalar::{SEDENION_DIMENSION, Sedenion, basis_vector};
     use scirust_solvers::Tolerance;
@@ -289,5 +361,54 @@ mod tests {
         assert_eq!(first.decision, DevelopmentGateDecision::Cayley,);
         assert!(first.selected.dev_score.loss < 1.0e-10);
         assert!(first.selected.dev_score.mean_noise_ratio < 1.0e-16);
+    }
+
+    #[test]
+    fn zero_divisor_selection_rejects_zero_top_k() {
+        let case = known_case();
+
+        assert!(
+            select_zero_divisor_train_dev(
+                std::slice::from_ref(&case),
+                std::slice::from_ref(&case),
+                0,
+                1.0e-6,
+                10.0,
+                1.0e-12,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn zero_divisor_selection_is_deterministic_and_gated() {
+        let case = known_case();
+
+        let first = select_zero_divisor_train_dev(
+            std::slice::from_ref(&case),
+            std::slice::from_ref(&case),
+            8,
+            1.0e-6,
+            10.0,
+            1.0e-12,
+        )
+        .expect("first zero-divisor selection succeeds");
+
+        let second = select_zero_divisor_train_dev(
+            std::slice::from_ref(&case),
+            std::slice::from_ref(&case),
+            8,
+            1.0e-6,
+            10.0,
+            1.0e-12,
+        )
+        .expect("second zero-divisor selection succeeds");
+
+        assert_eq!(first, second);
+        assert_eq!(first.decision, DevelopmentGateDecision::Cayley,);
+        assert!(first.selected.seed_first_index >= 1);
+        assert_eq!(first.selected.seed_multiplier[0], 0.0);
+        assert_eq!(first.selected.dev_score.rejected_dimension, 4,);
+        assert!(!first.selected.refinement_used);
     }
 }

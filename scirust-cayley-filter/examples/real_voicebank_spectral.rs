@@ -1,7 +1,6 @@
 use scirust_cayley_filter::{
-    CayleyProjector, MultiplierCase, MultiplierScore, SPECTRAL_COMPLEX_BINS, Sedenion,
-    SoftCayleyFilter, SpectralBlockFilter, development_gate,
-    rank_zero_divisor_two_term_multipliers, score_multiplier, squared_norm,
+    CayleyProjector, MultiplierCase, SPECTRAL_COMPLEX_BINS, Sedenion, SoftCayleyFilter,
+    SpectralBlockFilter, select_zero_divisor_train_dev, squared_norm,
 };
 use scirust_signal::Complex;
 use scirust_signal::denoise::{classify, denoise_auto, stft_wiener_auto};
@@ -21,17 +20,6 @@ const DISTORTION_WEIGHT: f64 = 10.0;
 
 const CASE_ENERGY_FLOOR: f64 = 1.0e-24;
 const METRIC_ENERGY_FLOOR: f64 = 1.0e-30;
-
-#[derive(Clone, Debug)]
-struct SelectedSeed {
-    train_rank: usize,
-    first_index: usize,
-    second_index: usize,
-    second_sign: i8,
-    multiplier: Sedenion,
-    train_score: MultiplierScore,
-    dev_score: MultiplierScore,
-}
 
 #[derive(Clone, Copy, Debug)]
 struct Metrics {
@@ -194,49 +182,6 @@ fn spectral_cases(clean: &[f64], noisy: &[f64]) -> Result<Vec<MultiplierCase>, S
     Ok(cases)
 }
 
-fn select_sparse_seed(
-    train: &[MultiplierCase],
-    dev: &[MultiplierCase],
-) -> Result<SelectedSeed, String> {
-    let ranked =
-        rank_zero_divisor_two_term_multipliers(train, RELATIVE_SCALE, DISTORTION_WEIGHT, 1.0e-12)?;
-
-    let mut best: Option<SelectedSeed> = None;
-
-    for (train_rank, candidate) in ranked.into_iter().take(TOP_K).enumerate()
-    {
-        let dev_score = score_multiplier(
-            dev,
-            &candidate.multiplier,
-            RELATIVE_SCALE,
-            DISTORTION_WEIGHT,
-        )?;
-
-        let selected = SelectedSeed {
-            train_rank,
-            first_index: candidate.first_index,
-            second_index: candidate.second_index,
-            second_sign: candidate.second_sign,
-            multiplier: candidate.multiplier,
-            train_score: candidate.score,
-            dev_score,
-        };
-
-        let replace = best.as_ref().is_none_or(|current| {
-            selected.dev_score.loss < current.dev_score.loss
-                || (selected.dev_score.loss == current.dev_score.loss
-                    && selected.train_rank < current.train_rank)
-        });
-
-        if replace
-        {
-            best = Some(selected);
-        }
-    }
-
-    best.ok_or_else(|| "no multiplier selected".into())
-}
-
 fn metrics(clean: &[f64], noisy: &[f64], estimate: &[f64]) -> Metrics {
     let signal_energy = clean.iter().map(|value| value * value).sum::<f64>();
 
@@ -289,9 +234,17 @@ fn main() -> Result<(), String> {
         &noisy[TRAIN_SAMPLES..dev_end],
     )?;
 
-    let selected = select_sparse_seed(&train_cases, &dev_cases)?;
+    let selection = select_zero_divisor_train_dev(
+        &train_cases,
+        &dev_cases,
+        TOP_K,
+        RELATIVE_SCALE,
+        DISTORTION_WEIGHT,
+        1.0e-12,
+    )?;
 
-    let decision = development_gate(&selected.dev_score)?;
+    let selected = &selection.selected;
+    let decision = selection.decision;
 
     let soft = SoftCayleyFilter::new(selected.multiplier, RELATIVE_SCALE)
         .map_err(|error| error.to_string())?;
@@ -352,10 +305,17 @@ fn main() -> Result<(), String> {
 
     println!(
         "selected_seed=e{}{}e{},train_rank={},train_loss={},dev_loss={},soft_effective_rejected={},hard_rejected={}",
-        selected.first_index,
-        if selected.second_sign > 0 { "+" } else { "-" },
-        selected.second_index,
-        selected.train_rank,
+        selected.seed_first_index,
+        if selected.seed_second_sign > 0
+        {
+            "+"
+        }
+        else
+        {
+            "-"
+        },
+        selected.seed_second_index,
+        selected.seed_rank,
         selected.train_score.loss,
         selected.dev_score.loss,
         soft.gains().iter().filter(|&&gain| gain <= 0.5).count(),
