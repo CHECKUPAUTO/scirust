@@ -6,6 +6,55 @@ use crate::optimizer::{MultiplierCase, MultiplierScore, optimize_multiplier, sco
 use crate::scalar::Sedenion;
 use crate::search::rank_two_term_multipliers;
 
+/// Development loss of the identity baseline under the normalized score.
+///
+/// A Cayley candidate must be strictly better than this value to pass
+/// the safety gate.
+pub const IDENTITY_DEVELOPMENT_LOSS: f64 = 1.0;
+
+/// Final deterministic decision made using development data only.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DevelopmentGateDecision {
+    /// Preserve the observation unchanged.
+    Identity,
+    /// Activate the selected Cayley filter.
+    Cayley,
+}
+
+impl DevelopmentGateDecision {
+    /// Returns `true` only when the Cayley candidate passed the gate.
+    #[must_use]
+    pub const fn uses_cayley(self) -> bool {
+        matches!(self, Self::Cayley)
+    }
+}
+
+/// Applies the strict development safety gate.
+///
+/// The candidate is accepted only when:
+///
+/// `candidate.dev_loss < 1.0`.
+///
+/// Equality is rejected deliberately, so a filter that does not
+/// demonstrate an improvement cannot replace the identity baseline.
+pub fn development_gate(
+    candidate_score: &MultiplierScore,
+) -> Result<DevelopmentGateDecision, String> {
+    if !candidate_score.loss.is_finite() || candidate_score.loss < 0.0
+    {
+        return Err("development loss must be finite and non-negative".into());
+    }
+
+    if candidate_score.loss < IDENTITY_DEVELOPMENT_LOSS
+    {
+        Ok(DevelopmentGateDecision::Cayley)
+    }
+    else
+    {
+        Ok(DevelopmentGateDecision::Identity)
+    }
+}
+
 /// One globally seeded candidate evaluated on separate development data.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SelectedMultiplierCandidate {
@@ -28,14 +77,18 @@ pub struct SelectedMultiplierCandidate {
 pub struct MultiplierSelectionResult {
     pub selected: SelectedMultiplierCandidate,
     pub candidates: Vec<SelectedMultiplierCandidate>,
+    pub decision: DevelopmentGateDecision,
 }
 
-/// Ranks sparse multipliers on `train`, refines the best `top_k` on `train`,
-/// then selects exactly once using `dev`.
+/// Ranks sparse multipliers on `train`, refines the best `top_k` on
+/// `train`, then selects exactly once using `dev`.
 ///
-/// A refined multiplier replaces its sparse seed only when its development
-/// loss is strictly lower. Failed or harmful refinements remain visible in
-/// the report and do not invalidate the complete search.
+/// A refined multiplier replaces its sparse seed only when its
+/// development loss is strictly lower. Failed or harmful refinements
+/// remain visible in the report.
+///
+/// The selected multiplier passes the final safety gate only when its
+/// development loss is strictly below the identity baseline.
 pub fn select_multiplier_train_dev(
     train: &[MultiplierCase],
     dev: &[MultiplierCase],
@@ -123,16 +176,19 @@ pub fn select_multiplier_train_dev(
         .cloned()
         .ok_or_else(|| "no multiplier candidate was produced".to_string())?;
 
+    let decision = development_gate(&selected.dev_score)?;
+
     Ok(MultiplierSelectionResult {
         selected,
         candidates,
+        decision,
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::select_multiplier_train_dev;
-    use crate::optimizer::MultiplierCase;
+    use super::{DevelopmentGateDecision, development_gate, select_multiplier_train_dev};
+    use crate::optimizer::{MultiplierCase, MultiplierScore};
     use crate::scalar::{SEDENION_DIMENSION, Sedenion, basis_vector};
     use scirust_solvers::Tolerance;
 
@@ -146,6 +202,15 @@ mod tests {
         noise[15] = -1.0;
 
         MultiplierCase::new(signal, noise)
+    }
+
+    fn score(loss: f64) -> MultiplierScore {
+        MultiplierScore {
+            loss,
+            mean_noise_ratio: loss,
+            mean_distortion_ratio: 0.0,
+            rejected_dimension: 0,
+        }
     }
 
     #[test]
@@ -164,6 +229,32 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn development_gate_is_strict() {
+        assert_eq!(
+            development_gate(&score(0.999)).expect("valid score"),
+            DevelopmentGateDecision::Cayley,
+        );
+
+        assert_eq!(
+            development_gate(&score(1.0)).expect("valid score"),
+            DevelopmentGateDecision::Identity,
+        );
+
+        assert_eq!(
+            development_gate(&score(1.001)).expect("valid score"),
+            DevelopmentGateDecision::Identity,
+        );
+    }
+
+    #[test]
+    fn development_gate_rejects_invalid_losses() {
+        for loss in [-1.0, f64::INFINITY, f64::NEG_INFINITY, f64::NAN]
+        {
+            assert!(development_gate(&score(loss)).is_err());
+        }
     }
 
     #[test]
@@ -195,6 +286,7 @@ mod tests {
 
         assert_eq!(first, second);
         assert_eq!(first.candidates.len(), 1);
+        assert_eq!(first.decision, DevelopmentGateDecision::Cayley,);
         assert!(first.selected.dev_score.loss < 1.0e-10);
         assert!(first.selected.dev_score.mean_noise_ratio < 1.0e-16);
     }

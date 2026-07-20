@@ -44,7 +44,8 @@ pub use soft::{SoftCayleyFilter, SoftFilterError};
 pub use subspace::{NoiseSubspaceProjector, SubspaceProjectionError};
 
 pub use selection::{
-    MultiplierSelectionResult, SelectedMultiplierCandidate, select_multiplier_train_dev,
+    DevelopmentGateDecision, IDENTITY_DEVELOPMENT_LOSS, MultiplierSelectionResult,
+    SelectedMultiplierCandidate, development_gate, select_multiplier_train_dev,
 };
 pub use spectral::{SPECTRAL_COMPLEX_BINS, SpectralBlockFilter};
 pub use temporal::{TEMPORAL_BLOCK_SIZE, TemporalBlockFilter};
