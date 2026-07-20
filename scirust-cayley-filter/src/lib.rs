@@ -28,7 +28,8 @@ pub use baseline::{IdentityFilter, NoiseDirectionProjector, ProjectionError};
 pub use clifford::{
     CliffordGateDecision, CliffordProjectorCandidate, CliffordProjectorError,
     CliffordSelectionResult, SelectedCliffordCandidate, SplitCliffordProjector,
-    rank_two_term_clifford_projectors, rank_two_term_nullity_four_clifford_projectors,
+    fit_clifford_noise_subspace, rank_two_term_clifford_projectors,
+    rank_two_term_nullity_four_clifford_projectors,
     rank_zero_divisor_matched_nullity_four_clifford_projectors, score_clifford_projector,
     select_clifford_train_dev,
 };

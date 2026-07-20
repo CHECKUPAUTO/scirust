@@ -1,5 +1,7 @@
 //! Associative split-Clifford projectors on R^16.
 
+use scirust_solvers::{Matrix, linalg::svd};
+
 use crate::filter::FilterEvaluation;
 use crate::operator::{Matrix16, matrix_vector_mul};
 use crate::optimizer::{MultiplierCase, MultiplierScore};
@@ -321,6 +323,79 @@ pub fn rank_zero_divisor_matched_nullity_four_clifford_projectors(
     Ok(candidates)
 }
 
+pub fn fit_clifford_noise_subspace(
+    cases: &[MultiplierCase],
+    max_dimension: usize,
+    relative_tolerance: f64,
+) -> Result<SplitCliffordProjector, String> {
+    if cases.is_empty()
+    {
+        return Err("at least one training case is required".into());
+    }
+    if max_dimension == 0 || max_dimension > SEDENION_DIMENSION
+    {
+        return Err("max dimension must be between 1 and 16".into());
+    }
+    if !relative_tolerance.is_finite() || relative_tolerance <= 0.0
+    {
+        return Err("relative tolerance must be finite and positive".into());
+    }
+
+    let mut covariance = [[0.0; SEDENION_DIMENSION]; SEDENION_DIMENSION];
+
+    for case in cases
+    {
+        if case.noise.iter().any(|value| !value.is_finite())
+        {
+            return Err("training noise must be finite".into());
+        }
+
+        for (row, covariance_row) in covariance.iter_mut().enumerate()
+        {
+            let noise_row = case.noise[row];
+
+            for (column, value) in covariance_row.iter_mut().enumerate()
+            {
+                *value += noise_row * case.noise[column];
+            }
+        }
+    }
+
+    let data = covariance
+        .iter()
+        .flat_map(|row| row.iter().copied())
+        .collect();
+
+    let matrix = Matrix::from_row_major(SEDENION_DIMENSION, SEDENION_DIMENSION, data);
+    let decomposition = svd(&matrix).map_err(|error| error.to_string())?;
+
+    let sigma_max = decomposition.s.first().copied().unwrap_or(0.0);
+    if sigma_max == 0.0
+    {
+        return Err("training noise must contain non-zero energy".into());
+    }
+
+    let cutoff = relative_tolerance * sigma_max;
+    let dimension = decomposition
+        .s
+        .iter()
+        .take(max_dimension)
+        .take_while(|&&sigma| sigma > cutoff)
+        .count();
+
+    if dimension == 0
+    {
+        return Err("no stable noise direction was identified".into());
+    }
+
+    let basis: Vec<Sedenion> = (0..dimension)
+        .map(|direction| core::array::from_fn(|row| decomposition.v[(row, direction)]))
+        .collect();
+
+    SplitCliffordProjector::from_orthonormal_basis(&basis)
+        .map_err(|_| "invalid learned Clifford basis".to_string())
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CliffordGateDecision {
     Identity,
@@ -454,6 +529,37 @@ mod tests {
         CayleyProjector, NoiseSubspaceProjector, SEDENION_DIMENSION, analyze_matrix, basis_vector,
         left_multiplication_matrix, matrix_vector_mul,
     };
+
+    #[test]
+    fn learned_clifford_recovers_full_cayley_kernel() {
+        let mut multiplier = [0.0; SEDENION_DIMENSION];
+        multiplier[1] = 1.0;
+        multiplier[10] = 1.0;
+
+        let matrix = left_multiplication_matrix(multiplier);
+        let analysis = analyze_matrix(&matrix, 1.0e-12).unwrap();
+
+        let signal = basis_vector(0).unwrap();
+        let cases: Vec<_> = analysis
+            .kernel_basis()
+            .iter()
+            .copied()
+            .map(|noise| MultiplierCase::new(signal, noise))
+            .collect();
+
+        let projector = super::fit_clifford_noise_subspace(&cases, 4, 1.0e-12).unwrap();
+
+        assert_eq!(projector.rejected_dimension(), 4);
+
+        for noise in analysis.kernel_basis()
+        {
+            let residual = projector.apply(noise);
+            let energy = residual.iter().map(|x| x * x).sum::<f64>();
+            assert!(energy < 1.0e-20);
+        }
+
+        assert_eq!(projector.apply(&signal), signal);
+    }
 
     #[test]
     fn cayley_kernel_and_clifford_projectors_are_equivalent() {

@@ -1,6 +1,6 @@
 use scirust_cayley_filter::{
     MultiplierCase, SEDENION_DIMENSION, Sedenion, analyze_matrix, basis_vector,
-    left_multiplication_matrix, rank_hard_zero_divisor_projectors,
+    fit_clifford_noise_subspace, left_multiplication_matrix, rank_hard_zero_divisor_projectors,
     rank_zero_divisor_matched_nullity_four_clifford_projectors, score_cayley_projector,
     score_clifford_projector, squared_norm,
 };
@@ -78,11 +78,15 @@ fn main() {
 
     let c = &cayley[0];
     let k = &clifford[0];
+    let learned = fit_clifford_noise_subspace(&train, 4, TOLERANCE).unwrap();
 
     let c_dev = score_cayley_projector(&dev, &c.projector, WEIGHT).unwrap();
     let c_test = score_cayley_projector(&test, &c.projector, WEIGHT).unwrap();
     let k_dev = score_clifford_projector(&dev, &k.projector, WEIGHT).unwrap();
     let k_test = score_clifford_projector(&test, &k.projector, WEIGHT).unwrap();
+    let l_train = score_clifford_projector(&train, &learned, WEIGHT).unwrap();
+    let l_dev = score_clifford_projector(&dev, &learned, WEIGHT).unwrap();
+    let l_test = score_clifford_projector(&test, &learned, WEIGHT).unwrap();
 
     println!("family,i,j,sign,train_loss,dev_loss,test_loss,nullity");
     println!(
@@ -106,6 +110,14 @@ fn main() {
         k.projector.rejected_dimension(),
     );
 
+    println!(
+        "learned_clifford,-,-,-,{},{},{},{}",
+        l_train.loss,
+        l_dev.loss,
+        l_test.loss,
+        learned.rejected_dimension(),
+    );
+
     assert_eq!(cayley.len(), 84);
     assert_eq!(clifford.len(), 84);
     assert!(c.score.loss < 1.0e-20);
@@ -115,4 +127,8 @@ fn main() {
     assert!(k.score.loss > 0.5);
     assert!(k_dev.loss > 0.5);
     assert!(k_test.loss > 0.5);
+
+    assert!(l_train.loss < 1.0e-20);
+    assert!(l_dev.loss < 1.0e-20);
+    assert!(l_test.loss < 1.0e-20);
 }
