@@ -1,44 +1,21 @@
 # scirust-cayley-filter
 
-Experimental SciRust crate for investigating denoising operators derived from
-Cayley–Dickson multiplication.
+Filtrage expérimental déterministe en Rust fondé sur les sédénions.
 
-## Initial research question
+## Règle de sécurité
 
-For a fixed sedenion `a`, left multiplication defines a real-linear operator:
+Le filtre Cayley est activé uniquement si :
 
-```text
-L_a(x) = a · x```
+`development_loss < 1.0`
 
-When `a` is a zero divisor, `L_a` may have a non-trivial kernel. The project
-tests whether an identified noise subspace can be mapped into or near this
-kernel while preserving the useful signal.
+Sinon, la sortie reste identique à l’entrée.
 
-## Scientific position
+## Résultats
 
-CayleyFilter does not assume superiority over established denoising methods.
+- succès sur les bruits synthétiques alignés ;
+- abstention sur VoiceBank, MIT-BIH ECG et CWRU ;
+- 71 tests validés ;
+- Clippy strict validé ;
+- code unsafe interdit.
 
-Every claim must be supported by reproducible comparisons against suitable
-baselines, including:
-
-- Wiener filtering;
-- LMS and RLS;
-- singular-value decomposition;
-- Kalman filtering;
-- STFT-based denoising;
-- spectral subtraction.
-
-## Development order
-
-1. Scalar `f64` mathematical oracle.
-2. Exact Cayley-Dickson multiplication.
-3. Construction of the real-linear operator `L_a`.
-4. Kernel, rank, and singular-value diagnostics.
-5. Synthetic falsification experiments.
-6. Comparison with established denoising baselines.
-7. Scalar `f32` numerical parity.
-8. AArch64 and x86_64 SIMD kernels.
-
-## Initial status
-
-The crate currently contains only the deterministic scalar foundation.
+Voir `docs/ARCHITECTURE.md`.
