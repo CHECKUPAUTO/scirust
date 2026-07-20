@@ -151,6 +151,60 @@ impl SplitCliffordProjector {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct CliffordProjectorCandidate {
+    pub direction: Sedenion,
+    pub first_index: usize,
+    pub second_index: usize,
+    pub second_sign: i8,
+    pub projector: SplitCliffordProjector,
+    pub score: MultiplierScore,
+}
+
+pub fn rank_two_term_clifford_projectors(
+    cases: &[MultiplierCase],
+    distortion_weight: f64,
+) -> Result<Vec<CliffordProjectorCandidate>, String> {
+    let mut candidates = Vec::with_capacity(240);
+
+    for first_index in 0..SEDENION_DIMENSION
+    {
+        for second_index in (first_index + 1)..SEDENION_DIMENSION
+        {
+            for second_sign in [-1_i8, 1_i8]
+            {
+                let mut direction = [0.0; SEDENION_DIMENSION];
+                direction[first_index] = 1.0;
+                direction[second_index] = f64::from(second_sign);
+
+                let projector = SplitCliffordProjector::from_direction(direction)
+                    .map_err(|_| "invalid Clifford direction".to_string())?;
+                let score = score_clifford_projector(cases, &projector, distortion_weight)?;
+
+                candidates.push(CliffordProjectorCandidate {
+                    direction,
+                    first_index,
+                    second_index,
+                    second_sign,
+                    projector,
+                    score,
+                });
+            }
+        }
+    }
+
+    candidates.sort_by(|a, b| {
+        a.score
+            .loss
+            .total_cmp(&b.score.loss)
+            .then_with(|| a.first_index.cmp(&b.first_index))
+            .then_with(|| a.second_index.cmp(&b.second_index))
+            .then_with(|| a.second_sign.cmp(&b.second_sign))
+    });
+
+    Ok(candidates)
+}
+
 const ENERGY_FLOOR: f64 = 1.0e-30;
 
 pub fn score_clifford_projector(
@@ -197,6 +251,7 @@ fn squared_distance(left: &Sedenion, right: &Sedenion) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    use super::rank_two_term_clifford_projectors;
     use super::{CliffordProjectorError, SplitCliffordProjector, score_clifford_projector};
     use crate::MultiplierCase;
     use crate::{SEDENION_DIMENSION, basis_vector, matrix_vector_mul};
@@ -289,6 +344,13 @@ mod tests {
             SplitCliffordProjector::from_direction([0.0; SEDENION_DIMENSION]),
             Err(CliffordProjectorError::InvalidDirection)
         );
+    }
+
+    #[test]
+    fn sparse_search_contains_240_candidates() {
+        let case = MultiplierCase::new(basis_vector(7).unwrap(), basis_vector(2).unwrap());
+        let candidates = rank_two_term_clifford_projectors(&[case], 1.0).unwrap();
+        assert_eq!(candidates.len(), 240);
     }
 
     #[test]
