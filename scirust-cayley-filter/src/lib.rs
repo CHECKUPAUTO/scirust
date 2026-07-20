@@ -9,6 +9,7 @@ pub mod autotune;
 
 pub mod analysis;
 pub mod baseline;
+pub mod clifford;
 pub mod filter;
 pub mod operator;
 pub mod optimizer;
@@ -24,6 +25,14 @@ pub mod temporal;
 pub use analysis::{AnalysisError, MatrixAnalysis, analyze_matrix, kernel_residual_norm};
 pub use autotune::{CayleyAutotuneResult, CayleyCase, autotune_threshold};
 pub use baseline::{IdentityFilter, NoiseDirectionProjector, ProjectionError};
+pub use clifford::{
+    CliffordGateDecision, CliffordProjectorCandidate, CliffordProjectorError,
+    CliffordSelectionResult, SelectedCliffordCandidate, SplitCliffordProjector,
+    fit_clifford_noise_subspace, rank_two_term_clifford_projectors,
+    rank_two_term_nullity_four_clifford_projectors,
+    rank_zero_divisor_matched_nullity_four_clifford_projectors, score_clifford_projector,
+    select_clifford_train_dev,
+};
 pub use filter::{CayleyFilter, FilterEvaluation, FilterMetrics};
 pub use operator::{
     LeftMultiplicationOperator, Matrix16, left_multiplication_matrix, matrix_vector_mul,
@@ -32,7 +41,11 @@ pub use optimizer::{
     MultiplierCase, MultiplierOptimizationResult, MultiplierScore, optimize_multiplier,
     score_multiplier,
 };
-pub use projector::{CayleyProjector, ProjectorError};
+pub use projector::{
+    CayleyProjector, HardCayleyProjectorCandidate, HardCayleySelectionResult, ProjectorError,
+    SelectedHardCayleyProjector, rank_hard_zero_divisor_projectors, score_cayley_projector,
+    select_hard_cayley_train_dev,
+};
 pub use scalar::{
     SEDENION_DIMENSION, Sedenion, basis_vector, conjugate, sedenion_mul, squared_norm,
 };
