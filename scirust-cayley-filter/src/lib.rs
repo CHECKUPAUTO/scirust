@@ -15,6 +15,7 @@ pub mod optimizer;
 pub mod projector;
 pub mod scalar;
 pub mod search;
+pub mod selection;
 pub mod soft;
 pub mod subspace;
 
@@ -36,3 +37,7 @@ pub use scalar::{
 pub use search::{SparseMultiplierCandidate, rank_two_term_multipliers};
 pub use soft::{SoftCayleyFilter, SoftFilterError};
 pub use subspace::{NoiseSubspaceProjector, SubspaceProjectionError};
+
+pub use selection::{
+    MultiplierSelectionResult, SelectedMultiplierCandidate, select_multiplier_train_dev,
+};
