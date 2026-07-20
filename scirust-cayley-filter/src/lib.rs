@@ -15,6 +15,7 @@ pub mod optimizer;
 pub mod projector;
 pub mod scalar;
 pub mod soft;
+pub mod subspace;
 
 pub use analysis::{AnalysisError, MatrixAnalysis, analyze_matrix, kernel_residual_norm};
 pub use autotune::{CayleyAutotuneResult, CayleyCase, autotune_threshold};
@@ -32,3 +33,4 @@ pub use scalar::{
     SEDENION_DIMENSION, Sedenion, basis_vector, conjugate, sedenion_mul, squared_norm,
 };
 pub use soft::{SoftCayleyFilter, SoftFilterError};
+pub use subspace::{NoiseSubspaceProjector, SubspaceProjectionError};
