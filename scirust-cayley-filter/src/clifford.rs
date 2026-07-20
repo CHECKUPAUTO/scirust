@@ -4,6 +4,7 @@ use crate::filter::FilterEvaluation;
 use crate::operator::{Matrix16, matrix_vector_mul};
 use crate::optimizer::{MultiplierCase, MultiplierScore};
 use crate::scalar::{SEDENION_DIMENSION, Sedenion, squared_norm};
+use crate::selection::{DevelopmentGateDecision, development_gate};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CliffordProjectorError {
@@ -205,6 +206,86 @@ pub fn rank_two_term_clifford_projectors(
     Ok(candidates)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CliffordGateDecision {
+    Identity,
+    Clifford,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SelectedCliffordCandidate {
+    pub first_index: usize,
+    pub second_index: usize,
+    pub second_sign: i8,
+    pub direction: Sedenion,
+    pub projector: SplitCliffordProjector,
+    pub train_score: MultiplierScore,
+    pub dev_score: MultiplierScore,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CliffordSelectionResult {
+    pub selected: SelectedCliffordCandidate,
+    pub candidates: Vec<SelectedCliffordCandidate>,
+    pub decision: CliffordGateDecision,
+}
+
+pub fn select_clifford_train_dev(
+    train: &[MultiplierCase],
+    dev: &[MultiplierCase],
+    top_k: usize,
+    distortion_weight: f64,
+) -> Result<CliffordSelectionResult, String> {
+    if top_k == 0
+    {
+        return Err("top_k must be strictly positive".into());
+    }
+
+    let ranked = rank_two_term_clifford_projectors(train, distortion_weight)?;
+    let mut candidates = Vec::with_capacity(top_k.min(ranked.len()));
+
+    for candidate in ranked.into_iter().take(top_k)
+    {
+        let dev_score = score_clifford_projector(dev, &candidate.projector, distortion_weight)?;
+
+        candidates.push(SelectedCliffordCandidate {
+            first_index: candidate.first_index,
+            second_index: candidate.second_index,
+            second_sign: candidate.second_sign,
+            direction: candidate.direction,
+            projector: candidate.projector,
+            train_score: candidate.score,
+            dev_score,
+        });
+    }
+
+    candidates.sort_by(|a, b| {
+        a.dev_score
+            .loss
+            .total_cmp(&b.dev_score.loss)
+            .then_with(|| a.train_score.loss.total_cmp(&b.train_score.loss))
+            .then_with(|| a.first_index.cmp(&b.first_index))
+            .then_with(|| a.second_index.cmp(&b.second_index))
+            .then_with(|| a.second_sign.cmp(&b.second_sign))
+    });
+
+    let selected = candidates
+        .first()
+        .cloned()
+        .ok_or_else(|| "no Clifford candidate was produced".to_string())?;
+    let decision = match development_gate(&selected.dev_score)?
+    {
+        DevelopmentGateDecision::Identity => CliffordGateDecision::Identity,
+        DevelopmentGateDecision::Cayley => CliffordGateDecision::Clifford,
+    };
+
+    Ok(CliffordSelectionResult {
+        selected,
+        candidates,
+        decision,
+    })
+}
+
 const ENERGY_FLOOR: f64 = 1.0e-30;
 
 pub fn score_clifford_projector(
@@ -347,9 +428,48 @@ mod tests {
     }
 
     #[test]
+    fn train_dev_selection_activates_clifford() {
+        let mut noise = [0.0; SEDENION_DIMENSION];
+        noise[2] = 1.0;
+        noise[3] = 1.0;
+
+        let case = MultiplierCase::new(basis_vector(7).unwrap(), noise);
+        let result = super::select_clifford_train_dev(
+            std::slice::from_ref(&case),
+            std::slice::from_ref(&case),
+            8,
+            10.0,
+        )
+        .unwrap();
+
+        assert_eq!(result.decision, super::CliffordGateDecision::Clifford);
+        assert!(result.selected.dev_score.loss < 1.0e-20);
+    }
+
+    #[test]
+    fn train_dev_shift_selects_identity() {
+        let mut train_noise = [0.0; SEDENION_DIMENSION];
+        train_noise[2] = 1.0;
+        train_noise[3] = 1.0;
+
+        let mut dev_noise = [0.0; SEDENION_DIMENSION];
+        dev_noise[4] = 1.0;
+        dev_noise[5] = 1.0;
+
+        let train = MultiplierCase::new(basis_vector(7).unwrap(), train_noise);
+        let dev = MultiplierCase::new(basis_vector(7).unwrap(), dev_noise);
+
+        let result = super::select_clifford_train_dev(&[train], &[dev], 1, 10.0).unwrap();
+
+        assert_eq!(result.decision, super::CliffordGateDecision::Identity);
+        assert_eq!(result.selected.dev_score.loss, 1.0);
+    }
+
+    #[test]
     fn sparse_search_contains_240_candidates() {
         let case = MultiplierCase::new(basis_vector(7).unwrap(), basis_vector(2).unwrap());
-        let candidates = rank_two_term_clifford_projectors(&[case], 1.0).unwrap();
+        let candidates =
+            rank_two_term_clifford_projectors(std::slice::from_ref(&case), 1.0).unwrap();
         assert_eq!(candidates.len(), 240);
     }
 
@@ -357,7 +477,7 @@ mod tests {
     fn score_rewards_exact_noise_rejection() {
         let p = SplitCliffordProjector::canonical(4).unwrap();
         let case = MultiplierCase::new(basis_vector(7).unwrap(), basis_vector(2).unwrap());
-        let score = score_clifford_projector(&[case], &p, 1.0).unwrap();
+        let score = score_clifford_projector(std::slice::from_ref(&case), &p, 1.0).unwrap();
         assert_eq!(score.loss, 0.0);
         assert_eq!(score.rejected_dimension, 4);
     }
