@@ -6,9 +6,11 @@
 #![forbid(unsafe_code)]
 
 mod closure;
+mod evaluation;
 mod projector;
 
 pub use closure::{SrccAdmissionCertificate, SrccClosure, SrccClosureError};
+pub use evaluation::SrccEvaluation;
 pub use projector::SrccProjector;
 
 use core::fmt;
