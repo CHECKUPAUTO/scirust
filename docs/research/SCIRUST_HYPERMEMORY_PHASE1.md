@@ -1,5 +1,12 @@
 # SciRust-Hypermemory — Phase 1 Research Specification
 
+> **Program archived.** The falsification program this document specifies ran
+> to completion; the verdicts, measured numbers, and the stable
+> `scirust-retrieval` ports of what won are synthesized in
+> [SCIRUST_HYPERMEMORY_CONCLUSIONS.md](SCIRUST_HYPERMEMORY_CONCLUSIONS.md).
+> This document remains the authoritative contract for the research crate
+> itself.
+
 > **Status:** Phase 1 (deterministic exact-memory foundation).
 > **Positioning:** A deterministic associative-memory *research* subsystem using
 > 16-dimensional hypercomplex representations and explicitly parenthesized

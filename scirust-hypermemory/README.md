@@ -1,5 +1,11 @@
 # scirust-hypermemory
 
+> **Program archived.** The falsification program is complete; see
+> [`docs/research/SCIRUST_HYPERMEMORY_CONCLUSIONS.md`](../docs/research/SCIRUST_HYPERMEMORY_CONCLUSIONS.md)
+> for the verdicts and the stable `scirust-retrieval` ports (HRR binding,
+> cleanup memory, observation fusion, deterministic IVF) recommended for new
+> work. This crate remains as the auditable research record.
+
 > ```text
 > RESEARCH-GRADE ASSOCIATIVE-MEMORY SUBSYSTEM — PHASE 1
 >
