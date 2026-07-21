@@ -17,6 +17,10 @@ use super::pll::{Nco, PiLoopFilter, Pll};
 use super::resample::design_prototype;
 use super::stft::{istft, magnitude_spectrogram, num_frames, power_spectrogram, stft};
 use super::timing::{SymbolTimingLoop, gardner_ted, mueller_muller_ted};
+use super::wavelet::{
+    Wavelet, cdf53_forward, cdf53_inverse, dwt_decompose, dwt_reconstruct, haar_forward,
+    haar_inverse,
+};
 use super::window;
 use super::{
     Biquad, BiquadCascade, Fir, group_delay, magnitude, magnitude_db, phase, resample, unwrap_phase,
@@ -3187,4 +3191,175 @@ fn kalman_update_singular_returns_none_and_leaves_state_all_scalars() {
     check_kalman_update_singular_returns_none_and_leaves_state::<f32>();
     check_kalman_update_singular_returns_none_and_leaves_state::<f64>();
     check_kalman_update_singular_returns_none_and_leaves_state::<Q16_16>();
+}
+
+// ------------------------------------------------------------------ //
+//  Wavelet : dwt_decompose/dwt_reconstruct (lifting, Haar et CDF 5/3)  //
+// ------------------------------------------------------------------ //
+
+fn random_signal<T: Scalar>(seed: u64, n: usize) -> Vec<T> {
+    let mut s = seed;
+    (0..n).map(|_| T::of(lcg_noise(&mut s) * 10.0)).collect()
+}
+
+fn check_haar_known_value<T: Scalar>() {
+    // pairs=[4,6], impairs=[2,0] : moyenne=[3,3], différence=[o−e]=[−2,−6].
+    let mut x = [T::of(4.0), T::of(2.0), T::of(6.0), T::of(0.0)];
+    haar_forward(&mut x);
+    let want = [3.0, 3.0, -2.0, -6.0];
+    for k in 0..4
+    {
+        assert!(
+            (x[k].to_f64() - want[k]).abs() <= T::TOL * 4.0,
+            "haar_forward[{k}] = {} vs {}",
+            x[k].to_f64(),
+            want[k]
+        );
+    }
+}
+
+#[test]
+fn haar_known_value_all_scalars() {
+    check_haar_known_value::<f32>();
+    check_haar_known_value::<f64>();
+    check_haar_known_value::<Q16_16>();
+}
+
+fn check_haar_roundtrip<T: Scalar>() {
+    let mut x = random_signal::<T>(0xABCD_0001, 16);
+    let original = x.clone();
+    haar_forward(&mut x);
+    haar_inverse(&mut x);
+    for k in 0..original.len()
+    {
+        assert!(
+            (x[k].to_f64() - original[k].to_f64()).abs() <= T::TOL * 4.0,
+            "haar roundtrip[{k}] : {} vs {}",
+            x[k].to_f64(),
+            original[k].to_f64()
+        );
+    }
+}
+
+#[test]
+fn haar_roundtrip_all_scalars() {
+    check_haar_roundtrip::<f32>();
+    check_haar_roundtrip::<f64>();
+    check_haar_roundtrip::<Q16_16>();
+}
+
+fn check_cdf53_roundtrip<T: Scalar>() {
+    let mut x = random_signal::<T>(0xABCD_0002, 16);
+    let original = x.clone();
+    cdf53_forward(&mut x);
+    cdf53_inverse(&mut x);
+    for k in 0..original.len()
+    {
+        assert!(
+            (x[k].to_f64() - original[k].to_f64()).abs() <= T::TOL * 4.0,
+            "cdf53 roundtrip[{k}] : {} vs {}",
+            x[k].to_f64(),
+            original[k].to_f64()
+        );
+    }
+}
+
+#[test]
+fn cdf53_roundtrip_all_scalars() {
+    check_cdf53_roundtrip::<f32>();
+    check_cdf53_roundtrip::<f64>();
+    check_cdf53_roundtrip::<Q16_16>();
+}
+
+fn check_dwt_multilevel_roundtrip<T: Scalar>(wavelet: Wavelet) {
+    let mut x = random_signal::<T>(0xABCD_0003, 32);
+    let original = x.clone();
+    dwt_decompose(&mut x, 3, wavelet);
+    dwt_reconstruct(&mut x, 3, wavelet);
+    for k in 0..original.len()
+    {
+        assert!(
+            (x[k].to_f64() - original[k].to_f64()).abs() <= T::TOL * 4.0,
+            "dwt multi-niveau roundtrip[{k}] : {} vs {}",
+            x[k].to_f64(),
+            original[k].to_f64()
+        );
+    }
+}
+
+#[test]
+fn dwt_multilevel_roundtrip_haar_all_scalars() {
+    check_dwt_multilevel_roundtrip::<f32>(Wavelet::Haar);
+    check_dwt_multilevel_roundtrip::<f64>(Wavelet::Haar);
+    check_dwt_multilevel_roundtrip::<Q16_16>(Wavelet::Haar);
+}
+
+#[test]
+fn dwt_multilevel_roundtrip_cdf53_all_scalars() {
+    check_dwt_multilevel_roundtrip::<f32>(Wavelet::Cdf53);
+    check_dwt_multilevel_roundtrip::<f64>(Wavelet::Cdf53);
+    check_dwt_multilevel_roundtrip::<Q16_16>(Wavelet::Cdf53);
+}
+
+#[test]
+fn haar_roundtrip_is_bit_exact_for_fixed_point() {
+    // Contrairement à f32/f64 (où +/− arrondissent aussi, cf. en-tête de
+    // module), l'addition/soustraction en virgule fixe est exacte : seule la
+    // multiplication par ½ arrondit, et elle est recalculée identiquement à
+    // l'aller et au retour — la reconstruction est donc exacte au bit près.
+    let mut x = random_signal::<Q16_16>(0xF00D_BEE0, 16);
+    let original = x.clone();
+    haar_forward(&mut x);
+    haar_inverse(&mut x);
+    for (k, (&got, &want)) in x.iter().zip(&original).enumerate()
+    {
+        assert_eq!(got.to_raw(), want.to_raw(), "composante {k} non bit-exacte");
+    }
+}
+
+#[test]
+fn cdf53_roundtrip_is_bit_exact_for_fixed_point() {
+    let mut x = random_signal::<Q16_16>(0xF00D_BEE1, 16);
+    let original = x.clone();
+    cdf53_forward(&mut x);
+    cdf53_inverse(&mut x);
+    for (k, (&got, &want)) in x.iter().zip(&original).enumerate()
+    {
+        assert_eq!(got.to_raw(), want.to_raw(), "composante {k} non bit-exacte");
+    }
+}
+
+fn check_cdf53_better_compaction_than_haar<T: Scalar>() {
+    // Signal lisse (rampe + sinusoïde basse fréquence) : CDF 5/3 (prédiction
+    // à deux voisins) doit produire une énergie de détail (Σ|d[i]|)
+    // strictement plus faible que Haar (un seul voisin) — meilleure
+    // compaction d'énergie sur un signal lisse par morceaux (cf. en-tête de
+    // module).
+    const N: usize = 32;
+    let signal: Vec<T> = (0..N)
+        .map(|i| {
+            let t = i as f64 / N as f64;
+            T::of(t * 5.0 + (t * 2.0 * std::f64::consts::PI).sin() * 0.3)
+        })
+        .collect();
+
+    let mut xh = signal.clone();
+    haar_forward(&mut xh);
+    let energy_haar: f64 = xh[N / 2..].iter().map(|v| v.to_f64().abs()).sum();
+
+    let mut xc = signal.clone();
+    cdf53_forward(&mut xc);
+    let energy_cdf53: f64 = xc[N / 2..].iter().map(|v| v.to_f64().abs()).sum();
+
+    assert!(
+        energy_cdf53 < energy_haar,
+        "CDF 5/3 devrait mieux compacter l'énergie que Haar : {energy_cdf53} vs {energy_haar}"
+    );
+}
+
+#[test]
+fn cdf53_better_compaction_than_haar_all_scalars() {
+    check_cdf53_better_compaction_than_haar::<f32>();
+    check_cdf53_better_compaction_than_haar::<f64>();
+    check_cdf53_better_compaction_than_haar::<Q16_16>();
 }
