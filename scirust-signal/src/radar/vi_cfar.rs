@@ -1152,6 +1152,23 @@ impl DesignPointRng {
     }
 }
 
+/// Practical caps on [`calibrate_k_vi`]'s total Monte Carlo work. Its
+/// runtime has two independent `O(_)` terms — generating `reference_cells`
+/// unit-exponential draws for each of `trials` samples, then rescanning all
+/// `trials` samples up to roughly [`BISECTION_MAX_ITERS`] times inside
+/// [`bisect_decreasing`] — fit directly from release-build timings
+/// (`reference_cells, trials, seconds`: `(8, 300_000, 0.034)`,
+/// `(64, 1_000_000, 0.677)`, `(1_000, 1_000_000, 9.88)`) to
+/// `time ≈ 1.0e-8·(reference_cells·trials) + 3.4e-8·trials`. Neither
+/// `reference_cells` (already under [`MAX_PRACTICAL_REFERENCE_CELLS`]) nor
+/// `trials` alone need look unreasonable for their product, or `trials` on
+/// its own, to still make a call run for an unbounded time, so both terms
+/// are capped independently, each to roughly half a second worst case;
+/// existing calibration test/doc usage stays an order of magnitude or more
+/// under either.
+const MAX_PRACTICAL_MONTE_CARLO_SAMPLES: usize = 100_000_000;
+const MAX_PRACTICAL_MONTE_CARLO_TRIALS: usize = 10_000_000;
+
 /// Monte-Carlo-calibrates `k_vi` for a target false-non-homogeneity rate
 /// `alpha`: `P(VI > k_vi) = alpha` under the switch's own null case (a
 /// homogeneous reference half-window, i.i.d. unit-mean-exponential power).
@@ -1180,6 +1197,13 @@ pub fn calibrate_k_vi(
     {
         return Err(CfarError::TooFewReferenceCells(reference_cells));
     }
+    if reference_cells > MAX_PRACTICAL_REFERENCE_CELLS
+    {
+        return Err(CfarError::ExactCalibrationFailed(format!(
+            "reference_cells={reference_cells} exceeds the practical limit of \
+             {MAX_PRACTICAL_REFERENCE_CELLS} (see MAX_PRACTICAL_REFERENCE_CELLS)"
+        )));
+    }
     if !(alpha.is_finite() && alpha > 0.0 && alpha < 1.0)
     {
         return Err(CfarError::ExactCalibrationFailed(format!(
@@ -1191,6 +1215,32 @@ pub fn calibrate_k_vi(
         return Err(CfarError::ExactCalibrationFailed(
             "trials must be at least 1".to_string(),
         ));
+    }
+    // See `MAX_PRACTICAL_MONTE_CARLO_SAMPLES`/`MAX_PRACTICAL_MONTE_CARLO_TRIALS`:
+    // two independent cost terms, so both are checked -- `trials` alone
+    // bounds the rescan cost (dominant for small `reference_cells`), the
+    // product bounds the generation cost (dominant for large
+    // `reference_cells`). Rejected here rather than left to block for an
+    // open-ended time.
+    if trials > MAX_PRACTICAL_MONTE_CARLO_TRIALS
+    {
+        return Err(CfarError::ExactCalibrationFailed(format!(
+            "trials={trials} exceeds the practical limit of \
+             {MAX_PRACTICAL_MONTE_CARLO_TRIALS}"
+        )));
+    }
+    let work = reference_cells.checked_mul(trials);
+    let work_impractical = match work
+    {
+        Some(w) => w > MAX_PRACTICAL_MONTE_CARLO_SAMPLES,
+        None => true,
+    };
+    if work_impractical
+    {
+        return Err(CfarError::ExactCalibrationFailed(format!(
+            "reference_cells={reference_cells} * trials={trials} exceeds the practical \
+             Monte Carlo sample budget of {MAX_PRACTICAL_MONTE_CARLO_SAMPLES}"
+        )));
     }
     let mut rng = DesignPointRng(seed);
     let n = reference_cells as f64;
@@ -2393,6 +2443,54 @@ mod tests {
             calibrate_k_vi(16, 0.05, 0, 0),
             Err(CfarError::ExactCalibrationFailed(_))
         ));
+    }
+
+    #[test]
+    fn calibrate_k_vi_rejects_reference_cells_beyond_the_practical_bound() {
+        // Symmetry with `CfarConfig::validate`'s own practical bound:
+        // `calibrate_k_vi`'s `reference_cells` is the same per-side
+        // reference-window size, so it is bounded the same way.
+        assert!(matches!(
+            calibrate_k_vi(MAX_PRACTICAL_REFERENCE_CELLS + 1, 0.05, 1000, 0),
+            Err(CfarError::ExactCalibrationFailed(_))
+        ));
+    }
+
+    #[test]
+    fn calibrate_k_vi_rejects_trials_beyond_the_practical_bound() {
+        assert!(matches!(
+            calibrate_k_vi(16, 0.05, MAX_PRACTICAL_MONTE_CARLO_TRIALS + 1, 0),
+            Err(CfarError::ExactCalibrationFailed(_))
+        ));
+    }
+
+    #[test]
+    fn calibrate_k_vi_rejects_a_reasonable_looking_product_beyond_the_practical_bound() {
+        // New-finding regression: `reference_cells` and `trials` can each
+        // look entirely reasonable in isolation (both far under their own
+        // caps) while their product -- the actual O(reference_cells *
+        // trials) sample-generation cost -- is not. Direct timing before
+        // this fix showed this class of combination taking multiple
+        // seconds and scaling linearly with the product, unbounded.
+        let reference_cells = 2_000;
+        let trials = MAX_PRACTICAL_MONTE_CARLO_SAMPLES / reference_cells + 1;
+        assert!(reference_cells <= MAX_PRACTICAL_REFERENCE_CELLS);
+        assert!(trials <= MAX_PRACTICAL_MONTE_CARLO_TRIALS);
+        assert!(matches!(
+            calibrate_k_vi(reference_cells, 0.05, trials, 0),
+            Err(CfarError::ExactCalibrationFailed(_))
+        ));
+    }
+
+    #[test]
+    fn calibrate_k_vi_accepts_a_product_right_at_the_practical_bound() {
+        // Boundary check: sitting exactly at `MAX_PRACTICAL_MONTE_CARLO_SAMPLES`
+        // must still succeed (and complete promptly) -- not be off-by-one
+        // rejected.
+        let reference_cells = MAX_PRACTICAL_REFERENCE_CELLS;
+        let trials = MAX_PRACTICAL_MONTE_CARLO_SAMPLES / reference_cells;
+        assert!(trials <= MAX_PRACTICAL_MONTE_CARLO_TRIALS);
+        assert!(calibrate_k_vi(reference_cells, 0.05, trials, 0).is_ok());
     }
 
     #[test]
