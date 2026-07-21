@@ -88,7 +88,7 @@ deployment from within a method crate.
 |------:|-------|--------|----|--------------|--------|
 | 721 | Robust descriptive statistics | `claude/scirust-srcc-robust-stats-6ue9xc` | [#725](https://github.com/Memorithm/scirust/pull/725) | `f2b87380eb02dda91e39c7c45f1ab73d6f9a5a36` | **Merged** |
 | 722 | Robust multivariate geometry | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#729](https://github.com/Memorithm/scirust/pull/729) | `c4e49bfbeb936182b4474a67afd83595ade6727e` | **Merged** |
-| 723 | Scale-aware SRCC source geometry | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | _(open)_ | _(pending)_ | In progress |
+| 723 | Scale-aware SRCC source geometry | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#737](https://github.com/Memorithm/scirust/pull/737) | _(pending)_ | In review |
 | 724 | Deterministic robust regression | `feat/learning-robust-regression` | — | — | Not started |
 | 725 | Trust & contamination models | `feat/srcc-trust-contamination-models` | — | — | Not started |
 | 726 | Certified medoid clustering | `feat/solvers-certified-medoid-clustering` | — | — | Not started |
