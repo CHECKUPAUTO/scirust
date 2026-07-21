@@ -11,6 +11,7 @@ mod evaluation;
 mod fitting;
 mod projector;
 mod robust;
+mod robust_search;
 mod scoring;
 mod search;
 mod selection;
@@ -27,6 +28,10 @@ pub use projector::SrccProjector;
 pub use robust::{
     SrccRobustFitError, SrccRobustStabilityError, evaluate_robust_leave_one_out_stability,
     fit_robust_srcc_projector_from_views,
+};
+pub use robust_search::{
+    SrccRobustSearchError, SrccRobustStableSearchError, search_robust_srcc_structures_from_views,
+    search_stable_robust_srcc_structures_from_views,
 };
 pub use scoring::{SrccCase, SrccScore, SrccScoringError, score_projector};
 pub use search::{
