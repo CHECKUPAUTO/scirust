@@ -25,8 +25,10 @@ pub use fitting::{SrccFitError, SrccFitResult, fit_srcc_projector, fit_srcc_proj
 pub use projector::SrccProjector;
 pub use scoring::{SrccCase, SrccScore, SrccScoringError, score_projector};
 pub use search::{
-    SrccSearchCandidate, SrccSearchError, SrccSearchGrid, SrccSearchResult, search_srcc_structures,
-    search_srcc_structures_from_views,
+    SrccSearchCandidate, SrccSearchError, SrccSearchGrid, SrccSearchResult,
+    SrccStableSearchCandidate, SrccStableSearchConfig, SrccStableSearchError,
+    SrccStableSearchResult, search_srcc_structures, search_srcc_structures_from_views,
+    search_stable_srcc_structures_from_views,
 };
 pub use selection::{
     SelectedSrccCandidate, SrccGateDecision, SrccSelectionError, SrccSelectionResult,
