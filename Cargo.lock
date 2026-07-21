@@ -2940,6 +2940,7 @@ dependencies = [
  "scirust-core",
  "scirust-signal",
  "scirust-solvers",
+ "scirust-srcc",
 ]
 
 [[package]]
