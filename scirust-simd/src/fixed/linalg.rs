@@ -104,6 +104,19 @@
 // cond(A)²`), alors que QR opère directement sur `A` — la voie standard
 // lorsque `A` est mal conditionnée.
 //
+// [`conjugate_gradient`]/[`preconditioned_conjugate_gradient`]/[`bicgstab`]
+// complètent Cholesky/LU/QR par des solveurs **itératifs** : contrairement
+// à une factorisation directe (`O(n³)` en temps, `O(n²)` en mémoire pour
+// stocker `L`/`U`/`Q`/`R`), une méthode de Krylov n'a besoin que du produit
+// matrice-vecteur `A·v` à chaque étape (`O(n²)` par itération, aucune
+// factorisation matérialisée) — avantageux pour de grands systèmes ou
+// quand une solution approchée à faible coût suffit. [`conjugate_gradient`]
+// (Hestenes & Stiefel, 1952) est LE solveur de référence pour `A`
+// symétrique définie positive ; [`preconditioned_conjugate_gradient`]
+// accélère sa convergence via un préconditionneur diagonal de Jacobi ;
+// [`bicgstab`] (van der Vorst, 1992) généralise aux matrices
+// **quelconques** (non symétriques).
+//
 // ## Reproductibilité bit-à-bit (point clé)
 //
 // Chaque coefficient de sortie est un produit scalaire `Σ aᵢ·bᵢ` où **chaque
@@ -699,6 +712,235 @@ where
         qtb.push(dot(&col, b));
     }
     back_substitution(&r, &qtb, n)
+}
+
+// ------------------------------------------------------------------ //
+//  Solveurs itératifs de Krylov (gradient conjugué, BiCGStab)          //
+// ------------------------------------------------------------------ //
+//
+// Complètent Cholesky/LU/QR (résolution directe) par des méthodes qui
+// n'ont besoin que du produit matrice-vecteur [`matvec`] à chaque étape
+// (cf. en-tête de module) — chaque mise à jour vectorielle n'utilise que
+// `wrapping_add`/`wrapping_mul` (exacts, enveloppants) et chaque division
+// [`FixedReducible::checked_div`] (vérifiée) : la trajectoire d'itération
+// est donc reproductible au bit près, comme le reste du module. `None`
+// uniquement en cas de rupture numérique (dénominateur nul dans une mise
+// à jour), pas en cas de non-convergence à `max_iter` — comme
+// [`jacobi_eigen`]/[`matrix_sqrt`], ces solveurs renvoient le dernier
+// itéré (meilleur effort borné) plutôt que d'abandonner.
+
+/// Gradient conjugué (Hestenes & Stiefel, 1952) : résout `A·x = b` pour `A`
+/// symétrique définie positive (`n × n` row-major), en au plus `max_iter`
+/// itérations ou jusqu'à `‖b − A·x‖ ≤ tol`. Part de `x₀ = 0`.
+///
+/// `None` uniquement en cas de rupture numérique (`pᵀ·A·p = 0` : direction
+/// de recherche orthogonale à `A`, typique d'une matrice qui n'est pas
+/// réellement définie positive) — cf. en-tête de section. Panique si
+/// `a.len() != n·n` ou `b.len() != n`.
+#[must_use]
+pub fn conjugate_gradient<T>(a: &[T], b: &[T], n: usize, tol: T, max_iter: usize) -> Option<Vec<T>>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    assert_eq!(
+        a.len(),
+        n * n,
+        "conjugate_gradient : A de longueur {} ≠ {n}×{n}",
+        a.len()
+    );
+    assert_eq!(
+        b.len(),
+        n,
+        "conjugate_gradient : b de longueur {} ≠ {n}",
+        b.len()
+    );
+
+    let mut x = vec![T::ZERO; n];
+    let mut r = b.to_vec(); // b − A·x₀ = b (x₀ = 0).
+    let mut p = r.clone();
+    let mut rr = dot(&r, &r);
+
+    for _ in 0..max_iter
+    {
+        if rr.sqrt() <= tol
+        {
+            return Some(x);
+        }
+        let ap = matvec(a, &p, n, n);
+        let p_ap = dot(&p, &ap);
+        let alpha = rr.checked_div(p_ap)?;
+
+        for i in 0..n
+        {
+            x[i] = x[i].wrapping_add(alpha.wrapping_mul(p[i]));
+            r[i] = r[i] - alpha.wrapping_mul(ap[i]);
+        }
+
+        let rr_new = dot(&r, &r);
+        let beta = rr_new.checked_div(rr)?;
+        for i in 0..n
+        {
+            p[i] = r[i].wrapping_add(beta.wrapping_mul(p[i]));
+        }
+        rr = rr_new;
+    }
+    Some(x)
+}
+
+/// Gradient conjugué **préconditionné** (préconditionneur de Jacobi,
+/// diagonal) : comme [`conjugate_gradient`], mais résout implicitement
+/// `M⁻¹·A·x = M⁻¹·b` (`M = diag(A)`) à chaque étape — accélère la
+/// convergence quand `A` est mal conditionnée, sans jamais former `M⁻¹·A`
+/// explicitement (un produit élément par élément par itération).
+///
+/// `None` si un coefficient diagonal de `A` est nul (préconditionneur
+/// indéfini) ou en cas de rupture numérique (cf. [`conjugate_gradient`]).
+/// Panique si `a.len() != n·n` ou `b.len() != n`.
+#[must_use]
+pub fn preconditioned_conjugate_gradient<T>(
+    a: &[T],
+    b: &[T],
+    n: usize,
+    tol: T,
+    max_iter: usize,
+) -> Option<Vec<T>>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    assert_eq!(
+        a.len(),
+        n * n,
+        "preconditioned_conjugate_gradient : A de longueur {} ≠ {n}×{n}",
+        a.len()
+    );
+    assert_eq!(
+        b.len(),
+        n,
+        "preconditioned_conjugate_gradient : b de longueur {} ≠ {n}",
+        b.len()
+    );
+
+    let diag: Vec<T> = (0..n).map(|i| a[i * n + i]).collect();
+    let precondition = |v: &[T]| -> Option<Vec<T>> {
+        v.iter()
+            .zip(&diag)
+            .map(|(&vi, &di)| vi.checked_div(di))
+            .collect()
+    };
+
+    let mut x = vec![T::ZERO; n];
+    let mut r = b.to_vec();
+    let z0 = precondition(&r)?;
+    let mut p = z0.clone();
+    let mut rz = dot(&r, &z0);
+
+    for _ in 0..max_iter
+    {
+        if dot(&r, &r).sqrt() <= tol
+        {
+            return Some(x);
+        }
+        let ap = matvec(a, &p, n, n);
+        let p_ap = dot(&p, &ap);
+        let alpha = rz.checked_div(p_ap)?;
+
+        for i in 0..n
+        {
+            x[i] = x[i].wrapping_add(alpha.wrapping_mul(p[i]));
+            r[i] = r[i] - alpha.wrapping_mul(ap[i]);
+        }
+
+        let z_new = precondition(&r)?;
+        let rz_new = dot(&r, &z_new);
+        let beta = rz_new.checked_div(rz)?;
+        for i in 0..n
+        {
+            p[i] = z_new[i].wrapping_add(beta.wrapping_mul(p[i]));
+        }
+        rz = rz_new;
+    }
+    Some(x)
+}
+
+/// BiCGStab (van der Vorst, 1992) : résout `A·x = b` pour `A` **quelconque**
+/// (non nécessairement symétrique, `n × n` row-major), en au plus
+/// `max_iter` itérations ou jusqu'à `‖b − A·x‖ ≤ tol`. Combine la méthode du
+/// gradient biconjugué (BiCG, direction « shadow » `r̂₀` fixée à `b`) avec
+/// une étape de stabilisation de type GMRES(1) à chaque pas, qui supprime
+/// les oscillations erratiques de convergence de BiCG pur. Part de
+/// `x₀ = 0`.
+///
+/// `None` en cas de rupture numérique (`r̂₀·v = 0` ou `t·t = 0` — rare en
+/// pratique, résoluble en redémarrant avec un autre `r̂₀`, non automatisé
+/// ici). Panique si `a.len() != n·n` ou `b.len() != n`.
+#[must_use]
+pub fn bicgstab<T>(a: &[T], b: &[T], n: usize, tol: T, max_iter: usize) -> Option<Vec<T>>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    assert_eq!(
+        a.len(),
+        n * n,
+        "bicgstab : A de longueur {} ≠ {n}×{n}",
+        a.len()
+    );
+    assert_eq!(b.len(), n, "bicgstab : b de longueur {} ≠ {n}", b.len());
+
+    let mut x = vec![T::ZERO; n];
+    let mut r = b.to_vec();
+    let r_hat = r.clone(); // r̂₀, choix classique r̂₀ = r₀.
+    let mut rho = T::one();
+    let mut alpha = T::one();
+    let mut omega = T::one();
+    let mut v = vec![T::ZERO; n];
+    let mut p = vec![T::ZERO; n];
+
+    for _ in 0..max_iter
+    {
+        if dot(&r, &r).sqrt() <= tol
+        {
+            return Some(x);
+        }
+
+        let rho_new = dot(&r_hat, &r);
+        let beta = rho_new
+            .checked_div(rho)?
+            .wrapping_mul(alpha.checked_div(omega)?);
+        for i in 0..n
+        {
+            p[i] = r[i].wrapping_add(beta.wrapping_mul(p[i] - omega.wrapping_mul(v[i])));
+        }
+        v = matvec(a, &p, n, n);
+        alpha = rho_new.checked_div(dot(&r_hat, &v))?;
+
+        let mut h = vec![T::ZERO; n];
+        for i in 0..n
+        {
+            h[i] = x[i].wrapping_add(alpha.wrapping_mul(p[i]));
+        }
+
+        let mut s = vec![T::ZERO; n];
+        for i in 0..n
+        {
+            s[i] = r[i] - alpha.wrapping_mul(v[i]);
+        }
+        if dot(&s, &s).sqrt() <= tol
+        {
+            return Some(h);
+        }
+
+        let t = matvec(a, &s, n, n);
+        let tt = dot(&t, &t);
+        omega = dot(&t, &s).checked_div(tt)?;
+
+        for i in 0..n
+        {
+            x[i] = h[i].wrapping_add(omega.wrapping_mul(s[i]));
+            r[i] = s[i] - omega.wrapping_mul(t[i]);
+        }
+        rho = rho_new;
+    }
+    Some(x)
 }
 
 // ------------------------------------------------------------------ //

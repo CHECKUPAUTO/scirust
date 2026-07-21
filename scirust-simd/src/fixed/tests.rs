@@ -972,6 +972,187 @@ fn determinant_zero_for_singular() {
 }
 
 // ------------------------------------------------------------------ //
+//  Solveurs itératifs de Krylov (gradient conjugué, BiCGStab)          //
+// ------------------------------------------------------------------ //
+
+// Tolérance de résidu/écart pour les solveurs itératifs : à la différence
+// des solveurs directs (Cholesky/LU, une seule passe), la précision atteinte
+// est bornée par le critère de convergence `tol=1e-4` passé au solveur
+// (norme L2 du résidu), pas seulement par l'arrondi Q16.16 d'une passe
+// unique — chaque composante individuelle peut donc s'écarter d'un peu plus
+// que `1e-4`. Mesuré empiriquement (résidu max composante par composante,
+// `n` ≤ 6, `max_iter=100..200`) : ≤ 3,8e-3 pour CG/PCG/BiCGStab confondus ;
+// `5e-3` garde une marge confortable sans masquer une vraie régression.
+const KRYLOV_RES_TOL: f64 = 5e-3;
+
+#[test]
+fn conjugate_gradient_matches_matvec_random_spd() {
+    let mut rng = Lcg(0xC6D1_5ED0);
+    for &n in &[1usize, 2, 3, 4, 6]
+    {
+        let a = random_spd(&mut rng, n);
+        let x_true: Vec<Q16_16> = (0..n)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+            .collect();
+        let b = linalg::matvec(&a, &x_true, n, n);
+        let x = linalg::conjugate_gradient(&a, &b, n, q16(1e-4), 200).expect("A construite SPD");
+        let b_check = linalg::matvec(&a, &x, n, n);
+        for i in 0..n
+        {
+            let diff = (b_check[i].to_f64() - b[i].to_f64()).abs();
+            assert!(
+                diff <= KRYLOV_RES_TOL,
+                "n={n} i={i}: résidu {diff} > {KRYLOV_RES_TOL}"
+            );
+        }
+    }
+}
+
+#[test]
+fn conjugate_gradient_matches_cholesky_solve_random_spd() {
+    let mut rng = Lcg(0xCC15_0001);
+    for &n in &[2usize, 3, 4, 6]
+    {
+        let a = random_spd(&mut rng, n);
+        let x_true: Vec<Q16_16> = (0..n)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+            .collect();
+        let b = linalg::matvec(&a, &x_true, n, n);
+        let x_direct = linalg::cholesky_solve(&a, &b, n).expect("SPD");
+        let x_cg = linalg::conjugate_gradient(&a, &b, n, q16(1e-4), 200).expect("SPD");
+        for i in 0..n
+        {
+            let diff = (x_cg[i].to_f64() - x_direct[i].to_f64()).abs();
+            assert!(
+                diff <= KRYLOV_RES_TOL,
+                "n={n} i={i}: CG {} vs Cholesky {}",
+                x_cg[i].to_f64(),
+                x_direct[i].to_f64()
+            );
+        }
+    }
+}
+
+#[test]
+fn preconditioned_conjugate_gradient_matches_matvec_random_spd() {
+    let mut rng = Lcg(0xACC1_0001);
+    for &n in &[1usize, 2, 3, 4, 6]
+    {
+        let a = random_spd(&mut rng, n);
+        let x_true: Vec<Q16_16> = (0..n)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+            .collect();
+        let b = linalg::matvec(&a, &x_true, n, n);
+        let x = linalg::preconditioned_conjugate_gradient(&a, &b, n, q16(1e-4), 200)
+            .expect("A construite SPD");
+        let b_check = linalg::matvec(&a, &x, n, n);
+        for i in 0..n
+        {
+            let diff = (b_check[i].to_f64() - b[i].to_f64()).abs();
+            assert!(
+                diff <= KRYLOV_RES_TOL,
+                "n={n} i={i}: résidu {diff} > {KRYLOV_RES_TOL}"
+            );
+        }
+    }
+}
+
+#[test]
+fn preconditioned_conjugate_gradient_converges_in_one_iteration_on_diagonal_system() {
+    // A diagonale à coefficients très disparates : le préconditionneur de
+    // Jacobi M = diag(A) rend le système préconditionné M⁻¹·A EXACTEMENT
+    // l'identité — PCG converge donc en **une seule** itération quel que
+    // soit `b`, alors que CG simple, à une seule itération également
+    // autorisée, ne peut en général pas atteindre la solution exacte (sauf
+    // coïncidence où `b` est déjà colinéaire à un vecteur propre).
+    let n = 4;
+    let diag_vals = [1.0, 1000.0, 1.0, 1000.0];
+    let mut a = vec![Q16_16::zero(); n * n];
+    for (i, &d) in diag_vals.iter().enumerate()
+    {
+        a[i * n + i] = q16(d);
+    }
+    let b = vec![q16(1.0); n]; // composantes non nulles dans toutes les directions.
+    let x_true: Vec<f64> = diag_vals.iter().map(|&d| 1.0 / d).collect();
+
+    let pcg = linalg::preconditioned_conjugate_gradient(&a, &b, n, q16(1e-3), 1)
+        .expect("A diagonale à coefficients positifs : bien posé");
+    for i in 0..n
+    {
+        let diff = (pcg[i].to_f64() - x_true[i]).abs();
+        assert!(
+            diff <= 1e-2,
+            "PCG[{i}] = {} vs {} après 1 itération",
+            pcg[i].to_f64(),
+            x_true[i]
+        );
+    }
+
+    let cg = linalg::conjugate_gradient(&a, &b, n, q16(1e-3), 1).expect("même système, CG simple");
+    let cg_err: f64 = (0..n).map(|i| (cg[i].to_f64() - x_true[i]).abs()).sum();
+    assert!(
+        cg_err > 0.5,
+        "CG simple ne devrait pas converger en 1 itération sur ce système mal conditionné (erreur {cg_err})"
+    );
+}
+
+#[test]
+fn conjugate_gradient_zero_matrix_returns_none() {
+    let n = 3;
+    let a = vec![Q16_16::zero(); n * n];
+    let b = vec![q16(1.0); n];
+    assert!(linalg::conjugate_gradient(&a, &b, n, q16(1e-4), 50).is_none());
+}
+
+#[test]
+fn bicgstab_matches_matvec_random_diag_dominant() {
+    let mut rng = Lcg(0xB1C6_57AB);
+    for &n in &[1usize, 2, 3, 4, 6]
+    {
+        let a = random_diag_dominant(&mut rng, n);
+        let x_true: Vec<Q16_16> = (0..n)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+            .collect();
+        let b = linalg::matvec(&a, &x_true, n, n);
+        let x = linalg::bicgstab(&a, &b, n, q16(1e-4), 100).expect("diag. dominante ⇒ bien posé");
+        let b_check = linalg::matvec(&a, &x, n, n);
+        for i in 0..n
+        {
+            let diff = (b_check[i].to_f64() - b[i].to_f64()).abs();
+            assert!(
+                diff <= KRYLOV_RES_TOL,
+                "n={n} i={i}: résidu {diff} > {KRYLOV_RES_TOL}"
+            );
+        }
+    }
+}
+
+#[test]
+fn bicgstab_matches_lu_solve_random_diag_dominant() {
+    let mut rng = Lcg(0xB1C6_57AC);
+    for &n in &[2usize, 3, 4, 6]
+    {
+        let a = random_diag_dominant(&mut rng, n);
+        let x_true: Vec<Q16_16> = (0..n)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 10))
+            .collect();
+        let b = linalg::matvec(&a, &x_true, n, n);
+        let x_direct = linalg::lu_solve(&a, &b, n).expect("diag. dominante ⇒ inversible");
+        let x_bicg = linalg::bicgstab(&a, &b, n, q16(1e-4), 100).expect("bien posé");
+        for i in 0..n
+        {
+            let diff = (x_bicg[i].to_f64() - x_direct[i].to_f64()).abs();
+            assert!(
+                diff <= KRYLOV_RES_TOL,
+                "n={n} i={i}: BiCGStab {} vs LU {}",
+                x_bicg[i].to_f64(),
+                x_direct[i].to_f64()
+            );
+        }
+    }
+}
+
+// ------------------------------------------------------------------ //
 //  QR (Householder) : moindres carrés                                 //
 // ------------------------------------------------------------------ //
 

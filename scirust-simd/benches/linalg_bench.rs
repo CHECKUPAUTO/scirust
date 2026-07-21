@@ -439,6 +439,40 @@ fn bench_kabsch(c: &mut Criterion) {
     g.finish();
 }
 
+/// Solveurs itératifs de Krylov contre leurs homologues directs — mesure le
+/// compromis coût/itération (`O(n²)` par produit matrice-vecteur, aucune
+/// factorisation matérialisée) face à une factorisation directe `O(n³)`
+/// unique, à la même taille `N` que [`bench_cholesky`]/[`bench_lu`].
+fn bench_krylov(c: &mut Criterion) {
+    let a_spd = spd_data(0x1C, N);
+    let b = fixed_data(0x1D, N);
+    let tol = Q16_16::try_from(1e-4).unwrap();
+
+    let mut g = c.benchmark_group("conjugate_gradient_48");
+    g.throughput(Throughput::Elements((N * N * N) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter(|| flin::conjugate_gradient(black_box(&a_spd), black_box(&b), N, tol, 200))
+    });
+    g.finish();
+
+    let mut g = c.benchmark_group("preconditioned_conjugate_gradient_48");
+    g.throughput(Throughput::Elements((N * N * N) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter(|| {
+            flin::preconditioned_conjugate_gradient(black_box(&a_spd), black_box(&b), N, tol, 200)
+        })
+    });
+    g.finish();
+
+    let a_diag_dominant = diag_dominant_data(0x1E, N);
+    let mut g = c.benchmark_group("bicgstab_48");
+    g.throughput(Throughput::Elements((N * N * N) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter(|| flin::bicgstab(black_box(&a_diag_dominant), black_box(&b), N, tol, 200))
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_matmul,
@@ -458,6 +492,7 @@ criterion_group!(
     bench_generalized_eig_symmetric,
     bench_matrix_sqrt,
     bench_matrix_log,
-    bench_kabsch
+    bench_kabsch,
+    bench_krylov
 );
 criterion_main!(benches);
