@@ -9,11 +9,16 @@ mod closure;
 mod evaluation;
 mod projector;
 mod scoring;
+mod selection;
 
 pub use closure::{SrccAdmissionCertificate, SrccClosure, SrccClosureError};
 pub use evaluation::SrccEvaluation;
 pub use projector::SrccProjector;
 pub use scoring::{SrccCase, SrccScore, SrccScoringError, score_projector};
+pub use selection::{
+    SelectedSrccCandidate, SrccGateDecision, SrccSelectionError, SrccSelectionResult,
+    select_srcc_train_dev,
+};
 
 use core::fmt;
 
