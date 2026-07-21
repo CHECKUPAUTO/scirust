@@ -590,6 +590,26 @@ mod tests {
     }
 
     #[test]
+    fn closure_is_invariant_to_transport_scale_and_sign() {
+        let seed = basis_vector(1).unwrap();
+
+        let first_transports = [transport(1, 2, 1.0), transport(1, 2, -1.0)];
+
+        let scaled_transports = [transport(1, 2, -7.0), transport(1, 2, 5.0)];
+
+        let first = SrccClosure::build(&[seed], &first_transports, SrccConfig::default()).unwrap();
+
+        let second =
+            SrccClosure::build(&[seed], &scaled_transports, SrccConfig::default()).unwrap();
+
+        assert_eq!(first.basis(), second.basis());
+
+        assert_eq!(first.accepted_per_round(), second.accepted_per_round(),);
+
+        assert_eq!(first.certificates(), second.certificates(),);
+    }
+
+    #[test]
     fn closure_is_invariant_to_transport_order() {
         let seeds = [basis_vector(1).unwrap()];
 
