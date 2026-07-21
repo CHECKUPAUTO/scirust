@@ -13,6 +13,7 @@ mod projector;
 mod scoring;
 mod search;
 mod selection;
+mod stability;
 
 pub use closure::{SrccAdmissionCertificate, SrccClosure, SrccClosureError};
 pub use discovery::{
@@ -30,6 +31,9 @@ pub use search::{
 pub use selection::{
     SelectedSrccCandidate, SrccGateDecision, SrccSelectionError, SrccSelectionResult,
     select_srcc_train_dev,
+};
+pub use stability::{
+    SrccStabilityError, SrccStabilityReport, SrccStabilityVariant, evaluate_leave_one_out_stability,
 };
 
 use core::fmt;
