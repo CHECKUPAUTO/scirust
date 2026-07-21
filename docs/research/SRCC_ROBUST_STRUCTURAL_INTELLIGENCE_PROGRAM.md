@@ -355,16 +355,52 @@ sample order and view order.
 ### Determinism and invariance (never overstated)
 
 Clustering decisions under `RobustDiagonal` are invariant (within FP tolerance)
-to positive per-coordinate rescaling of the sources when the scaler is refit.
-Nothing makes the learned transports or projector rescaling-invariant —
-transport learning still sees raw coordinates — and no affine invariance is
-claimed. Global-scale, coordinate-wise and affine invariance are explicitly
-distinguished; only the first two (for clustering decisions, after refit) are
-claimed and tested.
+to positive per-coordinate rescaling of the sources when the scaler is refit
+**and the scaler configuration is itself scale-covariant** (`minimum_scale = 0`
+with policy `Error` or `DropDimension`). `UnitScale` keeps degenerate
+coordinates in raw units and a positive `minimum_scale` is an absolute raw-unit
+threshold; both deliberately re-introduce a scale dependence and void the
+invariance (documented on the API). Nothing makes the learned transports or
+projector rescaling-invariant — transport learning still sees raw coordinates —
+and no affine invariance is claimed. The raw pipeline's failure on the
+anisotropic fixture is precisely characterised as **three regimes** (singleton
+fragmentation below the signal separation, typed consensus ambiguity in the
+bridging band, silent majority-vote state merging above the noise spread) — it
+is *not* claimed that every raw radius produces a typed error.
+
+### Adversarial review (pre-merge)
+
+A 25-agent adversarial review (5 dimensions × refutation-based verification,
+with empirical probe programs) confirmed and led to fixing before merge:
+
+- **Non-finite fitted scale bypassed every zero-scale policy** (overflowing MAD
+  × 1.4826 or mean/variance on huge finite values produced `scale = ∞` marked
+  *active*; `1/∞ = 0` then silently deactivated the coordinate — demonstrated
+  end-to-end as a silent wrong `Ok`). Fixed by a finiteness gate in
+  `RobustScaler::fit` (new typed `RobustGeometryError::NonFiniteScale`) plus a
+  reciprocal-finiteness check at metric fitting (new typed
+  `SrccRobustFitError::NonFiniteSourceScale`, also covering subnormal scales
+  whose reciprocal overflows).
+- **Dropped coordinates were not exactly inert**: `(±∞ diff) × 0.0 = NaN`
+  aborted the fit on a coordinate the policy had removed. Fixed by a structural
+  skip of zero-inverse-scale coordinates before any arithmetic.
+- **Overclaimed raw-failure and invariance statements** (see above) reworded
+  and pinned by a three-regime test; the rescaling-invariance test now asserts
+  exact canonical-cluster equality (rescaled canonicalization ==
+  coordinate-wise-rescaled original canonicalization, bit-exact), not a
+  rejected-dimension proxy; a StandardDeviation view/sample-order test now
+  guards the canonical pooled-source sort (deleting the sort fails it);
+  `UnitScale`, `NoActiveSourceDimensions` and discovery-before-geometry error
+  precedence gained dedicated tests.
+- The RawEuclidean equality suite proves *delegation*; absolute historical
+  behaviour is pinned independently by the pre-existing exact-value tests and
+  the byte-identical historical example outputs (both verified unchanged).
 
 ### Tests
 
-14 new tests (99 total in the crate, all green): four full-struct equality
+18 new tests (103 total in the crate, all green; plus one new
+overflow-gate test in `scirust-multivariate`, 65 total there): four full-struct
+equality
 suites proving `RawEuclidean` ≡ historical pipeline (fit, LOO, search, stable
 search; zero and positive radii), transitivity to the exact-source pipeline at
 radius 0, an anisotropic two-state fixture where raw geometry fails with a
