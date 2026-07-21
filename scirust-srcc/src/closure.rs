@@ -112,7 +112,7 @@ impl SrccClosure {
                     continue;
                 }
 
-                let minimum_alignment = minimum_anchor_alignment(&cluster);
+                let minimum_alignment = minimum_pairwise_alignment(&cluster);
 
                 let representative = cluster_representative(&cluster);
 
@@ -272,9 +272,11 @@ fn cluster_proposals(proposals: Vec<Proposal>, threshold: f64) -> Vec<ResonanceC
 
         for (index, cluster) in clusters.iter().enumerate()
         {
-            let alignment = dot(&cluster[0].direction, &proposal.direction).abs();
+            let resonates_with_every_member = cluster
+                .iter()
+                .all(|member| dot(&member.direction, &proposal.direction).abs() >= threshold);
 
-            if alignment >= threshold
+            if resonates_with_every_member
             {
                 selected = Some(index);
                 break;
@@ -305,13 +307,18 @@ fn distinct_transport_indices(cluster: &[Proposal], transport_count: usize) -> V
         .collect()
 }
 
-fn minimum_anchor_alignment(cluster: &[Proposal]) -> f64 {
-    let anchor = &cluster[0].direction;
+fn minimum_pairwise_alignment(cluster: &[Proposal]) -> f64 {
+    let mut minimum: f64 = 1.0;
 
-    cluster
-        .iter()
-        .map(|proposal| dot(anchor, &proposal.direction).abs())
-        .fold(1.0, f64::min)
+    for left_index in 0..cluster.len()
+    {
+        for right in cluster.iter().skip(left_index + 1)
+        {
+            minimum = minimum.min(dot(&cluster[left_index].direction, &right.direction).abs());
+        }
+    }
+
+    minimum
 }
 
 fn cluster_representative(cluster: &[Proposal]) -> Vector16 {
@@ -462,6 +469,45 @@ mod tests {
         assert_eq!(second.transport_indices, vec![0, 1]);
         assert_eq!(second.support, 2);
         assert!((second.minimum_alignment - 1.0).abs() < 1.0e-15);
+    }
+
+    #[test]
+    fn resonance_clusters_require_pairwise_agreement() {
+        let angle = 20.0_f64.to_radians();
+
+        let anchor = basis_vector(1).unwrap();
+
+        let mut positive = [0.0; SRCC_DIMENSION];
+        positive[1] = angle.cos();
+        positive[2] = angle.sin();
+
+        let mut negative = [0.0; SRCC_DIMENSION];
+        negative[1] = angle.cos();
+        negative[2] = -angle.sin();
+
+        let clusters = cluster_proposals(
+            vec![
+                Proposal {
+                    direction: anchor,
+                    transport_index: 0,
+                },
+                Proposal {
+                    direction: positive,
+                    transport_index: 1,
+                },
+                Proposal {
+                    direction: negative,
+                    transport_index: 2,
+                },
+            ],
+            0.9,
+        );
+
+        assert_eq!(clusters.len(), 2);
+        assert_eq!(clusters[0].len(), 2);
+        assert_eq!(clusters[1].len(), 1);
+
+        assert!(minimum_pairwise_alignment(&clusters[0]) >= 0.9);
     }
 
     #[test]
