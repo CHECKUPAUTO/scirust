@@ -20,6 +20,8 @@ impl SrccTransportSample {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SrccDiscoveryError {
     EmptySamples,
+    EmptyViews,
+    EmptyView { index: usize },
     InvalidViewCount,
     TooManyViews,
     InsufficientDistinctViews,
@@ -33,6 +35,11 @@ impl fmt::Display for SrccDiscoveryError {
         match self
         {
             Self::EmptySamples => formatter.write_str("transport samples must not be empty"),
+            Self::EmptyViews => formatter.write_str("transport views must not be empty"),
+            Self::EmptyView { index } =>
+            {
+                write!(formatter, "transport view {index} must not be empty")
+            },
             Self::InvalidViewCount => formatter.write_str("view count must be strictly positive"),
             Self::TooManyViews => formatter.write_str("view count must not exceed sample count"),
             Self::InsufficientDistinctViews =>
@@ -57,15 +64,109 @@ impl fmt::Display for SrccDiscoveryError {
 
 impl std::error::Error for SrccDiscoveryError {}
 
-/// Learns independent real-linear transport views.
+/// Learns real-linear transport views from a flat sample family.
 ///
-/// Samples are assigned deterministically using:
+/// Equal samples are grouped canonically, then distinct groups are
+/// distributed deterministically across the requested views.
 ///
-/// `view_index = sample_index mod view_count`.
+/// Prefer [`learn_transport_views`] when the independent views are
+/// already known explicitly.
 ///
 /// Each sample contributes the normalized rank-one action:
 ///
 /// `target * source^T / ||source||^2`.
+/// Learns one deterministic real-linear transport per explicit view.
+///
+/// Sample order inside each view does not affect the learned transport.
+/// The index reported by sample-validation errors is the flattened index
+/// across the explicit view family.
+pub fn learn_transport_views(
+    views: &[&[SrccTransportSample]],
+    energy_floor: f64,
+) -> Result<Vec<LinearMap16>, SrccDiscoveryError> {
+    if views.is_empty()
+    {
+        return Err(SrccDiscoveryError::EmptyViews);
+    }
+
+    if !energy_floor.is_finite() || energy_floor <= 0.0
+    {
+        return Err(SrccDiscoveryError::InvalidEnergyFloor);
+    }
+
+    let mut flattened_index = 0;
+
+    for (view_index, view) in views.iter().enumerate()
+    {
+        if view.is_empty()
+        {
+            return Err(SrccDiscoveryError::EmptyView { index: view_index });
+        }
+
+        for sample in *view
+        {
+            if sample
+                .source
+                .iter()
+                .chain(sample.target.iter())
+                .any(|value| !value.is_finite())
+            {
+                return Err(SrccDiscoveryError::NonFiniteSample {
+                    index: flattened_index,
+                });
+            }
+
+            if squared_norm(&sample.source) <= energy_floor
+            {
+                return Err(SrccDiscoveryError::ZeroSource {
+                    index: flattened_index,
+                });
+            }
+
+            flattened_index += 1;
+        }
+    }
+
+    let mut transports = Vec::with_capacity(views.len());
+
+    for view in views
+    {
+        let mut ordered_samples = view.to_vec();
+        ordered_samples.sort_by(compare_samples);
+
+        let mut transport = [[0.0; SRCC_DIMENSION]; SRCC_DIMENSION];
+
+        for sample in &ordered_samples
+        {
+            let inverse_energy = 1.0 / squared_norm(&sample.source);
+
+            for (target_value, row) in sample.target.iter().zip(transport.iter_mut())
+            {
+                let scaled_target = target_value * inverse_energy;
+
+                for (entry, source_value) in row.iter_mut().zip(sample.source.iter())
+                {
+                    *entry += scaled_target * source_value;
+                }
+            }
+        }
+
+        let inverse_count = 1.0 / ordered_samples.len() as f64;
+
+        for row in &mut transport
+        {
+            for value in row
+            {
+                *value *= inverse_count;
+            }
+        }
+
+        transports.push(transport);
+    }
+
+    Ok(transports)
+}
+
 pub fn learn_interleaved_transport_views(
     samples: &[SrccTransportSample],
     view_count: usize,
@@ -195,6 +296,59 @@ fn compare_vectors(left: &Vector16, right: &Vector16) -> core::cmp::Ordering {
 mod tests {
     use super::*;
     use crate::{SrccClosure, SrccConfig, basis_vector, dot};
+
+    #[test]
+    fn explicit_views_generate_consensus() {
+        let source = basis_vector(1).unwrap();
+        let target = basis_vector(2).unwrap();
+        let negative = target.map(|value| -value);
+
+        let first_view = [SrccTransportSample::new(source, target)];
+
+        let second_view = [SrccTransportSample::new(source, negative)];
+
+        let views = [first_view.as_slice(), second_view.as_slice()];
+
+        let transports = learn_transport_views(&views, 1.0e-30).unwrap();
+
+        let closure = SrccClosure::build(&[source], &transports, SrccConfig::default()).unwrap();
+
+        assert_eq!(closure.dimension(), 2);
+        assert_eq!(closure.certificates()[0].support, 2,);
+    }
+
+    #[test]
+    fn explicit_views_ignore_sample_order() {
+        let first = SrccTransportSample::new(basis_vector(1).unwrap(), basis_vector(2).unwrap());
+
+        let second = SrccTransportSample::new(basis_vector(3).unwrap(), basis_vector(4).unwrap());
+
+        let ordered = [first, second];
+        let reversed = [second, first];
+
+        let first_views = [ordered.as_slice()];
+        let second_views = [reversed.as_slice()];
+
+        assert_eq!(
+            learn_transport_views(&first_views, 1.0e-30,).unwrap(),
+            learn_transport_views(&second_views, 1.0e-30,).unwrap(),
+        );
+    }
+
+    #[test]
+    fn empty_explicit_views_are_rejected() {
+        assert_eq!(
+            learn_transport_views(&[], 1.0e-30),
+            Err(SrccDiscoveryError::EmptyViews),
+        );
+
+        let views: [&[SrccTransportSample]; 1] = [&[]];
+
+        assert_eq!(
+            learn_transport_views(&views, 1.0e-30),
+            Err(SrccDiscoveryError::EmptyView { index: 0 },),
+        );
+    }
 
     #[test]
     fn independent_views_generate_consensus() {

@@ -4,7 +4,7 @@ use core::fmt;
 
 use crate::{
     LinearMap16, SrccClosureError, SrccConfig, SrccDiscoveryError, SrccProjector,
-    SrccTransportSample, Vector16, learn_interleaved_transport_views,
+    SrccTransportSample, Vector16, learn_interleaved_transport_views, learn_transport_views,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -43,6 +43,21 @@ impl From<SrccClosureError> for SrccFitError {
     }
 }
 
+pub fn fit_srcc_projector_from_views(
+    seeds: &[Vector16],
+    views: &[&[SrccTransportSample]],
+    config: SrccConfig,
+) -> Result<SrccFitResult, SrccFitError> {
+    let transports = learn_transport_views(views, config.energy_floor)?;
+
+    let projector = SrccProjector::build(seeds, &transports, config)?;
+
+    Ok(SrccFitResult {
+        transports,
+        projector,
+    })
+}
+
 pub fn fit_srcc_projector(
     seeds: &[Vector16],
     samples: &[SrccTransportSample],
@@ -63,6 +78,25 @@ pub fn fit_srcc_projector(
 mod tests {
     use super::*;
     use crate::{basis_vector, squared_norm};
+
+    #[test]
+    fn explicit_views_fit_consensus_projector() {
+        let seed = basis_vector(1).unwrap();
+        let target = basis_vector(2).unwrap();
+
+        let positive = [SrccTransportSample::new(seed, target)];
+
+        let negative = [SrccTransportSample::new(seed, target.map(|value| -value))];
+
+        let views = [positive.as_slice(), negative.as_slice()];
+
+        let result = fit_srcc_projector_from_views(&[seed], &views, SrccConfig::default()).unwrap();
+
+        assert_eq!(result.transports.len(), 2);
+        assert_eq!(result.projector.rejected_dimension(), 2,);
+
+        assert!(squared_norm(&result.projector.apply(&target),) < 1.0e-24);
+    }
 
     #[test]
     fn fitted_projector_rejects_discovered_consensus() {

@@ -15,9 +15,12 @@ mod search;
 mod selection;
 
 pub use closure::{SrccAdmissionCertificate, SrccClosure, SrccClosureError};
-pub use discovery::{SrccDiscoveryError, SrccTransportSample, learn_interleaved_transport_views};
+pub use discovery::{
+    SrccDiscoveryError, SrccTransportSample, learn_interleaved_transport_views,
+    learn_transport_views,
+};
 pub use evaluation::SrccEvaluation;
-pub use fitting::{SrccFitError, SrccFitResult, fit_srcc_projector};
+pub use fitting::{SrccFitError, SrccFitResult, fit_srcc_projector, fit_srcc_projector_from_views};
 pub use projector::SrccProjector;
 pub use scoring::{SrccCase, SrccScore, SrccScoringError, score_projector};
 pub use search::{SrccSearchCandidate, SrccSearchError, SrccSearchResult, search_srcc_structures};
