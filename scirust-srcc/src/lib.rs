@@ -6,12 +6,14 @@
 #![forbid(unsafe_code)]
 
 mod closure;
+mod discovery;
 mod evaluation;
 mod projector;
 mod scoring;
 mod selection;
 
 pub use closure::{SrccAdmissionCertificate, SrccClosure, SrccClosureError};
+pub use discovery::{SrccDiscoveryError, SrccTransportSample, learn_interleaved_transport_views};
 pub use evaluation::SrccEvaluation;
 pub use projector::SrccProjector;
 pub use scoring::{SrccCase, SrccScore, SrccScoringError, score_projector};
