@@ -632,6 +632,84 @@ mod stable_search_tests {
     }
 
     #[test]
+    fn stable_search_ignores_explicit_view_order() {
+        let seed = basis_vector(1).unwrap();
+        let target = basis_vector(2).unwrap();
+
+        let positive = [
+            SrccTransportSample::new(seed, target),
+            SrccTransportSample::new(seed, target),
+        ];
+
+        let negative_target = target.map(|value| -value);
+
+        let negative = [
+            SrccTransportSample::new(seed, negative_target),
+            SrccTransportSample::new(seed, negative_target),
+        ];
+
+        let first_order = [positive.as_slice(), negative.as_slice()];
+
+        let reversed_order = [negative.as_slice(), positive.as_slice()];
+
+        let cases = [SrccCase::new(basis_vector(8).unwrap(), target)];
+
+        let first = search_stable_srcc_structures_from_views(
+            &[seed],
+            &first_order,
+            &[0.999],
+            stable_config(),
+            &cases,
+            &cases,
+        )
+        .unwrap();
+
+        let second = search_stable_srcc_structures_from_views(
+            &[seed],
+            &reversed_order,
+            &[0.999],
+            stable_config(),
+            &cases,
+            &cases,
+        )
+        .unwrap();
+
+        assert_eq!(first.decision, second.decision);
+
+        assert_eq!(
+            first
+                .selected
+                .as_ref()
+                .unwrap()
+                .candidate
+                .projector
+                .transform(),
+            second
+                .selected
+                .as_ref()
+                .unwrap()
+                .candidate
+                .projector
+                .transform(),
+        );
+
+        assert_eq!(
+            first
+                .selected
+                .as_ref()
+                .unwrap()
+                .stability
+                .maximum_frobenius_distance,
+            second
+                .selected
+                .as_ref()
+                .unwrap()
+                .stability
+                .maximum_frobenius_distance,
+        );
+    }
+
+    #[test]
     fn invalid_stability_gate_is_rejected() {
         let seed = basis_vector(1).unwrap();
         let target = basis_vector(2).unwrap();

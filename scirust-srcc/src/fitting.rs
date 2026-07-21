@@ -99,6 +99,33 @@ mod tests {
     }
 
     #[test]
+    fn explicit_view_order_does_not_change_projector() {
+        let seed = basis_vector(1).unwrap();
+        let target = basis_vector(2).unwrap();
+
+        let positive = [SrccTransportSample::new(seed, target)];
+
+        let negative = [SrccTransportSample::new(seed, target.map(|value| -value))];
+
+        let first_order = [positive.as_slice(), negative.as_slice()];
+
+        let reversed_order = [negative.as_slice(), positive.as_slice()];
+
+        let first =
+            fit_srcc_projector_from_views(&[seed], &first_order, SrccConfig::default()).unwrap();
+
+        let second =
+            fit_srcc_projector_from_views(&[seed], &reversed_order, SrccConfig::default()).unwrap();
+
+        assert_eq!(first.projector.transform(), second.projector.transform(),);
+
+        assert_eq!(
+            first.projector.rejected_dimension(),
+            second.projector.rejected_dimension(),
+        );
+    }
+
+    #[test]
     fn fitted_projector_rejects_discovered_consensus() {
         let seed = basis_vector(1).unwrap();
         let target = basis_vector(2).unwrap();
