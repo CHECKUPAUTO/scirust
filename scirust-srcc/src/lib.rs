@@ -8,7 +8,7 @@
 mod closure;
 mod projector;
 
-pub use closure::{SrccClosure, SrccClosureError};
+pub use closure::{SrccAdmissionCertificate, SrccClosure, SrccClosureError};
 pub use projector::SrccProjector;
 
 use core::fmt;

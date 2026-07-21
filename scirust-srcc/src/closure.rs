@@ -42,10 +42,20 @@ impl fmt::Display for SrccClosureError {
 impl std::error::Error for SrccClosureError {}
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct SrccAdmissionCertificate {
+    pub round: usize,
+    pub basis_index: usize,
+    pub transport_indices: Vec<usize>,
+    pub support: usize,
+    pub minimum_alignment: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct SrccClosure {
     basis: Vec<Vector16>,
     rounds: usize,
     accepted_per_round: Vec<usize>,
+    certificates: Vec<SrccAdmissionCertificate>,
     config: SrccConfig,
 }
 
@@ -78,8 +88,9 @@ impl SrccClosure {
         }
 
         let mut accepted_per_round = Vec::new();
+        let mut certificates = Vec::new();
 
-        for _ in 0..config.maximum_rounds
+        for round_index in 0..config.maximum_rounds
         {
             if basis.len() >= config.maximum_dimension
             {
@@ -94,14 +105,27 @@ impl SrccClosure {
 
             for cluster in clusters
             {
-                if distinct_support(&cluster, transports.len()) < config.minimum_support
+                let transport_indices = distinct_transport_indices(&cluster, transports.len());
+
+                if transport_indices.len() < config.minimum_support
                 {
                     continue;
                 }
 
+                let minimum_alignment = minimum_anchor_alignment(&cluster);
+
                 let representative = cluster_representative(&cluster);
 
-                push_orthonormal(&mut expanded, representative, absolute_floor);
+                if push_orthonormal(&mut expanded, representative, absolute_floor)
+                {
+                    certificates.push(SrccAdmissionCertificate {
+                        round: round_index + 1,
+                        basis_index: expanded.len() - 1,
+                        support: transport_indices.len(),
+                        transport_indices,
+                        minimum_alignment,
+                    });
+                }
 
                 if expanded.len() >= config.maximum_dimension
                 {
@@ -124,6 +148,7 @@ impl SrccClosure {
             basis,
             rounds: accepted_per_round.len(),
             accepted_per_round,
+            certificates,
             config,
         })
     }
@@ -146,6 +171,11 @@ impl SrccClosure {
     #[must_use]
     pub fn accepted_per_round(&self) -> &[usize] {
         &self.accepted_per_round
+    }
+
+    #[must_use]
+    pub fn certificates(&self) -> &[SrccAdmissionCertificate] {
+        &self.certificates
     }
 
     #[must_use]
@@ -261,7 +291,7 @@ fn cluster_proposals(proposals: Vec<Proposal>, threshold: f64) -> Vec<ResonanceC
     clusters
 }
 
-fn distinct_support(cluster: &[Proposal], transport_count: usize) -> usize {
+fn distinct_transport_indices(cluster: &[Proposal], transport_count: usize) -> Vec<usize> {
     let mut seen = vec![false; transport_count];
 
     for proposal in cluster
@@ -269,7 +299,19 @@ fn distinct_support(cluster: &[Proposal], transport_count: usize) -> usize {
         seen[proposal.transport_index] = true;
     }
 
-    seen.into_iter().filter(|value| *value).count()
+    seen.iter()
+        .enumerate()
+        .filter_map(|(index, present)| present.then_some(index))
+        .collect()
+}
+
+fn minimum_anchor_alignment(cluster: &[Proposal]) -> f64 {
+    let anchor = &cluster[0].direction;
+
+    cluster
+        .iter()
+        .map(|proposal| dot(anchor, &proposal.direction).abs())
+        .fold(1.0, f64::min)
 }
 
 fn cluster_representative(cluster: &[Proposal]) -> Vector16 {
@@ -389,6 +431,37 @@ mod tests {
         assert!(dot(&closure.basis()[1], &basis_vector(2).unwrap(),).abs() > 1.0 - 1.0e-12);
 
         assert!(dot(&closure.basis()[2], &basis_vector(3).unwrap(),).abs() > 1.0 - 1.0e-12);
+    }
+
+    #[test]
+    fn certificates_record_multi_round_consensus() {
+        let seeds = [basis_vector(1).unwrap()];
+
+        let mut first = [[0.0; SRCC_DIMENSION]; SRCC_DIMENSION];
+        first[2][1] = 1.0;
+        first[3][2] = 1.0;
+
+        let mut second = [[0.0; SRCC_DIMENSION]; SRCC_DIMENSION];
+        second[2][1] = -2.0;
+        second[3][2] = 3.0;
+
+        let closure = SrccClosure::build(&seeds, &[first, second], SrccConfig::default()).unwrap();
+
+        assert_eq!(closure.certificates().len(), 2);
+
+        let first = &closure.certificates()[0];
+        assert_eq!(first.round, 1);
+        assert_eq!(first.basis_index, 1);
+        assert_eq!(first.transport_indices, vec![0, 1]);
+        assert_eq!(first.support, 2);
+        assert!((first.minimum_alignment - 1.0).abs() < 1.0e-15);
+
+        let second = &closure.certificates()[1];
+        assert_eq!(second.round, 2);
+        assert_eq!(second.basis_index, 2);
+        assert_eq!(second.transport_indices, vec![0, 1]);
+        assert_eq!(second.support, 2);
+        assert!((second.minimum_alignment - 1.0).abs() < 1.0e-15);
     }
 
     #[test]
