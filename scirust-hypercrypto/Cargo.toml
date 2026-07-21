@@ -14,6 +14,16 @@ scirust-modalg = { path = "../scirust-modalg" }
 # spec's GraphId. It is NOT part of any keyed construction here. Already present
 # in Cargo.lock (RustCrypto), so this adds no new download.
 sha2 = "0.10"
+# Optional bridge to the workspace-wide CANR §9 benchmark schema
+# (`Json::to_bench_records`, analysis/report.rs). Off by default: this crate's
+# own report.rs deliberately has no serde dependency ("field order is explicit
+# and stable"), and scirust-bench-schema pulls in serde/serde_json — so the
+# default build stays exactly as it was, and the bridge only compiles in when
+# a consumer opts in.
+scirust-bench-schema = { path = "../scirust-bench-schema", optional = true }
+
+[features]
+bench-schema = ["dep:scirust-bench-schema"]
 
 [[bin]]
 name = "hypercrypto-falsify"

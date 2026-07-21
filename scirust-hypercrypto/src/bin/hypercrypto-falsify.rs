@@ -115,7 +115,36 @@ fn emit(o: &Opts, name: &str, meta_fields: Vec<(&'static str, Json)>, extra: Vec
         },
         Err(e) => eprintln!("  (could not write result file: {e})"),
     }
+    emit_bench_records(o, name, &doc);
 }
+
+/// Optional CANR §9 sidecar (feature `bench-schema`, off by default): every
+/// `emit()` call also flattens its result document into
+/// `scirust-bench-schema` records and appends them as JSONL next to the
+/// pretty-printed `.json`/`.json.sha256` this crate already writes — the
+/// document itself is unchanged, this is a second, machine-uniform view of
+/// the same numbers.
+#[cfg(feature = "bench-schema")]
+fn emit_bench_records(o: &Opts, name: &str, doc: &Json) {
+    let dataset = format!("{}/{}", o.width.variant_name(), o.fixture.label());
+    let records = doc.to_bench_records("hypercrypto/phase1", dataset, name, o.seed);
+    let path = o.out.join(format!("{name}.bench.jsonl"));
+    if let Err(e) = scirust_bench_schema::write_jsonl(&path, &records)
+    {
+        eprintln!("  (could not write bench-schema sidecar: {e})");
+    }
+    else
+    {
+        println!(
+            "  bench_jsonl : {} ({} records)",
+            path.display(),
+            records.len()
+        );
+    }
+}
+
+#[cfg(not(feature = "bench-schema"))]
+fn emit_bench_records(_o: &Opts, _name: &str, _doc: &Json) {}
 
 fn banner(sub: &str) {
     println!("{EXPERIMENTAL_BANNER}");

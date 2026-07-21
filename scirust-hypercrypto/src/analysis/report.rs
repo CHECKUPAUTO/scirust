@@ -123,6 +123,103 @@ fn push_indent(out: &mut String, indent: usize) {
     }
 }
 
+/// Optional bridge to the workspace-wide CANR §9 benchmark schema
+/// (`scirust-bench-schema`, feature `bench-schema`). This crate's own
+/// [`Json`] stays serde-free by design (see the module docs); this bridge
+/// only compiles in when a consumer opts into the feature, and converts
+/// *after* a result document exists — it does not touch how `Json` itself
+/// is built or serialized.
+#[cfg(feature = "bench-schema")]
+impl Json {
+    /// Flatten every numeric leaf of this document into a
+    /// [`scirust_bench_schema::BenchRecord`], one row per leaf, `metric`
+    /// being the dot/bracket-joined path from the root (e.g.
+    /// `"gf2_rank"`, `"differentials.0.prob_ppm"`). Non-numeric leaves
+    /// (`Str`, `Null`) are skipped — they carry no measured quantity to
+    /// certify or track over time. `Bool` leaves convert to `0.0`/`1.0`.
+    ///
+    /// `kernel`/`dataset`/`method`/`seed` are supplied by the caller — this
+    /// document has no notion of them itself (it is a bag of measurements,
+    /// not a benchmark record).
+    #[must_use]
+    pub fn to_bench_records(
+        &self,
+        kernel: impl Into<String>,
+        dataset: impl Into<String>,
+        method: impl Into<String>,
+        seed: u64,
+    ) -> Vec<scirust_bench_schema::BenchRecord> {
+        let kernel = kernel.into();
+        let dataset = dataset.into();
+        let method = method.into();
+        let mut out = Vec::new();
+        self.flatten_into("", &kernel, &dataset, &method, seed, &mut out);
+        out
+    }
+
+    fn flatten_into(
+        &self,
+        path: &str,
+        kernel: &str,
+        dataset: &str,
+        method: &str,
+        seed: u64,
+        out: &mut Vec<scirust_bench_schema::BenchRecord>,
+    ) {
+        let leaf = |value: f64, out: &mut Vec<scirust_bench_schema::BenchRecord>| {
+            out.push(scirust_bench_schema::BenchRecord::new(
+                kernel.to_string(),
+                dataset.to_string(),
+                method.to_string(),
+                seed,
+                path.to_string(),
+                value,
+            ));
+        };
+        match self
+        {
+            Json::Null | Json::Str(_) =>
+            {},
+            Json::Bool(b) => leaf(f64::from(u8::from(*b)), out),
+            // u64/i64 up to 2^53 round-trip exactly through f64; this
+            // crate's measured quantities (ranks, counts, ppm fractions,
+            // kernel-size logs) are far below that ceiling.
+            Json::U64(v) => leaf(*v as f64, out),
+            Json::I64(v) => leaf(*v as f64, out),
+            Json::Arr(items) =>
+            {
+                for (i, item) in items.iter().enumerate()
+                {
+                    let child_path = if path.is_empty()
+                    {
+                        i.to_string()
+                    }
+                    else
+                    {
+                        format!("{path}.{i}")
+                    };
+                    item.flatten_into(&child_path, kernel, dataset, method, seed, out);
+                }
+            },
+            Json::Obj(pairs) =>
+            {
+                for (k, v) in pairs
+                {
+                    let child_path = if path.is_empty()
+                    {
+                        k.clone()
+                    }
+                    else
+                    {
+                        format!("{path}.{k}")
+                    };
+                    v.flatten_into(&child_path, kernel, dataset, method, seed, out);
+                }
+            },
+        }
+    }
+}
+
 /// A `[u64; 8]` as a JSON array.
 pub fn u64x8(v: [u64; 8]) -> Json {
     Json::Arr(v.iter().map(|&x| Json::U64(x)).collect())
@@ -209,5 +306,57 @@ mod tests {
         assert_eq!(id.len(), 64);
         // stable across calls
         assert_eq!(id, f_prog_graph_id());
+    }
+
+    #[cfg(feature = "bench-schema")]
+    #[test]
+    fn to_bench_records_flattens_numeric_leaves_with_dotted_paths() {
+        let doc = Json::obj(vec![
+            ("gf2_rank", Json::U64(12)),
+            ("invertible", Json::Bool(true)),
+            ("note", Json::s("skipped: not numeric")),
+            (
+                "differentials",
+                Json::Arr(vec![
+                    Json::obj(vec![("prob_ppm", Json::U64(500))]),
+                    Json::obj(vec![("prob_ppm", Json::U64(750))]),
+                ]),
+            ),
+        ]);
+        let records = doc.to_bench_records(
+            "hypercrypto/phase1",
+            "MINI-8/fixed",
+            "matrix-lifting",
+            0xA11CE,
+        );
+
+        // 4 numeric leaves; the Str leaf is skipped.
+        assert_eq!(records.len(), 4);
+        assert!(records.iter().all(|r| r.seed == 0xA11CE));
+        assert!(records.iter().all(|r| r.method == "matrix-lifting"));
+
+        let rank = records.iter().find(|r| r.metric == "gf2_rank").unwrap();
+        assert_eq!(rank.value, 12.0);
+
+        let inv = records.iter().find(|r| r.metric == "invertible").unwrap();
+        assert_eq!(inv.value, 1.0);
+
+        let d0 = records
+            .iter()
+            .find(|r| r.metric == "differentials.0.prob_ppm")
+            .unwrap();
+        assert_eq!(d0.value, 500.0);
+        let d1 = records
+            .iter()
+            .find(|r| r.metric == "differentials.1.prob_ppm")
+            .unwrap();
+        assert_eq!(d1.value, 750.0);
+
+        assert!(!records.iter().any(|r| r.metric == "note"));
+
+        // Round trips as JSONL like any other BenchRecord set.
+        let text = scirust_bench_schema::to_jsonl(&records);
+        let back = scirust_bench_schema::parse_jsonl(&text).expect("round trip");
+        assert_eq!(back, records);
     }
 }

@@ -3222,6 +3222,7 @@ dependencies = [
 name = "scirust-hypercrypto"
 version = "0.1.0"
 dependencies = [
+ "scirust-bench-schema",
  "scirust-modalg",
  "sha2",
 ]

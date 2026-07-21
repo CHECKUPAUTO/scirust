@@ -34,6 +34,12 @@ fn main() {
     println!("F6 threshold   : {F6_THRESHOLD:e} (relative associator)");
     println!();
 
+    // Every survey below is also collected as shared CANR §9 benchmark
+    // records (scirust-bench-schema) and streamed as JSONL at the end — the
+    // F2/F6 falsification numbers now speak the workspace's one benchmark
+    // schema, not only this bespoke text table.
+    let mut records: Vec<scirust_bench_schema::BenchRecord> = Vec::new();
+
     // ---- F2: zero-divisor / norm-collapse frequency ------------------------
     println!("F2 — zero-divisor / norm-collapse survey");
     println!("  (defect ratio r = ‖a·b‖² / (‖a‖²·‖b‖²); r≡1 iff composition algebra)");
@@ -59,6 +65,7 @@ fn main() {
     for (name, dist) in f2_dists
     {
         let s = survey_zero_divisors(0xF2, SAMPLES, dist, DEFAULT_NEAR_ZERO_THRESHOLD);
+        records.extend(s.to_bench_records(0xF2, name));
         println!(
             "  {:<22} {:>9} {:>9} {:>10.4} {:>10.4} {:>10.4} {:>8.2}%",
             name,
@@ -99,6 +106,7 @@ fn main() {
     for (name, dist) in f6_dists
     {
         let s = survey_structure_discrimination(0xF6, SAMPLES, dist, F6_THRESHOLD);
+        records.extend(s.to_bench_records(0xF6, name));
         println!(
             "  {:<22} {:>12.4}% {:>12.6} {:>12.6} {:>12.6}",
             name,
@@ -147,4 +155,11 @@ fn main() {
          both failure modes are confined to structured/degenerate inputs. This does NOT establish usefulness — \
          only that the necessary discriminative capacity exists."
     );
+
+    println!();
+    println!(
+        "=== bench-schema JSONL ({} records, scirust-bench-schema) ===",
+        records.len()
+    );
+    print!("{}", scirust_bench_schema::to_jsonl(&records));
 }

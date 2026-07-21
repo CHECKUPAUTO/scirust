@@ -25,6 +25,11 @@ use rust_decimal::{Decimal, RoundingStrategy};
 pub mod amort;
 pub mod audit;
 pub mod brktcalc;
+// Certified round-trip bounds for the fixed-point decimal fields — the
+// scirust-core::certified_numerics idea in exact, float-free decimal form.
+// Deliberately NOT in tests/no_float_guard.rs's SOURCES list: it certifies the
+// money path but is not itself part of it (and contains no floating point).
+pub mod certified;
 pub mod currcvt;
 pub mod daycount;
 pub mod paycalc;
