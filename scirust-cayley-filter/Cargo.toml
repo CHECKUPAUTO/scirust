@@ -17,3 +17,4 @@ scirust-core = { path = "../scirust-core" }
 scirust-solvers = { path = "../scirust-solvers" }
 
 [dev-dependencies]
+scirust-srcc = { path = "../scirust-srcc" }
