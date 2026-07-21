@@ -10,6 +10,7 @@ use super::adaptive::{Lms, Nlms, Rls};
 use super::biquad::{butterworth_qs, chebyshev1_pole_params};
 use super::fft::{Complex, Plan, fft, ifft, irfft, rfft};
 use super::fftconv::fft_convolve;
+use super::kalman::KalmanFilter;
 use super::mel::MelFilterbank;
 use super::mfcc::{Mfcc, dct2, dct2_basis};
 use super::pll::{Nco, PiLoopFilter, Pll};
@@ -2984,4 +2985,206 @@ fn symbol_timing_loop_reset_restores_initial_state() {
     loop_.reset();
     assert_eq!(loop_.samples_per_symbol_estimate(), initial_est);
     assert_eq!(loop_.mu(), 0.0);
+}
+
+// ------------------------------------------------------------------ //
+//  Kalman : KalmanFilter (linéaire et EKF)                            //
+// ------------------------------------------------------------------ //
+
+fn check_kalman_constant_velocity_converges<T: Scalar>() {
+    // Modèle vitesse constante : état [position, vitesse], mesure = position
+    // seule. Bruit de mesure/processus petit mais représentable en Q16_16
+    // (résolution ≈ 1,5e-5 : en dessous, R/Q s'arrondiraient à 0 et
+    // dégénéreraient l'exemple). Estimation initiale fausse ([0, 0]) et
+    // covariance initiale large : vérifie que le filtre converge vers la
+    // trajectoire vraie malgré cette incertitude de départ.
+    let dt = 1.0f64;
+    let (p0_true, v0_true) = (2.0f64, 0.5f64);
+    const STEPS: i32 = 50;
+
+    let f = [[T::of(1.0), T::of(dt)], [T::of(0.0), T::of(1.0)]];
+    let q = [[T::of(1e-3), T::of(0.0)], [T::of(0.0), T::of(1e-3)]];
+    let h = [[T::of(1.0), T::of(0.0)]];
+    let r = [[T::of(1e-2)]];
+
+    let x0 = [T::of(0.0), T::of(0.0)];
+    let p_init = [[T::of(100.0), T::of(0.0)], [T::of(0.0), T::of(100.0)]];
+    let mut kf = KalmanFilter::<T, 2, 1>::new(x0, p_init);
+
+    for k in 1..=STEPS
+    {
+        kf.predict(&f, &q);
+        let true_pos = p0_true + v0_true * f64::from(k) * dt;
+        kf.update(&[T::of(true_pos)], &h, &r)
+            .expect("S inversible (bruit non nul)");
+    }
+
+    let x = kf.state();
+    let want_pos = p0_true + v0_true * f64::from(STEPS) * dt;
+    assert!(
+        (x[0].to_f64() - want_pos).abs() <= 0.1,
+        "position estimée {} vs {want_pos}",
+        x[0].to_f64()
+    );
+    assert!(
+        (x[1].to_f64() - v0_true).abs() <= 0.1,
+        "vitesse estimée {} vs {v0_true}",
+        x[1].to_f64()
+    );
+}
+
+#[test]
+fn kalman_constant_velocity_converges_all_scalars() {
+    check_kalman_constant_velocity_converges::<f32>();
+    check_kalman_constant_velocity_converges::<f64>();
+    check_kalman_constant_velocity_converges::<Q16_16>();
+}
+
+fn check_kalman_predict_grows_covariance<T: Scalar>() {
+    // Sans mesure, la covariance ne peut que croître (couplage position-
+    // vitesse de `F`, plus le bruit de processus `Q` ajouté à chaque pas) —
+    // seule `update` peut la réduire.
+    let f = [[T::of(1.0), T::of(1.0)], [T::of(0.0), T::of(1.0)]];
+    let q = [[T::of(0.01), T::of(0.0)], [T::of(0.0), T::of(0.01)]];
+    let x0 = [T::of(0.0), T::of(0.0)];
+    let p0 = [[T::of(1.0), T::of(0.0)], [T::of(0.0), T::of(1.0)]];
+    let mut kf = KalmanFilter::<T, 2, 1>::new(x0, p0);
+
+    let initial_var = kf.covariance()[0][0].to_f64();
+    for _ in 0..5
+    {
+        kf.predict(&f, &q);
+    }
+    let grown_var = kf.covariance()[0][0].to_f64();
+    assert!(
+        grown_var > initial_var,
+        "la covariance devrait croître sans mesure : {initial_var} → {grown_var}"
+    );
+}
+
+#[test]
+fn kalman_predict_grows_covariance_all_scalars() {
+    check_kalman_predict_grows_covariance::<f32>();
+    check_kalman_predict_grows_covariance::<f64>();
+    check_kalman_predict_grows_covariance::<Q16_16>();
+}
+
+fn check_kalman_update_matches_hand_computation<T: Scalar>() {
+    // N = M = 1 : un pas de prédiction (F = 1, Q = 0, donc P inchangée) puis
+    // de mise à jour, comparé à la formule scalaire classique du filtre de
+    // Kalman : S = P+R, K = P/S, x' = x + K·(z−x), P' = (1−K)·P — la forme de
+    // Joseph dégénère à cette forme simplifiée en dimension 1 (K, P, R
+    // commutent tous en tant que scalaires).
+    let (p_prior, r, z, x_prior) = (4.0f64, 1.0f64, 5.0f64, 2.0f64);
+    let s = p_prior + r;
+    let k = p_prior / s;
+    let x_expected = x_prior + k * (z - x_prior);
+    let p_expected = (1.0 - k) * p_prior;
+
+    let f = [[T::of(1.0)]];
+    let q = [[T::of(0.0)]];
+    let h = [[T::of(1.0)]];
+    let r_m = [[T::of(r)]];
+
+    let mut kf = KalmanFilter::<T, 1, 1>::new([T::of(x_prior)], [[T::of(p_prior)]]);
+    kf.predict(&f, &q);
+    kf.update(&[T::of(z)], &h, &r_m).expect("S inversible");
+
+    assert!(
+        (kf.state()[0].to_f64() - x_expected).abs() <= T::TOL * 8.0,
+        "x' = {} vs {x_expected}",
+        kf.state()[0].to_f64()
+    );
+    assert!(
+        (kf.covariance()[0][0].to_f64() - p_expected).abs() <= T::TOL * 8.0,
+        "P' = {} vs {p_expected}",
+        kf.covariance()[0][0].to_f64()
+    );
+}
+
+#[test]
+fn kalman_update_matches_hand_computation_all_scalars() {
+    check_kalman_update_matches_hand_computation::<f32>();
+    check_kalman_update_matches_hand_computation::<f64>();
+    check_kalman_update_matches_hand_computation::<Q16_16>();
+}
+
+fn check_kalman_ekf_nonlinear_measurement_converges<T: Scalar>() {
+    // Exemple classique d'EKF : mesure non linéaire `z = x²` (état statique,
+    // aucune dynamique). Depuis une estimée initiale de même signe que la
+    // vraie valeur, la linéarisation locale (jacobienne `2·x̂` réévaluée à
+    // chaque pas) fait converger l'estimée vers `x_vrai` — même récurrence
+    // que l'itération de Newton pour `√z` (`x ← (x + z/x)/2`), régularisée
+    // par le bruit `R`/la covariance a priori. La trajectoire de `x` ne
+    // dépend (à l'échelle de `P` près) que du *rapport* `P/R`, pas de leur
+    // magnitude absolue : `R = 1.0` (plutôt qu'un bruit « réaliste » plus
+    // petit) garde `P` très au-dessus de la résolution Q16.16 (≈ 1,5e-5)
+    // tout au long de la convergence, sans changer sa vitesse — un `R` trop
+    // petit ferait sous-flotter `P` à zéro en virgule fixe bien avant
+    // convergence, bloquant le gain (`K = P/S → 0`) prématurément.
+    let x_true = 3.0f64;
+    let z_val = x_true * x_true;
+
+    let f_jac = [[T::of(1.0)]];
+    let q = [[T::of(0.0)]];
+    let r = [[T::of(1.0)]];
+
+    let mut kf = KalmanFilter::<T, 1, 1>::new([T::of(1.0)], [[T::of(10.0)]]);
+
+    for _ in 0..40
+    {
+        kf.predict_nonlinear(|x| *x, &f_jac, &q);
+        let x_hat = kf.state()[0].to_f64();
+        let jac = [[T::of(2.0 * x_hat)]];
+        kf.update_nonlinear(&[T::of(z_val)], |x| [x[0] * x[0]], &jac, &r)
+            .expect("S inversible");
+    }
+
+    assert!(
+        (kf.state()[0].to_f64() - x_true).abs() <= 0.06,
+        "EKF n'a pas convergé vers {x_true} : {}",
+        kf.state()[0].to_f64()
+    );
+}
+
+#[test]
+fn kalman_ekf_nonlinear_measurement_converges_all_scalars() {
+    check_kalman_ekf_nonlinear_measurement_converges::<f32>();
+    check_kalman_ekf_nonlinear_measurement_converges::<f64>();
+    check_kalman_ekf_nonlinear_measurement_converges::<Q16_16>();
+}
+
+fn check_kalman_update_singular_returns_none_and_leaves_state<T: Scalar + core::fmt::Debug>() {
+    // `H = 0` (mesure totalement non informative) et `R = 0` (bruit nul)
+    // rendent `S = H·P·Hᵀ + R` nulle, donc singulière : `update` doit
+    // renvoyer `None` sans modifier l'état ni la covariance.
+    let f = [[T::of(1.0)]];
+    let q = [[T::of(0.0)]];
+    let h = [[T::of(0.0)]];
+    let r = [[T::of(0.0)]];
+
+    let mut kf = KalmanFilter::<T, 1, 1>::new([T::of(5.0)], [[T::of(2.0)]]);
+    kf.predict(&f, &q);
+    let x_before = *kf.state();
+    let p_before = *kf.covariance();
+
+    let result = kf.update(&[T::of(1.0)], &h, &r);
+    assert!(result.is_none(), "S = 0 devrait être détectée singulière");
+    assert_eq!(
+        *kf.state(),
+        x_before,
+        "état modifié malgré l'échec de mise à jour"
+    );
+    assert_eq!(
+        *kf.covariance(),
+        p_before,
+        "covariance modifiée malgré l'échec de mise à jour"
+    );
+}
+
+#[test]
+fn kalman_update_singular_returns_none_and_leaves_state_all_scalars() {
+    check_kalman_update_singular_returns_none_and_leaves_state::<f32>();
+    check_kalman_update_singular_returns_none_and_leaves_state::<f64>();
+    check_kalman_update_singular_returns_none_and_leaves_state::<Q16_16>();
 }
