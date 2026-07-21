@@ -13,6 +13,7 @@ mod projector;
 mod robust;
 mod robust_search;
 mod robust_source;
+mod robust_source_search;
 mod scoring;
 mod search;
 mod selection;
@@ -37,6 +38,10 @@ pub use robust_search::{
 pub use robust_source::{
     SrccRobustSourceClusteringConfig, evaluate_source_clustered_robust_leave_one_out_stability,
     fit_source_clustered_robust_srcc_projector_from_views,
+};
+pub use robust_source_search::{
+    SrccSourceClusteredSearchConfig, search_source_clustered_robust_srcc_structures_from_views,
+    search_stable_source_clustered_robust_srcc_structures_from_views,
 };
 pub use scoring::{SrccCase, SrccScore, SrccScoringError, score_projector};
 pub use search::{
