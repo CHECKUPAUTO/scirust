@@ -23,6 +23,15 @@ use crate::{
 pub enum SrccRobustFitError {
     Discovery(SrccDiscoveryError),
     Closure(SrccClosureError),
+    InvalidMaximumSourceDistance,
+    NonFiniteSourceDistance {
+        view_index: usize,
+        source_cluster_index: usize,
+    },
+    AmbiguousSourceClusterAssignment {
+        view_index: usize,
+        sample_index: usize,
+    },
     AmbiguousTargetConsensus {
         view_index: usize,
         source_group_index: usize,
@@ -39,6 +48,30 @@ impl fmt::Display for SrccRobustFitError {
         {
             Self::Discovery(error) => error.fmt(formatter),
             Self::Closure(error) => error.fmt(formatter),
+            Self::InvalidMaximumSourceDistance =>
+            {
+                formatter.write_str("maximum source distance must be finite and non-negative")
+            },
+            Self::NonFiniteSourceDistance {
+                view_index,
+                source_cluster_index,
+            } =>
+            {
+                write!(
+                    formatter,
+                    "transport view {view_index}, source cluster {source_cluster_index} has a non-finite source distance",
+                )
+            },
+            Self::AmbiguousSourceClusterAssignment {
+                view_index,
+                sample_index,
+            } =>
+            {
+                write!(
+                    formatter,
+                    "transport view {view_index}, canonically ordered sample {sample_index} is compatible with multiple source clusters",
+                )
+            },
             Self::AmbiguousTargetConsensus {
                 view_index,
                 source_group_index,
