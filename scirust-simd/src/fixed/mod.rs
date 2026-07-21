@@ -96,7 +96,11 @@
 //   rigide de nuages de points via SVD (`orthogonal_procrustes`, `kabsch`,
 //   `kabsch_align`) retrouve la rotation (propre ou avec réflexion) et la
 //   translation alignant deux nuages de points — étalonnage de capteurs,
-//   ICP, alignement de structures.
+//   ICP, alignement de structures. Les solveurs itératifs de Krylov
+//   (`conjugate_gradient`, `preconditioned_conjugate_gradient`, `bicgstab`)
+//   complètent Cholesky/LU/QR par une résolution de `A·x = b` qui n'a besoin
+//   que du produit matrice-vecteur à chaque étape — pas de factorisation
+//   `O(n³)`/`O(n²)` en mémoire, avantageux pour les grands systèmes.
 // * [`activation`] — activations quantifiées (`relu`, `relu6`, `hardswish`…).
 // * [`layer`] — couche linéaire quantifiée [`layer::Linear`] (`W·x + b`, +
 //   activation), avec inférence par lot (`forward_batch` et variantes).
