@@ -2,6 +2,31 @@
 //
 // cargo bench --package benchmarks --features scirust-core/portable-simd
 
+// --- scirust-bench-schema migration note ----------------------------------
+// This file has no data-generation seed to pin: every input below (dot/axpy/
+// gemm/relu vectors and matrices) is built purely structurally from its
+// index -- e.g. `(0..size).map(|i| i as f32)`, `(i as f32) * 0.5`,
+// `(i as f32) * 0.01`, `i as f32 - (size / 2) as f32` -- with no RNG, LCG, or
+// seeded generator anywhere in this file. When migrating one of these
+// criterion targets (after `cargo bench`) to `BenchRecord` via
+// `scirust_bench_schema::criterion_estimate_to_record`, use `0` as an
+// explicit "no randomness" sentinel for the mandatory `seed` argument, e.g.
+// for the `dot_f32/simd/65536` benchmark:
+//
+//   let estimates_json = std::fs::read_to_string(
+//       "target/criterion/dot_f32/simd/65536/new/estimates.json")?;
+//   let record = scirust_bench_schema::criterion_estimate_to_record(
+//       &estimates_json,
+//       "benchmarks/dot_f32",       // kernel
+//       "size=65536",               // dataset: the swept `size` axis
+//       "simd_backend::sdot_f32",  // method: the SIMD-backend variant benched
+//       0,                          // seed: no RNG in this file -- see above
+//   )?;
+//
+// See scirust-bench-schema's crate docs ("Migrating criterion targets") for
+// the full pattern.
+// ---------------------------------------------------------------------------
+
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use scirust_core::matrix::{
     view::{MatrixView, MatrixViewMut},
