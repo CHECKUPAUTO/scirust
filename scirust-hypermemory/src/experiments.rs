@@ -219,6 +219,42 @@ impl ZeroDivisorSurvey {
             self.near_zero_count as f64 / self.samples as f64
         }
     }
+
+    /// This survey as shared CANR §9 benchmark records
+    /// ([`scirust_bench_schema`]). `seed` is the actual LCG seed that
+    /// generated the sampled products (the struct does not store it — pass
+    /// the seed you gave [`survey_zero_divisors`]); `dataset` names the
+    /// operand distribution. Emitting the whole survey as machine-readable
+    /// rows lets the F2 falsification result share the workspace's one
+    /// benchmark schema instead of a bespoke text table.
+    #[must_use]
+    pub fn to_bench_records(
+        &self,
+        seed: u64,
+        dataset: &str,
+    ) -> Vec<scirust_bench_schema::BenchRecord> {
+        let rec = |metric: &str, value: f64| {
+            scirust_bench_schema::BenchRecord::new(
+                "hypermemory/F2_zero_divisor",
+                dataset,
+                "sedenion_product",
+                seed,
+                metric,
+                value,
+            )
+        };
+        vec![
+            rec("samples", self.samples as f64),
+            rec("near_zero_fraction", self.near_zero_fraction()),
+            rec("exact_zero_count", self.exact_zero_count as f64),
+            rec("min_defect_ratio", f64::from(self.min_defect_ratio)),
+            rec("max_defect_ratio", f64::from(self.max_defect_ratio)),
+            rec("mean_defect_ratio", self.mean_defect_ratio),
+            rec("frac_below_half", self.frac_below_half),
+            rec("frac_below_tenth", self.frac_below_tenth),
+            rec("frac_below_hundredth", self.frac_below_hundredth),
+        ]
+    }
 }
 
 /// Survey the zero-divisor / norm-collapse behaviour of `samples` products,
@@ -355,6 +391,46 @@ impl StructureDiscriminationSurvey {
         {
             (self.samples - self.indistinguishable_count) as f64 / self.samples as f64
         }
+    }
+
+    /// This survey as shared CANR §9 benchmark records
+    /// ([`scirust_bench_schema`]). `seed` is the actual LCG seed passed to
+    /// [`survey_structure_discrimination`]; `dataset` names the operand
+    /// distribution. See [`ZeroDivisorSurvey::to_bench_records`].
+    #[must_use]
+    pub fn to_bench_records(
+        &self,
+        seed: u64,
+        dataset: &str,
+    ) -> Vec<scirust_bench_schema::BenchRecord> {
+        let rec = |metric: &str, value: f64| {
+            scirust_bench_schema::BenchRecord::new(
+                "hypermemory/F6_structure_discrimination",
+                dataset,
+                "sedenion_associator",
+                seed,
+                metric,
+                value,
+            )
+        };
+        vec![
+            rec("samples", self.samples as f64),
+            rec("discriminable_fraction", self.discriminable_fraction()),
+            rec(
+                "indistinguishable_count",
+                self.indistinguishable_count as f64,
+            ),
+            rec(
+                "min_relative_associator",
+                f64::from(self.min_relative_associator),
+            ),
+            rec(
+                "max_relative_associator",
+                f64::from(self.max_relative_associator),
+            ),
+            rec("mean_relative_associator", self.mean_relative_associator),
+            rec("threshold", f64::from(self.threshold)),
+        ]
     }
 }
 

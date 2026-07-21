@@ -34,6 +34,13 @@ scirust-simd = { path = "../scirust-simd", features = ["portable-simd"] }
 # download.
 sha2 = "0.10"
 
+# The workspace-wide CANR §9 benchmark-record schema. The F2/F6 falsification
+# surveys expose their numbers as `to_bench_records`, so the results share the
+# one benchmark schema used by scirust-signal, scirust-tdi-bench and the ANEE
+# examples instead of a bespoke text table. Library-level dependency because
+# `to_bench_records` lives on the survey types in `experiments.rs`.
+scirust-bench-schema = { path = "../scirust-bench-schema" }
+
 # SciRust's dedicated noise-processing toolkit (scirust-signal::denoise:
 # Kalman-RTS smoothing, Hampel impulse rejection, and much more). Used by the
 # observation-fusion front-end that pre-filters repeated noisy observations of
