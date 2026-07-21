@@ -8,6 +8,7 @@
 mod closure;
 mod discovery;
 mod evaluation;
+mod fitting;
 mod projector;
 mod scoring;
 mod selection;
@@ -15,6 +16,7 @@ mod selection;
 pub use closure::{SrccAdmissionCertificate, SrccClosure, SrccClosureError};
 pub use discovery::{SrccDiscoveryError, SrccTransportSample, learn_interleaved_transport_views};
 pub use evaluation::SrccEvaluation;
+pub use fitting::{SrccFitError, SrccFitResult, fit_srcc_projector};
 pub use projector::SrccProjector;
 pub use scoring::{SrccCase, SrccScore, SrccScoringError, score_projector};
 pub use selection::{
