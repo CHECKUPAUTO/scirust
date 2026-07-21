@@ -335,6 +335,47 @@ train/fine-tune/generate/speculative stack rides on top unchanged.
   path-traversal-safe); dedup is the missing quality piece before scaling the corpus
   10–100×.
 
+- **v3 corpus — the scale-up (×16.5).** The crates.io pull + the deduped ingest built
+  the real corpus: **1673 crates + the 3 repos → 34,722 files (6,976 skipped: 3,461
+  duplicates, 3,340 generated, rest data-tables) → 87.7 M tokens** (was 5.3 M). At
+  60k steps × 512 that's only ~0.35 epochs — so for the first time the model trains on
+  diverse data **without** the memorization pressure of the v2 run (~4 epochs on
+  5.3 M). Retrain in progress (`checkpoints/bpe350m_v3`, v2 tokenizer, shuffle + dedup
+  + retention all on); resume-to-target makes extending past 60k a one-liner.
+
+- **B20 — `fetch-crates` rate-limit retry.** The first pull lost ~half its crates to
+  crates.io **429**s (1673 of 3000 requested). `get_with_retry` now retries 429/503 —
+  honoring a `Retry-After` header, else exponential backoff capped at 60 s, up to
+  `--max-retries` (default 5) — across all four request sites (top-N pagination, the
+  version detail, the tarball download). Lets the next, larger polite pull actually
+  complete instead of skipping most crates, so the corpus can grow further toward the
+  100 M+ a 304M model wants.
+
+- **B21 — streaming, buffered shard writer (`collect-data`).** The collector used to
+  accumulate the **entire** token stream in RAM (`Vec<u32>`) before packing shards —
+  4 GB at 1B tokens on a memory-shared Jetson, and a crash late in the pass lost
+  everything. `ShardWriter` now flushes a shard the moment its buffer fills, so peak
+  memory is O(`tokens_per_shard`) regardless of corpus size, and partial progress
+  lands on disk. Writes go through a `BufWriter` (was one `write_all` **per token** —
+  a billion-syscall storm). Shard filenames widen to `shard_{:06}.bin`: the loader
+  sorts shards *lexically*, and the old `:04` silently misordered past 9999 shards
+  (`"10000" < "9999"`); 6 digits keeps concatenation order correct at any scale. This
+  de-risks the ~1B-token reshard the v3-eval verdict demands.
+
+## v3 quality verdict (step_60000, tokenizer_v3) — the 0%-parse wall
+
+Measured on the Thor with `cuda_eval`: **UTF-8 100 %** (reversible tokenizer fix holds,
+zero placeholder leaks), no repetition collapse (trigram-repeat 0.6 %, TTR 0.87), val
+loss improved vs v1 (6.37 vs 6.80 nats/tok) — **but `syn::parse_file` 0 % and balanced
+brackets 0 %**: still token salad, no valid Rust. Root cause is **not** the tokenizer or
+the training mechanics: train loss is still **5.60** (ppl 269), i.e. the model hasn't
+even fit the train set. At **304M params on ~86M tokens** that's **~0.28 token/param —
+~70× under Chinchilla**. The smooth 10.45→5.5 curve was only the initial descent; the
+model is data-starved for its size. Decision: **keep the 304M, grow the corpus toward
+~1B unique tokens** (big `fetch-crates` pull → reshard with the *same* tokenizer_v3 so
+`step_60000` warm-starts → long run via `SCIAGENT_TOTAL_STEPS`). B21 is the enabling
+step. More epochs on 86M would overfit before reaching syntax — the lever is unique data.
+
 ## Risks / honesty
 
 - **Toolchain gate (highest risk):** if the Thor's installed CUDA can't emit sm_110,

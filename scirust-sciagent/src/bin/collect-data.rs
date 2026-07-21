@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::Write;
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use std::collections::{BTreeMap, HashSet};
@@ -64,6 +64,75 @@ impl CollectStats {
     }
 }
 
+/// Streams tokens to fixed-size little-endian `u32` `.bin` shards, flushing a
+/// shard as soon as the buffer fills — so peak memory is O(tokens_per_shard),
+/// **not** O(corpus). This is what lets the collector tokenize a billion-token
+/// corpus on a memory-shared Jetson without holding the whole token stream in
+/// RAM (4 GB at 1B tokens), and it lands partial progress on disk instead of
+/// losing everything if the pass is interrupted late. Writes go through a
+/// `BufWriter`, replacing the old per-token `write_all` syscall storm.
+///
+/// Filenames are zero-padded to 6 digits (`shard_000000.bin`): the loader sorts
+/// shards *lexically* by name, so a uniform width keeps the concatenation order
+/// correct at any shard count (`shard_{:04}` silently misordered past 9999).
+struct ShardWriter {
+    out: PathBuf,
+    shard_size: usize,
+    buf: Vec<u32>,
+    shard_idx: usize,
+    total_tokens: usize,
+}
+
+impl ShardWriter {
+    fn new(out: PathBuf, shard_size: usize) -> Self {
+        let shard_size = shard_size.max(1);
+        Self {
+            out,
+            shard_size,
+            buf: Vec::with_capacity(shard_size),
+            shard_idx: 0,
+            total_tokens: 0,
+        }
+    }
+
+    /// Append token ids, flushing whenever a shard's worth has accumulated.
+    fn extend(&mut self, ids: impl IntoIterator<Item = u32>) {
+        for id in ids
+        {
+            self.buf.push(id);
+            self.total_tokens += 1;
+            if self.buf.len() >= self.shard_size
+            {
+                self.flush();
+            }
+        }
+    }
+
+    /// Write the buffered tokens as the next shard and clear the buffer.
+    fn flush(&mut self) {
+        if self.buf.is_empty()
+        {
+            return;
+        }
+        let shard_path = self.out.join(format!("shard_{:06}.bin", self.shard_idx));
+        let f = fs::File::create(&shard_path).expect("Cannot create shard file");
+        let mut w = BufWriter::new(f);
+        for &token in &self.buf
+        {
+            w.write_all(&token.to_le_bytes()).expect("Write error");
+        }
+        w.flush().expect("Flush error");
+        eprintln!(
+            "Shard {:06}: {} tokens -> {:?}",
+            self.shard_idx,
+            self.buf.len(),
+            shard_path
+        );
+        self.shard_idx += 1;
+        self.buf.clear();
+    }
+}
+
 fn main() {
     let args = Args::parse();
     fs::create_dir_all(&args.output).expect("Cannot create output dir");
@@ -87,7 +156,8 @@ fn main() {
         }
     );
 
-    let mut all_tokens: Vec<u32> = Vec::new();
+    eprintln!("Packing into shards of {} tokens...", args.tokens_per_shard);
+    let mut writer = ShardWriter::new(args.output.clone(), args.tokens_per_shard);
     let mut stats = CollectStats::default();
     for path in &args.input
     {
@@ -96,48 +166,25 @@ fn main() {
         {
             if let Ok(content) = fs::read_to_string(p)
             {
-                ingest_file(p, &content, filter, &tok, &mut all_tokens, &mut stats);
+                ingest_file(p, &content, filter, &tok, &mut writer, &mut stats);
             }
         }
         else if p.is_dir() && args.recursive
         {
-            collect_dir(p, &exts, filter, &tok, &mut all_tokens, &mut stats);
+            collect_dir(p, &exts, filter, &tok, &mut writer, &mut stats);
         }
     }
+    writer.flush(); // write the final partial shard
 
     eprintln!(
         "files kept {} | skipped {} | reasons {:?}",
         stats.kept, stats.skipped, stats.reasons
     );
-    eprintln!("Total tokens: {}", all_tokens.len());
-    eprintln!("Packing into shards of {} tokens...", args.tokens_per_shard);
-
-    let shard_size = args.tokens_per_shard;
-    let num_shards = all_tokens.len().div_ceil(shard_size);
-
-    for shard_idx in 0..num_shards
-    {
-        let start = shard_idx * shard_size;
-        let end = std::cmp::min(start + shard_size, all_tokens.len());
-        let shard_data = &all_tokens[start..end];
-
-        let shard_path = args.output.join(format!("shard_{:04}.bin", shard_idx));
-        let mut f = fs::File::create(&shard_path).expect("Cannot create shard file");
-
-        for &token in shard_data
-        {
-            f.write_all(&token.to_le_bytes()).expect("Write error");
-        }
-
-        eprintln!(
-            "Shard {:04}: {} tokens -> {:?}",
-            shard_idx,
-            shard_data.len(),
-            shard_path
-        );
-    }
-
-    eprintln!("Done: {} shards written to {:?}", num_shards, args.output);
+    eprintln!("Total tokens: {}", writer.total_tokens);
+    eprintln!(
+        "Done: {} shards written to {:?}",
+        writer.shard_idx, args.output
+    );
 }
 
 /// Tokenize one file into `tokens`, applying the quality filter and updating stats.
@@ -146,7 +193,7 @@ fn ingest_file(
     content: &str,
     filter: bool,
     tok: &BpeTokenizer,
-    tokens: &mut Vec<u32>,
+    writer: &mut ShardWriter,
     stats: &mut CollectStats,
 ) {
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
@@ -167,7 +214,7 @@ fn ingest_file(
         return;
     }
     let ids = tok.encode_with_special(content, true, true);
-    tokens.extend(ids.iter().map(|&i| i as u32));
+    writer.extend(ids.iter().map(|&i| i as u32));
     stats.kept += 1;
 }
 
@@ -176,7 +223,7 @@ fn collect_dir(
     exts: &[String],
     filter: bool,
     tok: &BpeTokenizer,
-    tokens: &mut Vec<u32>,
+    writer: &mut ShardWriter,
     stats: &mut CollectStats,
 ) {
     if let Ok(entries) = fs::read_dir(dir)
@@ -197,13 +244,13 @@ fn collect_dir(
                         continue;
                     }
                 }
-                collect_dir(&path, exts, filter, tok, tokens, stats);
+                collect_dir(&path, exts, filter, tok, writer, stats);
             }
             else if matches_extension(&path, exts)
             {
                 if let Ok(content) = fs::read_to_string(&path)
                 {
-                    ingest_file(&path, &content, filter, tok, tokens, stats);
+                    ingest_file(&path, &content, filter, tok, writer, stats);
                 }
             }
         }

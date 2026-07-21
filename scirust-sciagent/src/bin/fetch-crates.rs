@@ -16,6 +16,54 @@ use clap::Parser;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
+const USER_AGENT: &str = "scirust-sciagent/0.1 (data-collection)";
+
+/// GET `url` with retry-on-rate-limit. crates.io returns **429** (and sometimes
+/// **503**) under a fast crawl — the first big pull lost ~half its crates to it.
+/// On those, wait (honoring a `Retry-After` header if present, else exponential
+/// backoff capped at 60 s) and retry up to `max_retries`. Other statuses and
+/// transport errors fail immediately. This is what lets a large polite pull
+/// actually complete instead of skipping most crates.
+fn get_with_retry(
+    url: &str,
+    max_retries: u32,
+) -> Result<ureq::Response, Box<dyn std::error::Error>> {
+    let mut backoff = Duration::from_secs(2);
+    let mut attempt = 0;
+    loop
+    {
+        match ureq::get(url)
+            .set("User-Agent", USER_AGENT)
+            .timeout(Duration::from_secs(120))
+            .call()
+        {
+            Ok(resp) => return Ok(resp),
+            Err(ureq::Error::Status(code, resp)) if code == 429 || code == 503 =>
+            {
+                if attempt >= max_retries
+                {
+                    return Err(format!("{url}: status {code} after {max_retries} retries").into());
+                }
+                // Honor Retry-After (seconds) if the server sent one, else back off.
+                let wait = resp
+                    .header("retry-after")
+                    .and_then(|s| s.trim().parse::<u64>().ok())
+                    .map(Duration::from_secs)
+                    .unwrap_or(backoff);
+                eprintln!(
+                    "  {code} rate-limited — waiting {}s (retry {}/{max_retries})",
+                    wait.as_secs(),
+                    attempt + 1
+                );
+                std::thread::sleep(wait);
+                backoff = (backoff * 2).min(Duration::from_secs(60));
+                attempt += 1;
+            },
+            Err(e) => return Err(e.into()),
+        }
+    }
+}
+
 // ── crates.io API response shapes ──────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -77,6 +125,10 @@ struct Args {
     /// Path to a file listing specific crates (one per line) instead of fetching top crates.
     #[arg(long)]
     crate_list: Option<PathBuf>,
+
+    /// Retries on a 429/503 rate-limit before giving up on a request (with backoff).
+    #[arg(long, default_value_t = 5)]
+    max_retries: u32,
 }
 
 fn main() {
@@ -99,7 +151,7 @@ fn main() {
     }
     else
     {
-        fetch_top_crates(args.count)
+        fetch_top_crates(args.count, args.max_retries)
     };
 
     eprintln!("Fetching {} crates...", crates.len());
@@ -115,7 +167,7 @@ fn main() {
             continue;
         }
 
-        if let Err(e) = fetch_and_extract(c, out, args.skip_extract)
+        if let Err(e) = fetch_and_extract(c, out, args.skip_extract, args.max_retries)
         {
             eprintln!("  SKIP {}: {e}", c.id);
         }
@@ -141,18 +193,15 @@ fn main() {
     );
 }
 
-fn fetch_top_crates(count: usize) -> Vec<CrateSummary> {
+fn fetch_top_crates(count: usize, max_retries: u32) -> Vec<CrateSummary> {
     let url = format!(
         "https://crates.io/api/v1/crates?page=1&per_page={}&sort=downloads",
         count.min(100)
     );
-    let resp = ureq::get(&url)
-        .set("User-Agent", "scirust-sciagent/0.1 (data-collection)")
-        .call()
-        .unwrap_or_else(|e| {
-            eprintln!("Error fetching crate list: {e}");
-            std::process::exit(1);
-        });
+    let resp = get_with_retry(&url, max_retries).unwrap_or_else(|e| {
+        eprintln!("Error fetching crate list: {e}");
+        std::process::exit(1);
+    });
     let api: ApiResponse = resp.into_json().unwrap_or_else(|e| {
         eprintln!("Error parsing crate list JSON: {e}");
         std::process::exit(1);
@@ -166,16 +215,14 @@ fn fetch_top_crates(count: usize) -> Vec<CrateSummary> {
         {
             let url =
                 format!("https://crates.io/api/v1/crates?page={page}&per_page=100&sort=downloads");
-            if let Ok(resp) = ureq::get(&url)
-                .set("User-Agent", "scirust-sciagent/0.1 (data-collection)")
-                .call()
+            if let Ok(resp) = get_with_retry(&url, max_retries)
             {
                 if let Ok(api) = resp.into_json::<ApiResponse>()
                 {
                     all.extend(api.crates);
                 }
             }
-            std::thread::sleep(Duration::from_millis(50));
+            std::thread::sleep(Duration::from_millis(200));
         }
         all.truncate(count);
         all
@@ -190,15 +237,14 @@ fn fetch_and_extract(
     krate: &CrateSummary,
     out: &Path,
     skip_extract: bool,
+    max_retries: u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // 1. Resolve the version AND its published checksum from the crates.io
     //    detail endpoint. The checksum is the SHA-256 of the .crate tarball
     //    as published; verifying the download against it makes the fetch
     //    tamper-evident (audit `AUDIT_COMPLET.md`, finding S3).
     let detail_url = format!("https://crates.io/api/v1/crates/{}", krate.id);
-    let resp = ureq::get(&detail_url)
-        .set("User-Agent", "scirust-sciagent/0.1 (data-collection)")
-        .call()?;
+    let resp = get_with_retry(&detail_url, max_retries)?;
     let detail: CrateDetail = resp.into_json()?;
     let chosen = if krate.max_version.is_empty()
     {
@@ -231,10 +277,7 @@ fn fetch_and_extract(
             "  DL {} v{} ({} downloads)",
             krate.id, version, krate.downloads
         );
-        let resp = ureq::get(&dl_url)
-            .set("User-Agent", "scirust-sciagent/0.1 (data-collection)")
-            .timeout(Duration::from_secs(120))
-            .call()?;
+        let resp = get_with_retry(&dl_url, max_retries)?;
 
         let mut body = Vec::new();
         resp.into_reader().read_to_end(&mut body)?;
