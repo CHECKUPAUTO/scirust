@@ -34,10 +34,21 @@ const MAX_REFERENCE_CELLS: usize = 40;
 
 /// Any `usize` a `reference_cells`/`guard_cells`/trim field might hold,
 /// including the small edge values (`0`, `1`) that are invalid for
-/// `reference_cells` specifically — the whole point is to exercise both
-/// sides of that boundary, not only the valid range.
+/// `reference_cells` specifically, and — the whole point being to exercise
+/// both sides of every boundary, not only the "reasonable" range — the huge
+/// values (`usize::MAX` and near it) that must be rejected with a structured
+/// `ReferenceWindowTooLarge`/`InvalidTrimCounts` error rather than panicking
+/// on overflow in the `reference_cells + guard_cells`/`2 * reference_cells`/
+/// `trim_low + trim_high` arithmetic.
 fn any_small_count() -> impl Strategy<Value = usize> {
-    0..=MAX_REFERENCE_CELLS
+    prop_oneof![
+        6 => 0..=MAX_REFERENCE_CELLS,
+        1 => Just(0usize),
+        1 => Just(1usize),
+        1 => Just(usize::MAX),
+        1 => Just(usize::MAX - 1),
+        1 => Just(usize::MAX / 2),
+    ]
 }
 
 /// Any `f64` a `pfa`/`k_vi`/`k_mr` field might hold: ordinary finite values
@@ -89,11 +100,14 @@ fn any_detector_policy() -> impl Strategy<Value = DetectorPolicy> {
 
 /// A `CfarConfig` with every field independently drawn from its full
 /// possible range, including values [`CfarConfig::validate`] must reject —
-/// deliberately not filtered down to "valid configs only".
+/// deliberately not filtered down to "valid configs only". `guard_cells`
+/// shares [`any_small_count`]'s distribution (including near-`usize::MAX`
+/// draws) since `reference_cells + guard_cells` is exactly the other half of
+/// the overflow-prone window-size arithmetic.
 fn any_config() -> impl Strategy<Value = CfarConfig> {
     (
         any_small_count(),
-        0usize..=8,
+        any_small_count(),
         any_config_scalar(),
         any_detector_policy(),
         any_robust_estimator(),
