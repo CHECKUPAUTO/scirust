@@ -254,13 +254,40 @@ fn generate_proposals(
             }
 
             proposals.push(Proposal {
-                direction: normalize(residual),
+                direction: canonicalize_direction(normalize(residual)),
                 transport_index,
             });
         }
     }
 
+    proposals.sort_by(|left, right| {
+        left.direction
+            .iter()
+            .zip(right.direction.iter())
+            .find_map(|(left_value, right_value)| {
+                let ordering = left_value.total_cmp(right_value);
+
+                ordering.is_ne().then_some(ordering)
+            })
+            .unwrap_or_else(|| left.transport_index.cmp(&right.transport_index))
+    });
+
     proposals
+}
+
+fn canonicalize_direction(mut direction: Vector16) -> Vector16 {
+    if let Some(pivot) = direction.iter().find(|value| **value != 0.0)
+    {
+        if *pivot < 0.0
+        {
+            for value in &mut direction
+            {
+                *value = -*value;
+            }
+        }
+    }
+
+    direction
 }
 
 fn cluster_proposals(proposals: Vec<Proposal>, threshold: f64) -> Vec<ResonanceCluster> {
@@ -508,6 +535,28 @@ mod tests {
         assert_eq!(clusters[1].len(), 1);
 
         assert!(minimum_pairwise_alignment(&clusters[0]) >= 0.9);
+    }
+
+    #[test]
+    fn closure_is_invariant_to_transport_order() {
+        let seeds = [basis_vector(1).unwrap()];
+
+        let transports = [
+            transport(1, 2, 1.0),
+            transport(1, 2, -2.0),
+            transport(1, 3, 1.0),
+        ];
+
+        let reordered = [transports[2], transports[1], transports[0]];
+
+        let first = SrccClosure::build(&seeds, &transports, SrccConfig::default()).unwrap();
+
+        let second = SrccClosure::build(&seeds, &reordered, SrccConfig::default()).unwrap();
+
+        assert_eq!(first.basis(), second.basis());
+        assert_eq!(first.dimension(), second.dimension());
+
+        assert_eq!(first.accepted_per_round(), second.accepted_per_round(),);
     }
 
     #[test]
