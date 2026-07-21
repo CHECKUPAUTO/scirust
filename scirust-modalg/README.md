@@ -39,6 +39,7 @@ optimized SIMD/hardware library instead — see [Positioning](#positioning).
 | [`hypercomplex`] | Exact integer **octonions** and **quaternions** over any `Word`, with an authoritative multiplication oracle cross-checked against a Fano-triple generator. |
 | [`bigint`] | Arbitrary-precision signed integers: decimal I/O, comparison, `+ − ×`, truncated `divmod`, `pow`, `gcd`, and an **NTT-accelerated `mul_ntt`** (multi-prime + CRT). |
 | [`bigrational`] | Exact rationals over `BigInt` and **overflow-free** exact linear algebra (`solve`, `determinant`). |
+| [`smith`] | The exact **Smith normal form** of an integer matrix over `BigInt` (**no overflow ceiling**): invariant factors `d₁ \| d₂ \| …` plus unimodular certificates `U`, `V` with `U · A · V = D` — the overflow-free companion to the Hermite normal form. |
 
 ### The four outlets (*débouchés*)
 
@@ -84,7 +85,8 @@ vector**, not just self-consistency:
 - `GF(p)[x]` division reconstructed (`a = q·b + r`), Bézout (`u·a + v·b = g`), the product rule (`(fg)' = f'g + fg'`), Rabin irreducibility vs an exhaustive root search (plus the AES modulus `x⁸+x⁴+x³+x+1`), and factorization reconstructed (`∏ qᵢ^eᵢ = f`, each `qᵢ` irreducible; `x^p − x` splits into all `p` linear factors);
 - `GF(p^k)` field axioms on random elements, `a^(p^k−1) = 1` and `a^(p^k) = a` (Lagrange + Frobenius), and `GF(2^8)` products/inverses matching the packed `gf2::Gf2Field::rijndael8`;
 - LLL output verified LLL-reduced with a unimodular certificate (`U·A = reduced`, `det U = ±1`) and preserved lattice volume;
-- `BigInt` arithmetic vs `i128` over thousands of random cases.
+- `BigInt` arithmetic vs `i128` over thousands of random cases;
+- Smith normal form reconstructed (`U·A·V = D`), `U`, `V` unimodular (`det = ±1`), the divisibility chain `dᵢ | dᵢ₊₁`, and `∏ dᵢ = |det A|` for square matrices.
 
 ## Usage
 
@@ -139,6 +141,7 @@ matter more than speed; choose an optimized library otherwise.
 [`hypercomplex`]: src/hypercomplex/mod.rs
 [`bigint`]: src/bigint.rs
 [`bigrational`]: src/bigrational.rs
+[`smith`]: src/smith.rs
 [`codes`]: src/codes.rs
 [`crc`]: src/crc.rs
 [`sbox`]: src/sbox.rs
