@@ -86,8 +86,8 @@ deployment from within a method crate.
 
 | Phase | Title | Branch | PR | Merge commit | Status |
 |------:|-------|--------|----|--------------|--------|
-| 721 | Robust descriptive statistics | `claude/scirust-srcc-robust-stats-6ue9xc` | [#725](https://github.com/Memorithm/scirust/pull/725) | _(pending)_ | In review |
-| 722 | Robust multivariate geometry | `feat/multivariate-robust-geometry` | — | — | Not started |
+| 721 | Robust descriptive statistics | `claude/scirust-srcc-robust-stats-6ue9xc` | [#725](https://github.com/Memorithm/scirust/pull/725) | `f2b87380eb02dda91e39c7c45f1ab73d6f9a5a36` | **Merged** |
+| 722 | Robust multivariate geometry | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#729](https://github.com/Memorithm/scirust/pull/729) | _(pending)_ | In review |
 | 723 | Scale-aware SRCC source geometry | `feat/srcc-scale-aware-source-geometry` | — | — | Not started |
 | 724 | Deterministic robust regression | `feat/learning-robust-regression` | — | — | Not started |
 | 725 | Trust & contamination models | `feat/srcc-trust-contamination-models` | — | — | Not started |
@@ -96,13 +96,15 @@ deployment from within a method crate.
 | 728 | Real industrial evaluation | `feat/srcc-industrial-real-data-evaluation` | — | — | Not started |
 | 729 | Shadow deployment & promotion gates | `feat/mlops-srcc-shadow-deployment` | — | — | Not started |
 
-> Notes for phase 721:
-> - The program's suggested branch was `feat/stats-robust-descriptive`, but this
->   session's fixed development branch is `claude/scirust-srcc-robust-stats-6ue9xc`.
-> - GitHub assigned this phase the real number **PR #725** (numbers 721–724 were
->   consumed by other concurrent branches). The phase→number mapping is *not* 1:1:
->   "Phase 721" is tracked by GitHub PR #725. This is recorded honestly rather than
->   forcing a matching number.
+> Branch and numbering notes:
+> - The program's suggested per-phase branches (`feat/stats-robust-descriptive`,
+>   `feat/multivariate-robust-geometry`, …) are replaced by this session's fixed
+>   development branch `claude/scirust-srcc-robust-stats-6ue9xc`, which is
+>   restarted from the merged `master` for each successive phase (one PR per
+>   phase is preserved).
+> - GitHub assigned phase 721 the real number **PR #725** (numbers 721–724 were
+>   consumed by other concurrent branches). The phase→number mapping is *not*
+>   1:1; real numbers are recorded here honestly rather than forced to match.
 
 ---
 
@@ -190,3 +192,112 @@ with any dependent.
   audited normal quantile; only same-toolchain run-to-run identity is verified here.
 - Multivariate/covariance robustness, robust regression and SRCC integration are
   out of scope for this phase.
+
+---
+
+## Phase 722 — Robust multivariate scaling and geometry
+
+**Crate:** `scirust-multivariate` · **Module:** `scirust-multivariate/src/robust_geometry.rs`
+
+### Design
+
+Fitted geometry models that remove accidental dependence on raw coordinate
+scales and units. New public surface (re-exported at the crate root):
+
+- `RobustScaler` (`fit` / `transform` / `inverse_transform`) with
+  `RobustScalerConfig { center, scale_method, zero_scale_policy, minimum_scale }`,
+  `RobustScaleMethod { StandardDeviation, MedianAbsoluteDeviation,
+  InterquartileRange }` and `ZeroScalePolicy { Error, UnitScale, DropDimension }`.
+  Locations are the mean (std-dev method) or median (MAD/IQR); the location is
+  always fitted and stored, so dropped dimensions are restorable. Degenerate
+  dimensions (scale ≤ `minimum_scale`) follow the explicit policy — never a
+  silent substitution. Config and scaler derive serde.
+- `FittedDistanceMetric { RawEuclidean, RelativeNorm { epsilon },
+  RobustDiagonal { scaler }, RegularizedMahalanobis { location, inverse_scatter,
+  ridge } }` with `distance`, `fit_robust_diagonal`,
+  `fit_regularized_mahalanobis`, `fitted_dimension_count`, and
+  `validate_feature_descriptors`. The relative norm is
+  `‖x − y‖ / max(‖x‖, ‖y‖, ε)`. The Mahalanobis variant is named
+  `RegularizedMahalanobis` — **not** `RobustAffineInvariant` — because its
+  location/scatter are the classical mean/covariance plus an explicit ridge; a
+  singular regularized scatter is a typed `SingularScatter` error via a strict
+  Cholesky, never a hidden fallback (the crate's historical regularizing
+  `cholesky` is untouched; its `invert_lower_triangular` is reused).
+- `FeatureDescriptor { name, dimension: scirust_units::Dimension }` — the units
+  boundary. Raw metrics (`RawEuclidean`, `RelativeNorm`) require one common
+  physical dimension across features; fitted metrics render coordinates
+  dimensionless and accept mixed dimensions (count must match). No serde on this
+  type (`Dimension` does not serialize).
+- Typed `RobustGeometryError` (manual `Display`/`Error` with `source()` for the
+  embedded `RobustStatsError`); ragged matrices, non-finite entries, invalid
+  ε/ridge/minimum-scale, dimension mismatches and empty descriptors are all
+  explicit errors. No silent `NaN`.
+
+Reuse: MAD/IQR/median/mean come from `scirust-stats` (phase 721) — no duplicate
+robust statistics. Dependencies added to `scirust-multivariate`: `scirust-stats`,
+`scirust-units` (both cycle-free; multivariate has no reverse dependencies), and
+dev-only `serde_json` for a serialization round-trip test. `#![forbid(unsafe_code)]`
+added to the crate (it contained no unsafe).
+
+### Invariance groups (documented, tested, never overstated)
+
+| Metric | Invariant to | Not invariant to |
+|---|---|---|
+| `RawEuclidean` | rigid motions | any rescaling |
+| `RelativeNorm` | common positive rescaling (ε-inactive regime) | per-coordinate rescaling, translation |
+| `RobustDiagonal` (refit) | positive per-coordinate rescaling + translation | rotations, general affine maps |
+| `RegularizedMahalanobis` (refit) | affine maps in exact arithmetic only; ridge + floating point break exact equivariance | — |
+
+### Determinism contract
+
+Pure fixed-order loops, no RNG, no thread-dependent reductions; benchmark
+neighbour ranking uses `f64::total_cmp` with index tie-breaks. Fitting the same
+matrix twice yields bit-identical models (tested).
+
+### Tests
+
+22 inline unit tests: transform/inverse round trips (all methods × center
+on/off), hand-computed MAD scaling, deterministic fitting (bit-identical),
+row-order invariance for order-statistic scalers, all three zero-scale policies,
+all-constant matrix → `NoActiveDimensions`, ragged/non-finite/mismatch
+rejections, per-coordinate rescaling and translation invariance after refit,
+relative-norm common-scale invariance and zero-vector behaviour, Mahalanobis vs
+hand-computed isotropic case, singular scatter as typed error resolved by an
+explicit ridge, invalid ε/ridge rejection, units-descriptor validation, serde
+round trip, and a no-silent-NaN sweep.
+
+### Benchmark fingerprint
+
+Example `scirust-multivariate/examples/robust_geometry.rs` — fixed two-cluster
+dataset; global scales `{1, 1e3, 1e6, 1e9}` and an anisotropic column scaling
+`diag(1, 1e3, 1e6, 1e9)`; metrics refit per transform; reports kNN-set
+preservation, two-cluster nearest-medoid recovery, and max pairwise distortion.
+Timings go to stderr only — never into the hashed artifact.
+
+```
+SHA-256 (scientific stdout, nightly-2026-07-02, x86_64):
+bad8cf079c7d0aa4a2320fa40d96ff843f222507ed77142ee2bd3703ccf87dee
+```
+
+Honest highlights: under anisotropic scaling, raw-Euclidean kNN preservation
+collapses to 2.5 % while robust-diagonal stays at 100 % with ~1e-15 distortion;
+the relative norm also collapses under anisotropy (documented — it is only
+common-scale invariant) and shows weak cluster recovery (65 %) even at baseline
+because it is not translation invariant; the Mahalanobis ridge visibly breaks
+exact scale equivariance (~8e-10 distortion). Negative results retained.
+
+### Compatibility
+
+Purely additive to the public API; the historical `cholesky`/`invert_matrix`
+Mahalanobis helpers are untouched and all 42 pre-existing tests pass unchanged.
+`Cargo.lock` gains only the three new dependency edges (no new external
+packages). `cargo check --workspace --all-targets --locked` passes.
+
+### Known limitations / deferred
+
+- The robust scatter problem (MCD-style robust covariance) is **not** solved
+  here; `RegularizedMahalanobis` is a classical baseline by design.
+- Scale invariance of `RobustDiagonal` holds when the scaler is refit on the
+  rescaled data — a frozen scaler applied to differently-scaled inputs is not
+  invariant (and is validated only for dimension count, not provenance).
+- SRCC integration is deferred to phase 723.
