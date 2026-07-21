@@ -27,6 +27,14 @@
 //   paramètres de Plücker/Chasles du vissage ([`Screw`] : axe, angle, pas,
 //   moment) en API autonome — utile pour extraire l'axe de vissage fini
 //   entre deux poses (calibrage/visualisation en robotique).
+// * [`ahrs`] — fusion de capteurs inertiels en orientation
+//   ([`ahrs::MadgwickFilter`] par descente de gradient,
+//   [`ahrs::MahonyFilter`] complémentaire explicite proportionnel-intégral) :
+//   combine gyroscope (intègre précisément à court terme, dérive à long
+//   terme) et accéléromètre/magnétomètre (bruités mais sans dérive) — le
+//   cœur de tout contrôleur de vol de drone ou carte AHRS/IMU. `update_imu`
+//   (6 ddl) ne contraint pas le lacet (invisible à la gravité seule) ;
+//   `update_marg` (9 ddl, magnétomètre) le corrige aussi.
 //
 // ## Pourquoi générique ?
 //
@@ -38,10 +46,12 @@
 // hérite de cette généricité : composer des poses `SE(3)` en virgule fixe
 // donne la même trajectoire, bit pour bit, sur toute plateforme.
 
+pub mod ahrs;
 pub mod dual_quaternion;
 pub mod quaternion;
 pub mod transform;
 
+pub use ahrs::{MadgwickFilter, MahonyFilter};
 pub use dual_quaternion::{DualQuaternion, Screw};
 pub use quaternion::Quaternion;
 pub use transform::Transform;

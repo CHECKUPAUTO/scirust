@@ -14,7 +14,7 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::fixed::Q16_16;
-use scirust_simd::geometry::{DualQuaternion, Quaternion, Transform};
+use scirust_simd::geometry::{DualQuaternion, MadgwickFilter, MahonyFilter, Quaternion, Transform};
 
 const N: usize = 1 << 12;
 
@@ -478,6 +478,94 @@ fn bench_dual_quaternion(c: &mut Criterion) {
     g.finish();
 }
 
+/// Fusion AHRS (IMU 6 ddl) : Madgwick (descente de gradient numérique,
+/// 8 évaluations de coût par échantillon) contre Mahony (rétroaction directe
+/// par produit vectoriel) — mesure le surcoût du gradient numérique face à
+/// une correction analytique.
+fn bench_ahrs(c: &mut Criterion) {
+    let n = 1 << 12;
+    let mut rng = Lcg(0xE7);
+    let gyro_f: Vec<[f32; 3]> = (0..n)
+        .map(|_| {
+            [
+                rng.unit() as f32 * 0.1,
+                rng.unit() as f32 * 0.1,
+                rng.unit() as f32 * 0.1,
+            ]
+        })
+        .collect();
+    let accel_f: Vec<[f32; 3]> = (0..n)
+        .map(|_| [rng.unit() as f32 * 0.05, rng.unit() as f32 * 0.05, 1.0])
+        .collect();
+    let gyro_x: Vec<[Q16_16; 3]> = gyro_f
+        .iter()
+        .map(|g| g.map(|v| Q16_16::try_from(v as f64).unwrap()))
+        .collect();
+    let accel_x: Vec<[Q16_16; 3]> = accel_f
+        .iter()
+        .map(|a| a.map(|v| Q16_16::try_from(v as f64).unwrap()))
+        .collect();
+
+    let mut g = c.benchmark_group("madgwick_update_imu");
+    g.throughput(Throughput::Elements(n as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            let mut f = MadgwickFilter::<Q16_16>::new(Q16_16::try_from(0.1).unwrap());
+            for i in 0..n
+            {
+                f.update_imu(
+                    black_box(gyro_x[i]),
+                    black_box(accel_x[i]),
+                    Q16_16::try_from(0.01).unwrap(),
+                );
+            }
+            f.orientation()
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| {
+            let mut f = MadgwickFilter::<f32>::new(0.1);
+            for i in 0..n
+            {
+                f.update_imu(black_box(gyro_f[i]), black_box(accel_f[i]), 0.01);
+            }
+            f.orientation()
+        })
+    });
+    g.finish();
+
+    let mut g = c.benchmark_group("mahony_update_imu");
+    g.throughput(Throughput::Elements(n as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            let mut f = MahonyFilter::<Q16_16>::new(
+                Q16_16::try_from(1.0).unwrap(),
+                Q16_16::try_from(0.05).unwrap(),
+            );
+            for i in 0..n
+            {
+                f.update_imu(
+                    black_box(gyro_x[i]),
+                    black_box(accel_x[i]),
+                    Q16_16::try_from(0.01).unwrap(),
+                );
+            }
+            f.orientation()
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| {
+            let mut f = MahonyFilter::<f32>::new(1.0, 0.05);
+            for i in 0..n
+            {
+                f.update_imu(black_box(gyro_f[i]), black_box(accel_f[i]), 0.01);
+            }
+            f.orientation()
+        })
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_rotate,
@@ -486,6 +574,7 @@ criterion_group!(
     bench_from_rotation_matrix,
     bench_euler_roundtrip,
     bench_transform,
-    bench_dual_quaternion
+    bench_dual_quaternion,
+    bench_ahrs
 );
 criterion_main!(benches);
