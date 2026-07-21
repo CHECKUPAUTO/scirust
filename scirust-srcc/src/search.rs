@@ -3,7 +3,7 @@
 use core::fmt;
 
 use crate::{
-    SrccCase, SrccConfig, SrccFitError, SrccGateDecision, SrccProjector, SrccScore,
+    SRCC_DIMENSION, SrccCase, SrccConfig, SrccFitError, SrccGateDecision, SrccProjector, SrccScore,
     SrccSelectionError, SrccTransportSample, Vector16, fit_srcc_projector,
     fit_srcc_projector_from_views, select_srcc_train_dev,
 };
@@ -411,6 +411,8 @@ pub struct SrccStableSearchConfig {
     pub distortion_weight: f64,
     pub maximum_frobenius_distance: f64,
     pub minimum_dimension_stability_ratio: f64,
+    /// Minimum closure dimension required before a stable candidate may be selected.
+    pub minimum_rejected_dimension: usize,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -432,6 +434,7 @@ pub struct SrccStableSearchResult {
 pub enum SrccStableSearchError {
     InvalidMaximumFrobeniusDistance,
     InvalidMinimumDimensionStabilityRatio,
+    InvalidMinimumRejectedDimension,
     Search(SrccSearchError),
     Stability(crate::SrccStabilityError),
 }
@@ -447,6 +450,10 @@ impl fmt::Display for SrccStableSearchError {
             Self::InvalidMinimumDimensionStabilityRatio =>
             {
                 formatter.write_str("minimum dimension stability ratio must belong to [0, 1]")
+            },
+            Self::InvalidMinimumRejectedDimension =>
+            {
+                formatter.write_str("minimum rejected dimension must not exceed the SRCC dimension")
             },
             Self::Search(error) => error.fmt(formatter),
             Self::Stability(error) => error.fmt(formatter),
@@ -487,6 +494,11 @@ pub fn search_stable_srcc_structures_from_views(
         return Err(SrccStableSearchError::InvalidMinimumDimensionStabilityRatio);
     }
 
+    if config.minimum_rejected_dimension > SRCC_DIMENSION
+    {
+        return Err(SrccStableSearchError::InvalidMinimumRejectedDimension);
+    }
+
     let search = search_srcc_structures_from_views(
         seeds,
         views,
@@ -510,7 +522,8 @@ pub fn search_stable_srcc_structures_from_views(
 
         let passes_stability_gate = stability.maximum_frobenius_distance
             <= config.maximum_frobenius_distance
-            && stability.dimension_stability_ratio() >= config.minimum_dimension_stability_ratio;
+            && stability.dimension_stability_ratio() >= config.minimum_dimension_stability_ratio
+            && candidate.projector.rejected_dimension() >= config.minimum_rejected_dimension;
 
         candidates.push(SrccStableSearchCandidate {
             candidate,
@@ -552,6 +565,7 @@ mod stable_search_tests {
             distortion_weight: 10.0,
             maximum_frobenius_distance: 1.0e-12,
             minimum_dimension_stability_ratio: 1.0,
+            minimum_rejected_dimension: 1,
         }
     }
 
@@ -627,6 +641,90 @@ mod stable_search_tests {
         assert_eq!(result.decision, SrccGateDecision::Identity,);
 
         assert!(result.selected.is_none());
+
+        assert!(!result.candidates[0].passes_stability_gate);
+    }
+
+    #[test]
+    fn excessive_minimum_rejected_dimension_is_rejected() {
+        let seed = basis_vector(1).unwrap();
+        let target = basis_vector(2).unwrap();
+
+        let positive = [
+            SrccTransportSample::new(seed, target),
+            SrccTransportSample::new(seed, target),
+        ];
+
+        let negative_target = target.map(|value| -value);
+
+        let negative = [
+            SrccTransportSample::new(seed, negative_target),
+            SrccTransportSample::new(seed, negative_target),
+        ];
+
+        let views = [positive.as_slice(), negative.as_slice()];
+        let cases = [SrccCase::new(basis_vector(8).unwrap(), target)];
+
+        let mut config = stable_config();
+        config.minimum_rejected_dimension = SRCC_DIMENSION + 1;
+
+        assert_eq!(
+            search_stable_srcc_structures_from_views(
+                &[seed],
+                &views,
+                &[0.999],
+                config,
+                &cases,
+                &cases,
+            ),
+            Err(SrccStableSearchError::InvalidMinimumRejectedDimension),
+        );
+    }
+
+    #[test]
+    fn under_dimensioned_candidate_falls_back_to_identity() {
+        let seed = basis_vector(1).unwrap();
+        let target = basis_vector(2).unwrap();
+
+        let positive = [
+            SrccTransportSample::new(seed, target),
+            SrccTransportSample::new(seed, target),
+        ];
+
+        let negative_target = target.map(|value| -value);
+
+        let negative = [
+            SrccTransportSample::new(seed, negative_target),
+            SrccTransportSample::new(seed, negative_target),
+        ];
+
+        let views = [positive.as_slice(), negative.as_slice()];
+
+        let cases = [SrccCase::new(basis_vector(8).unwrap(), target)];
+
+        let mut config = stable_config();
+        config.minimum_rejected_dimension = 3;
+
+        let result = search_stable_srcc_structures_from_views(
+            &[seed],
+            &views,
+            &[0.999],
+            config,
+            &cases,
+            &cases,
+        )
+        .unwrap();
+
+        assert_eq!(result.decision, SrccGateDecision::Identity);
+        assert!(result.selected.is_none());
+
+        assert_eq!(
+            result.candidates[0]
+                .candidate
+                .projector
+                .rejected_dimension(),
+            2,
+        );
 
         assert!(!result.candidates[0].passes_stability_gate);
     }
