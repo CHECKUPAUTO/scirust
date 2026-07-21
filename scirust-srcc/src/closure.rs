@@ -290,14 +290,25 @@ fn compare_directions(left: &Vector16, right: &Vector16) -> core::cmp::Ordering 
 }
 
 fn canonicalize_direction(mut direction: Vector16) -> Vector16 {
-    if let Some(pivot) = direction.iter().find(|value| **value != 0.0)
+    let mut pivot_index = 0;
+    let mut pivot_magnitude = direction[0].abs();
+
+    for (index, value) in direction.iter().enumerate().skip(1)
     {
-        if *pivot < 0.0
+        let magnitude = value.abs();
+
+        if magnitude > pivot_magnitude
         {
-            for value in &mut direction
-            {
-                *value = -*value;
-            }
+            pivot_index = index;
+            pivot_magnitude = magnitude;
+        }
+    }
+
+    if direction[pivot_index] < 0.0
+    {
+        for value in &mut direction
+        {
+            *value = -*value;
         }
     }
 
@@ -640,6 +651,30 @@ mod tests {
 
         assert_eq!(closure.dimension(), 1);
         assert_eq!(closure.rounds(), 0);
+    }
+
+    #[test]
+    fn canonical_sign_uses_largest_magnitude_pivot() {
+        let mut direction = [0.0; SRCC_DIMENSION];
+        direction[0] = 1.0e-300;
+        direction[7] = -1.0;
+
+        let canonical = canonicalize_direction(direction);
+
+        assert_eq!(canonical[0], -1.0e-300);
+        assert_eq!(canonical[7], 1.0);
+    }
+
+    #[test]
+    fn canonical_sign_uses_lowest_index_on_tie() {
+        let mut direction = [0.0; SRCC_DIMENSION];
+        direction[3] = -1.0;
+        direction[8] = 1.0;
+
+        let canonical = canonicalize_direction(direction);
+
+        assert_eq!(canonical[3], 1.0);
+        assert_eq!(canonical[8], -1.0);
     }
 
     #[test]
