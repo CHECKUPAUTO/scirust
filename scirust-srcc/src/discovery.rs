@@ -22,6 +22,7 @@ pub enum SrccDiscoveryError {
     EmptySamples,
     InvalidViewCount,
     TooManyViews,
+    InsufficientDistinctViews,
     InvalidEnergyFloor,
     NonFiniteSample { index: usize },
     ZeroSource { index: usize },
@@ -34,6 +35,10 @@ impl fmt::Display for SrccDiscoveryError {
             Self::EmptySamples => formatter.write_str("transport samples must not be empty"),
             Self::InvalidViewCount => formatter.write_str("view count must be strictly positive"),
             Self::TooManyViews => formatter.write_str("view count must not exceed sample count"),
+            Self::InsufficientDistinctViews =>
+            {
+                formatter.write_str("view count must not exceed distinct sample count")
+            },
             Self::InvalidEnergyFloor =>
             {
                 formatter.write_str("energy floor must be finite and positive")
@@ -86,10 +91,6 @@ pub fn learn_interleaved_transport_views(
         return Err(SrccDiscoveryError::InvalidEnergyFloor);
     }
 
-    let mut transports = vec![[[0.0; SRCC_DIMENSION]; SRCC_DIMENSION]; view_count];
-
-    let mut counts = vec![0_usize; view_count];
-
     for (sample_index, sample) in samples.iter().enumerate()
     {
         if sample
@@ -111,21 +112,51 @@ pub fn learn_interleaved_transport_views(
                 index: sample_index,
             });
         }
+    }
 
-        let view_index = sample_index % view_count;
-        let inverse_energy = 1.0 / source_energy;
+    let mut ordered_samples = samples.to_vec();
+    ordered_samples.sort_by(compare_samples);
 
-        for (target_value, row) in sample.target.iter().zip(transports[view_index].iter_mut())
+    let mut groups: Vec<Vec<SrccTransportSample>> = Vec::new();
+
+    for sample in ordered_samples
+    {
+        match groups.last_mut()
         {
-            let scaled_target = target_value * inverse_energy;
-
-            for (entry, source_value) in row.iter_mut().zip(sample.source.iter())
-            {
-                *entry += scaled_target * source_value;
-            }
+            Some(group) if group[0] == sample => group.push(sample),
+            _ => groups.push(vec![sample]),
         }
+    }
 
-        counts[view_index] += 1;
+    if groups.len() < view_count
+    {
+        return Err(SrccDiscoveryError::InsufficientDistinctViews);
+    }
+
+    let mut transports = vec![[[0.0; SRCC_DIMENSION]; SRCC_DIMENSION]; view_count];
+
+    let mut counts = vec![0_usize; view_count];
+
+    for (group_index, group) in groups.iter().enumerate()
+    {
+        let view_index = group_index % view_count;
+
+        for sample in group
+        {
+            let inverse_energy = 1.0 / squared_norm(&sample.source);
+
+            for (target_value, row) in sample.target.iter().zip(transports[view_index].iter_mut())
+            {
+                let scaled_target = target_value * inverse_energy;
+
+                for (entry, source_value) in row.iter_mut().zip(sample.source.iter())
+                {
+                    *entry += scaled_target * source_value;
+                }
+            }
+
+            counts[view_index] += 1;
+        }
     }
 
     for (transport, count) in transports.iter_mut().zip(counts)
@@ -142,6 +173,22 @@ pub fn learn_interleaved_transport_views(
     }
 
     Ok(transports)
+}
+
+fn compare_samples(left: &SrccTransportSample, right: &SrccTransportSample) -> core::cmp::Ordering {
+    compare_vectors(&left.source, &right.source)
+        .then_with(|| compare_vectors(&left.target, &right.target))
+}
+
+fn compare_vectors(left: &Vector16, right: &Vector16) -> core::cmp::Ordering {
+    left.iter()
+        .zip(right.iter())
+        .find_map(|(left_value, right_value)| {
+            let ordering = left_value.total_cmp(right_value);
+
+            ordering.is_ne().then_some(ordering)
+        })
+        .unwrap_or(core::cmp::Ordering::Equal)
 }
 
 #[cfg(test)]
@@ -189,14 +236,39 @@ mod tests {
 
     #[test]
     fn discovery_is_deterministic() {
+        let source = basis_vector(1).unwrap();
+        let target = basis_vector(2).unwrap();
+
         let samples = [
-            SrccTransportSample::new(basis_vector(1).unwrap(), basis_vector(2).unwrap()),
-            SrccTransportSample::new(basis_vector(1).unwrap(), basis_vector(2).unwrap()),
+            SrccTransportSample::new(source, target),
+            SrccTransportSample::new(source, target.map(|value| -value)),
         ];
 
         let first = learn_interleaved_transport_views(&samples, 2, 1.0e-30).unwrap();
 
         let second = learn_interleaved_transport_views(&samples, 2, 1.0e-30).unwrap();
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn discovery_is_invariant_to_sample_order() {
+        let source = basis_vector(1).unwrap();
+        let positive = basis_vector(2).unwrap();
+        let negative = positive.map(|value| -value);
+
+        let samples = [
+            SrccTransportSample::new(source, positive),
+            SrccTransportSample::new(source, negative),
+            SrccTransportSample::new(source, positive),
+            SrccTransportSample::new(source, negative),
+        ];
+
+        let reordered = [samples[3], samples[0], samples[2], samples[1]];
+
+        let first = learn_interleaved_transport_views(&samples, 2, 1.0e-30).unwrap();
+
+        let second = learn_interleaved_transport_views(&reordered, 2, 1.0e-30).unwrap();
 
         assert_eq!(first, second);
     }

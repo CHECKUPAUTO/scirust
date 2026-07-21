@@ -94,7 +94,7 @@ mod tests {
 
         let samples = [
             SrccTransportSample::new(seed, target),
-            SrccTransportSample::new(seed, target),
+            SrccTransportSample::new(seed, target.map(|value| -value)),
         ];
 
         let first = fit_srcc_projector(&[seed], &samples, 2, SrccConfig::default()).unwrap();
