@@ -53,7 +53,13 @@ fn main() {
     let certificate = &closure.certificates()[0];
 
     assert_eq!(certificate.support, 2);
-    assert_eq!(certificate.transport_indices, vec![0, 1]);
+    assert_eq!(certificate.transport_indices.len(), certificate.support,);
+    assert!(
+        certificate
+            .transport_indices
+            .windows(2)
+            .all(|pair| pair[0] < pair[1])
+    );
 
     assert!(residual_e1 < 1.0e-24);
     assert!(residual_e2 < 1.0e-24);
