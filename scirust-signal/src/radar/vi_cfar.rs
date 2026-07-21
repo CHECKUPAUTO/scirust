@@ -457,7 +457,10 @@ pub enum DetectorPolicy {
 pub struct CfarConfig {
     /// Reference cells *per side* (lagging and leading are the same size —
     /// see the module docs' reference-window layout). Must be `>= 2` (a
-    /// sample variance, hence `VI`, needs at least two cells).
+    /// sample variance, hence `VI`, needs at least two cells) and, well
+    /// beyond any real radar reference window, `<= 100_000` — a practical
+    /// cap keeping calibration cost bounded (see `MAX_PRACTICAL_REFERENCE_CELLS`
+    /// and [`CfarError::ReferenceWindowTooLarge`]).
     pub reference_cells: usize,
     /// Guard cells per side (may be `0`).
     pub guard_cells: usize,
@@ -484,6 +487,22 @@ pub enum CfarError {
          variance (hence the Variability Index) needs at least two cells"
     )]
     TooFewReferenceCells(usize),
+    /// `reference_cells`/`guard_cells` are too large to be usable: either
+    /// computing the reference-window size (`reference_cells + guard_cells`,
+    /// or `2 * reference_cells`) would overflow `usize` arithmetic, or
+    /// `reference_cells` exceeds [`MAX_PRACTICAL_REFERENCE_CELLS`] — caught
+    /// here, deterministically, rather than left to panic on overflow, or
+    /// (for the practical bound) to hang inside calibration, wherever that
+    /// happens to occur downstream.
+    #[error(
+        "reference_cells={reference_cells}, guard_cells={guard_cells} is not a usable \
+         reference window (overflows reference-window-size arithmetic, or exceeds the \
+         practical limit of {MAX_PRACTICAL_REFERENCE_CELLS} reference cells)"
+    )]
+    ReferenceWindowTooLarge {
+        reference_cells: usize,
+        guard_cells: usize,
+    },
     /// `pfa` outside `(0, 1)`, or non-finite.
     #[error("pfa must satisfy 0 < pfa < 1 (got {0})")]
     InvalidPfa(f64),
@@ -525,6 +544,24 @@ pub enum CfarError {
     ExactCalibrationFailed(String),
 }
 
+/// Practical upper bound on `reference_cells`, enforced by
+/// [`CfarConfig::validate`] — not an arithmetic limit (`usize` overflow is
+/// caught separately, well past this point) but a *cost* one:
+/// `CalibratedThresholds::compute`'s `TrimmedMean`/`CensoredMean` calibration
+/// path (`trimmed_mean_alpha`/`censored_mean_alpha`) evaluates a product over
+/// all `n_ref = 2 * reference_cells` pooled cells, and does so up to roughly
+/// [`BISECTION_MAX_ITERS`] times inside [`bisect_decreasing`] — `O(n_ref)`
+/// per call. A `reference_cells` value nowhere near overflowing (so not
+/// caught by the overflow check above) but merely huge — found by widening
+/// this module's own proptest strategy to draw large `usize`s, which then
+/// hung indefinitely instead of finishing — would make `CfarDetector::new`/
+/// `evaluate_slice`/`CfarStreamDetector::new` block for an unbounded time
+/// instead of returning a fast, structured error. No real radar reference
+/// window is remotely close to this bound (tens to low hundreds of cells is
+/// typical); it exists purely to turn that unbounded hang into an immediate
+/// `Err`.
+const MAX_PRACTICAL_REFERENCE_CELLS: usize = 100_000;
+
 impl CfarConfig {
     /// Validate every field. Called internally by [`evaluate_slice`] and
     /// [`CfarStreamDetector::new`]; exposed so callers can validate a config
@@ -533,6 +570,24 @@ impl CfarConfig {
         if self.reference_cells < 2
         {
             return Err(CfarError::TooFewReferenceCells(self.reference_cells));
+        }
+        // Every downstream computation needs `reference_cells + guard_cells`
+        // (the half-window span, e.g. in `CfarDetector::evaluate`) and
+        // `2 * reference_cells` (the pooled robust-estimator window size) to
+        // fit in a `usize` without wrapping — checked here, once, rather
+        // than left to panic wherever that arithmetic happens to occur.
+        // `reference_cells` alone is also capped well below where any of
+        // that could overflow (see `MAX_PRACTICAL_REFERENCE_CELLS`), since
+        // calibration cost — not just overflow — must stay bounded.
+        let window_size_overflows = self.reference_cells.checked_add(self.guard_cells).is_none()
+            || self.reference_cells.checked_mul(2).is_none();
+        let window_size_impractical = self.reference_cells > MAX_PRACTICAL_REFERENCE_CELLS;
+        if window_size_overflows || window_size_impractical
+        {
+            return Err(CfarError::ReferenceWindowTooLarge {
+                reference_cells: self.reference_cells,
+                guard_cells: self.guard_cells,
+            });
         }
         if !(self.pfa.is_finite() && self.pfa > 0.0 && self.pfa < 1.0)
         {
@@ -549,8 +604,13 @@ impl CfarConfig {
             }
         }
         let (trim_low, trim_high) = self.robust_estimator.trim_counts();
-        let n_ref = 2 * self.reference_cells;
-        if trim_low + trim_high >= n_ref
+        let n_ref = 2 * self.reference_cells; // safe: checked above
+        let trim_counts_invalid = match trim_low.checked_add(trim_high)
+        {
+            Some(sum) => sum >= n_ref,
+            None => true,
+        };
+        if trim_counts_invalid
         {
             return Err(CfarError::InvalidTrimCounts {
                 n_ref,
@@ -1181,7 +1241,12 @@ pub fn trimmed_mean(
     trim_high: usize,
 ) -> Result<TrimmedMeanResult, CfarError> {
     let n_ref = scratch.len();
-    if trim_low + trim_high >= n_ref
+    let trim_counts_invalid = match trim_low.checked_add(trim_high)
+    {
+        Some(sum) => sum >= n_ref,
+        None => true,
+    };
+    if trim_counts_invalid
     {
         return Err(CfarError::InvalidTrimCounts {
             n_ref,
@@ -1233,7 +1298,12 @@ pub fn censored_mean(
     trim_high: usize,
 ) -> Result<CensoredMeanResult, CfarError> {
     let n_ref = scratch.len();
-    if trim_low + trim_high >= n_ref
+    let trim_counts_invalid = match trim_low.checked_add(trim_high)
+    {
+        Some(sum) => sum >= n_ref,
+        None => true,
+    };
+    if trim_counts_invalid
     {
         return Err(CfarError::InvalidTrimCounts {
             n_ref,
@@ -1483,7 +1553,7 @@ impl CfarDetector {
         let guard = self.config.guard_cells;
         let half = train + guard;
         let n = power.len();
-        let mut decisions = Vec::new();
+        let mut decisions = Vec::with_capacity(n.saturating_sub(2 * half));
 
         // EdgePolicy::Exclude (the only policy today): the loop bound below
         // simply never visits a cell without a full window on both sides.
@@ -1544,6 +1614,13 @@ impl CfarDetector {
 /// itself is empty) rather than an error, since a malformed *measurement*
 /// is a different kind of problem than a malformed *configuration*.
 pub fn vi_cfar_2d(power: &[Vec<f64>], config: &CfarConfig) -> Result<Vec<Vec<bool>>, CfarError> {
+    // Config validation/calibration happens first, unconditionally --
+    // before any check of `power`'s shape -- so an invalid config always
+    // surfaces as `Err`, regardless of whether `power` is empty, ragged, or
+    // zero-width (matching `evaluate_slice`, which validates `config`
+    // before ever looking at `power`'s content).
+    let mut detector = CfarDetector::new(*config)?;
+
     let rows = power.len();
     if rows == 0
     {
@@ -1556,7 +1633,6 @@ pub fn vi_cfar_2d(power: &[Vec<f64>], config: &CfarConfig) -> Result<Vec<Vec<boo
         return Ok(det);
     }
 
-    let mut detector = CfarDetector::new(*config)?;
     let mut column = vec![0.0_f64; rows];
     for d in 0..cols
     {
@@ -1889,6 +1965,91 @@ mod tests {
         );
     }
 
+    #[test]
+    fn config_rejects_reference_cells_that_would_overflow_2x() {
+        // Adversarial-audit regression: `2 * reference_cells` used to be
+        // computed with a plain `*`, panicking on overflow instead of
+        // returning a structured error.
+        let mut c = default_config();
+        c.reference_cells = usize::MAX / 2 + 10;
+        assert_eq!(
+            c.validate(),
+            Err(CfarError::ReferenceWindowTooLarge {
+                reference_cells: usize::MAX / 2 + 10,
+                guard_cells: c.guard_cells,
+            })
+        );
+    }
+
+    #[test]
+    fn config_rejects_guard_cells_that_would_overflow_the_half_window() {
+        // Adversarial-audit regression: `guard_cells` had *no* validation at
+        // all, so `reference_cells + guard_cells` (computed in
+        // `CfarDetector::evaluate`, well after validation) could overflow
+        // and panic on an otherwise entirely ordinary `reference_cells`.
+        let mut c = default_config();
+        c.guard_cells = usize::MAX;
+        assert_eq!(
+            c.validate(),
+            Err(CfarError::ReferenceWindowTooLarge {
+                reference_cells: c.reference_cells,
+                guard_cells: usize::MAX,
+            })
+        );
+        // And the detector constructors that call `validate()` first must
+        // also reject it, rather than ever reaching the arithmetic that
+        // used to panic.
+        assert!(matches!(
+            CfarDetector::new(c),
+            Err(CfarError::ReferenceWindowTooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn config_rejects_reference_cells_beyond_the_practical_calibration_bound() {
+        // New-finding regression (surfaced by widening this module's own
+        // proptest strategies to draw large-but-valid `usize`s, which then
+        // hung indefinitely instead of finishing): `reference_cells` not
+        // overflowing `2 * reference_cells` is not enough on its own --
+        // `CalibratedThresholds::compute`'s `TrimmedMean`/`CensoredMean`
+        // path (`trimmed_mean_alpha`/`censored_mean_alpha`) is an O(n_ref)
+        // loop run up to ~140 times inside `bisect_decreasing`, so a merely
+        // astronomically large (nowhere near overflowing) `reference_cells`
+        // used to make calibration -- and so `CfarDetector::new` -- block
+        // for an unbounded time instead of returning a structured error.
+        let mut c = default_config();
+        c.reference_cells = MAX_PRACTICAL_REFERENCE_CELLS + 1;
+        c.detector = DetectorPolicy::AlwaysRobust;
+        assert_eq!(
+            c.validate(),
+            Err(CfarError::ReferenceWindowTooLarge {
+                reference_cells: MAX_PRACTICAL_REFERENCE_CELLS + 1,
+                guard_cells: c.guard_cells,
+            })
+        );
+        // `CfarDetector::new` must reject it before ever reaching
+        // `CalibratedThresholds::compute` -- this assertion itself is the
+        // hang-vs-fast-`Err` check: the test process would never reach here
+        // before this fix.
+        assert!(matches!(
+            CfarDetector::new(c),
+            Err(CfarError::ReferenceWindowTooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn config_accepts_reference_cells_right_at_the_practical_calibration_bound() {
+        // Boundary check for `MAX_PRACTICAL_REFERENCE_CELLS` itself: sitting
+        // exactly at the limit, with the O(n_ref) `TrimmedMean` calibration
+        // path exercised, must still validate and calibrate successfully
+        // (and promptly) -- not be off-by-one rejected.
+        let mut c = default_config();
+        c.reference_cells = MAX_PRACTICAL_REFERENCE_CELLS;
+        c.detector = DetectorPolicy::AlwaysRobust;
+        assert!(c.validate().is_ok());
+        assert!(CfarDetector::new(c).is_ok());
+    }
+
     // ---- trimmed_mean primitive --------------------------------------------
 
     #[test]
@@ -1919,6 +2080,24 @@ mod tests {
                 n_ref: 4,
                 trim_low: 2,
                 trim_high: 2
+            })
+        );
+    }
+
+    #[test]
+    fn trimmed_mean_rejects_overflowing_trim_counts_instead_of_panicking() {
+        // trim_low + trim_high must not be computed with a plain `+` -- an
+        // adversarial-audit regression: `usize::MAX + usize::MAX` overflows
+        // and panics in a debug build rather than returning a structured
+        // error, exactly the "never panic, only Ok or CfarError" contract
+        // this module documents.
+        let mut data = [1.0, 2.0, 3.0, 4.0];
+        assert_eq!(
+            trimmed_mean(&mut data, usize::MAX, usize::MAX),
+            Err(CfarError::InvalidTrimCounts {
+                n_ref: 4,
+                trim_low: usize::MAX,
+                trim_high: usize::MAX,
             })
         );
     }
@@ -1962,6 +2141,19 @@ mod tests {
                 n_ref: 4,
                 trim_low: 2,
                 trim_high: 2
+            })
+        );
+    }
+
+    #[test]
+    fn censored_mean_rejects_overflowing_trim_counts_instead_of_panicking() {
+        let mut data = [1.0, 2.0, 3.0, 4.0];
+        assert_eq!(
+            censored_mean(&mut data, usize::MAX, usize::MAX),
+            Err(CfarError::InvalidTrimCounts {
+                n_ref: 4,
+                trim_low: usize::MAX,
+                trim_high: usize::MAX,
             })
         );
     }
@@ -2795,6 +2987,37 @@ mod tests {
         let power = vec![vec![1.0; 4]; 4];
         let err = vi_cfar_2d(&power, &config).unwrap_err();
         assert!(matches!(err, CfarError::TooFewReferenceCells(1)));
+    }
+
+    #[test]
+    fn vi_cfar_2d_propagates_a_calibration_error_even_with_a_degenerate_shape() {
+        // Adversarial-audit regression: an invalid config used to be
+        // silently swallowed (returning `Ok`) whenever `power` was also
+        // empty, ragged, or zero-width, because the shape checks ran
+        // *before* `CfarDetector::new` -- contradicting this function's own
+        // documented contract that config errors always surface via `Err`.
+        let mut invalid = vi_cfar_config(16, 2, 6.0, 2.0);
+        invalid.reference_cells = 1; // invalid: TooFewReferenceCells
+
+        let err = vi_cfar_2d(&[], &invalid).unwrap_err();
+        assert!(
+            matches!(err, CfarError::TooFewReferenceCells(1)),
+            "empty power: {err:?}"
+        );
+
+        let ragged = vec![vec![1.0; 5], vec![1.0; 4]];
+        let err = vi_cfar_2d(&ragged, &invalid).unwrap_err();
+        assert!(
+            matches!(err, CfarError::TooFewReferenceCells(1)),
+            "ragged power: {err:?}"
+        );
+
+        let zero_width: Vec<Vec<f64>> = vec![Vec::new(); 3];
+        let err = vi_cfar_2d(&zero_width, &invalid).unwrap_err();
+        assert!(
+            matches!(err, CfarError::TooFewReferenceCells(1)),
+            "zero-width power: {err:?}"
+        );
     }
 
     // ---- Streaming API ------------------------------------------------------
