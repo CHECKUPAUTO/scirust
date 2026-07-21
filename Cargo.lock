@@ -3389,7 +3389,10 @@ version = "0.1.0"
 dependencies = [
  "rand 0.8.6",
  "scirust-core",
+ "scirust-stats",
+ "scirust-units",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

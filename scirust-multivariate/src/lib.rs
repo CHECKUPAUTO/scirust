@@ -1,13 +1,24 @@
 //! Multivariate pattern detection algorithms.
 //!
 //! Provides PCA, ICA, K-Means clustering, Mahalanobis distance,
-//! Multi-dimensional Scaling, and Canonical Correlation Analysis.
+//! Multi-dimensional Scaling, Canonical Correlation Analysis, and fitted
+//! robust scaling / scale-aware geometry ([`robust_geometry`]).
 //!
-//! All algorithms operate on `f64` data and use pure-Rust linear algebra
-//! with no external dependencies beyond `scirust-core` and `serde`.
+//! All algorithms operate on `f64` data and use pure-Rust linear algebra with
+//! no external dependencies beyond `scirust-core`, `scirust-stats`,
+//! `scirust-units`, and `serde`.
+
+#![forbid(unsafe_code)]
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
+
+pub mod robust_geometry;
+
+pub use robust_geometry::{
+    FeatureDescriptor, FittedDistanceMetric, RobustGeometryError, RobustScaleMethod, RobustScaler,
+    RobustScalerConfig, ZeroScalePolicy,
+};
 
 // ────────────────────────────── helpers ──────────────────────────────
 
