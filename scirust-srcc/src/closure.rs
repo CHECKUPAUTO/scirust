@@ -124,7 +124,7 @@ impl SrccClosure {
 
                 let minimum_alignment = minimum_pairwise_alignment(&cluster);
 
-                let representative = cluster_representative(&cluster);
+                let representative = cluster_representative(&cluster, transports.len());
 
                 if push_orthonormal(&mut expanded, representative, absolute_floor)
                 {
@@ -373,9 +373,12 @@ fn minimum_pairwise_alignment(cluster: &[Proposal]) -> f64 {
     minimum
 }
 
-fn cluster_representative(cluster: &[Proposal]) -> Vector16 {
+fn cluster_representative(cluster: &[Proposal], transport_count: usize) -> Vector16 {
     let anchor = cluster[0].direction;
-    let mut sum = [0.0; SRCC_DIMENSION];
+
+    let mut transport_sums = vec![[0.0; SRCC_DIMENSION]; transport_count];
+
+    let mut present = vec![false; transport_count];
 
     for proposal in cluster
     {
@@ -388,13 +391,34 @@ fn cluster_representative(cluster: &[Proposal]) -> Vector16 {
             1.0
         };
 
-        for (sum_value, direction_value) in sum.iter_mut().zip(proposal.direction.iter())
+        let transport_sum = &mut transport_sums[proposal.transport_index];
+
+        for (sum_value, direction_value) in transport_sum.iter_mut().zip(proposal.direction.iter())
         {
             *sum_value += sign * direction_value;
         }
+
+        present[proposal.transport_index] = true;
     }
 
-    normalize(sum)
+    let mut consensus = [0.0; SRCC_DIMENSION];
+
+    for (transport_sum, is_present) in transport_sums.into_iter().zip(present)
+    {
+        if !is_present
+        {
+            continue;
+        }
+
+        let vote = normalize(transport_sum);
+
+        for (consensus_value, vote_value) in consensus.iter_mut().zip(vote)
+        {
+            *consensus_value += vote_value;
+        }
+    }
+
+    normalize(consensus)
 }
 
 fn residual_outside_span(vector: &Vector16, basis: &[Vector16]) -> Vector16 {
@@ -651,6 +675,37 @@ mod tests {
 
         assert_eq!(closure.dimension(), 1);
         assert_eq!(closure.rounds(), 0);
+    }
+
+    #[test]
+    fn each_transport_has_one_consensus_vote() {
+        let mut first = [0.0; SRCC_DIMENSION];
+        first[1] = 1.0;
+
+        let mut tilted = first;
+        tilted[2] = 0.01;
+        let tilted = normalize(tilted);
+
+        let cluster = vec![
+            Proposal {
+                direction: first,
+                transport_index: 0,
+            },
+            Proposal {
+                direction: first,
+                transport_index: 0,
+            },
+            Proposal {
+                direction: tilted,
+                transport_index: 1,
+            },
+        ];
+
+        let representative = cluster_representative(&cluster, 2);
+
+        let expected = normalize(core::array::from_fn(|index| first[index] + tilted[index]));
+
+        assert!(dot(&representative, &expected) > 1.0 - 1.0e-12);
     }
 
     #[test]
