@@ -3794,6 +3794,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-srcc"
+version = "0.1.0"
+
+[[package]]
 name = "scirust-stats"
 version = "0.1.0"
 dependencies = [

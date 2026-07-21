@@ -99,6 +99,7 @@ members = [
     "examples/industrial_monitor",
     "scirust-signal",
     "scirust-cayley-filter",
+    "scirust-srcc",
     "scirust-trader",
     "scirust-opcua",
     "scirust-mqtt",

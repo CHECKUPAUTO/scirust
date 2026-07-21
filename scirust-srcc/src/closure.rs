@@ -1,0 +1,831 @@
+//! Deterministic resonant-consensus closure.
+
+use core::fmt;
+
+use crate::{
+    LinearMap16, SRCC_DIMENSION, SrccConfig, SrccError, Vector16, apply_linear_map, dot,
+    squared_norm,
+};
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SrccClosureError {
+    InvalidConfig(SrccError),
+    EmptySeeds,
+    EmptyTransports,
+    NonFiniteSeed { index: usize },
+    NonFiniteTransport { index: usize },
+    ZeroSeedSpan,
+    SeedDimensionExceedsMaximum,
+}
+
+impl fmt::Display for SrccClosureError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self
+        {
+            Self::InvalidConfig(error) => error.fmt(formatter),
+            Self::EmptySeeds => formatter.write_str("seed family must not be empty"),
+            Self::EmptyTransports => formatter.write_str("transport family must not be empty"),
+            Self::NonFiniteSeed { index } => write!(formatter, "seed {index} is non-finite"),
+            Self::NonFiniteTransport { index } =>
+            {
+                write!(formatter, "transport {index} is non-finite")
+            },
+            Self::ZeroSeedSpan => formatter.write_str("seed family has zero span"),
+            Self::SeedDimensionExceedsMaximum =>
+            {
+                formatter.write_str("seed span exceeds configured maximum dimension")
+            },
+        }
+    }
+}
+
+impl std::error::Error for SrccClosureError {}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SrccAdmissionCertificate {
+    pub round: usize,
+    pub basis_index: usize,
+    pub transport_indices: Vec<usize>,
+    pub support: usize,
+    pub minimum_alignment: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SrccClosure {
+    basis: Vec<Vector16>,
+    rounds: usize,
+    accepted_per_round: Vec<usize>,
+    certificates: Vec<SrccAdmissionCertificate>,
+    config: SrccConfig,
+}
+
+impl SrccClosure {
+    pub fn build(
+        seeds: &[Vector16],
+        transports: &[LinearMap16],
+        config: SrccConfig,
+    ) -> Result<Self, SrccClosureError> {
+        let config = config.validate().map_err(SrccClosureError::InvalidConfig)?;
+
+        validate_inputs(seeds, transports)?;
+
+        let absolute_floor = config.energy_floor.sqrt();
+
+        let mut canonical_seeds: Vec<_> = seeds
+            .iter()
+            .copied()
+            .map(normalize)
+            .map(canonicalize_direction)
+            .collect();
+
+        canonical_seeds.sort_by(compare_directions);
+
+        let mut basis = Vec::new();
+
+        for seed in canonical_seeds
+        {
+            push_orthonormal(&mut basis, seed, absolute_floor);
+        }
+
+        if basis.is_empty()
+        {
+            return Err(SrccClosureError::ZeroSeedSpan);
+        }
+
+        if basis.len() > config.maximum_dimension
+        {
+            return Err(SrccClosureError::SeedDimensionExceedsMaximum);
+        }
+
+        let mut accepted_per_round = Vec::new();
+        let mut certificates = Vec::new();
+
+        for round_index in 0..config.maximum_rounds
+        {
+            if basis.len() >= config.maximum_dimension
+            {
+                break;
+            }
+
+            let proposals = generate_proposals(&basis, transports, config);
+
+            let clusters = cluster_proposals(proposals, config.resonance_threshold);
+
+            let mut expanded = basis.clone();
+
+            for cluster in clusters
+            {
+                let transport_indices = distinct_transport_indices(&cluster, transports.len());
+
+                if transport_indices.len() < config.minimum_support
+                {
+                    continue;
+                }
+
+                let minimum_alignment = minimum_pairwise_alignment(&cluster);
+
+                let representative = cluster_representative(&cluster, transports.len());
+
+                if push_orthonormal(&mut expanded, representative, absolute_floor)
+                {
+                    certificates.push(SrccAdmissionCertificate {
+                        round: round_index + 1,
+                        basis_index: expanded.len() - 1,
+                        support: transport_indices.len(),
+                        transport_indices,
+                        minimum_alignment,
+                    });
+                }
+
+                if expanded.len() >= config.maximum_dimension
+                {
+                    break;
+                }
+            }
+
+            let accepted = expanded.len() - basis.len();
+
+            if accepted == 0
+            {
+                break;
+            }
+
+            basis = expanded;
+            accepted_per_round.push(accepted);
+        }
+
+        Ok(Self {
+            basis,
+            rounds: accepted_per_round.len(),
+            accepted_per_round,
+            certificates,
+            config,
+        })
+    }
+
+    #[must_use]
+    pub fn basis(&self) -> &[Vector16] {
+        &self.basis
+    }
+
+    #[must_use]
+    pub fn dimension(&self) -> usize {
+        self.basis.len()
+    }
+
+    #[must_use]
+    pub const fn rounds(&self) -> usize {
+        self.rounds
+    }
+
+    #[must_use]
+    pub fn accepted_per_round(&self) -> &[usize] {
+        &self.accepted_per_round
+    }
+
+    #[must_use]
+    pub fn certificates(&self) -> &[SrccAdmissionCertificate] {
+        &self.certificates
+    }
+
+    #[must_use]
+    pub const fn config(&self) -> SrccConfig {
+        self.config
+    }
+}
+
+#[derive(Clone, Debug)]
+struct Proposal {
+    direction: Vector16,
+    transport_index: usize,
+}
+
+type ResonanceCluster = Vec<Proposal>;
+
+fn validate_inputs(seeds: &[Vector16], transports: &[LinearMap16]) -> Result<(), SrccClosureError> {
+    if seeds.is_empty()
+    {
+        return Err(SrccClosureError::EmptySeeds);
+    }
+
+    if transports.is_empty()
+    {
+        return Err(SrccClosureError::EmptyTransports);
+    }
+
+    for (index, seed) in seeds.iter().enumerate()
+    {
+        if seed.iter().any(|value| !value.is_finite())
+        {
+            return Err(SrccClosureError::NonFiniteSeed { index });
+        }
+    }
+
+    for (index, transport) in transports.iter().enumerate()
+    {
+        if transport.iter().flatten().any(|value| !value.is_finite())
+        {
+            return Err(SrccClosureError::NonFiniteTransport { index });
+        }
+    }
+
+    Ok(())
+}
+
+fn generate_proposals(
+    basis: &[Vector16],
+    transports: &[LinearMap16],
+    config: SrccConfig,
+) -> Vec<Proposal> {
+    let mut proposals = Vec::new();
+
+    for (transport_index, transport) in transports.iter().enumerate()
+    {
+        for direction in basis
+        {
+            let transported = apply_linear_map(transport, direction);
+
+            let transported_norm = squared_norm(&transported).sqrt();
+
+            if transported_norm <= config.energy_floor.sqrt()
+            {
+                continue;
+            }
+
+            let residual = residual_outside_span(&transported, basis);
+
+            let residual_norm = squared_norm(&residual).sqrt();
+
+            let novelty = residual_norm / transported_norm.max(config.energy_floor);
+
+            if novelty <= config.novelty_threshold
+            {
+                continue;
+            }
+
+            proposals.push(Proposal {
+                direction: canonicalize_direction(normalize(residual)),
+                transport_index,
+            });
+        }
+    }
+
+    proposals.sort_by(|left, right| {
+        compare_directions(&left.direction, &right.direction)
+            .then_with(|| left.transport_index.cmp(&right.transport_index))
+    });
+
+    proposals
+}
+
+fn compare_directions(left: &Vector16, right: &Vector16) -> core::cmp::Ordering {
+    left.iter()
+        .zip(right.iter())
+        .find_map(|(left_value, right_value)| {
+            let ordering = left_value.total_cmp(right_value);
+
+            ordering.is_ne().then_some(ordering)
+        })
+        .unwrap_or(core::cmp::Ordering::Equal)
+}
+
+fn canonicalize_direction(mut direction: Vector16) -> Vector16 {
+    let mut pivot_index = 0;
+    let mut pivot_magnitude = direction[0].abs();
+
+    for (index, value) in direction.iter().enumerate().skip(1)
+    {
+        let magnitude = value.abs();
+
+        if magnitude > pivot_magnitude
+        {
+            pivot_index = index;
+            pivot_magnitude = magnitude;
+        }
+    }
+
+    if direction[pivot_index] < 0.0
+    {
+        for value in &mut direction
+        {
+            *value = -*value;
+        }
+    }
+
+    direction
+}
+
+fn cluster_proposals(proposals: Vec<Proposal>, threshold: f64) -> Vec<ResonanceCluster> {
+    let mut clusters: Vec<ResonanceCluster> = Vec::new();
+
+    for proposal in proposals
+    {
+        let mut selected = None;
+
+        for (index, cluster) in clusters.iter().enumerate()
+        {
+            let resonates_with_every_member = cluster
+                .iter()
+                .all(|member| dot(&member.direction, &proposal.direction).abs() >= threshold);
+
+            if resonates_with_every_member
+            {
+                selected = Some(index);
+                break;
+            }
+        }
+
+        match selected
+        {
+            Some(index) => clusters[index].push(proposal),
+            None => clusters.push(vec![proposal]),
+        }
+    }
+
+    clusters
+}
+
+fn distinct_transport_indices(cluster: &[Proposal], transport_count: usize) -> Vec<usize> {
+    let mut seen = vec![false; transport_count];
+
+    for proposal in cluster
+    {
+        seen[proposal.transport_index] = true;
+    }
+
+    seen.iter()
+        .enumerate()
+        .filter_map(|(index, present)| present.then_some(index))
+        .collect()
+}
+
+fn minimum_pairwise_alignment(cluster: &[Proposal]) -> f64 {
+    let mut minimum: f64 = 1.0;
+
+    for left_index in 0..cluster.len()
+    {
+        for right in cluster.iter().skip(left_index + 1)
+        {
+            minimum = minimum.min(dot(&cluster[left_index].direction, &right.direction).abs());
+        }
+    }
+
+    minimum
+}
+
+fn cluster_representative(cluster: &[Proposal], transport_count: usize) -> Vector16 {
+    let anchor = cluster[0].direction;
+
+    let mut transport_sums = vec![[0.0; SRCC_DIMENSION]; transport_count];
+
+    let mut present = vec![false; transport_count];
+
+    for proposal in cluster
+    {
+        let sign = if dot(&anchor, &proposal.direction) < 0.0
+        {
+            -1.0
+        }
+        else
+        {
+            1.0
+        };
+
+        let transport_sum = &mut transport_sums[proposal.transport_index];
+
+        for (sum_value, direction_value) in transport_sum.iter_mut().zip(proposal.direction.iter())
+        {
+            *sum_value += sign * direction_value;
+        }
+
+        present[proposal.transport_index] = true;
+    }
+
+    let mut consensus = [0.0; SRCC_DIMENSION];
+
+    for (transport_sum, is_present) in transport_sums.into_iter().zip(present)
+    {
+        if !is_present
+        {
+            continue;
+        }
+
+        let vote = normalize(transport_sum);
+
+        for (consensus_value, vote_value) in consensus.iter_mut().zip(vote)
+        {
+            *consensus_value += vote_value;
+        }
+    }
+
+    normalize(consensus)
+}
+
+fn residual_outside_span(vector: &Vector16, basis: &[Vector16]) -> Vector16 {
+    let mut residual = *vector;
+
+    for _ in 0..2
+    {
+        for direction in basis
+        {
+            let coefficient = dot(direction, &residual);
+
+            for coordinate in 0..SRCC_DIMENSION
+            {
+                residual[coordinate] -= coefficient * direction[coordinate];
+            }
+        }
+    }
+
+    residual
+}
+
+fn push_orthonormal(basis: &mut Vec<Vector16>, vector: Vector16, absolute_floor: f64) -> bool {
+    let residual = residual_outside_span(&vector, basis);
+    let norm = squared_norm(&residual).sqrt();
+
+    if !norm.is_finite() || norm <= absolute_floor
+    {
+        return false;
+    }
+
+    basis.push(residual.map(|value| value / norm));
+    true
+}
+
+fn normalize(vector: Vector16) -> Vector16 {
+    let norm = squared_norm(&vector).sqrt();
+
+    if norm == 0.0
+    {
+        return vector;
+    }
+
+    vector.map(|value| value / norm)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::basis_vector;
+
+    fn transport(source: usize, target: usize, coefficient: f64) -> LinearMap16 {
+        let mut map = [[0.0; SRCC_DIMENSION]; SRCC_DIMENSION];
+        map[target][source] = coefficient;
+        map
+    }
+
+    #[test]
+    fn dense_approximate_consensus_is_recovered() {
+        let raw_seed: Vector16 = core::array::from_fn(|index| index as f64 + 1.0);
+
+        let seed = normalize(raw_seed);
+
+        let raw_target: Vector16 =
+            core::array::from_fn(|index| if index % 2 == 0 { 1.0 } else { -0.7 });
+
+        let target = normalize(residual_outside_span(&raw_target, &[seed]));
+
+        let raw_perturbation: Vector16 = core::array::from_fn(|index| {
+            let value = index as f64 + 1.0;
+            value * value - 40.0
+        });
+
+        let perturbation = normalize(residual_outside_span(&raw_perturbation, &[seed, target]));
+
+        let perturbed_target = normalize(core::array::from_fn(|index| {
+            target[index] + 0.01 * perturbation[index]
+        }));
+
+        let rank_one = |output: Vector16| -> LinearMap16 {
+            core::array::from_fn(|row| core::array::from_fn(|column| output[row] * seed[column]))
+        };
+
+        let transports = [rank_one(target), rank_one(perturbed_target)];
+
+        let config = SrccConfig {
+            novelty_threshold: 0.02,
+            ..SrccConfig::default()
+        };
+
+        let closure = SrccClosure::build(&[seed], &transports, config).unwrap();
+
+        assert_eq!(closure.dimension(), 2);
+        assert_eq!(closure.rounds(), 1);
+        assert_eq!(closure.accepted_per_round(), &[1]);
+
+        let certificate = &closure.certificates()[0];
+
+        assert_eq!(certificate.support, 2);
+
+        assert!(certificate.minimum_alignment >= config.resonance_threshold);
+
+        assert!(certificate.minimum_alignment < 1.0);
+
+        let expected_consensus = normalize(core::array::from_fn(|index| {
+            target[index] + perturbed_target[index]
+        }));
+
+        assert!(dot(&closure.basis()[1], &expected_consensus,).abs() > 1.0 - 1.0e-12);
+
+        let projector = crate::SrccProjector::from_closure(closure);
+
+        assert!(squared_norm(&projector.apply(&seed),) < 1.0e-24);
+
+        assert!(squared_norm(&projector.apply(&expected_consensus,),) < 1.0e-24);
+
+        let raw_preserved: Vector16 = core::array::from_fn(|index| {
+            let value = index as f64 + 2.0;
+            value * value * value - 200.0
+        });
+
+        let preserved = normalize(residual_outside_span(
+            &raw_preserved,
+            &[seed, expected_consensus],
+        ));
+
+        let filtered = projector.apply(&preserved);
+
+        let preservation_error: Vector16 =
+            core::array::from_fn(|index| filtered[index] - preserved[index]);
+
+        assert!(squared_norm(&preservation_error) < 1.0e-24);
+
+        assert!(seed.iter().all(|value| { value.abs() > 1.0e-12 }));
+
+        assert!(
+            expected_consensus
+                .iter()
+                .all(|value| { value.abs() > 1.0e-12 })
+        );
+    }
+
+    #[test]
+    fn consensus_adds_shared_direction() {
+        let seeds = [basis_vector(1).unwrap()];
+        let transports = [
+            transport(1, 2, 1.0),
+            transport(1, 2, -2.0),
+            transport(1, 3, 1.0),
+        ];
+
+        let closure = SrccClosure::build(&seeds, &transports, SrccConfig::default()).unwrap();
+
+        assert_eq!(closure.dimension(), 2);
+        assert_eq!(closure.rounds(), 1);
+        assert_eq!(closure.accepted_per_round(), &[1]);
+
+        assert!(dot(&closure.basis()[1], &basis_vector(2).unwrap(),).abs() > 1.0 - 1.0e-12);
+    }
+
+    #[test]
+    fn consensus_closure_grows_across_rounds() {
+        let seeds = [basis_vector(1).unwrap()];
+
+        let mut first = [[0.0; SRCC_DIMENSION]; SRCC_DIMENSION];
+        first[2][1] = 1.0;
+        first[3][2] = 1.0;
+
+        let mut second = [[0.0; SRCC_DIMENSION]; SRCC_DIMENSION];
+        second[2][1] = -2.0;
+        second[3][2] = 3.0;
+
+        let closure = SrccClosure::build(&seeds, &[first, second], SrccConfig::default()).unwrap();
+
+        assert_eq!(closure.dimension(), 3);
+        assert_eq!(closure.rounds(), 2);
+        assert_eq!(closure.accepted_per_round(), &[1, 1]);
+
+        assert!(dot(&closure.basis()[1], &basis_vector(2).unwrap(),).abs() > 1.0 - 1.0e-12);
+
+        assert!(dot(&closure.basis()[2], &basis_vector(3).unwrap(),).abs() > 1.0 - 1.0e-12);
+    }
+
+    #[test]
+    fn certificates_record_multi_round_consensus() {
+        let seeds = [basis_vector(1).unwrap()];
+
+        let mut first = [[0.0; SRCC_DIMENSION]; SRCC_DIMENSION];
+        first[2][1] = 1.0;
+        first[3][2] = 1.0;
+
+        let mut second = [[0.0; SRCC_DIMENSION]; SRCC_DIMENSION];
+        second[2][1] = -2.0;
+        second[3][2] = 3.0;
+
+        let closure = SrccClosure::build(&seeds, &[first, second], SrccConfig::default()).unwrap();
+
+        assert_eq!(closure.certificates().len(), 2);
+
+        let first = &closure.certificates()[0];
+        assert_eq!(first.round, 1);
+        assert_eq!(first.basis_index, 1);
+        assert_eq!(first.transport_indices, vec![0, 1]);
+        assert_eq!(first.support, 2);
+        assert!((first.minimum_alignment - 1.0).abs() < 1.0e-15);
+
+        let second = &closure.certificates()[1];
+        assert_eq!(second.round, 2);
+        assert_eq!(second.basis_index, 2);
+        assert_eq!(second.transport_indices, vec![0, 1]);
+        assert_eq!(second.support, 2);
+        assert!((second.minimum_alignment - 1.0).abs() < 1.0e-15);
+    }
+
+    #[test]
+    fn resonance_clusters_require_pairwise_agreement() {
+        let angle = 20.0_f64.to_radians();
+
+        let anchor = basis_vector(1).unwrap();
+
+        let mut positive = [0.0; SRCC_DIMENSION];
+        positive[1] = angle.cos();
+        positive[2] = angle.sin();
+
+        let mut negative = [0.0; SRCC_DIMENSION];
+        negative[1] = angle.cos();
+        negative[2] = -angle.sin();
+
+        let clusters = cluster_proposals(
+            vec![
+                Proposal {
+                    direction: anchor,
+                    transport_index: 0,
+                },
+                Proposal {
+                    direction: positive,
+                    transport_index: 1,
+                },
+                Proposal {
+                    direction: negative,
+                    transport_index: 2,
+                },
+            ],
+            0.9,
+        );
+
+        assert_eq!(clusters.len(), 2);
+        assert_eq!(clusters[0].len(), 2);
+        assert_eq!(clusters[1].len(), 1);
+
+        assert!(minimum_pairwise_alignment(&clusters[0]) >= 0.9);
+    }
+
+    #[test]
+    fn closure_is_invariant_to_seed_scale_and_sign() {
+        let seed = basis_vector(1).unwrap();
+        let scaled_seed = seed.map(|value| -5.0 * value);
+
+        let transports = [transport(1, 2, 1.0), transport(1, 2, -1.0)];
+
+        let first = SrccClosure::build(&[seed], &transports, SrccConfig::default()).unwrap();
+
+        let second =
+            SrccClosure::build(&[scaled_seed], &transports, SrccConfig::default()).unwrap();
+
+        assert_eq!(first.basis(), second.basis());
+
+        assert_eq!(first.accepted_per_round(), second.accepted_per_round(),);
+
+        assert_eq!(first.certificates(), second.certificates(),);
+    }
+
+    #[test]
+    fn closure_is_invariant_to_seed_order() {
+        let seeds = [basis_vector(1).unwrap(), basis_vector(4).unwrap()];
+
+        let reordered = [seeds[1], seeds[0]];
+
+        let transports = [transport(1, 2, 1.0), transport(1, 2, -1.0)];
+
+        let first = SrccClosure::build(&seeds, &transports, SrccConfig::default()).unwrap();
+
+        let second = SrccClosure::build(&reordered, &transports, SrccConfig::default()).unwrap();
+
+        assert_eq!(first.basis(), second.basis());
+
+        assert_eq!(first.accepted_per_round(), second.accepted_per_round(),);
+
+        assert_eq!(first.certificates(), second.certificates(),);
+    }
+
+    #[test]
+    fn closure_is_invariant_to_transport_scale_and_sign() {
+        let seed = basis_vector(1).unwrap();
+
+        let first_transports = [transport(1, 2, 1.0), transport(1, 2, -1.0)];
+
+        let scaled_transports = [transport(1, 2, -7.0), transport(1, 2, 5.0)];
+
+        let first = SrccClosure::build(&[seed], &first_transports, SrccConfig::default()).unwrap();
+
+        let second =
+            SrccClosure::build(&[seed], &scaled_transports, SrccConfig::default()).unwrap();
+
+        assert_eq!(first.basis(), second.basis());
+
+        assert_eq!(first.accepted_per_round(), second.accepted_per_round(),);
+
+        assert_eq!(first.certificates(), second.certificates(),);
+    }
+
+    #[test]
+    fn closure_is_invariant_to_transport_order() {
+        let seeds = [basis_vector(1).unwrap()];
+
+        let transports = [
+            transport(1, 2, 1.0),
+            transport(1, 2, -2.0),
+            transport(1, 3, 1.0),
+        ];
+
+        let reordered = [transports[2], transports[1], transports[0]];
+
+        let first = SrccClosure::build(&seeds, &transports, SrccConfig::default()).unwrap();
+
+        let second = SrccClosure::build(&seeds, &reordered, SrccConfig::default()).unwrap();
+
+        assert_eq!(first.basis(), second.basis());
+        assert_eq!(first.dimension(), second.dimension());
+
+        assert_eq!(first.accepted_per_round(), second.accepted_per_round(),);
+    }
+
+    #[test]
+    fn unsupported_direction_is_rejected() {
+        let seeds = [basis_vector(1).unwrap()];
+        let transports = [transport(1, 3, 1.0)];
+
+        let closure = SrccClosure::build(&seeds, &transports, SrccConfig::default()).unwrap();
+
+        assert_eq!(closure.dimension(), 1);
+        assert_eq!(closure.rounds(), 0);
+    }
+
+    #[test]
+    fn each_transport_has_one_consensus_vote() {
+        let mut first = [0.0; SRCC_DIMENSION];
+        first[1] = 1.0;
+
+        let mut tilted = first;
+        tilted[2] = 0.01;
+        let tilted = normalize(tilted);
+
+        let cluster = vec![
+            Proposal {
+                direction: first,
+                transport_index: 0,
+            },
+            Proposal {
+                direction: first,
+                transport_index: 0,
+            },
+            Proposal {
+                direction: tilted,
+                transport_index: 1,
+            },
+        ];
+
+        let representative = cluster_representative(&cluster, 2);
+
+        let expected = normalize(core::array::from_fn(|index| first[index] + tilted[index]));
+
+        assert!(dot(&representative, &expected) > 1.0 - 1.0e-12);
+    }
+
+    #[test]
+    fn canonical_sign_uses_largest_magnitude_pivot() {
+        let mut direction = [0.0; SRCC_DIMENSION];
+        direction[0] = 1.0e-300;
+        direction[7] = -1.0;
+
+        let canonical = canonicalize_direction(direction);
+
+        assert_eq!(canonical[0], -1.0e-300);
+        assert_eq!(canonical[7], 1.0);
+    }
+
+    #[test]
+    fn canonical_sign_uses_lowest_index_on_tie() {
+        let mut direction = [0.0; SRCC_DIMENSION];
+        direction[3] = -1.0;
+        direction[8] = 1.0;
+
+        let canonical = canonicalize_direction(direction);
+
+        assert_eq!(canonical[3], 1.0);
+        assert_eq!(canonical[8], -1.0);
+    }
+
+    #[test]
+    fn closure_is_deterministic() {
+        let seeds = [basis_vector(1).unwrap()];
+        let transports = [transport(1, 2, 1.0), transport(1, 2, -1.0)];
+
+        let first = SrccClosure::build(&seeds, &transports, SrccConfig::default()).unwrap();
+
+        let second = SrccClosure::build(&seeds, &transports, SrccConfig::default()).unwrap();
+
+        assert_eq!(first, second);
+    }
+}
