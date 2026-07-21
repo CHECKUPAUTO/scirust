@@ -476,6 +476,91 @@ mod tests {
     }
 
     #[test]
+    fn dense_approximate_consensus_is_recovered() {
+        let raw_seed: Vector16 = core::array::from_fn(|index| index as f64 + 1.0);
+
+        let seed = normalize(raw_seed);
+
+        let raw_target: Vector16 =
+            core::array::from_fn(|index| if index % 2 == 0 { 1.0 } else { -0.7 });
+
+        let target = normalize(residual_outside_span(&raw_target, &[seed]));
+
+        let raw_perturbation: Vector16 = core::array::from_fn(|index| {
+            let value = index as f64 + 1.0;
+            value * value - 40.0
+        });
+
+        let perturbation = normalize(residual_outside_span(&raw_perturbation, &[seed, target]));
+
+        let perturbed_target = normalize(core::array::from_fn(|index| {
+            target[index] + 0.01 * perturbation[index]
+        }));
+
+        let rank_one = |output: Vector16| -> LinearMap16 {
+            core::array::from_fn(|row| core::array::from_fn(|column| output[row] * seed[column]))
+        };
+
+        let transports = [rank_one(target), rank_one(perturbed_target)];
+
+        let config = SrccConfig {
+            novelty_threshold: 0.02,
+            ..SrccConfig::default()
+        };
+
+        let closure = SrccClosure::build(&[seed], &transports, config).unwrap();
+
+        assert_eq!(closure.dimension(), 2);
+        assert_eq!(closure.rounds(), 1);
+        assert_eq!(closure.accepted_per_round(), &[1]);
+
+        let certificate = &closure.certificates()[0];
+
+        assert_eq!(certificate.support, 2);
+
+        assert!(certificate.minimum_alignment >= config.resonance_threshold);
+
+        assert!(certificate.minimum_alignment < 1.0);
+
+        let expected_consensus = normalize(core::array::from_fn(|index| {
+            target[index] + perturbed_target[index]
+        }));
+
+        assert!(dot(&closure.basis()[1], &expected_consensus,).abs() > 1.0 - 1.0e-12);
+
+        let projector = crate::SrccProjector::from_closure(closure);
+
+        assert!(squared_norm(&projector.apply(&seed),) < 1.0e-24);
+
+        assert!(squared_norm(&projector.apply(&expected_consensus,),) < 1.0e-24);
+
+        let raw_preserved: Vector16 = core::array::from_fn(|index| {
+            let value = index as f64 + 2.0;
+            value * value * value - 200.0
+        });
+
+        let preserved = normalize(residual_outside_span(
+            &raw_preserved,
+            &[seed, expected_consensus],
+        ));
+
+        let filtered = projector.apply(&preserved);
+
+        let preservation_error: Vector16 =
+            core::array::from_fn(|index| filtered[index] - preserved[index]);
+
+        assert!(squared_norm(&preservation_error) < 1.0e-24);
+
+        assert!(seed.iter().all(|value| { value.abs() > 1.0e-12 }));
+
+        assert!(
+            expected_consensus
+                .iter()
+                .all(|value| { value.abs() > 1.0e-12 })
+        );
+    }
+
+    #[test]
     fn consensus_adds_shared_direction() {
         let seeds = [basis_vector(1).unwrap()];
         let transports = [
