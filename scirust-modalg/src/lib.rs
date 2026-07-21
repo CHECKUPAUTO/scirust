@@ -82,6 +82,10 @@
 //! - [`lll`] — exact **LLL lattice-basis reduction** with rational Gram–Schmidt
 //!   (no floating point, no overflow) and a unimodular certificate `U` proving
 //!   the reduced basis spans the same lattice.
+//! - [`smith`] — the exact **Smith normal form** of an integer matrix over
+//!   `BigInt` (**no overflow ceiling**): the invariant factors `d₁ | d₂ | …`
+//!   plus unimodular certificates `U`, `V` with `U · A · V = D` — the
+//!   overflow-free companion to the `rational` Hermite normal form.
 //!
 //! Everything is deterministic and reproducible bit-for-bit on every platform.
 //!
@@ -257,6 +261,18 @@
 //!     assert_eq!(n2.to_decimal(), "1"); // ‖·‖² == 1
 //! }
 //! ```
+//!
+//! ```
+//! use scirust_modalg::bigint::BigInt;
+//! use scirust_modalg::smith::smith_normal_form;
+//!
+//! // Smith normal form of diag(2,3): coprime, so the CRT merges them into
+//! // diag(1,6) — the invariant factors, with 1 | 6.
+//! let big = |v: i128| BigInt::from_i128(v);
+//! let a = vec![vec![big(2), big(0)], vec![big(0), big(3)]];
+//! let snf = smith_normal_form(&a);
+//! assert_eq!(snf.invariants, vec![big(1), big(6)]);
+//! ```
 
 pub mod bigint;
 pub mod bigrational;
@@ -275,6 +291,7 @@ pub mod poly;
 pub mod rational;
 pub mod ring;
 pub mod sbox;
+pub mod smith;
 
 pub use bigint::BigInt;
 pub use bigrational::BigRational;
@@ -291,3 +308,4 @@ pub use poly::Poly;
 pub use rational::{Fraction, RatMatrix};
 pub use ring::Word;
 pub use sbox::Sbox;
+pub use smith::{SmithNormalForm, smith_normal_form};
