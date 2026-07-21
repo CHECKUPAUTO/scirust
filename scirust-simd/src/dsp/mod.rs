@@ -73,6 +73,13 @@
 //   mise à jour de covariance. [`kalman::KalmanFilter::predict_nonlinear`]/
 //   [`update_nonlinear`](kalman::KalmanFilter::update_nonlinear) généralisent
 //   aux modèles non linéaires (EKF) par linéarisation à chaque pas.
+// * [`wavelet`] — transformée en ondelettes discrète par schéma de lifting
+//   ([`wavelet::dwt_decompose`]/[`wavelet::dwt_reconstruct`], Haar ou CDF 5/3
+//   « LeGall ») : complète [`fft`]/[`stft`] (résolution temps-fréquence
+//   **fixe**) par une décomposition **multirésolution**. Réversible
+//   **exactement** (au bit près) quel que soit `T` — la prédiction/mise à
+//   jour de lifting s'annule par télescopage à la reconstruction, sans
+//   arrondi requis, contrairement à un banc de filtres flottant classique.
 //
 // ## Pourquoi la virgule fixe pour le DSP ?
 //
@@ -94,6 +101,7 @@ pub mod pll;
 pub mod resample;
 pub mod stft;
 pub mod timing;
+pub mod wavelet;
 pub mod window;
 
 pub use adaptive::{Lms, Nlms, Rls};
@@ -107,6 +115,7 @@ pub use mfcc::{Mfcc, dct2};
 pub use pll::{Nco, PiLoopFilter, Pll};
 pub use resample::resample;
 pub use timing::{SymbolTimingLoop, gardner_ted, mueller_muller_ted};
+pub use wavelet::{Wavelet, dwt_decompose, dwt_reconstruct};
 
 #[cfg(test)]
 mod tests;

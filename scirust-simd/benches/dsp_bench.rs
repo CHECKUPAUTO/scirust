@@ -16,6 +16,7 @@ use scirust_simd::dsp::mfcc::Mfcc;
 use scirust_simd::dsp::pll::Pll;
 use scirust_simd::dsp::stft::{power_spectrogram, stft};
 use scirust_simd::dsp::timing::SymbolTimingLoop;
+use scirust_simd::dsp::wavelet::{Wavelet, dwt_decompose};
 use scirust_simd::dsp::window;
 use scirust_simd::dsp::{
     Biquad, BiquadCascade, Complex, Fir, Lms, Nlms, Plan, Rls, fft, fft_convolve, group_delay,
@@ -752,6 +753,53 @@ fn bench_kalman(c: &mut Criterion) {
     g.finish();
 }
 
+/// Décomposition en pyramide (4 niveaux) via lifting, Haar vs CDF 5/3 —
+/// CDF 5/3 prédit/met à jour sur deux voisins (contre un pour Haar), donc un
+/// surcoût par échantillon plus élevé mais une bien meilleure compaction
+/// d'énergie (cf. `cdf53_better_compaction_than_haar_all_scalars` dans les
+/// tests, et l'en-tête de module).
+fn bench_wavelet(c: &mut Criterion) {
+    let sf = signal_f32();
+    let sx = signal_fixed(&sf);
+    const LEVELS: usize = 4;
+
+    let mut g = c.benchmark_group("dwt_decompose_haar");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            let mut x = sx.clone();
+            dwt_decompose(&mut x, LEVELS, Wavelet::Haar);
+            x[0]
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| {
+            let mut x = sf.clone();
+            dwt_decompose(&mut x, LEVELS, Wavelet::Haar);
+            x[0]
+        })
+    });
+    g.finish();
+
+    let mut g = c.benchmark_group("dwt_decompose_cdf53");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            let mut x = sx.clone();
+            dwt_decompose(&mut x, LEVELS, Wavelet::Cdf53);
+            x[0]
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| {
+            let mut x = sf.clone();
+            dwt_decompose(&mut x, LEVELS, Wavelet::Cdf53);
+            x[0]
+        })
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_biquad,
@@ -772,6 +820,7 @@ criterion_group!(
     bench_freqz,
     bench_pll,
     bench_symbol_timing,
-    bench_kalman
+    bench_kalman,
+    bench_wavelet
 );
 criterion_main!(benches);
