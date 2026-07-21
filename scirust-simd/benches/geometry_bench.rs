@@ -456,6 +456,26 @@ fn bench_dual_quaternion(c: &mut Criterion) {
         b.iter(|| DualQuaternion::sclerp(black_box(dqf_a), black_box(dqf_b), 0.37f32))
     });
     g.finish();
+
+    let mut g = c.benchmark_group("dual_quaternion_to_screw");
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| black_box(dqx_a).to_screw())
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| black_box(dqf_a).to_screw())
+    });
+    g.finish();
+
+    let sx = dqx_a.to_screw().unwrap();
+    let sf = dqf_a.to_screw().unwrap();
+    let mut g = c.benchmark_group("dual_quaternion_from_screw");
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| DualQuaternion::from_screw(black_box(sx)))
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| DualQuaternion::from_screw(black_box(sf)))
+    });
+    g.finish();
 }
 
 criterion_group!(

@@ -23,6 +23,10 @@
 //   **et** linéaire constantes), là où interpoler séparément rotation et
 //   translation de deux `Transform` ne suit pas la trajectoire physique
 //   réelle si l'axe de rotation ne passe pas par l'origine.
+//   [`DualQuaternion::to_screw`]/[`DualQuaternion::from_screw`] exposent les
+//   paramètres de Plücker/Chasles du vissage ([`Screw`] : axe, angle, pas,
+//   moment) en API autonome — utile pour extraire l'axe de vissage fini
+//   entre deux poses (calibrage/visualisation en robotique).
 //
 // ## Pourquoi générique ?
 //
@@ -38,7 +42,7 @@ pub mod dual_quaternion;
 pub mod quaternion;
 pub mod transform;
 
-pub use dual_quaternion::DualQuaternion;
+pub use dual_quaternion::{DualQuaternion, Screw};
 pub use quaternion::Quaternion;
 pub use transform::Transform;
 

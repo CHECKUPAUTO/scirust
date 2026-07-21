@@ -52,6 +52,20 @@
 // que [`Quaternion::from_rotation_matrix`] : `recip()` perdrait de la
 // précision avant même la multiplication (cf. [`crate::dsp::mel`]). Diviser
 // par `2` (puissance de deux) reste en revanche `recip()`, exact.
+//
+// ## `to_screw`/`from_screw` — paramètres de Plücker/Chasles
+//
+// [`Self::pow`] décompose déjà, en interne, un vissage unitaire en axe,
+// angle, pas et moment (théorème de Chasles / paramétrage de Plücker d'une
+// droite) — uniquement pour reconstituer `pow(t)`. [`Self::to_screw`] expose
+// cette même décomposition en API autonome ([`Screw<T>`]), et
+// [`Self::from_screw`] en est la reconstruction réciproque indépendante
+// (pas seulement `pow(1)`) — utile pour extraire l'axe de vissage fini entre
+// deux poses (calibrage/visualisation en robotique) ou construire un
+// déplacement rigide directement depuis axe/angle/pas plutôt qu'en composant
+// rotation et translation séparément. [`Screw::axis_point`] reconstruit le
+// point de la droite le plus proche de l'origine (`axe × moment`, identité
+// de Plücker standard).
 
 use core::ops::{Div, Mul};
 
@@ -67,6 +81,45 @@ pub struct DualQuaternion<T> {
     pub real: Quaternion<T>,
     /// Partie duale (encodage de la translation, cf. [`Self::from_rotation_translation`]).
     pub dual: Quaternion<T>,
+}
+
+/// Paramètres de vissage de Plücker/Chasles (cf. en-tête de module) : rotation
+/// d'angle `angle` autour d'un axe unitaire `axis`, plus translation `pitch`
+/// le long de cet axe. `moment` place la droite dans l'espace (moment de
+/// Plücker `p × axis` pour un point `p` quelconque de la droite — invariant
+/// au choix de `p`) ; [`Self::axis_point`] en reconstruit un point canonique.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Screw<T> {
+    /// Axe de rotation unitaire.
+    pub axis: [T; 3],
+    /// Angle de rotation (radians, même convention que
+    /// [`Quaternion::to_axis_angle`] — `∈ [0, 2π]`).
+    pub angle: T,
+    /// Translation le long de l'axe.
+    pub pitch: T,
+    /// Moment de Plücker de la droite (`p × axis`).
+    pub moment: [T; 3],
+}
+
+/// Produit vectoriel `a × b` (fonction libre, opérations d'anneau) — même
+/// technique que [`super::quaternion`] (fonction privée à ce module,
+/// reproduite localement plutôt que partagée).
+#[inline]
+fn cross<T: NumericScalar>(a: [T; 3], b: [T; 3]) -> [T; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+impl<T: NumericScalar> Screw<T> {
+    /// Point de la droite de vissage le plus proche de l'origine :
+    /// `axe × moment` (identité de Plücker standard — cf. en-tête de module).
+    #[must_use]
+    pub fn axis_point(&self) -> [T; 3] {
+        cross(self.axis, self.moment)
+    }
 }
 
 impl<T: NumericScalar> DualQuaternion<T> {
@@ -215,6 +268,82 @@ impl<T: RealScalar + Div<Output = T>> DualQuaternion<T> {
         ];
         let dual_t = Quaternion::new(dual_t_w, dual_t_vec[0], dual_t_vec[1], dual_t_vec[2]);
         Self::new(real_t, dual_t)
+    }
+
+    /// Décompose un vissage unitaire en ses paramètres de Plücker/Chasles
+    /// ([`Screw`]) — la même décomposition qu'utilise en interne
+    /// [`Self::pow`], exposée en API autonome (cf. en-tête de module).
+    ///
+    /// `None` pour une rotation quasi nulle (translation pure, axe
+    /// indéterminé) — même seuil que [`Self::pow`]/
+    /// [`Quaternion::to_axis_angle`].
+    #[must_use]
+    pub fn to_screw(self) -> Option<Screw<T>> {
+        let one = T::one();
+        let two = T::from_i32(2);
+        let half = two.recip(); // puissance de 2 : recip() exact.
+        let w = if self.real.w > one
+        {
+            one
+        }
+        else if self.real.w < -one
+        {
+            -one
+        }
+        else
+        {
+            self.real.w
+        };
+        let sin_half = (one - w * w).sqrt();
+        let tiny = T::from_i32(10000).recip(); // 1e-4, cf. Self::pow.
+
+        if sin_half < tiny
+        {
+            return None;
+        }
+
+        let theta = two * w.acos();
+        let cos_half = w;
+        let axis = [
+            self.real.x / sin_half,
+            self.real.y / sin_half,
+            self.real.z / sin_half,
+        ];
+        let d = (-two * self.dual.w) / sin_half;
+        let dual_vec = self.dual.vector();
+        let m = [
+            (dual_vec[0] - (d * half) * cos_half * axis[0]) / sin_half,
+            (dual_vec[1] - (d * half) * cos_half * axis[1]) / sin_half,
+            (dual_vec[2] - (d * half) * cos_half * axis[2]) / sin_half,
+        ];
+
+        Some(Screw {
+            axis,
+            angle: theta,
+            pitch: d,
+            moment: m,
+        })
+    }
+
+    /// Reconstruit le vissage unitaire depuis ses paramètres de Plücker/Chasles
+    /// (réciproque de [`Self::to_screw`]) : `s.axis` doit être unitaire.
+    #[must_use]
+    pub fn from_screw(s: Screw<T>) -> Self {
+        let half = T::from_i32(2).recip(); // puissance de 2 : recip() exact.
+        let half_theta = s.angle * half;
+        let (sn, cs) = (half_theta.sin(), half_theta.cos());
+        let real = Quaternion::new(cs, s.axis[0] * sn, s.axis[1] * sn, s.axis[2] * sn);
+
+        let half_pitch = s.pitch * half;
+        let dual_w = -half_pitch * sn;
+        let dual_vec = [
+            sn * s.moment[0] + half_pitch * cs * s.axis[0],
+            sn * s.moment[1] + half_pitch * cs * s.axis[1],
+            sn * s.moment[2] + half_pitch * cs * s.axis[2],
+        ];
+        let dual = Quaternion::new(dual_w, dual_vec[0], dual_vec[1], dual_vec[2]);
+
+        Self::new(real, dual)
     }
 
     /// **Screw linear interpolation** (ScLERP) entre deux poses `a`/`b`,
