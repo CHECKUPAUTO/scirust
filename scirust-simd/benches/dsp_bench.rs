@@ -10,6 +10,7 @@
 //     cargo bench -p scirust-simd --features portable-simd --bench dsp_bench
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use scirust_simd::dsp::kalman::KalmanFilter;
 use scirust_simd::dsp::mel::MelFilterbank;
 use scirust_simd::dsp::mfcc::Mfcc;
 use scirust_simd::dsp::pll::Pll;
@@ -687,6 +688,70 @@ fn bench_symbol_timing(c: &mut Criterion) {
     g.finish();
 }
 
+/// Cycle prédiction + mise à jour d'un filtre de Kalman (état
+/// `[position, vitesse]`, mesure = position seule) — modèle vitesse
+/// constante générique le plus courant. Mesure le coût du chemin **linéaire**
+/// ([`KalmanFilter::predict`]/[`KalmanFilter::update`]) : produits/inversion
+/// `2×2`/`1×1` par échantillon, comparable en coût à [`Rls`] (covariance
+/// `N×N` mise à jour à chaque pas) mais avec en plus une étape de prédiction
+/// distincte et une inversion `M×M` (ici triviale, `M=1`).
+fn bench_kalman(c: &mut Criterion) {
+    let sf = signal_f32();
+    let sx = signal_fixed(&sf);
+
+    let f_f = [[1.0f32, 1.0], [0.0, 1.0]];
+    let q_f = [[0.001f32, 0.0], [0.0, 0.001]];
+    let h_f = [[1.0f32, 0.0]];
+    let r_f = [[0.01f32]];
+
+    let f_x = [
+        [
+            Q16_16::try_from(1.0).unwrap(),
+            Q16_16::try_from(1.0).unwrap(),
+        ],
+        [
+            Q16_16::try_from(0.0).unwrap(),
+            Q16_16::try_from(1.0).unwrap(),
+        ],
+    ];
+    let q_x = [
+        [Q16_16::try_from(0.001).unwrap(), Q16_16::zero()],
+        [Q16_16::zero(), Q16_16::try_from(0.001).unwrap()],
+    ];
+    let h_x = [[Q16_16::try_from(1.0).unwrap(), Q16_16::zero()]];
+    let r_x = [[Q16_16::try_from(0.01).unwrap()]];
+
+    let mut g = c.benchmark_group("kalman_predict_update");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            let mut kf = KalmanFilter::<Q16_16, 2, 1>::new(
+                [Q16_16::zero(), Q16_16::zero()],
+                [
+                    [Q16_16::try_from(1.0).unwrap(), Q16_16::zero()],
+                    [Q16_16::zero(), Q16_16::try_from(1.0).unwrap()],
+                ],
+            );
+            for &x in &sx
+            {
+                kf.predict(&f_x, &q_x);
+                black_box(kf.update(&[x], &h_x, &r_x));
+            }
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| {
+            let mut kf = KalmanFilter::<f32, 2, 1>::new([0.0, 0.0], [[1.0, 0.0], [0.0, 1.0]]);
+            for &x in &sf
+            {
+                kf.predict(&f_f, &q_f);
+                black_box(kf.update(&[x], &h_f, &r_f));
+            }
+        })
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_biquad,
@@ -706,6 +771,7 @@ criterion_group!(
     bench_adaptive,
     bench_freqz,
     bench_pll,
-    bench_symbol_timing
+    bench_symbol_timing,
+    bench_kalman
 );
 criterion_main!(benches);

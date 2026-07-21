@@ -65,6 +65,14 @@
 //   continue) — les deux boucles indépendantes de toute chaîne de réception
 //   numérique. [`timing::mueller_muller_ted`] (piloté par décision) est
 //   fourni comme brique indépendante pour un synchroniseur personnalisé.
+// * [`kalman`] — filtre de Kalman linéaire et étendu ([`kalman::KalmanFilter`]) :
+//   contrairement à [`adaptive`] (aucun modèle a priori, coefficients appris
+//   depuis l'erreur instantanée), connaît un modèle de transition **et** de
+//   mesure et calcule l'estimateur bayésien de variance minimale à chaque
+//   pas — le « gain de Kalman » que [`adaptive::Rls`] mentionne déjà dans sa
+//   mise à jour de covariance. [`kalman::KalmanFilter::predict_nonlinear`]/
+//   [`update_nonlinear`](kalman::KalmanFilter::update_nonlinear) généralisent
+//   aux modèles non linéaires (EKF) par linéarisation à chaque pas.
 //
 // ## Pourquoi la virgule fixe pour le DSP ?
 //
@@ -79,6 +87,7 @@ pub mod fft;
 pub mod fftconv;
 pub mod fir;
 pub mod freqz;
+pub mod kalman;
 pub mod mel;
 pub mod mfcc;
 pub mod pll;
@@ -93,6 +102,7 @@ pub use fft::{Complex, Plan, fft, ifft, irfft, rfft};
 pub use fftconv::fft_convolve;
 pub use fir::Fir;
 pub use freqz::{group_delay, magnitude, magnitude_db, phase, unwrap_phase};
+pub use kalman::KalmanFilter;
 pub use mfcc::{Mfcc, dct2};
 pub use pll::{Nco, PiLoopFilter, Pll};
 pub use resample::resample;
