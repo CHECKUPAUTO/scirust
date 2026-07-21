@@ -123,11 +123,42 @@ q\in K_r,\ T_i\in\mathcal{T}
 \right\}.
 \]
 
-Normalize all non-negligible proposals and group them into deterministic
-resonance classes.
+Normalize all non-negligible proposals, canonicalize their signs using
+the coordinate of greatest absolute magnitude, and sort them
+deterministically.
 
-For every class with support at least \(c_{\min}\), select a canonical
-representative using fixed traversal and accumulation order.
+Resonance classes use complete-link agreement: a proposal joins a class
+only when it resonates with every existing member of that class.
+
+For a resonance class \(C\), let \(C_i\) contain the proposals generated
+by transport \(T_i\). Using a canonical anchor \(a\), define one vote per
+transport:
+
+\[
+v_i
+=
+\operatorname{normalize}
+\left(
+\sum_{u\in C_i}
+\operatorname{sign}
+igl(\langle a,uangleigr)u
+ight).
+\]
+
+The class representative is:
+
+\[
+r_C
+=
+\operatorname{normalize}
+\left(
+\sum_{i:C_i
+eqarnothing}v_i
+ight).
+\]
+
+Therefore, repeated proposals from one transport cannot outweigh the
+other independent transport paths.
 
 Then:
 
@@ -165,7 +196,98 @@ I-Q_\star Q_\star^\top.
 
 It rejects every component belonging to the resonant closure.
 
-## 9. Required invariants
+## 9. Data-driven transport discovery
+
+For an explicit view \(D_j\) containing source-target pairs
+\((x_k,y_k)\), SRCC learns:
+
+\[
+T_j
+=
+rac{1}{|D_j|}
+\sum_{(x_k,y_k)\in D_j}
+rac{y_kx_k^	op}{\|x_k\|^2}.
+\]
+
+Samples inside every view are sorted canonically before accumulation.
+The learned operator is therefore invariant to sample order.
+
+Explicit views are the primary scientific interface because their
+independence is supplied by the experiment rather than inferred from
+array position.
+
+A secondary convenience interface can construct deterministic views
+from a flat sample family by canonical grouping.
+
+## 10. Structural selection
+
+Candidate structures may vary:
+
+- resonance threshold;
+- number of inferred views;
+- other validated SRCC configuration parameters.
+
+Each candidate is scored on separate train and development cases using:
+
+\[
+L
+=
+R_{\mathrm{noise}}
++
+\lambda D_{\mathrm{signal}},
+\]
+
+where \(R_{\mathrm{noise}}\) is the mean residual-noise ratio and
+\(D_{\mathrm{signal}}\) is the mean signal-distortion ratio.
+
+The selected SRCC candidate is activated only when its development loss
+is strictly lower than the identity transform.
+
+## 11. Leave-one-out stability
+
+For explicit views, remove each removable sample in turn, refit SRCC,
+and compare the reduced projector \(P_{-k}\) with the full projector
+\(P\).
+
+The normalized Frobenius distance is:
+
+\[
+d_F(P,P_{-k})
+=
+rac{\|P-P_{-k}\|_F}{\sqrt{16}}.
+\]
+
+The stability report contains:
+
+- mean Frobenius distance;
+- maximum Frobenius distance;
+- rejected dimension after each removal;
+- proportion of removals preserving the full rejected dimension.
+
+A stability-gated search accepts a candidate only when both:
+
+\[
+\max_k d_F(P,P_{-k})
+\leq
+\delta_{\max},
+\]
+
+and:
+
+\[
+rac{
+\#\{k:\dim K_{-k}=\dim K\}
+}{
+\#\{k\}
+}
+\geq
+\gamma_{\min}.
+\]
+
+If no candidate passes the stability gate, the identity transform is
+selected.
+
+## 12. Required invariants
 
 The implementation must satisfy:
 
@@ -173,14 +295,40 @@ The implementation must satisfy:
 2. finite termination;
 3. monotonic closure dimension;
 4. orthonormal final basis;
-5. sign invariance of transport proposals;
-6. scale invariance of normalized proposals;
-7. projector symmetry within numerical tolerance;
-8. projector idempotence within numerical tolerance;
-9. exact preservation of vectors orthogonal to the closure;
-10. rejection of unsupported isolated perturbations.
+5. seed sign and scale invariance;
+6. transport sign and scale invariance;
+7. seed-family order invariance;
+8. transport-family order invariance;
+9. explicit-view order invariance of the final projector;
+10. sample-order invariance inside explicit views;
+11. complete-link resonance agreement;
+12. one normalized consensus vote per transport;
+13. projector symmetry within numerical tolerance;
+14. projector idempotence within numerical tolerance;
+15. preservation of vectors orthogonal to the closure;
+16. rejection of unsupported isolated perturbations;
+17. deterministic train/development selection;
+18. deterministic leave-one-out stability evaluation.
 
-## 10. Planned extensions
+## 13. Implemented validation oracles
+
+The current implementation includes deterministic tests for:
+
+- exact single-round consensus;
+- certified multi-round closure;
+- unsupported transport outlier rejection;
+- pairwise resonance enforcement;
+- sign, scale and ordering invariance;
+- equal transport weighting;
+- explicit transport views;
+- learned transport fitting;
+- train/development structural search;
+- identity fallback;
+- leave-one-out stability gating;
+- dense non-axis-aligned approximate consensus;
+- projector symmetry, idempotence, rejection and preservation.
+
+## 14. Planned extensions
 
 Later versions may add:
 
@@ -188,14 +336,15 @@ Later versions may add:
   \[
   T_iT_jq-T_jT_iq;
   \]
-- train/dev selection of transport families;
 - soft resonance gains;
 - temporal transport operators;
 - multiscale closure;
-- confidence and stability scores;
-- automatic transport discovery.
+- bootstrap and repeated holdout stability;
+- sparse and structured transport estimators;
+- real-signal benchmark suites;
+- formal complexity bounds.
 
-## 11. Scientific controls
+## 15. Scientific controls
 
 SRCC must be compared against Cayley and Clifford with:
 
@@ -204,9 +353,12 @@ SRCC must be compared against Cayley and Clifford with:
 - identical train/dev/test partitions;
 - contamination sweeps;
 - sample-efficiency curves;
-- deterministic repeated runs.
+- deterministic repeated runs;
+- leave-one-out and repeated-holdout stability;
+- dense non-axis-aligned synthetic oracles;
+- explicit reporting of identity fallback frequency.
 
-## 12. Novelty statement
+## 16. Novelty statement
 
 SRCC is an original SciRust design target combining novelty residuals,
 transport-path agreement and consensus-gated finite closure.
