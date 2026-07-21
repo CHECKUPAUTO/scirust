@@ -87,7 +87,7 @@ deployment from within a method crate.
 | Phase | Title | Branch | PR | Merge commit | Status |
 |------:|-------|--------|----|--------------|--------|
 | 721 | Robust descriptive statistics | `claude/scirust-srcc-robust-stats-6ue9xc` | [#725](https://github.com/Memorithm/scirust/pull/725) | `f2b87380eb02dda91e39c7c45f1ab73d6f9a5a36` | **Merged** |
-| 722 | Robust multivariate geometry | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | _(open)_ | _(pending)_ | In review |
+| 722 | Robust multivariate geometry | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#729](https://github.com/Memorithm/scirust/pull/729) | _(pending)_ | In review |
 | 723 | Scale-aware SRCC source geometry | `feat/srcc-scale-aware-source-geometry` | — | — | Not started |
 | 724 | Deterministic robust regression | `feat/learning-robust-regression` | — | — | Not started |
 | 725 | Trust & contamination models | `feat/srcc-trust-contamination-models` | — | — | Not started |
