@@ -420,6 +420,25 @@ fn bench_matrix_log(c: &mut Criterion) {
     g.finish();
 }
 
+/// Recalage rigide (Kabsch) d'un nuage de `M_POINTS` points en dimension 3 —
+/// échelle typique d'un alignement de nuage de points/étalonnage de capteur.
+const M_POINTS: usize = 100;
+const DIM: usize = 3;
+
+fn bench_kabsch(c: &mut Criterion) {
+    let p = fixed_data(0x1A, M_POINTS * DIM);
+    let r = diag_dominant_data(0x1B, DIM);
+    let q = flin::matmul(&p, &r, M_POINTS, DIM, DIM);
+    let tol = Q16_16::try_from(1e-4).unwrap();
+
+    let mut g = c.benchmark_group("kabsch_100x3");
+    g.throughput(Throughput::Elements((M_POINTS * DIM * DIM) as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |bch| {
+        bch.iter(|| flin::kabsch(black_box(&p), black_box(&q), M_POINTS, DIM, tol, 60))
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_matmul,
@@ -438,6 +457,7 @@ criterion_group!(
     bench_matrix_exp,
     bench_generalized_eig_symmetric,
     bench_matrix_sqrt,
-    bench_matrix_log
+    bench_matrix_log,
+    bench_kabsch
 );
 criterion_main!(benches);

@@ -92,7 +92,11 @@
 //   `matrix_log`/`matrix_pow_real` (mise à l'échelle inverse de Higham)
 //   complètent ce trio pour les matrices **symétriques définies
 //   positives** — le pendant matriciel de
-//   [`crate::hypercomplex::OctonionSimd::exp`]/`ln`/`powf`.
+//   [`crate::hypercomplex::OctonionSimd::exp`]/`ln`/`powf`. Le recalage
+//   rigide de nuages de points via SVD (`orthogonal_procrustes`, `kabsch`,
+//   `kabsch_align`) retrouve la rotation (propre ou avec réflexion) et la
+//   translation alignant deux nuages de points — étalonnage de capteurs,
+//   ICP, alignement de structures.
 // * [`activation`] — activations quantifiées (`relu`, `relu6`, `hardswish`…).
 // * [`layer`] — couche linéaire quantifiée [`layer::Linear`] (`W·x + b`, +
 //   activation), avec inférence par lot (`forward_batch` et variantes).
