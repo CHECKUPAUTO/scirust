@@ -61,6 +61,9 @@
 //!   a monic irreducible `m`: add/sub/mul/pow/inverse and the Frobenius map,
 //!   with an automatic modulus search. Generalises `gf2` — `GF(2^8)` with the
 //!   AES modulus reproduces `gf2::Gf2Field::rijndael8` exactly. Composes `poly`.
+//! - [`dlog`] — exact **discrete logarithms** in `(ℤ/pℤ)*`: baby-step
+//!   giant-step and **Pohlig–Hellman** (fast for smooth group orders), plus the
+//!   multiplicative order of an element. Composes `numtheory`.
 //! - [`sbox`] — exact **S-box analysis**: difference distribution table and
 //!   differential uniformity, linear approximation table and nonlinearity (via
 //!   the Walsh transform), algebraic degree, and the strict-avalanche matrix —
@@ -273,12 +276,20 @@
 //! let snf = smith_normal_form(&a);
 //! assert_eq!(snf.invariants, vec![big(1), big(6)]);
 //! ```
+//!
+//! ```
+//! use scirust_modalg::dlog::discrete_log;
+//!
+//! // Discrete log in (ℤ/11ℤ)*: 2^6 = 64 ≡ 9 (mod 11), and 2 is a primitive root.
+//! assert_eq!(discrete_log(2, 9, 11), Some(6));
+//! ```
 
 pub mod bigint;
 pub mod bigrational;
 pub mod boolean;
 pub mod codes;
 pub mod crc;
+pub mod dlog;
 pub mod extfield;
 pub mod gf2;
 pub mod hypercomplex;
@@ -297,6 +308,7 @@ pub use bigint::BigInt;
 pub use bigrational::BigRational;
 pub use codes::ReedSolomon;
 pub use crc::Crc;
+pub use dlog::{bsgs, discrete_log};
 pub use extfield::ExtField;
 pub use gf2::Gf2Field;
 pub use hypercomplex::{Oct, Quat};

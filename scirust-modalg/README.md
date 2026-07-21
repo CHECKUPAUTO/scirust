@@ -31,6 +31,7 @@ optimized SIMD/hardware library instead — see [Positioning](#positioning).
 |--------|------------------|
 | [`ring`] | The finite rings `Z/2^k` as sealed `Word` types (`W2 … W64`), explicit wrapping arithmetic only, 2-adic valuation, unit test, modular inverse of odd elements. |
 | [`numtheory`] | Extended GCD, modular inverse/exponentiation, CRT, integer sqrt, **deterministic** Miller–Rabin primality (exact for every `u64`), **deterministic** Pollard–Brent factorization, Euler's totient, divisors, Jacobi symbol. |
+| [`dlog`] | Exact **discrete logarithms** in `(ℤ/pℤ)*`: baby-step giant-step and **Pohlig–Hellman** (fast for smooth group orders), plus the multiplicative order of an element. |
 | [`gf2`] | Carryless `GF(2)[x]` multiply / divide / gcd, and finite fields `GF(2^n)` (add/mul/pow/inv) with the AES/Rijndael `GF(2^8)`, a primitive `GF(2^8)` and a `GF(2^16)`. |
 | [`poly`] | The univariate polynomial ring **`GF(p)[x]`** over any prime field: long division, monic (extended) GCD, modular exponentiation, Lagrange interpolation, the formal derivative, an exact **Rabin irreducibility test**, and full **factorization into irreducibles** (deterministic Cantor–Zassenhaus) — the field-generic companion to `gf2` (the `p = 2` case). |
 | [`extfield`] | Finite **extension fields `GF(p^k)`** as `GF(p)[x]/(m)`: add/sub/mul/pow/inverse and the Frobenius map, with an automatic irreducible-modulus search. Generalises `gf2` — `GF(2^8)` with the AES modulus reproduces `gf2::Gf2Field::rijndael8` exactly. |
@@ -86,7 +87,8 @@ vector**, not just self-consistency:
 - `GF(p^k)` field axioms on random elements, `a^(p^k−1) = 1` and `a^(p^k) = a` (Lagrange + Frobenius), and `GF(2^8)` products/inverses matching the packed `gf2::Gf2Field::rijndael8`;
 - LLL output verified LLL-reduced with a unimodular certificate (`U·A = reduced`, `det U = ±1`) and preserved lattice volume;
 - `BigInt` arithmetic vs `i128` over thousands of random cases;
-- Smith normal form reconstructed (`U·A·V = D`), `U`, `V` unimodular (`det = ±1`), the divisibility chain `dᵢ | dᵢ₊₁`, and `∏ dᵢ = |det A|` for square matrices.
+- Smith normal form reconstructed (`U·A·V = D`), `U`, `V` unimodular (`det = ±1`), the divisibility chain `dᵢ | dᵢ₊₁`, and `∏ dᵢ = |det A|` for square matrices;
+- discrete logs vs brute force and BSGS vs Pohlig–Hellman agreement (`gˣ = h`), including recovery of a known exponent modulo the Fermat prime `65537` (a fully smooth group order).
 
 ## Usage
 
@@ -135,6 +137,7 @@ matter more than speed; choose an optimized library otherwise.
 
 [`ring`]: src/ring.rs
 [`numtheory`]: src/numtheory.rs
+[`dlog`]: src/dlog.rs
 [`gf2`]: src/gf2.rs
 [`boolean`]: src/boolean.rs
 [`linalg`]: src/linalg.rs
