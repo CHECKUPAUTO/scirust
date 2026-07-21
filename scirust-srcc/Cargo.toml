@@ -7,6 +7,9 @@ rust-version = "1.89"
 authors = ["SciRust Team"]
 description = "Deterministic resonant-consensus closure and projection"
 license-file = "../LICENSE.md"
+repository = "https://github.com/Memorithm/scirust"
+homepage = "https://github.com/Memorithm/scirust"
+documentation = "https://docs.rs/scirust-srcc"
 
 [features]
 default = []
