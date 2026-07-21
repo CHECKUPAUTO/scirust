@@ -183,6 +183,61 @@ fn print_record(label: &str, record: &Record) {
     println!("  return profile : {:?}", record.return_profile);
 }
 
+/// The exhaustive scan is **fully deterministic**: there is no RNG, the 256
+/// systems are enumerated, and every measurement is a pure function of the
+/// system id. The CANR §9 `seed` field is mandatory precisely to force this
+/// disclosure — so it carries the true determinant: the `system_id` for the
+/// two witness rows (each row IS that system), and `0` for the aggregate
+/// counts, whose `dataset` label spells out that the space is exhaustive and
+/// randomness-free. That is the honest answer to "what seed reproduces this
+/// row": for an exhaustive scan, the enumeration itself.
+fn scan_records(summary: &ScanSummary) -> Vec<scirust_bench_schema::BenchRecord> {
+    let mut records = Vec::new();
+    let exhaustive = format!("exhaustive/width{WIDTH}/all-{}-systems", summary.systems);
+    for (metric, value) in [
+        ("systems_analyzed", summary.systems as f64),
+        ("entropy_buckets", summary.entropy_buckets as f64),
+        (
+            "same_entropy_opposite_outcomes",
+            summary.mixed_recovery_pairs as f64,
+        ),
+        ("tdi_separated_pairs", summary.tdi_separated_pairs as f64),
+    ]
+    {
+        records.push(scirust_bench_schema::BenchRecord::new(
+            "tdi_scan/width2",
+            exhaustive.clone(),
+            "exhaustive_deterministic_scan",
+            0,
+            metric,
+            value,
+        ));
+    }
+    for (role, record) in [
+        ("recovered_witness", &summary.witness.recovered),
+        ("failed_witness", &summary.witness.failed),
+    ]
+    {
+        records.push(scirust_bench_schema::BenchRecord::new(
+            "tdi_scan/width2",
+            format!("witness/system_id={}", record.system_id),
+            role,
+            u64::from(record.system_id),
+            "entropy_bits",
+            record.entropy,
+        ));
+        records.push(scirust_bench_schema::BenchRecord::new(
+            "tdi_scan/width2",
+            format!("witness/system_id={}", record.system_id),
+            role,
+            u64::from(record.system_id),
+            "recovered",
+            f64::from(u8::from(record.recovered)),
+        ));
+    }
+    records
+}
+
 fn main() -> Result<(), String> {
     let summary = exhaustive_scan()?;
 
@@ -203,12 +258,20 @@ fn main() -> Result<(), String> {
     println!();
     print_record("FAILED WITNESS", &summary.witness.failed);
 
+    let records = scan_records(&summary);
+    println!();
+    println!(
+        "=== bench-schema JSONL ({} records, scirust-bench-schema) ===",
+        records.len()
+    );
+    print!("{}", scirust_bench_schema::to_jsonl(&records));
+
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{SYSTEM_COUNT, exhaustive_scan};
+    use super::{SYSTEM_COUNT, exhaustive_scan, scan_records};
 
     #[test]
     fn exhaustive_scan_finds_a_predictive_tdi_separation() {
@@ -227,5 +290,37 @@ mod tests {
             summary.witness.recovered.return_profile,
             summary.witness.failed.return_profile
         );
+    }
+
+    #[test]
+    fn scan_records_carry_the_witnesses_and_round_trip_as_jsonl() {
+        let summary = exhaustive_scan().expect("exhaustive scan succeeds");
+        let records = scan_records(&summary);
+        // 4 aggregate counts + 2 metrics x 2 witnesses.
+        assert_eq!(records.len(), 8);
+
+        // The witness rows are keyed by the true determinant (system_id),
+        // and the two witnesses' entropies agree (same-entropy pair).
+        let recovered_entropy = records
+            .iter()
+            .find(|r| r.method == "recovered_witness" && r.metric == "entropy_bits")
+            .expect("recovered witness entropy row");
+        assert_eq!(
+            recovered_entropy.seed,
+            u64::from(summary.witness.recovered.system_id)
+        );
+        assert_eq!(recovered_entropy.value, summary.witness.recovered.entropy);
+
+        // Aggregate rows disclose determinism via seed 0 + an exhaustive label.
+        let counts = records
+            .iter()
+            .find(|r| r.metric == "systems_analyzed")
+            .expect("systems_analyzed row");
+        assert_eq!(counts.seed, 0);
+        assert!(counts.dataset.contains("exhaustive"));
+
+        let text = scirust_bench_schema::to_jsonl(&records);
+        let back = scirust_bench_schema::parse_jsonl(&text).expect("round trip");
+        assert_eq!(back, records);
     }
 }

@@ -556,4 +556,76 @@ mod tests {
             assert_eq!(result[i].to_bits(), inputs[0][i].to_bits());
         }
     }
+
+    /// **Le contraste que le résultat D2 de la Phase D rend explicite**
+    /// (`docs/research/ANEE_PHASE_D_RESULTS_2026-07-18.md` §2) : une réduction
+    /// n'est invariante à la *forme de la réduction* que si sa structure de
+    /// sommation l'est. On garde le **multiensemble de contributions
+    /// identique** (les 16 mêmes vecteurs) et on ne fait varier que
+    /// l'affectation rang→contribution — c'est-à-dire l'association des
+    /// additions dans l'arbre fixe, l'analogue direct du re-découpage en
+    /// chunks que D2 étudie. `FixedOrderSum` change de bits selon
+    /// l'association (l'addition f32 n'est pas associative — il n'est donc
+    /// *pas* portable à travers un changement de forme/nombre de workers),
+    /// tandis que `ExactSum` reste bit-identique. Sans ce test, seul le
+    /// versant positif (ExactSum invariant) était épinglé ; le versant D2 — le
+    /// défaut d'invariance de la voie f32 — ne l'était pas, et un appelant
+    /// pouvait croire `FixedOrderSum` sûr à forme variable. Il ne l'est pas :
+    /// pour ce contrat, utiliser `ExactSum`.
+    #[test]
+    fn reduction_shape_invariance_holds_only_for_the_exact_sum() {
+        let dim = 48;
+        let n = 16;
+        let contributions = make_inputs(n, dim, 20260718);
+
+        // Le MÊME multiensemble de 16 vecteurs, quatre affectations
+        // rang→contribution différentes (rotations premières à 16, donc
+        // permutations non triviales) : seule l'association des additions
+        // change, jamais l'ensemble sommé.
+        let assignments: Vec<Vec<Vec<f32>>> = [0usize, 3, 7, 11]
+            .iter()
+            .map(|&k| {
+                let mut v = contributions.clone();
+                v.rotate_left(k);
+                v
+            })
+            .collect();
+
+        // ExactSum : bits identiques pour toute association (la somme de
+        // Kulisch est exacte, donc associativement invariante).
+        let exact_ref: Vec<u32> = tree_all_reduce(&assignments[0], &ExactSum, None)
+            .iter()
+            .map(|x| x.to_bits())
+            .collect();
+        for a in &assignments
+        {
+            let got: Vec<u32> = tree_all_reduce(a, &ExactSum, None)
+                .iter()
+                .map(|x| x.to_bits())
+                .collect();
+            assert_eq!(
+                got, exact_ref,
+                "ExactSum doit être invariant à l'association"
+            );
+        }
+
+        // Versant D2 : au moins deux associations produisent des bits
+        // DIFFÉRENTS pour FixedOrderSum. Déterministe (graine fixe) : si la
+        // propriété tient une fois, elle tient toujours.
+        let fixed_seen: Vec<Vec<u32>> = assignments
+            .iter()
+            .map(|a| {
+                tree_all_reduce(a, &FixedOrderSum, None)
+                    .iter()
+                    .map(|x| x.to_bits())
+                    .collect()
+            })
+            .collect();
+        let all_identical = fixed_seen.windows(2).all(|w| w[0] == w[1]);
+        assert!(
+            !all_identical,
+            "FixedOrderSum devrait dépendre de l'association (versant D2) — \
+             s'il était invariant, la voie f32 aurait un contrat différent"
+        );
+    }
 }
