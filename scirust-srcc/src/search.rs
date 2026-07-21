@@ -4,7 +4,8 @@ use core::fmt;
 
 use crate::{
     SrccCase, SrccConfig, SrccFitError, SrccGateDecision, SrccProjector, SrccScore,
-    SrccSelectionError, SrccTransportSample, Vector16, fit_srcc_projector, select_srcc_train_dev,
+    SrccSelectionError, SrccTransportSample, Vector16, fit_srcc_projector,
+    fit_srcc_projector_from_views, select_srcc_train_dev,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -146,6 +147,67 @@ pub fn search_srcc_structures(
     })
 }
 
+pub fn search_srcc_structures_from_views(
+    seeds: &[Vector16],
+    views: &[&[SrccTransportSample]],
+    resonance_thresholds: &[f64],
+    base_config: SrccConfig,
+    train: &[SrccCase],
+    dev: &[SrccCase],
+    distortion_weight: f64,
+) -> Result<SrccSearchResult, SrccSearchError> {
+    if resonance_thresholds.is_empty()
+    {
+        return Err(SrccSearchError::EmptyResonanceThresholds);
+    }
+
+    let mut ordered_thresholds = resonance_thresholds.to_vec();
+
+    ordered_thresholds.sort_by(f64::total_cmp);
+    ordered_thresholds.dedup_by(|left, right| left.total_cmp(right).is_eq());
+
+    let mut projectors = Vec::with_capacity(ordered_thresholds.len());
+
+    for &resonance_threshold in &ordered_thresholds
+    {
+        let config = SrccConfig {
+            resonance_threshold,
+            ..base_config
+        };
+
+        let fit = fit_srcc_projector_from_views(seeds, views, config)?;
+
+        projectors.push(fit.projector);
+    }
+
+    let selection = select_srcc_train_dev(&projectors, train, dev, distortion_weight)?;
+
+    let candidates: Vec<_> = selection
+        .candidates
+        .iter()
+        .map(|candidate| {
+            let resonance_threshold = ordered_thresholds[candidate.candidate_index];
+
+            SrccSearchCandidate {
+                view_count: views.len(),
+                resonance_threshold,
+                projector: candidate.projector.clone(),
+                train_score: candidate.train_score,
+                dev_score: candidate.dev_score,
+            }
+        })
+        .collect();
+
+    let selected = candidates[0].clone();
+
+    Ok(SrccSearchResult {
+        selected,
+        candidates,
+        identity_dev_score: selection.identity_dev_score,
+        decision: selection.decision,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,6 +284,78 @@ mod tests {
                 view_counts: vec![2, 3],
                 resonance_thresholds: vec![0.999, 1.0],
             },
+            SrccConfig::default(),
+            &cases,
+            &cases,
+            10.0,
+        )
+        .unwrap();
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn explicit_view_search_selects_consensus() {
+        let seed = basis_vector(1).unwrap();
+        let target = basis_vector(2).unwrap();
+
+        let positive = [SrccTransportSample::new(seed, target)];
+
+        let negative = [SrccTransportSample::new(seed, target.map(|value| -value))];
+
+        let views = [positive.as_slice(), negative.as_slice()];
+
+        let cases = cases();
+
+        let result = search_srcc_structures_from_views(
+            &[seed],
+            &views,
+            &[1.0, 0.999],
+            SrccConfig::default(),
+            &cases,
+            &cases,
+            10.0,
+        )
+        .unwrap();
+
+        assert_eq!(result.candidates.len(), 2);
+        assert_eq!(result.selected.view_count, 2);
+
+        assert_eq!(result.selected.resonance_threshold, 0.999,);
+
+        assert_eq!(result.decision, SrccGateDecision::Srcc,);
+
+        assert!(result.selected.dev_score.loss < 1.0e-24);
+    }
+
+    #[test]
+    fn explicit_view_search_ignores_threshold_order() {
+        let seed = basis_vector(1).unwrap();
+        let target = basis_vector(2).unwrap();
+
+        let positive = [SrccTransportSample::new(seed, target)];
+
+        let negative = [SrccTransportSample::new(seed, target.map(|value| -value))];
+
+        let views = [positive.as_slice(), negative.as_slice()];
+
+        let cases = cases();
+
+        let first = search_srcc_structures_from_views(
+            &[seed],
+            &views,
+            &[1.0, 0.999],
+            SrccConfig::default(),
+            &cases,
+            &cases,
+            10.0,
+        )
+        .unwrap();
+
+        let second = search_srcc_structures_from_views(
+            &[seed],
+            &views,
+            &[0.999, 1.0],
             SrccConfig::default(),
             &cases,
             &cases,
