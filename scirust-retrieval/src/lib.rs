@@ -7,11 +7,13 @@
 pub mod forgetting;
 pub mod hybrid;
 pub mod index;
+pub mod ivf;
 pub mod license;
 pub mod metrics;
 pub mod rag;
 pub mod rerank;
 pub mod vector;
+pub mod vsa;
 
 // `learned` extras — backed by scirust-core (autodiff/nn) and scirust-graph.
 #[cfg(feature = "learned")]
@@ -26,7 +28,12 @@ pub mod feedback;
 pub use forgetting::{BoundedSemanticMemory, DecaySchedule, DocMeta};
 pub use hybrid::{Bm25Index, HybridRetriever, reciprocal_rank_fusion};
 pub use index::DenseIndex;
+pub use ivf::IvfIndex;
 pub use license::RetrievalAccess;
+pub use vsa::{Cleaned, CleanupMemory};
+
+#[cfg(feature = "fusion")]
+pub use vsa::{FusionStrategy, fuse_observations};
 
 #[cfg(feature = "learned")]
 pub use ann::LshIndex;
@@ -56,6 +63,17 @@ pub enum RetrievalError {
         /// The dimension that was supplied.
         got: usize,
     },
+    /// An operation needed at least one element and got none.
+    EmptyInput,
+    /// An input contained NaN or ±∞ where finite values are required.
+    NonFiniteInput,
+    /// An operation required a nonzero vector.
+    ZeroVector,
+    /// A configuration parameter was out of its valid range.
+    InvalidParameter {
+        /// What was wrong with the parameter.
+        reason: &'static str,
+    },
 }
 
 impl fmt::Display for RetrievalError {
@@ -68,6 +86,22 @@ impl fmt::Display for RetrievalError {
                     f,
                     "vector dimension {got} does not match index dimension {expected}"
                 )
+            },
+            RetrievalError::EmptyInput =>
+            {
+                write!(f, "operation requires at least one element")
+            },
+            RetrievalError::NonFiniteInput =>
+            {
+                write!(f, "input contains NaN or infinite values")
+            },
+            RetrievalError::ZeroVector =>
+            {
+                write!(f, "operation requires a nonzero vector")
+            },
+            RetrievalError::InvalidParameter { reason } =>
+            {
+                write!(f, "invalid parameter: {reason}")
             },
         }
     }

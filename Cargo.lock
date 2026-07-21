@@ -3517,6 +3517,7 @@ dependencies = [
  "scirust-core",
  "scirust-graph",
  "scirust-license",
+ "scirust-signal",
  "serde",
 ]
 

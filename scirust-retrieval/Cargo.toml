@@ -10,10 +10,16 @@ description = "SciRust pure semantic (dense transformer) retrieval — determini
 scirust-core = { path = "../scirust-core", optional = true }
 scirust-graph = { path = "../scirust-graph", optional = true }
 scirust-license = { path = "../scirust-license" }
+# SciRust's noise-processing toolkit, backing `vsa::fuse_observations`: repeated
+# noisy observations of one code are denoised per lane (Kalman-RTS smoothing,
+# Hampel impulse rejection) before the cleanup-memory snap. Optional because it
+# pulls scirust-core transitively — the pure core (default-features = false)
+# stays zero-dependency.
+scirust-signal = { path = "../scirust-signal", optional = true }
 serde = { version = "1", features = ["derive"] }
 
 [features]
-default = ["learned"]
+default = ["learned", "fusion"]
 # `learned` pulls the heavier scirust crates (scirust-core's autodiff/nn and
 # scirust-graph) and enables the modules backed by them: the MiniLLM transformer
 # encoder (`impl Encoder for EmbeddingEngine`), contrastive fine-tuning + the
@@ -25,6 +31,10 @@ default = ["learned"]
 # embeddings via the `Encoder` trait. This is the variant an external consumer
 # (e.g. ccos) depends on to keep its own zero-dependency, replay-exact posture.
 learned = ["dep:scirust-core", "dep:scirust-graph"]
+# Observation fusion for the VSA cleanup memory (`vsa::fuse_observations`),
+# backed by scirust-signal's denoisers. Off in the pure core for the same
+# reason as `learned`: it pulls the heavier scirust crates transitively.
+fusion = ["dep:scirust-signal"]
 
 # The end-to-end demo and the contrastive benchmark exercise the learned stack
 # (EmbeddingEngine, contrastive training, the improvement loop), so they are only
