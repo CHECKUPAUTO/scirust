@@ -144,6 +144,17 @@ pub enum RobustGeometryError {
         /// The underlying robust-statistics error.
         source: RobustStatsError,
     },
+    /// A fitted location or scale overflowed to a non-finite value on finite
+    /// input (for example a mean beyond `f64::MAX` or a MAD whose
+    /// normal-consistency product overflows). Reported explicitly: a non-finite
+    /// scale must never silently bypass the zero-scale policy.
+    NonFiniteScale {
+        /// The dimension whose estimate overflowed.
+        dimension: usize,
+        /// The non-finite fitted scale (the location may be the overflowing
+        /// quantity instead; the scale is reported as fitted).
+        scale: f64,
+    },
     /// Two feature descriptors carry incompatible physical dimensions where the
     /// metric requires a single common dimension.
     IncompatibleFeatureDimensions {
@@ -229,6 +240,11 @@ consider a larger ridge"
                     "fitting robust scale for dimension {dimension}: {source}"
                 )
             },
+            Self::NonFiniteScale { dimension, scale } => write!(
+                f,
+                "fitted location or scale for dimension {dimension} is not finite \
+(scale = {scale}); the estimate overflowed"
+            ),
             Self::IncompatibleFeatureDimensions {
                 first_index,
                 second_index,
@@ -393,6 +409,20 @@ impl RobustScaler {
                         (describe::median(&column), iqr)
                     },
                 };
+
+            // A location or scale estimate can overflow to a non-finite value
+            // even on finite input (a huge mean, a MAD whose normal-consistency
+            // product exceeds f64::MAX). A non-finite scale must never be
+            // marked active — `inf <= minimum_scale` is false, which would
+            // silently bypass every zero-scale policy — so it is a typed
+            // failure, not a silent fallback.
+            if !loc.is_finite() || !raw_scale.is_finite()
+            {
+                return Err(RobustGeometryError::NonFiniteScale {
+                    dimension: j,
+                    scale: raw_scale,
+                });
+            }
 
             if raw_scale <= config.minimum_scale
             {
@@ -1369,6 +1399,43 @@ mod tests {
         let json = serde_json::to_string(&scaler).unwrap();
         let back: RobustScaler = serde_json::from_str(&json).unwrap();
         assert_eq!(scaler, back);
+    }
+
+    #[test]
+    fn overflowing_scale_estimate_is_a_typed_error_not_a_silent_active_dimension() {
+        // MAD path: raw MAD 1.7e308 overflows when multiplied by the
+        // normal-consistency factor. Before the finiteness gate this produced
+        // scale = +inf marked ACTIVE (`inf <= minimum_scale` is false),
+        // silently bypassing every zero-scale policy.
+        let data = Matrix::from_slice(&[&[0.0], &[1.7e308], &[-1.7e308]]);
+        for policy in [
+            ZeroScalePolicy::Error,
+            ZeroScalePolicy::UnitScale,
+            ZeroScalePolicy::DropDimension,
+        ]
+        {
+            let config = RobustScalerConfig {
+                zero_scale_policy: policy,
+                ..RobustScalerConfig::default()
+            };
+            assert!(matches!(
+                RobustScaler::fit(&data, config),
+                Err(RobustGeometryError::NonFiniteScale { dimension: 0, .. })
+            ));
+        }
+
+        // Standard-deviation path: a CONSTANT column at 1.7e308 has true scale
+        // zero, but the mean/variance accumulators overflow; the honest result
+        // is the typed overflow error, never an active infinite scale.
+        let constant_huge = Matrix::from_slice(&[&[1.7e308], &[1.7e308], &[1.7e308]]);
+        let config = RobustScalerConfig {
+            scale_method: RobustScaleMethod::StandardDeviation,
+            ..RobustScalerConfig::default()
+        };
+        assert!(matches!(
+            RobustScaler::fit(&constant_huge, config),
+            Err(RobustGeometryError::NonFiniteScale { dimension: 0, .. })
+        ));
     }
 
     #[test]
