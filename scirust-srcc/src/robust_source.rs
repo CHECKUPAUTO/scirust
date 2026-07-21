@@ -41,9 +41,10 @@ impl Default for SrccRobustSourceClusteringConfig {
 /// opt-in scale-aware variant used by
 /// [`crate::robust_source_geometry`]: coordinate differences are multiplied by
 /// fitted inverse scales before entering the exact same fixed-order scaled
-/// accumulation. An inverse scale of `0.0` deactivates a coordinate (its scaled
-/// difference is exactly `0.0` and skipped, matching the historical zero-skip
-/// branch).
+/// accumulation. An inverse scale of `0.0` marks a dropped coordinate, which is
+/// skipped structurally before any arithmetic — so even an overflowing raw
+/// difference on a dropped coordinate contributes nothing (`inf * 0.0` would
+/// otherwise be `NaN`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum SourceMetric {
     Raw,
@@ -409,12 +410,13 @@ fn source_distance(left: &Vector16, right: &Vector16) -> f64 {
 
 /// Scale-aware variant of [`source_distance`].
 ///
-/// This mirrors the frozen [`source_distance`] body line for line; the only
-/// change is that each coordinate difference is multiplied by its fitted
-/// inverse scale before entering the accumulation. A zero inverse scale makes
-/// the scaled difference exactly `0.0`, which the historical zero-skip branch
-/// then ignores — dropped dimensions therefore contribute nothing, without any
-/// extra branch.
+/// This mirrors the frozen [`source_distance`] body line for line, with two
+/// changes: a coordinate whose inverse scale is exactly `0.0` (a dropped
+/// dimension) is skipped **before any arithmetic** — otherwise an overflowing
+/// raw difference on a dropped coordinate would produce `inf * 0.0 = NaN` and
+/// abort the fit even though the policy removed that coordinate — and each
+/// remaining coordinate difference is multiplied by its fitted inverse scale
+/// before entering the accumulation.
 fn scaled_source_distance(left: &Vector16, right: &Vector16, inverse_scales: &Vector16) -> f64 {
     let mut scale = 0.0;
     let mut scaled_sum = 1.0;
@@ -422,6 +424,11 @@ fn scaled_source_distance(left: &Vector16, right: &Vector16, inverse_scales: &Ve
     for ((left_value, right_value), inverse_scale_value) in
         left.iter().zip(right).zip(inverse_scales)
     {
+        if *inverse_scale_value == 0.0
+        {
+            continue;
+        }
+
         let difference = ((left_value - right_value) * inverse_scale_value).abs();
 
         if !difference.is_finite()

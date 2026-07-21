@@ -1,7 +1,9 @@
 //! Deterministic mechanism benchmark for scale-aware SRCC source geometry.
 //!
-//! Three sections, every claim runtime-verified (the process exits non-zero on
-//! any drift):
+//! Three sections. Every scientific claim printed as `true`, `ok`, `certified`
+//! or `typed_breakdown` is asserted at runtime and the process exits non-zero
+//! if it fails; purely descriptive fields (error names, numeric magnitudes)
+//! are printed verbatim from the computation:
 //!
 //! 1. **Compatibility** — the scale-aware pipeline under
 //!    `SrccSourceGeometrySpec::RawEuclidean` must equal the historical
@@ -10,10 +12,14 @@
 //!    zero radius.
 //! 2. **Global and anisotropic scaling** — a two-operating-state fixture whose
 //!    state signal lives on a coordinate three orders of magnitude below a
-//!    pure-noise coordinate. Raw geometry cannot separate the states at any
-//!    radius (typed consensus ambiguity — never a silent wrong answer), while
-//!    refit robust-diagonal geometry recovers them, with an identical structural
-//!    outcome under common source rescaling by 1, 1e3, 1e6, 1e9.
+//!    pure-noise coordinate. No raw radius groups the intra-state jitter while
+//!    keeping the states apart: below the signal separation raw clustering
+//!    fragments into singletons, in the bridging band (exercised here, asserted
+//!    at every scale) it fails with a typed consensus ambiguity, and above the
+//!    noise spread it silently merges the states by majority vote. Refit
+//!    robust-diagonal geometry groups and separates simultaneously, with an
+//!    identical structural outcome under common source rescaling by 1, 1e3,
+//!    1e6, 1e9.
 //! 3. **Majority breakdown (honest negative)** — the geometry is fitted on the
 //!    sources pooled across every view, so with two six-to-three views the
 //!    pooled majority (12 vs 6) survives any single removal and the
@@ -198,6 +204,7 @@ fn fit_error_name(error: &SrccRobustFitError) -> &'static str {
         SrccRobustFitError::NonFiniteTargetDistance { .. } => "non_finite_target_distance",
         SrccRobustFitError::InvalidSourceGeometry => "invalid_source_geometry",
         SrccRobustFitError::DegenerateSourceScale { .. } => "degenerate_source_scale",
+        SrccRobustFitError::NonFiniteSourceScale { .. } => "non_finite_source_scale",
         SrccRobustFitError::NoActiveSourceDimensions => "no_active_source_dimensions",
     }
 }
@@ -377,13 +384,16 @@ fn scaling_section() -> Result<(), String> {
             Err(error) => format!("err:{},nan,nan,nan", fit_error_name(error)),
         };
 
-        if scale == 1.0
-            && !matches!(
-                raw,
-                Err(SrccRobustFitError::AmbiguousTargetConsensus { .. })
-            )
+        // The bridging radius is rescaled with the data, so the typed
+        // ambiguity is the asserted outcome at every scale.
+        if !matches!(
+            raw,
+            Err(SrccRobustFitError::AmbiguousTargetConsensus { .. })
+        )
         {
-            return Err("raw geometry failed to produce the expected typed ambiguity".to_string());
+            return Err(format!(
+                "raw geometry failed to produce the expected typed ambiguity at scale {scale}"
+            ));
         }
 
         println!(
@@ -489,6 +499,16 @@ fn breakdown_section() -> Result<(), String> {
 
     let views = [view_four.as_slice(), view_three.as_slice()];
 
+    // The FULL fit must succeed: the breakdown is a leave-one-out property
+    // (one removal balances the pooled states), not an outright failure.
+    fit_scale_aware_source_clustered_robust_srcc_projector_from_views(
+        &[seed],
+        &views,
+        scale_aware(diagonal_geometry(), SCALED_RADIUS),
+        base_config(),
+    )
+    .map_err(|error| format!("unbalanced-pair full fit unexpectedly failed: {error}"))?;
+
     let breakdown = evaluate_scale_aware_source_clustered_robust_leave_one_out_stability(
         &[seed],
         &views,
@@ -498,9 +518,19 @@ fn breakdown_section() -> Result<(), String> {
 
     match breakdown
     {
-        Err(error) =>
+        Err(
+            error @ scirust_srcc::SrccRobustStabilityError::Fit(
+                SrccRobustFitError::AmbiguousTargetConsensus { .. },
+            ),
+        ) =>
         {
             println!("4v3_plus_3v3,typed_breakdown,{}", error);
+        },
+        Err(error) =>
+        {
+            return Err(format!(
+                "unbalanced-view leave-one-out failed with an unexpected error kind: {error}"
+            ));
         },
         Ok(_) =>
         {

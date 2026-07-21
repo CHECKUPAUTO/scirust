@@ -10,9 +10,14 @@
 //!   body on identical inputs in identical order);
 //! - [`SrccSourceGeometrySpec::RobustDiagonal`] fits a per-coordinate robust
 //!   scaler (from `scirust-multivariate`, phase 722) on the observed sources
-//!   and measures distances in fitted-scale units, making the clustering radius
-//!   invariant — after refitting — to positive per-coordinate rescaling of the
-//!   sources.
+//!   and measures distances in fitted-scale units. Clustering decisions are
+//!   then invariant — after refitting — to positive per-coordinate rescaling of
+//!   the sources **provided the scaler configuration is itself
+//!   scale-covariant**: `minimum_scale = 0` with the `Error` or
+//!   `DropDimension` policy. `UnitScale` keeps a degenerate coordinate in raw
+//!   units, and a positive `minimum_scale` is an absolute threshold in raw
+//!   units; both deliberately re-introduce a scale dependence and void the
+//!   invariance.
 //!
 //! # No leakage
 //!
@@ -26,7 +31,9 @@
 //!
 //! `RobustDiagonal` clustering decisions are invariant (within floating-point
 //! tolerance) to positive per-coordinate rescaling of the *sources* when the
-//! scaler is refit on the rescaled data. Nothing here makes the learned
+//! scaler is refit on the rescaled data and its configuration is
+//! scale-covariant (`minimum_scale = 0`, policy `Error` or `DropDimension` —
+//! see above). Nothing here makes the learned
 //! transports or the projector invariant to source rescaling — transport
 //! learning still sees the raw coordinates — and no affine invariance is
 //! claimed. Scale estimation inherits the breakdown limits of the underlying
@@ -67,9 +74,12 @@ pub enum SrccSourceGeometrySpec {
     /// the location) and is ignored by the metric; the scaler's zero-scale
     /// policy applies: `Error` fails with
     /// [`SrccRobustFitError::DegenerateSourceScale`], `UnitScale` keeps the
-    /// coordinate unscaled, and `DropDimension` removes it from the metric
+    /// coordinate **in raw units** (voiding rescaling invariance for that
+    /// coordinate), and `DropDimension` removes it from the metric
     /// (all-dropped fails with
-    /// [`SrccRobustFitError::NoActiveSourceDimensions`]).
+    /// [`SrccRobustFitError::NoActiveSourceDimensions`]). A scale estimate
+    /// that overflows, or whose reciprocal overflows, is a typed
+    /// [`SrccRobustFitError::NonFiniteSourceScale`].
     RobustDiagonal {
         /// Configuration for the per-coordinate robust scaler.
         scaler_config: RobustScalerConfig,
@@ -420,7 +430,18 @@ fn fit_source_metric(
             {
                 if scaler.active_dimensions[index]
                 {
-                    *inverse_scale = 1.0 / scaler.scale[index];
+                    let inverse = 1.0 / scaler.scale[index];
+
+                    // A subnormal fitted scale makes the reciprocal overflow to
+                    // infinity, which would poison every distance with a
+                    // misattributed non-finite-distance error; surface the
+                    // overflow where it happens instead.
+                    if !(inverse.is_finite() && inverse > 0.0)
+                    {
+                        return Err(SrccRobustFitError::NonFiniteSourceScale { dimension: index });
+                    }
+
+                    *inverse_scale = inverse;
                 }
             }
 
@@ -442,6 +463,10 @@ fn map_scaler_error(error: RobustGeometryError) -> SrccRobustFitError {
         RobustGeometryError::DegenerateDimension { dimension, .. } =>
         {
             SrccRobustFitError::DegenerateSourceScale { dimension }
+        },
+        RobustGeometryError::NonFiniteScale { dimension, .. } =>
+        {
+            SrccRobustFitError::NonFiniteSourceScale { dimension }
         },
         RobustGeometryError::NoActiveDimensions => SrccRobustFitError::NoActiveSourceDimensions,
         _ => SrccRobustFitError::InvalidSourceGeometry,
@@ -564,12 +589,20 @@ mod tests {
     /// Euclidean coordinates the smallest inter-state distance (the raw
     /// coordinate-8 separation, `0.001`, reached at identical coordinate-0
     /// jitter) is far below the largest intra-state distance (`0.04` of pure
-    /// coordinate-0 jitter), so no raw radius can separate the states. In
-    /// fitted MAD units the majority state keeps the coordinate-8 scale at the
-    /// jitter level, so the states are hundreds of scale units apart — and the
-    /// six-to-three majority keeps that true for every single-sample removal
-    /// (a five-to-three reduction still leaves the small deviations in the
-    /// majority), which the leave-one-out tests rely on.
+    /// coordinate-0 jitter), so **no raw radius groups the intra-state jitter
+    /// while keeping the states apart**. Concretely the raw pipeline has three
+    /// regimes: below the coordinate-8 separation it fragments every sample
+    /// into singletons (no grouping — the fit still succeeds via exact
+    /// repetition across views); in a middle bridging band it mixes the states
+    /// inside one cluster and fails with a typed consensus ambiguity; above
+    /// the intra-state spread it merges everything and the six-to-three
+    /// majority silently outvotes state B (an `Ok` with state B's targets
+    /// discarded). In fitted MAD units the majority state keeps the
+    /// coordinate-8 scale at the jitter level, so the states are hundreds of
+    /// scale units apart — and the six-to-three majority keeps that true for
+    /// every single-sample removal (a five-to-three reduction still leaves the
+    /// small deviations in the majority), which the leave-one-out tests rely
+    /// on.
     fn anisotropic_state_views() -> (Vector16, Vec<SrccTransportSample>, Vec<SrccTransportSample>) {
         let target_a = basis_vector(2).unwrap();
         let target_b = basis_vector(3).unwrap();
@@ -777,30 +810,44 @@ mod tests {
     }
 
     #[test]
-    fn anisotropic_states_defeat_raw_euclidean_at_every_radius() {
-        // Raw geometry: the largest intra-state source distance (~0.04, pure
-        // coordinate-0 jitter) exceeds the smallest inter-state distance
-        // (0.001, the coordinate-8 separation at identical jitter), so any raw
-        // radius either splits a state or bridges both. At this radius the
-        // canonical clustering mixes states inside one cluster and the two
-        // distinct targets tie 1-1, which is a typed consensus ambiguity —
-        // never a silent wrong answer.
+    fn anisotropic_states_expose_raw_euclidean_three_regime_failure() {
+        // No raw radius groups the intra-state jitter while separating the
+        // states. The three regimes are pinned explicitly:
+        //
+        // - a radius below the coordinate-8 separation fragments every jittered
+        //   sample into a singleton (no grouping happens; the fit succeeds only
+        //   because the fixture repeats sources across views);
+        // - a bridging radius mixes the states inside one cluster and fails
+        //   with the typed consensus ambiguity;
+        // - a radius above the intra-state spread merges everything and the
+        //   six-to-three majority silently outvotes state B (an Ok whose
+        //   clustering has destroyed the two-state structure).
+        //
+        // Only the robust-diagonal geometry achieves grouped-and-separated.
         let (seed, view_a, view_b) = anisotropic_state_views();
 
         let views = [view_a.as_slice(), view_b.as_slice()];
 
-        let raw = fit_scale_aware_source_clustered_robust_srcc_projector_from_views(
-            &[seed],
-            &views,
-            scale_aware(SrccSourceGeometrySpec::RawEuclidean, 2.0e-2),
-            test_config(),
-        );
+        let raw_at = |radius: f64| {
+            fit_scale_aware_source_clustered_robust_srcc_projector_from_views(
+                &[seed],
+                &views,
+                scale_aware(SrccSourceGeometrySpec::RawEuclidean, radius),
+                test_config(),
+            )
+        };
 
+        // Fragmenting regime: succeeds, but no approximate grouping occurred.
+        assert!(raw_at(5.0e-4).is_ok());
+
+        // Bridging regime: typed ambiguity.
         assert!(matches!(
-            raw,
+            raw_at(2.0e-2),
             Err(SrccRobustFitError::AmbiguousTargetConsensus { .. })
-                | Err(SrccRobustFitError::AmbiguousSourceClusterAssignment { .. })
         ));
+
+        // Merging regime: Ok, with the minority state silently outvoted.
+        assert!(raw_at(1.0e-1).is_ok());
     }
 
     #[test]
@@ -888,6 +935,29 @@ mod tests {
             original.projector.rejected_dimension(),
             rescaled.projector.rejected_dimension(),
         );
+
+        // Exact structural check, not a proxy: canonicalizing the rescaled
+        // views must yield exactly the canonicalized original views with every
+        // rewritten source multiplied coordinate-wise by the factors (the
+        // medoid is an observed source, so the correspondence is bit-exact:
+        // both sides multiply the same f64 values by the same factors).
+        let original_metric = fit_source_metric(&original_views, diagonal_geometry()).unwrap();
+        let rescaled_metric = fit_source_metric(&rescaled_views, diagonal_geometry()).unwrap();
+
+        let original_canonical =
+            canonicalize_source_clusters(&original_views, source_config(10.0), &original_metric)
+                .unwrap();
+
+        let rescaled_canonical =
+            canonicalize_source_clusters(&rescaled_views, source_config(10.0), &rescaled_metric)
+                .unwrap();
+
+        let expected_canonical: Vec<Vec<SrccTransportSample>> = original_canonical
+            .iter()
+            .map(|view| view.iter().map(rescale).collect())
+            .collect();
+
+        assert_eq!(rescaled_canonical, expected_canonical);
     }
 
     #[test]
@@ -1027,6 +1097,133 @@ mod tests {
             ),
             Err(SrccRobustFitError::InvalidMaximumSourceDistance),
         );
+    }
+
+    #[test]
+    fn fitted_metric_is_invariant_to_view_and_sample_order_even_for_std_dev() {
+        // The standard-deviation scale is summation-order sensitive, so this
+        // guards the canonical global sort in fit_source_metric: deleting the
+        // sort makes the pooled accumulation order depend on view/sample
+        // order and this test fails.
+        let (_, view_a, _) = anisotropic_state_views();
+
+        let mut view_b: Vec<SrccTransportSample> = view_a.clone();
+        view_b.truncate(6);
+
+        let mut shuffled_a = view_a.clone();
+        shuffled_a.reverse();
+        shuffled_a.swap(0, 3);
+
+        let geometry = SrccSourceGeometrySpec::RobustDiagonal {
+            scaler_config: RobustScalerConfig {
+                center: true,
+                scale_method: RobustScaleMethod::StandardDeviation,
+                zero_scale_policy: ZeroScalePolicy::DropDimension,
+                minimum_scale: 0.0,
+            },
+        };
+
+        let forward: [&[SrccTransportSample]; 2] = [view_a.as_slice(), view_b.as_slice()];
+        let swapped: [&[SrccTransportSample]; 2] = [view_b.as_slice(), view_a.as_slice()];
+        let shuffled: [&[SrccTransportSample]; 2] = [shuffled_a.as_slice(), view_b.as_slice()];
+
+        let reference = fit_source_metric(&forward, geometry).unwrap();
+
+        assert_eq!(reference, fit_source_metric(&swapped, geometry).unwrap());
+        assert_eq!(reference, fit_source_metric(&shuffled, geometry).unwrap());
+    }
+
+    #[test]
+    fn unit_scale_policy_keeps_degenerate_coordinates_in_raw_units() {
+        // UnitScale marks every degenerate coordinate active with scale 1.0.
+        // On this fixture the degenerate coordinates are identically zero in
+        // every source, so they contribute |0 - 0| = 0 and the clustering
+        // matches the DropDimension outcome; the policy is exercised
+        // end to end and documented as voiding rescaling invariance.
+        let (seed, view_a, view_b) = anisotropic_state_views();
+
+        let views = [view_a.as_slice(), view_b.as_slice()];
+
+        let unit_scale = SrccSourceGeometrySpec::RobustDiagonal {
+            scaler_config: RobustScalerConfig {
+                center: true,
+                scale_method: RobustScaleMethod::MedianAbsoluteDeviation,
+                zero_scale_policy: ZeroScalePolicy::UnitScale,
+                minimum_scale: 0.0,
+            },
+        };
+
+        let result = fit_scale_aware_source_clustered_robust_srcc_projector_from_views(
+            &[seed],
+            &views,
+            scale_aware(unit_scale, 10.0),
+            test_config(),
+        )
+        .unwrap();
+
+        assert_eq!(result.projector.rejected_dimension(), 2);
+    }
+
+    #[test]
+    fn identical_sources_drop_every_dimension_with_typed_error() {
+        // Every observed source identical: all 16 coordinate MADs are zero,
+        // DropDimension deactivates everything, and the typed
+        // NoActiveSourceDimensions error fires at geometry fitting.
+        let source = basis_vector(1).unwrap();
+        let target = basis_vector(2).unwrap();
+
+        let samples = [
+            SrccTransportSample::new(source, target),
+            SrccTransportSample::new(source, target),
+        ];
+
+        let views = [samples.as_slice(), samples.as_slice()];
+
+        assert_eq!(
+            fit_scale_aware_source_clustered_robust_srcc_projector_from_views(
+                &[source],
+                &views,
+                scale_aware(diagonal_geometry(), 10.0),
+                test_config(),
+            ),
+            Err(SrccRobustFitError::NoActiveSourceDimensions),
+        );
+    }
+
+    #[test]
+    fn discovery_errors_precede_geometry_fitting() {
+        // Historical error precedence: transport validation runs on the
+        // original views before any geometry fitting, so a degenerate sample
+        // surfaces as a discovery error even when the geometry is also
+        // invalid.
+        let zero_source = [0.0; SRCC_DIMENSION];
+        let target = basis_vector(2).unwrap();
+
+        let samples = [
+            SrccTransportSample::new(zero_source, target),
+            SrccTransportSample::new(zero_source, target),
+        ];
+
+        let views = [samples.as_slice(), samples.as_slice()];
+
+        let invalid = SrccSourceGeometrySpec::RobustDiagonal {
+            scaler_config: RobustScalerConfig {
+                center: true,
+                scale_method: RobustScaleMethod::MedianAbsoluteDeviation,
+                zero_scale_policy: ZeroScalePolicy::DropDimension,
+                minimum_scale: -1.0,
+            },
+        };
+
+        assert!(matches!(
+            fit_scale_aware_source_clustered_robust_srcc_projector_from_views(
+                &[basis_vector(1).unwrap()],
+                &views,
+                scale_aware(invalid, 10.0),
+                test_config(),
+            ),
+            Err(SrccRobustFitError::Discovery(_)),
+        ));
     }
 
     #[test]
