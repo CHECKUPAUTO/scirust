@@ -70,11 +70,17 @@ impl SrccClosure {
         validate_inputs(seeds, transports)?;
 
         let absolute_floor = config.energy_floor.sqrt();
+
+        let mut canonical_seeds: Vec<_> =
+            seeds.iter().copied().map(canonicalize_direction).collect();
+
+        canonical_seeds.sort_by(compare_directions);
+
         let mut basis = Vec::new();
 
-        for seed in seeds
+        for seed in canonical_seeds
         {
-            push_orthonormal(&mut basis, *seed, absolute_floor);
+            push_orthonormal(&mut basis, seed, absolute_floor);
         }
 
         if basis.is_empty()
@@ -261,18 +267,22 @@ fn generate_proposals(
     }
 
     proposals.sort_by(|left, right| {
-        left.direction
-            .iter()
-            .zip(right.direction.iter())
-            .find_map(|(left_value, right_value)| {
-                let ordering = left_value.total_cmp(right_value);
-
-                ordering.is_ne().then_some(ordering)
-            })
-            .unwrap_or_else(|| left.transport_index.cmp(&right.transport_index))
+        compare_directions(&left.direction, &right.direction)
+            .then_with(|| left.transport_index.cmp(&right.transport_index))
     });
 
     proposals
+}
+
+fn compare_directions(left: &Vector16, right: &Vector16) -> core::cmp::Ordering {
+    left.iter()
+        .zip(right.iter())
+        .find_map(|(left_value, right_value)| {
+            let ordering = left_value.total_cmp(right_value);
+
+            ordering.is_ne().then_some(ordering)
+        })
+        .unwrap_or(core::cmp::Ordering::Equal)
 }
 
 fn canonicalize_direction(mut direction: Vector16) -> Vector16 {
@@ -535,6 +545,25 @@ mod tests {
         assert_eq!(clusters[1].len(), 1);
 
         assert!(minimum_pairwise_alignment(&clusters[0]) >= 0.9);
+    }
+
+    #[test]
+    fn closure_is_invariant_to_seed_order() {
+        let seeds = [basis_vector(1).unwrap(), basis_vector(4).unwrap()];
+
+        let reordered = [seeds[1], seeds[0]];
+
+        let transports = [transport(1, 2, 1.0), transport(1, 2, -1.0)];
+
+        let first = SrccClosure::build(&seeds, &transports, SrccConfig::default()).unwrap();
+
+        let second = SrccClosure::build(&reordered, &transports, SrccConfig::default()).unwrap();
+
+        assert_eq!(first.basis(), second.basis());
+
+        assert_eq!(first.accepted_per_round(), second.accepted_per_round(),);
+
+        assert_eq!(first.certificates(), second.certificates(),);
     }
 
     #[test]
