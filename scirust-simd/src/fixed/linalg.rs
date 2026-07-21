@@ -974,6 +974,232 @@ where
 }
 
 // ------------------------------------------------------------------ //
+//  Procruste orthogonal et Kabsch (recalage rigide via SVD)           //
+// ------------------------------------------------------------------ //
+//
+// Problème : étant donné deux nuages de `m` points en dimension `n` (`A`/`P`
+// et `B`/`Q`, `m × n` row-major, une ligne par point), retrouver la
+// transformation orthogonale qui aligne le premier sur le second. Les deux
+// variantes partagent le même cœur (SVD de la covariance croisée
+// `H = Aᵀ·B`), comme [`matrix_sqrt`]/[`matrix_log`] partagent la même
+// itération de Denman-Beavers :
+//
+// * [`orthogonal_procrustes`] — la solution générale (Schönemann, 1966) :
+//   `R = U·Vᵀ` minimise `‖A·R − B‖_F` sur toutes les matrices
+//   **orthogonales** `R` (`det(R) = ±1` — une réflexion est acceptée).
+// * [`kabsch`] — la même SVD, mais **corrige le signe** pour forcer
+//   `det(R) = +1` (une **rotation propre**, jamais une réflexion) :
+//   si `det(U)·det(V) < 0`, la dernière colonne de `V` est inversée avant de
+//   recomposer `R`. Piège classique de l'algorithme de Kabsch (bien connu
+//   dans la littérature) : omettre cette correction laisse passer une
+//   réflexion chaque fois que la meilleure transformation orthogonale n'est
+//   pas une rotation — silencieusement faux plutôt qu'en échec visible.
+// * [`kabsch_align`] — enveloppe pratique : centre `P`/`Q` (soustrait leur
+//   centroïde), appelle [`kabsch`] sur les nuages centrés, et calcule la
+//   translation `t = centroïde(Q) − centroïde(P)·R` complétant la rotation
+//   en une transformation rigide complète `p·R + t ≈ q`.
+//
+// Usages classiques : recalage de nuages de points (ICP), étalonnage de
+// capteurs, alignement de structures — la sortie `R` s'utilise directement
+// avec [`crate::geometry::Quaternion::from_rotation_matrix`] en dimension 3.
+
+/// SVD de la covariance croisée `H = Aᵀ·B` (`n × n`), cœur partagé de
+/// [`orthogonal_procrustes`] et [`kabsch`].
+fn cross_covariance_svd<T>(
+    a: &[T],
+    b: &[T],
+    m: usize,
+    n: usize,
+    tol: T,
+    max_sweeps: usize,
+) -> Option<SvdResult<T>>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    let at = transpose(a, m, n);
+    let h = matmul(&at, b, n, m, n);
+    svd(&h, n, n, tol, max_sweeps)
+}
+
+/// Solution générale du problème de Procruste orthogonal : la matrice
+/// **orthogonale** `R` (`n × n`, `det(R) = ±1`) minimisant `‖A·R − B‖_F`
+/// (`A`/`B` : `m × n` row-major, une ligne par point). Cf. en-tête de
+/// section — accepte une réflexion ; pour une rotation propre garantie,
+/// voir [`kabsch`].
+///
+/// `None` en cas de débordement virgule fixe (cf. [`svd`]). Panique si
+/// `a.len() != m·n` ou `b.len() != m·n`.
+#[must_use]
+pub fn orthogonal_procrustes<T>(
+    a: &[T],
+    b: &[T],
+    m: usize,
+    n: usize,
+    tol: T,
+    max_sweeps: usize,
+) -> Option<Vec<T>>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    assert_eq!(
+        a.len(),
+        m * n,
+        "orthogonal_procrustes : A de longueur {} ≠ {m}×{n}",
+        a.len()
+    );
+    assert_eq!(
+        b.len(),
+        m * n,
+        "orthogonal_procrustes : B de longueur {} ≠ {m}×{n}",
+        b.len()
+    );
+    let (u, _sigma, vt, _sweeps) = cross_covariance_svd(a, b, m, n, tol, max_sweeps)?;
+    Some(matmul(&u, &vt, n, n, n))
+}
+
+/// Algorithme de Kabsch : la **rotation propre** `R` (`n × n`,
+/// `det(R) = +1`) minimisant `‖P·R − Q‖_F` (`P`/`Q` : `m × n` row-major,
+/// déjà **centrés** — voir [`kabsch_align`] pour la variante qui centre et
+/// calcule aussi la translation). Cf. en-tête de section pour la correction
+/// de signe qui distingue cette fonction d'[`orthogonal_procrustes`].
+///
+/// `None` en cas de débordement virgule fixe (cf. [`svd`]). Panique si
+/// `p.len() != m·n` ou `q.len() != m·n`.
+#[must_use]
+pub fn kabsch<T>(p: &[T], q: &[T], m: usize, n: usize, tol: T, max_sweeps: usize) -> Option<Vec<T>>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    assert_eq!(
+        p.len(),
+        m * n,
+        "kabsch : P de longueur {} ≠ {m}×{n}",
+        p.len()
+    );
+    assert_eq!(
+        q.len(),
+        m * n,
+        "kabsch : Q de longueur {} ≠ {m}×{n}",
+        q.len()
+    );
+    let (u, _sigma, mut vt, _sweeps) = cross_covariance_svd(p, q, m, n, tol, max_sweeps)?;
+
+    let v = transpose(&vt, n, n);
+    let det_u = determinant(&u, n);
+    let det_v = determinant(&v, n);
+    if det_u.wrapping_mul(det_v) < T::ZERO
+    {
+        // Réflexion détectée : inverse la dernière colonne de V (dernière
+        // ligne de Vᵀ) pour forcer det(R) = +1 (cf. en-tête de section).
+        for col in 0..n
+        {
+            let idx = (n - 1) * n + col;
+            vt[idx] = T::ZERO - vt[idx];
+        }
+    }
+    Some(matmul(&u, &vt, n, n, n))
+}
+
+/// Centroïde (moyenne par colonne) d'un nuage de `m` points en dimension
+/// `n`. `None` en cas de débordement de la division par `m`.
+fn centroid<T>(points: &[T], m: usize, n: usize) -> Option<Vec<T>>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    let mut sums = vec![T::ZERO; n];
+    for row in 0..m
+    {
+        for col in 0..n
+        {
+            sums[col] = sums[col].wrapping_add(points[row * n + col]);
+        }
+    }
+    let m_t = small_int::<T>(m as u32);
+    let mut out = vec![T::ZERO; n];
+    for col in 0..n
+    {
+        out[col] = sums[col].checked_div(m_t)?;
+    }
+    Some(out)
+}
+
+/// Soustrait `centroid` (longueur `n`) de chaque ligne d'un nuage de `m`
+/// points en dimension `n`.
+fn center_points<T>(points: &[T], m: usize, n: usize, centroid: &[T]) -> Vec<T>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    let mut out = vec![T::ZERO; m * n];
+    for row in 0..m
+    {
+        for col in 0..n
+        {
+            out[row * n + col] = points[row * n + col] - centroid[col];
+        }
+    }
+    out
+}
+
+/// [`kabsch`] complet : centre `P`/`Q` (soustrait leur centroïde), calcule la
+/// rotation propre `R` sur les nuages centrés, puis la translation
+/// `t = centroïde(Q) − centroïde(P)·R` — ensemble, `p·R + t ≈ q` pour chaque
+/// point (transformation rigide complète, pas seulement la rotation).
+///
+/// Nécessite `m ≥ 1` point (panique sinon). `None` en cas de débordement
+/// virgule fixe (centrage ou [`kabsch`]). Panique si `p.len() != m·n` ou
+/// `q.len() != m·n`.
+///
+/// Le problème n'est bien posé (rotation entièrement déterminée) que pour
+/// `m ≥ n` points non colinéaires/coplanaires — sous-déterminé sinon, cf. la
+/// gestion des valeurs singulières négligeables de [`svd`], qui ne panique
+/// pas mais peut renvoyer une rotation partiellement arbitraire dans les
+/// directions non contraintes par les données.
+#[must_use]
+pub fn kabsch_align<T>(
+    p: &[T],
+    q: &[T],
+    m: usize,
+    n: usize,
+    tol: T,
+    max_sweeps: usize,
+) -> Option<(Vec<T>, Vec<T>)>
+where
+    T: FixedReducible + Sub<Output = T>,
+{
+    assert!(m >= 1, "kabsch_align : au moins un point requis");
+    assert_eq!(
+        p.len(),
+        m * n,
+        "kabsch_align : P de longueur {} ≠ {m}×{n}",
+        p.len()
+    );
+    assert_eq!(
+        q.len(),
+        m * n,
+        "kabsch_align : Q de longueur {} ≠ {m}×{n}",
+        q.len()
+    );
+
+    let centroid_p = centroid(p, m, n)?;
+    let centroid_q = centroid(q, m, n)?;
+    let p_centered = center_points(p, m, n, &centroid_p);
+    let q_centered = center_points(q, m, n, &centroid_q);
+
+    let r = kabsch(&p_centered, &q_centered, m, n, tol, max_sweeps)?;
+
+    // t = centroïde(Q) − centroïde(P)·R (centroïde(P)·R via Rᵀ·centroïde(P),
+    // vecteur colonne, cf. matvec).
+    let rt = transpose(&r, n, n);
+    let cp_r = matvec(&rt, &centroid_p, n, n);
+    let mut t = vec![T::ZERO; n];
+    for i in 0..n
+    {
+        t[i] = centroid_q[i] - cp_r[i];
+    }
+    Some((r, t))
+}
+
+// ------------------------------------------------------------------ //
 //  Problème aux valeurs propres généralisé (A·x = λ·B·x)              //
 // ------------------------------------------------------------------ //
 

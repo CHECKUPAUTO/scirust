@@ -1424,6 +1424,195 @@ fn svd_dim_mismatch_panics() {
 }
 
 // ------------------------------------------------------------------ //
+//  Procruste orthogonal et Kabsch (recalage rigide via SVD)           //
+// ------------------------------------------------------------------ //
+
+/// Octaèdre centré à l'origine (6 points, non coplanaires, moyenne nulle) —
+/// nuage de contrôle pour les tests de rotation/réflexion.
+fn octahedron() -> [Q16_16; 18] {
+    #[rustfmt::skip]
+    let p = [
+        q16(1.0), q16(0.0), q16(0.0),
+        q16(-1.0), q16(0.0), q16(0.0),
+        q16(0.0), q16(1.0), q16(0.0),
+        q16(0.0), q16(-1.0), q16(0.0),
+        q16(0.0), q16(0.0), q16(1.0),
+        q16(0.0), q16(0.0), q16(-1.0),
+    ];
+    p
+}
+
+/// Applique la rotation/matrice `r` (`n × n`) à chaque ligne de `points`
+/// (`m × n`) : `out[i,:] = points[i,:] · r`.
+fn apply_matrix(points: &[Q16_16], m: usize, n: usize, r: &[Q16_16]) -> Vec<Q16_16> {
+    linalg::matmul(points, r, m, n, n)
+}
+
+#[test]
+fn kabsch_recovers_known_rotation() {
+    // Rotation de 90° autour de l'axe z : (x,y,z) → (-y,x,z), exacte en
+    // Q16_16 (coefficients ∈ {-1,0,1}).
+    #[rustfmt::skip]
+    let r_true = [
+        q16(0.0), q16(1.0), q16(0.0),
+        q16(-1.0), q16(0.0), q16(0.0),
+        q16(0.0), q16(0.0), q16(1.0),
+    ];
+    let p = octahedron();
+    let q = apply_matrix(&p, 6, 3, &r_true);
+
+    let r = linalg::kabsch(&p, &q, 6, 3, q16(1e-4), 60).expect("pas de débordement");
+    for i in 0..9
+    {
+        let diff = (r[i].to_f64() - r_true[i].to_f64()).abs();
+        assert!(
+            diff <= 1e-2,
+            "R[{i}] = {} attendu {}",
+            r[i].to_f64(),
+            r_true[i].to_f64()
+        );
+    }
+    // R doit être une rotation propre : det(R) ≈ +1.
+    let det = linalg::determinant(&r, 3).to_f64();
+    assert!((det - 1.0).abs() <= 1e-2, "det(R) = {det} attendu ≈ 1");
+}
+
+#[test]
+fn kabsch_align_recovers_known_rotation_and_translation() {
+    #[rustfmt::skip]
+    let r_true = [
+        q16(0.0), q16(1.0), q16(0.0),
+        q16(-1.0), q16(0.0), q16(0.0),
+        q16(0.0), q16(0.0), q16(1.0),
+    ];
+    let t_true = [q16(2.0), q16(-1.0), q16(0.5)];
+
+    let p = octahedron();
+    let rotated = apply_matrix(&p, 6, 3, &r_true);
+    let mut q = vec![Q16_16::zero(); 18];
+    for i in 0..6
+    {
+        for j in 0..3
+        {
+            q[i * 3 + j] = rotated[i * 3 + j] + t_true[j];
+        }
+    }
+
+    let (r, t) = linalg::kabsch_align(&p, &q, 6, 3, q16(1e-4), 60).expect("pas de débordement");
+    for i in 0..9
+    {
+        let diff = (r[i].to_f64() - r_true[i].to_f64()).abs();
+        assert!(
+            diff <= 1e-2,
+            "R[{i}] = {} attendu {}",
+            r[i].to_f64(),
+            r_true[i].to_f64()
+        );
+    }
+    for j in 0..3
+    {
+        let diff = (t[j].to_f64() - t_true[j].to_f64()).abs();
+        assert!(
+            diff <= 1e-2,
+            "t[{j}] = {} attendu {}",
+            t[j].to_f64(),
+            t_true[j].to_f64()
+        );
+    }
+}
+
+#[test]
+fn kabsch_forces_proper_rotation_against_reflection() {
+    // M = diag(1, 1, -1) (réflexion, det = -1) : Q = P·M satisfait
+    // exactement une transformation orthogonale — mais c'est une réflexion.
+    // orthogonal_procrustes doit la retrouver telle quelle (résidu nul,
+    // det ≈ -1) ; kabsch, contraint à det = +1, ne peut PAS renvoyer M et
+    // doit produire une rotation propre différente.
+    #[rustfmt::skip]
+    let m_reflect = [
+        q16(1.0), q16(0.0), q16(0.0),
+        q16(0.0), q16(1.0), q16(0.0),
+        q16(0.0), q16(0.0), q16(-1.0),
+    ];
+    let p = octahedron();
+    let q = apply_matrix(&p, 6, 3, &m_reflect);
+
+    let r_procrustes =
+        linalg::orthogonal_procrustes(&p, &q, 6, 3, q16(1e-4), 60).expect("pas de débordement");
+    for i in 0..9
+    {
+        let diff = (r_procrustes[i].to_f64() - m_reflect[i].to_f64()).abs();
+        assert!(
+            diff <= 1e-2,
+            "orthogonal_procrustes[{i}] = {} attendu {}",
+            r_procrustes[i].to_f64(),
+            m_reflect[i].to_f64()
+        );
+    }
+    let det_procrustes = linalg::determinant(&r_procrustes, 3).to_f64();
+    assert!(
+        (det_procrustes + 1.0).abs() <= 1e-2,
+        "det(orthogonal_procrustes) = {det_procrustes} attendu ≈ -1"
+    );
+
+    let r_kabsch = linalg::kabsch(&p, &q, 6, 3, q16(1e-4), 60).expect("pas de débordement");
+    let det_kabsch = linalg::determinant(&r_kabsch, 3).to_f64();
+    assert!(
+        (det_kabsch - 1.0).abs() <= 1e-2,
+        "det(kabsch) = {det_kabsch} attendu ≈ +1 (correction de réflexion)"
+    );
+}
+
+#[test]
+fn kabsch_i64_storage() {
+    let r_true = [
+        Q32_32::zero(),
+        Q32_32::one(),
+        Q32_32::zero(),
+        Q32_32::zero() - Q32_32::one(),
+        Q32_32::zero(),
+        Q32_32::zero(),
+        Q32_32::zero(),
+        Q32_32::zero(),
+        Q32_32::one(),
+    ];
+    let p: Vec<Q32_32> = octahedron()
+        .iter()
+        .map(|&v| Q32_32::try_from(v.to_f64()).unwrap())
+        .collect();
+    let q = linalg::matmul(&p, &r_true, 6, 3, 3);
+
+    let r = linalg::kabsch(&p, &q, 6, 3, Q32_32::try_from(1e-4).unwrap(), 60)
+        .expect("pas de débordement");
+    for i in 0..9
+    {
+        let diff = (Q32_32::to_f64(r[i]) - Q32_32::to_f64(r_true[i])).abs();
+        assert!(
+            diff <= 1e-2,
+            "R[{i}] = {} attendu {}",
+            Q32_32::to_f64(r[i]),
+            Q32_32::to_f64(r_true[i])
+        );
+    }
+}
+
+#[test]
+#[should_panic(expected = "kabsch_align")]
+fn kabsch_align_requires_at_least_one_point() {
+    let p: [Q16_16; 0] = [];
+    let q: [Q16_16; 0] = [];
+    let _ = linalg::kabsch_align(&p, &q, 0, 3, q16(1e-4), 60);
+}
+
+#[test]
+#[should_panic(expected = "kabsch")]
+fn kabsch_dim_mismatch_panics() {
+    let p = vec![Q16_16::zero(); 5]; // annoncé 2×3 = 6 ≠ 5.
+    let q = vec![Q16_16::zero(); 6];
+    let _ = linalg::kabsch(&p, &q, 2, 3, q16(1e-4), 60);
+}
+
+// ------------------------------------------------------------------ //
 //  Problème aux valeurs propres généralisé (A·x = λ·B·x)              //
 // ------------------------------------------------------------------ //
 
