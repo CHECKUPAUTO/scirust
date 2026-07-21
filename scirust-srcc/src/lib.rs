@@ -8,10 +8,12 @@
 mod closure;
 mod evaluation;
 mod projector;
+mod scoring;
 
 pub use closure::{SrccAdmissionCertificate, SrccClosure, SrccClosureError};
 pub use evaluation::SrccEvaluation;
 pub use projector::SrccProjector;
+pub use scoring::{SrccCase, SrccScore, SrccScoringError, score_projector};
 
 use core::fmt;
 
