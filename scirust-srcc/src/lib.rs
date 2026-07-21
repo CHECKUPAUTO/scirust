@@ -10,6 +10,7 @@ mod discovery;
 mod evaluation;
 mod fitting;
 mod projector;
+mod robust;
 mod scoring;
 mod search;
 mod selection;
@@ -23,6 +24,10 @@ pub use discovery::{
 pub use evaluation::SrccEvaluation;
 pub use fitting::{SrccFitError, SrccFitResult, fit_srcc_projector, fit_srcc_projector_from_views};
 pub use projector::SrccProjector;
+pub use robust::{
+    SrccRobustFitError, SrccRobustStabilityError, evaluate_robust_leave_one_out_stability,
+    fit_robust_srcc_projector_from_views,
+};
 pub use scoring::{SrccCase, SrccScore, SrccScoringError, score_projector};
 pub use search::{
     SrccSearchCandidate, SrccSearchError, SrccSearchGrid, SrccSearchResult,
