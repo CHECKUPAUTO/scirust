@@ -8,7 +8,7 @@
 //    composition, angle-axe) mesurées contre une référence `f64` ;
 //  * déterminisme bit-à-bit du chemin virgule fixe.
 
-use super::{DualQuaternion, Quaternion, Transform};
+use super::{DualQuaternion, Quaternion, Screw, Transform};
 use crate::fixed::{NumericScalar, Q16_16, RealScalar};
 
 // ------------------------------------------------------------------ //
@@ -1032,4 +1032,145 @@ fn dual_quaternion_identity_is_neutral_all_scalars() {
     check_dual_quaternion_identity_is_neutral::<f32>();
     check_dual_quaternion_identity_is_neutral::<f64>();
     check_dual_quaternion_identity_is_neutral::<Q16_16>();
+}
+
+// ------------------------------------------------------------------ //
+//  to_screw / from_screw (paramètres de Plücker/Chasles)               //
+// ------------------------------------------------------------------ //
+
+fn check_dual_quaternion_screw_roundtrip<T: Scalar + core::ops::Div<Output = T>>() {
+    let t = tof::<T>([0.267, 0.535, 0.802], 1.3, [0.4, -0.6, 0.2]);
+    let dq = DualQuaternion::from(t);
+    let s = dq.to_screw().expect("rotation non nulle");
+    let back = DualQuaternion::from_screw(s);
+
+    approx_quat(
+        back.real,
+        [
+            dq.real.w.to_f64(),
+            dq.real.x.to_f64(),
+            dq.real.y.to_f64(),
+            dq.real.z.to_f64(),
+        ],
+        "from_screw(to_screw(dq)) : partie réelle",
+    );
+    approx_quat(
+        back.dual,
+        [
+            dq.dual.w.to_f64(),
+            dq.dual.x.to_f64(),
+            dq.dual.y.to_f64(),
+            dq.dual.z.to_f64(),
+        ],
+        "from_screw(to_screw(dq)) : partie duale",
+    );
+
+    let p = [T::of(0.3), T::of(-0.5), T::of(0.7)];
+    let want = dq.transform_point(p);
+    approx_vec(
+        back.transform_point(p),
+        [want[0].to_f64(), want[1].to_f64(), want[2].to_f64()],
+        "from_screw(to_screw(dq)) : transform_point",
+    );
+}
+
+#[test]
+fn dual_quaternion_screw_roundtrip_all_scalars() {
+    check_dual_quaternion_screw_roundtrip::<f32>();
+    check_dual_quaternion_screw_roundtrip::<f64>();
+    check_dual_quaternion_screw_roundtrip::<Q16_16>();
+}
+
+fn check_dual_quaternion_screw_known_axis_through_point<T: Scalar + core::ops::Div<Output = T>>() {
+    // Rotation de 90° autour de l'axe vertical passant par (1,0,·) (pas
+    // l'origine, même construction que `sclerp_matches_screw_motion_circular_arc`
+    // mais à 90°) : t = c − R(c), c = (1,0,0), R(c) = rotation de (1,0,0) par
+    // 90° autour de +z = (0,1,0) ⇒ t = (1,−1,0). Vissage attendu : axe = +z,
+    // angle = π/2, pas nul (translation entièrement perpendiculaire à l'axe),
+    // point de la droite = (1,0,0) (déjà perpendiculaire à +z, donc invariant).
+    let pi = std::f64::consts::PI;
+    let rotation =
+        Quaternion::<T>::from_axis_angle([T::of(0.0), T::of(0.0), T::of(1.0)], T::of(pi / 2.0));
+    let dq =
+        DualQuaternion::from_rotation_translation(rotation, [T::of(1.0), T::of(-1.0), T::zero()]);
+
+    let s = dq.to_screw().expect("rotation non nulle");
+    approx_vec(s.axis, [0.0, 0.0, 1.0], "axe du vissage");
+    assert!(
+        (s.angle.to_f64() - pi / 2.0).abs() <= T::TOL * 8.0,
+        "angle {} vs {}",
+        s.angle.to_f64(),
+        pi / 2.0
+    );
+    assert!(
+        s.pitch.to_f64().abs() <= T::TOL * 8.0,
+        "pas non nul : {}",
+        s.pitch.to_f64()
+    );
+    approx_vec(
+        s.axis_point(),
+        [1.0, 0.0, 0.0],
+        "point de la droite de vissage",
+    );
+}
+
+#[test]
+fn dual_quaternion_screw_known_axis_through_point_all_scalars() {
+    check_dual_quaternion_screw_known_axis_through_point::<f32>();
+    check_dual_quaternion_screw_known_axis_through_point::<f64>();
+    check_dual_quaternion_screw_known_axis_through_point::<Q16_16>();
+}
+
+fn check_dual_quaternion_screw_pure_translation_is_none<T: Scalar + core::ops::Div<Output = T>>() {
+    let dq = DualQuaternion::from_rotation_translation(
+        Quaternion::<T>::identity(),
+        [T::of(0.3), T::of(-0.6), T::of(0.9)],
+    );
+    assert!(
+        dq.to_screw().is_none(),
+        "translation pure : vissage indéterminé"
+    );
+}
+
+#[test]
+fn dual_quaternion_screw_pure_translation_is_none_all_scalars() {
+    check_dual_quaternion_screw_pure_translation_is_none::<f32>();
+    check_dual_quaternion_screw_pure_translation_is_none::<f64>();
+    check_dual_quaternion_screw_pure_translation_is_none::<Q16_16>();
+}
+
+fn check_dual_quaternion_screw_pow_agrees<T: Scalar + core::ops::Div<Output = T>>() {
+    // `pow(t)` et `from_screw` du même vissage avec angle/pas mis à l'échelle
+    // par `t` (même axe, même moment) doivent coïncider — `pow` effectue en
+    // interne exactement cette même reconstruction (cf. en-tête de module).
+    let t = tof::<T>([0.408, 0.408, 0.816], 1.1, [0.3, -0.5, 0.2]);
+    let dq = DualQuaternion::from(t);
+    let s = dq.to_screw().expect("rotation non nulle");
+
+    for &tt in &[0.0, 0.3, 0.5, 1.0, 1.7]
+    {
+        let scaled = Screw {
+            axis: s.axis,
+            angle: s.angle * T::of(tt),
+            pitch: s.pitch * T::of(tt),
+            moment: s.moment,
+        };
+        let via_screw = DualQuaternion::from_screw(scaled);
+        let via_pow = dq.pow(T::of(tt));
+
+        let p = [T::of(0.2), T::of(0.6), T::of(-0.4)];
+        let want = via_pow.transform_point(p);
+        approx_vec(
+            via_screw.transform_point(p),
+            [want[0].to_f64(), want[1].to_f64(), want[2].to_f64()],
+            &format!("from_screw(t·vissage) vs pow(t), t={tt}"),
+        );
+    }
+}
+
+#[test]
+fn dual_quaternion_screw_pow_agrees_all_scalars() {
+    check_dual_quaternion_screw_pow_agrees::<f32>();
+    check_dual_quaternion_screw_pow_agrees::<f64>();
+    check_dual_quaternion_screw_pow_agrees::<Q16_16>();
 }
