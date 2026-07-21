@@ -16,6 +16,30 @@
 //   RUSTFLAGS="-C target-cpu=x86-64-v3" \
 //     cargo bench -p scirust-simd --features portable-simd --bench cnn2d_bench
 
+// Migrating this file's results onto scirust-bench-schema::BenchRecord:
+// inputs are seeded, not random, but there is no single file-wide seed --
+// each `bench_*` fn passes its own literal per-tensor seed (hex constants
+// `0x1` through `0xE`) into the shared `fixed_data`/`f32_data` helpers, which
+// wrap a fresh `Lcg` (the LCG struct defined below) around that seed; see
+// the `fixed_data(...)`/`f32_data(...)` call inside each fn for the exact
+// constant used for its `x`/weights/bias. Example, after
+// `cargo bench -p scirust-simd --features portable-simd --bench cnn2d_bench`,
+// converting the "conv2d" group's "fixed/Q16_16" result (`x` there is seeded
+// via `fixed_data(0x1, IN_CHANNELS * HEIGHT * WIDTH)`):
+//
+//   let json = std::fs::read_to_string(
+//       "target/criterion/conv2d/fixed/Q16_16/new/estimates.json",
+//   ).unwrap();
+//   let record = scirust_bench_schema::criterion_estimate_to_record(
+//       &json,
+//       "scirust-simd/conv2d_forward",
+//       "32x32x4in_8out_k3",
+//       "Q16_16",
+//       0x1,
+//   ).unwrap();
+//
+// See scirust-bench-schema's crate docs ("Migrating criterion targets") for the full pattern.
+
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::fixed::Q16_16;
 use scirust_simd::fixed::conv2d::{

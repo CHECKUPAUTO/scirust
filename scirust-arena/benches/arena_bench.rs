@@ -1,3 +1,26 @@
+// Migration note (scirust-bench-schema): like `io_bench.rs`, this file has NO
+// random data generator to pin -- there is no seed_from_u64/Lcg::new/PcgEngine::new
+// call anywhere below. `bench_bump_allocation`, `bench_aligned_fill`, and
+// `bench_slab_reuse` each operate on one fixed-size, fixed-value buffer
+// (4096 f32 elements filled with the constant black_box(1.0)/black_box(2.0);
+// a 1024-slot, 128-byte Slab written with the constant black_box(3.0)) --
+// there is no swept parametrization axis and no randomness to make
+// reproducible in the first place. `BenchRecord::seed` is still mandatory,
+// so a conversion uses `0` to mean "no RNG -- fixed, non-random input", e.g.
+// (after `cargo bench --bench arena_bench`, reading
+// target/criterion/arena/alloc_fill_4096_f32/new/estimates.json -- the
+// "arena/..." prefix baked into each bench_function name is criterion's
+// group, "alloc_fill_4096_f32"/"aligned_fill_4096_f32"/"slab_alloc_write_free"
+// are its bench ids):
+//   scirust_bench_schema::criterion_estimate_to_record(
+//       &estimates_json,
+//       "scirust-arena/bump_allocation",  // kernel
+//       "fixed_4096_f32",                 // dataset (no swept axis; fixed size)
+//       "PinnedArena::alloc_slice_fill",   // method
+//       0,                                 // seed: no RNG, constant input
+//   )
+// See scirust-bench-schema's crate docs ("Migrating criterion targets") for the full pattern.
+
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use scirust_arena::{AlignedVec, PinnedArena, Slab};
 

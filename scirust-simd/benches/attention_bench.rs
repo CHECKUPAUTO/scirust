@@ -16,6 +16,28 @@
 //   RUSTFLAGS="-C target-cpu=x86-64-v3" \
 //     cargo bench -p scirust-simd --features portable-simd --bench attention_bench
 
+// Migration des résultats de ce fichier vers scirust-bench-schema::BenchRecord :
+// chaque fonction de benchmark seede son propre générateur en inline via
+// fixed_data(seed, len) / f32_data(seed, len) (LCG à seed fixe, voir la
+// struct Lcg ci-dessous) -- bench_attention utilise 0x1/0x2/0x3 (q/k/v),
+// bench_causal_attention 0x4/0x5/0x6, bench_multi_head_attention 0x7/0x8/0x9.
+// Exemple, après `cargo bench -p scirust-simd --features portable-simd
+// --bench attention_bench`, conversion du résultat "fixed/Q16_16" du groupe
+// "attention_64x64x32" (entrée q seedée par fixed_data(0x1, ...)) :
+//
+//   let json = std::fs::read_to_string(
+//       "target/criterion/attention_64x64x32/fixed/Q16_16/new/estimates.json",
+//   ).unwrap();
+//   let record = scirust_bench_schema::criterion_estimate_to_record(
+//       &json,
+//       "scirust-simd/attention",
+//       "64x64x32",
+//       "Q16_16",
+//       0x1,
+//   ).unwrap();
+//
+// See scirust-bench-schema's crate docs ("Migrating criterion targets") for the full pattern.
+
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::fixed::Q16_16;
 use scirust_simd::fixed::attention::{attention, causal_attention, multi_head_attention};

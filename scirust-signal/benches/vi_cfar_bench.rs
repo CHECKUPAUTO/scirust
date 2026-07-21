@@ -15,6 +15,28 @@
 //
 // Run: cargo bench -p scirust-signal --bench vi_cfar_bench
 
+// Migrating this file's results onto scirust-bench-schema::BenchRecord:
+// inputs are seeded, not random. `homogeneous_signal` drives a fixed-seed
+// `Lcg(0x5647_4152)`; `contaminated_signal` builds on that same stream and
+// then layers a second `Lcg(0x434f_4e54_414d)` on top to place interferers.
+// (`vi_cfar_calibration_cost`'s `CfarDetector::new` calls use no randomness
+// at all -- they're driven purely by `CfarConfig`.) Example, after
+// `cargo bench -p scirust-signal --bench vi_cfar_bench`, converting the
+// "vi_cfar_classical_vs_robust" group's "classical_homogeneous/n=32" result:
+//
+//   let json = std::fs::read_to_string(
+//       "target/criterion/vi_cfar_classical_vs_robust/classical_homogeneous/n=32/new/estimates.json",
+//   ).unwrap();
+//   let record = scirust_bench_schema::criterion_estimate_to_record(
+//       &json,
+//       "scirust-signal/vi_cfar_evaluate",
+//       "homogeneous/n=32",
+//       "ClassicalViCfar",
+//       0x5647_4152,
+//   ).unwrap();
+//
+// See scirust-bench-schema's crate docs ("Migrating criterion targets") for the full pattern.
+
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_signal::radar::vi_cfar::{
     CfarConfig, CfarDetector, DetectorPolicy, EdgePolicy, InputValidationPolicy,
