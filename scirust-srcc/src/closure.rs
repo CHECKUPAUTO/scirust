@@ -71,8 +71,12 @@ impl SrccClosure {
 
         let absolute_floor = config.energy_floor.sqrt();
 
-        let mut canonical_seeds: Vec<_> =
-            seeds.iter().copied().map(canonicalize_direction).collect();
+        let mut canonical_seeds: Vec<_> = seeds
+            .iter()
+            .copied()
+            .map(normalize)
+            .map(canonicalize_direction)
+            .collect();
 
         canonical_seeds.sort_by(compare_directions);
 
@@ -545,6 +549,25 @@ mod tests {
         assert_eq!(clusters[1].len(), 1);
 
         assert!(minimum_pairwise_alignment(&clusters[0]) >= 0.9);
+    }
+
+    #[test]
+    fn closure_is_invariant_to_seed_scale_and_sign() {
+        let seed = basis_vector(1).unwrap();
+        let scaled_seed = seed.map(|value| -5.0 * value);
+
+        let transports = [transport(1, 2, 1.0), transport(1, 2, -1.0)];
+
+        let first = SrccClosure::build(&[seed], &transports, SrccConfig::default()).unwrap();
+
+        let second =
+            SrccClosure::build(&[scaled_seed], &transports, SrccConfig::default()).unwrap();
+
+        assert_eq!(first.basis(), second.basis());
+
+        assert_eq!(first.accepted_per_round(), second.accepted_per_round(),);
+
+        assert_eq!(first.certificates(), second.certificates(),);
     }
 
     #[test]
