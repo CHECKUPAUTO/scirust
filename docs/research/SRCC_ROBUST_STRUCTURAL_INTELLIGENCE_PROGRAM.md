@@ -86,7 +86,7 @@ deployment from within a method crate.
 
 | Phase | Title | Branch | PR | Merge commit | Status |
 |------:|-------|--------|----|--------------|--------|
-| 721 | Robust descriptive statistics | `claude/scirust-srcc-robust-stats-6ue9xc` | _(open)_ | _(pending)_ | In review |
+| 721 | Robust descriptive statistics | `claude/scirust-srcc-robust-stats-6ue9xc` | [#725](https://github.com/Memorithm/scirust/pull/725) | _(pending)_ | In review |
 | 722 | Robust multivariate geometry | `feat/multivariate-robust-geometry` | — | — | Not started |
 | 723 | Scale-aware SRCC source geometry | `feat/srcc-scale-aware-source-geometry` | — | — | Not started |
 | 724 | Deterministic robust regression | `feat/learning-robust-regression` | — | — | Not started |
@@ -96,10 +96,13 @@ deployment from within a method crate.
 | 728 | Real industrial evaluation | `feat/srcc-industrial-real-data-evaluation` | — | — | Not started |
 | 729 | Shadow deployment & promotion gates | `feat/mlops-srcc-shadow-deployment` | — | — | Not started |
 
-> Branch-name note for phase 721: the program's suggested branch was
-> `feat/stats-robust-descriptive`, but this session's fixed development branch is
-> `claude/scirust-srcc-robust-stats-6ue9xc`; the phase mapping is preserved and the
-> real PR number will be recorded honestly here once assigned by GitHub.
+> Notes for phase 721:
+> - The program's suggested branch was `feat/stats-robust-descriptive`, but this
+>   session's fixed development branch is `claude/scirust-srcc-robust-stats-6ue9xc`.
+> - GitHub assigned this phase the real number **PR #725** (numbers 721–724 were
+>   consumed by other concurrent branches). The phase→number mapping is *not* 1:1:
+>   "Phase 721" is tracked by GitHub PR #725. This is recorded honestly rather than
+>   forcing a matching number.
 
 ---
 
