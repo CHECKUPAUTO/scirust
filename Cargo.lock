@@ -3802,6 +3802,9 @@ dependencies = [
 [[package]]
 name = "scirust-srcc"
 version = "0.1.0"
+dependencies = [
+ "scirust-multivariate",
+]
 
 [[package]]
 name = "scirust-stats"

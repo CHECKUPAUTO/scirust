@@ -40,6 +40,11 @@ pub enum SrccRobustFitError {
         view_index: usize,
         source_group_index: usize,
     },
+    InvalidSourceGeometry,
+    DegenerateSourceScale {
+        dimension: usize,
+    },
+    NoActiveSourceDimensions,
 }
 
 impl fmt::Display for SrccRobustFitError {
@@ -93,6 +98,22 @@ has an ambiguous target consensus",
                     "transport view {view_index}, source group {source_group_index} \
 has a non-finite target distance",
                 )
+            },
+            Self::InvalidSourceGeometry =>
+            {
+                formatter.write_str("source geometry specification is invalid")
+            },
+            Self::DegenerateSourceScale { dimension } =>
+            {
+                write!(
+                    formatter,
+                    "source coordinate {dimension} has a degenerate robust scale \
+under the configured zero-scale policy",
+                )
+            },
+            Self::NoActiveSourceDimensions =>
+            {
+                formatter.write_str("every source coordinate was dropped; no geometry remains")
             },
         }
     }

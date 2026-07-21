@@ -34,6 +34,35 @@ impl Default for SrccRobustSourceClusteringConfig {
     }
 }
 
+/// Source metric used by the clustering helpers.
+///
+/// `Raw` delegates to the historical [`source_distance`] body, so every
+/// existing entry point keeps its bit-identical behaviour. `Diagonal` is the
+/// opt-in scale-aware variant used by
+/// [`crate::robust_source_geometry`]: coordinate differences are multiplied by
+/// fitted inverse scales before entering the exact same fixed-order scaled
+/// accumulation. An inverse scale of `0.0` deactivates a coordinate (its scaled
+/// difference is exactly `0.0` and skipped, matching the historical zero-skip
+/// branch).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum SourceMetric {
+    Raw,
+    Diagonal { inverse_scales: Vector16 },
+}
+
+impl SourceMetric {
+    pub(crate) fn distance(&self, left: &Vector16, right: &Vector16) -> f64 {
+        match self
+        {
+            Self::Raw => source_distance(left, right),
+            Self::Diagonal { inverse_scales } =>
+            {
+                scaled_source_distance(left, right, inverse_scales)
+            },
+        }
+    }
+}
+
 /// Fits a robust SRCC projector after deterministic source clustering.
 ///
 /// A sample joins a source cluster only when its source is within
@@ -59,7 +88,7 @@ pub fn fit_source_clustered_robust_srcc_projector_from_views(
     // Validate every original observation before any canonicalization.
     let _validated_transports = learn_transport_views(views, config.energy_floor)?;
 
-    let clustered_storage = canonicalize_source_clusters(views, source_config)?;
+    let clustered_storage = canonicalize_source_clusters(views, source_config, &SourceMetric::Raw)?;
 
     let clustered_views: Vec<&[SrccTransportSample]> =
         clustered_storage.iter().map(Vec::as_slice).collect();
@@ -150,7 +179,7 @@ pub fn evaluate_source_clustered_robust_leave_one_out_stability(
     })
 }
 
-fn validate_source_config(
+pub(crate) fn validate_source_config(
     config: SrccRobustSourceClusteringConfig,
 ) -> Result<(), SrccRobustFitError> {
     if !config.maximum_source_distance.is_finite() || config.maximum_source_distance < 0.0
@@ -161,9 +190,10 @@ fn validate_source_config(
     Ok(())
 }
 
-fn canonicalize_source_clusters(
+pub(crate) fn canonicalize_source_clusters(
     views: &[&[SrccTransportSample]],
     config: SrccRobustSourceClusteringConfig,
+    metric: &SourceMetric,
 ) -> Result<Vec<Vec<SrccTransportSample>>, SrccRobustFitError> {
     let mut result = Vec::with_capacity(views.len());
 
@@ -176,13 +206,15 @@ fn canonicalize_source_clusters(
             ordered_samples,
             view_index,
             config.maximum_source_distance,
+            metric,
         )?;
 
         let mut canonical_view = Vec::with_capacity(view.len());
 
         for (source_cluster_index, cluster) in clusters.iter().enumerate()
         {
-            let representative_source = source_medoid(cluster, view_index, source_cluster_index)?;
+            let representative_source =
+                source_medoid(cluster, view_index, source_cluster_index, metric)?;
 
             canonical_view.extend(
                 cluster
@@ -197,10 +229,11 @@ fn canonicalize_source_clusters(
     Ok(result)
 }
 
-fn build_complete_link_clusters(
+pub(crate) fn build_complete_link_clusters(
     ordered_samples: Vec<SrccTransportSample>,
     view_index: usize,
     maximum_source_distance: f64,
+    metric: &SourceMetric,
 ) -> Result<Vec<Vec<SrccTransportSample>>, SrccRobustFitError> {
     let mut clusters: Vec<Vec<SrccTransportSample>> = Vec::new();
 
@@ -214,7 +247,7 @@ fn build_complete_link_clusters(
 
             for member in cluster
             {
-                let distance = source_distance(&sample.source, &member.source);
+                let distance = metric.distance(&sample.source, &member.source);
 
                 if !distance.is_finite()
                 {
@@ -258,18 +291,31 @@ fn build_complete_link_clusters(
     Ok(clusters)
 }
 
-fn source_medoid(
+pub(crate) fn source_medoid(
     cluster: &[SrccTransportSample],
     view_index: usize,
     source_cluster_index: usize,
+    metric: &SourceMetric,
 ) -> Result<Vector16, SrccRobustFitError> {
     let mut best_source = cluster[0].source;
 
-    let mut best_score = source_score(&best_source, cluster, view_index, source_cluster_index)?;
+    let mut best_score = source_score(
+        &best_source,
+        cluster,
+        view_index,
+        source_cluster_index,
+        metric,
+    )?;
 
     for sample in cluster.iter().skip(1)
     {
-        let score = source_score(&sample.source, cluster, view_index, source_cluster_index)?;
+        let score = source_score(
+            &sample.source,
+            cluster,
+            view_index,
+            source_cluster_index,
+            metric,
+        )?;
 
         if score.total_cmp(&best_score).is_lt()
         {
@@ -281,17 +327,18 @@ fn source_medoid(
     Ok(best_source)
 }
 
-fn source_score(
+pub(crate) fn source_score(
     candidate: &Vector16,
     cluster: &[SrccTransportSample],
     view_index: usize,
     source_cluster_index: usize,
+    metric: &SourceMetric,
 ) -> Result<f64, SrccRobustFitError> {
     let mut score = 0.0;
 
     for sample in cluster
     {
-        let distance = source_distance(candidate, &sample.source);
+        let distance = metric.distance(candidate, &sample.source);
 
         if !distance.is_finite()
         {
@@ -360,7 +407,57 @@ fn source_distance(left: &Vector16, right: &Vector16) -> f64 {
     }
 }
 
-fn projector_frobenius_distance(left: &SrccProjector, right: &SrccProjector) -> f64 {
+/// Scale-aware variant of [`source_distance`].
+///
+/// This mirrors the frozen [`source_distance`] body line for line; the only
+/// change is that each coordinate difference is multiplied by its fitted
+/// inverse scale before entering the accumulation. A zero inverse scale makes
+/// the scaled difference exactly `0.0`, which the historical zero-skip branch
+/// then ignores — dropped dimensions therefore contribute nothing, without any
+/// extra branch.
+fn scaled_source_distance(left: &Vector16, right: &Vector16, inverse_scales: &Vector16) -> f64 {
+    let mut scale = 0.0;
+    let mut scaled_sum = 1.0;
+
+    for ((left_value, right_value), inverse_scale_value) in
+        left.iter().zip(right).zip(inverse_scales)
+    {
+        let difference = ((left_value - right_value) * inverse_scale_value).abs();
+
+        if !difference.is_finite()
+        {
+            return f64::INFINITY;
+        }
+
+        if difference == 0.0
+        {
+            continue;
+        }
+
+        if scale < difference
+        {
+            let ratio = scale / difference;
+            scaled_sum = 1.0 + scaled_sum * ratio * ratio;
+            scale = difference;
+        }
+        else
+        {
+            let ratio = difference / scale;
+            scaled_sum += ratio * ratio;
+        }
+    }
+
+    if scale == 0.0
+    {
+        0.0
+    }
+    else
+    {
+        scale * scaled_sum.sqrt()
+    }
+}
+
+pub(crate) fn projector_frobenius_distance(left: &SrccProjector, right: &SrccProjector) -> f64 {
     let squared_distance = left
         .transform()
         .iter()
@@ -374,12 +471,12 @@ fn projector_frobenius_distance(left: &SrccProjector, right: &SrccProjector) -> 
     squared_distance.sqrt() / (SRCC_DIMENSION as f64).sqrt()
 }
 
-fn compare_samples(left: &SrccTransportSample, right: &SrccTransportSample) -> Ordering {
+pub(crate) fn compare_samples(left: &SrccTransportSample, right: &SrccTransportSample) -> Ordering {
     compare_vectors(&left.source, &right.source)
         .then_with(|| compare_vectors(&left.target, &right.target))
 }
 
-fn compare_vectors(left: &Vector16, right: &Vector16) -> Ordering {
+pub(crate) fn compare_vectors(left: &Vector16, right: &Vector16) -> Ordering {
     left.iter()
         .zip(right)
         .find_map(|(left_value, right_value)| {
