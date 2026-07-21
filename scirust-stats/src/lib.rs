@@ -25,6 +25,11 @@
 //!   plus overflow-free `ln_factorial` / `ln_binomial`.
 //! - **Descriptive statistics** ([`describe`]): mean, unbiased variance / std,
 //!   standard error, quantiles, median, min/max.
+//! - **Robust descriptive statistics** ([`robust`]): median absolute deviation
+//!   (raw or normal-consistent), interquartile range, weighted median, symmetric
+//!   trimmed / winsorized means, and a deterministic median-of-means estimator —
+//!   all with typed errors, no hidden `NaN`, and reuse of the [`describe`] median
+//!   and quantile.
 //! - **Hypothesis tests** ([`htest`]): one- and two-sample t-tests (pooled &
 //!   Welch), one-way ANOVA, Pearson χ² goodness-of-fit (raw counts *and* a
 //!   `chi2_gof_discrete` that bins a fitted discrete distribution, pools thin
@@ -71,6 +76,7 @@ pub mod dist;
 pub mod htest;
 pub mod lottery;
 pub mod rng;
+pub mod robust;
 
 pub use discrete::{
     BetaBinomial, Binomial, Boltzmann, DirichletMultinomial, DiscreteDistribution, DiscreteLaplace,
@@ -86,6 +92,11 @@ pub use htest::{
 };
 pub use lottery::{LotteryGame, PrizeTier, draw_frequency_chi_square};
 pub use rng::SplitMix64;
+pub use robust::{
+    MadConsistency, MedianOfMeansConfig, MedianOfMeansPartition, RobustStatsError,
+    interquartile_range, median_absolute_deviation, median_of_means, trimmed_mean, weighted_median,
+    winsorized_mean,
+};
 
 /// One-import surface for the common statistics workflow.
 pub mod prelude {
@@ -108,4 +119,9 @@ pub mod prelude {
     };
     pub use crate::lottery::{LotteryGame, PrizeTier, draw_frequency_chi_square};
     pub use crate::rng::SplitMix64;
+    pub use crate::robust::{
+        MadConsistency, MedianOfMeansConfig, MedianOfMeansPartition, RobustStatsError,
+        interquartile_range, median_absolute_deviation, median_of_means, trimmed_mean,
+        weighted_median, winsorized_mean,
+    };
 }
