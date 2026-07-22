@@ -92,7 +92,7 @@ deployment from within a method crate.
 | 724 | Deterministic robust regression | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#739](https://github.com/Memorithm/scirust/pull/739) | `c1c10946a48cb57daaff3fb4875a69064a0bb148` | **Merged** |
 | 725 | Trust & contamination models | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#742](https://github.com/Memorithm/scirust/pull/742) | `b1eca0ff7df85168539a841a7223d7a0af059e7b` | **Merged** |
 | 726 | Certified medoid clustering | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#745](https://github.com/Memorithm/scirust/pull/745) | `091cefad9c3ec00c37aab4631d2890146482b613` | **Merged** |
-| 727 | Industrial benchmark harness | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | _(open)_ | _(pending)_ | In progress |
+| 727 | Industrial benchmark harness | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#747](https://github.com/Memorithm/scirust/pull/747) | _(pending)_ | **In review** |
 | 728 | Real industrial evaluation | `feat/srcc-industrial-real-data-evaluation` | — | — | Not started |
 | 729 | Shadow deployment & promotion gates | `feat/mlops-srcc-shadow-deployment` | — | — | Not started |
 
