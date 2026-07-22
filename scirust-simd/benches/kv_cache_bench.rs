@@ -18,6 +18,22 @@
 //   RUSTFLAGS="-C target-cpu=x86-64-v3" \
 //     cargo bench -p scirust-simd --features portable-simd --bench kv_cache_bench
 
+// Migration note (scirust-bench-schema): inputs come from `fixed_data(seed,
+// len)`, backed by the in-file `Lcg`; bench_kv_cache_incremental_decode
+// pins q/k/v to seeds 0x1/0x2/0x3. S=64 tokens, DM=64. Example conversion
+// for the "kv_cache_decode_64_steps" group's "fixed"/"Q16_16" case (after
+// `cargo bench --bench kv_cache_bench`, reading
+// target/criterion/kv_cache_decode_64_steps/fixed/Q16_16/new/estimates.json):
+//
+//   scirust_bench_schema::criterion_estimate_to_record(
+//       &estimates_json,
+//       "scirust-simd/kv_cache_incremental_decode", // kernel
+//       "S=64,DM=64",                                 // dataset
+//       "fixed:Q16_16",                               // method
+//       0x1,                                           // seed: q's fixed_data() seed
+//   )
+// See scirust-bench-schema's crate docs ("Migrating criterion targets") for the full pattern.
+
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::fixed::Q16_16;
 use scirust_simd::fixed::attention::multi_head_attention;

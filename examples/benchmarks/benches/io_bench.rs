@@ -4,6 +4,25 @@
 //
 // cd examples/benchmarks && cargo bench --bench io_bench
 
+// Migration note (scirust-bench-schema): unlike most criterion targets in
+// this workspace, this file has NO random data generator to pin -- there is
+// no seed_from_u64/Lcg::new/PcgEngine::new call anywhere below. Every tensor
+// in both `bench_serialize` and `bench_deserialize` is a fixed-size,
+// fixed-value constant (`vec![0.5f32; 256 * 256]`, named "layer{i}.weight"),
+// varied only along the swept `n_tensors` axis ([1, 8, 64]); there is no
+// randomness to make reproducible in the first place. `BenchRecord::seed`
+// is still mandatory, so a conversion uses `0` to mean "no RNG -- fixed,
+// non-random input", e.g. (after `cargo bench --bench io_bench`, reading
+// target/criterion/safetensors_serialize/64/new/estimates.json):
+//   scirust_bench_schema::criterion_estimate_to_record(
+//       &estimates_json,
+//       "scirust-core/safetensors_serialize", // kernel
+//       "n_tensors=64",                       // dataset (the swept axis)
+//       "serialize_state_dict",                // method
+//       0,                                     // seed: no RNG, constant input
+//   )
+// See scirust-bench-schema's crate docs ("Migrating criterion targets") for the full pattern.
+
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use scirust_core::autodiff::reverse::Tensor;
 use scirust_core::io::safetensors::{serialize_state_dict, deserialize_state_dict};

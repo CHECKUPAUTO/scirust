@@ -24,6 +24,27 @@
 //
 // Run: cargo bench -p scirust-signal --bench denoise_bench
 
+// Benchmark-schema migration note (scirust-bench-schema): every input here
+// is `noisy_signal(n, seed)`, i.e. the `Lcg` above seeded with a fixed
+// per-group constant — 0x4445_4e4f_4953_4531 for
+// `denoise_family_representative_cost`, 0x4155_544f_5049_5045 for
+// `denoise_auto_pipelines`, and 0x5343_414c_494e_4721 for
+// `denoise_scaling_with_length` (all three swept sizes in that group share
+// this one seed). After `cargo bench -p scirust-signal --bench
+// denoise_bench`, one `denoise_scaling_with_length` row converts as:
+//   scirust_bench_schema::criterion_estimate_to_record(
+//       &std::fs::read_to_string(
+//           "target/criterion/denoise_scaling_with_length/\
+//            wavelet_denoise_sure/4096/new/estimates.json",
+//       )?,
+//       "scirust-signal/denoise_scaling_with_length",
+//       "n=4096",
+//       "wavelet_denoise_sure",
+//       0x5343_414c_494e_4721,
+//   )?;
+// See scirust-bench-schema's crate docs ("Migrating criterion targets") for
+// the full pattern.
+
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_signal::denoise::{
     Wavelet, collab1d_auto, denoise_auto, denoise_best, denoise_cascade_auto, kalman_smooth_auto,

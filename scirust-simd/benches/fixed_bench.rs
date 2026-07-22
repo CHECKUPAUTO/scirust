@@ -18,6 +18,22 @@
 //   RUSTFLAGS="-C target-cpu=x86-64-v3" \
 //     cargo bench -p scirust-simd --features portable-simd --bench fixed_bench
 
+// Migration note (scirust-bench-schema): inputs come from `fixed_data`/
+// `f32_data(seed)`, backed by the in-file `Lcg`; each bench function pins a
+// literal seed (bench_add=0x1, bench_mul=0x2, ...). N=65536. Example
+// conversion for the "add" group's "fixed"/"Q16_16x8" case (after `cargo
+// bench --bench fixed_bench`, reading
+// target/criterion/add/fixed/Q16_16x8/new/estimates.json):
+//
+//   scirust_bench_schema::criterion_estimate_to_record(
+//       &estimates_json,
+//       "scirust-simd/fixed_add", // kernel
+//       "N=65536",                 // dataset
+//       "fixed:Q16_16x8",          // method
+//       0x1,                       // seed: bench_add's fixed_data/f32_data seed
+//   )
+// See scirust-bench-schema's crate docs ("Migrating criterion targets") for the full pattern.
+
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::fixed::reductions as fred;
 use scirust_simd::fixed::{FixedI32x8, Q16_16};

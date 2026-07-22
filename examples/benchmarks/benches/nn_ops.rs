@@ -3,6 +3,29 @@
 // Benchmarks des opérations NN et autodiff de SciRust v11.2
 //
 // cd examples/benchmarks && cargo bench --bench nn_ops
+//
+// Benchmark-record migration note (scirust-bench-schema):
+// Only bench_linear_forward and bench_tt_linear_forward seed anything --
+// both call `PcgEngine::new(42)` to drive `KaimingNormal` weight init via
+// `Linear::new(in_f, out_f, &KaimingNormal, &Zeros, &mut rng)`. The other
+// benches (sum_axis, broadcast, softmax, cross_entropy, matmul) fill tensors
+// with fixed constants (`vec![1.0f32; ...]`, `vec![0.5f32; ...]`,
+// `vec![0.01f32; ...]`) and have no seed at all.
+//
+// Example conversion, after `cargo bench --bench nn_ops`, for the
+// linear_forward/256x256->128 case (target/criterion/linear_forward/
+// 256x256->128/new/estimates.json):
+//
+//   scirust_bench_schema::criterion_estimate_to_record(
+//       &estimates_json,
+//       "scirust-core/linear_forward",
+//       "256x256->128",
+//       "Linear::forward",
+//       42,
+//   )?;
+//
+// See scirust-bench-schema's crate docs ("Migrating criterion targets") for
+// the full pattern.
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use scirust_core::autodiff::reverse::{Tape, Tensor};

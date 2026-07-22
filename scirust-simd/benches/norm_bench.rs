@@ -15,6 +15,22 @@
 //   RUSTFLAGS="-C target-cpu=x86-64-v3" \
 //     cargo bench -p scirust-simd --features portable-simd --bench norm_bench
 
+// Migration note (scirust-bench-schema): inputs come from `fixed_data`/
+// `f32_data(seed, len)`, backed by the in-file `Lcg`; bench_rmsnorm pins
+// x/fx to seed 0x1 and gamma/fgamma to seed 0x2. ROWS=32, D=256. Example
+// conversion for the "rmsnorm" group's "fixed"/"Q16_16" case (after `cargo
+// bench --bench norm_bench`, reading
+// target/criterion/rmsnorm/fixed/Q16_16/new/estimates.json):
+//
+//   scirust_bench_schema::criterion_estimate_to_record(
+//       &estimates_json,
+//       "scirust-simd/norm_rmsnorm", // kernel
+//       "ROWS=32,D=256",              // dataset
+//       "fixed:Q16_16",               // method
+//       0x1,                          // seed: x's fixed_data() seed
+//   )
+// See scirust-bench-schema's crate docs ("Migrating criterion targets") for the full pattern.
+
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::fixed::Q16_16;
 use scirust_simd::fixed::norm::{batch_norm, layer_norm, rmsnorm, rope_apply};

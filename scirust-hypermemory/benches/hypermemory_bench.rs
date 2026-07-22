@@ -15,6 +15,29 @@
 //! sedenion product, the real-16 baseline search, and (for comparison) the
 //! independent `scirust_retrieval::DenseIndex` search.
 
+// Bench-schema migration (scirust-bench-schema): every corpus here comes
+// from the in-file `Lcg`, seeded via `Lcg::new(seed)` (which XORs the given
+// seed with 0x9E37_79B9_7F4A_7C15) and driven through `anchors(n, seed)`.
+// Per function: bench_insertion uses anchors(1_000, 0xA1); bench_lookup_by_id
+// uses anchors(10_000, 0xB2); bench_search / bench_real16_search /
+// bench_dense_index_search each use anchors(n, 0xC3 ^ n as u64) for n in
+// SIZES; bench_expression_evaluation uses anchors(8, 0xD4); and
+// bench_sedenion_product seeds Lcg::new(0xE5) directly.
+//
+// Example conversion, for the "exact_topk_search_cosine" group's n=10_000
+// case (target/criterion/exact_topk_search_cosine/10000/new/estimates.json):
+//
+//   scirust_bench_schema::criterion_estimate_to_record(
+//       &estimates_json,
+//       "scirust-hypermemory/exact_topk_search",
+//       "corpus_n=10000",
+//       "S16ExactIndex::search(cosine)",
+//       0xC3 ^ 10_000u64, // = 10_195
+//   )?;
+//
+// See scirust-bench-schema's crate docs ("Migrating criterion targets") for
+// the full pattern.
+
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use scirust_hypermemory::{
     ConceptId, ConceptSpec, ExprLimits, Real16Index, S16ExactIndex, S16Expr, S16Store,

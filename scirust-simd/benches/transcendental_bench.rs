@@ -14,6 +14,23 @@
 //   RUSTFLAGS="-C target-cpu=x86-64-v3" \
 //     cargo bench -p scirust-simd --features portable-simd --bench transcendental_bench
 
+// Migration note (scirust-bench-schema): inputs come from `data(seed,
+// scale)`, backed by the in-file `Lcg`; `bench_unary`'s shared helper seeds
+// `0xC0FFEE ^ name.len() as u64` (e.g. "exp".len()==3 -> 0xC0FFEE ^ 3), so
+// each transcendental's group name IS its own seed derivation input. N=16384.
+// Example conversion for the "exp" group's "fixed"/"Q16_16" case (after
+// `cargo bench --bench transcendental_bench`, reading
+// target/criterion/exp/fixed/Q16_16/new/estimates.json):
+//
+//   scirust_bench_schema::criterion_estimate_to_record(
+//       &estimates_json,
+//       "scirust-simd/transcendental_exp", // kernel
+//       "N=16384,scale=5.0",                 // dataset
+//       "fixed:Q16_16",                      // method
+//       0xC0FFEE ^ 3,                        // seed: data()'s seed for "exp" (len 3)
+//   )
+// See scirust-bench-schema's crate docs ("Migrating criterion targets") for the full pattern.
+
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::fixed::Q16_16;
 use scirust_simd::fixed::RealScalar;

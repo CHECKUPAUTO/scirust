@@ -14,6 +14,21 @@
 // pas exécuter, ce qui peut provoquer un SIGILL. Le cas échéant, préférer une
 // cible explicite : `-C target-cpu=x86-64-v3` (AVX2) ou `x86-64-v4` (AVX-512).
 
+// Migration note (scirust-bench-schema): inputs come from `data_f32`/
+// `data_f64(seed)`, backed by the in-file `Lcg`; bench_sum pins a32 to
+// 0x501 and a64 to 0x502. N=65536. Example conversion for the "sum_f32"
+// group's fast-variant case (after `cargo bench --bench reductions_bench`,
+// reading target/criterion/sum_f32/.../new/estimates.json):
+//
+//   scirust_bench_schema::criterion_estimate_to_record(
+//       &estimates_json,
+//       "scirust-simd/reductions_sum_f32", // kernel
+//       "N=65536",                           // dataset
+//       "sum_fast",                          // method
+//       0x501,                               // seed: a32's data_f32() seed
+//   )
+// See scirust-bench-schema's crate docs ("Migrating criterion targets") for the full pattern.
+
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::reductions::{
     ReductionMode, argmin, dot, l2_norm, linf_norm, sum_deterministic, sum_fast, sum_kahan,

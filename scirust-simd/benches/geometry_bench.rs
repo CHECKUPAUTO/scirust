@@ -12,6 +12,21 @@
 //   RUSTFLAGS="-C target-cpu=x86-64-v3" \
 //     cargo bench -p scirust-simd --features portable-simd --bench geometry_bench
 
+// Migration note (scirust-bench-schema): inputs come from `vectors(seed)`,
+// backed by the in-file `Lcg`; e.g. bench_rotate uses seed 0xA1. N=4096
+// vectors. Example conversion for the "rotate_vector" group's "fixed"/
+// "Q16_16" case (after `cargo bench --bench geometry_bench`, reading
+// target/criterion/rotate_vector/fixed/Q16_16/new/estimates.json):
+//
+//   scirust_bench_schema::criterion_estimate_to_record(
+//       &estimates_json,
+//       "scirust-simd/geometry_rotate", // kernel
+//       "N=4096",                        // dataset
+//       "fixed:Q16_16",                  // method
+//       0xA1,                            // seed: bench_rotate's vectors() seed
+//   )
+// See scirust-bench-schema's crate docs ("Migrating criterion targets") for the full pattern.
+
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::fixed::Q16_16;
 use scirust_simd::geometry::{DualQuaternion, MadgwickFilter, MahonyFilter, Quaternion, Transform};
