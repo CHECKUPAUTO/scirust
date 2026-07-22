@@ -190,6 +190,83 @@ fn bench_slerp(c: &mut Criterion) {
     g.finish();
 }
 
+/// Spline cubique de Shoemake (`squad_setup` + `squad`, double slerp imbriqué
+/// derrière deux `ln`/`exp` de quaternion via `to_axis_angle`/`from_axis_angle`)
+/// fixe vs f32 — surcoût face à un `slerp` seul (mesuré par [`bench_slerp`]
+/// ci-dessus) pour la continuité de vitesse angulaire aux jonctions.
+fn bench_squad(c: &mut Criterion) {
+    let qx0 = Quaternion::<Q16_16>::from_axis_angle(
+        [Q16_16::one(), Q16_16::zero(), Q16_16::zero()],
+        Q16_16::try_from(0.2).unwrap(),
+    );
+    let qx1 = Quaternion::<Q16_16>::from_axis_angle(
+        [Q16_16::zero(), Q16_16::one(), Q16_16::zero()],
+        Q16_16::try_from(0.8).unwrap(),
+    );
+    let qx2 = Quaternion::<Q16_16>::from_axis_angle(
+        [Q16_16::zero(), Q16_16::zero(), Q16_16::one()],
+        Q16_16::try_from(1.3).unwrap(),
+    );
+    let qx3 = Quaternion::<Q16_16>::from_axis_angle(
+        [
+            Q16_16::try_from(0.577).unwrap(),
+            Q16_16::try_from(0.577).unwrap(),
+            Q16_16::try_from(0.577).unwrap(),
+        ],
+        Q16_16::try_from(2.1).unwrap(),
+    );
+    let sx1 = Quaternion::squad_setup(qx0, qx1, qx2);
+    let sx2 = Quaternion::squad_setup(qx1, qx2, qx3);
+
+    let qf0 = Quaternion::<f32>::from_axis_angle([1.0, 0.0, 0.0], 0.2);
+    let qf1 = Quaternion::<f32>::from_axis_angle([0.0, 1.0, 0.0], 0.8);
+    let qf2 = Quaternion::<f32>::from_axis_angle([0.0, 0.0, 1.0], 1.3);
+    let qf3 = Quaternion::<f32>::from_axis_angle([0.577, 0.577, 0.577], 2.1);
+    let sf1 = Quaternion::squad_setup(qf0, qf1, qf2);
+    let sf2 = Quaternion::squad_setup(qf1, qf2, qf3);
+
+    let steps = 256u32;
+    let mut g = c.benchmark_group("squad");
+    g.throughput(Throughput::Elements(steps as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            let mut acc = Quaternion::<Q16_16>::zero();
+            for s in 0..steps
+            {
+                let t = Q16_16::try_from(s as f64 / steps as f64).unwrap();
+                acc = acc
+                    + Quaternion::squad(
+                        black_box(qx1),
+                        black_box(qx2),
+                        black_box(sx1),
+                        black_box(sx2),
+                        t,
+                    );
+            }
+            acc
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| {
+            let mut acc = Quaternion::<f32>::zero();
+            for s in 0..steps
+            {
+                let t = s as f32 / steps as f32;
+                acc = acc
+                    + Quaternion::squad(
+                        black_box(qf1),
+                        black_box(qf2),
+                        black_box(sf1),
+                        black_box(sf2),
+                        t,
+                    );
+            }
+            acc
+        })
+    });
+    g.finish();
+}
+
 /// Reconstruction depuis une matrice de rotation (méthode de Shepperd, sqrt +
 /// divisions réelles) fixe vs f32.
 fn bench_from_rotation_matrix(c: &mut Criterion) {
@@ -586,6 +663,7 @@ criterion_group!(
     bench_rotate,
     bench_from_axis_angle,
     bench_slerp,
+    bench_squad,
     bench_from_rotation_matrix,
     bench_euler_roundtrip,
     bench_transform,

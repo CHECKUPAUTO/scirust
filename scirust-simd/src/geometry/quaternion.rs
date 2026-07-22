@@ -31,6 +31,14 @@
 // inverse déterministe de [`RealScalar`] (`acos`), elle-même à bornes ULP
 // prouvées en virgule fixe.
 //
+// [`Quaternion::squad`] généralise `slerp` à une **séquence** de mots-clés
+// (animation, trajectoire d'orientation multi-points) : interpolation
+// cubique de Shoemake, à vitesse angulaire continue aux jonctions, contre la
+// discontinuité d'une suite de `slerp` indépendants. [`Quaternion::squad_setup`]
+// calcule le quaternion auxiliaire de chaque mot-clé (à partir de ses deux
+// voisins) requis par `squad` — bâti entièrement sur `slerp`/`to_axis_angle`/
+// `from_axis_angle` déjà existants, sans nouvelle primitive numérique.
+//
 // ## Autres représentations d'orientation
 //
 // [`Quaternion::from_rotation_matrix`] réciproque [`Quaternion::to_rotation_matrix`]
@@ -289,6 +297,75 @@ impl<T: RealScalar> Quaternion<T> {
             let inv = s.recip();
             ([self.x * inv, self.y * inv, self.z * inv], angle)
         }
+    }
+
+    /// Logarithme d'un quaternion **unitaire** : pour `q = cos θ + sin θ·v̂`
+    /// (`θ = angle/2` de la représentation axe-angle), `ln(q) = θ·v̂`
+    /// (quaternion **pur**, partie réelle nulle). Utilisé par
+    /// [`Self::squad_setup`] — pas destiné à un usage général (le logarithme
+    /// quaternionique complet, valable pour tout `q` non nul, existe pour
+    /// [`crate::hypercomplex::OctonionSimd`] mais n'est pas nécessaire ici).
+    #[inline]
+    fn ln_unit(self) -> Self {
+        let (axis, angle) = self.to_axis_angle();
+        let half = angle * T::from_i32(2).recip();
+        Self::from_vector([axis[0] * half, axis[1] * half, axis[2] * half])
+    }
+
+    /// Exponentielle d'un quaternion **pur** `v = θ·v̂` (réciproque de
+    /// [`Self::ln_unit`] sur son image) : `exp(v) = cos θ + sin θ·v̂`,
+    /// `θ = ‖v‖`. Renvoie l'identité pour `v ≈ 0` (comme [`Self::to_axis_angle`]
+    /// pour une rotation quasi nulle — même seuil).
+    #[inline]
+    fn exp_pure(self) -> Self {
+        let v = self.vector();
+        let phi = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        let tiny = T::from_i32(10000).recip(); // 1e-4, même seuil que to_axis_angle
+        if phi < tiny
+        {
+            Self::identity()
+        }
+        else
+        {
+            let inv = phi.recip();
+            let axis = [v[0] * inv, v[1] * inv, v[2] * inv];
+            Self::from_axis_angle(axis, phi * T::from_i32(2))
+        }
+    }
+
+    /// Quaternion auxiliaire ("tangent") de Shoemake au mot-clé `q`, à partir
+    /// de ses voisins `q_prev`/`q_next` dans la séquence — nécessaire pour
+    /// interpoler *entre* deux mots-clés consécutifs avec [`Self::squad`] à
+    /// vitesse angulaire continue (analogue quaternionique d'une tangente de
+    /// Catmull-Rom).
+    ///
+    /// `s = q · exp(−(ln(q⁻¹·q_prev) + ln(q⁻¹·q_next)) / 4)` (Shoemake, 1987).
+    #[must_use]
+    pub fn squad_setup(q_prev: Self, q: Self, q_next: Self) -> Self {
+        let inv_q = q.inverse();
+        let log_prev = inv_q.mul_quat(q_prev).ln_unit();
+        let log_next = inv_q.mul_quat(q_next).ln_unit();
+        let quarter = T::from_i32(4).recip(); // puissance de 2 : recip() exact
+        let exponent = -((log_prev + log_next).scale(quarter));
+        q.mul_quat(exponent.exp_pure())
+    }
+
+    /// Interpolation cubique sphérique de Shoemake (**SQUAD**) entre deux
+    /// mots-clés unitaires consécutifs `q0`/`q1`, `t ∈ [0,1]`, avec leurs
+    /// quaternions auxiliaires `s0`/`s1` ([`Self::squad_setup`]) : double
+    /// [`Self::slerp`] imbriqué. Contrairement à une suite de `slerp`
+    /// indépendants (vitesse angulaire discontinue à chaque jonction),
+    /// produit une trajectoire à vitesse angulaire **continue** aux mots-clés
+    /// — l'équivalent quaternionique d'une spline cubique C¹.
+    ///
+    /// `squad(t) = slerp(slerp(q0, q1, t), slerp(s0, s1, t), 2t(1−t))`.
+    #[must_use]
+    pub fn squad(q0: Self, q1: Self, s0: Self, s1: Self, t: T) -> Self {
+        let two = T::from_i32(2);
+        let inner = Self::slerp(q0, q1, t);
+        let outer = Self::slerp(s0, s1, t);
+        let blend = two * t * (T::one() - t);
+        Self::slerp(inner, outer, blend)
     }
 }
 
