@@ -31,7 +31,8 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::reductions::{
-    ReductionMode, argmin, dot, l2_norm, linf_norm, sum_deterministic, sum_fast, sum_kahan,
+    ReductionMode, argmin, dot, l2_norm, linf_norm, mean, sum_deterministic, sum_fast, sum_kahan,
+    variance_population,
 };
 
 /// 65 536 éléments : le tableau f32 (256 Kio) déborde le L1/L2 → débit soutenu.
@@ -151,5 +152,44 @@ fn bench_linf_argmin(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(benches, bench_sum, bench_dot_norm, bench_linf_argmin);
+/// `mean`/`variance_population` (Welford lane-parallèle + fusion de Chan)
+/// vs référence scalaire naïve **deux passes** (`Σx/n` puis `Σ(x−mean)²/n`) —
+/// mesure le surcoût de l'algorithme en ligne face à la formule directe,
+/// pour la même exactitude sur données bien conditionnées (cf. en-tête de
+/// module de `reductions::mod`).
+fn bench_moments(c: &mut Criterion) {
+    let a = data_f32(0x801);
+
+    let mut g = c.benchmark_group("mean_f32");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("scalar", "naive"), |bch| {
+        bch.iter(|| black_box(&a).iter().copied().sum::<f32>() / N as f32)
+    });
+    g.bench_function(BenchmarkId::new("simd", "fast"), |bch| {
+        bch.iter(|| mean(black_box(&a), ReductionMode::Fast))
+    });
+    g.finish();
+
+    let mut g = c.benchmark_group("variance_population_f32");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("scalar", "naive_two_pass"), |bch| {
+        bch.iter(|| {
+            let data = black_box(&a);
+            let m = data.iter().copied().sum::<f32>() / N as f32;
+            data.iter().map(|&x| (x - m) * (x - m)).sum::<f32>() / N as f32
+        })
+    });
+    g.bench_function(BenchmarkId::new("simd", "welford"), |bch| {
+        bch.iter(|| variance_population(black_box(&a)))
+    });
+    g.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_sum,
+    bench_dot_norm,
+    bench_linf_argmin,
+    bench_moments
+);
 criterion_main!(benches);

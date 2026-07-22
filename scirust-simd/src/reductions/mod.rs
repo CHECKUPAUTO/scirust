@@ -23,6 +23,22 @@
 // [`sum_kahan`] ajoute une compensation de Neumaier/Kahan lane-parallèle pour
 // les sommes longues où l'erreur d'arrondi accumulée compte.
 //
+// ## Moments statistiques
+//
+// [`mean`] réutilise directement [`sum`]. [`variance_population`]/
+// [`variance_sample`] (et [`std_population`]/[`std_sample`]) évitent en
+// revanche la formule naïve `Σx²/n − mean²` (soustraction de deux grandeurs
+// proches, catastrophiquement instable pour des données de grande moyenne et
+// faible dispersion) : elles utilisent l'algorithme en ligne de Welford, qui
+// met à jour moyenne et somme des carrés des écarts (`M2`) simultanément sans
+// jamais recalculer `Σx²`. La parallélisation lane par lane accumule un
+// agrégat de Welford indépendant par lane (chaque lane ne voit qu'un
+// sous-ensemble régulier d'indices, exactement comme [`sum_deterministic`]),
+// puis les fusionne dans un ordre de lane fixe via la formule de fusion
+// parallèle de Chan, Golub & LeVeque (1979) — déterministe par construction,
+// sans paramètre [`ReductionMode`] (il n'y a pas de variante « rapide »
+// significativement plus simple ici, contrairement aux sommes).
+//
 // ## Appariement et alignement
 //
 // Toutes les fonctions découpent via `chunks_exact(WIDTH)` + `from_slice`
@@ -75,6 +91,9 @@ pub trait SimdReducible: Copy + PartialEq {
     fn max(self, other: Self) -> Self;
     /// Minimum scalaire.
     fn min(self, other: Self) -> Self;
+    /// Convertit un compte d'éléments en scalaire (diviseurs `Σ/n`, formules
+    /// de Welford/Chan).
+    fn from_usize(n: usize) -> Self;
 }
 
 macro_rules! impl_simd_reducible {
@@ -117,6 +136,10 @@ macro_rules! impl_simd_reducible {
             #[inline(always)]
             fn min(self, other: Self) -> Self {
                 <$ty>::min(self, other)
+            }
+            #[inline(always)]
+            fn from_usize(n: usize) -> Self {
+                n as $ty
             }
         }
     };
@@ -249,6 +272,161 @@ pub fn sum<T: SimdReducible>(data: &[T], mode: ReductionMode) -> T {
         ReductionMode::Fast => sum_fast(data),
         ReductionMode::Deterministic => sum_deterministic(data),
     }
+}
+
+// ------------------------------------------------------------------ //
+//  Moments statistiques (moyenne, variance, écart-type)               //
+// ------------------------------------------------------------------ //
+
+/// Agrégat de Welford : compte, moyenne courante, somme des carrés des
+/// écarts à cette moyenne (`M2`). Fusionnable via [`Self::merge`] (formule de
+/// Chan, Golub & LeVeque 1979) — cf. en-tête de module.
+#[derive(Clone, Copy, Debug)]
+struct WelfordAgg<T> {
+    count: usize,
+    mean: T,
+    m2: T,
+}
+
+impl<T: SimdReducible> WelfordAgg<T> {
+    #[inline(always)]
+    fn empty() -> Self {
+        Self {
+            count: 0,
+            mean: T::ZERO,
+            m2: T::ZERO,
+        }
+    }
+
+    /// Incorpore une valeur (mise à jour en ligne de Welford, un élément).
+    #[inline(always)]
+    fn update(&mut self, x: T) {
+        self.count += 1;
+        let delta = x.sub(self.mean);
+        self.mean = self.mean.add(delta.div(T::from_usize(self.count)));
+        let delta2 = x.sub(self.mean);
+        self.m2 = self.m2.add(delta.mul(delta2));
+    }
+
+    /// Fusionne deux agrégats indépendants (leurs sous-ensembles d'indices
+    /// respectifs) en un seul, sans repasser sur les données sources.
+    #[inline]
+    fn merge(self, other: Self) -> Self {
+        if self.count == 0
+        {
+            return other;
+        }
+        if other.count == 0
+        {
+            return self;
+        }
+        let n = self.count + other.count;
+        let delta = other.mean.sub(self.mean);
+        let mean = self
+            .mean
+            .add(delta.mul(T::from_usize(other.count)).div(T::from_usize(n)));
+        let m2 = self.m2.add(other.m2).add(
+            delta
+                .mul(delta)
+                .mul(T::from_usize(self.count))
+                .mul(T::from_usize(other.count))
+                .div(T::from_usize(n)),
+        );
+        Self { count: n, mean, m2 }
+    }
+}
+
+/// Calcule l'agrégat de Welford de `data`, lane-parallèle : chaque lane
+/// maintient son propre agrégat sur un sous-ensemble d'indices régulier
+/// (comme [`sum_deterministic`]), incrémenté en lock-step (`k`-ième chunk ⇒
+/// `k` éléments déjà vus par lane, un diviseur scalaire commun à toutes les
+/// lanes). Les `T::WIDTH` agrégats de lane sont ensuite fusionnés dans un
+/// ordre d'indice fixe — déterministe, cf. en-tête de module — puis la
+/// queue (< `T::WIDTH` éléments) est incorporée scalairement.
+#[inline]
+fn welford<T: SimdReducible>(data: &[T]) -> WelfordAgg<T> {
+    let mut mean_vec = T::Simd::zero();
+    let mut m2_vec = T::Simd::zero();
+    let mut chunks = data.chunks_exact(T::WIDTH);
+    let mut k = 0usize;
+    for chunk in chunks.by_ref()
+    {
+        k += 1;
+        let x = T::Simd::from_slice(chunk);
+        let inv_k = T::Simd::splat(T::from_usize(1).div(T::from_usize(k)));
+        let delta = x - mean_vec;
+        mean_vec = mean_vec + delta * inv_k;
+        let delta2 = x - mean_vec;
+        m2_vec = m2_vec + delta * delta2;
+    }
+    let mut total = WelfordAgg::empty();
+    for i in 0..T::WIDTH
+    {
+        let lane_agg = WelfordAgg {
+            count: k,
+            mean: mean_vec.lane(i),
+            m2: m2_vec.lane(i),
+        };
+        total = total.merge(lane_agg);
+    }
+    for &v in chunks.remainder()
+    {
+        total.update(v);
+    }
+    total
+}
+
+/// Moyenne arithmétique `(Σ aᵢ)/n`. `None` si `data` est vide (moyenne
+/// indéfinie, comme la division réelle par zéro).
+#[inline]
+#[must_use]
+pub fn mean<T: SimdReducible>(data: &[T], mode: ReductionMode) -> Option<T> {
+    if data.is_empty()
+    {
+        return None;
+    }
+    Some(sum(data, mode).div(T::from_usize(data.len())))
+}
+
+/// Variance de population `M2/n` (biaisée : la moyenne des carrés des écarts
+/// à la moyenne du même échantillon sous-estime en espérance la variance de
+/// la population sous-jacente). `None` si `data` est vide.
+#[inline]
+#[must_use]
+pub fn variance_population<T: SimdReducible>(data: &[T]) -> Option<T> {
+    if data.is_empty()
+    {
+        return None;
+    }
+    let agg = welford(data);
+    Some(agg.m2.div(T::from_usize(agg.count)))
+}
+
+/// Variance d'échantillon `M2/(n−1)` (correction de Bessel, non biaisée).
+/// `None` si `data.len() < 2` (indéfinie : diviseur nul).
+#[inline]
+#[must_use]
+pub fn variance_sample<T: SimdReducible>(data: &[T]) -> Option<T> {
+    if data.len() < 2
+    {
+        return None;
+    }
+    let agg = welford(data);
+    Some(agg.m2.div(T::from_usize(agg.count - 1)))
+}
+
+/// Écart-type de population `√(variance_population)`.
+#[inline]
+#[must_use]
+pub fn std_population<T: SimdReducible>(data: &[T]) -> Option<T> {
+    variance_population(data).map(T::sqrt)
+}
+
+/// Écart-type d'échantillon `√(variance_sample)`.
+#[inline]
+#[must_use]
+pub fn std_sample<T: SimdReducible>(data: &[T]) -> Option<T> {
+    variance_sample(data).map(T::sqrt)
 }
 
 // ------------------------------------------------------------------ //

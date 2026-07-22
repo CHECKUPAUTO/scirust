@@ -685,7 +685,8 @@ pub mod transformer;
 pub mod hypercomplex;
 
 // Socle de réductions SIMD (SimdScalar, sommes fast/déterministe/Kahan,
-// dot, normes, extrema) — construit sur std::simd (feature `portable-simd`).
+// dot, normes, extrema, moments statistiques mean/variance/écart-type) —
+// construit sur std::simd (feature `portable-simd`).
 #[cfg(feature = "portable-simd")]
 pub mod reductions;
 

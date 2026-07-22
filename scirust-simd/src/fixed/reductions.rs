@@ -29,12 +29,25 @@
 // La voie SIMD accélère `sum`/`dot`/`l1_norm` du chemin `i32` (accumulation
 // élargie `i64` en lanes) ; le chemin `i64` charge scalaire mais accumule en
 // `i128` pour rester exact (pas de vecteur `i128`).
+//
+// ## Moments statistiques
+//
+// [`mean`]/[`variance_population`]/[`variance_sample`] (et leurs
+// écarts-types) utilisent ici l'algorithme naïf en **deux passes**
+// (moyenne, puis `Σ(aᵢ−mean)²`) plutôt que l'algorithme en ligne de Welford
+// utilisé côté flottant (`super::super::reductions`) : Welford existe pour
+// éviter l'instabilité de `Σaᵢ²/n − mean²` due à l'arrondi flottant
+// accumulé — un problème qui **n'existe pas** en virgule fixe, où seule la
+// multiplication arrondit (déterministe, cf. ci-dessus) et où la somme reste
+// exacte quel que soit l'ordre. Le calcul naïf est donc ici tout aussi
+// exact/déterministe que Welford, pour un code bien plus simple.
 
 use std::simd::i32x8;
 use std::simd::num::SimdInt;
 
 use super::math::sqrt;
 use super::simd::FixedI32x8;
+use super::traits::NumericScalar;
 use super::types::Fixed;
 
 /// Scalaire virgule fixe réductible : primitives de réduction exactes/SIMD.
@@ -350,4 +363,70 @@ pub fn argmax<T: FixedReducible>(data: &[T]) -> Option<usize> {
         }
     }
     best.map(|(i, _)| i)
+}
+
+// ------------------------------------------------------------------ //
+//  Moments statistiques (moyenne, variance, écart-type)               //
+// ------------------------------------------------------------------ //
+
+/// Somme des carrés des écarts à la moyenne `Σ(aᵢ−m)²` (aide interne
+/// partagée par les deux variances). `m` et chaque écart/carré sont arrondis
+/// comme `-`/`*` ; la somme finale est exacte (cf. en-tête de module).
+fn sum_sq_dev<T: FixedReducible + NumericScalar>(data: &[T], m: T) -> T {
+    let mut total = T::ZERO;
+    for &x in data
+    {
+        let d = x - m;
+        total = total.wrapping_add(d * d);
+    }
+    total
+}
+
+/// Moyenne arithmétique `(Σ aᵢ)/n` (division tronquée vers zéro, comme
+/// l'opérateur `/`). `None` si `data` est vide, ou si la division déborde
+/// (cf. [`Fixed::checked_div`]).
+#[inline]
+#[must_use]
+pub fn mean<T: FixedReducible + NumericScalar>(data: &[T]) -> Option<T> {
+    if data.is_empty()
+    {
+        return None;
+    }
+    sum(data).checked_div(T::from_i32(data.len() as i32))
+}
+
+/// Variance de population `Σ(aᵢ−mean)²/n` (biaisée — cf. la version
+/// flottante pour la justification statistique). `None` si `data` est vide.
+#[inline]
+#[must_use]
+pub fn variance_population<T: FixedReducible + NumericScalar>(data: &[T]) -> Option<T> {
+    let m = mean(data)?;
+    sum_sq_dev(data, m).checked_div(T::from_i32(data.len() as i32))
+}
+
+/// Variance d'échantillon `Σ(aᵢ−mean)²/(n−1)` (correction de Bessel).
+/// `None` si `data.len() < 2` (diviseur nul).
+#[inline]
+#[must_use]
+pub fn variance_sample<T: FixedReducible + NumericScalar>(data: &[T]) -> Option<T> {
+    if data.len() < 2
+    {
+        return None;
+    }
+    let m = mean(data)?;
+    sum_sq_dev(data, m).checked_div(T::from_i32((data.len() - 1) as i32))
+}
+
+/// Écart-type de population `√(variance_population)`.
+#[inline]
+#[must_use]
+pub fn std_population<T: FixedReducible + NumericScalar>(data: &[T]) -> Option<T> {
+    variance_population(data).map(FixedReducible::sqrt)
+}
+
+/// Écart-type d'échantillon `√(variance_sample)`.
+#[inline]
+#[must_use]
+pub fn std_sample<T: FixedReducible + NumericScalar>(data: &[T]) -> Option<T> {
+    variance_sample(data).map(FixedReducible::sqrt)
 }

@@ -71,7 +71,9 @@
 // * [`convert`] — conversions.
 // * [`traits`] — [`NumericScalar`] et [`RealScalar`].
 // * [`simd`] — vecteurs [`FixedI16x8`], [`FixedI32x8`], [`FixedI64x4`].
-// * [`reductions`] — sommes, `dot`, normes, extrema, cosinus.
+// * [`reductions`] — sommes, `dot`, normes, extrema, cosinus, moments
+//   statistiques (`mean`, variances de population/d'échantillon,
+//   écarts-types).
 // * [`linalg`] — GEMM déterministe (`matmul`, `matmul_bt`, `matvec`,
 //   `transpose`) et décompositions directes (`cholesky`, `lu_decompose`/
 //   `lu_solve`, `determinant`, `qr_decompose`/`qr_solve`) pour résoudre
