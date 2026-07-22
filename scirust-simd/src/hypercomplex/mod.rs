@@ -59,7 +59,9 @@
 // * [`octonion`]  — [`OctonionSimd`], produit 𝕆 par Cayley-Dickson sur ℍ.
 // * [`sedenion`]  — [`SedenionSimd`], produit 𝕊 par Cayley-Dickson sur 𝕆.
 // * [`dual`]      — [`DualOctonion`] / [`DualSedenion`], différenciation
-//                   automatique forward-mode (nombres duaux ε² = 0).
+//                   automatique forward-mode (nombres duaux ε² = 0) :
+//                   `conj`/`norm`/`normalize`/`inverse` et, comme leurs
+//                   bases, `exp`/`ln`/`powf` (dérivée de Fréchet).
 // * [`scalar`]    — implémentations scalaires de référence (récursives et
 //                   par table de constantes de structure) pour la validation
 //                   croisée et les benchmarks comparatifs.

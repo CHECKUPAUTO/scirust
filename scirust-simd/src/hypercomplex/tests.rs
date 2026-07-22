@@ -873,3 +873,173 @@ fn dual_sedenion_norm_normalize_inverse_match_finite_differences() {
     let err_inverse = (dual_inverse.eps - fd_inverse).norm_sqr().sqrt();
     assert!(err_inverse < 1e-2, "inverse : err = {err_inverse}");
 }
+
+// ------------------------------------------------------------------ //
+//  Différenciation automatique forward-mode : exp/ln/powf             //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn dual_octonion_exp_ln_powf_match_finite_differences() {
+    // Même x0/v que `dual_octonion_norm_normalize_inverse_match_finite_differences`
+    // (branche générale : θ = ‖partie pure‖ ≫ tiny, w > 0).
+    let x0 = OctonionSimd::from_array([0.5, -0.25, 1.0, 0.75, -0.5, 0.25, -1.0, 0.5]);
+    let v = OctonionSimd::from_array([1.0, 0.5, -0.5, 0.25, 0.75, -0.25, 0.5, -1.0]);
+    let h = 1.0e-3f32;
+    let dual = DualOctonion::variable(x0, v);
+
+    let dual_exp = dual.exp();
+    assert_eq!(dual_exp.val, x0.exp());
+    let plus = (x0 + v.scale(h)).exp();
+    let minus = (x0 - v.scale(h)).exp();
+    let fd = (plus - minus).scale(1.0 / (2.0 * h));
+    let err = (dual_exp.eps - fd).norm_sqr().sqrt();
+    assert!(err < 1e-2, "exp : err = {err}");
+
+    let dual_ln = dual.ln();
+    assert_eq!(dual_ln.val, x0.ln());
+    let plus = (x0 + v.scale(h)).ln();
+    let minus = (x0 - v.scale(h)).ln();
+    let fd = (plus - minus).scale(1.0 / (2.0 * h));
+    let err = (dual_ln.eps - fd).norm_sqr().sqrt();
+    assert!(err < 1e-2, "ln : err = {err}");
+
+    // Exposant non entier : chemin générique de powf, pas de cas
+    // particulier « puissance entière ». `powf` compose trois étapes non
+    // linéaires (ln, mise à l'échelle, exp) : le pas `h` optimal pour des
+    // différences centrales en f32 (qui équilibre troncature en O(h²) et
+    // arrondi en O(1/h)) est repoussé vers des valeurs plus grandes par
+    // cette composition — `h` seul (1e-3) tombe déjà dans le régime dominé
+    // par l'arrondi ici (mesuré : erreur non monotone en h, cf. historique
+    // de développement), d'où `h_powf` dédié.
+    let h_powf = 1.0e-2f32;
+    let t = 2.5f32;
+    let dual_powf = dual.powf(t);
+    assert_eq!(dual_powf.val, x0.powf(t));
+    let plus = (x0 + v.scale(h_powf)).powf(t);
+    let minus = (x0 - v.scale(h_powf)).powf(t);
+    let fd = (plus - minus).scale(1.0 / (2.0 * h_powf));
+    let err = (dual_powf.eps - fd).norm_sqr().sqrt();
+    assert!(err < 1e-2, "powf : err = {err}");
+}
+
+#[test]
+fn dual_octonion_exp_ln_special_branches() {
+    // Point central (θ = 0 < tiny) : exp/ln s'y réduisent à une simple
+    // mise à l'échelle de la direction complète `d` (cf. en-tête de
+    // fonction). `v` mélange coefficient réel et imaginaires pour bien
+    // exercer la formule sur `self.eps` en entier (pas seulement sa
+    // partie réelle).
+    let w = 2.0f32;
+    let x0 = OctonionSimd::from_array([w, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+    let v = OctonionSimd::from_array([0.3, -0.7, 0.4, 0.0, 0.0, 1.1, 0.0, -0.2]);
+    let dual = DualOctonion::variable(x0, v);
+
+    let dual_exp = dual.exp();
+    assert_eq!(dual_exp.val, x0.exp());
+    assert_eq!(dual_exp.eps, v.scale(w.exp()));
+
+    let dual_ln = dual.ln();
+    assert_eq!(dual_ln.val, x0.ln());
+    assert_eq!(dual_ln.eps, v.scale(1.0 / w));
+
+    // Coupure de branche du logarithme (w < 0, θ < tiny) : la valeur
+    // retient la convention documentée (e1·π), la dérivée n'en propage
+    // que la partie réelle (dw/w) — la correction imaginaire est traitée
+    // comme une constante.
+    let w_neg = -3.0f32;
+    let x0_neg = OctonionSimd::from_array([w_neg, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+    let dual_ln_neg = DualOctonion::variable(x0_neg, v).ln();
+    assert_eq!(dual_ln_neg.val, x0_neg.ln());
+    let dw = v.to_array()[0];
+    assert_eq!(dual_ln_neg.eps, OctonionSimd::ONE.scale(dw / w_neg));
+
+    // powf(1.0) = identité (exp∘ln, branche principale) — sanity check
+    // bon marché sur la composition des trois fonctions, même tolérance
+    // que les autres tests d'aller-retour exp/ln du fichier.
+    let dual_id = DualOctonion::variable(x0, v).powf(1.0);
+    let val_err = (dual_id.val - x0).norm_sqr().sqrt();
+    let eps_err = (dual_id.eps - v).norm_sqr().sqrt();
+    assert!(val_err < 5e-3, "powf(1) val : err = {val_err}");
+    assert!(eps_err < 1e-2, "powf(1) eps : err = {eps_err}");
+}
+
+#[test]
+fn dual_sedenion_exp_ln_powf_match_finite_differences() {
+    // Même x0/v que `dual_sedenion_norm_normalize_inverse_match_finite_differences`.
+    let x0 = SedenionSimd::from_array([
+        1.0, -2.0, 3.0, 0.0, 1.0, -1.0, 2.0, 0.0, -3.0, 1.0, 0.0, 2.0, -1.0, 1.0, 0.0, -2.0,
+    ]);
+    let v = SedenionSimd::from_array([
+        2.0, 1.0, 0.0, -1.0, 1.0, 3.0, -2.0, 0.0, 1.0, -1.0, 2.0, 0.0, 1.0, -2.0, 0.0, 3.0,
+    ]);
+    let h = 1.0e-3f32;
+    let dual = DualSedenion::variable(x0, v);
+
+    let dual_exp = dual.exp();
+    assert_eq!(dual_exp.val, x0.exp());
+    let plus = (x0 + v.scale(h)).exp();
+    let minus = (x0 - v.scale(h)).exp();
+    let fd = (plus - minus).scale(1.0 / (2.0 * h));
+    let err = (dual_exp.eps - fd).norm_sqr().sqrt();
+    assert!(err < 1e-2, "exp : err = {err}");
+
+    let dual_ln = dual.ln();
+    assert_eq!(dual_ln.val, x0.ln());
+    let plus = (x0 + v.scale(h)).ln();
+    let minus = (x0 - v.scale(h)).ln();
+    let fd = (plus - minus).scale(1.0 / (2.0 * h));
+    let err = (dual_ln.eps - fd).norm_sqr().sqrt();
+    assert!(err < 1e-2, "ln : err = {err}");
+
+    // cf. `dual_octonion_exp_ln_powf_match_finite_differences` pour la
+    // justification de `h_powf` (composition ln→scale→exp : `h` seul
+    // tombe dans le régime dominé par l'arrondi f32).
+    let h_powf = 1.0e-2f32;
+    let t = 2.5f32;
+    let dual_powf = dual.powf(t);
+    assert_eq!(dual_powf.val, x0.powf(t));
+    let plus = (x0 + v.scale(h_powf)).powf(t);
+    let minus = (x0 - v.scale(h_powf)).powf(t);
+    let fd = (plus - minus).scale(1.0 / (2.0 * h_powf));
+    let err = (dual_powf.eps - fd).norm_sqr().sqrt();
+    assert!(err < 1e-2, "powf : err = {err}");
+}
+
+#[test]
+fn dual_sedenion_exp_ln_special_branches() {
+    let w = 2.0f32;
+    let mut c0 = [0.0f32; 16];
+    c0[0] = w;
+    let x0 = SedenionSimd::from_array(c0);
+    let mut cv = [0.0f32; 16];
+    cv[0] = 0.3;
+    cv[1] = -0.7;
+    cv[2] = 0.4;
+    cv[5] = 1.1;
+    cv[9] = -0.2;
+    let v = SedenionSimd::from_array(cv);
+    let dual = DualSedenion::variable(x0, v);
+
+    let dual_exp = dual.exp();
+    assert_eq!(dual_exp.val, x0.exp());
+    assert_eq!(dual_exp.eps, v.scale(w.exp()));
+
+    let dual_ln = dual.ln();
+    assert_eq!(dual_ln.val, x0.ln());
+    assert_eq!(dual_ln.eps, v.scale(1.0 / w));
+
+    let w_neg = -3.0f32;
+    let mut c0_neg = [0.0f32; 16];
+    c0_neg[0] = w_neg;
+    let x0_neg = SedenionSimd::from_array(c0_neg);
+    let dual_ln_neg = DualSedenion::variable(x0_neg, v).ln();
+    assert_eq!(dual_ln_neg.val, x0_neg.ln());
+    let dw = v.to_array()[0];
+    assert_eq!(dual_ln_neg.eps, SedenionSimd::ONE.scale(dw / w_neg));
+
+    let dual_id = DualSedenion::variable(x0, v).powf(1.0);
+    let val_err = (dual_id.val - x0).norm_sqr().sqrt();
+    let eps_err = (dual_id.eps - v).norm_sqr().sqrt();
+    assert!(val_err < 5e-3, "powf(1) val : err = {val_err}");
+    assert!(eps_err < 1e-2, "powf(1) eps : err = {eps_err}");
+}

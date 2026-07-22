@@ -22,6 +22,18 @@
 //
 // Chaque opération duale reste 100 % registre : un dual = 2 registres
 // SIMD, un produit dual = 3 produits hypercomplexes + 1 addition.
+//
+// ## exp/ln/powf duaux
+//
+// Au-delà de `conj`/`norm`/`normalize`/`inverse`, [`DualOctonion`]/
+// [`DualSedenion`] exposent `exp`/`ln`/`powf`, pendants duaux des mêmes
+// fonctions sur [`OctonionSimd`]/[`SedenionSimd`] : `f'` est la dérivée de
+// Fréchet de `f` en `v`, dans la direction `d`, obtenue en différentiant
+// terme à terme le développement `exp(w·e₀+p) = eʷ·(cosθ·e₀ + sinc(θ)·p)`.
+// Un fait clé simplifie les points quasi réels (`θ = ‖p‖ → 0`) : `v` y est
+// au premier ordre un élément **central** (`w·e₀`), donc la dérivée de
+// Fréchet d'une fonction analytique s'y réduit exactement à `f'(w)·d` —
+// sans distinguer partie réelle/imaginaire de la direction `d`.
 
 use core::ops::{Add, Mul, Neg, Sub};
 use std::simd::num::SimdFloat;
@@ -128,6 +140,136 @@ macro_rules! impl_dual {
                     val: c.val.scale(r),
                     eps: c.eps.scale(r) + c.val.scale(dr),
                 }
+            }
+
+            /// Mise à l'échelle réelle duale : `t` est une constante (non
+            /// dérivée), donc `(t·f)' = t·f'` — linéarité en `f`.
+            #[inline(always)]
+            #[must_use]
+            pub fn scale(self, t: f32) -> Self {
+                Self { val: self.val.scale(t), eps: self.eps.scale(t) }
+            }
+
+            /// Exponentielle duale : `f = exp(v)`, `f' = D(exp)ᵥ[d]`
+            /// (dérivée de Fréchet), obtenue en différentiant chaque terme
+            /// de `exp(w·e₀ + p) = eʷ·(cos θ·e₀ + sinc(θ)·p)` (`θ = ‖p‖`,
+            /// `sinc(θ) = sin(θ)/θ`) — cf. [`OctonionSimd::exp`]/
+            /// [`SedenionSimd::exp`], dont on réutilise le même seuil.
+            ///
+            /// Pour `θ < tiny`, `v` est au premier ordre un élément
+            /// **central** (`w·e₀`, qui commute avec tout) : la dérivée de
+            /// Fréchet d'une fonction analytique en un point central se
+            /// réduit exactement à `f'(w)·d` — ici `eʷ·d`, sans distinguer
+            /// partie réelle/imaginaire de `d` (cf. calcul fonctionnel sur
+            /// élément central).
+            #[inline]
+            #[must_use]
+            pub fn exp(self) -> Self {
+                let w = self.val.to_array()[0];
+                let pure = self.val - <$base>::ONE.scale(w);
+                let dw = self.eps.to_array()[0];
+                let dp = self.eps - <$base>::ONE.scale(dw);
+
+                let theta = pure.norm();
+                let exp_w = w.exp();
+                let tiny = 1e-4; // cf. OctonionSimd::exp / SedenionSimd::exp.
+
+                if theta < tiny
+                {
+                    Self { val: <$base>::ONE.scale(exp_w), eps: self.eps.scale(exp_w) }
+                }
+                else
+                {
+                    let (sin_t, cos_t) = (theta.sin(), theta.cos());
+                    let sinc = sin_t / theta;
+                    // ⟨pure, dp⟩ / θ : même règle que la dérivée de
+                    // Self::norm (θ est le rayon euclidien réel de la
+                    // partie pure).
+                    let dtheta = (pure.0 * dp.0).reduce_sum() / theta;
+                    let dsinc = (theta * cos_t - sin_t) / (theta * theta);
+
+                    let c = exp_w * cos_t;
+                    let s = exp_w * sinc;
+                    let dc = exp_w * (dw * cos_t - sin_t * dtheta);
+                    let ds = exp_w * (dw * sinc + dsinc * dtheta);
+
+                    Self {
+                        val: <$base>::ONE.scale(c) + pure.scale(s),
+                        eps: <$base>::ONE.scale(dc) + pure.scale(ds) + dp.scale(s),
+                    }
+                }
+            }
+
+            /// Logarithme dual, réciproque de [`Self::exp`] restreinte à sa
+            /// branche principale — même seuil/convention que
+            /// [`OctonionSimd::ln`]/[`SedenionSimd::ln`]. Indéfini pour
+            /// `v = 0` (comme [`Self::inverse`]).
+            ///
+            /// Sur la coupure de branche (`v` quasi réel négatif), la
+            /// **valeur** retient déjà une direction imaginaire arbitraire
+            /// (`e₁`, indépendante de `d`) : sa dérivée y est donc, comme la
+            /// valeur, non rigoureusement définie — seule la partie réelle
+            /// (`ln|w|`, dérivée `1/w`) est propagée, la correction `π·e₁`
+            /// étant traitée comme constante (dérivée nulle).
+            #[inline]
+            #[must_use]
+            pub fn ln(self) -> Self {
+                let w = self.val.to_array()[0];
+                let pure = self.val - <$base>::ONE.scale(w);
+                let dw = self.eps.to_array()[0];
+                let dp = self.eps - <$base>::ONE.scale(dw);
+
+                let theta = pure.norm();
+                let (o_norm, do_norm) = self.norm();
+                let ln_norm = o_norm.ln();
+                let dln_norm = do_norm / o_norm;
+                let tiny = 1e-4; // cf. OctonionSimd::ln / SedenionSimd::ln.
+
+                if theta < tiny
+                {
+                    if w >= 0.0
+                    {
+                        // `v` central au premier ordre : même argument que
+                        // Self::exp, avec ln'(w) = 1/w.
+                        Self { val: <$base>::ONE.scale(ln_norm), eps: self.eps.scale(1.0 / w) }
+                    }
+                    else
+                    {
+                        Self {
+                            val: <$base>::ONE.scale(ln_norm)
+                                + <$base>::unit(1).scale(core::f32::consts::PI),
+                            eps: <$base>::ONE.scale(dw / w),
+                        }
+                    }
+                }
+                else
+                {
+                    let dtheta = (pure.0 * dp.0).reduce_sum() / theta;
+                    let ratio = (w / o_norm).clamp(-1.0, 1.0);
+                    let theta_acos = ratio.acos();
+                    // ‖v‖² = w² + θ² exactement (décomposition réel/pur
+                    // orthogonale) ⇒ √(1 − ratio²) = θ/‖v‖ : évite un second
+                    // appel trigonométrique pour dérouler la dérivée d'acos.
+                    let dphi = (w * do_norm - dw * o_norm) / (o_norm * theta);
+                    let k = theta_acos / theta;
+                    let dk = (dphi * theta - theta_acos * dtheta) / (theta * theta);
+
+                    Self {
+                        val: <$base>::ONE.scale(ln_norm) + pure.scale(k),
+                        eps: <$base>::ONE.scale(dln_norm) + pure.scale(dk) + dp.scale(k),
+                    }
+                }
+            }
+
+            /// Puissance réelle duale `f(t) = v(t)ᵗ = exp(t·ln(v(t)))`
+            /// (`t` constant, non dérivé) : simple composition de
+            /// [`Self::ln`], [`Self::scale`] et [`Self::exp`], la règle de
+            /// dérivation en chaîne se propageant automatiquement à travers
+            /// les trois. Indéfini pour `v = 0` (via [`Self::ln`]).
+            #[inline]
+            #[must_use]
+            pub fn powf(self, t: f32) -> Self {
+                self.ln().scale(t).exp()
             }
         }
 

@@ -93,7 +93,7 @@ fn method_configs() -> Vec<(&'static str, RobustRegressionConfig)> {
             RobustRegressionConfig {
                 method: RobustRegressionMethod::MedianOfMeans {
                     block_count: 5,
-                    seed: 0x0B10_C55,
+                    seed: 0x00B1_0C55,
                 },
                 ..base
             },
