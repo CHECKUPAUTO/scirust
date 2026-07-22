@@ -108,6 +108,7 @@ deployment from within a method crate.
 | A2 | Axis 2 — SECOM past the linear ceiling (drift correction vs degree-2 nonlinearity) | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#765](https://github.com/Memorithm/scirust/pull/765) | `c47f2eba` | **Merged** |
 | A3 | Axis 3 — real native heavy-tailed contamination (OBD2 robust regression) | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#766](https://github.com/Memorithm/scirust/pull/766) | `eaed8f61` | **Merged** |
 | A4 | Axis 4 — extended promotion gates (weighted composite, switching cost, shadow windows) | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#767](https://github.com/Memorithm/scirust/pull/767) | `743fbb55` | **Merged** |
+| 3A | Third program, direction A — fast SPD solver (drop format! from cholesky O(n³) loop) + axis-1 stride-20 re-test | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | _pending_ | _pending_ | Draft |
 
 > Branch and numbering notes:
 > - The program's suggested per-phase branches (`feat/stats-robust-descriptive`,

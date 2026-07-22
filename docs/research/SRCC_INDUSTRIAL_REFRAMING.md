@@ -812,3 +812,61 @@ no) — and even a real win can be too small or too temporally inconsistent to
 deploy, which is exactly what a preregistered extended gate is for. Every result
 here is a deterministic, checksum-anchored, honestly-reported number: the wins,
 the nulls, and the metric-dependent "it depends" that the gate then resolves.
+
+## Third program (direction A) — a fast SPD solver, and the axis-1 re-test it enables
+
+Axis 1 (Follow-up 5) carried an explicit honest caveat: kernel ridge ran at
+**stride 40** because a large per-iteration constant in the shared Cholesky made
+the finer strides too slow, and "a faster SPD solver might narrow the FD003 gap."
+This direction removes the constant and settles the caveat with numbers.
+
+**The fix.** `scirust_solvers::linalg::cholesky_decompose` called `check_finite`
+on every entry in its innermost `O(n³)` loop — and each call built its context
+message with `format!(...)` *eagerly*, allocating a `String` per inner iteration,
+even though `check_finite` **ignored** that message (its error variant carries no
+location). Three wasted heap allocations per inner step dominated the solve. At
+`n ≈ 640` that was ≈ 8.7 × 10⁷ allocations ≈ **17 s** of pure overhead; removing
+them (the numeric path is untouched) is **bit-identical** and turns the whole
+stride-20 axis-1 sweep from an intractable multi-minute timeout into **≈ 2 s**.
+Verified: at stride 40 the binary reproduces its committed stdout SHA `9c529e9d…`
+and results SHA `71788a20…` exactly.
+
+**The re-test (now-tractable stride 20, ~640 pooled train rows).** Ceiling ratio
+(lower = more realized); `kernel − iso > 0` means kernel ridge beats the 1-D
+isotonic recalibration:
+
+| cell | OLS | isotonic | **kernel ridge** (γ, λ) | kernel − iso @20 | (was @40) |
+|------|----:|---------:|------------------------:|-----------------:|----------:|
+| FD001 raw-linear | 0.666 | 0.643 | **0.596** (0.01, 1.0) | **+0.048** win | +0.059 win |
+| FD001 piecewise-125 | 0.545 | 0.457 | **0.443** (0.01, 0.1) | **+0.015** win | −0.004 tie |
+| FD003 raw-linear | 0.607 | 0.560 | **0.554** (0.01, 1.0) | **+0.006** win | −0.053 iso |
+| FD003 piecewise-125 | 0.505 | **0.442** | 0.478 (0.05, 1.0) | −0.036 iso | −0.048 iso |
+
+**Finding — the stride-40 result was partly a resolution artifact.** With twice
+the training data the nonlinear model, previously starved, wins **3 of 4 cells**
+(was 1 of 4): FD001-piecewise flips tie→win and **FD003-raw flips iso-win→kernel-win**
+(−0.053 → +0.006) — precisely the gap the axis-1 caveat flagged. The mechanism is
+visible in the selection: on FD003-raw the validation-chosen bandwidth drops from
+γ = 0.10 at stride 40 (too wiggly for ~320 rows, over-fits) to a smoother γ = 0.01
+at stride 20, which generalizes. Kernel ridge is **more competitive than axis 1
+reported** once it is not data-starved.
+
+**But the framing nuance survives, narrowed.** On the single reframed target where
+it most matters — **FD003 piecewise-125** — the simple 1-D isotonic recalibration
+still beats kernel ridge (−0.036, narrowed from −0.048). So the axis-1 through-line
+holds in its careful form: nonlinearity does not *reliably* dominate the cheap
+monotone recalibration on the reframed RUL target — but the margin is thin and
+data-dependent, not the 1-of-4 rout the stride-40 numbers implied. Re-testing a
+caveat with the tool that was missing is the honest close it asked for.
+
+**Determinism.**
+
+```
+solver fix: axis-1 stride-40 stdout SHA 9c529e9d… / results 71788a20…  (unchanged — bit-identical)
+re-test:    axis-1 stride-20 stdout SHA c14b000a9bb2fee12b61b524bcfd48f13c48294e00ef8359237e77d82053c91c
+            axis-1 stride-20 results SHA ec12cce8954062f32c228b0a96fcdd9e51069a64b952f394cede72e564aab03b  (24 records)
+```
+
+Run twice byte-identical; the `industrial-nonlinear-rul` binary gained a `--stride`
+flag (default 40, so the committed artifact is unchanged); 201 `scirust-solvers`
+tests and the `industrial_protocol_demo` fingerprint (`167c13de…`) are unaffected.

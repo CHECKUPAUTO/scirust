@@ -15,7 +15,7 @@ fn pivot_tol(n: usize, max_abs: f64) -> f64 {
     (n as f64) * f64::EPSILON * max_abs.max(1e-300)
 }
 
-fn check_finite(value: f64, _location: &str) -> Result<(), SolverError> {
+fn check_finite(value: f64) -> Result<(), SolverError> {
     if !value.is_finite()
     {
         return Err(SolverError::NanDetected { iter: 0, value });
@@ -43,12 +43,12 @@ pub fn cholesky_decompose(a: Matrix) -> SolverResult<Matrix> {
             {
                 let lik = l[(i, k)];
                 let ljk = l[(j, k)];
-                check_finite(lik, &format!("l[{i},{k}] Cholesky"))?;
-                check_finite(ljk, &format!("l[{j},{k}] Cholesky"))?;
+                check_finite(lik)?;
+                check_finite(ljk)?;
                 s += lik * ljk;
             }
             let aij = a[(i, j)];
-            check_finite(aij, &format!("a[{i},{j}] Cholesky"))?;
+            check_finite(aij)?;
 
             if i == j
             {
@@ -63,7 +63,7 @@ pub fn cholesky_decompose(a: Matrix) -> SolverResult<Matrix> {
                     return Err(SolverError::NotSpd);
                 }
                 let root = val.sqrt();
-                check_finite(root, &format!("sqrt Cholesky [{i},{i}]"))?;
+                check_finite(root)?;
                 l[(i, j)] = root;
             }
             else
@@ -79,7 +79,7 @@ pub fn cholesky_decompose(a: Matrix) -> SolverResult<Matrix> {
                     return Err(SolverError::NotSpd);
                 }
                 let entry = (aij - s) / ljj;
-                check_finite(entry, &format!("l[{i},{j}] Cholesky"))?;
+                check_finite(entry)?;
                 l[(i, j)] = entry;
             }
         }
@@ -150,9 +150,9 @@ pub fn solve_cholesky(l: &Matrix, b: &[f64]) -> SolverResult<Vec<f64>> {
         });
     }
     // Vérifier que b est fini
-    for (i, &bi) in b.iter().enumerate()
+    for &bi in b
     {
-        check_finite(bi, &format!("b[{i}]"))?;
+        check_finite(bi)?;
     }
 
     // L n'est pas reçue avec la matrice A d'origine ; sa propre diagonale est
@@ -179,7 +179,7 @@ pub fn solve_cholesky(l: &Matrix, b: &[f64]) -> SolverResult<Vec<f64>> {
             });
         }
         y[i] = s / diag;
-        check_finite(y[i], &format!("y[{i}]"))?;
+        check_finite(y[i])?;
     }
     // L^T · x = y (substitution arrière)
     let mut x = vec![0.0; n];
@@ -199,7 +199,7 @@ pub fn solve_cholesky(l: &Matrix, b: &[f64]) -> SolverResult<Vec<f64>> {
             });
         }
         x[i] = s / diag;
-        check_finite(x[i], &format!("x[{i}] Cholesky"))?;
+        check_finite(x[i])?;
     }
     Ok(x)
 }
