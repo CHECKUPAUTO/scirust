@@ -40,6 +40,14 @@ pub enum SrccRobustFitError {
         view_index: usize,
         source_group_index: usize,
     },
+    InvalidSourceGeometry,
+    DegenerateSourceScale {
+        dimension: usize,
+    },
+    NonFiniteSourceScale {
+        dimension: usize,
+    },
+    NoActiveSourceDimensions,
 }
 
 impl fmt::Display for SrccRobustFitError {
@@ -93,6 +101,30 @@ has an ambiguous target consensus",
                     "transport view {view_index}, source group {source_group_index} \
 has a non-finite target distance",
                 )
+            },
+            Self::InvalidSourceGeometry => formatter.write_str(
+                "source geometry cannot be fitted (invalid scaler configuration \
+or insufficient source observations)",
+            ),
+            Self::DegenerateSourceScale { dimension } =>
+            {
+                write!(
+                    formatter,
+                    "source coordinate {dimension} has a degenerate robust scale \
+under the configured zero-scale policy",
+                )
+            },
+            Self::NonFiniteSourceScale { dimension } =>
+            {
+                write!(
+                    formatter,
+                    "source coordinate {dimension} has a non-finite fitted scale \
+or inverse scale; the scale estimate overflowed",
+                )
+            },
+            Self::NoActiveSourceDimensions =>
+            {
+                formatter.write_str("every source coordinate was dropped; no geometry remains")
             },
         }
     }

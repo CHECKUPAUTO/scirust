@@ -87,8 +87,8 @@ deployment from within a method crate.
 | Phase | Title | Branch | PR | Merge commit | Status |
 |------:|-------|--------|----|--------------|--------|
 | 721 | Robust descriptive statistics | `claude/scirust-srcc-robust-stats-6ue9xc` | [#725](https://github.com/Memorithm/scirust/pull/725) | `f2b87380eb02dda91e39c7c45f1ab73d6f9a5a36` | **Merged** |
-| 722 | Robust multivariate geometry | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#729](https://github.com/Memorithm/scirust/pull/729) | _(pending)_ | In review |
-| 723 | Scale-aware SRCC source geometry | `feat/srcc-scale-aware-source-geometry` | — | — | Not started |
+| 722 | Robust multivariate geometry | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#729](https://github.com/Memorithm/scirust/pull/729) | `c4e49bfbeb936182b4474a67afd83595ade6727e` | **Merged** |
+| 723 | Scale-aware SRCC source geometry | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#737](https://github.com/Memorithm/scirust/pull/737) | _(pending)_ | In review |
 | 724 | Deterministic robust regression | `feat/learning-robust-regression` | — | — | Not started |
 | 725 | Trust & contamination models | `feat/srcc-trust-contamination-models` | — | — | Not started |
 | 726 | Certified medoid clustering | `feat/solvers-certified-medoid-clustering` | — | — | Not started |
@@ -301,3 +301,154 @@ packages). `cargo check --workspace --all-targets --locked` passes.
   rescaled data — a frozen scaler applied to differently-scaled inputs is not
   invariant (and is validated only for dimension count, not provenance).
 - SRCC integration is deferred to phase 723.
+
+---
+
+## Phase 723 — Scale-aware SRCC source geometry
+
+**Crate:** `scirust-srcc` · **Module:** `scirust-srcc/src/robust_source_geometry.rs`
+
+### Design
+
+Opt-in scale-aware geometry for SRCC source clustering, leave-one-out
+stability, and stable search. New public surface:
+
+- `SrccSourceGeometrySpec { RawEuclidean, RobustDiagonal { scaler_config } }` —
+  `RawEuclidean` delegates to the frozen historical `source_distance` body, so
+  the historical pipeline is reproduced **bit for bit at every radius**;
+  `RobustDiagonal` fits a `scirust-multivariate::RobustScaler` (phase 722) on
+  the sources pooled across the fitted views and measures distances in
+  fitted-scale units.
+- `SrccScaleAwareSourceClusteringConfig { geometry, clustering }` — geometry and
+  radius travel together because the radius' meaning depends on the geometry.
+- `SrccScaleAwareSourceClusteredSearchConfig { source, base_config,
+  distortion_weight }`.
+- Four opt-in functions mirroring the PR #719/#720 grammar:
+  `fit_scale_aware_source_clustered_robust_srcc_projector_from_views`,
+  `evaluate_scale_aware_source_clustered_robust_leave_one_out_stability`,
+  `search_scale_aware_source_clustered_robust_srcc_structures_from_views`,
+  `search_stable_scale_aware_source_clustered_robust_srcc_structures_from_views`.
+- Three appended `SrccRobustFitError` variants (Eq-safe payloads, additive
+  Display): `InvalidSourceGeometry`, `DegenerateSourceScale { dimension }`,
+  `NoActiveSourceDimensions`. The existing `From` chain surfaces them through
+  LOO/search/stable-search with no new error types.
+
+**Injection mechanism.** A `pub(crate) enum SourceMetric { Raw, Diagonal {
+inverse_scales } }` is threaded through the four private clustering helpers in
+`robust_source.rs` (signatures only; bodies untouched). `Raw` calls the frozen
+`source_distance`; `Diagonal` calls `scaled_source_distance`, a line-for-line
+mirror whose only change is multiplying each coordinate difference by its
+fitted inverse scale — a zero inverse scale reproduces the historical zero-skip
+branch, implementing dropped dimensions with no extra logic. Distance
+evaluation deliberately stays srcc-local: the multivariate crate's Euclidean is
+**not** bit-compatible with srcc's hypot-style scaled accumulation. Fitting
+reuses `RobustScaler` — no second robust scaler exists.
+
+### No-leakage contract
+
+The geometry model is fitted **inside** every fit call from the sources of
+exactly the views being fitted; the leave-one-out evaluator therefore refits
+the scaler after every removal. Sources are globally sorted into the crate's
+canonical vector order before fitting so the fitted metric is invariant to both
+sample order and view order.
+
+### Determinism and invariance (never overstated)
+
+Clustering decisions under `RobustDiagonal` are invariant (within FP tolerance)
+to positive per-coordinate rescaling of the sources when the scaler is refit
+**and the scaler configuration is itself scale-covariant** (`minimum_scale = 0`
+with policy `Error` or `DropDimension`). `UnitScale` keeps degenerate
+coordinates in raw units and a positive `minimum_scale` is an absolute raw-unit
+threshold; both deliberately re-introduce a scale dependence and void the
+invariance (documented on the API). Nothing makes the learned transports or
+projector rescaling-invariant — transport learning still sees raw coordinates —
+and no affine invariance is claimed. The raw pipeline's failure on the
+anisotropic fixture is precisely characterised as **three regimes** (singleton
+fragmentation below the signal separation, typed consensus ambiguity in the
+bridging band, silent majority-vote state merging above the noise spread) — it
+is *not* claimed that every raw radius produces a typed error.
+
+### Adversarial review (pre-merge)
+
+A 25-agent adversarial review (5 dimensions × refutation-based verification,
+with empirical probe programs) confirmed and led to fixing before merge:
+
+- **Non-finite fitted scale bypassed every zero-scale policy** (overflowing MAD
+  × 1.4826 or mean/variance on huge finite values produced `scale = ∞` marked
+  *active*; `1/∞ = 0` then silently deactivated the coordinate — demonstrated
+  end-to-end as a silent wrong `Ok`). Fixed by a finiteness gate in
+  `RobustScaler::fit` (new typed `RobustGeometryError::NonFiniteScale`) plus a
+  reciprocal-finiteness check at metric fitting (new typed
+  `SrccRobustFitError::NonFiniteSourceScale`, also covering subnormal scales
+  whose reciprocal overflows).
+- **Dropped coordinates were not exactly inert**: `(±∞ diff) × 0.0 = NaN`
+  aborted the fit on a coordinate the policy had removed. Fixed by a structural
+  skip of zero-inverse-scale coordinates before any arithmetic.
+- **Overclaimed raw-failure and invariance statements** (see above) reworded
+  and pinned by a three-regime test; the rescaling-invariance test now asserts
+  exact canonical-cluster equality (rescaled canonicalization ==
+  coordinate-wise-rescaled original canonicalization, bit-exact), not a
+  rejected-dimension proxy; a StandardDeviation view/sample-order test now
+  guards the canonical pooled-source sort (deleting the sort fails it);
+  `UnitScale`, `NoActiveSourceDimensions` and discovery-before-geometry error
+  precedence gained dedicated tests.
+- The RawEuclidean equality suite proves *delegation*; absolute historical
+  behaviour is pinned independently by the pre-existing exact-value tests and
+  the byte-identical historical example outputs (both verified unchanged).
+
+### Tests
+
+18 new tests (103 total in the crate, all green; plus one new
+overflow-gate test in `scirust-multivariate`, 65 total there): four full-struct
+equality
+suites proving `RawEuclidean` ≡ historical pipeline (fit, LOO, search, stable
+search; zero and positive radii), transitivity to the exact-source pipeline at
+radius 0, an anisotropic two-state fixture where raw geometry fails with a
+*typed* consensus ambiguity at every radius while robust-diagonal geometry
+recovers the states, per-coordinate rescaling invariance after refit,
+sample/view-order invariance, bit-identical determinism, `Error`-policy
+degenerate-coordinate reporting, invalid-config and error-precedence checks,
+stable-search certification, and a **breakdown regression**: an unbalanced view
+pair (4+3 / 3+3) whose single removal balances the pooled states 6–6, inflating
+the signal coordinate's MAD to the separation itself — the LOO evaluation fails
+with a typed ambiguity, never a silent certificate.
+
+### Benchmark fingerprint
+
+Example `scirust-srcc/examples/scale_aware_source_geometry.rs` — three
+runtime-verified sections: (1) RawEuclidean compatibility across the PR #720
+jitter grid plus exact-source equivalence at radius 0; (2) the anisotropic
+two-state fixture under common source rescaling 1/1e3/1e6/1e9 — raw geometry
+yields the typed ambiguity, robust-diagonal yields an identical structural
+outcome (rejected dimension 2, LOO ratio 1.0) at the same scaled radius at
+every scale; (3) the majority-breakdown honest negative described above. The
+historical examples are untouched and byte-identical before/after the change
+(verified by `cmp`).
+
+```
+SHA-256 (scientific stdout, nightly-2026-07-02, x86_64):
+scale_aware_source_geometry:  fc0dcbca9f9763d25c6ba5e6485a95d26daad9da9648044948e4d595580fb84c
+source_clustered_stable_search (unchanged): b2a1a0415693addc40ab4224c8d498325ac106c52dfc11ebcc691d731f8766cb
+robust_source_clustering (unchanged):       4943a4e48312224268abf555d4f304c3ab33095d1c15813423be2c407fa2dc27
+```
+
+### Compatibility
+
+No existing public item changed; no field added to any existing struct; the
+two historical entry points pass `SourceMetric::Raw` into the refactored
+helpers and execute the identical frozen distance body on identical inputs in
+identical order. All 85 pre-existing tests pass unchanged. `scirust-srcc` gains
+one cycle-free dependency edge (`scirust-multivariate`); `Cargo.lock` changes
+by exactly that edge.
+
+### Known limitations / deferred
+
+- The pooled-source MAD inherits the ~50 % breakdown of robust scales: balanced
+  two-state populations inflate the signal coordinate's scale (demonstrated and
+  typed, not hidden). Explicit trust/identifiability assumptions are phase 725.
+- `RobustDiagonal` requires genuinely spread coordinates: a majority of exactly
+  repeated values gives a zero MAD (policy-controlled). The historical
+  exact-repetition fixtures are therefore served by `RawEuclidean`, not by MAD
+  geometry.
+- Only diagonal scaling is offered; no rotation/affine-invariant source metric
+  is claimed or provided.

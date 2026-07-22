@@ -15,3 +15,7 @@ documentation = "https://docs.rs/scirust-srcc"
 default = []
 
 [dependencies]
+# Fitted per-coordinate robust scaling for the opt-in scale-aware source
+# geometry (SRCC program, phase 723). Fitting only: distance evaluation stays
+# in this crate to preserve the frozen fixed-order source-distance body.
+scirust-multivariate = { path = "../scirust-multivariate" }
