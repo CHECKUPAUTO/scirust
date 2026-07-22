@@ -392,14 +392,14 @@ fn target_score(candidate: &Vector16, group: &[SrccTransportSample]) -> f64 {
     })
 }
 
-fn squared_distance(left: &Vector16, right: &Vector16) -> f64 {
+pub(crate) fn squared_distance(left: &Vector16, right: &Vector16) -> f64 {
     left.iter().zip(right).fold(0.0, |sum, (left, right)| {
         let difference = left - right;
         sum + difference * difference
     })
 }
 
-fn compare_samples(left: &SrccTransportSample, right: &SrccTransportSample) -> Ordering {
+pub(crate) fn compare_samples(left: &SrccTransportSample, right: &SrccTransportSample) -> Ordering {
     compare_vectors(&left.source, &right.source)
         .then_with(|| compare_vectors(&left.target, &right.target))
 }
