@@ -1,0 +1,24 @@
+[package]
+name = "scirust-srcc-bench"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Reproducible industrial benchmark harness for the SRCC robust structural intelligence program: dataset manifests, deterministic anti-leakage splits, contamination generators with exact manifests, a capability-declared baseline adapter interface, deterministic paired bootstrap, and BenchRecord output. The harness tests claims; it never manufactures them."
+license-file = "../LICENSE.md"
+repository = "https://github.com/Memorithm/scirust"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dependencies]
+scirust-bench-schema = { path = "../scirust-bench-schema" }
+scirust-learning = { path = "../scirust-learning" }
+scirust-multivariate = { path = "../scirust-multivariate" }
+scirust-solvers = { path = "../scirust-solvers" }
+scirust-spc = { path = "../scirust-spc" }
+scirust-srcc = { path = "../scirust-srcc" }
+scirust-stats = { path = "../scirust-stats" }
+scirust-unsupervised = { path = "../scirust-unsupervised" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+sha2 = "0.10"
