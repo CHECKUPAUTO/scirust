@@ -219,3 +219,57 @@ estimator is not warranted by this evidence; investment in **task framing**
 classification) is where the measurable gains live. This is the honest,
 falsifiable close the phase-728 diagnostic pointed to — reached by building
 and running the tests, not by assertion.
+
+---
+
+## Follow-up 1 — realizing the lever-1 ceiling with a monotone model
+
+The synthesis located the C-MAPSS gain in *task framing* and named the next
+model class explicitly: **monotone / nonlinear RUL**. This follow-up builds and
+runs it. `scirust_learning::isotonic::IsotonicRegression` (PAVA, PR #757)
+supplies the monotone, piecewise shape freedom a purely affine fit lacks: an
+ordinary-least-squares regressor produces a scalar degradation score, an
+isotonic map is fit from the **train** score to the **train** RUL (no leakage),
+and applied to the test scores. Same frozen `phase728.json` splits, same 2×2
+grid as lever 1 — the only change is the monotone model layered on the score.
+
+`industrial-monotone-rul`, C-MAPSS FD001 / FD003, clean fit; lower ceiling ratio
+= more of the task ceiling realized:
+
+| subset | RUL target | stride | ceiling RMSE | OLS ratio | **isotonic ratio** | Δ |
+|--------|-----------|-------:|-------------:|----------:|-------------------:|----:|
+| FD001 | raw-linear | 20 | 63.010 | 0.6664 | 0.6433 | +0.0231 |
+| FD001 | piecewise-125 | 20 | 41.737 | 0.5453 | **0.4570** | +0.0882 |
+| FD001 | raw-linear | 5 | 61.233 | 0.6492 | 0.6275 | +0.0217 |
+| FD001 | piecewise-125 | 5 | 42.014 | 0.5212 | **0.4665** | +0.0547 |
+| FD003 | raw-linear | 20 | 103.319 | 0.6074 | 0.5602 | +0.0472 |
+| FD003 | piecewise-125 | 20 | 41.700 | 0.5052 | **0.4418** | +0.0634 |
+| FD003 | raw-linear | 5 | 101.392 | 0.6033 | 0.5491 | +0.0543 |
+| FD003 | piecewise-125 | 5 | 40.910 | 0.5049 | **0.4498** | +0.0552 |
+
+**Finding.** The monotone recalibration lowers the ceiling ratio in **all eight
+cells** — it realizes strictly more of the task ceiling than the linear fit,
+confirming the synthesis's prediction. The gain is largest on the **piecewise**
+target the reframe introduced (Δ up to +0.088 on FD001 / stride-20), exactly
+where a linear model most under-fits the flat early-life plateau: isotonic drives
+the piecewise ratio down to ~0.44–0.47, from OLS's ~0.51–0.55.
+
+**Honest bounds.** This is rank-preserving recalibration of a single OLS score:
+it corrects a monotone-nonlinear miscalibration of that score's ordering but
+cannot recover signal the OLS ordering discards. The residual ratio (~0.44) says
+the piecewise ceiling is now *materially* realized, not closed — going further
+needs richer degradation indices or a multivariate nonlinear model, not a better
+one-dimensional monotone map. The claim this follow-up makes is the narrow one,
+and it holds: the framing gain lever 1 opened is real, and a monotone model
+captures a concrete, reproducible slice of it.
+
+**Determinism.**
+
+```
+stdout SHA-256: 63067a526be1c10d84c5f7b342c222b816b5bd78237052cfb38ed3e24eb66bde
+results (40 BenchRecords): 516ecd0a673ffbea4ade0f498914a12f927051f091c2717a6c82bf65c6d68967
+```
+
+Run twice, byte-identical; no network; checksum-verified C-MAPSS inputs; OLS
+(Householder QR) and isotonic (PAVA) are both deterministic, with no RNG beyond
+the frozen split seed.
