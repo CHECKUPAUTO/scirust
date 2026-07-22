@@ -598,3 +598,102 @@ nonlinear  results SHA-256: 1a6f012a0b75b2b112ab2098b04962f7776b45e7ddb5f8258943
 Run twice, byte-identical; no network; checksum-verified SECOM inputs; both
 binaries are all-linear-algebra (LDA covariance is `d × d`, no `O(n³)` kernel
 solve) and RNG-free.
+
+## Follow-up 7 (axis 3) — real native heavy tails: does robustness finally win on real data?
+
+Follow-up 3 identified *where* robust regression wins — pervasive heavy-tailed
+vertical noise — but it had to **manufacture** that regime: the real C-MAPSS
+design matrix carried a *planted* linear signal plus *injected* Student-t errors,
+because C-MAPSS's own residuals are not that heavy. This axis removes the
+injection and anchors item 3 in real measurements: the in-repo Opel-Corsa **OBD2
+telemetry** (43 139 rows, seven driving segments), predicting one real engine
+channel from the other eleven sensors (`industrial-obd2-native`). No planted
+signal, no injected noise — whatever heaviness the residuals carry is the car's.
+
+Three targets are used, each with natively heavy-tailed OLS residuals; the binary
+**re-derives** the tail statistics from its own pooled OLS residuals, so
+"native" is checked, not asserted:
+
+| target | OLS-residual excess kurtosis | beyond 3·MAD | beyond 5·MAD |
+|--------|-----------------------------:|-------------:|------------:|
+| `ENGINE_LOAD` | 45.2 | 3.87 % | 1.395 % |
+| `THROTTLE_POS` | 19.0 | 5.05 % | 2.612 % |
+| `MAF` | 10.3 | 2.36 % | 0.614 % |
+| *normal reference* | 0 | 0.27 % | 0.00006 % |
+
+A residual mass beyond 5·MAD of 0.6–2.6 % is three-to-four orders of magnitude
+above the Gaussian rate: these are genuinely heavy tails, from a real sensor
+stream. Evaluation is honest **leave-one-segment-out** cross-validation (each of
+the seven segments is the held-out test set exactly once, so no within-segment
+autocorrelation leaks train→test), estimators fit on the other six segments with
+features standardized on the training rows, fixed a-priori hyperparameters (Huber
+`δ = 1.345`, trimmed keep `0.9`) — nothing selected on any outcome.
+
+Because a real held-out target is itself noisy (no noiseless truth to recover),
+robustness is judged on **bulk** prediction. Which estimator wins each pooled
+held-out metric (values: OLS vs the robust estimator it loses/wins against):
+
+| target | RMSE (L2) | MAE | median-AE | 10 %-trim RMSE |
+|--------|-----------|-----|-----------|----------------|
+| `ENGINE_LOAD` | OLS 1.833 < 1.903 | **Huber 1.065** < 1.140 | **trim 0.63** < 0.81 | **trim 0.84** < 1.00 |
+| `THROTTLE_POS` | OLS 1.674 < 1.784 | **Huber 0.892** < 0.964 | **trim 0.50** < 0.60 | **trim 0.62** < 0.80 |
+| `MAF` | OLS 1.280 < 1.358 | **Huber 0.844** < 0.912 | **trim 0.50** < 0.71 | **trim 0.71** < 0.83 |
+
+The split is perfectly consistent across all three real targets: **OLS wins RMSE**
+(the L2 metric it alone minimizes, bought by chasing the tail spikes), while
+**Huber and trimmed win MAE, median absolute error and trimmed RMSE** — every
+bulk metric — because they refuse to let the heavy-tailed rows distort the fit.
+The median-absolute-error gains are large (0.81→0.63, 0.60→0.50, 0.71→0.50): on
+the typical held-out row a robust fit is materially closer.
+
+The signed verdict, from the seeded paired bootstrap of per-row absolute-error
+reduction (OLS − robust; positive ⇒ robust better; 95 % CI, 2000 resamples):
+
+| target | Huber − OLS (abs-error) | Trimmed − OLS (abs-error) |
+|--------|-------------------------|---------------------------|
+| `ENGINE_LOAD` | +0.0752 [+0.0705, +0.0796] **wins** | +0.0260 [+0.0158, +0.0357] **wins** |
+| `THROTTLE_POS` | +0.0721 [+0.0667, +0.0775] **wins** | +0.0571 [+0.0492, +0.0647] **wins** |
+| `MAF` | +0.0679 [+0.0637, +0.0717] **wins** | +0.0468 [+0.0395, +0.0539] **wins** |
+
+Every interval is strictly above zero: on this real workload robust regression
+beats OLS on mean absolute error too — not merely on the tail-insensitive
+summaries — with a margin that clears its own confidence interval in all six
+target×method cells.
+
+**Finding — yes; on real native heavy tails robustness wins, and the win is
+metric-dependent exactly as theory predicts.** This is the program's first *real*
+(non-semi-synthetic, no injection) workload where the robust regressors
+decisively beat OLS, and it wins for the right reason: the OBD2 residuals are
+natively heavy-tailed (kurtosis 10–45), so OLS's tail-chasing degrades its bulk
+predictions, and Huber/trimmed — by bounding tail influence — predict the typical
+held-out row markedly better. OLS retains only its home metric, RMSE.
+
+**Interpretation.** Follow-up 3 predicted that the robust regressors reward one
+specific regime — pervasive heavy-tailed vertical noise — and that the real
+industrial RUL workload (lever 2's null) simply does not live in it. Axis 3
+completes that argument from the other side: a *different* real workload that
+*does* live in the heavy-tailed regime, and there the same estimators win, on
+real data, under a preregistered protocol. The lesson is not "robustness is
+better" or "worse" but **regime-matching** — the estimator has to fit the
+contamination the data actually has. Automotive telemetry has heavy vertical
+tails; turbofan degradation does not; the robust regressors help exactly where
+the tails are, and the metric they help on (bulk vs L2) is itself diagnostic.
+
+**Honest bounds.** (1) The win is on *bulk* metrics; if a downstream user's loss
+is genuinely squared-error, OLS remains the RMSE-optimal choice — the honest
+recommendation is "match the estimator to the loss". (2) Hyperparameters are
+fixed a priori, not tuned; a tuned Huber/trim could widen or narrow the gap, but
+the sign is robust across three targets and two estimators. (3) LOSO segments are
+whole driving sessions, so segment-level regime shift (city vs motorway) is part
+of the held-out difficulty — a feature, not a bug, of the real workload.
+
+**Determinism.**
+
+```
+stdout  SHA-256: 0535a67bd4165b3f7fbb35f8c125da9e419d68f39d3398e1f1039179b5da7d73
+results SHA-256: 32ad439fb4c536760b1f298e051b46a41c0c30469138a3b4206bd3e064bf9a93  (51 BenchRecords)
+```
+
+Run twice, byte-identical (built `--release`; release is equally deterministic);
+no network; checksum-verified in-repo OBD2 CSV; OLS (QR), Huber-IRLS and trimmed
+LS are RNG-free and the paired bootstrap is explicitly seeded.
