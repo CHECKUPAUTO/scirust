@@ -48,6 +48,10 @@ pub enum SrccRobustFitError {
         dimension: usize,
     },
     NoActiveSourceDimensions,
+    CertifiedClusteringFailed {
+        view_index: usize,
+        detail: String,
+    },
 }
 
 impl fmt::Display for SrccRobustFitError {
@@ -125,6 +129,13 @@ or inverse scale; the scale estimate overflowed",
             Self::NoActiveSourceDimensions =>
             {
                 formatter.write_str("every source coordinate was dropped; no geometry remains")
+            },
+            Self::CertifiedClusteringFailed { view_index, detail } =>
+            {
+                write!(
+                    formatter,
+                    "certified source clustering failed for view {view_index}: {detail}",
+                )
             },
         }
     }

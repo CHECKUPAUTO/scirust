@@ -206,6 +206,7 @@ fn fit_error_name(error: &SrccRobustFitError) -> &'static str {
         SrccRobustFitError::DegenerateSourceScale { .. } => "degenerate_source_scale",
         SrccRobustFitError::NonFiniteSourceScale { .. } => "non_finite_source_scale",
         SrccRobustFitError::NoActiveSourceDimensions => "no_active_source_dimensions",
+        SrccRobustFitError::CertifiedClusteringFailed { .. } => "certified_clustering_failed",
     }
 }
 
