@@ -104,7 +104,7 @@ deployment from within a method crate.
 | F3 | Follow-up 3 — native heavy-tailed noise (the regime robustness wins) | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#760](https://github.com/Memorithm/scirust/pull/760) | `1c75ab3d` | **Merged** |
 | 729 | Shadow deployment & promotion gates (follow-up 4) | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#761](https://github.com/Memorithm/scirust/pull/761) | `15a7319c` | **Merged** |
 | A1a | Axis 1 — RBF kernel ridge regression method (`scirust-learning`) | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#763](https://github.com/Memorithm/scirust/pull/763) | `c8f5beb3` | **Merged** |
-| A1b | Axis 1 — multivariate nonlinear RUL evaluation (kernel ridge vs isotonic) | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | _(pending)_ | _(pending)_ | **In review** |
+| A1b | Axis 1 — multivariate nonlinear RUL evaluation (kernel ridge vs isotonic) | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#764](https://github.com/Memorithm/scirust/pull/764) | _(pending)_ | **In review** |
 
 > Branch and numbering notes:
 > - The program's suggested per-phase branches (`feat/stats-robust-descriptive`,
