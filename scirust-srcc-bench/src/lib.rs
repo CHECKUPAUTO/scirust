@@ -37,7 +37,7 @@ pub use contamination::{
     apply_contamination,
 };
 pub use dataset::{DatasetError, TabularDataset};
-pub use loaders::{LoaderError, parse_cmapss_training, parse_obd2, parse_secom};
+pub use loaders::{LoaderError, clip_rul_targets, parse_cmapss_training, parse_obd2, parse_secom};
 pub use manifest::{DatasetManifest, FeatureDescriptor, ManifestError};
 pub use metrics::{
     ConfusionCounts, DetectionOutcome, DetectionReport, MetricError, adjusted_rand_index, auroc,

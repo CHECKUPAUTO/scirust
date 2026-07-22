@@ -232,6 +232,33 @@ pub fn parse_cmapss_training(text: &str) -> Result<TabularDataset, LoaderError> 
     })
 }
 
+/// Clips run-to-failure targets to the **piecewise-linear RUL** convention:
+/// `RUL_pw = min(RUL, r_early)`. Early in a unit's life the degradation is
+/// not yet observable, so the raw linear RUL asks the model to predict large
+/// remaining lives from sensors that carry no degradation signal; the
+/// piecewise cap at the `r_early` knee is the canonical C-MAPSS framing
+/// (Heimes 2008, `R_early = 125`) that makes the regression learnable. Only
+/// the targets change; features, groups and time index are untouched.
+///
+/// # Panics
+///
+/// Panics if `r_early` is not finite and positive — the knee is a modelling
+/// constant, so a bad value is caller error, not data.
+#[must_use]
+pub fn clip_rul_targets(dataset: &TabularDataset, r_early: f64) -> TabularDataset {
+    assert!(
+        r_early.is_finite() && r_early > 0.0,
+        "piecewise RUL knee r_early must be finite and positive, got {r_early}"
+    );
+
+    TabularDataset {
+        features: dataset.features.clone(),
+        targets: dataset.targets.iter().map(|&t| t.min(r_early)).collect(),
+        groups: dataset.groups.clone(),
+        time_index: dataset.time_index.clone(),
+    }
+}
+
 /// Parses the SECOM data and label files. Missing sensor readings stay as
 /// `f64::NAN`; the caller must apply the train-fitted missing-value policy
 /// before validation or hashing-dependent stages that require finiteness.
@@ -468,6 +495,45 @@ mod tests {
         // Unit 1 fails at cycle 3, unit 2 at cycle 2.
         assert_eq!(dataset.targets, vec![2.0, 1.0, 0.0, 1.0, 0.0]);
         assert_eq!(dataset.validate(), Ok(()));
+    }
+
+    #[test]
+    fn clip_rul_applies_the_piecewise_knee() {
+        let text = [
+            cmapss_line(1, 1, 0.5),
+            cmapss_line(1, 2, 0.6),
+            cmapss_line(1, 3, 0.7),
+            cmapss_line(2, 1, 1.5),
+            cmapss_line(2, 2, 1.6),
+        ]
+        .join("\n");
+
+        let dataset = parse_cmapss_training(&text).unwrap();
+        // Raw RUL: unit 1 → [2,1,0], unit 2 → [1,0].
+        assert_eq!(dataset.targets, vec![2.0, 1.0, 0.0, 1.0, 0.0]);
+
+        let clipped = clip_rul_targets(&dataset, 1.0);
+        // Capped at the knee 1.0; features and keys untouched.
+        assert_eq!(clipped.targets, vec![1.0, 1.0, 0.0, 1.0, 0.0]);
+        assert_eq!(clipped.features, dataset.features);
+        assert_eq!(clipped.groups, dataset.groups);
+        assert_eq!(clipped.time_index, dataset.time_index);
+
+        // A knee above every RUL is a no-op.
+        assert_eq!(clip_rul_targets(&dataset, 100.0).targets, dataset.targets);
+    }
+
+    #[test]
+    #[should_panic(expected = "r_early must be finite and positive")]
+    fn clip_rul_rejects_a_nonpositive_knee() {
+        let dataset = TabularDataset {
+            features: vec![vec![1.0]],
+            targets: vec![5.0],
+            groups: Some(vec![1]),
+            time_index: Some(vec![1]),
+        };
+
+        let _ = clip_rul_targets(&dataset, 0.0);
     }
 
     #[test]
