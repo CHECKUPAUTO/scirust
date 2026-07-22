@@ -1,0 +1,9 @@
+{
+  "git_commit": "36250890710de8c10d2571a2b67b5afff2eca4ba",
+  "dataset_sha256": "eb5f102178e1508ff2b5b97e14c3e67f95f3e508f9291b37949e5d06cc61c939",
+  "configuration_sha256": "58c9476f6cc573d58f6a8e6ab4b9ccc0ab5cac2061bf207f02200e08606e6a94",
+  "toolchain": "nightly-2026-07-02",
+  "feature_flags": [
+    "default"
+  ]
+}

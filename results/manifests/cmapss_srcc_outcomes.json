@@ -1,0 +1,14 @@
+[
+  "rescale factor 0.01 column 11 affected 89 rows",
+  "rescale factor 100 column 11 affected 89 rows",
+  "historical_exact radius 0: ok",
+  "source_clustered_raw radius 10: transport view 0, canonically ordered sample 2 is compatible with multiple source clusters",
+  "source_clustered_raw radius 30: transport view 1, source group 1 has an ambiguous target consensus",
+  "source_clustered_raw radius 100: ok",
+  "scale_aware_greedy radius 2: ok",
+  "scale_aware_certified radius 2: ok",
+  "scale_aware_greedy radius 4: transport view 0, canonically ordered sample 6 is compatible with multiple source clusters",
+  "scale_aware_certified radius 4: transport view 0, source group 0 has an ambiguous target consensus",
+  "scale_aware_greedy radius 8: transport view 2, canonically ordered sample 5 is compatible with multiple source clusters",
+  "scale_aware_certified radius 8: transport view 0, source group 0 has an ambiguous target consensus"
+]

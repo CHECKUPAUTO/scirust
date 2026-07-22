@@ -1,0 +1,71 @@
+{
+  "input_feature_count": 24,
+  "kept_columns": [
+    0,
+    1,
+    4,
+    5,
+    6,
+    8,
+    9,
+    10,
+    11,
+    13,
+    14,
+    15,
+    16,
+    17,
+    19,
+    22,
+    23
+  ],
+  "training_medians": [
+    -0.0,
+    0.0,
+    642.59,
+    1589.96,
+    1407.31,
+    21.61,
+    553.58,
+    2388.09,
+    9059.69,
+    47.48,
+    521.54,
+    2388.09,
+    8139.73,
+    8.4353,
+    393.0,
+    38.86,
+    23.3117
+  ],
+  "dropped_columns": [
+    [
+      2,
+      "ConstantColumn"
+    ],
+    [
+      3,
+      "ConstantColumn"
+    ],
+    [
+      7,
+      "ConstantColumn"
+    ],
+    [
+      12,
+      "ConstantColumn"
+    ],
+    [
+      18,
+      "ConstantColumn"
+    ],
+    [
+      20,
+      "ConstantColumn"
+    ],
+    [
+      21,
+      "ConstantColumn"
+    ]
+  ]
+}
