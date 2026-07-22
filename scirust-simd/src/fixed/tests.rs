@@ -538,6 +538,85 @@ fn reductions_simd_vs_scalar_dot() {
 }
 
 // ------------------------------------------------------------------ //
+//  Moments statistiques                                               //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn moments_known_values() {
+    // [1,2,3,4,5] : mean=3, var_pop=2, var_sample=2.5 — toutes exactement
+    // représentables en Q16.16, sans reste de division.
+    let data: Vec<Q16_16> = [1.0, 2.0, 3.0, 4.0, 5.0].iter().map(|&v| q16(v)).collect();
+    assert_eq!(red::mean(&data).unwrap().to_f64(), 3.0);
+    assert_eq!(red::variance_population(&data).unwrap().to_f64(), 2.0);
+    assert_eq!(red::variance_sample(&data).unwrap().to_f64(), 2.5);
+    let sp = red::std_population(&data).unwrap().to_f64();
+    assert!((sp - 2.0f64.sqrt()).abs() < 1e-3, "std_pop={sp}");
+    let ss = red::std_sample(&data).unwrap().to_f64();
+    assert!((ss - 2.5f64.sqrt()).abs() < 1e-3, "std_sample={ss}");
+}
+
+#[test]
+fn moments_match_naive_fixed_point_reference() {
+    // Référence naïve bâtie avec les mêmes primitives enveloppantes
+    // (wrapping_add/wrapping_mul/checked_div) que l'implémentation : doit
+    // coïncider **bit-à-bit** — même schéma que `reductions_simd_vs_scalar_dot`.
+    let mut rng = Lcg(0x5741);
+    for &n in &[2usize, 3, 5, 8, 9, 17, 100]
+    {
+        let data: Vec<Q16_16> = (0..n)
+            .map(|_| Q16_16::from_raw(rng.raw_i32() >> 8))
+            .collect();
+
+        let n_fixed = q16(n as f64);
+        let sum: Q16_16 = data
+            .iter()
+            .fold(Q16_16::from_raw(0), |acc, &x| acc.wrapping_add(x));
+        let mean_ref = sum.checked_div(n_fixed).unwrap();
+        let ss_ref: Q16_16 = data.iter().fold(Q16_16::from_raw(0), |acc, &x| {
+            let d = x - mean_ref;
+            acc.wrapping_add(d.wrapping_mul(d))
+        });
+        let var_pop_ref = ss_ref.checked_div(n_fixed).unwrap();
+
+        assert_eq!(red::mean(&data).unwrap(), mean_ref, "mean n={n}");
+        assert_eq!(
+            red::variance_population(&data).unwrap(),
+            var_pop_ref,
+            "var_pop n={n}"
+        );
+
+        let var_sample_ref = ss_ref.checked_div(q16((n - 1) as f64)).unwrap();
+        assert_eq!(
+            red::variance_sample(&data).unwrap(),
+            var_sample_ref,
+            "var_sample n={n}"
+        );
+    }
+}
+
+#[test]
+fn moments_empty_and_edge_cases() {
+    let empty: Vec<Q16_16> = vec![];
+    assert_eq!(red::mean(&empty), None);
+    assert_eq!(red::variance_population(&empty), None);
+    assert_eq!(red::variance_sample(&empty), None);
+    assert_eq!(red::std_population(&empty), None);
+    assert_eq!(red::std_sample(&empty), None);
+
+    // Un seul élément : moyenne définie, variance de population nulle
+    // (aucun écart), variance d'échantillon indéfinie (n−1 = 0).
+    let one = vec![q16(7.0)];
+    assert_eq!(red::mean(&one).unwrap().to_f64(), 7.0);
+    assert_eq!(red::variance_population(&one).unwrap().to_f64(), 0.0);
+    assert_eq!(red::variance_sample(&one), None);
+
+    // Données constantes : variance nulle quelle que soit la longueur.
+    let constant: Vec<Q16_16> = vec![q16(3.5); 20];
+    assert_eq!(red::variance_population(&constant).unwrap().to_f64(), 0.0);
+    assert_eq!(red::variance_sample(&constant).unwrap().to_f64(), 0.0);
+}
+
+// ------------------------------------------------------------------ //
 //  Algèbre linéaire : GEMM déterministe                               //
 // ------------------------------------------------------------------ //
 
