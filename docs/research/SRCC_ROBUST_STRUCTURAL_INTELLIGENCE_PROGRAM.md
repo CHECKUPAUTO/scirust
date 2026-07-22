@@ -88,8 +88,8 @@ deployment from within a method crate.
 |------:|-------|--------|----|--------------|--------|
 | 721 | Robust descriptive statistics | `claude/scirust-srcc-robust-stats-6ue9xc` | [#725](https://github.com/Memorithm/scirust/pull/725) | `f2b87380eb02dda91e39c7c45f1ab73d6f9a5a36` | **Merged** |
 | 722 | Robust multivariate geometry | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#729](https://github.com/Memorithm/scirust/pull/729) | `c4e49bfbeb936182b4474a67afd83595ade6727e` | **Merged** |
-| 723 | Scale-aware SRCC source geometry | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#737](https://github.com/Memorithm/scirust/pull/737) | _(pending)_ | In review |
-| 724 | Deterministic robust regression | `feat/learning-robust-regression` | — | — | Not started |
+| 723 | Scale-aware SRCC source geometry | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#737](https://github.com/Memorithm/scirust/pull/737) | `96b73ea9c45b4c97456ca11cbb0a1e3164d3cfae` | **Merged** |
+| 724 | Deterministic robust regression | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | _(open)_ | _(pending)_ | In review |
 | 725 | Trust & contamination models | `feat/srcc-trust-contamination-models` | — | — | Not started |
 | 726 | Certified medoid clustering | `feat/solvers-certified-medoid-clustering` | — | — | Not started |
 | 727 | Industrial benchmark harness | `feat/srcc-industrial-benchmark-harness` | — | — | Not started |
@@ -452,3 +452,104 @@ by exactly that edge.
   geometry.
 - Only diagonal scaling is offered; no rotation/affine-invariant source metric
   is claimed or provided.
+
+---
+
+## Phase 724 — Deterministic robust regression
+
+**Crate:** `scirust-learning` · **Module:** `scirust-learning/src/robust_regression.rs`
+
+### Design
+
+General, SRCC-independent robust linear/affine regression with typed errors and
+convergence metadata. New public surface (re-exported at the crate root):
+`RegressionDataset` (features `n×p`, targets `n×k`, optional weights),
+`LinearRegressionModel` (+ `predict`), `RobustLoss { Squared, AbsoluteApprox,
+Huber, TukeyBisquare }`, `RobustRegressionMethod { OrdinaryLeastSquares,
+IterativelyReweightedLeastSquares, TrimmedLeastSquares { retained_fraction },
+MedianOfMeans { block_count, seed } }`, `RobustRegressionConfig` (+ `Default`),
+`RobustRegressionReport`, `RobustRegressionError`, `fit_robust_regression`.
+
+- **Solves** run through `scirust-solvers` Householder QR
+  (`qr_decompose` + `solve_qr_least_squares`) — never normal equations; ridge is
+  row augmentation of the QR design (never penalizing the intercept); rank
+  deficiency without ridge is the typed `LeastSquaresSolveFailed`.
+- **OLS** supports multiple outputs; the robust methods are single-output with a
+  typed `UnsupportedMultiOutput` otherwise.
+- **IRLS** initializes at the deterministic OLS solution; the residual scale is
+  the normal-consistent MAD from `scirust-stats`; the `σ = 0` case (majority of
+  residuals vanish) uses the documented `σ→0` weight limit with a warning.
+  `AbsoluteApprox` is honestly named a smoothed approximation, never "exact
+  LAD"; Tukey bisquare is documented non-convex/initialization-dependent.
+- **Trimmed LS** is the C-step iteration with `f64::total_cmp` ranking and
+  original-index tie-breaks; convergence is retained-set fixed point **or
+  objective stagnation** (near-exact fits leave FP-tied residuals whose ranked
+  subset churns among equivalent sets without changing the objective), plus
+  explicit cycle detection with a warning. Rejected indices are reported.
+- **Median-of-means** uses a seeded `SplitMix64` Fisher–Yates permutation and
+  as-even-as-possible contiguous blocks; per-block OLS coefficients are
+  aggregated by coordinate-wise median — a **documented heuristic** (not affine
+  equivariant, no optimality certificate, requires a majority of clean blocks;
+  each outlier can poison an entire block, so the guarantee needs
+  `outliers ≤ ⌊(blocks−1)/2⌋`).
+- Optional feature standardization refits `scirust-multivariate::RobustScaler`
+  (policy `Error`: a degenerate feature scale is typed, never a silent unit
+  fallback). Historical `linear_regression`/`polynomial_fit` baselines
+  untouched.
+
+### Determinism contract
+
+The only pseudo-randomness is the explicit MoM seed. Same input + config ⇒
+bit-identical reports (tested per method). Row order is documented as *not* a
+free invariance: QR rotations differ at the last bit under permutation (tested
+to tolerance), and the MoM partition composes the seed with the caller's row
+order.
+
+### Tests
+
+20 new tests (71 total in the crate, all green): exact affine/linear/
+multi-output recovery, cross-check against the historical 1-D
+`linear_regression`, Huber vs OLS under minority outliers, trimmed exact
+recovery + rejected-index reporting, MoM seeded reproducibility with the
+`outliers ≤ ⌊(blocks−1)/2⌋` guarantee **and** an honest majority-block
+breakdown test, rank-deficiency typed failure + ridge resolution, zero-weight
+samples, non-convergence reporting, standardized rescaling invariance of
+predictions, row-permutation tolerance agreement, per-method bit determinism,
+and the full typed-error battery (inputs, weights, config, multi-output,
+degenerate feature scale, underdetermined designs).
+
+### Benchmark fingerprint
+
+`scirust-learning/examples/robust_regression_contamination.rs` — fixed noisy
+affine truth, contamination sweep 0/5/10/20/30/40 % (front-loaded `+100` target
+shifts), methods OLS / Huber(1.345) / trimmed(0.7) / MoM(5 blocks); metrics:
+parameter error, clean RMSE, clean median absolute error, worst clean error,
+effective samples, iterations, convergence.
+
+```
+SHA-256 (scientific stdout, nightly-2026-07-02, x86_64):
+8bb566fb73f2d255d6653e9c9b814fcf835f64d62f01eea71ad2070255ad3722
+```
+
+Honest highlights (negative results retained): OLS breaks from 5 %; MoM breaks
+at 10 % (six outliers touch three of five blocks); Huber hits its iteration cap
+at 20 % (`converged=false` in the output) and breaks at 30 %; trimmed h = 0.7
+holds through 20 % and fails exactly at its 30 % boundary; at 30–40 % the
+robust methods can be *worse* than OLS. No majority-corruption robustness is
+claimed anywhere.
+
+### Compatibility
+
+Purely additive: no existing `scirust-learning` item changed; `Cargo.lock`
+gains exactly the three cycle-free workspace edges (`scirust-solvers`,
+`scirust-stats`, `scirust-multivariate`). `cargo check --workspace
+--all-targets --locked` passes; clippy `-D warnings` and `fmt` clean.
+
+### Known limitations / deferred
+
+- Robust methods are single-output; multi-output robust fitting is deferred.
+- No exact LAD (linear programming) and no MM-estimation; `AbsoluteApprox` is a
+  smoothed surrogate.
+- Breakdown honesty: Huber's breakdown shrinks with leverage (no leverage-based
+  weighting here); trimmed tolerates at most `1 − h`; MoM needs a clean-block
+  majority. SRCC integration and identifiability assumptions are later phases.
