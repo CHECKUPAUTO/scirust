@@ -95,7 +95,7 @@ deployment from within a method crate.
 | 727 | Industrial benchmark harness | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#747](https://github.com/Memorithm/scirust/pull/747) | `2e44bada7f20c50afa427e3c94a816c2348819d4` | **Merged** |
 | 728 | Real industrial evaluation | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#750](https://github.com/Memorithm/scirust/pull/750) | `ea45a4d073c1a1aa1e2e9c87335146bf2c158ab2` | **Merged** |
 | 728D | Diagnostic — why the 728 nulls (framing, not power) | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#751](https://github.com/Memorithm/scirust/pull/751) | `8c83bf6ca74e1f4fb157982594ee98df5ac87659` | **Merged** |
-| 728R1 | Re-framing lever 1 — piecewise RUL + reduced decimation | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | _(open)_ | _(pending)_ | **In review** |
+| 728R1 | Re-framing lever 1 — piecewise RUL + reduced decimation | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#753](https://github.com/Memorithm/scirust/pull/753) | _(pending)_ | **In review** |
 | 729 | Shadow deployment & promotion gates | `feat/mlops-srcc-shadow-deployment` | — | — | Not started |
 
 > Branch and numbering notes:
