@@ -43,7 +43,7 @@
 // See scirust-bench-schema's crate docs ("Migrating criterion targets") for the full pattern.
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group};
-use scirust_simd::hypercomplex::{OctonionSimd, SedenionSimd, scalar};
+use scirust_simd::hypercomplex::{DualOctonion, DualSedenion, OctonionSimd, SedenionSimd, scalar};
 
 /// Nombre de paires d'opérandes par itération mesurée.
 /// 4096 octonions = 128 Kio × 2 opérandes : le jeu de données déborde
@@ -312,12 +312,92 @@ fn bench_exp_log(c: &mut Criterion) {
     group.finish();
 }
 
+/// exp/ln/powf duaux (différenciation automatique forward-mode) : même
+/// débit de référence que [`bench_exp_log`] sur les types de base, pour
+/// situer le surcoût de la propagation simultanée valeur+dérivée (un dual
+/// = 2 registres, un exp/ln dual ≈ 2-3× le coût du exp/ln de base — cf.
+/// en-tête de module de `dual.rs`).
+fn bench_dual_exp_log(c: &mut Criterion) {
+    let oct_val: Vec<OctonionSimd> = nonzero_operands::<8>(0xD0_0C7A)
+        .iter()
+        .map(|&a| OctonionSimd::from_array(a))
+        .collect();
+    let oct_eps: Vec<OctonionSimd> = operand_pairs::<8>(0xD0_0C7B)
+        .iter()
+        .map(|&(x, _)| OctonionSimd::from_array(x))
+        .collect();
+    let oct: Vec<DualOctonion> = oct_val
+        .iter()
+        .zip(oct_eps.iter())
+        .map(|(&v, &d)| DualOctonion::variable(v, d))
+        .collect();
+
+    let sed_val: Vec<SedenionSimd> = nonzero_operands::<16>(0xD0_5ED0)
+        .iter()
+        .map(|&a| SedenionSimd::from_array(a))
+        .collect();
+    let sed_eps: Vec<SedenionSimd> = operand_pairs::<16>(0xD0_5ED1)
+        .iter()
+        .map(|&(x, _)| SedenionSimd::from_array(x))
+        .collect();
+    let sed: Vec<DualSedenion> = sed_val
+        .iter()
+        .zip(sed_eps.iter())
+        .map(|(&v, &d)| DualSedenion::variable(v, d))
+        .collect();
+
+    let mut group = c.benchmark_group("dual_exp_log");
+    group.throughput(Throughput::Elements(N_PAIRS as u64));
+    group.bench_function(BenchmarkId::new("octonion", "exp"), |b| {
+        b.iter(|| {
+            let mut acc = DualOctonion::constant(OctonionSimd::ZERO);
+            for &d in black_box(&oct)
+            {
+                acc = acc + d.exp();
+            }
+            acc
+        })
+    });
+    group.bench_function(BenchmarkId::new("octonion", "ln"), |b| {
+        b.iter(|| {
+            let mut acc = DualOctonion::constant(OctonionSimd::ZERO);
+            for &d in black_box(&oct)
+            {
+                acc = acc + d.ln();
+            }
+            acc
+        })
+    });
+    group.bench_function(BenchmarkId::new("sedenion", "exp"), |b| {
+        b.iter(|| {
+            let mut acc = DualSedenion::constant(SedenionSimd::ZERO);
+            for &d in black_box(&sed)
+            {
+                acc = acc + d.exp();
+            }
+            acc
+        })
+    });
+    group.bench_function(BenchmarkId::new("sedenion", "ln"), |b| {
+        b.iter(|| {
+            let mut acc = DualSedenion::constant(SedenionSimd::ZERO);
+            for &d in black_box(&sed)
+            {
+                acc = acc + d.ln();
+            }
+            acc
+        })
+    });
+    group.finish();
+}
+
 criterion_group!(
     wall_time,
     bench_octonion_mul,
     bench_sedenion_mul,
     bench_inverse,
-    bench_exp_log
+    bench_exp_log,
+    bench_dual_exp_log
 );
 
 // ------------------------------------------------------------------ //
