@@ -73,6 +73,11 @@
 //   mise à jour de covariance. [`kalman::KalmanFilter::predict_nonlinear`]/
 //   [`update_nonlinear`](kalman::KalmanFilter::update_nonlinear) généralisent
 //   aux modèles non linéaires (EKF) par linéarisation à chaque pas.
+//   [`kalman::UnscentedKalmanFilter`] évite même cette linéarisation : il
+//   propage des points sigma **directement** à travers `f`/`h` non linéaires
+//   (aucune jacobienne requise), exact au second ordre pour toute
+//   non-linéarité et exact pour tout système linéaire (l'EKF n'est exact
+//   qu'au premier ordre).
 // * [`wavelet`] — transformée en ondelettes discrète par schéma de lifting
 //   ([`wavelet::dwt_decompose`]/[`wavelet::dwt_reconstruct`], Haar ou CDF 5/3
 //   « LeGall ») : complète [`fft`]/[`stft`] (résolution temps-fréquence
@@ -110,7 +115,7 @@ pub use fft::{Complex, Plan, fft, ifft, irfft, rfft};
 pub use fftconv::fft_convolve;
 pub use fir::Fir;
 pub use freqz::{group_delay, magnitude, magnitude_db, phase, unwrap_phase};
-pub use kalman::KalmanFilter;
+pub use kalman::{KalmanFilter, UnscentedKalmanFilter};
 pub use mfcc::{Mfcc, dct2};
 pub use pll::{Nco, PiLoopFilter, Pll};
 pub use resample::resample;

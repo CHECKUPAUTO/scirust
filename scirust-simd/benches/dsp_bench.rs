@@ -27,7 +27,7 @@
 // See scirust-bench-schema's crate docs ("Migrating criterion targets") for the full pattern.
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
-use scirust_simd::dsp::kalman::KalmanFilter;
+use scirust_simd::dsp::kalman::{KalmanFilter, UnscentedKalmanFilter};
 use scirust_simd::dsp::mel::MelFilterbank;
 use scirust_simd::dsp::mfcc::Mfcc;
 use scirust_simd::dsp::pll::Pll;
@@ -770,6 +770,93 @@ fn bench_kalman(c: &mut Criterion) {
     g.finish();
 }
 
+/// UKF sur le même système linéaire que [`bench_kalman`] — comparaison
+/// directe. La transition/mesure sont ici des fermetures (aucune jacobienne),
+/// appliquées à `2N+1 = 5` points sigma par pas au lieu d'un unique produit
+/// matriciel : le surcoût mesurable face à [`bench_kalman`] est le prix de
+/// l'absence de linéarisation (cf. en-tête de module).
+fn bench_ukf(c: &mut Criterion) {
+    let sf = signal_f32();
+    let sx = signal_fixed(&sf);
+
+    let f_f = [[1.0f32, 1.0], [0.0, 1.0]];
+    let q_f = [[0.001f32, 0.0], [0.0, 0.001]];
+    let h_f = [[1.0f32, 0.0]];
+    let r_f = [[0.01f32]];
+
+    let f_x = [
+        [
+            Q16_16::try_from(1.0).unwrap(),
+            Q16_16::try_from(1.0).unwrap(),
+        ],
+        [
+            Q16_16::try_from(0.0).unwrap(),
+            Q16_16::try_from(1.0).unwrap(),
+        ],
+    ];
+    let q_x = [
+        [Q16_16::try_from(0.001).unwrap(), Q16_16::zero()],
+        [Q16_16::zero(), Q16_16::try_from(0.001).unwrap()],
+    ];
+    let h_x = [[Q16_16::try_from(1.0).unwrap(), Q16_16::zero()]];
+    let r_x = [[Q16_16::try_from(0.01).unwrap()]];
+
+    let mut g = c.benchmark_group("ukf_predict_update");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            let mut kf = UnscentedKalmanFilter::<Q16_16, 2, 1>::new(
+                [Q16_16::zero(), Q16_16::zero()],
+                [
+                    [Q16_16::try_from(1.0).unwrap(), Q16_16::zero()],
+                    [Q16_16::zero(), Q16_16::try_from(1.0).unwrap()],
+                ],
+                Q16_16::try_from(1.0).unwrap(),
+                Q16_16::try_from(2.0).unwrap(),
+                Q16_16::try_from(1.0).unwrap(),
+            );
+            for &x in &sx
+            {
+                black_box(kf.predict(
+                    |s| {
+                        [
+                            f_x[0][0] * s[0] + f_x[0][1] * s[1],
+                            f_x[1][0] * s[0] + f_x[1][1] * s[1],
+                        ]
+                    },
+                    &q_x,
+                ));
+                black_box(kf.update(&[x], |s| [h_x[0][0] * s[0] + h_x[0][1] * s[1]], &r_x));
+            }
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| {
+            let mut kf = UnscentedKalmanFilter::<f32, 2, 1>::new(
+                [0.0, 0.0],
+                [[1.0, 0.0], [0.0, 1.0]],
+                1.0,
+                2.0,
+                1.0,
+            );
+            for &x in &sf
+            {
+                black_box(kf.predict(
+                    |s| {
+                        [
+                            f_f[0][0] * s[0] + f_f[0][1] * s[1],
+                            f_f[1][0] * s[0] + f_f[1][1] * s[1],
+                        ]
+                    },
+                    &q_f,
+                ));
+                black_box(kf.update(&[x], |s| [h_f[0][0] * s[0] + h_f[0][1] * s[1]], &r_f));
+            }
+        })
+    });
+    g.finish();
+}
+
 /// Décomposition en pyramide (4 niveaux) via lifting, Haar vs CDF 5/3 —
 /// CDF 5/3 prédit/met à jour sur deux voisins (contre un pour Haar), donc un
 /// surcoût par échantillon plus élevé mais une bien meilleure compaction
@@ -838,6 +925,7 @@ criterion_group!(
     bench_pll,
     bench_symbol_timing,
     bench_kalman,
+    bench_ukf,
     bench_wavelet
 );
 criterion_main!(benches);

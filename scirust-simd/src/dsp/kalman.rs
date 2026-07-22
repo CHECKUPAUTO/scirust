@@ -65,6 +65,28 @@
 // construction pour une entrée réellement SDP), donc déterministe et stable
 // pour `f32`/`f64` **et** virgule fixe sans introduire de comparaison de
 // magnitude entre lignes.
+//
+// ## [`UnscentedKalmanFilter`] — transformée non parfumée (UKF)
+//
+// L'EKF linéarise `f`/`h` par leur jacobienne au premier ordre — approximation
+// dégradée si `f`/`h` sont fortement non linéaires, et qui demande à
+// l'appelant de fournir cette jacobienne. [`UnscentedKalmanFilter`] évite les
+// deux : il propage un petit ensemble de « points sigma » (`2N+1`, choisis
+// pour représenter exactement la moyenne et la covariance de l'état courant)
+// **directement** à travers `f`/`h` non linéaires (aucune dérivée requise),
+// puis reconstruit moyenne/covariance à partir de leurs images pondérées —
+// la « transformée non parfumée » (*unscented transform*), exacte au second
+// ordre pour toute non-linéarité (l'EKF n'est exact qu'au premier ordre).
+//
+// Pour un système **linéaire**, la transformée non parfumée reproduit
+// *exactement* `F·x`/`F·P·Fᵀ` (vérifié par
+// `ukf_matches_linear_kalman_filter_on_linear_system` dans les tests) : l'UKF
+// n'est jamais moins précis que le filtre linéaire, seulement plus coûteux
+// (`2N+1` évaluations de `f`/`h` par étape contre une seule).
+//
+// Réutilise directement l'algèbre matricielle et [`cholesky`]/[`invert_spd`]
+// ci-dessus (les points sigma sont construits à partir des colonnes du
+// facteur de Cholesky de `P`) — aucune nouvelle primitive numérique.
 
 use core::ops::Div;
 
@@ -350,5 +372,210 @@ impl<T: RealScalar + Div<Output = T>, const N: usize, const M: usize> KalmanFilt
     #[inline]
     pub fn update(&mut self, z: &[T; M], h: &[[T; N]; M], r: &[[T; M]; M]) -> Option<()> {
         self.update_nonlinear(z, |x| matvec(h, x), h, r)
+    }
+}
+
+// ------------------------------------------------------------------ //
+//  UnscentedKalmanFilter<T, N, M>                                      //
+// ------------------------------------------------------------------ //
+
+/// `2N+1` points sigma représentant exactement la moyenne `x` et la
+/// covariance `p` (Julier & Uhlmann) : le point central `x`, puis pour
+/// chaque colonne `c` du facteur de Cholesky `L` de `p` (mis à l'échelle par
+/// `√(N+λ)`), les deux points `x ± c`. `None` si `p` n'est pas symétrique
+/// définie positive.
+#[allow(clippy::needless_range_loop)]
+fn sigma_points<T: RealScalar + Div<Output = T>, const N: usize>(
+    x: &[T; N],
+    p: &[[T; N]; N],
+    lambda: T,
+) -> Option<Vec<[T; N]>> {
+    let l = cholesky(p)?;
+    let scale = (T::from_i32(N as i32) + lambda).sqrt();
+
+    let mut points = Vec::with_capacity(2 * N + 1);
+    points.push(*x);
+    for j in 0..N
+    {
+        let mut plus = *x;
+        let mut minus = *x;
+        for i in 0..N
+        {
+            let c = l[i][j] * scale;
+            plus[i] = plus[i] + c;
+            minus[i] = minus[i] - c;
+        }
+        points.push(plus);
+        points.push(minus);
+    }
+    Some(points)
+}
+
+/// Poids de la transformée non parfumée : `(Wm₀, Wc₀, Wᵢ)` — `Wm₀`/`Wc₀`
+/// pour le point sigma central (index `0`), `Wᵢ` commun aux `2N` points
+/// restants (`Wm et Wc coïncident pour ceux-là`).
+fn ukf_weights<T: RealScalar + Div<Output = T>, const N: usize>(
+    alpha: T,
+    beta: T,
+    lambda: T,
+) -> (T, T, T) {
+    let n_plus_lambda = T::from_i32(N as i32) + lambda;
+    let wm0 = lambda / n_plus_lambda;
+    let wc0 = wm0 + (T::one() - alpha * alpha + beta);
+    let wi = T::from_i32(2).recip() / n_plus_lambda; // puissance de 2 : recip() exact avant la division.
+    (wm0, wc0, wi)
+}
+
+/// Filtre de Kalman **non parfumé** (état de dimension `N`, mesure de
+/// dimension `M`), sans jacobienne — cf. en-tête de module.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UnscentedKalmanFilter<T, const N: usize, const M: usize> {
+    x: [T; N],
+    p: [[T; N]; N],
+    alpha: T,
+    beta: T,
+    kappa: T,
+}
+
+impl<T: RealScalar + Div<Output = T>, const N: usize, const M: usize>
+    UnscentedKalmanFilter<T, N, M>
+{
+    /// Construit depuis un état initial `x0`/covariance `p0` et les
+    /// paramètres de la transformée non parfumée : `alpha` (étalement des
+    /// points sigma, typiquement `1e-3`–`1`), `beta` (connaissance a priori
+    /// de la distribution ; `2` pour une gaussienne), `kappa` (mise à
+    /// l'échelle secondaire, souvent `0` ou `3−N`).
+    #[inline]
+    pub fn new(x0: [T; N], p0: [[T; N]; N], alpha: T, beta: T, kappa: T) -> Self {
+        Self {
+            x: x0,
+            p: p0,
+            alpha,
+            beta,
+            kappa,
+        }
+    }
+
+    /// État estimé courant.
+    #[inline]
+    pub fn state(&self) -> &[T; N] {
+        &self.x
+    }
+
+    /// Covariance d'erreur courante.
+    #[inline]
+    pub fn covariance(&self) -> &[[T; N]; N] {
+        &self.p
+    }
+
+    #[inline]
+    fn lambda(&self) -> T {
+        self.alpha * self.alpha * (T::from_i32(N as i32) + self.kappa) - T::from_i32(N as i32)
+    }
+
+    /// Prédiction : propage les points sigma directement à travers la
+    /// transition non linéaire `transition` (aucune jacobienne), reconstruit
+    /// `x`/`P` à partir de leurs images pondérées, ajoute le bruit de
+    /// processus `q`. `None` si `P` courante n'est pas SDP (points sigma
+    /// indéfinis) — cf. en-tête de module.
+    pub fn predict(
+        &mut self,
+        transition: impl Fn(&[T; N]) -> [T; N],
+        q: &[[T; N]; N],
+    ) -> Option<()> {
+        let lambda = self.lambda();
+        let (wm0, wc0, wi) = ukf_weights::<T, N>(self.alpha, self.beta, lambda);
+        let points = sigma_points(&self.x, &self.p, lambda)?;
+        let propagated: Vec<[T; N]> = points.iter().map(transition).collect();
+
+        let mut x_new = [T::zero(); N];
+        for (k, pt) in propagated.iter().enumerate()
+        {
+            let w = if k == 0 { wm0 } else { wi };
+            for i in 0..N
+            {
+                x_new[i] = x_new[i] + w * pt[i];
+            }
+        }
+
+        let mut p_new = [[T::zero(); N]; N];
+        for (k, pt) in propagated.iter().enumerate()
+        {
+            let w = if k == 0 { wc0 } else { wi };
+            let d = vecsub(pt, &x_new);
+            for i in 0..N
+            {
+                for j in 0..N
+                {
+                    p_new[i][j] = p_new[i][j] + w * d[i] * d[j];
+                }
+            }
+        }
+
+        self.x = x_new;
+        self.p = matadd(&p_new, q);
+        Some(())
+    }
+
+    /// Mise à jour à partir d'une observation `z` : régénère les points
+    /// sigma depuis l'état prédit, les transforme par la mesure non linéaire
+    /// `measurement` (aucune jacobienne), calcule la covariance d'innovation
+    /// `S`, la covariance croisée état/mesure et le gain `K = Pxz·S⁻¹`.
+    ///
+    /// `None` si `S` n'est pas inversible ou si `P` courante n'est pas SDP —
+    /// **l'état n'est alors pas modifié**.
+    pub fn update(
+        &mut self,
+        z: &[T; M],
+        measurement: impl Fn(&[T; N]) -> [T; M],
+        r: &[[T; M]; M],
+    ) -> Option<()> {
+        let lambda = self.lambda();
+        let (wm0, wc0, wi) = ukf_weights::<T, N>(self.alpha, self.beta, lambda);
+        let points = sigma_points(&self.x, &self.p, lambda)?;
+        let measured: Vec<[T; M]> = points.iter().map(measurement).collect();
+
+        let mut z_hat = [T::zero(); M];
+        for (k, m) in measured.iter().enumerate()
+        {
+            let w = if k == 0 { wm0 } else { wi };
+            for i in 0..M
+            {
+                z_hat[i] = z_hat[i] + w * m[i];
+            }
+        }
+
+        let mut s = [[T::zero(); M]; M];
+        let mut pxz = [[T::zero(); M]; N];
+        for (k, (pt, m)) in points.iter().zip(&measured).enumerate()
+        {
+            let w = if k == 0 { wc0 } else { wi };
+            let dz = vecsub(m, &z_hat);
+            let dx = vecsub(pt, &self.x);
+            for i in 0..M
+            {
+                for j in 0..M
+                {
+                    s[i][j] = s[i][j] + w * dz[i] * dz[j];
+                }
+            }
+            for i in 0..N
+            {
+                for j in 0..M
+                {
+                    pxz[i][j] = pxz[i][j] + w * dx[i] * dz[j];
+                }
+            }
+        }
+        let s = matadd(&s, r);
+        let s_inv = invert_spd(&s)?;
+        let k_gain = matmul(&pxz, &s_inv);
+
+        let innovation = vecsub(z, &z_hat);
+        self.x = vecadd(&self.x, &matvec(&k_gain, &innovation));
+
+        let ks_kt = matmul(&matmul(&k_gain, &s), &transpose(&k_gain));
+        self.p = matsub(&self.p, &ks_kt);
+        Some(())
     }
 }
