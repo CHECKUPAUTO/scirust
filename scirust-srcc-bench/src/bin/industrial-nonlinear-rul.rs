@@ -52,9 +52,11 @@ const TRAIN_FD003_SHA: &str = "2abbe9968cc5e8eb091980f51b20f62bb4127336d3482cb52
 
 /// The canonical C-MAPSS piecewise-linear RUL knee (Heimes 2008).
 const R_EARLY: f64 = 125.0;
-/// Fixed at 40 (~320 pooled train rows): kernel ridge's dense O(n³) Cholesky,
-/// with the shared solver's large per-iteration constant, makes the finer
-/// strides too slow across the (γ, λ) grid. All three models use this stride.
+/// Default decimation stride (~320 pooled train rows). Overridable with
+/// `--stride`. The original stride-40 default was forced by a large
+/// per-iteration constant in the shared Cholesky (an eager `format!` in its
+/// O(n³) hot loop); with that removed the finer stride 20 is tractable, and the
+/// re-test at stride 20 is what this binary now also supports.
 const STRIDE: usize = 40;
 /// A-priori RBF bandwidth grid, selected on validation (not tuned on test).
 const GAMMA_GRID: [f64; 3] = [0.01, 0.05, 0.1];
@@ -292,6 +294,7 @@ fn evaluate(
     label: &str,
     raw: &TabularDataset,
     config: &RegressionConfig,
+    stride: usize,
     records: &mut Vec<BenchRecord>,
     summary: &mut Vec<String>,
 ) {
@@ -300,7 +303,7 @@ fn evaluate(
         ("piecewise_125", clip_rul_targets(raw, R_EARLY)),
     ]
     {
-        let decimated = decimate_by_group(&dataset, STRIDE);
+        let decimated = decimate_by_group(&dataset, stride);
 
         let split = split_dataset(
             &decimated,
@@ -337,7 +340,7 @@ fn evaluate(
         let train_mean = train.targets.iter().sum::<f64>() / train.sample_count() as f64;
         let predict_mean_rmse = rmse(&vec![train_mean; test.sample_count()], &test.targets);
 
-        let cell = format!("{label}/{rul_name}/stride_{STRIDE}");
+        let cell = format!("{label}/{rul_name}/stride_{stride}");
 
         records.push(BenchRecord::new(
             "nonlinear_rul/ceiling",
@@ -418,6 +421,7 @@ isotonic={isotonic_ratio:.4} kernel={kernel_ratio:.4} (g={:.2},l={:.1}) kernel_v
 fn main() {
     let mut data_dir = PathBuf::from("data/industrial");
     let mut out_dir = PathBuf::from("results");
+    let mut stride = STRIDE;
 
     let mut arguments = std::env::args().skip(1);
 
@@ -433,9 +437,17 @@ fn main() {
         {
             "--data-dir" => data_dir = PathBuf::from(value("--data-dir")),
             "--out" => out_dir = PathBuf::from(value("--out")),
+            "--stride" =>
+            {
+                stride = value("--stride")
+                    .parse()
+                    .expect("--stride is a positive integer")
+            },
             other => panic!("unknown argument: {other}"),
         }
     }
+
+    assert!(stride > 0, "--stride must be positive");
 
     let config: Config = serde_json::from_str(CONFIG_TEXT).expect("embedded config is valid");
 
@@ -458,6 +470,7 @@ fn main() {
         "cmapss",
         &fd001,
         &config.cmapss.regression,
+        stride,
         &mut records,
         &mut summary,
     );
@@ -471,6 +484,7 @@ fn main() {
         "cmapss_fd003",
         &fd003,
         &config.cmapss_fd003.regression,
+        stride,
         &mut records,
         &mut summary,
     );
@@ -481,8 +495,15 @@ fn main() {
     }
 
     fs::create_dir_all(&out_dir).expect("results directory is writable");
-    fs::write(out_dir.join("nonlinear_rul.jsonl"), to_jsonl(&records))
-        .expect("results file is writable");
+    let out_name = if stride == STRIDE
+    {
+        "nonlinear_rul.jsonl".to_string()
+    }
+    else
+    {
+        format!("nonlinear_rul_stride{stride}.jsonl")
+    };
+    fs::write(out_dir.join(out_name), to_jsonl(&records)).expect("results file is writable");
 
     println!("# records={}", records.len());
 }
