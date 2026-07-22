@@ -5,6 +5,7 @@
 
 pub mod control;
 pub mod finance;
+pub mod isotonic;
 pub mod nlp;
 pub mod optim;
 pub mod pattern_miner;
@@ -13,6 +14,7 @@ pub mod robust_regression;
 pub mod simd_nn;
 pub mod time_series;
 
+pub use isotonic::{IsotonicRegression, IsotonicRegressionError, MonotoneDirection};
 pub use robust_regression::{
     LinearRegressionModel, RegressionDataset, RobustLoss, RobustRegressionConfig,
     RobustRegressionError, RobustRegressionMethod, RobustRegressionReport, fit_robust_regression,
