@@ -50,8 +50,9 @@ pub use paired::{
     PairedBootstrapReport, PairedComparisonError, paired_bootstrap, paired_differences,
 };
 pub use promotion::{
-    CriterionFinding, Decision, Guardrail, Orientation, PairedMetric, PrimaryCriterion,
-    PromotionError, PromotionGate, PromotionReport,
+    CriterionFinding, Decision, ExtendedPromotionGate, ExtendedPromotionReport, Guardrail,
+    Orientation, PairedMetric, PrimaryCriterion, PromotionError, PromotionGate, PromotionReport,
+    ShadowWindow, WeightedMetric, WindowFinding, WindowMetricValues,
 };
 pub use records::{
     RecordKey, RunMetadata, alarm_records, anomaly_label_records, anomaly_score_records,
