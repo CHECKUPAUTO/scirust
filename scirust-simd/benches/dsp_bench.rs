@@ -9,6 +9,23 @@
 //   RUSTFLAGS="-C target-cpu=x86-64-v3" \
 //     cargo bench -p scirust-simd --features portable-simd --bench dsp_bench
 
+// Migration note (scirust-bench-schema): unlike most criterion targets in
+// this workspace, every benchmark function here shares ONE fixed global
+// signal from `signal_f32()`'s inline LCG (seed 0x2468, N=16384 samples) --
+// there is no per-call seed parameter to vary. Example conversion for the
+// "biquad_lowpass" group's "fixed"/"Q16_16" case (after `cargo bench
+// --bench dsp_bench`, reading
+// target/criterion/biquad_lowpass/fixed/Q16_16/new/estimates.json):
+//
+//   scirust_bench_schema::criterion_estimate_to_record(
+//       &estimates_json,
+//       "scirust-simd/dsp_biquad_lowpass", // kernel
+//       "N=16384",                          // dataset
+//       "fixed:Q16_16",                     // method
+//       0x2468,                             // seed: signal_f32()'s LCG seed
+//   )
+// See scirust-bench-schema's crate docs ("Migrating criterion targets") for the full pattern.
+
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::dsp::mel::MelFilterbank;
 use scirust_simd::dsp::mfcc::Mfcc;

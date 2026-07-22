@@ -20,6 +20,23 @@
 //   RUSTFLAGS="-C target-cpu=x86-64-v3" \
 //     cargo bench -p scirust-simd --features portable-simd --bench transformer_bench
 
+// Migration note (scirust-bench-schema): weights come from `fixed_data`/
+// `f32_data(seed, len, scale)`, backed by the in-file `Lcg`, at fixed seeds
+// 0x10..0x16 (one per weight matrix); bench_transformer_prefill's own input
+// x0 uses seed 0x1. S=32, D=64, H=4, DFF=256. Example conversion for the
+// "transformer_prefill_32x64_h4_dff256" group's "fixed"/"Q16_16" case
+// (after `cargo bench --bench transformer_bench`, reading
+// target/criterion/transformer_prefill_32x64_h4_dff256/fixed/Q16_16/new/estimates.json):
+//
+//   scirust_bench_schema::criterion_estimate_to_record(
+//       &estimates_json,
+//       "scirust-simd/transformer_prefill", // kernel
+//       "S=32,D=64,H=4,DFF=256",              // dataset
+//       "fixed:Q16_16",                       // method
+//       0x1,                                   // seed: x0's fixed_data() seed
+//   )
+// See scirust-bench-schema's crate docs ("Migrating criterion targets") for the full pattern.
+
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::fixed::Q16_16;
 use scirust_simd::fixed::kv_cache::KvCache;

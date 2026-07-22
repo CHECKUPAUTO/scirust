@@ -14,6 +14,22 @@
 //   RUSTFLAGS="-C target-cpu=x86-64-v3" \
 //     cargo bench -p scirust-simd --features portable-simd --bench linalg_bench
 
+// Migration note (scirust-bench-schema): inputs come from `fixed_data`/
+// `f32_data(seed, len)`, backed by the in-file `Lcg`; bench_matmul pins a/fa
+// to seed 0x1 and b/fb to seed 0x2. D=128 (D^3 MACs/product). Example
+// conversion for the "matmul" group's "fixed"/"Q16_16" case (after `cargo
+// bench --bench linalg_bench`, reading
+// target/criterion/matmul/fixed/Q16_16/new/estimates.json):
+//
+//   scirust_bench_schema::criterion_estimate_to_record(
+//       &estimates_json,
+//       "scirust-simd/linalg_matmul", // kernel
+//       "D=128",                       // dataset
+//       "fixed:Q16_16",                // method
+//       0x1,                           // seed: a's fixed_data() seed
+//   )
+// See scirust-bench-schema's crate docs ("Migrating criterion targets") for the full pattern.
+
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::fixed::Q16_16;
 use scirust_simd::fixed::layer::Linear;

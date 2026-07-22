@@ -26,6 +26,22 @@
 // consommés par accumulation + `black_box` pour interdire au compilateur
 // d'éliminer ou de sortir le produit de la boucle.
 
+// Migration note (scirust-bench-schema): inputs come from `operand_pairs`/
+// `nonzero_operands::<N>(seed)`, backed by the in-file `Lcg`; each call site
+// pins its own literal seed (e.g. bench_octonion_mul's operand_pairs::<8>
+// uses 0x0C70_BE0C). N_PAIRS=4096. Example conversion for the
+// "octonion_mul" group's SIMD case (after `cargo bench`, reading
+// target/criterion/octonion_mul/simd/.../new/estimates.json):
+//
+//   scirust_bench_schema::criterion_estimate_to_record(
+//       &estimates_json,
+//       "scirust-simd/hypercomplex_octonion_mul", // kernel
+//       "N_PAIRS=4096",                             // dataset
+//       "simd",                                     // method
+//       0x0C70_BE0C,                                 // seed: operand_pairs::<8> seed
+//   )
+// See scirust-bench-schema's crate docs ("Migrating criterion targets") for the full pattern.
+
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group};
 use scirust_simd::hypercomplex::{OctonionSimd, SedenionSimd, scalar};
 
