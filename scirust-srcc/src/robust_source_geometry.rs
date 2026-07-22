@@ -400,7 +400,7 @@ pub fn search_stable_scale_aware_source_clustered_robust_srcc_structures_from_vi
 /// the order-statistic methods are insensitive anyway). Duplicated sources are
 /// deliberately kept: repetition is evidence of an operating state and must
 /// weigh on the scale estimate.
-fn fit_source_metric(
+pub(crate) fn fit_source_metric(
     views: &[&[SrccTransportSample]],
     geometry: SrccSourceGeometrySpec,
 ) -> Result<SourceMetric, SrccRobustFitError> {

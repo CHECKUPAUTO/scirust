@@ -19,3 +19,6 @@ default = []
 # geometry (SRCC program, phase 723). Fitting only: distance evaluation stays
 # in this crate to preserve the frozen fixed-order source-distance body.
 scirust-multivariate = { path = "../scirust-multivariate" }
+# Certified diameter-constrained medoid clustering for the opt-in
+# SrccSourceClusteringSolver (SRCC program, phase 726).
+scirust-solvers = { path = "../scirust-solvers" }

@@ -5,6 +5,7 @@
 
 #![forbid(unsafe_code)]
 
+mod certified_source;
 mod closure;
 mod discovery;
 mod evaluation;
@@ -21,6 +22,10 @@ mod selection;
 mod stability;
 mod trust;
 
+pub use certified_source::{
+    SrccCertifiedFitResult, SrccSourceClusteringSolver,
+    fit_certified_source_clustered_robust_srcc_projector_from_views,
+};
 pub use closure::{SrccAdmissionCertificate, SrccClosure, SrccClosureError};
 pub use discovery::{
     SrccDiscoveryError, SrccTransportSample, learn_interleaved_transport_views,
@@ -52,6 +57,7 @@ pub use robust_source_search::{
     SrccSourceClusteredSearchConfig, search_source_clustered_robust_srcc_structures_from_views,
     search_stable_source_clustered_robust_srcc_structures_from_views,
 };
+pub use scirust_solvers::combinatorial::{CertifiedClusteringMode, ClusteringCertificate};
 pub use scoring::{SrccCase, SrccScore, SrccScoringError, score_projector};
 pub use search::{
     SrccSearchCandidate, SrccSearchError, SrccSearchGrid, SrccSearchResult,

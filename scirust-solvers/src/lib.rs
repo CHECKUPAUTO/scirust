@@ -24,6 +24,7 @@
 
 #![allow(clippy::needless_range_loop)]
 
+pub mod combinatorial;
 pub mod linalg;
 pub mod nonlinear;
 pub mod ode;
