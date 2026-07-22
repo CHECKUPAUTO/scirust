@@ -1,0 +1,7 @@
+{"kernel":"secom_supervised/validation","dataset":"secom/ridge_0.001","method":"linear_discriminant","seed":0,"metric":"validation_auroc","value":0.39614689945815773}
+{"kernel":"secom_supervised/validation","dataset":"secom/ridge_0.001","method":"linear_discriminant","seed":0,"metric":"train_auroc","value":0.9744608918128655}
+{"kernel":"secom_supervised/validation","dataset":"secom/ridge_0.1","method":"linear_discriminant","seed":0,"metric":"validation_auroc","value":0.4334738109572547}
+{"kernel":"secom_supervised/validation","dataset":"secom/ridge_0.1","method":"linear_discriminant","seed":0,"metric":"train_auroc","value":0.9467288011695907}
+{"kernel":"secom_supervised/test","dataset":"secom/temporal_test","method":"linear_discriminant","seed":0,"metric":"selected_ridge","value":0.1}
+{"kernel":"secom_supervised/test","dataset":"secom/temporal_test","method":"linear_discriminant","seed":0,"metric":"test_auroc","value":0.5805109922756981}
+{"kernel":"secom_supervised/test","dataset":"secom/temporal_test","method":"unsupervised_baseline","seed":0,"metric":"test_auroc","value":0.469}
