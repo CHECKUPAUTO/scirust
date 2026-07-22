@@ -376,6 +376,25 @@ model is data-starved for its size. Decision: **keep the 304M, grow the corpus t
 `step_60000` warm-starts → long run via `SCIAGENT_TOTAL_STEPS`). B21 is the enabling
 step. More epochs on 86M would overfit before reaching syntax — the lever is unique data.
 
+## v4 corpus milestone — 1.03B tokens + the seq_len wall
+
+The `fetch-crates --count 20000` pull (B20 retry carried it through the 429 storms —
+18,318 fetched, only ~1673 lost) plus the B21 streaming reshard of `crates_raw` with
+tokenizer_v3 produced **1,029,492,639 tokens across 1030 shards** (`data/shards_v4`).
+The B15 quality filter earned its keep here: it dropped **228,726 `@generated` files**
+(the AWS-SDK / protobuf codegen bulk) plus 36,828 duplicates, leaving 442,738 hand-written
+Rust files — ×12 the v3 corpus and far cleaner. No external dataset (The Stack) needed.
+
+Second, independent lever found while prepping the run: the 350M's `max_seq_len` is
+**8192**, but every run so far used `SCIAGENT_SEQ=128` (the default). A 128-token window
+is ~550 chars — it almost never holds a whole Rust function, so the model *never sees a
+`{` and its closing `}` in the same window* and cannot learn to balance them. This is a
+structural contributor to the 0%-balanced result, orthogonal to data volume. The v4 run
+therefore fixes both at once: ×12 unique data **and** context 128→512 (`SCIAGENT_SEQ=512`,
+warm-started from `step_60000`, `SCIAGENT_TOTAL_STEPS` for a multi-epoch pass). Gate:
+re-eval at ~step_130000 — if `syn::parse` is still 0% with 1B tokens *and* a 512 context,
+the cause is deeper than data/context.
+
 ## Risks / honesty
 
 - **Toolchain gate (highest risk):** if the Thor's installed CUDA can't emit sm_110,
