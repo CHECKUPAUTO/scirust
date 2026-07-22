@@ -4,11 +4,16 @@
 returned every remaining avenue with a verdict and the program's last open
 novelty candidate was closed (negative, empirically, by its own
 pre-registered criterion). The program is **closed with zero open claims**.
-This file is the index and the seal; it adds no new results.
+This file is the index and the seal for the *research*; §"Ordinary
+engineering after the seal" below tracks what has since shipped under the
+seal's own terms (no reopening — see "Reopening conditions") and is kept
+current as that continues.
 
 Scope note: this archive covers only the numerical-representation program
 below. Other documents in `docs/research/` (HYPERCRYPTO, HYPERMEMORY, …)
-belong to separate programs and are not covered here.
+belong to separate programs and are not covered here — their own tooling
+adoptions are tracked in the section below because they *consume* this
+program's output, not because this archive extends to their research.
 
 ## Reading order
 
@@ -38,11 +43,62 @@ Experiment sources: `tsa_experiments/`, `atra_experiments/`,
   the honest negative exhibit its docs now are part of.
 - `scirust-core::autotune_accumulate`, `transform_autotune`,
   `transform_search`, `compute_capability`, `representation_graph_quaternion`.
-- `scirust-bench-schema` — the CANR §9 record as a type; adopters:
-  `vst_bench`, the dose-response and Phase D binaries, `tdi-holdout`
-  (with real CIs), plus the criterion converter.
+- `scirust-bench-schema` — the CANR §9 record as a type; adopters listed in
+  full in the section below (this program's own binaries plus every
+  cross-project adoption that followed).
 - Reproducible benchmark binaries: `anee_phase_c_{prototype,kernel2_quaternion,dose_response,two_hop}`,
   `anee_phase_d_{cache,determinism_transfer,certificates}`.
+
+## Ordinary engineering after the seal (no reopening; kept current)
+
+Everything below is the program's own tooling doing exactly what "anything
+else is maintenance" (§ Reopening conditions) anticipated: no new phase, no
+new criteria, no new priors — bounded extension and cross-project adoption
+of what Phase D already validated or built. Each item is closed engineering
+with its own tests; none revisits a closed research question.
+
+- **Cross-project synergies (#727)** — five adoptions of this program's
+  tooling and lessons in the sibling research crates, each fitted to the
+  target's actual constraints rather than force-fit:
+  - `scirust-hypermemory` — `ZeroDivisorSurvey`/`StructureDiscriminationSurvey::to_bench_records`
+    flatten the F2/F6 falsification surveys into `scirust-bench-schema`
+    records (real LCG seed, operand distribution as dataset).
+  - `scirust-hypercrypto` — an **optional** `bench-schema` feature (the
+    crate's `report.rs` deliberately has no serde dependency by default);
+    `Json::to_bench_records` flattens numeric leaves via dotted-path metric
+    names, wired into the CLI's `emit()` choke point.
+  - `scirust-finmigrate` — the crate bans `f64`/`f32` outright in the money
+    path (compile-time-enforced), so `certified_numerics` isn't directly
+    reusable; the new `certified` module (`FixedPointField`) transfers the
+    *idea* — a proven round-trip bound plus an explicit domain of
+    validity — into exact decimal arithmetic (a proven ½-ULP bound for
+    COBOL `ROUNDED`, a proven <1-ULP bound for truncation; swept over 500k
+    values, zero violations).
+  - `scirust-tdi-bench`'s `tdi-scan` — bench-schema records made honest
+    about having **no RNG at all** (an exhaustive 256-system scan; seed `0`
+    with an explicit "exhaustive" dataset label) rather than papering over
+    the absence.
+  - `scirust-core::tree_allreduce` — pinned the D2 contrast directly:
+    `ExactSum`'s topology-independence already had a test; a new test
+    constructs four reassignments of the same 16-vector multiset to show
+    `FixedOrderSum`'s *lack* of association-invariance, which previously
+    only had D2's one-off result to point to.
+- **finmigrate audit-trail certificate (#738)** — `certified::money_field`
+  wired into `finaudit`'s actual PASS/FAIL verdict, not just left as a
+  standalone module: 14 real `PIC S9(9)V99` money columns across 5 of 6
+  units (traced to each module's `store_money_rounded`/`store_money_trunc`
+  call sites, not assumed), CURRCVT explicitly declared out of scope
+  (variable target minor unit, Gap-R) rather than silently skipped. A
+  missing declared column or unparseable cell is itself a violation —
+  schema drift is exactly the failure this exists to catch.
+- **bench-schema adoption completed workspace-wide (#738)** — all 21
+  criterion bench targets found in the workspace (not the ~15-16 originally
+  estimated) now carry a migration note naming their real traced
+  deterministic seed(s) and one concrete `criterion_estimate_to_record`
+  example; `io_bench.rs` documents having no RNG at all rather than
+  inventing a seed. `scirust-bench-schema` gained a
+  `criterion_estimate_to_record` converter and crate-doc migration guide to
+  make this possible.
 
 ## Reopening conditions (written; none currently met)
 
