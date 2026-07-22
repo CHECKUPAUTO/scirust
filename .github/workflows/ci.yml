@@ -140,6 +140,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      # The full `--workspace --all-targets` debug build here writes tens of GB
+      # of artifacts and periodically exhausts the hosted runner's root
+      # filesystem. The overflow surfaces mid-build as `No space left on device
+      # (os error 28)` and, once rust-lld can no longer write its output, a
+      # downstream `collect2: ld terminated with signal 7 [Bus error]` — an
+      # infrastructure flake, not a code failure. Reclaim the large preinstalled
+      # toolchains this Rust job never touches (~25 GB: Android SDK/NDK, .NET,
+      # GHC/GHCup, CodeQL, Boost) so the build keeps comfortable headroom.
+      # Coreutils only — no third-party action; `-rf` ignores any path already
+      # absent, and `df -h /` records the reclaimed space in the job log.
+      - name: Free disk space for the workspace build
+        run: |
+          sudo rm -rf \
+            /usr/local/lib/android \
+            /usr/share/dotnet \
+            /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/share/boost
+          df -h /
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
@@ -245,6 +264,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      # Same root-filesystem exhaustion as the nightly `build-test` job above
+      # (ENOSPC mid-build, then a downstream rust-lld `signal 7 [Bus error]`):
+      # reclaim the unused preinstalled toolchains before this stable
+      # `--workspace --all-targets` debug build so it keeps disk headroom.
+      - name: Free disk space for the workspace build
+        run: |
+          sudo rm -rf \
+            /usr/local/lib/android \
+            /usr/share/dotnet \
+            /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/share/boost
+          df -h /
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
