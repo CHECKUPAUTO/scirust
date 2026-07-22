@@ -337,7 +337,9 @@ fn evaluate(
                         if method == "ols"
                             && let Some(clean) = &clean_ols
                         {
-                            accumulator.prediction_shifts.push(rmse(&predictions, clean));
+                            accumulator
+                                .prediction_shifts
+                                .push(rmse(&predictions, clean));
                         }
                     },
                     None => engine_ok = false,
