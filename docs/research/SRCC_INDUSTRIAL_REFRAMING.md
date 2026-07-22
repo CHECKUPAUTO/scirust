@@ -273,3 +273,66 @@ results (40 BenchRecords): 516ecd0a673ffbea4ade0f498914a12f927051f091c2717a6c82b
 Run twice, byte-identical; no network; checksum-verified C-MAPSS inputs; OLS
 (Householder QR) and isotonic (PAVA) are both deterministic, with no RNG beyond
 the frozen split seed.
+
+---
+
+## Follow-up 2 — stabilizing the supervised SECOM discriminant
+
+Lever 3 confirmed SECOM is a supervised-classification problem, but its
+discriminant over-fit hard: **all ~416 imputed features**, a **total-scatter**
+covariance, ridge only in {0.001, 0.1}. Its in-sample AUROC was 0.975 while its
+**validation AUROC sat below chance (0.40–0.43)** — so its frozen-test 0.581 was
+*not a validation-selectable result*, it was the less-bad of two broken options.
+This follow-up builds the model lever 3 named but did not fit — a **regularized
+LDA that tries to generalize** — with three additive stabilizers, each aimed at
+the p ≫ n overfit (`industrial-secom-stable`):
+
+1. **Standardization** — train-fitted per-feature z-scoring (scale-fair ridge and
+   feature scores).
+2. **Univariate feature selection** — keep the top-`k` features by the absolute
+   pooled-standardized (Cohen's-d) class-mean difference on **train** only,
+   cutting ~416 → `k` so the covariance is estimable (`k` ≪ the ~90 minority
+   rows).
+3. **Within-class (Fisher) covariance** — `w = S_W⁻¹ (μ_fail − μ_pass)` using the
+   pooled *within-class* scatter (each row centered by its own class mean before
+   the regularized-Mahalanobis fit), not lever 3's total scatter.
+
+`(k, ridge)` selected on validation AUROC over fixed a-priori grids
+(`k ∈ {5,10,20,40,80}`, `ridge ∈ {0.01,0.1,1,10}`), frozen on the same phase-728
+temporal test split:
+
+| model | validation AUROC | frozen-test AUROC | validation→test |
+|-------|----------------:|------------------:|----------------:|
+| unsupervised (phase 728, best density) | — | 0.469 | — |
+| lever-3 supervised (416 feat, total scatter) | 0.40–0.43 | 0.581 | +0.15 (anti-predictive) |
+| **follow-up 2** (k=20, within-class LDA, standardized) | **0.587** | **0.567** | **−0.020** |
+
+**Finding — reliability, not a higher ceiling.** The stabilized model does **not**
+raise the absolute test AUROC (0.567 vs 0.581 is within noise for ~1500 rows).
+What it changes is *trustworthiness*: its validation AUROC (0.587) is now **above
+chance and tightly predicts the frozen test** (0.567, drift −0.020), whereas
+lever 3's below-chance validation could not select its own test number at all.
+Stabilization converts an unselectable, lucky-looking 0.581 into a **validation-
+selectable, drift-stable ~0.57** — the number you would actually have picked in
+advance. It also does so with **20 features instead of 416**.
+
+**Honest bound.** SECOM's linear-supervised ceiling is ~0.57 on this frozen
+temporal split, and no combination in the grid clears it: standardization,
+selection and within-class covariance curb variance but cannot manufacture the
+signal a linear model in these features does not have. Going higher needs a
+*nonlinear* classifier or explicit drift correction, not a better-conditioned
+linear discriminant — the same "framing, then model class" ladder lever 1 / and
+follow-up 1 climbed on the RUL side. The narrow, defensible claim: the supervised
+SECOM result is now **reproducible and selectable**, which lever 3's was not.
+
+**Determinism.**
+
+```
+stdout  SHA-256: 719d2f746856793494b5a98018674dd8552abed19df94fd4024a4fbf50c4d4a2
+results SHA-256: 000d876b2d24d5e179c46801318db34c96786c45c6779c50aaaf58a3ab466336  (26 BenchRecords)
+```
+
+Run twice, byte-identical; no network; checksum-verified SECOM inputs; the
+standardizer, univariate selection (`total_cmp` with index tie-break), and the
+regularized within-class LDA are all deterministic, with no RNG beyond the frozen
+temporal split.
