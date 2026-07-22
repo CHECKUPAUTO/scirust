@@ -102,7 +102,7 @@ deployment from within a method crate.
 | F1b | Follow-up 1 — monotone RUL evaluation (realize the lever-1 ceiling) | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#758](https://github.com/Memorithm/scirust/pull/758) | `6342217c` | **Merged** |
 | F2 | Follow-up 2 — stabilized supervised SECOM (feature selection + within-class LDA) | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#759](https://github.com/Memorithm/scirust/pull/759) | `eaf6c2f3` | **Merged** |
 | F3 | Follow-up 3 — native heavy-tailed noise (the regime robustness wins) | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#760](https://github.com/Memorithm/scirust/pull/760) | `1c75ab3d` | **Merged** |
-| 729 | Shadow deployment & promotion gates (follow-up 4) | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#761](https://github.com/Memorithm/scirust/pull/761) | _(pending)_ | **In review** |
+| 729 | Shadow deployment & promotion gates (follow-up 4) | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#761](https://github.com/Memorithm/scirust/pull/761) | `15a7319c` | **Merged** |
 
 > Branch and numbering notes:
 > - The program's suggested per-phase branches (`feat/stats-robust-descriptive`,
