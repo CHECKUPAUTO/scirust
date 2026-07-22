@@ -19,6 +19,7 @@ mod scoring;
 mod search;
 mod selection;
 mod stability;
+mod trust;
 
 pub use closure::{SrccAdmissionCertificate, SrccClosure, SrccClosureError};
 pub use discovery::{
@@ -64,6 +65,13 @@ pub use selection::{
 };
 pub use stability::{
     SrccStabilityError, SrccStabilityReport, SrccStabilityVariant, evaluate_leave_one_out_stability,
+};
+pub use trust::{
+    SrccGroupTrustCertificate, SrccObservationTrust, SrccTrustCertificate, SrccTrustError,
+    SrccTrustEvidence, SrccTrustEvidenceKind, SrccTrustEvidenceProvider, SrccTrustModel,
+    SrccTrustPolicy, SrccTrustProviderId, SrccTrustedFitError, SrccTrustedFitResult,
+    collect_trust_evidence, evaluate_trusted_robust_leave_one_out_stability,
+    fit_trusted_robust_srcc_projector_from_views,
 };
 
 use core::fmt;

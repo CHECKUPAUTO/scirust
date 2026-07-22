@@ -89,8 +89,8 @@ deployment from within a method crate.
 | 721 | Robust descriptive statistics | `claude/scirust-srcc-robust-stats-6ue9xc` | [#725](https://github.com/Memorithm/scirust/pull/725) | `f2b87380eb02dda91e39c7c45f1ab73d6f9a5a36` | **Merged** |
 | 722 | Robust multivariate geometry | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#729](https://github.com/Memorithm/scirust/pull/729) | `c4e49bfbeb936182b4474a67afd83595ade6727e` | **Merged** |
 | 723 | Scale-aware SRCC source geometry | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#737](https://github.com/Memorithm/scirust/pull/737) | `96b73ea9c45b4c97456ca11cbb0a1e3164d3cfae` | **Merged** |
-| 724 | Deterministic robust regression | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#739](https://github.com/Memorithm/scirust/pull/739) | _(pending)_ | In review |
-| 725 | Trust & contamination models | `feat/srcc-trust-contamination-models` | — | — | Not started |
+| 724 | Deterministic robust regression | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#739](https://github.com/Memorithm/scirust/pull/739) | `c1c10946a48cb57daaff3fb4875a69064a0bb148` | **Merged** |
+| 725 | Trust & contamination models | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#742](https://github.com/Memorithm/scirust/pull/742) | _(pending)_ | In review |
 | 726 | Certified medoid clustering | `feat/solvers-certified-medoid-clustering` | — | — | Not started |
 | 727 | Industrial benchmark harness | `feat/srcc-industrial-benchmark-harness` | — | — | Not started |
 | 728 | Real industrial evaluation | `feat/srcc-industrial-real-data-evaluation` | — | — | Not started |
@@ -553,3 +553,122 @@ gains exactly the three cycle-free workspace edges (`scirust-solvers`,
 - Breakdown honesty: Huber's breakdown shrinks with leverage (no leverage-based
   weighting here); trimmed tolerates at most `1 − h`; MoM needs a clean-block
   majority. SRCC integration and identifiability assumptions are later phases.
+
+---
+
+## Phase 725 — Trust fusion and identifiable majority contamination
+
+**Crate:** `scirust-srcc` · **Module:** `scirust-srcc/src/trust.rs`
+
+### Design
+
+Explicit, machine-checkable trust models that keep SRCC useful when aberrant
+observations form a global numerical majority — only under declared
+identifiability assumptions, never as arbitrary-majority robustness. Principle:
+if two incompatible explanations are equally consistent with the supplied
+assumptions, the result is the typed
+`SrccTrustError::UnidentifiableContamination { competing_hypotheses }`.
+
+New public surface: `SrccTrustProviderId` (typed, no strings),
+`SrccTrustEvidenceKind` (8 kinds with per-kind score semantics: anchors are
+exactly `{0,1}`, temporal predictions are non-negative errors, everything else
+`[0,1]`), `SrccTrustEvidence`, `SrccObservationTrust` (caller addressing,
+finite non-negative priors), `SrccTrustModel`, `SrccTrustPolicy { Unweighted,
+TrustedAnchors, IndependentViews, TemporalPersistence,
+GroupContaminationBound, CompositeAll }` (conjunction only — a disjunction
+would certify nothing and is deliberately not exposed), the
+`SrccTrustEvidenceProvider` trait + `collect_trust_evidence` (the integration
+point for estimation/SPC/PdM monitors; no heavy dependency is hard-wired),
+`fit_trusted_robust_srcc_projector_from_views`,
+`evaluate_trusted_robust_leave_one_out_stability`, `SrccTrustedFitResult` with
+`SrccTrustCertificate` (assumptions + per-group total weight, winning support,
+runner-up support, anchor count) and typed `SrccTrustError` /
+`SrccTrustedFitError`.
+
+### Consensus mathematics
+
+- The per-group target consensus becomes the **weighted medoid**
+  `argmin_c Σᵢ wᵢ·d²(c, targetᵢ)` over positive-weight candidates, scanned in
+  the historical fixed order; under `Unweighted` every weight is `1.0` and
+  `1.0 · x == x` in IEEE arithmetic, so the historical unweighted result is
+  reproduced **bit for bit** through the same code path (full-struct equality
+  test against `fit_robust_srcc_projector_from_views`).
+- **Adversarial margin**: with `support(c)` the summed weight of observations
+  bit-identical to `c`, a policy bounding corrupted weight by `β·W` accepts
+  only when `support(winner) − support(runner-up) > 2·β·W` — otherwise an
+  adversary inside the declared bound could have flipped the outcome, and the
+  typed unidentifiability is returned. Bounds are validated `β ∈ [0, 0.5)`.
+- Weights are **not** probabilities and are never multiplied across evidence
+  kinds; each policy states exactly how evidence gates weights (anchors gate
+  non-anchors to zero; persistence gates observations lacking
+  `minimum_consistent_steps` predictions within `maximum_prediction_error`;
+  `CompositeAll` takes the per-observation minimum and the strictest margins).
+- Tied distinct targets are counted (deduplicated) as competing hypotheses;
+  under an anchor policy a weighted tie means the anchors themselves disagree
+  and is remapped to the explicit `ConflictingAnchors`.
+
+### Leave-one-out contract
+
+`evaluate_trusted_robust_leave_one_out_stability` re-derives the trust weights
+for every reduced view set (records addressing the removed sample are dropped,
+later records shift down) and refits the complete trusted pipeline — trust
+decisions are recomputed per variant, never frozen (verified: removing one of
+exactly-minimum anchors yields the typed `InsufficientAnchorSupport`).
+
+### Tests
+
+14 new tests (117 total in the crate): the bit-exact Unweighted compatibility
+test plus the program's ten adversarial scenarios — (1) count-majority /
+weight-minority accepted under the per-view bound with certificate; (2)
+view-concentrated 80 % weight rejected as unidentifiable; (3) unweighted
+majority corruption silently electing the contaminant (exposed) while the
+group bound refuses; (4) trusted anchors recovering under count-majority
+corruption; (5) conflicting anchors failing explicitly; (6) temporal
+persistence defeating a burst attack; (7) a 50/50 persistent split reported as
+`UnidentifiableContamination { 2 }`, not blindly rejected; (8) conflicting
+policies under `CompositeAll` failing loudly (`AllObservationsUntrusted`); (9)
+deterministic weighted ties; (10) trusted leave-one-out recomputation — plus
+the invalid-model battery (bounds, duplicates, scores, priors, nested/empty
+composites, insufficient views) and provider-collection determinism.
+
+### Benchmark fingerprint
+
+`scirust-srcc/examples/trusted_consensus_contamination.rs` — a 225-row
+contamination matrix (corrupt count {0..4, 6} against 5 clean per view ×
+weight concentration × anchor corruption × burst/persistent attack × five
+policies) with typed outcomes and certificate fields per cell, driven through
+a deterministic `SrccTrustEvidenceProvider` adapter.
+
+```
+SHA-256 (scientific stdout, nightly-2026-07-02, x86_64):
+7d0a6d72c15ac5bc316761bd9c258439704b5bb15c06021ab9daf02256353a9b
+```
+
+Honest failure surface, printed not hidden: at the 55 % corrupt majority the
+unweighted consensus silently elects the contaminant (`accepted:bad`); the
+bounded policies refuse (`unidentifiable:2`); trusted anchors recover
+(`accepted:clean`); temporal persistence gates the burst but **accepts the
+contaminant under a persistent majority attack** — persistence alone is not an
+identifiability assumption against persistent adversaries. The 50/50
+persistent split is unidentifiable under every policy, by construction.
+
+### Compatibility
+
+Purely additive: no existing public item changed; two private helpers of
+`robust.rs` promoted `pub(crate)` (bodies untouched); all three historical
+srcc example outputs remain byte-identical (`b2a1a041…`, `4943a4e4…`,
+`fc0dcbca…`). No new dependency edge. `cargo check --workspace --all-targets
+--locked` passes.
+
+### Known limitations / deferred
+
+- Trust integrates with the exact-source robust fitter; composition with the
+  scale-aware clustered pipeline (723) is deferred to the benchmark-harness
+  phase where both opt-ins meet.
+- Anchor incorruptibility, per-scope corruption bounds and persistence are
+  *assumptions*, not detections; the certificates state them, the policies
+  enforce their logical consequences, and nothing here verifies them against
+  ground truth (that is what phases 727–728 measure).
+- The margin analysis covers vote flipping between bit-identical target
+  candidates; continuous-target displacement attacks inside a candidate are
+  bounded only by the medoid geometry, not by the margin certificate.
