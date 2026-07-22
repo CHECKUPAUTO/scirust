@@ -33,6 +33,7 @@
 //! [`SensorDropout`]: ContaminationKind::SensorDropout
 //! [`BurstAttack`]: ContaminationKind::BurstAttack
 //! [`ViewConcentratedAttack`]: ContaminationKind::ViewConcentratedAttack
+//! [`LeveragePoint`]: ContaminationKind::LeveragePoint
 
 use core::fmt;
 
@@ -109,6 +110,26 @@ pub enum ContaminationKind {
         group: u64,
         /// Constant added to the affected targets (finite).
         target_shift: f64,
+    },
+    /// A **high-leverage bad point**: every feature of an affected row is
+    /// pushed to `feature_shift_mads` train-MADs beyond its column median (a
+    /// fixed positive direction), and its target is overwritten with
+    /// `corrupt_target`. Unlike [`CoherentAlternativeCluster`], which the
+    /// phase-728 diagnostic showed barely moved the least-squares fit (a
+    /// low-leverage block), a point far out in feature space with a wrong
+    /// target exerts large influence on ordinary least squares — the classic
+    /// bad-leverage case robust regression is meant to reject. The per-column
+    /// median and MAD are computed over the input dataset's rows; a
+    /// near-constant column (MAD 0) receives no shift (no leverage there),
+    /// which is stated rather than hidden.
+    ///
+    /// [`CoherentAlternativeCluster`]: ContaminationKind::CoherentAlternativeCluster
+    LeveragePoint {
+        /// How many train-MADs beyond each column's median to push the
+        /// affected rows' features (finite, positive).
+        feature_shift_mads: f64,
+        /// The corrupt target value written to affected rows (finite).
+        corrupt_target: f64,
     },
 }
 
@@ -347,9 +368,62 @@ fn validate_kind(
                 });
             }
         },
+        ContaminationKind::LeveragePoint {
+            feature_shift_mads,
+            corrupt_target,
+        } =>
+        {
+            if !feature_shift_mads.is_finite() || *feature_shift_mads <= 0.0
+            {
+                return Err(ContaminationError::InvalidParameter {
+                    parameter: "feature_shift_mads must be finite and positive",
+                });
+            }
+
+            if !corrupt_target.is_finite()
+            {
+                return Err(ContaminationError::InvalidParameter {
+                    parameter: "corrupt_target must be finite",
+                });
+            }
+        },
     }
 
     Ok(())
+}
+
+/// Per-column (median, normal-consistency MAD) over a set of rows, matching
+/// the program's sorted-midpoint convention.
+fn column_median_mads(features: &[Vec<f64>]) -> Vec<(f64, f64)> {
+    let columns = features.first().map_or(0, Vec::len);
+
+    let midpoint_median = |sorted: &[f64]| -> f64 {
+        let n = sorted.len();
+
+        if n % 2 == 1
+        {
+            sorted[n / 2]
+        }
+        else
+        {
+            (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0
+        }
+    };
+
+    (0..columns)
+        .map(|column| {
+            let mut values: Vec<f64> = features.iter().map(|row| row[column]).collect();
+            values.sort_by(f64::total_cmp);
+            let median = midpoint_median(&values);
+
+            let mut deviations: Vec<f64> =
+                values.iter().map(|value| (value - median).abs()).collect();
+            deviations.sort_by(f64::total_cmp);
+            let mad = midpoint_median(&deviations) * 1.482_602_218_505_602;
+
+            (median, mad)
+        })
+        .collect()
 }
 
 /// Seeded Fisher–Yates over the given candidate rows; returns the first
@@ -537,6 +611,24 @@ pub fn apply_contamination(
             for &row in &affected
             {
                 output.targets[row] += target_shift;
+            }
+        },
+        ContaminationKind::LeveragePoint {
+            feature_shift_mads,
+            corrupt_target,
+        } =>
+        {
+            // Reference spread from the original (unmutated) rows.
+            let spreads = column_median_mads(&dataset.features);
+
+            for &row in &affected
+            {
+                for (column, (median, mad)) in spreads.iter().enumerate()
+                {
+                    output.features[row][column] = median + feature_shift_mads * mad;
+                }
+
+                output.targets[row] = *corrupt_target;
             }
         },
     }
@@ -749,6 +841,81 @@ mod tests {
         {
             assert_eq!(output.targets[row], data.targets[row] + 25.0);
         }
+    }
+
+    #[test]
+    fn leverage_point_pushes_features_out_and_corrupts_targets() {
+        // Column 0 over rows {0..10}: values 0..9 → median 4.5, MAD ≈ 2.5·k.
+        // Column 1 is constant (100) → MAD 0 → no shift there.
+        let data = dataset();
+
+        let (output, manifest) = apply_contamination(
+            &data,
+            &config(
+                ContaminationKind::LeveragePoint {
+                    feature_shift_mads: 10.0,
+                    corrupt_target: -999.0,
+                },
+                0.2,
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(manifest.affected_rows.len(), 2);
+
+        let spreads = column_median_mads(&data.features);
+
+        for &row in &manifest.affected_rows
+        {
+            // Column 0 pushed far out; column 1 (MAD 0) untouched in value.
+            assert_eq!(output.features[row][0], spreads[0].0 + 10.0 * spreads[0].1,);
+            assert!(output.features[row][0] > data.features[row][0] + 10.0);
+            assert_eq!(output.features[row][1], spreads[1].0); // MAD 0 → median
+            assert_eq!(output.targets[row], -999.0);
+        }
+
+        // Unaffected rows are untouched.
+        for row in 0..10
+        {
+            if !manifest.affected_rows.contains(&row)
+            {
+                assert_eq!(output.features[row], data.features[row]);
+                assert_eq!(output.targets[row], data.targets[row]);
+            }
+        }
+    }
+
+    #[test]
+    fn leverage_point_rejects_bad_parameters() {
+        let data = dataset();
+
+        assert!(matches!(
+            apply_contamination(
+                &data,
+                &config(
+                    ContaminationKind::LeveragePoint {
+                        feature_shift_mads: 0.0,
+                        corrupt_target: 1.0,
+                    },
+                    0.5,
+                ),
+            ),
+            Err(ContaminationError::InvalidParameter { .. })
+        ));
+
+        assert!(matches!(
+            apply_contamination(
+                &data,
+                &config(
+                    ContaminationKind::LeveragePoint {
+                        feature_shift_mads: 5.0,
+                        corrupt_target: f64::NAN,
+                    },
+                    0.5,
+                ),
+            ),
+            Err(ContaminationError::InvalidParameter { .. })
+        ));
     }
 
     #[test]
