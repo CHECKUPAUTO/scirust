@@ -10,17 +10,23 @@ use super::adaptive::{Lms, Nlms, Rls};
 use super::biquad::{butterworth_qs, chebyshev1_pole_params};
 use super::fft::{Complex, Plan, fft, ifft, irfft, rfft};
 use super::fftconv::fft_convolve;
+use super::goertzel::{goertzel, goertzel_hz, goertzel_power};
+use super::hilbert::{
+    analytic_signal, envelope, hilbert, instantaneous_frequency, instantaneous_phase,
+};
 use super::kalman::{KalmanFilter, UnscentedKalmanFilter};
 use super::mel::MelFilterbank;
 use super::mfcc::{Mfcc, dct2, dct2_basis};
 use super::pll::{Nco, PiLoopFilter, Pll};
 use super::resample::design_prototype;
+use super::savgol::{savgol_coeffs, savgol_filter};
 use super::stft::{istft, magnitude_spectrogram, num_frames, power_spectrogram, stft};
 use super::timing::{SymbolTimingLoop, gardner_ted, mueller_muller_ted};
 use super::wavelet::{
     Wavelet, cdf53_forward, cdf53_inverse, dwt_decompose, dwt_reconstruct, haar_forward,
     haar_inverse,
 };
+use super::welch::{welch, welch_freqs};
 use super::window;
 use super::{
     Biquad, BiquadCascade, Fir, group_delay, magnitude, magnitude_db, phase, resample, unwrap_phase,
@@ -3549,4 +3555,388 @@ fn cdf53_better_compaction_than_haar_all_scalars() {
     check_cdf53_better_compaction_than_haar::<f32>();
     check_cdf53_better_compaction_than_haar::<f64>();
     check_cdf53_better_compaction_than_haar::<Q16_16>();
+}
+
+// ================================================================== //
+//  hilbert : signal analytique, enveloppe, phase/fréquence instant.  //
+// ================================================================== //
+
+/// Signal d'un ton pur bin-aligné `cos(2π·k0·n/N)` (aucune fuite spectrale).
+fn tone<T: Scalar>(n: usize, k0: usize) -> Vec<T> {
+    (0..n)
+        .map(|i| {
+            let ph = 2.0 * core::f64::consts::PI * (k0 as f64) * (i as f64) / (n as f64);
+            T::of(ph.cos())
+        })
+        .collect()
+}
+
+/// La transformée de Hilbert d'un cosinus bin-aligné est le sinus correspondant,
+/// et la partie réelle du signal analytique reconstruit le cosinus. `tol` est
+/// une borne **absolue** : deux FFT en cascade (directe + inverse) accumulent
+/// l'arrondi des twiddles, plus large en virgule fixe qu'en flottant.
+fn check_hilbert_of_cosine_is_sine<T: Scalar>(tol: f64) {
+    let n = 64;
+    let k0 = 8;
+    let x = tone::<T>(n, k0);
+    let z = analytic_signal(&x);
+    let h = hilbert(&x);
+    for i in 0..n
+    {
+        let ph = 2.0 * core::f64::consts::PI * (k0 as f64) * (i as f64) / (n as f64);
+        // re ≈ cos, im ≈ sin.
+        assert!((z[i].re.to_f64() - ph.cos()).abs() <= tol, "re @ {i}");
+        assert!((z[i].im.to_f64() - ph.sin()).abs() <= tol, "im @ {i}");
+        assert!((h[i].to_f64() - ph.sin()).abs() <= tol, "hilbert @ {i}");
+    }
+}
+
+// Q8_24 est **exclu** de ces tests à FFT de longueur 64 : la plage ±128 du
+// format sature le terme d'angle `−2π·k` de `fft` dès `k ≳ 20` (limitation
+// connue du chemin FFT en Q8_24, sans rapport avec `hilbert`). Q16_16 (plage
+// ±32768) n'a pas ce souci.
+#[test]
+fn hilbert_of_cosine_is_sine_all_scalars() {
+    check_hilbert_of_cosine_is_sine::<f32>(1e-4);
+    check_hilbert_of_cosine_is_sine::<f64>(1e-12);
+    check_hilbert_of_cosine_is_sine::<Q16_16>(2e-2);
+}
+
+/// L'enveloppe d'un ton pur est constante (= 1). `tol` : borne absolue (cf.
+/// [`check_hilbert_of_cosine_is_sine`]).
+fn check_envelope_of_tone_is_constant<T: Scalar>(tol: f64) {
+    let n = 64;
+    let env = envelope(&tone::<T>(n, 8));
+    for (i, e) in env.iter().enumerate()
+    {
+        assert!(
+            (e.to_f64() - 1.0).abs() <= tol,
+            "env @ {i} = {}",
+            e.to_f64()
+        );
+    }
+}
+
+// Q8_24 exclu (FFT de longueur 64 sature la plage ±128, cf.
+// `hilbert_of_cosine_is_sine_all_scalars`).
+#[test]
+fn envelope_of_tone_is_constant_all_scalars() {
+    check_envelope_of_tone_is_constant::<f32>(1e-4);
+    check_envelope_of_tone_is_constant::<f64>(1e-12);
+    check_envelope_of_tone_is_constant::<Q16_16>(2e-2);
+}
+
+/// La fréquence instantanée d'un ton pur est constante (= k0·fs/N).
+#[allow(clippy::needless_range_loop)] // `i` étiquette aussi l'échantillon dans l'assertion.
+fn check_instantaneous_frequency_of_tone<T: Scalar>() {
+    let n = 64;
+    let k0 = 8;
+    let fs = T::of(n as f64); // fs = N ⇒ fréquence attendue = k0.
+    let f = instantaneous_frequency(&tone::<T>(n, k0), fs);
+    // Bords exclus (différences décentrées).
+    for i in 2..n - 2
+    {
+        assert!(
+            (f[i].to_f64() - k0 as f64).abs() <= 0.2,
+            "f @ {i} = {}",
+            f[i].to_f64()
+        );
+    }
+}
+
+#[test]
+fn instantaneous_frequency_of_tone_floats() {
+    check_instantaneous_frequency_of_tone::<f32>();
+    check_instantaneous_frequency_of_tone::<f64>();
+}
+
+/// La phase instantanée déballée croît linéairement de `2π·k0/N` par échantillon.
+fn check_instantaneous_phase_linear<T: Scalar>() {
+    let n = 64;
+    let k0 = 8;
+    let ph = instantaneous_phase(&tone::<T>(n, k0));
+    let step = 2.0 * core::f64::consts::PI * (k0 as f64) / (n as f64);
+    for i in 3..n - 3
+    {
+        let d = ph[i + 1].to_f64() - ph[i].to_f64();
+        assert!((d - step).abs() <= 0.05, "dφ @ {i} = {d}, attendu {step}");
+    }
+}
+
+#[test]
+fn instantaneous_phase_linear_floats() {
+    check_instantaneous_phase_linear::<f32>();
+    check_instantaneous_phase_linear::<f64>();
+}
+
+// ================================================================== //
+//  goertzel : DFT à une seule fréquence                              //
+// ================================================================== //
+
+/// Goertzel à `ω = 2πk/N` reproduit le bin `k` de la FFT. `tol` : borne
+/// absolue — les deux chemins numériques (récurrence vs papillons) divergent
+/// plus en virgule fixe.
+#[allow(clippy::needless_range_loop)] // `k` sert à la fois d'indice de bin et de fréquence.
+fn check_goertzel_matches_fft_bin<T: Scalar>(tol: f64) {
+    let n = 16;
+    // Signal déterministe borné.
+    let x: Vec<T> = (0..n)
+        .map(|i| T::of((i as f64 * 0.37).sin() * 0.5 + (i as f64 * 0.11).cos() * 0.3))
+        .collect();
+    let mut spec: Vec<Complex<T>> = x.iter().map(|&v| Complex::from_real(v)).collect();
+    fft(&mut spec);
+    for k in 1..n / 2
+    {
+        let omega = T::of(2.0 * core::f64::consts::PI * (k as f64) / (n as f64));
+        let g = goertzel(&x, omega);
+        assert!(
+            (g.re.to_f64() - spec[k].re.to_f64()).abs() <= tol,
+            "re bin {k}"
+        );
+        assert!(
+            (g.im.to_f64() - spec[k].im.to_f64()).abs() <= tol,
+            "im bin {k}"
+        );
+    }
+}
+
+#[test]
+fn goertzel_matches_fft_bin_all_scalars() {
+    check_goertzel_matches_fft_bin::<f32>(1e-4);
+    check_goertzel_matches_fft_bin::<f64>(1e-12);
+    check_goertzel_matches_fft_bin::<Q16_16>(2e-2);
+    check_goertzel_matches_fft_bin::<Q8_24>(2e-2);
+}
+
+/// `goertzel_power` égale `|goertzel|²` (identité algébrique).
+fn check_goertzel_power_matches_magnitude<T: Scalar>() {
+    let n = 24;
+    let x: Vec<T> = (0..n)
+        .map(|i| T::of((i as f64 * 0.5).sin() * 0.4))
+        .collect();
+    let omega = T::of(2.0 * core::f64::consts::PI * 3.0 / (n as f64));
+    let g = goertzel(&x, omega);
+    let p = goertzel_power(&x, omega);
+    let mag2 = g.re.to_f64() * g.re.to_f64() + g.im.to_f64() * g.im.to_f64();
+    assert!(
+        (p.to_f64() - mag2).abs() <= T::TOL * 20.0,
+        "{} vs {mag2}",
+        p.to_f64()
+    );
+}
+
+#[test]
+fn goertzel_power_matches_magnitude_all_scalars() {
+    check_goertzel_power_matches_magnitude::<f32>();
+    check_goertzel_power_matches_magnitude::<f64>();
+    check_goertzel_power_matches_magnitude::<Q16_16>();
+    check_goertzel_power_matches_magnitude::<Q8_24>();
+}
+
+/// Détection de tonalité : la puissance Goertzel au bin d'un ton pur domine
+/// largement les bins voisins.
+fn check_goertzel_detects_tone<T: Scalar>() {
+    let n = 64;
+    let k0 = 10;
+    let x = tone::<T>(n, k0);
+    let at = |k: usize| {
+        let omega = T::of(2.0 * core::f64::consts::PI * (k as f64) / (n as f64));
+        goertzel_power(&x, omega).to_f64()
+    };
+    let peak = at(k0);
+    assert!(
+        peak > 100.0 * at(k0 - 2).max(1e-9),
+        "pic {peak} vs voisin {}",
+        at(k0 - 2)
+    );
+    assert!(
+        peak > 100.0 * at(k0 + 2).max(1e-9),
+        "pic {peak} vs voisin {}",
+        at(k0 + 2)
+    );
+}
+
+#[test]
+fn goertzel_detects_tone_all_scalars() {
+    check_goertzel_detects_tone::<f32>();
+    check_goertzel_detects_tone::<f64>();
+    check_goertzel_detects_tone::<Q16_16>();
+}
+
+/// `goertzel_hz` convertit correctement Hz → ω = 2π·f/fs.
+#[test]
+fn goertzel_hz_matches_omega() {
+    let x: Vec<f64> = (0..32).map(|i| (i as f64 * 0.3).sin()).collect();
+    let (fs, f0) = (1000.0, 125.0); // ω = 2π·125/1000 = π/4.
+    let via_hz = goertzel_hz(&x, fs, f0);
+    let via_omega = goertzel(&x, 2.0 * core::f64::consts::PI * f0 / fs);
+    assert!((via_hz.re - via_omega.re).abs() <= 1e-12);
+    assert!((via_hz.im - via_omega.im).abs() <= 1e-12);
+}
+
+// ================================================================== //
+//  welch : densité spectrale de puissance                            //
+// ================================================================== //
+
+/// La PSD de Welch d'un sinus bin-aligné pique au bon bin.
+fn check_welch_peaks_at_tone<T: Scalar>() {
+    let frame = 64;
+    let k0 = 8;
+    let len = 512;
+    // Sinus à f0 = k0 (avec fs = frame ⇒ bin-aligné à la trame).
+    let sig: Vec<T> = (0..len)
+        .map(|i| {
+            let ph = 2.0 * core::f64::consts::PI * (k0 as f64) * (i as f64) / (frame as f64);
+            T::of(ph.sin())
+        })
+        .collect();
+    let win: Vec<T> = window::hann(frame);
+    let fs = T::of(frame as f64);
+    let psd = welch(&sig, &win, frame / 2, fs);
+    assert_eq!(psd.len(), frame / 2 + 1);
+    // argmax = k0.
+    let mut best = 0;
+    for k in 1..psd.len()
+    {
+        if psd[k].to_f64() > psd[best].to_f64()
+        {
+            best = k;
+        }
+    }
+    assert_eq!(best, k0, "pic PSD au bin {best}, attendu {k0}");
+    // Toutes les valeurs sont positives.
+    assert!(psd.iter().all(|p| p.to_f64() >= 0.0));
+}
+
+#[test]
+fn welch_peaks_at_tone_all_scalars() {
+    check_welch_peaks_at_tone::<f32>();
+    check_welch_peaks_at_tone::<f64>();
+    check_welch_peaks_at_tone::<Q16_16>();
+}
+
+/// Les fréquences des bins de Welch : f[k] = k·fs/frame.
+#[test]
+fn welch_freqs_are_correct() {
+    let freqs = welch_freqs::<f64>(64, 128.0);
+    assert_eq!(freqs.len(), 33);
+    for (k, f) in freqs.iter().enumerate()
+    {
+        assert!((f - k as f64 * 2.0).abs() <= 1e-12); // 128/64 = 2 Hz/bin.
+    }
+}
+
+// ================================================================== //
+//  savgol : lissage & différentiation polynomiale                    //
+// ================================================================== //
+
+/// Coefficients de lissage quadratique 5 points = [-3,12,17,12,-3]/35 (classique).
+fn check_savgol_smoothing_coeffs_5pt<T: Scalar>() {
+    let c = savgol_coeffs::<T>(5, 2, 0);
+    let expect = [
+        -3.0 / 35.0,
+        12.0 / 35.0,
+        17.0 / 35.0,
+        12.0 / 35.0,
+        -3.0 / 35.0,
+    ];
+    for (i, &e) in expect.iter().enumerate()
+    {
+        assert!(
+            (c[i].to_f64() - e).abs() <= T::TOL * 6.0,
+            "coeff {i} = {}, attendu {e}",
+            c[i].to_f64()
+        );
+    }
+    // Somme = 1 (lissage préserve la constante).
+    let sum: f64 = c.iter().map(|v| v.to_f64()).sum();
+    assert!((sum - 1.0).abs() <= T::TOL * 6.0);
+}
+
+#[test]
+fn savgol_smoothing_coeffs_5pt_all_scalars() {
+    check_savgol_smoothing_coeffs_5pt::<f32>();
+    check_savgol_smoothing_coeffs_5pt::<f64>();
+    check_savgol_smoothing_coeffs_5pt::<Q16_16>();
+    check_savgol_smoothing_coeffs_5pt::<Q8_24>();
+}
+
+/// Coefficients de dérivée première 5 points = [-2,-1,0,1,2]/10 (classique).
+fn check_savgol_deriv_coeffs_5pt<T: Scalar>() {
+    let c = savgol_coeffs::<T>(5, 2, 1);
+    let expect = [-0.2, -0.1, 0.0, 0.1, 0.2];
+    for (i, &e) in expect.iter().enumerate()
+    {
+        assert!(
+            (c[i].to_f64() - e).abs() <= T::TOL * 6.0,
+            "coeff {i} = {}",
+            c[i].to_f64()
+        );
+    }
+    // Somme des coefficients de dérivée = 0.
+    let sum: f64 = c.iter().map(|v| v.to_f64()).sum();
+    assert!(sum.abs() <= T::TOL * 6.0);
+}
+
+#[test]
+fn savgol_deriv_coeffs_5pt_all_scalars() {
+    check_savgol_deriv_coeffs_5pt::<f32>();
+    check_savgol_deriv_coeffs_5pt::<f64>();
+    check_savgol_deriv_coeffs_5pt::<Q16_16>();
+    check_savgol_deriv_coeffs_5pt::<Q8_24>();
+}
+
+/// Un filtre SG d'ordre `p` reproduit **exactement** un polynôme de degré ≤ p
+/// (aux points intérieurs) — ici une parabole avec poly_order = 2.
+#[test]
+fn savgol_reproduces_polynomial() {
+    // x[n] = 0.01n² − 0.5n + 3.
+    let x: Vec<f64> = (0..40)
+        .map(|n| 0.01 * (n * n) as f64 - 0.5 * n as f64 + 3.0)
+        .collect();
+    let y = savgol_filter(&x, 7, 2, 0);
+    for i in 3..x.len() - 3
+    {
+        assert!((y[i] - x[i]).abs() <= 1e-9, "@ {i}: {} vs {}", y[i], x[i]);
+    }
+}
+
+/// La dérivée première SG d'une rampe linéaire est la pente constante.
+#[test]
+#[allow(clippy::needless_range_loop)] // `i` étiquette aussi l'échantillon dans l'assertion.
+fn savgol_derivative_of_ramp_is_slope() {
+    let slope = 0.75;
+    let x: Vec<f64> = (0..30).map(|n| slope * n as f64 - 1.0).collect();
+    let d = savgol_filter(&x, 5, 2, 1);
+    for i in 2..x.len() - 2
+    {
+        assert!((d[i] - slope).abs() <= 1e-9, "@ {i}: {}", d[i]);
+    }
+}
+
+/// `savgol_filter` préserve la longueur et lisse le bruit (variance réduite).
+#[test]
+fn savgol_filter_reduces_noise_variance() {
+    // Signal lisse (sinus) + bruit déterministe.
+    let n = 200;
+    let mut lcg = 0x1234u64;
+    let x: Vec<f64> = (0..n)
+        .map(|i| {
+            lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let noise = ((lcg >> 40) as f64 / (1u64 << 24) as f64 - 0.5) * 0.2;
+            (i as f64 * 0.1).sin() + noise
+        })
+        .collect();
+    let y = savgol_filter(&x, 11, 3, 0);
+    assert_eq!(y.len(), n);
+    // La variance de l'erreur au signal lisse sous-jacent diminue.
+    let clean: Vec<f64> = (0..n).map(|i| (i as f64 * 0.1).sin()).collect();
+    let var = |v: &[f64]| -> f64 {
+        v.iter()
+            .zip(&clean)
+            .map(|(a, c)| (a - c).powi(2))
+            .sum::<f64>()
+            / n as f64
+    };
+    assert!(var(&y) < var(&x), "SG devrait réduire la variance du bruit");
 }
