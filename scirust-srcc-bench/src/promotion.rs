@@ -393,7 +393,7 @@ mod tests {
 
         assert_eq!(report.decision, Decision::Hold);
         assert!(report.primary.passed);
-        assert_eq!(report.guardrails[0].passed, false);
+        assert!(!report.guardrails[0].passed);
         assert!(report.reasons.iter().any(|r| r.contains("guardrail")));
     }
 
