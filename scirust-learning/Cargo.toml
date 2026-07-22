@@ -7,6 +7,12 @@ publish = false
 [dependencies]
 scirust-core = { path = "../scirust-core" }
 scirust-simd = { path = "../scirust-simd" }
+# Robust regression (SRCC program, phase 724): Householder QR least squares
+# from scirust-solvers, MAD residual scales and the seeded SplitMix64 from
+# scirust-stats, fitted feature standardization from scirust-multivariate.
+scirust-solvers = { path = "../scirust-solvers" }
+scirust-stats = { path = "../scirust-stats" }
+scirust-multivariate = { path = "../scirust-multivariate" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 fastrand = "2.0"
