@@ -764,3 +764,51 @@ in-repo OBD2 CSV; OLS/Huber are RNG-free and every gate decision is a seeded
 paired bootstrap. The `ExtendedPromotionGate` core carries seven new unit tests
 (composite arithmetic, switching-cost deadband, per-window consistency, and the
 typed-error surface) beside phase 729's six.
+
+## Second four-axis program — synthesis
+
+The three-lever program concluded that *framing*, not more robustness, was the
+missing piece. The two follow-up programs pushed each conclusion until it either
+broke or held. The first (monotone RUL, stabilized SECOM, injected heavy tails,
+promotion gates) sharpened the framing thesis; this **second** program tested its
+four hardest edges — richer models, a broken ceiling, real contamination, and a
+deployable decision — and returns a more nuanced verdict than "framing always
+wins":
+
+- **Axis 1 — multivariate nonlinear RUL (kernel ridge, PR #763/#764): mostly no.**
+  A genuinely nonlinear regressor closes the C-MAPSS ceiling further than the
+  1-D monotone recalibration in only **1 of 4 cells** (FD001 raw, +0.059), ties
+  once, and over-fits on both FD003 cells. Model capacity is an *inconsistent*
+  lever for turbofan RUL; the monotone ordering of the linear score already holds
+  most of the signal. Framing still dominates here.
+- **Axis 2 — SECOM past the linear ceiling (PR #765): yes, but by curvature, not
+  recency.** Degree-2 polynomial LDA lifts the frozen-test AUROC to **0.6177**,
+  above item 2 (0.567) and lever 3 (0.581); explicit drift correction (recency
+  windowing) *overfits* and drops to 0.530. The ~0.57 ceiling was breakable — the
+  binding constraint is model capacity per (rare) failure, spent well by low-order
+  nonlinearity and wasted by discarding data.
+- **Axis 3 — real native heavy tails (PR #766): yes, decisively — the first real
+  win.** On real Opel-Corsa OBD2 telemetry (OLS-residual excess kurtosis 45/19/10,
+  no injection), leave-one-segment-out, Huber and trimmed LS beat OLS on **every
+  bulk metric** across all three channels (paired-bootstrap CIs strictly positive
+  even on MAE), while OLS keeps only its L2-home RMSE. Robustness wins when the
+  regime matches — automotive telemetry has the heavy vertical tails turbofan
+  degradation lacked; that regime-match, not estimator strength, was always the
+  question.
+- **Axis 4 — extended promotion gates (PR #767): the industrialization payoff.**
+  A weighted composite + switching-cost deadband + temporal shadow windows turns
+  axis 3's two-sided result into a single defensible decision. On the same OBD2
+  shadow deployment every control flips a verdict a single-metric gate would get
+  wrong: all three candidates have a clean positive pooled composite, yet only
+  `ENGINE_LOAD` promotes and only at zero switching cost, while `THROTTLE_POS`
+  and `MAF` are held for regressing on one driving segment.
+
+**Program conclusion.** The framing thesis survives, refined: *matched capacity
+and matched regime* beat raw robustness, but neither is free and neither is
+universal. Nonlinearity helps only where curvature carries transferable signal
+under the sample budget (SECOM yes, C-MAPSS mostly no); robustness helps only
+where the native error regime is genuinely heavy-tailed (real OBD2 yes, turbofan
+no) — and even a real win can be too small or too temporally inconsistent to
+deploy, which is exactly what a preregistered extended gate is for. Every result
+here is a deterministic, checksum-anchored, honestly-reported number: the wins,
+the nulls, and the metric-dependent "it depends" that the gate then resolves.
