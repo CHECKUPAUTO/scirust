@@ -653,6 +653,7 @@ mod tests {
 pub mod activations;
 pub mod complex;
 pub mod dispatch;
+pub mod eigen;
 pub mod gemm;
 pub mod grad;
 pub mod matrix;
