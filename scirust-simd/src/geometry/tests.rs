@@ -8,7 +8,8 @@
 //    composition, angle-axe) mesurées contre une référence `f64` ;
 //  * déterminisme bit-à-bit du chemin virgule fixe.
 
-use super::{DualQuaternion, MadgwickFilter, MahonyFilter, Quaternion, Screw, Transform};
+use super::curves::{bezier_cubic, bezier_cubic_tangent, catmull_rom};
+use super::{DualQuaternion, MadgwickFilter, MahonyFilter, Quaternion, Screw, Se2, Transform};
 use crate::fixed::{NumericScalar, Q16_16, RealScalar};
 
 // ------------------------------------------------------------------ //
@@ -1636,4 +1637,237 @@ fn mahony_reset_restores_identity_and_zero_bias() {
     f.reset();
     assert_eq!(f.orientation(), Quaternion::<f64>::identity());
     assert_eq!(f.bias(), [0.0, 0.0, 0.0]);
+}
+
+// ------------------------------------------------------------------ //
+//  Se2 : déplacement rigide plan (SE(2))                              //
+// ------------------------------------------------------------------ //
+
+/// Un point transformé puis ramené par l'inverse revient à sa position.
+fn check_se2_inverse_round_trip<T: Scalar>() {
+    let t = Se2::<T>::new(T::of(0.6), T::of(1.5), T::of(-0.75));
+    let p = [T::of(0.3), T::of(-1.2)];
+    let back = t.inverse().transform_point(t.transform_point(p));
+    assert!((back[0].to_f64() - 0.3).abs() <= T::TOL * 8.0, "x");
+    assert!((back[1].to_f64() - (-1.2)).abs() <= T::TOL * 8.0, "y");
+}
+
+#[test]
+fn se2_inverse_round_trip_all_scalars() {
+    check_se2_inverse_round_trip::<f32>();
+    check_se2_inverse_round_trip::<f64>();
+    check_se2_inverse_round_trip::<Q16_16>();
+}
+
+/// `compose` respecte la convention `a∘b` = « b d'abord, puis a ».
+fn check_se2_compose_matches_sequential<T: Scalar>() {
+    let a = Se2::<T>::new(T::of(0.4), T::of(2.0), T::of(1.0));
+    let b = Se2::<T>::new(T::of(-0.9), T::of(-0.5), T::of(0.7));
+    let p = [T::of(1.1), T::of(-0.4)];
+    let direct = a.compose(&b).transform_point(p);
+    let seq = a.transform_point(b.transform_point(p));
+    assert!(
+        (direct[0].to_f64() - seq[0].to_f64()).abs() <= T::TOL * 8.0,
+        "x"
+    );
+    assert!(
+        (direct[1].to_f64() - seq[1].to_f64()).abs() <= T::TOL * 8.0,
+        "y"
+    );
+    // L'opérateur `*` est la composition.
+    let via_op = (a * b).transform_point(p);
+    assert!(
+        (via_op[0].to_f64() - seq[0].to_f64()).abs() <= T::TOL * 8.0,
+        "x op"
+    );
+    assert!(
+        (via_op[1].to_f64() - seq[1].to_f64()).abs() <= T::TOL * 8.0,
+        "y op"
+    );
+}
+
+#[test]
+fn se2_compose_matches_sequential_all_scalars() {
+    check_se2_compose_matches_sequential::<f32>();
+    check_se2_compose_matches_sequential::<f64>();
+    check_se2_compose_matches_sequential::<Q16_16>();
+}
+
+/// L'identité est le neutre de la composition ; une translation pure ne tourne
+/// pas ; une rotation pure de π/2 envoie (1,0) sur (0,1).
+fn check_se2_special_cases<T: Scalar>() {
+    let id = Se2::<T>::identity();
+    let g = Se2::<T>::new(T::of(0.3), T::of(1.0), T::of(2.0));
+    let comp = g.compose(&id);
+    assert!((comp.angle.to_f64() - 0.3).abs() <= T::TOL);
+    assert!((comp.translation[0].to_f64() - 1.0).abs() <= T::TOL);
+
+    // Translation pure : le point est juste décalé.
+    let tr = Se2::<T>::from_translation(T::of(3.0), T::of(-1.0));
+    let moved = tr.transform_point([T::of(0.5), T::of(0.5)]);
+    assert!((moved[0].to_f64() - 3.5).abs() <= T::TOL);
+    assert!((moved[1].to_f64() - (-0.5)).abs() <= T::TOL);
+
+    // Rotation pure de π/2 : (1,0) ↦ (0,1).
+    let rot = Se2::<T>::from_angle(T::of(core::f64::consts::FRAC_PI_2));
+    let r = rot.transform_point([T::of(1.0), T::of(0.0)]);
+    assert!(r[0].to_f64().abs() <= T::TOL * 8.0, "x≈0");
+    assert!((r[1].to_f64() - 1.0).abs() <= T::TOL * 8.0, "y≈1");
+}
+
+#[test]
+fn se2_special_cases_all_scalars() {
+    check_se2_special_cases::<f32>();
+    check_se2_special_cases::<f64>();
+    check_se2_special_cases::<Q16_16>();
+}
+
+/// La rotation `SE(2)` conserve les longueurs (isométrie).
+fn check_se2_preserves_length<T: Scalar>() {
+    let t = Se2::<T>::new(T::of(1.1), T::of(4.0), T::of(-2.0));
+    let v = [T::of(0.6), T::of(-0.8)]; // longueur 1
+    let rv = t.transform_vector(v);
+    let len2 = rv[0].to_f64() * rv[0].to_f64() + rv[1].to_f64() * rv[1].to_f64();
+    assert!((len2 - 1.0).abs() <= T::TOL * 8.0);
+}
+
+#[test]
+fn se2_preserves_length_all_scalars() {
+    check_se2_preserves_length::<f32>();
+    check_se2_preserves_length::<f64>();
+    check_se2_preserves_length::<Q16_16>();
+}
+
+// ------------------------------------------------------------------ //
+//  Courbes : Bézier cubique & Catmull–Rom                             //
+// ------------------------------------------------------------------ //
+
+/// La Bézier passe par ses extrémités : `B(0)=p0`, `B(1)=p3`.
+fn check_bezier_endpoints<T: Scalar>() {
+    let p0 = [T::of(0.0), T::of(0.0)];
+    let p1 = [T::of(1.0), T::of(2.0)];
+    let p2 = [T::of(3.0), T::of(-1.0)];
+    let p3 = [T::of(4.0), T::of(0.5)];
+    let b0 = bezier_cubic(p0, p1, p2, p3, T::of(0.0));
+    let b1 = bezier_cubic(p0, p1, p2, p3, T::of(1.0));
+    assert!((b0[0].to_f64() - 0.0).abs() <= T::TOL && (b0[1].to_f64() - 0.0).abs() <= T::TOL);
+    assert!((b1[0].to_f64() - 4.0).abs() <= T::TOL && (b1[1].to_f64() - 0.5).abs() <= T::TOL);
+}
+
+#[test]
+fn bezier_endpoints_all_scalars() {
+    check_bezier_endpoints::<f32>();
+    check_bezier_endpoints::<f64>();
+    check_bezier_endpoints::<Q16_16>();
+}
+
+/// La tangente de Bézier aux extrémités vaut `3(p1−p0)` en 0 et `3(p3−p2)`
+/// en 1 (propriété exacte de la base de Bernstein).
+fn check_bezier_tangent_endpoints<T: Scalar>() {
+    let p0 = [T::of(0.0), T::of(0.0)];
+    let p1 = [T::of(1.0), T::of(2.0)];
+    let p2 = [T::of(3.0), T::of(-1.0)];
+    let p3 = [T::of(4.0), T::of(0.5)];
+    let d0 = bezier_cubic_tangent(p0, p1, p2, p3, T::of(0.0));
+    let d1 = bezier_cubic_tangent(p0, p1, p2, p3, T::of(1.0));
+    // 3(p1−p0) = (3, 6) ; 3(p3−p2) = (3, 4.5).
+    assert!((d0[0].to_f64() - 3.0).abs() <= T::TOL && (d0[1].to_f64() - 6.0).abs() <= T::TOL);
+    assert!((d1[0].to_f64() - 3.0).abs() <= T::TOL && (d1[1].to_f64() - 4.5).abs() <= T::TOL);
+}
+
+#[test]
+fn bezier_tangent_endpoints_all_scalars() {
+    check_bezier_tangent_endpoints::<f32>();
+    check_bezier_tangent_endpoints::<f64>();
+    check_bezier_tangent_endpoints::<Q16_16>();
+}
+
+/// Bézier à points de contrôle **colinéaires régulièrement espacés** = segment
+/// affine : `B(u)` interpole linéairement de p0 à p3.
+fn check_bezier_collinear_is_affine<T: Scalar>() {
+    // p_i = (i, 2i) : sur la droite y = 2x, espacés régulièrement.
+    let p0 = [T::of(0.0), T::of(0.0)];
+    let p1 = [T::of(1.0), T::of(2.0)];
+    let p2 = [T::of(2.0), T::of(4.0)];
+    let p3 = [T::of(3.0), T::of(6.0)];
+    let b = bezier_cubic(p0, p1, p2, p3, T::of(0.25));
+    // À u=0.25, position attendue = 0.25·3 = 0.75 en x, 1.5 en y.
+    assert!((b[0].to_f64() - 0.75).abs() <= T::TOL * 4.0, "x");
+    assert!((b[1].to_f64() - 1.5).abs() <= T::TOL * 4.0, "y");
+}
+
+#[test]
+fn bezier_collinear_is_affine_all_scalars() {
+    check_bezier_collinear_is_affine::<f32>();
+    check_bezier_collinear_is_affine::<f64>();
+    check_bezier_collinear_is_affine::<Q16_16>();
+}
+
+/// Catmull–Rom **passe par** ses points centraux : `C(0)=p1`, `C(1)=p2`.
+fn check_catmull_rom_interpolates<T: Scalar>() {
+    let p0 = [T::of(0.0), T::of(1.0)];
+    let p1 = [T::of(1.0), T::of(3.0)];
+    let p2 = [T::of(2.0), T::of(-1.0)];
+    let p3 = [T::of(3.0), T::of(0.0)];
+    let c0 = catmull_rom(p0, p1, p2, p3, T::of(0.0));
+    let c1 = catmull_rom(p0, p1, p2, p3, T::of(1.0));
+    assert!(
+        (c0[0].to_f64() - 1.0).abs() <= T::TOL && (c0[1].to_f64() - 3.0).abs() <= T::TOL,
+        "C(0)=p1"
+    );
+    assert!(
+        (c1[0].to_f64() - 2.0).abs() <= T::TOL && (c1[1].to_f64() - (-1.0)).abs() <= T::TOL,
+        "C(1)=p2"
+    );
+}
+
+#[test]
+fn catmull_rom_interpolates_all_scalars() {
+    check_catmull_rom_interpolates::<f32>();
+    check_catmull_rom_interpolates::<f64>();
+    check_catmull_rom_interpolates::<Q16_16>();
+}
+
+/// La tangente de Catmull–Rom en p1 vaut `(p2−p0)/2` (dérivée en u=0),
+/// vérifiée par différence finie de la courbe.
+fn check_catmull_rom_tangent<T: Scalar>() {
+    let p0 = [T::of(0.0), T::of(0.0)];
+    let p1 = [T::of(1.0), T::of(0.0)];
+    let p2 = [T::of(2.0), T::of(2.0)];
+    let p3 = [T::of(3.0), T::of(0.0)];
+    // Différence finie centrée autour de u=0 impossible (bord) ; on prend la
+    // dérivée analytique attendue (p2−p0)/2 = (1, 1) et on la compare à une
+    // différence avant fine.
+    let h = 1e-3;
+    let a = catmull_rom(p0, p1, p2, p3, T::of(0.0));
+    let b = catmull_rom(p0, p1, p2, p3, T::of(h));
+    let dx = (b[0].to_f64() - a[0].to_f64()) / h;
+    let dy = (b[1].to_f64() - a[1].to_f64()) / h;
+    assert!((dx - 1.0).abs() <= 1e-2, "dx≈1, got {dx}");
+    assert!((dy - 1.0).abs() <= 1e-2, "dy≈1, got {dy}");
+}
+
+#[test]
+fn catmull_rom_tangent_f64() {
+    check_catmull_rom_tangent::<f64>();
+}
+
+/// Courbes en 3D : la généricité sur la dimension `[T; D]` fonctionne.
+#[test]
+fn bezier_works_in_3d() {
+    let p0 = [0.0f64, 0.0, 0.0];
+    let p1 = [1.0, 0.0, 1.0];
+    let p2 = [2.0, 1.0, 1.0];
+    let p3 = [3.0, 1.0, 0.0];
+    let mid = bezier_cubic(p0, p1, p2, p3, 0.5);
+    // Milieu par symétrie/moyenne des points de contrôle pondérés (1,3,3,1)/8.
+    let expect = [
+        (p0[0] + 3.0 * p1[0] + 3.0 * p2[0] + p3[0]) / 8.0,
+        (p0[1] + 3.0 * p1[1] + 3.0 * p2[1] + p3[1]) / 8.0,
+        (p0[2] + 3.0 * p1[2] + 3.0 * p2[2] + p3[2]) / 8.0,
+    ];
+    for k in 0..3
+    {
+        assert!((mid[k] - expect[k]).abs() <= 1e-12);
+    }
 }

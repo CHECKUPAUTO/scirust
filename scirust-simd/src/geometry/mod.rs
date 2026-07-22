@@ -16,6 +16,15 @@
 //   interpolation `nlerp`/`slerp`.
 // * [`Transform`] — déplacement rigide `SE(3)` (rotation + translation) :
 //   composition, inverse, matrice homogène 4×4 (aller-retour).
+// * [`Se2`] — le pendant **plan** de [`Transform`] : déplacement rigide
+//   `SE(2)` (rotation `SO(2)` + translation 2D), composition/inverse en
+//   `O(1)` — l'algèbre de pose de la robotique mobile 2D (odométrie, SLAM
+//   plan) reproductible bit-à-bit.
+// * [`curves`] — splines d'interpolation ([`curves::bezier_cubic`] et sa
+//   tangente [`curves::bezier_cubic_tangent`], [`curves::catmull_rom`]),
+//   génériques sur le scalaire **et** la dimension `[T; D]` : lissage de
+//   trajectoires (Catmull–Rom **passe par** ses points de contrôle, Bézier
+//   les approche en restant tangente aux extrémités).
 // * [`DualQuaternion`] — le même déplacement `SE(3)`, encodé en un seul
 //   quaternion dual (`qᵣ + ε·q_d`) plutôt qu'une paire ; permet
 //   [`DualQuaternion::sclerp`] (*screw linear interpolation*), la
@@ -47,13 +56,17 @@
 // donne la même trajectoire, bit pour bit, sur toute plateforme.
 
 pub mod ahrs;
+pub mod curves;
 pub mod dual_quaternion;
 pub mod quaternion;
+pub mod se2;
 pub mod transform;
 
 pub use ahrs::{MadgwickFilter, MahonyFilter};
+pub use curves::{bezier_cubic, bezier_cubic_tangent, catmull_rom};
 pub use dual_quaternion::{DualQuaternion, Screw};
 pub use quaternion::Quaternion;
+pub use se2::Se2;
 pub use transform::Transform;
 
 #[cfg(test)]
