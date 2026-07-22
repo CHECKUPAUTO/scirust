@@ -90,8 +90,8 @@ deployment from within a method crate.
 | 722 | Robust multivariate geometry | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#729](https://github.com/Memorithm/scirust/pull/729) | `c4e49bfbeb936182b4474a67afd83595ade6727e` | **Merged** |
 | 723 | Scale-aware SRCC source geometry | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#737](https://github.com/Memorithm/scirust/pull/737) | `96b73ea9c45b4c97456ca11cbb0a1e3164d3cfae` | **Merged** |
 | 724 | Deterministic robust regression | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#739](https://github.com/Memorithm/scirust/pull/739) | `c1c10946a48cb57daaff3fb4875a69064a0bb148` | **Merged** |
-| 725 | Trust & contamination models | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#742](https://github.com/Memorithm/scirust/pull/742) | _(pending)_ | In review |
-| 726 | Certified medoid clustering | `feat/solvers-certified-medoid-clustering` | — | — | Not started |
+| 725 | Trust & contamination models | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#742](https://github.com/Memorithm/scirust/pull/742) | `b1eca0ff7df85168539a841a7223d7a0af059e7b` | **Merged** |
+| 726 | Certified medoid clustering | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | _(open)_ | _(pending)_ | In progress |
 | 727 | Industrial benchmark harness | `feat/srcc-industrial-benchmark-harness` | — | — | Not started |
 | 728 | Real industrial evaluation | `feat/srcc-industrial-real-data-evaluation` | — | — | Not started |
 | 729 | Shadow deployment & promotion gates | `feat/mlops-srcc-shadow-deployment` | — | — | Not started |
@@ -672,3 +672,134 @@ srcc example outputs remain byte-identical (`b2a1a041…`, `4943a4e4…`,
 - The margin analysis covers vote flipping between bit-identical target
   candidates; continuous-target displacement attacks inside a candidate are
   bounded only by the medoid geometry, not by the margin certificate.
+
+---
+
+## Phase 726 — Certified globally-optimal medoid clustering
+
+**Crates:** `scirust-solvers` (`src/combinatorial/mod.rs`, new module) and
+`scirust-srcc` (`src/certified_source.rs`, opt-in integration)
+
+### Design
+
+Replaces "greedy complete-link is good enough" with an opt-in solver that
+either **proves** a globally optimal source partition or returns the best
+known partition with a valid lower bound and an explicit optimality gap —
+never an unproven optimality claim.
+
+Problem: given `n` points with pairwise distances and a diameter budget `D`,
+partition so every intra-cluster pair satisfies `d(i, j) ≤ D`, optimizing the
+lexicographic objective (1) minimum cluster count, (2) minimum total
+**observed-medoid** cost `Σ_C min_{m∈C} Σ_{p∈C} d(p, m)` (medoids are observed
+points, smallest index on ties), (3) lexicographically smallest canonical
+assignment (labels by first occurrence). Connecting pairs with `d > D` yields
+the *incompatibility graph*; a valid cluster is an independent set, so the
+count objective is graph coloring — NP-hard in general, hence certificates
+instead of unconditional speed claims.
+
+New public surface (solvers): `DistanceMatrix` (validated: exact symmetry with
+zero tolerance, exactly-zero diagonal, finite non-negative entries),
+`CertifiedClusteringMode { Exact, Hybrid { maximum_nodes, maximum_iterations }
+}`, `CertifiedMedoidClusteringConfig`, `ClusteringCertificate`,
+`CertifiedMedoidClusteringResult`, `certified_medoid_clustering`, typed
+`MedoidClusteringError` (8 variants). New public surface (srcc):
+`SrccSourceClusteringSolver { GreedyCompleteLink, CertifiedMedoid { mode } }`,
+`SrccCertifiedFitResult { fit, view_certificates }`,
+`fit_certified_source_clustered_robust_srcc_projector_from_views`, plus
+re-exported `CertifiedClusteringMode` / `ClusteringCertificate`.
+
+### Algorithm and certificates
+
+- Deterministic DSATUR-style branch and bound: saturation-first vertex
+  selection (ties: descending incompatibility degree, then ascending index),
+  colors tried in ascending label order plus at most one fresh label, pruned
+  against the incumbent's lexicographic objective. Greedy first-fit warm start
+  in both modes; `Hybrid` adds a bounded deterministic local-improvement pass
+  and a node budget.
+- Count lower bound: deterministic greedy clique on the incompatibility graph
+  (`χ ≥ ω` — valid, not claimed tight; the benchmark's `weak_lower_bound`
+  family shows it strictly undershooting).
+- `proven_optimal = true` **only** when the search space is exhausted. On
+  budget exhaustion: incumbent + clique lower bound + `lower_bound_medoid_cost
+  = None` (distances are not required to satisfy the triangle inequality, so
+  the trivial `0` is the only generally valid cost bound and no nontrivial
+  bound is claimed) + documented positive gap (integer count gap when
+  positive, else the conservative `cost/(1+cost)` fraction). Budget exhaustion
+  is a certificate state, not an error.
+- Exactness is verified against an exhaustive oracle enumerating **all set
+  partitions** via restricted growth strings: sizes 2–7 × 12 seeds × 3
+  diameters (216 instances), bit-exact cost equality (`to_bits`).
+
+### SRCC integration semantics (honest)
+
+`GreedyCompleteLink` delegates to the scale-aware pipeline unchanged
+(runtime-verified full-struct equality; empty certificate vector — greedy
+certifies nothing). `CertifiedMedoid` solves each view's pairwise
+source-distance matrix under the fitted geometry (canonical sample order,
+distances computed once and mirrored), rewrites members to observed source
+medoids, and delegates target aggregation to the frozen robust fitter. The
+semantic difference is stated, not hidden: a bridge sample the greedy pass
+rejects as `AmbiguousSourceClusterAssignment` is *assigned* here — optimally,
+deterministically, with a certificate (demonstrated on the recorded PR #719
+bridge fixture). Both behaviours are legitimate; the caller chooses by
+choosing the solver. Defaults are untouched.
+
+### Tests
+
+12 new solver tests (201 total in scirust-solvers): validation battery,
+single-point/one-cluster/all-singleton edges, greedy-suboptimal bridge
+repaired by search, cost refinement at equal counts, canonical tie
+resolution on the perfect square, the 216-instance oracle equivalence, hybrid
+budget exhaustion (feasibility preserved, gap positive, no cost bound), hybrid
+with ample budget proving optimality, determinism, zero-diameter duplicate
+grouping. 6 new srcc tests (123 total): bit-exact greedy delegation, certified
+= greedy on a proven two-cluster fixture, bridge resolution the greedy pass
+rejects, determinism, per-view gapped certificates under an exhausted budget,
+radius validation ordering.
+
+### Benchmark fingerprint
+
+`scirust-solvers/examples/certified_medoid_clustering.rs` — seven families
+(separable / chain / bridge / seeded metric-free adversarial / cost ties with
+canonical winners / odd anti-cycle with provably weak clique bound /
+increasing n) × three arms (`exact`, `hybrid_n1_i1`, `hybrid_n64_i4`), CSV
+with count, cost, both lower bounds, proven flag, gap, explored/pruned nodes
+and canonical assignments.
+
+```
+SHA-256 (scientific stdout, nightly-2026-07-02, x86_64):
+c7da6bb4e3990d000ac3d269bc2cb75349dc71b378b8ddecf5f50f4471ee5f3d
+```
+
+Honest readings printed by the benchmark itself: `hybrid_n1_i1` often *finds*
+the optimum but never *proves* it (nonzero gap on every non-trivial row — the
+certificate separates finding from proving); on `increasing_n` n=8 it is
+strictly suboptimal in count (4 vs 3, integer gap 1); on `weak_lower_bound`
+(odd 13-cycle incompatibility, χ=3 > ω=2) the exact proof costs 2049 nodes,
+the 64-node hybrid exhausts with gap 1, and the clique bound provably
+undershoots.
+
+### Compatibility
+
+Purely additive. New dependency edge `scirust-srcc → scirust-solvers`
+(cycle-free: solvers depends only on autodiff/symbolic). No existing public
+item changed; `fit_source_metric` promoted `pub(crate)` (body untouched); one
+appended `SrccRobustFitError::CertifiedClusteringFailed` variant (additive —
+the enum is not `#[non_exhaustive]`, so downstream exhaustive matches gain one
+arm, as this repo's own example did). All seven historical example outputs
+re-verified byte-identical (`9699b515…`, `bad8cf07…`, `b2a1a041…`,
+`4943a4e4…`, `fc0dcbca…`, `7d0a6d72…`, `8bb566fb…`). `cargo clippy --workspace
+--all-targets --locked -- -D warnings` and `cargo fmt --all --check` pass.
+
+### Known limitations / deferred
+
+- Worst-case exponential: `Exact` is intended for the small per-view source
+  sets SRCC actually produces; large instances belong to `Hybrid`, whose
+  certificate says exactly what was and was not proven.
+- The medoid-cost lower bound on budget exhaustion is deliberately absent
+  rather than approximate; a Lagrangian or LP bound is future work and will
+  come with its own validity proof or not at all.
+- The certified path is per-view; cross-view consistency of the partitions is
+  enforced downstream by the frozen robust fitter, not by the solver.
+- Scale-aware + certified + trusted composition in one call is deferred to
+  the benchmark-harness phase (727), where the opt-ins meet under one harness.
