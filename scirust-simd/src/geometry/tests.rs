@@ -447,6 +447,169 @@ fn to_axis_angle_inverts_from_axis_angle() {
 }
 
 // ------------------------------------------------------------------ //
+//  squad / squad_setup (spline de Shoemake)                            //
+// ------------------------------------------------------------------ //
+
+fn check_squad_endpoints<T: Scalar>() {
+    // Mots-clés/tangentes génériques (axes différents) : les extrémités de
+    // squad ne dépendent QUE de q0/q1 — le facteur de mélange 2t(1−t)
+    // s'annule en t=0 et t=1, quels que soient s0/s1.
+    let q0 = Quaternion::<T>::from_axis_angle([T::of(1.0), T::of(0.0), T::of(0.0)], T::of(0.4));
+    let q1 = Quaternion::<T>::from_axis_angle([T::of(0.0), T::of(1.0), T::of(0.0)], T::of(0.9));
+    let s0 = Quaternion::<T>::from_axis_angle([T::of(0.0), T::of(0.0), T::of(1.0)], T::of(-0.3));
+    let s1 = Quaternion::<T>::from_axis_angle([T::of(1.0), T::of(1.0), T::of(0.0)], T::of(0.6));
+
+    let at0 = Quaternion::squad(q0, q1, s0, s1, T::of(0.0));
+    approx_quat(
+        at0,
+        [q0.w.to_f64(), q0.x.to_f64(), q0.y.to_f64(), q0.z.to_f64()],
+        "squad t=0",
+    );
+    let at1 = Quaternion::squad(q0, q1, s0, s1, T::of(1.0));
+    approx_quat(
+        at1,
+        [q1.w.to_f64(), q1.x.to_f64(), q1.y.to_f64(), q1.z.to_f64()],
+        "squad t=1",
+    );
+}
+
+#[test]
+fn squad_endpoints_all_scalars() {
+    check_squad_endpoints::<f32>();
+    check_squad_endpoints::<f64>();
+    check_squad_endpoints::<Q16_16>();
+}
+
+fn check_squad_reduces_to_slerp_when_tangents_equal_keyframes<T: Scalar>() {
+    // s0=q0, s1=q1 ⇒ squad(t) == slerp(q0,q1,t) pour tout t : slerp(s0,s1,t)
+    // == slerp(q0,q1,t) == inner, et slerp(x,x,·) = x (branche quasi
+    // colinéaire, dot=1).
+    let q0 =
+        Quaternion::<T>::from_axis_angle([T::of(0.267), T::of(0.535), T::of(0.802)], T::of(0.3));
+    let q1 =
+        Quaternion::<T>::from_axis_angle([T::of(0.267), T::of(0.535), T::of(0.802)], T::of(1.7));
+    for &t in &[0.0f64, 0.25, 0.5, 0.75, 1.0]
+    {
+        let squad = Quaternion::squad(q0, q1, q0, q1, T::of(t));
+        let slerp = Quaternion::slerp(q0, q1, T::of(t));
+        approx_quat(
+            squad,
+            [
+                slerp.w.to_f64(),
+                slerp.x.to_f64(),
+                slerp.y.to_f64(),
+                slerp.z.to_f64(),
+            ],
+            &format!("squad==slerp t={t}"),
+        );
+    }
+}
+
+#[test]
+fn squad_reduces_to_slerp_when_tangents_equal_keyframes_all_scalars() {
+    check_squad_reduces_to_slerp_when_tangents_equal_keyframes::<f32>();
+    check_squad_reduces_to_slerp_when_tangents_equal_keyframes::<f64>();
+    check_squad_reduces_to_slerp_when_tangents_equal_keyframes::<Q16_16>();
+}
+
+fn check_squad_setup_identical_keyframes<T: Scalar>() {
+    // q_prev = q = q_next : la tangente de Shoemake dégénère à q lui-même
+    // (les deux logarithmes sont nuls — aucune "vitesse" voisine à transmettre).
+    let q = Quaternion::<T>::from_axis_angle([T::of(0.3), T::of(-0.6), T::of(0.75)], T::of(1.1));
+    let s = Quaternion::squad_setup(q, q, q);
+    approx_quat(
+        s,
+        [q.w.to_f64(), q.x.to_f64(), q.y.to_f64(), q.z.to_f64()],
+        "squad_setup(q,q,q) == q",
+    );
+}
+
+#[test]
+fn squad_setup_identical_keyframes_all_scalars() {
+    check_squad_setup_identical_keyframes::<f32>();
+    check_squad_setup_identical_keyframes::<f64>();
+    check_squad_setup_identical_keyframes::<Q16_16>();
+}
+
+fn check_squad_matches_analytic_constant_angular_velocity<T: Scalar>() {
+    // Quatre mots-clés uniformément espacés le long d'un MÊME grand cercle
+    // (angle croissant autour d'un axe fixe) : la vitesse angulaire y est
+    // déjà constante, donc la tangente de Shoemake en chaque point intérieur
+    // dégénère au point lui-même (aucune correction cubique nécessaire), et
+    // squad doit alors coïncider avec la rotation attendue en forme close.
+    let step = 0.4f64;
+    let axis = [T::of(0.0), T::of(0.0), T::of(1.0)];
+    let q0 = Quaternion::<T>::from_axis_angle(axis, T::of(0.0));
+    let q1 = Quaternion::<T>::from_axis_angle(axis, T::of(step));
+    let q2 = Quaternion::<T>::from_axis_angle(axis, T::of(2.0 * step));
+    let q3 = Quaternion::<T>::from_axis_angle(axis, T::of(3.0 * step));
+
+    let s1 = Quaternion::squad_setup(q0, q1, q2);
+    let s2 = Quaternion::squad_setup(q1, q2, q3);
+
+    // Les tangentes dégénèrent à leur mot-clé (vitesse déjà constante).
+    approx_quat(
+        s1,
+        [q1.w.to_f64(), q1.x.to_f64(), q1.y.to_f64(), q1.z.to_f64()],
+        "s1 == q1 (vitesse constante)",
+    );
+    approx_quat(
+        s2,
+        [q2.w.to_f64(), q2.x.to_f64(), q2.y.to_f64(), q2.z.to_f64()],
+        "s2 == q2 (vitesse constante)",
+    );
+
+    for &t in &[0.0f64, 0.3, 0.5, 0.7, 1.0]
+    {
+        let got = Quaternion::squad(q1, q2, s1, s2, T::of(t));
+        // Rotation attendue : angle = step·(1+t) autour de +z.
+        let half = step * (1.0 + t) / 2.0;
+        approx_quat(
+            got,
+            [half.cos(), 0.0, 0.0, half.sin()],
+            &format!("squad t={t}"),
+        );
+    }
+}
+
+#[test]
+fn squad_matches_analytic_constant_angular_velocity_all_scalars() {
+    check_squad_matches_analytic_constant_angular_velocity::<f32>();
+    check_squad_matches_analytic_constant_angular_velocity::<f64>();
+    check_squad_matches_analytic_constant_angular_velocity::<Q16_16>();
+}
+
+fn check_squad_stays_unit_norm_for_general_keyframes<T: Scalar>() {
+    // Mots-clés à axes DIFFÉRENTS (cas général, pas de grand cercle commun) :
+    // squad doit rester unitaire (à la tolérance du scalaire près) pour
+    // toute valeur de t — propriété de robustesse, pas de forme close ici.
+    let q0 = Quaternion::<T>::from_axis_angle([T::of(1.0), T::of(0.0), T::of(0.0)], T::of(0.2));
+    let q1 = Quaternion::<T>::from_axis_angle([T::of(0.0), T::of(1.0), T::of(0.0)], T::of(0.8));
+    let q2 = Quaternion::<T>::from_axis_angle([T::of(0.0), T::of(0.0), T::of(1.0)], T::of(1.3));
+    let q3 = Quaternion::<T>::from_axis_angle([T::of(1.0), T::of(1.0), T::of(1.0)], T::of(2.1));
+
+    let s1 = Quaternion::squad_setup(q0, q1, q2);
+    let s2 = Quaternion::squad_setup(q1, q2, q3);
+
+    for &t in &[0.0f64, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0]
+    {
+        let got = Quaternion::squad(q1, q2, s1, s2, T::of(t));
+        let n = got.norm().to_f64();
+        assert!(
+            (n - 1.0).abs() <= T::TOL * 8.0,
+            "squad non unitaire à t={t}: norme={n}"
+        );
+    }
+}
+
+#[test]
+fn squad_stays_unit_norm_for_general_keyframes_all_scalars() {
+    check_squad_stays_unit_norm_for_general_keyframes::<f32>();
+    check_squad_stays_unit_norm_for_general_keyframes::<f64>();
+    check_squad_stays_unit_norm_for_general_keyframes::<Q16_16>();
+}
+
+// ------------------------------------------------------------------ //
 //  from_rotation_matrix (réciproque de to_rotation_matrix)             //
 // ------------------------------------------------------------------ //
 
