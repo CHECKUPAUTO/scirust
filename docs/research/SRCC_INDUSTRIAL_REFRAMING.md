@@ -405,3 +405,54 @@ results SHA-256: 6f366e1a0cf2aba36c6d09b06c0972e65f20dedb97976a5bf8cfc2ab227dca8
 Run twice, byte-identical; no network; checksum-verified C-MAPSS inputs; the
 Student-t draws use a seeded `SplitMix64` through the distribution's inverse CDF
 (`ν`-combined seed), and OLS / Huber / trimmed are deterministic — no other RNG.
+
+---
+
+## Follow-up 4 (phase 729) — shadow deployment & promotion gates
+
+The program produced *evidence*; a deployment needs a reproducible *decision*.
+This is the industrialization layer: a deterministic
+`scirust_srcc_bench::promotion::PromotionGate` that turns a **preregistered** rule
+into a promote/hold verdict on a **shadow comparison** — a candidate model scored
+alongside the incumbent on the same units. The rule has a **primary criterion**
+(the candidate must improve the primary metric, with the *lower* bound of the
+improvement's bootstrap CI clearing `min_improvement`) and any number of
+**guardrails** (the candidate must not regress, with the *upper* bound of each
+regression's CI staying below `max_regression`); promotion needs the primary to
+pass **and** every guardrail to hold. Every decision is the seeded paired
+bootstrap from `crate::paired` — never a point estimate — so the verdict is
+bit-reproducible. The module ships with a manual typed `PromotionError` and six
+unit tests (clear-win promote, straddle hold, guardrail-regression hold,
+higher-is-better orientation, missing-metric error, determinism).
+
+`industrial-promotion-gate` drives it on a real shadow comparison that
+operationalizes follow-up 3: **candidate Huber-IRLS vs incumbent OLS** on the same
+held-out C-MAPSS rows under native Student-t training noise, with a preregistered
+gate (primary = per-row signal squared error, `min_improvement = 0`; guardrail =
+per-row signal absolute error, `max_regression = 0.5`):
+
+| `ν` (tail) | decision | primary Δ (95% CI) | guardrail regression (CI upper) |
+|-----------:|:--------:|--------------------|---------------------------------|
+| **2** (heavy) | **PROMOTE** | +2.645 [2.084, 3.241] ✓ | −0.753 (−0.619) ✓ |
+| 5 (moderate) | **HOLD** | +0.014 [−0.415, 0.288] ✗ | −0.046 (0.013) ✓ |
+| 30 (~Gaussian) | **HOLD** | +0.044 [−0.132, 0.345] ✗ | +0.026 (0.075) ✓ |
+
+**The gate deploys Huber precisely when the data is heavy-tailed and holds the
+incumbent otherwise** — the automated MLOps decision that the whole program's
+finding implies, made mechanically rather than by eyeballing a mean. At `ν = 2`
+the squared-error improvement CI clears zero and the absolute-error guardrail is
+also favorable, so Huber is promoted; at `ν ≥ 5` the improvement CI straddles zero
+(no statistically defensible gain) and the incumbent stays. This is exactly the
+discipline the phase-728 preregistration argued for, now applied to the
+promotion boundary itself: a candidate is adopted only on evidence fixed in
+advance, not on a hopeful point estimate.
+
+**Determinism.**
+
+```
+stdout  SHA-256: a555aab5303f6225be7ca27348d1588078123c671c0da334805860fc77eb3a42
+results SHA-256: e39c82d1ac7b39a29cae66c1a17188e7e11dbbe5dacc36552c0ec6777b098397  (9 BenchRecords)
+```
+
+Run twice, byte-identical; no network; checksum-verified C-MAPSS inputs; the whole
+decision is the seeded paired bootstrap — no RNG beyond its recorded seed.
