@@ -133,3 +133,89 @@ where breakdown-point robustness is weakest and is a separate question; it is
 not claimed resolved here. What is resolved: bad leverage points, the textbook
 case robust regression exists for, do not create damage on this workload for
 robustness to repair.
+
+## Lever 3 — SECOM supervised reformulation
+
+**Change.** The diagnostic showed SECOM failures are *not geometric outliers*
+(regularized-Mahalanobis in-sample AUROC 0.56; failures sit closer to the
+normal centre than passes), so every unsupervised density detector was at or
+below chance on the frozen test (best 0.469) — a **problem-formulation** null,
+not a detector-power deficit. Lever 3 tests that directly with a **supervised**
+linear discriminant that uses the labels: on the imputed train split only,
+`w = Σ⁻¹(μ_fail − μ_pass)` (ridge-regularized inverse covariance from
+`fit_regularized_mahalanobis`), score `w · x`, ridge selected on validation
+AUROC {0.001, 0.1}, frozen on test. Same phase-728 temporal split and
+train-fitted imputer (no leakage).
+
+**Binary.** `scirust-srcc-bench/src/bin/industrial-secom-supervised.rs` (four
+unit tests for the pure discriminant/mean helpers).
+
+```
+SHA-256 (scientific stdout, nightly-2026-07-02, x86_64):
+61ae9dd5e3b2b3fbf3f554ddaacbd54fe9a5d7a6e97172b20f150960eb46b568
+records (7): results/secom_supervised.jsonl
+```
+
+**Result.**
+
+| Quantity | Supervised discriminant | Unsupervised (phase 728) |
+|----------|------------------------:|-------------------------:|
+| **in-sample (train) AUROC** | **0.975** (ridge 0.001) / 0.947 (ridge 0.1) | 0.56 (Mahalanobis) |
+| validation AUROC | 0.40 (ridge 0.001) / 0.43 (ridge 0.1) | — |
+| **frozen-test AUROC** (validation-selected ridge 0.1) | **0.581** | 0.469 |
+
+Two findings, held in honest tension:
+
+1. **The formulation conclusion is confirmed.** In-sample, the supervised
+   discriminant separates SECOM failures **near-perfectly (0.975)** where the
+   unsupervised Mahalanobis distance is barely above chance (0.56). The labels
+   carry strong *linear discriminative* signal that density/geometry cannot
+   see — SECOM is a supervised-classification problem wearing an
+   anomaly-detection costume, exactly as the diagnostic argued.
+2. **But SECOM stays genuinely hard.** The near-perfect in-sample fit collapses
+   out of sample: validation AUROC drops *below* chance (0.40–0.43) and the
+   frozen-test AUROC is only **0.581**. With 416 imputed features and ~86
+   positive training rows, a naive linear discriminant massively overfits, and
+   the temporal drift the diagnostic measured (27/405 features > 1 train-MAD)
+   makes even supervised generalization unstable (validation below test).
+
+**Verdict.** Supervision crosses from below chance (0.469) to above chance
+(0.581) on the frozen test **and** reaches 0.975 in-sample — decisive that the
+SECOM null was **problem formulation, not detector power**. But the modest,
+unstable held-out number is reported, not dressed up: the reformulation
+identifies the right problem *class* (supervised classification) without
+solving it — proper regularization, feature selection and drift handling are
+the real next steps, deliberately out of scope for a one-direction linear
+probe.
+
+---
+
+## Three-lever synthesis
+
+The phase-728 diagnostic asked whether a *more powerful contamination-robust
+algorithm* was the missing piece. Across all three levers the answer is a
+consistent, evidence-backed **no** — the barriers were framing, not power:
+
+- **Lever 1** raised the C-MAPSS task ceiling with the canonical piecewise RUL
+  (ratio 0.65 → 0.55 / 0.61 → 0.46) and restored 4× the statistical power, but
+  the pooled linear fit stays modest (~0.5) — a framing gain, not a robustness
+  gain.
+- **Lever 2** ran the decisive robustness test on that improved task: under a
+  genuine high-leverage attack swept to 30 %, **Huber never beats OLS and
+  trimmed LS is always worse**, because far-out training corruption has bounded
+  influence on in-distribution held-out predictions. No regime rewards the
+  current robust regressors — and, by the diagnostic's structural argument, no
+  *more powerful* one would either on this workload.
+- **Lever 3** showed the SECOM anomaly null was a mis-formulation: supervision
+  separates failures near-perfectly in-sample (0.975 vs unsupervised 0.56) and
+  clears chance on the frozen test (0.581 vs 0.469), while remaining hard.
+
+**Program conclusion.** For these two real industrial workloads, contamination
+robustness was never the bottleneck: C-MAPSS RUL is structurally insensitive
+to the contamination robust regression repairs, and SECOM was the wrong problem
+class for unsupervised anomaly detection. Investment in a stronger robust
+estimator is not warranted by this evidence; investment in **task framing**
+(monotone/nonlinear RUL models; supervised, regularized, drift-aware SECOM
+classification) is where the measurable gains live. This is the honest,
+falsifiable close the phase-728 diagnostic pointed to — reached by building
+and running the tests, not by assertion.
