@@ -697,3 +697,70 @@ results SHA-256: 32ad439fb4c536760b1f298e051b46a41c0c30469138a3b4206bd3e064bf9a9
 Run twice, byte-identical (built `--release`; release is equally deterministic);
 no network; checksum-verified in-repo OBD2 CSV; OLS (QR), Huber-IRLS and trimmed
 LS are RNG-free and the paired bootstrap is explicitly seeded.
+
+## Follow-up 8 (axis 4) — extended promotion gates: pricing a two-sided result
+
+Phase 729's `PromotionGate` made a single-metric promote/hold call. But axis 3
+handed the operator a genuinely **two-sided** candidate: Huber beats OLS on the
+bulk (MAE, median error) and *loses* on tail-sensitive squared error. "It
+depends" is not a deployment decision. This axis extends the gate additively
+(`ExtendedPromotionGate`, same seeded paired-bootstrap machinery) with the three
+controls an operator actually needs, and drives it on the axis-3 workload —
+incumbent OLS vs candidate Huber, leave-one-segment-out on the OBD2 telemetry,
+**the seven driving segments as temporal shadow windows**:
+
+1. **Weighted composite** — the decision runs on one per-unit score,
+   `0.75·rel(abs-err) + 0.25·rel(sq-err)`, each metric's improvement scaled by the
+   incumbent's own pooled error magnitude (its known operating point), so the
+   bulk/tail trade-off is priced *before* the candidate is judged, not argued
+   after;
+2. **Switching cost** — the pooled composite improvement's CI *lower bound* must
+   exceed a preregistered hurdle (a hysteresis deadband): promote only when the
+   candidate is better by more than the cost of changing models;
+3. **Temporal shadow windows** — every segment's *mean* composite improvement
+   must stay non-negative, so a candidate that wins pooled but regresses in some
+   period is held.
+
+Evaluated at two preregistered switching costs (`0.00`, a free switch; `0.05`, a
+5 %-weighted-gain hurdle):
+
+| target | composite Δ (CI) | windows held | cost 0.00 | cost 0.05 |
+|--------|-----------------:|:------------:|:---------:|:---------:|
+| `ENGINE_LOAD` | +0.0300 [+0.0245, +0.0351] | 7/7 | **PROMOTE** | **HOLD** |
+| `THROTTLE_POS` | +0.0222 [+0.0134, +0.0310] | 5/7 | **HOLD** | HOLD |
+| `MAF` | +0.0244 [+0.0167, +0.0315] | 6/7 | **HOLD** | HOLD |
+
+**Finding — every control changes a decision that a single-metric gate would get
+wrong.** All three candidates have a *statistically clean, positive* pooled
+composite (Huber's 3:1-weighted bulk win outweighs its squared-error loss on
+average), so a naive pooled test promotes all three. The extended gate promotes
+**only `ENGINE_LOAD`, and only when switching is free**:
+
+- **`ENGINE_LOAD`** clears every window but its +3.0 % weighted gain does **not**
+  clear the 5 % switching cost — the deadband correctly withholds a real-but-marginal
+  improvement (cost 0.00 → PROMOTE, cost 0.05 → HOLD).
+- **`THROTTLE_POS`** and **`MAF`** are **held even at zero cost**: Huber
+  *regresses* on the composite in the last, shortest driving segment
+  (`segment_12`: −0.069 and −0.029 — a distinct low-data driving regime), and one
+  further segment for `THROTTLE_POS`. The per-window floor catches exactly the
+  "wins on average, fails in a period" pathology the control exists for; the
+  pooled mean hides it.
+
+This is the program's industrialization payoff: the same robust estimator is a
+*promote* or a *hold* depending on the operating cost and the temporal
+consistency the operator demands — a defensible, reproducible decision no point
+estimate (and no single-metric gate) can produce. It closes the loop from
+evidence (axes 1–3) to a deployable rule.
+
+**Determinism.**
+
+```
+stdout  SHA-256: 291cc5198fce2711ac5f545e4fe970e3d503e2c2d1da9efb3f55da485cb28078
+results SHA-256: aec4059bdf37af593897158fc5af450b3dcb4a0f3299f46b66639838c315191d  (18 BenchRecords)
+```
+
+Run twice, byte-identical (built `--release`); no network; checksum-verified
+in-repo OBD2 CSV; OLS/Huber are RNG-free and every gate decision is a seeded
+paired bootstrap. The `ExtendedPromotionGate` core carries seven new unit tests
+(composite arithmetic, switching-cost deadband, per-window consistency, and the
+typed-error surface) beside phase 729's six.
