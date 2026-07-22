@@ -27,13 +27,17 @@
 // See scirust-bench-schema's crate docs ("Migrating criterion targets") for the full pattern.
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use scirust_simd::dsp::goertzel::goertzel_power;
+use scirust_simd::dsp::hilbert::analytic_signal;
 use scirust_simd::dsp::kalman::{KalmanFilter, UnscentedKalmanFilter};
 use scirust_simd::dsp::mel::MelFilterbank;
 use scirust_simd::dsp::mfcc::Mfcc;
 use scirust_simd::dsp::pll::Pll;
+use scirust_simd::dsp::savgol::savgol_filter;
 use scirust_simd::dsp::stft::{power_spectrogram, stft};
 use scirust_simd::dsp::timing::SymbolTimingLoop;
 use scirust_simd::dsp::wavelet::{Wavelet, dwt_decompose};
+use scirust_simd::dsp::welch::welch;
 use scirust_simd::dsp::window;
 use scirust_simd::dsp::{
     Biquad, BiquadCascade, Complex, Fir, Lms, Nlms, Plan, Rls, fft, fft_convolve, group_delay,
@@ -904,6 +908,94 @@ fn bench_wavelet(c: &mut Criterion) {
     g.finish();
 }
 
+/// Signal analytique par FFT (transformée de Hilbert), longueur 1024, fixe vs
+/// f32 : deux FFT en cascade (directe + inverse) plus le masque fréquentiel.
+fn bench_hilbert(c: &mut Criterion) {
+    const M: usize = 1 << 10;
+    let sf = signal_f32();
+    let real_f: Vec<f32> = sf[..M].to_vec();
+    let real_x: Vec<Q16_16> = real_f
+        .iter()
+        .map(|&v| Q16_16::try_from(v as f64).unwrap())
+        .collect();
+
+    let mut g = c.benchmark_group("hilbert_analytic1024");
+    g.throughput(Throughput::Elements(M as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| analytic_signal(black_box(&real_x)))
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| analytic_signal(black_box(&real_f)))
+    });
+    g.finish();
+}
+
+/// Goertzel (puissance à une seule fréquence, `O(N)`) sur le signal complet,
+/// fixe vs f32 : une récurrence à un multiplieur par échantillon, sans table.
+fn bench_goertzel(c: &mut Criterion) {
+    let sf = signal_f32();
+    let sx = signal_fixed(&sf);
+    // ω = 2π·1000/8000 = π/4.
+    let omega_f = core::f32::consts::PI / 4.0;
+    let omega_x = Q16_16::try_from(core::f64::consts::PI / 4.0).unwrap();
+
+    let mut g = c.benchmark_group("goertzel_power");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| goertzel_power(black_box(&sx), black_box(omega_x)))
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| goertzel_power(black_box(&sf), black_box(omega_f)))
+    });
+    g.finish();
+}
+
+/// PSD par la méthode de Welch (trames de 1024, saut 512, fenêtre de Hann)
+/// sur le signal complet, fixe vs f32 : STFT + accumulation + normalisation.
+fn bench_welch(c: &mut Criterion) {
+    const FRAME: usize = 1 << 10;
+    const HOP: usize = FRAME / 2;
+    let sf = signal_f32();
+    let sx = signal_fixed(&sf);
+    let win_f: Vec<f32> = window::hann(FRAME);
+    let win_x: Vec<Q16_16> = window::hann(FRAME);
+
+    let mut g = c.benchmark_group("welch_psd");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            welch(
+                black_box(&sx),
+                black_box(&win_x),
+                HOP,
+                Q16_16::try_from(8000.0).unwrap(),
+            )
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| welch(black_box(&sf), black_box(&win_f), HOP, 8000.0f32))
+    });
+    g.finish();
+}
+
+/// Filtre de Savitzky–Golay (lissage, fenêtre 11, ordre 3) sur le signal
+/// complet, fixe vs f32 : les coefficients sont résolus une fois (petit
+/// système normal), puis une convolution FIR par échantillon.
+fn bench_savgol(c: &mut Criterion) {
+    let sf = signal_f32();
+    let sx = signal_fixed(&sf);
+
+    let mut g = c.benchmark_group("savgol_smooth_w11_p3");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| savgol_filter(black_box(&sx), 11, 3, 0))
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| savgol_filter(black_box(&sf), 11, 3, 0))
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_biquad,
@@ -926,6 +1018,10 @@ criterion_group!(
     bench_symbol_timing,
     bench_kalman,
     bench_ukf,
-    bench_wavelet
+    bench_wavelet,
+    bench_hilbert,
+    bench_goertzel,
+    bench_welch,
+    bench_savgol
 );
 criterion_main!(benches);

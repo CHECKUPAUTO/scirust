@@ -85,6 +85,25 @@
 //   **exactement** (au bit près) quel que soit `T` — la prédiction/mise à
 //   jour de lifting s'annule par télescopage à la reconstruction, sans
 //   arrondi requis, contrairement à un banc de filtres flottant classique.
+// * [`hilbert`] — signal analytique par FFT ([`hilbert::analytic_signal`],
+//   [`hilbert::hilbert`]) et quantités instantanées qui en découlent :
+//   enveloppe ([`hilbert::envelope`], détection AM), phase
+//   ([`hilbert::instantaneous_phase`]) et fréquence
+//   ([`hilbert::instantaneous_frequency`], démodulation FM) instantanées —
+//   la brique de démodulation qui manquait au-dessus de [`fft`], en amont de
+//   [`pll`].
+// * [`goertzel`] — DFT à **une seule fréquence** ([`goertzel::goertzel`],
+//   [`goertzel::goertzel_power`]) par récurrence en `O(N)` sans table :
+//   détection de tonalité/DTMF, mesure de puissance à une raie — le
+//   complément « un bin » de la [`fft`] complète.
+// * [`welch`] — densité spectrale de puissance par la méthode de Welch
+//   ([`welch::welch`]) : périodogrammes fenêtrés moyennés (au-dessus de
+//   [`stft`]), estimateur de PSD consistant là où un périodogramme brut ne
+//   l'est pas.
+// * [`savgol`] — filtre de Savitzky–Golay ([`savgol::savgol_filter`],
+//   [`savgol::savgol_coeffs`]) : lissage et différentiation par ajustement
+//   polynomial glissant au sens des moindres carrés — préserve pics et
+//   moments, contrairement à une moyenne glissante.
 //
 // ## Pourquoi la virgule fixe pour le DSP ?
 //
@@ -99,14 +118,18 @@ pub mod fft;
 pub mod fftconv;
 pub mod fir;
 pub mod freqz;
+pub mod goertzel;
+pub mod hilbert;
 pub mod kalman;
 pub mod mel;
 pub mod mfcc;
 pub mod pll;
 pub mod resample;
+pub mod savgol;
 pub mod stft;
 pub mod timing;
 pub mod wavelet;
+pub mod welch;
 pub mod window;
 
 pub use adaptive::{Lms, Nlms, Rls};
@@ -115,12 +138,18 @@ pub use fft::{Complex, Plan, fft, ifft, irfft, rfft};
 pub use fftconv::fft_convolve;
 pub use fir::Fir;
 pub use freqz::{group_delay, magnitude, magnitude_db, phase, unwrap_phase};
+pub use goertzel::{goertzel, goertzel_power};
+pub use hilbert::{
+    analytic_signal, envelope, hilbert, instantaneous_frequency, instantaneous_phase,
+};
 pub use kalman::{KalmanFilter, UnscentedKalmanFilter};
 pub use mfcc::{Mfcc, dct2};
 pub use pll::{Nco, PiLoopFilter, Pll};
 pub use resample::resample;
+pub use savgol::{savgol_coeffs, savgol_filter};
 pub use timing::{SymbolTimingLoop, gardner_ted, mueller_muller_ted};
 pub use wavelet::{Wavelet, dwt_decompose, dwt_reconstruct};
+pub use welch::welch;
 
 #[cfg(test)]
 mod tests;

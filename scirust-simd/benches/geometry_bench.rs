@@ -29,7 +29,10 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use scirust_simd::fixed::Q16_16;
-use scirust_simd::geometry::{DualQuaternion, MadgwickFilter, MahonyFilter, Quaternion, Transform};
+use scirust_simd::geometry::curves::{bezier_cubic, catmull_rom};
+use scirust_simd::geometry::{
+    DualQuaternion, MadgwickFilter, MahonyFilter, Quaternion, Se2, Transform,
+};
 
 const N: usize = 1 << 12;
 
@@ -658,6 +661,151 @@ fn bench_ahrs(c: &mut Criterion) {
     g.finish();
 }
 
+/// Déplacement rigide plan `SE(2)` : composition (cos/sin de l'angle) et flux
+/// de transformations de points, fixe vs f32 — le pendant 2D de
+/// [`bench_transform`].
+fn bench_se2(c: &mut Criterion) {
+    let (fx3, ff3) = vectors(0xF7);
+    // Réutilise les deux premières composantes des vecteurs 3D comme points 2D.
+    let px: Vec<[Q16_16; 2]> = fx3.iter().map(|v| [v[0], v[1]]).collect();
+    let pf: Vec<[f32; 2]> = ff3.iter().map(|v| [v[0], v[1]]).collect();
+
+    let ax = Se2::<Q16_16>::new(
+        Q16_16::try_from(0.7).unwrap(),
+        Q16_16::try_from(1.5).unwrap(),
+        Q16_16::try_from(-0.75).unwrap(),
+    );
+    let bx = Se2::<Q16_16>::new(
+        Q16_16::try_from(-0.9).unwrap(),
+        Q16_16::try_from(0.3).unwrap(),
+        Q16_16::try_from(0.6).unwrap(),
+    );
+    let af = Se2::<f32>::new(0.7, 1.5, -0.75);
+    let bf = Se2::<f32>::new(-0.9, 0.3, 0.6);
+
+    let mut g = c.benchmark_group("se2_compose");
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| black_box(ax).compose(black_box(&bx)))
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| black_box(af).compose(black_box(&bf)))
+    });
+    g.finish();
+
+    let mut g = c.benchmark_group("se2_transform_point");
+    g.throughput(Throughput::Elements(N as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            let mut acc = [Q16_16::zero(); 2];
+            for &v in black_box(&px)
+            {
+                let r = ax.transform_point(v);
+                acc[0] += r[0];
+                acc[1] += r[1];
+            }
+            acc
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| {
+            let mut acc = [0.0f32; 2];
+            for &v in black_box(&pf)
+            {
+                let r = af.transform_point(v);
+                acc[0] += r[0];
+                acc[1] += r[1];
+            }
+            acc
+        })
+    });
+    g.finish();
+}
+
+/// Splines d'interpolation : Bézier cubique (De Casteljau, purement anneau) et
+/// Catmull–Rom (une division par 2) sur un flux de `steps` valeurs de
+/// paramètre, fixe vs f32.
+fn bench_curves(c: &mut Criterion) {
+    let p0x = [Q16_16::zero(), Q16_16::zero()];
+    let p1x = [
+        Q16_16::try_from(1.0).unwrap(),
+        Q16_16::try_from(2.0).unwrap(),
+    ];
+    let p2x = [
+        Q16_16::try_from(3.0).unwrap(),
+        Q16_16::try_from(-1.0).unwrap(),
+    ];
+    let p3x = [
+        Q16_16::try_from(4.0).unwrap(),
+        Q16_16::try_from(0.5).unwrap(),
+    ];
+    let p0f = [0.0f32, 0.0];
+    let p1f = [1.0f32, 2.0];
+    let p2f = [3.0f32, -1.0];
+    let p3f = [4.0f32, 0.5];
+
+    let steps = 1024u32;
+
+    let mut g = c.benchmark_group("bezier_cubic");
+    g.throughput(Throughput::Elements(steps as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            let mut acc = [Q16_16::zero(); 2];
+            for s in 0..steps
+            {
+                let u = Q16_16::try_from(s as f64 / steps as f64).unwrap();
+                let p = bezier_cubic(p0x, p1x, p2x, p3x, black_box(u));
+                acc[0] += p[0];
+                acc[1] += p[1];
+            }
+            acc
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| {
+            let mut acc = [0.0f32; 2];
+            for s in 0..steps
+            {
+                let u = s as f32 / steps as f32;
+                let p = bezier_cubic(p0f, p1f, p2f, p3f, black_box(u));
+                acc[0] += p[0];
+                acc[1] += p[1];
+            }
+            acc
+        })
+    });
+    g.finish();
+
+    let mut g = c.benchmark_group("catmull_rom");
+    g.throughput(Throughput::Elements(steps as u64));
+    g.bench_function(BenchmarkId::new("fixed", "Q16_16"), |b| {
+        b.iter(|| {
+            let mut acc = [Q16_16::zero(); 2];
+            for s in 0..steps
+            {
+                let u = Q16_16::try_from(s as f64 / steps as f64).unwrap();
+                let p = catmull_rom(p0x, p1x, p2x, p3x, black_box(u));
+                acc[0] += p[0];
+                acc[1] += p[1];
+            }
+            acc
+        })
+    });
+    g.bench_function(BenchmarkId::new("f32", "f32"), |b| {
+        b.iter(|| {
+            let mut acc = [0.0f32; 2];
+            for s in 0..steps
+            {
+                let u = s as f32 / steps as f32;
+                let p = catmull_rom(p0f, p1f, p2f, p3f, black_box(u));
+                acc[0] += p[0];
+                acc[1] += p[1];
+            }
+            acc
+        })
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_rotate,
@@ -668,6 +816,8 @@ criterion_group!(
     bench_euler_roundtrip,
     bench_transform,
     bench_dual_quaternion,
-    bench_ahrs
+    bench_ahrs,
+    bench_se2,
+    bench_curves
 );
 criterion_main!(benches);
