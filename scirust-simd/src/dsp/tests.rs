@@ -10,7 +10,7 @@ use super::adaptive::{Lms, Nlms, Rls};
 use super::biquad::{butterworth_qs, chebyshev1_pole_params};
 use super::fft::{Complex, Plan, fft, ifft, irfft, rfft};
 use super::fftconv::fft_convolve;
-use super::kalman::KalmanFilter;
+use super::kalman::{KalmanFilter, UnscentedKalmanFilter};
 use super::mel::MelFilterbank;
 use super::mfcc::{Mfcc, dct2, dct2_basis};
 use super::pll::{Nco, PiLoopFilter, Pll};
@@ -3191,6 +3191,193 @@ fn kalman_update_singular_returns_none_and_leaves_state_all_scalars() {
     check_kalman_update_singular_returns_none_and_leaves_state::<f32>();
     check_kalman_update_singular_returns_none_and_leaves_state::<f64>();
     check_kalman_update_singular_returns_none_and_leaves_state::<Q16_16>();
+}
+
+// ------------------------------------------------------------------ //
+//  Kalman : UnscentedKalmanFilter (UKF, points sigma)                  //
+// ------------------------------------------------------------------ //
+
+/// Produit matrice-vecteur `A·v` — petit doublon local de la fonction privée
+/// homonyme de `dsp::kalman` (même convention que `cross`/`slide_window`
+/// ailleurs dans les tests : aucune visibilité à changer côté production).
+fn test_matvec<T: Scalar, const R: usize, const C: usize>(a: &[[T; C]; R], v: &[T; C]) -> [T; R] {
+    let mut out = [T::zero(); R];
+    for i in 0..R
+    {
+        let mut acc = T::zero();
+        for j in 0..C
+        {
+            acc = acc + a[i][j] * v[j];
+        }
+        out[i] = acc;
+    }
+    out
+}
+
+fn check_ukf_matches_linear_kalman_filter_on_linear_system<T: Scalar>() {
+    // La transformée non parfumée est EXACTE pour un système linéaire (cf.
+    // en-tête de module de `dsp::kalman`) : sur le même modèle vitesse
+    // constante que `check_kalman_constant_velocity_converges`,
+    // `KalmanFilter` et `UnscentedKalmanFilter` doivent converger vers
+    // (quasiment) le même état — seul l'ordre des opérations en virgule
+    // flottante/fixe diffère entre les deux implémentations.
+    let dt = 1.0f64;
+    let (p0_true, v0_true) = (2.0f64, 0.5f64);
+    const STEPS: i32 = 30;
+
+    let f = [[T::of(1.0), T::of(dt)], [T::of(0.0), T::of(1.0)]];
+    let q = [[T::of(1e-3), T::of(0.0)], [T::of(0.0), T::of(1e-3)]];
+    let h = [[T::of(1.0), T::of(0.0)]];
+    let r = [[T::of(1e-2)]];
+
+    let x0 = [T::of(0.0), T::of(0.0)];
+    let p_init = [[T::of(100.0), T::of(0.0)], [T::of(0.0), T::of(100.0)]];
+
+    let mut kf = KalmanFilter::<T, 2, 1>::new(x0, p_init);
+    // kappa = 3 − N = 1 pour N = 2 (paramétrage classique de Julier & Uhlmann,
+    // évite les poids extrêmes d'un `alpha` très petit — cf. commentaire de
+    // `check_ukf_nonlinear_measurement_converges`).
+    let mut ukf =
+        UnscentedKalmanFilter::<T, 2, 1>::new(x0, p_init, T::of(1.0), T::of(2.0), T::of(1.0));
+
+    for k in 1..=STEPS
+    {
+        kf.predict(&f, &q);
+        ukf.predict(|x| test_matvec(&f, x), &q).expect("P SDP");
+        let true_pos = p0_true + v0_true * f64::from(k) * dt;
+        let z = [T::of(true_pos)];
+        kf.update(&z, &h, &r).expect("S inversible (bruit non nul)");
+        ukf.update(&z, |x| test_matvec(&h, x), &r)
+            .expect("S inversible (bruit non nul)");
+    }
+
+    for i in 0..2
+    {
+        let diff = (kf.state()[i].to_f64() - ukf.state()[i].to_f64()).abs();
+        assert!(
+            diff <= 0.05,
+            "KF[{i}]={} vs UKF[{i}]={}",
+            kf.state()[i].to_f64(),
+            ukf.state()[i].to_f64()
+        );
+    }
+}
+
+#[test]
+fn ukf_matches_linear_kalman_filter_on_linear_system_all_scalars() {
+    check_ukf_matches_linear_kalman_filter_on_linear_system::<f32>();
+    check_ukf_matches_linear_kalman_filter_on_linear_system::<f64>();
+    check_ukf_matches_linear_kalman_filter_on_linear_system::<Q16_16>();
+}
+
+fn check_ukf_predict_grows_covariance<T: Scalar>() {
+    let f = [[T::of(1.0), T::of(1.0)], [T::of(0.0), T::of(1.0)]];
+    let q = [[T::of(0.01), T::of(0.0)], [T::of(0.0), T::of(0.01)]];
+    let x0 = [T::of(0.0), T::of(0.0)];
+    let p0 = [[T::of(1.0), T::of(0.0)], [T::of(0.0), T::of(1.0)]];
+    let mut kf = UnscentedKalmanFilter::<T, 2, 1>::new(x0, p0, T::of(1.0), T::of(2.0), T::of(1.0));
+
+    let initial_var = kf.covariance()[0][0].to_f64();
+    for _ in 0..5
+    {
+        kf.predict(|x| test_matvec(&f, x), &q).expect("P SDP");
+    }
+    let grown_var = kf.covariance()[0][0].to_f64();
+    assert!(
+        grown_var > initial_var,
+        "la covariance devrait croître sans mesure : {initial_var} → {grown_var}"
+    );
+}
+
+#[test]
+fn ukf_predict_grows_covariance_all_scalars() {
+    check_ukf_predict_grows_covariance::<f32>();
+    check_ukf_predict_grows_covariance::<f64>();
+    check_ukf_predict_grows_covariance::<Q16_16>();
+}
+
+fn check_ukf_nonlinear_measurement_converges<T: Scalar>() {
+    // Même exemple que `check_kalman_ekf_nonlinear_measurement_converges`
+    // (mesure non linéaire `z = x²`, état statique), cette fois **sans**
+    // jacobienne : l'UKF propage directement les points sigma à travers
+    // `x ↦ x²`. Même choix de `R = 1.0` (plutôt qu'un bruit plus réaliste
+    // mais plus petit) pour garder `P` loin de la résolution Q16.16 tout au
+    // long de la convergence — cf. commentaire de l'EKF.
+    let x_true = 3.0f64;
+    let z_val = x_true * x_true;
+
+    let q = [[T::of(0.0)]];
+    let r = [[T::of(1.0)]];
+
+    // kappa = 3 − N = 2 pour N = 1.
+    let mut kf = UnscentedKalmanFilter::<T, 1, 1>::new(
+        [T::of(1.0)],
+        [[T::of(10.0)]],
+        T::of(1.0),
+        T::of(2.0),
+        T::of(2.0),
+    );
+
+    for _ in 0..40
+    {
+        kf.predict(|x| *x, &q).expect("P SDP");
+        kf.update(&[T::of(z_val)], |x| [x[0] * x[0]], &r)
+            .expect("S inversible");
+    }
+
+    assert!(
+        (kf.state()[0].to_f64() - x_true).abs() <= 0.06,
+        "UKF n'a pas convergé vers {x_true} : {}",
+        kf.state()[0].to_f64()
+    );
+}
+
+#[test]
+fn ukf_nonlinear_measurement_converges_all_scalars() {
+    check_ukf_nonlinear_measurement_converges::<f32>();
+    check_ukf_nonlinear_measurement_converges::<f64>();
+    check_ukf_nonlinear_measurement_converges::<Q16_16>();
+}
+
+fn check_ukf_update_singular_returns_none_and_leaves_state<T: Scalar + core::fmt::Debug>() {
+    // Mesure constante (indépendante de l'état, donc de variance nulle entre
+    // points sigma) et `R = 0` (bruit nul) rendent `S` nulle, donc
+    // singulière : `update` doit renvoyer `None` sans modifier l'état ni la
+    // covariance.
+    let f = [[T::of(1.0)]];
+    let q = [[T::of(0.0)]];
+    let r = [[T::of(0.0)]];
+
+    let mut kf = UnscentedKalmanFilter::<T, 1, 1>::new(
+        [T::of(5.0)],
+        [[T::of(2.0)]],
+        T::of(1.0),
+        T::of(2.0),
+        T::of(2.0),
+    );
+    kf.predict(|x| test_matvec(&f, x), &q).expect("P SDP");
+    let x_before = *kf.state();
+    let p_before = *kf.covariance();
+
+    let result = kf.update(&[T::of(1.0)], |_x| [T::zero()], &r);
+    assert!(result.is_none(), "S = 0 devrait être détectée singulière");
+    assert_eq!(
+        *kf.state(),
+        x_before,
+        "état modifié malgré l'échec de mise à jour"
+    );
+    assert_eq!(
+        *kf.covariance(),
+        p_before,
+        "covariance modifiée malgré l'échec de mise à jour"
+    );
+}
+
+#[test]
+fn ukf_update_singular_returns_none_and_leaves_state_all_scalars() {
+    check_ukf_update_singular_returns_none_and_leaves_state::<f32>();
+    check_ukf_update_singular_returns_none_and_leaves_state::<f64>();
+    check_ukf_update_singular_returns_none_and_leaves_state::<Q16_16>();
 }
 
 // ------------------------------------------------------------------ //
