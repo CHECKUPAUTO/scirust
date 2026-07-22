@@ -93,7 +93,7 @@ deployment from within a method crate.
 | 725 | Trust & contamination models | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#742](https://github.com/Memorithm/scirust/pull/742) | `b1eca0ff7df85168539a841a7223d7a0af059e7b` | **Merged** |
 | 726 | Certified medoid clustering | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#745](https://github.com/Memorithm/scirust/pull/745) | `091cefad9c3ec00c37aab4631d2890146482b613` | **Merged** |
 | 727 | Industrial benchmark harness | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#747](https://github.com/Memorithm/scirust/pull/747) | `2e44bada7f20c50afa427e3c94a816c2348819d4` | **Merged** |
-| 728 | Real industrial evaluation | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | _(open)_ | _(pending)_ | In progress |
+| 728 | Real industrial evaluation | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#750](https://github.com/Memorithm/scirust/pull/750) | _(pending)_ | **In review** |
 | 729 | Shadow deployment & promotion gates | `feat/mlops-srcc-shadow-deployment` | — | — | Not started |
 
 > Branch and numbering notes:
