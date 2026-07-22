@@ -3811,6 +3811,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-srcc-bench"
+version = "0.1.0"
+dependencies = [
+ "scirust-bench-schema",
+ "scirust-learning",
+ "scirust-multivariate",
+ "scirust-solvers",
+ "scirust-spc",
+ "scirust-srcc",
+ "scirust-stats",
+ "scirust-unsupervised",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "scirust-stats"
 version = "0.1.0"
 dependencies = [

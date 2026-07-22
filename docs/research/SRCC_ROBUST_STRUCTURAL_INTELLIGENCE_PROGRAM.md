@@ -91,8 +91,8 @@ deployment from within a method crate.
 | 723 | Scale-aware SRCC source geometry | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#737](https://github.com/Memorithm/scirust/pull/737) | `96b73ea9c45b4c97456ca11cbb0a1e3164d3cfae` | **Merged** |
 | 724 | Deterministic robust regression | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#739](https://github.com/Memorithm/scirust/pull/739) | `c1c10946a48cb57daaff3fb4875a69064a0bb148` | **Merged** |
 | 725 | Trust & contamination models | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#742](https://github.com/Memorithm/scirust/pull/742) | `b1eca0ff7df85168539a841a7223d7a0af059e7b` | **Merged** |
-| 726 | Certified medoid clustering | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#745](https://github.com/Memorithm/scirust/pull/745) | _(pending)_ | **In review** |
-| 727 | Industrial benchmark harness | `feat/srcc-industrial-benchmark-harness` | — | — | Not started |
+| 726 | Certified medoid clustering | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#745](https://github.com/Memorithm/scirust/pull/745) | `091cefad9c3ec00c37aab4631d2890146482b613` | **Merged** |
+| 727 | Industrial benchmark harness | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#747](https://github.com/Memorithm/scirust/pull/747) | _(pending)_ | **In review** |
 | 728 | Real industrial evaluation | `feat/srcc-industrial-real-data-evaluation` | — | — | Not started |
 | 729 | Shadow deployment & promotion gates | `feat/mlops-srcc-shadow-deployment` | — | — | Not started |
 
@@ -803,3 +803,154 @@ re-verified byte-identical (`9699b515…`, `bad8cf07…`, `b2a1a041…`,
   enforced downstream by the frozen robust fitter, not by the solver.
 - Scale-aware + certified + trusted composition in one call is deferred to
   the benchmark-harness phase (727), where the opt-ins meet under one harness.
+
+---
+
+## Phase 727 — Industrial benchmark protocol and harness
+
+**Crate:** `scirust-srcc-bench` (new, workspace layer above every method
+crate) · **Preregistration:**
+`docs/research/SRCC_INDUSTRIAL_BENCHMARK_PREREGISTRATION.md`
+
+### Design
+
+Protocol, not verdict: the harness provides the machinery to test industrial
+claims honestly and contains **no superiority claims** — producing evidence
+is phase 728's job, under the committed preregistration. New-crate decision:
+the workspace precedent is one benchmark crate per program
+(`scirust-tdi-bench` over `scirust-tdi`), all emitting
+`scirust-bench-schema::BenchRecord`; `scirust-srcc-bench` follows it, sits
+strictly above the method layers (bench-schema/estimation/stats/solvers/
+unsupervised → multivariate/spc → srcc/learning), and no method crate
+depends back on it.
+
+Seven modules:
+
+- `dataset`: `TabularDataset { features, targets, groups, time_index }` with
+  typed shape/finiteness validation and a canonical versioned little-endian
+  IEEE-754-bit SHA-256 (`content_sha256`) — bit-level identity, stricter
+  than `==` (`-0.0` ≠ `+0.0` in the hash, verified);
+- `manifest`: `DatasetManifest` (name, version, source, license, sha256,
+  shape, target description, per-feature descriptors with units) validated
+  *against the data*: checksum or shape disagreement is a typed error. No
+  network anywhere; absent large data ⇒ skip, never download, in tests;
+- `splits`: `RandomHoldout` / `GroupedHoldout` / `Temporal` /
+  `LeaveOneGroupOut` with structural leakage prevention (groups never
+  straddle, training never postdates evaluation, ties in `time_index`
+  break by row index canonically), seeded Fisher–Yates, and a
+  `SplitManifest` (seed, strategy, grouping key, dataset checksum) on every
+  assignment;
+- `contamination`: the program's nine kinds (`AdditiveNoise`,
+  `CoordinateScaleShift`, `TargetFlip`, `SourceDuplication`,
+  `CoherentAlternativeCluster`, `SensorBias`, `SensorDropout`,
+  `BurstAttack` — temporally contiguous window, `ViewConcentratedAttack` —
+  within one group) with exact `ContaminationManifest`s (kind verbatim,
+  seed, affected rows, appended rows, input/output checksums).
+  `fraction = 0` is a recorded no-op; overflow to non-finite is a typed
+  error, not an emitted value. `TargetFlip` is documented as exactly
+  involutive on `{0,1}` labels only (`1 − (1 − y) ≠ y` in IEEE — stated,
+  not hidden);
+- `adapter`: the common interface `BaselineAdapter` with **declared
+  capabilities**: `TaskKind` (Regression / AnomalyDetection / StreamAlarm),
+  `FittingProtocol` (Inductive / Transductive — LOF and DBSCAN are declared
+  transductive rather than discovered), and `AdapterOutput` (Predictions /
+  AnomalyScores / AnomalyLabels / AlarmSteps) which decides which metrics
+  exist at all. Eleven adapters: OLS, Huber IRLS, trimmed LS,
+  median-of-means (scirust-learning); Isolation Forest, LOF, DBSCAN-noise
+  (scirust-unsupervised); regularized Mahalanobis (scirust-multivariate
+  fitted metric), Hotelling T², CUSUM, EWMA (scirust-spc). Underlying
+  failures surface as typed `AdapterError`s carrying the method's own error
+  text;
+- `metrics`: RMSE/MAE/median/worst absolute error; rank-based AUROC with
+  average ranks on ties (score producers only; degenerate label sets are
+  typed errors); confusion-derived rates as typed absences when undefined
+  (`None`, never `0.0`); typed `DetectionOutcome::{Detected{delay},
+  Missed}` with pre-onset false alarms counted separately; Rand and
+  adjusted Rand indices (zero-denominator ARI is a typed error);
+- `paired` + `records`: seeded percentile paired bootstrap (documented
+  floor-quantile rule, paired Cohen's d as `None` on zero variance) →
+  `ConfidenceInterval`; `RecordKey` emission helpers encode the
+  capability-honesty rule once (label-only detectors never get an AUROC
+  row; missed detections have no delay row; undefined rates are absent);
+  `RunMetadata` (git commit, dataset SHA, configuration SHA, toolchain,
+  feature flags) serialized **next to** result files, never inside hashed
+  scientific content.
+
+### Preregistration
+
+Committed in this phase, before any real data: five falsifiable hypotheses
+(H1 scale invariance, H2 robust regression under contamination, H3 trust
+identifiability, H4 certified-vs-greedy clustering — with "greedy matches
+everywhere" explicitly an acceptable publishable outcome, H5 end-task
+transfer), primary/secondary metrics, dataset requirements incl. the fixed
+SRCC transport-view construction (16 channels, preregistered horizon,
+per-trajectory median centering), split strategy, baselines, hyperparameter
+policy (never on test), exclusion rules, failure reporting, and a four-part
+superiority criterion (paired CI excluding zero, ≥ 5 % relative, no
+safety-metric degradation beyond budget, replication) below which the only
+permitted conclusions are "no significant difference" / "underperformed" /
+"inconclusive".
+
+### Tests
+
+49 tests: dataset hashing identity (every observable field changes the hash;
+`-0.0` vs `+0.0`); manifest validation against tampered content and shapes;
+split determinism, coverage, group-straddle impossibility, temporal
+no-future-training with canonical tie-break, typed error battery;
+contamination determinism + exact manifests, burst temporal contiguity on
+scrambled time indices, view confinement, aligned duplication, binary-flip
+involution, overflow detection; hand-computed metric values (AUROC tie
+cases, ARI including its IEEE rounding), typed degeneracies; bootstrap
+determinism, seed sensitivity, degenerate-variance handling; adapter
+recovery of a noiseless affine law, gross-outlier ranking by all four score
+producers, DBSCAN noise flags, stream alarms after a level shift with no
+false alarms on the in-control prefix, typed shape/degeneracy errors;
+record emission (AUROC present for scores, absent for labels; absent ≠
+zero; missed detections carry no delay row).
+
+### Benchmark fingerprint
+
+`scirust-srcc-bench/examples/industrial_protocol_demo.rs` — the full
+protocol on a deterministic 6-machine synthetic plant: manifest; grouped
+split; coherent-cluster training contamination sweep over four estimators;
+leave-one-machine-out paired OLS-vs-Huber bootstrap; five anomaly detectors
+against an evaluation-set coherent cluster; CUSUM/EWMA on a constructed
+level shift; all rows re-emitted as `BenchRecord` JSONL.
+
+```
+SHA-256 (scientific stdout, nightly-2026-07-02, x86_64):
+167c13def9ef160ac7aec91955485f696d4c5d7ea74628584b47d8c66746bfc9
+```
+
+Honest readings printed by the demo itself: median-of-means is poor on this
+fixture even at zero contamination (its block-majority heuristic is a
+documented weakness, shown); the six-machine paired interval
+`[−1.24e−2, 7.44e−3]` straddles zero — the demo's own conclusion is "no
+significant difference", exercising the anti-overclaim path; the
+transductive density methods **fail structurally** on the coherent
+alternative cluster (LOF AUROC 0.39, DBSCAN balanced accuracy 0.50 — a
+dense fake cluster is not "noise") while train-distribution methods
+(Isolation Forest, Mahalanobis, T²) separate it perfectly — precisely the
+adversarial scenario the trust phases exist for.
+
+### Compatibility
+
+Purely additive: one new workspace member; no existing crate modified; all
+eight historical example outputs re-verified byte-identical (`9699b515…`,
+`bad8cf07…`, `b2a1a041…`, `4943a4e4…`, `fc0dcbca…`, `7d0a6d72…`,
+`8bb566fb…`, `c7da6bb4…`). Edition 2024 (the `scirust-bench-schema`
+precedent); `sha2`/`serde` are established workspace dependencies. `cargo
+clippy --workspace --all-targets --locked -- -D warnings` and `cargo fmt
+--all --check` pass.
+
+### Known limitations / deferred
+
+- SRCC-family adapters are not in the 727 demo: SRCC consumes transport
+  views, not tabular rows; the preregistration fixes the view construction
+  and phase 728 wires those adapters against real trajectories.
+- Runtime/memory metrics are declared side channels; the harness does not
+  measure them yet (no timings may enter hashed stdout).
+- The paired bootstrap is percentile-only (no BCa correction); the exact
+  floor-quantile convention is documented and deterministic.
+- `RandomHoldout` deliberately offers no leakage protection and says so;
+  grouped/temporal strategies are the industrial defaults.

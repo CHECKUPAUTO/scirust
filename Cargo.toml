@@ -173,6 +173,7 @@ members = [
     "scirust-itd",
     "scirust-tdi",
     "scirust-tdi-bench",
+    "scirust-srcc-bench",
     "scirust-bench-schema",
 ]
 exclude = [
