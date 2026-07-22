@@ -97,7 +97,7 @@ deployment from within a method crate.
 | 728D | Diagnostic — why the 728 nulls (framing, not power) | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#751](https://github.com/Memorithm/scirust/pull/751) | `8c83bf6ca74e1f4fb157982594ee98df5ac87659` | **Merged** |
 | 728R1 | Re-framing lever 1 — piecewise RUL + reduced decimation | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#753](https://github.com/Memorithm/scirust/pull/753) | `c152e850d7a38f8e03c6d05d0796cb78b63ebfe5` | **Merged** |
 | 728R2 | Re-framing lever 2 — high-leverage contamination (decisive test) | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#754](https://github.com/Memorithm/scirust/pull/754) | `2467b18b80657774f843fc116335e9ada9126ffd` | **Merged** |
-| 728R3 | Re-framing lever 3 — SECOM supervised reformulation | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#755](https://github.com/Memorithm/scirust/pull/755) | _(pending)_ | **In review** |
+| 728R3 | Re-framing lever 3 — SECOM supervised reformulation | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#755](https://github.com/Memorithm/scirust/pull/755) | `c60c5769` | **Merged** |
 | 729 | Shadow deployment & promotion gates | `feat/mlops-srcc-shadow-deployment` | — | — | Not started |
 
 > Branch and numbering notes:
