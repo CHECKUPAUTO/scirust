@@ -9,8 +9,14 @@ pub mod nlp;
 pub mod optim;
 pub mod pattern_miner;
 pub mod rl;
+pub mod robust_regression;
 pub mod simd_nn;
 pub mod time_series;
+
+pub use robust_regression::{
+    LinearRegressionModel, RegressionDataset, RobustLoss, RobustRegressionConfig,
+    RobustRegressionError, RobustRegressionMethod, RobustRegressionReport, fit_robust_regression,
+};
 
 use serde::{Deserialize, Serialize};
 

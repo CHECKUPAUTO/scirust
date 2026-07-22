@@ -3290,7 +3290,10 @@ dependencies = [
  "fastrand",
  "rand 0.8.6",
  "scirust-core",
+ "scirust-multivariate",
  "scirust-simd",
+ "scirust-solvers",
+ "scirust-stats",
  "serde",
  "serde_json",
 ]
