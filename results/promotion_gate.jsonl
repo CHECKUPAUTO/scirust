@@ -1,0 +1,9 @@
+{"kernel":"promotion_gate/decision","dataset":"cmapss/df_2","method":"huber_vs_ols","seed":728099,"metric":"promote","value":1.0}
+{"kernel":"promotion_gate/primary","dataset":"cmapss/df_2","method":"signal_squared_error","seed":728099,"metric":"improvement_mean","value":2.6452952407351304,"ci":{"lo":2.0842436236048276,"hi":3.241061761573521,"level":0.95}}
+{"kernel":"promotion_gate/guardrail","dataset":"cmapss/df_2","method":"signal_absolute_error","seed":728099,"metric":"regression_mean","value":-0.7531529864588892,"ci":{"lo":-0.9020564325651057,"hi":-0.6185716202971788,"level":0.95}}
+{"kernel":"promotion_gate/decision","dataset":"cmapss/df_5","method":"huber_vs_ols","seed":728099,"metric":"promote","value":0.0}
+{"kernel":"promotion_gate/primary","dataset":"cmapss/df_5","method":"signal_squared_error","seed":728099,"metric":"improvement_mean","value":0.01439976700399003,"ci":{"lo":-0.41496318957833145,"hi":0.2879648241911666,"level":0.95}}
+{"kernel":"promotion_gate/guardrail","dataset":"cmapss/df_5","method":"signal_absolute_error","seed":728099,"metric":"regression_mean","value":-0.046363879568659436,"ci":{"lo":-0.10525645802675881,"hi":0.012643332318633698,"level":0.95}}
+{"kernel":"promotion_gate/decision","dataset":"cmapss/df_30","method":"huber_vs_ols","seed":728099,"metric":"promote","value":0.0}
+{"kernel":"promotion_gate/primary","dataset":"cmapss/df_30","method":"signal_squared_error","seed":728099,"metric":"improvement_mean","value":0.04429398252794484,"ci":{"lo":-0.13156129792420804,"hi":0.34458327329190147,"level":0.95}}
+{"kernel":"promotion_gate/guardrail","dataset":"cmapss/df_30","method":"signal_absolute_error","seed":728099,"metric":"regression_mean","value":0.026185251431050847,"ci":{"lo":-0.03184930168937169,"hi":0.07473229075172533,"level":0.95}}

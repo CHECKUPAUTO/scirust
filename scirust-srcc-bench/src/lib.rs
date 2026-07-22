@@ -23,6 +23,7 @@ pub mod manifest;
 pub mod metrics;
 pub mod missing;
 pub mod paired;
+pub mod promotion;
 pub mod records;
 pub mod splits;
 pub mod srcc_views;
@@ -47,6 +48,10 @@ pub use metrics::{
 pub use missing::{DropReason, FittedImputer, MissingPolicyError, MissingValuePolicy};
 pub use paired::{
     PairedBootstrapReport, PairedComparisonError, paired_bootstrap, paired_differences,
+};
+pub use promotion::{
+    CriterionFinding, Decision, Guardrail, Orientation, PairedMetric, PrimaryCriterion,
+    PromotionError, PromotionGate, PromotionReport,
 };
 pub use records::{
     RecordKey, RunMetadata, alarm_records, anomaly_label_records, anomaly_score_records,
