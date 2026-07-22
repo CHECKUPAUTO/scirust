@@ -512,3 +512,89 @@ results SHA-256: 71788a2019cc32efd5e6bade26eb2abd2aa35df53d2a1a5ea23d9cfa9e47cc9
 Run twice, byte-identical (built `--release` for the `O(n³)` solves; release is
 equally deterministic); no network; checksum-verified C-MAPSS inputs; OLS, isotonic
 (PAVA) and kernel ridge (Cholesky) are all RNG-free.
+
+## Follow-up 6 (axis 2) — SECOM past the linear ceiling: nonlinearity vs drift
+
+Item 2 stabilized the supervised SECOM discriminant (standardize → univariate
+top-`k` → within-class LDA) into a *selectable* ~0.567 frozen-test AUROC, but
+could not raise the ceiling, and named two suspects for the residual barrier:
+**temporal drift** (the SECOM process moves, so the earliest wafers least
+resemble the test period) and **functional form** (a linear discriminant may be
+too rigid). This axis tests each with its own binary, both under item 2's exact
+protocol — temporal split, train-fit imputation, `(·)` selected on validation,
+frozen on test — so the only thing that changes is the hypothesis.
+
+### Route A — explicit drift correction (`industrial-secom-drift`)
+
+Fit the *same* within-class LDA on a **recency window**: the most-recent fraction
+`w` of the temporally-ordered train split, closest to the held-out test regime.
+Sweep `w ∈ {0.4, 0.6, 0.8, 1.0}` (with `w = 1.0` recovering item 2's all-train
+model), `k ∈ {5, 10, 20, 40}`, `ridge ∈ {0.1, 1, 10}`; skip any window with fewer
+than five of either class; select `(w, k, ridge)` on validation AUROC.
+
+**Finding — null; drift correction *hurts* here.** Validation selects
+`w = 0.8, k = 40, ridge = 0.1` at validation AUROC **0.630**, but the frozen test
+falls to **0.530** — a validation→test drop of **−0.099**, and *below* item 2's
+0.567. Trimming stale training rows does not help; it overfits the small
+validation set and throws away data the rare-failure class cannot spare. The
+recency window is the wrong lever.
+
+### Route B — low-order nonlinearity (`industrial-secom-nonlinear`)
+
+Keep all training rows but let the discriminant be **nonlinear** in the top-`k`
+features: expand them with a degree-2 polynomial map (squares and pairwise
+products, width `k(k+3)/2`) before the within-class LDA. `degree = 1` recovers
+item 2's linear model, so the sweep carries its own linear baseline. The honest
+constraint is small samples — the train split holds only **76 failures** — so
+every configuration whose expanded width exceeds that failure count is **skipped
+a priori** (a discriminant with more parameters than the rarer class is
+rank-starved); the complexity budget is tied to the data, not chosen to flatter
+the result. That caps degree-2 at `k ≤ 8` (width 44); `k = 12, 20` (widths 90,
+230) are skipped. Sweep `degree ∈ {1, 2}`, `k ∈ {4, 6, 8, 12, 20}`,
+`ridge ∈ {0.1, 1, 10}`.
+
+| model | selected config | validation AUROC | frozen-test AUROC |
+|-------|-----------------|-----------------:|------------------:|
+| linear (degree 1), best on validation | `k = 6, ridge = 1` | 0.615 | — (not selected) |
+| **degree-2 polynomial LDA** | `k = 8, ridge = 10`, width 44 | **0.662** | **0.6177** |
+| item-2 baseline (linear, all features via total scatter → within-class) | — | — | 0.567 |
+| lever-3 baseline (all features, total scatter) | — | — | 0.581 |
+| unsupervised baseline (best density detector) | — | — | 0.469 |
+
+**Finding — yes; nonlinearity clears the ceiling.** Degree-2 dominates degree-1
+on validation (0.662 vs 0.615, i.e. the sweep *chooses* to be nonlinear), and the
+selected quadratic generalizes: frozen-test AUROC **0.6177**, above both item 2
+(**+0.051**) and lever 3 (**+0.037**), with a modest validation→test drift
+(**−0.044**, comparable to item 2's own −0.02). Curvature in the eight strongest
+features carries real, transferable failure signal that the linear discriminant
+discards.
+
+### Axis-2 synthesis
+
+The ~0.57 SECOM ceiling **is** breakable — but by the functional lever, not the
+temporal one. Adding low-order curvature *within the failure-count budget* lifts
+the frozen-test AUROC to 0.618; trimming stale rows to chase drift *drops* it to
+0.530. The two routes fail and succeed for the same underlying reason: SECOM's
+failures are rare, so the binding constraint is **model capacity per failure**.
+The drift route spends that scarce budget by shrinking the training set; the
+nonlinear route spends it by adding just enough parameters to stay under the
+budget while capturing curvature. Same constraint, opposite sign. This refines —
+does not overturn — the program's through-line: framing and capacity, matched to
+how little labelled failure data exists, beat both raw robustness and naive
+"use-more-recent-data" heuristics. Honest bound: SECOM's validation and test
+folds are small (76 train / a few dozen test failures), so the point estimates
+carry wide intervals; the deterministic winner clears both baselines but the
+margin is not large.
+
+**Determinism.**
+
+```
+drift      stdout  SHA-256: 23f55815bbfffcdb80ab6a0f50a758597697465a8dc2c1377230aea551c10b01
+drift      results SHA-256: 226b01142e32de66617f2940ec9a55068455f7236d8ccd97edff570962409a40  (56 BenchRecords)
+nonlinear  stdout  SHA-256: 34489263a2d788e8293cb60188038455dad0b5b7c01853a35a23b39cedb61f6e
+nonlinear  results SHA-256: 1a6f012a0b75b2b112ab2098b04962f7776b45e7ddb5f82589435e0425eae20b  (33 BenchRecords)
+```
+
+Run twice, byte-identical; no network; checksum-verified SECOM inputs; both
+binaries are all-linear-algebra (LDA covariance is `d × d`, no `O(n³)` kernel
+solve) and RNG-free.
