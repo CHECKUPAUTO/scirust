@@ -8,7 +8,7 @@
 //    composition, angle-axe) mesurées contre une référence `f64` ;
 //  * déterminisme bit-à-bit du chemin virgule fixe.
 
-use super::{DualQuaternion, Quaternion, Screw, Transform};
+use super::{DualQuaternion, MadgwickFilter, MahonyFilter, Quaternion, Screw, Transform};
 use crate::fixed::{NumericScalar, Q16_16, RealScalar};
 
 // ------------------------------------------------------------------ //
@@ -1173,4 +1173,304 @@ fn dual_quaternion_screw_pow_agrees_all_scalars() {
     check_dual_quaternion_screw_pow_agrees::<f32>();
     check_dual_quaternion_screw_pow_agrees::<f64>();
     check_dual_quaternion_screw_pow_agrees::<Q16_16>();
+}
+
+// ------------------------------------------------------------------ //
+//  AHRS : MadgwickFilter, MahonyFilter                                 //
+// ------------------------------------------------------------------ //
+
+/// Simule les lectures statiques (accéléromètre, magnétomètre) d'un corps
+/// d'orientation vraie `q_true` (repère corps → repère monde), immobile,
+/// pour une référence magnétique monde `mag_world`.
+fn simulate_static_readings<T: Scalar>(
+    q_true: Quaternion<T>,
+    mag_world: [T; 3],
+) -> ([T; 3], [T; 3]) {
+    let up = [T::zero(), T::zero(), T::one()];
+    let accel = q_true.conjugate().rotate_vector(up);
+    let mag = q_true.conjugate().rotate_vector(mag_world);
+    (accel, mag)
+}
+
+/// Compare `got` à `want` avec une tolérance absolue explicite `tol` (pas
+/// `T::TOL`) : utilisé pour les tests de convergence AHRS, où l'erreur
+/// résiduelle est bornée par la dynamique de l'algorithme (gain fixe,
+/// oscillation résiduelle près du minimum pour Madgwick — cf. en-tête de
+/// section), pas par la précision arithmétique de `T`.
+fn approx_vec_tol<T: Scalar>(got: [T; 3], want: [f64; 3], tol: f64, ctx: &str) {
+    for k in 0..3
+    {
+        let d = (got[k].to_f64() - want[k]).abs();
+        assert!(d <= tol, "{ctx}: composante {k} écart {d:.2e} > {tol:.0e}");
+    }
+}
+
+fn check_madgwick_converges_to_known_tilt<T: Scalar + core::ops::Div<Output = T>>() {
+    // Inclinaison vraie : 30° de roulis puis 20° de tangage (composés) — pas
+    // de lacet, pour isoler la convergence roulis/tangage de la question du
+    // lacet (cf. `*_imu_only_cannot_observe_yaw`).
+    //
+    // Invariant vérifié : la gravité **prédite en repère corps**
+    // (`q̂⁻¹·[0,0,1]`) doit rejoindre la mesure `accel` — **pas** `q`
+    // lui-même comparé à `q_true` composante par composante, qui resterait
+    // indéterminé : la gravité seule ne contraint que le roulis/tangage
+    // (2 ddl), laissant un degré de liberté de lacet libre (cf. en-tête de
+    // module) — la trajectoire, partant de l'identité, peut converger vers
+    // **n'importe quel** représentant de la famille à un paramètre des
+    // quaternions de même inclinaison, pas spécifiquement `q_true`.
+    let roll = Quaternion::<T>::from_axis_angle([T::of(1.0), T::of(0.0), T::of(0.0)], T::of(0.5));
+    let pitch = Quaternion::<T>::from_axis_angle([T::of(0.0), T::of(1.0), T::of(0.0)], T::of(0.3));
+    let q_true = roll.mul_quat(pitch).normalize();
+    let (accel, _) = simulate_static_readings(q_true, [T::of(1.0), T::of(0.0), T::of(0.0)]);
+
+    let mut f = MadgwickFilter::<T>::new(T::of(0.8));
+    for _ in 0..300
+    {
+        f.update_imu([T::zero(); 3], accel, T::of(0.01));
+    }
+
+    let up = [T::zero(), T::zero(), T::one()];
+    let v_hat = f.orientation().conjugate().rotate_vector(up);
+    approx_vec_tol(
+        v_hat,
+        [accel[0].to_f64(), accel[1].to_f64(), accel[2].to_f64()],
+        0.03,
+        "Madgwick : gravité prédite vs mesurée",
+    );
+}
+
+#[test]
+fn madgwick_converges_to_known_tilt_all_scalars() {
+    check_madgwick_converges_to_known_tilt::<f32>();
+    check_madgwick_converges_to_known_tilt::<f64>();
+    check_madgwick_converges_to_known_tilt::<Q16_16>();
+}
+
+fn check_mahony_converges_to_known_tilt<T: Scalar>() {
+    // Même invariant que `check_madgwick_converges_to_known_tilt` (gravité
+    // prédite vs mesurée, pas `q` vs `q_true` — cf. son commentaire).
+    let roll = Quaternion::<T>::from_axis_angle([T::of(1.0), T::of(0.0), T::of(0.0)], T::of(0.5));
+    let pitch = Quaternion::<T>::from_axis_angle([T::of(0.0), T::of(1.0), T::of(0.0)], T::of(0.3));
+    let q_true = roll.mul_quat(pitch).normalize();
+    let (accel, _) = simulate_static_readings(q_true, [T::of(1.0), T::of(0.0), T::of(0.0)]);
+
+    let mut f = MahonyFilter::<T>::new(T::of(2.0), T::of(0.0));
+    for _ in 0..300
+    {
+        f.update_imu([T::zero(); 3], accel, T::of(0.01));
+    }
+
+    let up = [T::zero(), T::zero(), T::one()];
+    let v_hat = f.orientation().conjugate().rotate_vector(up);
+    approx_vec_tol(
+        v_hat,
+        [accel[0].to_f64(), accel[1].to_f64(), accel[2].to_f64()],
+        0.03,
+        "Mahony : gravité prédite vs mesurée",
+    );
+}
+
+#[test]
+fn mahony_converges_to_known_tilt_all_scalars() {
+    check_mahony_converges_to_known_tilt::<f32>();
+    check_mahony_converges_to_known_tilt::<f64>();
+    check_mahony_converges_to_known_tilt::<Q16_16>();
+}
+
+fn check_madgwick_imu_only_cannot_observe_yaw<T: Scalar + core::ops::Div<Output = T>>() {
+    // Vraie orientation : 90° de lacet pur (rotation autour de l'axe
+    // vertical). La gravité vue en repère corps est **identique** à celle de
+    // l'identité (le lacet ne fait pas tourner l'axe vertical lui-même) :
+    // `update_imu` seul, démarré à l'identité, ne doit donc quasiment pas
+    // bouger — l'accéléromètre ne contraint pas le lacet (cf. en-tête de
+    // module).
+    let q_true = Quaternion::<T>::from_axis_angle([T::of(0.0), T::of(0.0), T::of(1.0)], T::of(1.5));
+    let (accel, _) = simulate_static_readings(q_true, [T::of(1.0), T::of(0.0), T::of(0.0)]);
+
+    let mut f = MadgwickFilter::<T>::new(T::of(0.8));
+    for _ in 0..200
+    {
+        f.update_imu([T::zero(); 3], accel, T::of(0.01));
+    }
+
+    // "Avant" du corps (axe x) doit rester proche de l'identité (1,0,0), PAS
+    // de la vraie orientation tournée de 90° (0,1,0 environ) : le lacet n'a
+    // pas été corrigé.
+    let forward = f
+        .orientation()
+        .rotate_vector([T::one(), T::zero(), T::zero()]);
+    assert!(
+        forward[0].to_f64() > 0.9,
+        "le lacet n'aurait pas dû être corrigé par l'accéléromètre seul : avant = {:?}",
+        [
+            forward[0].to_f64(),
+            forward[1].to_f64(),
+            forward[2].to_f64()
+        ]
+    );
+}
+
+#[test]
+fn madgwick_imu_only_cannot_observe_yaw_all_scalars() {
+    check_madgwick_imu_only_cannot_observe_yaw::<f32>();
+    check_madgwick_imu_only_cannot_observe_yaw::<f64>();
+    check_madgwick_imu_only_cannot_observe_yaw::<Q16_16>();
+}
+
+fn check_mahony_imu_only_cannot_observe_yaw<T: Scalar>() {
+    let q_true = Quaternion::<T>::from_axis_angle([T::of(0.0), T::of(0.0), T::of(1.0)], T::of(1.5));
+    let (accel, _) = simulate_static_readings(q_true, [T::of(1.0), T::of(0.0), T::of(0.0)]);
+
+    let mut f = MahonyFilter::<T>::new(T::of(2.0), T::of(0.0));
+    for _ in 0..200
+    {
+        f.update_imu([T::zero(); 3], accel, T::of(0.01));
+    }
+
+    let forward = f
+        .orientation()
+        .rotate_vector([T::one(), T::zero(), T::zero()]);
+    assert!(
+        forward[0].to_f64() > 0.9,
+        "le lacet n'aurait pas dû être corrigé par l'accéléromètre seul : avant = {:?}",
+        [
+            forward[0].to_f64(),
+            forward[1].to_f64(),
+            forward[2].to_f64()
+        ]
+    );
+}
+
+#[test]
+fn mahony_imu_only_cannot_observe_yaw_all_scalars() {
+    check_mahony_imu_only_cannot_observe_yaw::<f32>();
+    check_mahony_imu_only_cannot_observe_yaw::<f64>();
+    check_mahony_imu_only_cannot_observe_yaw::<Q16_16>();
+}
+
+fn check_madgwick_marg_corrects_yaw<T: Scalar + core::ops::Div<Output = T>>() {
+    // Même vraie orientation (lacet pur de 90°) que le test précédent, mais
+    // avec un magnétomètre : `update_marg` doit cette fois converger vers le
+    // lacet vrai (le magnétomètre lève l'ambiguïté, cf. en-tête de module).
+    let q_true = Quaternion::<T>::from_axis_angle([T::of(0.0), T::of(0.0), T::of(1.0)], T::of(1.5));
+    let mag_world = [T::of(1.0), T::of(0.0), T::of(0.0)];
+    let (accel, mag) = simulate_static_readings(q_true, mag_world);
+
+    let mut f = MadgwickFilter::<T>::new(T::of(0.8));
+    for _ in 0..500
+    {
+        f.update_marg([T::zero(); 3], accel, mag, T::of(0.01));
+    }
+
+    // Le magnétomètre lève l'ambiguïté de lacet : contrairement au test
+    // précédent, `q` converge maintenant vers `q_true` (unique à un point
+    // fixe isolé, plus de degré de liberté libre). Tolérance plus large que
+    // `T::TOL` : la descente de gradient à gain fixe oscille légèrement
+    // autour du minimum (mesuré ≤ ~1,1e-2 sur 3000 itérations, jamais
+    // exactement nul) — cf. en-tête de module.
+    let forward = f
+        .orientation()
+        .rotate_vector([T::one(), T::zero(), T::zero()]);
+    let want = q_true.rotate_vector([T::one(), T::zero(), T::zero()]);
+    approx_vec_tol(
+        forward,
+        [want[0].to_f64(), want[1].to_f64(), want[2].to_f64()],
+        0.03,
+        "Madgwick MARG converge vers le lacet vrai",
+    );
+}
+
+#[test]
+fn madgwick_marg_corrects_yaw_all_scalars() {
+    check_madgwick_marg_corrects_yaw::<f32>();
+    check_madgwick_marg_corrects_yaw::<f64>();
+    check_madgwick_marg_corrects_yaw::<Q16_16>();
+}
+
+fn check_mahony_marg_corrects_yaw<T: Scalar>() {
+    let q_true = Quaternion::<T>::from_axis_angle([T::of(0.0), T::of(0.0), T::of(1.0)], T::of(1.5));
+    let mag_world = [T::of(1.0), T::of(0.0), T::of(0.0)];
+    let (accel, mag) = simulate_static_readings(q_true, mag_world);
+
+    let mut f = MahonyFilter::<T>::new(T::of(2.0), T::of(0.0));
+    for _ in 0..800
+    {
+        f.update_marg([T::zero(); 3], accel, mag, T::of(0.01));
+    }
+
+    // Mahony (rétroaction directe, pas de descente de gradient) converge
+    // beaucoup plus proprement que Madgwick au point fixe (mesuré ~1,8e-7 en
+    // f64) ; tolérance calée sur le chemin virgule fixe (Q16.16, résolution
+    // ≈ 1,5e-5, accumulée sur la dynamique itérative — mesuré ~2e-3), pas
+    // sur `T::TOL` (identités algébriques exactes, pas cette dynamique).
+    let forward = f
+        .orientation()
+        .rotate_vector([T::one(), T::zero(), T::zero()]);
+    let want = q_true.rotate_vector([T::one(), T::zero(), T::zero()]);
+    approx_vec_tol(
+        forward,
+        [want[0].to_f64(), want[1].to_f64(), want[2].to_f64()],
+        5e-3,
+        "Mahony MARG converge vers le lacet vrai",
+    );
+}
+
+#[test]
+fn mahony_marg_corrects_yaw_all_scalars() {
+    check_mahony_marg_corrects_yaw::<f32>();
+    check_mahony_marg_corrects_yaw::<f64>();
+    check_mahony_marg_corrects_yaw::<Q16_16>();
+}
+
+fn check_mahony_bias_estimation_converges<T: Scalar>() {
+    // Biais gyroscopique constant simulé (0.1 rad/s sur l'axe x) : avec des
+    // corrections d'accéléromètre répétées sur un corps immobile, le terme
+    // intégral doit converger vers l'opposé du biais (pour que la vitesse
+    // angulaire corrigée nette reste nulle).
+    let true_bias = [T::of(0.1), T::of(0.0), T::of(0.0)];
+    let accel = [T::zero(), T::zero(), T::one()]; // corps au niveau, immobile.
+
+    let mut f = MahonyFilter::<T>::new(T::of(2.0), T::of(0.3));
+    for _ in 0..2000
+    {
+        f.update_imu(true_bias, accel, T::of(0.01));
+    }
+
+    let est = f.bias();
+    assert!(
+        (est[0].to_f64() - (-0.1)).abs() <= 0.02,
+        "biais estimé[0] = {} vs -0.1",
+        est[0].to_f64()
+    );
+    assert!(
+        est[1].to_f64().abs() <= 0.02,
+        "biais estimé[1] = {} vs 0",
+        est[1].to_f64()
+    );
+}
+
+#[test]
+fn mahony_bias_estimation_converges_all_scalars() {
+    check_mahony_bias_estimation_converges::<f32>();
+    check_mahony_bias_estimation_converges::<f64>();
+    check_mahony_bias_estimation_converges::<Q16_16>();
+}
+
+#[test]
+fn madgwick_reset_restores_identity() {
+    let mut f = MadgwickFilter::<f64>::new(0.5);
+    f.update_imu([0.1, 0.0, 0.0], [0.0, 0.3, 0.9], 0.01);
+    assert_ne!(f.orientation(), Quaternion::<f64>::identity());
+    f.reset();
+    assert_eq!(f.orientation(), Quaternion::<f64>::identity());
+}
+
+#[test]
+fn mahony_reset_restores_identity_and_zero_bias() {
+    let mut f = MahonyFilter::<f64>::new(2.0, 0.1);
+    f.update_imu([0.1, 0.0, 0.0], [0.0, 0.3, 0.9], 0.01);
+    assert_ne!(f.orientation(), Quaternion::<f64>::identity());
+    f.reset();
+    assert_eq!(f.orientation(), Quaternion::<f64>::identity());
+    assert_eq!(f.bias(), [0.0, 0.0, 0.0]);
 }
