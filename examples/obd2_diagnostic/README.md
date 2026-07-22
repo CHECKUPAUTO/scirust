@@ -177,6 +177,45 @@ Les modèles entraînés sont sérialisés dans `models/` au format
 Le round-trip est vérifié à chaque run : rechargement dans un modèle
 vierge via `load_state_dict` → écart maximal de prédiction = 0.
 
+## API de diagnostic (`obd2_api`)
+
+Le binary `obd2_api` expose le modèle « données réelles » via une API HTTP
+**sans aucune dépendance externe** (serveur `std::net::TcpListener`, JSON
+minimal fait main). Il charge le fichier safetensors auto-suffisant :
+l'architecture du réseau est reconstruite depuis les shapes des tenseurs,
+la normalisation et le seuil d'anomalie depuis les métadonnées embarquées.
+
+```bash
+cargo run -p obd2_diagnostic --release --bin obd2_api            # port 8080
+cargo run -p obd2_diagnostic --release --bin obd2_api -- 9090    # port choisi
+```
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /health` | état du service et architecture du modèle |
+| `GET /model` | features attendues, cible, seuil, source des données |
+| `POST /diagnose` | relevés capteurs JSON → trim prédit, résidu, verdict |
+
+Exemple (relevé réel sain du CSV) :
+
+```bash
+curl -s localhost:8080/diagnose -d '{"RPM":1898,"SPEED":39,
+  "THROTTLE_POS":23.53,"MAF":2.66,"COOLANT_TEMP":93,"INTAKE_TEMP":27,
+  "O2_B1S1":0.625,"ENGINE_LOAD":5.49,"INTAKE_PRESSURE":26,
+  "O2_B1S2":0.055,"LONG_FUEL_TRIM_1":17.97}'
+```
+
+```json
+{"trim_observe_pct":17.97,"trim_predit_pct":17.49,"residu_pct":0.48,
+ "seuil_pct":8.85,"anomalie":false,"verdict":"sain",
+ "interpretation":"Le trim observé est cohérent avec l'état moteur…"}
+```
+
+Le même relevé avec un trim gonflé de +14 % (symptôme de prise d'air)
+renvoie `"verdict":"anomalie_melange_pauvre"` avec les suspects classiques
+P0171 ; un trim anormalement bas renvoie `"anomalie_melange_riche"`
+(logique P0172). Champ manquant → HTTP 400 avec le nom du capteur attendu.
+
 ## Honnêteté sur les limites
 
 Les versions massive/ultra/mégaverse restent **synthétiques** : l'IA y
