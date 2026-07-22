@@ -336,3 +336,72 @@ Run twice, byte-identical; no network; checksum-verified SECOM inputs; the
 standardizer, univariate selection (`total_cmp` with index tie-break), and the
 regularized within-class LDA are all deterministic, with no RNG beyond the frozen
 temporal split.
+
+---
+
+## Follow-up 3 — the regime that reopens the question: native heavy-tailed noise
+
+The whole program's opening question was whether the robust estimators the SRCC
+work built are ever the missing piece. Lever 2 answered "not under *injected
+high-leverage* contamination" — but that is one contamination geometry. This
+follow-up tests the other canonical one, the regime robust M-/trimmed estimators
+are actually *designed* for: **pervasive heavy-tailed vertical outliers** (a
+native error distribution with heavy tails, not a handful of adversarial leverage
+points).
+
+Controlled and honest: the **real** C-MAPSS FD001 design matrix (imputed,
+standardized — real feature geometry and collinearity, the same X as lever 2), a
+fixed planted linear signal `Xβ`, and native errors drawn from a **Student-t**
+whose degrees of freedom `ν` sweep the tail heaviness (`ν = 1` Cauchy … `ν = 30`
+≈ Gaussian). Recovery is measured against the *noiseless* signal on a held-out
+grouped split, so the metric is how well each estimator recovered the truth
+despite heavy-tailed *training* noise; OLS / Huber-IRLS / trimmed LS are compared
+with the same seeded paired bootstrap (of per-row signal squared error) as
+lever 2 (`industrial-heavy-tailed`).
+
+| `ν` (tail) | OLS signal-RMSE | Huber − OLS (paired Δ, 95% CI) | Trimmed − OLS |
+|-----------:|----------------:|-------------------------------|---------------|
+| **1** (Cauchy) | **39.63** | **+1568.9 [1307.9, 1867.7] robust wins** | **+1566.4 robust wins** |
+| **2** | 1.681 | **+1.79 [1.34, 2.30] robust wins** | **+1.04 [0.50, 1.58] robust wins** |
+| 3 | 1.286 | **+0.68 [0.32, 1.12] robust wins** | −1.46 ols wins |
+| 5 | 1.106 | +0.13 [−0.08, 0.44] tie | −1.54 ols wins |
+| 30 (~Gaussian) | 0.818 | −0.13 [−0.45, 0.05] tie | −1.65 ols wins |
+
+**Finding — yes, a regime rewards the robust estimators, and it is the mirror
+image of lever 2.** Under genuinely heavy tails (`ν ≤ 2–3`) **Huber-IRLS
+decisively beats OLS** — at `ν = 1` OLS is wrecked (signal-RMSE 39.6, the Cauchy
+tail dominates the L2 loss) while Huber and trimmed recover the signal orders of
+magnitude better. As the tails lighten toward Gaussian (`ν = 30`) the advantage
+vanishes: Huber converges to OLS (a tie, exactly as theory says) and OLS is
+optimal. Lever 2 and follow-up 3 use the **same** C-MAPSS design and the **same**
+paired test; only the contamination *geometry* differs — injected high-leverage
+points (lever 2) → OLS wins; pervasive heavy-tailed vertical outliers
+(follow-up 3) → robust wins. **The pivot is geometry, not estimator power.**
+
+**Honest bounds.** (1) This is semi-synthetic: real `X`, but a planted signal and
+native `t`-errors — the way to *isolate* the noise geometry a fixed real target
+cannot vary. (2) The result is about which regime rewards robustness, not a claim
+that C-MAPSS lives in it: the real RUL residuals are not this heavy, which is
+precisely why lever 2 was null. (3) **Huber, not trimmed, is the robust estimator
+that pays** — trimmed LS's fixed 0.7 retention helps only at the most extreme
+tails (`ν ≤ 2`) and *hurts* from `ν = 3` up by discarding good rows; a fixed
+trimming fraction is the wrong knob unless the contamination fraction is known.
+
+**What it means for the program.** The contamination-robust tools are not dead
+weight — they are the right instrument for **heavy-tailed vertical-outlier
+noise**, a real and common sensor-failure mode. They are simply not what the two
+industrial workloads studied here needed. "Do we need a more powerful robust
+algorithm?" resolves to: *not for these workloads, but the regime where the
+existing ones already win is well-defined and now demonstrated* — and Huber, the
+bounded-influence M-estimator, is the one to reach for there.
+
+**Determinism.**
+
+```
+stdout  SHA-256: ac16966be618033828fb86b868d8efa6bcf180b2b70dccc1d460107ad0e12387
+results SHA-256: 6f366e1a0cf2aba36c6d09b06c0972e65f20dedb97976a5bf8cfc2ab227dca8f  (25 BenchRecords)
+```
+
+Run twice, byte-identical; no network; checksum-verified C-MAPSS inputs; the
+Student-t draws use a seeded `SplitMix64` through the distribution's inverse CDF
+(`ν`-combined seed), and OLS / Huber / trimmed are deterministic — no other RNG.
