@@ -60,3 +60,76 @@ framing lever, out of scope here. What Lever 1 establishes is a task with
 enough ceiling and enough rows for Lever 2 (a high-leverage contamination
 model) to be a *fair* test of whether the current robustness has anything to
 demonstrate.
+
+## Lever 2 — high-leverage contamination (the decisive test)
+
+**Change.** The diagnostic showed the low-leverage coherent block barely moved
+the least-squares fit, so robustness had nothing to repair. Lever 2 runs the
+*fair* test: on the re-framed piecewise-RUL task it injects a genuinely
+**high-leverage** attack — `ContaminationKind::LeveragePoint`, a fraction of
+training rows pushed 20 train-MADs out in every feature with the target
+overwritten to 250 (twice the RUL knee) — and re-runs the paired
+leave-one-engine-out OLS-vs-robust comparison, sweeping the contamination
+fraction {0.1, 0.2, 0.3} so the verdict's dependence on attack strength is
+reported rather than a single tuned point.
+
+**Binary.** `scirust-srcc-bench/src/bin/industrial-leverage.rs`, plus the
+`LeveragePoint` library kind (tested, exact manifest). Per subset and
+fraction: the mean OLS **prediction shift** `RMS(pred_contaminated −
+pred_clean)` on held-out engines (leverage confirmation) and the seeded
+bootstrap CI of the per-engine RMSE difference `OLS − robust`.
+
+```
+SHA-256 (scientific stdout, nightly-2026-07-02, x86_64):
+cd038816dae2b7af6fbdf872c0363fdae7c39befbb0cd0a6adba4b925ad90d1c
+records (24): results/leverage.jsonl
+55a1df473074f3342fd22c4392d589f242cf43b5362e73f2f30e3cf6535185bb
+```
+
+**Result.** Paired mean `OLS − robust` RMSE difference, 95 % bootstrap CI over
+100 engines (a CI above zero means robust wins; below zero means OLS wins):
+
+| Subset | fraction | OLS shift (RUL) | OLS − Huber (CI) | OLS − trimmed (CI) |
+|--------|---------:|----------------:|------------------|--------------------|
+| FD001 | 0.1 | 2.18 | −0.042 [−0.137, +0.046] · **ties** | −3.399 [−4.404, −2.479] · OLS wins |
+| FD001 | 0.2 | 2.42 | −0.027 [−0.114, +0.058] · **ties** | −2.245 [−3.397, −1.140] · OLS wins |
+| FD001 | 0.3 | 2.65 | −0.072 [−0.169, +0.022] · **ties** | −1.593 [−2.484, −0.728] · OLS wins |
+| FD003 | 0.1 | 6.99 | −0.040 [−0.214, +0.144] · **ties** | −1.641 [−2.423, −0.832] · OLS wins |
+| FD003 | 0.2 | 7.05 | −0.023 [−0.190, +0.157] · **ties** | −1.299 [−1.986, −0.561] · OLS wins |
+| FD003 | 0.3 | 7.12 | −0.041 [−0.248, +0.194] · **ties** | −0.810 [−1.383, −0.156] · OLS wins |
+
+Three findings, and they are decisive:
+
+1. **The attack barely dents held-out error.** Even at 30 % contamination with
+   20-MAD-out leverage points, OLS's held-out prediction shifts only 2–7 RUL
+   (against clean-fit RMSEs of ~22–31). A cluster of coincident far-out
+   leverage points has bounded influence on predictions in the *normal* region
+   the held-out engines occupy — the metric is structurally insensitive to
+   feature-space-far training corruption. This is a property of the task, not
+   a failure to attack hard enough: the fraction was swept to 30 % and the
+   magnitude to 20 MADs.
+2. **Huber never wins.** Every Huber-vs-OLS CI straddles zero, at every
+   fraction, on both subsets: Huber is statistically indistinguishable from
+   OLS under a confirmed high-leverage attack.
+3. **Trimmed least squares actively hurts.** OLS beats trimmed at every cell.
+   Trimming a fixed 30 % by residual discards good data whenever the
+   contamination fraction is below the trim fraction; the disadvantage shrinks
+   as contamination rises toward 30 % (Δ −3.40 → −1.59 on FD001) but never
+   closes — a cautionary result about fixed-retention trimming.
+
+**Verdict.** There is **no regime** — across contamination fraction 0.1–0.3
+and a genuinely high-leverage attack — where the current robust regressors
+beat OLS on held-out C-MAPSS RUL. Combined with the diagnostic (low task
+ceiling) and Lever 1 (piecewise raises the ceiling but the linear fit stays
+modest), this is decisive evidence that **a more powerful robust regression
+algorithm is not the missing piece for this workload**: the held-out-RUL task
+is structurally insensitive to feature-space contamination, so no estimator —
+however high its breakdown point — has a contest to win.
+
+**Honest scope.** This tests **feature-space leverage** attacks. A different
+attack model — in-distribution target noise that looks like the test
+distribution — could damage held-out error, but that is precisely the regime
+where breakdown-point robustness is weakest and is a separate question; it is
+not claimed resolved here. What is resolved: bad leverage points, the textbook
+case robust regression exists for, do not create damage on this workload for
+robustness to repair.
