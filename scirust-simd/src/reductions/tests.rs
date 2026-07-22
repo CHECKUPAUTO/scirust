@@ -320,3 +320,121 @@ fn single_element() {
     assert_eq!(l2_norm(&one, ReductionMode::Deterministic), 42.0);
     assert_eq!(linf_norm(&one), 42.0);
 }
+
+// ------------------------------------------------------------------ //
+//  Moments statistiques                                               //
+// ------------------------------------------------------------------ //
+
+/// Référence naïve (deux passes), volontairement indépendante de Welford :
+/// `mean`, puis `Σ(xᵢ−mean)²/n` ou `/(n−1)`.
+fn naive_moments(data: &[f64]) -> (f64, f64, f64) {
+    let n = data.len() as f64;
+    let m = data.iter().sum::<f64>() / n;
+    let ss: f64 = data.iter().map(|&x| (x - m) * (x - m)).sum();
+    (m, ss / n, ss / (n - 1.0))
+}
+
+#[test]
+fn moments_known_values() {
+    // [1,2,3,4,5] : mean=3, var_pop=2, var_sample=2.5.
+    let v = [1.0f64, 2.0, 3.0, 4.0, 5.0];
+    assert_eq!(mean(&v, ReductionMode::Fast), Some(3.0));
+    assert_eq!(variance_population(&v), Some(2.0));
+    assert_eq!(variance_sample(&v), Some(2.5));
+    assert!((std_population(&v).unwrap() - 2.0f64.sqrt()).abs() < 1e-12);
+    assert!((std_sample(&v).unwrap() - 2.5f64.sqrt()).abs() < 1e-12);
+
+    // f32 : même propriété, tolérance plus large.
+    let v32: Vec<f32> = v.iter().map(|&x| x as f32).collect();
+    assert_eq!(mean(&v32, ReductionMode::Fast), Some(3.0));
+    assert_eq!(variance_population(&v32), Some(2.0));
+    assert_eq!(variance_sample(&v32), Some(2.5));
+}
+
+#[test]
+fn moments_match_naive_reference_various_lengths() {
+    // Longueurs variées, dont non-multiples de la largeur (8 pour f32, 4 pour
+    // f64) : exerce le repli sur la queue et la fusion multi-lane.
+    for &n in &[2usize, 3, 4, 5, 7, 8, 9, 16, 17, 63, 64, 65, 257]
+    {
+        let data = real_vec(0x9E0 + n as u64, n);
+        let (m_ref, pop_ref, sample_ref) = naive_moments(&data);
+
+        let m = mean(&data, ReductionMode::Fast).unwrap();
+        let pop = variance_population(&data).unwrap();
+        let sample = variance_sample(&data).unwrap();
+
+        assert!((m - m_ref).abs() < 1e-9, "mean n={n}: {m} vs {m_ref}");
+        assert!(
+            (pop - pop_ref).abs() < 1e-9,
+            "var_pop n={n}: {pop} vs {pop_ref}"
+        );
+        assert!(
+            (sample - sample_ref).abs() < 1e-9,
+            "var_sample n={n}: {sample} vs {sample_ref}"
+        );
+        assert!((std_population(&data).unwrap() - pop_ref.sqrt()).abs() < 1e-9);
+        assert!((std_sample(&data).unwrap() - sample_ref.sqrt()).abs() < 1e-9);
+    }
+}
+
+#[test]
+fn variance_is_shift_invariant() {
+    // Propriété métamorphique : Var(x + c) = Var(x) (la variance ne dépend
+    // que des écarts à la moyenne, pas de l'origine).
+    let x = real_vec(0x5417, 200);
+    let base_pop = variance_population(&x).unwrap();
+    let base_sample = variance_sample(&x).unwrap();
+    for &c in &[100.0f64, -50.0, 1e6]
+    {
+        let shifted: Vec<f64> = x.iter().map(|&v| v + c).collect();
+        assert!(
+            (variance_population(&shifted).unwrap() - base_pop).abs() < 1e-6,
+            "c={c}"
+        );
+        assert!(
+            (variance_sample(&shifted).unwrap() - base_sample).abs() < 1e-6,
+            "c={c}"
+        );
+    }
+}
+
+#[test]
+fn variance_scales_quadratically() {
+    // Propriété métamorphique : Var(a·x) = a²·Var(x).
+    let x = real_vec(0x5418, 150);
+    let base = variance_population(&x).unwrap();
+    for &a in &[2.0f64, -3.0, 0.5]
+    {
+        let scaled: Vec<f64> = x.iter().map(|&v| a * v).collect();
+        let got = variance_population(&scaled).unwrap();
+        assert!(
+            (got - a * a * base).abs() < 1e-9,
+            "a={a}: {got} vs {}",
+            a * a * base
+        );
+    }
+}
+
+#[test]
+fn moments_empty_and_edge_cases() {
+    let empty: [f64; 0] = [];
+    assert_eq!(mean(&empty, ReductionMode::Fast), None);
+    assert_eq!(variance_population(&empty), None);
+    assert_eq!(variance_sample(&empty), None);
+    assert_eq!(std_population(&empty), None);
+    assert_eq!(std_sample(&empty), None);
+
+    // Un seul élément : moyenne bien définie, variance de population nulle
+    // (aucun écart), variance d'échantillon indéfinie (n−1 = 0).
+    let one = [7.0f64];
+    assert_eq!(mean(&one, ReductionMode::Fast), Some(7.0));
+    assert_eq!(variance_population(&one), Some(0.0));
+    assert_eq!(variance_sample(&one), None);
+    assert_eq!(std_sample(&one), None);
+
+    // Données constantes : variance nulle quelle que soit la longueur.
+    let constant = vec![3.5f64; 20];
+    assert_eq!(variance_population(&constant), Some(0.0));
+    assert_eq!(variance_sample(&constant), Some(0.0));
+}
