@@ -456,3 +456,59 @@ results SHA-256: e39c82d1ac7b39a29cae66c1a17188e7e11dbbe5dacc36552c0ec6777b09839
 
 Run twice, byte-identical; no network; checksum-verified C-MAPSS inputs; the whole
 decision is the seeded paired bootstrap — no RNG beyond its recorded seed.
+
+---
+
+## Follow-up 5 (axis 1) — multivariate nonlinear RUL: does it close the ceiling further?
+
+Follow-up 1 realized part of the lever-1 ceiling with a *one-dimensional*
+monotone recalibration (isotonic on the OLS score) — rank-preserving, so it
+cannot recover signal the OLS ordering discards. This tests the model class
+beyond it: a genuinely **multivariate nonlinear** regressor,
+`scirust_learning::KernelRidgeRegression` (RBF, PR #763), with `(γ, λ)` selected
+on validation and frozen on test, head-to-head with OLS and isotonic-OLS on the
+**same** rows (`industrial-nonlinear-rul`). Decimation is stride 40 (~320 pooled
+train rows) for all three models: kernel ridge is a dense `O(n³)` Cholesky and
+the shared solver's per-iteration constant is large, so the finer strides balloon
+the grid-search runtime — the absolute ratios thus differ from follow-up 1's
+stride-20 numbers, and what is tested is the *ordering* on identical data.
+
+Ceiling ratio (`clean_fit_rmse / predict_mean_rmse`, lower = more realized):
+
+| subset | RUL target | OLS | isotonic-OLS | **kernel ridge** (γ, λ) | kernel − isotonic |
+|--------|-----------|----:|-------------:|------------------------:|------------------:|
+| FD001 | raw-linear | 0.679 | 0.667 | **0.608** (0.01, 1.0) | **+0.059 (kernel wins)** |
+| FD001 | piecewise-125 | 0.573 | **0.445** | 0.448 (0.01, 0.1) | −0.004 (tie) |
+| FD003 | raw-linear | 0.601 | **0.574** | 0.627 (0.10, 1.0) | −0.053 (isotonic wins) |
+| FD003 | piecewise-125 | 0.507 | **0.438** | 0.485 (0.05, 1.0) | −0.048 (isotonic wins) |
+
+**Finding — mostly no; nonlinearity is an inconsistent lever here.** The
+multivariate nonlinear model closes the ceiling further than the 1-D isotonic
+recalibration in **only one of four cells** (FD001 raw-linear, where the most
+ceiling is unrealized and there is room for curvature to help); it **ties** on
+the FD001 piecewise target and is **beaten on both FD003 cells**, where the
+validation-selected kernel over-fits and generalizes worse than the simple
+monotone recalibration. The 1-D isotonic recalibration is a surprisingly strong
+baseline: on the reframed piecewise target it is at least as good as kernel ridge
+everywhere.
+
+**Interpretation.** For C-MAPSS RUL, most of the learnable signal is captured by
+the *monotone ordering* of the linear degradation score; the extra capacity of a
+multivariate nonlinear model mostly buys over-fitting rather than new signal,
+especially on the harder FD003. This reinforces the program's through-line: the
+big lever was **framing** (the piecewise target), not model complexity — richer
+models give diminishing, dataset-dependent returns. Honest bound: this is at
+stride 40 with a modest a-priori `(γ, λ)` grid; a larger sweep or a faster SPD
+solver might narrow the FD003 gap, but the qualitative result — nonlinearity does
+not *reliably* beat the 1-D recalibration — is unlikely to flip.
+
+**Determinism.**
+
+```
+stdout  SHA-256: 9c529e9d89153944c4a5432cc0402ca4851ceab6c6f84bae634c81e0b3c75dbe
+results SHA-256: 71788a2019cc32efd5e6bade26eb2abd2aa35df53d2a1a5ea23d9cfa9e47cc93  (24 BenchRecords)
+```
+
+Run twice, byte-identical (built `--release` for the `O(n³)` solves; release is
+equally deterministic); no network; checksum-verified C-MAPSS inputs; OLS, isotonic
+(PAVA) and kernel ridge (Cholesky) are all RNG-free.
