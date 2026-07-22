@@ -1,0 +1,11 @@
+[
+  "lof k=5: validation auroc Some(0.2823600240818784)",
+  "lof k=10: validation auroc Some(0.49729078868151716)",
+  "lof k=20: validation auroc Some(0.5406381697772427)",
+  "mahalanobis ridge=0.001: validation auroc Some(0.648103552077062)",
+  "mahalanobis ridge=0.1: validation auroc Some(0.5897049969897652)",
+  "dbscan eps=10: validation balanced accuracy Some(0.5)",
+  "dbscan eps=100: validation balanced accuracy Some(0.5)",
+  "dbscan eps=1000: validation balanced accuracy Some(0.5)",
+  "selected: lof Some((20, 0.5406381697772427)), mahalanobis Some((0.001, 0.648103552077062)), dbscan Some((10.0, 0.5))"
+]

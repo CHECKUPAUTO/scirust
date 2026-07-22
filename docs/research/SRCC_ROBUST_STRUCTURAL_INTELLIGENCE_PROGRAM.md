@@ -92,8 +92,8 @@ deployment from within a method crate.
 | 724 | Deterministic robust regression | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#739](https://github.com/Memorithm/scirust/pull/739) | `c1c10946a48cb57daaff3fb4875a69064a0bb148` | **Merged** |
 | 725 | Trust & contamination models | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#742](https://github.com/Memorithm/scirust/pull/742) | `b1eca0ff7df85168539a841a7223d7a0af059e7b` | **Merged** |
 | 726 | Certified medoid clustering | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#745](https://github.com/Memorithm/scirust/pull/745) | `091cefad9c3ec00c37aab4631d2890146482b613` | **Merged** |
-| 727 | Industrial benchmark harness | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#747](https://github.com/Memorithm/scirust/pull/747) | _(pending)_ | **In review** |
-| 728 | Real industrial evaluation | `feat/srcc-industrial-real-data-evaluation` | — | — | Not started |
+| 727 | Industrial benchmark harness | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#747](https://github.com/Memorithm/scirust/pull/747) | `2e44bada7f20c50afa427e3c94a816c2348819d4` | **Merged** |
+| 728 | Real industrial evaluation | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#750](https://github.com/Memorithm/scirust/pull/750) | _(pending)_ | **In review** |
 | 729 | Shadow deployment & promotion gates | `feat/mlops-srcc-shadow-deployment` | — | — | Not started |
 
 > Branch and numbering notes:
@@ -954,3 +954,121 @@ clippy --workspace --all-targets --locked -- -D warnings` and `cargo fmt
   floor-quantile convention is documented and deterministic.
 - `RandomHoldout` deliberately offers no leakage protection and says so;
   grouped/temporal strategies are the industrial defaults.
+
+---
+
+## Phase 728 — Real industrial evaluation under the preregistration
+
+**Crate:** `scirust-srcc-bench` (new `loaders`, `missing`, `srcc_views`
+modules + `industrial-eval` binary) · **Report:**
+`docs/research/SRCC_INDUSTRIAL_EVALUATION_REPORT.md` · **Data:**
+`scirust-srcc-bench/DATASETS.md`, `scripts/fetch_industrial_datasets.sh`
+
+### Design
+
+Runs the phase-727 preregistration on real data. Two industrial families,
+three workloads: **C-MAPSS FD001 and FD003** (NASA turbofan run-to-failure,
+public domain — the PdM replication pair) and **SECOM** (UCI semiconductor
+process/yield, CC BY 4.0 — real anomaly detection). An earlier draft used
+in-repo OBD2 automotive telemetry as a third workload; it was removed as
+out-of-domain (consumer driving data, not industrial machinery), and the
+SRCC replication requirement is met within the turbofan domain by the
+FD001/FD003 pair.
+
+New crate surface: `loaders` (typed C-MAPSS / SECOM / OBD2 text parsers —
+the OBD2 parser stays in the library, unused by the binary, since it is
+tested and harmless), `missing` (train-fitted drop/impute policy that also
+guards least-squares rank deficiency by dropping constant training columns),
+`srcc_views` (the preregistered transport-view construction: one view per
+engine, `(time, row)` order, ≤16 zero-padded channels, per-trajectory median
+centering, every failure typed). The `industrial-eval` binary embeds the
+frozen `configs/phase728.json` (its SHA-256 in the run metadata), verifies
+every input file against a pinned checksum before use, and never touches the
+network.
+
+Data discipline: nothing is fetched by `cargo test` or library code; the
+only download path is `scripts/fetch_industrial_datasets.sh`, which verifies
+archive and extracted-file checksums. The full datasets are git-ignored
+(`/data/`); small license-clean head fixtures are committed under
+`tests/data/` and the integration tests **skip loudly** when the full data
+is absent. Trajectory decimation (stride 20, fixed a priori) keeps certified
+branch-and-bound and 100-engine leave-one-out refitting tractable — a
+documented subsampling, never tuned on outcomes.
+
+### Results (every outcome, positive and negative)
+
+- **H1 scale invariance — supported and replicated (the strongest result):**
+  robust-diagonal clustering preserves 48/48 assignments under the ±unit
+  rescalings on both FD001 and FD003; raw Euclidean preserves 15/48 and
+  13/48. Decision invariance under unit change, demonstrated on real turbofan
+  sensors in both fault-mode regimes.
+- **H4 certified vs. greedy — supported and modest:** certified is never
+  worse on cluster count (2/48 strictly fewer, 46/48 equal), strictly cheaper
+  in cost on 20/48 at equal count, and 48/48 `proven_optimal`. Greedy is
+  usually already count-optimal here, so certification most often adds proof
+  rather than a better partition — the acceptable-outcome branch the
+  preregistration named.
+- **H2 robust regression — inconclusive, does not replicate:** Huber beats
+  OLS with a CI excluding zero on FD003 (`+1.52 [+0.37,+2.75]`) but not FD001
+  (`+0.59 [−0.17,+1.36]`); replication fails, so no superiority is claimed.
+  Median-of-means breaks down catastrophically (RMSE ~10⁵) exactly as its
+  block-majority assumption predicts.
+- **SECOM anomaly — negative, exposed by the frozen test:** every
+  score-producing detector lands at or below chance on the frozen test
+  (Mahalanobis 0.469, LOF 0.441, isolation forest 0.424 AUROC) despite
+  Mahalanobis reaching 0.648 on validation — a validation-to-test collapse
+  aggregate reporting would have hidden. Hotelling T² returns a typed
+  degenerate-fit failure.
+- **Trust — measured null:** the one-view target-shift attack produces 0.0
+  projector displacement under both Unweighted and GroupContaminationBound,
+  because continuous industrial sources make every exact-source group a
+  singleton; the trust margin has no group structure to act on. Not
+  applicable here, measured rather than assumed; the trust models remain
+  validated on the phase-725 synthetic battery.
+- **Stability:** leave-one-out mean Frobenius 0.018 (max 0.354), 38 stable
+  dimensions — stable on real data.
+- **Streams:** CUSUM/EWMA detect the injected sensor burst (delay 1 and 0)
+  but with 9 and 16 pre-onset false alarms — the false-alarm budget is not
+  met at the preregistered settings, reported not tuned away.
+
+No result licenses "SRCC is superior"; the one clean win (H1) is a specific
+testable property, stated as exactly that.
+
+### Fingerprint
+
+```
+SHA-256 (results/industrial_728.jsonl, deterministic scientific content):
+d97f23f4c6069ff500579daee51babbcb2cf83a396251a51a66e1b6ff7ebd7a4
+```
+
+1197 `BenchRecord` rows + JSON manifests committed under `results/`;
+`run_metadata.json` (git commit, toolchain, config hash) is environment
+identity, excluded from the determinism fingerprint. The JSONL and every
+scientific manifest are byte-identical across runs.
+
+### Tests
+
+7 new library tests (loaders: C-MAPSS RUL derivation and malformed-row
+rejection, SECOM missing-value and label parsing, OBD2 header handling;
+missing policy: drop/impute with train-only medians, typed degeneracies) and
+3 integration tests over the committed head fixtures (C-MAPSS RUL-0 at last
+cycle, SECOM binary labels, plus a full-data check that skips loudly when
+absent). `srcc_views` adds 5 tests (canonical order, per-trajectory
+centering, horizon, typed errors, determinism). 71 crate tests total.
+
+### Compatibility
+
+Purely additive: no existing crate touched; `parse_obd2` remains exported
+but unused by the binary. `cargo clippy --workspace --all-targets --locked
+-- -D warnings` and `cargo fmt --all --check` pass; all eight historical
+example SHAs re-verified byte-identical.
+
+### Known limitations / deferred
+
+- The C-MAPSS RUL regression is a deliberately simple pooled linear baseline
+  (RUL is piecewise); the point is the contamination *comparison*, not
+  absolute RUL accuracy.
+- Decimation trades statistical power for tractability (100-engine CIs, ~10
+  cycles per engine fit).
+- Runtime/memory unmeasured (declared side channels).
+- Trust and shadow-deployment integration of these results is phase 729.

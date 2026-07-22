@@ -1,0 +1,11 @@
+{
+  "seed": 728020,
+  "strategy": {
+    "GroupedHoldout": {
+      "train_fraction": 0.6,
+      "validation_fraction": 0.2
+    }
+  },
+  "grouping_key": "unit",
+  "dataset_sha256": "e76368b2c46b741e71746c71151e85c0c87d86e22e5b1e9f7322759330b96707"
+}

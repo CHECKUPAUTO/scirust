@@ -1,0 +1,11 @@
+{
+  "seed": 0,
+  "strategy": {
+    "Temporal": {
+      "train_fraction": 0.6,
+      "validation_fraction": 0.2
+    }
+  },
+  "grouping_key": null,
+  "dataset_sha256": "a25b83ccf26460727d4b41ce0be5c45d5b05c2c3fdd63eb3257cad31a466d16b"
+}
