@@ -6,7 +6,7 @@
 # docs/sos/ (RFC-0002) for the architecture this implements.
 [workspace]
 resolver = "2"
-members = ["sos-core"]
+members = ["sos-core", "sos-store"]
 
 [workspace.package]
 edition = "2021"
@@ -19,6 +19,9 @@ repository = "https://github.com/Memorithm/scirust"
 # scirust-provenance and scirust-sciagent's CcosLog; thiserror backs
 # scirust-core), so SOS adds no new third-party download.
 [workspace.dependencies]
+# Internal SOS crates (path deps relative to this workspace root).
+sos-core = { path = "sos-core" }
+# Pure-Rust, no-FFI third-party set (all already in the repository lockfile).
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
