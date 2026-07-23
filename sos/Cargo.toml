@@ -15,6 +15,7 @@ members = [
     "sos-reasoning",
     "sos-curiosity",
     "sos-theory",
+    "sos-workflow",
 ]
 
 [workspace.package]

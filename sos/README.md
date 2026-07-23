@@ -20,6 +20,7 @@ stubs, no TODOs, no placeholders cross a phase boundary.
 |-------|-------|--------|
 | **P1 — Kernel & substrate** | `sos-core`, `sos-store`, `sos-provenance`, `sos-registry` (+ SOS CI) | substrate **done**; `sos-repro` pending (needs the workflow engine for full `verify`/`rerun`) |
 | **P2 — Knowledge & Reasoning** | `sos-knowledge`, `sos-reasoning` | **done** (deterministic cores landed; Datalog / e-graph / theorem-proving deferred to `sos-scirust` per Invariant VIII) |
+| **P3 — Discovery, Planning, Simulation** | `sos-workflow`, `sos-planner`, `sos-simulation`, re-homed `sde-*` stages | `sos-workflow` **core landed** (the memoized scheduler — cache keys, deterministic scheduling, ledger; needs only `sos-core`. Stage execution / manifest resolution / stopping rules await the engine plugins, a frontend, and `sos-planner`) |
 | **P4 — Curiosity & Theory** | `sos-curiosity`, `sos-theory` | **cores landed** (both need only the P2 substrate; information-gain / analogy / Bayes-factor ranking / discriminating-experiment planning await P3's `sos-planner` and `scirust-*` per Invariant VIII) |
 
 ### Landed
@@ -98,6 +99,21 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   domain, so competitors coexist rather than being forced to a single winner.
   (Bayes-factor `Confidence` ranking and discriminating-experiment planning are
   deferred to the statistics backend + `sos-planner` per Invariant VIII.)
+- **`sos-workflow`** — the Workflow Engine (the OS **scheduler**; a *build system
+  for knowledge*). An immutable [`Plan`](sos-workflow/src/plan.rs) DAG of
+  [`Stage`](sos-workflow/src/plan.rs)s with a **deterministic** topological
+  schedule (ties by `StageId`); the content-addressed
+  [`CacheKey`](sos-workflow/src/cache.rs) — `hash(descriptor ⊕ inputs ⊕ config ⊕
+  seed ⊕ env)` — that gives **reproducibility and incremental compute from one
+  mechanism**; and [`run_plan`](sos-workflow/src/engine.rs), the memoized driver
+  (cache-hit ⇒ reuse, cache-miss ⇒ execute via a pluggable
+  [`StageExecutor`](sos-workflow/src/engine.rs)) that records the schedule taken
+  in a content-addressed [`RunLedger`](sos-workflow/src/ledger.rs). Re-running an
+  unchanged plan against a warm [`Memo`](sos-workflow/src/engine.rs) is all cache
+  hits — provably identical, nearly free, and the property that makes a crashed
+  run resumable. (Stage *logic*, manifest resolution, the world-touching effect
+  boundary, and stopping rules are supplied by the engine plugins / `sos-scirust`
+  / `sos-planner` per Invariant VIII — no stub.)
 
 ## Engineering standards (the gate)
 
