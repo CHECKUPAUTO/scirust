@@ -40,6 +40,13 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   `roots`, `tips` — plus deterministic [environment capture](sos-provenance/src/env.rs)
   for the reproducibility key. (Signing is deferred to `sos-scirust`, keeping this
   crate backend-agnostic per Invariant VIII.)
+- **`sos-registry`** — the Plugin System. Content-pinned
+  [`PluginDescriptor`](sos-registry/src/descriptor.rs)s (name + version +
+  content hash + [`Role`](sos-registry/src/descriptor.rs) + determinism level +
+  capabilities + domains), a [`Registry`](sos-registry/src/registry.rs) that
+  resolves by semantic version and **detects content-hash drift**, and
+  least-privilege [capability authorization](sos-registry/src/capability.rs)
+  (refuse-by-default).
 
 ## Engineering standards (the gate)
 

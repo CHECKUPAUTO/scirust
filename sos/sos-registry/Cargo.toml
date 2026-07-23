@@ -1,0 +1,18 @@
+[package]
+name = "sos-registry"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SOS Plugin System: content-pinned plugin descriptors with capability and determinism-level metadata, semantic-version resolution with drift detection, least-privilege capability authorization, and role/domain discovery. Pure Rust, no FFI."
+keywords = ["plugin", "registry", "capability", "versioning", "science"]
+categories = ["science", "data-structures"]
+
+[dependencies]
+sos-core = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

@@ -6,7 +6,7 @@
 # docs/sos/ (RFC-0002) for the architecture this implements.
 [workspace]
 resolver = "2"
-members = ["sos-core", "sos-store", "sos-provenance"]
+members = ["sos-core", "sos-store", "sos-provenance", "sos-registry"]
 
 [workspace.package]
 edition = "2021"
