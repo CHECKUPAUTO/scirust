@@ -22,7 +22,7 @@ stubs, no TODOs, no placeholders cross a phase boundary.
 | **P2 — Knowledge & Reasoning** | `sos-knowledge`, `sos-reasoning` | **done** (deterministic cores landed; Datalog / e-graph / theorem-proving deferred to `sos-scirust` per Invariant VIII) |
 | **P3 — Discovery, Planning, Simulation** | `sos-workflow`, `sos-simulation`, `sos-planner`, re-homed `sde-*` stages | engine **cores landed** — the memoized scheduler, the backend-independent `Simulate` interface, and the planner (utility ranking + information-exhaustion + stopping rules). The EIG/solver **numerics**, manifest resolution, and the re-homed discovery stages await `sos-scirust` / a frontend per Invariant VIII |
 | **P4 — Curiosity & Theory** | `sos-curiosity`, `sos-theory` | **cores landed** (both need only the P2 substrate; information-gain / analogy / Bayes-factor ranking / discriminating-experiment planning await P3's `sos-planner` and `scirust-*` per Invariant VIII) |
-| **P5 — Userland** | `sos-publication` | engine **core landed** — the publication is a verifiable projection of the object graph: content-addressed claims typed-bound to their evidence, the multi-phase claim/scope/reproducibility verifier, and deterministic Markdown/HTML/JSON. Re-execution of exhibits is `sos-workflow`'s job and real signing is `sos-provenance`'s per Invariant VIII; this crate consumes decisions, never recomputes them |
+| **P5 — Userland** | `sos-publication`, `sos-cli` | `sos-publication` **core landed** — the publication is a verifiable projection of the object graph: content-addressed claims typed-bound to their evidence, the multi-phase claim/scope/reproducibility verifier, and deterministic Markdown/HTML/JSON. Re-execution of exhibits is `sos-workflow`'s job and real signing is `sos-provenance`'s per Invariant VIII; this crate consumes decisions, never recomputes them. `sos-cli` **porcelain landed** — `init`/`clone`/`push`/`log`/`know`/`ask`/`why`/`verify`/`diff`/`plan`/`publish`/`plugins` over the already-landed engines and the new persistent `FileStore`; `sos run` (needs a real `StageExecutor` backend) and a true `sos merge` are deferred, not stubbed |
 | **P6 — Backend adapters** | `sos-ccos` (cognitive), `sos-scirust` (computational) | `sos-ccos` **deterministic boundary landed** — the untrusted-proposer contract (Invariant IX): grounded, content-addressed proposals, the deterministic disposition gate, a tamper-evident attestation chain, and a no-LLM memory fallback. The generative LLM/CCOS backend and `sos-scirust`'s numerics are the deferred out-of-process backends per Invariant VIII |
 
 ### Landed
@@ -204,6 +204,23 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   (recall degrades to exact structural overlap). (The generative LLM/CCOS backend
   and embedding-backed recall are the deferred out-of-process backend per
   Invariant VIII — no stub, no fake cognition.)
+- **`sos-cli`** — the `sos` command-line porcelain (RFC-0002 §10.4), the
+  first-ever user-facing entry point into SOS. A thin, git-shaped shell adding
+  no new compute of its own: `sos init`/`clone`/`push` manage a reasoning
+  repository (a [`FileStore`](sos-store/src/file.rs)); `sos log` lists every
+  object; `sos know` queries the knowledge graph (neighbors / related / path);
+  `sos ask` runs a curiosity sweep; `sos why` prints the provenance behind an
+  object; `sos verify` checks structural identity plus, for every `Body` kind
+  landed so far, a real recomputed content-hash check; `sos diff` compares two
+  studies' ancestor sets (reusing `sos-publication`'s dependency-closure
+  walker); `sos plan`/`sos publish`/`sos plugins` consume already-computed
+  candidates/publications/descriptors exactly as their engines are scoped to.
+  Hand-rolled argument parsing (`args.rs`) — no new third-party dependency,
+  matching `scirust-cli`'s own convention. (`sos run` needs a real
+  [`StageExecutor`](sos-workflow/src/engine.rs) backend — `sos-scirust`'s job,
+  not yet landed — and a true `sos merge` needs conflict-resolution semantics
+  no crate has designed yet; neither is stubbed. A network remote for
+  `clone`/`push` is `sos-mcp`'s domain.)
 
 ## Engineering standards (the gate)
 

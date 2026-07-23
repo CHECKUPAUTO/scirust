@@ -160,6 +160,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "sos-cli"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sos-ccos",
+ "sos-core",
+ "sos-curiosity",
+ "sos-knowledge",
+ "sos-planner",
+ "sos-provenance",
+ "sos-publication",
+ "sos-reasoning",
+ "sos-registry",
+ "sos-repro",
+ "sos-store",
+ "sos-theory",
+ "sos-workflow",
+ "thiserror",
+]
+
+[[package]]
 name = "sos-core"
 version = "0.1.0"
 dependencies = [
