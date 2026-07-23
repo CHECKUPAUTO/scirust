@@ -64,6 +64,11 @@ cargo test  --manifest-path sos/Cargo.toml
   randomness, no wall-clock in hashed state).
 - No `unsafe` (`#![forbid(unsafe_code)]`), no FFI.
 
-> Note: SOS is not built by the repository's root CI (it is a separate,
-> excluded workspace). A dedicated `sos` CI job is a P1 follow-up; until then the
-> commands above are the gate, run locally and reported in the PR.
+> SOS is a separate, excluded workspace, so the repository's root CI does not
+> build it. A dedicated **SOS CI** workflow
+> ([`.github/workflows/sos-ci.yml`](../.github/workflows/sos-ci.yml)) gates it
+> upstream with the commands above — fmt (on the repo's pinned nightly, since
+> `rustfmt.toml` uses unstable options), clippy `-D warnings`, `test` on stable,
+> and an MSRV 1.89 check — path-filtered to run only when `sos/` changes. The
+> workspace's `Cargo.lock` is committed so CI builds with `--locked` are
+> reproducible.
