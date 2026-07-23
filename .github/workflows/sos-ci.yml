@@ -1,0 +1,104 @@
+name: SOS CI
+
+# The Scientific Operating System (sos/) is a SEPARATE Cargo workspace, excluded
+# from the root workspace build (docs/sos/ RFC-0002 §11.6). This workflow gates
+# it with the same commands documented in sos/README.md, runnable identically
+# locally. It is path-filtered so it runs only when sos/ (or this workflow)
+# changes — the root CI never builds sos/, and this job never rebuilds the root.
+#
+# Toolchain policy (mirrors the root CI's use of `cargo +<toolchain>` to bypass
+# the repo's nightly-pinned rust-toolchain.toml):
+#   * fmt   — the pinned nightly, because sos/ inherits the repo rustfmt.toml
+#             which uses unstable options that stable rustfmt rejects.
+#   * clippy — the same pinned nightly, so results match the root Clippy gate
+#             and the locally-run gate.
+#   * test  — stable, to prove SOS's "builds and passes on stable" promise.
+#   * msrv  — 1.89.0, the declared MSRV.
+
+on:
+  push:
+    branches: [master, main, develop]
+    paths:
+      - "sos/**"
+      - ".github/workflows/sos-ci.yml"
+  pull_request:
+    branches: [master, main, develop]
+    paths:
+      - "sos/**"
+      - ".github/workflows/sos-ci.yml"
+
+concurrency:
+  group: sos-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  sos-fmt:
+    name: SOS Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt
+      - name: Check formatting
+        run: cargo +nightly-2026-07-02 fmt --manifest-path sos/Cargo.toml --all -- --check
+
+  sos-clippy:
+    name: SOS Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: nightly-2026-07-02
+          components: clippy
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: "sos"
+      - name: Run clippy
+        run: cargo +nightly-2026-07-02 clippy --manifest-path sos/Cargo.toml --all-targets --locked -- -D warnings
+
+  sos-test:
+    name: SOS Build & Test (stable)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: "sos"
+      # Plain `cargo test` (not `--all-targets`) so doctests run too.
+      - name: Build and test
+        run: cargo +stable test --manifest-path sos/Cargo.toml --locked
+
+  sos-msrv:
+    name: SOS Check (MSRV 1.89.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install MSRV toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: 1.89.0
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: "sos"
+      - name: Check on MSRV
+        run: cargo +1.89.0 check --manifest-path sos/Cargo.toml --all-targets --locked
