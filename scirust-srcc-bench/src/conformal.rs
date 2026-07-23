@@ -53,6 +53,15 @@ pub enum ConformalError {
         /// Requested level.
         level: f64,
     },
+    /// The conformalized-quantile calibration slices had unequal lengths.
+    MismatchedCalibration {
+        /// Lower-prediction slice length.
+        lower: usize,
+        /// Upper-prediction slice length.
+        upper: usize,
+        /// Actual-value slice length.
+        actual: usize,
+    },
 }
 
 impl fmt::Display for ConformalError {
@@ -76,6 +85,18 @@ impl fmt::Display for ConformalError {
                 write!(
                     formatter,
                     "{count} calibration points are too few for a finite band at level {level}"
+                )
+            },
+            Self::MismatchedCalibration {
+                lower,
+                upper,
+                actual,
+            } =>
+            {
+                write!(
+                    formatter,
+                    "conformalized-quantile calibration slices differ in length: \
+lower {lower}, upper {upper}, actual {actual}"
                 )
             },
         }
@@ -165,6 +186,119 @@ impl SplitConformal {
     }
 }
 
+/// A conformalized-quantile-regression adjustment (Romano, Patterson & Candès, 2019).
+///
+/// Split conformal makes a *constant*-width band; native quantile regression makes
+/// an *adaptive* band with no coverage guarantee. CQR unites them: fit lower/upper
+/// quantile predictors, then on a calibration set compute the nonconformity score
+/// `Eᵢ = max(q_lo(xᵢ) − yᵢ, yᵢ − q_hi(xᵢ))` — how far `yᵢ` falls outside the native
+/// interval (negative when comfortably inside). The single conformal offset `Q` is
+/// the `⌈(n+1)·level⌉`-th smallest `Eᵢ`, and the adjusted interval
+/// `[q_lo(x) − Q, q_hi(x) + Q]` has finite-sample coverage `≥ level` for **any**
+/// distribution, **while keeping the adaptive shape** of the quantile band. `Q` may
+/// be negative — a too-wide native interval is *tightened*. No RNG.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ConformalizedQuantile {
+    offset: f64,
+    level: f64,
+    calibration_count: usize,
+}
+
+impl ConformalizedQuantile {
+    /// Fits the offset from calibration triples: lower/upper quantile predictions
+    /// and the observed targets, all aligned and of equal length.
+    ///
+    /// # Errors
+    ///
+    /// [`ConformalError::MismatchedCalibration`] for unequal slice lengths;
+    /// [`ConformalError::EmptyCalibration`] / [`ConformalError::InvalidLevel`] /
+    /// [`ConformalError::NonFiniteResidual`] for malformed input; and
+    /// [`ConformalError::CalibrationTooSmall`] when `⌈(n+1)·level⌉ > n`.
+    pub fn fit(
+        lower: &[f64],
+        upper: &[f64],
+        actual: &[f64],
+        level: f64,
+    ) -> Result<Self, ConformalError> {
+        if lower.len() != upper.len() || lower.len() != actual.len()
+        {
+            return Err(ConformalError::MismatchedCalibration {
+                lower: lower.len(),
+                upper: upper.len(),
+                actual: actual.len(),
+            });
+        }
+
+        if lower.is_empty()
+        {
+            return Err(ConformalError::EmptyCalibration);
+        }
+
+        if !(level > 0.0 && level < 1.0)
+        {
+            return Err(ConformalError::InvalidLevel { level });
+        }
+
+        let mut scores: Vec<f64> = Vec::with_capacity(lower.len());
+
+        for ((&low, &high), &target) in lower.iter().zip(upper).zip(actual)
+        {
+            if !low.is_finite() || !high.is_finite() || !target.is_finite()
+            {
+                return Err(ConformalError::NonFiniteResidual);
+            }
+
+            scores.push((low - target).max(target - high));
+        }
+
+        scores.sort_by(f64::total_cmp);
+
+        let n = scores.len();
+        let rank = (((n + 1) as f64) * level).ceil() as usize;
+
+        if rank > n
+        {
+            return Err(ConformalError::CalibrationTooSmall { count: n, level });
+        }
+
+        Ok(Self {
+            offset: scores[rank - 1],
+            level,
+            calibration_count: n,
+        })
+    }
+
+    /// The conformal offset `Q` (added to `q_hi`, subtracted from `q_lo`; may be
+    /// negative).
+    pub fn offset(&self) -> f64 {
+        self.offset
+    }
+
+    /// The nominal coverage level the offset was fitted at.
+    pub fn level(&self) -> f64 {
+        self.level
+    }
+
+    /// Calibration points used.
+    pub fn calibration_count(&self) -> usize {
+        self.calibration_count
+    }
+
+    /// The adjusted interval `[q_lo − Q, q_hi + Q]` for one prediction pair.
+    pub fn interval(&self, lower_prediction: f64, upper_prediction: f64) -> (f64, f64) {
+        (
+            lower_prediction - self.offset,
+            upper_prediction + self.offset,
+        )
+    }
+
+    /// Whether the adjusted interval covers `actual`.
+    pub fn covers(&self, lower_prediction: f64, upper_prediction: f64, actual: f64) -> bool {
+        let (low, high) = self.interval(lower_prediction, upper_prediction);
+        low <= actual && actual <= high
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -246,5 +380,57 @@ mod tests {
         );
         // Nine points suffice at 0.9: rank = ceil(10 * 0.9) = 9 = n.
         assert!(SplitConformal::fit(&[1.0; 9], 0.9).is_ok());
+    }
+
+    #[test]
+    fn cqr_guarantees_in_sample_coverage() {
+        // Native interval [0, 1] for every point; actuals spread well outside it.
+        let actual: Vec<f64> = (0..100)
+            .map(|i| ((i * 7) % 21) as f64 * 0.25 - 2.0)
+            .collect();
+        let lower = vec![0.0; 100];
+        let upper = vec![1.0; 100];
+        for &level in &[0.8, 0.9, 0.95]
+        {
+            let cqr = ConformalizedQuantile::fit(&lower, &upper, &actual, level).unwrap();
+            let covered = (0..100)
+                .filter(|&i| cqr.covers(lower[i], upper[i], actual[i]))
+                .count();
+            let empirical = covered as f64 / 100.0;
+            assert!(empirical >= level, "empirical {empirical} below {level}");
+        }
+    }
+
+    #[test]
+    fn cqr_offset_tightens_a_too_wide_interval() {
+        // Native interval [-10, 10] is far too wide; actuals sit near zero, so the
+        // conformal offset is negative and the adjusted interval is narrower.
+        let actual: Vec<f64> = (0..50).map(|i| (i % 3) as f64 - 1.0).collect();
+        let lower = vec![-10.0; 50];
+        let upper = vec![10.0; 50];
+        let cqr = ConformalizedQuantile::fit(&lower, &upper, &actual, 0.9).unwrap();
+        assert!(
+            cqr.offset() < 0.0,
+            "offset {} should be negative",
+            cqr.offset()
+        );
+        let (low, high) = cqr.interval(-10.0, 10.0);
+        assert!(
+            high - low < 20.0,
+            "adjusted width {} not tighter",
+            high - low
+        );
+    }
+
+    #[test]
+    fn cqr_rejects_mismatched_lengths() {
+        assert_eq!(
+            ConformalizedQuantile::fit(&[1.0], &[1.0, 2.0], &[1.0], 0.9),
+            Err(ConformalError::MismatchedCalibration {
+                lower: 1,
+                upper: 2,
+                actual: 1
+            })
+        );
     }
 }

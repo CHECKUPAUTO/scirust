@@ -34,7 +34,7 @@ pub use adapter::{
     FittingProtocol, HotellingT2Adapter, IsolationForestAdapter, LofAdapter, MahalanobisAdapter,
     RobustRegressionAdapter, TaskKind,
 };
-pub use conformal::{ConformalError, SplitConformal};
+pub use conformal::{ConformalError, ConformalizedQuantile, SplitConformal};
 pub use contamination::{
     ContaminationConfig, ContaminationError, ContaminationKind, ContaminationManifest,
     apply_contamination,
