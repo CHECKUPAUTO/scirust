@@ -5,6 +5,7 @@
 
 pub mod control;
 pub mod finance;
+pub mod influence;
 pub mod isotonic;
 pub mod kernel_ridge;
 pub mod nlp;
@@ -16,6 +17,9 @@ pub mod robust_regression;
 pub mod simd_nn;
 pub mod time_series;
 
+pub use influence::{
+    InfluenceConfig, InfluenceError, InfluenceRecord, InfluenceReport, ObservationInfluenceClass,
+};
 pub use isotonic::{IsotonicRegression, IsotonicRegressionError, MonotoneDirection};
 pub use kernel_ridge::{KernelRidgeConfig, KernelRidgeError, KernelRidgeRegression};
 pub use quantile_regression::{
