@@ -949,3 +949,69 @@ training rows are decimated 12× for tractability (test rows full), so the absol
 MAE magnitudes would tighten with more training data — but the qualitative
 composition result (each lever adds, sub-additively where one already dominates) is
 a property of the residual structure, not the sample size.
+
+## Third program (direction C, sub-PR 1) — calibrated uncertainty: split-conformal intervals
+
+The program produced point predictions (axes 1–3) and promote/hold decisions
+(axis 4); a deployment also needs **honest uncertainty**. Under heavy tails a `±σ`
+band lies — the variance is inflated by the very outliers robustness exists to
+tame. **Split-conformal prediction** sidesteps distributional assumptions entirely:
+given a point predictor and an exchangeable calibration set, the band `ŷ ± q`, with
+`q` the `⌈(n+1)·level⌉`-th smallest absolute calibration residual, covers a fresh
+target with probability ≥ `level` for *any* residual distribution (Vovk; Lei et
+al.). This adds a small, pure, deterministic `SplitConformal` type to the harness
+(6 unit tests: the finite-sample order-statistic, the in-sample coverage guarantee,
+the too-small-calibration typed error) and asks the question axis 3 implies: turned
+into intervals, does the *robust* predictor give **tighter valid** intervals?
+
+`industrial-obd2-conformal` answers it on the real OBD2 workload, leave-one-segment-out,
+level 0.9, calibration carved as every 5th training row (OLS and Huber share the
+split, so the comparison is exact). This is conformal under a mild **distribution
+shift** — calibrate on some driving segments, deploy on a held-out one — the
+realistic deployment condition rather than the i.i.d. ideal.
+
+| target | OLS coverage / width | Huber coverage / width | Huber/OLS width |
+|--------|---------------------:|-----------------------:|----------------:|
+| `ENGINE_LOAD` | 0.899 / 4.471 | 0.898 / 4.457 | 0.997 (Huber ~tied) |
+| `THROTTLE_POS` | 0.899 / 3.817 | 0.898 / 3.088 | **0.809 (Huber −19 %)** |
+| `MAF` | 0.895 / 3.610 | 0.900 / 3.667 | 1.016 (OLS tighter) |
+
+**Finding — conformal coverage holds on real data under shift, and robustness
+tightens the band only when its gains reach the coverage quantile.** Two results:
+
+1. **The distribution-free guarantee delivers.** Empirical coverage sits at
+   0.895–0.900 for *both* predictors on all three channels — essentially the
+   nominal 0.9 — even though calibration and test are different driving segments.
+   Under heavy tails, where a Gaussian `±1.64σ` band would mis-cover, conformal is
+   honest by construction.
+2. **Robustness buys a tighter interval only on `THROTTLE_POS` (−19 %).** The
+   conformal half-width is the ~90th-percentile absolute residual, not the mean, so
+   a predictor only narrows the band if it improves residuals *up at that quantile*.
+   This is exactly consistent with direction B: on `THROTTLE_POS`, the channel where
+   robustness was the strong lever, Huber shrinks residuals all the way to the
+   coverage quantile and the band tightens 19 %; on `ENGINE_LOAD`/`MAF`, where
+   direction B found robustness only trims the deep bulk (nonlinearity owned the
+   rest), the 90th-percentile residual — and thus the interval — is essentially
+   unchanged (0.997, 1.016).
+
+**Interpretation.** Calibrated uncertainty inherits the same "match the tool to the
+data" logic as point accuracy, but keyed to a *different statistic*: a robust loss
+tightens a conformal interval precisely when its residual improvement extends to the
+coverage quantile. Where robustness only helps the median (ENGINE_LOAD/MAF), the
+90 %-interval is unmoved; where it helps the moderate tail (THROTTLE_POS), the
+interval narrows materially — all while conformal keeps coverage honest regardless.
+
+**Determinism.**
+
+```
+stdout  SHA-256: 1cd59eb0b4443f92220feb7a1b7a3c9e0be5b96697ae5308d75bcd216c7c859f
+results SHA-256: d47c8f796abde6145b64e419828d960d57641ab7520377e69823f00e602e906a  (15 BenchRecords)
+```
+
+Run twice byte-identical; no network; checksum-verified in-repo OBD2 CSV; OLS/Huber
+(QR) are RNG-free and the conformal band is a sort plus an index. Additive: one new
+`conformal` module + one binary + docs; `industrial_protocol_demo` fingerprint
+(`167c13de…`) and the other 81 lib tests unaffected (87 lib tests total). Next
+sub-PRs of direction C: quantile regression (pinball loss) and conformalized
+quantile regression (adaptive-width intervals), then a promotion gate on interval
+quality.

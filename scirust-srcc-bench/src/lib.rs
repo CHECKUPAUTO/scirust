@@ -16,6 +16,7 @@
 #![forbid(unsafe_code)]
 
 pub mod adapter;
+pub mod conformal;
 pub mod contamination;
 pub mod dataset;
 pub mod loaders;
@@ -33,6 +34,7 @@ pub use adapter::{
     FittingProtocol, HotellingT2Adapter, IsolationForestAdapter, LofAdapter, MahalanobisAdapter,
     RobustRegressionAdapter, TaskKind,
 };
+pub use conformal::{ConformalError, SplitConformal};
 pub use contamination::{
     ContaminationConfig, ContaminationError, ContaminationKind, ContaminationManifest,
     apply_contamination,
