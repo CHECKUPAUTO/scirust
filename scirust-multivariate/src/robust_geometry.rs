@@ -45,8 +45,8 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use scirust_stats::robust::{MadConsistency, median_absolute_deviation};
-use scirust_stats::{RobustStatsError, describe};
+use scirust_stats::robust::{MadConsistency, interquartile_range, median_absolute_deviation};
+use scirust_stats::{ChiSquared, Distribution, Normal, RobustStatsError, describe};
 
 use crate::{Matrix, invert_lower_triangular};
 
@@ -141,6 +141,13 @@ pub enum RobustGeometryError {
     ScaleEstimation {
         /// The dimension being fitted.
         dimension: usize,
+        /// The underlying robust-statistics error.
+        source: RobustStatsError,
+    },
+    /// A robust scale estimate inside the OGK scatter construction failed (for a
+    /// column or a pairwise sum/difference — for example an overflow to a
+    /// non-finite value).
+    ScatterScaleEstimation {
         /// The underlying robust-statistics error.
         source: RobustStatsError,
     },
@@ -240,6 +247,10 @@ consider a larger ridge"
                     "fitting robust scale for dimension {dimension}: {source}"
                 )
             },
+            Self::ScatterScaleEstimation { source } =>
+            {
+                write!(f, "fitting a robust scale inside OGK scatter: {source}")
+            },
             Self::NonFiniteScale { dimension, scale } => write!(
                 f,
                 "fitted location or scale for dimension {dimension} is not finite \
@@ -267,6 +278,7 @@ impl std::error::Error for RobustGeometryError {
         match self
         {
             Self::ScaleEstimation { source, .. } => Some(source),
+            Self::ScatterScaleEstimation { source } => Some(source),
             _ => None,
         }
     }
@@ -932,6 +944,588 @@ fn strict_cholesky(m: &Matrix) -> Result<Matrix, RobustGeometryError> {
     Ok(l)
 }
 
+// ─────────────────── Robust affine scatter (OGK, phase 4E.1) ───────────────────
+//
+// The metrics above are diagonal (`RobustScaler`) or classical
+// (`RegularizedMahalanobis`); neither resists *multivariate* outliers that are
+// unremarkable coordinate-by-coordinate (a point off the correlation axis). This
+// adds a deterministic Orthogonalized Gnanadesikan–Kettenring (OGK) location and
+// scatter estimator (Maronna & Zamar, 2002), reusing this crate's `jacobi_eigen`
+// and `scirust-stats` robust scales — no new dependency edge, no RNG.
+//
+// Equivariance actually achieved (never overstated). OGK is **exactly**
+// equivariant under translation and per-coordinate positive scaling, and only
+// **approximately** affine-equivariant: it is *not* exactly affine-equivariant in
+// finite samples — only the classical covariance (in exact arithmetic) and an
+// exact MCD are. Rotation behaviour is *measured* in the benchmark, not claimed.
+
+/// The robust univariate scale driving OGK's pairwise step and projections.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RobustUnivariateScale {
+    /// Median absolute deviation, scaled to normal consistency.
+    MedianAbsoluteDeviation,
+    /// Interquartile range, scaled to normal consistency.
+    InterquartileRange,
+}
+
+/// The multivariate location/scatter estimator.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum RobustScatterMethod {
+    /// Classical column means and population covariance — a baseline inside this
+    /// API (not robust to multivariate outliers; kept for honest comparison).
+    Classical,
+    /// Deterministic OGK robust location and scatter.
+    Ogk {
+        /// The univariate scale used throughout.
+        scale: RobustUnivariateScale,
+        /// Apply the hard-reweighting refinement (a χ²-cutoff C-step loop).
+        reweight: bool,
+    },
+}
+
+/// What equivariance a fitted model actually achieves — stated, not overstated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AchievedEquivariance {
+    /// Classical covariance: affine-equivariant in exact arithmetic only (the
+    /// ridge and floating point break exact equivariance).
+    AffineExactArithmetic,
+    /// OGK: exactly equivariant under translation and per-coordinate positive
+    /// scaling; only approximately affine-equivariant (rotations pass through the
+    /// eigenbasis but are not reproduced exactly in finite samples).
+    TranslationScalingExactApproximateAffine,
+}
+
+/// Configuration for [`RobustScatterModel::fit`].
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct RobustScatterConfig {
+    /// The estimator.
+    pub method: RobustScatterMethod,
+    /// Ridge added to the scatter diagonal before inversion (`>= 0`). `0.0`
+    /// leaves the estimate unregularized; a non-positive-definite scatter then
+    /// surfaces as [`RobustGeometryError::SingularScatter`] — never a silent
+    /// classical fallback.
+    pub ridge: f64,
+    /// Maximum hard-reweighting iterations (used only when `reweight` is true).
+    pub maximum_iterations: usize,
+    /// Relative Frobenius change in the scatter below which reweighting stops.
+    pub relative_tolerance: f64,
+    /// A per-coordinate robust scale at or below this floor marks the dimension
+    /// inactive (and is floored to a positive value to avoid division blow-up).
+    /// Must be finite and `>= 0`.
+    pub minimum_scale: f64,
+}
+
+impl Default for RobustScatterConfig {
+    fn default() -> Self {
+        Self {
+            method: RobustScatterMethod::Ogk {
+                scale: RobustUnivariateScale::MedianAbsoluteDeviation,
+                reweight: true,
+            },
+            ridge: 0.0,
+            maximum_iterations: 10,
+            relative_tolerance: 1.0e-9,
+            minimum_scale: 1.0e-12,
+        }
+    }
+}
+
+/// A machine-readable account of a robust-scatter fit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RobustScatterReport {
+    /// Which estimator produced the model.
+    pub method: RobustScatterMethod,
+    /// The equivariance actually achieved.
+    pub achieved_equivariance: AchievedEquivariance,
+    /// Rows contributing to the final estimate (equals the row count when no
+    /// reweighting was applied).
+    pub effective_sample_count: usize,
+    /// Rows rejected by the reweighting cutoff (`0` when no reweighting).
+    pub reweighted_outlier_count: usize,
+    /// Reweighting iterations performed (`0` when no reweighting).
+    pub iterations: usize,
+    /// Whether reweighting reached its stability/tolerance criterion.
+    pub converged: bool,
+    /// Non-fatal notes (degenerate dimensions, skipped reweighting, …).
+    pub warnings: Vec<String>,
+}
+
+/// A fitted robust multivariate location/scatter model.
+///
+/// Not `Serialize`/`Deserialize`: it holds [`Matrix`] values, which (by this
+/// crate's convention, like [`FittedDistanceMetric`]) do not implement serde.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RobustScatterModel {
+    /// Robust location (one entry per column).
+    pub location: Vec<f64>,
+    /// Robust scatter matrix (`p × p`, ridge already added).
+    pub scatter: Matrix,
+    /// Inverse of `scatter`.
+    pub inverse_scatter: Matrix,
+    /// Per-dimension activity flag (`false` where the robust scale was at or
+    /// below `minimum_scale`).
+    pub active_dimensions: Vec<bool>,
+    /// The fit report.
+    pub report: RobustScatterReport,
+}
+
+impl RobustScatterModel {
+    /// Fit a robust location/scatter model on `data` (rows = observations).
+    ///
+    /// # Errors
+    ///
+    /// Typed [`RobustGeometryError`] on an empty/ragged/non-finite matrix, fewer
+    /// than two rows, an invalid ridge or `minimum_scale`, a robust-scale failure
+    /// ([`RobustGeometryError::ScatterScaleEstimation`]), a non-finite scale
+    /// ([`RobustGeometryError::NonFiniteScale`]), or a scatter that is not
+    /// positive definite after regularization
+    /// ([`RobustGeometryError::SingularScatter`]).
+    pub fn fit(data: &Matrix, config: RobustScatterConfig) -> Result<Self, RobustGeometryError> {
+        validate_matrix(data)?;
+        if !(config.ridge.is_finite() && config.ridge >= 0.0)
+        {
+            return Err(RobustGeometryError::InvalidRidge {
+                ridge: config.ridge,
+            });
+        }
+        if !(config.minimum_scale.is_finite() && config.minimum_scale >= 0.0)
+        {
+            return Err(RobustGeometryError::InvalidMinimumScale {
+                minimum_scale: config.minimum_scale,
+            });
+        }
+        if data.rows < 2
+        {
+            return Err(RobustGeometryError::InsufficientSamples {
+                required: 2,
+                found: data.rows,
+            });
+        }
+
+        match config.method
+        {
+            RobustScatterMethod::Classical => Self::fit_classical(data, config),
+            RobustScatterMethod::Ogk { scale, reweight } =>
+            {
+                Self::fit_ogk(data, config, scale, reweight)
+            },
+        }
+    }
+
+    fn fit_classical(
+        data: &Matrix,
+        config: RobustScatterConfig,
+    ) -> Result<Self, RobustGeometryError> {
+        let (centered, location) = data.center();
+        let mut scatter = centered.cov_matrix();
+        for i in 0..scatter.rows
+        {
+            scatter.data[i][i] += config.ridge;
+        }
+        let inverse_scatter = invert_positive_definite(&scatter)?;
+        Ok(Self {
+            location,
+            scatter,
+            inverse_scatter,
+            active_dimensions: vec![true; data.cols],
+            report: RobustScatterReport {
+                method: config.method,
+                achieved_equivariance: AchievedEquivariance::AffineExactArithmetic,
+                effective_sample_count: data.rows,
+                reweighted_outlier_count: 0,
+                iterations: 0,
+                converged: true,
+                warnings: Vec::new(),
+            },
+        })
+    }
+
+    fn fit_ogk(
+        data: &Matrix,
+        config: RobustScatterConfig,
+        scale_method: RobustUnivariateScale,
+        reweight: bool,
+    ) -> Result<Self, RobustGeometryError> {
+        let n = data.rows;
+        let p = data.cols;
+        let mut warnings: Vec<String> = Vec::new();
+
+        // Step 1 — robust per-column scales; flag and floor degenerate columns.
+        let mut floored = vec![0.0_f64; p];
+        let mut active = vec![true; p];
+        for j in 0..p
+        {
+            let column: Vec<f64> = (0..n).map(|i| data.data[i][j]).collect();
+            let scale = univariate_scale(&column, scale_method)?;
+            if !scale.is_finite()
+            {
+                return Err(RobustGeometryError::NonFiniteScale {
+                    dimension: j,
+                    scale,
+                });
+            }
+            active[j] = scale > config.minimum_scale;
+            if !active[j]
+            {
+                warnings.push(format!(
+                    "dimension {j} has robust scale {scale:.3e} <= minimum_scale {:.3e}; marked inactive",
+                    config.minimum_scale
+                ));
+            }
+            floored[j] = scale.max(config.minimum_scale).max(f64::MIN_POSITIVE);
+        }
+
+        // Scaled data Y = X D^{-1}.
+        let mut y = Matrix::zeros(n, p);
+        for i in 0..n
+        {
+            for (j, &scale) in floored.iter().enumerate()
+            {
+                y.data[i][j] = data.data[i][j] / scale;
+            }
+        }
+
+        // Step 2 — the GK pairwise matrix U (unit diagonal, symmetric).
+        let mut u = Matrix::zeros(p, p);
+        for j in 0..p
+        {
+            u.data[j][j] = 1.0;
+        }
+        for j in 0..p
+        {
+            for k in (j + 1)..p
+            {
+                let mut sum = vec![0.0_f64; n];
+                let mut diff = vec![0.0_f64; n];
+                for i in 0..n
+                {
+                    sum[i] = y.data[i][j] + y.data[i][k];
+                    diff[i] = y.data[i][j] - y.data[i][k];
+                }
+                let scale_sum = univariate_scale(&sum, scale_method)?;
+                let scale_diff = univariate_scale(&diff, scale_method)?;
+                let entry = 0.25 * (scale_sum * scale_sum - scale_diff * scale_diff);
+                u.data[j][k] = entry;
+                u.data[k][j] = entry;
+            }
+        }
+
+        // Step 3 — eigendecompose U with a deterministic order and sign.
+        let (raw_values, raw_vectors) = crate::jacobi_eigen(&u);
+        let vectors = canonicalize_eigenvectors(&raw_values, raw_vectors);
+
+        // Step 4 — project the scaled data onto the eigenbasis: V = Y E.
+        let mut projected = Matrix::zeros(n, p);
+        for i in 0..n
+        {
+            for (l, vector) in vectors.iter().enumerate()
+            {
+                let mut acc = 0.0;
+                for (k, &component) in vector.iter().enumerate()
+                {
+                    acc += y.data[i][k] * component;
+                }
+                projected.data[i][l] = acc;
+            }
+        }
+
+        // Step 5 — robust scale and location of every projected coordinate.
+        let mut gamma = vec![0.0_f64; p];
+        let mut nu = vec![0.0_f64; p];
+        for l in 0..p
+        {
+            let column: Vec<f64> = (0..n).map(|i| projected.data[i][l]).collect();
+            gamma[l] = univariate_scale(&column, scale_method)?;
+            nu[l] = describe::median(&column);
+        }
+
+        // Step 6 — assemble in Y-space, then Step 7 — map back to X-space.
+        // Σ_X[a][b] = d_a d_b Σᵧ[a][b],  Σᵧ[a][b] = Σ_l γ_l² e_l[a] e_l[b];
+        // μ_X[a]    = d_a μᵧ[a],         μᵧ[a]    = Σ_l ν_l e_l[a].
+        let mut scatter = Matrix::zeros(p, p);
+        for a in 0..p
+        {
+            for b in 0..p
+            {
+                let mut acc = 0.0;
+                for l in 0..p
+                {
+                    acc += gamma[l] * gamma[l] * vectors[l][a] * vectors[l][b];
+                }
+                scatter.data[a][b] = floored[a] * floored[b] * acc;
+            }
+        }
+        // Symmetrize away floating-point asymmetry before factorization.
+        for a in 0..p
+        {
+            for b in (a + 1)..p
+            {
+                let mean = 0.5 * (scatter.data[a][b] + scatter.data[b][a]);
+                scatter.data[a][b] = mean;
+                scatter.data[b][a] = mean;
+            }
+        }
+        let mut location = vec![0.0_f64; p];
+        for a in 0..p
+        {
+            let mut acc = 0.0;
+            for l in 0..p
+            {
+                acc += nu[l] * vectors[l][a];
+            }
+            location[a] = floored[a] * acc;
+        }
+
+        for a in 0..p
+        {
+            scatter.data[a][a] += config.ridge;
+        }
+        let mut inverse_scatter = invert_positive_definite(&scatter)?;
+
+        let mut effective_sample_count = n;
+        let mut reweighted_outlier_count = 0;
+        let mut iterations = 0;
+        let mut converged = true;
+
+        // Step 8 — optional hard-reweighting refinement (χ²-cutoff C-steps).
+        if reweight
+        {
+            converged = false;
+            let chi_median = ChiSquared::new(p as f64).quantile(0.5);
+            let chi_cutoff = ChiSquared::new(p as f64).quantile(0.975);
+            let mut previous: Option<Vec<usize>> = None;
+
+            for _ in 0..config.maximum_iterations.max(1)
+            {
+                iterations += 1;
+                let distances = squared_distances(data, &location, &inverse_scatter);
+                let median_distance = describe::median(&distances);
+                let correction = if chi_median > 0.0
+                {
+                    (median_distance / chi_median).max(f64::MIN_POSITIVE)
+                }
+                else
+                {
+                    1.0
+                };
+                let threshold = chi_cutoff * correction;
+                let retained: Vec<usize> = (0..n).filter(|&i| distances[i] <= threshold).collect();
+
+                if retained.len() < p + 1
+                {
+                    warnings.push(format!(
+                        "reweighting stopped: only {} of {n} rows passed the χ² cutoff (< p+1 = {})",
+                        retained.len(),
+                        p + 1
+                    ));
+                    converged = true;
+                    break;
+                }
+
+                let subset = select_rows(data, &retained);
+                let (centered, new_location) = subset.center();
+                let mut new_scatter = centered.cov_matrix();
+                for a in 0..p
+                {
+                    new_scatter.data[a][a] += config.ridge;
+                }
+                let new_inverse = invert_positive_definite(&new_scatter)?;
+
+                let stable = previous.as_ref() == Some(&retained);
+                let change = frobenius_relative_change(&scatter, &new_scatter);
+
+                location = new_location;
+                scatter = new_scatter;
+                inverse_scatter = new_inverse;
+                effective_sample_count = retained.len();
+                reweighted_outlier_count = n - retained.len();
+
+                if stable || change < config.relative_tolerance
+                {
+                    converged = true;
+                    break;
+                }
+                previous = Some(retained);
+            }
+        }
+
+        Ok(Self {
+            location,
+            scatter,
+            inverse_scatter,
+            active_dimensions: active,
+            report: RobustScatterReport {
+                method: config.method,
+                achieved_equivariance:
+                    AchievedEquivariance::TranslationScalingExactApproximateAffine,
+                effective_sample_count,
+                reweighted_outlier_count,
+                iterations,
+                converged,
+                warnings,
+            },
+        })
+    }
+
+    /// Squared robust Mahalanobis distance of `point` from the fitted location.
+    ///
+    /// # Errors
+    ///
+    /// [`RobustGeometryError::DimensionCountMismatch`] on a length mismatch;
+    /// [`RobustGeometryError::NonFiniteCoordinate`] on a non-finite coordinate.
+    pub fn mahalanobis_squared(&self, point: &[f64]) -> Result<f64, RobustGeometryError> {
+        if point.len() != self.location.len()
+        {
+            return Err(RobustGeometryError::DimensionCountMismatch {
+                expected: self.location.len(),
+                found: point.len(),
+            });
+        }
+        for (index, &value) in point.iter().enumerate()
+        {
+            if !value.is_finite()
+            {
+                return Err(RobustGeometryError::NonFiniteCoordinate { index, value });
+            }
+        }
+        let mut difference = vec![0.0_f64; point.len()];
+        for i in 0..point.len()
+        {
+            difference[i] = point[i] - self.location[i];
+        }
+        let transformed = self.inverse_scatter.mul_vec(&difference);
+        let mut squared = 0.0;
+        for i in 0..point.len()
+        {
+            squared += difference[i] * transformed[i];
+        }
+        Ok(squared)
+    }
+
+    /// Robust Mahalanobis distance (the non-negative square root of
+    /// [`Self::mahalanobis_squared`]).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::mahalanobis_squared`].
+    pub fn mahalanobis(&self, point: &[f64]) -> Result<f64, RobustGeometryError> {
+        Ok(self.mahalanobis_squared(point)?.max(0.0).sqrt())
+    }
+}
+
+/// A robust univariate scale, scaled to normal consistency.
+fn univariate_scale(
+    values: &[f64],
+    method: RobustUnivariateScale,
+) -> Result<f64, RobustGeometryError> {
+    match method
+    {
+        RobustUnivariateScale::MedianAbsoluteDeviation =>
+        {
+            median_absolute_deviation(values, MadConsistency::Normal)
+                .map_err(|source| RobustGeometryError::ScatterScaleEstimation { source })
+        },
+        RobustUnivariateScale::InterquartileRange =>
+        {
+            let raw = interquartile_range(values)
+                .map_err(|source| RobustGeometryError::ScatterScaleEstimation { source })?;
+            // Normal consistency: IQR / (2·Φ⁻¹(0.75)) matches σ under normality.
+            let factor = 2.0 * Normal::standard().quantile(0.75);
+            Ok(raw / factor)
+        },
+    }
+}
+
+/// Sort eigenpairs by eigenvalue descending (stable on ties by original index)
+/// and fix each eigenvector's sign so its first entry above a small tolerance is
+/// positive — a fully deterministic basis regardless of the solver's output.
+fn canonicalize_eigenvectors(values: &[f64], vectors: Vec<Vec<f64>>) -> Vec<Vec<f64>> {
+    let mut order: Vec<usize> = (0..values.len()).collect();
+    order.sort_by(|&a, &b| values[b].total_cmp(&values[a]).then(a.cmp(&b)));
+    order
+        .into_iter()
+        .map(|i| {
+            let mut vector = vectors[i].clone();
+            let pivot = vector
+                .iter()
+                .copied()
+                .find(|value| value.abs() > 1.0e-12)
+                .unwrap_or(1.0);
+            if pivot < 0.0
+            {
+                for value in &mut vector
+                {
+                    *value = -*value;
+                }
+            }
+            vector
+        })
+        .collect()
+}
+
+/// Invert a positive-definite matrix through a strict Cholesky factorization.
+fn invert_positive_definite(matrix: &Matrix) -> Result<Matrix, RobustGeometryError> {
+    let lower = strict_cholesky(matrix)?;
+    let lower_inverse = invert_lower_triangular(&lower);
+    Ok(lower_inverse.transpose().mul(&lower_inverse))
+}
+
+/// Per-row squared Mahalanobis distances of `data` from `location` under
+/// `inverse_scatter`.
+fn squared_distances(data: &Matrix, location: &[f64], inverse_scatter: &Matrix) -> Vec<f64> {
+    let p = data.cols;
+    (0..data.rows)
+        .map(|i| {
+            let mut difference = vec![0.0_f64; p];
+            for j in 0..p
+            {
+                difference[j] = data.data[i][j] - location[j];
+            }
+            let transformed = inverse_scatter.mul_vec(&difference);
+            let mut squared = 0.0;
+            for j in 0..p
+            {
+                squared += difference[j] * transformed[j];
+            }
+            squared
+        })
+        .collect()
+}
+
+/// Build the sub-matrix of `data` selecting `rows` in order.
+fn select_rows(data: &Matrix, rows: &[usize]) -> Matrix {
+    let mut out = Matrix::zeros(rows.len(), data.cols);
+    for (target, &source) in rows.iter().enumerate()
+    {
+        out.data[target] = data.data[source].clone();
+    }
+    out
+}
+
+/// Relative Frobenius change `‖a − b‖_F / ‖b‖_F` (falls back to `‖a − b‖_F` when
+/// `b` is all zeros).
+fn frobenius_relative_change(a: &Matrix, b: &Matrix) -> f64 {
+    let mut numerator = 0.0;
+    let mut denominator = 0.0;
+    for i in 0..a.rows
+    {
+        for j in 0..a.cols
+        {
+            let delta = a.data[i][j] - b.data[i][j];
+            numerator += delta * delta;
+            denominator += b.data[i][j] * b.data[i][j];
+        }
+    }
+    if denominator > 0.0
+    {
+        (numerator / denominator).sqrt()
+    }
+    else
+    {
+        numerator.sqrt()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1450,5 +2044,380 @@ mod tests {
                 assert!(v.is_finite());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod ogk_scatter_tests {
+    use super::*;
+
+    fn mat(data: Vec<Vec<f64>>) -> Matrix {
+        let rows = data.len();
+        let cols = data[0].len();
+        Matrix { rows, cols, data }
+    }
+
+    fn ogk(reweight: bool, ridge: f64) -> RobustScatterConfig {
+        RobustScatterConfig {
+            method: RobustScatterMethod::Ogk {
+                scale: RobustUnivariateScale::MedianAbsoluteDeviation,
+                reweight,
+            },
+            ridge,
+            ..RobustScatterConfig::default()
+        }
+    }
+
+    /// A deterministic, healthy-rank correlated 2-D cloud (slope 0.8 + bounded
+    /// wiggle), no RNG.
+    fn correlated_cloud(n: usize) -> Vec<Vec<f64>> {
+        (0..n)
+            .map(|i| {
+                let x = (i as f64) - (n as f64) / 2.0;
+                let wiggle = ((i * 7) % 13) as f64 - 6.0;
+                vec![x, 0.8 * x + wiggle]
+            })
+            .collect()
+    }
+
+    /// Two near-independent coordinates with equal spread — isotropic, so `U` has
+    /// a repeated eigenvalue.
+    fn isotropic_cloud(n: usize) -> Vec<Vec<f64>> {
+        (0..n)
+            .map(|i| {
+                let a = ((i * 5) % 17) as f64 - 8.0;
+                let b = ((i * 11) % 17) as f64 - 8.0;
+                vec![a, b]
+            })
+            .collect()
+    }
+
+    fn eigenvalues_2x2(m: &Matrix) -> (f64, f64) {
+        let a = m.data[0][0];
+        let b = m.data[0][1];
+        let d = m.data[1][1];
+        let half = (a + d) / 2.0;
+        let root = (((a - d) / 2.0).powi(2) + b * b).sqrt();
+        (half + root, half - root)
+    }
+
+    fn rel_close(actual: f64, expected: f64, relative: f64) -> bool {
+        (actual - expected).abs() <= relative * expected.abs().max(1.0)
+    }
+
+    #[test]
+    fn ogk_fits_a_correlated_cloud_positive_definite() {
+        let data = mat(correlated_cloud(40));
+        let model = RobustScatterModel::fit(&data, ogk(true, 0.0)).unwrap();
+        assert_eq!(model.location.len(), 2);
+        assert!(model.scatter.data[0][0] > 0.0 && model.scatter.data[1][1] > 0.0);
+        let det = model.scatter.data[0][0] * model.scatter.data[1][1]
+            - model.scatter.data[0][1] * model.scatter.data[1][0];
+        assert!(det > 0.0, "scatter must be positive definite");
+        assert!(
+            model.scatter.data[0][1] > 0.0,
+            "positive correlation preserved"
+        );
+        assert!(model.active_dimensions.iter().all(|&a| a));
+    }
+
+    #[test]
+    fn ogk_is_translation_equivariant() {
+        let base = correlated_cloud(40);
+        let shift = [10.0, -7.0];
+        let shifted: Vec<Vec<f64>> = base
+            .iter()
+            .map(|r| vec![r[0] + shift[0], r[1] + shift[1]])
+            .collect();
+        let a = RobustScatterModel::fit(&mat(base), ogk(false, 0.0)).unwrap();
+        let b = RobustScatterModel::fit(&mat(shifted), ogk(false, 0.0)).unwrap();
+        for (j, &offset) in shift.iter().enumerate()
+        {
+            assert!((b.location[j] - a.location[j] - offset).abs() < 1e-9);
+        }
+        for i in 0..2
+        {
+            for j in 0..2
+            {
+                assert!((b.scatter.data[i][j] - a.scatter.data[i][j]).abs() < 1e-9);
+            }
+        }
+    }
+
+    #[test]
+    fn ogk_scales_scatter_quadratically_and_location_linearly() {
+        let base = correlated_cloud(40);
+        let c = 3.0;
+        let scaled: Vec<Vec<f64>> = base.iter().map(|r| vec![c * r[0], c * r[1]]).collect();
+        let a = RobustScatterModel::fit(&mat(base), ogk(false, 0.0)).unwrap();
+        let b = RobustScatterModel::fit(&mat(scaled), ogk(false, 0.0)).unwrap();
+        for j in 0..2
+        {
+            assert!(rel_close(b.location[j], c * a.location[j], 1e-9));
+        }
+        for i in 0..2
+        {
+            for j in 0..2
+            {
+                assert!(rel_close(
+                    b.scatter.data[i][j],
+                    c * c * a.scatter.data[i][j],
+                    1e-9
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn ogk_is_coordinate_scaling_equivariant() {
+        let base = correlated_cloud(40);
+        let (sx, sy) = (2.0, 5.0);
+        let scaled: Vec<Vec<f64>> = base.iter().map(|r| vec![sx * r[0], sy * r[1]]).collect();
+        let a = RobustScatterModel::fit(&mat(base), ogk(false, 0.0)).unwrap();
+        let b = RobustScatterModel::fit(&mat(scaled), ogk(false, 0.0)).unwrap();
+        assert!(rel_close(b.location[0], sx * a.location[0], 1e-9));
+        assert!(rel_close(b.location[1], sy * a.location[1], 1e-9));
+        assert!(rel_close(
+            b.scatter.data[0][0],
+            sx * sx * a.scatter.data[0][0],
+            1e-9
+        ));
+        assert!(rel_close(
+            b.scatter.data[1][1],
+            sy * sy * a.scatter.data[1][1],
+            1e-9
+        ));
+        assert!(rel_close(
+            b.scatter.data[0][1],
+            sx * sy * a.scatter.data[0][1],
+            1e-9
+        ));
+    }
+
+    #[test]
+    fn ogk_rotation_equivariance_is_approximate_raw_and_tighter_reweighted() {
+        // OGK is NOT exactly affine/rotation equivariant (only translation and
+        // per-coordinate scaling are exact). We MEASURE it and state both facts:
+        // raw OGK preserves the scatter spectrum only loosely under rotation,
+        // while the reweighting step — a classical covariance on the retained
+        // inliers, which IS affine-equivariant — tightens it markedly.
+        let base = correlated_cloud(48);
+        let theta = 0.5_f64;
+        let (c, s) = (theta.cos(), theta.sin());
+        let rotated: Vec<Vec<f64>> = base
+            .iter()
+            .map(|r| vec![c * r[0] - s * r[1], s * r[0] + c * r[1]])
+            .collect();
+
+        let raw_a = RobustScatterModel::fit(&mat(base.clone()), ogk(false, 0.0)).unwrap();
+        let raw_b = RobustScatterModel::fit(&mat(rotated.clone()), ogk(false, 0.0)).unwrap();
+        let re_a = RobustScatterModel::fit(&mat(base), ogk(true, 0.0)).unwrap();
+        let re_b = RobustScatterModel::fit(&mat(rotated), ogk(true, 0.0)).unwrap();
+
+        let spectrum_gap = |x: &Matrix, y: &Matrix| {
+            let (x1, x2) = eigenvalues_2x2(x);
+            let (y1, y2) = eigenvalues_2x2(y);
+            let g1 = (x1 - y1).abs() / x1.abs().max(1.0);
+            let g2 = (x2 - y2).abs() / x2.abs().max(1.0);
+            g1.max(g2)
+        };
+        let raw_gap = spectrum_gap(&raw_a.scatter, &raw_b.scatter);
+        let reweighted_gap = spectrum_gap(&re_a.scatter, &re_b.scatter);
+
+        // Both are bounded (approximate equivariance, not wild), and reweighting
+        // is at least as good — here strictly tighter.
+        assert!(
+            raw_gap < 0.30,
+            "raw rotation gap {raw_gap} out of expected band"
+        );
+        assert!(
+            reweighted_gap < 0.12,
+            "reweighted rotation gap {reweighted_gap}"
+        );
+        assert!(
+            reweighted_gap <= raw_gap + 1e-12,
+            "reweighting should not worsen rotation equivariance ({reweighted_gap} vs {raw_gap})"
+        );
+    }
+
+    #[test]
+    fn ogk_flags_zero_scale_dimensions_without_failing() {
+        // Append a constant third column (zero robust scale).
+        let data: Vec<Vec<f64>> = correlated_cloud(40)
+            .into_iter()
+            .map(|mut r| {
+                r.push(4.0);
+                r
+            })
+            .collect();
+        let model = RobustScatterModel::fit(&mat(data), ogk(false, 1e-6)).unwrap();
+        assert!(model.active_dimensions[0] && model.active_dimensions[1]);
+        assert!(!model.active_dimensions[2], "constant column is inactive");
+        assert!(!model.report.warnings.is_empty());
+    }
+
+    #[test]
+    fn ogk_singular_scatter_is_a_typed_error_and_ridge_recovers() {
+        // Perfectly collinear data: y = 2x, no off-line spread → singular.
+        let collinear: Vec<Vec<f64>> = (0..30)
+            .map(|i| {
+                let x = i as f64 - 15.0;
+                vec![x, 2.0 * x]
+            })
+            .collect();
+        let err = RobustScatterModel::fit(&mat(collinear.clone()), ogk(false, 0.0)).unwrap_err();
+        assert!(matches!(err, RobustGeometryError::SingularScatter { .. }));
+        // A positive ridge regularizes it to positive definite.
+        let ok = RobustScatterModel::fit(&mat(collinear), ogk(false, 0.5));
+        assert!(ok.is_ok());
+    }
+
+    #[test]
+    fn ogk_is_deterministic_and_permutation_stable() {
+        let data = mat(correlated_cloud(40));
+        let first = RobustScatterModel::fit(&data, ogk(true, 0.0)).unwrap();
+        let second = RobustScatterModel::fit(&data, ogk(true, 0.0)).unwrap();
+        assert_eq!(first, second, "same input, bit-identical model");
+
+        // Reversing the rows must not change the estimate (up to float order).
+        let reversed: Vec<Vec<f64>> = correlated_cloud(40).into_iter().rev().collect();
+        let permuted = RobustScatterModel::fit(&mat(reversed), ogk(true, 0.0)).unwrap();
+        for j in 0..2
+        {
+            assert!((permuted.location[j] - first.location[j]).abs() < 1e-8);
+            for k in 0..2
+            {
+                assert!((permuted.scatter.data[j][k] - first.scatter.data[j][k]).abs() < 1e-8);
+            }
+        }
+    }
+
+    fn contaminated() -> (Matrix, Vec<usize>) {
+        let mut rows = correlated_cloud(40);
+        let outliers: Vec<usize> = (40..48).collect();
+        for k in 0..8
+        {
+            let t = k as f64;
+            rows.push(vec![10.0 + t, -25.0 - 2.0 * t]);
+        }
+        (mat(rows), outliers)
+    }
+
+    #[test]
+    fn ogk_resists_gross_multivariate_contamination_where_classical_fails() {
+        let (data, _) = contaminated();
+        let robust = RobustScatterModel::fit(&data, ogk(true, 0.0)).unwrap();
+        let classical = RobustScatterModel::fit(
+            &data,
+            RobustScatterConfig {
+                method: RobustScatterMethod::Classical,
+                ridge: 0.0,
+                ..RobustScatterConfig::default()
+            },
+        )
+        .unwrap();
+        // The clean cloud is positively correlated; robust keeps that sign and
+        // rejects a positive number of outliers.
+        assert!(
+            robust.scatter.data[0][1] > 0.0,
+            "robust keeps positive correlation"
+        );
+        assert!(robust.report.reweighted_outlier_count > 0);
+        // Classical correlation is dragged down (toward or below zero) by the
+        // anti-correlated contamination — strictly weaker than robust's.
+        assert!(
+            classical.scatter.data[0][1] < robust.scatter.data[0][1],
+            "classical off-diagonal {} should be below robust {}",
+            classical.scatter.data[0][1],
+            robust.scatter.data[0][1]
+        );
+    }
+
+    #[test]
+    fn ogk_mahalanobis_ranks_the_true_outliers_highest() {
+        let (data, outliers) = contaminated();
+        let model = RobustScatterModel::fit(&data, ogk(true, 0.0)).unwrap();
+        let mut ranked: Vec<(usize, f64)> = (0..data.rows)
+            .map(|i| {
+                let row: Vec<f64> = data.data[i].clone();
+                (i, model.mahalanobis_squared(&row).unwrap())
+            })
+            .collect();
+        ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
+        let top: std::collections::BTreeSet<usize> = ranked
+            .iter()
+            .take(outliers.len())
+            .map(|(i, _)| *i)
+            .collect();
+        let expected: std::collections::BTreeSet<usize> = outliers.into_iter().collect();
+        assert_eq!(
+            top, expected,
+            "the top robust distances must be the injected outliers"
+        );
+    }
+
+    #[test]
+    fn ogk_handles_repeated_eigenvalues_isotropic_data() {
+        let data = mat(isotropic_cloud(51));
+        let first = RobustScatterModel::fit(&data, ogk(false, 0.0)).unwrap();
+        let second = RobustScatterModel::fit(&data, ogk(false, 0.0)).unwrap();
+        assert_eq!(first, second);
+        assert!(first.scatter.data[0][0] > 0.0 && first.scatter.data[1][1] > 0.0);
+        // Near-isotropic: off-diagonal small relative to the diagonal.
+        let scale = first.scatter.data[0][0].max(first.scatter.data[1][1]);
+        assert!(first.scatter.data[0][1].abs() < 0.4 * scale);
+    }
+
+    #[test]
+    fn classical_method_matches_direct_mean_and_covariance() {
+        let data = mat(correlated_cloud(40));
+        let model = RobustScatterModel::fit(
+            &data,
+            RobustScatterConfig {
+                method: RobustScatterMethod::Classical,
+                ridge: 0.0,
+                ..RobustScatterConfig::default()
+            },
+        )
+        .unwrap();
+        let (centered, means) = data.center();
+        let cov = centered.cov_matrix();
+        for (j, &mean) in means.iter().enumerate()
+        {
+            assert!((model.location[j] - mean).abs() < 1e-9);
+            for (k, &covariance) in cov.data[j].iter().enumerate()
+            {
+                assert!((model.scatter.data[j][k] - covariance).abs() < 1e-9);
+            }
+        }
+        assert_eq!(
+            model.report.achieved_equivariance,
+            AchievedEquivariance::AffineExactArithmetic
+        );
+    }
+
+    #[test]
+    fn ogk_rejects_invalid_configuration_and_input() {
+        let data = mat(correlated_cloud(40));
+        assert!(matches!(
+            RobustScatterModel::fit(&data, ogk(false, -1.0)).unwrap_err(),
+            RobustGeometryError::InvalidRidge { .. }
+        ));
+        assert!(matches!(
+            RobustScatterModel::fit(
+                &data,
+                RobustScatterConfig {
+                    minimum_scale: -0.1,
+                    ..ogk(false, 0.0)
+                }
+            )
+            .unwrap_err(),
+            RobustGeometryError::InvalidMinimumScale { .. }
+        ));
+        let single = mat(vec![vec![1.0, 2.0]]);
+        assert!(matches!(
+            RobustScatterModel::fit(&single, ogk(false, 0.0)).unwrap_err(),
+            RobustGeometryError::InsufficientSamples { .. }
+        ));
     }
 }
