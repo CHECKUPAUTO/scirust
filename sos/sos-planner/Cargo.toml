@@ -1,0 +1,18 @@
+[package]
+name = "sos-planner"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SOS Planning Engine (deterministic core): turns expected-information-gain estimates into decisions — an explicit versioned utility policy (U = EIG/cost), a cost model, myopic ranking of candidate experiments, honest information-exhaustion, and composable stopping rules. Integer fixed-point, pure Rust, no FFI."
+keywords = ["planning", "experiment-design", "information", "deterministic", "science"]
+categories = ["science", "algorithms"]
+
+[dependencies]
+sos-core = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

@@ -20,7 +20,7 @@ stubs, no TODOs, no placeholders cross a phase boundary.
 |-------|-------|--------|
 | **P1 — Kernel & substrate** | `sos-core`, `sos-store`, `sos-provenance`, `sos-registry`, `sos-repro` (+ SOS CI) | **done** (`sos-repro` core landed on the merged scheduler — env-lock + drift + the level-aware reproduction contract; the numeric `L2`/`L1` verdict is backend-supplied per Invariant VIII) |
 | **P2 — Knowledge & Reasoning** | `sos-knowledge`, `sos-reasoning` | **done** (deterministic cores landed; Datalog / e-graph / theorem-proving deferred to `sos-scirust` per Invariant VIII) |
-| **P3 — Discovery, Planning, Simulation** | `sos-workflow`, `sos-simulation`, `sos-planner`, re-homed `sde-*` stages | `sos-workflow` + `sos-simulation` **cores landed** (the memoized scheduler, and the backend-independent `Simulate` interface + record/replay VCR + honest determinism stamping). `sos-planner`, the solver backends, manifest resolution, and stopping rules await the engine plugins / `sos-scirust` per Invariant VIII |
+| **P3 — Discovery, Planning, Simulation** | `sos-workflow`, `sos-simulation`, `sos-planner`, re-homed `sde-*` stages | engine **cores landed** — the memoized scheduler, the backend-independent `Simulate` interface, and the planner (utility ranking + information-exhaustion + stopping rules). The EIG/solver **numerics**, manifest resolution, and the re-homed discovery stages await `sos-scirust` / a frontend per Invariant VIII |
 | **P4 — Curiosity & Theory** | `sos-curiosity`, `sos-theory` | **cores landed** (both need only the P2 substrate; information-gain / analogy / Bayes-factor ranking / discriminating-experiment planning await P3's `sos-planner` and `scirust-*` per Invariant VIII) |
 
 ### Landed
@@ -142,6 +142,22 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   replay it identically thereafter — letting an expensive or one-shot simulation
   live inside a reproducible workflow. (The capability-gated world-effect boundary
   is the Workflow executor seam's job per Invariant VIII.)
+- **`sos-planner`** — the Planning Engine (deterministic; the engine `sos-curiosity`
+  and `sos-theory` defer their information-gain queries to). It turns
+  expected-information-gain estimates into the decision *"run this experiment
+  next"* — or the honest *"information is exhausted, stop"*. An
+  [`Estimate`](sos-planner/src/estimate.rs) **carries its own uncertainty** (point,
+  standard error, level), a versioned [`UtilityPolicy`](sos-planner/src/policy.rs)
+  (`U = EIG/cost`) scores it against a [`Cost`](sos-planner/src/estimate.rs) model,
+  and the myopic [`GreedyPlanner`](sos-planner/src/planner.rs) ranks candidates
+  into a content-addressed, defensible [`Plan`](sos-planner/src/plan.rs) —
+  recommending `ξ*` or [`InformationExhausted`](sos-planner/src/plan.rs) when no
+  design clears the `eig < ε` floor. Composable
+  [`StoppingRule`](sos-planner/src/stopping.rs)s (`posterior_mass > p`, `eig < ε`,
+  `budget_exhausted`) close the discovery loop. Integer fixed-point (EIG in
+  millibits) — no opaque score. (**Computing** EIG — GP predictive variance,
+  nested Monte-Carlo — is `sos-scirust`'s job per Invariant VIII; this crate
+  consumes estimates.)
 
 ## Engineering standards (the gate)
 
