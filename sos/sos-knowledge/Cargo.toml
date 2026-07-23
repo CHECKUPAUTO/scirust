@@ -1,0 +1,17 @@
+[package]
+name = "sos-knowledge"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SOS Knowledge Engine: a typed, provenance-bound semantic knowledge graph — first-class relation edges over content-addressed objects, with deterministic structural queries (neighbors, paths, relations). Pure Rust, no FFI."
+keywords = ["knowledge-graph", "semantic", "relations", "science", "provenance"]
+categories = ["science", "data-structures"]
+
+[dependencies]
+sos-core = { workspace = true }
+sos-store = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

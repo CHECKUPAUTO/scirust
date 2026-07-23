@@ -18,7 +18,8 @@ stubs, no TODOs, no placeholders cross a phase boundary.
 
 | Phase | Scope | Status |
 |-------|-------|--------|
-| **P1 — Kernel & substrate** | `sos-core`, `sos-store`, `sos-provenance`, `sos-repro`, `sos-registry` | **in progress** |
+| **P1 — Kernel & substrate** | `sos-core`, `sos-store`, `sos-provenance`, `sos-registry` (+ SOS CI) | substrate **done**; `sos-repro` pending (needs the workflow engine for full `verify`/`rerun`) |
+| **P2 — Knowledge & Reasoning** | `sos-knowledge`, `sos-reasoning` | **in progress** (`sos-knowledge` landed) |
 
 ### Landed
 
@@ -47,6 +48,14 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   resolves by semantic version and **detects content-hash drift**, and
   least-privilege [capability authorization](sos-registry/src/capability.rs)
   (refuse-by-default).
+- **`sos-knowledge`** — the Knowledge Engine (typed semantic graph). First-class
+  relation [`Edge`](sos-knowledge/src/edge.rs)s (a typed
+  [`Relation`](sos-knowledge/src/relation.rs) between two objects, sealed as
+  content-addressed objects) and a deterministic
+  [`KnowledgeGraph`](sos-knowledge/src/graph.rs) view with structural queries —
+  `neighbors`, `in_neighbors`, `related`, shortest `path`. (Datalog / e-graph /
+  analogy-by-isomorphism reasoning is deferred to `sos-reasoning` + `sos-scirust`
+  per Invariant VIII.)
 
 ## Engineering standards (the gate)
 
