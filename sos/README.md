@@ -22,6 +22,7 @@ stubs, no TODOs, no placeholders cross a phase boundary.
 | **P2 — Knowledge & Reasoning** | `sos-knowledge`, `sos-reasoning` | **done** (deterministic cores landed; Datalog / e-graph / theorem-proving deferred to `sos-scirust` per Invariant VIII) |
 | **P3 — Discovery, Planning, Simulation** | `sos-workflow`, `sos-simulation`, `sos-planner`, re-homed `sde-*` stages | engine **cores landed** — the memoized scheduler, the backend-independent `Simulate` interface, and the planner (utility ranking + information-exhaustion + stopping rules). The EIG/solver **numerics**, manifest resolution, and the re-homed discovery stages await `sos-scirust` / a frontend per Invariant VIII |
 | **P4 — Curiosity & Theory** | `sos-curiosity`, `sos-theory` | **cores landed** (both need only the P2 substrate; information-gain / analogy / Bayes-factor ranking / discriminating-experiment planning await P3's `sos-planner` and `scirust-*` per Invariant VIII) |
+| **P5 — Userland** | `sos-publication` | engine **core landed** — the publication is a verifiable projection of the object graph: content-addressed claims typed-bound to their evidence, the multi-phase claim/scope/reproducibility verifier, and deterministic Markdown/HTML/JSON. Re-execution of exhibits is `sos-workflow`'s job and real signing is `sos-provenance`'s per Invariant VIII; this crate consumes decisions, never recomputes them |
 
 ### Landed
 
@@ -158,6 +159,28 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   millibits) — no opaque score. (**Computing** EIG — GP predictive variance,
   nested Monte-Carlo — is `sos-scirust`'s job per Invariant VIII; this crate
   consumes estimates.)
+- **`sos-publication`** — the Publication & Claim-Verification Engine (the
+  *reproducibility crisis, inverted*). A **publication is a verifiable
+  projection of the object graph**: a content-addressed
+  [`Publication`](sos-publication/src/publication.rs) whose first-class
+  [`Claim`](sos-publication/src/claim.rs)s are wired to the graph by typed
+  [`ClaimBinding`](sos-publication/src/claim.rs)s (directly/indirectly supports,
+  **contradicts**, supplies-method/data, reproduces, …), so *which object
+  supports this claim?* has a mechanical answer. The multi-phase
+  [`verify`](sos-publication/src/verify.rs) resolves every dependency, takes the
+  declared-scope [closure](sos-publication/src/source.rs), and assigns each claim
+  a categorical [`ClaimStatus`](sos-publication/src/verify.rs)
+  (supported / partially / **contradicted** / unresolved / unverifiable /
+  dependency-missing / reproducibility-failed / policy-rejected) under a
+  versioned, non-opaque [`StandardPolicy`](sos-publication/src/policy.rs) —
+  integrity is never mistaken for truth, and a contradiction is reported, never
+  hidden. Plus [`verify_exhibits`](sos-publication/src/verify.rs) (figure/table
+  drift localization), [`check_release`](sos-publication/src/verify.rs)
+  ("changed since release?"), a semantic [`diff`](sos-publication/src/diff.rs),
+  and deterministic Markdown/HTML/JSON
+  [`render`](sos-publication/src/render.rs). (Re-executing exhibits is
+  `sos-workflow`'s job and real Merkle/Lamport signing is `sos-provenance`'s per
+  Invariant VIII; LaTeX/PDF need a typesetting backend — no stub.)
 
 ## Engineering standards (the gate)
 

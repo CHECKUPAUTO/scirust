@@ -19,6 +19,7 @@ members = [
     "sos-repro",
     "sos-simulation",
     "sos-planner",
+    "sos-publication",
 ]
 
 [workspace.package]
@@ -37,7 +38,11 @@ sos-core = { path = "sos-core" }
 sos-store = { path = "sos-store" }
 sos-knowledge = { path = "sos-knowledge" }
 sos-reasoning = { path = "sos-reasoning" }
+sos-theory = { path = "sos-theory" }
 sos-workflow = { path = "sos-workflow" }
+sos-repro = { path = "sos-repro" }
+sos-simulation = { path = "sos-simulation" }
+sos-planner = { path = "sos-planner" }
 # Pure-Rust, no-FFI third-party set (all already in the repository lockfile).
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

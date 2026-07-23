@@ -1,0 +1,26 @@
+[package]
+name = "sos-publication"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SOS Publication Engine (deterministic core): a publication is a verifiable projection of the SOS scientific object graph. Content-addressed Publication/Claim objects whose statements are typed-bound to the reasoning, theory, experiment, simulation, workflow and reproducibility objects that support them; a multi-phase verifier that reports which claims are supported, contradicted, unresolved or unverifiable, whether dependencies resolve, whether the declared scope is complete, and whether the reproducibility bar is met; deterministic Markdown/HTML/JSON rendering and a semantic diff. Pure Rust, no FFI, no network, no LLM."
+keywords = ["publication", "reproducibility", "provenance", "verification", "science"]
+categories = ["science", "text-processing"]
+
+[dependencies]
+sos-core = { workspace = true }
+sos-store = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+sos-reasoning = { workspace = true }
+sos-theory = { workspace = true }
+sos-workflow = { workspace = true }
+sos-repro = { workspace = true }
+sos-simulation = { workspace = true }
+sos-planner = { workspace = true }

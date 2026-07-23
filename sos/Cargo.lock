@@ -202,6 +202,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "sos-publication"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sos-core",
+ "sos-planner",
+ "sos-reasoning",
+ "sos-repro",
+ "sos-simulation",
+ "sos-store",
+ "sos-theory",
+ "sos-workflow",
+ "thiserror",
+]
+
+[[package]]
 name = "sos-reasoning"
 version = "0.1.0"
 dependencies = [
