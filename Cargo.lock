@@ -2934,6 +2934,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-causal"
+version = "0.1.0"
+dependencies = [
+ "scirust-graph",
+ "scirust-solvers",
+]
+
+[[package]]
 name = "scirust-cayley-filter"
 version = "0.1.0"
 dependencies = [
