@@ -1,0 +1,22 @@
+llama.cpp 8f114a9b573b69035299f9b924047f53c1e22c7e https://github.com/ggml-org/llama.cpp 
+ggml 524f974bb21a1013408f76d71c15732482c0c3fe https://github.com/ggml-org/ggml 
+candle 31f35b147389700ed2a178ee66a91c3cc25cc80d https://github.com/huggingface/candle 
+burn 105b0e9bcf03f4f9979fc0e8f648cd120477440a https://github.com/tracel-ai/burn 
+pytorch 3bda74318624581502db16e6439c36effdb16481 https://github.com/pytorch/pytorch aten/src,c10,caffe2/utils/math
+tensorflow bb8ff7dcc71373e740a49effcea2e16036b282f9 https://github.com/tensorflow/tensorflow tensorflow/core/kernels
+onnxruntime f4aa2b4407a4f4d6dfb0707e7cb320690d4d707b https://github.com/microsoft/onnxruntime onnxruntime/core
+OpenBLAS 7c991951a5f3b1dbdd27f200f2bd4557b4c51a3d https://github.com/OpenMathLib/OpenBLAS kernel,lapack
+eigen 26f009dbbe1f8520439e6b1b6c564d897e80ace6 https://gitlab.com/libeigen/eigen Eigen/src
+cutlass e6233cbac5d7c7a865c19c91cd684ceece19513c https://github.com/NVIDIA/cutlass include
+ndarray bd3ade99c1f6d1fbd0f31866153e2d155e7b75ab https://github.com/rust-ndarray/ndarray 
+nalgebra 3320ecca21dc08f7a93c9595f6b257f05ba21273 https://github.com/dimforge/nalgebra 
+faer-rs 0539947ffb757a739d7e703a7d2fa0c792a909c1 https://github.com/sarah-quinones/faer-rs 
+tract 26edc98ea88bf973622853fa8f7c35d236d6ffc5 https://github.com/sonos/tract 
+wgpu 48904f8e769a9b1ef146032a4fc94c53a1e02e00 https://github.com/gfx-rs/wgpu 
+glam-rs 16e0d32f832a2269779cb6bd351eacd8920761e3 https://github.com/bitshifter/glam-rs 
+ncnn 13b6d5318c73be53bb386fa51e8067615d0eb7c1 https://github.com/Tencent/ncnn src
+MNN 785907a83194f6607762742adab86240582aa013 https://github.com/alibaba/MNN source
+tvm 67bd1ea1a16390db0b6760fea57f55a893fd9375 https://github.com/apache/tvm src
+whisper.cpp 6fc7c33b4c3a2cec83e4b65abd5e96a890480375 https://github.com/ggml-org/whisper.cpp 
+stable-diffusion.cpp cc734292286f85f9c48305d94d7fd22f42838522 https://github.com/leejet/stable-diffusion.cpp 
+wonnx c62f5d336c152102882a163ebc1eb18e63550de8 https://github.com/webonnx/wonnx 

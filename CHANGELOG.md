@@ -5,6 +5,25 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Clôturé — chantier paper Correctness '26 : archivage (non soumis en 2026)
+- **Décision utilisateur (2026-07-11)** : pas de soumission cette année. Le
+  draft `paper/correctness26/` est archivé en l'état (bandeau de statut +
+  note de gel des chiffres aux commits `0c2f1bf`/`014795f` du 2026-07-10),
+  `paper/PAPER_PLAN.md` gagne un §7 « Statut final — ARCHIVÉ » listant ce
+  qui reste valable (draft, related work, toutes les claims `[CI]`
+  re-testées à chaque commit) et ce qui est à rafraîchir avant une
+  soumission future (re-mesure O1, bibliographie, TODO de soumission,
+  section sur la voie f32 portable ajoutée depuis).
+- **Évidence brute archivée dans `docs/evidence/`** : les 22 rapports de
+  minage « dead guards » par dépôt (scellés `Report-SHA256`, jusqu'ici
+  uniquement dans le `/tmp` éphémère de la session) + `SHAS.txt` des
+  commits clonés ; et les sorties du banc O1 — deux exécutions x86-64 et
+  les deux protocoles Jetson AGX Thor complets (retranscrits des sorties
+  de terminal de l'opérateur, bundles originaux conservés sur le Jetson),
+  chaque fichier avec sa note de provenance. Les 4 empreintes
+  cross-platform (`0x60daf62c…`, `0x9bf7c3f3…`, `0xd5b8e15f…`,
+  `0x7e99a9d0…`) y sont re-vérifiables.
+
 ### Ajouté — validation sur données réelles n°3 : parole bruitée (VoiceBank+DEMAND)
 Troisième domaine réel (§9.4 du rapport TSHF) — **cartographie honnête d'une limite**
 du toolkit généraliste plutôt qu'un succès.
