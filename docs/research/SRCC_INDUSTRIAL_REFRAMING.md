@@ -1146,3 +1146,86 @@ Additive: the `ConformalizedQuantile` type extends the existing `conformal` modu
 conformal tests, was 6) + one binary + docs; `industrial_protocol_demo` fingerprint
 (`167c13de…`) unchanged. Next: a promotion gate on interval quality
 (coverage-constrained width improvement), closing direction C's loop back to axis 4.
+
+## Third program (direction C, sub-PR 4) — a promotion gate on interval quality
+
+Axis 4 built promote/hold gates for *point* accuracy; sub-PRs 1–3 built *intervals*.
+This closes the loop: an `IntervalPromotionGate` decides whether a candidate interval
+is worth deploying over an incumbent. The rule is **coverage-constrained width
+improvement**, and it is one a point-accuracy gate structurally *cannot* express —
+because interval quality has two axes that pull against each other:
+
+- **coverage** is an **absolute** constraint — meet a nominal SLA floor — not a
+  relative one. A band that covers *better than the incumbent* but still under-covers
+  the floor is not deployable;
+- **width** is a **relative** improvement — tighter than the incumbent.
+
+The gate promotes only when **both** hold on the seeded paired bootstrap (never a
+point estimate, exactly as axis 4): the candidate's coverage *lower* bound must reach
+the floor, and the paired width-reduction's *lower* bound must exceed a minimum. Both
+tests reuse `crate::paired`; the type is additive (97 lib tests, was 90). On the real
+OBD2 workload the **incumbent is the C.1 OLS-conformal band** at level 0.9, and three
+candidates face the gate on the same pooled test points, floor **0.85** (the nominal
+0.9 minus a five-point operational slack under segment shift), any defensible
+tightening:
+
+| target | candidate | decision | coverage (CI-lo) | Δwidth vs incumbent (CI-lo) |
+|--------|-----------|:--------:|-----------------:|----------------------------:|
+| `ENGINE_LOAD` | **cqr** | **PROMOTE** | 0.898 (0.896) | +0.398 (0.375) |
+| | quantile_native | PROMOTE | 0.893 (0.890) | +0.438 (0.415) |
+| | conformal_shrunk_0.6 | **HOLD** | 0.718 (0.714) | +1.787 (1.787) |
+| `THROTTLE_POS` | **cqr** | **PROMOTE** | 0.898 (0.895) | +0.121 (0.096) |
+| | quantile_native | PROMOTE | 0.891 (0.888) | +0.165 (0.140) |
+| | conformal_shrunk_0.6 | **HOLD** | 0.753 (0.749) | +1.540 (1.539) |
+| `MAF` | **cqr** | **PROMOTE** | 0.894 (0.891) | +0.101 (0.083) |
+| | quantile_native | PROMOTE | 0.890 (0.887) | +0.128 (0.110) |
+| | conformal_shrunk_0.6 | **HOLD** | 0.712 (0.707) | +1.447 (1.447) |
+
+**Finding — the gate promotes the calibrated bands and holds the over-tightened one,
+on every channel.** Three results:
+
+1. **CQR clears the gate on all three channels.** Its coverage lower bound
+   (0.891–0.896) clears the 0.85 floor with headroom, and its width-reduction lower
+   bound is strictly positive *even on `THROTTLE_POS`* (+0.096), where the C.3 margin
+   was thinnest. This is the *deployment-decision* confirmation of C.3: CQR is not
+   merely tighter in a table, it passes a preregistered gate.
+2. **The over-tightened band is held on all three — despite being by far the
+   tightest.** `conformal_shrunk_0.6` (the incumbent scaled to 60 % of its
+   half-width) delivers a width reduction of 1.4–1.8 — **four to fifteen times** the
+   CQR/native gains — and the gate refuses it, because its coverage (0.71–0.75) falls
+   below the floor. This is the entire point: **width is not a free lunch**, and a
+   gate that rewarded tightness alone would deploy exactly the wrong band. The
+   coverage constraint is what makes "tighter" trustworthy.
+3. **The native band is promoted too, but with less headroom — and the gate cannot
+   see the missing guarantee.** `quantile_native`'s coverage (0.890–0.893) sits a
+   notch below CQR's and nearer the floor, and (per C.2) it carries no finite-sample
+   guarantee. The gate certifies *empirical* coverage under this shift, which native
+   meets here; the guarantee is the extra assurance CQR brings that a gate on
+   measured coverage cannot test. Stated plainly rather than hidden: the gate is only
+   as strong as the metric it checks, and CQR is the candidate that satisfies both
+   the gate *and* the theorem.
+
+**Interpretation — axis-4 discipline reaches uncertainty.** The point-accuracy gate
+chased a single number; the interval gate holds two in tension — *cover first, then
+tighten* — which is the whole C.1→C.3 arc turned into an operating rule. It refuses
+the seductive failure mode (a beautifully tight band that quietly stops covering) and
+promotes the two bands that spend width honestly, preferring the one (CQR) that also
+brings a proof. The program's through-line, *match the tool to the data*, ends where
+a deployment actually lives: not at a metric, but at a defensible go/no-go.
+
+**Determinism.**
+
+```
+stdout  SHA-256: 9f96170729c4f317d3761c773a713ef6c1342d68cb9e31fe3f45a96e8c0f631a
+results SHA-256: 1bbd44799fc01a0474ab0f137945ed63634577a5c3eb615bd5d9afc436c77a03  (45 BenchRecords)
+```
+
+Run twice byte-identical; no network; checksum-verified in-repo OBD2 CSV; OLS and
+quantile IRLS (QR) are RNG-free and the gate's whole decision is the seeded paired
+bootstrap. Additive: `IntervalPromotionGate` extends the existing `promotion` module
+(97 lib tests, was 90) + one binary (3 tests) + docs; `industrial_protocol_demo`
+fingerprint (`167c13de…`) unchanged. Honest bound: proper-training is decimated 6×
+for tractability (calibration and test rows full), so the coverage/width *magnitudes*
+would shift a little with more training data — but the three verdicts are a property
+of the *ranking* (who covers, who is tighter), and they are stable: a 40×-decimation
+pilot returned the identical promote/promote/hold pattern on every channel.

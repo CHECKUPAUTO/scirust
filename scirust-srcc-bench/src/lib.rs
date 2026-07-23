@@ -53,8 +53,9 @@ pub use paired::{
 };
 pub use promotion::{
     CriterionFinding, Decision, ExtendedPromotionGate, ExtendedPromotionReport, Guardrail,
-    Orientation, PairedMetric, PrimaryCriterion, PromotionError, PromotionGate, PromotionReport,
-    ShadowWindow, WeightedMetric, WindowFinding, WindowMetricValues,
+    IntervalPromotionGate, IntervalPromotionReport, IntervalSample, Orientation, PairedMetric,
+    PrimaryCriterion, PromotionError, PromotionGate, PromotionReport, ShadowWindow, WeightedMetric,
+    WindowFinding, WindowMetricValues,
 };
 pub use records::{
     RecordKey, RunMetadata, alarm_records, anomaly_label_records, anomaly_score_records,

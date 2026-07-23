@@ -112,7 +112,8 @@ deployment from within a method crate.
 | 3B | Third program, direction B — robust ∘ nonlinear composition (2×2 factorial on OBD2; QR+LU format! fix) | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#773](https://github.com/Memorithm/scirust/pull/773) | `f4389653` | **Merged** |
 | 3C.1 | Third program, direction C (calibrated uncertainty) — split-conformal prediction module + OBD2 coverage/width study | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#775](https://github.com/Memorithm/scirust/pull/775) | `34256baf` | **Merged** |
 | 3C.2 | Direction C — quantile regression (pinball IRLS) in `scirust-learning` + native-interval vs conformal study | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#777](https://github.com/Memorithm/scirust/pull/777) | `f058e9e0` | **Merged** |
-| 3C.3 | Direction C — conformalized quantile regression (CQR): guaranteed coverage at adaptive width | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | _pending_ | _pending_ | Draft |
+| 3C.3 | Direction C — conformalized quantile regression (CQR): guaranteed coverage at adaptive width | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#781](https://github.com/Memorithm/scirust/pull/781) | `4752d694` | **Merged** |
+| 3C.4 | Direction C — interval-quality promotion gate (coverage-constrained width improvement); OBD2 promote/hold study | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | _pending_ | _pending_ | Draft |
 
 > Branch and numbering notes:
 > - The program's suggested per-phase branches (`feat/stats-robust-descriptive`,
