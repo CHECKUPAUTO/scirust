@@ -20,6 +20,7 @@ stubs, no TODOs, no placeholders cross a phase boundary.
 |-------|-------|--------|
 | **P1 — Kernel & substrate** | `sos-core`, `sos-store`, `sos-provenance`, `sos-registry` (+ SOS CI) | substrate **done**; `sos-repro` pending (needs the workflow engine for full `verify`/`rerun`) |
 | **P2 — Knowledge & Reasoning** | `sos-knowledge`, `sos-reasoning` | **done** (deterministic cores landed; Datalog / e-graph / theorem-proving deferred to `sos-scirust` per Invariant VIII) |
+| **P4 — Curiosity & Theory** | `sos-curiosity`, `sos-theory` | `sos-curiosity` **core landed** (its deterministic scanners need only the P2 substrate; the information-gain scanner awaits P3's `sos-planner`, analogy awaits `scirust-graph`) |
 
 ### Landed
 
@@ -69,6 +70,20 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   as first-class [`Contradiction`](sos-reasoning/src/contradiction.rs) objects.
   (Datalog inference, SAT/SMT, e-graph saturation, theorem proving, and analogy
   by subgraph isomorphism are deferred to `sos-scirust` per Invariant VIII.)
+- **`sos-curiosity`** — the Curiosity Engine (the OS **idle daemon**;
+  deterministic, **LLM-free**). [`BeCurious::sweep`](sos-curiosity/src/sweep.rs)
+  scans the knowledge graph and emits ranked
+  [`ScientificQuestion`](sos-curiosity/src/question.rs)s, each a content-addressed
+  object grounded in the real nodes it concerns and carrying a `Derivation`
+  explaining *why* it is worth asking. Three deterministic lenses
+  ([`Strategy`](sos-curiosity/src/strategy.rs)): **contradiction-hunt** (reusing
+  `sos-reasoning`'s contradiction detection), **under-connected** (weakly-linked
+  nodes), and **weakly-supported** (claims refuted yet unsupported). Scoring is an
+  explicit, versioned [`CuriosityPolicy`](sos-curiosity/src/policy.rs) —
+  **integer fixed-point, saturating** (bit-exact `L3` ranking, no opaque
+  priorities, overflow-proof). (Information-gain scoring via `sos-planner`,
+  cross-domain analogy via `scirust-graph`, and cognitive proposals via
+  `sos-ccos` are deferred per Invariant VIII.)
 
 ## Engineering standards (the gate)
 
