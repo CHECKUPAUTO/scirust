@@ -1,0 +1,16 @@
+[package]
+name = "sos-store"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SOS Storage Layer: a content-addressed object store (the kernel's filesystem) with typed put/get + integrity verification, content-addressed blobs, named refs, and reachability GC. Pure Rust, no FFI."
+keywords = ["content-addressed", "store", "provenance", "merkle", "science"]
+categories = ["science", "data-structures"]
+
+[dependencies]
+sos-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
