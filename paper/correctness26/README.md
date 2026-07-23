@@ -1,9 +1,18 @@
-# Soumission Correctness '26 (SC26, Chicago)
+# Soumission Correctness — ARCHIVÉ (non soumis en 2026)
+
+> **Statut (2026-07-11, décision utilisateur)** : soumission reportée — le
+> draft n'a pas été soumis à Correctness '26 et est archivé en l'état,
+> prêt pour une édition future (CFP analogue attendu vers juin-juillet de
+> chaque année). **Chiffres arrêtés aux commits `0c2f1bf`/`014795f` du
+> 2026-07-10** (évidence brute : `docs/evidence/`) ; avant toute soumission
+> future, re-mesurer O1 (x86 + Jetson), re-vérifier la bibliographie, et
+> reprendre les TODO ci-dessous. Voir `paper/PAPER_PLAN.md` §7.
 
 Draft du papier « Determinism as Certification Evidence: A Fully Auditable
 Rust Stack for Bit-Reproducible Training and Quantized Edge Inference ».
 
-- **Deadline** : 23 juillet 2026 (notification : 1er septembre 2026).
+- **Deadline visée à l'époque** : 23 juillet 2026 (notification :
+  1er septembre 2026) — non tenue par décision, pas par retard.
 - **Format** : ACM `acmart` option `sigconf` ; papier régulier = 7 à 8 pages
   de contenu (tout compris **sauf** les références) ; repli papier court =
   4 pages. CFP : <https://correctness-workshop.github.io/2026/>.

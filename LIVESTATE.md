@@ -3,6 +3,25 @@
 > Fichier de bord partagé entre agents.
 > Dernière mise à jour : 2026-07-11
 
+## Session 2026-07-11 — volet 119 : clôture/archivage du chantier paper Correctness '26
+- **Décision utilisateur : pas de soumission en 2026.** Archivage propre du chantier
+  (volets 108-109) :
+  - `paper/correctness26/README.md` : bandeau ARCHIVÉ + gel des chiffres (commits
+    0c2f1bf/014795f du 2026-07-10) + liste de ce qui est à rafraîchir avant une
+    soumission future (re-mesure O1, bib, TODO, section voie f32 portable).
+  - `paper/PAPER_PLAN.md` §7 « Statut final — ARCHIVÉ » : ce qui ne périme pas
+    (draft, RELATED_WORK, claims [CI] re-testées à chaque commit) vs ce qui périme
+    (protocoles wall-clock, bibliographie).
+  - **`docs/evidence/` créé** : 22 rapports de minage scellés SHA-256 + SHAS.txt
+    (sauvés du /tmp éphémère de la session AVANT destruction du conteneur) ;
+    sorties O1 x86 (2 runs) et Jetson AGX Thor (2 protocoles complets, retranscrits
+    des collages de l'opérateur — bundles originaux sur le Jetson) ; README de
+    provenance. Les empreintes cross-platform y sont re-vérifiables.
+  - Rien d'autre en vol : PR #268/#269 mergées, triggers désarmés, tâches closes.
+  - Reste optionnel (opérateur) : copier les 2 bundles bruts du Jetson dans
+    docs/evidence/ s'il veut les originaux au dépôt (les retranscriptions font
+    l'affaire pour la provenance courante).
+
 ## Session 2026-07-11 — volet 118 : preuve a priori étendue à sin/cos/ln
 - **Contexte** : PR #307 (volet 117) MERGÉE. Demande utilisateur : traiter les
   deux points identifiés comme suite possible — (1) preuve a priori pour

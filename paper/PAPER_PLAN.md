@@ -193,3 +193,27 @@ Décisions — toutes actées au 2026-07-10 :
    `references.bib` vérifiées + README de build). TODO restants marqués
    dans le tex : affiliation, lien d'artefact relecteurs, vérif anonymat
    CFP, contrôle de longueur après compilation.
+
+## 7. Statut final — ARCHIVÉ (décision utilisateur du 2026-07-11)
+
+**Soumission reportée : pas de soumission en 2026.** Le chantier est clos
+en l'état, prêt à reprendre pour une édition future (Correctness est
+annuel ; l'édition '27 à SC27 aura vraisemblablement un CFP analogue vers
+juin-juillet 2027, à re-vérifier le moment venu).
+
+Ce qui reste valable tel quel : le draft `paper/correctness26/main.tex`
+(structure, argumentaire, table claims → évidence), `paper/RELATED_WORK.md`,
+et toutes les claims `[CI]` de la table §4 — elles sont re-testées à chaque
+commit et ne périment pas.
+
+Ce qui est à rafraîchir avant toute soumission future :
+- re-mesurer le protocole O1 (x86 + Jetson, `scripts/bench-o1-jetson.sh`)
+  sur le commit de soumission et mettre à jour la table §4 et le tex ;
+- re-vérifier les métadonnées bibliographiques et l'état de l'art (RepDL a
+  pu évoluer ; la voie f32 portable ajoutée depuis — voir RELATED_WORK §3 —
+  mérite probablement une section dans le papier) ;
+- reprendre les 4 TODO de soumission listés dans
+  `paper/correctness26/README.md`.
+
+Évidence brute archivée dans `docs/evidence/` (rapports de minage scellés
+SHA-256 + sorties O1 x86/Jetson avec notes de provenance).
