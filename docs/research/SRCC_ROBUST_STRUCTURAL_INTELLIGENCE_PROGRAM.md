@@ -114,7 +114,7 @@ deployment from within a method crate.
 | 3C.2 | Direction C — quantile regression (pinball IRLS) in `scirust-learning` + native-interval vs conformal study | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#777](https://github.com/Memorithm/scirust/pull/777) | `f058e9e0` | **Merged** |
 | 3C.3 | Direction C — conformalized quantile regression (CQR): guaranteed coverage at adaptive width | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#781](https://github.com/Memorithm/scirust/pull/781) | `4752d694` | **Merged** |
 | 3C.4 | Direction C — interval-quality promotion gate (coverage-constrained width improvement); OBD2 promote/hold study | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#785](https://github.com/Memorithm/scirust/pull/785) | `379616c2` | **Merged** |
-| 3D | Third program, direction D — the contamination-frontier law tested & **falsified** (kurtosis does not gate robust bulk gain; 12 OBD2 channels) | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | _pending_ | _pending_ | Draft |
+| 3D | Third program, direction D — the contamination-frontier law tested & **falsified** (kurtosis does not gate robust bulk gain; 12 OBD2 channels) | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#787](https://github.com/Memorithm/scirust/pull/787) | `3d41841b` | **Merged** |
 
 > Branch and numbering notes:
 > - The program's suggested per-phase branches (`feat/stats-robust-descriptive`,
@@ -1092,3 +1092,27 @@ example SHAs re-verified byte-identical.
   cycles per engine fit).
 - Runtime/memory unmeasured (declared side channels).
 - Trust and shadow-deployment integration of these results is phase 729.
+
+## Program 3 — closing synthesis
+
+The third program (directions 3A–3D) is complete and merged (3A #769, 3B #773,
+3C.1 #775, 3C.2 #777, 3C.3 #781, 3C.4 #785, 3D #787 merge commit `3d41841b`).
+Its capstone result stands as the program's operating conclusion:
+
+- The tested kurtosis frontier was **falsified** — a robust estimator is *not*
+  useful if and only if OLS residual excess kurtosis exceeds some threshold.
+  Across 12 real OBD2 channels no threshold separated the sign of the robust bulk
+  gain (1/12 misclassified) and the magnitude correlation was weak (Spearman
+  0.33).
+- **Robust benefit cannot be selected reliably from a single marginal moment.**
+  Excess kurtosis misses leverage, asymmetry, misspecification, and the
+  operational metric that actually matters.
+- The recommended policy is **empirical comparison plus uncertainty-aware
+  gating**: measure competing methods under a leakage-free protocol, quantify
+  uncertainty, and make an explicit promote / hold / reject / inconclusive
+  decision — never a one-number shortcut.
+
+This conclusion motivates the fourth program (Adaptive Robust Decision
+Intelligence), which operationalizes measure-and-decide with leverage-aware
+diagnostics, high-breakdown regression, adaptive estimator tournaments that may
+abstain, conditional/temporal conformal inference, and certified deployment.
