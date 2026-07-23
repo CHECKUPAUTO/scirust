@@ -28,6 +28,7 @@ pub mod promotion;
 pub mod records;
 pub mod splits;
 pub mod srcc_views;
+pub mod tournament;
 
 pub use adapter::{
     AdapterError, AdapterOutput, BaselineAdapter, CusumAdapter, DbscanAdapter, EwmaAdapter,
@@ -63,3 +64,7 @@ pub use records::{
 };
 pub use splits::{SplitAssignment, SplitError, SplitManifest, SplitStrategy, split_dataset};
 pub use srcc_views::{TransportViewSpec, TransportViews, ViewError, build_transport_views};
+pub use tournament::{
+    CandidateFinding, EstimatorTournament, TournamentDecision, TournamentEntry, TournamentError,
+    TournamentReport,
+};
