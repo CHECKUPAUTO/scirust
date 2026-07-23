@@ -1,0 +1,19 @@
+[package]
+name = "sos-theory"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SOS Theory Engine (deterministic core): theories as first-class, immutable, evolving objects with domains of validity, retained anomalies, revision lineage, and evidential-balance comparison of rivals over a shared scope. Pure Rust, no FFI, no LLM."
+keywords = ["theory", "revision", "provenance", "deterministic", "science"]
+categories = ["science", "data-structures"]
+
+[dependencies]
+sos-core = { workspace = true }
+sos-store = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
