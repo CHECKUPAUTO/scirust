@@ -27,6 +27,14 @@ pub enum StoreError {
     /// (De)serialization of an object's interchange form failed.
     #[error("serialization error: {0}")]
     Serde(#[from] serde_json::Error),
+
+    /// A filesystem operation failed while opening a persistent store (e.g.
+    /// [`crate::FileStore::open`]). Raised only at setup time; a successfully
+    /// opened store treats further I/O failures as unrecoverable corruption of
+    /// the storage medium (see [`crate::FileStore`]'s docs) rather than a typed
+    /// error, because [`crate::ObjectStore`]'s methods are infallible by design.
+    #[error("filesystem error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 /// Convenience alias for storage results.

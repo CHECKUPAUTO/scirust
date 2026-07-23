@@ -19,8 +19,12 @@
 //!   refs, so a discarded experimental branch is pruned only on purpose.
 //! * [`MemoryStore`] — a complete in-memory backend (not a mock: a real,
 //!   deterministic `HashMap`-backed store, useful for tests, ephemeral
-//!   sessions, and embedding). Persistent local / object-storage backends
-//!   implement the same [`ObjectStore`] trait and are follow-on increments.
+//!   sessions, and embedding).
+//! * [`FileStore`] — a complete, persistent, filesystem-backed store: objects
+//!   and blobs as content-addressed files under a git-style sharded directory
+//!   layout, refs as a small JSON index. State survives closing and reopening
+//!   the store. A remote/object-storage backend implementing the same
+//!   [`ObjectStore`] trait is a follow-on increment.
 //!
 //! ## Guarantees
 //!
@@ -69,12 +73,14 @@
 
 pub mod blob;
 pub mod error;
+pub mod file;
 pub mod mem;
 pub mod record;
 pub mod store;
 
 pub use blob::BlobRef;
 pub use error::{Result, StoreError};
+pub use file::FileStore;
 pub use mem::MemoryStore;
 pub use record::{NamedRef, ObjectHeader, StoredRecord};
 pub use store::{GcReport, ObjectStore, TypedStore, gc, reachable};
