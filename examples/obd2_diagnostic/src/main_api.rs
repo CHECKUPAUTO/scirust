@@ -694,3 +694,192 @@ fn main() {
         handle(&mut s, &mut state);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Parsing JSON minimal ────────────────────────────────────────────
+
+    #[test]
+    fn json_number_parses_int_and_float() {
+        let body = r#"{"RPM":1898,"trim":-3.5}"#;
+        assert_eq!(json_number(body, "RPM"), Some(1898.0));
+        assert_eq!(json_number(body, "trim"), Some(-3.5));
+    }
+
+    #[test]
+    fn json_number_missing_key_is_none() {
+        assert_eq!(json_number(r#"{"RPM":1898}"#, "SPEED"), None);
+    }
+
+    #[test]
+    fn json_number_rejects_non_numeric_value() {
+        assert_eq!(json_number(r#"{"RPM":"abc"}"#, "RPM"), None);
+    }
+
+    #[test]
+    fn json_float_array_parses() {
+        let body = r#"{"features":[0.1, 0.2,0.30,-1]}"#;
+        assert_eq!(
+            json_float_array(body, "features"),
+            Some(vec![0.1, 0.2, 0.30, -1.0])
+        );
+    }
+
+    #[test]
+    fn json_float_array_missing_key_is_none() {
+        assert_eq!(json_float_array(r#"{"other":[1,2]}"#, "features"), None);
+    }
+
+    #[test]
+    fn json_string_parses() {
+        let body = r#"{"cause_confirmee":"prise_air","notes":"joint durci"}"#;
+        assert_eq!(
+            json_string(body, "cause_confirmee"),
+            Some("prise_air".to_string())
+        );
+        assert_eq!(json_string(body, "notes"), Some("joint durci".to_string()));
+    }
+
+    #[test]
+    fn json_string_missing_key_is_none() {
+        assert_eq!(json_string(r#"{"RPM":1898}"#, "cause_confirmee"), None);
+    }
+
+    // ── TripStore : résidu glissant ──────────────────────────────────────
+    // Reproduit exactement le scénario vérifié manuellement (README) :
+    // un biais constant de +3% (sous le seuil ponctuel 8.85%) reste
+    // non détecté pendant 8 relevés, puis bascule au 9e relevé quand
+    // 8.85/√9 = 2.95 passe sous 3.00.
+
+    #[test]
+    fn trip_threshold_shrinks_and_flags_persistent_bias() {
+        let mut trips = TripStore::new();
+        let id = trips.start();
+        let threshold = 8.85f32;
+
+        for n in 1..=8
+        {
+            trips.add_reading(id, 3.0).unwrap();
+            let status = trips.status(id, threshold).unwrap();
+            assert!(
+                status.contains("\"anomalie\":false"),
+                "relevé {n}: devrait rester sain, eu {status}"
+            );
+        }
+
+        trips.add_reading(id, 3.0).unwrap(); // 9e relevé
+        let status = trips.status(id, threshold).unwrap();
+        assert!(
+            status.contains("\"anomalie\":true"),
+            "relevé 9: devrait basculer en anomalie, eu {status}"
+        );
+    }
+
+    #[test]
+    fn trip_zero_bias_never_flags() {
+        let mut trips = TripStore::new();
+        let id = trips.start();
+        for _ in 0..50
+        {
+            trips.add_reading(id, 0.0).unwrap();
+        }
+        let status = trips.status(id, 8.85).unwrap();
+        assert!(status.contains("\"anomalie\":false"));
+    }
+
+    #[test]
+    fn trip_unknown_id_is_error() {
+        let trips = TripStore::new();
+        assert!(trips.status(999, 8.85).is_err());
+    }
+
+    #[test]
+    fn trip_add_reading_unknown_id_is_error() {
+        let mut trips = TripStore::new();
+        assert!(trips.add_reading(999, 1.0).is_err());
+    }
+
+    // ── FuelTrimService : contre les poids réels committés ──────────────
+
+    fn load_fueltrim_for_test() -> FuelTrimService {
+        let path = resolve("models/obd2_real_fueltrim.safetensors");
+        FuelTrimService::load(&path)
+    }
+
+    #[test]
+    fn fueltrim_healthy_reading_is_sain() {
+        let mut svc = load_fueltrim_for_test();
+        let body = r#"{"RPM":1898,"SPEED":39,"THROTTLE_POS":23.53,"MAF":2.66,
+            "COOLANT_TEMP":93,"INTAKE_TEMP":27,"O2_B1S1":0.625,"ENGINE_LOAD":5.49,
+            "INTAKE_PRESSURE":26,"O2_B1S2":0.055,"LONG_FUEL_TRIM_1":17.97}"#;
+        let json = svc.diagnose(body).expect("diagnose should succeed");
+        assert!(json.contains("\"verdict\":\"sain\""), "eu: {json}");
+    }
+
+    #[test]
+    fn fueltrim_lean_bias_flags_pauvre() {
+        let mut svc = load_fueltrim_for_test();
+        // Même relevé, trim gonflé de +14% (symptôme prise d'air).
+        let body = r#"{"RPM":1898,"SPEED":39,"THROTTLE_POS":23.53,"MAF":2.66,
+            "COOLANT_TEMP":93,"INTAKE_TEMP":27,"O2_B1S1":0.625,"ENGINE_LOAD":5.49,
+            "INTAKE_PRESSURE":26,"O2_B1S2":0.055,"LONG_FUEL_TRIM_1":31.97}"#;
+        let json = svc.diagnose(body).expect("diagnose should succeed");
+        assert!(
+            json.contains("\"verdict\":\"anomalie_melange_pauvre\""),
+            "eu: {json}"
+        );
+    }
+
+    #[test]
+    fn fueltrim_missing_sensor_is_error() {
+        let mut svc = load_fueltrim_for_test();
+        let err = svc.diagnose(r#"{"RPM":1898}"#).unwrap_err();
+        assert!(
+            err.contains("SPEED") || err.contains("capteur"),
+            "eu: {err}"
+        );
+    }
+
+    // ── MegaverseService : contre une signature de classe connue ────────
+    // Features exactes de la cause 200 (générées par build_signatures()
+    // dans main_megaverse.rs, seed 42, sans bruit) — même vecteur que
+    // celui vérifié manuellement via curl pendant le développement du PR.
+    const CLASS_200_SIGNATURE: [f32; 20] = [
+        0.5000, 0.5000, 0.0622, 0.8148, 0.5000, 0.5000, 0.0592, 0.0633, 0.5000, 0.5000, 0.5000,
+        0.9370, 0.5000, 0.9065, 0.5000, 0.5000, 0.5000, 0.9021, 0.5000, 0.1791,
+    ];
+
+    fn load_megaverse_for_test() -> MegaverseService {
+        let path = resolve("models/obd2_megaverse.safetensors");
+        MegaverseService::load(&path)
+    }
+
+    #[test]
+    fn megaverse_predicts_known_class_200() {
+        let mut svc = load_megaverse_for_test();
+        let features_json = CLASS_200_SIGNATURE
+            .iter()
+            .map(|v| v.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let body = format!("{{\"features\":[{features_json}],\"vraie_cause\":200}}");
+        let json = svc.diagnose(&body).expect("diagnose should succeed");
+        assert!(json.contains("\"cause_id\":200"), "eu: {json}");
+        assert!(json.contains("\"correct\":true"), "eu: {json}");
+    }
+
+    #[test]
+    fn megaverse_wrong_feature_count_is_error() {
+        let mut svc = load_megaverse_for_test();
+        let err = svc.diagnose(r#"{"features":[0.1,0.2]}"#).unwrap_err();
+        assert!(err.contains("20"), "eu: {err}");
+    }
+
+    #[test]
+    fn megaverse_missing_features_is_error() {
+        let mut svc = load_megaverse_for_test();
+        assert!(svc.diagnose(r#"{"other":1}"#).is_err());
+    }
+}
