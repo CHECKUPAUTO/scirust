@@ -23,6 +23,7 @@ stubs, no TODOs, no placeholders cross a phase boundary.
 | **P3 — Discovery, Planning, Simulation** | `sos-workflow`, `sos-simulation`, `sos-planner`, re-homed `sde-*` stages | engine **cores landed** — the memoized scheduler, the backend-independent `Simulate` interface, and the planner (utility ranking + information-exhaustion + stopping rules). The EIG/solver **numerics**, manifest resolution, and the re-homed discovery stages await `sos-scirust` / a frontend per Invariant VIII |
 | **P4 — Curiosity & Theory** | `sos-curiosity`, `sos-theory` | **cores landed** (both need only the P2 substrate; information-gain / analogy / Bayes-factor ranking / discriminating-experiment planning await P3's `sos-planner` and `scirust-*` per Invariant VIII) |
 | **P5 — Userland** | `sos-publication` | engine **core landed** — the publication is a verifiable projection of the object graph: content-addressed claims typed-bound to their evidence, the multi-phase claim/scope/reproducibility verifier, and deterministic Markdown/HTML/JSON. Re-execution of exhibits is `sos-workflow`'s job and real signing is `sos-provenance`'s per Invariant VIII; this crate consumes decisions, never recomputes them |
+| **P6 — Backend adapters** | `sos-ccos` (cognitive), `sos-scirust` (computational) | `sos-ccos` **deterministic boundary landed** — the untrusted-proposer contract (Invariant IX): grounded, content-addressed proposals, the deterministic disposition gate, a tamper-evident attestation chain, and a no-LLM memory fallback. The generative LLM/CCOS backend and `sos-scirust`'s numerics are the deferred out-of-process backends per Invariant VIII |
 
 ### Landed
 
@@ -181,6 +182,23 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   [`render`](sos-publication/src/render.rs). (Re-executing exhibits is
   `sos-workflow`'s job and real Merkle/Lamport signing is `sos-provenance`'s per
   Invariant VIII; LaTeX/PDF need a typesetting backend — no stub.)
+- **`sos-ccos`** — the Cognitive Backend Adapter (the *untrusted proposer*). The
+  one place SOS touches generative intelligence, and the one place it must never
+  trust: **cognition proposes, determinism disposes** (Invariant IX). A
+  [`Proposal`](sos-ccos/src/proposal.rs) is a content-addressed, **untrusted**
+  suggestion that must **ground** in real objects; [`dispose`](sos-ccos/src/disposition.rs)
+  turns a deterministic engine's ruling into an [`Admission`](sos-ccos/src/disposition.rs),
+  and the gate is not bypassable — a tampered or ungrounded proposal is rejected
+  even under an `Admit`, and a [`Trusted`](sos-ccos/src/disposition.rs) reference
+  exists *only* via an admitted admission (Invariant IX enforced in the type
+  system). Every cognitive act is recorded in a tamper-evident
+  [`CcosChain`](sos-ccos/src/attest.rs) (`input→output→chain` hashes, `verify()`
+  localizes any alteration), acts are capability-scoped
+  ([`Cognition`](sos-ccos/src/session.rs), refuse-by-default), and
+  [`LocalMemory`](sos-ccos/src/memory.rs) is a deterministic no-LLM fallback
+  (recall degrades to exact structural overlap). (The generative LLM/CCOS backend
+  and embedding-backed recall are the deferred out-of-process backend per
+  Invariant VIII — no stub, no fake cognition.)
 
 ## Engineering standards (the gate)
 

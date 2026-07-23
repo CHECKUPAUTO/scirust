@@ -147,6 +147,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "sos-ccos"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sos-core",
+ "sos-reasoning",
+ "sos-registry",
+ "sos-store",
+ "thiserror",
+]
+
+[[package]]
 name = "sos-core"
 version = "0.1.0"
 dependencies = [
