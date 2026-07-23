@@ -109,7 +109,8 @@ deployment from within a method crate.
 | A3 | Axis 3 — real native heavy-tailed contamination (OBD2 robust regression) | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#766](https://github.com/Memorithm/scirust/pull/766) | `eaed8f61` | **Merged** |
 | A4 | Axis 4 — extended promotion gates (weighted composite, switching cost, shadow windows) | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#767](https://github.com/Memorithm/scirust/pull/767) | `743fbb55` | **Merged** |
 | 3A | Third program, direction A — fast SPD solver (drop format! from cholesky O(n³) loop) + axis-1 stride-20 re-test | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#769](https://github.com/Memorithm/scirust/pull/769) | `93bddafc` | **Merged** |
-| 3B | Third program, direction B — robust ∘ nonlinear composition (2×2 factorial on OBD2; QR+LU format! fix) | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#773](https://github.com/Memorithm/scirust/pull/773) | _pending_ | Draft |
+| 3B | Third program, direction B — robust ∘ nonlinear composition (2×2 factorial on OBD2; QR+LU format! fix) | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#773](https://github.com/Memorithm/scirust/pull/773) | `f4389653` | **Merged** |
+| 3C.1 | Third program, direction C (calibrated uncertainty) — split-conformal prediction module + OBD2 coverage/width study | `claude/scirust-srcc-robust-stats-6ue9xc` (restarted) | [#775](https://github.com/Memorithm/scirust/pull/775) | _pending_ | Draft |
 
 > Branch and numbering notes:
 > - The program's suggested per-phase branches (`feat/stats-robust-descriptive`,

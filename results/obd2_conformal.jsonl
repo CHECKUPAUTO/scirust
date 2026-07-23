@@ -1,0 +1,15 @@
+{"kernel":"obd2_conformal/interval","dataset":"obd2/ENGINE_LOAD","method":"ols","seed":0,"metric":"empirical_coverage","value":0.8986300099677785}
+{"kernel":"obd2_conformal/interval","dataset":"obd2/ENGINE_LOAD","method":"ols","seed":0,"metric":"mean_interval_width","value":4.470975124482331}
+{"kernel":"obd2_conformal/interval","dataset":"obd2/ENGINE_LOAD","method":"huber_irls","seed":0,"metric":"empirical_coverage","value":0.8975405085885162}
+{"kernel":"obd2_conformal/interval","dataset":"obd2/ENGINE_LOAD","method":"huber_irls","seed":0,"metric":"mean_interval_width","value":4.4570723473963305}
+{"kernel":"obd2_conformal/interval","dataset":"obd2/ENGINE_LOAD","method":"huber_over_ols","seed":0,"metric":"width_ratio","value":0.9968904373880607}
+{"kernel":"obd2_conformal/interval","dataset":"obd2/THROTTLE_POS","method":"ols","seed":0,"metric":"empirical_coverage","value":0.8990704466955655}
+{"kernel":"obd2_conformal/interval","dataset":"obd2/THROTTLE_POS","method":"ols","seed":0,"metric":"mean_interval_width","value":3.816626279268473}
+{"kernel":"obd2_conformal/interval","dataset":"obd2/THROTTLE_POS","method":"huber_irls","seed":0,"metric":"empirical_coverage","value":0.8975173277081063}
+{"kernel":"obd2_conformal/interval","dataset":"obd2/THROTTLE_POS","method":"huber_irls","seed":0,"metric":"mean_interval_width","value":3.0879491415589833}
+{"kernel":"obd2_conformal/interval","dataset":"obd2/THROTTLE_POS","method":"huber_over_ols","seed":0,"metric":"width_ratio","value":0.8090782056216533}
+{"kernel":"obd2_conformal/interval","dataset":"obd2/MAF","method":"ols","seed":0,"metric":"empirical_coverage","value":0.895268782308352}
+{"kernel":"obd2_conformal/interval","dataset":"obd2/MAF","method":"ols","seed":0,"metric":"mean_interval_width","value":3.6101269319197637}
+{"kernel":"obd2_conformal/interval","dataset":"obd2/MAF","method":"huber_irls","seed":0,"metric":"empirical_coverage","value":0.8997426922274508}
+{"kernel":"obd2_conformal/interval","dataset":"obd2/MAF","method":"huber_irls","seed":0,"metric":"mean_interval_width","value":3.667428274682132}
+{"kernel":"obd2_conformal/interval","dataset":"obd2/MAF","method":"huber_over_ols","seed":0,"metric":"width_ratio","value":1.015872390041393}
