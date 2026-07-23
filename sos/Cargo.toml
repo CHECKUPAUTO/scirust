@@ -20,6 +20,7 @@ members = [
     "sos-simulation",
     "sos-planner",
     "sos-publication",
+    "sos-ccos",
 ]
 
 [workspace.package]
@@ -36,6 +37,7 @@ repository = "https://github.com/Memorithm/scirust"
 # Internal SOS crates (path deps relative to this workspace root).
 sos-core = { path = "sos-core" }
 sos-store = { path = "sos-store" }
+sos-registry = { path = "sos-registry" }
 sos-knowledge = { path = "sos-knowledge" }
 sos-reasoning = { path = "sos-reasoning" }
 sos-theory = { path = "sos-theory" }

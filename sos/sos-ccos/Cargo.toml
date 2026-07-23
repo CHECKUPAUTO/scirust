@@ -1,0 +1,21 @@
+[package]
+name = "sos-ccos"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SOS Cognitive Backend Adapter (deterministic core): the untrusted-proposer boundary for LLM/agent cognition. First-class untrusted Proposals that must survive deterministic disposition before entering the trusted graph (Invariant IX — cognition proposes, determinism disposes), a tamper-evident attestation hash-chain for every cognitive act, a capability-scoped cognitive syscall, and a deterministic no-LLM memory fallback. Pure Rust, no FFI, no LLM, no network."
+keywords = ["cognitive", "provenance", "attestation", "untrusted", "science"]
+categories = ["science"]
+
+[dependencies]
+sos-core = { workspace = true }
+sos-registry = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+sos-store = { workspace = true }
+sos-reasoning = { workspace = true }
