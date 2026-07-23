@@ -16,6 +16,7 @@
 #![forbid(unsafe_code)]
 
 pub mod adapter;
+pub mod conditional_conformal;
 pub mod conformal;
 pub mod contamination;
 pub mod dataset;
@@ -34,6 +35,9 @@ pub use adapter::{
     AdapterError, AdapterOutput, BaselineAdapter, CusumAdapter, DbscanAdapter, EwmaAdapter,
     FittingProtocol, HotellingT2Adapter, IsolationForestAdapter, LofAdapter, MahalanobisAdapter,
     RobustRegressionAdapter, TaskKind,
+};
+pub use conditional_conformal::{
+    AdaptiveConformal, ConditionalConformalError, GroupBand, MondrianConformal,
 };
 pub use conformal::{ConformalError, ConformalizedQuantile, SplitConformal};
 pub use contamination::{
