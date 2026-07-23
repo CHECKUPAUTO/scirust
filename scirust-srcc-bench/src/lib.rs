@@ -21,6 +21,7 @@ pub mod conditional_conformal;
 pub mod conformal;
 pub mod contamination;
 pub mod dataset;
+pub mod deployment_policy;
 pub mod loaders;
 pub mod manifest;
 pub mod metrics;
@@ -50,6 +51,10 @@ pub use contamination::{
     apply_contamination,
 };
 pub use dataset::{DatasetError, TabularDataset};
+pub use deployment_policy::{
+    DeploymentAction, DeploymentDecision, DeploymentPolicy, DeploymentPolicyError, MonitorState,
+    RollbackMonitor, decide_deployment,
+};
 pub use loaders::{LoaderError, clip_rul_targets, parse_cmapss_training, parse_obd2, parse_secom};
 pub use manifest::{DatasetManifest, FeatureDescriptor, ManifestError};
 pub use metrics::{
