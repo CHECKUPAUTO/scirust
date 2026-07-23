@@ -214,6 +214,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sos-repro"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sos-core",
+ "sos-store",
+ "sos-workflow",
+ "thiserror",
+]
+
+[[package]]
 name = "sos-store"
 version = "0.1.0"
 dependencies = [
