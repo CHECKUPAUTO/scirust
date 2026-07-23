@@ -10,6 +10,7 @@ pub mod kernel_ridge;
 pub mod nlp;
 pub mod optim;
 pub mod pattern_miner;
+pub mod quantile_regression;
 pub mod rl;
 pub mod robust_regression;
 pub mod simd_nn;
@@ -17,6 +18,10 @@ pub mod time_series;
 
 pub use isotonic::{IsotonicRegression, IsotonicRegressionError, MonotoneDirection};
 pub use kernel_ridge::{KernelRidgeConfig, KernelRidgeError, KernelRidgeRegression};
+pub use quantile_regression::{
+    QuantileRegressionConfig, QuantileRegressionError, QuantileRegressionReport,
+    fit_quantile_regression,
+};
 pub use robust_regression::{
     LinearRegressionModel, RegressionDataset, RobustLoss, RobustRegressionConfig,
     RobustRegressionError, RobustRegressionMethod, RobustRegressionReport, fit_robust_regression,
