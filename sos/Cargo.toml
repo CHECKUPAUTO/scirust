@@ -6,7 +6,14 @@
 # docs/sos/ (RFC-0002) for the architecture this implements.
 [workspace]
 resolver = "2"
-members = ["sos-core", "sos-store", "sos-provenance", "sos-registry", "sos-knowledge"]
+members = [
+    "sos-core",
+    "sos-store",
+    "sos-provenance",
+    "sos-registry",
+    "sos-knowledge",
+    "sos-reasoning",
+]
 
 [workspace.package]
 edition = "2021"
@@ -22,6 +29,7 @@ repository = "https://github.com/Memorithm/scirust"
 # Internal SOS crates (path deps relative to this workspace root).
 sos-core = { path = "sos-core" }
 sos-store = { path = "sos-store" }
+sos-knowledge = { path = "sos-knowledge" }
 # Pure-Rust, no-FFI third-party set (all already in the repository lockfile).
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

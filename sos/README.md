@@ -19,7 +19,7 @@ stubs, no TODOs, no placeholders cross a phase boundary.
 | Phase | Scope | Status |
 |-------|-------|--------|
 | **P1 — Kernel & substrate** | `sos-core`, `sos-store`, `sos-provenance`, `sos-registry` (+ SOS CI) | substrate **done**; `sos-repro` pending (needs the workflow engine for full `verify`/`rerun`) |
-| **P2 — Knowledge & Reasoning** | `sos-knowledge`, `sos-reasoning` | **in progress** (`sos-knowledge` landed) |
+| **P2 — Knowledge & Reasoning** | `sos-knowledge`, `sos-reasoning` | **done** (deterministic cores landed; Datalog / e-graph / theorem-proving deferred to `sos-scirust` per Invariant VIII) |
 
 ### Landed
 
@@ -56,6 +56,19 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   `neighbors`, `in_neighbors`, `related`, shortest `path`. (Datalog / e-graph /
   analogy-by-isomorphism reasoning is deferred to `sos-reasoning` + `sos-scirust`
   per Invariant VIII.)
+- **`sos-reasoning`** — the Reasoning Engine (deterministic, **LLM-free** core).
+  Sound entailment over the knowledge graph — a directly-asserted edge, or a
+  chain of a **transitive** relation — via [`Reason::entails`](sos-reasoning/src/reason.rs),
+  returning a [`Conclusion`](sos-reasoning/src/reason.rs) whose
+  [`Derivation`](sos-reasoning/src/derivation.rs) is itself a content-addressed,
+  re-verifiable object that cites the exact edges used. Every result carries an
+  honest [`Soundness`](sos-reasoning/src/soundness.rs) label (`Proof` vs a
+  deterministic `Check`), and "not found" is `Undetermined`, never a false
+  disproof. [`Reason::contradictions`](sos-reasoning/src/reason.rs) surfaces
+  incompatibilities (asserted `contradicts` edges and mutual-`supersedes` cycles)
+  as first-class [`Contradiction`](sos-reasoning/src/contradiction.rs) objects.
+  (Datalog inference, SAT/SMT, e-graph saturation, theorem proving, and analogy
+  by subgraph isomorphism are deferred to `sos-scirust` per Invariant VIII.)
 
 ## Engineering standards (the gate)
 

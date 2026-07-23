@@ -1,0 +1,20 @@
+[package]
+name = "sos-reasoning"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SOS Reasoning Engine (deterministic core): transitive-relation entailment that emits a proof/explanation Derivation with Proof/Check soundness, and contradiction detection over the knowledge graph. LLM-free, pure Rust, no FFI."
+keywords = ["reasoning", "derivation", "contradiction", "deterministic", "science"]
+categories = ["science", "data-structures"]
+
+[dependencies]
+sos-core = { workspace = true }
+sos-knowledge = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+sos-store = { workspace = true }
+serde_json = { workspace = true }
