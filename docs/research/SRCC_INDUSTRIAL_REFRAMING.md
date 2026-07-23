@@ -1229,3 +1229,81 @@ for tractability (calibration and test rows full), so the coverage/width *magnit
 would shift a little with more training data — but the three verdicts are a property
 of the *ranking* (who covers, who is tighter), and they are stable: a 40×-decimation
 pilot returned the identical promote/promote/hold pattern on every channel.
+
+## Third program (direction D) — the contamination-frontier law, tested and falsified
+
+The program has repeatedly found robustness helps *sometimes*. Direction D turns that
+into a **falsifiable law** — the tempting shortcut every practitioner half-believes —
+and tests it to destruction:
+
+> A robust fit (Huber) beats OLS on the **bulk** (the *median* absolute error — the
+> central data, not the tails) **if and only if** the OLS residuals' **excess
+> kurtosis** exceeds a threshold `τ*`.
+
+If true, a *single pre-measurable scalar* — kurtosis, computable from OLS alone,
+before ever fitting a robust model — would tell you whether robustness is worth it.
+Tested across the **12 real OBD2 sensor channels**, each in turn the regression target
+on the other eleven (twelve genuine industrial tasks spanning excess kurtosis −1.3 to
+47), full training, last two segments held out:
+
+| channel (by kurtosis) | excess kurt | bulk gain (median AE) | robust wins bulk? |
+|-----------------------|------------:|----------------------:|:-----------------:|
+| `O2_B1S1` | −1.32 | **+7.4 %** | ✅ |
+| `O2_B1S2` | −0.64 | **+6.3 %** | ✅ |
+| `INTAKE_TEMP` | −0.07 | −0.4 % | ❌ |
+| `COOLANT_TEMP` | 0.68 | +37.4 % | ✅ |
+| `INTAKE_PRESSURE` | 1.55 | +32.2 % | ✅ |
+| `LONG_FUEL_TRIM_1` | 2.57 | +4.5 % | ✅ |
+| `SPEED` | 2.79 | +35.9 % | ✅ |
+| `SHORT_FUEL_TRIM_1` | 3.25 | +9.9 % | ✅ |
+| `RPM` | 5.80 | +16.4 % | ✅ |
+| `MAF` | 9.40 | +20.0 % | ✅ |
+| `THROTTLE_POS` | 18.37 | +8.8 % | ✅ |
+| `ENGINE_LOAD` | 46.85 | +24.9 % | ✅ |
+
+**Finding — the law is falsified, cleanly and instructively.** No kurtosis threshold
+separates the wins from the loss (1 misclassification of 12; sign-separable = false):
+
+1. **Kurtosis does not predict the sign.** The one channel where robustness *loses*
+   the bulk (`INTAKE_TEMP`, −0.4 %) sits at near-zero kurtosis — while two channels
+   with **lighter-than-Gaussian tails** (`O2_B1S1`, `O2_B1S2`, *negative* excess
+   kurtosis) still see robustness *win*. Any threshold drawn to exclude the loss also
+   excludes those two wins. The iff fails at both ends.
+2. **Kurtosis does not predict the magnitude either.** Spearman(kurtosis, relative
+   bulk gain) = **0.329** — weak. The two *largest* gains (`COOLANT_TEMP` +37 %,
+   `SPEED` +36 %) are at *low-to-moderate* kurtosis; the two *highest*-kurtosis
+   channels (`ENGINE_LOAD` 47, `THROTTLE_POS` 18) return middling +25 % / +9 %. The
+   fourth moment is not the dial.
+3. **What survives is stronger and more useful than the law it replaces: robustness
+   helps the bulk on 11 of 12 real channels, nearly universally, and independent of
+   tail weight.** This refutes the textbook heuristic *"only reach for a robust loss
+   when your residuals are heavy-tailed."* On real telemetry Huber's bulk advantage is
+   broad — even light-tailed channels benefit slightly — and the lone loss is a −0.4 %
+   at Gaussian-like kurtosis, exactly the mild efficiency cost Huber is supposed to pay
+   under normality.
+
+**Interpretation — why kurtosis fails, and what the program already knew.** Excess
+kurtosis is a *marginal, symmetric* fourth moment of the residuals. But an OLS fit is
+distorted by **leverage** (a high-leverage point moves the fit regardless of its
+residual's contribution to kurtosis — precisely the regime where lever 2 found
+robustness wins *decisively*) and by mild, pervasive asymmetry a single symmetric
+moment cannot see. The frontier is real — robustness pays, and broadly — but its gate
+is *not* a one-number residual diagnostic. Which is the whole program's answer restated
+from the other side: you cannot cheaply *predict* robust benefit, so you **measure and
+decide** — the promotion gates of axis 4 and direction C.4, not a moment computed in
+advance. Direction D falsifies the shortcut and, in doing so, justifies the machinery.
+
+**Determinism.**
+
+```
+stdout  SHA-256: dc6ac062ccf34f5f90988769f681a05eb693fb6f4d3740320a655299fdb2b0f7
+results SHA-256: fb0b84efa789445b0476b52b9a1b7b115d93fb8f79974300555585272705ec7a  (76 BenchRecords)
+```
+
+Run twice byte-identical; no network; checksum-verified in-repo OBD2 CSV; OLS and Huber
+(QR/IRLS) are RNG-free and the frontier analysis (excess kurtosis, Spearman, threshold
+search) is closed-form — the binary carries no RNG at all. Additive: one binary (4
+tests), no library change; `industrial_protocol_demo` fingerprint (`167c13de…`)
+unchanged. Honest bound: one train/test split (last two segments test); the verdict is
+stride-stable — the law is falsified at full training and at 4× decimation alike
+(Spearman 0.33 vs 0.15, both far from a clean gate).
