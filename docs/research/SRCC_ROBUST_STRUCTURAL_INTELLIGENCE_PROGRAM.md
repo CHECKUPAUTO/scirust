@@ -1116,3 +1116,63 @@ This conclusion motivates the fourth program (Adaptive Robust Decision
 Intelligence), which operationalizes measure-and-decide with leverage-aware
 diagnostics, high-breakdown regression, adaptive estimator tournaments that may
 abstain, conditional/temporal conformal inference, and certified deployment.
+
+## Program 4 — closing synthesis (Adaptive Robust Decision Intelligence)
+
+The fourth program turned Program 3's conclusion — *measure competing methods
+under a leakage-free protocol, quantify uncertainty, and make an explicit decision,
+never a one-number shortcut* — into a full, deterministic **measure → decide →
+certify → deploy** stack. All ten phases are merged; each is purely additive, has
+typed errors, uses no `unsafe`, and ships a run-twice byte-identical benchmark.
+
+| Phase | Capability | Crate | PR |
+| --- | --- | --- | --- |
+| 4E.1 | Robust affine scatter (OGK) | `scirust-multivariate` | [#793](https://github.com/Memorithm/scirust/pull/793) |
+| 4E.2 | Leverage & influence diagnostics | `scirust-learning` | [#794](https://github.com/Memorithm/scirust/pull/794) |
+| 4E.3 | High-breakdown regression (FAST-LTS → MM) | `scirust-learning` | [#795](https://github.com/Memorithm/scirust/pull/795) |
+| 4E.4 | Robust multi-output regression | `scirust-learning` | [#797](https://github.com/Memorithm/scirust/pull/797) |
+| 4E.5 | Estimator tournament with abstention | `scirust-srcc-bench` | [#799](https://github.com/Memorithm/scirust/pull/799) |
+| 4E.6 | Conditional (Mondrian) & temporal (ACI) conformal | `scirust-srcc-bench` | [#800](https://github.com/Memorithm/scirust/pull/800) |
+| 4E.7 | Unified certified decision pipeline | `scirust-srcc-bench` | [#801](https://github.com/Memorithm/scirust/pull/801) |
+| 4E.8 | Stronger certified clustering bounds (max-clique) | `scirust-solvers` | [#802](https://github.com/Memorithm/scirust/pull/802) |
+| 4E.9 | Expanded real-data validation (OBD2) | `scirust-srcc-bench` | [#804](https://github.com/Memorithm/scirust/pull/804) |
+| 4E.10 | Production decision & rollback policy | `scirust-srcc-bench` | [#805](https://github.com/Memorithm/scirust/pull/805) |
+
+### The through-line
+
+The phases compose. Diagnostics (4E.2) and the robust geometry (4E.1) feed the
+high-breakdown estimators (4E.3) and their multi-output generalization (4E.4). The
+tournament (4E.5) selects among those estimators — or abstains — under a paired
+bootstrap; conformal calibration (4E.6) attaches a coverage guarantee that survives
+sub-populations and drift. The certified pipeline (4E.7) chains selection and
+calibration into one report with an explicit list of guarantees and caveats; the
+deployment policy (4E.10) gates that report into production and latches a rollback
+when live coverage degrades. Certified clustering gained an independent stronger
+bound (4E.8), and the whole decision stack was exercised on real OBD2 telemetry
+(4E.9).
+
+### The honest program-level conclusion
+
+- **The deliverable is honesty under uncertainty, not a robustness win.** On the
+  real OBD2 data the robust fits had a *slightly* lower held-out error than OLS on
+  most folds, yet the pipeline mostly **abstained** (Inconclusive/Tie) — because
+  the improvement was not statistically defensible at the available sample size.
+  Coverage held near the nominal level on held-out segments. The operational answer
+  to "is robustness worth switching to here?" was, faithfully, "not decisively —
+  so hold."
+- **Every capability documents its own limit.** OGK is only *approximately* affine
+  equivariant; IRLS reweighting does **not** fix bad leverage (that is what the
+  high-breakdown estimators are for); the FAST-LTS/MM subset search is
+  best-observed, never `proven_optimal`; multi-output robustness makes no
+  arbitrary-contamination claim; the tournament reports `Tie`/`Inconclusive` rather
+  than fabricate a winner; conformal coverage is marginal-or-conditional-on-group,
+  never conditional-on-`x`, and assumes exchangeability (ACI is the drift answer);
+  the clustering clique bound can be strictly below the chromatic number on odd
+  anti-cycles; and the deployment gate's safe default is always to keep what is
+  running.
+- **The recommended posture is the pipeline itself:** diagnose, fit a robust panel,
+  select-or-abstain under uncertainty, certify coverage with explicit caveats, gate
+  the deployment on that certificate, and monitor for rollback. Claim an improvement
+  only when the evidence supports it; otherwise say so.
+
+This closes Program 4.
