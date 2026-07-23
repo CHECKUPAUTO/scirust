@@ -749,6 +749,218 @@ impl Search<'_> {
     }
 }
 
+/// A certified lower bound on the minimum number of diameter-`D` clusters,
+/// obtained from a clique in the incompatibility graph.
+///
+/// Two points are *incompatible* when `d(i, j) > D`: they can never share a
+/// cluster. The minimum cluster count equals the chromatic number `χ` of the
+/// incompatibility graph, and `ω ≤ χ` for the clique number `ω`, so **any**
+/// clique size is a valid lower bound. [`certified_cluster_count_bound`]
+/// strengthens the greedy bound baked into [`ClusteringCertificate`] to a
+/// maximum-clique search, so the bound is `ω` — the tightest a clique argument
+/// can give — whenever the search completes within budget.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClusterCountBound {
+    /// The largest clique found: a valid lower bound on the minimum cluster
+    /// count.
+    pub lower_bound: usize,
+    /// `true` when the Bron–Kerbosch enumeration completed within the node
+    /// budget, so `lower_bound` is provably the maximum clique `ω` (the tightest
+    /// clique bound). `false` when the budget was exhausted first — the bound is
+    /// still valid, just not certified maximal.
+    pub clique_is_maximum: bool,
+    /// Bron–Kerbosch recursion nodes explored.
+    pub explored_nodes: usize,
+}
+
+impl ClusterCountBound {
+    /// Whether this bound **proves** that a partition using `incumbent_count`
+    /// clusters is count-optimal.
+    ///
+    /// A valid clustering has `count ≥ χ ≥ ω = lower_bound`, so
+    /// `lower_bound == incumbent_count` squeezes `χ` to exactly
+    /// `incumbent_count`. (`lower_bound` can never exceed a valid clustering's
+    /// count, so the comparison is effectively equality.) This holds regardless
+    /// of `clique_is_maximum` — a matching clique of any size is a proof.
+    pub fn certifies_count_optimal(&self, incumbent_count: usize) -> bool {
+        self.lower_bound >= incumbent_count
+    }
+}
+
+/// A certified maximum-clique lower bound on the minimum diameter-`D` cluster
+/// count, stronger than the greedy bound in [`certified_medoid_clustering`].
+///
+/// Builds the incompatibility graph (`d(i, j) > D`), warm-starts with the greedy
+/// degree-ordered clique, then runs a deterministic pivoted Bron–Kerbosch
+/// enumeration bounded by `maximum_nodes` recursion nodes. If the enumeration
+/// completes, `clique_is_maximum` is `true` and the bound is the exact maximum
+/// clique `ω`; otherwise the best clique seen so far (never below the greedy
+/// warm start) is returned with `clique_is_maximum = false`. Pass
+/// `maximum_nodes = usize::MAX` for an unbounded exact search, or `0` to keep
+/// only the greedy warm start.
+///
+/// # Errors
+///
+/// [`MedoidClusteringError::InvalidDiameter`] when the diameter is negative or
+/// non-finite.
+pub fn certified_cluster_count_bound(
+    distances: &DistanceMatrix,
+    maximum_cluster_diameter: f64,
+    maximum_nodes: usize,
+) -> Result<ClusterCountBound, MedoidClusteringError> {
+    if !maximum_cluster_diameter.is_finite() || maximum_cluster_diameter < 0.0
+    {
+        return Err(MedoidClusteringError::InvalidDiameter);
+    }
+
+    let n = distances.size;
+    if n == 0
+    {
+        return Ok(ClusterCountBound {
+            lower_bound: 0,
+            clique_is_maximum: true,
+            explored_nodes: 0,
+        });
+    }
+
+    // Incompatibility neighbourhoods: j is a neighbour of i iff d(i, j) > D.
+    let neighbours: Vec<Vec<usize>> = (0..n)
+        .map(|i| {
+            (0..n)
+                .filter(|&j| i != j && distances.distance(i, j) > maximum_cluster_diameter)
+                .collect()
+        })
+        .collect();
+    let adjacency: Vec<Vec<bool>> = (0..n)
+        .map(|i| {
+            let mut row = vec![false; n];
+            for &j in &neighbours[i]
+            {
+                row[j] = true;
+            }
+            row
+        })
+        .collect();
+    let degrees: Vec<usize> = neighbours.iter().map(Vec::len).collect();
+
+    // Greedy warm start — always a valid clique.
+    let mut best = greedy_clique_bound(&adjacency, &degrees);
+
+    // Exact (bounded) maximum-clique enumeration.
+    let mut explored_nodes = 0usize;
+    let candidates: Vec<usize> = (0..n).collect();
+    let exhausted = bron_kerbosch(
+        &adjacency,
+        0,
+        candidates,
+        Vec::new(),
+        &mut best,
+        &mut explored_nodes,
+        maximum_nodes,
+    );
+
+    Ok(ClusterCountBound {
+        lower_bound: best.max(1),
+        clique_is_maximum: !exhausted,
+        explored_nodes,
+    })
+}
+
+/// Pivoted Bron–Kerbosch, tracking the largest clique in `best`. `depth` is the
+/// current clique size (the `R` set is represented only by its size, since we
+/// only need the maximum clique *count*). Returns `true` if the node budget was
+/// hit before the enumeration finished (so the result is not certified maximal).
+///
+/// Determinism: candidate vertices are visited in ascending index order and the
+/// pivot maximises `|P ∩ N(pivot)|`, ties broken by smallest index.
+fn bron_kerbosch(
+    adjacency: &[Vec<bool>],
+    depth: usize,
+    candidates: Vec<usize>,
+    excluded: Vec<usize>,
+    best: &mut usize,
+    explored_nodes: &mut usize,
+    maximum_nodes: usize,
+) -> bool {
+    *explored_nodes += 1;
+    if *explored_nodes > maximum_nodes
+    {
+        return true;
+    }
+
+    if candidates.is_empty() && excluded.is_empty()
+    {
+        *best = (*best).max(depth);
+        return false;
+    }
+
+    // Bound: even taking every remaining candidate cannot beat the incumbent.
+    if depth + candidates.len() <= *best
+    {
+        return false;
+    }
+
+    // Pivot maximising |P ∩ N(u)| over P ∪ X (Tomita's rule), ties by index.
+    let pivot = candidates
+        .iter()
+        .chain(excluded.iter())
+        .copied()
+        .max_by(|&a, &b| {
+            let na = candidates.iter().filter(|&&v| adjacency[a][v]).count();
+            let nb = candidates.iter().filter(|&&v| adjacency[b][v]).count();
+            na.cmp(&nb).then(b.cmp(&a))
+        });
+
+    let extend: Vec<usize> = match pivot
+    {
+        Some(u) => candidates
+            .iter()
+            .copied()
+            .filter(|&v| !adjacency[u][v])
+            .collect(),
+        None => candidates.clone(),
+    };
+
+    let mut candidates = candidates;
+    let mut excluded = excluded;
+    let mut exhausted = false;
+    for vertex in extend
+    {
+        // Only vertices still in P are branched on.
+        if !candidates.contains(&vertex)
+        {
+            continue;
+        }
+        let next_candidates: Vec<usize> = candidates
+            .iter()
+            .copied()
+            .filter(|&v| adjacency[vertex][v])
+            .collect();
+        let next_excluded: Vec<usize> = excluded
+            .iter()
+            .copied()
+            .filter(|&v| adjacency[vertex][v])
+            .collect();
+        exhausted |= bron_kerbosch(
+            adjacency,
+            depth + 1,
+            next_candidates,
+            next_excluded,
+            best,
+            explored_nodes,
+            maximum_nodes,
+        );
+        // Move vertex from P to X.
+        candidates.retain(|&v| v != vertex);
+        excluded.push(vertex);
+        if exhausted
+        {
+            break;
+        }
+    }
+    exhausted
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1212,5 +1424,112 @@ mod tests {
         assert_eq!(result.assignments, vec![0, 1, 0, 2]);
         assert_eq!(result.certificate.objective_cluster_count, 3);
         assert!(result.certificate.proven_optimal);
+    }
+
+    /// Incompatibility graph engineered so the degree-ordered greedy clique
+    /// (size 3) misses the maximum clique (size 4): a `K4` among {0,1,2,3}, plus
+    /// a hub 4 of higher degree whose neighbourhood contains only a triangle.
+    fn greedy_fooling_matrix() -> DistanceMatrix {
+        let n = 8;
+        let far = 2.0; // > diameter 1 -> incompatible
+        let mut values = vec![0.0; n * n];
+        let mark = |values: &mut [f64], i: usize, j: usize| {
+            values[i * n + j] = far;
+            values[j * n + i] = far;
+        };
+        // K4 clique among 0,1,2,3.
+        for i in 0..4
+        {
+            for j in (i + 1)..4
+            {
+                mark(&mut values, i, j);
+            }
+        }
+        // Hub 4 incompatible with 0,1 and the three leaves 5,6,7 (degree 5).
+        for &j in &[0, 1, 5, 6, 7]
+        {
+            mark(&mut values, 4, j);
+        }
+        DistanceMatrix::new(n, values).unwrap()
+    }
+
+    #[test]
+    fn exact_bound_exceeds_greedy_and_certifies_optimality() {
+        let distances = greedy_fooling_matrix();
+
+        // The greedy bound baked into the standard certificate stops at 3.
+        let greedy = certified_medoid_clustering(
+            &distances,
+            CertifiedMedoidClusteringConfig {
+                maximum_cluster_diameter: 1.0,
+                mode: CertifiedClusteringMode::Hybrid {
+                    maximum_nodes: 1,
+                    maximum_iterations: 1,
+                },
+            },
+        )
+        .unwrap();
+        assert_eq!(greedy.certificate.lower_bound_cluster_count, 3);
+
+        // The maximum-clique bound reaches 4 and certifies it.
+        let strong = certified_cluster_count_bound(&distances, 1.0, usize::MAX).unwrap();
+        assert_eq!(strong.lower_bound, 4);
+        assert!(strong.clique_is_maximum);
+        assert!(strong.lower_bound > greedy.certificate.lower_bound_cluster_count);
+        assert!(strong.certifies_count_optimal(4));
+        assert!(!strong.certifies_count_optimal(5));
+    }
+
+    #[test]
+    fn all_compatible_needs_one_cluster() {
+        // Every off-diagonal distance is within the diameter -> empty
+        // incompatibility graph -> a single cluster suffices.
+        let distances = DistanceMatrix::new(5, vec![0.0; 25]).unwrap();
+        let bound = certified_cluster_count_bound(&distances, 1.0, usize::MAX).unwrap();
+        assert_eq!(bound.lower_bound, 1);
+        assert!(bound.clique_is_maximum);
+    }
+
+    #[test]
+    fn all_incompatible_needs_n_clusters() {
+        // Every distinct pair exceeds the diameter -> complete incompatibility
+        // graph -> the maximum clique is all n points.
+        let n = 6;
+        let mut values = vec![2.0; n * n];
+        for i in 0..n
+        {
+            values[i * n + i] = 0.0;
+        }
+        let distances = DistanceMatrix::new(n, values).unwrap();
+        let bound = certified_cluster_count_bound(&distances, 1.0, usize::MAX).unwrap();
+        assert_eq!(bound.lower_bound, n);
+        assert!(bound.clique_is_maximum);
+        assert!(bound.certifies_count_optimal(n));
+    }
+
+    #[test]
+    fn zero_budget_keeps_the_greedy_warm_start() {
+        let distances = greedy_fooling_matrix();
+        let bound = certified_cluster_count_bound(&distances, 1.0, 0).unwrap();
+        // Only the greedy warm start ran; still a valid (if not maximal) bound.
+        assert_eq!(bound.lower_bound, 3);
+        assert!(!bound.clique_is_maximum);
+    }
+
+    #[test]
+    fn count_bound_is_deterministic_and_validates_diameter() {
+        let distances = greedy_fooling_matrix();
+        let first = certified_cluster_count_bound(&distances, 1.0, usize::MAX).unwrap();
+        let second = certified_cluster_count_bound(&distances, 1.0, usize::MAX).unwrap();
+        assert_eq!(first, second);
+
+        assert_eq!(
+            certified_cluster_count_bound(&distances, -1.0, usize::MAX),
+            Err(MedoidClusteringError::InvalidDiameter)
+        );
+        assert_eq!(
+            certified_cluster_count_bound(&distances, f64::NAN, usize::MAX),
+            Err(MedoidClusteringError::InvalidDiameter)
+        );
     }
 }
