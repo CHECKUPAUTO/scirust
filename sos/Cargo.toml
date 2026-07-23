@@ -17,6 +17,7 @@ members = [
     "sos-theory",
     "sos-workflow",
     "sos-repro",
+    "sos-simulation",
 ]
 
 [workspace.package]

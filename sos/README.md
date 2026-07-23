@@ -20,7 +20,7 @@ stubs, no TODOs, no placeholders cross a phase boundary.
 |-------|-------|--------|
 | **P1 — Kernel & substrate** | `sos-core`, `sos-store`, `sos-provenance`, `sos-registry`, `sos-repro` (+ SOS CI) | **done** (`sos-repro` core landed on the merged scheduler — env-lock + drift + the level-aware reproduction contract; the numeric `L2`/`L1` verdict is backend-supplied per Invariant VIII) |
 | **P2 — Knowledge & Reasoning** | `sos-knowledge`, `sos-reasoning` | **done** (deterministic cores landed; Datalog / e-graph / theorem-proving deferred to `sos-scirust` per Invariant VIII) |
-| **P3 — Discovery, Planning, Simulation** | `sos-workflow`, `sos-planner`, `sos-simulation`, re-homed `sde-*` stages | `sos-workflow` **core landed** (the memoized scheduler — cache keys, deterministic scheduling, ledger; needs only `sos-core`. Stage execution / manifest resolution / stopping rules await the engine plugins, a frontend, and `sos-planner`) |
+| **P3 — Discovery, Planning, Simulation** | `sos-workflow`, `sos-simulation`, `sos-planner`, re-homed `sde-*` stages | `sos-workflow` + `sos-simulation` **cores landed** (the memoized scheduler, and the backend-independent `Simulate` interface + record/replay VCR + honest determinism stamping). `sos-planner`, the solver backends, manifest resolution, and stopping rules await the engine plugins / `sos-scirust` per Invariant VIII |
 | **P4 — Curiosity & Theory** | `sos-curiosity`, `sos-theory` | **cores landed** (both need only the P2 substrate; information-gain / analogy / Bayes-factor ranking / discriminating-experiment planning await P3's `sos-planner` and `scirust-*` per Invariant VIII) |
 
 ### Landed
@@ -128,6 +128,20 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   recomputes. (The numeric/statistical `L2`/`L1` evaluation and a store-driven
   `verify(object)` that walks + re-executes a sub-DAG are deferred to
   `sos-scirust` per Invariant VIII — no stub.)
+- **`sos-simulation`** — the Simulation Engine (backend-independent core). A
+  simulation is *an experiment whose executor is a solver*: the
+  [`Simulate`](sos-simulation/src/simulate.rs) trait is the syscall the discovery
+  loop names instead of a concrete backend, so the loop is identical whether
+  evidence comes from a PDE solve or a wet lab (solvers are `sos-scirust`
+  backends implementing the trait — **no solver here**). Every result is an
+  [`Observation`](sos-simulation/src/observation.rs) that **stamps the honest
+  [`DeterminismLevel`](sos-core/src/determinism.rs)** the backend realized (`L3`
+  bit-exact … `L1` seeded-stochastic), so nothing is presented as more
+  reproducible than its backend allows. A record/replay
+  [`Vcr`](sos-simulation/src/vcr.rs) memoizes runs — perform a simulation once,
+  replay it identically thereafter — letting an expensive or one-shot simulation
+  live inside a reproducible workflow. (The capability-gated world-effect boundary
+  is the Workflow executor seam's job per Invariant VIII.)
 
 ## Engineering standards (the gate)
 
