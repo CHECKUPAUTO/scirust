@@ -20,7 +20,7 @@ stubs, no TODOs, no placeholders cross a phase boundary.
 |-------|-------|--------|
 | **P1 — Kernel & substrate** | `sos-core`, `sos-store`, `sos-provenance`, `sos-registry` (+ SOS CI) | substrate **done**; `sos-repro` pending (needs the workflow engine for full `verify`/`rerun`) |
 | **P2 — Knowledge & Reasoning** | `sos-knowledge`, `sos-reasoning` | **done** (deterministic cores landed; Datalog / e-graph / theorem-proving deferred to `sos-scirust` per Invariant VIII) |
-| **P4 — Curiosity & Theory** | `sos-curiosity`, `sos-theory` | `sos-curiosity` **core landed** (its deterministic scanners need only the P2 substrate; the information-gain scanner awaits P3's `sos-planner`, analogy awaits `scirust-graph`) |
+| **P4 — Curiosity & Theory** | `sos-curiosity`, `sos-theory` | **cores landed** (both need only the P2 substrate; information-gain / analogy / Bayes-factor ranking / discriminating-experiment planning await P3's `sos-planner` and `scirust-*` per Invariant VIII) |
 
 ### Landed
 
@@ -84,6 +84,20 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   priorities, overflow-proof). (Information-gain scoring via `sos-planner`,
   cross-domain analogy via `scirust-graph`, and cognitive proposals via
   `sos-ccos` are deferred per Invariant VIII.)
+- **`sos-theory`** — the Theory Engine (deterministic). Theories are
+  **first-class, immutable, evolving** objects: a
+  [`Theory`](sos-theory/src/theory.rs) records all ten mandate fields (axioms,
+  assumptions, equations, [`Scope`](sos-theory/src/scope.rs) domain of validity,
+  supporting **and** contradicting evidence, confidence, citations, revision
+  parent, competitors) as ids into the graph — a view over provenance, not a
+  document. [`Theory::revise`](sos-theory/src/theory.rs) evolves a theory into a
+  *new* node that **retains its anomalies** (contradicting evidence is never
+  hidden) and links its parent; the [`Theories`](sos-theory/src/engine.rs) engine
+  walks the full [`revision_chain`](sos-theory/src/engine.rs) (old theories stay
+  queryable) and [`compare`](sos-theory/src/engine.rs)s rivals over their shared
+  domain, so competitors coexist rather than being forced to a single winner.
+  (Bayes-factor `Confidence` ranking and discriminating-experiment planning are
+  deferred to the statistics backend + `sos-planner` per Invariant VIII.)
 
 ## Engineering standards (the gate)
 
