@@ -34,6 +34,12 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   blobs, mutable named refs, and reachability [`gc`](sos-store/src/store.rs). Ships
   a complete in-memory backend ([`MemoryStore`](sos-store/src/mem.rs)); persistent
   backends implement the same trait.
+- **`sos-provenance`** — the Provenance Engine. A queryable
+  [`ProvenanceGraph`](sos-provenance/src/graph.rs) over any store — `ancestors`
+  ("why do we believe X"), `descendants` ("what breaks if X is retracted"),
+  `roots`, `tips` — plus deterministic [environment capture](sos-provenance/src/env.rs)
+  for the reproducibility key. (Signing is deferred to `sos-scirust`, keeping this
+  crate backend-agnostic per Invariant VIII.)
 
 ## Engineering standards (the gate)
 

@@ -1,0 +1,19 @@
+[package]
+name = "sos-provenance"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SOS Provenance Engine: queries over the provenance DAG (ancestors, descendants, roots, tips) that answer 'why do we believe X' and 'what breaks if X is retracted', plus deterministic environment capture. Pure Rust, no FFI."
+keywords = ["provenance", "dag", "lineage", "reproducibility", "science"]
+categories = ["science", "data-structures"]
+
+[dependencies]
+sos-core = { workspace = true }
+sos-store = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde = { workspace = true }
