@@ -5,6 +5,7 @@
 
 pub mod control;
 pub mod finance;
+pub mod high_breakdown;
 pub mod influence;
 pub mod isotonic;
 pub mod kernel_ridge;
@@ -17,6 +18,10 @@ pub mod robust_regression;
 pub mod simd_nn;
 pub mod time_series;
 
+pub use high_breakdown::{
+    HighBreakdownConfig, HighBreakdownError, HighBreakdownMethod, HighBreakdownRegressionReport,
+    fit_high_breakdown,
+};
 pub use influence::{
     InfluenceConfig, InfluenceError, InfluenceRecord, InfluenceReport, ObservationInfluenceClass,
 };
