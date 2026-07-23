@@ -9,6 +9,7 @@ pub mod high_breakdown;
 pub mod influence;
 pub mod isotonic;
 pub mod kernel_ridge;
+pub mod multi_output;
 pub mod nlp;
 pub mod optim;
 pub mod pattern_miner;
@@ -27,6 +28,10 @@ pub use influence::{
 };
 pub use isotonic::{IsotonicRegression, IsotonicRegressionError, MonotoneDirection};
 pub use kernel_ridge::{KernelRidgeConfig, KernelRidgeError, KernelRidgeRegression};
+pub use multi_output::{
+    MultiOutputError, MultiOutputResidualGeometry, MultiOutputRobustConfig,
+    MultiOutputRobustReport, fit_multi_output_robust,
+};
 pub use quantile_regression::{
     QuantileRegressionConfig, QuantileRegressionError, QuantileRegressionReport,
     fit_quantile_regression,
