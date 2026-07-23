@@ -27,6 +27,19 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   hashing, the honest four-level [`DeterminismLevel`](sos-core/src/determinism.rs)
   taxonomy, and full provenance / reproducibility metadata. Pure Rust, no FFI,
   `#![forbid(unsafe_code)]`, `#![deny(missing_docs)]`.
+- **`sos-store`** — the Storage Layer (the kernel's filesystem). A
+  content-addressed [`ObjectStore`](sos-store/src/store.rs) with typed
+  [`put_object`/`get_object`](sos-store/src/store.rs) that **verify the content
+  address on read and write**, content-addressed [`BlobRef`](sos-store/src/blob.rs)
+  blobs, mutable named refs, and reachability [`gc`](sos-store/src/store.rs). Ships
+  a complete in-memory backend ([`MemoryStore`](sos-store/src/mem.rs)); persistent
+  backends implement the same trait.
+- **`sos-provenance`** — the Provenance Engine. A queryable
+  [`ProvenanceGraph`](sos-provenance/src/graph.rs) over any store — `ancestors`
+  ("why do we believe X"), `descendants` ("what breaks if X is retracted"),
+  `roots`, `tips` — plus deterministic [environment capture](sos-provenance/src/env.rs)
+  for the reproducibility key. (Signing is deferred to `sos-scirust`, keeping this
+  crate backend-agnostic per Invariant VIII.)
 
 ## Engineering standards (the gate)
 
