@@ -1,0 +1,12 @@
+[package]
+name = "scirust-causal"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Deterministic causal discovery and exactly invertible cubic flows for SciRust"
+license-file = "../LICENSE.md"
+repository = "https://github.com/Memorithm/scirust"
+
+[dependencies]
+scirust-solvers = { path = "../scirust-solvers" }
+scirust-graph = { path = "../scirust-graph" }
