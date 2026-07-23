@@ -38,51 +38,79 @@ fn rejects_non_positive_tolerances() {
 
 // ─── Small deterministic problem ────────────────────────────────────────────
 
-#[test]
-fn optimize_small_problem() {
-    // Tiny known DAG: 2 variables, A[1,0] = 0.5
-    // Generate data through the forward flow
+/// Deterministic 2-variable data from the true DAG `A[1,0] = 0.5`.
+fn two_variable_samples() -> Matrix {
     let true_a = Matrix::from_row_major(2, 2, vec![0.0, 0.0, 0.5, 0.0]);
-    let flow = scirust_causal::TriangularCubicFlow::new(true_a.clone()).unwrap();
-
-    // Generate synthetic samples
-    let noise = vec![
-        vec![0.1, 0.2],
-        vec![-0.3, 0.5],
-        vec![0.7, -0.1],
-        vec![-0.4, -0.6],
-        vec![0.2, 0.8],
+    let flow = scirust_causal::TriangularCubicFlow::new(true_a).unwrap();
+    let noise = [
+        [0.1, 0.2],
+        [-0.3, 0.5],
+        [0.7, -0.1],
+        [-0.4, -0.6],
+        [0.2, 0.8],
     ];
-
     let mut samples_data = Vec::new();
     for n in &noise
     {
-        let x = flow.inverse(n).unwrap();
-        samples_data.extend(x);
+        samples_data.extend(flow.inverse(n).unwrap());
     }
+    Matrix::from_row_major(5, 2, samples_data)
+}
 
-    let samples = Matrix::from_row_major(5, 2, samples_data);
+#[test]
+fn zero_init_is_reported_as_stationary_not_converged() {
+    // The all-zeros interaction matrix is a saddle of the cubic score (its
+    // gradient vanishes there). The optimizer must NOT report this as a found
+    // minimum: it returns StationaryAtInitialPoint with the empty graph unchanged.
+    let samples = two_variable_samples();
     let initial = Matrix::zeros(2, 2);
+    let config = OptimizerConfig::new(30, 5, 1.0e-5, 1.0e-8).unwrap();
 
-    let config = OptimizerConfig::new(30, 5, 1.0e-5, 1.0e-8);
+    let result = optimize_causal(&samples, &initial, 0.001, 1.0e-8, 0.0, 1.0, &config).unwrap();
 
-    let result = optimize_causal(
-        &samples,
-        &initial,
-        0.001,
-        1.0e-8,
-        0.0,
-        1.0,
-        &config.unwrap(),
-    )
-    .unwrap();
+    assert_eq!(
+        result.termination,
+        scirust_causal::TerminationReason::StationaryAtInitialPoint
+    );
+    assert_eq!(result.inner_iterations, 0);
+    // The result is the initial guess, untouched.
+    assert_eq!(result.interactions.data(), initial.data());
+    assert!(
+        result.warnings.iter().any(|w| w.contains("stationary")),
+        "a stationarity warning must be surfaced"
+    );
+}
 
-    assert!(result.objective.is_finite());
-    assert!(result.gradient_norm.is_finite());
-    assert!(result.acyclicity.is_finite());
-    assert!(result.outer_iterations > 0 || result.inner_iterations > 0);
+#[test]
+fn recovers_structure_from_a_nonzero_init() {
+    // Initialized OFF the zero saddle, the optimizer must actually descend and
+    // recover the true coupling A[1,0] ≈ 0.5 (not stay at the 0.1 start).
+    //
+    // `lambda_l1 = 0.0` here: with only 5 samples the raw data-term gradient
+    // near the true value has magnitude ~1e-4, so even a small L1 sparsity
+    // penalty (e.g. 0.001) dominates it and pulls the fit back to exactly
+    // zero — a real, honest optimum of *that* penalized objective, just not
+    // the one this test is checking. Disabling L1 isolates the thing being
+    // tested: does the score + acyclicity machinery, started off the saddle,
+    // actually move toward the generating structure. 30 outer iterations are
+    // enough for this small problem to certify `Converged` outright (verified
+    // empirically), not merely exhaust its iteration budget.
+    let samples = two_variable_samples();
+    let initial = Matrix::from_row_major(2, 2, vec![0.0, 0.0, 0.1, 0.0]);
+    let config = OptimizerConfig::new(60, 30, 1.0e-6, 1.0e-10).unwrap();
 
-    // Check that the optimization didn't cause non-finite gradients
+    let result = optimize_causal(&samples, &initial, 0.0, 1.0e-8, 0.0, 1.0, &config).unwrap();
+
+    assert_eq!(
+        result.termination,
+        scirust_causal::TerminationReason::Converged,
+        "expected a certified minimum, got {:?}",
+        result.termination
+    );
+    assert!(
+        result.inner_iterations > 0,
+        "the optimizer must take descent steps"
+    );
     for i in 0..2
     {
         for j in 0..2
@@ -90,17 +118,21 @@ fn optimize_small_problem() {
             assert!(result.interactions[(i, j)].is_finite());
         }
     }
-
-    // Diagonal should remain near zero
-    assert_close(result.interactions[(0, 0)], 0.0, 1.0e-4);
-    assert_close(result.interactions[(1, 1)], 0.0, 1.0e-4);
+    // Structure recovered: the coupling lands close to the true 0.5, well past
+    // its 0.1 start (empirically ≈ 0.530).
+    assert_close(result.interactions[(1, 0)], 0.5, 0.1);
+    // The reverse and diagonal entries stay near zero (empirically ≤ 3.1e-4).
+    assert_close(result.interactions[(0, 1)], 0.0, 0.05);
+    assert_close(result.interactions[(0, 0)], 0.0, 0.05);
+    assert_close(result.interactions[(1, 1)], 0.0, 0.05);
 }
 
 // ─── Zero interactions, zero sparsity, clean data ───────────────────────────
 
 #[test]
-fn zero_interaction_optimization() {
-    // Data where A = 0 is optimal: X = noise, no coupling.
+fn zero_init_on_uncoupled_data_is_stationary() {
+    // A = 0 is optimal here; a zero start is already stationary, so the honest
+    // report is StationaryAtInitialPoint (no descent step taken), not Converged.
     let samples = Matrix::from_row_major(4, 2, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
     let initial = Matrix::zeros(2, 2);
 
@@ -110,11 +142,11 @@ fn zero_interaction_optimization() {
 
     assert!(result.objective.is_finite());
     assert!(result.gradient_norm.is_finite());
-    assert!(matches!(
+    assert_eq!(
         result.termination,
-        scirust_causal::TerminationReason::MaxOuterIterations
-            | scirust_causal::TerminationReason::Converged
-    ));
+        scirust_causal::TerminationReason::StationaryAtInitialPoint
+    );
+    assert_eq!(result.inner_iterations, 0);
 }
 
 // ─── Dimension mismatch propagates ──────────────────────────────────────────

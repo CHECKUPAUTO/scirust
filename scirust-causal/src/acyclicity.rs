@@ -209,12 +209,24 @@ impl PolynomialAcyclicity {
         {
             for j in 0..cols
             {
-                let v = 2.0 * interactions[(i, j)] * accum[(i, j)];
-                if !v.is_finite() && interactions[(i, j)] != 0.0
+                // grad_{ij} = 2·W_{ij}·accum_{ij}, and is exactly zero where
+                // W_{ij} = 0. Computing it as literal 0 there avoids a spurious
+                // `0 · ∞ = NaN` if `accum` overflowed at a zero-weight entry, so
+                // the finiteness guard below is now unconditional and catches a
+                // genuine overflow at a nonzero weight.
+                let v = if interactions[(i, j)] == 0.0
+                {
+                    0.0
+                }
+                else
+                {
+                    2.0 * interactions[(i, j)] * accum[(i, j)]
+                };
+                if !v.is_finite()
                 {
                     return Err(CausalError::NonFiniteComputation {
                         operation: "acyclicity_gradient",
-                        index: i,
+                        index: i * cols + j,
                         value: v,
                     });
                 }

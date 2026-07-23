@@ -41,13 +41,6 @@ pub enum CausalError {
         detail: &'static str,
     },
     CyclicGraph,
-    OptimizerFailure {
-        reason: &'static str,
-    },
-    NonConvergence {
-        iterations: usize,
-        gradient_norm: f64,
-    },
 }
 
 impl fmt::Display for CausalError {
@@ -111,21 +104,10 @@ impl fmt::Display for CausalError {
             },
             Self::CyclicGraph =>
             {
-                write!(f, "extracted graph contains a cycle")
-            },
-            Self::OptimizerFailure { reason } =>
-            {
-                write!(f, "optimizer failure: {reason}")
-            },
-            Self::NonConvergence {
-                iterations,
-                gradient_norm,
-            } =>
-            {
                 write!(
                     f,
-                    "optimizer did not converge after {iterations} \
-                     iterations, final gradient norm {gradient_norm:.17e}"
+                    "graph extraction produced a cycle (a super-threshold entry \
+                     on the diagonal or a thresholded pattern with a directed cycle)"
                 )
             },
         }
