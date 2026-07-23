@@ -18,7 +18,7 @@ stubs, no TODOs, no placeholders cross a phase boundary.
 
 | Phase | Scope | Status |
 |-------|-------|--------|
-| **P1 — Kernel & substrate** | `sos-core`, `sos-store`, `sos-provenance`, `sos-registry` (+ SOS CI) | substrate **done**; `sos-repro` pending (needs the workflow engine for full `verify`/`rerun`) |
+| **P1 — Kernel & substrate** | `sos-core`, `sos-store`, `sos-provenance`, `sos-registry`, `sos-repro` (+ SOS CI) | **done** (`sos-repro` core landed on the merged scheduler — env-lock + drift + the level-aware reproduction contract; the numeric `L2`/`L1` verdict is backend-supplied per Invariant VIII) |
 | **P2 — Knowledge & Reasoning** | `sos-knowledge`, `sos-reasoning` | **done** (deterministic cores landed; Datalog / e-graph / theorem-proving deferred to `sos-scirust` per Invariant VIII) |
 | **P3 — Discovery, Planning, Simulation** | `sos-workflow`, `sos-planner`, `sos-simulation`, re-homed `sde-*` stages | `sos-workflow` **core landed** (the memoized scheduler — cache keys, deterministic scheduling, ledger; needs only `sos-core`. Stage execution / manifest resolution / stopping rules await the engine plugins, a frontend, and `sos-planner`) |
 | **P4 — Curiosity & Theory** | `sos-curiosity`, `sos-theory` | **cores landed** (both need only the P2 substrate; information-gain / analogy / Bayes-factor ranking / discriminating-experiment planning await P3's `sos-planner` and `scirust-*` per Invariant VIII) |
@@ -114,6 +114,20 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   run resumable. (Stage *logic*, manifest resolution, the world-touching effect
   boundary, and stopping rules are supplied by the engine plugins / `sos-scirust`
   / `sos-planner` per Invariant VIII — no stub.)
+- **`sos-repro`** — the Reproducibility Engine (the *Nix analogy*). Where
+  provenance *records* the environment, this **pins and re-realizes** it: an
+  [`EnvLock`](sos-repro/src/lock.rs) is the hermetic lockfile (toolchain, backend
+  versions + content hashes, hardware, OS) whose `env_digest` keys the workflow
+  cache, plus itemized [`Drift`](sos-repro/src/lock.rs) detection — "binds the
+  same pins or **declares** the drift". The level-aware **reproduction contract**
+  ([`verify_reproduction`](sos-repro/src/contract.rs)) decides `L3` bit-exact and
+  `L0` replay by object-id equality and localizes any deviation to a node and its
+  level; `L2` within-certificate / `L1` in-distribution take a backend-supplied
+  verdict. [`rerun`](sos-repro/src/rerun.rs) re-realizes a `sos-workflow` plan
+  under a pinned lock — a binding lock reproduces from cache, a drifted lock
+  recomputes. (The numeric/statistical `L2`/`L1` evaluation and a store-driven
+  `verify(object)` that walks + re-executes a sub-DAG are deferred to
+  `sos-scirust` per Invariant VIII — no stub.)
 
 ## Engineering standards (the gate)
 
