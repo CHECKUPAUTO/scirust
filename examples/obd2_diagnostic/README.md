@@ -159,8 +159,10 @@ modèle apprend à contextualiser.
 
 Limite honnête : corrompre *un seul* capteur (ex. MAF −35 %) n'est pas
 toujours détecté sur un relevé isolé — les capteurs corrélés (charge,
-pression) « compensent » dans la prédiction. Un vrai outil analyserait le
-résidu **sur la durée** (moyenne glissante par trajet), pas relevé par relevé.
+pression) « compensent » dans la prédiction. C'est justement ce que
+`POST /trip/{id}/reading` (voir section API ci-dessous) adresse : un biais
+persistant mais discret devient statistiquement visible sur plusieurs
+relevés d'un même trajet, là où un relevé isolé le manque.
 
 ## Poids sauvegardés (safetensors)
 
@@ -179,11 +181,13 @@ vierge via `load_state_dict` → écart maximal de prédiction = 0.
 
 ## API de diagnostic (`obd2_api`)
 
-Le binary `obd2_api` expose le modèle « données réelles » via une API HTTP
-**sans aucune dépendance externe** (serveur `std::net::TcpListener`, JSON
-minimal fait main). Il charge le fichier safetensors auto-suffisant :
-l'architecture du réseau est reconstruite depuis les shapes des tenseurs,
-la normalisation et le seuil d'anomalie depuis les métadonnées embarquées.
+Le binary `obd2_api` expose **les deux modèles entraînés** (fueltrim +
+mégaverse) via une API HTTP **sans aucune dépendance externe** (serveur
+`std::net::TcpListener`, JSON minimal fait main). Chaque modèle est chargé
+depuis son fichier safetensors auto-suffisant : l'architecture du réseau
+est reconstruite depuis les shapes des tenseurs, la normalisation et le
+seuil d'anomalie viennent des métadonnées embarquées — rien n'est codé en
+dur côté serveur.
 
 ```bash
 cargo run -p obd2_diagnostic --release --bin obd2_api            # port 8080
@@ -192,9 +196,15 @@ cargo run -p obd2_diagnostic --release --bin obd2_api -- 9090    # port choisi
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /health` | état du service et architecture du modèle |
-| `GET /model` | features attendues, cible, seuil, source des données |
+| `GET /health` | état du service, modèles chargés |
+| `GET /model` | features attendues, cible, seuil (modèle fueltrim) |
+| `GET /model/megaverse` | architecture, classes, précision (modèle mégaverse) |
 | `POST /diagnose` | relevés capteurs JSON → trim prédit, résidu, verdict |
+| `POST /diagnose/megaverse` | 20 features brutes → top-3 causes prédites |
+| `POST /trip/start` | démarre un trajet → `trip_id` |
+| `POST /trip/{id}/reading` | ajoute un relevé au trajet → résidu glissant |
+| `GET /trip/{id}/status` | stats du trajet sans ajouter de relevé |
+| `POST /feedback` | cas confirmé en atelier → archivé (JSONL) pour un futur ré-entraînement |
 
 Exemple (relevé réel sain du CSV) :
 
@@ -215,6 +225,36 @@ Le même relevé avec un trim gonflé de +14 % (symptôme de prise d'air)
 renvoie `"verdict":"anomalie_melange_pauvre"` avec les suspects classiques
 P0171 ; un trim anormalement bas renvoie `"anomalie_melange_riche"`
 (logique P0172). Champ manquant → HTTP 400 avec le nom du capteur attendu.
+
+### Résidu glissant sur un trajet (`/trip/*`)
+
+Un biais persistant mais discret (ex. MAF légèrement sous-évaluant) peut
+rester sous le seuil de détection sur un relevé isolé. `POST
+/trip/{id}/reading` accumule le résidu **signé** relevé après relevé et
+compare sa moyenne à un seuil resserré en 1/√n (le bruit indépendant par
+relevé s'annule dans une moyenne, pas un biais systématique) :
+
+```bash
+curl -s -X POST localhost:8080/trip/start                # → {"trip_id":1}
+# puis, à chaque relevé du trajet (même schéma que /diagnose) :
+curl -s localhost:8080/trip/1/reading -d '{...mêmes champs que /diagnose...}'
+```
+
+Testé en pratique : un biais constant de +3 % (bien sous le seuil ponctuel
+de 8.85 %) reste `"anomalie":false` pendant 8 relevés, puis bascule à
+`"anomalie":true` au 9ᵉ relevé — le seuil effectif (8.85/√n, plancher 1.0)
+passe sous 3 % exactement à ce moment-là.
+
+### Multi-modèles et feedback atelier
+
+`POST /diagnose/megaverse` interroge le classifieur 1000 causes (démo de
+passage à l'échelle, cf. plus haut) avec 20 features brutes ; réponse
+identique aux prédictions obtenues pendant l'entraînement (vérifié :
+`{"features":[…signature classe 200…]}` → `"cause_id":200` à 100 %).
+
+`POST /feedback` archive un cas confirmé (relevés + `cause_confirmee` +
+`notes` optionnel) dans `data/feedback.jsonl`, horodaté, un JSON par ligne
+— la base de départ d'un futur ré-entraînement sur cas d'atelier réels.
 
 ## Honnêteté sur les limites
 
