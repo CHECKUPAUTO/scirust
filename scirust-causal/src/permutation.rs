@@ -135,11 +135,41 @@ impl VariablePermutation {
     }
 }
 
+/// Reorders `interactions` into `dag`'s topological order. When the matrix's
+/// nonzero pattern is consistent with the DAG (every nonzero `A[i, j]` is an edge
+/// `j → i`) the permuted matrix is **strictly lower triangular**.
+///
+/// The result is *verified* strictly lower triangular: any nonzero on or above
+/// the diagonal (a self-loop, or an interaction the DAG does not contain) means
+/// the `(matrix, dag)` pair is inconsistent, and an error is returned rather than
+/// a silently non-triangular matrix. (The permutation only moves values, so this
+/// check is exact — no round-off.)
+///
+/// # Errors
+///
+/// [`CausalError::InvalidPermutation`] if `dag` is not a valid permutation source
+/// or the `(matrix, dag)` pair is inconsistent.
 pub fn triangularize_from_dag(
     interactions: &Matrix,
     dag: &CausalDag,
 ) -> Result<(VariablePermutation, Matrix), CausalError> {
     let perm = VariablePermutation::from_dag(dag)?;
     let tri = perm.permute_matrix(interactions)?;
+
+    let n = tri.rows();
+    for i in 0..n
+    {
+        for j in i..n
+        {
+            if tri[(i, j)] != 0.0
+            {
+                return Err(CausalError::InvalidPermutation {
+                    detail: "matrix nonzero pattern is inconsistent with the DAG \
+                             (triangularized result is not strictly lower triangular)",
+                });
+            }
+        }
+    }
+
     Ok((perm, tri))
 }

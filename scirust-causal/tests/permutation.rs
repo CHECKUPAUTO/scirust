@@ -71,19 +71,23 @@ fn triangularize_simple_dag() {
     dag.add_directed_edge(0, 1).unwrap();
     let (perm, tri) = triangularize_from_dag(&interactions, &dag).unwrap();
 
+    // The headline property: the result is strictly lower triangular (every
+    // entry on or above the diagonal is exactly zero).
     for i in 0..2
     {
-        for j in 0..2
+        for j in i..2
         {
-            if i > j
-            {
-                // Should be lower triangular
-            }
+            assert_eq!(
+                tri[(i, j)],
+                0.0,
+                "entry ({i},{j}) above the diagonal is nonzero"
+            );
         }
     }
+    // The edge 0 -> 1 survives, in the lower triangle.
+    assert_eq!(tri[(1, 0)], 0.5);
 
-    // permuted matrix should have edge preserved
-    // Since topo order is [0, 1], permuted[1, 0] should be the edge
+    // The returned matrix equals the permutation applied to the input.
     let expected_perm = perm.permute_matrix(&interactions).unwrap();
     assert_eq!(tri.data(), expected_perm.data());
 }
@@ -141,20 +145,22 @@ fn chain_triangularization() {
 
     let (perm, tri) = triangularize_from_dag(&interactions, &dag).unwrap();
 
-    // After permutation, all edges should be in lower triangle
-    // Topo order is [0, 1, 2], so the triangularized matrix reorders
-    // variables to match this order
+    // After permutation every edge is in the lower triangle: the result is
+    // strictly lower triangular (on/above the diagonal is exactly zero).
     for i in 0..3
     {
         for j in i..3
         {
-            if i != j
-            {
-                // Upper triangle entries should be 0 if the edge direction
-                // is properly handled
-            }
+            assert_eq!(
+                tri[(i, j)],
+                0.0,
+                "entry ({i},{j}) above the diagonal is nonzero"
+            );
         }
     }
+    // Both chain edges survive in the lower triangle.
+    assert_eq!(tri[(1, 0)], 0.5);
+    assert_eq!(tri[(2, 1)], 0.3);
 
     // Verify round-trip
     let restored = perm.restore_matrix(&tri).unwrap();
