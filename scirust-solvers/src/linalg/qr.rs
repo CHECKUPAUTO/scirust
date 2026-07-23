@@ -23,7 +23,7 @@ fn pivot_tol(n: usize, max_abs: f64) -> f64 {
     (n as f64) * f64::EPSILON * max_abs.max(1e-300)
 }
 
-fn check_finite(value: f64, _location: &str) -> Result<(), SolverError> {
+fn check_finite(value: f64) -> Result<(), SolverError> {
     if !value.is_finite()
     {
         return Err(SolverError::NanDetected { iter: 0, value });
@@ -116,10 +116,10 @@ pub fn qr_decompose(mut a: Matrix) -> SolverResult<Qr> {
         for i in k..m
         {
             let aik = a[(i, k)];
-            check_finite(aik, &format!("a[{i},{k}] in QR sigma"))?;
+            check_finite(aik)?;
             sigma_sq += aik * aik;
         }
-        check_finite(sigma_sq, &format!("sigma_sq QR k={k}"))?;
+        check_finite(sigma_sq)?;
 
         let sigma = sigma_sq.sqrt();
         if sigma < FINITE_EPS
@@ -139,14 +139,14 @@ pub fn qr_decompose(mut a: Matrix) -> SolverResult<Qr> {
         }
         // tau = 2 / (v^T · v) = (akk - alpha) / (-alpha)
         let tau_k = diff / (-alpha);
-        check_finite(tau_k, &format!("tau_k QR k={k}"))?;
+        check_finite(tau_k)?;
         tau[k] = tau_k;
 
         // Normalise v[1..] dans la colonne k
         for i in (k + 1)..m
         {
             let normalized = a[(i, k)] / diff;
-            check_finite(normalized, &format!("v_norm QR k={k},i={i}"))?;
+            check_finite(normalized)?;
             a[(i, k)] = normalized;
         }
         a[(k, k)] = alpha;
@@ -160,12 +160,12 @@ pub fn qr_decompose(mut a: Matrix) -> SolverResult<Qr> {
                 dot += a[(i, k)] * a[(i, j)];
             }
             let s = tau_k * dot;
-            check_finite(s, &format!("s QR k={k},j={j}"))?;
+            check_finite(s)?;
             a[(k, j)] -= s;
             for i in (k + 1)..m
             {
                 let updated = a[(i, j)] - s * a[(i, k)];
-                check_finite(updated, &format!("a_upd QR k={k},i={i},j={j}"))?;
+                check_finite(updated)?;
                 a[(i, j)] = updated;
             }
         }
@@ -188,9 +188,9 @@ pub fn solve_qr_least_squares(qr: &Qr, b: &[f64]) -> SolverResult<Vec<f64>> {
     }
 
     // Vérifier que b est fini
-    for (i, &bi) in b.iter().enumerate()
+    for &bi in b
     {
-        check_finite(bi, &format!("b[{i}]"))?;
+        check_finite(bi)?;
     }
 
     // R n'est pas reçue avec la matrice A d'origine ; sa propre diagonale
@@ -215,7 +215,7 @@ pub fn solve_qr_least_squares(qr: &Qr, b: &[f64]) -> SolverResult<Vec<f64>> {
             dot += qr.data[(i, k)] * y[i];
         }
         let s = tau_k * dot;
-        check_finite(s, &format!("s Q^T·b k={k}"))?;
+        check_finite(s)?;
         y[k] -= s;
         for i in (k + 1)..qr.m
         {
@@ -243,7 +243,7 @@ pub fn solve_qr_least_squares(qr: &Qr, b: &[f64]) -> SolverResult<Vec<f64>> {
             return Err(SolverError::Singular { row: i, pivot });
         }
         x[i] = s / pivot;
-        check_finite(x[i], &format!("x[{i}] QR solve"))?;
+        check_finite(x[i])?;
     }
     Ok(x)
 }

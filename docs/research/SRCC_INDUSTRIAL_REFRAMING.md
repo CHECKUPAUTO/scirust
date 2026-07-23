@@ -870,3 +870,82 @@ re-test:    axis-1 stride-20 stdout SHA c14b000a9bb2fee12b61b524bcfd48f13c48294e
 Run twice byte-identical; the `industrial-nonlinear-rul` binary gained a `--stride`
 flag (default 40, so the committed artifact is unchanged); 201 `scirust-solvers`
 tests and the `industrial_protocol_demo` fingerprint (`167c13de…`) are unaffected.
+
+## Third program (direction B) — do the two winning levers compose?
+
+Axis 2 showed **nonlinearity** helps (degree-2 features broke the SECOM ceiling);
+axis 3 showed **robustness** helps (Huber beat OLS on real heavy-tailed OBD2
+residuals). Each was tested alone. This direction asks whether they **compose** on
+the same real workload with a clean **2×2 factorial** — linear/polynomial features
+× squared/Huber loss — under axis 3's leave-one-segment-out protocol
+(`industrial-obd2-robust-nonlinear`). The two factors are *exactly* "degree-2
+polynomial features" (nonlinearity) and "Huber loss" (robustness); nothing else
+differs.
+
+**Enabling fix.** The same eager-`format!` defect direction A removed from the
+Cholesky hot loop also sat in `scirust-solvers`' **QR and LU** factorizations —
+`check_finite(x, &format!(…))` allocating a `String` per innermost Householder
+update, on the path every OLS/Huber/trimmed fit takes. Removing it (bit-identical:
+axis-3's `industrial-obd2-native` reproduces its stdout SHA `0535a67b…` exactly,
+201 solver tests pass, demo `167c13de…` unchanged) is what makes a degree-2 Huber
+IRLS fit feasible at all. Even so, that fit re-factorizes a ~37 k × 77 QR every
+iteration, so the **fit** uses every 12th training row (`--train-stride 12`; heavy
+tails survive subsampling, all four cells share the identical decimated rows) while
+every model is still **scored on the full held-out segment** — full bootstrap power.
+
+Mean absolute error per cell (bulk metric; lower better):
+
+| target | `ols_linear` | `huber_linear` | `ols_poly` | `huber_poly` |
+|--------|-------------:|---------------:|-----------:|-------------:|
+| `ENGINE_LOAD` | 1.142 | 1.066 | 0.320 | **0.298** |
+| `THROTTLE_POS` | 0.969 | 0.893 | 0.874 | **0.740** |
+| `MAF` | 0.910 | 0.846 | 0.140 | **0.134** |
+
+Per-row absolute-error gain vs `ols_linear` (seeded paired bootstrap; all CIs
+strictly one-sided unless noted):
+
+| target | robustness alone | nonlinearity alone | both | additive gap | robustness *on top of* nonlinearity |
+|--------|-----------------:|-------------------:|-----:|-------------:|------------------------------------:|
+| `ENGINE_LOAD` | +0.076 | +0.821 | +0.845 | **−0.053** (sub) | +0.023 (wins) |
+| `THROTTLE_POS` | +0.075 | +0.095 | +0.229 | **+0.059** (super) | +0.134 (wins) |
+| `MAF` | +0.064 | +0.771 | +0.776 | **−0.059** (sub) | +0.006 (wins) |
+
+**Finding — they compose, but not independently, and nonlinearity is usually the
+bigger lever.** Three things hold across all three real channels:
+
+1. **Each lever helps alone** (every single-lever CI > 0) — reproducing axis 3's
+   robustness win *and* confirming a nonlinearity win on the same data.
+2. **Robustness still adds on top of nonlinearity everywhere** (the last column is
+   positive in all three) — the levers genuinely compose, they are not substitutes.
+3. **But the increment shrinks exactly where nonlinearity already explains the
+   bulk.** On `ENGINE_LOAD` and `MAF` — engine channels that are *strongly*
+   nonlinear in the sensor inputs (MAE collapses 1.14 → 0.32 and 0.91 → 0.14 the
+   moment degree-2 cross-terms enter) — a good nonlinear fit leaves few vertical
+   outliers for Huber to down-weight, so robustness-on-top is real but small
+   (+0.023, +0.006) and the joint gain is **sub-additive**. On `THROTTLE_POS`,
+   where nonlinearity is a modest lever, the two **reinforce super-additively**
+   (gap +0.059) and robustness-on-top is large (+0.134).
+
+**Interpretation — this reframes axis 3.** The linear-robust win axis 3 measured
+is real but *small relative to the nonlinearity that was on the table*: on two of
+three channels a degree-2 OLS already cuts bulk error several-fold, and Huber then
+trims a little more. Robustness and nonlinearity are **complementary but
+overlapping** — both attack the same heavy-tailed residuals, so stacking them pays,
+with diminishing returns once one lever has captured the structure. The program's
+through-line holds in its sharpest form yet: *match the model to the data*
+(curvature where the map is nonlinear, a robust loss where the noise is heavy) —
+and expect the second lever to help less once the first has done its work.
+
+**Determinism.**
+
+```
+stdout  SHA-256: ac650e7b66549a5cfd7b627a786a4d48174c9978af5aa6c615d133ff3598a4f7
+results SHA-256: d2e30dfe31be773d64b3596d1e6f8820ea9acf43da7ec251a6dc668f20a7d888  (66 BenchRecords)
+```
+
+Run twice byte-identical; no network; checksum-verified in-repo OBD2 CSV; OLS and
+Huber (QR) are RNG-free and every gain is a seeded paired bootstrap. Honest bound:
+training rows are decimated 12× for tractability (test rows full), so the absolute
+MAE magnitudes would tighten with more training data — but the qualitative
+composition result (each lever adds, sub-additively where one already dominates) is
+a property of the residual structure, not the sample size.

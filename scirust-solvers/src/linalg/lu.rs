@@ -19,7 +19,7 @@ fn pivot_tol(n: usize, max_abs: f64) -> f64 {
     (n as f64) * f64::EPSILON * max_abs.max(1e-300)
 }
 
-fn check_finite(value: f64, _location: &str) -> Result<(), SolverError> {
+fn check_finite(value: f64) -> Result<(), SolverError> {
     if !value.is_finite()
     {
         return Err(SolverError::NanDetected { iter: 0, value });
@@ -60,7 +60,7 @@ pub fn lu_decompose(mut a: Matrix) -> SolverResult<Lu> {
         for i in (k + 1)..n
         {
             let v = a[(i, k)].abs();
-            check_finite(v, &format!("LU pivot a[{i},{k}]"))?;
+            check_finite(v)?;
             if v > max_val
             {
                 max_val = v;
@@ -90,12 +90,12 @@ pub fn lu_decompose(mut a: Matrix) -> SolverResult<Lu> {
         for i in (k + 1)..n
         {
             let factor = a[(i, k)] / pivot;
-            check_finite(factor, &format!("LU factor L[{i},{k}]"))?;
+            check_finite(factor)?;
             a[(i, k)] = factor;
             for j in (k + 1)..n
             {
                 let aij = a[(i, j)] - factor * a[(k, j)];
-                check_finite(aij, &format!("LU update a[{i},{j}]"))?;
+                check_finite(aij)?;
                 a[(i, j)] = aij;
             }
         }
@@ -120,9 +120,9 @@ pub fn solve_lu(lu: &Lu, b: &[f64]) -> SolverResult<Vec<f64>> {
         });
     }
 
-    for (i, &bi) in b.iter().enumerate()
+    for &bi in b
     {
-        check_finite(bi, &format!("b[{i}] LU"))?;
+        check_finite(bi)?;
     }
 
     // Applique la permutation : b' = P·b
@@ -161,7 +161,7 @@ pub fn solve_lu(lu: &Lu, b: &[f64]) -> SolverResult<Vec<f64>> {
             return Err(SolverError::Singular { row: i, pivot });
         }
         x[i] = s / pivot;
-        check_finite(x[i], &format!("x[{i}] LU solve"))?;
+        check_finite(x[i])?;
     }
 
     Ok(x)
