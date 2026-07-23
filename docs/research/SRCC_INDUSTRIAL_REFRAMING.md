@@ -1015,3 +1015,54 @@ Run twice byte-identical; no network; checksum-verified in-repo OBD2 CSV; OLS/Hu
 sub-PRs of direction C: quantile regression (pinball loss) and conformalized
 quantile regression (adaptive-width intervals), then a promotion gate on interval
 quality.
+
+## Third program (direction C, sub-PR 2) — native quantile-regression intervals
+
+Sub-PR 1's conformal band wraps a *point* predictor in a **constant** half-width.
+Quantile regression instead predicts the conditional quantiles directly — a new
+`scirust_learning::fit_quantile_regression` (pinball/check loss, fit by
+Schlossmacher IRLS reusing the crate's weighted-OLS path; honestly a *smoothed*
+approximation, the `ε`-floored weights and a `converged` flag reported as such; 5
+unit tests) — so fitting `τ = 0.05` and `τ = 0.95` gives a **native 90 % interval**
+`[q₀.₀₅(x), q₀.₉₅(x)]` whose width **adapts** to the local noise. Same OBD2
+leave-one-segment-out protocol; the native band is compared head-to-head with the
+C.1 OLS-conformal band, both targeting 0.9.
+
+| target | quantile-native coverage / width | OLS-conformal coverage / width | native/conformal width |
+|--------|---------------------------------:|-------------------------------:|-----------------------:|
+| `ENGINE_LOAD` | 0.899 / 4.094 (122 crossings) | 0.899 / 4.471 | **0.916 (native −8.4 %)** |
+| `THROTTLE_POS` | 0.899 / 3.762 (166 crossings) | 0.899 / 3.817 | 0.986 |
+| `MAF` | 0.895 / 3.499 (3 crossings) | 0.895 / 3.610 | 0.969 |
+
+**Finding — the adaptive native interval is tighter than conformal at matched
+coverage, but without the guarantee.** Two things:
+
+1. **Native quantile intervals are tighter on all three channels** (−8.4 %, −1.4 %,
+   −3.1 %) at essentially the *same* empirical coverage (~0.9). By widening only
+   where the data is locally noisy and narrowing where it is tight, quantile
+   regression spends interval width more efficiently than a constant conformal band.
+2. **But quantile regression carries no finite-sample coverage guarantee, and it
+   frays at the edges.** Coverage happened to land near nominal here, but nothing
+   *proves* it will; and the estimator produces **quantile crossings** (`q₀.₀₅ >
+   q₀.₉₅`) on 0.3–2.3 % of rows for the two heavier channels — an empty, non-covering
+   interval, counted openly rather than hidden. The tighter width is only trustworthy
+   if the coverage is trustworthy.
+
+**Interpretation.** This is the exact trade-off conformal and quantile methods are
+each half of: conformal *guarantees* coverage at a constant width; quantile
+regression *adapts* the width but only estimates coverage. Neither alone is the
+whole answer — which motivates sub-PR 3, **conformalized quantile regression**,
+which conformalizes the native interval to restore the finite-sample guarantee
+*while keeping* the adaptive width, and should dominate both.
+
+**Determinism.**
+
+```
+stdout  SHA-256: 20ed9d280d57bd1f13c8ef88b1807c0b83337fc198d3980ac0d26b61ced1206c
+results SHA-256: ff2d55f0f79fc0aeb1486d73159fd6c1e3c8ae3f3c5c90beebae8dc66865b5e2  (18 BenchRecords)
+```
+
+Run twice byte-identical; no network; checksum-verified in-repo OBD2 CSV; OLS and
+quantile IRLS (QR) are RNG-free. Additive: a new `quantile_regression` module in
+`scirust-learning` (92 lib tests, was 87) + one binary + docs; `industrial_protocol_demo`
+fingerprint (`167c13de…`) unchanged.
