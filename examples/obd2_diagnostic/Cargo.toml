@@ -28,5 +28,9 @@ path = "src/main_real.rs"
 name = "obd2_api"
 path = "src/main_api.rs"
 
+[[bin]]
+name = "obd2_retrain"
+path = "src/main_retrain.rs"
+
 [dependencies]
 scirust-core = { path = "../../scirust-core" }

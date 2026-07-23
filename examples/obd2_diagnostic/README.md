@@ -189,6 +189,10 @@ est reconstruite depuis les shapes des tenseurs, la normalisation et le
 seuil d'anomalie viennent des métadonnées embarquées — rien n'est codé en
 dur côté serveur.
 
+Testé automatiquement (`cargo test -p obd2_diagnostic --bin obd2_api`) :
+parsing JSON, logique du seuil glissant (déterministe, sans modèle), et
+les deux modèles contre leurs poids réels committés — 17 tests.
+
 ```bash
 cargo run -p obd2_diagnostic --release --bin obd2_api            # port 8080
 cargo run -p obd2_diagnostic --release --bin obd2_api -- 9090    # port choisi
@@ -254,7 +258,42 @@ identique aux prédictions obtenues pendant l'entraînement (vérifié :
 
 `POST /feedback` archive un cas confirmé (relevés + `cause_confirmee` +
 `notes` optionnel) dans `data/feedback.jsonl`, horodaté, un JSON par ligne
-— la base de départ d'un futur ré-entraînement sur cas d'atelier réels.
+— la base de départ du ré-entraînement décrit ci-dessous.
+
+## Ré-entraînement depuis le feedback (`obd2_retrain`)
+
+Ferme la boucle : `obd2_retrain` recharge le CSV atelier **et**
+`data/feedback.jsonl`, puis entraîne **deux fois** le même modèle
+(architecture et hyperparamètres identiques, même split de test jamais
+touché) — une fois sur le CSV seul (baseline), une fois CSV + feedback
+(augmenté) — pour comparer honnêtement les deux MAE plutôt que de
+présumer que plus de données améliore toujours le résultat.
+
+```bash
+cargo run -p obd2_diagnostic --release --bin obd2_retrain
+# ou avec des chemins/epochs personnalisés :
+cargo run -p obd2_diagnostic --release --bin obd2_retrain -- <csv> <feedback.jsonl> <epochs>
+```
+
+Seuls les cas de feedback avec les 10 capteurs **et** le trim confirmé
+sont exploitables pour cette régression (`cause_confirmee` est un texte
+libre, pas une cible numérique — il attendra un futur classifieur de
+causes entraîné sur historique d'atelier labellisé). Sans fichier de
+feedback (premier run), l'entraînement augmenté est simplement identique
+à la baseline — pas une erreur.
+
+Le modèle augmenté écrase `models/obd2_real_fueltrim.safetensors` en
+préservant exactement le schéma de métadonnées dont dépend `obd2_api`
+(features, normalisation, seuil, source), plus deux clés de traçabilité :
+`feedback_cases_used` et `baseline_mae_no_feedback_pct`. Round-trip
+vérifié à chaque run, comme pour `obd2_real`.
+
+Vérifié en pratique (30 relevés dupliqués du CSV comme cas de feedback
+factices, uniquement pour valider la mécanique du pipeline — pas une
+mesure de gain réel puisque le modèle les avait déjà vus) : chargement,
+fusion, ré-entraînement, sauvegarde et rechargement par `obd2_api`
+fonctionnent de bout en bout, métadonnées `feedback_cases_used: 30`
+correctement embarquées.
 
 ## Honnêteté sur les limites
 
