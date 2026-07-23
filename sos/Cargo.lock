@@ -226,6 +226,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sos-simulation"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sos-core",
+ "thiserror",
+]
+
+[[package]]
 name = "sos-store"
 version = "0.1.0"
 dependencies = [

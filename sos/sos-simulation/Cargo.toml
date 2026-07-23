@@ -1,0 +1,18 @@
+[package]
+name = "sos-simulation"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SOS Simulation Engine (backend-independent core): the Simulate trait so the discovery loop is identical whether evidence comes from a PDE solve or a wet lab, an Observation that stamps the honest determinism level on every result, and a record/replay VCR that memoizes runs. Pure Rust, no FFI."
+keywords = ["simulation", "determinism", "reproducibility", "science", "backend"]
+categories = ["science", "simulation"]
+
+[dependencies]
+sos-core = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
