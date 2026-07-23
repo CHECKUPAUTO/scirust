@@ -192,5 +192,10 @@ exclude = [
     # dedicated `hypermemory` CI job (nightly). Keeps the "whole workspace
     # builds on stable" gate intact.
     "scirust-hypermemory",
+    # SOS (Scientific Operating System) lives in its OWN Cargo workspace under
+    # sos/, and is deliberately NOT part of the SciRust workspace build (see
+    # docs/sos/, RFC-0002 §11.6). Excluded so a root `cargo --workspace` never
+    # descends into it and the "whole workspace builds on stable" gate is kept.
+    "sos",
 ]
 resolver = "2"

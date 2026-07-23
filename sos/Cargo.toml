@@ -1,0 +1,25 @@
+# Scientific Operating System (SOS) — its own Cargo workspace.
+#
+# SOS is a SEPARATE workspace from the SciRust one at the repository root: it
+# consumes SciRust as ordinary path dependencies (only from the two backend
+# adapter crates) but is never a member of the SciRust workspace build. See
+# docs/sos/ (RFC-0002) for the architecture this implements.
+[workspace]
+resolver = "2"
+members = ["sos-core"]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.89"
+license = "PolyForm-Noncommercial-1.0.0"
+repository = "https://github.com/Memorithm/scirust"
+
+# Pure-Rust, no-FFI dependency set. All three are already present in the
+# repository lockfile (serde/serde_json are ubiquitous; sha2 backs
+# scirust-provenance and scirust-sciagent's CcosLog; thiserror backs
+# scirust-core), so SOS adds no new third-party download.
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
