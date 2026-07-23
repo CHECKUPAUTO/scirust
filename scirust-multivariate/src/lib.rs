@@ -16,8 +16,9 @@ use std::fmt;
 pub mod robust_geometry;
 
 pub use robust_geometry::{
-    FeatureDescriptor, FittedDistanceMetric, RobustGeometryError, RobustScaleMethod, RobustScaler,
-    RobustScalerConfig, ZeroScalePolicy,
+    AchievedEquivariance, FeatureDescriptor, FittedDistanceMetric, RobustGeometryError,
+    RobustScaleMethod, RobustScaler, RobustScalerConfig, RobustScatterConfig, RobustScatterMethod,
+    RobustScatterModel, RobustScatterReport, RobustUnivariateScale, ZeroScalePolicy,
 };
 
 // ────────────────────────────── helpers ──────────────────────────────
