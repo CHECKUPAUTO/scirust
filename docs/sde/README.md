@@ -9,6 +9,12 @@
 directory is the design document. See [Non-goals](#non-goals-for-v1) and the
 [Roadmap](./10-roadmap-risks-future.md).
 
+> **SDE is now one subsystem of a larger architecture.** The [Scientific
+> Operating System (SOS), RFC-0002](../sos/README.md) makes SDE its *Discovery
+> Engine* and promotes this RFC's `sde-core` substrate into the SOS kernel
+> (`sos-core`). This document stands as the definitive spec of the discovery
+> loop; SOS references it rather than repeating it.
+
 ---
 
 ## The one-paragraph pitch
