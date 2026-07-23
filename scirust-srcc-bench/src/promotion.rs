@@ -166,6 +166,25 @@ pub enum PromotionError {
         /// The composite metric missing from that window.
         metric: String,
     },
+    /// An [`IntervalPromotionGate`]'s five per-unit vectors were not all the same
+    /// length.
+    IntervalLengthMismatch {
+        /// Incumbent lower-bound count.
+        incumbent_lower: usize,
+        /// Incumbent upper-bound count.
+        incumbent_upper: usize,
+        /// Candidate lower-bound count.
+        candidate_lower: usize,
+        /// Candidate upper-bound count.
+        candidate_upper: usize,
+        /// Actual-target count.
+        actual: usize,
+    },
+    /// An [`IntervalPromotionGate`] coverage floor was not in `(0, 1]`.
+    InvalidCoverageFloor {
+        /// The rejected floor.
+        floor: f64,
+    },
 }
 
 impl fmt::Display for PromotionError {
@@ -211,6 +230,26 @@ impl fmt::Display for PromotionError {
                 write!(
                     formatter,
                     "shadow window '{window}' has no paired metric named '{metric}'"
+                )
+            },
+            Self::IntervalLengthMismatch {
+                incumbent_lower,
+                incumbent_upper,
+                candidate_lower,
+                candidate_upper,
+                actual,
+            } =>
+            {
+                write!(
+                    formatter,
+                    "interval inputs have misaligned lengths: incumbent [lower={incumbent_lower}, upper={incumbent_upper}], candidate [lower={candidate_lower}, upper={candidate_upper}], actual={actual}"
+                )
+            },
+            Self::InvalidCoverageFloor { floor } =>
+            {
+                write!(
+                    formatter,
+                    "coverage floor {floor} must be finite and in (0, 1]"
                 )
             },
         }
@@ -625,6 +664,226 @@ impl ExtendedPromotionGate {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Interval-quality promotion gate (direction C, sub-PR 4). Calibrated
+// uncertainty needs its own promotion rule. A point-accuracy gate cannot express
+// it: coverage is an *absolute* constraint (meet a nominal floor) while width is
+// a *relative* improvement, and a tighter interval that under-covers is worse,
+// not better. Additive — a new gate on the same seeded paired-bootstrap
+// machinery, reusing `Decision` and `CriterionFinding`.
+// ---------------------------------------------------------------------------
+
+/// One method's per-unit prediction intervals on a set of evaluation units.
+///
+/// `lower[i]` and `upper[i]` are the bounds for unit `i`; both vectors must align
+/// with the `actual` targets passed to [`IntervalPromotionGate::decide`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct IntervalSample {
+    /// Per-unit lower interval bounds.
+    pub lower: Vec<f64>,
+    /// Per-unit upper interval bounds, aligned with `lower`.
+    pub upper: Vec<f64>,
+}
+
+/// A preregistered **interval-quality** promotion gate.
+///
+/// Promotes the candidate over the incumbent only when both conditions hold on
+/// the seeded paired bootstrap (never on a point estimate):
+///
+/// - **coverage floor** (absolute) — the candidate's empirical coverage must meet
+///   `coverage_floor`, and the *lower* bound of its bootstrap interval must reach
+///   it (defensible coverage, not a lucky mean). Unlike a point-accuracy
+///   guardrail this is absolute: a tighter interval that under-covers is worse
+///   regardless of the incumbent;
+/// - **width improvement** (relative) — the candidate's mean width must beat the
+///   incumbent's by at least `min_width_improvement`, and the *lower* bound of the
+///   paired width-reduction interval must exceed it (a defensible tightening,
+///   symmetric to the point gate's primary test).
+///
+/// Promotion requires both. The width test is paired (same units); the coverage
+/// test bootstraps the candidate's per-unit coverage indicators.
+#[derive(Clone, Debug, PartialEq)]
+pub struct IntervalPromotionGate {
+    /// Absolute nominal coverage the candidate must defensibly meet, in `(0, 1]`.
+    pub coverage_floor: f64,
+    /// Minimum mean width reduction (incumbent − candidate) whose bootstrap lower
+    /// bound must be exceeded to promote. Use `0.0` for "any defensible tightening".
+    pub min_width_improvement: f64,
+    /// Bootstrap resample count.
+    pub resamples: usize,
+    /// Confidence level in `(0, 1)`.
+    pub level: f64,
+    /// Bootstrap seed (recorded in the report).
+    pub seed: u64,
+}
+
+/// The interval-quality gate's reproducible report.
+#[derive(Clone, Debug, PartialEq)]
+pub struct IntervalPromotionReport {
+    /// Promote or hold.
+    pub decision: Decision,
+    /// Width-reduction evidence: `mean` is the mean (incumbent − candidate) width;
+    /// `passed` is true when its CI lower bound exceeds `min_width_improvement`.
+    pub width: CriterionFinding,
+    /// Candidate-coverage evidence: `mean` is the candidate's empirical coverage;
+    /// `passed` is true when its CI lower bound meets `coverage_floor`.
+    pub coverage: CriterionFinding,
+    /// The incumbent's empirical coverage (context — the gate constrains the
+    /// candidate against the absolute floor, not against the incumbent).
+    pub incumbent_coverage: f64,
+    /// Human-readable reasons a hold was issued (empty when promoted).
+    pub reasons: Vec<String>,
+}
+
+impl IntervalPromotionGate {
+    /// Evaluates candidate intervals against incumbent intervals on the same
+    /// units and returns a promote/hold report.
+    ///
+    /// # Errors
+    ///
+    /// [`PromotionError::InvalidCoverageFloor`] when `coverage_floor` is outside
+    /// `(0, 1]`; [`PromotionError::IntervalLengthMismatch`] when the five per-unit
+    /// vectors are not all the same length; [`PromotionError::Comparison`] when a
+    /// target is non-finite or the paired bootstrap rejects the derived values
+    /// (non-finite bounds, fewer than two units, level outside `(0, 1)`, zero
+    /// resamples).
+    pub fn decide(
+        &self,
+        incumbent: &IntervalSample,
+        candidate: &IntervalSample,
+        actual: &[f64],
+    ) -> Result<IntervalPromotionReport, PromotionError> {
+        if !self.coverage_floor.is_finite()
+            || self.coverage_floor <= 0.0
+            || self.coverage_floor > 1.0
+        {
+            return Err(PromotionError::InvalidCoverageFloor {
+                floor: self.coverage_floor,
+            });
+        }
+
+        let units = actual.len();
+
+        if incumbent.lower.len() != units
+            || incumbent.upper.len() != units
+            || candidate.lower.len() != units
+            || candidate.upper.len() != units
+        {
+            return Err(PromotionError::IntervalLengthMismatch {
+                incumbent_lower: incumbent.lower.len(),
+                incumbent_upper: incumbent.upper.len(),
+                candidate_lower: candidate.lower.len(),
+                candidate_upper: candidate.upper.len(),
+                actual: units,
+            });
+        }
+
+        // Coverage indicators cannot flag a non-finite target (they collapse to
+        // "not covered"), so reject one explicitly at its unit.
+        for (index, target) in actual.iter().enumerate()
+        {
+            if !target.is_finite()
+            {
+                return Err(PromotionError::Comparison(
+                    PairedComparisonError::NonFiniteDifference { index },
+                ));
+            }
+        }
+
+        // Per-unit width reduction (incumbent − candidate); the paired bootstrap
+        // rejects any non-finite interval bound through this derived vector.
+        let width_reduction: Vec<f64> = incumbent
+            .lower
+            .iter()
+            .zip(&incumbent.upper)
+            .zip(candidate.lower.iter().zip(&candidate.upper))
+            .map(
+                |((incumbent_low, incumbent_high), (candidate_low, candidate_high))| {
+                    (incumbent_high - incumbent_low) - (candidate_high - candidate_low)
+                },
+            )
+            .collect();
+        let width_report =
+            paired_bootstrap(&width_reduction, self.resamples, self.level, self.seed)?;
+        let width_passed = width_report.confidence_interval.lo > self.min_width_improvement;
+
+        // Per-unit coverage indicators (1.0 covered, 0.0 not).
+        let candidate_covered = coverage_indicators(candidate, actual);
+        let incumbent_covered = coverage_indicators(incumbent, actual);
+        let coverage_report =
+            paired_bootstrap(&candidate_covered, self.resamples, self.level, self.seed)?;
+        let coverage_passed = coverage_report.confidence_interval.lo >= self.coverage_floor;
+        let incumbent_coverage =
+            incumbent_covered.iter().sum::<f64>() / incumbent_covered.len() as f64;
+
+        let mut reasons: Vec<String> = Vec::new();
+
+        if !coverage_passed
+        {
+            reasons.push(format!(
+                "candidate coverage CI lower bound {:.4} fell below floor {:.4}",
+                coverage_report.confidence_interval.lo, self.coverage_floor
+            ));
+        }
+
+        if !width_passed
+        {
+            reasons.push(format!(
+                "width reduction CI lower bound {:.4} did not exceed required {:.4}",
+                width_report.confidence_interval.lo, self.min_width_improvement
+            ));
+        }
+
+        let decision = if coverage_passed && width_passed
+        {
+            Decision::Promote
+        }
+        else
+        {
+            Decision::Hold
+        };
+
+        Ok(IntervalPromotionReport {
+            decision,
+            width: CriterionFinding {
+                metric: "interval_width".to_string(),
+                mean: width_report.mean_difference,
+                confidence_interval: width_report.confidence_interval,
+                passed: width_passed,
+            },
+            coverage: CriterionFinding {
+                metric: "coverage".to_string(),
+                mean: coverage_report.mean_difference,
+                confidence_interval: coverage_report.confidence_interval,
+                passed: coverage_passed,
+            },
+            incumbent_coverage,
+            reasons,
+        })
+    }
+}
+
+/// Per-unit closed-interval coverage indicators (`1.0` when `lower ≤ actual ≤
+/// upper`, else `0.0`). Lengths are validated by the caller before this runs.
+fn coverage_indicators(sample: &IntervalSample, actual: &[f64]) -> Vec<f64> {
+    sample
+        .lower
+        .iter()
+        .zip(&sample.upper)
+        .zip(actual)
+        .map(|((low, high), target)| {
+            if low <= target && target <= high
+            {
+                1.0
+            }
+            else
+            {
+                0.0
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1024,6 +1283,157 @@ mod tests {
         assert_eq!(
             extended_gate(0.1, 0.0).decide(&windows),
             extended_gate(0.1, 0.0).decide(&windows)
+        );
+    }
+
+    // --- interval-quality gate (direction C, sub-PR 4) ---------------------
+
+    fn interval_gate(coverage_floor: f64, min_width_improvement: f64) -> IntervalPromotionGate {
+        IntervalPromotionGate {
+            coverage_floor,
+            min_width_improvement,
+            resamples: 512,
+            level: 0.95,
+            seed: 0x00C4,
+        }
+    }
+
+    fn constant_intervals(lower: f64, upper: f64, count: usize) -> IntervalSample {
+        IntervalSample {
+            lower: vec![lower; count],
+            upper: vec![upper; count],
+        }
+    }
+
+    /// 200 targets: 190 at 1.0 (inside a `[0, 3]` band), 10 at 100.0 (never
+    /// inside) — an empirical coverage of 0.95 for any band that brackets 1.0.
+    fn coverage_targets() -> Vec<f64> {
+        (0..200)
+            .map(|index| if index % 20 == 0 { 100.0 } else { 1.0 })
+            .collect()
+    }
+
+    #[test]
+    fn interval_gate_promotes_a_tighter_still_covering_candidate() {
+        let actual = coverage_targets();
+        let incumbent = constant_intervals(0.0, 3.0, actual.len());
+        let candidate = constant_intervals(0.5, 2.0, actual.len());
+
+        let report = interval_gate(0.88, 0.0)
+            .decide(&incumbent, &candidate, &actual)
+            .unwrap();
+
+        assert_eq!(report.decision, Decision::Promote);
+        assert!(report.width.passed);
+        assert!(report.coverage.passed);
+        // Width reduction is a constant 1.5 (3.0 − 1.5) on every unit.
+        assert!((report.width.mean - 1.5).abs() < 1.0e-9);
+        // Both bands bracket 1.0, so the candidate keeps the incumbent's coverage.
+        assert!((report.coverage.mean - 0.95).abs() < 1.0e-9);
+        assert!((report.incumbent_coverage - 0.95).abs() < 1.0e-9);
+        assert!(report.reasons.is_empty());
+    }
+
+    #[test]
+    fn interval_gate_holds_a_tighter_but_undercovering_candidate() {
+        let actual = coverage_targets();
+        let incumbent = constant_intervals(0.0, 3.0, actual.len());
+        // A far tighter band that no longer brackets the 1.0 targets.
+        let candidate = constant_intervals(1.2, 1.5, actual.len());
+
+        let report = interval_gate(0.88, 0.0)
+            .decide(&incumbent, &candidate, &actual)
+            .unwrap();
+
+        assert_eq!(report.decision, Decision::Hold);
+        assert!(report.width.passed, "the band is genuinely tighter");
+        assert!(!report.coverage.passed, "but it stops covering");
+        assert!((report.coverage.mean - 0.0).abs() < 1.0e-9);
+        assert!(
+            report
+                .reasons
+                .iter()
+                .any(|reason| reason.contains("coverage"))
+        );
+    }
+
+    #[test]
+    fn interval_gate_holds_when_the_tightening_is_not_defensible() {
+        let actual = coverage_targets();
+        let incumbent = constant_intervals(0.0, 3.0, actual.len());
+        // Identical band: covers exactly as well, but is not one bit tighter.
+        let candidate = incumbent.clone();
+
+        let report = interval_gate(0.88, 0.0)
+            .decide(&incumbent, &candidate, &actual)
+            .unwrap();
+
+        assert_eq!(report.decision, Decision::Hold);
+        assert!(report.coverage.passed);
+        assert!(!report.width.passed);
+        assert!((report.width.mean - 0.0).abs() < 1.0e-9);
+        assert!(report.reasons.iter().any(|reason| reason.contains("width")));
+    }
+
+    #[test]
+    fn interval_gate_rejects_a_coverage_floor_outside_the_unit_interval() {
+        let actual = coverage_targets();
+        let incumbent = constant_intervals(0.0, 3.0, actual.len());
+        let candidate = constant_intervals(0.5, 2.0, actual.len());
+
+        assert_eq!(
+            interval_gate(1.5, 0.0).decide(&incumbent, &candidate, &actual),
+            Err(PromotionError::InvalidCoverageFloor { floor: 1.5 }),
+        );
+        assert_eq!(
+            interval_gate(0.0, 0.0).decide(&incumbent, &candidate, &actual),
+            Err(PromotionError::InvalidCoverageFloor { floor: 0.0 }),
+        );
+    }
+
+    #[test]
+    fn interval_gate_rejects_misaligned_inputs() {
+        let actual = coverage_targets();
+        let incumbent = constant_intervals(0.0, 3.0, actual.len());
+        let mut candidate = constant_intervals(0.5, 2.0, actual.len());
+        candidate.upper.pop();
+
+        assert_eq!(
+            interval_gate(0.88, 0.0).decide(&incumbent, &candidate, &actual),
+            Err(PromotionError::IntervalLengthMismatch {
+                incumbent_lower: 200,
+                incumbent_upper: 200,
+                candidate_lower: 200,
+                candidate_upper: 199,
+                actual: 200,
+            }),
+        );
+    }
+
+    #[test]
+    fn interval_gate_rejects_a_non_finite_target() {
+        let mut actual = coverage_targets();
+        actual[3] = f64::NAN;
+        let incumbent = constant_intervals(0.0, 3.0, actual.len());
+        let candidate = constant_intervals(0.5, 2.0, actual.len());
+
+        assert_eq!(
+            interval_gate(0.88, 0.0).decide(&incumbent, &candidate, &actual),
+            Err(PromotionError::Comparison(
+                PairedComparisonError::NonFiniteDifference { index: 3 }
+            )),
+        );
+    }
+
+    #[test]
+    fn interval_gate_decision_is_deterministic() {
+        let actual = coverage_targets();
+        let incumbent = constant_intervals(0.0, 3.0, actual.len());
+        let candidate = constant_intervals(0.5, 2.0, actual.len());
+
+        assert_eq!(
+            interval_gate(0.88, 0.0).decide(&incumbent, &candidate, &actual),
+            interval_gate(0.88, 0.0).decide(&incumbent, &candidate, &actual),
         );
     }
 }
