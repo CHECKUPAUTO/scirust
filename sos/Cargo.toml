@@ -13,6 +13,7 @@ members = [
     "sos-registry",
     "sos-knowledge",
     "sos-reasoning",
+    "sos-curiosity",
 ]
 
 [workspace.package]
@@ -30,6 +31,7 @@ repository = "https://github.com/Memorithm/scirust"
 sos-core = { path = "sos-core" }
 sos-store = { path = "sos-store" }
 sos-knowledge = { path = "sos-knowledge" }
+sos-reasoning = { path = "sos-reasoning" }
 # Pure-Rust, no-FFI third-party set (all already in the repository lockfile).
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
