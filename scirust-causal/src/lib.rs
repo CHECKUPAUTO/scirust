@@ -1,18 +1,29 @@
-//! Deterministic invertible cubic flows and constrained causal-structure
-//! optimization.
+//! Deterministic invertible cubic flows, constrained causal-structure
+//! optimization, and a typed data model for honest causal claims.
 //!
 //! # Scope
 //!
-//! Two capabilities:
+//! Three capabilities:
 //!
 //! 1. an exactly invertible **strictly lower-triangular cubic map**
-//!    ([`TriangularCubicFlow`]); and
+//!    ([`TriangularCubicFlow`]);
 //! 2. a continuous **causal-structure optimizer** ([`optimize_causal`]) — a
 //!    NOTEARS-style smooth score ([`CubicCausalScore`]) with a polynomial
 //!    acyclicity penalty ([`PolynomialAcyclicity`]) assembled into an
 //!    augmented-Lagrangian objective ([`CausalObjective`]) and minimized by a
 //!    deterministic BFGS loop, with optional thresholding into a
-//!    [`scirust_graph::dag::CausalDag`] ([`extract_causal_dag`]).
+//!    [`scirust_graph::dag::CausalDag`] ([`extract_causal_dag`]); and
+//! 3. a **typed causal-contract data model** — [`CausalVariable`]s with
+//!    [`VariableRole`]s, [`Intervention`]s grouped into [`Environment`]s,
+//!    provenance-carrying [`CausalDataset`]s, an [`AssumptionRegistry`] that
+//!    tracks *why* each assumption is believed to hold, [`GraphConstraints`]
+//!    (background knowledge a candidate DAG must satisfy), and
+//!    [`CausalCertificate`] — the mandated shape for reporting any causal
+//!    claim as a conditional statement rather than an assertion. This layer
+//!    defines *contracts*, not algorithms: it contains no discovery,
+//!    identification, or estimation procedure. Its [`CausalCertificateBuilder`]
+//!    structurally forbids attaching a numeric estimate to any status other
+//!    than [`IdentifiabilityStatus::Identifiable`] — see its docs.
 //!
 //! # Causal interpretation — read before using the discovery API
 //!
@@ -68,21 +79,37 @@
 #![forbid(unsafe_code)]
 
 mod acyclicity;
+mod assumptions;
+mod certificate;
 mod cubic_score;
+mod dataset;
+mod environment;
 mod error;
+mod fingerprint;
 mod graph;
+mod graph_constraints;
+mod intervention;
 mod objective;
 mod optimize;
 mod permutation;
 mod synthetic;
 mod triangular_cubic;
+mod variable;
 
 pub use acyclicity::PolynomialAcyclicity;
+pub use assumptions::{AssumptionBasis, AssumptionRecord, AssumptionRegistry, CausalAssumption};
+pub use certificate::{CausalCertificate, CausalCertificateBuilder, IdentifiabilityStatus};
 pub use cubic_score::CubicCausalScore;
+pub use dataset::{CausalDataset, SampleBlock};
+pub use environment::Environment;
 pub use error::CausalError;
+pub use fingerprint::sha256_hex;
 pub use graph::{GraphExtractionConfig, extract_causal_dag};
+pub use graph_constraints::{ConstraintViolation, GraphConstraints};
+pub use intervention::{Intervention, InterventionKind};
 pub use objective::{AugmentedLagrangianConfig, CausalObjective, ObjectiveEvaluation};
 pub use optimize::{CausalOptimizationResult, OptimizerConfig, TerminationReason, optimize_causal};
 pub use permutation::{VariablePermutation, triangularize_from_dag};
 pub use synthetic::{SyntheticDataConfig, generate_causal_samples, generate_noise_matrix};
 pub use triangular_cubic::TriangularCubicFlow;
+pub use variable::{CausalVariable, VariableKind, VariableRole, validate_variable_set};
