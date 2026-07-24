@@ -1,0 +1,29 @@
+[package]
+name = "sos-mcp"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SOS MCP server: exposes the Scientific Operating System's syscalls (store, knowledge, curiosity, provenance, reproducibility-check, planning, publication, plugins) as Model Context Protocol tools over blocking stdio, so any agent can discover and drive them deterministically. Read tools wrap sos-cli directly; the opt-in `propose` tool is the untrusted-proposer entry point (Invariant IX) — every agent-submitted proposal is content-addressed, grounded, and attested into a tamper-evident chain, never trusted until a deterministic engine disposes of it. Pure Rust, no FFI, no async runtime, no new third-party dependency."
+keywords = ["mcp", "agent", "protocol", "science"]
+categories = ["science", "command-line-utilities"]
+
+[[bin]]
+name = "sos-mcp"
+path = "src/bin/sos-mcp.rs"
+doc = false
+
+[dependencies]
+sos-core = { workspace = true }
+sos-store = { workspace = true }
+sos-cli = { workspace = true }
+sos-ccos = { workspace = true }
+sos-planner = { workspace = true }
+sos-publication = { workspace = true }
+sos-registry = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+sos-reasoning = { workspace = true }

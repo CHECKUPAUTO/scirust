@@ -22,7 +22,7 @@ stubs, no TODOs, no placeholders cross a phase boundary.
 | **P2 — Knowledge & Reasoning** | `sos-knowledge`, `sos-reasoning` | **done** (deterministic cores landed; Datalog / e-graph / theorem-proving deferred to `sos-scirust` per Invariant VIII) |
 | **P3 — Discovery, Planning, Simulation** | `sos-workflow`, `sos-simulation`, `sos-planner`, re-homed `sde-*` stages | engine **cores landed** — the memoized scheduler, the backend-independent `Simulate` interface, and the planner (utility ranking + information-exhaustion + stopping rules). The EIG/solver **numerics**, manifest resolution, and the re-homed discovery stages await `sos-scirust` / a frontend per Invariant VIII |
 | **P4 — Curiosity & Theory** | `sos-curiosity`, `sos-theory` | **cores landed** (both need only the P2 substrate; information-gain / analogy / Bayes-factor ranking / discriminating-experiment planning await P3's `sos-planner` and `scirust-*` per Invariant VIII) |
-| **P5 — Userland** | `sos-publication`, `sos-cli` | `sos-publication` **core landed** — the publication is a verifiable projection of the object graph: content-addressed claims typed-bound to their evidence, the multi-phase claim/scope/reproducibility verifier, and deterministic Markdown/HTML/JSON. Re-execution of exhibits is `sos-workflow`'s job and real signing is `sos-provenance`'s per Invariant VIII; this crate consumes decisions, never recomputes them. `sos-cli` **porcelain landed** — `init`/`clone`/`push`/`log`/`know`/`ask`/`why`/`verify`/`diff`/`plan`/`publish`/`plugins` over the already-landed engines and the new persistent `FileStore`; `sos run` (needs a real `StageExecutor` backend) and a true `sos merge` are deferred, not stubbed |
+| **P5 — Userland** | `sos-publication`, `sos-cli`, `sos-mcp` | `sos-publication` **core landed** — the publication is a verifiable projection of the object graph: content-addressed claims typed-bound to their evidence, the multi-phase claim/scope/reproducibility verifier, and deterministic Markdown/HTML/JSON. Re-execution of exhibits is `sos-workflow`'s job and real signing is `sos-provenance`'s per Invariant VIII; this crate consumes decisions, never recomputes them. `sos-cli` **porcelain landed** — `init`/`clone`/`push`/`log`/`know`/`ask`/`why`/`verify`/`diff`/`plan`/`publish`/`plugins` over the already-landed engines and the new persistent `FileStore`; `sos run` (needs a real `StageExecutor` backend) and a true `sos merge` are deferred, not stubbed. `sos-mcp` **server landed** — the same syscalls as MCP tools over blocking stdio JSON-RPC (no async runtime, no new third-party dependency), with the untrusted-proposer tool opt-in per Invariant IX |
 | **P6 — Backend adapters** | `sos-ccos` (cognitive), `sos-scirust` (computational) | `sos-ccos` **deterministic boundary landed** — the untrusted-proposer contract (Invariant IX): grounded, content-addressed proposals, the deterministic disposition gate, a tamper-evident attestation chain, and a no-LLM memory fallback. The generative LLM/CCOS backend and `sos-scirust`'s numerics are the deferred out-of-process backends per Invariant VIII |
 
 ### Landed
@@ -221,6 +221,23 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   not yet landed — and a true `sos merge` needs conflict-resolution semantics
   no crate has designed yet; neither is stubbed. A network remote for
   `clone`/`push` is `sos-mcp`'s domain.)
+- **`sos-mcp`** — the SOS Model Context Protocol server. Exposes the same
+  syscalls as `sos-cli` (`sos_log`/`sos_why`/`sos_verify`/`sos_diff`/`sos_know`/
+  `sos_ask`/`sos_plan`/`sos_publish`/`sos_plugins`) as MCP tools over a
+  blocking stdio JSON-RPC 2.0 transport
+  ([`server.rs`](sos-mcp/src/server.rs)) — no async runtime, no third-party
+  MCP/JSON-RPC crate, mirroring `scirust-mcp`'s own proven pattern in this
+  repository rather than adding a new dependency. Read tools call
+  [`sos-cli`](sos-cli)'s command functions directly (one implementation, not
+  two); `sos_plan`/`sos_publish`/`sos_plugins` take their data **inline** as
+  MCP arguments rather than a file path. Every tool call is attested into a
+  [`CcosChain`](sos-ccos/src/attest.rs) — reusing `sos-ccos`'s tamper-evident
+  chain rather than a bespoke audit log, because an MCP call from an agent
+  *is* a cognitive act in RFC-0002's framing. `sos_propose` — the
+  untrusted-proposer entry point (Invariant IX) — is **opt-in**: a
+  [`RegistryProfile::Query`](sos-mcp/src/lib.rs) server never registers it at
+  all, so a strictly read-only deployment is one by construction, not by
+  policy alone.
 
 ## Engineering standards (the gate)
 

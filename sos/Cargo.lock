@@ -216,6 +216,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "sos-mcp"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sos-ccos",
+ "sos-cli",
+ "sos-core",
+ "sos-planner",
+ "sos-publication",
+ "sos-reasoning",
+ "sos-registry",
+ "sos-store",
+]
+
+[[package]]
 name = "sos-planner"
 version = "0.1.0"
 dependencies = [
