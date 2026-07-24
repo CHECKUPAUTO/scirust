@@ -9,10 +9,10 @@
 //!
 //! ## What's here
 //!
-//! Gap #1 of the `sos-scirust` scoping plan — `sos-planner` already ships the
-//! ranking/stopping-rule machinery and deliberately consumes
-//! [`sos_planner::Estimate`]s rather than computing them; this crate is the
-//! real computation, not a change to that contract:
+//! **Gap #1** — `sos-planner` already ships the ranking/stopping-rule
+//! machinery and deliberately consumes [`sos_planner::Estimate`]s rather than
+//! computing them; this crate is the real computation, not a change to that
+//! contract. All three EIG tiers SDE §08 §3 names are landed:
 //!
 //! * [`eig`] — **tier 1**, closed-form: [`GpEigEstimator`] wraps
 //!   [`scirust_gp::GaussianProcess`]'s exact posterior variance via the
@@ -34,18 +34,32 @@
 //!   `SplitMix64`. `L1`, and — unlike tiers 1/2 — a genuinely non-zero
 //!   standard error, computed for real rather than asserted.
 //!
-//! Gap #1's three tiers are now all landed — every EIG-computation path SDE
-//! §08 §3 names.
+//! **Gap #3** (`sos-simulation` backends) — `sos-simulation` ships the
+//! backend-independent [`sos_simulation::Simulate`] syscall, honest
+//! determinism stamping, and record/replay, but implements no solver, the
+//! same Invariant VIII boundary gap #1 respects for `sos-planner`:
+//!
+//! * [`ode`] — first backend: [`ode::Rk4OdeSimulator`] runs
+//!   `dy/dt = f(t, y)` via `scirust_solvers`'s fixed-step RK4. `L3`,
+//!   seedless-deterministic (RFC-0002 §08 §1's classification of
+//!   `scirust-solvers` itself) — a fixed sequence of scalar `f64` operations
+//!   with no adaptive branching, unlike an adaptive-step or
+//!   iterative-to-tolerance solver's `L2`-plus-certificate case.
 //!
 //! ## What is deliberately not here yet
 //!
-//! Gaps #2–8 (the `sos-workflow` `StageExecutor`, `sos-simulation` backends,
-//! and the rest) are untouched — each is its own increment, not stubbed here.
+//! Gap #2 (the `sos-workflow` `StageExecutor`) needs a dispatch/registry
+//! mechanism first — a materially different, larger increment — and gaps
+//! #4–8 are untouched; each is its own increment, not stubbed here.
 //! Registry-mediated resolution (binding a `sos-registry` `PluginDescriptor`
-//! to any of the three estimators above) is also deferred: `sos-scirust` is
-//! documented as the in-process "Static Rust... the default" transport
-//! (RFC-0002 §10 §1), so direct construction is the expected shape until a
-//! caller actually needs to swap implementations.
+//! to any capability above) is also deferred: `sos-scirust` is documented as
+//! the in-process "Static Rust... the default" transport (RFC-0002 §10 §1),
+//! so direct construction is the expected shape until a caller actually needs
+//! to swap implementations. Within gap #3 itself, only the RK4 fixed-step
+//! integrator is here — `scirust-solvers`' adaptive Dormand-Prince 5(4),
+//! nonlinear (Newton/Broyden), and quadrature are separate follow-on
+//! backends, and `scirust-signal`/`scirust-sim`'s executor kinds (SDE §08 §2)
+//! are untouched.
 //!
 //! ## Example
 //!
@@ -82,8 +96,10 @@ pub mod bo;
 pub mod eig;
 pub mod error;
 pub mod nmc;
+pub mod ode;
 
 pub use bo::BoResult;
 pub use eig::GpEigEstimator;
 pub use error::{Result, ScirustError};
 pub use nmc::NestedMcEigEstimator;
+pub use ode::Rk4OdeSimulator;
