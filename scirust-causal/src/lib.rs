@@ -3,7 +3,7 @@
 //!
 //! # Scope
 //!
-//! Four capabilities:
+//! Five capabilities:
 //!
 //! 1. an exactly invertible **strictly lower-triangular cubic map**
 //!    ([`TriangularCubicFlow`]);
@@ -25,27 +25,44 @@
 //!    structurally forbids attaching a numeric estimate to any status other
 //!    than [`IdentifiabilityStatus::Identifiable`] — see its docs; and
 //! 4. deterministic, robust **conditional-independence (CI) testing**
-//!    ([`PartialCorrelationTest`]) — the statistical oracle a future
-//!    causal-discovery algorithm (e.g. PC-Stable) would consume. Classical
-//!    (QR-residualized, optionally Fisher-z calibrated), robust
-//!    (OGK-residualized), and deterministic-permutation-calibrated variants
-//!    are provided; none of them perform causal discovery — see the private
+//!    ([`PartialCorrelationTest`]) — the statistical oracle a
+//!    causal-discovery algorithm consumes. Classical (QR-residualized,
+//!    optionally Fisher-z calibrated), robust (OGK-residualized), and
+//!    deterministic-permutation-calibrated variants are provided; none of
+//!    them perform causal discovery on their own — see the private
 //!    `conditional_independence` module's own docs (readable via the source
 //!    or `cargo doc --document-private-items`) for the exact scientific
-//!    scope and honesty caveats this capability stays within.
+//!    scope and honesty caveats this capability stays within; and
+//! 5. constraint-based **equivalence-class discovery**
+//!    ([`PcStable`]/[`EquivalenceClassDiscovery`]) — repeated CI testing
+//!    (capability 4) assembled into skeleton search, unshielded-collider
+//!    (v-structure) detection, and Meek's orientation rules, returning a
+//!    [`Cpdag`] that honestly marks which edges the evidence *compels* versus
+//!    leaves *reversible* — the equivalence-class gap capability 2's own docs
+//!    (below) name explicitly. This is a **separate, additive** discovery
+//!    paradigm from capability 2 (constraint-based vs. score-based); neither
+//!    calls the other. See the private `equivalence_class` module's own docs
+//!    for the exact scientific scope, in particular what a `Cpdag` from this
+//!    procedure does and does not claim about latent confounding and
+//!    faithfulness.
 //!
 //! # Causal interpretation — read before using the discovery API
 //!
 //! **A fitted interaction matrix, or a `CausalDag` extracted from it, is a model
 //! selected by optimization. It is not, and must not be reported as, the true
-//! causal graph.** This crate performs *structure optimization*, which is a
-//! source of hypotheses, not a causal oracle. Specifically:
+//! causal graph.** This crate's continuous optimizer ([`optimize_causal`],
+//! capability 2 above) performs *structure optimization*, which is a source
+//! of hypotheses, not a causal oracle. Specifically:
 //!
 //! - Observational structure learning can identify a causal DAG only up to its
-//!   **Markov-equivalence class** (a CPDAG); returning a single directed graph is
-//!   at best *one representative* of that class. This crate does **not** compute
-//!   the equivalence class and does **not** mark which edges are compelled versus
-//!   reversible.
+//!   **Markov-equivalence class** (a CPDAG); a single directed graph is at best
+//!   *one representative* of that class. [`optimize_causal`]/[`extract_causal_dag`]
+//!   do **not** compute the equivalence class and do **not** mark which edges
+//!   are compelled versus reversible — for that, use the separate
+//!   constraint-based [`PcStable`] (capability 5 above), which returns exactly
+//!   that marking (subject to *its own* stated assumptions and limitations,
+//!   documented in the private `equivalence_class` module — it is not a
+//!   universal fix for what this optimizer cannot claim).
 //! - Even that representative is meaningful only **under strong, unverified
 //!   assumptions**: acyclicity; **causal sufficiency** (no latent common causes);
 //!   faithfulness; the correct functional/noise form (here an additive
@@ -60,10 +77,13 @@
 //!   (notably for an all-zeros start, the empty-graph saddle) and every
 //!   non-`Converged` reason mean the matrix carries **no** optimality guarantee.
 //!
-//! Effect identification, adjustment sets, conditional-independence testing,
-//! equivalence-class (CPDAG/PAG) discovery, latent-confounding handling, and
-//! sensitivity analysis are **out of scope for this crate as it stands** and are
-//! the subject of later work.
+//! Conditional-independence testing (capability 4) and constraint-based
+//! Markov-equivalence-class discovery (capability 5, CPDAG only — **not**
+//! PAG, which needs latent-confounding-robust discovery this crate does not
+//! implement) exist; see their own docs for exact scope. Effect
+//! identification, adjustment sets, latent-confounding-robust discovery
+//! (e.g. FCI), and sensitivity analysis remain **out of scope for this crate
+//! as it stands** and are the subject of later work.
 //!
 //! # Cubic-flow mathematical properties
 //!
@@ -91,9 +111,11 @@ mod acyclicity;
 mod assumptions;
 mod certificate;
 mod conditional_independence;
+mod cpdag;
 mod cubic_score;
 mod dataset;
 mod environment;
+mod equivalence_class;
 mod error;
 mod fingerprint;
 mod graph;
@@ -101,10 +123,12 @@ mod graph_constraints;
 mod intervention;
 mod objective;
 mod optimize;
+mod orientation;
 mod partial_correlation;
 mod permutation;
 mod permutation_calibration;
 mod robust_partial_correlation;
+mod skeleton_discovery;
 mod synthetic;
 mod triangular_cubic;
 mod variable;
@@ -117,9 +141,13 @@ pub use conditional_independence::{
     ConditionalIndependenceResult, ConditionalIndependenceTest, IndependenceDecision,
     MissingValuePolicy, PartialCorrelationTest, RegimeSelection, ResidualizationMethod,
 };
+pub use cpdag::Cpdag;
 pub use cubic_score::CubicCausalScore;
 pub use dataset::{CausalDataset, SampleBlock};
 pub use environment::Environment;
+pub use equivalence_class::{
+    EquivalenceClassConfig, EquivalenceClassDiscovery, EquivalenceClassResult, PcStable,
+};
 pub use error::CausalError;
 pub use fingerprint::sha256_hex;
 pub use graph::{GraphExtractionConfig, extract_causal_dag};
