@@ -9,26 +9,34 @@
 //!
 //! ## What's here
 //!
-//! [`eig`] — a closed-form expected-information-gain estimator for
-//! `sos-planner`, wrapping [`scirust_gp::GaussianProcess`]'s exact posterior
-//! variance via the Gaussian-channel mutual-information formula. This is
-//! gap #1 (tier 1) of the `sos-scirust` scoping plan: `sos-planner` already
-//! ships the ranking/stopping-rule machinery and deliberately consumes
+//! Gap #1 of the `sos-scirust` scoping plan — `sos-planner` already ships the
+//! ranking/stopping-rule machinery and deliberately consumes
 //! [`sos_planner::Estimate`]s rather than computing them; this crate is the
-//! real computation, not a change to that contract.
+//! real computation, not a change to that contract:
+//!
+//! * [`eig`] — **tier 1**, closed-form: [`GpEigEstimator`] wraps
+//!   [`scirust_gp::GaussianProcess`]'s exact posterior variance via the
+//!   Gaussian-channel mutual-information formula. Exact, `L3`, zero standard
+//!   error.
+//! * [`bo`] — **tier 2**, search: [`bo::BoResult`] reuses
+//!   `scirust-automl`'s seeded `bayesian_optimize`/`expected_improvement` loop
+//!   to maximize `sos-planner`'s own [`sos_planner::UtilityPolicy::utility`]
+//!   over a *continuous* design box, rather than ranking a pre-enumerated
+//!   discrete set. Seeded, `L1` (SDE §08 §6's `automl` classification),
+//!   even though the EIG value at the returned point is itself exact.
 //!
 //! ## What is deliberately not here yet
 //!
-//! Per gap #1's remaining tiers: the Bayesian-optimization search loop
-//! (`scirust-automl::bayesian_optimize`) and the seeded nested-Monte-Carlo
-//! fallback for non-Gaussian likelihoods (`scirust-stats::SplitMix64`) are
-//! separate, documented follow-on increments. So are gaps #2–8 (the
-//! `sos-workflow` `StageExecutor`, `sos-simulation` backends, and the rest) —
-//! each is its own increment, not stubbed here. Registry-mediated resolution
-//! (binding a `sos-registry` `PluginDescriptor` to this estimator) is also
-//! deferred: `sos-scirust` is documented as the in-process "Static Rust...
-//! the default" transport (RFC-0002 §10 §1), so direct construction is the
-//! expected shape until a caller actually needs to swap implementations.
+//! Gap #1's third tier — the seeded nested-Monte-Carlo fallback for discrete
+//! hypothesis discrimination with non-Gaussian likelihoods
+//! (`scirust-stats::SplitMix64`) — is a separate, documented follow-on
+//! increment. So are gaps #2–8 (the `sos-workflow` `StageExecutor`,
+//! `sos-simulation` backends, and the rest) — each is its own increment, not
+//! stubbed here. Registry-mediated resolution (binding a `sos-registry`
+//! `PluginDescriptor` to either estimator) is also deferred: `sos-scirust` is
+//! documented as the in-process "Static Rust... the default" transport
+//! (RFC-0002 §10 §1), so direct construction is the expected shape until a
+//! caller actually needs to swap implementations.
 //!
 //! ## Example
 //!
@@ -61,8 +69,10 @@
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
+pub mod bo;
 pub mod eig;
 pub mod error;
 
+pub use bo::BoResult;
 pub use eig::GpEigEstimator;
 pub use error::{Result, ScirustError};
