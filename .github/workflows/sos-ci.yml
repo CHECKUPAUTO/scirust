@@ -14,6 +14,9 @@ name: SOS CI
 #             and the locally-run gate.
 #   * test  — stable, to prove SOS's "builds and passes on stable" promise.
 #   * msrv  — 1.89.0, the declared MSRV.
+#   * lint-deps — stable; a pure `cargo metadata` + Python (stdlib only, no
+#             pip install) check, so any toolchain that can run `cargo
+#             metadata` works. See docs/sos/11-workspace-and-crate-graph.md §5.
 
 on:
   push:
@@ -102,3 +105,21 @@ jobs:
           workspaces: "sos"
       - name: Check on MSRV
         run: cargo +1.89.0 check --manifest-path sos/Cargo.toml --all-targets --locked
+
+  sos-lint-deps:
+    name: SOS Dependency Invariants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: "sos"
+      - name: Run lint self-tests
+        run: python3 sos/scripts/test_lint_deps.py -v
+      - name: Enforce dependency invariants (Invariant VIII, RFC-0002 §11.5)
+        run: python3 sos/scripts/lint-deps.py

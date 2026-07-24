@@ -18,7 +18,7 @@ stubs, no TODOs, no placeholders cross a phase boundary.
 
 | Phase | Scope | Status |
 |-------|-------|--------|
-| **P1 — Kernel & substrate** | `sos-core`, `sos-store`, `sos-provenance`, `sos-registry`, `sos-repro` (+ SOS CI) | **done** (`sos-repro` core landed on the merged scheduler — env-lock + drift + the level-aware reproduction contract; the numeric `L2`/`L1` verdict is backend-supplied per Invariant VIII) |
+| **P1 — Kernel & substrate** | `sos-core`, `sos-store`, `sos-provenance`, `sos-registry`, `sos-repro` (+ SOS CI) | **done** (`sos-repro` core landed on the merged scheduler — env-lock + drift + the level-aware reproduction contract; the numeric `L2`/`L1` verdict is backend-supplied per Invariant VIII). The workspace's 4 dependency invariants are now CI-**enforced**, not just documented — see the dependency-invariant lint under Landed below |
 | **P2 — Knowledge & Reasoning** | `sos-knowledge`, `sos-reasoning` | **done** (deterministic cores landed; Datalog / e-graph / theorem-proving deferred to `sos-scirust` per Invariant VIII) |
 | **P3 — Discovery, Planning, Simulation** | `sos-workflow`, `sos-simulation`, `sos-planner`, re-homed `sde-*` stages | engine **cores landed** — the memoized scheduler, the backend-independent `Simulate` interface, and the planner (utility ranking + information-exhaustion + stopping rules). The EIG/solver **numerics**, manifest resolution, and the re-homed discovery stages await `sos-scirust` / a frontend per Invariant VIII |
 | **P4 — Curiosity & Theory** | `sos-curiosity`, `sos-theory` | **cores landed** (both need only the P2 substrate; information-gain / analogy / Bayes-factor ranking / discriminating-experiment planning await P3's `sos-planner` and `scirust-*` per Invariant VIII) |
@@ -238,6 +238,15 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   [`RegistryProfile::Query`](sos-mcp/src/lib.rs) server never registers it at
   all, so a strictly read-only deployment is one by construction, not by
   policy alone.
+- **Dependency-invariant lint** — [`sos/scripts/lint-deps.py`](scripts/lint-deps.py)
+  reads real `cargo metadata` and mechanically enforces all four rules from
+  [11 §5](../docs/sos/11-workspace-and-crate-graph.md#5-dependency-invariants-enforced-in-ci):
+  `sos-core` is the universal sink (every crate reaches it, directly or
+  transitively), the workspace graph is acyclic, engine-to-engine composition
+  is confined to the documented edges, and `scirust-*`/CCOS naming is confined
+  to `sos-scirust`/`sos-ccos` (Invariant VIII) — in *any* dependency kind, so a
+  test-only leak fails it too. Runs as its own job
+  ([`sos-lint-deps`](../.github/workflows/sos-ci.yml)) on every `sos/` change.
 
 ## Engineering standards (the gate)
 
@@ -247,6 +256,7 @@ Every crate must pass, on every change:
 cargo fmt   --manifest-path sos/Cargo.toml --all --check
 cargo clippy --manifest-path sos/Cargo.toml --all-targets -- -D warnings
 cargo test  --manifest-path sos/Cargo.toml
+python3 sos/scripts/lint-deps.py
 ```
 
 - Rust **stable**, MSRV **1.89**.
@@ -254,12 +264,15 @@ cargo test  --manifest-path sos/Cargo.toml
 - Deterministic + property-based tests (seeded generators; no unseeded
   randomness, no wall-clock in hashed state).
 - No `unsafe` (`#![forbid(unsafe_code)]`), no FFI.
+- The 4 dependency invariants ([11 §5](../docs/sos/11-workspace-and-crate-graph.md#5-dependency-invariants-enforced-in-ci))
+  hold, mechanically — [`sos/scripts/lint-deps.py`](scripts/lint-deps.py) reads
+  real `cargo metadata`, not intent.
 
 > SOS is a separate, excluded workspace, so the repository's root CI does not
 > build it. A dedicated **SOS CI** workflow
 > ([`.github/workflows/sos-ci.yml`](../.github/workflows/sos-ci.yml)) gates it
 > upstream with the commands above — fmt (on the repo's pinned nightly, since
 > `rustfmt.toml` uses unstable options), clippy `-D warnings`, `test` on stable,
-> and an MSRV 1.89 check — path-filtered to run only when `sos/` changes. The
-> workspace's `Cargo.lock` is committed so CI builds with `--locked` are
-> reproducible.
+> an MSRV 1.89 check, and the dependency-invariant lint — path-filtered to run
+> only when `sos/` changes. The workspace's `Cargo.lock` is committed so CI
+> builds with `--locked` are reproducible.
