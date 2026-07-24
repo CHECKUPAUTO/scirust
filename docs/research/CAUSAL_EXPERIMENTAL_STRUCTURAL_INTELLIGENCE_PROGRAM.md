@@ -280,7 +280,7 @@ already used elsewhere in the workspace at the same version bounds, e.g.
 
 **Status: Draft.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, opened
 from `origin/master` at `5fd76dcc` (the commit 5C.1 merged onto, unchanged by
-this phase). PR: to be recorded once opened. Additive to `scirust-causal` (no
+this phase). PR #821. Additive to `scirust-causal` (no
 existing public API changed). This phase implements **statistical testing
 only** — it does **not** implement PC-Stable or any other causal
 graph-discovery algorithm, does not compute a CPDAG/PAG equivalence class,
