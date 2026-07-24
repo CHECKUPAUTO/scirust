@@ -3,7 +3,7 @@
 //!
 //! # Scope
 //!
-//! Three capabilities:
+//! Four capabilities:
 //!
 //! 1. an exactly invertible **strictly lower-triangular cubic map**
 //!    ([`TriangularCubicFlow`]);
@@ -23,7 +23,16 @@
 //!    defines *contracts*, not algorithms: it contains no discovery,
 //!    identification, or estimation procedure. Its [`CausalCertificateBuilder`]
 //!    structurally forbids attaching a numeric estimate to any status other
-//!    than [`IdentifiabilityStatus::Identifiable`] — see its docs.
+//!    than [`IdentifiabilityStatus::Identifiable`] — see its docs; and
+//! 4. deterministic, robust **conditional-independence (CI) testing**
+//!    ([`PartialCorrelationTest`]) — the statistical oracle a future
+//!    causal-discovery algorithm (e.g. PC-Stable) would consume. Classical
+//!    (QR-residualized, optionally Fisher-z calibrated), robust
+//!    (OGK-residualized), and deterministic-permutation-calibrated variants
+//!    are provided; none of them perform causal discovery — see the private
+//!    `conditional_independence` module's own docs (readable via the source
+//!    or `cargo doc --document-private-items`) for the exact scientific
+//!    scope and honesty caveats this capability stays within.
 //!
 //! # Causal interpretation — read before using the discovery API
 //!
@@ -81,6 +90,7 @@
 mod acyclicity;
 mod assumptions;
 mod certificate;
+mod conditional_independence;
 mod cubic_score;
 mod dataset;
 mod environment;
@@ -91,7 +101,10 @@ mod graph_constraints;
 mod intervention;
 mod objective;
 mod optimize;
+mod partial_correlation;
 mod permutation;
+mod permutation_calibration;
+mod robust_partial_correlation;
 mod synthetic;
 mod triangular_cubic;
 mod variable;
@@ -99,6 +112,11 @@ mod variable;
 pub use acyclicity::PolynomialAcyclicity;
 pub use assumptions::{AssumptionBasis, AssumptionRecord, AssumptionRegistry, CausalAssumption};
 pub use certificate::{CausalCertificate, CausalCertificateBuilder, IdentifiabilityStatus};
+pub use conditional_independence::{
+    CalibrationMethod, ConditionalIndependenceConfig, ConditionalIndependenceMethod,
+    ConditionalIndependenceResult, ConditionalIndependenceTest, IndependenceDecision,
+    MissingValuePolicy, PartialCorrelationTest, RegimeSelection, ResidualizationMethod,
+};
 pub use cubic_score::CubicCausalScore;
 pub use dataset::{CausalDataset, SampleBlock};
 pub use environment::Environment;
@@ -110,6 +128,7 @@ pub use intervention::{Intervention, InterventionKind};
 pub use objective::{AugmentedLagrangianConfig, CausalObjective, ObjectiveEvaluation};
 pub use optimize::{CausalOptimizationResult, OptimizerConfig, TerminationReason, optimize_causal};
 pub use permutation::{VariablePermutation, triangularize_from_dag};
+pub use robust_partial_correlation::RobustCalibration;
 pub use synthetic::{SyntheticDataConfig, generate_causal_samples, generate_noise_matrix};
 pub use triangular_cubic::TriangularCubicFlow;
 pub use variable::{CausalVariable, VariableKind, VariableRole, validate_variable_set};
