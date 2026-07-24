@@ -7,9 +7,11 @@ The architecture it realizes is specified in [`docs/sos/`](../docs/sos/)
 
 SOS is a **separate Cargo workspace** from the SciRust workspace at the
 repository root (RFC-0002 §11.6): it is excluded from the root workspace build,
-has its own `Cargo.lock`, and will consume SciRust only from the two backend
-adapter crates. This keeps SciRust's "whole workspace builds on stable" gate
-intact and lets SOS evolve on its own cadence.
+has its own `Cargo.lock`, and consumes SciRust only from the two backend
+adapter crates (`sos-scirust`, `sos-ccos`) — mechanically enforced by
+[`sos/scripts/lint-deps.py`](scripts/lint-deps.py). This keeps SciRust's
+"whole workspace builds on stable" gate intact and lets SOS evolve on its own
+cadence.
 
 ## Status
 
@@ -20,10 +22,10 @@ stubs, no TODOs, no placeholders cross a phase boundary.
 |-------|-------|--------|
 | **P1 — Kernel & substrate** | `sos-core`, `sos-store`, `sos-provenance`, `sos-registry`, `sos-repro` (+ SOS CI) | **done** (`sos-repro` core landed on the merged scheduler — env-lock + drift + the level-aware reproduction contract; the numeric `L2`/`L1` verdict is backend-supplied per Invariant VIII). The workspace's 4 dependency invariants are now CI-**enforced**, not just documented — see the dependency-invariant lint under Landed below |
 | **P2 — Knowledge & Reasoning** | `sos-knowledge`, `sos-reasoning` | **done** (deterministic cores landed; Datalog / e-graph / theorem-proving deferred to `sos-scirust` per Invariant VIII) |
-| **P3 — Discovery, Planning, Simulation** | `sos-workflow`, `sos-simulation`, `sos-planner`, re-homed `sde-*` stages | engine **cores landed** — the memoized scheduler, the backend-independent `Simulate` interface, and the planner (utility ranking + information-exhaustion + stopping rules). The EIG/solver **numerics**, manifest resolution, and the re-homed discovery stages await `sos-scirust` / a frontend per Invariant VIII |
+| **P3 — Discovery, Planning, Simulation** | `sos-workflow`, `sos-simulation`, `sos-planner`, re-homed `sde-*` stages | engine **cores landed** — the memoized scheduler, the backend-independent `Simulate` interface, and the planner (utility ranking + information-exhaustion + stopping rules). The closed-form GP tier of the EIG numerics is now real (`sos-scirust`'s `GpEigEstimator`, unchanged `sos-planner` contract); the Bayesian-optimization/nested-MC tiers, solver numerics, manifest resolution, and the re-homed discovery stages still await `sos-scirust` / a frontend per Invariant VIII |
 | **P4 — Curiosity & Theory** | `sos-curiosity`, `sos-theory` | **cores landed** (both need only the P2 substrate; information-gain / analogy / Bayes-factor ranking / discriminating-experiment planning await P3's `sos-planner` and `scirust-*` per Invariant VIII) |
 | **P5 — Userland** | `sos-publication`, `sos-cli`, `sos-mcp` | `sos-publication` **core landed** — the publication is a verifiable projection of the object graph: content-addressed claims typed-bound to their evidence, the multi-phase claim/scope/reproducibility verifier, and deterministic Markdown/HTML/JSON. Re-execution of exhibits is `sos-workflow`'s job and real signing is `sos-provenance`'s per Invariant VIII; this crate consumes decisions, never recomputes them. `sos-cli` **porcelain landed** — `init`/`clone`/`push`/`log`/`know`/`ask`/`why`/`verify`/`diff`/`plan`/`publish`/`plugins` over the already-landed engines and the new persistent `FileStore`; `sos run` (needs a real `StageExecutor` backend) and a true `sos merge` are deferred, not stubbed. `sos-mcp` **server landed** — the same syscalls as MCP tools over blocking stdio JSON-RPC (no async runtime, no new third-party dependency), with the untrusted-proposer tool opt-in per Invariant IX |
-| **P6 — Backend adapters** | `sos-ccos` (cognitive), `sos-scirust` (computational) | `sos-ccos` **deterministic boundary landed** — the untrusted-proposer contract (Invariant IX): grounded, content-addressed proposals, the deterministic disposition gate, a tamper-evident attestation chain, and a no-LLM memory fallback. The generative LLM/CCOS backend and `sos-scirust`'s numerics are the deferred out-of-process backends per Invariant VIII |
+| **P6 — Backend adapters** | `sos-ccos` (cognitive), `sos-scirust` (computational) | `sos-ccos` **deterministic boundary landed** — the untrusted-proposer contract (Invariant IX): grounded, content-addressed proposals, the deterministic disposition gate, a tamper-evident attestation chain, and a no-LLM memory fallback. `sos-scirust` **first capability landed** — a closed-form GP-based EIG estimator wrapping `scirust-gp`, the sole crate CI-confirmed to touch `scirust-*`; the BO/nested-MC EIG tiers and every other gap (`sos-workflow`'s `StageExecutor`, `sos-simulation` backends, …) are deferred, not stubbed. The generative LLM/CCOS backend remains a deferred out-of-process backend per Invariant VIII |
 
 ### Landed
 
@@ -204,6 +206,22 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   (recall degrades to exact structural overlap). (The generative LLM/CCOS backend
   and embedding-backed recall are the deferred out-of-process backend per
   Invariant VIII — no stub, no fake cognition.)
+- **`sos-scirust`** — the Computational Backend Adapter, and the only other
+  crate the dependency lint permits to name `scirust-*` (Invariant VIII).
+  First capability: [`GpEigEstimator`](sos-scirust/src/eig.rs) wraps
+  [`scirust-gp`](../scirust-gp)'s exact Gaussian-process posterior variance in
+  the closed-form Gaussian-channel mutual-information formula
+  (`0.5·log2(1 + var/noise)` bits) to produce real
+  [`sos_planner::Estimate`](sos-planner/src/estimate.rs)s — `L3`, zero
+  standard error, since the formula is analytic in the GP's own variance, not
+  sampled. `sos-planner`'s ranking/stopping-rule machinery is **unchanged**:
+  this crate produces the same `Estimate`/`Candidate` types a consumer always
+  could, now backed by a real posterior instead of a hand-supplied number.
+  (The Bayesian-optimization search loop over a continuous design box and the
+  seeded nested-Monte-Carlo fallback for non-Gaussian likelihoods are gap #1's
+  other two tiers — deferred, not stubbed — and so is every other gap in the
+  `sos-scirust` scoping plan: `sos-workflow`'s `StageExecutor`,
+  `sos-simulation` backends, and the rest.)
 - **`sos-cli`** — the `sos` command-line porcelain (RFC-0002 §10.4), the
   first-ever user-facing entry point into SOS. A thin, git-shaped shell adding
   no new compute of its own: `sos init`/`clone`/`push` manage a reasoning
