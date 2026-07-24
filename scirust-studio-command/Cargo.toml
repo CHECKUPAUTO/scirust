@@ -1,0 +1,8 @@
+[package]
+name = "scirust-studio-command"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust Studio: typed command descriptors, a command registry, and the SRST-* error catalogue shared by the CLI and (later) the desktop application."
+
+[dependencies]

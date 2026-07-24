@@ -1,0 +1,12 @@
+[package]
+name = "scirust-studio-schema"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust Studio: the versioned .scirust.toml scenario schema, a small explicit unit-symbol table over scirust-units, and scenario validation."
+
+[dependencies]
+scirust-studio-command = { path = "../scirust-studio-command" }
+scirust-units = { path = "../scirust-units" }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"

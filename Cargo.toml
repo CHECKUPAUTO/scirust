@@ -176,6 +176,10 @@ members = [
     "scirust-tdi-bench",
     "scirust-srcc-bench",
     "scirust-bench-schema",
+    # SciRust Studio (docs/studio/): shared, platform-neutral foundation used
+    # by both scirust-cli and (later) the desktop application.
+    "scirust-studio-command",
+    "scirust-studio-schema",
 ]
 exclude = [
     "examples/simd_views_demo",
