@@ -2971,7 +2971,6 @@ dependencies = [
  "scirust-neuro-symbolic",
  "scirust-runtime",
  "scirust-sciagent",
- "scirust-sim",
  "scirust-solvers",
  "scirust-som-cli",
  "scirust-som-dataset",
@@ -2979,11 +2978,13 @@ dependencies = [
  "scirust-som-model",
  "scirust-som-tokenizer",
  "scirust-som-trainer",
+ "scirust-studio-runtime",
  "scirust-studio-schema",
  "scirust-symbolic",
  "scirust-symreg",
  "scirust-tn",
  "scirust-trader",
+ "serde_json",
 ]
 
 [[package]]
@@ -3855,6 +3856,33 @@ version = "0.1.0"
 [[package]]
 name = "scirust-studio-command"
 version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "scirust-studio-registry"
+version = "0.1.0"
+dependencies = [
+ "scirust-studio-command",
+ "scirust-units",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "scirust-studio-runtime"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "scirust-sim",
+ "scirust-studio-command",
+ "scirust-studio-registry",
+ "scirust-studio-schema",
+ "scirust-units",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "scirust-studio-schema"

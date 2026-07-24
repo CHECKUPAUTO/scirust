@@ -1,0 +1,16 @@
+[package]
+name = "scirust-studio-runtime"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust Studio: the CapabilityAdapter execution contract, the structured RunResult model, and the real scirust-sim adapters (spring-mass-damper, SIR, two-body orbital, series RLC, Robertson stiff kinetics) that implement it."
+
+[dependencies]
+scirust-studio-command = { path = "../scirust-studio-command" }
+scirust-studio-registry = { path = "../scirust-studio-registry" }
+scirust-studio-schema = { path = "../scirust-studio-schema" }
+scirust-units = { path = "../scirust-units" }
+scirust-sim = { path = "../scirust-sim", features = ["stiff"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }

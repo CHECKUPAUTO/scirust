@@ -1,0 +1,45 @@
+# SciRust Studio tutorial scenario: an SIR epidemic outbreak.
+#
+# scirust-studio-runtime's own test suite executes this exact file via
+# include_str! (see scirust-studio-runtime/src/adapters/sir.rs), so the file
+# a user is told to run is the file that is tested.
+#
+#   scirust run docs/studio/tutorials/sir_epidemic.scirust.toml
+#
+# R0 = beta/gamma = 3, well above the epidemic threshold of 1: the infected
+# fraction should rise well above its initial 0.001 before decaying, and
+# s + i + r should stay 1 to numerical round-off throughout.
+
+schema_version = 1
+
+[experiment]
+name = "SIR outbreak (R0 = 3)"
+description = "A fully susceptible population with one seed infection; the infected fraction should peak around t ~ 19 and settle near 0."
+seed = 1
+
+[capability]
+id = "sim.epidemiology.sir"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+beta = { value = 0.6, unit = "1/s" }
+gamma = { value = 0.2, unit = "1/s" }
+
+[initial_state]
+s = [{ value = 0.999, unit = "1" }]
+i = [{ value = 0.001, unit = "1" }]
+r = [{ value = 0.0, unit = "1" }]
+
+[solver]
+id = "rk4"
+start = { value = 0.0, unit = "s" }
+end = { value = 60.0, unit = "s" }
+step = { value = 0.05, unit = "s" }
+
+[outputs]
+record = ["s", "i", "r"]
+sample_every = 1

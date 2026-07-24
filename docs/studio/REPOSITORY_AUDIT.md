@@ -275,3 +275,28 @@ workstreams that should be sequenced explicitly with the person directing this
 project rather than assumed, given (a) their size relative to a single session
 and (b) this session's inability to build or test Windows GUI artifacts
 directly.
+
+## 12. Update — Phase 2A (capability registry, adapter runtime, four more models)
+
+Phase 1's single hard-coded capability path has been replaced with a real
+capability registry (`scirust-studio-registry`) and adapter runtime
+(`scirust-studio-runtime`), and four more `scirust-sim` models —
+`sim.epidemiology.sir`, `sim.orbital.two_body`, `sim.electrical.rlc`, and
+the stiff `sim.chemistry.robertson` — were adapted alongside the original
+`sim.mechanics.spring_mass_damper`, chosen specifically to force the
+architecture to support vector-valued state, multiple solvers per
+capability, and a genuinely different (adaptive, linearly-implicit) solver
+family. `scirust-cli` no longer depends on `scirust-sim` at all — every
+capability is reached through `CapabilityAdapter`. Full detail:
+`docs/studio/adr/0001-capability-registry.md`,
+`docs/studio/adr/0002-structured-run-results.md`,
+`docs/studio/RUNTIME_CONTRACT.md`, and `docs/studio/CAPABILITY_MATRIX.md`
+(which supersedes the crate-integration classification in §10 above for
+`scirust-sim` specifically — §10 remains accurate for the other ~120
+workspace members, which Phase 2A did not touch).
+
+The remaining 11 `scirust-sim` model families (pendulum/projectile/double
+pendulum, SEIR, ecology, the two non-stiff chemistry models, thermal, RC/Van
+der Pol, stochastic, pharmacokinetics, rigid-body, battery, HVAC, grid,
+laser, photodiode, APD) are unchanged: real and tested in `scirust-sim`'s
+own suite, not yet wired to a Studio scenario. Adapting them is Phase 3.

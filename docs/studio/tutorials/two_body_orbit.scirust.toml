@@ -1,0 +1,45 @@
+# SciRust Studio tutorial scenario: a circular two-body (Kepler) orbit.
+#
+# scirust-studio-runtime's own test suite executes this exact file via
+# include_str! (see scirust-studio-runtime/src/adapters/two_body.rs).
+#
+#   scirust run docs/studio/tutorials/two_body_orbit.scirust.toml
+#
+# mu = 1, r0 = 1: a circular orbit needs speed sqrt(mu/r) = 1 and closes
+# after one Kepler period 2*pi*sqrt(r^3/mu) = 2*pi, which is exactly the
+# [solver].end chosen here. The symplectic Euler solver keeps specific
+# energy and angular momentum bounded over the orbit; RK4 also works well
+# over this single-orbit horizon (see the tutorial for scirust-studio-runtime's
+# own longer-horizon comparison in its test suite).
+
+schema_version = 1
+
+[experiment]
+name = "Circular two-body orbit"
+description = "A unit-radius circular orbit around a mu = 1 primary, integrated with symplectic Euler for one full Kepler period."
+seed = 1
+
+[capability]
+id = "sim.orbital.two_body"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+mu = { value = 1.0, unit = "m^3/s^2" }
+
+[initial_state]
+position = [{ value = 1.0, unit = "m" }, { value = 0.0, unit = "m" }]
+velocity = [{ value = 0.0, unit = "m/s" }, { value = 1.0, unit = "m/s" }]
+
+[solver]
+id = "symplectic_euler"
+start = { value = 0.0, unit = "s" }
+end = { value = 6.283185307179586, unit = "s" }
+step = { value = 0.001, unit = "s" }
+
+[outputs]
+record = ["position_x", "position_y", "velocity_x", "velocity_y"]
+sample_every = 1

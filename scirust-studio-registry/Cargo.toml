@@ -1,0 +1,12 @@
+[package]
+name = "scirust-studio-registry"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust Studio: machine-readable capability descriptors and the registry that catalogues them (text and JSON), shared by the CLI, the runtime, and (later) the desktop application."
+
+[dependencies]
+scirust-studio-command = { path = "../scirust-studio-command" }
+scirust-units = { path = "../scirust-units" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

@@ -1,0 +1,50 @@
+# SciRust Studio tutorial scenario: the Robertson stiff-kinetics benchmark.
+#
+# scirust-studio-runtime's own test suite executes this exact file via
+# include_str! (see scirust-studio-runtime/src/adapters/robertson.rs).
+#
+#   scirust run docs/studio/tutorials/robertson_stiff.scirust.toml
+#
+# The canonical rate constants (k1 = 0.04, k2 = 3e7, k3 = 1e4) span nine
+# orders of magnitude, which is why this capability requires the adaptive,
+# linearly-implicit stiff_rosenbrock_w solver (a fixed-step explicit method
+# like rk4 blows up on this system — scirust-sim's own tests demonstrate
+# that directly). At t = 0.4, the reference solution (Hairer & Wanner) is
+# a ~ 0.9851, b ~ 3.39e-5, c ~ 0.0149; mass (a+b+c) stays 1 throughout.
+
+schema_version = 1
+
+[experiment]
+name = "Robertson stiff kinetics (classic rate constants)"
+description = "The autocatalytic A -> B -> C system integrated to t = 0.4 with the adaptive stiff Rosenbrock-W solver."
+seed = 1
+
+[capability]
+id = "sim.chemistry.robertson"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+k1 = { value = 0.04, unit = "1/s" }
+k2 = { value = 3.0e7, unit = "1/s" }
+k3 = { value = 1.0e4, unit = "1/s" }
+
+[initial_state]
+a = [{ value = 1.0, unit = "1" }]
+b = [{ value = 0.0, unit = "1" }]
+c = [{ value = 0.0, unit = "1" }]
+
+[solver]
+id = "stiff_rosenbrock_w"
+start = { value = 0.0, unit = "s" }
+end = { value = 0.4, unit = "s" }
+step = { value = 1.0e-6, unit = "s" }
+rtol = 1.0e-7
+atol = 1.0e-10
+
+[outputs]
+record = ["a", "b", "c"]
+sample_every = 1

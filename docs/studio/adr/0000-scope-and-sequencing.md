@@ -105,3 +105,38 @@ Deliberately not done in this increment: refactoring any of the ~55 existing
 proven itself further), wiring up any other `scirust-sim` model (Phase 3),
 and anything Tauri/Dioxus/Windows-installer-shaped (still pending the
 direction decision above).
+
+## Update (direction confirmed; Phase 2A landed)
+
+The person directing this project confirmed the direction explicitly:
+**build the shared headless execution core first** (capability registry,
+structured result contract, representative multi-domain adapters, then the
+cross-platform runtime/worker/storage layer), **then** the Tauri/Dioxus
+desktop shell on top of that real core — explicitly *not* by migrating the
+~55 legacy commands first, and *not* by building a GUI that calls
+`scirust-cli` or duplicates execution logic. The full seven-step sequence
+they specified: (1) capability registry + result contract, (2)
+representative adapters, (3) cross-platform runtime/worker/storage, (4)
+first desktop vertical slice, (5) remaining adapters + help, (6) legacy CLI
+migration, (7) Windows installer/signing/updater.
+
+Phase 2A implements step (1) and a deliberately-chosen slice of step (2):
+`scirust-studio-registry` (capability descriptors) and
+`scirust-studio-runtime` (the `CapabilityAdapter` contract, the structured
+`RunResult` model, and five real adapters — the original spring-mass-damper
+plus SIR, two-body orbital, series RLC, and stiff Robertson kinetics, chosen
+specifically to force the architecture to handle vector-valued state,
+multiple solvers per capability, and a genuinely different stiff solver
+family). See `docs/studio/adr/0001-capability-registry.md`,
+`docs/studio/adr/0002-structured-run-results.md`,
+`docs/studio/RUNTIME_CONTRACT.md`, and `docs/studio/CAPABILITY_MATRIX.md`.
+`scirust-cli` now reaches every capability through the registry/adapter
+pair — it no longer depends on `scirust-sim` at all — but the ~55 legacy
+commands are still untouched, per the explicit instruction not to migrate
+them yet.
+
+Still not started: the worker process, bounded IPC, job lifecycle,
+cancellation beyond a pre-execution check, run storage/manifest/provenance
+(step 3); anything Tauri/Dioxus (step 4); the remaining 11 `scirust-sim`
+model families (step 5); legacy CLI migration (step 6); and Windows
+installer/signing/updater (step 7).
