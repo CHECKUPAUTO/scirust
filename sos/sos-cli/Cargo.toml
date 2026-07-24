@@ -1,0 +1,37 @@
+[package]
+name = "sos-cli"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The `sos` command-line porcelain: a git-style shell over the Scientific Operating System's already-landed engines (store, knowledge, reasoning, curiosity, theory, workflow, reproducibility, planning, publication, cognitive, provenance, registry). Adds no new compute of its own — a discoverable command surface over capabilities that are implemented and tested in their own crates. Pure Rust, no FFI, no new third-party dependency."
+keywords = ["cli", "porcelain", "science"]
+categories = ["science", "command-line-utilities"]
+
+[lib]
+name = "sos_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sos"
+path = "src/main.rs"
+doc = false
+
+[dependencies]
+sos-core = { workspace = true }
+sos-store = { workspace = true }
+sos-knowledge = { workspace = true }
+sos-reasoning = { workspace = true }
+sos-curiosity = { workspace = true }
+sos-theory = { workspace = true }
+sos-workflow = { workspace = true }
+sos-repro = { workspace = true }
+sos-planner = { workspace = true }
+sos-publication = { workspace = true }
+sos-ccos = { workspace = true }
+sos-provenance = { workspace = true }
+sos-registry = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
