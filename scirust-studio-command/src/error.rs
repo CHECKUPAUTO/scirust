@@ -6,8 +6,10 @@
 
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 /// One of the code families from the SciRust Studio error design.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ErrorFamily {
     /// `SRST-CLI-xxxx` — command-line usage errors.
     Cli,
@@ -53,7 +55,7 @@ impl ErrorFamily {
 }
 
 /// A stable, structured error code, e.g. `SRST-VAL-0001`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ErrorCode {
     /// Which family the error belongs to.
     pub family: ErrorFamily,
@@ -77,7 +79,7 @@ impl fmt::Display for ErrorCode {
 /// A user-facing error entry: a stable code, a short title, a plain-language
 /// explanation, whether the user can recover from it, and what to try next —
 /// not just a `Display` string with no structure behind it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CatalogedError {
     /// The stable code, e.g. `SRST-VAL-0001`.
     pub code: ErrorCode,

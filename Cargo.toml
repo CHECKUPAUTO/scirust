@@ -180,6 +180,8 @@ members = [
     # by both scirust-cli and (later) the desktop application.
     "scirust-studio-command",
     "scirust-studio-schema",
+    "scirust-studio-registry",
+    "scirust-studio-runtime",
 ]
 exclude = [
     "examples/simd_views_demo",

@@ -31,5 +31,8 @@ scirust-som-model = { path = "../scirust-som/crates/model" }
 scirust-som-trainer = { path = "../scirust-som/crates/trainer" }
 scirust-som-inference = { path = "../scirust-som/crates/inference" }
 scirust-sciagent = { path = "../scirust-sciagent" }
-scirust-sim = { path = "../scirust-sim" }
 scirust-studio-schema = { path = "../scirust-studio-schema" }
+scirust-studio-runtime = { path = "../scirust-studio-runtime" }
+
+[dev-dependencies]
+serde_json = "1"

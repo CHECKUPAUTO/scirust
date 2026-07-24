@@ -50,6 +50,17 @@ pub fn lookup(symbol: &str) -> Option<UnitEntry> {
         "kg/s" => Dimension::MASS.div(Dimension::TIME),
         "kg/s^2" => Dimension::MASS.div(Dimension::TIME.powi(2)),
         "kg/m^3" => Dimension::MASS.div(Dimension::LENGTH.powi(3)),
+        // Rate constants (SIR beta/gamma, Robertson k1/k2/k3 in their
+        // dimensionless-fraction formulation): dimensionally identical to
+        // Hz, but "1/s" reads naturally for a rate constant that is not an
+        // oscillation frequency.
+        "1/s" => Dimension::FREQUENCY,
+        // Gravitational parameter mu = G*M (orbital two-body problem).
+        "m^3/s^2" => Dimension::LENGTH.powi(3).div(Dimension::TIME.powi(2)),
+        // Henry (inductance): H = J/A^2 (from E = 1/2 L I^2).
+        "H" => Dimension::ENERGY.div(Dimension::CURRENT.powi(2)),
+        // Farad (capacitance): F = C/V.
+        "F" => Dimension::CHARGE.div(Dimension::VOLTAGE),
         _ => return None,
     };
     Some(UnitEntry {
@@ -91,5 +102,22 @@ mod tests {
         assert_eq!(lookup(""), None);
         assert_eq!(lookup("m/s^3"), None);
         assert_eq!(lookup("furlong"), None);
+    }
+
+    #[test]
+    fn recognises_the_phase_2a_adapter_units() {
+        assert_eq!(lookup("1/s").unwrap().dimension, Dimension::FREQUENCY);
+        assert_eq!(
+            lookup("m^3/s^2").unwrap().dimension,
+            Dimension::LENGTH.powi(3).div(Dimension::TIME.powi(2))
+        );
+        assert_eq!(
+            lookup("H").unwrap().dimension,
+            Dimension::ENERGY.div(Dimension::CURRENT.powi(2))
+        );
+        assert_eq!(
+            lookup("F").unwrap().dimension,
+            Dimension::CHARGE.div(Dimension::VOLTAGE)
+        );
     }
 }

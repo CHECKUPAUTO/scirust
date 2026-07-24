@@ -1,0 +1,46 @@
+# SciRust Studio tutorial scenario: an underdamped series RLC circuit.
+#
+# scirust-studio-runtime's own test suite executes this exact file via
+# include_str! (see scirust-studio-runtime/src/adapters/rlc.rs).
+#
+#   scirust run docs/studio/tutorials/rlc_circuit.scirust.toml
+#
+# R = 0.4 Ohm, L = 1 H, C = 0.25 F gives natural frequency omega0 = 2 rad/s
+# and damping ratio zeta = 0.1 (underdamped): the capacitor discharges
+# through a decaying oscillation, and stored energy must never increase
+# (passivity) since there is no source.
+
+schema_version = 1
+
+[experiment]
+name = "Underdamped RLC discharge"
+description = "A charged capacitor discharging through an underdamped series RLC loop with no source."
+seed = 1
+
+[capability]
+id = "sim.electrical.rlc"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+resistance = { value = 0.4, unit = "Ohm" }
+inductance = { value = 1.0, unit = "H" }
+capacitance = { value = 0.25, unit = "F" }
+v_source = { value = 0.0, unit = "V" }
+
+[initial_state]
+charge = [{ value = 1.0, unit = "C" }]
+current = [{ value = 0.0, unit = "A" }]
+
+[solver]
+id = "rk4"
+start = { value = 0.0, unit = "s" }
+end = { value = 10.0, unit = "s" }
+step = { value = 0.001, unit = "s" }
+
+[outputs]
+record = ["charge", "current", "capacitor_voltage"]
+sample_every = 1

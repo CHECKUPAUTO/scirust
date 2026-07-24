@@ -411,12 +411,12 @@ const GROUPS: &[(&str, &[Command])] = &[
         &[
             Command {
                 name: "catalog",
-                args: "",
-                about: "List the capabilities this build can run as a scenario (currently: 1).",
+                args: "[--format text|json]",
+                about: "List the capabilities this build can run as a scenario (currently: 5).",
             },
             Command {
                 name: "run",
-                args: "<scenario.scirust.toml>",
+                args: "<scenario.scirust.toml> [--format text|json]",
                 about: "Validate and execute a SciRust Studio scenario file.",
             },
         ],
