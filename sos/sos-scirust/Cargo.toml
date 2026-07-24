@@ -5,14 +5,16 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "SOS Computational Backend Adapter (Invariant VIII): the sole SOS crate permitted to depend on scirust-* crates, wrapping them behind the engine syscalls that need real numerics. Capabilities: a closed-form expected-information-gain estimator wrapping scirust-gp's exact Gaussian-process posterior variance (L3, zero standard error); a continuous-design-box Bayesian-optimization search reusing scirust-automl's seeded EI loop to maximize sos-planner's own utility policy (L1, seeded); and a seeded nested-Monte-Carlo EIG estimator over finite scirust-stats discrete-hypothesis likelihoods, with a real, non-fabricated standard error (L1). Pure Rust, no FFI, no unsafe."
+description = "SOS Computational Backend Adapter (Invariant VIII): the sole SOS crate permitted to depend on scirust-* crates, wrapping them behind the engine syscalls that need real numerics. Capabilities: a closed-form expected-information-gain estimator wrapping scirust-gp's exact Gaussian-process posterior variance (L3, zero standard error); a continuous-design-box Bayesian-optimization search reusing scirust-automl's seeded EI loop to maximize sos-planner's own utility policy (L1, seeded); a seeded nested-Monte-Carlo EIG estimator over finite scirust-stats discrete-hypothesis likelihoods, with a real, non-fabricated standard error (L1); and a real sos-simulation Simulate backend wrapping scirust-solvers' fixed-step RK4 ODE integrator (L3, seedless-deterministic). Pure Rust, no FFI, no unsafe."
 keywords = ["scirust", "backend", "adapter", "gaussian-process", "science"]
 categories = ["science"]
 
 [dependencies]
 sos-core = { workspace = true }
 sos-planner = { workspace = true }
+sos-simulation = { workspace = true }
 thiserror = { workspace = true }
 scirust-gp = { path = "../../scirust-gp" }
 scirust-automl = { path = "../../scirust-automl" }
 scirust-stats = { path = "../../scirust-stats" }
+scirust-solvers = { path = "../../scirust-solvers" }

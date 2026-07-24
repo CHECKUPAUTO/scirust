@@ -467,6 +467,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-solvers"
+version = "0.1.0"
+dependencies = [
+ "scirust-autodiff",
+ "scirust-symbolic",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "scirust-special"
 version = "0.1.0"
 
@@ -715,9 +725,11 @@ version = "0.1.0"
 dependencies = [
  "scirust-automl",
  "scirust-gp",
+ "scirust-solvers",
  "scirust-stats",
  "sos-core",
  "sos-planner",
+ "sos-simulation",
  "thiserror",
 ]
 
