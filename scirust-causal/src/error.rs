@@ -47,6 +47,38 @@ pub enum CausalError {
     UnknownVariableIndex {
         index: usize,
     },
+    SameVariable {
+        variable: usize,
+    },
+    ConditioningContainsEndpoint {
+        variable: usize,
+    },
+    DuplicateConditioningVariable {
+        variable: usize,
+    },
+    UnsupportedVariableKind {
+        variable: usize,
+    },
+    InsufficientSamples {
+        required: usize,
+        actual: usize,
+    },
+    NonFiniteSample {
+        row: usize,
+        variable: usize,
+        value: f64,
+    },
+    ZeroVariance {
+        variable: usize,
+    },
+    RankDeficientConditioningSet {
+        rank: usize,
+        columns: usize,
+    },
+    ScatterFailure(scirust_multivariate::RobustGeometryError),
+    SolverFailure {
+        detail: String,
+    },
 }
 
 impl fmt::Display for CausalError {
@@ -124,8 +156,85 @@ impl fmt::Display for CausalError {
             {
                 write!(f, "reference to unknown variable index {index}")
             },
+            Self::SameVariable { variable } =>
+            {
+                write!(
+                    f,
+                    "variable {variable} cannot be tested against itself (x == y)"
+                )
+            },
+            Self::ConditioningContainsEndpoint { variable } =>
+            {
+                write!(
+                    f,
+                    "conditioning set contains variable {variable}, which is also an endpoint (x or y)"
+                )
+            },
+            Self::DuplicateConditioningVariable { variable } =>
+            {
+                write!(
+                    f,
+                    "variable {variable} appears more than once in the conditioning set"
+                )
+            },
+            Self::UnsupportedVariableKind { variable } =>
+            {
+                write!(
+                    f,
+                    "variable {variable} has a kind this test does not support (expected Continuous)"
+                )
+            },
+            Self::InsufficientSamples { required, actual } =>
+            {
+                write!(
+                    f,
+                    "at least {required} eligible samples are required, got {actual}"
+                )
+            },
+            Self::NonFiniteSample {
+                row,
+                variable,
+                value,
+            } =>
+            {
+                write!(
+                    f,
+                    "non-finite value for variable {variable} at row {row}: {value:.17e}"
+                )
+            },
+            Self::ZeroVariance { variable } =>
+            {
+                write!(
+                    f,
+                    "variable {variable} has zero variance (no association is defined)"
+                )
+            },
+            Self::RankDeficientConditioningSet { rank, columns } =>
+            {
+                write!(
+                    f,
+                    "conditioning design has rank {rank} but {columns} columns \
+                     (near-singular under the configured tolerance)"
+                )
+            },
+            Self::ScatterFailure(source) =>
+            {
+                write!(f, "robust scatter estimation failed: {source}")
+            },
+            Self::SolverFailure { detail } =>
+            {
+                write!(f, "linear solver failed: {detail}")
+            },
         }
     }
 }
 
-impl Error for CausalError {}
+impl Error for CausalError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self
+        {
+            Self::ScatterFailure(source) => Some(source),
+            _ => None,
+        }
+    }
+}

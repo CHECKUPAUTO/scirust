@@ -41,6 +41,11 @@ pub enum CausalAssumption {
     /// The causal mechanism of interest is the same across the environments
     /// being compared (the precondition invariance-based methods rely on).
     InvarianceAcrossEnvironments,
+    /// Under the tested null, the residuals of one variable (after removing
+    /// its best linear predictor from the conditioning set) are exchangeable
+    /// — the precondition a Freedman-Lane-style residual permutation test
+    /// relies on for its calibration to be valid.
+    ResidualExchangeability,
     /// An assumption not covered by the named variants above.
     Other(String),
 }
