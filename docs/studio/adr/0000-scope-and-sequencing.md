@@ -77,3 +77,31 @@ Concretely, for the immediate next increment (Phase 1):
   for them, since that decision changes crate layout (`apps/scirust-studio/`,
   possible separate workspace) and CI (new `windows-latest`-based workflows).
 - This ADR will be superseded or updated once that direction is confirmed.
+
+## Update (first Phase 1 increment landed)
+
+`scirust-studio-command` (command descriptors, a registry, and the
+`SRST-VAL-*` error catalogue) and `scirust-studio-schema` (the versioned
+`.scirust.toml` scenario schema, a small explicit unit table over
+`scirust-units`, and validation) were added to the root workspace, with real
+unit tests (34 tests + 1 doctest). `scirust-cli` gained two new commands,
+`catalog` and `run`, additive to its existing ~55 commands (all of which keep
+passing, including the two tests — `dispatch_reaches_each_group` and
+`help_lists_every_dispatched_command` — that exist specifically to catch a
+command being wired into dispatch without being documented). `run` executes a
+real capability end to end: `sim.mechanics.spring_mass_damper`, backed by the
+actual `scirust_sim::mechanics::SpringMassDamper` model and
+`scirust_sim::simulate` (RK4), not a mock. The shipped tutorial scenario
+(`docs/studio/tutorials/spring_mass_damper.scirust.toml`) is the exact file
+executed by `scirust-cli`'s own test suite via `include_str!`, so the example
+a user is told to run is the example that is tested — running it prints a
+measured relative energy drift around `7e-15` for the undamped case, which is
+a real oracle check (RK4 approximately conserves energy; a bug that broke the
+integrator would show up as a much larger number here, not just a passing
+test).
+
+Deliberately not done in this increment: refactoring any of the ~55 existing
+`scirust-cli` commands onto the new registry (Phase 4, once the registry has
+proven itself further), wiring up any other `scirust-sim` model (Phase 3),
+and anything Tauri/Dioxus/Windows-installer-shaped (still pending the
+direction decision above).

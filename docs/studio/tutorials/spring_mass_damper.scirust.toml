@@ -1,0 +1,47 @@
+# SciRust Studio tutorial scenario: an undamped mass on a spring.
+#
+# This is the scenario `scirust catalog` and `scirust run` actually execute
+# (scirust-cli/src/studio.rs embeds and runs this exact file as a test —
+# see docs/studio/REPOSITORY_AUDIT.md and adr/0000-scope-and-sequencing.md
+# for why this is the first, and currently only, real end-to-end capability
+# adapter). Run it with:
+#
+#   scirust run docs/studio/tutorials/spring_mass_damper.scirust.toml
+#
+# With damping = 0, mechanical energy m*v^2/2 + k*x^2/2 is conserved by the
+# real physics; RK4 only conserves it approximately, so a well-behaved run
+# should print a relative energy drift many orders of magnitude below 1.
+
+schema_version = 1
+
+[experiment]
+name = "Spring-mass-damper (undamped)"
+description = "A 1 kg mass on a stiffness-4 N/m spring, released from x = 1 m at rest. Energy should stay nearly constant."
+seed = 42
+
+[capability]
+id = "sim.mechanics.spring_mass_damper"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+mass = { value = 1.0, unit = "kg" }
+damping = { value = 0.0, unit = "kg/s" }
+stiffness = { value = 4.0, unit = "kg/s^2" }
+
+[initial_state]
+position = [{ value = 1.0, unit = "m" }]
+velocity = [{ value = 0.0, unit = "m/s" }]
+
+[solver]
+id = "rk4"
+start = { value = 0.0, unit = "s" }
+end = { value = 10.0, unit = "s" }
+step = { value = 0.001, unit = "s" }
+
+[outputs]
+record = ["position", "velocity", "energy"]
+sample_every = 1

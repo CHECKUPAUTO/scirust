@@ -12,6 +12,7 @@ pub mod numeric;
 pub mod quickstart;
 pub mod reasoning;
 pub mod sciagent;
+pub mod studio;
 pub mod symbolic;
 pub mod synergy;
 pub mod trader;
@@ -78,6 +79,8 @@ const ALL_COMMANDS: &[&str] = &[
     "analyze",
     "verify",
     "trader",
+    "catalog",
+    "run",
 ];
 
 /// One registered command for the help listing.
@@ -404,6 +407,21 @@ const GROUPS: &[(&str, &[Command])] = &[
         ],
     ),
     (
+        "SCIRUST STUDIO",
+        &[
+            Command {
+                name: "catalog",
+                args: "",
+                about: "List the capabilities this build can run as a scenario (currently: 1).",
+            },
+            Command {
+                name: "run",
+                args: "<scenario.scirust.toml>",
+                about: "Validate and execute a SciRust Studio scenario file.",
+            },
+        ],
+    ),
+    (
         "META",
         &[
             Command {
@@ -704,6 +722,8 @@ fn dispatch(args: &[String]) -> u8 {
         Some("analyze") => scirust_som_cli::run(rest, "scirust analyze"),
         Some("verify") => scirust_runtime::proofcli::run(rest),
         Some("trader") => trader::run(rest),
+        Some("catalog") => studio::run_catalog(rest),
+        Some("run") => studio::run_scenario(rest),
         Some(other) =>
         {
             eprintln!(
@@ -782,6 +802,8 @@ mod tests {
             "verify",
             "trader",
             "analyze",
+            "catalog",
+            "run",
         ]
         {
             assert!(
@@ -860,6 +882,8 @@ mod tests {
         assert_eq!(run(&s(&["gptq", "--seed", "1"])), 0);
         assert_eq!(run(&s(&["awq", "--seed", "1"])), 0);
         assert_eq!(run(&s(&["bitnet", "--seed", "1"])), 0);
+        assert_eq!(run(&s(&["catalog"])), 0);
+        assert_eq!(run(&s(&["run"])), 2);
         assert_eq!(
             run(&s(&[
                 "optimize",
