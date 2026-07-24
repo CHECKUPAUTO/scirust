@@ -4,6 +4,10 @@
 # obd2_api runtime feedback archive (generated locally, not a static asset)
 examples/obd2_diagnostic/data/feedback.jsonl
 
+# Python bytecode cache (scripts/, sos/scripts/)
+__pycache__/
+*.pyc
+
 # Build artifacts
 /target/
 examples/benchmarks/target/

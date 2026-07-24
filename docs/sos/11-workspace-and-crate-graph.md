@@ -151,20 +151,25 @@ precisely what makes them swappable.
 
 Four rules keep the workspace acyclic and the OS guarantees real. Each is a
 `cargo`-metadata lint that **fails the build** on violation — intent is not
-enough at this scale:
+enough at this scale. Enforced by `sos/scripts/lint-deps.py`, run as its own
+job in `sos-ci.yml`.
 
 1. **`sos-core` is the universal sink.** It depends on no other SOS crate; every
-   other SOS crate depends on it.
-2. **No cyclic dependencies** anywhere (the mandate's explicit requirement).
-   Enforced by a topological check over the workspace graph.
+   other SOS crate depends on it, directly or transitively.
+2. **No cyclic dependencies** anywhere (the mandate's explicit requirement),
+   checked over normal + build dependencies. Dev-dependency back-edges (a
+   crate's tests exercising a crate that depends on it) are exempt — that is a
+   Cargo-supported pattern, not an architectural cycle.
 3. **No engine depends on another engine by type**, except the documented
    composition edges (`reasoning → knowledge`, `curiosity → {knowledge,
-   planner}`, `theory → reasoning`, discovery stages `→ reasoning`). Engines
-   otherwise compose only through `sos-core` traits and SOS-IR objects — the
-   guarantee of independent replaceability.
+   reasoning, planner}`, `theory → reasoning`, discovery stages `→ reasoning`).
+   Engines otherwise compose only through `sos-core` traits and SOS-IR objects
+   — the guarantee of independent replaceability.
 4. **`scirust-*` and CCOS appear in exactly two crates** (`sos-scirust`,
-   `sos-ccos`). Any other SOS crate naming them fails the lint — the mechanical
-   guarantee of backend-independence (Invariant VIII).
+   `sos-ccos`). Any other SOS crate naming them, in any dependency kind
+   (including dev-dependencies — a test-only leak is still a coupling), fails
+   the lint — the mechanical guarantee of backend-independence (Invariant
+   VIII).
 
 ---
 
