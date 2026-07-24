@@ -138,8 +138,8 @@ shift with what's true at the time).
 | --- | --- | --- |
 | — | Observe | Pre-existing (`scirust-causal`, audited & remediated above) |
 | 5C.1 | Represent assumptions | **Done** — typed causal contracts and data model |
-| 5C.2 | Distinguish association from causal evidence | **Draft** — deterministic robust conditional-independence testing |
-| 5C.3 | Discover equivalence classes | Planned — CPDAG/PAG-returning discovery |
+| 5C.2 | Distinguish association from causal evidence | **Done** — deterministic robust conditional-independence testing |
+| 5C.3 | Discover equivalence classes | **Draft** — PC-Stable, CPDAG-returning (no PAG/latent-confounding-robust discovery) |
 | 5C.4 | Estimate identifiable effects | Planned — adjustment-set estimation under stated assumptions |
 | 5C.5 | Test invariance | Planned — cross-environment invariant prediction |
 | 5C.6 | Simulate interventions | Planned — SCM-based counterfactual simulation |
@@ -278,9 +278,9 @@ already used elsewhere in the workspace at the same version bounds, e.g.
 
 ## Phase 5C.2 — Deterministic robust conditional-independence testing
 
-**Status: Draft.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, opened
+**Status: Done.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, opened
 from `origin/master` at `5fd76dcc` (the commit 5C.1 merged onto, unchanged by
-this phase). PR #821. Additive to `scirust-causal` (no
+this phase). PR #821, merged at `1fd2ffef`. Additive to `scirust-causal` (no
 existing public API changed). This phase implements **statistical testing
 only** — it does **not** implement PC-Stable or any other causal
 graph-discovery algorithm, does not compute a CPDAG/PAG equivalence class,
@@ -510,3 +510,176 @@ identifiable or estimated.
   otherwise), equivalence-class construction, effect estimation, or
   invariance test exists yet — those remain 5C.3 onward, not to be started
   until this phase is merged and `master` is resynchronized.
+
+## Phase 5C.3 — Discover equivalence classes (PC-Stable)
+
+**Status: Draft.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
+from `origin/master` at `376fd353` (fresh master after PR #821 merged; this
+phase's branch carries only this phase's commits). Additive to
+`scirust-causal` (no existing public API changed). This phase implements
+**constraint-based Markov-equivalence-class discovery** — PC-Stable (Colombo &
+Maathuis, *Order-Independent Constraint-Based Causal Structure Learning*,
+JMLR 2014), the order-independent variant of Spirtes, Glymour & Scheines's PC
+algorithm — built entirely on top of 5C.2's conditional-independence oracle.
+It does **not** implement FCI or any latent-confounding-robust discovery, does
+**not** construct a PAG, and does **not** estimate a causal effect.
+
+### Scientific scope — read before using this API
+
+`PcStable::discover` answers: *given repeated conditional-independence
+evidence, what is the Markov equivalence class consistent with it?* Under
+three assumptions — **acyclicity**, **causal sufficiency** (no latent
+confounder between any two observed variables), and **faithfulness** (every
+conditional independence in the data reflects a d-separation in the true
+graph, no coincidental cancellation) — and given a CI oracle without error,
+this procedure recovers the *exact* equivalence class: every directed edge in
+the output [`Cpdag`](../../scirust-causal/src/cpdag.rs) is compelled in every
+DAG consistent with the observed (in)dependencies; every undirected edge is
+genuinely ambiguous from this evidence alone.
+
+It must **not** be read as: proof that causal sufficiency holds (see the
+latent-confounding adversarial test below — a confounded pair looks *exactly*
+like an ambiguous-direction direct edge, and this procedure has no way to
+tell the difference); proof that faithfulness holds; a claim that an
+undirected edge means "no causal relationship" (it means the opposite — a
+causal relationship whose direction the data cannot determine); or immunity
+from the standard bounded-conditioning-set-size limitation any constraint-
+based search shares (a true separating set larger than
+`EquivalenceClassConfig::max_conditioning_set_size` is missed, incorrectly
+retaining that edge).
+
+### Design
+
+Three-stage pipeline, one file per stage plus the public orchestration layer:
+
+- `cpdag.rs` — [`Cpdag`]: a plain, invariant-protected partially directed
+  graph (`BTreeSet<(usize,usize)>` for directed edges, a second one,
+  canonicalized `(min,max)`, for undirected edges — a pair is never in both).
+  Fields are private; mutation (`orient`, `remove_edge`) goes only through
+  methods that preserve the invariant.
+- `skeleton_discovery.rs` — the adjacency search. Starting from the complete
+  graph, for increasing conditioning-set size `ℓ = 0, 1, 2, …`: freeze every
+  variable's adjacency into a snapshot at the *start* of the level (the
+  "stable" fix — see the module docs for exactly why classic PC's live-updated
+  adjacency is order-dependent and this snapshot removes that dependence);
+  test every still-adjacent pair against size-`ℓ` subsets of each endpoint's
+  frozen neighbor set; remove every pair a test found
+  `IndependentWithinThreshold` for, but only *after* the whole level
+  finishes. `Dependent` and `Inconclusive` both leave an edge in place — only
+  an explicit `IndependentWithinThreshold` verdict removes one. A handful of
+  expected-at-large-`ℓ` [`CausalError`] variants (rank deficiency,
+  insufficient samples, zero residual variance, a singular robust scatter, a
+  solver failure) are caught, recorded as a warning, and treated as "this one
+  candidate is untestable, try the next" — every other `CausalError` (a
+  malformed request this module's own index bookkeeping should never
+  produce) propagates as a genuine `Err`.
+- `orientation.rs` — v-structure detection (every unshielded triple `x-z-y`
+  whose recorded separating set for `{x,y}` does not contain `z` is a
+  collider: orient `x->z`, `y->z`) followed by Meek's rules R1-R3 (Meek, UAI
+  1995) applied to a fixpoint, propagating those orientations as far as they
+  logically force without creating an unevidenced collider or a directed
+  cycle. Two conflicting v-structure demands on the same edge (only possible
+  under finite-sample error or a genuine assumption violation, provably not
+  under a perfect oracle) are left undirected with a recorded warning, never
+  silently resolved. Rule 4 is out of scope by construction: it is needed
+  only when orientations *beyond* v-structures (background knowledge) are
+  injected, and this phase accepts none.
+- `equivalence_class.rs` — [`PcStable`] /
+  [`EquivalenceClassDiscovery`] / [`EquivalenceClassConfig`] /
+  [`EquivalenceClassResult`], wiring the three stages together and unioning
+  the discovery procedure's own three assumptions with every underlying CI
+  test call's own reported assumptions (so the final assumption list is
+  honest about the *entire* evidentiary chain, not only the discovery
+  procedure's own preconditions).
+
+`EquivalenceClassResult::separating_sets` is a sorted `Vec<((usize,usize),
+Vec<usize>)>`, not a `BTreeMap` — `serde_json` rejects a non-string map key at
+serialize time (verified directly: `BTreeMap<(usize,usize), _>` fails with
+"key must be a string"), so the public result type avoids that shape
+entirely; the internal `BTreeMap` (used for O(log n) lookup during
+v-structure detection) never crosses the public API.
+
+This is a **separate, additive discovery paradigm** from the crate's existing
+continuous-optimization structure learner (`optimize_causal`, constraint-based
+vs. score-based); neither calls the other, and the crate root's docs are
+updated to state precisely which capability now covers the
+equivalence-class gap the optimizer's own docs have always named as out of
+scope for itself.
+
+### Determinism contract
+
+Skeleton discovery's frozen-per-level adjacency makes the result independent
+of the order pairs are visited *within* the algorithm (the "stable" property,
+verified indirectly via a relabeling-invariance test — see below). All three
+data structures (`Cpdag`'s `BTreeSet`s, `BTreeMap` separating sets) iterate in
+a fixed, deterministic order; combinations of a frozen neighbor set are
+generated in lexicographic order over an explicitly sorted slice. No RNG is
+used anywhere in this phase's own code — determinism (or its absence) is
+entirely inherited from whichever `ConditionalIndependenceTest` the caller
+supplies (5C.2's own determinism contract already covers that).
+
+### Tests
+
+248 tests existed for `scirust-causal` before this phase (166 pre-5C.2 +
+82 from 5C.2, verified against merged `master`). This phase adds **60**: 21
+embedded unit tests (6 in `cpdag.rs`, 8 in `skeleton_discovery.rs` including
+two full chain/collider end-to-end recoveries, 12 in `orientation.rs`
+covering v-structure detection, a hand-verified conflicting-demand case, and
+each of R1/R2/R3 in isolation — 3 in `equivalence_class.rs`), 7 in
+`tests/pc_stable.rs` (chain/fork/collider motifs, the chain≡fork Markov-
+equivalence demonstration, a 4-node case that hand-verifiably requires Meek's
+rule 1 to complete, a 5-node two-chained-collider case resolved by
+v-structures alone, cross-method compatibility with the robust+permutation CI
+method), and 6 in `tests/pc_stable_adversarial.rs` (latent confounding as an
+undisguised negative result, the bounded-`max_conditioning_set_size`
+limitation via direct with/without comparison, `Inconclusive`-never-removes-
+an-edge on genuinely independent data, a relabeling-invariance check,
+determinism, and small-sample-count graceful degradation with 12 verified
+"untestable candidate" warnings correctly propagated to the public result).
+Every hand-derived expected `Cpdag` in every test — including the two
+5-node/4-node integration cases — matched the implementation's actual output
+on first run; none were adjusted after the fact to fit an implementation
+bug.
+
+### Compatibility
+
+Purely additive. No existing public item's signature changed.
+`examples/typed_causal_contract.rs` and
+`examples/conditional_independence_benchmark.rs` untouched. The crate root's
+docs are updated (five capabilities, not four) and one paragraph in the
+"Causal interpretation" section is corrected: it no longer claims
+equivalence-class discovery is out of scope for the *crate* — only for the
+continuous optimizer specifically, which is what it always meant.
+
+### Supported and unsupported claims
+
+May claim: deterministic Markov-equivalence-class discovery via repeated
+conditional-independence testing; an honestly three-way edge marking
+(directed/undirected/absent) rather than a single guessed hypothesis DAG; a
+documented, provably-complete (Meek 1995) orientation-propagation step for
+the no-background-knowledge setting; conservative behavior under
+`Inconclusive` or an untestable candidate (never an unjustified edge
+removal); an honest warning, never a silent resolution, for a conflicting
+v-structure demand.
+
+Must **not** claim: that causal sufficiency or faithfulness has been
+verified (both are assumed, not checked); that an undirected edge means no
+causal relationship exists; that a bounded `max_conditioning_set_size` search
+is complete; that this constructs a PAG or handles latent confounding in any
+way; that any numerical causal effect has been identified or estimated.
+
+### Known limitations / deferred
+
+- No FCI / latent-confounding-robust discovery, hence no PAG — a future
+  phase's explicit subject, not attempted here.
+- Meek's rule 4 is not implemented (see "Design" above for why this is
+  provably not a completeness gap in the no-background-knowledge setting
+  this phase operates in).
+- `max_conditioning_set_size` unbounded by default; a real, densely connected
+  or high-dimensional variable set may need a caller-supplied bound, trading
+  completeness for tractability — this phase does not choose a default bound
+  on the caller's behalf.
+- Effect identification, adjustment sets, invariance testing, interventions,
+  counterfactuals, and experimental design remain out of scope — 5C.4
+  onward, not to be started until this phase is merged and `master` is
+  resynchronized.
