@@ -138,7 +138,7 @@ shift with what's true at the time).
 | --- | --- | --- |
 | — | Observe | Pre-existing (`scirust-causal`, audited & remediated above) |
 | 5C.1 | Represent assumptions | **Done** — typed causal contracts and data model |
-| 5C.2 | Distinguish association from causal evidence | Planned — conditional-independence testing |
+| 5C.2 | Distinguish association from causal evidence | **Draft** — deterministic robust conditional-independence testing |
 | 5C.3 | Discover equivalence classes | Planned — CPDAG/PAG-returning discovery |
 | 5C.4 | Estimate identifiable effects | Planned — adjustment-set estimation under stated assumptions |
 | 5C.5 | Test invariance | Planned — cross-environment invariant prediction |
@@ -275,3 +275,238 @@ already used elsewhere in the workspace at the same version bounds, e.g.
   hatch exists precisely because later phases will likely need assumptions
   not yet named here (e.g. positivity-of-instrument strength, monotonicity
   for IV estimators).
+
+## Phase 5C.2 — Deterministic robust conditional-independence testing
+
+**Status: Draft.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, opened
+from `origin/master` at `5fd76dcc` (the commit 5C.1 merged onto, unchanged by
+this phase). PR: to be recorded once opened. Additive to `scirust-causal` (no
+existing public API changed). This phase implements **statistical testing
+only** — it does **not** implement PC-Stable or any other causal
+graph-discovery algorithm, does not compute a CPDAG/PAG equivalence class,
+and does not estimate a causal effect. It builds the statistical oracle
+(`X ⟂ Y | Z` evidence) a discovery algorithm would later consume — see 5C.3
+in the roadmap above for that (still unstarted) next step.
+
+### Scientific scope — read before using this API
+
+A [`scirust_causal::PartialCorrelationTest`] answers one narrow statistical
+question: is the *linear* partial association between `X` and `Y`,
+controlling for `Z`, distinguishable from noise under a stated model,
+calibration, and significance level? It does **not** establish that a causal
+edge is absent, that the eventual discovered graph is acyclic, causal
+sufficiency, faithfulness, the absence of selection bias, or correct temporal
+ordering — see the crate root's "Causal interpretation" section and the
+(private) `conditional_independence` module's own docs, which this phase's
+results are subject to exactly the same way. Three further, deliberately
+undisguised limitations, each with its own adversarial test:
+
+- **Linear only.** A linear partial correlation can be exactly zero while `X`
+  and `Y` remain conditionally *dependent* through a nonlinear or purely
+  heteroscedastic relationship (`nonlinear_dependence_is_invisible_to_a_linear_partial_correlation_test`,
+  `heteroscedastic_dependence_is_invisible_to_a_mean_based_linear_test`).
+- **Failure to reject is not proof of independence.**
+  `IndependenceDecision::IndependentWithinThreshold` means exactly that — the
+  null was not rejected under the declared model/calibration/alpha/sample —
+  never that independence was established. A tiny but real path coefficient
+  can be statistically invisible at ordinary sample sizes
+  (`near_unfaithful_chain_with_tiny_coefficient_is_not_reliably_detected`).
+- **Latent confounding is untestable by construction.** If a confounder is
+  not a column in the dataset, no conditioning-set choice can control for it;
+  the test cannot and does not distinguish a direct causal link from a
+  latent-confounded one
+  (`confounded_association_with_latent_confounder_cannot_be_told_apart_from_direct_dependence`).
+
+### Design
+
+Four new modules, reusing existing infrastructure rather than duplicating
+it — QR/SVD from `scirust-solvers`, the standard-normal survival function
+from `scirust-stats`, and the OGK robust scatter estimator from
+`scirust-multivariate` (Program 4, phase 4E.1) are all consumed, not
+reimplemented:
+
+- **`partial_correlation.rs`** (private) — fixed-order-accumulation Pearson
+  correlation; QR-residualization (`scirust_solvers::linalg::qr_decompose` /
+  `solve_qr_least_squares`) against an intercept + conditioning-set design,
+  with numerical rank checked via SVD *before* solving (typed
+  `RankDeficientConditioningSet` on a design below full column rank, not a
+  silent least-squares fallback); Fisher-z calibration
+  (`z = atanh(r)·sqrt(n − |Z| − 3)`, `None` — not an error — when degrees of
+  freedom are exhausted or `|r| = 1` exactly).
+- **`robust_partial_correlation.rs`** (private) — the robust analogue, in two
+  stages: (1) OGK-projection residualization against `Z` (reusing
+  `RobustScatterModel::inverse_scatter`'s conditional-mean identity, exactly
+  as documented in the crate); (2) a **second**, two-dimensional OGK fit on
+  the two residual vectors, reading the correlation directly off *that* fit's
+  precision matrix (`r = -P[0,1] / sqrt(P[0,0]·P[1,1])`). Stage 2 matters: an
+  earlier iteration of this phase computed the final correlation via ordinary
+  Pearson correlation of the (robustly centered) residuals, which is
+  mathematically inert — Pearson recenters internally, so any prior centering
+  cannot change its output — silently providing **zero** actual robustness
+  for the empty-conditioning-set case. This was caught by a comparative test
+  (contaminated data giving identical classical/robust statistics) before
+  being shipped, and is now pinned down by a permanent regression test
+  (`contaminated_empty_z_result_differs_from_plain_pearson_correlation`). On
+  genuinely clean data this method is routinely *bit-identical* to the
+  classical one — an expected, correct property of `RobustScatterConfig`'s
+  default hard-reweighting OGK (when no row is rejected, the reweighted
+  scatter *is* the ordinary covariance of every row), not a bug or an unused
+  code path; the two visibly diverge once rows are actually down-weighted.
+  `RobustCalibration::NoPValue` (the honest default) reports the statistic
+  with no p-value; `GaussianApproximation` applies the same Fisher-z formula
+  with an always-attached inexactness warning (not proven exact for an
+  OGK-derived statistic); `Permutation` calibrates deterministically.
+- **`permutation_calibration.rs`** (private) — one continuing
+  `scirust_stats::SplitMix64` stream drives all `B` requested permutations
+  (Durstenfeld Fisher-Yates on `0..n`); each permutation reshuffles a
+  **residual** (Freedman-Lane-style), not a raw variable — naive raw-variable
+  permutation is invalid whenever the permuted variable actually depends on
+  `Z`, so this module never offers that as an option. Two-sided p-value
+  `(1 + exceedances) / (1 + completed)` — the standard finite-sample
+  correction, never exactly zero. A permutation whose recomputation
+  degenerates (e.g. a zero-variance resample, or — for the robust path — a
+  singular 2-D refit) is excluded from both `completed` and `exceedances`,
+  never silently treated as a non-exceedance.
+- **`conditional_independence.rs`** (private, re-exports public) — the
+  orchestration layer: `ConditionalIndependenceTest` trait,
+  `PartialCorrelationTest` (the one implementor this phase ships),
+  `ConditionalIndependenceConfig` (validated `significance_level ∈ (0,1)`,
+  rank tolerance, `RegimeSelection`, `MissingValuePolicy`),
+  `ConditionalIndependenceMethod` (Gaussian / Robust / Permutation, each
+  carrying its own calibration choice), and `ConditionalIndependenceResult`
+  (`x`, `y`, canonicalized `conditioned_on`, `statistic`, `effect_size`,
+  `p_value: Option<f64>`, `decision`, `sample_count`, `effective_rank`,
+  `method`, `calibration`, `assumptions`, `warnings`). `IndependenceDecision`
+  is a **three-way** outcome (`Dependent` / `IndependentWithinThreshold` /
+  `Inconclusive`), never collapsed to a boolean, and is kept structurally
+  distinct from a typed `CausalError` (malformed *inputs* — unknown/duplicate/
+  endpoint-overlapping variable, insufficient samples, non-`Continuous` kind —
+  are errors; a well-formed but scientifically unresolved request is
+  `Inconclusive`, never an error). `RegimeSelection` (ObservationalOnly /
+  Environment(id) / ExplicitRows) makes mixing interventional and
+  observational rows an explicit, auditable choice rather than a silent
+  default; `MissingValuePolicy` (Error / CompleteCases) is implemented and
+  tested even though `CausalDataset`'s current finite-at-construction
+  invariant makes it presently a no-op — the no-op-ness is itself a checked
+  claim, not an assumption.
+- **9 new `CausalError` variants** (extending the crate's existing one error
+  enum, per its established one-enum-per-crate convention, rather than
+  introducing a parallel `ConditionalIndependenceError`): `SameVariable`,
+  `ConditioningContainsEndpoint`, `DuplicateConditioningVariable`,
+  `UnsupportedVariableKind`, `InsufficientSamples`, `NonFiniteSample`,
+  `ZeroVariance`, `RankDeficientConditioningSet`, `ScatterFailure` (wraps
+  `scirust_multivariate::RobustGeometryError` as a real `source()`, not a
+  stringified message), `SolverFailure`. One new `CausalAssumption` variant,
+  `ResidualExchangeability` — the precondition Freedman-Lane permutation
+  relies on.
+- Two new dependencies in `scirust-causal/Cargo.toml`: `scirust-stats` and
+  `scirust-multivariate` (both path dependencies, already at the top of the
+  dependency graph — `scirust-multivariate` depends on `scirust-stats`, which
+  depends only on `scirust-special`; neither depends back on
+  `scirust-causal`, so no cycle is introduced).
+
+### Determinism contract
+
+- The conditioning set is canonicalized (sorted) before any computation, so
+  callers passing the same set in a different order get identical results
+  (tested for all three methods, including the permutation-calibrated one).
+- Row selection and column extraction use a fixed block-then-row order; QR/SVD
+  and OGK are both deterministic by construction (no internal RNG, fixed
+  accumulation order).
+- The one seeded procedure (permutation calibration) is a single continuing
+  `SplitMix64` stream, entirely determined by `seed` and the sample count.
+- No floating-point sort occurs anywhere in this phase's code: SVD already
+  returns singular values pre-sorted descending, and exceedance counting is a
+  direct `>=` comparison on already-validated-finite values — so
+  `f64::total_cmp` is not needed here.
+- `examples/conditional_independence_benchmark.rs` is deterministic
+  end-to-end (fixed seeds, no wall-clock/hostname in its stdout). Run twice
+  and hashed:
+
+  ```
+  SHA-256 (scientific stdout, nightly-2026-07-02, x86_64):
+  c1449177f21aad6c7579bf5de902e654531c8e3d0c195ae88a4530d6b0ab7a9c
+  ```
+
+  (Confirmed bit-identical across two consecutive runs, and across a debug
+  vs. release build.) The historical `industrial_protocol_demo` fingerprint
+  (`167c13de…`) was independently reverified unchanged — this phase touches
+  no file that example depends on.
+
+### Tests
+
+166 tests existed for `scirust-causal` before this phase (verified directly
+against `origin/master` at `5fd76dcc`, not assumed from prior phases' notes);
+this phase adds **82**: 26 embedded unit tests across the three new private
+modules, 29 in `tests/conditional_independence.rs` (basic correlation cases,
+the three causal motifs — chain/fork/collider, each with the theoretically-
+predicted marginal/conditional (in)dependence pattern verified, including the
+collider's "conditioning induces dependence" case future discovery algorithms
+rely on — confounded association with an observed vs. latent confounder,
+9 dataset-contract checks, JSON round-trip, and 6 property-style invariance
+tests: symmetry, conditioning-set-order, row-order, positive-scale,
+translation, and sign-negation invariance), and 27 in
+`tests/conditional_independence_adversarial.rs` (contamination: vertical
+outliers, bad leverage points, correlated/structured contamination, a clean
+case where classical and robust agree, bitwise-deterministic robust repeats,
+a near-constant conditioning dimension; permutation calibration: determinism,
+seed-sensitivity of the p-value without a change in result shape, the exact
+two-sided exceedance formula, detection of real dependence, non-rejection of
+real independence, the chain motif via residual permutation, an invalid
+permutation count, conditioning-order invariance; boundary/numerical cases:
+near-perfect vs. exact rank deficiency, a conditioning set that saturates the
+sample — proven to force a spurious `r = ±1` that is honestly reported
+`Inconclusive`, not `Dependent` — a near-unfaithful (tiny-coefficient) chain,
+a minority bypass-contaminated conditional test, heavy-tailed independent
+variables, the two undisguised nonlinear/heteroscedastic negative results,
+mixed intervention/observational rows, a small environment at the exact
+sample-size boundary, and duplicate variable metadata).
+
+### Compatibility
+
+Purely additive: four new (private) modules plus new public re-exports
+(`PartialCorrelationTest`, `ConditionalIndependenceTest`,
+`ConditionalIndependenceConfig`, `ConditionalIndependenceMethod`,
+`ConditionalIndependenceResult`, `IndependenceDecision`, `CalibrationMethod`,
+`RegimeSelection`, `MissingValuePolicy`, `ResidualizationMethod`,
+`RobustCalibration`), 9 new `CausalError` variants and 1 new
+`CausalAssumption` variant (both additive to existing open enums, not
+breaking), 2 new path dependencies. No existing public item's signature
+changed; `examples/typed_causal_contract.rs` is untouched and its behavior is
+unaffected.
+
+### Supported and unsupported claims
+
+May claim: deterministic linear conditional-independence testing under
+(approximate) Gaussian assumptions with Fisher-z calibration; a genuinely
+robust association measure via OGK when data is contaminated; a calibrated
+p-value under a documented, named exchangeability assumption via residual
+permutation; a structurally-enforced three-way decision (never a boolean);
+suitability as one candidate statistical input to a future PC-Stable-style
+discovery algorithm.
+
+Must **not** claim: that `IndependentWithinThreshold` proves independence or
+that a graph edge is absent; that latent confounding has been excluded;
+that faithfulness has been validated; that the classical Fisher-z null is
+exact for an OGK-derived statistic; that permutation calibration is valid
+under every possible dependence structure (only under
+`ResidualExchangeability`); that this phase detects arbitrary nonlinear
+dependence; that a DAG has been discovered or that any effect is
+identifiable or estimated.
+
+### Known limitations / deferred
+
+- Linear association only — see "Scientific scope" above; a future phase
+  that wants nonlinear CI testing (e.g. kernel-based or rank-based measures)
+  would need a new method variant, not a change to this one.
+- The robust method's residualization uses two independent per-variable OGK
+  fits against `Z`, then a third 2-D fit on the residuals — not a single
+  joint fit over `{X, Y} ∪ Z` with the partial correlation read off in one
+  step. Both are legitimate designs; this phase does not claim the two are
+  numerically equivalent.
+- `MissingValuePolicy` is a no-op under `CausalDataset`'s current
+  finite-at-construction invariant (inherited from 5C.1, unchanged here).
+- No conditional-independence-based discovery algorithm (PC-Stable or
+  otherwise), equivalence-class construction, effect estimation, or
+  invariance test exists yet — those remain 5C.3 onward, not to be started
+  until this phase is merged and `master` is resynchronized.
