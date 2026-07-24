@@ -515,7 +515,7 @@ identifiable or estimated.
 
 **Status: Draft.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
 from `origin/master` at `376fd353` (fresh master after PR #821 merged; this
-phase's branch carries only this phase's commits). Additive to
+phase's branch carries only this phase's commits). PR #824. Additive to
 `scirust-causal` (no existing public API changed). This phase implements
 **constraint-based Markov-equivalence-class discovery** — PC-Stable (Colombo &
 Maathuis, *Order-Independent Constraint-Based Causal Structure Learning*,
