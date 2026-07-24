@@ -41,6 +41,12 @@ pub enum CausalError {
         detail: &'static str,
     },
     CyclicGraph,
+    InvalidContract {
+        detail: &'static str,
+    },
+    UnknownVariableIndex {
+        index: usize,
+    },
 }
 
 impl fmt::Display for CausalError {
@@ -109,6 +115,14 @@ impl fmt::Display for CausalError {
                     "graph extraction produced a cycle (a super-threshold entry \
                      on the diagonal or a thresholded pattern with a directed cycle)"
                 )
+            },
+            Self::InvalidContract { detail } =>
+            {
+                write!(f, "invalid causal contract: {detail}")
+            },
+            Self::UnknownVariableIndex { index } =>
+            {
+                write!(f, "reference to unknown variable index {index}")
             },
         }
     }

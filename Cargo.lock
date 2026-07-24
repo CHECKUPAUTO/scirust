@@ -2939,6 +2939,9 @@ version = "0.1.0"
 dependencies = [
  "scirust-graph",
  "scirust-solvers",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
