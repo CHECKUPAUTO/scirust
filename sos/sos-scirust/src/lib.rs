@@ -24,16 +24,25 @@
 //!   over a *continuous* design box, rather than ranking a pre-enumerated
 //!   discrete set. Seeded, `L1` (SDE §08 §6's `automl` classification),
 //!   even though the EIG value at the returned point is itself exact.
+//! * [`nmc`] — **tier 3**, nested Monte Carlo:
+//!   [`nmc::NestedMcEigEstimator`] estimates EIG for *discrete hypothesis
+//!   discrimination with non-Gaussian likelihoods* — a finite set of
+//!   `scirust-stats` [`scirust_stats::DiscreteDistribution`]s (`Poisson`,
+//!   `Binomial`, ...), one per hypothesis. The inner Bayes update is exact
+//!   (the hypothesis set is small and finite); only the outer expectation
+//!   over the observation is Monte Carlo, seeded via `scirust-stats`'
+//!   `SplitMix64`. `L1`, and — unlike tiers 1/2 — a genuinely non-zero
+//!   standard error, computed for real rather than asserted.
+//!
+//! Gap #1's three tiers are now all landed — every EIG-computation path SDE
+//! §08 §3 names.
 //!
 //! ## What is deliberately not here yet
 //!
-//! Gap #1's third tier — the seeded nested-Monte-Carlo fallback for discrete
-//! hypothesis discrimination with non-Gaussian likelihoods
-//! (`scirust-stats::SplitMix64`) — is a separate, documented follow-on
-//! increment. So are gaps #2–8 (the `sos-workflow` `StageExecutor`,
-//! `sos-simulation` backends, and the rest) — each is its own increment, not
-//! stubbed here. Registry-mediated resolution (binding a `sos-registry`
-//! `PluginDescriptor` to either estimator) is also deferred: `sos-scirust` is
+//! Gaps #2–8 (the `sos-workflow` `StageExecutor`, `sos-simulation` backends,
+//! and the rest) are untouched — each is its own increment, not stubbed here.
+//! Registry-mediated resolution (binding a `sos-registry` `PluginDescriptor`
+//! to any of the three estimators above) is also deferred: `sos-scirust` is
 //! documented as the in-process "Static Rust... the default" transport
 //! (RFC-0002 §10 §1), so direct construction is the expected shape until a
 //! caller actually needs to swap implementations.
@@ -72,7 +81,9 @@
 pub mod bo;
 pub mod eig;
 pub mod error;
+pub mod nmc;
 
 pub use bo::BoResult;
 pub use eig::GpEigEstimator;
 pub use error::{Result, ScirustError};
+pub use nmc::NestedMcEigEstimator;

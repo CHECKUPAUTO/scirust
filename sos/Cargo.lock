@@ -471,6 +471,13 @@ name = "scirust-special"
 version = "0.1.0"
 
 [[package]]
+name = "scirust-stats"
+version = "0.1.0"
+dependencies = [
+ "scirust-special",
+]
+
+[[package]]
 name = "scirust-symbolic"
 version = "0.1.0"
 dependencies = [
@@ -708,6 +715,7 @@ version = "0.1.0"
 dependencies = [
  "scirust-automl",
  "scirust-gp",
+ "scirust-stats",
  "sos-core",
  "sos-planner",
  "thiserror",

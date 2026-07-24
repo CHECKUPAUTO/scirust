@@ -22,10 +22,10 @@ stubs, no TODOs, no placeholders cross a phase boundary.
 |-------|-------|--------|
 | **P1 — Kernel & substrate** | `sos-core`, `sos-store`, `sos-provenance`, `sos-registry`, `sos-repro` (+ SOS CI) | **done** (`sos-repro` core landed on the merged scheduler — env-lock + drift + the level-aware reproduction contract; the numeric `L2`/`L1` verdict is backend-supplied per Invariant VIII). The workspace's 4 dependency invariants are now CI-**enforced**, not just documented — see the dependency-invariant lint under Landed below |
 | **P2 — Knowledge & Reasoning** | `sos-knowledge`, `sos-reasoning` | **done** (deterministic cores landed; Datalog / e-graph / theorem-proving deferred to `sos-scirust` per Invariant VIII) |
-| **P3 — Discovery, Planning, Simulation** | `sos-workflow`, `sos-simulation`, `sos-planner`, re-homed `sde-*` stages | engine **cores landed** — the memoized scheduler, the backend-independent `Simulate` interface, and the planner (utility ranking + information-exhaustion + stopping rules). Two of the three EIG-numerics tiers are now real: the closed-form GP tier (`sos-scirust`'s `GpEigEstimator`) and the Bayesian-optimization continuous-design-box search tier (`sos-scirust`'s `BoResult`/`search_best_design`, reusing `sos-planner`'s own `UtilityPolicy` — unchanged `sos-planner` contract either way). The nested-MC tier, solver numerics, manifest resolution, and the re-homed discovery stages still await `sos-scirust` / a frontend per Invariant VIII |
+| **P3 — Discovery, Planning, Simulation** | `sos-workflow`, `sos-simulation`, `sos-planner`, re-homed `sde-*` stages | engine **cores landed** — the memoized scheduler, the backend-independent `Simulate` interface, and the planner (utility ranking + information-exhaustion + stopping rules). All three EIG-numerics tiers SDE §08 §3 names are now real, and `sos-planner`'s own contract is unchanged by any of them: the closed-form GP tier (`sos-scirust`'s `GpEigEstimator`), the Bayesian-optimization continuous-design-box search tier (`BoResult`/`search_best_design`, reusing `sos-planner`'s own `UtilityPolicy`), and the nested-Monte-Carlo discrete-hypothesis tier (`NestedMcEigEstimator`, with a real, computed standard error). Solver numerics, manifest resolution, and the re-homed discovery stages still await `sos-scirust` / a frontend per Invariant VIII |
 | **P4 — Curiosity & Theory** | `sos-curiosity`, `sos-theory` | **cores landed** (both need only the P2 substrate; information-gain / analogy / Bayes-factor ranking / discriminating-experiment planning await P3's `sos-planner` and `scirust-*` per Invariant VIII) |
 | **P5 — Userland** | `sos-publication`, `sos-cli`, `sos-mcp` | `sos-publication` **core landed** — the publication is a verifiable projection of the object graph: content-addressed claims typed-bound to their evidence, the multi-phase claim/scope/reproducibility verifier, and deterministic Markdown/HTML/JSON. Re-execution of exhibits is `sos-workflow`'s job and real signing is `sos-provenance`'s per Invariant VIII; this crate consumes decisions, never recomputes them. `sos-cli` **porcelain landed** — `init`/`clone`/`push`/`log`/`know`/`ask`/`why`/`verify`/`diff`/`plan`/`publish`/`plugins` over the already-landed engines and the new persistent `FileStore`; `sos run` (needs a real `StageExecutor` backend) and a true `sos merge` are deferred, not stubbed. `sos-mcp` **server landed** — the same syscalls as MCP tools over blocking stdio JSON-RPC (no async runtime, no new third-party dependency), with the untrusted-proposer tool opt-in per Invariant IX |
-| **P6 — Backend adapters** | `sos-ccos` (cognitive), `sos-scirust` (computational) | `sos-ccos` **deterministic boundary landed** — the untrusted-proposer contract (Invariant IX): grounded, content-addressed proposals, the deterministic disposition gate, a tamper-evident attestation chain, and a no-LLM memory fallback. `sos-scirust` **two EIG tiers landed** — a closed-form GP-based estimator wrapping `scirust-gp`, and a Bayesian-optimization continuous-design-box search reusing `scirust-automl`'s seeded EI loop (honestly tagged `L1`, not `L3`, since *which* point a seeded search returns is never bit-independent of the seed — SDE §08 §6); this is the sole crate CI-confirmed to touch `scirust-*`. The nested-MC EIG tier and every other gap (`sos-workflow`'s `StageExecutor`, `sos-simulation` backends, …) are deferred, not stubbed. The generative LLM/CCOS backend remains a deferred out-of-process backend per Invariant VIII |
+| **P6 — Backend adapters** | `sos-ccos` (cognitive), `sos-scirust` (computational) | `sos-ccos` **deterministic boundary landed** — the untrusted-proposer contract (Invariant IX): grounded, content-addressed proposals, the deterministic disposition gate, a tamper-evident attestation chain, and a no-LLM memory fallback. `sos-scirust` **all three EIG tiers landed** — a closed-form GP-based estimator wrapping `scirust-gp`; a Bayesian-optimization continuous-design-box search reusing `scirust-automl`'s seeded EI loop; and a nested-Monte-Carlo estimator over finite `scirust-stats` discrete-hypothesis likelihoods, with a real, computed standard error rather than an asserted one. The two seeded tiers are honestly tagged `L1`, not `L3` (SDE §08 §6); this is the sole crate CI-confirmed to touch `scirust-*`. Every other gap (`sos-workflow`'s `StageExecutor`, `sos-simulation` backends, …) is deferred, not stubbed. The generative LLM/CCOS backend remains a deferred out-of-process backend per Invariant VIII |
 
 ### Landed
 
@@ -207,28 +207,38 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   and embedding-backed recall are the deferred out-of-process backend per
   Invariant VIII — no stub, no fake cognition.)
 - **`sos-scirust`** — the Computational Backend Adapter, and the only other
-  crate the dependency lint permits to name `scirust-*` (Invariant VIII). Gap
-  #1's first two tiers: [`GpEigEstimator`](sos-scirust/src/eig.rs) wraps
+  crate the dependency lint permits to name `scirust-*` (Invariant VIII). All
+  three of gap #1's EIG tiers are landed, and `sos-planner`'s
+  ranking/stopping-rule machinery is **unchanged** by any of them: each tier
+  only produces the same `Estimate`/`Candidate` types a consumer always could,
+  now backed by real numerics instead of a hand-supplied number.
+  [`GpEigEstimator`](sos-scirust/src/eig.rs) (**tier 1**, closed-form) wraps
   [`scirust-gp`](../scirust-gp)'s exact Gaussian-process posterior variance in
   the closed-form Gaussian-channel mutual-information formula
-  (`0.5·log2(1 + var/noise)` bits) to produce real
-  [`sos_planner::Estimate`](sos-planner/src/estimate.rs)s — `L3`, zero
-  standard error, since the formula is analytic in the GP's own variance, not
-  sampled. [`BoResult`/`search_best_design`](sos-scirust/src/bo.rs) answers a
-  different question — the best design in a whole *continuous* box, not a
-  ranking of a pre-enumerated set — by reusing `scirust-automl`'s seeded
-  `bayesian_optimize`/`expected_improvement` loop to maximize `sos-planner`'s
-  own [`UtilityPolicy::utility`](sos-planner/src/policy.rs) directly (no
-  duplicate scalarization); tagged `L1`, honestly, since *which* point a
-  seeded search returns is a function of the seed even though the EIG value at
-  that point is itself exact (SDE §08 §6's `automl` classification). Either
-  way, `sos-planner`'s ranking/stopping-rule machinery is **unchanged**: this
-  crate only produces the same `Estimate`/`Candidate` types a consumer always
-  could, now backed by real numerics instead of a hand-supplied number. (The
-  seeded nested-Monte-Carlo fallback for non-Gaussian likelihoods is gap #1's
-  third tier — deferred, not stubbed — and so is every other gap in the
-  `sos-scirust` scoping plan: `sos-workflow`'s `StageExecutor`,
-  `sos-simulation` backends, and the rest.)
+  (`0.5·log2(1 + var/noise)` bits) — `L3`, zero standard error, since the
+  formula is analytic in the GP's own variance, not sampled.
+  [`BoResult`/`search_best_design`](sos-scirust/src/bo.rs) (**tier 2**,
+  search) answers a different question — the best design in a whole
+  *continuous* box, not a ranking of a pre-enumerated set — by reusing
+  `scirust-automl`'s seeded `bayesian_optimize`/`expected_improvement` loop to
+  maximize `sos-planner`'s own
+  [`UtilityPolicy::utility`](sos-planner/src/policy.rs) directly (no duplicate
+  scalarization); `L1`, honestly, since *which* point a seeded search returns
+  is a function of the seed even though the EIG value at that point is itself
+  exact (SDE §08 §6's `automl` classification).
+  [`NestedMcEigEstimator`](sos-scirust/src/nmc.rs) (**tier 3**, nested Monte
+  Carlo) is for a third, genuinely different scenario — discrete hypothesis
+  discrimination with non-Gaussian likelihoods, a finite set of
+  `scirust-stats` `DiscreteDistribution`s (`Poisson`, `Binomial`, ...), one per
+  hypothesis: the inner Bayes update is exact (a finite, `K`-term
+  log-sum-exp), only the outer expectation over the observation is seeded
+  Monte Carlo (`scirust-stats`' `SplitMix64`); `L1`, and — unlike tiers 1/2 —
+  a genuinely non-zero standard error, computed from the real spread of the
+  Monte-Carlo draws
+  ([`scirust_stats::describe::std_error`](../scirust-stats/src/describe.rs)),
+  never asserted. Every other gap in the `sos-scirust` scoping plan
+  (`sos-workflow`'s `StageExecutor`, `sos-simulation` backends, and the rest)
+  is deferred, not stubbed.
 - **`sos-cli`** — the `sos` command-line porcelain (RFC-0002 §10.4), the
   first-ever user-facing entry point into SOS. A thin, git-shaped shell adding
   no new compute of its own: `sos init`/`clone`/`push` manage a reasoning
