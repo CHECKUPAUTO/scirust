@@ -37,8 +37,13 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   [`put_object`/`get_object`](sos-store/src/store.rs) that **verify the content
   address on read and write**, content-addressed [`BlobRef`](sos-store/src/blob.rs)
   blobs, mutable named refs, and reachability [`gc`](sos-store/src/store.rs). Ships
-  a complete in-memory backend ([`MemoryStore`](sos-store/src/mem.rs)); persistent
-  backends implement the same trait.
+  a complete in-memory backend ([`MemoryStore`](sos-store/src/mem.rs)) and a
+  **persistent, filesystem-backed** [`FileStore`](sos-store/src/file.rs) — a
+  git-style sharded-directory layout for objects/blobs, a small JSON ref index
+  (never a caller-supplied name turned directly into a path — no
+  path-traversal surface), atomic write-then-rename durability, and state that
+  survives closing and reopening the store. A remote/object-storage backend
+  implementing the same trait is a follow-on increment.
 - **`sos-provenance`** — the Provenance Engine. A queryable
   [`ProvenanceGraph`](sos-provenance/src/graph.rs) over any store — `ancestors`
   ("why do we believe X"), `descendants` ("what breaks if X is retracted"),
