@@ -23,6 +23,7 @@ members = [
     "sos-ccos",
     "sos-cli",
     "sos-mcp",
+    "sos-scirust",
 ]
 
 [workspace.package]

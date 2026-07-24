@@ -93,6 +93,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-gp"
+version = "0.1.0"
+
+[[package]]
 name = "serde"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -300,6 +304,16 @@ dependencies = [
  "sos-core",
  "sos-store",
  "sos-workflow",
+ "thiserror",
+]
+
+[[package]]
+name = "sos-scirust"
+version = "0.1.0"
+dependencies = [
+ "scirust-gp",
+ "sos-core",
+ "sos-planner",
  "thiserror",
 ]
 

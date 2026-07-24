@@ -1,0 +1,16 @@
+[package]
+name = "sos-scirust"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SOS Computational Backend Adapter (Invariant VIII): the sole SOS crate permitted to depend on scirust-* crates, wrapping them behind the engine syscalls that need real numerics. First capability: a closed-form expected-information-gain estimator for sos-planner, wrapping scirust-gp's exact Gaussian-process posterior variance via the Gaussian-channel mutual-information formula (L3, zero standard error). Pure Rust, no FFI, no unsafe."
+keywords = ["scirust", "backend", "adapter", "gaussian-process", "science"]
+categories = ["science"]
+
+[dependencies]
+sos-core = { workspace = true }
+sos-planner = { workspace = true }
+thiserror = { workspace = true }
+scirust-gp = { path = "../../scirust-gp" }
