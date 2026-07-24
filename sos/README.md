@@ -22,10 +22,10 @@ stubs, no TODOs, no placeholders cross a phase boundary.
 |-------|-------|--------|
 | **P1 — Kernel & substrate** | `sos-core`, `sos-store`, `sos-provenance`, `sos-registry`, `sos-repro` (+ SOS CI) | **done** (`sos-repro` core landed on the merged scheduler — env-lock + drift + the level-aware reproduction contract; the numeric `L2`/`L1` verdict is backend-supplied per Invariant VIII). The workspace's 4 dependency invariants are now CI-**enforced**, not just documented — see the dependency-invariant lint under Landed below |
 | **P2 — Knowledge & Reasoning** | `sos-knowledge`, `sos-reasoning` | **done** (deterministic cores landed; Datalog / e-graph / theorem-proving deferred to `sos-scirust` per Invariant VIII) |
-| **P3 — Discovery, Planning, Simulation** | `sos-workflow`, `sos-simulation`, `sos-planner`, re-homed `sde-*` stages | engine **cores landed** — the memoized scheduler, the backend-independent `Simulate` interface, and the planner (utility ranking + information-exhaustion + stopping rules). All three EIG-numerics tiers SDE §08 §3 names are now real, and `sos-planner`'s own contract is unchanged by any of them: the closed-form GP tier (`sos-scirust`'s `GpEigEstimator`), the Bayesian-optimization continuous-design-box search tier (`BoResult`/`search_best_design`, reusing `sos-planner`'s own `UtilityPolicy`), and the nested-Monte-Carlo discrete-hypothesis tier (`NestedMcEigEstimator`, with a real, computed standard error). `sos-simulation`'s first real backend is also landed — `sos-scirust`'s `Rk4OdeSimulator` wraps `scirust-solvers`' fixed-step RK4, `L3`, with `sos-simulation`'s own `Simulate`/`Observation`/`Vcr` machinery unchanged. The remaining solver numerics (adaptive/nonlinear/quadrature), manifest resolution, `sos-workflow`'s `StageExecutor` (needs a dispatch/registry mechanism first), and the re-homed discovery stages still await `sos-scirust` / a frontend per Invariant VIII |
+| **P3 — Discovery, Planning, Simulation** | `sos-workflow`, `sos-simulation`, `sos-planner`, re-homed `sde-*` stages | engine **cores landed** — the memoized scheduler, the backend-independent `Simulate` interface, and the planner (utility ranking + information-exhaustion + stopping rules). All three EIG-numerics tiers SDE §08 §3 names are now real, and `sos-planner`'s own contract is unchanged by any of them: the closed-form GP tier (`sos-scirust`'s `GpEigEstimator`), the Bayesian-optimization continuous-design-box search tier (`BoResult`/`search_best_design`, reusing `sos-planner`'s own `UtilityPolicy`), and the nested-Monte-Carlo discrete-hypothesis tier (`NestedMcEigEstimator`, with a real, computed standard error). `sos-simulation` now has two real backends spanning both determinism levels SDE §08 §2 names for this family — `sos-scirust`'s `Rk4OdeSimulator` (fixed-step, `L3`) and `Dopri5OdeSimulator` (adaptive, `L2` with a real `CertifiedTrajectory` tolerance certificate, since `Observation` itself has no certificate field) — with `sos-simulation`'s own `Simulate`/`Observation`/`Vcr` machinery unchanged by either. The remaining solver numerics (nonlinear, quadrature), manifest resolution, `sos-workflow`'s `StageExecutor` (needs a dispatch/registry mechanism first), and the re-homed discovery stages still await `sos-scirust` / a frontend per Invariant VIII |
 | **P4 — Curiosity & Theory** | `sos-curiosity`, `sos-theory` | **cores landed** (both need only the P2 substrate; information-gain / analogy / Bayes-factor ranking / discriminating-experiment planning await P3's `sos-planner` and `scirust-*` per Invariant VIII) |
 | **P5 — Userland** | `sos-publication`, `sos-cli`, `sos-mcp` | `sos-publication` **core landed** — the publication is a verifiable projection of the object graph: content-addressed claims typed-bound to their evidence, the multi-phase claim/scope/reproducibility verifier, and deterministic Markdown/HTML/JSON. Re-execution of exhibits is `sos-workflow`'s job and real signing is `sos-provenance`'s per Invariant VIII; this crate consumes decisions, never recomputes them. `sos-cli` **porcelain landed** — `init`/`clone`/`push`/`log`/`know`/`ask`/`why`/`verify`/`diff`/`plan`/`publish`/`plugins` over the already-landed engines and the new persistent `FileStore`; `sos run` (needs a real `StageExecutor` backend) and a true `sos merge` are deferred, not stubbed. `sos-mcp` **server landed** — the same syscalls as MCP tools over blocking stdio JSON-RPC (no async runtime, no new third-party dependency), with the untrusted-proposer tool opt-in per Invariant IX |
-| **P6 — Backend adapters** | `sos-ccos` (cognitive), `sos-scirust` (computational) | `sos-ccos` **deterministic boundary landed** — the untrusted-proposer contract (Invariant IX): grounded, content-addressed proposals, the deterministic disposition gate, a tamper-evident attestation chain, and a no-LLM memory fallback. `sos-scirust` **all three gap-#1 EIG tiers, plus gap #3's first backend, landed** — a closed-form GP-based EIG estimator wrapping `scirust-gp`; a Bayesian-optimization continuous-design-box search reusing `scirust-automl`'s seeded EI loop; a nested-Monte-Carlo estimator over finite `scirust-stats` discrete-hypothesis likelihoods, with a real, computed standard error rather than an asserted one; and a real `sos-simulation` `Simulate` backend wrapping `scirust-solvers`' fixed-step RK4 (`L3`, seedless-deterministic). The two seeded EIG tiers are honestly tagged `L1`, not `L3` (SDE §08 §6); this is the sole crate CI-confirmed to touch `scirust-*`. Gap #2 (`sos-workflow`'s `StageExecutor`) needs a dispatch/registry mechanism first — a materially larger increment — and every other gap is deferred, not stubbed. The generative LLM/CCOS backend remains a deferred out-of-process backend per Invariant VIII |
+| **P6 — Backend adapters** | `sos-ccos` (cognitive), `sos-scirust` (computational) | `sos-ccos` **deterministic boundary landed** — the untrusted-proposer contract (Invariant IX): grounded, content-addressed proposals, the deterministic disposition gate, a tamper-evident attestation chain, and a no-LLM memory fallback. `sos-scirust` **all three gap-#1 EIG tiers, plus gap #3's first two backends, landed** — a closed-form GP-based EIG estimator wrapping `scirust-gp`; a Bayesian-optimization continuous-design-box search reusing `scirust-automl`'s seeded EI loop; a nested-Monte-Carlo estimator over finite `scirust-stats` discrete-hypothesis likelihoods, with a real, computed standard error rather than an asserted one; and two real `sos-simulation` `Simulate` backends wrapping `scirust-solvers`' ODE integrators — fixed-step RK4 (`L3`, seedless-deterministic) and adaptive Dormand-Prince 5(4) (`L2`, with a real tolerance certificate carried in the output type since `Observation` has none of its own). Three of the four capabilities are honestly tagged below `L3` (`L1`/`L1`/`L2`, not `L3`) precisely where the underlying algorithm is seeded or tolerance-bounded, not by default; this is the sole crate CI-confirmed to touch `scirust-*`. Gap #2 (`sos-workflow`'s `StageExecutor`) needs a dispatch/registry mechanism first — a materially larger increment — and every other gap is deferred, not stubbed. The generative LLM/CCOS backend remains a deferred out-of-process backend per Invariant VIII |
 
 ### Landed
 
@@ -238,31 +238,39 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   ([`scirust_stats::describe::std_error`](../scirust-stats/src/describe.rs)),
   never asserted.
 
-  Gap #3 (`sos-simulation` backends) also has its first entry:
-  [`Rk4OdeSimulator`](sos-scirust/src/ode.rs) is a real
-  [`Simulate`](sos-simulation/src/simulate.rs) implementation — `sos-simulation`
-  ships the backend-independent syscall, `Observation`'s honest determinism
-  stamping, and the `Vcr` record/replay memo, but (like `sos-planner`)
-  implements no solver itself. `Rk4OdeSimulator` integrates `dy/dt = f(t, y)`
-  via `scirust-solvers`' fixed-step RK4 and is `L3`, not `L2` — RFC-0002 §08 §1
-  classifies `scirust-solvers` itself as *seedless-deterministic*, and the
-  fixed-step loop bears that out concretely (a fixed sequence of scalar `f64`
-  operations, no adaptive branching); an adaptive-step or
-  iterative-to-tolerance solver is the natural `L2`-plus-certificate case and a
-  separate, deferred backend. Its `OdeConfig` carries `f64` fields but the
-  kernel's `CanonicalEncoder` is deliberately float-free
-  (`sos_core::canonical` module docs), so `encode` quantizes every field to a
-  fixed-point `i64` before hashing — content-addressing only, never affecting
-  the full-`f64`-precision integration itself. `SimDescriptor` is
-  caller-supplied rather than hardcoded, since two different physical models
-  sharing this same RK4 code need distinct descriptors to cache distinctly.
+  Gap #3 (`sos-simulation` backends) now has two entries, both in
+  [`sos-scirust/src/ode.rs`](sos-scirust/src/ode.rs), spanning the two
+  determinism levels SDE §08 §2 names for ODE integration — `sos-simulation`
+  ships the backend-independent [`Simulate`](sos-simulation/src/simulate.rs)
+  syscall, `Observation`'s honest determinism stamping, and the `Vcr`
+  record/replay memo, but (like `sos-planner`) implements no solver itself.
+  `Rk4OdeSimulator` integrates `dy/dt = f(t, y)` via `scirust-solvers`'
+  fixed-step RK4 and is `L3` — RFC-0002 §08 §1 classifies `scirust-solvers`
+  itself as *seedless-deterministic*, and the fixed-step loop bears that out
+  concretely (a fixed sequence of scalar `f64` operations, no adaptive
+  branching). `Dopri5OdeSimulator` integrates the same equation via adaptive
+  Dormand-Prince 5(4) (the algorithm behind `scipy.integrate.RK45` / MATLAB's
+  `ode45`) and is `L2`, not `L3`: every step's accept/reject decision branches
+  on a computed error norm against the caller's `rtol`/`atol`, the textbook
+  "iterative solver to a tolerance" case. Because `Observation` has no
+  dedicated certificate field, the certificate lives in the output type
+  itself — `CertifiedTrajectory` carries the trajectory *and* the
+  `rtol`/`atol`/accepted/rejected-step bookkeeping that bounds its accuracy,
+  so a caller can see exactly what the result is certified to. Both configs
+  carry `f64` fields but the kernel's `CanonicalEncoder` is deliberately
+  float-free (`sos_core::canonical` module docs), so `encode` quantizes every
+  field to a fixed-point `i64` before hashing — content-addressing only,
+  never affecting the full-`f64`-precision integration itself.
+  `SimDescriptor` is caller-supplied rather than hardcoded for both, since two
+  different physical models sharing the same integrator code need distinct
+  descriptors to cache distinctly.
 
   Every other gap in the `sos-scirust` scoping plan is deferred, not stubbed:
   gap #2 (`sos-workflow`'s `StageExecutor`) needs a dispatch/registry
   mechanism first — materially larger than a single adapter — and gap #3
-  itself still has `scirust-solvers`' adaptive Dormand-Prince 5(4),
-  nonlinear (Newton/Broyden), and quadrature, plus
-  `scirust-signal`/`scirust-sim`'s executor kinds, ahead of it.
+  itself still has `scirust-solvers`' nonlinear (Newton/Broyden) and
+  quadrature, plus `scirust-signal`/`scirust-sim`'s executor kinds, ahead of
+  it.
 - **`sos-cli`** — the `sos` command-line porcelain (RFC-0002 §10.4), the
   first-ever user-facing entry point into SOS. A thin, git-shaped shell adding
   no new compute of its own: `sos init`/`clone`/`push` manage a reasoning

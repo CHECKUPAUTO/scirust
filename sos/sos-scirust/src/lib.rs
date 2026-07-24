@@ -39,12 +39,20 @@
 //! determinism stamping, and record/replay, but implements no solver, the
 //! same Invariant VIII boundary gap #1 respects for `sos-planner`:
 //!
-//! * [`ode`] — first backend: [`ode::Rk4OdeSimulator`] runs
-//!   `dy/dt = f(t, y)` via `scirust_solvers`'s fixed-step RK4. `L3`,
-//!   seedless-deterministic (RFC-0002 §08 §1's classification of
-//!   `scirust-solvers` itself) — a fixed sequence of scalar `f64` operations
-//!   with no adaptive branching, unlike an adaptive-step or
-//!   iterative-to-tolerance solver's `L2`-plus-certificate case.
+//! * [`ode`] — two backends, both integrating `dy/dt = f(t, y)`, at the two
+//!   determinism levels SDE §08 §2 names for this family:
+//!     * [`ode::Rk4OdeSimulator`] — `scirust_solvers`'s fixed-step RK4. `L3`,
+//!       seedless-deterministic (RFC-0002 §08 §1's classification of
+//!       `scirust-solvers` itself) — a fixed sequence of scalar `f64`
+//!       operations with no adaptive branching.
+//!     * [`ode::Dopri5OdeSimulator`] — `scirust_solvers`'s adaptive
+//!       Dormand-Prince 5(4). `L2`, not `L3`: every step's accept/reject
+//!       decision branches on a computed error norm against a declared
+//!       tolerance, the textbook "iterative solver to a tolerance" case.
+//!       Because `Observation` has no dedicated certificate field, the
+//!       certificate lives in the output: [`ode::CertifiedTrajectory`] carries
+//!       the trajectory *and* the `rtol`/`atol`/accepted/rejected-step
+//!       bookkeeping that bounds its accuracy.
 //!
 //! ## What is deliberately not here yet
 //!
@@ -55,11 +63,9 @@
 //! to any capability above) is also deferred: `sos-scirust` is documented as
 //! the in-process "Static Rust... the default" transport (RFC-0002 §10 §1),
 //! so direct construction is the expected shape until a caller actually needs
-//! to swap implementations. Within gap #3 itself, only the RK4 fixed-step
-//! integrator is here — `scirust-solvers`' adaptive Dormand-Prince 5(4),
-//! nonlinear (Newton/Broyden), and quadrature are separate follow-on
-//! backends, and `scirust-signal`/`scirust-sim`'s executor kinds (SDE §08 §2)
-//! are untouched.
+//! to swap implementations. Within gap #3 itself, `scirust-solvers`' nonlinear
+//! (Newton/Broyden) and quadrature are separate follow-on backends, and
+//! `scirust-signal`/`scirust-sim`'s executor kinds (SDE §08 §2) are untouched.
 //!
 //! ## Example
 //!
@@ -102,4 +108,4 @@ pub use bo::BoResult;
 pub use eig::GpEigEstimator;
 pub use error::{Result, ScirustError};
 pub use nmc::NestedMcEigEstimator;
-pub use ode::Rk4OdeSimulator;
+pub use ode::{Dopri5OdeSimulator, Rk4OdeSimulator};
