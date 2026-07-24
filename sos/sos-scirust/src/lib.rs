@@ -53,6 +53,18 @@
 //!       certificate lives in the output: [`ode::CertifiedTrajectory`] carries
 //!       the trajectory *and* the `rtol`/`atol`/accepted/rejected-step
 //!       bookkeeping that bounds its accuracy.
+//! * [`quadrature`] — a third `L2`-plus-certificate entry:
+//!   [`quadrature::QuadratureSimulator`] estimates `∫ₐᵇ f(x) dx` via
+//!   `scirust_solvers`'s adaptive Simpson quadrature, using the *strict*
+//!   variant that errors on depth exhaustion rather than silently returning a
+//!   non-compliant estimate — a certificate that could be wrong isn't one.
+//!   [`quadrature::CertifiedIntegral`] needs no accepted/rejected bookkeeping
+//!   the way [`ode::CertifiedTrajectory`] does: a *successful* strict call is
+//!   by construction guaranteed to have met the declared tolerance.
+//!
+//! [`ode`] and [`quadrature`] share their `f64`-quantization and
+//! `scirust-solvers`-error-mapping helpers via [`solver`] rather than
+//! duplicating them.
 //!
 //! ## What is deliberately not here yet
 //!
@@ -64,8 +76,11 @@
 //! the in-process "Static Rust... the default" transport (RFC-0002 §10 §1),
 //! so direct construction is the expected shape until a caller actually needs
 //! to swap implementations. Within gap #3 itself, `scirust-solvers`' nonlinear
-//! (Newton/Broyden) and quadrature are separate follow-on backends, and
-//! `scirust-signal`/`scirust-sim`'s executor kinds (SDE §08 §2) are untouched.
+//! (Newton/Broyden) is a separate follow-on backend — root-finding does not
+//! obviously fit `Simulate`'s "observe an experiment" framing the way
+//! integration does, so it needs its own look rather than a mechanical
+//! repeat of this pattern — and `scirust-signal`/`scirust-sim`'s executor
+//! kinds (SDE §08 §2) are untouched.
 //!
 //! ## Example
 //!
@@ -103,9 +118,12 @@ pub mod eig;
 pub mod error;
 pub mod nmc;
 pub mod ode;
+pub mod quadrature;
+mod solver;
 
 pub use bo::BoResult;
 pub use eig::GpEigEstimator;
 pub use error::{Result, ScirustError};
 pub use nmc::NestedMcEigEstimator;
 pub use ode::{Dopri5OdeSimulator, Rk4OdeSimulator};
+pub use quadrature::QuadratureSimulator;

@@ -37,11 +37,12 @@
 //! ## Canonical config, honestly
 //!
 //! Both configs carry `f64` fields, but the kernel's [`CanonicalEncoder`] is
-//! deliberately float-free (`sos_core::canonical` module docs): `encode`
-//! quantizes every field to a fixed-point `i64` at a declared
-//! [`FIXED_POINT_SCALE`] before hashing, exactly as those docs prescribe. This
-//! affects only content-addressing (the `Vcr`/workflow cache key); the
-//! integration itself always runs at full `f64` precision.
+//! deliberately float-free (`sos_core::canonical` module docs). `encode`
+//! encodes every field exactly via [`crate::solver::encode_f64`] (shared with
+//! [`crate::quadrature`]) rather than quantizing to a fixed-point scale — see
+//! that function's docs for why. This affects only content-addressing (the
+//! `Vcr`/workflow cache key); the integration itself always runs at full
+//! `f64` precision.
 //!
 //! ## Whose job cache-key disambiguation is
 //!
@@ -54,29 +55,18 @@
 //! models is the caller's responsibility, the same way it already is for any
 //! [`Simulate`] implementor.
 //!
-//! Nonlinear (Newton/Broyden) and quadrature — SDE §08 §2's other named
-//! members of this same `L2`-plus-certificate family — and
+//! Nonlinear (Newton/Broyden) — SDE §08 §2's other named member of this same
+//! `L2`-plus-certificate family, alongside [`crate::quadrature`] — and
 //! `scirust-signal`/`scirust-sim`'s executor kinds are separate, deliberately
 //! deferred backends, not here.
 
-use scirust_solvers::SolverError;
 use scirust_solvers::ode::dopri5::dopri5;
 use scirust_solvers::ode::rk4::rk4_fixed;
 use sos_core::DeterminismLevel;
 use sos_core::canonical::{Canonical, CanonicalEncoder};
-use sos_simulation::{Observation, Result, SimDescriptor, SimError, Simulate};
+use sos_simulation::{Observation, Result, SimDescriptor, Simulate};
 
-/// Fixed-point scale for quantizing `f64` configuration fields into the
-/// kernel's float-free canonical encoding: values are rounded to the nearest
-/// `1 / FIXED_POINT_SCALE`Th before hashing (nanoscale precision — ample for
-/// any physically meaningful integration bound, initial condition, or step
-/// size). This affects only the content hash, never the computation.
-const FIXED_POINT_SCALE: f64 = 1e9;
-
-/// Quantize an `f64` to a fixed-point `i64` at [`FIXED_POINT_SCALE`].
-fn quantize(v: f64) -> i64 {
-    (v * FIXED_POINT_SCALE).round() as i64
-}
+use crate::solver::{ExactF64Seq, encode_f64, map_solver_error};
 
 /// The configuration for one RK4 integration: the interval `[t0, t_end]`, the
 /// initial state `y0`, and the fixed step size `step`.
@@ -109,11 +99,10 @@ impl OdeConfig {
 
 impl Canonical for OdeConfig {
     fn encode(&self, enc: &mut CanonicalEncoder) {
-        enc.i64(quantize(self.t0));
-        enc.i64(quantize(self.t_end));
-        enc.i64(quantize(self.step));
-        let y0_quantized: Vec<i64> = self.y0.iter().map(|&v| quantize(v)).collect();
-        enc.seq(&y0_quantized);
+        encode_f64(enc, self.t0);
+        encode_f64(enc, self.t_end);
+        encode_f64(enc, self.step);
+        enc.value(&ExactF64Seq(&self.y0));
     }
 }
 
@@ -213,13 +202,12 @@ impl AdaptiveOdeConfig {
 
 impl Canonical for AdaptiveOdeConfig {
     fn encode(&self, enc: &mut CanonicalEncoder) {
-        enc.i64(quantize(self.t0));
-        enc.i64(quantize(self.t_end));
-        let y0_quantized: Vec<i64> = self.y0.iter().map(|&v| quantize(v)).collect();
-        enc.seq(&y0_quantized);
-        enc.i64(quantize(self.rtol));
-        enc.i64(quantize(self.atol));
-        enc.i64(quantize(self.h_init));
+        encode_f64(enc, self.t0);
+        encode_f64(enc, self.t_end);
+        enc.value(&ExactF64Seq(&self.y0));
+        encode_f64(enc, self.rtol);
+        encode_f64(enc, self.atol);
+        encode_f64(enc, self.h_init);
     }
 }
 
@@ -305,20 +293,10 @@ where
     }
 }
 
-/// Map a `scirust-solvers` error to the two-variant `SimError` contract:
-/// input rejected before compute began vs. a failure while running.
-fn map_solver_error(e: SolverError) -> SimError {
-    match e
-    {
-        SolverError::InvalidInput(msg) => SimError::InvalidConfig(msg),
-        other => SimError::Backend(other.to_string()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use sos_core::SemVer;
-    use sos_simulation::Vcr;
+    use sos_simulation::{SimError, Vcr};
 
     use super::*;
 
@@ -496,6 +474,15 @@ mod tests {
             base.canonical_bytes(),
             AdaptiveOdeConfig::new(0.0, 1.0, vec![1.0], 1e-6, 1e-9, 0.2).canonical_bytes()
         );
+    }
+
+    #[test]
+    fn dopri5_sub_nanoscale_tolerances_do_not_collide() {
+        // Regression: nanoscale fixed-point quantization used to collapse
+        // 1e-10 and 1e-12 to the same encoded value.
+        let a = AdaptiveOdeConfig::new(0.0, 1.0, vec![1.0], 1e-6, 1e-10, 0.1);
+        let b = AdaptiveOdeConfig::new(0.0, 1.0, vec![1.0], 1e-6, 1e-12, 0.1);
+        assert_ne!(a.canonical_bytes(), b.canonical_bytes());
     }
 
     #[test]
