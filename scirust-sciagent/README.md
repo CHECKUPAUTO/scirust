@@ -48,19 +48,21 @@ pre‑fix checkpoints; they predate the gradient fixes.
 
 ### Usage
 
+Commands that use model weights (`ask`, `chat`, `explain`, and `generate`) require an explicit `--checkpoint PATH` and fail closed if it cannot be loaded. `info` may run without a checkpoint because it does not perform inference or allocate model weights.
+
 ```bash
 # Ask a prompt
 cargo run --release --bin sciagent -- --model small \\
-  --checkpoint /tmp/scirust_small_2k/final \\
+  --checkpoint scirust-sciagent/checkpoints/small-20M/final \\
   ask "fn main()" --max-tokens 100 --temperature 0.0
 
 # Interactive chat
 cargo run --release --bin sciagent -- --model small \\
-  --checkpoint /tmp/scirust_small_2k/final chat
+  --checkpoint scirust-sciagent/checkpoints/small-20M/final chat
 
 # Model info
 cargo run --release --bin sciagent -- --model small \\
-  --checkpoint /tmp/scirust_small_2k/final info
+  --checkpoint scirust-sciagent/checkpoints/small-20M/final info
 ```
 
 ## Tokenizer

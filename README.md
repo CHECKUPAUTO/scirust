@@ -314,11 +314,11 @@ The `scirust-sciagent` crate provides a from-scratch transformer trained on Rust
 | 350M   | 350M   | 32768 | 24     | 8192    |
 | 7B     | 7B     | 32768 | 40     | 8192    |
 
-**Pretrained**: `small` checkpoint (2000 steps, loss 9.01→8.90) at `/tmp/scirust_small_2k/final/`. See `scirust-sciagent/README.md`.
+**Pretrained**: `small` checkpoint (2000 steps, loss 9.01→8.90) at `scirust-sciagent/checkpoints/small-20M/final/`. See `scirust-sciagent/README.md`.
 
 ```bash
 cargo run --release -p scirust-sciagent --bin sciagent -- --model small \\
-  --checkpoint /tmp/scirust_small_2k/final ask "fn main()" --max-tokens 100
+  --checkpoint scirust-sciagent/checkpoints/small-20M/final ask "fn main()" --max-tokens 100
 ```
 
 ## License
