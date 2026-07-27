@@ -342,8 +342,8 @@ const GROUPS: &[(&str, &[Command])] = &[
         "SCIAGENT SLM",
         &[Command {
             name: "sciagent",
-            args: "ask|chat|explain|generate|info|attest|quantize [args]",
-            about: "Deterministic SLM for Rust + agentic — GQA + SwiGLU + RoPE + RMSNorm.",
+            args: "ask|chat|explain|generate|info|attest|quantize [--checkpoint PATH] [args]",
+            about: "Deterministic SLM for Rust + agentic; trained-weight commands require a checkpoint.",
         }],
     ),
     (
