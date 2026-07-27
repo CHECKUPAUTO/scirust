@@ -53,6 +53,7 @@ members = [
     "scirust-macros",
     "scirust-autodiff",
     "scirust-simd",
+    "scirust-compute",
     "scirust-gpu",
     "scirust-cuda",
     "scirust-core",
