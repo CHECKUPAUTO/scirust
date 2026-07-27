@@ -3253,6 +3253,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "pollster",
+ "scirust-compute",
  "scirust-core",
  "scirust-cuda",
  "scirust-license",

@@ -38,9 +38,13 @@ extern crate alloc;
 #[cfg(not(feature = "std"))]
 use alloc::{format, string::String, vec, vec::Vec};
 
+pub use compute_adapter::{CpuBuffer, CpuComputeAdapter, CpuEvent, CpuKernel, CpuStream};
+
 /// Optional product-licensing gate for the GPU module (feature `license-gate`).
 #[cfg(feature = "license-gate")]
 pub mod license;
+
+mod compute_adapter;
 
 #[cfg(feature = "wgpu")]
 mod chain;
