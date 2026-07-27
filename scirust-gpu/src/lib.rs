@@ -66,6 +66,8 @@ pub mod ops;
 mod tensor;
 #[cfg(feature = "wgpu")]
 mod wgpu_backend;
+#[cfg(feature = "wgpu")]
+mod wgpu_compute_adapter;
 
 #[cfg(feature = "wgpu")]
 pub use chain::{
@@ -84,6 +86,10 @@ pub use fusion::{FusedLayer, FusionNode, plan_fusion};
 pub use tensor::GpuTensor;
 #[cfg(feature = "wgpu")]
 pub use wgpu_backend::{GpuMatrix, WgpuContext, wgpu_scale_causal_mask, wgpu_softmax};
+#[cfg(feature = "wgpu")]
+pub use wgpu_compute_adapter::{
+    WgpuComputeAdapter, WgpuComputeBuffer, WgpuComputeEvent, WgpuComputeKernel, WgpuComputeStream,
+};
 
 /// Error returned when a compute backend cannot service a request.
 #[derive(Debug, Clone, PartialEq, Eq)]
