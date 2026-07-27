@@ -50,6 +50,8 @@ mod compute_adapter;
 mod chain;
 #[cfg(feature = "wgpu")]
 mod conv_gpu;
+#[cfg(feature = "cuda")]
+mod cuda_compute_adapter;
 #[cfg(feature = "wgpu")]
 pub mod deterministic;
 #[cfg(feature = "wgpu")]
@@ -76,6 +78,10 @@ pub use chain::{
 };
 #[cfg(feature = "wgpu")]
 pub use conv_gpu::{COL2IM_WGSL, IM2COL_WGSL, cpu_col2im, cpu_im2col};
+#[cfg(feature = "cuda")]
+pub use cuda_compute_adapter::{
+    CudaComputeAdapter, CudaComputeBuffer, CudaComputeEvent, CudaComputeKernel, CudaComputeStream,
+};
 #[cfg(feature = "wgpu")]
 pub use deterministic_gpu::{DeterministicGpu, DeterministicValidator};
 #[cfg(feature = "wgpu")]
@@ -420,18 +426,27 @@ mod tests {
 
     #[test]
     fn device_backends_are_honest_not_fake() {
-        let a = [1.0, 2.0, 3.0, 4.0];
-        let b = [1.0, 0.0, 0.0, 1.0];
         #[cfg(not(feature = "cuda"))]
-        assert_eq!(
-            CudaBackend.gemm_f32(&a, &b, 2, 2, 2),
-            Err(BackendError::Unavailable("cuda"))
-        );
+        {
+            let a = [1.0, 2.0, 3.0, 4.0];
+            let b = [1.0, 0.0, 0.0, 1.0];
+
+            assert_eq!(
+                CudaBackend.gemm_f32(&a, &b, 2, 2, 2),
+                Err(BackendError::Unavailable("cuda"))
+            );
+        }
+
         #[cfg(not(feature = "wgpu"))]
-        assert_eq!(
-            WgpuBackend.gemm_f32(&a, &b, 2, 2, 2),
-            Err(BackendError::Unavailable("wgpu"))
-        );
+        {
+            let a = [1.0, 2.0, 3.0, 4.0];
+            let b = [1.0, 0.0, 0.0, 1.0];
+
+            assert_eq!(
+                WgpuBackend.gemm_f32(&a, &b, 2, 2, 2),
+                Err(BackendError::Unavailable("wgpu"))
+            );
+        }
     }
 
     #[cfg(feature = "cuda")]
