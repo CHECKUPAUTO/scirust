@@ -3047,6 +3047,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-compute"
+version = "0.1.0"
+
+[[package]]
 name = "scirust-control"
 version = "0.1.0"
 dependencies = [
