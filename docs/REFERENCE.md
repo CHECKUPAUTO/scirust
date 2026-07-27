@@ -42,6 +42,8 @@ scirust help                       # liste toutes les commandes
 scirust quickstart                 # entraîne le classifieur démo (déterministe) → 4/4
 scirust analyze <file.rs> [--sarif]
 scirust verify emit|verify <args...>
+scirust sciagent info
+scirust sciagent ask "pub fn" --checkpoint <checkpoint-dir>
 scirust version
 ```
 
@@ -104,6 +106,8 @@ Codes de sortie : 0 succès, 1 échec métier (faute/MISMATCH), 2 usage/IO.
 | `gptq [--seed N] [--samples S] [--damp D]` | quantification int8 GPTQ (feedback d'erreur d'ordre 2) ; affiche la réduction d'erreur de calibration vs round-to-nearest | `scirust-core::quantization` |
 | `awq [--seed N] [--samples S] [--grid G]` | quantification int8 AWQ (scaling per-canal par recherche, conscient des activations) ; affiche l'`alpha` retenu et la réduction d'erreur vs round-to-nearest | `scirust-core::quantization` |
 | `bitnet [--seed N]` | quantification ternaire BitNet b1.58 (`{-1,0,+1}`, ~1,58 bit/poids) ; vérifie le matmul sans multiplication | `scirust-core::quantization` |
+| `sciagent ask|chat|explain|generate|attest|quantize ... --checkpoint PATH` | opérations SCIAGENT utilisant des poids ; checkpoint obligatoire, erreur bloquante s'il est absent ou invalide | `scirust-sciagent` |
+| `sciagent info [--checkpoint PATH]` | affiche la configuration sans allouer de poids aléatoires ; avec checkpoint, lit ses métadonnées | `scirust-sciagent` |
 | `info` / `help` / `version` | méta | — |
 
 
