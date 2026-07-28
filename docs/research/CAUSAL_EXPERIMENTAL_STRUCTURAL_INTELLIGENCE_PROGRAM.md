@@ -139,8 +139,8 @@ shift with what's true at the time).
 | — | Observe | Pre-existing (`scirust-causal`, audited & remediated above) |
 | 5C.1 | Represent assumptions | **Done** — typed causal contracts and data model |
 | 5C.2 | Distinguish association from causal evidence | **Done** — deterministic robust conditional-independence testing |
-| 5C.3 | Discover equivalence classes | **Draft** — PC-Stable, CPDAG-returning (no PAG/latent-confounding-robust discovery) |
-| 5C.4 | Estimate identifiable effects | Planned — adjustment-set estimation under stated assumptions |
+| 5C.3 | Discover equivalence classes | **Done** — PC-Stable, CPDAG-returning (no PAG/latent-confounding-robust discovery) |
+| 5C.4 | Estimate identifiable effects | **Draft** — backdoor identification + linear adjustment estimation |
 | 5C.5 | Test invariance | Planned — cross-environment invariant prediction |
 | 5C.6 | Simulate interventions | Planned — SCM-based counterfactual simulation |
 | 5C.7 | Choose the next experiment | Planned — experimental design / value of information |
@@ -513,9 +513,10 @@ identifiable or estimated.
 
 ## Phase 5C.3 — Discover equivalence classes (PC-Stable)
 
-**Status: Draft.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
+**Status: Done.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
 from `origin/master` at `376fd353` (fresh master after PR #821 merged; this
-phase's branch carries only this phase's commits). PR #824. Additive to
+phase's branch carries only this phase's commits). PR #824, merged at
+`a7214617`. Additive to
 `scirust-causal` (no existing public API changed). This phase implements
 **constraint-based Markov-equivalence-class discovery** — PC-Stable (Colombo &
 Maathuis, *Order-Independent Constraint-Based Causal Structure Learning*,
@@ -683,3 +684,202 @@ way; that any numerical causal effect has been identified or estimated.
   counterfactuals, and experimental design remain out of scope — 5C.4
   onward, not to be started until this phase is merged and `master` is
   resynchronized.
+
+## Phase 5C.4 — Estimate identifiable effects (backdoor adjustment)
+
+**Status: Draft.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
+from `origin/master` at `bfb6b8cf` (fresh master after PR #824 merged; this
+phase's branch carries only this phase's commits). PR #840. Additive to
+`scirust-causal` (no existing public API changed). This phase implements
+**identification by Pearl's backdoor criterion plus estimation by linear
+covariate adjustment**. It does **not** implement front-door or
+instrumental-variable identification, does **not** perform quantitative
+sensitivity analysis, and does **not** relax the causal-sufficiency
+assumption in any way.
+
+This is the phase 5C.1's certificate layer was built for. That module's own
+docs said, at the time: *"No phase in this crate yet produces a certificate
+with `status = Identifiable` and a real estimate — that is later work."*
+This is that work, and the structural rule 5C.1 installed (only
+`Identifiable` may carry a numeric estimate) is now exercised end to end
+rather than only unit-tested in isolation.
+
+### Scientific scope — read before using this API
+
+`estimate_effect_from_dag` answers a **two-part** question, and keeps the
+parts separate:
+
+1. *Identification* (pure graph reasoning, no data touched): does some set
+   `Z` satisfy the backdoor criterion for (treatment, outcome) in the graph
+   the caller supplied? If yes, `P(Y | do(X))` is a function of the
+   observational distribution.
+2. *Estimation* (data): under the **additional** assumption that `Y` is
+   linear in `X` and `Z`, the coefficient of `X` in `Y ~ 1 + X + Z` is that
+   effect.
+
+Step 1 is a statement **about the supplied graph**, not a validation of it.
+Every one of the following remains assumed and unchecked: that the graph is
+correct; that there is no latent confounder (one absent from the graph is
+invisible to a criterion evaluated *on* that graph); that positivity holds;
+that the relationship is linear; that measurement is accurate. The phase's
+headline adversarial result is a direct demonstration of the first two
+failing together — see "Adversarial tests" below.
+
+### Design
+
+Three new modules plus the estimator:
+
+- `d_separation.rs` — d-separation via the **ancestral-moralization**
+  characterization (Lauritzen, Dawid, Larsen & Leimer 1990): `X ⟂d Y | Z`
+  iff `X` and `Y` are separated by `Z` in the moral graph of `G` restricted
+  to `An(X ∪ Y ∪ Z)`. This was chosen over a literal path-walk specifically
+  because the collider-descendant clause ("a collider blocks unless it *or
+  any descendant of it* is conditioned on") is a classic source of silent
+  bugs in hand-rolled implementations; under moralization that clause is not
+  written at all — it falls out of which nodes survive into the ancestral
+  set — so it cannot be written wrong. Overlapping or out-of-range sets
+  return the conservative "not separated" rather than a separation the
+  definition does not license.
+- `adjustment.rs` — the backdoor criterion. Condition 1 (no adjustment
+  variable is a descendant of the treatment) is a direct descendant check;
+  condition 2 (all backdoor paths blocked) uses the standard reduction: in
+  the graph with **every edge out of the treatment deleted**, the only
+  remaining paths from the treatment are exactly the backdoor paths, so
+  condition 2 holds iff the treatment is d-separated from the outcome given
+  `Z` in that mutilated graph. Also provides the canonical parents-of-
+  treatment set and bounded enumeration of all *minimal* valid sets.
+- `effect_estimation.rs` — the estimator and the certificate. Estimation
+  uses the Frisch–Waugh–Lovell decomposition (residualize treatment and
+  outcome on `[1, Z]`, then `β = Σx̃ỹ / Σx̃²`), which is *identical* to the
+  full multiple regression's coefficient but reuses 5C.2's existing
+  QR-with-SVD-rank-check residualizer — so a collinear adjustment set is a
+  typed `RankDeficientConditioningSet` error rather than a silent
+  pseudo-inverse. The standard error comes from the same residuals:
+  `se = sqrt(σ̂² / Σx̃²)` with `σ̂² = RSS / (n − |Z| − 2)`.
+
+### The three abstention paths
+
+No estimate is produced — and, by the certificate layer's structural rule,
+*cannot* be attached — in any of these cases:
+
+| Situation | Status | Why abstain rather than report |
+| --- | --- | --- |
+| No valid backdoor set | `NotIdentifiable` | A regression would run fine and produce a confident number that is not a causal effect |
+| CPDAG with an unoriented edge at the treatment | `EquivalenceClassOnly` | Members of the class disagree about the treatment's parents, so the class does not determine one effect |
+| `n ≤ card(Z) + 2` | `Inconclusive` | The point estimate is arithmetically available but its uncertainty is not, and an effect with no quantifiable uncertainty is what this program exists not to report |
+
+The CPDAG gate's condition — *every* edge incident to the treatment is
+directed — is **sufficient, and not claimed necessary**: when it holds the
+treatment's parent set is identical in every member DAG, so backdoor
+adjustment by those parents gives the same answer for every member, and no
+representative DAG need be chosen. Enumerating the full multiset of effects
+across the class (the IDA approach), which would report a *range* instead of
+abstaining, is deliberately out of scope and named below.
+
+### Determinism contract
+
+No RNG anywhere in this phase's own code. d-separation uses `BTreeSet`
+adjacency and a fixed BFS order; adjustment-set enumeration is lexicographic
+over an explicitly sorted candidate list; the estimator is QR least squares
+(deterministic by construction) over a fixed row order inherited from 5C.2's
+regime selection. Certificate fingerprints are therefore reproducible, and a
+test asserts two identical runs produce byte-identical fingerprints.
+
+### Tests
+
+308 tests existed for `scirust-causal` before this phase (verified against
+merged `master`). This phase adds **48**: 25 embedded unit tests (11
+d-separation — chain/fork/collider, the collider-*descendant* case, the
+M-structure, set-valued queries, overlapping and out-of-range guards; 14
+backdoor — each condition in isolation, the canonical set, minimal-set
+enumeration, and the `max_size` bound's honest incompleteness), 14 in
+`tests/effect_estimation.rs` (recovering known coefficients of `+0.7`,
+`+0.5`, `0.0`, `−0.6`; standard-error shrinkage with sample size; the
+certificate mirroring the structured estimate exactly; fingerprint
+reproducibility; JSON round-trip), and 9 in
+`tests/effect_estimation_adversarial.rs`.
+
+### Adversarial tests
+
+- **Latent confounding (the headline negative result).** `U` confounds `X`
+  and `Y` with a true effect of `0.7`, but `U` is in neither the data nor the
+  graph. The backdoor criterion is *satisfied* for the graph supplied (`X`
+  has no parents, so there is no backdoor path), the result is certified
+  `Identifiable`, and the reported estimate is **1.497** — a bias of
+  **121.5 standard errors**. A tight confidence interval around a badly
+  wrong number, which is exactly the failure mode causal sufficiency's
+  violation produces, demonstrated numerically rather than asserted in prose.
+- Adjusting for a collider (M-structure) is refused, not silently biased.
+- Adjusting for a mediator is refused by condition 1, and the correctly
+  unadjusted query recovers the total effect `0.8 × 0.8 = 0.64`.
+- A CPDAG with an unoriented edge at the treatment abstains; one fully
+  oriented at the treatment estimates (both via real `PcStable` output, so
+  this is a genuine 5C.3 → 5C.4 composition test, not a hand-built fixture).
+- Exhausted degrees of freedom, a treatment fully determined by its
+  adjustment set (`ZeroVariance`), and a collinear adjustment set
+  (`RankDeficientConditioningSet`).
+- A sweep asserting that **every** non-`Identifiable` path carries no
+  estimate, no uncertainty, and no adjustment set.
+
+### Benchmark
+
+`examples/effect_estimation_benchmark.rs`: 13 scenarios, each checked
+against an explicit oracle on status and (where a true coefficient exists)
+on the estimate. The `latent_confounding` row prints its own bias and
+bias-in-standard-errors, so the failure mode is visible in the output rather
+than buried in a test name.
+
+Oracle tolerances are expressed in **standard errors**, not absolute units.
+An earlier draft used an absolute `0.02` bound, which is ~1.25 standard
+errors at these sample sizes, and duly failed on a perfectly correct
+estimate (`0.6746` against a truth of `0.7`, se `0.0160`). "Close to the
+truth" is only meaningful relative to the estimator's own sampling noise;
+the bound is now 4 standard errors throughout.
+
+Run-twice SHA-256 (scientific stdout, nightly-2026-07-02, x86_64):
+`7ac0dc767f76ef715f0282f51eda30411b6706dfb3d4c8be21912996fd14d93b`, verified
+byte-identical across two runs and a debug/release build. The three
+historical fingerprints — `industrial_protocol_demo` (`167c13de…`),
+`conditional_independence_benchmark` (`c1449177…`), and
+`pc_stable_benchmark` (`79e57e69…`) — were all independently reverified
+unchanged.
+
+### Compatibility
+
+Purely additive. No existing public item's signature changed. Three
+previously-private helpers were widened to `pub(crate)` for reuse rather
+than duplicated (`skeleton_discovery::combinations`,
+`partial_correlation::residualize`, and `conditional_independence`'s
+`select_rows`/`extract_column`) — reuse keeps regime-selection and
+rank-check semantics identical across phases instead of letting two copies
+drift. The crate root's docs go from five capabilities to six, and the
+out-of-scope paragraph is narrowed accordingly.
+
+### Supported and unsupported claims
+
+May claim: backdoor identification decided by a provably-correct
+d-separation implementation; recovery of a known linear coefficient to
+within sampling error; an honest three-way abstention discipline; a
+certificate that names every assumption its estimate rests on and whose
+fingerprint is reproducible.
+
+Must **not** claim: that causal sufficiency, positivity, linearity, or graph
+correctness have been *verified* (all are assumed); that an estimate is
+robust to a latent confounder (it demonstrably is not); that abstention on a
+CPDAG means no effect exists; that the `max_size` bound on minimal-set
+enumeration proves no larger valid set exists.
+
+### Known limitations / deferred
+
+- Backdoor only. Front-door and instrumental-variable identification, which
+  can identify effects the backdoor criterion cannot, are not implemented.
+- Linear estimation only, matching 5C.2's own linear-association limitation.
+- No IDA-style enumeration of the effect multiset across an equivalence
+  class — the CPDAG path abstains where IDA would report a range.
+- No quantitative sensitivity analysis (e.g. E-values, bias bounds under an
+  assumed unmeasured confounder strength). The certificate carries a
+  *qualitative* sensitivity note only; the adversarial test shows precisely
+  why a quantitative one would be valuable, making it the most clearly
+  motivated candidate for 5C.5 onward.
+- Continuous variables only; binary/discrete treatments would need a
+  different estimator.
