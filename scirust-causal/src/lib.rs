@@ -3,7 +3,7 @@
 //!
 //! # Scope
 //!
-//! Five capabilities:
+//! Six capabilities:
 //!
 //! 1. an exactly invertible **strictly lower-triangular cubic map**
 //!    ([`TriangularCubicFlow`]);
@@ -44,7 +44,23 @@
 //!    calls the other. See the private `equivalence_class` module's own docs
 //!    for the exact scientific scope, in particular what a `Cpdag` from this
 //!    procedure does and does not claim about latent confounding and
-//!    faithfulness.
+//!    faithfulness; and
+//! 6. **effect identification and estimation**
+//!    ([`estimate_effect_from_dag`]/[`estimate_effect_from_cpdag`]) —
+//!    Pearl's backdoor criterion ([`check_backdoor_criterion`], decided by
+//!    d-separation) to establish *whether* an effect is identifiable from a
+//!    given graph, then linear backdoor adjustment to estimate it. This is
+//!    the one capability that produces a [`CausalCertificate`] carrying a
+//!    real numeric estimate, and it is the reason capability 3's
+//!    "only `Identifiable` may carry an estimate" rule exists: an
+//!    unidentifiable query, an equivalence class that does not determine one
+//!    effect, and an exhausted-degrees-of-freedom sample all return a
+//!    certificate with **no** estimate rather than a plausible number. See
+//!    the private `effect_estimation` module's own docs for the full
+//!    assumption list, and the crate's adversarial tests for a latent
+//!    confounder producing a confidently wrong estimate through an
+//!    adjustment set that is perfectly valid for the graph it was checked
+//!    against.
 //!
 //! # Causal interpretation — read before using the discovery API
 //!
@@ -77,13 +93,18 @@
 //!   (notably for an all-zeros start, the empty-graph saddle) and every
 //!   non-`Converged` reason mean the matrix carries **no** optimality guarantee.
 //!
-//! Conditional-independence testing (capability 4) and constraint-based
+//! Conditional-independence testing (capability 4), constraint-based
 //! Markov-equivalence-class discovery (capability 5, CPDAG only — **not**
 //! PAG, which needs latent-confounding-robust discovery this crate does not
-//! implement) exist; see their own docs for exact scope. Effect
-//! identification, adjustment sets, latent-confounding-robust discovery
-//! (e.g. FCI), and sensitivity analysis remain **out of scope for this crate
-//! as it stands** and are the subject of later work.
+//! implement), and backdoor identification plus linear effect estimation
+//! (capability 6) exist; see their own docs for exact scope. Note that
+//! capability 6 identifies effects **relative to a graph the caller
+//! supplies** — it assumes causal sufficiency rather than establishing it,
+//! so a latent confounder yields a confidently wrong estimate. Front-door
+//! and instrumental-variable identification, latent-confounding-robust
+//! discovery (e.g. FCI), invariance testing, counterfactual simulation, and
+//! quantitative sensitivity analysis remain **out of scope for this crate as
+//! it stands** and are the subject of later work.
 //!
 //! # Cubic-flow mathematical properties
 //!
@@ -108,12 +129,15 @@
 #![forbid(unsafe_code)]
 
 mod acyclicity;
+mod adjustment;
 mod assumptions;
 mod certificate;
 mod conditional_independence;
 mod cpdag;
 mod cubic_score;
+mod d_separation;
 mod dataset;
+mod effect_estimation;
 mod environment;
 mod equivalence_class;
 mod error;
@@ -134,6 +158,10 @@ mod triangular_cubic;
 mod variable;
 
 pub use acyclicity::PolynomialAcyclicity;
+pub use adjustment::{
+    BackdoorVerdict, BackdoorViolation, canonical_adjustment_set, check_backdoor_criterion,
+    find_minimal_adjustment_sets,
+};
 pub use assumptions::{AssumptionBasis, AssumptionRecord, AssumptionRegistry, CausalAssumption};
 pub use certificate::{CausalCertificate, CausalCertificateBuilder, IdentifiabilityStatus};
 pub use conditional_independence::{
@@ -144,6 +172,10 @@ pub use conditional_independence::{
 pub use cpdag::Cpdag;
 pub use cubic_score::CubicCausalScore;
 pub use dataset::{CausalDataset, SampleBlock};
+pub use effect_estimation::{
+    AdjustmentStrategy, EffectEstimate, EffectEstimationConfig, estimate_effect_from_cpdag,
+    estimate_effect_from_dag,
+};
 pub use environment::Environment;
 pub use equivalence_class::{
     EquivalenceClassConfig, EquivalenceClassDiscovery, EquivalenceClassResult, PcStable,
