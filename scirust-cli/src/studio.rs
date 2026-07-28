@@ -26,7 +26,11 @@ use crate::ux;
 fn report_store_outcome(recorded: Result<String, StoreError>) {
     match recorded
     {
-        Ok(run_id) => println!("{}", ux::dim(&format!("recorded as run {run_id}"))),
+        // stderr, not stdout: this is a status notice, and stdout carries
+        // the result — which under `--format json` must stay parseable.
+        // Printing it to stdout made `scirust run --format json --store …`
+        // emit a leading non-JSON line.
+        Ok(run_id) => eprintln!("{}", ux::dim(&format!("recorded as run {run_id}"))),
         Err(e) => eprintln!("{} could not record this run: {e}", ux::error_prefix()),
     }
 }
