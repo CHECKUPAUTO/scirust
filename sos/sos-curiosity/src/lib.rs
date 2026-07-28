@@ -17,23 +17,40 @@
 //!   graph structure, never a hunch.
 //! * The scanners ([`Strategy`]): **contradiction-hunt** (reusing the Reasoning
 //!   Engine's [`Reason::contradictions`](sos_reasoning::Reason::contradictions)),
-//!   **under-connected** (weakly-linked / isolated nodes), and **weakly-supported**
-//!   (claims refuted yet unsupported).
+//!   **under-connected** (weakly-linked / isolated nodes), **weakly-supported**
+//!   (claims refuted yet unsupported), and **maximal-information-gain** over
+//!   planner-supplied designs ([`Curiosity::with_designs`]).
 //! * [`ScientificQuestion`] — a content-addressed `Object`, grounded in the real
 //!   nodes it concerns (a question that grounds in nothing is never emitted).
 //! * [`CuriosityPolicy`] / [`Priority`] — explicit, versioned, **integer
 //!   fixed-point** scoring: no opaque priorities (Invariant VI), bit-exact
 //!   ranking (`L3`), overflow-proof (saturating arithmetic).
 //!
+//! ## The information lens, and what it does *not* do
+//!
+//! [`Strategy::MaxInfoGain`] is the sanctioned `sos-curiosity` → `sos-planner`
+//! composition edge (RFC-0002 §11.5 rule 3). Curiosity never *computes* EIG —
+//! that is the Planning Engine's job, backed by real numerics in `sos-scirust`
+//! per Invariant VIII. It **consumes** a planner
+//! [`Candidate`](sos_planner::Candidate) and asks the question a real estimate
+//! justifies, scored by the very same [`CuriosityPolicy`] as every structural
+//! question so the two are directly comparable on one agenda.
+//!
+//! Two honesty properties are deliberate: the lens scores the **conservative
+//! lower bound** (point − standard error), never the point estimate, and it
+//! **skips designs whose EIG is not significant** rather than emitting a
+//! question whose premise is "this might teach us nothing" — mirroring the
+//! planner's own admission rule. See [`Features::from_design`].
+//!
 //! ## What is deliberately *not* here yet
 //!
-//! The scanners that need a backend are deferred per Invariant VIII (RFC-0002
-//! §01): **maximal-information-gain** (EIG/BOED, `sos-planner`), **cross-domain
-//! analogy** by subgraph isomorphism (`scirust-graph`), **unexplored-parameters**
-//! (`scirust-symbolic`), centrality/modularity connectivity metrics
-//! (`scirust-graph`), and **cognitive proposals** (`sos-ccos`, an untrusted
-//! proposer whose suggestions would be scored by this same policy). This crate
-//! ships only the lenses it can fully implement over the graph alone — no stub.
+//! The remaining scanners need backends that have not attached, and are
+//! deferred per Invariant VIII (RFC-0002 §01) — no stub: **cross-domain
+//! analogy** by subgraph isomorphism (`scirust-graph`),
+//! **unexplored-parameters** (`scirust-symbolic`), centrality/modularity
+//! connectivity metrics (`scirust-graph`), and **cognitive proposals**
+//! (`sos-ccos`, an untrusted proposer whose suggestions would be scored by this
+//! same policy).
 //!
 //! ## Example
 //!
@@ -69,6 +86,40 @@
 //! assert!(top.priority.total > 0);              // an explicit, non-opaque score
 //! assert_eq!(top.derivation.steps.len(), 1);    // and an explanation
 //! ```
+//!
+//! ## Example — the information lens
+//!
+//! ```
+//! use sos_core::{DeterminismLevel, HashAlgo, ObjectId};
+//! use sos_knowledge::KnowledgeGraph;
+//! use sos_planner::{Candidate, Cost, Estimate};
+//! use sos_curiosity::{
+//!     Curiosity, BeCurious, CuriosityPolicy, Budget, Strategy, DEFAULT_EIG_SATURATION_MILLI,
+//! };
+//! use sos_store::MemoryStore;
+//!
+//! let kg = KnowledgeGraph::build(&MemoryStore::new()).unwrap();
+//! let design = |t: &[u8]| ObjectId::compute(HashAlgo::default(), b"design", t);
+//!
+//! // Two designs the Planning Engine has estimated. Curiosity computes no EIG
+//! // itself — it asks the question a real estimate justifies.
+//! let designs = [
+//!     // 1.5 bits, measured exactly.
+//!     Candidate::new(design(b"decisive"), Estimate::exact(1_500), Cost::new(1, 0, 0, 0)),
+//!     // 0.02 ± 0.03 bits — not significant, so no question is raised at all.
+//!     Candidate::new(design(b"noise"), Estimate::new(20, 30, DeterminismLevel::L1), Cost::new(1, 0, 0, 0)),
+//! ];
+//!
+//! let questions = Curiosity::new(&kg)
+//!     .with_designs(&designs, DEFAULT_EIG_SATURATION_MILLI)
+//!     .sweep(&CuriosityPolicy::default(), &Budget::new(10));
+//!
+//! // Only the design that can defend a real claim is on the agenda.
+//! assert_eq!(questions.len(), 1);
+//! assert_eq!(questions[0].question.strategy, Strategy::MaxInfoGain);
+//! assert_eq!(questions[0].question.subject, vec![design(b"decisive")]);
+//! assert!(questions[0].priority.info_gain > 0);
+//! ```
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
@@ -84,7 +135,7 @@ pub use error::{CuriosityError, Result};
 pub use policy::{CuriosityPolicy, Features, Priority, SCALE};
 pub use question::{ScientificQuestion, seal_question};
 pub use strategy::Strategy;
-pub use sweep::{BeCurious, Budget, Curiosity, ScoredQuestion};
+pub use sweep::{BeCurious, Budget, Curiosity, DEFAULT_EIG_SATURATION_MILLI, ScoredQuestion};
 
 // Re-exported so callers can inspect the explanation a question carries without
 // depending on `sos-reasoning` directly.
