@@ -488,12 +488,14 @@ pub enum CfarError {
     )]
     TooFewReferenceCells(usize),
     /// `reference_cells`/`guard_cells` are too large to be usable: either
-    /// computing the reference-window size (`reference_cells + guard_cells`,
-    /// or `2 * reference_cells`) would overflow `usize` arithmetic, or
-    /// `reference_cells` exceeds [`MAX_PRACTICAL_REFERENCE_CELLS`] — caught
-    /// here, deterministically, rather than left to panic on overflow, or
-    /// (for the practical bound) to hang inside calibration, wherever that
-    /// happens to occur downstream.
+    /// computing the full reference-window span
+    /// (`2 * (reference_cells + guard_cells)`, which bounds every narrower
+    /// span the detectors compute — see [`CfarConfig::validate`]) would
+    /// overflow `usize` arithmetic, or `reference_cells` exceeds
+    /// [`MAX_PRACTICAL_REFERENCE_CELLS`] — caught here, deterministically,
+    /// rather than left to panic on overflow (or, with `overflow-checks`
+    /// off, to wrap silently), or (for the practical bound) to hang inside
+    /// calibration, wherever that happens to occur downstream.
     #[error(
         "reference_cells={reference_cells}, guard_cells={guard_cells} is not a usable \
          reference window (overflows reference-window-size arithmetic, or exceeds the \
@@ -571,16 +573,33 @@ impl CfarConfig {
         {
             return Err(CfarError::TooFewReferenceCells(self.reference_cells));
         }
-        // Every downstream computation needs `reference_cells + guard_cells`
-        // (the half-window span, e.g. in `CfarDetector::evaluate`) and
-        // `2 * reference_cells` (the pooled robust-estimator window size) to
-        // fit in a `usize` without wrapping — checked here, once, rather
-        // than left to panic wherever that arithmetic happens to occur.
+        // Every downstream window computation must fit in a `usize` without
+        // wrapping — checked here, once, rather than left to panic (or, with
+        // `overflow-checks` off, to wrap silently) wherever that arithmetic
+        // happens to occur. The widest such expression is the *full* window
+        // span `2 * (reference_cells + guard_cells)`, which
+        // `CfarDetector::evaluate` both reserves output capacity from and
+        // compares against the input length; checking it here subsumes every
+        // narrower span the detectors compute, given `reference_cells >= 2`
+        // (rejected just above otherwise):
+        //
+        // * `reference_cells + guard_cells` — the half-window span
+        //   (`CfarDetector::evaluate`); an intermediate of this very check.
+        // * `2 * reference_cells` — the pooled robust-estimator window size
+        //   `n_ref` and the scratch buffer; `<=` the full span because
+        //   `guard_cells` only adds.
+        // * `2 * guard_cells + reference_cells + 2` — `CfarStreamDetector`'s
+        //   delay-line capacity; `<=` the full span exactly when
+        //   `reference_cells >= 2`.
+        //
         // `reference_cells` alone is also capped well below where any of
         // that could overflow (see `MAX_PRACTICAL_REFERENCE_CELLS`), since
         // calibration cost — not just overflow — must stay bounded.
-        let window_size_overflows = self.reference_cells.checked_add(self.guard_cells).is_none()
-            || self.reference_cells.checked_mul(2).is_none();
+        let window_size_overflows = self
+            .reference_cells
+            .checked_add(self.guard_cells)
+            .and_then(|half| half.checked_mul(2))
+            .is_none();
         let window_size_impractical = self.reference_cells > MAX_PRACTICAL_REFERENCE_CELLS;
         if window_size_overflows || window_size_impractical
         {
@@ -2053,6 +2072,61 @@ mod tests {
             CfarDetector::new(c),
             Err(CfarError::ReferenceWindowTooLarge { .. })
         ));
+    }
+
+    #[test]
+    fn config_rejects_guard_cells_that_would_overflow_the_doubled_half_window() {
+        // Proptest regression (`tests/vi_cfar_proptest.rs`'s
+        // `never_panics_on_any_config_and_power`, whose `any_small_count`
+        // strategy draws `usize::MAX / 2`): validation used to check the
+        // half-window span `reference_cells + guard_cells` and the pooled
+        // size `2 * reference_cells`, but never their combination
+        // `2 * (reference_cells + guard_cells)` -- which is exactly what
+        // `CfarDetector::evaluate` computes, twice, for its output capacity
+        // and its loop bound.
+        //
+        // The gap is only reachable in the narrow band where the half-window
+        // fits but its double does not: `guard_cells = usize::MAX / 2`
+        // (== `i64::MAX` on a 64-bit target) with `reference_cells = 4`
+        // gives `half = 2^63 + 3`, which fits a `usize` -- so the old check
+        // passed -- while `2 * half = 2^64 + 6` does not.
+        let mut c = default_config();
+        c.reference_cells = 4;
+        c.guard_cells = usize::MAX / 2;
+        assert!(c.reference_cells.checked_add(c.guard_cells).is_some());
+        assert_eq!(
+            c.validate(),
+            Err(CfarError::ReferenceWindowTooLarge {
+                reference_cells: 4,
+                guard_cells: usize::MAX / 2,
+            })
+        );
+    }
+
+    #[test]
+    fn doubled_half_window_overflow_boundary_is_exact() {
+        // The accept/reject boundary is `2 * (reference_cells + guard_cells)
+        // <= usize::MAX`, and it must be sharp in both directions -- the
+        // check is a real bound, not a conservative slap-down of any large
+        // `guard_cells`. With `reference_cells = 4` the largest usable guard
+        // is `usize::MAX / 2 - 4` (half = 2^63 - 1, double = 2^64 - 2).
+        let mut c = default_config();
+        c.reference_cells = 4;
+
+        c.guard_cells = usize::MAX / 2 - 4;
+        assert!(
+            c.validate().is_ok(),
+            "the last fitting guard must be accepted"
+        );
+
+        c.guard_cells = usize::MAX / 2 - 3; // half = 2^63, double = 2^64
+        assert_eq!(
+            c.validate(),
+            Err(CfarError::ReferenceWindowTooLarge {
+                reference_cells: 4,
+                guard_cells: usize::MAX / 2 - 3,
+            })
+        );
     }
 
     #[test]
