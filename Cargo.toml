@@ -189,6 +189,7 @@ members = [
     "scirust-studio-ipc",
     "scirust-studio-store",
     "scirust-studio-worker",
+    "scirust-studio-app-service",
 ]
 exclude = [
     "examples/simd_views_demo",

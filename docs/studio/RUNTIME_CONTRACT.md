@@ -180,6 +180,24 @@ verifications equal an in-process run of the same scenario exactly.
 invocation would add latency a command-line user gains nothing from. The
 worker exists for the desktop shell, and is tested directly.
 
+## Result schema
+
+Results use **schema version 2**: every `Axis` carries its coordinates and
+every `Series` names the axis it belongs to, so nothing infers sample
+spacing. Runs stored under v1 remain readable and verifiable but are never
+given a reconstructed time axis — see
+`docs/studio/adr/0006-result-axis-coordinates.md` and
+`docs/studio/STORAGE_LAYOUT.md`.
+
+`validate_result` replaces `assert_finite` and checks the whole result for
+internal consistency, reporting every defect rather than the first.
+
+## Application orchestration
+
+`scirust-studio-app-service` supervises the worker, owns the job lifecycle
+and selects the run store, with no dependency on any GUI toolkit. See
+`docs/studio/APP_SERVICE.md`.
+
 ## Run storage
 
 `scirust run --store <dir>` (or `SCIRUST_STUDIO_STORE`) records the run
