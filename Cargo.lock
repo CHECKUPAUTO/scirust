@@ -2980,6 +2980,7 @@ dependencies = [
  "scirust-som-trainer",
  "scirust-studio-runtime",
  "scirust-studio-schema",
+ "scirust-studio-store",
  "scirust-symbolic",
  "scirust-symreg",
  "scirust-tn",
@@ -3861,6 +3862,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-studio-ipc"
+version = "0.1.0"
+dependencies = [
+ "scirust-studio-runtime",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "scirust-studio-registry"
 version = "0.1.0"
 dependencies = [
@@ -3892,6 +3902,28 @@ dependencies = [
  "scirust-units",
  "serde",
  "toml",
+]
+
+[[package]]
+name = "scirust-studio-store"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "scirust-studio-runtime",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
+name = "scirust-studio-worker"
+version = "0.1.0"
+dependencies = [
+ "scirust-studio-ipc",
+ "scirust-studio-runtime",
+ "scirust-studio-schema",
+ "serde_json",
 ]
 
 [[package]]

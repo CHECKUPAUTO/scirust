@@ -14,20 +14,35 @@ use scirust_studio_runtime::{
     build_registry, find_adapter,
 };
 use scirust_studio_schema::{parse_toml, validate};
+use scirust_studio_store::{RunStore, StoreError};
 
 use crate::ux;
 
-/// Pull a `--format text|json` flag out of `args`, defaulting to `"text"`.
-/// Returns the format and the remaining (positional) arguments.
-fn take_format(args: &[String]) -> (String, Vec<String>) {
-    let mut format = "text".to_string();
+/// Report where a run was recorded, or why it could not be.
+///
+/// A storage failure after a successful computation is reported but does not
+/// change the exit code: the run really did succeed, and claiming otherwise
+/// would be as wrong as silently swallowing the problem.
+fn report_store_outcome(recorded: Result<String, StoreError>) {
+    match recorded
+    {
+        Ok(run_id) => println!("{}", ux::dim(&format!("recorded as run {run_id}"))),
+        Err(e) => eprintln!("{} could not record this run: {e}", ux::error_prefix()),
+    }
+}
+
+/// Pull `--<name> <value>` out of `args`, returning the value (if present)
+/// and the remaining arguments.
+pub(crate) fn take_option(args: &[String], name: &str) -> (Option<String>, Vec<String>) {
+    let flag = format!("--{name}");
+    let mut value = None;
     let mut rest = Vec::new();
     let mut i = 0;
     while i < args.len()
     {
-        if args[i] == "--format" && i + 1 < args.len()
+        if args[i] == flag && i + 1 < args.len()
         {
-            format = args[i + 1].clone();
+            value = Some(args[i + 1].clone());
             i += 2;
         }
         else
@@ -36,7 +51,32 @@ fn take_format(args: &[String]) -> (String, Vec<String>) {
             i += 1;
         }
     }
-    (format, rest)
+    (value, rest)
+}
+
+/// Pull a `--format text|json` flag out of `args`, defaulting to `"text"`.
+/// Returns the format and the remaining (positional) arguments.
+fn take_format(args: &[String]) -> (String, Vec<String>) {
+    let (value, rest) = take_option(args, "format");
+    (value.unwrap_or_else(|| "text".to_string()), rest)
+}
+
+/// The environment variable naming a default run store.
+pub(crate) const STORE_ENV: &str = "SCIRUST_STUDIO_STORE";
+
+/// Resolve where runs should be recorded: `--store <dir>` wins, then
+/// `SCIRUST_STUDIO_STORE`, and otherwise nothing is recorded.
+///
+/// There is deliberately no built-in default path. Writing run history into
+/// a guessed location under the user's home directory without being asked is
+/// a decision that belongs to the application, not to a library call, and
+/// this build has no user-facing setting to turn it back off.
+pub(crate) fn resolve_store(explicit: Option<String>) -> Option<String> {
+    explicit.or_else(|| match std::env::var(STORE_ENV)
+    {
+        Ok(path) if !path.trim().is_empty() => Some(path),
+        _ => None,
+    })
 }
 
 /// `scirust catalog [--format text|json]` — list the capabilities this
@@ -94,11 +134,14 @@ pub fn run_catalog(args: &[String]) -> u8 {
 /// brief: 2 usage, 3 validation, 5 numerical failure, 6 cancelled, 7
 /// internal failure.
 pub fn run_scenario(args: &[String]) -> u8 {
-    let (format, rest) = take_format(args);
+    let (store_arg, args) = take_option(args, "store");
+    let (format, rest) = take_format(&args);
     let Some(path) = rest.first()
     else
     {
-        eprintln!("usage: scirust run <scenario.scirust.toml> [--format text|json]");
+        eprintln!(
+            "usage: scirust run <scenario.scirust.toml> [--format text|json] [--store <dir>]"
+        );
         return 2;
     };
     let text = match std::fs::read_to_string(path)
@@ -162,12 +205,47 @@ pub fn run_scenario(args: &[String]) -> u8 {
         },
     };
 
+    // Open the store *before* executing, so a run killed part-way through
+    // leaves a detectable interrupted record rather than no trace at all —
+    // that is the whole point of recording the attempt separately from the
+    // outcome. See `docs/studio/adr/0004-immutable-run-storage.md`.
+    let mut pending = None;
+    if let Some(root) = resolve_store(store_arg)
+    {
+        match RunStore::open(&root)
+        {
+            Ok(store) => match store.begin(&scenario.capability.id, &text)
+            {
+                Ok(p) => pending = Some(p),
+                Err(e) =>
+                {
+                    eprintln!("{} cannot record this run: {e}", ux::error_prefix());
+                    return 7;
+                },
+            },
+            Err(e) =>
+            {
+                eprintln!("{} cannot open run store `{root}`: {e}", ux::error_prefix());
+                return 7;
+            },
+        }
+    }
+
     let mut sink = NullEventSink;
     let result = match adapter.execute(&validated, &ExecutionControl::new(), &mut sink)
     {
         Ok(r) => r,
         Err(e) =>
         {
+            if let Some(pending) = pending
+            {
+                let recorded = match e
+                {
+                    ExecutionError::Cancelled => pending.cancel(),
+                    _ => pending.fail(&e.to_string()),
+                };
+                report_store_outcome(recorded);
+            }
             eprintln!("{} {e}", ux::error_prefix());
             return match e
             {
@@ -178,6 +256,11 @@ pub fn run_scenario(args: &[String]) -> u8 {
             };
         },
     };
+
+    if let Some(pending) = pending
+    {
+        report_store_outcome(pending.complete(&result));
+    }
 
     match format.as_str()
     {
