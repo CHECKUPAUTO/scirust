@@ -77,6 +77,7 @@ members = [
     "scirust-fusion",
     "scirust-tn",
     "scirust-tensor-core",
+    "scirust-tensor-ir",
     "scirust-tensor-einsum",
     "scirust-tensor-contraction",
     "scirust-tensor-compile",
