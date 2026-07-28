@@ -615,6 +615,7 @@ dependencies = [
  "serde_json",
  "sos-core",
  "sos-knowledge",
+ "sos-planner",
  "sos-reasoning",
  "sos-store",
  "thiserror",
@@ -771,6 +772,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sos-core",
+ "sos-registry",
  "sos-store",
  "thiserror",
 ]

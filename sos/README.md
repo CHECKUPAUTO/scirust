@@ -22,10 +22,10 @@ stubs, no TODOs, no placeholders cross a phase boundary.
 |-------|-------|--------|
 | **P1 — Kernel & substrate** | `sos-core`, `sos-store`, `sos-provenance`, `sos-registry`, `sos-repro` (+ SOS CI) | **done** (`sos-repro` core landed on the merged scheduler — env-lock + drift + the level-aware reproduction contract; the numeric `L2`/`L1` verdict is backend-supplied per Invariant VIII). The workspace's 4 dependency invariants are now CI-**enforced**, not just documented — see the dependency-invariant lint under Landed below |
 | **P2 — Knowledge & Reasoning** | `sos-knowledge`, `sos-reasoning` | **done** (deterministic cores landed; Datalog / e-graph / theorem-proving deferred to `sos-scirust` per Invariant VIII) |
-| **P3 — Discovery, Planning, Simulation** | `sos-workflow`, `sos-simulation`, `sos-planner`, re-homed `sde-*` stages | engine **cores landed** — the memoized scheduler, the backend-independent `Simulate` interface, and the planner (utility ranking + information-exhaustion + stopping rules). All three EIG-numerics tiers SDE §08 §3 names are now real, and `sos-planner`'s own contract is unchanged by any of them: the closed-form GP tier (`sos-scirust`'s `GpEigEstimator`), the Bayesian-optimization continuous-design-box search tier (`BoResult`/`search_best_design`, reusing `sos-planner`'s own `UtilityPolicy`), and the nested-Monte-Carlo discrete-hypothesis tier (`NestedMcEigEstimator`, with a real, computed standard error). `sos-simulation` now has three real backends — `sos-scirust`'s `Rk4OdeSimulator` (fixed-step ODE, `L3`), `Dopri5OdeSimulator` (adaptive ODE, `L2` with a real `CertifiedTrajectory` tolerance certificate), and `QuadratureSimulator` (adaptive Simpson quadrature, `L2` with a `CertifiedIntegral`) — with `sos-simulation`'s own `Simulate`/`Observation`/`Vcr` machinery unchanged by any of them. The remaining solver numerics (nonlinear root-finding — a different fit than `Simulate`'s "observe an experiment" framing, so it needs its own look), manifest resolution, `sos-workflow`'s `StageExecutor` (needs a dispatch/registry mechanism first), and the re-homed discovery stages still await `sos-scirust` / a frontend per Invariant VIII |
-| **P4 — Curiosity & Theory** | `sos-curiosity`, `sos-theory` | **cores landed** (both need only the P2 substrate; information-gain / analogy / Bayes-factor ranking / discriminating-experiment planning await P3's `sos-planner` and `scirust-*` per Invariant VIII) |
+| **P3 — Discovery, Planning, Simulation** | `sos-workflow`, `sos-simulation`, `sos-planner`, re-homed `sde-*` stages | engine **cores landed** — the memoized scheduler, the backend-independent `Simulate` interface, and the planner (utility ranking + information-exhaustion + stopping rules). All three EIG-numerics tiers SDE §08 §3 names are now real, and `sos-planner`'s own contract is unchanged by any of them: the closed-form GP tier (`sos-scirust`'s `GpEigEstimator`), the Bayesian-optimization continuous-design-box search tier (`BoResult`/`search_best_design`, reusing `sos-planner`'s own `UtilityPolicy`), and the nested-Monte-Carlo discrete-hypothesis tier (`NestedMcEigEstimator`, with a real, computed standard error). `sos-simulation` now has three real backends — `sos-scirust`'s `Rk4OdeSimulator` (fixed-step ODE, `L3`), `Dopri5OdeSimulator` (adaptive ODE, `L2` with a real `CertifiedTrajectory` tolerance certificate), and `QuadratureSimulator` (adaptive Simpson quadrature, `L2` with a `CertifiedIntegral`) — with `sos-simulation`'s own `Simulate`/`Observation`/`Vcr` machinery unchanged by any of them. `sos-workflow`'s binding seam is closed too: `Dispatch` resolves a stage's plugin through `sos-registry` pinned to the content hash the stage recorded (a drifted implementation fails the run rather than silently computing something else), authorized against the study's capability grant. The remaining solver numerics (nonlinear root-finding — a different fit than `Simulate`'s "observe an experiment" framing, so it needs its own look), manifest resolution, and the re-homed discovery stages still await `sos-scirust` / a frontend per Invariant VIII |
+| **P4 — Curiosity & Theory** | `sos-curiosity`, `sos-theory` | **cores landed**, and `sos-curiosity`'s **information lens is now real**: `Curiosity::with_designs` consumes planner `Candidate`s carrying genuine EIG estimates and scores them by the same `CuriosityPolicy` as every structural question, so one agenda ranks "resolve this contradiction" against "run this experiment". This is the `sos-curiosity` → `sos-planner` composition edge — sanctioned by RFC-0002 §11.5 rule 3 and by the dependency lint since it landed, but unexercised until the EIG numerics existed. Analogy / Bayes-factor ranking / discriminating-experiment planning still await `scirust-graph` and the statistics backend per Invariant VIII |
 | **P5 — Userland** | `sos-publication`, `sos-cli`, `sos-mcp` | `sos-publication` **core landed** — the publication is a verifiable projection of the object graph: content-addressed claims typed-bound to their evidence, the multi-phase claim/scope/reproducibility verifier, and deterministic Markdown/HTML/JSON. Re-execution of exhibits is `sos-workflow`'s job and real signing is `sos-provenance`'s per Invariant VIII; this crate consumes decisions, never recomputes them. `sos-cli` **porcelain landed** — `init`/`clone`/`push`/`log`/`know`/`ask`/`why`/`verify`/`diff`/`plan`/`publish`/`plugins` over the already-landed engines and the new persistent `FileStore`; `sos run` (needs a real `StageExecutor` backend) and a true `sos merge` are deferred, not stubbed. `sos-mcp` **server landed** — the same syscalls as MCP tools over blocking stdio JSON-RPC (no async runtime, no new third-party dependency), with the untrusted-proposer tool opt-in per Invariant IX |
-| **P6 — Backend adapters** | `sos-ccos` (cognitive), `sos-scirust` (computational) | `sos-ccos` **deterministic boundary landed** — the untrusted-proposer contract (Invariant IX): grounded, content-addressed proposals, the deterministic disposition gate, a tamper-evident attestation chain, and a no-LLM memory fallback. `sos-scirust` **all three gap-#1 EIG tiers, plus gap #3's first three backends, landed** — a closed-form GP-based EIG estimator wrapping `scirust-gp`; a Bayesian-optimization continuous-design-box search reusing `scirust-automl`'s seeded EI loop; a nested-Monte-Carlo estimator over finite `scirust-stats` discrete-hypothesis likelihoods, with a real, computed standard error rather than an asserted one; and three real `sos-simulation` `Simulate` backends wrapping `scirust-solvers` — fixed-step RK4 (`L3`, seedless-deterministic), adaptive Dormand-Prince 5(4) (`L2`, a real tolerance certificate carried in the output type since `Observation` has none of its own), and adaptive Simpson quadrature (`L2`, using the *strict* variant that errors on depth exhaustion rather than silently returning a non-compliant estimate). Four of the six capabilities are honestly tagged below `L3` (`L1`/`L1`/`L2`/`L2`, not `L3`) precisely where the underlying algorithm is seeded or tolerance-bounded, not by default; this is the sole crate CI-confirmed to touch `scirust-*`. (One of the quadrature backend's own tests caught a real bug along the way: the original fixed-point quantization scheme for hashing `f64` config fields collapsed distinct sub-nanoscale tolerances like `1e-10`/`1e-12` to the same encoded value — fixed workspace-wide by hashing configs as exact round-trip decimal strings instead of a quantized scale, still never a raw bit pattern.) Gap #2 (`sos-workflow`'s `StageExecutor`) needs a dispatch/registry mechanism first — a materially larger increment — and every other gap is deferred, not stubbed. The generative LLM/CCOS backend remains a deferred out-of-process backend per Invariant VIII |
+| **P6 — Backend adapters** | `sos-ccos` (cognitive), `sos-scirust` (computational) | `sos-ccos` **deterministic boundary landed** — the untrusted-proposer contract (Invariant IX): grounded, content-addressed proposals, the deterministic disposition gate, a tamper-evident attestation chain, and a no-LLM memory fallback. `sos-scirust` **all three gap-#1 EIG tiers, plus gap #3's first three backends, landed** — a closed-form GP-based EIG estimator wrapping `scirust-gp`; a Bayesian-optimization continuous-design-box search reusing `scirust-automl`'s seeded EI loop; a nested-Monte-Carlo estimator over finite `scirust-stats` discrete-hypothesis likelihoods, with a real, computed standard error rather than an asserted one; and three real `sos-simulation` `Simulate` backends wrapping `scirust-solvers` — fixed-step RK4 (`L3`, seedless-deterministic), adaptive Dormand-Prince 5(4) (`L2`, a real tolerance certificate carried in the output type since `Observation` has none of its own), and adaptive Simpson quadrature (`L2`, using the *strict* variant that errors on depth exhaustion rather than silently returning a non-compliant estimate). Four of the six capabilities are honestly tagged below `L3` (`L1`/`L1`/`L2`/`L2`, not `L3`) precisely where the underlying algorithm is seeded or tolerance-bounded, not by default; this is the sole crate CI-confirmed to touch `scirust-*`. (One of the quadrature backend's own tests caught a real bug along the way: the original fixed-point quantization scheme for hashing `f64` config fields collapsed distinct sub-nanoscale tolerances like `1e-10`/`1e-12` to the same encoded value — fixed workspace-wide by hashing configs as exact round-trip decimal strings instead of a quantized scale, still never a raw bit pattern.) Gap #2's blocker is now gone — `sos-workflow`'s `Dispatch` supplies the registry-mediated binding mechanism a `StageExecutor` needed, so backend-supplied stage handlers can attach without further scheduler work. Every other gap is deferred, not stubbed. The generative LLM/CCOS backend remains a deferred out-of-process backend per Invariant VIII |
 
 ### Landed
 
@@ -85,15 +85,42 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   scans the knowledge graph and emits ranked
   [`ScientificQuestion`](sos-curiosity/src/question.rs)s, each a content-addressed
   object grounded in the real nodes it concerns and carrying a `Derivation`
-  explaining *why* it is worth asking. Three deterministic lenses
+  explaining *why* it is worth asking. Four deterministic lenses
   ([`Strategy`](sos-curiosity/src/strategy.rs)): **contradiction-hunt** (reusing
   `sos-reasoning`'s contradiction detection), **under-connected** (weakly-linked
-  nodes), and **weakly-supported** (claims refuted yet unsupported). Scoring is an
+  nodes), **weakly-supported** (claims refuted yet unsupported), and
+  **maximal-information-gain** over planner-supplied designs
+  ([`Curiosity::with_designs`](sos-curiosity/src/sweep.rs)). Scoring is an
   explicit, versioned [`CuriosityPolicy`](sos-curiosity/src/policy.rs) —
   **integer fixed-point, saturating** (bit-exact `L3` ranking, no opaque
-  priorities, overflow-proof). (Information-gain scoring via `sos-planner`,
-  cross-domain analogy via `scirust-graph`, and cognitive proposals via
-  `sos-ccos` are deferred per Invariant VIII.)
+  priorities, overflow-proof).
+
+  The information lens is the `sos-curiosity` → `sos-planner` composition edge
+  (RFC-0002 §11.5 rule 3). Curiosity never *computes* EIG — that stays the
+  Planning Engine's job per Invariant VIII — it asks the question a real
+  estimate justifies, scored by the *same* policy as every structural question
+  so a contradiction and an experiment rank on one agenda. Two honesty
+  properties are deliberate: it scores
+  [`Estimate::lower_bound`](sos-planner/src/estimate.rs) (point − standard
+  error), never the point estimate, so a noisy `0.9 ± 0.8` bit claim
+  contributes what it can defend; and it **skips designs whose EIG is not
+  significant** rather than emitting a question whose premise is "this might
+  teach us nothing", mirroring the planner's own admission rule. Because EIG is
+  unbounded but features must be bounded by `SCALE`, the saturation point is a
+  caller-declared scale, not a magic constant.
+
+  Wiring that lens exposed a latent bug in the default policy: its documented
+  guarantee that a contradiction outranks everything else was spaced as
+  `w_contradiction = 4` against `w_novelty + w_inv_cost = 3`, **excluding**
+  `w_info_gain = 3` — sound only while `Features::info_gain` was hardcoded to
+  `0`. Once the lens made that field live, the non-contradiction ceiling became
+  `6·SCALE` and a sufficiently attractive design could displace an unresolved
+  contradiction from the top of the agenda. `w_contradiction` is now `7`, so
+  the dominance holds for *every* feature vector rather than accidentally; a
+  test pins the arithmetic. (This changes `CuriosityPolicy::default()`'s
+  content hash — acceptable pre-1.0, and preferable to the default agenda
+  silently changing behavior.) Cross-domain analogy via `scirust-graph` and
+  cognitive proposals via `sos-ccos` remain deferred per Invariant VIII.
 - **`sos-theory`** — the Theory Engine (deterministic). Theories are
   **first-class, immutable, evolving** objects: a
   [`Theory`](sos-theory/src/theory.rs) records all ten mandate fields (axioms,
@@ -120,9 +147,25 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   in a content-addressed [`RunLedger`](sos-workflow/src/ledger.rs). Re-running an
   unchanged plan against a warm [`Memo`](sos-workflow/src/engine.rs) is all cache
   hits — provably identical, nearly free, and the property that makes a crashed
-  run resumable. (Stage *logic*, manifest resolution, the world-touching effect
-  boundary, and stopping rules are supplied by the engine plugins / `sos-scirust`
-  / `sos-planner` per Invariant VIII — no stub.)
+  run resumable.
+
+  [`Dispatch`](sos-workflow/src/dispatch.rs) closes the binding seam: the
+  scheduler could always order and memoize stages, but nothing turned a stage's
+  plugin *name* into running code. `Dispatch` resolves each stage through
+  [`sos-registry`](sos-registry/src/registry.rs) **pinned to the content hash
+  the stage recorded**, so an implementation that drifted under the same name
+  and version fails the run rather than silently computing something else and
+  calling it the same result — the RFC's drift guarantee, now enforced rather
+  than asserted. Every binding is authorized against the study's capability
+  `Grant`, refusing by default, so a plugin gets the GPU or the right to cause
+  effects because the study granted them, not because it asked; and a
+  descriptor that resolves with no registered handler is an error, never a
+  quietly-empty output. `Dispatch` is itself a `StageExecutor`, so it drops
+  into `run_plan` with memoization and the ledger above it unchanged — and
+  because cache hits never call the executor, binding and capability checks
+  fall only on work that actually runs. (Stage *logic* itself, manifest
+  resolution, and stopping rules remain with the engine plugins /
+  `sos-scirust` / `sos-planner` per Invariant VIII — no stub.)
 - **`sos-repro`** — the Reproducibility Engine (the *Nix analogy*). Where
   provenance *records* the environment, this **pins and re-realizes** it: an
   [`EnvLock`](sos-repro/src/lock.rs) is the hermetic lockfile (toolchain, backend

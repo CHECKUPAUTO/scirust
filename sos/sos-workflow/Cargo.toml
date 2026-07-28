@@ -11,6 +11,7 @@ categories = ["science", "data-structures"]
 
 [dependencies]
 sos-core = { workspace = true }
+sos-registry = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 
