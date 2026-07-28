@@ -120,6 +120,30 @@ $ scirust runs discard <interrupted-run-id> --store ./store
 refuses anything that is not an interrupted run, so it cannot delete a
 finalized one.
 
+## Result schema versions
+
+`manifest.json` records `result_schema_version`, and `RunStore::load_result`
+returns a `LoadedRunResult` tagged with the version found **in the result
+file itself** (not the manifest's copy — the file is what is being decoded).
+
+| Version | Axis coordinates | Readable | Verifiable |
+|---|---|---|---|
+| 1 | absent | yes | yes |
+| 2 | stored exactly | yes | yes |
+
+A v1 result's metrics, warnings, verification checks, provenance and series
+*values* are all still available. What is not available is when each sample
+was taken, and none is invented: `LoadedRunResult::x_axis_meaning()` returns
+`SampleIndexOnly` for v1, so a consumer is made to acknowledge the
+difference. `load_result_v2` refuses a v1 run outright for callers that
+genuinely need coordinates.
+
+Nothing is migrated in place. An immutable store that rewrote its own files
+would invalidate every hash it had recorded — so a v1 run stays a v1 run, and
+new runs are written as v2 beside it. Hashes are over the stored bytes and
+are therefore version-agnostic; `tests/v1_compatibility.rs` pins all of this
+against real v1 fixtures produced by the shipped Phase 2B code.
+
 ## Limitations, stated rather than discovered
 
 - **Nothing prunes the store.** It grows without bound; no retention policy
