@@ -49,8 +49,9 @@ ENGINES = frozenset(
 )
 
 # Composition edges sanctioned by §5 rule 3. Listing an edge here means it is
-# ALLOWED, not that it is currently exercised — sos-curiosity -> sos-planner
-# is designed-for but not yet wired (the sos-scirust plan's gap #6).
+# ALLOWED, not that it is necessarily exercised. All five are wired as of the
+# maximal-information-gain lens (gap #6), which took up the last unused one,
+# sos-curiosity -> sos-planner.
 ALLOWED_ENGINE_EDGES = frozenset(
     {
         ("sos-reasoning", "sos-knowledge"),
