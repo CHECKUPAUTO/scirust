@@ -1,0 +1,83 @@
+# The SciRust Studio desktop application: its own Cargo workspace.
+#
+# Deliberately separate from the root workspace (which lists it under
+# `exclude`) so the GUI toolchain cannot affect the root MSRV gate, the root
+# dependency graph, or the build time of a `cargo check --workspace` that has
+# nothing to do with the desktop. See
+# `docs/studio/adr/0005-tauri-dioxus-desktop-architecture.md`.
+#
+# The scientific crates are consumed by path from the root workspace. No
+# business logic lives here.
+
+[workspace]
+members = ["src-tauri", "tools/prepare-sidecar"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Exact versions, no carets: a desktop application's toolchain is part of the
+# artifact a user installs, and "whatever resolved today" is not a thing to
+# ship or to reproduce a bug against.
+[workspace.dependencies]
+tauri = "=2.11.5"
+tauri-build = "=2.6.3"
+dioxus = "=0.7.9"
+serde = { version = "=1.0.228", features = ["derive"] }
+# `float_roundtrip` for the same reason every Studio crate needs it: a result
+# that crosses this boundary must not lose its last bit.
+serde_json = { version = "=1.0.145", features = ["float_roundtrip"] }
+wasm-bindgen = "=0.2.104"
+wasm-bindgen-futures = "=0.4.54"
+serde-wasm-bindgen = "=0.6.5"
+js-sys = "=0.3.81"
+web-sys = "=0.3.81"
+
+[package]
+name = "scirust-studio-ui"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "SciRust Studio: the Dioxus Web (WASM) frontend, loaded by the Tauri shell as bundled static assets."
+
+[lib]
+# A library as well as a binary: the pure reducers and view models are unit
+# tested on the host, which is only possible if they are importable.
+name = "scirust_studio_ui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "scirust-studio-ui"
+path = "src/main.rs"
+
+[dependencies]
+# `dioxus` with the `web` feature only. Never `desktop`: Tauri is the shell,
+# and a second one would be a second application.
+dioxus = { workspace = true, features = ["web"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+serde-wasm-bindgen = { workspace = true }
+js-sys = { workspace = true }
+web-sys = { workspace = true, features = [
+    "Window",
+    "Document",
+    "Element",
+    "HtmlElement",
+    "HtmlTextAreaElement",
+    "KeyboardEvent",
+    "Storage",
+] }
+
+[features]
+default = []
+# Compiles the deterministic in-memory backend used by frontend tests and by
+# `dx serve` when no Tauri host is present.
+#
+# A release build with this enabled is refused at compile time — see
+# `src/backend/mod.rs`. A shipped application must never be able to display
+# invented data.
+mock-backend = []

@@ -1,0 +1,65 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SciRust Studio",
+  "version": "0.1.0",
+  "identifier": "com.memorithm.scirust-studio",
+  "build": {
+    "frontendDist": "../dist",
+    "beforeBuildCommand": "cargo run --manifest-path ../../../apps/scirust-studio/Cargo.toml --bin scirust-studio-ui --help >/dev/null 2>&1 || true",
+    "beforeDevCommand": ""
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "SciRust Studio",
+        "label": "main",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1100,
+        "minHeight": 700,
+        "resizable": true,
+        "center": true,
+        "visible": true,
+        "decorations": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'",
+      "dangerousDisableAssetCspModification": false,
+      "freezePrototype": true,
+      "assetProtocol": {
+        "enable": false,
+        "scope": []
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "deb",
+      "appimage",
+      "nsis",
+      "app",
+      "dmg"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png"
+    ],
+    "externalBin": [
+      "binaries/scirust-studio-worker"
+    ],
+    "resources": [],
+    "copyright": "Copyright Memorithm",
+    "category": "Education",
+    "shortDescription": "Deterministic scientific simulation studio",
+    "longDescription": "SciRust Studio runs oracle-tested scientific simulations, records every run immutably with content hashes, and verifies stored results against them.",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  },
+  "plugins": {}
+}

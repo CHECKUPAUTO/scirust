@@ -1,0 +1,37 @@
+[package]
+name = "scirust-studio-desktop"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "SciRust Studio: the Tauri 2 native shell. Owns the window, the sidecar worker and a narrow set of typed commands; contains no scientific code."
+
+[lib]
+# Tauri's own convention: the application lives in a library so the mobile
+# entry points and the desktop binary share one definition.
+name = "scirust_studio_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "scirust-studio"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { workspace = true, features = [] }
+
+[dependencies]
+tauri = { workspace = true, features = [] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# The scientific core, by path from the root workspace. Nothing here
+# re-implements any of it.
+scirust-studio-app-service = { path = "../../../scirust-studio-app-service" }
+scirust-studio-registry = { path = "../../../scirust-studio-registry" }
+scirust-studio-runtime = { path = "../../../scirust-studio-runtime" }
+scirust-studio-store = { path = "../../../scirust-studio-store" }
+
+[dev-dependencies]
+tempfile = "=3.27.0"
+
+[features]
+default = []
