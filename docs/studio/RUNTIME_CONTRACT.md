@@ -65,17 +65,50 @@ pub trait CapabilityAdapter: Send + Sync {
   `FieldDescriptor`/`SolverDescriptor` tables — not five independent
   re-implementations of the same logic.
 - **`execute`** receives a `ValidatedScenario` (constructible only by a
-  successful `validate()`), an `ExecutionControl` (checked for
-  cancellation before the integration call — see
-  `docs/studio/adr/0002-structured-run-results.md` for why finer-grained
-  cancellation is Phase 2B), and an `&mut dyn EventSink` that receives
-  `RunEvent::Started`/`Warning`/`Completed`/`Cancelled`/`Failed`. It
-  returns a fully-populated `RunResult` or an `ExecutionError`, never a
+  successful `validate()`), an `ExecutionControl`, and an `&mut dyn
+  EventSink` that receives
+  `RunEvent::Started`/`Progress`/`Warning`/`Completed`/`Cancelled`/`Failed`.
+  It returns a fully-populated `RunResult` or an `ExecutionError`, never a
   partially-built one.
 - Every adapter calls `scirust_studio_runtime::assert_finite(&result)`
   immediately before returning `Ok(result)`, converting any non-finite
   derived value into `ExecutionError::Internal` instead of a silently
   "successful" result containing JSON `null`.
+
+## Cancellation and progress
+
+Fixed-step capabilities check `ExecutionControl` after **every accepted
+step** and report genuine progress, via
+`scirust_sim::simulate_observed`/`simulate_second_order_observed` (see
+`docs/studio/adr/0003-worker-process-and-ipc.md`). `simulate` and
+`simulate_second_order` are wrappers around those same functions, so
+observing a run cannot change the numbers a completed run produces —
+`scirust-sim`'s `observed_rk4_run_is_bit_identical_to_the_unobserved_one`
+test asserts exactly that.
+
+`RunEvent::Progress` carries the fraction of the scenario's **time span**
+already integrated, taken from the `t` the solver reports. It is not a
+timer and not an estimate, and it is emitted at most 20 times per run.
+
+Not every capability can do this, and the table below says which:
+
+| Capability | Cancellation | Progress |
+|---|---|---|
+| `sim.mechanics.spring_mass_damper` | every step | yes |
+| `sim.epidemiology.sir` | every step | yes |
+| `sim.orbital.two_body` | every step (both solvers) | yes |
+| `sim.electrical.rlc` | every step | yes |
+| `sim.chemistry.robertson` | **before execution only** | **none** |
+
+Robertson integrates through `scirust_sim::stiff_bridge`'s adaptive
+Rosenbrock-W solver, which exposes no per-step callback. It is given no
+fabricated progress fraction. Mid-run cancellation for it is covered at the
+process level instead — the worker can be killed — which is one of the
+reasons the worker exists.
+
+Every adapter, including Robertson, honours an already-cancelled control
+before starting; `every_adapter_honours_a_pre_cancelled_control` asserts
+this for all of them.
 
 ## Implemented capabilities (Phase 2A)
 
@@ -131,10 +164,35 @@ table:
 | 6 | cancelled | `ExecutionError::Cancelled` |
 | 7 | internal failure | unregistered adapter for a validated capability id (a bug), `ExecutionError::Internal`, JSON serialization failure |
 
+## Out-of-process execution
+
+The same pipeline runs inside `scirust-studio-worker`, which speaks
+`scirust-studio-ipc` over stdin/stdout — see
+`docs/studio/IPC_PROTOCOL.md` and
+`docs/studio/adr/0003-worker-process-and-ipc.md`. The worker reaches
+capabilities through the identical `find_adapter`/`validate`/`execute` path
+this document describes; it is not a second execution route. The test
+`a_run_through_the_worker_matches_an_in_process_run` runs a scenario in a
+real spawned worker process and asserts the returned series, metrics, and
+verifications equal an in-process run of the same scenario exactly.
+
+`scirust-cli` still executes in-process: spawning a worker per CLI
+invocation would add latency a command-line user gains nothing from. The
+worker exists for the desktop shell, and is tested directly.
+
+## Run storage
+
+`scirust run --store <dir>` (or `SCIRUST_STUDIO_STORE`) records the run
+immutably — scenario, result, and a hashed provenance manifest — and
+`scirust runs list|show|verify|discard` inspects the store. See
+`docs/studio/STORAGE_LAYOUT.md` and
+`docs/studio/adr/0004-immutable-run-storage.md`. Storage is opt-in; there is
+no default location.
+
 ## Output formats
 
-Both `scirust catalog` and `scirust run` accept `--format text|json`
-(default `text`). `text` is meant for a human at a terminal; `json` is
+`scirust catalog`, `scirust run`, and `scirust runs list|show` accept
+`--format text|json` (default `text`). `text` is meant for a human at a terminal; `json` is
 meant for tests, scripts, and — eventually — a desktop client, and is a
 direct serialization of `CapabilityRegistry`'s entries or a `RunResult`
 with stable field names (see the two ADRs for why the field types are

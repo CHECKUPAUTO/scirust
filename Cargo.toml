@@ -182,6 +182,9 @@ members = [
     "scirust-studio-schema",
     "scirust-studio-registry",
     "scirust-studio-runtime",
+    "scirust-studio-ipc",
+    "scirust-studio-store",
+    "scirust-studio-worker",
 ]
 exclude = [
     "examples/simd_views_demo",
