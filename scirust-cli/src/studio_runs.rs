@@ -4,7 +4,7 @@
 //! operation, `runs discard`, removes a *never-finalized* leftover and is
 //! refused for anything else (see `scirust-studio-store`).
 
-use scirust_studio_store::{RunStore, StoreError};
+use scirust_studio_store::{LoadedRunResult, RunStore, StoreError};
 
 use crate::studio::{resolve_store, take_option};
 use crate::ux;
@@ -204,13 +204,51 @@ fn show(store_arg: Option<String>, format: &str, run_id: Option<&String>) -> u8 
     {
         match store.load_result(run_id)
         {
-            Ok(result) =>
+            Ok(loaded) =>
             {
                 println!();
                 println!("{}", ux::heading("SERIES"));
-                for s in &result.series
+                match &loaded
                 {
-                    println!("  {:<18} {} points, unit {}", s.id, s.values.len(), s.unit);
+                    LoadedRunResult::V2(result) =>
+                    {
+                        let axis_points = result
+                            .time_axis()
+                            .map(|a| a.values.len())
+                            .unwrap_or_default();
+                        println!(
+                            "  {}",
+                            ux::dim(&format!(
+                                "plotted against {axis_points} exact time coordinates"
+                            ))
+                        );
+                        for s in &result.series
+                        {
+                            println!(
+                                "  {:<18} {} points, unit {} (axis `{}`)",
+                                s.id,
+                                s.values.len(),
+                                s.unit,
+                                s.axis_id
+                            );
+                        }
+                    },
+                    LoadedRunResult::V1(result) =>
+                    {
+                        // Say what is missing rather than printing series
+                        // that look interchangeable with a v2 result's.
+                        println!(
+                            "  {}",
+                            ux::yellow(
+                                "legacy result (schema v1): sample values only, no time \
+                                 coordinates were recorded"
+                            )
+                        );
+                        for s in &result.series
+                        {
+                            println!("  {:<18} {} samples, unit {}", s.id, s.values.len(), s.unit);
+                        }
+                    },
                 }
             },
             Err(e) => return report(e),

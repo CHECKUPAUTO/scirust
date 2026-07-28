@@ -45,6 +45,21 @@ pub enum StoreError {
         /// The hash the file has now.
         actual: String,
     },
+    /// A stored result uses a schema version this build cannot read, or one
+    /// the caller specifically required a different version of.
+    ///
+    /// Reported rather than worked around: the alternative is guessing what
+    /// an unknown format meant, and for a legacy result the specific guess
+    /// that matters — that its samples were evenly spaced — is false for any
+    /// adaptive solver.
+    UnsupportedResultSchema {
+        /// The run.
+        run_id: String,
+        /// The version found in the file.
+        found: u32,
+        /// The versions acceptable here.
+        supported: Vec<u32>,
+    },
     /// Serializing a manifest or result failed.
     Encode(String),
     /// Every candidate run id derived from this base was already taken.
@@ -91,6 +106,22 @@ impl std::fmt::Display for StoreError {
                 "run `{run_id}` has been modified: {file} hashes to {actual}, \
                  but its manifest records {expected}"
             ),
+            StoreError::UnsupportedResultSchema {
+                run_id,
+                found,
+                supported,
+            } =>
+            {
+                let list = supported
+                    .iter()
+                    .map(|v| format!("v{v}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(
+                    f,
+                    "run `{run_id}` stores a v{found} result; this needs one of: {list}"
+                )
+            },
             StoreError::Encode(reason) => write!(f, "could not encode for storage: {reason}"),
             StoreError::RunIdExhausted { base } =>
             {
