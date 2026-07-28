@@ -13,8 +13,15 @@ categories = ["science"]
 sos-core = { workspace = true }
 sos-planner = { workspace = true }
 sos-simulation = { workspace = true }
+sos-store = { workspace = true }
+sos-workflow = { workspace = true }
+serde = { workspace = true }
 thiserror = { workspace = true }
 scirust-gp = { path = "../../scirust-gp" }
 scirust-automl = { path = "../../scirust-automl" }
 scirust-stats = { path = "../../scirust-stats" }
 scirust-solvers = { path = "../../scirust-solvers" }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+sos-registry = { workspace = true }
