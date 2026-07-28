@@ -15,17 +15,25 @@
 mod adapter;
 mod adapters;
 mod control;
+mod execute_support;
 mod result;
 mod sink;
 mod validate_support;
 
 pub use adapter::{CapabilityAdapter, ExecutionError, ValidatedScenario, ValidationReport};
 pub use control::ExecutionControl;
+
 pub use result::{
     AxisDescriptor, Metric, MetricValue, RESULT_SCHEMA_VERSION, RunProvenance, RunResult,
     RunSummary, RunWarning, Series, VerificationResult, VerificationStatus, WarningCategory,
     assert_finite,
 };
+/// Re-exported because [`RunProvenance::determinism`] is a public field of a
+/// public type: a caller cannot name the type of something it can read
+/// without this.
+pub use scirust_studio_registry::DeterminismClass;
 pub use sink::{CollectingEventSink, EventSink, NullEventSink, RunEvent};
 
-pub use adapters::{all_adapters, build_registry, find_adapter};
+pub use adapters::{
+    all_adapters, build_registry, find_adapter, tutorial_file_name_for, tutorial_scenario_for,
+};

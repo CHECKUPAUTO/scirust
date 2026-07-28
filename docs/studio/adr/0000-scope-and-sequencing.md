@@ -135,8 +135,48 @@ pair — it no longer depends on `scirust-sim` at all — but the ~55 legacy
 commands are still untouched, per the explicit instruction not to migrate
 them yet.
 
-Still not started: the worker process, bounded IPC, job lifecycle,
-cancellation beyond a pre-execution check, run storage/manifest/provenance
-(step 3); anything Tauri/Dioxus (step 4); the remaining 11 `scirust-sim`
-model families (step 5); legacy CLI migration (step 6); and Windows
-installer/signing/updater (step 7).
+Still not started at that point: the worker process, bounded IPC, job
+lifecycle, cancellation beyond a pre-execution check, run
+storage/manifest/provenance (step 3); anything Tauri/Dioxus (step 4); the
+remaining 11 `scirust-sim` model families (step 5); legacy CLI migration
+(step 6); and Windows installer/signing/updater (step 7).
+
+## Update (Phase 2B landed — step 3 complete)
+
+Step (3), the cross-platform runtime/worker/storage layer, is implemented:
+
+- **Real cancellation and real progress.** `scirust-sim` gained an
+  additive per-step observer (`simulate_observed`,
+  `simulate_second_order_observed`, `StepAction`, `ObservedRun`); the
+  existing `simulate`/`simulate_second_order` are now wrappers around it, so
+  the numerics are unchanged and a bit-identity test in `scirust-sim`
+  proves it. All four fixed-step adapters now check cancellation after
+  every accepted step and emit genuine `RunEvent::Progress`. Robertson's
+  adaptive stiff solver offers no per-step callback, so it keeps
+  pre-execution-only cancellation and emits no progress rather than a
+  fabricated fraction — stated per capability in `RUNTIME_CONTRACT.md`.
+- **`scirust-studio-ipc`** — a versioned, size-bounded, request-correlated
+  NDJSON protocol, transport-free.
+- **`scirust-studio-worker`** — a real binary with a single-writer event
+  loop, one job at a time with a FIFO queue, mid-run cancellation, and
+  exactly one terminal message per request. Tested by spawning the actual
+  compiled executable and talking to it over real pipes.
+- **`scirust-studio-store`** — immutable, SHA-256-hashed run storage with
+  atomic publish-by-rename, tamper detection, and interrupted-run
+  detection. `scirust run --store` records runs; `scirust runs` inspects
+  them.
+
+See `docs/studio/adr/0003-worker-process-and-ipc.md`,
+`docs/studio/adr/0004-immutable-run-storage.md`,
+`docs/studio/IPC_PROTOCOL.md`, and `docs/studio/STORAGE_LAYOUT.md`.
+
+One real bug surfaced and was fixed in the process: `serde_json`'s default
+float parser is not bit-exact, so results crossing the worker boundary came
+back one ULP off. Every Studio crate that reads floats back from JSON now
+enables `float_roundtrip`, with bit-comparison tests pinning it.
+
+Deliberately still not done: worker *supervision* (spawn/restart policy,
+health checks) belongs with the application that owns the window; store
+retention/pruning; anything Tauri/Dioxus (step 4); the remaining 11
+`scirust-sim` model families (step 5); legacy CLI migration (step 6); and
+Windows installer/signing/updater (step 7).
