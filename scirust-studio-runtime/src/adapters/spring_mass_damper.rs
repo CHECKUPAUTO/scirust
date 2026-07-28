@@ -6,7 +6,8 @@
 //! constructs `SpringMassDamper` itself.
 
 use scirust_sim::mechanics::SpringMassDamper;
-use scirust_sim::simulate;
+
+use crate::execute_support::{TimeSpan, simulate_cancellable};
 use scirust_studio_command::{ErrorCode, ErrorFamily};
 use scirust_studio_registry::{
     BackendKind, CapabilityCategory, CapabilityDescriptor, CapabilityId, CapabilityMaturity,
@@ -256,10 +257,17 @@ impl CapabilityAdapter for SpringMassDamperAdapter {
         let started_at = chrono::Utc::now();
 
         let energy0 = model.energy(&[x0, v0]);
-        let traj = simulate(&model, &[x0, v0], t0, t1, step).map_err(|e| {
-            sink.emit(RunEvent::Failed(e.to_string()));
-            ExecutionError::Numerical(e.to_string())
-        })?;
+        let traj = simulate_cancellable(
+            &model,
+            &[x0, v0],
+            TimeSpan {
+                t0,
+                t_end: t1,
+                h: step,
+            },
+            control,
+            sink,
+        )?;
         let last = traj
             .last_state()
             .expect("simulate always returns at least the initial state");
