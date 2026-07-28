@@ -49,6 +49,8 @@ pub use compute_dispatch::{
 pub mod license;
 
 mod compute_adapter;
+#[cfg(test)]
+mod compute_conformance;
 mod compute_dispatch;
 
 #[cfg(feature = "wgpu")]
