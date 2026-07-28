@@ -488,12 +488,14 @@ pub enum CfarError {
     )]
     TooFewReferenceCells(usize),
     /// `reference_cells`/`guard_cells` are too large to be usable: either
-    /// computing the reference-window size (`reference_cells + guard_cells`,
-    /// or `2 * reference_cells`) would overflow `usize` arithmetic, or
-    /// `reference_cells` exceeds [`MAX_PRACTICAL_REFERENCE_CELLS`] — caught
-    /// here, deterministically, rather than left to panic on overflow, or
-    /// (for the practical bound) to hang inside calibration, wherever that
-    /// happens to occur downstream.
+    /// computing the full reference-window span
+    /// (`2 * (reference_cells + guard_cells)`, which bounds every narrower
+    /// span the detectors compute — see [`CfarConfig::validate`]) would
+    /// overflow `usize` arithmetic, or `reference_cells` exceeds
+    /// [`MAX_PRACTICAL_REFERENCE_CELLS`] — caught here, deterministically,
+    /// rather than left to panic on overflow (or, with `overflow-checks`
+    /// off, to wrap silently), or (for the practical bound) to hang inside
+    /// calibration, wherever that happens to occur downstream.
     #[error(
         "reference_cells={reference_cells}, guard_cells={guard_cells} is not a usable \
          reference window (overflows reference-window-size arithmetic, or exceeds the \
@@ -2109,6 +2111,36 @@ mod tests {
             evaluate_slice(&[], &c),
             Err(CfarError::ReferenceWindowTooLarge { .. })
         ));
+    }
+
+    #[test]
+    fn doubled_half_window_overflow_boundary_is_exact() {
+        // The test above pins the *rejecting* side of the doubled-window
+        // check. This one pins where that check stops rejecting, which is
+        // what makes it a bound rather than a blanket refusal of any large
+        // `guard_cells`: the condition is exactly
+        // `2 * (reference_cells + guard_cells) <= usize::MAX`, so with
+        // `reference_cells = 4` the largest usable guard is
+        // `usize::MAX / 2 - 4` (half = 2^63 - 1, double = 2^64 - 2) and the
+        // very next value overflows. Without this, tightening the guard into
+        // something conservative-but-wrong would pass the suite.
+        let mut c = default_config();
+        c.reference_cells = 4;
+
+        c.guard_cells = usize::MAX / 2 - 4;
+        assert!(
+            c.validate().is_ok(),
+            "the last representable window must be accepted"
+        );
+
+        c.guard_cells = usize::MAX / 2 - 3; // half = 2^63, double = 2^64
+        assert_eq!(
+            c.validate(),
+            Err(CfarError::ReferenceWindowTooLarge {
+                reference_cells: 4,
+                guard_cells: usize::MAX / 2 - 3,
+            })
+        );
     }
 
     #[test]
