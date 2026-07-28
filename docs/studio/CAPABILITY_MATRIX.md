@@ -23,6 +23,16 @@ Columns, exactly as specified for this matrix:
 - **Desktop exposed** — reachable from a desktop application. **Always
   "No" at this stage** — no desktop shell exists yet (Phase 5+).
 
+Since Phase 2B, every capability in the table below is also reachable
+out-of-process through `scirust-studio-worker` (see
+`docs/studio/IPC_PROTOCOL.md`), and any run can be recorded immutably with
+`scirust run --store` (see `docs/studio/STORAGE_LAYOUT.md`). Neither adds a
+capability, so neither gets a column; what *does* differ per capability is
+mid-run cancellation and progress reporting, tabulated in
+`docs/studio/RUNTIME_CONTRACT.md` — `sim.chemistry.robertson` supports
+neither in-process, because its adaptive stiff solver exposes no per-step
+callback.
+
 ## `scirust-sim` — the 16 modules audited in `docs/studio/REPOSITORY_AUDIT.md`
 
 | Module | Catalogued | Descriptor | Adapter | Scenario tested | Oracle tested | CLI exposed | Desktop exposed |

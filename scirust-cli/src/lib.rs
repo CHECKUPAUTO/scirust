@@ -13,6 +13,7 @@ pub mod quickstart;
 pub mod reasoning;
 pub mod sciagent;
 pub mod studio;
+pub mod studio_runs;
 pub mod symbolic;
 pub mod synergy;
 pub mod trader;
@@ -81,6 +82,7 @@ const ALL_COMMANDS: &[&str] = &[
     "trader",
     "catalog",
     "run",
+    "runs",
 ];
 
 /// One registered command for the help listing.
@@ -342,8 +344,8 @@ const GROUPS: &[(&str, &[Command])] = &[
         "SCIAGENT SLM",
         &[Command {
             name: "sciagent",
-            args: "ask|chat|explain|generate|info|attest|quantize [args]",
-            about: "Deterministic SLM for Rust + agentic — GQA + SwiGLU + RoPE + RMSNorm.",
+            args: "ask|chat|explain|generate|info|attest|quantize [--checkpoint PATH] [args]",
+            about: "Deterministic SLM for Rust + agentic; trained-weight commands require a checkpoint.",
         }],
     ),
     (
@@ -416,8 +418,13 @@ const GROUPS: &[(&str, &[Command])] = &[
             },
             Command {
                 name: "run",
-                args: "<scenario.scirust.toml> [--format text|json]",
+                args: "<scenario.scirust.toml> [--format text|json] [--store <dir>]",
                 about: "Validate and execute a SciRust Studio scenario file.",
+            },
+            Command {
+                name: "runs",
+                args: "<list|show|verify|discard> [--store <dir>] [--format text|json]",
+                about: "Inspect recorded runs: list them, show one, or re-verify their hashes.",
             },
         ],
     ),
@@ -724,6 +731,7 @@ fn dispatch(args: &[String]) -> u8 {
         Some("trader") => trader::run(rest),
         Some("catalog") => studio::run_catalog(rest),
         Some("run") => studio::run_scenario(rest),
+        Some("runs") => studio_runs::run(rest),
         Some(other) =>
         {
             eprintln!(
@@ -804,6 +812,7 @@ mod tests {
             "analyze",
             "catalog",
             "run",
+            "runs",
         ]
         {
             assert!(

@@ -6,7 +6,7 @@ publish = false
 
 [features]
 default = ["std"]
-std = []
+std = ["scirust-compute/std"]
 cuda = ["std", "dep:scirust-cuda", "scirust-cuda/cuda"]
 # Optional product-licensing gate for the GPU module (Module::Gpu). Off by
 # default so unlicensed/dev builds behave exactly as today; when enabled a
@@ -19,6 +19,7 @@ license-gate = ["std", "dep:scirust-license"]
 wgpu = ["std", "dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:scirust-core"]
 
 [dependencies]
+scirust-compute = { path = "../scirust-compute", default-features = false }
 scirust-core = { path = "../scirust-core", optional = true }
 scirust-cuda = { path = "../scirust-cuda", optional = true }
 scirust-license = { path = "../scirust-license", optional = true }

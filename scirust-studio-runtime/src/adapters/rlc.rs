@@ -11,7 +11,8 @@
 //! metric exercises.
 
 use scirust_sim::electrical::SeriesRlc;
-use scirust_sim::simulate;
+
+use crate::execute_support::{TimeSpan, simulate_cancellable};
 use scirust_studio_command::{ErrorCode, ErrorFamily};
 use scirust_studio_registry::{
     BackendKind, CapabilityCategory, CapabilityDescriptor, CapabilityId, CapabilityMaturity,
@@ -306,10 +307,17 @@ impl CapabilityAdapter for RlcAdapter {
         let wall_start = std::time::Instant::now();
         let started_at = chrono::Utc::now();
 
-        let traj = simulate(&model, &[q0, i0], t0, t1, step).map_err(|e| {
-            sink.emit(RunEvent::Failed(e.to_string()));
-            ExecutionError::Numerical(e.to_string())
-        })?;
+        let traj = simulate_cancellable(
+            &model,
+            &[q0, i0],
+            TimeSpan {
+                t0,
+                t_end: t1,
+                h: step,
+            },
+            control,
+            sink,
+        )?;
 
         let charge_series = traj.column(0).expect("dim 0 exists");
         let current_series = traj.column(1).expect("dim 1 exists");
