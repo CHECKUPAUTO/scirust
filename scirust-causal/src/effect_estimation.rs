@@ -172,8 +172,10 @@ fn query_label(dataset: &CausalDataset, treatment: usize, outcome: usize) -> Str
     )
 }
 
-/// Builds a non-identifiable / inconclusive result: a certificate with no
-/// estimate attached, plus the reason.
+/// The query context an abstaining result needs to describe itself: which
+/// effect was asked about, and how many rows the (still-performed) regime
+/// selection yielded. Bundled into a struct so [`unidentified`] stays within
+/// a reasonable argument count.
 struct AbstentionContext<'a> {
     dataset: &'a CausalDataset,
     treatment: usize,
@@ -181,6 +183,8 @@ struct AbstentionContext<'a> {
     sample_count: usize,
 }
 
+/// Builds a non-identifiable / inconclusive result: a certificate with no
+/// estimate attached, plus the reason.
 fn unidentified(
     context: &AbstentionContext<'_>,
     status: IdentifiabilityStatus,
