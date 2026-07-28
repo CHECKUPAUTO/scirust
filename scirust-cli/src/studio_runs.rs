@@ -447,26 +447,49 @@ mod tests {
         opened.verify(&runs[0].run_id).unwrap();
     }
 
+    /// Whether the ambient environment already selects a store.
+    ///
+    /// The two tests below are about the *absence* of a store, and
+    /// `cargo test` runs tests as threads in one process — so clearing the
+    /// variable here would race every other test that reads it. Reading it
+    /// and skipping is the only safe option; mutating shared process state
+    /// to make a test pass is not.
+    fn environment_selects_a_store() -> bool {
+        std::env::var(crate::studio::STORE_ENV)
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false)
+    }
+
     #[test]
     fn without_a_store_nothing_is_recorded_and_the_run_still_succeeds() {
+        if environment_selects_a_store()
+        {
+            return;
+        }
         let work = TempDir::new("nostore");
         let scenario = work.0.join("scenario.scirust.toml");
         std::fs::write(&scenario, TUTORIAL).unwrap();
-        // Explicitly clear the environment fallback for this process so the
-        // test does not depend on the machine it runs on.
-        unsafe {
-            std::env::remove_var(crate::studio::STORE_ENV);
-        }
         let code = crate::studio::run_scenario(&[scenario.to_string_lossy().into_owned()]);
-        assert_eq!(code, 0);
+        assert_eq!(code, 0, "a run without a store still succeeds");
     }
 
     #[test]
     fn runs_without_a_store_is_a_usage_error() {
-        unsafe {
-            std::env::remove_var(crate::studio::STORE_ENV);
+        if environment_selects_a_store()
+        {
+            return;
         }
         assert_eq!(run(&s(&["list"])), USAGE);
+    }
+
+    /// The precedence rule itself, tested as the pure function it is —
+    /// no environment mutation required.
+    #[test]
+    fn an_explicit_store_argument_wins_over_the_environment() {
+        assert_eq!(
+            crate::studio::resolve_store(Some("/explicit/path".to_string())).as_deref(),
+            Some("/explicit/path")
+        );
     }
 
     #[test]
