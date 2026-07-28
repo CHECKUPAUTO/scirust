@@ -19,6 +19,13 @@
 //!   a crashed run resumable).
 //! * [`RunLedger`] — the immutable, content-addressed record of *how* the plan
 //!   ran: control flow is data too.
+//! * [`Dispatch`] — the registry-mediated [`StageExecutor`] that **binds** a
+//!   stage to the code that runs it: resolving its plugin pinned to the content
+//!   hash the stage recorded (so a drifted implementation **fails** rather than
+//!   silently computing something else), authorizing it against the study's
+//!   capability `Grant` (refusing by default), then delegating. It is itself a
+//!   `StageExecutor`, so it composes into [`run_plan`] with the memoization and
+//!   ledger above it unchanged.
 //!
 //! ## What is deliberately *not* here yet
 //!
@@ -26,12 +33,12 @@
 //! [`ObjectId`](sos_core::ObjectId)s, not "curiosity" vs "reasoning." The stage
 //! *logic* (running a sweep, a derivation, a simulation) is supplied by the
 //! engine crates and backend adapters through the [`StageExecutor`] trait
-//! (Invariant VIII); this crate never runs a stage's logic. Also deferred, with
-//! **no stub**: manifest resolution (TOML study → `Plan`, a domain frontend), the
-//! effect boundary / executors that touch the world (`sos-scirust` + signed
-//! `Capability`s from `sos-registry`), and information-theoretic stopping rules
+//! (Invariant VIII); this crate binds and schedules that logic but never
+//! implements it. Also deferred, with **no stub**: manifest resolution (TOML
+//! study → `Plan`, a domain frontend) and information-theoretic stopping rules
 //! (`sos-planner` / statistics). The pieces here are the deterministic heart —
-//! cache keys, scheduling, memoization, ledger — fully implemented and tested.
+//! cache keys, scheduling, memoization, binding, ledger — fully implemented and
+//! tested.
 //!
 //! ## Example — memoization makes an unchanged re-run free
 //!
@@ -81,6 +88,7 @@
 
 pub mod cache;
 pub mod descriptor;
+pub mod dispatch;
 pub mod engine;
 pub mod error;
 pub mod ledger;
@@ -88,6 +96,7 @@ pub mod plan;
 
 pub use cache::CacheKey;
 pub use descriptor::StageDescriptor;
+pub use dispatch::Dispatch;
 pub use engine::{Memo, MemoTable, StageExecutor, run_plan};
 pub use error::{Result, WorkflowError};
 pub use ledger::{LedgerStep, RunLedger, StepOutcome};
