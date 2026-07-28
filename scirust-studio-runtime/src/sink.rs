@@ -1,11 +1,12 @@
 //! Structured lifecycle events an execution emits.
 //!
-//! No adapter in this crate emits a fake fractional `Progress` — Phase 2A's
-//! integrations are single blocking calls with no intermediate callback
-//! from `scirust-sim`, so there is nothing genuine to report between
-//! `Started` and `Completed`/`Failed`/`Cancelled`. A future chunked or
-//! worker-driven execution (Phase 2B) can emit real `Progress` events
-//! without changing this enum's shape.
+//! No event here is fabricated. [`RunEvent::Progress`] carries the fraction
+//! of the *time span* an integration has actually covered, measured from the
+//! `t` `scirust-sim` reports after each accepted step — not a guess, not a
+//! timer, and not a spinner dressed up as a percentage. Capabilities whose
+//! solver cannot report intermediate steps (the adaptive stiff path, see
+//! `crate::adapters::robertson`) emit no `Progress` at all rather than an
+//! invented one.
 
 use crate::result::RunWarning;
 
@@ -14,6 +15,18 @@ use crate::result::RunWarning;
 pub enum RunEvent {
     /// Execution began.
     Started,
+    /// Integration has reached time `t`, having covered `fraction` of the
+    /// requested span (`0.0..=1.0`).
+    ///
+    /// Emitted at most `20` times per run — enough to drive a progress bar,
+    /// few enough that reporting never costs more than the work being
+    /// reported on.
+    Progress {
+        /// Fraction of the time span completed, in `0.0..=1.0`.
+        fraction: f64,
+        /// The simulation time reached, in the axis's unit.
+        t: f64,
+    },
     /// A non-fatal warning was raised.
     Warning(RunWarning),
     /// Execution finished successfully.

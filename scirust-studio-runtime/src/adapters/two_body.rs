@@ -11,7 +11,8 @@
 
 use scirust_sim::engine::FirstOrderForm;
 use scirust_sim::orbital::TwoBody;
-use scirust_sim::{simulate, simulate_second_order};
+
+use crate::execute_support::{TimeSpan, simulate_cancellable, simulate_second_order_cancellable};
 use scirust_studio_command::{ErrorCode, ErrorFamily};
 use scirust_studio_registry::{
     BackendKind, CapabilityCategory, CapabilityDescriptor, CapabilityId, CapabilityMaturity,
@@ -249,13 +250,21 @@ impl CapabilityAdapter for TwoBodyAdapter {
         // Both solvers produce Trajectory rows shaped [x, y, vx, vy]:
         // simulate_second_order concatenates (q, v) directly, and
         // FirstOrderForm's dim = 2*dof with the same [q, v] split.
+        let span = TimeSpan {
+            t0,
+            t_end: t1,
+            h: step,
+        };
         let traj = match scn.solver.id.as_str()
         {
-            "symplectic_euler" => simulate_second_order(&model, &q0, &v0, t0, t1, step),
+            "symplectic_euler" =>
+            {
+                simulate_second_order_cancellable(&model, &q0, &v0, span, control, sink)?
+            },
             "rk4" =>
             {
                 let y0 = [q0[0], q0[1], v0[0], v0[1]];
-                simulate(&FirstOrderForm(&model), &y0, t0, t1, step)
+                simulate_cancellable(&FirstOrderForm(&model), &y0, span, control, sink)?
             },
             other =>
             {
@@ -263,11 +272,7 @@ impl CapabilityAdapter for TwoBodyAdapter {
                     "validated but unhandled solver id `{other}`"
                 )));
             },
-        }
-        .map_err(|e| {
-            sink.emit(RunEvent::Failed(e.to_string()));
-            ExecutionError::Numerical(e.to_string())
-        })?;
+        };
 
         let position_x = traj.column(0).expect("dim 0 exists");
         let position_y = traj.column(1).expect("dim 1 exists");

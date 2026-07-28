@@ -1,0 +1,21 @@
+[package]
+name = "scirust-studio-worker"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust Studio: the out-of-process capability worker. Speaks scirust-studio-ipc over stdin/stdout, runs one job at a time, streams genuine progress, and supports mid-run cancellation."
+
+[[bin]]
+name = "scirust-studio-worker"
+path = "src/main.rs"
+
+[dependencies]
+scirust-studio-ipc = { path = "../scirust-studio-ipc" }
+scirust-studio-runtime = { path = "../scirust-studio-runtime" }
+scirust-studio-schema = { path = "../scirust-studio-schema" }
+
+[dev-dependencies]
+# See scirust-studio-ipc's note: the tests compare a result that crossed the
+# process boundary against one computed in-process, which only holds when
+# float parsing is exact.
+serde_json = { version = "1", features = ["float_roundtrip"] }
