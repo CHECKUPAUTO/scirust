@@ -39,12 +39,17 @@ extern crate alloc;
 use alloc::{format, string::String, vec, vec::Vec};
 
 pub use compute_adapter::{CpuBuffer, CpuComputeAdapter, CpuEvent, CpuKernel, CpuStream};
+pub use compute_dispatch::{
+    BackendSelectionAttempt, BackendSelectionOutcome, ComputeDispatcher, ComputePreference,
+    DispatchBuffer, DispatchEvent, DispatchKernel, DispatchStream,
+};
 
 /// Optional product-licensing gate for the GPU module (feature `license-gate`).
 #[cfg(feature = "license-gate")]
 pub mod license;
 
 mod compute_adapter;
+mod compute_dispatch;
 
 #[cfg(feature = "wgpu")]
 mod chain;
