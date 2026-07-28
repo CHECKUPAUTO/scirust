@@ -689,7 +689,7 @@ way; that any numerical causal effect has been identified or estimated.
 
 **Status: Draft.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
 from `origin/master` at `bfb6b8cf` (fresh master after PR #824 merged; this
-phase's branch carries only this phase's commits). Additive to
+phase's branch carries only this phase's commits). PR #840. Additive to
 `scirust-causal` (no existing public API changed). This phase implements
 **identification by Pearl's backdoor criterion plus estimation by linear
 covariate adjustment**. It does **not** implement front-door or
