@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc adc9dfda9d5f02b5b61e2c76fc97ac70b861cbd9e1476041f51cccccec2d8ae5 # shrinks to config = CfarConfig { reference_cells: 4, guard_cells: 9223372036854775807, pfa: 0.9630909245323429, edge_policy: Exclude, input_validation: RejectNegative, detector: Ca, robust_estimator: TrimmedMean { trim_low: 0, trim_high: 0 } }, power = []

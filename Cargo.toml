@@ -77,6 +77,7 @@ members = [
     "scirust-fusion",
     "scirust-tn",
     "scirust-tensor-core",
+    "scirust-tensor-ir",
     "scirust-tensor-einsum",
     "scirust-tensor-contraction",
     "scirust-tensor-compile",
@@ -185,6 +186,9 @@ members = [
     "scirust-studio-schema",
     "scirust-studio-registry",
     "scirust-studio-runtime",
+    "scirust-studio-ipc",
+    "scirust-studio-store",
+    "scirust-studio-worker",
 ]
 exclude = [
     "examples/simd_views_demo",
