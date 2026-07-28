@@ -3999,6 +3999,7 @@ version = "0.1.0"
 dependencies = [
  "scirust-tensor-contraction",
  "scirust-tensor-core",
+ "scirust-tensor-ir",
 ]
 
 [[package]]
