@@ -144,8 +144,8 @@ shift with what's true at the time).
 | 5C.5 | Quantify sensitivity to unmeasured confounding | **Done** — Cinelli–Hazlett omitted-variable-bias bounds |
 | 5C.6 | Test invariance | **Done** — Invariant Causal Prediction across environments |
 | 5C.7 | Simulate interventions | **Done** — SCM-based intervention simulation and unit-level counterfactuals |
-| 5C.8 | Choose the next experiment | **Draft** — worst-case-guaranteed experimental design over a CPDAG |
-| 5C.9 | Update theories | Planned — assumption-registry revision under new evidence |
+| 5C.8 | Choose the next experiment | **Done** — worst-case-guaranteed experimental design over a CPDAG |
+| 5C.9 | Update theories | **Draft** — assumption-registry revision and certificate retraction under new evidence |
 | 5C.10 | Verify causal claims | Planned — end-to-end certificate audit |
 | 5C.11 | Closing synthesis | Planned |
 
@@ -1352,8 +1352,9 @@ remain exact arithmetic on the wrong model.
 
 ## Phase 5C.8 — Choose the next experiment (experimental design)
 
-**Status: Draft.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
-from `origin/master` at `5936d21f` (the commit 5C.7 merged at). Additive to
+**Status: Done.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
+from `origin/master` at `5936d21f` (the commit 5C.7 merged at). PR #861,
+merged at `56c46950`. Additive to
 `scirust-causal`.
 
 Phase 5C.7 ended on a bill. Two structural models whose joint distributions are
@@ -1513,3 +1514,159 @@ greedy sequence is the shortest; that any of these counts is an effect size.
 - No sample-size guidance: how much interventional data is needed to *read*
   an orientation reliably is a statistical question this structural layer does
   not touch.
+
+## Phase 5C.9 — Update theories (revision and retraction under new evidence)
+
+**Status: Draft.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
+from `origin/master` at `56c46950` (the commit 5C.8 merged at). Additive to
+`scirust-causal`, plus one new variant on an existing enum.
+
+### The program's own loose end
+
+Every certificate in this crate is a conditional: *under assumptions A,
+property Q is identifiable, estimated by M with uncertainty U*. Phases 5C.4
+through 5C.8 got progressively more careful about stating A. **None of them
+did anything when A turned out to be wrong.**
+
+That was not hypothetical. Phase 5C.4's adversarial fixture produces a
+certificate reading `Identifiable` with an estimate of `1.4973` against a truth
+of `0.7` — a **75.5-standard-error** error, caused by a latent confounder
+violating the causal sufficiency it assumed. Phase 5C.6 then showed Invariant
+Causal Prediction *detecting* that, on the same data. And nothing connected
+them: the detection landed in one result object, the bad certificate sat in
+another, unchanged and still quotable.
+
+This phase connects them. Evidence revises the registry; the revision
+re-audits certificates; a claim whose ground has moved says so.
+
+### The distinction the phase exists to hold
+
+The central design decision is that `AssumptionEvidence` names a **list** of
+assumptions, not one.
+
+Evidence naming **one** assumption attributes its verdict there: the
+assumption is `Contradicted`, and a claim that used it is `Retracted`.
+
+Evidence naming **several** falsified their *conjunction* and cannot say which
+member broke. Every member becomes `JointlyContradicted`, and a claim that used
+one of them is `InDoubt` — **not** retracted, because nothing established that
+*this* assumption is the false one.
+
+That is not a technicality; it is precisely the ICP case. Phase 5C.6's own
+documentation says ICP detects that something is wrong and "does not say what".
+Recording its verdict against causal sufficiency alone would manufacture an
+attribution the test never made. So `evidence_from_invariance` emits joint
+evidence against the conjunction of causal sufficiency, correct functional
+form, and cross-environment invariance — and the 5C.4 certificate comes back
+`InDoubt(2)`, not `Retracted`.
+
+A test in the battery makes the boundary explicit by running both on the *same*
+certificate: ICP puts it in doubt; a follow-up measurement that actually locates
+the confounder retracts it. Both block the number. Only the second says which
+premise failed.
+
+### Two asymmetries, both deliberate
+
+**Contradiction is not outvoted.** An assumption drawing both supporting and
+contradicting evidence is reported contradicted, whatever the counts —
+corroboration cannot cancel a falsification. The benchmark shows two supporting
+findings against one contradicting still leaving the assumption contradicted.
+The counts are reported, and a warning notes that a test at level `α` fires
+spuriously with probability `α`, so a reader can judge; the framework does not
+quietly average.
+
+**Corroboration never proves.** Supporting evidence lifts a basis from
+"asserted" or "unverified" to `TestedStatistically` — "we looked for a failure
+and did not find one" — and never overwrites a stronger existing basis. Nothing
+here can move an assumption to true, and an oracle in the benchmark asserts
+that corroboration can never manufacture a `GuaranteedByDesign`.
+
+### Four standings, and what each permits
+
+- `Stands` — nothing the claim relied on was undermined. Its docs and the audit
+  certificate both say this means *the ground has not moved*, not that the
+  claim was ever right.
+- `Retracted` — an assumption was contradicted outright.
+- `InDoubt` — an assumption belongs to a falsified conjunction.
+- `Unauditable` — the claim cites an assumption the registry has no record of,
+  so its standing cannot be determined.
+
+`estimate_is_usable()` returns `true` only for `Stands`. An undetermined
+standing is not permission — that is the whole reason `Unauditable` blocks the
+number rather than passing it through.
+
+### Absence of evidence versus evidence of absence
+
+`AssumptionBasis` gains `ContradictedByEvidence { source, jointly_with }`, and
+`is_supported` excludes it. This is the only change to an existing public type
+in this phase, and it exists because `Unverified` could not carry the meaning:
+"not checked" and "checked and failed" are different states, and collapsing
+them would have been the exact error this phase is about. The `jointly_with`
+list is empty when the contradiction is attributable — the type itself records
+whether blame could be assigned.
+
+### Implementation
+
+`src/theory_revision.rs`. `revise_assumptions` tallies evidence per assumption,
+assigns a five-way `RevisionVerdict` (`Contradicted`, `JointlyContradicted`,
+`Corroborated`, `Inconclusive`, `Untouched`), and returns a revised registry
+plus an outcome for **every** registered assumption — including the untouched
+ones, so a reader can see what was not examined. Evidence about an assumption
+the registry does not hold is warned about and ignored: this revises stated
+beliefs, it does not invent them.
+
+`audit_certificate` compares a certificate's declared assumptions against the
+revision and reports the worst applicable standing. It re-derives nothing. The
+audit is itself a `CausalCertificate`, so a retraction is as citable as the
+claim it retracts, and the original status and estimate are preserved for the
+record rather than erased.
+
+### Tests
+
+424 tests existed for `scirust-causal` before this phase; this adds **21**
+(12 unit, 9 integration), total **445**.
+
+### Benchmark
+
+`examples/theory_revision_benchmark.rs`, 10 oracle-checked rows plus 4 derived
+comment lines. Run-twice SHA-256:
+`51413a06e1fe7eb17be11f1cab120d590524d8c2de53b663c3bcb33fd0166927`, identical
+between debug and release. All eight prior fingerprints reverified unchanged:
+`167c13de…`, `c1449177…`, `79e57e69…`, `7ac0dc76…`, `1bc59a1d…`, `e1f0b99f…`,
+`f34e1cfa…`, `c368798e…`.
+
+### Compatibility
+
+Additive except for one new `AssumptionBasis` variant, which changes the
+behaviour of no existing code path — `is_supported` gains a case that could not
+previously arise, since only this module writes the variant. Crate root goes
+ten → eleven capabilities.
+
+### Supported and unsupported claims
+
+May claim: a deterministic record of what stated evidence does to stated
+assumptions; automatic, citable withdrawal of claims whose assumptions have
+been undermined; a principled distinction between attributable contradiction
+and the falsification of a conjunction.
+
+Must **not** claim: that any assumption is *true* — corroboration here is only
+"a check that could have failed did not"; that a revision re-derives or
+corrects an estimate; that `Stands` vindicates a claim; that the evidence
+supplied is itself sound, since this module takes findings at face value and
+revises beliefs accordingly.
+
+### Known limitations / deferred
+
+- Evidence is supplied by the caller. Only `evidence_from_invariance` is
+  provided; the other capabilities do not yet emit evidence, so wiring 5C.5's
+  robustness value or 5C.8's experiment outcomes in is left open.
+- No weighting of evidence strength: a decisive measurement and a marginal
+  test count the same. The counts are reported so a reader can weigh them, but
+  the verdict does not.
+- No temporal ordering or supersession — later evidence does not override
+  earlier evidence, it accumulates.
+- Retraction does not cascade: a claim built on another claim's estimate is not
+  tracked, so only directly-declared assumptions are audited.
+- The `jointly_with` set records which assumptions were falsified together, but
+  nothing attempts to narrow a conjunction down using several overlapping
+  findings.
