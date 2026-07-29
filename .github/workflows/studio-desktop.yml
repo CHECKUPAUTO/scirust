@@ -148,12 +148,22 @@ jobs:
       # Both install the exact version pinned above; neither accepts
       # "whatever is latest", because the CLI writes the bootstrap that loads
       # the compiled module.
+      #
+      # `--force` is not belt-and-braces. Cargo decides whether a tool is
+      # already installed by reading `~/.cargo/.crates.toml`, and the cache
+      # restores that file — so on a warm cache the install no-ops with
+      # "dioxus-cli v0.7.9 is already installed" and the next line dies with
+      # `dx: command not found`. Metadata claiming a binary exists is not the
+      # same as the binary being on PATH, and installing unconditionally costs
+      # a few seconds against a class of failure that only appears once the
+      # cache is warm — which is to say, never on the run that introduced it.
+      #
       # `-y` is `--no-confirm`; passing both is rejected by binstall, which
       # sends the step silently down the source-build fallback.
       - name: Install the Dioxus CLI
         run: |
-          cargo binstall -y "dioxus-cli@${DIOXUS_CLI_VERSION}" \
-            || cargo install dioxus-cli --locked --version "${DIOXUS_CLI_VERSION}"
+          cargo binstall -y --force "dioxus-cli@${DIOXUS_CLI_VERSION}" \
+            || cargo install dioxus-cli --locked --force --version "${DIOXUS_CLI_VERSION}"
           dx --version
 
       - name: Build the web bundle
@@ -275,12 +285,15 @@ jobs:
         with:
           tool: cargo-binstall
 
+      # `--force` for the same reason as the Dioxus CLI above: a restored
+      # `.crates.toml` makes the install no-op while the binary is absent.
+      #
       # One line on purpose: this step runs under pwsh, and a backtick
       # continuation combined with `||` is one more thing that can be subtly
       # wrong on a runner and nowhere else.
       - name: Install the Tauri CLI
         run: |
-          cargo binstall -y "tauri-cli@${env:TAURI_CLI_VERSION}" || cargo install tauri-cli --locked --version "${env:TAURI_CLI_VERSION}"
+          cargo binstall -y --force "tauri-cli@${env:TAURI_CLI_VERSION}" || cargo install tauri-cli --locked --force --version "${env:TAURI_CLI_VERSION}"
           cargo tauri --version
 
       # One build, producing both the executable and the installer. Unsigned
