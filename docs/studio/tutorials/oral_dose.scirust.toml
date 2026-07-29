@@ -1,0 +1,87 @@
+# SciRust Studio tutorial scenario: an oral dose.
+#
+# Run it with:
+#
+#   scirust run docs/studio/tutorials/oral_dose.scirust.toml
+#
+# 500 mg taken by mouth, 80% of it reaching the gut, absorbed at 1.5 per hour
+# and eliminated at 0.35 per hour. The plasma concentration rises, peaks at
+# about 1.27 h, and falls with a 1.98 h half-life — the Bateman curve behind
+# every dosing schedule.
+#
+# ---------------------------------------------------------------------------
+# Why this is the most strongly verified capability in the catalogue
+# ---------------------------------------------------------------------------
+#
+# Because it is the only one with a COMPLETE closed-form solution. Everything
+# else here is checked against a conserved quantity (rigid body), an asymptote
+# (HVAC, photodiode), a distribution (Ornstein-Uhlenbeck) or a rate. Those are
+# real checks, but each of them leaves room: a conserved energy can hide a
+# trajectory that is wrong in a way energy does not see, and a steady state
+# says nothing about the path taken to reach it.
+#
+# Here the check is the whole trajectory against the exact answer, sample by
+# sample:
+#
+#   * matches_the_closed_form — every point of the integrated curve against
+#     the analytic Bateman solution evaluated at the same coordinate. Not
+#     resampled, not interpolated. The error is RK4's alone.
+#   * peak_time — the maximum must land at ln(k_a/k_e)/(k_a - k_e). NOT
+#     implied by the first check: a flat peak can be tracked accurately
+#     everywhere and still be reported at the wrong sample, and the peak is
+#     the number a dosing schedule is actually built on.
+#
+# The peak tolerance is derived from the step. A run cannot locate a maximum
+# more precisely than the gap between two samples, so demanding better would
+# be asking it for something it does not have.
+#
+# ---------------------------------------------------------------------------
+# There is no [initial_state]
+# ---------------------------------------------------------------------------
+#
+# Deliberately. The state at t = 0 is determined by the dose and the
+# bioavailability — the gut holds F*dose and the body holds nothing — so
+# letting a scenario set it separately would allow the two to disagree, and
+# the run would then verify against a closed form built from different
+# numbers than the ones it integrated.
+#
+# Note also that k_a = k_e is REFUSED rather than run: the Bateman solution
+# has a removable singularity there, so a run at that point would be one
+# nobody could check. Try setting k_a to 0.35/3600 and see the reason.
+
+schema_version = 1
+
+[experiment]
+name = "Oral dose, one-compartment body"
+description = "A 500 mg oral dose absorbed and eliminated first-order, verified against its complete closed-form solution."
+
+[capability]
+id = "sim.pharmacology.oral_one_compartment"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+# 1.5 per hour, in SI.
+k_a = { value = 4.1666667e-4, unit = "1/s" }
+# 0.35 per hour: a two-hour half-life.
+k_e = { value = 9.7222222e-5, unit = "1/s" }
+# 35 litres, a typical apparent volume of distribution.
+volume = { value = 0.035, unit = "m^3" }
+bioavailability = { value = 0.8, unit = "1" }
+# Dose units are the scenario's own; concentrations come out in the same
+# units per cubic metre.
+dose = { value = 500.0, unit = "1" }
+
+[solver]
+id = "rk4"
+start = { value = 0.0, unit = "s" }
+# Eight half-lives, by which point 99.6% of the dose has been eliminated.
+end = { value = 57036.0, unit = "s" }
+# Fine enough to locate the peak to within 20 s of the closed form.
+step = { value = 10.0, unit = "s" }
+
+[outputs]
+record = ["gut", "central", "concentration", "exact_central"]

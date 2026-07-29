@@ -6,6 +6,7 @@ mod heat_rod;
 mod hvac_zone;
 mod logistic_growth;
 mod lotka_volterra;
+mod oral_dose;
 mod ornstein_uhlenbeck;
 mod pendulum;
 mod photodiode;
@@ -21,6 +22,7 @@ pub use heat_rod::HeatRodAdapter;
 pub use hvac_zone::HvacZoneAdapter;
 pub use logistic_growth::LogisticGrowthAdapter;
 pub use lotka_volterra::LotkaVolterraAdapter;
+pub use oral_dose::OralOneCompartmentAdapter;
 pub use ornstein_uhlenbeck::OrnsteinUhlenbeckAdapter;
 pub use pendulum::PendulumAdapter;
 pub use photodiode::PhotodiodeAdapter;
@@ -58,6 +60,7 @@ pub fn all_adapters() -> Vec<Box<dyn CapabilityAdapter>> {
         Box::new(PhotodiodeAdapter),
         Box::new(HvacZoneAdapter),
         Box::new(RigidBodyAdapter),
+        Box::new(OralOneCompartmentAdapter),
     ]
 }
 
@@ -141,6 +144,11 @@ const TUTORIAL_SCENARIOS: &[(&str, &str, &str)] = &[
         "sim.thermal.heat_rod_1d",
         "heat_rod.scirust.toml",
         include_str!("../../../docs/studio/tutorials/heat_rod.scirust.toml"),
+    ),
+    (
+        "sim.pharmacology.oral_one_compartment",
+        "oral_dose.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/oral_dose.scirust.toml"),
     ),
     (
         "sim.mechanics.rigid_body",
