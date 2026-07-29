@@ -10,7 +10,12 @@
 # business logic lives here.
 
 [workspace]
-members = ["src-tauri", "tools/prepare-sidecar", "tools/stage-frontend"]
+members = [
+    "src-tauri",
+    "tools/prepare-sidecar",
+    "tools/release-config",
+    "tools/stage-frontend",
+]
 resolver = "2"
 
 [workspace.package]
