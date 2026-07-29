@@ -145,8 +145,8 @@ shift with what's true at the time).
 | 5C.6 | Test invariance | **Done** — Invariant Causal Prediction across environments |
 | 5C.7 | Simulate interventions | **Done** — SCM-based intervention simulation and unit-level counterfactuals |
 | 5C.8 | Choose the next experiment | **Done** — worst-case-guaranteed experimental design over a CPDAG |
-| 5C.9 | Update theories | **Draft** — assumption-registry revision and certificate retraction under new evidence |
-| 5C.10 | Verify causal claims | Planned — end-to-end certificate audit |
+| 5C.9 | Update theories | **Done** — assumption-registry revision and certificate retraction under new evidence |
+| 5C.10 | Verify causal claims | **Draft** — certificate integrity plus end-to-end claim-set audit |
 | 5C.11 | Closing synthesis | Planned |
 
 ## Phase 5C.1 — Typed causal contracts and data model
@@ -1517,8 +1517,9 @@ greedy sequence is the shortest; that any of these counts is an effect size.
 
 ## Phase 5C.9 — Update theories (revision and retraction under new evidence)
 
-**Status: Draft.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
-from `origin/master` at `56c46950` (the commit 5C.8 merged at). Additive to
+**Status: Done.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
+from `origin/master` at `56c46950` (the commit 5C.8 merged at). PR #863,
+merged at `107818da`. Additive to
 `scirust-causal`, plus one new variant on an existing enum.
 
 ### The program's own loose end
@@ -1670,3 +1671,146 @@ revises beliefs accordingly.
 - The `jointly_with` set records which assumptions were falsified together, but
   nothing attempts to narrow a conjunction down using several overlapping
   findings.
+
+## Phase 5C.10 — Verify causal claims (integrity and claim-set audit)
+
+**Status: Draft.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
+from `origin/master` at `107818da` (the commit 5C.9 merged at).
+
+### Two holes, found by probing
+
+This phase was scoped as an audit layer. Before writing it, one premise wanted
+checking: does a certificate that reaches an auditor still satisfy the rules its
+builder enforced? A scratch crate answered no, twice.
+
+    BYPASS: status=Inconclusive estimate=Some(1.5)
+    TAMPER: estimate 1.5 -> 99.0, stored fingerprint unchanged and accepted
+
+1. **The coherence rule held only for built certificates.**
+   `CausalCertificateBuilder::finalize` forbids attaching a numeric estimate to
+   any status other than `Identifiable` — the rule phase 5C.1's certificate
+   layer exists to enforce, and the one every phase since has leaned on. But
+   `CausalCertificate` *derived* `Deserialize`, and serde populates private
+   fields directly, so any JSON could produce a certificate the builder would
+   have rejected. Every phase of this crate serializes certificates.
+
+2. **The fingerprint attested nothing.** It was a stored string nothing ever
+   recomputed. Editing an estimate left it byte-identical and accepted.
+
+Both are closed here, along different lines, and the difference matters:
+
+- `Deserialize` is now hand-written and **re-runs the coherence rule**. That
+  rule is a property of the content alone and holds across builds, so enforcing
+  it automatically is safe. The guarantee now covers every certificate in the
+  program, not only the ones that were built rather than parsed.
+- `CausalCertificate::verify_fingerprint` is an **explicit** check, not an
+  implicit one. Fingerprint reproducibility carries the caveat already
+  documented at the crate root — a fixed implementation, build and environment
+  — so rejecting a mismatch at parse time would turn a cross-version comparison
+  into a hard failure. The audit reports mismatches as findings instead.
+
+All 445 pre-existing tests passed unchanged after the `Deserialize` change,
+which is the evidence that the crate's own output always satisfied the rule; it
+was outside input that could violate it.
+
+### The provenance signal
+
+`ClaimFinding::EstimateOnUnbackedProvenance` fires when a certificate quotes a
+number while **every** assumption it declares is merely asserted or unverified.
+
+Run against the program's own adversarial fixture, it fires. That is the
+certificate estimating `1.4973` against a truth of `0.7` — a **75.5-standard-error**
+miss. Phase 5C.5 quantified that error, 5C.6 detected it, and 5C.9 withdrew the
+claim; each did so by *measuring* something. This flags the same claim from its
+metadata alone, reading no data at all.
+
+It is deliberately the weakest signal in the program. It is a `Warning`, not a
+violation — asserting an assumption is allowed, and analysts are sometimes
+right. Backing a single assumption clears it, which the benchmark shows
+directly. It flags a claim's epistemic posture, never its correctness. But it
+is also the earliest and cheapest thing in the whole program, and it would have
+raised a hand before any of the statistics ran.
+
+### Silence is not compliance
+
+A method with no requirement table is reported as
+`UnrecognizedMethod` rather than passed over. An unknown method that happens to
+declare nothing would otherwise be indistinguishable from a compliant one, and
+"we had no rule to apply" must not read as "the rule was satisfied". The
+benchmark shows registering such a method removing that finding and starting to
+enforce its requirements instead.
+
+### What is enforced rather than audited
+
+There is deliberately **no audit check** for an estimate on a non-`Identifiable`
+status. That rule is now enforced at both boundaries — construction and parsing
+— so a certificate violating it cannot exist to be audited. Auditing for an
+impossible condition would be dead weight dressed as rigour; tests assert the
+enforcement instead.
+
+### Findings and severities
+
+| Finding | Severity |
+|---|---|
+| `FingerprintMismatch` | Violation |
+| `ContradictedAssumptionCited` (bridges 5C.9) | Violation |
+| `ConflictingClaims` (same query, different status or estimate) | Violation |
+| `UndeclaredAssumption` (method's stated requirement missing) | Violation |
+| `UnrecognizedMethod` | Warning |
+| `UnregisteredAssumption` | Warning |
+| `EstimateOnUnbackedProvenance` | Warning |
+
+Findings are sorted violations-first, then by subject, then by content — a total
+order, so a report never depends on input order. A test asserts two orderings of
+the same input produce identical reports.
+
+### Tests
+
+445 tests existed for `scirust-causal` before this phase; this adds **24**
+(14 unit, 10 integration), total **469**. The two probes above are now
+regression tests, and one test audits the effect estimator's own certificate
+against the default requirement table, so the table and the implementation
+cannot drift apart silently.
+
+### Benchmark
+
+`examples/claim_audit_benchmark.rs`, 11 oracle-checked rows plus 4 derived
+comment lines. Run-twice SHA-256:
+`9d7e6d557188a19f432c6748f794701037050d2e24466650266596bc14446e54`, identical
+between debug and release. All nine prior fingerprints reverified unchanged.
+
+### Compatibility
+
+Additive except for `CausalCertificate`'s `Deserialize`, which now rejects JSON
+that violates the coherence rule. Previously such JSON parsed successfully into
+an invalid certificate, so this is a behavioural change — and the point of the
+phase. Nothing the crate itself emits is affected, evidenced by all 445 prior
+tests passing unchanged. Crate root goes eleven → twelve capabilities.
+
+### Supported and unsupported claims
+
+May claim: that a claim set obeys this crate's stated contract; that a
+certificate's content matches the fingerprint it carries; that the coherence
+rule now holds for parsed as well as constructed certificates.
+
+Must **not** claim: that an audited claim is *true*, or that a `Compliant`
+verdict is evidence of anything about the world. The audit reads no data and
+evaluates no method. A uniformly wrong claim set that is well formed and
+honestly provenanced passes.
+
+### Known limitations / deferred
+
+- The method requirement table is matched by substring and seeded with this
+  crate's own two methods. A caller's methods must be registered or they are
+  reported unrecognized — which is the intended failure direction, but it is
+  configuration, not knowledge.
+- `ConflictingClaims` compares estimates for exact equality. Two runs differing
+  in the last bit are reported as conflicting; there is no tolerance model,
+  because choosing one would be choosing what counts as the same answer.
+- Provenance is judged by `AssumptionBasis` alone. A `DomainKnowledge` citation
+  pointing at nothing counts as backed; the audit cannot read citations.
+- No cross-claim dependency tracking: a claim built on another claim's estimate
+  is not linked, so a retraction upstream is not detected downstream.
+- Fingerprint verification inherits the fixed-build caveat, so a mismatch across
+  toolchains is indistinguishable from tampering. The finding says the content
+  and fingerprint disagree, not that anyone edited anything.
