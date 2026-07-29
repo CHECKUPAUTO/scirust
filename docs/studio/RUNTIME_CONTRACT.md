@@ -99,6 +99,10 @@ Not every capability can do this, and the table below says which:
 | `sim.orbital.two_body` | every step (both solvers) | yes |
 | `sim.electrical.rlc` | every step | yes |
 | `sim.chemistry.robertson` | **before execution only** | **none** |
+| `sim.ecology.lotka_volterra` | every step | yes |
+| `sim.ecology.logistic_growth` | every step | yes |
+| `sim.mechanics.pendulum` | every step | yes |
+| `sim.mechanics.double_pendulum` | every step | yes (the main run only) |
 
 Robertson integrates through `scirust_sim::stiff_bridge`'s adaptive
 Rosenbrock-W solver, which exposes no per-step callback. It is given no
@@ -119,6 +123,10 @@ this for all of them.
 | `sim.orbital.two_body` | `scirust_sim::orbital::TwoBody` | `symplectic_euler`, `rk4` | `energy_drift`, `angular_momentum_drift`, `finite_trajectory` |
 | `sim.electrical.rlc` | `scirust_sim::electrical::SeriesRlc` | `rk4` | `finite_solution`, `damping_regime`, `energy_non_increasing` |
 | `sim.chemistry.robertson` | `scirust_sim::chemistry::Robertson` (via `scirust_sim::stiff_bridge::simulate_rosenbrock`, feature `stiff`) | `stiff_rosenbrock_w` | `mass_conservation`, `non_negative_concentrations`, `solver_completion` |
+| `sim.ecology.lotka_volterra` | `scirust_sim::ecology::LotkaVolterra` | `rk4` | `first_integral_drift`, `populations_stay_positive` |
+| `sim.ecology.logistic_growth` | `scirust_sim::ecology::LogisticGrowth` | `rk4` | `analytic_error`, `stays_below_capacity` |
+| `sim.mechanics.pendulum` | `scirust_sim::mechanics::Pendulum` | `rk4` | `energy_drift`, `amplitude_bounded` |
+| `sim.mechanics.double_pendulum` | `scirust_sim::mechanics::DoublePendulum` | `rk4` | `energy_drift`, `sensitive_dependence` |
 
 Every row is a real, tested adapter with a shipped, executed tutorial
 scenario under `docs/studio/tutorials/`. See `docs/studio/CAPABILITY_MATRIX.md`
@@ -144,6 +152,10 @@ Validation codes currently in use:
 - `SRST-VAL-0120`..`0129`: `sim.orbital.two_body` field errors.
 - `SRST-VAL-0130`..`0139`: `sim.electrical.rlc` field errors.
 - `SRST-VAL-0140`..`0149`: `sim.chemistry.robertson` field errors.
+- `SRST-VAL-0150`..`0159`: `sim.ecology.lotka_volterra` field errors.
+- `SRST-VAL-0160`..`0169`: `sim.ecology.logistic_growth` field errors.
+- `SRST-VAL-0170`..`0179`: `sim.mechanics.pendulum` field errors.
+- `SRST-VAL-0180`..`0189`: `sim.mechanics.double_pendulum` field errors.
 
 Each capability's exact field-to-code mapping is in that capability's
 adapter module (the `FieldDescriptor.error_code` on each `const`). A new
