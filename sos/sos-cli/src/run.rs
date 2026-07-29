@@ -57,6 +57,21 @@
 //!   record. Pass `--env` when results should be bound to a specific host.
 //!   This binary's version is folded in either way ([`env_digest`]).
 //!
+//! ## The run records itself, not only its results
+//!
+//! `run_plan` returns a [`RunLedger`](sos_workflow::RunLedger) — the schedule
+//! actually taken, with every cache hit and miss — and this command seals it,
+//! and the [`Plan`](sos_workflow::Plan) it ran, into the object store beside
+//! the results. Both are content-addressed [`Body`](sos_core::Body) types, so
+//! *"which stages ran, in what order, reusing what?"* becomes a citable object
+//! rather than a line of terminal output that scrolls away.
+//!
+//! It is also the precondition for verification. `sos-repro`'s
+//! `verify_object` finds the run that produced an object by scanning stored
+//! ledgers, then loads the `Plan` that run names and re-executes it. With
+//! neither stored, nothing this command produced could ever be re-verified —
+//! the results existed but the record of how they came to exist did not.
+//!
 //! ## Memoization survives the process
 //!
 //! Results are remembered in a [`FileMemo`] beside the object store, so
@@ -68,7 +83,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use sos_core::{Digest, HashAlgo, SemVer};
+use sos_core::{Author, Digest, HashAlgo, Object, ObjectId, SemVer};
 use sos_registry::{Capability, Grant, PluginDescriptor, Registry};
 use sos_scirust::model::ModelRun;
 use sos_scirust::spectrum::{SpectrumConfig, WelchConfig};
@@ -76,6 +91,7 @@ use sos_scirust::stage::{
     CatalogStageHandler, SpectrumStageHandler, WelchStageHandler, model_config_address,
     signal_backend, sim_backend, spectrum_config_address, welch_config_address,
 };
+use sos_store::TypedStore;
 use sos_workflow::{Dispatch, StageExecutor, resolve_manifest, run_plan};
 
 use crate::args::Args;
@@ -247,8 +263,28 @@ pub fn run(args: &Args) -> Result<String> {
                 .join(" ")
         ));
     }
+
+    // Record what ran, not only what it produced. See the module docs.
+    let plan_id = seal(&store, plan)?;
+    let ledger_id = seal(&store, ledger)?;
+    out.push_str(&format!("  plan                 {plan_id}\n"));
+    out.push_str(&format!("  ledger               {ledger_id}\n"));
     out.push_str(&format!("stored under {}", root.display()));
     Ok(out)
+}
+
+/// Seal a run record into the store, returning its id.
+///
+/// Authored by the engine rather than a human: nobody wrote a ledger, the
+/// scheduler observed one.
+fn seal<B: sos_core::Body, S: sos_store::ObjectStore>(
+    store: &Rc<RefCell<S>>,
+    body: B,
+) -> Result<ObjectId> {
+    let object = Object::builder(body)
+        .author(Author::engine("sos-cli/run"))
+        .seal();
+    Ok(store.borrow_mut().put_object(&object)?)
 }
 
 /// The backend build stamped into every result's [`ReproMeta`].

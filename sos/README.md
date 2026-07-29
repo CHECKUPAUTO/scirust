@@ -512,6 +512,30 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   reason: a configuration has to survive a file with its content address
   intact, or the manifest pinning it stops resolving.
 
+  A run now **records itself**, not only its results: `sos run` seals the
+  `Plan` it resolved and the `RunLedger` the scheduler produced into the
+  object store beside the outputs, and reports their ids. That closes a real
+  hole — the ledger is the record of *which stages ran, in what order,
+  reusing what*, and it was being computed and thrown away, so nothing
+  `sos run` produced could ever be re-verified: `sos-repro`'s `verify_object`
+  finds the producing run by scanning stored ledgers, then loads the `Plan`
+  that run names. With neither stored it could never find anything. (A
+  re-run's ledger is legitimately a *different* object from the first's, and a
+  test says so: the outputs are identical, but the second run reused rather
+  than recomputed, and the ledger records behaviour honestly rather than
+  claiming the same history.)
+
+  Wiring `verify_object` into `sos verify` itself is left, and for a stated
+  reason rather than an omission: the re-execution's stage handlers hold the
+  store through `Rc<RefCell<_>>` while `verify_object` wants `&Store` at the
+  same instant, which would panic on the borrow. That is an API question, not
+  plumbing.
+
+  `sos verify` also learned the four kinds `sos run` writes. Their absence
+  meant the binary reported *"unrecognized kind"* for objects it had just
+  written itself — and teaching it surfaced a genuine defect in the object
+  model, described below.
+
   Memoization **survives the process**: results are remembered in a
   [`FileMemo`](sos-cli/src/memo.rs) beside the object store, so re-running an
   unchanged study is served from cache rather than recomputed onto the same
@@ -532,6 +556,21 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   A true `sos merge` needs conflict-resolution semantics no crate has designed
   yet; it is not stubbed. A network remote for `clone`/`push` is `sos-mcp`'s
   domain.
+  **A kind-name collision, found by using the tool.** `sos-planner`'s `Plan`
+  and `sos-workflow`'s `Plan` both declared `Body::KIND = "Plan"`. Two
+  structurally different types under one kind is incoherent in a
+  content-addressed store: `TypedStore::get_object` guards against decoding a
+  record as the wrong type by comparing declared kind names, and a collision
+  defeats exactly that check. `sos verify` hit it trying to read a stored
+  workflow plan as a planner plan (`missing field 'policy'`) — loud only
+  because the two layouts happen to be incompatible; with overlapping shapes
+  it could have silently "verified" the wrong type. The planner's is now
+  `"ExperimentPlan"`, which is also the more accurate name (it is a
+  *recommendation* — ranked candidates and a stopping verdict — while
+  RFC-0002 §08's `Plan` is the stage DAG). A test now asserts every `Body`
+  kind the CLI links is pairwise distinct, so the class of bug cannot
+  reappear silently.
+
 - **`sos-mcp`** — the SOS Model Context Protocol server. Exposes the same
   syscalls as `sos-cli` (`sos_log`/`sos_why`/`sos_verify`/`sos_diff`/`sos_know`/
   `sos_ask`/`sos_plan`/`sos_publish`/`sos_plugins`) as MCP tools over a
