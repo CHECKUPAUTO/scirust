@@ -86,13 +86,14 @@ use std::rc::Rc;
 use sos_core::{Author, Digest, HashAlgo, Object, ObjectId, SemVer};
 use sos_registry::{Capability, Grant, PluginDescriptor, Registry};
 use sos_scirust::model::{AdaptiveModelRun, ModelRun};
-use sos_scirust::pipeline::TrajectorySpectrumConfig;
+use sos_scirust::pipeline::{TrajectorySpectrogramConfig, TrajectorySpectrumConfig};
 use sos_scirust::spectrum::{SpectrumConfig, WelchConfig};
 use sos_scirust::stage::{
     AdaptiveCatalogStageHandler, CatalogStageHandler, SpectrumStageHandler,
-    TrajectorySpectrumStageHandler, WelchStageHandler, adaptive_model_config_address,
-    model_config_address, signal_backend, sim_backend, spectrum_config_address,
-    trajectory_config_address, welch_config_address,
+    TrajectorySpectrogramStageHandler, TrajectorySpectrumStageHandler, WelchStageHandler,
+    adaptive_model_config_address, model_config_address, signal_backend, sim_backend,
+    spectrogram_config_address, spectrum_config_address, trajectory_config_address,
+    welch_config_address,
 };
 use sos_store::TypedStore;
 use sos_workflow::{Dispatch, StageExecutor, resolve_manifest, run_plan};
@@ -122,11 +123,15 @@ pub const TRAJECTORY_PLUGIN: &str = "trajectory-spectrum";
 /// only one whose results are `L2`.
 pub const ADAPTIVE_CATALOG_PLUGIN: &str = "sim-catalog-adaptive";
 
+/// The plugin name a stage taking the **spectrogram** of an upstream
+/// trajectory must pin.
+pub const SPECTROGRAM_PLUGIN: &str = "trajectory-spectrogram";
+
 /// Every plugin name this binary can bind, with a one-line description — the
 /// CLI's handler table, and the thing whose absence kept `sos run` from
 /// existing.
 ///
-/// Five entries. See the module docs on why it is five and not seven.
+/// Six entries. See the module docs on why it is six and not eight.
 pub const HANDLERS: &[(&str, &str)] = &[
     (
         CATALOG_PLUGIN,
@@ -147,6 +152,10 @@ pub const HANDLERS: &[(&str, &str)] = &[
     (
         ADAPTIVE_CATALOG_PLUGIN,
         "scirust-sim's catalogued models, adaptively (L2, carries a tolerance certificate)",
+    ),
+    (
+        SPECTROGRAM_PLUGIN,
+        "how a consumed trajectory's spectrum changes over the run (L3)",
     ),
 ];
 
@@ -169,6 +178,10 @@ pub enum StageConfig {
     /// [`ADAPTIVE_CATALOG_PLUGIN`] — the only variant whose result is `L2`,
     /// carrying the tolerances it is certified to.
     AdaptiveModel(AdaptiveModelRun),
+    /// A **spectrogram** of an upstream stage's trajectory, for
+    /// [`SPECTROGRAM_PLUGIN`] — how its spectrum changes, where
+    /// [`StageConfig::Trajectory`] reports what it averages to.
+    Spectrogram(TrajectorySpectrogramConfig),
     /// A measurement of an **upstream stage's** trajectory, for
     /// [`TRAJECTORY_PLUGIN`].
     ///
@@ -190,6 +203,7 @@ impl StageConfig {
             Self::Welch(config) => welch_config_address(config),
             Self::Trajectory(config) => trajectory_config_address(config),
             Self::AdaptiveModel(run) => adaptive_model_config_address(run),
+            Self::Spectrogram(config) => spectrogram_config_address(config),
         }
     }
 
@@ -203,6 +217,7 @@ impl StageConfig {
             Self::Welch(_) => WELCH_PLUGIN,
             Self::Trajectory(_) => TRAJECTORY_PLUGIN,
             Self::AdaptiveModel(_) => ADAPTIVE_CATALOG_PLUGIN,
+            Self::Spectrogram(_) => SPECTROGRAM_PLUGIN,
         }
     }
 
@@ -229,6 +244,10 @@ impl StageConfig {
                     r.model.kind, r.rtol, r.atol
                 )
             },
+            Self::Spectrogram(c) => format!(
+                "spectrogram of component {}, {}-sample frames, {} overlap",
+                c.component, c.segment_len, c.overlap
+            ),
         }
     }
 }
@@ -263,6 +282,8 @@ pub fn run(args: &Args) -> Result<String> {
     let mut trajectories =
         TrajectorySpectrumStageHandler::new(Rc::clone(&store), signal_backend_version());
     let mut adaptive = AdaptiveCatalogStageHandler::new(Rc::clone(&store), sim_backend_version());
+    let mut spectrograms =
+        TrajectorySpectrogramStageHandler::new(Rc::clone(&store), signal_backend_version());
     let offered: Vec<Digest> = configs
         .into_iter()
         .map(|c| match c
@@ -272,6 +293,7 @@ pub fn run(args: &Args) -> Result<String> {
             StageConfig::Welch(config) => welch.offer(config),
             StageConfig::Trajectory(config) => trajectories.offer(config),
             StageConfig::AdaptiveModel(run) => adaptive.offer(run),
+            StageConfig::Spectrogram(config) => spectrograms.offer(config),
         })
         .collect();
 
@@ -286,6 +308,10 @@ pub fn run(args: &Args) -> Result<String> {
     dispatch.register(
         ADAPTIVE_CATALOG_PLUGIN,
         Box::new(adaptive) as Box<dyn StageExecutor>,
+    );
+    dispatch.register(
+        SPECTROGRAM_PLUGIN,
+        Box::new(spectrograms) as Box<dyn StageExecutor>,
     );
 
     let env = env_digest(args.flag("env").unwrap_or(DEFAULT_ENV_LABEL));
