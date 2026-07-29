@@ -72,6 +72,16 @@ pub fn lookup(symbol: &str) -> Option<UnitEntry> {
         "rad" => Dimension::DIMENSIONLESS,
         // Angular velocity. Dimensionally a frequency, exactly as "1/s" is.
         "rad/s" => Dimension::FREQUENCY,
+        // Thermal resistance (HVAC zone model, battery self-heating).
+        "K/W" => Dimension::TEMPERATURE.div(Dimension::POWER),
+        // Heat capacity (the C of an RC thermal network).
+        "J/K" => Dimension::ENERGY.div(Dimension::TEMPERATURE),
+        // Spectral responsivity of a photodetector: photocurrent per watt.
+        "A/W" => Dimension::CURRENT.div(Dimension::POWER),
+        // Moment of inertia (rigid-body rotation).
+        "kg*m^2" => Dimension::MASS.mul(Dimension::LENGTH.powi(2)),
+        // Volume — of distribution, in the pharmacokinetic models.
+        "m^3" => Dimension::LENGTH.powi(3),
         _ => return None,
     };
     Some(UnitEntry {
@@ -112,7 +122,7 @@ mod tests {
         for symbol in [
             "1", "m", "kg", "s", "A", "K", "mol", "cd", "m/s", "m/s^2", "N", "J", "W", "Pa", "Hz",
             "C", "V", "Ohm", "kg/s", "kg/s^2", "kg/m^3", "1/s", "m^3/s^2", "m^2/s", "H", "F",
-            "rad", "rad/s",
+            "rad", "rad/s", "K/W", "J/K", "A/W", "kg*m^2", "m^3",
         ]
         {
             let entry = lookup(symbol).unwrap_or_else(|| panic!("{symbol} must be in the table"));

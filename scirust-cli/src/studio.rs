@@ -297,6 +297,26 @@ pub fn run_scenario(args: &[String]) -> u8 {
     }
 }
 
+/// Render a scalar so its magnitude survives.
+///
+/// Fixed notation inside the range where it reads naturally, scientific
+/// outside it. Zero is written plainly rather than as `0.000000e0`.
+fn format_scalar(v: f64) -> String {
+    let magnitude = v.abs();
+    if v == 0.0
+    {
+        "0".to_string()
+    }
+    else if (1e-3..1e7).contains(&magnitude)
+    {
+        format!("{v:.6}")
+    }
+    else
+    {
+        format!("{v:.6e}")
+    }
+}
+
 /// An integer metric's value, if the result carries one under that id.
 fn integer_metric(result: &RunResult, id: &str) -> Option<i64> {
     result
@@ -500,7 +520,11 @@ fn print_result_text(result: &RunResult) {
     {
         let value = match &m.value
         {
-            MetricValue::Scalar(v) => format!("{v:.6}"),
+            // `{:.6}` alone renders 1e-7 as "0.000000" and 1.6e6 as a wall
+            // of digits. A metric a capability thought worth reporting must
+            // not be rounded to nothing by its formatter: the photodiode's
+            // 100 ns time constant is the whole point of that run.
+            MetricValue::Scalar(v) => format_scalar(*v),
             MetricValue::Integer(v) => v.to_string(),
             MetricValue::Text(v) => v.clone(),
         };
