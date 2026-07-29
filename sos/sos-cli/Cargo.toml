@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "The `sos` command-line porcelain: a git-style shell over the Scientific Operating System's already-landed engines (store, knowledge, reasoning, curiosity, theory, workflow, reproducibility, planning, publication, cognitive, provenance, registry). Adds no new compute of its own — a discoverable command surface over capabilities that are implemented and tested in their own crates. Pure Rust, no FFI, no new third-party dependency."
+description = "The `sos` command-line porcelain: a git-style shell over the Scientific Operating System's already-landed engines (store, knowledge, reasoning, curiosity, theory, workflow, reproducibility, planning, publication, cognitive, provenance, registry). Adds no new compute of its own — a discoverable command surface over capabilities that are implemented and tested in their own crates — except for one binding it alone can supply: `sos run` maps a study manifest's plugin names to sos-scirust's stage handlers, executing a TOML study to stored, content-addressed results under content-hash pinning and a capability grant that is empty unless the caller says otherwise. Pure Rust, no FFI, no new third-party dependency."
 keywords = ["cli", "porcelain", "science"]
 categories = ["science", "command-line-utilities"]
 
@@ -32,6 +32,10 @@ sos-publication = { workspace = true }
 sos-ccos = { workspace = true }
 sos-provenance = { workspace = true }
 sos-registry = { workspace = true }
+sos-scirust = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+sos-scirust = { workspace = true }

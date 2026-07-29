@@ -52,6 +52,7 @@ sos-publication = { path = "sos-publication" }
 sos-ccos = { path = "sos-ccos" }
 sos-curiosity = { path = "sos-curiosity" }
 sos-provenance = { path = "sos-provenance" }
+sos-scirust = { path = "sos-scirust" }
 sos-cli = { path = "sos-cli" }
 # Pure-Rust, no-FFI third-party set (all already in the repository lockfile).
 serde = { version = "1", features = ["derive"] }

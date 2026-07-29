@@ -1,6 +1,6 @@
 //! `sos plan` — recommend the next experiment from a set of candidate designs.
 //!
-//! Computing the expected-information-gain [`Estimate`] behind each
+//! Computing the expected-information-gain [`Estimate`](sos_planner::Estimate) behind each
 //! [`Candidate`] is `sos-scirust`'s job (Invariant VIII); this command
 //! **consumes** already-computed estimates from a JSON file and runs the
 //! deterministic [`GreedyPlanner`] over them — exactly the boundary
