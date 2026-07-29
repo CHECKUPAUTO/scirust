@@ -124,7 +124,22 @@ impl Canonical for Plan {
 }
 
 impl Body for Plan {
-    const KIND: &'static str = "Plan";
+    /// `"ExperimentPlan"`, not `"Plan"`.
+    ///
+    /// `sos-workflow`'s [`Plan`](../../sos_workflow/struct.Plan.html) — a
+    /// validated DAG of stages — also declares a [`Body`] kind, and both
+    /// originally called themselves `"Plan"`. Two structurally different types
+    /// claiming one kind is incoherent in a content-addressed store: the
+    /// store's `KindMismatch` guard compares declared kind names, so a
+    /// collision defeats exactly the check that exists to stop a record being
+    /// decoded as the wrong type. `sos-cli`'s `sos verify` found it by trying
+    /// to read a stored workflow plan as this one.
+    ///
+    /// This is the side that renamed because the workflow `Plan` is the one
+    /// RFC-0002 §08 calls *the* plan, while this is a **recommendation** — a
+    /// ranking of candidate experiments and a stopping verdict. Naming it for
+    /// what it is costs nothing and removes the ambiguity.
+    const KIND: &'static str = "ExperimentPlan";
     const SCHEMA_VERSION: u32 = 1;
 }
 
