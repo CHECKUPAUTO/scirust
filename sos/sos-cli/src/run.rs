@@ -213,18 +213,9 @@ pub fn run(args: &Args) -> Result<String> {
     let root = store::resolve_root(args.flag("store"))?;
     let store = Rc::new(RefCell::new(store::open(&root)?));
 
-    let mut models = CatalogStageHandler::new(
-        Rc::clone(&store),
-        sim_backend(SemVer::new(0, 1, 0), backend_hash()),
-    );
-    let mut spectra = SpectrumStageHandler::new(
-        Rc::clone(&store),
-        signal_backend(SemVer::new(0, 1, 0), backend_hash()),
-    );
-    let mut welch = WelchStageHandler::new(
-        Rc::clone(&store),
-        signal_backend(SemVer::new(0, 1, 0), backend_hash()),
-    );
+    let mut models = CatalogStageHandler::new(Rc::clone(&store), sim_backend_version());
+    let mut spectra = SpectrumStageHandler::new(Rc::clone(&store), signal_backend_version());
+    let mut welch = WelchStageHandler::new(Rc::clone(&store), signal_backend_version());
     let offered: Vec<Digest> = configs
         .into_iter()
         .map(|c| match c
@@ -293,13 +284,23 @@ fn seal<B: sos_core::Body, S: sos_store::ObjectStore>(
 /// honest thing available here: the CLI does not know `scirust-sim`'s build
 /// hash, and inventing a plausible-looking digest would be worse than a
 /// derived one that is at least stable and traceable to a release.
+/// The `scirust-sim` backend version stamped on catalogue results.
+pub(crate) fn sim_backend_version() -> sos_core::BackendVersion {
+    sim_backend(SemVer::new(0, 1, 0), backend_hash())
+}
+
+/// The `scirust-signal` backend version stamped on spectral results.
+pub(crate) fn signal_backend_version() -> sos_core::BackendVersion {
+    signal_backend(SemVer::new(0, 1, 0), backend_hash())
+}
+
 fn backend_hash() -> Digest {
     HashAlgo::Sha256.hash(b"sos-cli:backend", env!("CARGO_PKG_VERSION").as_bytes())
 }
 
 /// Parse `--allow effectful,network` into a [`Grant`]. Absent means **no**
 /// capabilities, not all of them.
-fn parse_grant(flag: Option<&str>) -> Result<Grant> {
+pub(crate) fn parse_grant(flag: Option<&str>) -> Result<Grant> {
     let mut grant = Grant::new();
     let Some(list) = flag
     else
@@ -338,7 +339,7 @@ fn parse_capability(s: &str) -> Result<Capability> {
 /// all, but it is not a shortcut around pinning: the manifest's `pin` must
 /// still match, and [`default_registry`] uses the same well-known hash a study
 /// author can compute.
-fn load_registry(path: Option<&str>) -> Result<Registry> {
+pub(crate) fn load_registry(path: Option<&str>) -> Result<Registry> {
     let Some(path) = path
     else
     {
