@@ -1,0 +1,139 @@
+# SciRust Studio tutorial scenario: a generator swinging against the grid.
+#
+# Run it with:
+#
+#   scirust run docs/studio/tutorials/swing_equation.scirust.toml
+#
+# A 50 Hz synchronous machine delivering half of what its line could carry,
+# nudged 0.05 rad off its operating angle and left alone. What follows is the
+# electromechanical mode — the roughly 1 Hz swing every generator on a grid
+# has, and the thing transient-stability studies are about.
+#
+# There is no damping in this scenario, deliberately. That makes the transient
+# energy an exact invariant, and both checks below lean on it.
+#
+# What is verified:
+#
+#   * transient_energy_stays_bounded — two claims in one, and the second is
+#     the one worth having. The band the energy wanders inside must be no
+#     wider than the integrator's own error allows; AND the band must not be
+#     DRIFTING, which is checked by comparing the mean energy over the run's
+#     two halves. An integrator with small errors that accumulate passes the
+#     first and fails the second.
+#   * swings_at_the_small_signal_frequency — the run's own swing period,
+#     measured from its crossings of the equilibrium angle, against the
+#     2*pi/omega_n = 0.8518 s the model states.
+#
+# ---------------------------------------------------------------------------
+# Why symplectic Euler, and why it is the only solver offered here
+# ---------------------------------------------------------------------------
+#
+# The undamped swing equation is Hamiltonian, and symplectic Euler conserves a
+# MODIFIED Hamiltonian exactly. The true energy therefore oscillates inside a
+# band and stays there, rather than creeping. That band's relative half-width
+# works out to h*omega_n/2 — the swing amplitude cancels out — which is where
+# the energy check's threshold comes from, with no fitted constant anywhere in
+# it.
+#
+# The second reason is less obvious. Symplectic Euler is only FIRST order
+# accurate in the trajectory, which sounds like a poor choice for measuring a
+# period. But its FREQUENCY error is second order: the discrete frequency
+# satisfies cos(omega_h*h) = 1 - omega_n^2*h^2/2, so omega_h = omega_n*(1 +
+# omega_n^2*h^2/24). At this step that is a relative error of 9e-8, which is
+# four orders of magnitude below the physical effect the period check is
+# looking at. The integrator is not what is being measured.
+#
+# `sim.orbital.two_body` offers RK4 alongside symplectic Euler precisely to
+# show the contrast in long-horizon energy behaviour; there is no reason to
+# repeat that here.
+#
+# ---------------------------------------------------------------------------
+# The period tolerance is the nonlinearity, computed
+# ---------------------------------------------------------------------------
+#
+# A finite swing is slower than an infinitesimal one. Expanding the swing
+# equation about the equilibrium and applying the standard Lindstedt result
+# gives the leading correction
+#
+#     dT/T = a^2 * (1/16 + 5*tan(delta*)^2/48)
+#
+# which for a = 0.05 rad about delta* = pi/6 is 2.43e-4 — a quarter of a
+# millisecond on a 0.85 second swing. That number SIZES the tolerance rather
+# than shifting the prediction, so the check keeps working even if the
+# coefficient were out by a factor of two, and still fails whenever the
+# frequency is wrong by more than the nonlinearity could account for. At
+# delta* = 0 the formula reduces to the textbook pendulum's a^2/16, which is
+# what pins the algebra down.
+#
+# Separately, a test asserts the measured period comes out LONGER than the
+# small-signal one. That is a direction rather than a magnitude, and no
+# tolerance can fake it.
+#
+# ---------------------------------------------------------------------------
+# Per-unit
+# ---------------------------------------------------------------------------
+#
+# Powers here are per-unit: divided by the machine's own rating, so 1.0 means
+# "rated". The unit table carries "pu" as a dimensionless symbol with a
+# conversion factor of exactly one, for the same reason it carries "rad" — a
+# per-unit power written `unit = "1"` reads as a mistake. What the base IS
+# belongs in prose like this, not hidden in a lookup table.
+#
+# Try it: raise `p_mech` above `p_max`. The power-angle curve never meets the
+# mechanical input, the rotor accelerates away instead of swinging, and both
+# checks report as not applicable with a warning naming the reason — loss of
+# synchronism, which is the failure mode this whole model exists to predict.
+
+schema_version = 1
+
+[experiment]
+name = "Generator rotor swing"
+description = "An undamped synchronous machine displaced 0.05 rad from its equilibrium angle, swinging against an infinite bus."
+
+[capability]
+id = "sim.power.swing_equation"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+frequency_hz = { value = 50.0, unit = "Hz" }
+# Five seconds of rated output stored in the rotor's spin. A large machine.
+inertia_h = { value = 5.0, unit = "s" }
+# Zero, deliberately: see the note above. A real machine has some.
+damping = { value = 0.0, unit = "pu" }
+# Delivering half of what the line could carry, so delta* = asin(0.5) = pi/6.
+p_mech = { value = 1.0, unit = "pu" }
+p_max = { value = 2.0, unit = "pu" }
+
+[initial_state]
+# pi/6 + 0.05. Small enough that the small-signal frequency is a good
+# prediction, large enough that the nonlinear correction to it is a real,
+# computable number rather than round-off.
+rotor_angle = [{ value = 0.573598775598299, unit = "rad" }]
+# Displaced but not yet moving, so the starting angle is a turning point and
+# the swing amplitude is exactly the displacement.
+rotor_speed = [{ value = 0.0, unit = "rad/s" }]
+
+[solver]
+id = "symplectic_euler"
+start = { value = 0.0, unit = "s" }
+# Ten swing periods. The period is measured from the second half, which holds
+# about five of them.
+end = { value = 8.5, unit = "s" }
+# About 4300 steps per swing. Small enough that the energy band is a fraction
+# of a percent, large enough that the band is genuinely visible rather than
+# round-off — there is a test asserting exactly that, because a threshold
+# compared against nothing is not a check.
+step = { value = 0.0002, unit = "s" }
+
+[outputs]
+record = [
+    "rotor_angle",
+    "rotor_speed",
+    "electrical_power",
+    "transient_energy",
+    "equilibrium_angle",
+]

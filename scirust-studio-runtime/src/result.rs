@@ -248,6 +248,12 @@ impl RunResult {
     pub fn time_axis(&self) -> Option<&Axis> {
         self.axes.iter().find(|a| a.id == TIME_AXIS_ID)
     }
+
+    /// The axis the [`RunSummary`]'s bounds describe — the run's independent
+    /// variable, whether that is time or a swept parameter.
+    pub fn summary_axis(&self) -> Option<&Axis> {
+        self.axes.iter().find(|a| a.id == self.summary.axis_id)
+    }
 }
 
 /// The id every capability in this crate uses for its time axis.
@@ -262,12 +268,26 @@ pub struct RunSummary {
     pub scenario_name: String,
     /// Number of integration steps taken (excluding the initial condition).
     pub steps: usize,
-    /// Start time, in the axis's unit. Must equal the time axis's first
-    /// coordinate exactly — both come from the same trajectory.
+    /// Which axis [`Self::t_start`] and [`Self::t_end`] describe.
+    ///
+    /// Almost always [`TIME_AXIS_ID`], and that is what a result stored
+    /// before this field existed decodes as. It is stated rather than assumed
+    /// because not every capability integrates forward in time: a parameter
+    /// sweep (see `scirust_studio_registry::RunDomain`) has one axis and it
+    /// is not `t`, and "the summary describes whichever axis happens to be
+    /// first" is the kind of implicit rule that is right until it is not.
+    #[serde(default = "default_summary_axis_id")]
+    pub axis_id: String,
+    /// The first coordinate of [`Self::axis_id`], in that axis's unit. Must
+    /// equal it exactly — both come from the same trajectory or sweep.
     pub t_start: f64,
-    /// End time actually reached, in the axis's unit. Must equal the time
-    /// axis's last coordinate exactly.
+    /// The last coordinate of [`Self::axis_id`], in that axis's unit. Must
+    /// equal it exactly.
     pub t_end: f64,
+}
+
+fn default_summary_axis_id() -> String {
+    TIME_AXIS_ID.to_string()
 }
 
 /// A metric's value. Three kinds cover every metric an adapter in this
@@ -487,14 +507,14 @@ pub enum ResultDefect {
         /// The offending coordinate, rendered.
         value: String,
     },
-    /// `summary.t_start` disagrees with the time axis's first coordinate.
+    /// `summary.t_start` disagrees with its axis's first coordinate.
     SummaryStartMismatch {
         /// What the summary says.
         summary: String,
         /// What the axis says.
         axis: String,
     },
-    /// `summary.t_end` disagrees with the time axis's last coordinate.
+    /// `summary.t_end` disagrees with its axis's last coordinate.
     SummaryEndMismatch {
         /// What the summary says.
         summary: String,
@@ -639,12 +659,12 @@ impl std::fmt::Display for ResultDefect {
             ),
             ResultDefect::SummaryStartMismatch { summary, axis } => write!(
                 f,
-                "summary.t_start is {summary} but the time axis starts at {axis}"
+                "summary.t_start is {summary} but its axis starts at {axis}"
             ),
-            ResultDefect::SummaryEndMismatch { summary, axis } => write!(
-                f,
-                "summary.t_end is {summary} but the time axis ends at {axis}"
-            ),
+            ResultDefect::SummaryEndMismatch { summary, axis } =>
+            {
+                write!(f, "summary.t_end is {summary} but its axis ends at {axis}")
+            },
             ResultDefect::DuplicateEnsembleRole { role, series_id } => write!(
                 f,
                 "series `{series_id}` is a second `{role}`; an ensemble has one of each"
@@ -722,7 +742,8 @@ impl std::fmt::Display for ResultDefect {
 /// the wrong coordinates, and a non-monotonic time axis becomes a chart
 /// that doubles back on itself.
 ///
-/// `summary.t_start`/`t_end` are compared to the time axis with **exact**
+/// `summary.t_start`/`t_end` are compared to `summary.axis_id`'s axis with
+/// **exact**
 /// equality, because both are read out of the same stored trajectory: any
 /// difference at all means one of them was recomputed rather than carried
 /// through, which is precisely the bug this schema version exists to
@@ -819,7 +840,7 @@ pub fn validate_result(result: &RunResult) -> Result<(), Vec<ResultDefect>> {
     check_fields(result, &mut defects);
     check_ensemble(result, &mut defects);
 
-    if let Some(axis) = result.time_axis()
+    if let Some(axis) = result.summary_axis()
     {
         if let (Some(first), Some(last)) = (axis.values.first(), axis.values.last())
         {
@@ -1132,6 +1153,7 @@ mod tests {
             summary: RunSummary {
                 capability_display_name: "Spring-mass-damper".to_string(),
                 scenario_name: "test".to_string(),
+                axis_id: TIME_AXIS_ID.to_string(),
                 steps: 2,
                 t_start: 0.0,
                 t_end: 2.0,

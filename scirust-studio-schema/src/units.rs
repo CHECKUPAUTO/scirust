@@ -72,6 +72,25 @@ pub fn lookup(symbol: &str) -> Option<UnitEntry> {
         "rad" => Dimension::DIMENSIONLESS,
         // Angular velocity. Dimensionally a frequency, exactly as "1/s" is.
         "rad/s" => Dimension::FREQUENCY,
+        // Thermal resistance (HVAC zone model, battery self-heating).
+        "K/W" => Dimension::TEMPERATURE.div(Dimension::POWER),
+        // Heat capacity (the C of an RC thermal network).
+        "J/K" => Dimension::ENERGY.div(Dimension::TEMPERATURE),
+        // Spectral responsivity of a photodetector: photocurrent per watt.
+        "A/W" => Dimension::CURRENT.div(Dimension::POWER),
+        // Moment of inertia (rigid-body rotation).
+        "kg*m^2" => Dimension::MASS.mul(Dimension::LENGTH.powi(2)),
+        // Volume — of distribution, in the pharmacokinetic models.
+        "m^3" => Dimension::LENGTH.powi(3),
+        // Per-unit, the normalisation power engineers work in: every quantity
+        // is divided by a machine or system base, so it is genuinely
+        // dimensionless. Listed separately from "1" for the same reason "rad"
+        // is — a per-unit power written `unit = "1"` reads as a mistake, and a
+        // reader of a swing-equation scenario should be able to see at a
+        // glance that 1.0 means "rated", not "one watt". The factor is
+        // genuinely 1: what the base *is* belongs in the scenario's prose, not
+        // hidden in this table.
+        "pu" => Dimension::DIMENSIONLESS,
         _ => return None,
     };
     Some(UnitEntry {
@@ -103,6 +122,18 @@ mod tests {
         assert_eq!(rate.dimension, lookup("1/s").unwrap().dimension);
     }
 
+    /// Per-unit is dimensionless and unscaled, for the same reason the
+    /// radian is: it exists to make a scenario readable, not to convert
+    /// anything. If `pu` ever acquired a factor it would silently rescale
+    /// every power-system scenario in the repository.
+    #[test]
+    fn per_unit_is_dimensionless_and_unscaled() {
+        let pu = lookup("pu").expect("pu");
+        assert_eq!(pu.dimension, Dimension::DIMENSIONLESS);
+        assert_eq!(pu.to_si_factor, 1.0);
+        assert_eq!(pu.dimension, lookup("1").unwrap().dimension);
+    }
+
     /// Every symbol in the table converts to SI by a factor of exactly one.
     /// The table is a *dimension* table; the moment an entry needs a real
     /// conversion (mg, litre, hour) that is a deliberate change with its own
@@ -112,7 +143,7 @@ mod tests {
         for symbol in [
             "1", "m", "kg", "s", "A", "K", "mol", "cd", "m/s", "m/s^2", "N", "J", "W", "Pa", "Hz",
             "C", "V", "Ohm", "kg/s", "kg/s^2", "kg/m^3", "1/s", "m^3/s^2", "m^2/s", "H", "F",
-            "rad", "rad/s",
+            "rad", "rad/s", "K/W", "J/K", "A/W", "kg*m^2", "m^3", "pu",
         ]
         {
             let entry = lookup(symbol).unwrap_or_else(|| panic!("{symbol} must be in the table"));

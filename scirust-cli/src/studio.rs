@@ -297,6 +297,26 @@ pub fn run_scenario(args: &[String]) -> u8 {
     }
 }
 
+/// Render a scalar so its magnitude survives.
+///
+/// Fixed notation inside the range where it reads naturally, scientific
+/// outside it. Zero is written plainly rather than as `0.000000e0`.
+fn format_scalar(v: f64) -> String {
+    let magnitude = v.abs();
+    if v == 0.0
+    {
+        "0".to_string()
+    }
+    else if (1e-3..1e7).contains(&magnitude)
+    {
+        format!("{v:.6}")
+    }
+    else
+    {
+        format!("{v:.6e}")
+    }
+}
+
 /// An integer metric's value, if the result carries one under that id.
 fn integer_metric(result: &RunResult, id: &str) -> Option<i64> {
     result
@@ -431,8 +451,23 @@ fn print_result_text(result: &RunResult) {
     println!("  scenario      {}", result.summary.scenario_name);
     println!("  capability    {}", result.capability_id);
     println!("  steps         {}", result.summary.steps);
-    let axis_unit = result.axes.first().map(|a| a.unit.as_str()).unwrap_or("");
-    println!("  t final       {} {axis_unit}", result.summary.t_end);
+    // Not every capability integrates in time: a parameter sweep's summary
+    // describes the parameter it swept, so the label comes from the axis
+    // rather than being hardcoded to "t".
+    let axis = result.summary_axis().or_else(|| result.axes.first());
+    // The axis *id* rather than its display name: "t final" and "gain final"
+    // both read correctly and both fit the column, where "time final" would
+    // only have changed every existing line for no gain.
+    let (label, unit) = match axis
+    {
+        Some(a) => (a.id.as_str(), a.unit.as_str()),
+        None => ("axis", ""),
+    };
+    println!(
+        "  {:<13} {} {unit}",
+        format!("{label} final"),
+        result.summary.t_end
+    );
 
     // Printed only when the computation actually consumed one, and printed
     // next to the determinism class it qualifies: for a stochastic result the
@@ -500,7 +535,11 @@ fn print_result_text(result: &RunResult) {
     {
         let value = match &m.value
         {
-            MetricValue::Scalar(v) => format!("{v:.6}"),
+            // `{:.6}` alone renders 1e-7 as "0.000000" and 1.6e6 as a wall
+            // of digits. A metric a capability thought worth reporting must
+            // not be rounded to nothing by its formatter: the photodiode's
+            // 100 ns time constant is the whole point of that run.
+            MetricValue::Scalar(v) => format_scalar(*v),
             MetricValue::Integer(v) => v.to_string(),
             MetricValue::Text(v) => v.clone(),
         };

@@ -50,34 +50,37 @@ callback.
 | `ecology` (Lotka-Volterra, logistic growth) | Yes | Yes | Yes | Yes | Yes (exact first integral; closed-form solution) | Yes | See desktop table |
 | `chemistry` (consecutive/reversible reactions) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
 | `chemistry` (Robertson, stiff) | Yes | Yes | Yes | Yes | Yes (mass conservation, published reference values) | Yes | See desktop table |
-| `thermal` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
+| `thermal` (1-D heat rod) | Yes | Yes | Yes | Yes | Yes (slowest-mode decay rate) | Yes | See desktop table |
 | `electrical` (RC, series RLC) | Yes | Yes (RLC only) | Yes (RLC only) | Yes (RLC only) | Yes (passivity, closed-form match) | Yes (RLC only) | See desktop table |
 | `electrical` (Van der Pol) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
 | `stochastic` (Ornstein-Uhlenbeck) | Yes | Yes | Yes | Yes | Yes (exact stationary moments) | Yes | See desktop table |
 | `stochastic` (GBM, M/M/1 queue) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
-| `pharmacokinetics` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
-| `rigid_body` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
-| `battery` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
-| `hvac` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
-| `grid` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
-| `laser` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
-| `photodiode` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
-| `apd` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
+| `pharmacokinetics` (oral one-compartment) | Yes | Yes | Yes | Yes | Yes (Bateman closed form) | Yes | See desktop table |
+| `pharmacokinetics` (IV bolus, two-compartment) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
+| `rigid_body` | Yes | Yes | Yes | Yes | Yes (energy + angular momentum, intermediate-axis instability) | Yes | See desktop table |
+| `battery` | Yes | Yes | Yes | Yes | Yes (exact coulomb counting, closed-form relaxations) | Yes | See desktop table |
+| `hvac` | Yes | Yes | Yes | Yes | Yes (closed-form 2R2C equilibrium) | Yes | See desktop table |
+| `grid` | Yes | Yes | Yes | Yes | Yes (conserved transient energy, small-signal frequency) | Yes | See desktop table |
+| `laser` | Yes | Yes | Yes | Yes | Yes (threshold clamp, light-current law, relaxation frequency) | Yes | See desktop table |
+| `photodiode` | Yes | Yes | Yes | Yes | Yes (closed-form level and RC time constant) | Yes | See desktop table |
+| `apd` | Yes | Yes | Yes | Yes | Yes (McIntyre limits, SNR optimum) | Yes | See desktop table |
 | `envs` (CartPole, GridWorld — `Environment`, not `System`) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
 
 "Yes, per `scirust-sim`'s own tests (not independently re-verified this
-pass)" means: the audit read the module's own doc comments and knows tests
-exist (per `cargo test -p scirust-sim` passing in CI), but this Studio pass
-did not open the source and independently confirm the oracle's correctness
-the way it did for the adapted models. That distinction matters — do not read
-"Oracle tested: Yes" here as "Studio verified this," only as "the owning crate
-verifies this."
+pass)" — which no longer appears in the table above — meant: the audit read
+the module's own doc comments and knew tests existed, but the Studio pass had
+not opened the source and independently confirmed the oracle. Every row that
+carried that caveat has since been adapted, and its oracle is now named
+explicitly. The remaining "No" rows are model families *within* adapted
+modules, and they carry no such caveat because nothing is claimed about them
+beyond "their own crate tests them."
 
-**7 of 16 modules have a real Studio adapter**, covering 10 capabilities. The
-other 9 (plus 6 model families within already-partially-adapted modules —
-SEIR, the two non-stiff chemistry models, the projectile, Van der Pol, and
-stochastic's GBM and M/M/1 queue) are real, tested code that Studio does not
-yet expose. Building their adapters is the remainder of Phase 3B.
+**All 16 `scirust-sim` model modules now have at least one Studio adapter**,
+covering 19 capabilities. What is left is not a module with no coverage but
+six model *families* inside already-adapted modules — SEIR, the two non-stiff
+chemistry models, the projectile, Van der Pol, stochastic's GBM and M/M/1
+queue, and pharmacokinetics' IV-bolus and two-compartment variants. Those are
+real, tested code that Studio does not yet expose.
 
 ## Desktop exposure (Phase 3A)
 
@@ -114,6 +117,14 @@ Columns:
 | `sim.mechanics.double_pendulum` | Yes | Yes | Yes | Yes | Yes | Yes |
 | `sim.stochastic.ornstein_uhlenbeck` | Yes | Yes | Yes | Yes (per realisation) | Yes | Yes |
 | `sim.thermal.heat_rod_1d` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.optoelectronics.photodiode` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.thermal.hvac_zone` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.mechanics.rigid_body` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.pharmacology.oral_one_compartment` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.energy.battery_thevenin` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.optoelectronics.semiconductor_laser` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.power.swing_equation` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.optoelectronics.avalanche_photodiode` | Yes | Yes | Yes | Yes | Yes (against gain, not time) | Yes |
 | Every other `scirust-sim` model family | No | No | No | No | No | No |
 | Every other workspace crate | No | No | No | No | No | No |
 
@@ -134,8 +145,9 @@ Three notes, because a table like this is easy to over-read:
    Help view says so in its own first line rather than implying it documents a
    complete product.
 
-**Desktop-exposed: 9 capabilities across 6 of 16 `scirust-sim` module
-families**, identical to adapter coverage.
+**Desktop-exposed: 19 capabilities across all 16 `scirust-sim` module
+families**, identical to adapter coverage — as it has been at every phase,
+because the desktop reads the registry rather than a list of its own.
 
 Phase 3B-1 added four of these (Lotka-Volterra, logistic growth, pendulum,
 double pendulum) and **changed nothing in the desktop application** — no
@@ -284,3 +296,90 @@ exactly the operation that makes a spike disappear.
 
 Two of its series are plotted against *position* rather than time, also a
 first. See `docs/studio/adr/0009-fields.md`.
+
+## Summary counts (Phase 3B-3 through 3B-6)
+
+- Operational (descriptor + adapter + scenario-tested + CLI-exposed +
+  desktop-exposed): **19**.
+- **`scirust-sim` module families with at least one adapter: 16 of 16.**
+  There is no longer a model module that Studio cannot execute.
+- Determinism classes in use: still **2**. Every capability added since the
+  Ornstein-Uhlenbeck process is `StrictSameBinarySameTarget`.
+- Run domains in use: **2**. Eighteen capabilities are `RunDomain::Time`;
+  `sim.optoelectronics.avalanche_photodiode` is the first
+  `RunDomain::ParameterSweep`.
+
+The eight capabilities added across these updates were chosen so that each
+one made the *runtime* answer a question it had not been asked before, rather
+than only making the catalogue longer:
+
+- **`sim.optoelectronics.photodiode`** — the first capability whose tolerance
+  is **derived rather than chosen**. Its settling check compares against
+  `exp(-span/tau)`, the residual the run's own length in time constants
+  leaves behind, because a fixed `1e-3` failed a perfectly correct run that
+  measured `6.738e-3`. Every capability since has followed that rule.
+- **`sim.thermal.hvac_zone`** — a 2R2C network's slow time constant is an
+  exact root of a quadratic (46.2 h), not the naive `R*C` sum (57.8 h). The
+  check solves the quadratic. Its second check reverses every inequality
+  through a single sign factor, so a cooling scenario is verified by the same
+  code path as a heating one.
+- **`sim.mechanics.rigid_body`** — two exact invariants at once (the energy
+  ellipsoid and the momentum sphere), and the intermediate-axis instability
+  reported as a named property of the run rather than left for the reader to
+  notice in a chart.
+- **`sim.pharmacology.oral_one_compartment`** — verified against its
+  *complete* closed form at every sample, to `1.2e-12` across 5705 points. It
+  is the first capability with no `[initial_state]` at all: the state at
+  `t = 0` follows from the dose. It refuses `k_a == k_e` with a dedicated
+  error code rather than evaluating the Bateman form at its removable
+  singularity.
+- **`sim.energy.battery_thevenin`** — three states checked three different
+  ways, because they fail independently. Its settling threshold takes the
+  residual of the *slower* of two time constants (`R_th*C_th` = 200 s against
+  `R1*C1` = 20 s); a test pins that down, because holding the run to the fast
+  one would fail a correct integration.
+- **`sim.optoelectronics.semiconductor_laser`** — the first capability
+  verified against the **eigenvalues of its own Jacobian**. Numerical
+  integration and linear stability analysis are different routes to the same
+  rate equations, so a model with the right fixed point and the wrong
+  curvature there passes the operating-point check and fails the ringing one.
+  The damping correction is real: the damped period is 0.57 % longer than the
+  undamped `1/f_r`, against a 0.1 % tolerance.
+- **`sim.power.swing_equation`** — the first capability whose *integrator
+  choice* is part of the verification. Symplectic Euler conserves a modified
+  Hamiltonian exactly, so the energy check tests both the band's width
+  (measured `1.485e-3` against the derived `h*omega_n` = `1.475e-3`) and that
+  the band is not drifting (`2.3e-7` between halves). Its period tolerance is
+  the computed Lindstedt nonlinear correction, which the measurement matches
+  to 1 %.
+- **`sim.optoelectronics.avalanche_photodiode`** — the first capability with
+  **no time in it**, and the first whose checks have no tolerance at all. See
+  below.
+
+### What the parameter sweep changes
+
+An APD receiver analysis is algebraic: nothing is integrated. The capability
+sweeps avalanche gain instead, and its result carries a `gain` axis and no `t`
+axis.
+
+That is declared, not inferred. `CapabilityDescriptor` gained
+`domain: RunDomain`, and `RunSummary` gained `axis_id` naming which axis its
+bounds describe (defaulting to `"t"`, so every previously stored result
+decodes unchanged). The registry-driven test that demands a time axis now
+demands it of exactly the capabilities that promised one — and demands its
+*absence* from the ones that did not — instead of being weakened to "some
+axis" for everybody.
+
+Both of its checks are exact:
+
+- the SNR at the analytic optimum must be at least the SNR at **every** swept
+  gain. That is what a maximum is, so the only slack is round-off. The
+  optimum comes from the stationary condition `C*k*M^3 + C*(1-k)*M = 2T`,
+  whose left side is strictly increasing for every `k`, so bisection finds
+  its single root without a derivative or a guess.
+- the SNR curve must change direction **exactly once**, because that same
+  monotonicity guarantees a single root and therefore a single turn.
+
+A sweep that does not bracket the optimum reports both checks as not
+applicable and warns, rather than reporting its endpoint as the answer —
+which is what an argmax with no analytic companion would have done.
