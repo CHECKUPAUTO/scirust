@@ -113,6 +113,7 @@
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
+pub mod bayes;
 pub mod bo;
 pub mod eig;
 pub mod error;
@@ -124,6 +125,7 @@ mod solver;
 pub mod stage;
 pub mod verdict;
 
+pub use bayes::{BayesFactor, log10_bayes_factor};
 pub use bo::BoResult;
 pub use eig::GpEigEstimator;
 pub use error::{Result, ScirustError};
