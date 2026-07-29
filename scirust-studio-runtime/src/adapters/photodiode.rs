@@ -20,7 +20,7 @@ use scirust_studio_command::{ErrorCode, ErrorFamily};
 use scirust_studio_registry::{
     BackendKind, CapabilityCategory, CapabilityDescriptor, CapabilityId, CapabilityMaturity,
     Cardinality, DeterminismClass, FieldDescriptor, OutputDescriptor, PrecisionKind,
-    SolverDescriptor, VerificationCheckDescriptor, VerificationDescriptor,
+    VerificationCheckDescriptor, VerificationDescriptor,
 };
 use scirust_studio_schema::Scenario;
 
