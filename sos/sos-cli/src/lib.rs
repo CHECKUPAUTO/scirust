@@ -14,6 +14,7 @@
 //! sos ask [--store <path>] [--limit N]      run a curiosity sweep
 //! sos why [--store <path>] <object>        print the provenance behind an object
 //! sos verify [--store <path>] <object>     check an object's structural + content identity
+//!          [--rerun <runs.json>]            or re-execute its run and check reproduction
 //! sos diff [--store <path>] <a> <b>        compare two studies' ancestor sets
 //! sos plan <candidates.json> [--floor N]   recommend the next experiment
 //!          [--budget N]
@@ -192,7 +193,14 @@ fn dispatch(args: &[String]) -> error::Result<String> {
         {
             let a = Args::parse(&rest)?;
             let id = parse_object_id(a.positional(0, "object")?)?;
-            verify::run(a.flag("store"), id)
+            if a.flag("rerun").is_some()
+            {
+                verify::rerun(a.flag("store"), id, &a)
+            }
+            else
+            {
+                verify::run(a.flag("store"), id)
+            }
         },
         Some("diff") =>
         {
@@ -248,6 +256,8 @@ fn help_text() -> String {
         "  sos ask [--store <path>] [--limit N]     run a curiosity sweep\n",
         "  sos why [--store <path>] <object>        print the provenance behind an object\n",
         "  sos verify [--store <path>] <object>     check structural + content identity\n",
+        "           [--rerun <runs.json>] [--allow <caps>] [--plugins <f>]\n",
+        "                                          re-execute the run and check reproduction\n",
         "  sos diff [--store <path>] <a> <b>        compare two studies\n",
         "  sos plan <candidates.json> [--floor N]   recommend the next experiment\n",
         "           [--budget N]\n",

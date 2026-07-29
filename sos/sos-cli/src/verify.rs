@@ -13,26 +13,144 @@
 //! unrecognized kind still gets the structural report, honestly labelled as
 //! such rather than silently skipped.
 //!
-//! ## What this is not, yet
+//! ## `--rerun`: identity is not reproduction
 //!
-//! RFC-0002 §10.4 describes `sos verify <object>` as "re-execute and check the
-//! reproducibility contract", and this checks *identity*, not reproduction: it
-//! answers "is this object what it says it is", not "does running the
-//! experiment again produce it". `sos-repro`'s `verify_object` does the
-//! latter, and now has what it needs — `sos run` seals its `Plan` and
-//! `RunLedger`, which is how that function finds the run that produced an
-//! object. Wiring it here additionally needs a second store handle: the
-//! re-execution's stage handlers hold the store through `Rc<RefCell<_>>`
-//! while `verify_object` wants `&Store` for the same instant, which would
-//! panic on the borrow. That is a real API question, not plumbing, so it is
-//! left rather than forced.
+//! Without a flag this checks **identity** — is this object what it says it
+//! is — which is a real check but not the one RFC-0002 §10.4 describes.
+//! `sos verify --rerun <object> <runs.json>` does the other one: it finds the
+//! run that produced the object, re-executes its plan, and checks the
+//! reproduction contract node by node via `sos-repro`'s `verify_object`.
+//!
+//! Two things about that path are load-bearing.
+//!
+//! **The re-run must not be served from the cache.** `sos run` persists a
+//! memo table, and reusing it here would replay the recorded outputs and
+//! "verify" nothing at all — the strongest possible false pass. `--rerun`
+//! therefore always starts from an empty
+//! [`MemoTable`]. Re-executing is the point; a cache
+//! hit is the failure mode.
+//!
+//! **Two store handles, deliberately.** The re-execution's stage handlers
+//! hold the store through `Rc<RefCell<_>>` to write results, while
+//! `verify_object` wants `&Store` to read ledgers and levels — borrowing the
+//! same `RefCell` for both at once would panic. A second
+//! [`FileStore`](sos_store::FileStore) over the same path is safe here for
+//! reasons specific to that type: it caches no objects (every `get_raw` and
+//! `object_ids` reads the directory), and writes are content-addressed and
+//! first-wins, so the reading handle sees the re-run's output the moment it
+//! lands and no write can conflict with another.
+//!
+//! Certification uses [`NoCertifier`], which refuses
+//! every `L2`/`L1` node rather than certifying one no backend examined. All
+//! three backends `sos run` can bind are `L3`, so this passes for anything it
+//! produced — and a study that somehow contained an `L2` node is *told* so
+//! instead of quietly passing.
 
-use sos_core::ObjectId;
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use sos_core::{EnvRecord, ObjectId, SemVer};
+use sos_repro::{EnvLock, NoCertifier, verify_object};
+use sos_scirust::stage::{CatalogStageHandler, SpectrumStageHandler, WelchStageHandler};
 use sos_store::TypedStore;
+use sos_workflow::{Dispatch, MemoTable, StageExecutor};
 
+use crate::args::Args;
 use crate::error::Result;
 use crate::header::GenericHeader;
+use crate::run::{
+    CATALOG_PLUGIN, SPECTRUM_PLUGIN, StageConfig, WELCH_PLUGIN, load_registry, parse_grant,
+    signal_backend_version, sim_backend_version,
+};
 use crate::store;
+
+/// Run `sos verify --rerun <object> <runs.json>` — re-execute the run that
+/// produced `id` and check the reproduction contract.
+///
+/// # Errors
+/// [`crate::error::CliError::Usage`] for a missing argument or an unreadable
+/// file; [`crate::error::CliError::Repro`] if no stored run produced the
+/// object, if more than one did, or if the re-run diverges.
+pub fn rerun(path: Option<&str>, id: ObjectId, args: &Args) -> Result<String> {
+    let runs_path = args
+        .flag("rerun")
+        .ok_or_else(|| crate::error::CliError::Usage("--rerun needs a runs.json".to_owned()))?;
+    let configs: Vec<StageConfig> = serde_json::from_slice(&std::fs::read(runs_path)?)?;
+    let registry = load_registry(args.flag("plugins"))?;
+    let grant = parse_grant(args.flag("allow"))?;
+
+    let root = store::resolve_root(path)?;
+    // See the module docs: a *second* handle, because the handlers below hold
+    // the first one mutably for the whole re-execution.
+    let reader = store::open(&root)?;
+    let writer = Rc::new(RefCell::new(store::open(&root)?));
+
+    let mut models = CatalogStageHandler::new(Rc::clone(&writer), sim_backend_version());
+    let mut spectra = SpectrumStageHandler::new(Rc::clone(&writer), signal_backend_version());
+    let mut welch = WelchStageHandler::new(Rc::clone(&writer), signal_backend_version());
+    for config in configs
+    {
+        match config
+        {
+            StageConfig::Model(run) => drop(models.offer(run)),
+            StageConfig::Spectrum(c) => drop(spectra.offer(c)),
+            StageConfig::Welch(c) => drop(welch.offer(c)),
+        }
+    }
+    let mut dispatch = Dispatch::new(&registry, grant);
+    dispatch.register(CATALOG_PLUGIN, Box::new(models) as Box<dyn StageExecutor>);
+    dispatch.register(SPECTRUM_PLUGIN, Box::new(spectra) as Box<dyn StageExecutor>);
+    dispatch.register(WELCH_PLUGIN, Box::new(welch) as Box<dyn StageExecutor>);
+
+    // An empty memo, always. Reusing `sos run`'s persisted one would replay
+    // the recorded outputs and verify nothing.
+    let mut memo = MemoTable::new();
+    let lock = EnvLock::pin(EnvRecord::new(
+        "unspecified",
+        vec![sos_core::BackendVersion::new(
+            "sos-cli",
+            SemVer::new(0, 1, 0),
+            crate::run::plugin_hash("verify"),
+        )],
+        "unspecified",
+        "unspecified",
+    ));
+
+    let report = verify_object(
+        id,
+        &reader,
+        &lock,
+        &mut memo,
+        &mut dispatch,
+        &mut NoCertifier,
+    )?;
+
+    let mut out = format!(
+        "{id}\n  re-executed: {} node(s)\n  contract level: {}\n",
+        report.nodes.len(),
+        report.level.code()
+    );
+    for node in &report.nodes
+    {
+        out.push_str(&format!(
+            "  {} {} {:?}\n",
+            node.node,
+            node.level.code(),
+            node.verdict
+        ));
+    }
+    out.push_str(
+        if report.reproduced()
+        {
+            "  REPRODUCED (every node matched at its declared level)"
+        }
+        else
+        {
+            "  DID NOT REPRODUCE — see the node verdicts above"
+        },
+    );
+    Ok(out)
+}
 
 /// Run `sos verify [path] <object>`.
 ///

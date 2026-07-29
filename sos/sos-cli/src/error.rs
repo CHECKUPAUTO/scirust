@@ -54,6 +54,11 @@ pub enum CliError {
     #[error(transparent)]
     Registry(#[from] sos_registry::RegistryError),
 
+    /// A reproduction/verification error — no stored run produced the object,
+    /// more than one did, or a re-run diverged.
+    #[error(transparent)]
+    Repro(#[from] sos_repro::ReproError),
+
     /// A workflow execution error — a refused plugin, a drifted pin, or a
     /// stage that failed while running.
     #[error(transparent)]
