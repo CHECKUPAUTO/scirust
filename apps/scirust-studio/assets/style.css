@@ -1,0 +1,853 @@
+/*
+ * SciRust Studio's stylesheet.
+ *
+ * Four themes are driven from one set of custom properties on `[data-theme]`,
+ * so the components never name a colour and switching a theme cannot leave a
+ * panel unstyled. `system` follows the operating system through
+ * `prefers-color-scheme`; the other three are explicit choices a user made
+ * and are not overridden by it.
+ *
+ * The high-contrast theme is not "dark with brighter text": it uses pure
+ * black and white with a heavier focus ring, because its purpose is
+ * legibility for someone who needs it, not an aesthetic.
+ */
+
+:root,
+[data-theme="light"] {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #eef1f5;
+  --text: #16191d;
+  --muted: #5b6470;
+  --border: #d3d9e0;
+  --accent: #2f6fed;
+  --accent-text: #ffffff;
+  --ok: #0f8f6a;
+  --warn: #b06a00;
+  --bad: #c02b52;
+  --focus: #2f6fed;
+  --radius: 8px;
+  --mono: ui-monospace, "Cascadia Mono", "Consolas", "DejaVu Sans Mono", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", "Noto Sans", sans-serif;
+}
+
+[data-theme="dark"] {
+  --bg: #14171c;
+  --surface: #1b1f26;
+  --surface-2: #232833;
+  --text: #e7ebf1;
+  --muted: #9aa5b4;
+  --border: #313945;
+  --accent: #6d9bff;
+  --accent-text: #0b0d11;
+  --ok: #4cc79c;
+  --warn: #e0a24a;
+  --bad: #ff7a97;
+  --focus: #6d9bff;
+}
+
+[data-theme="high-contrast"] {
+  --bg: #000000;
+  --surface: #000000;
+  --surface-2: #0d0d0d;
+  --text: #ffffff;
+  --muted: #ffffff;
+  --border: #ffffff;
+  --accent: #ffff00;
+  --accent-text: #000000;
+  --ok: #00ff88;
+  --warn: #ffcc00;
+  --bad: #ff5c5c;
+  --focus: #ffff00;
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-theme="system"] {
+    --bg: #14171c;
+    --surface: #1b1f26;
+    --surface-2: #232833;
+    --text: #e7ebf1;
+    --muted: #9aa5b4;
+    --border: #313945;
+    --accent: #6d9bff;
+    --accent-text: #0b0d11;
+    --ok: #4cc79c;
+    --warn: #e0a24a;
+    --bad: #ff7a97;
+    --focus: #6d9bff;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+  /* A desktop application is not a document: the window scrolls its panes,
+     not the page. */
+  overflow: hidden;
+}
+
+#main,
+.app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Visible focus everywhere. Removing it would make the whole application
+   unusable from the keyboard, which is how the command palette and every
+   shortcut are meant to be reached. */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.mono {
+  font-family: var(--mono);
+  font-size: 0.92em;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+/* ---------- The fabricated-data banner ---------- */
+
+.mock-banner {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--bad),
+    var(--bad) 12px,
+    #000 12px,
+    #000 24px
+  );
+  color: #fff;
+  padding: 6px 12px;
+  font-weight: 700;
+  text-align: center;
+  letter-spacing: 0.04em;
+}
+
+/* ---------- Title bar ---------- */
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.brand-mark {
+  color: var(--accent);
+  font-size: 18px;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+}
+
+.tab {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--text);
+  cursor: pointer;
+  padding: 6px 12px;
+}
+
+.tab:hover {
+  background: var(--surface-2);
+}
+
+.tab-active {
+  background: var(--surface-2);
+  border-color: var(--border);
+  font-weight: 600;
+}
+
+.titlebar-tools {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.tool {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  cursor: pointer;
+  padding: 5px 10px;
+}
+
+/* ---------- Layout ---------- */
+
+.main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.content {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  min-width: 0;
+}
+
+.inspector {
+  width: 340px;
+  flex: 0 0 340px;
+  overflow: auto;
+  padding: 16px;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+}
+
+.inspector h3 {
+  margin: 0 0 4px;
+}
+
+.inspector h4 {
+  margin: 18px 0 6px;
+  font-size: 0.85em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* ---------- Cards, views ---------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.view h1 {
+  margin: 0 0 4px;
+  font-size: 1.5rem;
+}
+
+.view-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.tagline {
+  color: var(--muted);
+  margin-top: 0;
+}
+
+.home-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 16px;
+}
+
+.tutorial-list,
+.run-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tutorial-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.tutorial-row p {
+  margin: 2px 0 0;
+}
+
+.notice {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin: 12px 0;
+}
+
+.notice-warn {
+  border-left-color: var(--warn);
+}
+
+.legacy-notice {
+  background: var(--surface-2);
+  border-left: 4px solid var(--warn);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  margin: 8px 0;
+}
+
+/* ---------- Catalogue ---------- */
+
+.capability-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  gap: 16px;
+}
+
+.capability header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.capability details {
+  margin-top: 6px;
+}
+
+.capability summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.capability-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+}
+
+.chip {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.82em;
+  padding: 2px 10px;
+}
+
+.chip-warn {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.search {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 6px 10px;
+  min-width: 280px;
+}
+
+/* ---------- Editor ---------- */
+
+.editor-columns {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.editor {
+  width: 100%;
+  min-height: 320px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 12px;
+  resize: vertical;
+  tab-size: 2;
+}
+
+.problems {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.problem {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--bad);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+  padding: 8px 10px;
+}
+
+.problem p {
+  margin: 4px 0 0;
+}
+
+.suggestion {
+  color: var(--ok);
+}
+
+.dirty {
+  color: var(--warn);
+  font-weight: 400;
+  font-size: 0.8em;
+}
+
+.run-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.run-progress {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 8px 12px;
+}
+
+.run-progress progress {
+  flex: 1;
+  height: 10px;
+}
+
+.run-state {
+  font-weight: 600;
+  min-width: 140px;
+}
+
+/* ---------- Buttons ---------- */
+
+button {
+  font: inherit;
+}
+
+.primary,
+.secondary,
+.danger {
+  border-radius: var(--radius);
+  cursor: pointer;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+}
+
+.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.secondary {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.danger {
+  background: transparent;
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+}
+
+/* ---------- Chart ---------- */
+
+.chart {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-top: 16px;
+  padding: 12px;
+}
+
+.chart-head {
+  align-items: baseline;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.chart-head h3 {
+  margin: 0;
+}
+
+.chart-caption {
+  color: var(--muted);
+  font-size: 0.9em;
+}
+
+.plot {
+  width: 100%;
+  height: 380px;
+  color: var(--text);
+}
+
+.plot .tick {
+  fill: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.plot .axis-label {
+  fill: var(--text);
+  font-size: 12px;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.legend-item {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 6px;
+}
+
+.swatch {
+  border-radius: 2px;
+  display: inline-block;
+  height: 10px;
+  width: 18px;
+}
+
+.chart-text {
+  margin-top: 10px;
+}
+
+.chart-table,
+.runs-table,
+.shortcuts {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.chart-table th,
+.chart-table td,
+.runs-table th,
+.runs-table td,
+.shortcuts td {
+  border-bottom: 1px solid var(--border);
+  padding: 4px 8px;
+  text-align: left;
+}
+
+.row-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* ---------- Inspector detail ---------- */
+
+.metrics {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 12px;
+  margin: 0;
+}
+
+.metrics dt {
+  color: var(--muted);
+}
+
+.metrics dd {
+  margin: 0;
+  text-align: right;
+}
+
+.checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.check {
+  border-left: 3px solid var(--border);
+  margin-bottom: 8px;
+  padding-left: 8px;
+}
+
+.check p {
+  margin: 2px 0 0;
+}
+
+.check-passed {
+  border-left-color: var(--ok);
+}
+
+.check-warning {
+  border-left-color: var(--warn);
+}
+
+.check-failed {
+  border-left-color: var(--bad);
+}
+
+.check-status {
+  font-weight: 600;
+  margin-right: 6px;
+}
+
+/* ---------- Activity console ---------- */
+
+.activity {
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  height: 190px;
+  flex: 0 0 190px;
+}
+
+.activity-head {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 12px;
+}
+
+.activity-lines {
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow: auto;
+  padding: 6px 12px;
+}
+
+.line {
+  display: flex;
+  gap: 8px;
+}
+
+.line-tag {
+  flex: 0 0 70px;
+  color: var(--muted);
+}
+
+.line-pass .line-tag {
+  color: var(--ok);
+}
+
+.line-warn .line-tag {
+  color: var(--warn);
+}
+
+.line-error .line-tag {
+  color: var(--bad);
+}
+
+.line-run .line-tag {
+  color: var(--accent);
+}
+
+.activity-input {
+  border-top: 1px solid var(--border);
+  padding: 6px 12px;
+}
+
+.activity-input input {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--mono);
+  padding: 5px 8px;
+  width: 100%;
+}
+
+/* ---------- Status bar ---------- */
+
+.statusbar {
+  background: var(--surface-2);
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 18px;
+  font-size: 12px;
+  padding: 4px 12px;
+}
+
+.status-path {
+  margin-left: auto;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ok {
+  color: var(--ok);
+}
+
+.bad {
+  color: var(--bad);
+}
+
+/* ---------- Command palette ---------- */
+
+.palette-backdrop,
+.error-backdrop {
+  align-items: flex-start;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding-top: 12vh;
+  position: fixed;
+  z-index: 20;
+}
+
+.palette,
+.error-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+  padding: 12px;
+  width: min(640px, 90vw);
+}
+
+.palette-query {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 15px;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.palette-list {
+  list-style: none;
+  margin: 8px 0 0;
+  max-height: 50vh;
+  overflow: auto;
+  padding: 0;
+}
+
+.palette-row {
+  align-items: center;
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  padding: 6px 8px;
+  text-align: left;
+  width: 100%;
+}
+
+.palette-row:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.palette-label {
+  flex: 1;
+}
+
+.palette-reason {
+  color: var(--warn);
+  font-size: 0.85em;
+}
+
+.palette-shortcut {
+  color: var(--muted);
+}
+
+/* ---------- Error card ---------- */
+
+.error-card {
+  border-left: 4px solid var(--bad);
+}
+
+.error-card h2 {
+  margin: 0;
+}
+
+.error-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* ---------- Reduced motion ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* A narrow window folds the inspector under the content rather than
+   squeezing both into unreadable columns. */
+@media (max-width: 1100px) {
+  .main {
+    flex-direction: column;
+  }
+
+  .inspector {
+    width: auto;
+    flex: 0 0 auto;
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+
+  .editor-columns {
+    grid-template-columns: 1fr;
+  }
+}

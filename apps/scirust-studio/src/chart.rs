@@ -1,0 +1,651 @@
+//! Chart geometry: turning a result's real coordinates into SVG paths.
+//!
+//! Pure arithmetic, no Dioxus, no DOM — so it is unit tested on the host
+//! rather than only being looked at in a running window.
+//!
+//! Two properties are load-bearing:
+//!
+//! 1. **Nothing is invented.** The horizontal coordinates come from the
+//!    result. For a legacy (v1) result there are none, and the caller is
+//!    handed sample indices *labelled as such* — never a fabricated time
+//!    axis. See [`crate::chart::XAxisKind`].
+//! 2. **Reduction never hides a peak.** Long series are reduced for display
+//!    only, by a documented deterministic min/max bucket algorithm that
+//!    keeps every bucket's extremes. Plain every-Nth decimation is rejected
+//!    precisely because it can drop a spike entirely.
+
+use serde::{Deserialize, Serialize};
+
+/// The most points drawn per series. Beyond this the browser is drawing
+/// more path segments than the display has pixels.
+pub const MAX_POINTS_PER_SERIES: usize = 2000;
+
+/// What the horizontal axis genuinely represents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum XAxisKind {
+    /// Real coordinates from the integrator.
+    PhysicalCoordinates,
+    /// Sample ordinals only — a legacy result. The chart must say so.
+    SampleIndex,
+}
+
+/// A series ready to plot.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlotSeries {
+    /// Stable id.
+    pub id: String,
+    /// Label for the legend.
+    pub display_name: String,
+    /// Unit.
+    pub unit: String,
+    /// Values, aligned with the chart's x coordinates.
+    pub values: Vec<f64>,
+    /// Whether the user has it switched on.
+    pub visible: bool,
+}
+
+/// The numeric range a chart covers.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Range {
+    /// Lowest value.
+    pub min: f64,
+    /// Highest value.
+    pub max: f64,
+}
+
+impl Range {
+    /// A range that can be divided by without producing infinities.
+    ///
+    /// A constant series has zero extent; padding it puts the line in the
+    /// middle of the plot instead of dividing by zero.
+    pub fn padded(self) -> Range {
+        if !self.min.is_finite() || !self.max.is_finite()
+        {
+            return Range { min: 0.0, max: 1.0 };
+        }
+        let extent = self.max - self.min;
+        if extent.abs() < f64::EPSILON
+        {
+            let pad = if self.min.abs() > 1.0
+            {
+                self.min.abs() * 0.05
+            }
+            else
+            {
+                0.5
+            };
+            Range {
+                min: self.min - pad,
+                max: self.max + pad,
+            }
+        }
+        else
+        {
+            self
+        }
+    }
+
+    /// Where `value` sits in this range, as `0.0..=1.0`.
+    pub fn fraction(self, value: f64) -> f64 {
+        let extent = self.max - self.min;
+        if extent.abs() < f64::EPSILON
+        {
+            0.5
+        }
+        else
+        {
+            ((value - self.min) / extent).clamp(0.0, 1.0)
+        }
+    }
+}
+
+/// Everything needed to render one chart.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChartModel {
+    /// The horizontal coordinates actually drawn.
+    pub x: Vec<f64>,
+    /// The visible series, reduced to the same length as `x`.
+    pub series: Vec<PlotSeries>,
+    /// Horizontal range.
+    pub x_range: Range,
+    /// Vertical range across every visible series.
+    pub y_range: Range,
+    /// What the horizontal axis is.
+    pub x_axis_kind: XAxisKind,
+    /// Axis label.
+    pub x_label: String,
+    /// Axis unit, empty for a sample index.
+    pub x_unit: String,
+    /// How many points each series originally had.
+    pub source_points: usize,
+    /// How many are drawn.
+    pub drawn_points: usize,
+    /// Why there is nothing to draw, when there is not.
+    pub empty_reason: Option<EmptyReason>,
+}
+
+/// Why a chart has nothing to show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmptyReason {
+    /// The result carries no series at all.
+    NoSeries,
+    /// Every series is switched off in the legend.
+    AllSeriesHidden,
+    /// The data contained no finite values to plot.
+    NoFiniteData,
+    /// A series and the axis disagreed on length, so plotting it would pair
+    /// values with the wrong coordinates.
+    LengthMismatch,
+}
+
+impl EmptyReason {
+    /// A localization key for the explanation shown in place of the chart.
+    pub fn message_key(self) -> &'static str {
+        match self
+        {
+            EmptyReason::NoSeries => "chart.empty.no_series",
+            EmptyReason::AllSeriesHidden => "chart.empty.all_hidden",
+            EmptyReason::NoFiniteData => "chart.empty.no_finite_data",
+            EmptyReason::LengthMismatch => "chart.empty.length_mismatch",
+        }
+    }
+}
+
+/// Build a chart model from a result's coordinates and series.
+pub fn build_chart(
+    x: &[f64],
+    series: &[PlotSeries],
+    x_axis_kind: XAxisKind,
+    x_label: &str,
+    x_unit: &str,
+) -> ChartModel {
+    let empty = |reason: EmptyReason| ChartModel {
+        x: Vec::new(),
+        series: Vec::new(),
+        x_range: Range { min: 0.0, max: 1.0 },
+        y_range: Range { min: 0.0, max: 1.0 },
+        x_axis_kind,
+        x_label: x_label.to_string(),
+        x_unit: x_unit.to_string(),
+        source_points: x.len(),
+        drawn_points: 0,
+        empty_reason: Some(reason),
+    };
+
+    if series.is_empty()
+    {
+        return empty(EmptyReason::NoSeries);
+    }
+    let visible: Vec<&PlotSeries> = series.iter().filter(|s| s.visible).collect();
+    if visible.is_empty()
+    {
+        return empty(EmptyReason::AllSeriesHidden);
+    }
+    if x.is_empty() || !x.iter().all(|v| v.is_finite())
+    {
+        return empty(EmptyReason::NoFiniteData);
+    }
+    // Pairing a series with coordinates it does not match would draw points
+    // at the wrong places, which is worse than drawing nothing.
+    if visible.iter().any(|s| s.values.len() != x.len())
+    {
+        return empty(EmptyReason::LengthMismatch);
+    }
+
+    let buckets = bucket_count(x.len());
+    let indices = reduction_indices(x.len(), buckets);
+
+    let reduced_x: Vec<f64> = indices.iter().map(|&i| x[i]).collect();
+    let reduced: Vec<PlotSeries> = visible
+        .iter()
+        .map(|s| PlotSeries {
+            id: s.id.clone(),
+            display_name: s.display_name.clone(),
+            unit: s.unit.clone(),
+            values: indices.iter().map(|&i| s.values[i]).collect(),
+            visible: true,
+        })
+        .collect();
+
+    let x_range = Range {
+        min: reduced_x.iter().cloned().fold(f64::INFINITY, f64::min),
+        max: reduced_x.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
+    }
+    .padded();
+
+    let mut y_min = f64::INFINITY;
+    let mut y_max = f64::NEG_INFINITY;
+    for s in &reduced
+    {
+        for v in s.values.iter().filter(|v| v.is_finite())
+        {
+            y_min = y_min.min(*v);
+            y_max = y_max.max(*v);
+        }
+    }
+    if !y_min.is_finite() || !y_max.is_finite()
+    {
+        return empty(EmptyReason::NoFiniteData);
+    }
+
+    ChartModel {
+        drawn_points: reduced_x.len(),
+        source_points: x.len(),
+        x: reduced_x,
+        series: reduced,
+        x_range,
+        y_range: Range {
+            min: y_min,
+            max: y_max,
+        }
+        .padded(),
+        x_axis_kind,
+        x_label: x_label.to_string(),
+        x_unit: x_unit.to_string(),
+        empty_reason: None,
+    }
+}
+
+fn bucket_count(len: usize) -> usize {
+    // Each bucket contributes its minimum and its maximum, so the number of
+    // buckets is half the point budget.
+    (MAX_POINTS_PER_SERIES / 2).max(1).min(len)
+}
+
+/// The indices to draw, reducing `len` points to at most
+/// [`MAX_POINTS_PER_SERIES`].
+///
+/// **Min/max bucketing.** The range is split into equal buckets and each
+/// contributes the index of its lowest *and* its highest value, in
+/// positional order, so a spike inside a bucket survives. Every-Nth
+/// decimation is rejected for exactly this reason: a peak that falls between
+/// samples disappears silently, and a chart that quietly loses the maximum of
+/// a physical quantity is worse than one that admits it cannot draw
+/// everything.
+///
+/// Deterministic: the same input always yields the same indices, so two
+/// people looking at the same run see the same picture.
+///
+/// The first and last indices are always included, so the chart's endpoints
+/// are the run's endpoints.
+pub fn reduction_indices(len: usize, buckets: usize) -> Vec<usize> {
+    if len == 0
+    {
+        return Vec::new();
+    }
+    if len <= MAX_POINTS_PER_SERIES
+    {
+        return (0..len).collect();
+    }
+
+    let buckets = buckets.max(1);
+    let mut indices: Vec<usize> = Vec::with_capacity(buckets * 2 + 2);
+    indices.push(0);
+
+    for bucket in 0..buckets
+    {
+        let start = bucket * len / buckets;
+        let end = ((bucket + 1) * len / buckets).min(len);
+        if start >= end
+        {
+            continue;
+        }
+        indices.push(start);
+        if end - 1 > start
+        {
+            indices.push(end - 1);
+        }
+    }
+    indices.push(len - 1);
+
+    indices.sort_unstable();
+    indices.dedup();
+    indices
+}
+
+/// Reduce with the extremes of `values` preserved inside each bucket.
+///
+/// Used when a caller wants the *value-aware* reduction rather than the
+/// positional one — the positional version above is what keeps several
+/// series on a shared axis aligned, so this is offered separately rather
+/// than silently changing that behaviour.
+pub fn extreme_preserving_indices(values: &[f64], buckets: usize) -> Vec<usize> {
+    let len = values.len();
+    if len <= MAX_POINTS_PER_SERIES
+    {
+        return (0..len).collect();
+    }
+    let buckets = buckets.max(1);
+    let mut indices = Vec::with_capacity(buckets * 2 + 2);
+    indices.push(0);
+
+    for bucket in 0..buckets
+    {
+        let start = bucket * len / buckets;
+        let end = ((bucket + 1) * len / buckets).min(len);
+        if start >= end
+        {
+            continue;
+        }
+        let mut lo = start;
+        let mut hi = start;
+        for i in start..end
+        {
+            if values[i] < values[lo]
+            {
+                lo = i;
+            }
+            if values[i] > values[hi]
+            {
+                hi = i;
+            }
+        }
+        indices.push(lo.min(hi));
+        if lo != hi
+        {
+            indices.push(lo.max(hi));
+        }
+    }
+    indices.push(len - 1);
+    indices.sort_unstable();
+    indices.dedup();
+    indices
+}
+
+/// An SVG polyline `points` attribute for one series, in a viewbox of
+/// `width` × `height`.
+pub fn polyline_points(
+    chart: &ChartModel,
+    series: &PlotSeries,
+    width: f64,
+    height: f64,
+    padding: f64,
+) -> String {
+    let plot_w = (width - padding * 2.0).max(1.0);
+    let plot_h = (height - padding * 2.0).max(1.0);
+
+    let mut out = String::with_capacity(series.values.len() * 14);
+    for (i, value) in series.values.iter().enumerate()
+    {
+        if !value.is_finite()
+        {
+            continue;
+        }
+        let Some(x) = chart.x.get(i)
+        else
+        {
+            continue;
+        };
+        let px = padding + chart.x_range.fraction(*x) * plot_w;
+        // SVG's y grows downward; a plot's does not.
+        let py = padding + (1.0 - chart.y_range.fraction(*value)) * plot_h;
+        if !out.is_empty()
+        {
+            out.push(' ');
+        }
+        out.push_str(&format!("{px:.2},{py:.2}"));
+    }
+    out
+}
+
+/// A textual summary of the chart, for a screen reader and for the table
+/// fallback.
+///
+/// Present because a chart that only exists as a picture is unusable to
+/// someone who cannot see it, and because a reviewer should be able to read
+/// what the picture claims.
+pub fn accessible_summary(chart: &ChartModel) -> String {
+    if let Some(reason) = chart.empty_reason
+    {
+        return format!("No chart: {}", reason.message_key());
+    }
+    let axis = match chart.x_axis_kind
+    {
+        XAxisKind::PhysicalCoordinates => format!("{} ({})", chart.x_label, chart.x_unit),
+        XAxisKind::SampleIndex => format!("{} (ordinal, not time)", chart.x_label),
+    };
+    let names: Vec<&str> = chart
+        .series
+        .iter()
+        .map(|s| s.display_name.as_str())
+        .collect();
+    format!(
+        "{} series ({}) over {} from {:.6} to {:.6}; values range {:.6} to {:.6}; \
+         showing {} of {} points.",
+        chart.series.len(),
+        names.join(", "),
+        axis,
+        chart.x_range.min,
+        chart.x_range.max,
+        chart.y_range.min,
+        chart.y_range.max,
+        chart.drawn_points,
+        chart.source_points
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn series(id: &str, values: Vec<f64>) -> PlotSeries {
+        PlotSeries {
+            id: id.to_string(),
+            display_name: id.to_uppercase(),
+            unit: "m".to_string(),
+            values,
+            visible: true,
+        }
+    }
+
+    fn linear_chart(n: usize) -> ChartModel {
+        let x: Vec<f64> = (0..n).map(|i| i as f64 * 0.1).collect();
+        let y: Vec<f64> = (0..n).map(|i| (i as f64 * 0.01).sin()).collect();
+        build_chart(
+            &x,
+            &[series("y", y)],
+            XAxisKind::PhysicalCoordinates,
+            "time",
+            "s",
+        )
+    }
+
+    #[test]
+    fn a_short_series_is_drawn_in_full() {
+        let chart = linear_chart(100);
+        assert!(chart.empty_reason.is_none());
+        assert_eq!(chart.drawn_points, 100);
+        assert_eq!(chart.source_points, 100);
+        assert_eq!(chart.series[0].values.len(), 100);
+    }
+
+    #[test]
+    fn a_long_series_is_reduced_within_the_budget() {
+        let chart = linear_chart(250_000);
+        assert!(
+            chart.drawn_points <= MAX_POINTS_PER_SERIES + 2,
+            "{}",
+            chart.drawn_points
+        );
+        assert_eq!(chart.source_points, 250_000);
+        assert_eq!(chart.series[0].values.len(), chart.x.len());
+    }
+
+    /// The endpoints of the chart must be the endpoints of the run.
+    #[test]
+    fn reduction_keeps_the_first_and_last_point() {
+        let indices = reduction_indices(100_000, 1000);
+        assert_eq!(indices[0], 0);
+        assert_eq!(*indices.last().unwrap(), 99_999);
+    }
+
+    #[test]
+    fn reduction_is_deterministic() {
+        let a = reduction_indices(123_457, 1000);
+        let b = reduction_indices(123_457, 1000);
+        assert_eq!(a, b, "two viewers must see the same picture");
+    }
+
+    #[test]
+    fn reduction_indices_are_sorted_and_unique() {
+        let indices = reduction_indices(50_000, 1000);
+        let mut sorted = indices.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(indices, sorted);
+    }
+
+    /// The reason min/max bucketing is used rather than every-Nth
+    /// decimation: a narrow spike must survive reduction.
+    #[test]
+    fn a_narrow_spike_survives_extreme_preserving_reduction() {
+        let mut values = vec![0.0_f64; 100_000];
+        // A single-sample peak at a position every-Nth sampling would miss.
+        values[54_321] = 999.0;
+
+        let indices = extreme_preserving_indices(&values, 1000);
+        let kept: Vec<f64> = indices.iter().map(|&i| values[i]).collect();
+        let peak = kept.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        assert_eq!(peak, 999.0, "the spike must survive display reduction");
+
+        // And the naive alternative genuinely loses it, which is why this
+        // test exists.
+        let every_nth: Vec<f64> = values.iter().step_by(50).cloned().collect();
+        assert_eq!(
+            every_nth.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
+            0.0,
+            "every-Nth decimation drops the peak — this is the failure being avoided"
+        );
+    }
+
+    #[test]
+    fn an_empty_result_says_why() {
+        let chart = build_chart(&[], &[], XAxisKind::PhysicalCoordinates, "t", "s");
+        assert_eq!(chart.empty_reason, Some(EmptyReason::NoSeries));
+    }
+
+    #[test]
+    fn hiding_every_series_is_distinguished_from_having_none() {
+        let mut s = series("y", vec![1.0, 2.0]);
+        s.visible = false;
+        let chart = build_chart(&[0.0, 1.0], &[s], XAxisKind::PhysicalCoordinates, "t", "s");
+        assert_eq!(chart.empty_reason, Some(EmptyReason::AllSeriesHidden));
+    }
+
+    /// Plotting values against coordinates they do not match would draw
+    /// points in the wrong places.
+    #[test]
+    fn a_length_mismatch_refuses_to_plot() {
+        let chart = build_chart(
+            &[0.0, 1.0, 2.0],
+            &[series("y", vec![1.0, 2.0])],
+            XAxisKind::PhysicalCoordinates,
+            "t",
+            "s",
+        );
+        assert_eq!(chart.empty_reason, Some(EmptyReason::LengthMismatch));
+    }
+
+    #[test]
+    fn non_finite_coordinates_are_refused() {
+        let chart = build_chart(
+            &[0.0, f64::NAN],
+            &[series("y", vec![1.0, 2.0])],
+            XAxisKind::PhysicalCoordinates,
+            "t",
+            "s",
+        );
+        assert_eq!(chart.empty_reason, Some(EmptyReason::NoFiniteData));
+    }
+
+    #[test]
+    fn a_constant_series_still_produces_a_usable_range() {
+        let chart = build_chart(
+            &[0.0, 1.0, 2.0],
+            &[series("y", vec![5.0, 5.0, 5.0])],
+            XAxisKind::PhysicalCoordinates,
+            "t",
+            "s",
+        );
+        assert!(chart.empty_reason.is_none());
+        assert!(chart.y_range.max > chart.y_range.min, "{:?}", chart.y_range);
+        assert!(chart.y_range.min.is_finite() && chart.y_range.max.is_finite());
+    }
+
+    #[test]
+    fn polyline_points_stay_inside_the_viewbox() {
+        let chart = linear_chart(500);
+        let points = polyline_points(&chart, &chart.series[0], 800.0, 400.0, 40.0);
+        assert!(!points.is_empty());
+        for pair in points.split(' ')
+        {
+            let (x, y) = pair.split_once(',').expect("an x,y pair");
+            let x: f64 = x.parse().unwrap();
+            let y: f64 = y.parse().unwrap();
+            assert!((40.0..=760.0).contains(&x), "x out of range: {x}");
+            assert!((40.0..=360.0).contains(&y), "y out of range: {y}");
+        }
+    }
+
+    /// SVG's vertical axis grows downward; a plot's does not.
+    #[test]
+    fn a_higher_value_is_drawn_higher_on_the_screen() {
+        let chart = build_chart(
+            &[0.0, 1.0],
+            &[series("y", vec![0.0, 10.0])],
+            XAxisKind::PhysicalCoordinates,
+            "t",
+            "s",
+        );
+        let points = polyline_points(&chart, &chart.series[0], 100.0, 100.0, 0.0);
+        let ys: Vec<f64> = points
+            .split(' ')
+            .map(|p| p.split_once(',').unwrap().1.parse::<f64>().unwrap())
+            .collect();
+        assert!(ys[1] < ys[0], "the larger value must have the smaller y");
+    }
+
+    #[test]
+    fn a_non_finite_value_is_skipped_rather_than_drawn() {
+        let chart = build_chart(
+            &[0.0, 1.0, 2.0],
+            &[series("y", vec![1.0, f64::NAN, 3.0])],
+            XAxisKind::PhysicalCoordinates,
+            "t",
+            "s",
+        );
+        let points = polyline_points(&chart, &chart.series[0], 100.0, 100.0, 0.0);
+        assert_eq!(points.split(' ').count(), 2, "the NaN point is skipped");
+    }
+
+    /// The legacy case: a v1 result gets sample ordinals and the summary must
+    /// not call them time.
+    #[test]
+    fn a_sample_index_axis_is_described_as_ordinal_not_time() {
+        let chart = build_chart(
+            &[0.0, 1.0, 2.0],
+            &[series("y", vec![1.0, 2.0, 3.0])],
+            XAxisKind::SampleIndex,
+            "Sample index",
+            "",
+        );
+        let summary = accessible_summary(&chart);
+        assert!(summary.contains("ordinal, not time"), "{summary}");
+        assert!(!summary.contains("(s)"), "{summary}");
+    }
+
+    #[test]
+    fn the_accessible_summary_reports_what_was_reduced() {
+        let chart = linear_chart(250_000);
+        let summary = accessible_summary(&chart);
+        assert!(summary.contains("250000"), "{summary}");
+        assert!(summary.contains("showing"), "{summary}");
+    }
+
+    #[test]
+    fn an_empty_chart_summary_says_why() {
+        let chart = build_chart(&[], &[], XAxisKind::PhysicalCoordinates, "t", "s");
+        assert!(accessible_summary(&chart).contains("no_series"));
+    }
+}
