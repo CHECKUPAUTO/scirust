@@ -66,6 +66,22 @@ pub enum AssumptionBasis {
     DomainKnowledge { citation: String },
     /// Explicitly flagged as not checked at all. The safe default.
     Unverified,
+    /// Checked and **failed**: evidence bearing on this assumption points
+    /// against it. Written by `crate::theory_revision`, never by a caller
+    /// asserting a belief.
+    ///
+    /// `jointly_with` is empty when the evidence names this assumption alone,
+    /// so the contradiction is attributable to it. When non-empty, the
+    /// evidence falsified the *conjunction* of this assumption and those
+    /// listed — at least one member is false, but which is not determined.
+    /// That distinction is the whole reason this variant carries a list
+    /// rather than a flag: a misspecification test usually cannot say which
+    /// assumption it broke, and recording it as if it could would be the
+    /// exact overclaim this crate exists to prevent.
+    ContradictedByEvidence {
+        source: String,
+        jointly_with: Vec<CausalAssumption>,
+    },
 }
 
 /// One registry entry: an assumption's basis plus an optional free-text note.
@@ -131,8 +147,13 @@ impl AssumptionRegistry {
         self.entries.get(assumption)
     }
 
-    /// `true` iff `assumption` is registered with anything other than
-    /// [`AssumptionBasis::Unverified`].
+    /// `true` iff `assumption` is registered with a basis that is neither
+    /// [`AssumptionBasis::Unverified`] nor
+    /// [`AssumptionBasis::ContradictedByEvidence`].
+    ///
+    /// Those two are excluded for different reasons and must not be conflated
+    /// elsewhere: "not checked" is an absence of evidence, "contradicted" is
+    /// evidence of absence.
     #[must_use]
     pub fn is_supported(&self, assumption: &CausalAssumption) -> bool {
         matches!(
@@ -140,7 +161,10 @@ impl AssumptionRegistry {
             Some(AssumptionRecord {
                 basis: b,
                 ..
-            }) if !matches!(b, AssumptionBasis::Unverified)
+            }) if !matches!(
+                b,
+                AssumptionBasis::Unverified | AssumptionBasis::ContradictedByEvidence { .. }
+            )
         )
     }
 
