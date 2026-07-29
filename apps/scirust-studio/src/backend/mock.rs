@@ -184,6 +184,10 @@ impl MockBackend {
                 started_at: "2026-01-01T00:00:00Z".to_string(),
                 completed_at: "2026-01-01T00:00:01Z".to_string(),
                 elapsed_seconds: 1.0,
+                // The fabricated capability is a spring-mass-damper, which
+                // consumes no seed. A number here would render a Seed row in
+                // the inspector for a run that never drew a sample.
+                seed: None,
             },
             scenario_source: MockBackend::tutorial_source().to_string(),
             integrity: IntegrityWire {
