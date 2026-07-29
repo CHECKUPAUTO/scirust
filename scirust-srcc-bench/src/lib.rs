@@ -24,6 +24,7 @@ pub mod continual;
 pub mod dataset;
 pub mod deployment_policy;
 pub mod drift_monitor;
+pub mod group_drift;
 pub mod loaders;
 pub mod manifest;
 pub mod metrics;
@@ -62,6 +63,9 @@ pub use deployment_policy::{
     RollbackMonitor, decide_deployment,
 };
 pub use drift_monitor::{DriftMonitor, DriftMonitorConfig, DriftMonitorError, DriftState};
+pub use group_drift::{
+    GroupDriftConfig, GroupDriftError, GroupDriftMonitor, GroupDriftState, GroupReport,
+};
 pub use loaders::{LoaderError, clip_rul_targets, parse_cmapss_training, parse_obd2, parse_secom};
 pub use manifest::{DatasetManifest, FeatureDescriptor, ManifestError};
 pub use metrics::{
