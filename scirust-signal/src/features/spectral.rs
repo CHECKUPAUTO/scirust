@@ -32,6 +32,132 @@ pub struct WelchPsd {
     pub dropped_samples: usize,
 }
 
+/// A time–frequency view of a real signal: one power spectral density per
+/// frame.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Spectrogram {
+    /// One one-sided PSD per frame, each of length `segment_len / 2 + 1`, on
+    /// the same scale as [`psd`] and [`welch_psd`].
+    pub frames: Vec<Vec<f64>>,
+    /// Trailing samples that did not fill a whole frame and were not used.
+    pub dropped_samples: usize,
+}
+
+/// The short-time power spectral density of a **real** signal — how its
+/// spectrum changes over the record.
+///
+/// # Why this exists next to `radar::micro_doppler::spectrogram`
+///
+/// That one is built for radar slow-time returns and is right for them: it
+/// takes [`Complex`](crate::complex::Complex) samples, returns magnitudes in
+/// natural FFT bin order over the **full** `win_len` bins, and hard-codes a
+/// Hann window. A real-valued signal lifted into complex would pay twice: the
+/// full complex FFT costs about double a real-input one, and the upper half of
+/// the result is the conjugate mirror of the lower — redundant by
+/// construction.
+///
+/// This returns the one-sided PSD, takes the window as an argument like every
+/// other estimator here, and reports a [`SignalError`] instead of an empty
+/// `Vec` on bad input.
+///
+/// # Its exact relationship to `welch_psd`
+///
+/// Welch's method **is** this, averaged: for the same arguments,
+/// `welch_psd(...).psd[k]` equals the mean of `frames[f][k]` over `f`. Welch
+/// answers *"what is in this signal?"* and trades away time; this keeps time
+/// and trades away the variance reduction that averaging buys. Which one is
+/// wanted depends on whether the spectrum is expected to be stationary.
+///
+/// The two do **not** share an implementation, deliberately. Folding
+/// [`welch_psd`] into a mean over these frames would reorder its floating-point
+/// accumulation — it sums the periodograms and scales once, where averaging
+/// frames scales each and then sums — and its output is content-addressed by
+/// callers. Identical mathematics, different rounding, different addresses for
+/// results already stored. A test pins the relationship instead.
+///
+/// # Errors
+/// The same conditions as [`welch_psd`]: [`SignalError::InvalidInput`] if
+/// `segment_len` is not a power of two of at least 2, if `overlap >=
+/// segment_len`, if `window.len() != segment_len`, if the signal is shorter
+/// than one segment, or if any sample or window coefficient is non-finite.
+pub fn spectrogram_psd(
+    signal: &[f64],
+    segment_len: usize,
+    overlap: usize,
+    window: &[f64],
+) -> SignalResult<Spectrogram> {
+    let bad = |m: String| Err(SignalError::InvalidInput(m));
+    if segment_len < 2 || !segment_len.is_power_of_two()
+    {
+        return bad(format!(
+            "segment_len must be a power of two of at least 2, got {segment_len}"
+        ));
+    }
+    if overlap >= segment_len
+    {
+        return bad(format!(
+            "overlap {overlap} must be less than segment_len {segment_len}"
+        ));
+    }
+    if window.len() != segment_len
+    {
+        return bad(format!(
+            "window has {} coefficients but segment_len is {segment_len}",
+            window.len()
+        ));
+    }
+    if signal.len() < segment_len
+    {
+        return bad(format!(
+            "signal has {} samples, fewer than one segment of {segment_len}",
+            signal.len()
+        ));
+    }
+    if let Some(i) = signal.iter().position(|v| !v.is_finite())
+    {
+        return bad(format!("sample #{i} is not finite"));
+    }
+    if let Some(i) = window.iter().position(|v| !v.is_finite())
+    {
+        return bad(format!("window coefficient #{i} is not finite"));
+    }
+    let window_power = window.iter().map(|w| w * w).sum::<f64>() / segment_len as f64;
+    if window_power <= 0.0
+    {
+        return bad("window has zero total power".to_string());
+    }
+
+    let hop = segment_len - overlap;
+    let count = 1 + (signal.len() - segment_len) / hop;
+    let used = (count - 1) * hop + segment_len;
+    let scale = 1.0 / window_power;
+
+    let mut frames = Vec::with_capacity(count);
+    let mut shaped = vec![0.0_f64; segment_len];
+    for s in 0..count
+    {
+        let start = s * hop;
+        for (dst, (x, w)) in shaped
+            .iter_mut()
+            .zip(signal[start..start + segment_len].iter().zip(window))
+        {
+            *dst = x * w;
+        }
+        let spectrum = fft_real(&shaped);
+        frames.push(
+            psd(&spectrum, segment_len)
+                .iter()
+                .map(|p| p * scale)
+                .collect(),
+        );
+    }
+
+    Ok(Spectrogram {
+        frames,
+        dropped_samples: signal.len() - used,
+    })
+}
+
 /// Welch's method: the average of the periodograms of overlapping,
 /// windowed segments.
 ///
@@ -449,6 +575,163 @@ pub fn spectral_flatness(spectrum: &[Complex]) -> f64 {
         }
     };
     gm / am
+}
+
+#[cfg(test)]
+mod spectrogram_tests {
+    use super::*;
+    use crate::windows::hanning;
+    use std::f64::consts::TAU;
+
+    fn tone(freq: f64, rate: f64, n: usize) -> Vec<f64> {
+        (0..n)
+            .map(|i| (TAU * freq * i as f64 / rate).sin())
+            .collect()
+    }
+
+    #[test]
+    fn welch_is_exactly_the_mean_of_these_frames() {
+        // The relationship the docs claim, pinned. Not bit-exact by design:
+        // `welch_psd` sums the periodograms and scales once, this scales each
+        // frame and the test then averages, so the rounding differs. The
+        // mathematics is identical and the agreement is to 1e-12.
+        let x = tone(64.0, 1024.0, 4096);
+        let window = hanning(1024);
+        let welch = welch_psd(&x, 1024, 512, &window).unwrap();
+        let spec = spectrogram_psd(&x, 1024, 512, &window).unwrap();
+
+        assert_eq!(spec.frames.len(), welch.segments);
+        assert_eq!(spec.dropped_samples, welch.dropped_samples);
+        for k in 0..welch.psd.len()
+        {
+            let mean: f64 =
+                spec.frames.iter().map(|f| f[k]).sum::<f64>() / spec.frames.len() as f64;
+            let scale = welch.psd[k].abs().max(1e-300);
+            assert!(
+                (mean - welch.psd[k]).abs() / scale < 1e-12,
+                "bin {k}: {mean} vs {}",
+                welch.psd[k]
+            );
+        }
+    }
+
+    #[test]
+    fn a_frame_is_one_sided_and_the_right_length() {
+        // Half the bins of the complex spectrogram, because a real signal's
+        // upper half-spectrum is the conjugate mirror of its lower.
+        let spec = spectrogram_psd(&tone(64.0, 1024.0, 2048), 512, 0, &hanning(512)).unwrap();
+        assert_eq!(spec.frames.len(), 4);
+        for frame in &spec.frames
+        {
+            assert_eq!(frame.len(), 512 / 2 + 1);
+        }
+    }
+
+    #[test]
+    fn a_frequency_sweep_moves_its_peak_across_the_frames() {
+        // The whole point of keeping time: a signal whose spectrum changes is
+        // exactly the one Welch's average would hide.
+        let rate = 1024.0;
+        let n = 8192;
+        let sweep: Vec<f64> = (0..n)
+            .map(|i| {
+                let t = i as f64 / rate;
+                // Instantaneous frequency rising from 32 to 288 Hz.
+                let f = 32.0 + 256.0 * (i as f64 / n as f64);
+                (TAU * f * t).sin()
+            })
+            .collect();
+        let spec = spectrogram_psd(&sweep, 512, 256, &hanning(512)).unwrap();
+
+        let peak_of = |frame: &Vec<f64>| {
+            frame
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+                .unwrap()
+                .0
+        };
+        let first = peak_of(&spec.frames[0]);
+        let last = peak_of(&spec.frames[spec.frames.len() - 1]);
+        assert!(last > first + 20, "peak must climb: {first} -> {last}");
+
+        // And a Welch average of the same signal cannot show this at all: it
+        // reports one spectrum, with no notion of when.
+        let welch = welch_psd(&sweep, 512, 256, &hanning(512)).unwrap();
+        assert_eq!(welch.psd.len(), spec.frames[0].len());
+    }
+
+    #[test]
+    fn a_stationary_tone_keeps_the_same_peak_in_every_frame() {
+        let spec = spectrogram_psd(&tone(64.0, 1024.0, 4096), 1024, 512, &hanning(1024)).unwrap();
+        let peaks: Vec<usize> = spec
+            .frames
+            .iter()
+            .map(|f| {
+                f.iter()
+                    .enumerate()
+                    .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+                    .unwrap()
+                    .0
+            })
+            .collect();
+        assert!(peaks.windows(2).all(|w| w[0] == w[1]), "{peaks:?}");
+    }
+
+    #[test]
+    fn the_dropped_tail_is_reported_not_padded() {
+        // Same contract as `welch_psd`: padding would invent data.
+        let spec = spectrogram_psd(&tone(64.0, 1024.0, 1500), 512, 0, &hanning(512)).unwrap();
+        assert_eq!(spec.frames.len(), 2);
+        assert_eq!(spec.dropped_samples, 1500 - 1024);
+    }
+
+    #[test]
+    fn every_rejected_configuration_says_which_one() {
+        let x = tone(64.0, 1024.0, 2048);
+        let w = hanning(512);
+        assert!(
+            spectrogram_psd(&x, 500, 0, &vec![1.0; 500]).is_err(),
+            "not a power of two"
+        );
+        assert!(
+            spectrogram_psd(&x, 512, 512, &w).is_err(),
+            "overlap == segment_len"
+        );
+        assert!(
+            spectrogram_psd(&x, 512, 0, &hanning(256)).is_err(),
+            "window length"
+        );
+        assert!(
+            spectrogram_psd(&x[..100], 512, 0, &w).is_err(),
+            "shorter than a segment"
+        );
+        assert!(
+            spectrogram_psd(&x, 512, 0, &vec![0.0; 512]).is_err(),
+            "zero-power window"
+        );
+
+        let mut nan = x.clone();
+        nan[7] = f64::NAN;
+        assert!(
+            spectrogram_psd(&nan, 512, 0, &w).is_err(),
+            "non-finite sample"
+        );
+    }
+
+    #[test]
+    fn a_rectangular_single_frame_is_the_plain_periodogram() {
+        // The scale anchor, matching `welch_psd`'s: with no windowing and one
+        // frame, this must reproduce `psd(&fft_real(x), x.len())` exactly.
+        let x = tone(64.0, 1024.0, 1024);
+        let spec = spectrogram_psd(&x, 1024, 0, &vec![1.0; 1024]).unwrap();
+        assert_eq!(spec.frames.len(), 1);
+        let direct = psd(&fft_real(&x), 1024);
+        for (a, b) in spec.frames[0].iter().zip(&direct)
+        {
+            assert_eq!(a, b, "a rectangular single frame must be exact");
+        }
+    }
 }
 
 #[cfg(test)]
