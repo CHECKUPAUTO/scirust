@@ -77,7 +77,22 @@
 //!   not shrink with record length. Like [`root::CertifiedRoot`], its output
 //!   carries the choice that shaped it: [`spectrum::Spectrum::window`].
 //!
-//! [`ode`], [`quadrature`], [`root`] and [`spectrum`] share their
+//! * [`model`] — [`model::CatalogSimulator`] runs `scirust-sim`'s
+//!   oracle-tested domain models (SIR/SEIR, Lotka-Volterra, RC circuits, Van
+//!   der Pol, damped oscillators, ...) on its fixed-step RK4. `L3`, and the
+//!   reason it exists is not the integrator — [`ode::Rk4OdeSimulator`] already
+//!   integrates — but **identity**. That backend's model is an anonymous
+//!   closure, so an [`ode::OdeConfig`]'s content address fixes the span, the
+//!   step and the initial state while leaving the physics to whichever closure
+//!   the handler was built with; the same digest can denote two different
+//!   experiments. A [`model::ModelSpec`] is a name plus a parameter vector, so
+//!   a [`model::ModelRun`]'s address *determines what will be computed* — the
+//!   property a study manifest needs, since it identifies a stage's
+//!   configuration by digest and cannot inline a right-hand side.
+//!   [`model::ModeledTrajectoryBody`] makes such a run a first-class stored
+//!   object that can answer which model produced it.
+//!
+//! [`ode`], [`quadrature`], [`root`], [`spectrum`] and [`model`] share their
 //! `f64`-quantization helpers — and the solver backends their
 //! `scirust-solvers`-error mapping — via [`solver`] rather than duplicating
 //! them.
@@ -94,7 +109,14 @@
 //! so direct construction is the expected shape until a caller actually needs
 //! to swap implementations. Within the signal family, Welch averaging and
 //! spectrograms are follow-on work rather than something [`spectrum`] pretends
-//! to; `scirust-sim`'s executor kinds (SDE §08 §2) are untouched.
+//! to.
+//!
+//! [`model`] is a primitive, not a feature: no
+//! [`StageExecutor`](sos_workflow::StageExecutor) binds the catalogue to
+//! `sos-workflow` the way [`stage`] binds the closure-based ODE backend, and
+//! the CLI is connected to neither, so `sos run` is still not real. What is
+//! true after that module is narrower and checkable — a catalogued model can
+//! be specified, addressed, stored, integrated and reproduced.
 //!
 //! ## Example
 //!
@@ -131,6 +153,7 @@ pub mod bayes;
 pub mod bo;
 pub mod eig;
 pub mod error;
+pub mod model;
 pub mod nmc;
 pub mod ode;
 pub mod quadrature;
@@ -144,6 +167,10 @@ pub use bayes::{BayesFactor, log10_bayes_factor};
 pub use bo::BoResult;
 pub use eig::GpEigEstimator;
 pub use error::{Result, ScirustError};
+pub use model::{
+    CatalogSimulator, ModelKind, ModelRun, ModelSpec, ModeledTrajectory, ModeledTrajectoryBody,
+    UnknownModel,
+};
 pub use nmc::NestedMcEigEstimator;
 pub use ode::{Dopri5OdeSimulator, Rk4OdeSimulator};
 pub use quadrature::QuadratureSimulator;

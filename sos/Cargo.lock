@@ -510,6 +510,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-sim"
+version = "0.1.0"
+
+[[package]]
 name = "scirust-simd"
 version = "0.1.0"
 dependencies = [
@@ -786,6 +790,7 @@ dependencies = [
  "scirust-automl",
  "scirust-gp",
  "scirust-signal",
+ "scirust-sim",
  "scirust-solvers",
  "scirust-stats",
  "serde",
