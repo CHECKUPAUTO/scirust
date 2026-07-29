@@ -98,8 +98,14 @@
 //! them.
 //!
 //! **Gaps #2, #4–8** — the `sos-workflow` `StageExecutor` now dispatches real
-//! work through [`stage::OdeStageHandler`], and [`verdict`] supplies the
-//! agreement predicates `sos-repro` re-execution checks against.
+//! work through [`stage::OdeStageHandler`] and [`stage::CatalogStageHandler`],
+//! and [`verdict`] supplies the agreement predicates `sos-repro` re-execution
+//! checks against. The two handlers are the same mechanism with different
+//! guarantees, which is the clearest statement of what [`model`] adds: the
+//! catalogue one can be asked
+//! [`model_at`](stage::CatalogStageHandler::model_at) — *which model will this
+//! stage integrate?* — from a [`Plan`](sos_workflow::Plan) alone, before
+//! anything runs, and the closure-based one has no such answer to give.
 //!
 //! ## What is deliberately not here yet
 //!
@@ -111,12 +117,13 @@
 //! spectrograms are follow-on work rather than something [`spectrum`] pretends
 //! to.
 //!
-//! [`model`] is a primitive, not a feature: no
-//! [`StageExecutor`](sos_workflow::StageExecutor) binds the catalogue to
-//! `sos-workflow` the way [`stage`] binds the closure-based ODE backend, and
-//! the CLI is connected to neither, so `sos run` is still not real. What is
-//! true after that module is narrower and checkable — a catalogued model can
-//! be specified, addressed, stored, integrated and reproduced.
+//! Only two of the five [`Simulate`](sos_simulation::Simulate) backends have
+//! stage handlers ([`ode::Rk4OdeSimulator`] and
+//! [`model::CatalogSimulator`]); [`ode::Dopri5OdeSimulator`], [`quadrature`],
+//! [`root`] and [`spectrum`] do not, and no other engine's stages have
+//! handlers at all. `sos-cli` still has no handler registry, so nothing in
+//! that binary can bind a study's plugins to code — `sos run` is not real
+//! yet, and that is the remaining gap rather than anything in this crate.
 //!
 //! ## Example
 //!
