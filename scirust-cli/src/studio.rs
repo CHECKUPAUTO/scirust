@@ -10,8 +10,8 @@
 //! structurally rather than as a habit to maintain by hand.
 
 use scirust_studio_runtime::{
-    ExecutionControl, ExecutionError, MetricValue, NullEventSink, RunResult, SeriesRole,
-    VerificationStatus, build_registry, find_adapter,
+    Axis, ExecutionControl, ExecutionError, Field, MetricValue, NullEventSink, RunResult,
+    SeriesRole, VerificationStatus, build_registry, find_adapter,
 };
 use scirust_studio_schema::{parse_toml, validate};
 use scirust_studio_store::{RunStore, StoreError};
@@ -310,6 +310,122 @@ fn integer_metric(result: &RunResult, id: &str) -> Option<i64> {
         })
 }
 
+/// The character ramp, coolest to hottest.
+///
+/// ASCII only. A terminal that cannot render a block character would show
+/// replacement glyphs, and a field printed as a column of question marks is
+/// worse than one printed coarsely.
+const RAMP: &[u8] = b" .:-=+*#%@";
+
+/// Draw a field as a coarse ASCII map, and say what was dropped.
+///
+/// A field is `rows x columns` of numbers; a terminal has neither. The
+/// reduction keeps, for each cell, the sample **furthest from the field's
+/// mean** rather than the cell's average — the same principle the chart's
+/// min/max bucketing follows, for the same reason: an average is exactly the
+/// operation that makes a spike disappear. The header states both shapes so
+/// nobody reads the picture as the data.
+fn print_field(result: &RunResult, field: &Field) {
+    const MAX_ROWS: usize = 16;
+    const MAX_COLUMNS: usize = 64;
+
+    let rows = field.rows();
+    let columns = field.columns;
+    if rows == 0 || columns == 0
+    {
+        println!("  {} is empty", field.id);
+        return;
+    }
+
+    let axis_of = |id: &str| result.axes.iter().find(|a| a.id == id);
+    let row_axis = axis_of(&field.row_axis_id);
+    let column_axis = axis_of(&field.column_axis_id);
+    let label = |axis: Option<&Axis>| {
+        axis.map(|a| format!("{} ({})", a.display_name, a.unit))
+            .unwrap_or_else(|| "?".to_string())
+    };
+
+    let (min, max) = field
+        .values
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &v| {
+            (lo.min(v), hi.max(v))
+        });
+    let mean = field.values.iter().sum::<f64>() / field.values.len() as f64;
+
+    let drawn_rows = rows.min(MAX_ROWS);
+    let drawn_columns = columns.min(MAX_COLUMNS);
+    println!(
+        "  {:<18} {} {} x {} {}, drawn {} x {}",
+        field.id,
+        rows,
+        label(row_axis),
+        columns,
+        label(column_axis),
+        drawn_rows,
+        drawn_columns
+    );
+    println!(
+        "  {}",
+        ux::dim(&format!(
+            "{} .. {} {} mapped onto `{}`; each cell is the sample furthest from the mean, \
+             so an extreme is never averaged away",
+            format_args!("{min:.4}"),
+            format_args!("{max:.4}"),
+            field.unit,
+            String::from_utf8_lossy(RAMP).trim_end(),
+        ))
+    );
+
+    let extent = if (max - min).abs() > f64::EPSILON
+    {
+        max - min
+    }
+    else
+    {
+        1.0
+    };
+
+    for r in 0..drawn_rows
+    {
+        // Half-open blocks, so every source row lands in exactly one cell.
+        let row_lo = r * rows / drawn_rows;
+        let row_hi = ((r + 1) * rows / drawn_rows).max(row_lo + 1);
+        let mut line = String::with_capacity(drawn_columns);
+        for c in 0..drawn_columns
+        {
+            let col_lo = c * columns / drawn_columns;
+            let col_hi = ((c + 1) * columns / drawn_columns).max(col_lo + 1);
+            let mut chosen = mean;
+            let mut furthest = -1.0_f64;
+            for rr in row_lo..row_hi.min(rows)
+            {
+                for cc in col_lo..col_hi.min(columns)
+                {
+                    if let Some(v) = field.at(rr, cc)
+                    {
+                        let distance = (v - mean).abs();
+                        if distance > furthest
+                        {
+                            furthest = distance;
+                            chosen = v;
+                        }
+                    }
+                }
+            }
+            let level = (((chosen - min) / extent) * (RAMP.len() - 1) as f64).round();
+            let index = (level as usize).min(RAMP.len() - 1);
+            line.push(RAMP[index] as char);
+        }
+        // The row coordinate, so the vertical direction is readable.
+        let coordinate = row_axis
+            .and_then(|a| a.values.get(row_lo))
+            .map(|v| format!("{v:>10.4}"))
+            .unwrap_or_else(|| " ".repeat(10));
+        println!("  {coordinate} |{line}|");
+    }
+}
+
 fn print_result_text(result: &RunResult) {
     println!("{}", ux::heading(&result.summary.capability_display_name));
     println!("  scenario      {}", result.summary.scenario_name);
@@ -369,6 +485,13 @@ fn print_result_text(result: &RunResult) {
             s.values.len(),
             s.unit
         );
+    }
+
+    for field in &result.fields
+    {
+        println!();
+        println!("{}", ux::heading("FIELD"));
+        print_field(result, field);
     }
 
     println!();

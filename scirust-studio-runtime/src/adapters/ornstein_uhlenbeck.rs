@@ -576,6 +576,7 @@ impl CapabilityAdapter for OrnsteinUhlenbeckAdapter {
                 values: coordinates,
             }],
             series,
+            fields: vec![],
             metrics,
             warnings: vec![],
             verifications,

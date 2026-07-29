@@ -464,6 +464,7 @@ impl CapabilityAdapter for PendulumAdapter {
                     values: energy_series,
                 },
             ],
+            fields: vec![],
             metrics,
             warnings: vec![],
             verifications: vec![energy_check, amplitude_check],

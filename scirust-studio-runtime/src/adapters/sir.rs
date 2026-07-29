@@ -360,6 +360,7 @@ impl CapabilityAdapter for SirAdapter {
                     values: r_series,
                 },
             ],
+            fields: vec![],
             metrics: vec![
                 Metric {
                     id: "peak_infected".to_string(),
