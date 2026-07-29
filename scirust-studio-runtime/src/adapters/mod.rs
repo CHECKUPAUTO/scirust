@@ -5,6 +5,7 @@ mod apd;
 mod battery;
 mod consecutive_reactions;
 mod double_pendulum;
+mod gbm;
 mod grid;
 mod heat_rod;
 mod hvac_zone;
@@ -33,6 +34,7 @@ pub use apd::AvalanchePhotodiodeAdapter;
 pub use battery::BatteryAdapter;
 pub use consecutive_reactions::ConsecutiveReactionsAdapter;
 pub use double_pendulum::DoublePendulumAdapter;
+pub use gbm::GeometricBrownianMotionAdapter;
 pub use grid::SwingEquationAdapter;
 pub use heat_rod::HeatRodAdapter;
 pub use hvac_zone::HvacZoneAdapter;
@@ -97,6 +99,7 @@ pub fn all_adapters() -> Vec<Box<dyn CapabilityAdapter>> {
         Box::new(VanDerPolAdapter),
         Box::new(TwoCompartmentIvAdapter),
         Box::new(Mm1QueueAdapter),
+        Box::new(GeometricBrownianMotionAdapter),
     ]
 }
 
@@ -260,6 +263,11 @@ const TUTORIAL_SCENARIOS: &[(&str, &str, &str)] = &[
         "sim.stochastic.mm1_queue",
         "mm1_queue.scirust.toml",
         include_str!("../../../docs/studio/tutorials/mm1_queue.scirust.toml"),
+    ),
+    (
+        "sim.stochastic.geometric_brownian_motion",
+        "geometric_brownian_motion.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/geometric_brownian_motion.scirust.toml"),
     ),
 ];
 
