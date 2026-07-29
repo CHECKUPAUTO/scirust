@@ -25,12 +25,12 @@ use crate::adapter::{CapabilityAdapter, ExecutionError, ValidatedScenario, Valid
 use crate::control::ExecutionControl;
 use crate::result::{
     Axis, AxisMonotonicity, Metric, MetricValue, RESULT_SCHEMA_VERSION, RunProvenance, RunResult,
-    RunSummary, Series, TIME_AXIS_ID, VerificationResult, VerificationStatus,
+    RunSummary, Series, SeriesRole, TIME_AXIS_ID, VerificationResult, VerificationStatus,
 };
 use crate::sink::{EventSink, RunEvent};
 use crate::validate_support::{
-    check_unknown_model_fields, check_unknown_state_fields, resolve_model_scalar, resolve_solver,
-    resolve_state_vector,
+    check_unknown_model_fields, check_unknown_state_fields, resolve_model_scalar,
+    resolve_replicates, resolve_solver, resolve_state_vector,
 };
 
 const RESISTANCE: FieldDescriptor = FieldDescriptor {
@@ -253,6 +253,12 @@ impl CapabilityAdapter for RlcAdapter {
         {
             errors.push(e);
         }
+        // Every adapter checks this, including the deterministic ones — see
+        // `resolve_replicates`.
+        if let Err(e) = resolve_replicates(scenario, DESCRIPTOR.determinism)
+        {
+            errors.push(e);
+        }
         if !errors.is_empty()
         {
             return Err(ValidationReport { errors });
@@ -402,6 +408,7 @@ impl CapabilityAdapter for RlcAdapter {
                     display_name: "Charge".to_string(),
                     unit: "C".to_string(),
                     axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::Trajectory,
                     values: charge_series,
                 },
                 Series {
@@ -409,6 +416,7 @@ impl CapabilityAdapter for RlcAdapter {
                     display_name: "Current".to_string(),
                     unit: "A".to_string(),
                     axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::Trajectory,
                     values: current_series,
                 },
                 Series {
@@ -416,6 +424,7 @@ impl CapabilityAdapter for RlcAdapter {
                     display_name: "Capacitor voltage".to_string(),
                     unit: "V".to_string(),
                     axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::Trajectory,
                     values: capacitor_voltage_series,
                 },
             ],

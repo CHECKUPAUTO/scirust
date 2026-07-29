@@ -224,6 +224,46 @@ pub enum XAxisKind {
     SampleIndex,
 }
 
+/// What a plotted curve represents, mirroring
+/// `scirust_studio_runtime::SeriesRole`.
+///
+/// Crossing the bridge as a typed enum rather than a string: the interface
+/// *branches* on this to decide how to draw, and a mistyped string would
+/// silently fall through to the default — drawing a summary statistic and one
+/// noisy realisation with the same weight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SeriesRoleView {
+    /// One computed trajectory.
+    #[default]
+    Trajectory,
+    /// A comparison line the solver did not compute.
+    Reference,
+    /// One realisation out of an ensemble.
+    EnsembleMember,
+    /// The across-replicate mean.
+    EnsembleMean,
+    /// The lower edge of the spread band.
+    EnsembleBandLower,
+    /// The upper edge of the spread band.
+    EnsembleBandUpper,
+}
+
+impl From<scirust_studio_runtime::SeriesRole> for SeriesRoleView {
+    fn from(role: scirust_studio_runtime::SeriesRole) -> Self {
+        use scirust_studio_runtime::SeriesRole as R;
+        match role
+        {
+            R::Trajectory => SeriesRoleView::Trajectory,
+            R::Reference => SeriesRoleView::Reference,
+            R::EnsembleMember => SeriesRoleView::EnsembleMember,
+            R::EnsembleMean => SeriesRoleView::EnsembleMean,
+            R::EnsembleBandLower => SeriesRoleView::EnsembleBandLower,
+            R::EnsembleBandUpper => SeriesRoleView::EnsembleBandUpper,
+        }
+    }
+}
+
 /// One plottable series with the axis it belongs to.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SeriesView {
@@ -233,6 +273,10 @@ pub struct SeriesView {
     pub display_name: String,
     /// Unit.
     pub unit: String,
+    /// What this curve represents. Defaulted, so a run stored before roles
+    /// existed reads back as a trajectory — which is what it was.
+    #[serde(default)]
+    pub role: SeriesRoleView,
     /// The values.
     pub values: Vec<f64>,
 }
@@ -467,6 +511,7 @@ pub fn run_view(
                     id: s.id.clone(),
                     display_name: s.display_name.clone(),
                     unit: s.unit.clone(),
+                    role: s.role.into(),
                     values: s.values.clone(),
                 })
                 .collect();
@@ -482,6 +527,9 @@ pub fn run_view(
                     id: s.id.clone(),
                     display_name: s.display_name.clone(),
                     unit: s.unit.clone(),
+                    // Schema v1 predates roles entirely; every v1 series is a
+                    // plain trajectory, which is what the default says.
+                    role: SeriesRoleView::Trajectory,
                     values: s.values.clone(),
                 })
                 .collect();

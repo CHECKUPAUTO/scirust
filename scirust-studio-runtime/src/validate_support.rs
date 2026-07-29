@@ -8,8 +8,10 @@
 //! supported — still lives entirely in each adapter module.
 
 use scirust_studio_command::{CatalogedError, ErrorCode, ErrorFamily};
-use scirust_studio_registry::{Cardinality, FieldDescriptor, SolverDescriptor};
+use scirust_studio_registry::{Cardinality, DeterminismClass, FieldDescriptor, SolverDescriptor};
 use scirust_studio_schema::Scenario;
+
+use crate::ensemble::MAX_REPLICATES;
 
 /// Generic (not field-specific) capability-validation error codes. Field
 /// -specific codes live on each adapter's own `FieldDescriptor`s.
@@ -20,6 +22,11 @@ pub const CODE_MISSING_TOLERANCE: ErrorCode = ErrorCode::new(ErrorFamily::Valida
 pub const CODE_SUM_CONSTRAINT: ErrorCode = ErrorCode::new(ErrorFamily::Validation, 94);
 /// A stochastic capability was given no `experiment.seed`.
 pub const CODE_MISSING_SEED: ErrorCode = ErrorCode::new(ErrorFamily::Validation, 95);
+/// `experiment.replicates` was set above 1 on a capability that draws no
+/// sample, so the realisations would all be identical.
+pub const CODE_REPLICATES_UNSUPPORTED: ErrorCode = ErrorCode::new(ErrorFamily::Validation, 96);
+/// `experiment.replicates` was zero, or above [`MAX_REPLICATES`].
+pub const CODE_REPLICATES_OUT_OF_RANGE: ErrorCode = ErrorCode::new(ErrorFamily::Validation, 97);
 
 fn field_error(
     field: &FieldDescriptor,
@@ -326,6 +333,97 @@ pub fn resolve_seed(scenario: &Scenario) -> Result<u64, CatalogedError> {
             "add `seed = 42` (or any integer you choose) under [experiment]".to_string(),
         ),
     })
+}
+
+/// Resolve `experiment.replicates` for a capability of the given determinism
+/// class.
+///
+/// Absent means one realisation, which is what every capability produced
+/// before ensembles existed and what every deterministic one still produces.
+///
+/// **Every** adapter calls this, not only the stochastic ones, and that is the
+/// point: a scenario asking a spring-mass-damper for 500 replicates is asking
+/// for the same trajectory 500 times. Ignoring the field would waste the time
+/// silently; honouring it would present 500 identical curves as a
+/// distribution. It is refused instead, and the message says which of the two
+/// the user probably meant.
+///
+/// `docs/studio/adr/0008-ensembles.md` records why the class — rather than a
+/// per-adapter flag — decides this.
+pub fn resolve_replicates(
+    scenario: &Scenario,
+    determinism: DeterminismClass,
+) -> Result<usize, CatalogedError> {
+    let Some(requested) = scenario.experiment.replicates
+    else
+    {
+        return Ok(1);
+    };
+
+    if requested == 0
+    {
+        return Err(CatalogedError {
+            code: CODE_REPLICATES_OUT_OF_RANGE,
+            title: "Zero replicates".to_string(),
+            explanation: "`experiment.replicates = 0` asks for a run with no realisations in \
+                          it, which has no result to report"
+                .to_string(),
+            recoverable: true,
+            suggested_action: Some(
+                "use 1 for a single realisation, or remove the field — they mean the same thing"
+                    .to_string(),
+            ),
+        });
+    }
+
+    // One replicate is the single-realisation case and is always allowed,
+    // including for deterministic capabilities: it is what every scenario
+    // without the field already asks for, so rejecting it would make an
+    // explicit `replicates = 1` mean something different from omitting it.
+    if requested == 1
+    {
+        return Ok(1);
+    }
+
+    if !determinism.draws_a_sample()
+    {
+        return Err(CatalogedError {
+            code: CODE_REPLICATES_UNSUPPORTED,
+            title: "This capability has nothing to draw".to_string(),
+            explanation: format!(
+                "`experiment.replicates = {requested}` asks for {requested} independent \
+                 realisations, but this capability's determinism class is {determinism:?} — its \
+                 result is a function of its parameters, so every realisation would be the same \
+                 curve. An ensemble of identical curves is not a distribution"
+            ),
+            recoverable: true,
+            suggested_action: Some(
+                "remove `replicates` to run once; to vary the outcome, vary a parameter instead"
+                    .to_string(),
+            ),
+        });
+    }
+
+    if requested > MAX_REPLICATES
+    {
+        return Err(CatalogedError {
+            code: CODE_REPLICATES_OUT_OF_RANGE,
+            title: "Too many replicates".to_string(),
+            explanation: format!(
+                "`experiment.replicates = {requested}` exceeds the limit of {MAX_REPLICATES}. \
+                 The limit guards against a mistyped number; it is not a statement that \
+                 {MAX_REPLICATES} is affordable, because the cost of an ensemble is replicates \
+                 times steps and this bounds only the first"
+            ),
+            recoverable: true,
+            suggested_action: Some(format!(
+                "use at most {MAX_REPLICATES}; the standard error falls as 1/sqrt(n), so \
+                 quadrupling the replicates only halves it"
+            )),
+        });
+    }
+
+    Ok(requested as usize)
 }
 
 /// Check that a set of SI-coherent values sums to `expected` within

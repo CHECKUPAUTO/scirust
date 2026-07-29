@@ -259,6 +259,38 @@ pub enum XAxisKindWire {
     SampleIndex,
 }
 
+/// What a plotted curve represents, mirroring `SeriesRoleView` in the shell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SeriesRoleWire {
+    /// One computed trajectory.
+    #[default]
+    Trajectory,
+    /// A comparison line the solver did not compute.
+    Reference,
+    /// One realisation out of an ensemble.
+    EnsembleMember,
+    /// The across-replicate mean.
+    EnsembleMean,
+    /// The lower edge of the spread band.
+    EnsembleBandLower,
+    /// The upper edge of the spread band.
+    EnsembleBandUpper,
+}
+
+impl SeriesRoleWire {
+    /// Whether this curve is part of an ensemble's presentation.
+    pub fn is_ensemble(self) -> bool {
+        matches!(
+            self,
+            SeriesRoleWire::EnsembleMember
+                | SeriesRoleWire::EnsembleMean
+                | SeriesRoleWire::EnsembleBandLower
+                | SeriesRoleWire::EnsembleBandUpper
+        )
+    }
+}
+
 /// One plottable series.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SeriesWire {
@@ -268,6 +300,10 @@ pub struct SeriesWire {
     pub display_name: String,
     /// Unit.
     pub unit: String,
+    /// What this curve represents. Defaulted, so a run stored before roles
+    /// existed reads back as a trajectory — which is what it was.
+    #[serde(default)]
+    pub role: SeriesRoleWire,
     /// The values.
     pub values: Vec<f64>,
 }
@@ -578,6 +614,7 @@ mod tests {
             id: "x".to_string(),
             display_name: "Position".to_string(),
             unit: "m".to_string(),
+            role: SeriesRoleWire::Trajectory,
             values: values.clone(),
         };
         let text = serde_json::to_string(&series).unwrap();

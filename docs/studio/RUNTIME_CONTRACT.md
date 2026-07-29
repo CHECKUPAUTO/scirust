@@ -103,13 +103,23 @@ Not every capability can do this, and the table below says which:
 | `sim.ecology.logistic_growth` | every step | yes |
 | `sim.mechanics.pendulum` | every step | yes |
 | `sim.mechanics.double_pendulum` | every step | yes (the main run only) |
-| `sim.stochastic.ornstein_uhlenbeck` | **before execution only** | **none** |
+| `sim.stochastic.ornstein_uhlenbeck` | **between realisations** | **per realisation** |
 
 Robertson integrates through `scirust_sim::stiff_bridge`'s adaptive
 Rosenbrock-W solver, which exposes no per-step callback. It is given no
 fabricated progress fraction. Mid-run cancellation for it is covered at the
 process level instead — the worker can be killed — which is one of the
 reasons the worker exists.
+
+The Ornstein-Uhlenbeck process is the one row whose unit of progress is not
+the time step. `ou_path` samples a whole realisation in a single call and
+cannot be chunked — each call re-seeds, so splitting the span would produce a
+different and differently-distributed sample. Its atom is therefore the
+*realisation*: an ensemble of `n` reports `n` units and can be cancelled
+between them, and a one-replicate run has a single indivisible unit and
+reports one step from nothing to done. That last case is not a fabricated
+fraction; it is an accurate description of a job with one part. See
+`docs/studio/adr/0008-ensembles.md`, which supersedes ADR 0007 on this point.
 
 Every adapter, including Robertson, honours an already-cancelled control
 before starting; `every_adapter_honours_a_pre_cancelled_control` asserts
@@ -128,12 +138,19 @@ this for all of them.
 | `sim.ecology.logistic_growth` | `scirust_sim::ecology::LogisticGrowth` | `rk4` | `analytic_error`, `stays_below_capacity` |
 | `sim.mechanics.pendulum` | `scirust_sim::mechanics::Pendulum` | `rk4` | `energy_drift`, `amplitude_bounded` |
 | `sim.mechanics.double_pendulum` | `scirust_sim::mechanics::DoublePendulum` | `rk4` | `energy_drift`, `sensitive_dependence` |
-| `sim.stochastic.ornstein_uhlenbeck` | `scirust_sim::stochastic::ou_path` | `exact_gaussian_transition` | `stationary_moments`, `reproducible_from_seed` |
+| `sim.stochastic.ornstein_uhlenbeck` | `scirust_sim::stochastic::ou_path` | `exact_gaussian_transition` | `stationary_moments`, `reproducible_from_seed`, `ensemble_moments`*, `ensemble_derived_from_seed`* |
 
 Every row is a real, tested adapter with a shipped, executed tutorial
-scenario under `docs/studio/tutorials/`. See `docs/studio/CAPABILITY_MATRIX.md`
-for how these five relate to the rest of `scirust-sim` and the wider
-workspace.
+scenario under `docs/studio/tutorials/`. Checks marked `*` appear only when
+the scenario asks for more than one realisation. See
+`docs/studio/CAPABILITY_MATRIX.md` for how these relate to the rest of
+`scirust-sim` and the wider workspace.
+
+A capability may not emit a verification its catalogue entry does not
+declare; `no_adapter_emits_a_verification_its_catalogue_entry_does_not_declare`
+runs every adapter's own tutorial and checks it. The converse is deliberately
+not asserted, because a check that applies only to some scenarios would
+otherwise have to emit `NotApplicable` filler to satisfy it.
 
 ## Error codes
 
@@ -161,6 +178,10 @@ Validation codes currently in use:
 - `SRST-VAL-0190`..`0199`: `sim.stochastic.ornstein_uhlenbeck` field errors.
 - `SRST-VAL-0095`: a stochastic capability was given no `experiment.seed`
   (see `docs/studio/adr/0007-seeded-stochastic-capabilities.md`).
+- `SRST-VAL-0096`: `experiment.replicates` above 1 on a capability that draws
+  no sample, so every realisation would be the same curve.
+- `SRST-VAL-0097`: `experiment.replicates` is zero, or above the limit of
+  4 096 (see `docs/studio/adr/0008-ensembles.md`).
 
 Each capability's exact field-to-code mapping is in that capability's
 adapter module (the `FieldDescriptor.error_code` on each `const`). A new
@@ -259,3 +280,38 @@ Adding another stochastic capability means calling
 and setting `RunProvenance::seed`. Skipping any of the three produces a result
 nobody can reproduce, which is why the first two are enforced by the type
 system and the third by the bridge contract test.
+
+## Ensembles
+
+`experiment.replicates` asks a stochastic capability for `n` independent
+realisations instead of one. Absent, or `1`, means what every scenario meant
+before the field existed.
+
+- **The replicates' seeds are derived** from `experiment.seed` by
+  `ensemble::replicate_seeds`, so an ensemble is reproducible from the same
+  one number a lone run is. Replicate 0 keeps the base seed, which is what
+  makes a one-replicate run bit-identical to the run the capability did before
+  ensembles, and a small ensemble a prefix of a large one.
+- **Every adapter calls `validate_support::resolve_replicates`**, not only the
+  stochastic ones. A capability whose `DeterminismClass::draws_a_sample` is
+  false refuses `replicates > 1` with `SRST-VAL-0096`: `n` copies of one
+  trajectory is not a distribution.
+  `every_capability_answers_for_replicates_according_to_its_class` walks the
+  registry, so a new adapter that forgets fails in CI.
+- **The summary is accumulated in one pass** by `ensemble::EnsembleAccumulator`,
+  using Welford's update. Memory is `O(samples)` regardless of the replicate
+  count, and a small spread on a large mean survives — which the
+  `E[x²] − E[x]²` shortcut does not.
+- **Retention is bounded and reported.** At most
+  `ensemble::MAX_RETAINED_MEMBERS` individual realisations are kept; both the
+  count drawn and the count kept are metrics, and both interfaces show them.
+- **`Series::role` says what each curve is** — `EnsembleMean`,
+  `EnsembleBandLower`/`Upper`, `EnsembleMember`, plus `Reference` for a line
+  the solver did not compute. `validate_result` enforces the structural rules
+  (one mean, a band that brackets it, one shared axis) but not statistical
+  ones, which belong to the capability's own checks.
+
+See `docs/studio/adr/0008-ensembles.md`, in particular for why the seed
+derivation is scrambled rather than counted — SplitMix64 places every seed on
+one shared cycle, so two replicates whose seeds differ by a multiple of its
+increment would draw overlapping noise.

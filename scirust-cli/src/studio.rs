@@ -10,8 +10,8 @@
 //! structurally rather than as a habit to maintain by hand.
 
 use scirust_studio_runtime::{
-    ExecutionControl, ExecutionError, MetricValue, NullEventSink, RunResult, VerificationStatus,
-    build_registry, find_adapter,
+    ExecutionControl, ExecutionError, MetricValue, NullEventSink, RunResult, SeriesRole,
+    VerificationStatus, build_registry, find_adapter,
 };
 use scirust_studio_schema::{parse_toml, validate};
 use scirust_studio_store::{RunStore, StoreError};
@@ -297,6 +297,19 @@ pub fn run_scenario(args: &[String]) -> u8 {
     }
 }
 
+/// An integer metric's value, if the result carries one under that id.
+fn integer_metric(result: &RunResult, id: &str) -> Option<i64> {
+    result
+        .metrics
+        .iter()
+        .find(|m| m.id == id)
+        .and_then(|m| match m.value
+        {
+            MetricValue::Integer(v) => Some(v),
+            _ => None,
+        })
+}
+
 fn print_result_text(result: &RunResult) {
     println!("{}", ux::heading(&result.summary.capability_display_name));
     println!("  scenario      {}", result.summary.scenario_name);
@@ -315,11 +328,47 @@ fn print_result_text(result: &RunResult) {
         println!("  seed          {seed}  (re-run with this seed to obtain the same sample)");
     }
 
+    // An ensemble is announced before its series are listed, because
+    // "member_0 … member_7" beside a mean reads as eight results unless the
+    // reader is told that eight is a sample of the realisations and the mean
+    // is over all of them.
+    if let Some(drawn) = integer_metric(result, "replicates")
+    {
+        let kept = integer_metric(result, "retained_members").unwrap_or(0);
+        println!(
+            "  ensemble      {drawn} independent realisations, {kept} kept in the result{}",
+            if kept < drawn
+            {
+                format!(" ({} not stored)", drawn - kept)
+            }
+            else
+            {
+                String::new()
+            }
+        );
+    }
+
     println!();
     println!("{}", ux::heading("SERIES"));
     for s in &result.series
     {
-        println!("  {:<18} {} points, unit {}", s.id, s.values.len(), s.unit);
+        // The role, not the id, is what tells a reader whether a curve is
+        // evidence about many realisations or one of them.
+        let role = match s.role
+        {
+            SeriesRole::Trajectory => String::new(),
+            SeriesRole::Reference => ux::dim("reference"),
+            SeriesRole::EnsembleMean => ux::dim("mean over the ensemble"),
+            SeriesRole::EnsembleBandLower => ux::dim("band, lower edge"),
+            SeriesRole::EnsembleBandUpper => ux::dim("band, upper edge"),
+            SeriesRole::EnsembleMember => ux::dim("one realisation"),
+        };
+        println!(
+            "  {:<30} {} points, unit {:<4} {role}",
+            s.id,
+            s.values.len(),
+            s.unit
+        );
     }
 
     println!();
@@ -332,8 +381,14 @@ fn print_result_text(result: &RunResult) {
             MetricValue::Integer(v) => v.to_string(),
             MetricValue::Text(v) => v.clone(),
         };
-        let unit = m.unit.as_deref().unwrap_or("");
-        println!("  {:<18} {value} {unit}", m.id);
+        // Same column width as SERIES above, and wide enough for the longest
+        // id an ensemble produces — `ensemble_final_standard_error` ran off
+        // the end of the old 18.
+        match m.unit.as_deref()
+        {
+            Some(unit) if !unit.is_empty() => println!("  {:<30} {value} {unit}", m.id),
+            _ => println!("  {:<30} {value}", m.id),
+        }
     }
 
     println!();
