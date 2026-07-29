@@ -49,7 +49,7 @@ use crate::result::{
     Axis, AxisMonotonicity, Metric, MetricValue, RESULT_SCHEMA_VERSION, RunProvenance, RunResult,
     RunSummary, Series, SeriesRole, TIME_AXIS_ID, VerificationResult, VerificationStatus,
 };
-use crate::sink::{EventSink, RunEvent};
+use crate::sink::{EventSink, RunEvent, SubRangeSink};
 use crate::validate_support::{
     RK4_SOLVER, check_unknown_model_fields, check_unknown_state_fields, resolve_backend_kind,
     resolve_model_scalar, resolve_precision, resolve_replicates, resolve_solver,
@@ -268,13 +268,27 @@ impl CapabilityAdapter for VanDerPolAdapter {
             t_end: t1,
             h: step,
         };
-        let traj = simulate_cancellable(&model, &[x0, v0], span, control, sink)?;
+        // Two trajectories, so each gets half the progress window rather
+        // than reporting its own zero-to-one. See `SubRangeSink`.
+        let traj = simulate_cancellable(
+            &model,
+            &[x0, v0],
+            span,
+            control,
+            &mut SubRangeSink::new(sink, 0.0, 0.5),
+        )?;
 
         // A second trajectory from outside the cycle. The first starts inside
         // it, so the two approach from opposite directions and agreeing is a
         // stronger statement than two nearby starts agreeing.
         let probe_start = (x0 * x0 + v0 * v0).sqrt().max(1.0) * PROBE_RADIUS;
-        let probe = simulate_cancellable(&model, &[probe_start, 0.0], span, control, sink)?;
+        let probe = simulate_cancellable(
+            &model,
+            &[probe_start, 0.0],
+            span,
+            control,
+            &mut SubRangeSink::new(sink, 0.5, 1.0),
+        )?;
 
         let position = traj.column(0).expect("dim 0");
         let velocity = traj.column(1).expect("dim 1");

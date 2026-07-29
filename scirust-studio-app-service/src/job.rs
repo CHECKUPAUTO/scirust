@@ -134,16 +134,28 @@ pub struct JobSnapshot {
 
 /// Whether a capability can report genuine intermediate progress.
 ///
-/// Derived from the solvers the capability declares: a fixed-step solver is
-/// driven through `scirust-sim`'s per-step observer and reports real
-/// fractions, while the adaptive stiff path has no per-step callback to hook
-/// (see `docs/studio/RUNTIME_CONTRACT.md`). Read from the registry rather
-/// than hard-coded, so adding a capability does not require editing a list
-/// here.
+/// Read from each solver's own `reports_progress`, which it **declares**.
+/// This used to be inferred from `fixed_step`, on the reasoning that a
+/// fixed-step solver is driven through `scirust-sim`'s per-step observer.
+/// That proxy was wrong in both directions:
+///
+/// - the Ornstein-Uhlenbeck process declares a fixed step and emits no
+///   per-step fractions, so the interface drew a determinate bar that never
+///   moved (fixed in Phase 3B-3, by taking the *realisation* as the unit);
+/// - the M/M/1 queue has no step size at all and reports one unit per
+///   realisation perfectly well.
+///
+/// Two capabilities, two opposite failures of the same inference. So the
+/// answer is stated by the thing that knows it. Still read from the registry
+/// rather than a list here, so adding a capability does not mean editing this
+/// file.
 pub fn capability_supports_progress(
     descriptor: &scirust_studio_registry::CapabilityDescriptor,
 ) -> bool {
-    descriptor.supported_solvers.iter().any(|s| s.fixed_step)
+    descriptor
+        .supported_solvers
+        .iter()
+        .any(|s| s.reports_progress)
 }
 
 #[cfg(test)]

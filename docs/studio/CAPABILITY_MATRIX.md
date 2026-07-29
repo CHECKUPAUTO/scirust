@@ -43,20 +43,20 @@ callback.
 | `mechanics` (spring-mass-damper) | Yes | Yes | Yes | Yes | Yes (energy conservation) | Yes | See desktop table |
 | `mechanics` (pendulum) | Yes | Yes | Yes | Yes | Yes (energy conservation, small-angle period) | Yes | See desktop table |
 | `mechanics` (double pendulum) | Yes | Yes | Yes | Yes | Yes (energy conservation) | Yes | See desktop table |
-| `mechanics` (projectile) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
+| `mechanics` (projectile) | Yes | Yes | Yes | Yes | Yes (exact decoupled decay, terminal velocity) | Yes | See desktop table |
 | `orbital` (two-body) | Yes | Yes | Yes | Yes | Yes (energy + angular momentum) | Yes | See desktop table |
 | `epidemiology` (SIR) | Yes | Yes | Yes | Yes | Yes (population conservation, final-size relation) | Yes | See desktop table |
-| `epidemiology` (SEIR) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
+| `epidemiology` (SEIR) | Yes | Yes | Yes | Yes | Yes (population conservation, exposure leads infection) | Yes | See desktop table |
 | `ecology` (Lotka-Volterra, logistic growth) | Yes | Yes | Yes | Yes | Yes (exact first integral; closed-form solution) | Yes | See desktop table |
-| `chemistry` (consecutive/reversible reactions) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
+| `chemistry` (consecutive/reversible reactions) | Yes | Yes | Yes | Yes | Yes (Bateman closed form; closed form + equilibrium constant) | Yes | See desktop table |
 | `chemistry` (Robertson, stiff) | Yes | Yes | Yes | Yes | Yes (mass conservation, published reference values) | Yes | See desktop table |
 | `thermal` (1-D heat rod) | Yes | Yes | Yes | Yes | Yes (slowest-mode decay rate) | Yes | See desktop table |
-| `electrical` (RC, series RLC) | Yes | Yes (RLC only) | Yes (RLC only) | Yes (RLC only) | Yes (passivity, closed-form match) | Yes (RLC only) | See desktop table |
-| `electrical` (Van der Pol) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
+| `electrical` (RC, series RLC) | Yes | Yes | Yes | Yes | Yes (closed form + time constant; passivity, closed-form match) | Yes | See desktop table |
+| `electrical` (Van der Pol) | Yes | Yes | Yes | Yes | Yes (stated energy rate integrated; limit cycle from two starts) | Yes | See desktop table |
 | `stochastic` (Ornstein-Uhlenbeck) | Yes | Yes | Yes | Yes | Yes (exact stationary moments) | Yes | See desktop table |
-| `stochastic` (GBM, M/M/1 queue) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
+| `stochastic` (GBM, M/M/1 queue) | Yes | Yes | Yes | Yes | Yes (log-normal moments; L, rho and Little's law) | Yes | See desktop table |
 | `pharmacokinetics` (oral one-compartment) | Yes | Yes | Yes | Yes | Yes (Bateman closed form) | Yes | See desktop table |
-| `pharmacokinetics` (IV bolus, two-compartment) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
+| `pharmacokinetics` (IV bolus, two-compartment) | Yes | Yes | Yes | Yes | Yes (biexponential closed form, AUC = dose/k10) | Yes | See desktop table |
 | `rigid_body` | Yes | Yes | Yes | Yes | Yes (energy + angular momentum, intermediate-axis instability) | Yes | See desktop table |
 | `battery` | Yes | Yes | Yes | Yes | Yes (exact coulomb counting, closed-form relaxations) | Yes | See desktop table |
 | `hvac` | Yes | Yes | Yes | Yes | Yes (closed-form 2R2C equilibrium) | Yes | See desktop table |
@@ -64,7 +64,7 @@ callback.
 | `laser` | Yes | Yes | Yes | Yes | Yes (threshold clamp, light-current law, relaxation frequency) | Yes | See desktop table |
 | `photodiode` | Yes | Yes | Yes | Yes | Yes (closed-form level and RC time constant) | Yes | See desktop table |
 | `apd` | Yes | Yes | Yes | Yes | Yes (McIntyre limits, SNR optimum) | Yes | See desktop table |
-| `envs` (CartPole, GridWorld — `Environment`, not `System`) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
+| `envs` (CartPole, GridWorld — `Environment`, not `System`) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No, **and deliberately so** — see ADR 0012 |
 
 "Yes, per `scirust-sim`'s own tests (not independently re-verified this
 pass)" — which no longer appears in the table above — meant: the audit read
@@ -75,12 +75,14 @@ explicitly. The remaining "No" rows are model families *within* adapted
 modules, and they carry no such caveat because nothing is claimed about them
 beyond "their own crate tests them."
 
-**All 16 `scirust-sim` model modules now have at least one Studio adapter**,
-covering 19 capabilities. What is left is not a module with no coverage but
-six model *families* inside already-adapted modules — SEIR, the two non-stiff
-chemistry models, the projectile, Van der Pol, stochastic's GBM and M/M/1
-queue, and pharmacokinetics' IV-bolus and two-compartment variants. Those are
-real, tested code that Studio does not yet expose.
+**Every `scirust-sim` model family that implements `System` now has a Studio
+adapter** — 16 of 16 modules, 28 capabilities.
+
+The one remaining entry, `envs`, implements `Environment` rather than
+`System`, and is not adapted **by decision** rather than by omission: it
+needs an agent the scenario schema cannot express, and what would be
+verifiable about it is the harness rather than the physics. ADR 0012 sets out
+the attempt and the reasoning. It is closed, not pending.
 
 ## Desktop exposure (Phase 3A)
 
@@ -125,6 +127,15 @@ Columns:
 | `sim.optoelectronics.semiconductor_laser` | Yes | Yes | Yes | Yes | Yes | Yes |
 | `sim.power.swing_equation` | Yes | Yes | Yes | Yes | Yes | Yes |
 | `sim.optoelectronics.avalanche_photodiode` | Yes | Yes | Yes | Yes | Yes (against gain, not time) | Yes |
+| `sim.epidemiology.seir` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.chemistry.consecutive_reactions` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.chemistry.reversible_reaction` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.electrical.rc` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.mechanics.projectile` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.electrical.van_der_pol` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.pharmacology.two_compartment_iv` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.stochastic.mm1_queue` | Yes | Yes | Yes | Yes | Yes (histograms, against replicate) | Yes |
+| `sim.stochastic.geometric_brownian_motion` | Yes | Yes | Yes | Yes | Yes (curves and a histogram) | Yes |
 | Every other `scirust-sim` model family | No | No | No | No | No | No |
 | Every other workspace crate | No | No | No | No | No | No |
 
@@ -383,3 +394,60 @@ Both of its checks are exact:
 A sweep that does not bracket the optimum reports both checks as not
 applicable and warns, rather than reporting its endpoint as the answer —
 which is what an argmax with no analytic companion would have done.
+
+## Summary counts (Phase 3B-7)
+
+- Operational (descriptor + adapter + scenario-tested + CLI-exposed +
+  desktop-exposed): **28**.
+- **Every `scirust-sim` model family implementing `System` is adapted.** The
+  one that is not — `envs` — implements `Environment`, and is a decided
+  non-goal rather than an outstanding item (ADR 0012).
+- Determinism classes in use: **2**. Run domains in use: **3** (Time,
+  ParameterSweep, Ensemble).
+- Result members in use: series, fields, and now **distributions** (ADR 0011).
+
+### What the nine capabilities added here needed
+
+- **`sim.epidemiology.seir`** — conservation is a strong check on the
+  arithmetic and a weak one on the *structure*, so its second check is
+  structural and tolerance-free: the exposed compartment must peak strictly
+  before the infectious one, for every parameter set.
+- **`sim.chemistry.consecutive_reactions`** and
+  **`sim.chemistry.reversible_reaction`** — complete closed forms at every
+  sample. The reversible reaction's equilibrium threshold had to grow two
+  terms it was missing: the ratio `b/a` amplifies error in the smaller
+  species by `total²/(a·b)`, and past thirty time constants the exponential
+  residual drops below what `f64` accumulates.
+- **`sim.electrical.rc`** — the cheapest possible statement that a level and
+  a rate fail independently.
+- **`sim.mechanics.projectile`** — the horizontal equation is *decoupled*, so
+  its solution is exact whatever gravity does, and a test doubles gravity to
+  assert the trajectory is bit-for-bit identical. Its threshold is RK4's own
+  amplification factor `R(z)` against `exp(z)`, in closed form.
+- **`sim.electrical.van_der_pol`** — a *differential identity*: the model
+  states its own energy rate, so integrating it must reproduce the change in
+  energy. Its second check runs a second trajectory from outside the cycle,
+  which an energy identity cannot replace.
+- **`sim.pharmacology.two_compartment_iv`** — total exposure is `dose/k10`
+  regardless of distribution, so a test doubles both distribution rates and
+  asserts the curve reshapes while the area does not move.
+- **`sim.stochastic.mm1_queue`** — the first result that is a **distribution**,
+  the first `RunDomain::Ensemble`, and the first *statistical* thresholds:
+  three standard errors computed from the run's own spread, so more
+  replicates sharpen the test rather than leaving it loose. Little's law
+  relates two measured quantities and mentions no closed form at all.
+- **`sim.stochastic.geometric_brownian_motion`** — two checks that catch
+  opposite errors, because the mean of `S_T` does not depend on volatility
+  and its log-return variance does not depend on drift.
+
+### Two things closed rather than carried
+
+`envs`, and a three-axis `Field`. Both were reopened with the intent of
+finishing them and both were closed on evidence — see ADR 0012, which also
+records that the second investigation found `scirust-itd::Field3` and so
+disproved the assumption the decision was first drafted on.
+
+Adapting `scirust-itd` itself remains genuine future work: it would be the
+first capability from outside `scirust-sim`, its simulation driver returns
+time series and 2-D fields the schema already expresses, and the audit's rule
+that another crate needs a real API review before adoption applies.

@@ -47,6 +47,7 @@ pub const RK4_SOLVER: SolverDescriptor = SolverDescriptor {
     summary: "Classical fixed-step Runge-Kutta 4. Requires `solver.step`.",
     fixed_step: true,
     adaptive_tolerance: false,
+    reports_progress: true,
 };
 
 fn field_error(
@@ -742,6 +743,7 @@ mod tests {
             summary: "s",
             fixed_step: true,
             adaptive_tolerance: false,
+            reports_progress: true,
         };
         let err = resolve_solver(&scenario, std::slice::from_ref(&rk4)).unwrap_err();
         assert_eq!(err.code, CODE_UNSUPPORTED_SOLVER);
@@ -759,6 +761,7 @@ mod tests {
             summary: "s",
             fixed_step: true,
             adaptive_tolerance: false,
+            reports_progress: true,
         };
         let err = resolve_solver(&scenario, std::slice::from_ref(&rk4)).unwrap_err();
         assert_eq!(err.code, CODE_MISSING_STEP);
@@ -776,6 +779,7 @@ mod tests {
             summary: "s",
             fixed_step: false,
             adaptive_tolerance: true,
+            reports_progress: false,
         };
         let err = resolve_solver(&scenario, std::slice::from_ref(&stiff)).unwrap_err();
         assert_eq!(err.code, CODE_MISSING_TOLERANCE);

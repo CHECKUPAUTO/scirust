@@ -512,6 +512,87 @@ mod tests {
         }
     }
 
+    /// A capability's declared `reports_progress` must match what it
+    /// actually emits.
+    ///
+    /// This is the assertion the old `fixed_step` proxy could not make. That
+    /// proxy was wrong in both directions and produced two real defects: the
+    /// Ornstein-Uhlenbeck process declared a fixed step and emitted no
+    /// fractions, so the desktop drew a determinate bar that never moved;
+    /// and the discrete-event queue has no step size at all while reporting
+    /// one unit per realisation perfectly well.
+    ///
+    /// Driven by the registry, so a capability that declares progress and
+    /// forgets to emit it — or emits it while declaring it cannot — fails
+    /// here rather than in an interface nobody is watching.
+    #[test]
+    fn every_capability_emits_the_progress_it_declares() {
+        use crate::control::ExecutionControl;
+        use crate::sink::{CollectingEventSink, RunEvent};
+
+        for adapter in all_adapters()
+        {
+            let descriptor = adapter.descriptor();
+            let id = descriptor.id.0;
+            let declared = descriptor
+                .supported_solvers
+                .iter()
+                .any(|s| s.reports_progress);
+
+            let toml = tutorial_scenario_for(id).expect("tutorial");
+            let scenario = scirust_studio_schema::parse_toml(toml).expect("parses");
+            let validated = adapter.validate(&scenario).expect("validates");
+            let mut sink = CollectingEventSink::new();
+            adapter
+                .execute(&validated, &ExecutionControl::new(), &mut sink)
+                .unwrap_or_else(|e| panic!("{id} failed to execute: {e}"));
+
+            let fractions: Vec<f64> = sink
+                .events()
+                .iter()
+                .filter_map(|e| match e
+                {
+                    RunEvent::Progress { fraction, .. } => Some(*fraction),
+                    _ => None,
+                })
+                .collect();
+
+            if declared
+            {
+                assert!(
+                    !fractions.is_empty(),
+                    "{id} declares that it reports progress and emitted none; the interface \
+                     would draw a determinate bar that never moves"
+                );
+                // A fraction a reader can trust: forward-only and inside
+                // [0, 1]. An emitter that went backwards or past one would be
+                // worse than none at all.
+                let mut previous = 0.0_f64;
+                for fraction in &fractions
+                {
+                    assert!(
+                        (0.0..=1.0).contains(fraction),
+                        "{id} emitted a fraction of {fraction}"
+                    );
+                    assert!(
+                        *fraction >= previous,
+                        "{id} emitted {fraction} after {previous}; progress does not go backwards"
+                    );
+                    previous = *fraction;
+                }
+            }
+            else
+            {
+                assert!(
+                    fractions.is_empty(),
+                    "{id} declares that it cannot report progress and emitted {} fractions; the \
+                     interface would show indeterminate activity for a run that knows where it is",
+                    fractions.len()
+                );
+            }
+        }
+    }
+
     #[test]
     fn find_adapter_matches_the_registry() {
         let registry = build_registry();

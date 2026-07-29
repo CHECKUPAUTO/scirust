@@ -39,7 +39,7 @@ pub use result_v1::{
 /// public type: a caller cannot name the type of something it can read
 /// without this.
 pub use scirust_studio_registry::DeterminismClass;
-pub use sink::{CollectingEventSink, EventSink, NullEventSink, RunEvent};
+pub use sink::{CollectingEventSink, EventSink, NullEventSink, RunEvent, SubRangeSink};
 
 pub use adapters::{
     all_adapters, build_registry, find_adapter, tutorial_file_name_for, tutorial_scenario_for,
