@@ -9,6 +9,17 @@
 //!
 //! * [`Plan`] — an immutable, validated [`Stage`] DAG with a **deterministic**
 //!   topological [schedule](Plan::schedule) (ties broken by [`StageId`]).
+//!   A stage's edges come in two kinds, deliberately kept apart:
+//!   [`deps`](Stage::deps) is *ordering* ("run after"), while
+//!   [`consumes`](Stage::consumes) is *dataflow* ("read the outputs of", which
+//!   implies ordering). Without the second there was no way to feed one stage
+//!   into the next at all — [`inputs`](Stage::inputs) takes literal
+//!   [`ObjectId`](sos_core::ObjectId)s and an upstream stage's ids do not
+//!   exist until it has run — so every output recorded zero provenance
+//!   parents and a plan produced a graph with no edges between its own nodes.
+//!   [`run_plan`] resolves consumed outputs into a stage's inputs **before**
+//!   computing its [`CacheKey`], so a downstream stage necessarily misses the
+//!   cache when its upstream produced something different.
 //! * [`CacheKey`] — the content address of a stage invocation:
 //!   `hash(descriptor ⊕ inputs ⊕ config ⊕ seed ⊕ env)`. The one mechanism that
 //!   gives **both** reproducibility and incremental compute.

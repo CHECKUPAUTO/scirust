@@ -8,7 +8,7 @@ use sos_core::{Digest, ObjectId};
 use crate::cache::CacheKey;
 use crate::error::Result;
 use crate::ledger::{LedgerStep, RunLedger, StepOutcome};
-use crate::plan::{Plan, Stage};
+use crate::plan::{Plan, Stage, StageId};
 
 /// A memo of stage results keyed by [`CacheKey`] — the "solved sub-DAG is never
 /// re-solved" store. Backends persist this in the object store's named refs; the
@@ -93,20 +93,50 @@ pub fn run_plan<M: Memo, E: StageExecutor>(
     executor: &mut E,
 ) -> Result<RunLedger> {
     let mut steps = Vec::with_capacity(plan.stages().len());
+    // What each finished stage produced, so a later stage that *consumes* it
+    // can be handed real object ids. The schedule is topological, so every
+    // consumed stage is already in here by the time it is needed.
+    let mut produced_by: BTreeMap<StageId, Vec<ObjectId>> = BTreeMap::new();
     for id in plan.schedule()
     {
-        let stage = plan.get(&id).expect("scheduled id belongs to the plan");
+        let declared = plan.get(&id).expect("scheduled id belongs to the plan");
+        // Resolve dataflow before the cache key is computed, not after: the
+        // key reads `inputs`, so a stage whose upstream produced something
+        // different necessarily misses the cache. Resolving afterwards would
+        // let a downstream stage cache-hit on a changed upstream, which is the
+        // one way this feature could quietly corrupt a result.
+        let stage = if declared.consumes.is_empty()
+        {
+            declared.clone()
+        }
+        else
+        {
+            let mut resolved = declared.inputs.clone();
+            for upstream in &declared.consumes
+            {
+                resolved.extend(
+                    produced_by
+                        .get(upstream)
+                        .expect("a consumed stage is a dependency, so it ran first")
+                        .iter()
+                        .copied(),
+                );
+            }
+            declared.with_resolved_inputs(resolved)
+        };
+
         let cache_key = stage.cache_key(env_digest);
         let (outcome, outputs) = match memo.get(&cache_key)
         {
             Some(cached) => (StepOutcome::CacheHit, cached),
             None =>
             {
-                let produced = executor.run(stage)?;
+                let produced = executor.run(&stage)?;
                 memo.put(cache_key, produced.clone());
                 (StepOutcome::Ran, produced)
             },
         };
+        produced_by.insert(id.clone(), outputs.clone());
         steps.push(LedgerStep {
             stage: id,
             cache_key,
