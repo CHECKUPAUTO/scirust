@@ -274,6 +274,100 @@ mod tests {
         }
     }
 
+    /// `backend.precision` must mean something.
+    ///
+    /// The schema accepted `"f32"` and every adapter computed in `f64`
+    /// regardless, because nothing compared the scenario's request against the
+    /// descriptor. A run then recorded a stated precision it did not have —
+    /// the same shape of defect as `experiment.seed` before Phase 3B-2, and
+    /// worse, because a silently-upgraded precision looks like the user got
+    /// what they asked for.
+    ///
+    /// Driven by each descriptor rather than by today's answer: when a
+    /// capability grows an `f32` path, this follows it without being edited.
+    #[test]
+    fn every_capability_honours_the_precision_it_declares() {
+        for adapter in all_adapters()
+        {
+            let descriptor = adapter.descriptor();
+            let id = descriptor.id.0;
+            let source = tutorial_scenario_for(id).expect("every capability ships a tutorial");
+            let mut scenario =
+                scirust_studio_schema::parse_toml(source).expect("the tutorial parses");
+
+            for (name, kind) in [
+                ("f64", scirust_studio_registry::PrecisionKind::F64),
+                ("f32", scirust_studio_registry::PrecisionKind::F32),
+            ]
+            {
+                scenario.backend.precision = name.to_string();
+                let outcome = adapter.validate(&scenario);
+                if descriptor.supported_precisions.contains(&kind)
+                {
+                    assert!(
+                        outcome.is_ok(),
+                        "{id} declares {name} but refused it: {:?}",
+                        outcome.err()
+                    );
+                }
+                else
+                {
+                    let report = outcome.err().unwrap_or_else(|| {
+                        panic!(
+                            "{id} accepted `precision = \"{name}\"` although it does not declare \
+                             it; the run would have been computed at a different precision from \
+                             the one recorded"
+                        )
+                    });
+                    assert!(
+                        report.errors.iter().any(|e| {
+                            e.code == crate::validate_support::CODE_UNSUPPORTED_PRECISION
+                        }),
+                        "{id} refused {name} but not with the code that explains why: {:?}",
+                        report.errors.iter().map(|e| e.code).collect::<Vec<_>>()
+                    );
+                }
+            }
+        }
+    }
+
+    /// The same for `backend.kind`. It refuses nothing today — every
+    /// capability declares `Cpu` and the schema accepts only `"cpu"` — and
+    /// exists so the first capability that is not CPU-only fails loudly
+    /// rather than running somewhere it never claimed to.
+    #[test]
+    fn every_capability_honours_the_backend_it_declares() {
+        for adapter in all_adapters()
+        {
+            let descriptor = adapter.descriptor();
+            let id = descriptor.id.0;
+            let source = tutorial_scenario_for(id).expect("every capability ships a tutorial");
+            let mut scenario =
+                scirust_studio_schema::parse_toml(source).expect("the tutorial parses");
+
+            scenario.backend.kind = "cpu".to_string();
+            let outcome = adapter.validate(&scenario);
+            if descriptor
+                .supported_backends
+                .contains(&scirust_studio_registry::BackendKind::Cpu)
+            {
+                assert!(outcome.is_ok(), "{id} declares Cpu but refused it");
+            }
+            else
+            {
+                let report = outcome
+                    .err()
+                    .unwrap_or_else(|| panic!("{id} accepted a backend it does not declare"));
+                assert!(
+                    report
+                        .errors
+                        .iter()
+                        .any(|e| e.code == crate::validate_support::CODE_UNSUPPORTED_BACKEND)
+                );
+            }
+        }
+    }
+
     #[test]
     fn find_adapter_matches_the_registry() {
         let registry = build_registry();

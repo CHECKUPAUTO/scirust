@@ -509,3 +509,54 @@ which answers "where is the process at each moment". A histogram of first
 passage times is a distribution over a scalar, and needs an axis kind the
 schema does not have. ADR 0008 records it as the next thing, and as not
 attempted.
+
+## 17. Update — two promises nothing kept
+
+Not a phase; a correction. Both items were found by asking the question ADR
+0007 asked about `experiment.seed` — *does anything actually read this?* — of
+the fields around it.
+
+**`backend.precision` was accepted and ignored.** The schema validated
+`"f32"`, every descriptor declared `supported_precisions:
+&[PrecisionKind::F64]`, and **nothing compared the two**. A scenario asking
+for single precision passed validation and was computed in double, recording
+a stated precision it did not have.
+
+That is worse than a field nobody reads. An ignored `seed` produced a result
+that was merely unreproducible; an ignored `precision` produces a result that
+looks like the user got what they asked for. And `f32` is not a smaller
+`f64` — someone selecting it is usually asking about conditioning or matching
+another implementation's arithmetic, so answering in `f64` answers a different
+question and says nothing about having done so.
+
+Closed by `validate_support::resolve_precision`, called by every adapter, with
+`SRST-VAL-0098`. `PrecisionKind` gained an `F32` variant that no capability
+declares — a vocabulary entry, not a claim, so a descriptor can say "not here
+yet" instead of the schema saying "yes" on its behalf.
+`resolve_backend_kind`/`SRST-VAL-0099` closes the identical hole in
+`backend.kind` before it can matter, which will be the first time a capability
+is not CPU-only.
+
+**`commands.rs` documented a feature that does not exist.** Its module comment
+read *"File dialogs are native, run here, and hand back only the selected
+file's contents"* — a description of the intended design, written as though it
+had been built. There is no dialog command; `dialog:*` is not granted; the
+only scenario sources are the compiled-in tutorials and what the user types.
+
+`DESKTOP_SECURITY.md` and `DESKTOP_ARCHITECTURE.md` were both accurate about
+this, which is the interesting part: the inaccuracy survived because it was in
+the one place a reader would take most literally — the source. Corrected to
+state the absence, and to record the constraint the picker must satisfy when
+it is built, since that constraint is the reason the comment was written in
+the first place: a `read_file(path)` reintroduced as "the file the user just
+picked" is still `read_file(path)`.
+
+**Two registry-driven tests** walk `all_adapters()` and assert each honours
+the precision and backend it declares, following the descriptor rather than
+today's answer — so a capability that grows an `f32` path is covered without
+editing them.
+
+**Still outstanding**, unchanged: the native file picker itself; `thermal`'s
+`HeatRod1d`, which needs a presentation the interface does not have; a
+result axis whose coordinates are bins; code signing and everything that
+depends on it; and the remaining unadapted `scirust-sim` families.
