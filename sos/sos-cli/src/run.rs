@@ -7,26 +7,30 @@
 //! the binding — nothing in this binary could map a study's plugin names to
 //! code. That is what this module is.
 //!
-//! ## Why only the model catalogue is bound
+//! ## Which backends can be bound, and why it is not a matter of effort
 //!
-//! `sos-scirust` ships five `Simulate` backends and two stage handlers, and
-//! exactly one of them can be driven from a command line. That is not an
-//! arbitrary limit of this command; it follows from what a *file* can say.
+//! `sos-scirust` ships five `Simulate` backends. Exactly **two** can be driven
+//! from a command line, and that follows from what a *file* can say rather
+//! than from how much plumbing is here.
 //!
 //! [`OdeStageHandler`](sos_scirust::stage::OdeStageHandler) integrates
-//! `dy/dt = f(t, y)` where `f` is a Rust closure. No JSON file can name a
-//! closure, so no amount of CLI plumbing could let a user supply one — a
-//! study naming that plugin would have to be run from Rust that already has
-//! the right-hand side compiled in.
-//! [`CatalogStageHandler`] runs
-//! [`ModelRun`]s, which are *data*: a model name plus its parameters plus an
-//! initial state. Those can be written down, so they can be handed to a
-//! binary.
+//! `dy/dt = f(t, y)` where `f` is a Rust closure; `Dopri5OdeSimulator`,
+//! `QuadratureSimulator` and `BroydenRootSimulator` likewise take a function —
+//! a right-hand side, an integrand, a residual. **No JSON file can name a
+//! function**, so no amount of CLI plumbing could let a user supply one; those
+//! backends need a transport that ships *code* (RFC-0002 §10's WASM component
+//! or MCP transports), which is a different mechanism, not a bigger version of
+//! this one.
 //!
-//! That is the practical payoff of a model having an identity, and it is why
-//! `sos run` binds the catalogue plugin and nothing else. When another backend
-//! gets a data-only config and a handler, it joins the table
-//! ([`HANDLERS`]).
+//! The two that can be bound are the two whose configuration is data:
+//!
+//! * [`CatalogStageHandler`] runs [`ModelRun`]s — a model name, its
+//!   parameters, an initial state.
+//! * [`SpectrumStageHandler`] runs [`SpectrumConfig`]s — samples, a sample
+//!   rate, a named window.
+//!
+//! Both are written down in the same file, tagged by kind (see
+//! [`StageConfig`]), and both appear in [`HANDLERS`].
 //!
 //! ## What the command needs, and why each piece is asked for rather than
 //! guessed
@@ -64,7 +68,11 @@ use std::rc::Rc;
 use sos_core::{Digest, HashAlgo, SemVer};
 use sos_registry::{Capability, Grant, PluginDescriptor, Registry};
 use sos_scirust::model::ModelRun;
-use sos_scirust::stage::{CatalogStageHandler, model_config_address, sim_backend};
+use sos_scirust::spectrum::SpectrumConfig;
+use sos_scirust::stage::{
+    CatalogStageHandler, SpectrumStageHandler, model_config_address, signal_backend, sim_backend,
+    spectrum_config_address,
+};
 use sos_workflow::{Dispatch, MemoTable, StageExecutor, resolve_manifest, run_plan};
 
 use crate::args::Args;
@@ -78,15 +86,73 @@ use crate::store;
 /// yesterday must name the same plugin today.
 pub const CATALOG_PLUGIN: &str = "sim-catalog";
 
+/// The plugin name `sos run` binds to the spectral backend.
+pub const SPECTRUM_PLUGIN: &str = "signal-periodogram";
+
 /// Every plugin name this binary can bind, with a one-line description — the
 /// CLI's handler table, and the thing whose absence kept `sos run` from
 /// existing.
 ///
-/// One entry today. See the module docs on why it is one and not five.
-pub const HANDLERS: &[(&str, &str)] = &[(
-    CATALOG_PLUGIN,
-    "scirust-sim's catalogued models (L3, fixed-step RK4)",
-)];
+/// Two entries. See the module docs on why it is two and not five.
+pub const HANDLERS: &[(&str, &str)] = &[
+    (
+        CATALOG_PLUGIN,
+        "scirust-sim's catalogued models (L3, fixed-step RK4)",
+    ),
+    (
+        SPECTRUM_PLUGIN,
+        "scirust-signal's windowed periodogram (L3, reproducible not accurate)",
+    ),
+];
+
+/// One entry in a runs file: a stage configuration, tagged by which backend
+/// consumes it.
+///
+/// Tagged rather than inferred from shape, because guessing which backend a
+/// JSON object was meant for is exactly the kind of silent substitution the
+/// rest of this system refuses. An unknown tag is an error.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum StageConfig {
+    /// A catalogued model run, for [`CATALOG_PLUGIN`].
+    Model(ModelRun),
+    /// A spectral measurement, for [`SPECTRUM_PLUGIN`].
+    Spectrum(SpectrumConfig),
+}
+
+impl StageConfig {
+    /// The content address a study must write in a stage's `config` field to
+    /// select this configuration.
+    #[must_use]
+    pub fn address(&self) -> Digest {
+        match self
+        {
+            Self::Model(run) => model_config_address(run),
+            Self::Spectrum(config) => spectrum_config_address(config),
+        }
+    }
+
+    /// The plugin that consumes this configuration.
+    #[must_use]
+    pub const fn plugin(&self) -> &'static str {
+        match self
+        {
+            Self::Model(_) => CATALOG_PLUGIN,
+            Self::Spectrum(_) => SPECTRUM_PLUGIN,
+        }
+    }
+
+    /// A short description of what this configuration will do, for
+    /// [`address`]'s comments.
+    #[must_use]
+    pub fn summary(&self) -> String {
+        match self
+        {
+            Self::Model(run) => run.model.kind.to_string(),
+            Self::Spectrum(c) => format!("{} window over {} samples", c.window, c.signal.len()),
+        }
+    }
+}
 
 /// Run `sos run <manifest.toml> <runs.json> [--plugins <f>] [--allow <caps>]
 /// [--env <label>] [--store <path>]`.
@@ -105,21 +171,33 @@ pub fn run(args: &Args) -> Result<String> {
     let plan =
         resolve_manifest(&text).map_err(|e| CliError::Usage(format!("{manifest_path}: {e}")))?;
 
-    let runs: Vec<ModelRun> = serde_json::from_slice(&std::fs::read(runs_path)?)?;
+    let configs: Vec<StageConfig> = serde_json::from_slice(&std::fs::read(runs_path)?)?;
     let grant = parse_grant(args.flag("allow"))?;
     let registry = load_registry(args.flag("plugins"))?;
 
     let root = store::resolve_root(args.flag("store"))?;
     let store = Rc::new(RefCell::new(store::open(&root)?));
 
-    let mut handler = CatalogStageHandler::new(
+    let mut models = CatalogStageHandler::new(
         Rc::clone(&store),
         sim_backend(SemVer::new(0, 1, 0), backend_hash()),
     );
-    let offered: Vec<Digest> = runs.into_iter().map(|r| handler.offer(r)).collect();
+    let mut spectra = SpectrumStageHandler::new(
+        Rc::clone(&store),
+        signal_backend(SemVer::new(0, 1, 0), backend_hash()),
+    );
+    let offered: Vec<Digest> = configs
+        .into_iter()
+        .map(|c| match c
+        {
+            StageConfig::Model(run) => models.offer(run),
+            StageConfig::Spectrum(config) => spectra.offer(config),
+        })
+        .collect();
 
     let mut dispatch = Dispatch::new(&registry, grant);
-    dispatch.register(CATALOG_PLUGIN, Box::new(handler) as Box<dyn StageExecutor>);
+    dispatch.register(CATALOG_PLUGIN, Box::new(models) as Box<dyn StageExecutor>);
+    dispatch.register(SPECTRUM_PLUGIN, Box::new(spectra) as Box<dyn StageExecutor>);
 
     let env = HashAlgo::Sha256.hash(
         b"sos-cli:env",
@@ -128,7 +206,7 @@ pub fn run(args: &Args) -> Result<String> {
     let ledger = run_plan(&plan, &env, &mut MemoTable::new(), &mut dispatch)?;
 
     let mut out = format!(
-        "ran {} of {} stage(s) from {manifest_path} ({} run(s) on offer)\n",
+        "ran {} of {} stage(s) from {manifest_path} ({} config(s) on offer)\n",
         ledger.ran_count(),
         ledger.steps.len(),
         offered.len()
@@ -215,27 +293,43 @@ fn load_registry(path: Option<&str>) -> Result<Registry> {
     Ok(registry)
 }
 
-/// The well-known content hash of the built-in catalogue plugin — what a study
-/// must write in its stage `pin` to run without a descriptors file.
+/// The well-known content hash of a built-in plugin — what a study must write
+/// in its stage `pin` to run without a descriptors file.
 #[must_use]
-pub fn catalog_plugin_hash() -> Digest {
-    HashAlgo::Sha256.hash(b"sos-cli:plugin", b"sim-catalog@1.0.0")
+pub fn plugin_hash(plugin: &str) -> Digest {
+    HashAlgo::Sha256.hash(b"sos-cli:plugin", format!("{plugin}@1.0.0").as_bytes())
 }
 
-/// The registry `sos run` uses when no descriptors file is given: the
-/// catalogue plugin, at the hash [`catalog_plugin_hash`] publishes.
+/// The catalogue plugin's well-known hash. Kept as a named function because
+/// study authors and tests reference it directly.
+#[must_use]
+pub fn catalog_plugin_hash() -> Digest {
+    plugin_hash(CATALOG_PLUGIN)
+}
+
+/// The spectral plugin's well-known hash.
+#[must_use]
+pub fn spectrum_plugin_hash() -> Digest {
+    plugin_hash(SPECTRUM_PLUGIN)
+}
+
+/// The registry `sos run` uses when no descriptors file is given: every
+/// built-in plugin, at the hash [`plugin_hash`] publishes.
 #[must_use]
 pub fn default_registry() -> Registry {
     let mut registry = Registry::new();
-    registry.register(
-        PluginDescriptor::new(
-            CATALOG_PLUGIN,
-            SemVer::new(1, 0, 0),
-            catalog_plugin_hash(),
-            sos_registry::Role::Simulation,
-        )
-        .needs(Capability::Effectful),
-    );
+    for (name, _) in HANDLERS
+    {
+        registry.register(
+            PluginDescriptor::new(
+                *name,
+                SemVer::new(1, 0, 0),
+                plugin_hash(name),
+                sos_registry::Role::Simulation,
+            )
+            .needs(Capability::Effectful),
+        );
+    }
     registry
 }
 
@@ -266,26 +360,23 @@ pub fn run_address(run: &ModelRun) -> Digest {
 /// a different one.
 pub fn address(args: &Args) -> Result<String> {
     let path = args.positional(0, "runs.json")?;
-    let runs: Vec<ModelRun> = serde_json::from_slice(&std::fs::read(path)?)?;
-    if runs.is_empty()
+    let configs: Vec<StageConfig> = serde_json::from_slice(&std::fs::read(path)?)?;
+    if configs.is_empty()
     {
-        return Ok(format!("{path} contains no runs"));
+        return Ok(format!("{path} contains no configurations"));
     }
 
-    let mut out = format!(
-        "# stage fields for {path} — plugin `{CATALOG_PLUGIN}` v1.0.0\n\
-         # pin = \"{pin}\"\n",
-        pin = catalog_plugin_hash().to_hex()
-    );
-    for (i, run) in runs.iter().enumerate()
+    let mut out = format!("# stage fields for {path}\n");
+    for (i, config) in configs.iter().enumerate()
     {
         out.push_str(&format!(
-            "\n[[stage]]\nid      = \"stage-{i}\"  # {model}\n\
-             plugin  = \"{CATALOG_PLUGIN}\"\nversion = \"1.0.0\"\n\
+            "\n[[stage]]\nid      = \"stage-{i}\"  # {what}\n\
+             plugin  = \"{plugin}\"\nversion = \"1.0.0\"\n\
              pin     = \"{pin}\"\nconfig  = \"{cfg}\"\n",
-            model = run.model.kind,
-            pin = catalog_plugin_hash().to_hex(),
-            cfg = run_address(run).to_hex(),
+            what = config.summary(),
+            plugin = config.plugin(),
+            pin = plugin_hash(config.plugin()).to_hex(),
+            cfg = config.address().to_hex(),
         ));
     }
     out.pop();

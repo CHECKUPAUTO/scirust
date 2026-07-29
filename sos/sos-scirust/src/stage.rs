@@ -13,7 +13,7 @@
 //! a content-addressed object whose [`ObjectId`] the scheduler records in its
 //! ledger.
 //!
-//! ## Two handlers, and the difference between them
+//! ## Handlers, and the difference between them
 //!
 //! [`OdeStageHandler`] runs [`Rk4OdeSimulator`], whose model is a Rust closure
 //! the handler closes over. [`CatalogStageHandler`] runs
@@ -32,15 +32,30 @@
 //! about to do?* — before running anything, and [`OdeStageHandler`] has no
 //! such method to offer.
 //!
+//! ## The third handler, and the line it falls on
+//!
+//! [`SpectrumStageHandler`] joins [`CatalogStageHandler`] on the data side:
+//! a [`SpectrumConfig`] is samples, a rate and a named window, so it too can
+//! be written down, audited before it runs
+//! ([`measurement_at`](SpectrumStageHandler::measurement_at)) and driven from
+//! `sos run`.
+//!
+//! That is the whole partition, and it is worth stating because it is not a
+//! matter of effort. Of this crate's five `Simulate` backends, exactly **two**
+//! take configurations a file can express. [`crate::ode::Dopri5OdeSimulator`],
+//! [`crate::quadrature`] and [`crate::root`] each take a *function* — a
+//! right-hand side, an integrand, a residual — and no file can name a
+//! function. They can gain handlers; they can never gain a CLI binding
+//! without a transport that ships code (RFC-0002 §10's WASM or MCP
+//! transports), which is a different thing from more plumbing here.
+//!
 //! ## Only what these demonstrate
 //!
-//! Two backends of the five this crate ships are wired
-//! ([`crate::ode::Dopri5OdeSimulator`], [`crate::quadrature`],
-//! [`crate::root`] and [`crate::spectrum`] are not), and no other engine's
-//! stages have handlers. `sos-cli` is connected to neither, so `sos run` is
-//! still not real. What can be claimed is precise: a plan — hand-built, or
-//! resolved from a TOML study — whose stages name one of these two plugins
-//! runs, memoizes, and records real results.
+//! Three of the five backends have handlers, and no other engine's stages
+//! have any. What can be claimed is precise: a plan — hand-built, or resolved
+//! from a TOML study, or run from `sos run` for the two data-configured
+//! backends — whose stages name one of these plugins runs, memoizes, and
+//! records real results.
 //!
 //! ## The seams this module closes
 //!
@@ -106,13 +121,14 @@ use sos_core::{
     BackendVersion, Body, DeterminismLevel, Digest, EnvRecord, HashAlgo, Object, ObjectId,
     ProducerRef, ReproMeta, RngId, SemVer,
 };
-use sos_simulation::{Observation, Simulate};
+use sos_simulation::{Observation, SimDescriptor, Simulate};
 use sos_store::{ObjectStore, TypedStore};
 use sos_workflow::{Stage, StageExecutor, WorkflowError};
 
 use crate::model::{CatalogSimulator, ModelRun, ModelSpec, ModeledTrajectoryBody};
 use crate::ode::{OdeConfig, Rk4OdeSimulator, Trajectory};
 use crate::solver::{ExactF64Seq, encode_f64};
+use crate::spectrum::{PeriodogramSimulator, SpectrumBody, SpectrumConfig, WindowKind};
 
 /// Domain-separation prefix for an ODE stage configuration's content address.
 /// Distinct from every object kind's prefix, so a config address can never
@@ -545,9 +561,150 @@ impl<S: ObjectStore> StageExecutor for CatalogStageHandler<S> {
     }
 }
 
+/// Domain-separation prefix for a spectral measurement's content address.
+const SPECTRUM_CONFIG_DOMAIN: &[u8] = b"sos-scirust:spectrum-stage-config:v1";
+
+/// The content address of `config` — what a [`Stage`] must carry in its
+/// `config_hash` for [`SpectrumStageHandler`] to run it.
+#[must_use]
+pub fn spectrum_config_address(config: &SpectrumConfig) -> Digest {
+    HashAlgo::Sha256.hash(SPECTRUM_CONFIG_DOMAIN, &config.canonical_bytes())
+}
+
+/// A [`BackendVersion`] naming `scirust-signal`.
+#[must_use]
+pub fn signal_backend(version: SemVer, content_hash: Digest) -> BackendVersion {
+    BackendVersion::new("scirust-signal", version, content_hash)
+}
+
+/// The determinism level every [`SpectrumStageHandler`] output carries.
+///
+/// `L3` — and, as [`crate::spectrum`]'s own docs insist at length, that is a
+/// reproducibility claim and not an accuracy one.
+pub const SPECTRUM_STAGE_LEVEL: DeterminismLevel = DeterminismLevel::L3;
+
+/// A [`StageExecutor`] running spectral measurements on
+/// [`PeriodogramSimulator`].
+///
+/// Like [`CatalogStageHandler`] and unlike [`OdeStageHandler`], it carries no
+/// type parameter for a closure: a [`SpectrumConfig`] is data — samples, a
+/// rate, a named window — so it can be written down. That is what makes this
+/// the *second* backend a study author can reach without writing Rust, and
+/// the asymmetry is worth naming: of this crate's five `Simulate` backends,
+/// exactly two take configurations that a file can express. The other three
+/// take a function (`dy/dt = f(t, y)`, an integrand, a residual), and no file
+/// can name a function.
+pub struct SpectrumStageHandler<S> {
+    simulator: PeriodogramSimulator,
+    store: Rc<RefCell<S>>,
+    configs: BTreeMap<Digest, SpectrumConfig>,
+    backend: BackendVersion,
+}
+
+impl<S: ObjectStore> SpectrumStageHandler<S> {
+    /// A handler sealing its results into `store`.
+    #[must_use]
+    pub fn new(store: Rc<RefCell<S>>, backend: BackendVersion) -> Self {
+        Self {
+            simulator: PeriodogramSimulator::new(SimDescriptor::new(
+                "scirust-signal/periodogram",
+                SemVer::new(1, 0, 0),
+            )),
+            store,
+            configs: BTreeMap::new(),
+            backend,
+        }
+    }
+
+    /// Make `config` available to stages, returning its content address.
+    pub fn offer(&mut self, config: SpectrumConfig) -> Digest {
+        let address = spectrum_config_address(&config);
+        self.configs.insert(address, config);
+        address
+    }
+
+    /// The content addresses currently on offer, sorted.
+    #[must_use]
+    pub fn offered(&self) -> Vec<Digest> {
+        self.configs.keys().copied().collect()
+    }
+
+    /// Which window the measurement at `address` will apply, and over how many
+    /// samples — the audit [`CatalogStageHandler::model_at`] offers, for the
+    /// choice that shapes a spectrum.
+    #[must_use]
+    pub fn measurement_at(&self, address: &Digest) -> Option<(WindowKind, usize)> {
+        self.configs
+            .get(address)
+            .map(|c| (c.window, c.signal.len()))
+    }
+
+    fn env(&self) -> EnvRecord {
+        EnvRecord::new(
+            "unspecified",
+            vec![self.backend.clone()],
+            "unspecified",
+            "unspecified",
+        )
+    }
+
+    fn producer(&self) -> ProducerRef {
+        let descriptor = self.simulator.descriptor();
+        ProducerRef::new(
+            descriptor.name.clone(),
+            descriptor.version,
+            HashAlgo::Sha256.hash(b"sos-producer", &descriptor.canonical_bytes()),
+        )
+    }
+}
+
+impl<S: ObjectStore> StageExecutor for SpectrumStageHandler<S> {
+    fn run(&mut self, stage: &Stage) -> Result<Vec<ObjectId>, WorkflowError> {
+        let config =
+            self.configs
+                .get(&stage.config_hash)
+                .ok_or_else(|| WorkflowError::StageFailed {
+                    stage: stage.id.clone(),
+                    reason: format!(
+                        "no spectral measurement is on offer at content address {}",
+                        stage.config_hash
+                    ),
+                })?;
+
+        let observation =
+            self.simulator
+                .run(config, stage.seed)
+                .map_err(|e| WorkflowError::StageFailed {
+                    stage: stage.id.clone(),
+                    reason: e.to_string(),
+                })?;
+
+        let level = observation.level();
+        let repro = ReproMeta::new(
+            stage.seed,
+            RngId::new("none"),
+            self.env().digest(HashAlgo::Sha256),
+        )
+        .with_inputs(stage.inputs.clone());
+        let object = Object::builder(SpectrumBody::from_observation(observation))
+            .level(level)
+            .producer(self.producer())
+            .parents(stage.inputs.clone())
+            .repro(repro)
+            .seal();
+
+        let id = self.store.borrow_mut().put_object(&object).map_err(|e| {
+            WorkflowError::StageFailed {
+                stage: stage.id.clone(),
+                reason: e.to_string(),
+            }
+        })?;
+        Ok(vec![id])
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use sos_simulation::SimDescriptor;
     use sos_store::MemoryStore;
     use sos_workflow::{StageDescriptor, StageId};
 
@@ -941,6 +1098,166 @@ mod tests {
             assert_eq!(stored.repro.seed, 4242);
             assert_eq!(stored.parents, vec![input]);
             assert_eq!(stored.repro.inputs, vec![input]);
+        }
+    }
+
+    mod spectral {
+        use super::super::*;
+        use super::stage_at;
+        use sos_store::MemoryStore;
+        use std::f64::consts::TAU;
+
+        fn handler() -> SpectrumStageHandler<MemoryStore> {
+            SpectrumStageHandler::new(
+                Rc::new(RefCell::new(MemoryStore::new())),
+                signal_backend(
+                    SemVer::new(0, 1, 0),
+                    HashAlgo::Sha256.hash(b"test-backend", b"scirust-signal"),
+                ),
+            )
+        }
+
+        /// A 64 Hz tone sampled at 1024 Hz over 1024 samples — exactly bin 64.
+        fn tone() -> SpectrumConfig {
+            let signal = (0..1024)
+                .map(|i| (TAU * 64.0 * f64::from(i) / 1024.0).sin())
+                .collect();
+            SpectrumConfig::new(signal, 1024.0, WindowKind::Hann)
+        }
+
+        #[test]
+        fn running_a_stage_measures_the_spectrum_and_stores_it() {
+            let mut h = handler();
+            let store = Rc::clone(&h.store);
+            let address = h.offer(tone());
+
+            let ids = h.run(&stage_at(address)).unwrap();
+            let stored: Object<SpectrumBody> = store.borrow().get_object(ids[0]).unwrap().unwrap();
+
+            // Real physics through the stage: the tone lands in its own bin.
+            let peak = stored
+                .body
+                .spectrum
+                .psd
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+                .expect("a measured spectrum has bins")
+                .0;
+            assert_eq!(peak, 64, "the tone must land in bin 64");
+            assert_eq!(stored.body.spectrum.window, WindowKind::Hann);
+            assert_eq!(stored.level, SPECTRUM_STAGE_LEVEL);
+            assert_eq!(stored.producer.name, "scirust-signal/periodogram");
+        }
+
+        #[test]
+        fn a_measurement_can_be_audited_before_it_runs() {
+            let mut h = handler();
+            let address = h.offer(tone());
+            assert_eq!(h.measurement_at(&address), Some((WindowKind::Hann, 1024)));
+            assert_eq!(h.offered(), vec![address]);
+            let elsewhere = spectrum_config_address(&SpectrumConfig::new(
+                vec![0.0; 8],
+                8.0,
+                WindowKind::FlatTop,
+            ));
+            assert!(h.measurement_at(&elsewhere).is_none());
+        }
+
+        #[test]
+        fn the_window_is_part_of_the_address_and_never_collides_with_another_kind() {
+            let mut hann = tone();
+            hann.window = WindowKind::Hann;
+            let mut flat = tone();
+            flat.window = WindowKind::FlatTop;
+            assert_ne!(
+                spectrum_config_address(&hann),
+                spectrum_config_address(&flat)
+            );
+            // Domain separation: never the same as an ODE or model address.
+            let ode = config_address(&OdeConfig::new(0.0, 1.0, vec![1.0], 0.1));
+            assert_ne!(spectrum_config_address(&hann), ode);
+        }
+
+        #[test]
+        fn an_unoffered_address_fails_the_stage() {
+            let mut h = handler();
+            let err = h
+                .run(&stage_at(spectrum_config_address(&tone())))
+                .unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("no spectral measurement is on offer"),
+                "{err}"
+            );
+        }
+
+        #[test]
+        fn a_record_the_fft_would_assert_on_fails_the_stage_and_stores_nothing() {
+            // `fft_real` panics on a non-power-of-two record. A stage must not.
+            let mut h = handler();
+            let store = Rc::clone(&h.store);
+            let address = h.offer(SpectrumConfig::new(
+                vec![0.5; 100],
+                1024.0,
+                WindowKind::Hann,
+            ));
+            assert!(matches!(
+                h.run(&stage_at(address)),
+                Err(WorkflowError::StageFailed { .. })
+            ));
+            assert!(store.borrow().object_ids().is_empty());
+        }
+
+        #[test]
+        fn the_same_stage_run_twice_produces_the_same_object_id() {
+            let mut h = handler();
+            let address = h.offer(tone());
+            assert_eq!(
+                h.run(&stage_at(address)).unwrap(),
+                h.run(&stage_at(address)).unwrap()
+            );
+        }
+
+        #[test]
+        fn a_stored_spectrum_reloads_bit_for_bit() {
+            let mut h = handler();
+            let store = Rc::clone(&h.store);
+            let address = h.offer(tone());
+            let ids = h.run(&stage_at(address)).unwrap();
+
+            let fresh = h.simulator.run(&tone(), 0).unwrap().output;
+            let stored: Object<SpectrumBody> = store.borrow().get_object(ids[0]).unwrap().unwrap();
+            assert_eq!(fresh.psd.len(), stored.body.spectrum.psd.len());
+            for (i, (a, b)) in fresh.psd.iter().zip(&stored.body.spectrum.psd).enumerate()
+            {
+                assert_eq!(a.to_bits(), b.to_bits(), "psd differs at bin {i}");
+            }
+            assert_eq!(
+                fresh.centroid_hz.to_bits(),
+                stored.body.spectrum.centroid_hz.to_bits()
+            );
+        }
+
+        #[test]
+        fn a_config_survives_a_file_at_the_same_address() {
+            // What makes a spectral measurement authorable outside Rust.
+            let config = tone();
+            let json = serde_json::to_string(&config).unwrap();
+            assert!(json.contains("\"hann\""), "window travels as its code");
+            let back: SpectrumConfig = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, config);
+            assert_eq!(
+                spectrum_config_address(&back),
+                spectrum_config_address(&config)
+            );
+        }
+
+        #[test]
+        fn a_window_this_build_does_not_have_fails_to_load() {
+            let json = r#"{"signal":["1","0"],"sample_rate_hz":"8","window":"kaiser"}"#;
+            let err = serde_json::from_str::<SpectrumConfig>(json).unwrap_err();
+            assert!(err.to_string().contains("kaiser"), "{err}");
         }
     }
 }
