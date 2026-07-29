@@ -140,13 +140,14 @@ shift with what's true at the time).
 | 5C.1 | Represent assumptions | **Done** — typed causal contracts and data model |
 | 5C.2 | Distinguish association from causal evidence | **Done** — deterministic robust conditional-independence testing |
 | 5C.3 | Discover equivalence classes | **Done** — PC-Stable, CPDAG-returning (no PAG/latent-confounding-robust discovery) |
-| 5C.4 | Estimate identifiable effects | **Draft** — backdoor identification + linear adjustment estimation |
-| 5C.5 | Test invariance | Planned — cross-environment invariant prediction |
-| 5C.6 | Simulate interventions | Planned — SCM-based counterfactual simulation |
-| 5C.7 | Choose the next experiment | Planned — experimental design / value of information |
-| 5C.8 | Update theories | Planned — assumption-registry revision under new evidence |
-| 5C.9 | Verify causal claims | Planned — end-to-end certificate audit |
-| 5C.10 | Closing synthesis | Planned |
+| 5C.4 | Estimate identifiable effects | **Done** — backdoor identification + linear adjustment estimation |
+| 5C.5 | Quantify sensitivity to unmeasured confounding | **Draft** — Cinelli–Hazlett omitted-variable-bias bounds |
+| 5C.6 | Test invariance | Planned — cross-environment invariant prediction |
+| 5C.7 | Simulate interventions | Planned — SCM-based counterfactual simulation |
+| 5C.8 | Choose the next experiment | Planned — experimental design / value of information |
+| 5C.9 | Update theories | Planned — assumption-registry revision under new evidence |
+| 5C.10 | Verify causal claims | Planned — end-to-end certificate audit |
+| 5C.11 | Closing synthesis | Planned |
 
 ## Phase 5C.1 — Typed causal contracts and data model
 
@@ -689,7 +690,8 @@ way; that any numerical causal effect has been identified or estimated.
 
 **Status: Draft.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
 from `origin/master` at `bfb6b8cf` (fresh master after PR #824 merged; this
-phase's branch carries only this phase's commits). PR #840. Additive to
+phase's branch carries only this phase's commits). PR #840, merged at
+`d371eebb` (with a follow-up documentation correction in PR #846). Additive to
 `scirust-causal` (no existing public API changed). This phase implements
 **identification by Pearl's backdoor criterion plus estimation by linear
 covariate adjustment**. It does **not** implement front-door or
@@ -883,3 +885,171 @@ enumeration proves no larger valid set exists.
   motivated candidate for 5C.5 onward.
 - Continuous variables only; binary/discrete treatments would need a
   different estimator.
+
+## Phase 5C.5 — Quantify sensitivity to unmeasured confounding
+
+**Status: Draft.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
+from `origin/master` at `8f777520`. Additive to `scirust-causal` (no existing
+public API changed).
+
+**This phase was inserted ahead of the planned invariance work, and the
+roadmap renumbered accordingly** (invariance moves 5C.5 → 5C.6, and the rest
+shift by one). The reason is empirical rather than aesthetic: 5C.4's own
+adversarial test produced a latent confounder that made a certified estimate
+wrong by 121 standard errors, and the only signal available at the time was a
+prose sentence on the certificate. Building a quantitative answer to *how
+strong would a confounder have to be?* was the most clearly motivated next
+increment the program had, and it came from a measurement rather than a plan.
+
+### Scientific scope — read before using this API
+
+This module answers one question: **given a fitted linear model, how strong
+would an omitted linear confounder have to be to move the estimate by a stated
+fraction?** It is Cinelli & Hazlett (2020), *Making Sense of Sensitivity:
+Extending Omitted Variable Bias*, JRSS-B 82(1).
+
+It **quantifies a stated assumption**; it does **not** test whether a
+confounder exists. No data can do that — a confounder absent from the data is
+absent from every statistic computed on it. What this provides is a threshold
+to compare against domain knowledge, not evidence about the world.
+
+### Design
+
+`src/sensitivity.rs`, entirely closed-form (no RNG, no simulation, no
+re-fitting except in `benchmark_covariate`):
+
+- **Robustness value** `RV_q = ½(√(f_q⁴ + 4f_q²) − f_q²)` with
+  `f_q = q·|t|/√df` — the minimum share of residual variance a confounder must
+  explain in **both** treatment and outcome to move the estimate by `100·q`
+  percent. Bounded in `[0, 1)` by construction: as `f → ∞` it approaches but
+  never reaches 1, since a confounder can never need to explain more than all
+  the residual variance.
+- **Partial R² of treatment with outcome** `= t²/(t² + df)` — the
+  extreme-scenario benchmark.
+- **Bias bound** `= se(β̂)·√df·√(R²_{Y~U|D,X}·R²_{D~U|X} / (1 − R²_{D~U|X}))`,
+  with the adjusted standard error
+  `se·√((1 − R²_Y)/(1 − R²_D))·√(df/(df − 1))`.
+- **Covariate benchmarking** — expresses a hypothetical confounder in units of
+  an *observed* covariate, via leave-one-out residualization reusing 5C.2's
+  `residualize`/`pearson_correlation`. This is what makes `RV` actionable:
+  "0.93" means little alone; "0.93, and the strongest covariate we measured
+  reaches 0.04" means a great deal.
+
+`analyze_sensitivity` **refuses a non-`Identifiable` estimate** with a typed
+error. "How robust is this estimate?" presupposes an estimate, so the
+abstention discipline of 5C.4 propagates: there is no way to run a sensitivity
+analysis on something that was never identified.
+
+### The central validation
+
+The decisive test reconstructs 5C.4's latent-confounding scenario, then does
+something a real analyst cannot: measures how strong the confounder *actually*
+was, from a ground-truth dataset where `U` is present. Feeding those measured
+strengths to the bias formula predicts the bias that was actually realised.
+
+| Quantity | Value |
+| --- | --- |
+| Estimate (certified `Identifiable`) | 1.5163 |
+| True effect | 0.7 |
+| Actual bias | 0.8163 |
+| Measured confounder strength (treatment) | 0.9007 |
+| Measured confounder strength (outcome) | 0.4365 |
+| **Predicted bias** | **0.8333** |
+| **Relative error** | **2.09%** |
+
+The measured strengths also match an independent analytic derivation from the
+generating equations (`R²_D = 0.90`, `R²_Y ≈ 0.42`), so this is agreement
+between three routes — the closed-form formula, the empirical measurement, and
+the hand derivation — not a self-consistency check.
+
+### The finding this phase records
+
+**A high robustness value is not by itself reassurance.** On that same
+scenario `RV₁ = 0.9335`, which reads as "you would need a confounder
+explaining 93% of both residual variances to overturn this" — apparently very
+robust. The confounder actually present explained **90.1%** of the treatment's
+residual variance. It was very nearly that strong, and it was real.
+
+`RV` is a threshold, not a verdict. It is only informative when read against
+what is plausible in the domain, which is exactly what `benchmark_covariate`
+exists to supply. Both halves are pinned down by tests.
+
+### A tolerance correction worth recording
+
+An early draft of the decisive test asserted that the adjusted range must
+*contain* the true effect. It failed by ~2% of the bias on one seed. The cause
+is not a defect: the Cinelli–Hazlett bias is **exact** for a confounder of
+exactly the given partial R² values — it is a "bound" only over the unknown
+*direction*, and is not conservative in its inputs. Those inputs are measured
+from finite data, so the prediction can land marginally under the realised
+bias. The assertion now allows a shortfall of up to 5% of the bias bound, with
+the reason stated in the test, rather than claiming a guarantee the method does
+not make.
+
+### Determinism contract
+
+No RNG anywhere in this phase's code; every reported quantity is a closed-form
+function of `(β̂, se, df)` plus, for benchmarking, deterministic QR
+residualization. Verified byte-identical across two runs and a debug/release
+build.
+
+### Tests
+
+338 tests existed for `scirust-causal` before this phase. This phase adds
+**18**: 7 embedded unit tests (RV bounded/monotone; the hand-computed
+`f = 1 ⇒ RV = ½(√5 − 1) = 1/φ` case; scenario validation; a null confounder
+inducing exactly zero bias; bias monotone in strength; adjusted standard error
+moving in both documented directions; and an internal cross-check that a
+confounder at exactly `RV` induces a bias equal to the estimate — validating
+the RV formula against the *independent* bias formula), and 11 integration
+tests including the decisive recovery above, the RV-misleads finding, weak- vs
+strong-evidence RV ordering, `RV_q` monotonicity in `q`, irrelevant-covariate
+benchmarking, and the refusal on non-`Identifiable` input.
+
+### Benchmark
+
+`examples/sensitivity_benchmark.rs`, 5 scenario groups, oracle-checked, with
+the latent-confounder row printing its own measured strengths, predicted bias,
+actual bias and relative error so the central claim is visible in the output.
+
+Run-twice SHA-256:
+`1bc59a1d58facd07f3150ba94cb9e2d7762fc5aaf9f918e730ea6a9e40b52ea7`.
+All four prior fingerprints reverified unchanged: `industrial_protocol_demo`
+(`167c13de…`), `conditional_independence_benchmark` (`c1449177…`),
+`pc_stable_benchmark` (`79e57e69…`), `effect_estimation_benchmark`
+(`7ac0dc76…`).
+
+### Compatibility
+
+Purely additive. No existing public item's signature changed; no new
+`pub(crate)` widenings were needed (5C.4 already exposed `residualize` and
+`pearson_correlation`). Crate root goes from six capabilities to seven, and
+the out-of-scope paragraph now distinguishes *quantifying* a latent
+confounder's potential damage (done) from *detecting or removing* one (still
+out of scope).
+
+### Supported and unsupported claims
+
+May claim: a closed-form, deterministic robustness value and bias bound for a
+linear backdoor-adjusted estimate; agreement with a known confounder's
+realised bias to ~2%; expression of a hypothetical confounder in units of an
+observed covariate; refusal to analyse an unidentified effect.
+
+Must **not** claim: that a confounder has been detected, excluded, or
+corrected for; that a high `RV` means an estimate is trustworthy; that the
+bound covers nonlinear confounding, measurement error, or model
+misspecification other than an omitted linear term.
+
+### Known limitations / deferred
+
+- Linear omitted-variable bias only. Nonlinear confounding, effect
+  modification by the confounder, and measurement error are out of scope.
+- No E-values. The E-value is defined on a risk-ratio scale and would need a
+  standardized-mean-difference conversion to apply here — an approximation
+  layer offering no additional rigour over a framework that is *exact* for the
+  linear model 5C.4 actually produces. Deliberately omitted rather than
+  included for coverage's sake.
+- `benchmark_covariate` handles one covariate at a time; the "k times as
+  strong as covariate j" multiplier form of Cinelli–Hazlett is not
+  implemented.
+- No formal significance-adjusted robustness value (`RV_{q,α}`).
