@@ -27,12 +27,23 @@
 //! ## Provenance & scope
 //!
 //! This is a faithful re-homing of the TDI `tdi-core` crate, kept exact and
-//! test-for-test identical. As the reference project states, its results
-//! challenge entropy-only sufficiency within the tested synthetic families but
-//! do **not** establish a universal law, invariance across system sizes, or
-//! superiority over every dynamical baseline (TDI-1's signal was fully subsumed
-//! by the orbital baseline). What transfers to SciRust is the deterministic,
-//! exact machinery and its honest evaluation discipline.
+//! test-for-test identical: the twelve modules differ from the frozen upstream
+//! only by SciRust's `rustfmt.toml` and this documentation, so the upstream
+//! confirmatory results describe this crate's behaviour directly.
+//!
+//! Within small synthetic finite-state families, and under preregistered
+//! one-shot evaluation, the overlaps carry predictive information beyond exact
+//! contraction descriptors (TDI-5.5), beyond exact spectral moments (TDI-5.6),
+//! across four generator families (TDI-5.7), beyond the **literal** spectral
+//! gap and mixing time (TDI-6.1), and beyond a fourth spectral moment — which
+//! also shows the exact descriptor ladder saturating while the signal does not
+//! (TDI-5.9).
+//!
+//! It does **not** establish a universal law, invariance across system sizes,
+//! or superiority over every dynamical baseline: TDI-1's signal was fully
+//! subsumed by the orbital baseline, and cross-width invariance, causal effect,
+//! nonlinear sufficiency and information decomposition all remain unrun
+//! upstream. See the crate README for the full table and open questions.
 
 mod action;
 mod baseline;
