@@ -110,11 +110,22 @@ jobs:
             --features mock-backend -- -D warnings
 
       # Type-checks every Dioxus component against the tested logic.
+      #
+      # Both feature settings are compiled, which together with the two host
+      # steps above covers all four configurations this crate has. That
+      # matters more here than it looks: `ActiveBackend` is a type alias
+      # resolved by `cfg`, so `--features mock-backend` binds every component
+      # in the interface to `MockBackend` instead of `TauriBridge`. It is a
+      # genuinely different compilation, and it is the one `dx serve` uses.
+      # Leaving it out is how a struct-field addition once reached master
+      # compiling everywhere except behind the feature gate.
       - name: Clippy (wasm32, the target the interface actually runs on)
         working-directory: apps/scirust-studio
         run: |
           cargo clippy -p scirust-studio-ui --locked --all-targets \
             --target wasm32-unknown-unknown -- -D warnings
+          cargo clippy -p scirust-studio-ui --locked --all-targets \
+            --target wasm32-unknown-unknown --features mock-backend -- -D warnings
 
       - name: Build tooling tests
         working-directory: apps/scirust-studio
