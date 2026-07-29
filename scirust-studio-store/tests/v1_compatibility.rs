@@ -196,7 +196,7 @@ fn loading_a_v1_run_leaves_the_stored_bytes_untouched() {
 fn a_store_can_hold_both_versions_at_once() {
     use scirust_studio_runtime::{
         Axis, AxisMonotonicity, DeterminismClass, RESULT_SCHEMA_VERSION, RunProvenance, RunResult,
-        RunSummary, Series,
+        RunSummary, Series, SeriesRole,
     };
 
     let (_dir, store, v1_id) = spring_mass_store();
@@ -223,6 +223,7 @@ fn a_store_can_hold_both_versions_at_once() {
             display_name: "X".to_string(),
             unit: "m".to_string(),
             axis_id: "t".to_string(),
+            role: SeriesRole::Trajectory,
             values: vec![1.0, 0.5],
         }],
         metrics: vec![],

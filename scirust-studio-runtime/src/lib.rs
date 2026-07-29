@@ -15,6 +15,7 @@
 mod adapter;
 mod adapters;
 mod control;
+mod ensemble;
 mod execute_support;
 mod result;
 mod result_v1;
@@ -26,8 +27,8 @@ pub use control::ExecutionControl;
 
 pub use result::{
     Axis, AxisMonotonicity, Metric, MetricValue, RESULT_SCHEMA_VERSION, ResultDefect,
-    RunProvenance, RunResult, RunSummary, RunWarning, Series, TIME_AXIS_ID, VerificationResult,
-    VerificationStatus, WarningCategory, describe_defects, validate_result,
+    RunProvenance, RunResult, RunSummary, RunWarning, Series, SeriesRole, TIME_AXIS_ID,
+    VerificationResult, VerificationStatus, WarningCategory, describe_defects, validate_result,
 };
 pub use result_v1::{
     AxisDescriptorV1, RESULT_SCHEMA_VERSION_V1, RunResultV1, SeriesV1, XAxisMeaning,

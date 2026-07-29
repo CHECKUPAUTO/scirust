@@ -72,6 +72,49 @@ pub struct Axis {
     pub values: Vec<f64>,
 }
 
+/// What a [`Series`] *is*, so a consumer does not have to infer it from the
+/// id.
+///
+/// Before ensembles every series was one computed trajectory and this
+/// question had one answer, so it did not need asking. An ensemble result
+/// carries several kinds of curve at once — individual realisations, their
+/// mean, the edges of a spread band — and a chart that drew all of them
+/// identically would present a summary statistic and a single noisy sample as
+/// the same kind of evidence. That is a misleading picture, not merely an
+/// ugly one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SeriesRole {
+    /// One computed trajectory. The default, and what every deterministic
+    /// capability produces.
+    #[default]
+    Trajectory,
+    /// A line drawn for comparison that was not computed by the solver —
+    /// an analytic mean, an equilibrium level, a threshold.
+    Reference,
+    /// One realisation out of an ensemble, retained as an exemplar.
+    EnsembleMember,
+    /// The across-replicate mean at each axis coordinate.
+    EnsembleMean,
+    /// The lower edge of the ensemble's spread band.
+    EnsembleBandLower,
+    /// The upper edge of the ensemble's spread band.
+    EnsembleBandUpper,
+}
+
+impl SeriesRole {
+    /// Whether this role is part of an ensemble's presentation.
+    pub fn is_ensemble(self) -> bool {
+        matches!(
+            self,
+            SeriesRole::EnsembleMember
+                | SeriesRole::EnsembleMean
+                | SeriesRole::EnsembleBandLower
+                | SeriesRole::EnsembleBandUpper
+        )
+    }
+}
+
 /// One named output time-course, bound to the axis it is plotted against.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Series {
@@ -85,6 +128,12 @@ pub struct Series {
     /// consumer must never have to guess, and a run with more than one axis
     /// would make guessing wrong.
     pub axis_id: String,
+    /// What this curve represents.
+    ///
+    /// Defaulted, so every result written before this field existed reads
+    /// back as [`SeriesRole::Trajectory`] — which is what those series were.
+    #[serde(default)]
+    pub role: SeriesRole,
     /// The values, aligned one-to-one with that axis's coordinates.
     pub values: Vec<f64>,
 }
@@ -663,6 +712,7 @@ mod tests {
                 display_name: "Position".to_string(),
                 unit: "m".to_string(),
                 axis_id: TIME_AXIS_ID.to_string(),
+                role: SeriesRole::Trajectory,
                 values: vec![1.0, 0.9, 0.8],
             }],
             metrics: vec![Metric {

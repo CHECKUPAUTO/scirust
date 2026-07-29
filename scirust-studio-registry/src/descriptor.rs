@@ -84,6 +84,30 @@ pub enum DeterminismClass {
     NonDeterministic,
 }
 
+impl DeterminismClass {
+    /// Whether a capability of this class produces a *sample* — so that
+    /// drawing several realisations answers a question one realisation
+    /// cannot.
+    ///
+    /// This is the single place that mapping is stated. A capability that is
+    /// bit-identical from its parameters would return the same path however
+    /// many times it was asked, so an ensemble of them is not a distribution;
+    /// it is one answer copied `n` times, at `n` times the cost, presented as
+    /// evidence about a spread that does not exist.
+    ///
+    /// [`Self::NonDeterministic`] is excluded for the opposite reason: its
+    /// realisations do differ, but with no seed to derive them from the
+    /// ensemble could not be obtained again, and a distribution nobody can
+    /// re-draw is not a result this project stores.
+    pub fn draws_a_sample(self) -> bool {
+        matches!(
+            self,
+            DeterminismClass::SeededButBackendDependent
+                | DeterminismClass::InherentlyStochasticRecordedSeed
+        )
+    }
+}
+
 /// Compute backend a capability can run on. Only `Cpu` exists today — there
 /// is no GPU-backed Studio worker yet (see `docs/studio/REPOSITORY_AUDIT.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
