@@ -82,7 +82,7 @@ use sos_core::canonical::{Canonical, CanonicalEncoder};
 use sos_core::{Body, DeterminismLevel};
 use sos_simulation::{Observation, Result, SimDescriptor, SimError, Simulate};
 
-use crate::ode::Trajectory;
+use crate::ode::{AdaptiveOdeConfig, CertifiedTrajectory, Dopri5OdeSimulator, Trajectory};
 use crate::solver::{ExactF64Seq, encode_f64};
 use crate::stage::exact_trajectory;
 
@@ -463,6 +463,263 @@ impl<'de> Deserialize<'de> for ModelRun {
             t_end: parse(&repr.t_end)?,
             step: parse(&repr.step)?,
         })
+    }
+}
+
+/// The same catalogue, integrated **adaptively** — tolerances instead of a
+/// fixed step.
+///
+/// # Why this exists, and why it is not a closure
+///
+/// [`crate::ode::Dopri5OdeSimulator`] takes a right-hand side *function*, and
+/// no file can name a function. That was read for a long time as "the
+/// adaptive solver can never be driven from a study file", which is wrong, and
+/// this type is the correction: the catalogue already turns a **name** into a
+/// system ([`ModelSpec::instantiate`]), so the right-hand side is built inside
+/// this crate from a token a manifest wrote. The closure never crosses the
+/// file boundary. What genuinely cannot be bound is an *arbitrary user
+/// function* — a catalogued model is not one.
+///
+/// # What it buys
+///
+/// [`CatalogSimulator`] is `L3`: a fixed step, bit-reproducible, and no
+/// statement whatever about accuracy. This is `L2` and carries a
+/// [`CertifiedTrajectory`] — the result is certified to a declared `rtol` and
+/// `atol`, and it reports how many steps were accepted and rejected getting
+/// there. That is a different and stronger kind of claim, and until this
+/// existed no `L2` result was reachable from a study file at all.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AdaptiveModelRun {
+    /// The model to integrate.
+    pub model: ModelSpec,
+    /// The initial state. Its length must be [`ModelKind::state_dim`].
+    pub y0: Vec<f64>,
+    /// Integration start time.
+    pub t0: f64,
+    /// Integration end time; must be strictly greater than `t0`.
+    pub t_end: f64,
+    /// Relative error tolerance.
+    pub rtol: f64,
+    /// Absolute error tolerance.
+    pub atol: f64,
+    /// The initial step size, adapted thereafter to meet the tolerances.
+    pub h_init: f64,
+}
+
+impl AdaptiveModelRun {
+    /// A run specification. Validity is checked by
+    /// [`AdaptiveCatalogSimulator::run`], not here.
+    #[must_use]
+    pub fn new(
+        model: ModelSpec,
+        y0: impl Into<Vec<f64>>,
+        t0: f64,
+        t_end: f64,
+        rtol: f64,
+        atol: f64,
+        h_init: f64,
+    ) -> Self {
+        Self {
+            model,
+            y0: y0.into(),
+            t0,
+            t_end,
+            rtol,
+            atol,
+            h_init,
+        }
+    }
+}
+
+impl Canonical for AdaptiveModelRun {
+    fn encode(&self, enc: &mut CanonicalEncoder) {
+        enc.value(&self.model);
+        enc.value(&ExactF64Seq(&self.y0));
+        encode_f64(enc, self.t0);
+        encode_f64(enc, self.t_end);
+        encode_f64(enc, self.rtol);
+        encode_f64(enc, self.atol);
+        encode_f64(enc, self.h_init);
+    }
+}
+
+/// The exact-decimal file form, for the same reason [`RunRepr`] has one: a
+/// configuration has to survive a file with its content address intact.
+#[derive(Serialize, Deserialize)]
+struct AdaptiveRunRepr {
+    model: ModelSpec,
+    y0: Vec<String>,
+    t0: String,
+    t_end: String,
+    rtol: String,
+    atol: String,
+    h_init: String,
+}
+
+impl Serialize for AdaptiveModelRun {
+    fn serialize<S: Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        AdaptiveRunRepr {
+            model: self.model.clone(),
+            y0: self
+                .y0
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
+            t0: self.t0.to_string(),
+            t_end: self.t_end.to_string(),
+            rtol: self.rtol.to_string(),
+            atol: self.atol.to_string(),
+            h_init: self.h_init.to_string(),
+        }
+        .serialize(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for AdaptiveModelRun {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let repr = AdaptiveRunRepr::deserialize(d)?;
+        let parse = |s: &str| s.parse::<f64>().map_err(D::Error::custom);
+        Ok(AdaptiveModelRun {
+            model: repr.model,
+            y0: repr
+                .y0
+                .iter()
+                .map(|v| parse(v))
+                .collect::<std::result::Result<Vec<f64>, _>>()?,
+            t0: parse(&repr.t0)?,
+            t_end: parse(&repr.t_end)?,
+            rtol: parse(&repr.rtol)?,
+            atol: parse(&repr.atol)?,
+            h_init: parse(&repr.h_init)?,
+        })
+    }
+}
+
+/// A certified trajectory that names the model it came from.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CertifiedModeledTrajectory {
+    /// The model, with its parameters, that produced this.
+    pub model: ModelSpec,
+    /// The trajectory and the tolerances it is certified to.
+    pub certified: CertifiedTrajectory,
+}
+
+impl Canonical for CertifiedModeledTrajectory {
+    fn encode(&self, enc: &mut CanonicalEncoder) {
+        enc.value(&self.model);
+        enc.value(&self.certified);
+    }
+}
+
+/// The storable form.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CertifiedModeledTrajectoryBody {
+    /// The model that produced the trajectory.
+    pub model: ModelSpec,
+    /// The certified trajectory.
+    pub certified: CertifiedTrajectory,
+    /// The determinism level the backend realized: `L2`.
+    pub level: DeterminismLevel,
+    /// The seed the run used.
+    pub seed: u64,
+}
+
+impl CertifiedModeledTrajectoryBody {
+    /// Flatten an observation into a storable body.
+    #[must_use]
+    pub fn from_observation(observation: Observation<CertifiedModeledTrajectory>) -> Self {
+        Self {
+            level: observation.level(),
+            seed: observation.seed,
+            model: observation.output.model,
+            certified: observation.output.certified,
+        }
+    }
+}
+
+impl Canonical for CertifiedModeledTrajectoryBody {
+    fn encode(&self, enc: &mut CanonicalEncoder) {
+        enc.value(&self.model);
+        enc.value(&self.certified);
+        enc.value(&self.level);
+        enc.u64(self.seed);
+    }
+}
+
+impl Body for CertifiedModeledTrajectoryBody {
+    const KIND: &'static str = "CertifiedModeledTrajectory";
+    const SCHEMA_VERSION: u32 = 1;
+}
+
+/// The backend name every [`AdaptiveCatalogSimulator`] result is stamped with.
+pub const ADAPTIVE_CATALOG_BACKEND: &str = "scirust-sim/catalog-dopri5";
+
+/// Integrates a catalogued model with the adaptive DOPRI5 solver, `L2`.
+#[derive(Debug, Clone, Default)]
+pub struct AdaptiveCatalogSimulator;
+
+impl AdaptiveCatalogSimulator {
+    /// A simulator.
+    #[must_use]
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Simulate for AdaptiveCatalogSimulator {
+    type Config = AdaptiveModelRun;
+    type Output = CertifiedModeledTrajectory;
+
+    fn descriptor(&self) -> SimDescriptor {
+        SimDescriptor::new(ADAPTIVE_CATALOG_BACKEND, sos_core::SemVer::new(1, 0, 0))
+    }
+
+    fn level(&self) -> DeterminismLevel {
+        DeterminismLevel::L2
+    }
+
+    fn run(
+        &self,
+        config: &AdaptiveModelRun,
+        seed: u64,
+    ) -> Result<Observation<CertifiedModeledTrajectory>> {
+        // The whole trick, in two lines: the catalogue turns a *name* into a
+        // system, and the system's `derivatives` is exactly the right-hand
+        // side DOPRI5 wants. The closure is built here, from a token a file
+        // wrote — it never has to be written in the file itself.
+        let system = config.model.instantiate()?;
+        if config.y0.len() != system.dim()
+        {
+            return Err(SimError::InvalidConfig(format!(
+                "{} has state dimension {}, but {} initial value(s) were given",
+                config.model.kind,
+                system.dim(),
+                config.y0.len()
+            )));
+        }
+        let rhs = move |t: f64, y: &[f64], dy: &mut [f64]| system.derivatives(t, y, dy);
+
+        let solver = Dopri5OdeSimulator::new(self.descriptor(), rhs);
+        let observed = solver.run(
+            &AdaptiveOdeConfig {
+                t0: config.t0,
+                t_end: config.t_end,
+                y0: config.y0.clone(),
+                rtol: config.rtol,
+                atol: config.atol,
+                h_init: config.h_init,
+            },
+            seed,
+        )?;
+        let level = observed.level();
+        Ok(Observation::new(
+            CertifiedModeledTrajectory {
+                model: config.model.clone(),
+                certified: observed.output,
+            },
+            level,
+            seed,
+        ))
     }
 }
 
@@ -1180,5 +1437,131 @@ mod tests {
         // Same parameters, same state, same span — a different model.
         assert!(!vcr.observe(&sim, &cooling, 0).unwrap().replayed);
         assert_eq!(vcr.len(), 2);
+    }
+
+    // ---- the adaptive catalogue: an L2 result a file can ask for ----------
+
+    fn adaptive(rtol: f64, atol: f64) -> AdaptiveModelRun {
+        AdaptiveModelRun::new(
+            ModelSpec::new(ModelKind::SpringMassDamper, [1.0, 0.3, 4.0]),
+            [1.0, 0.0],
+            0.0,
+            10.0,
+            rtol,
+            atol,
+            0.01,
+        )
+    }
+
+    #[test]
+    fn a_catalogued_model_can_be_integrated_adaptively_from_a_name_alone() {
+        // The correction to "Dopri5 can never be driven from a file". It takes
+        // a right-hand side *function* — but the catalogue turns a name into
+        // one inside this crate, so the closure never crosses the file
+        // boundary. What cannot be bound is an arbitrary user function; a
+        // catalogued model is not one.
+        let observed = AdaptiveCatalogSimulator::new()
+            .run(&adaptive(1e-8, 1e-10), 0)
+            .unwrap();
+        assert_eq!(observed.level(), DeterminismLevel::L2);
+        assert_eq!(observed.output.model.kind, ModelKind::SpringMassDamper);
+        assert!(observed.output.certified.accepted_steps > 0);
+        assert!(observed.output.certified.trajectory.len() > 2);
+    }
+
+    #[test]
+    fn the_certificate_records_the_tolerance_it_was_asked_for() {
+        // The difference from `CatalogSimulator`, which is L3 and asserts
+        // nothing about accuracy: this result travels with its claim.
+        let observed = AdaptiveCatalogSimulator::new()
+            .run(&adaptive(1e-6, 1e-9), 3)
+            .unwrap();
+        assert_eq!(observed.output.certified.rtol, 1e-6);
+        assert_eq!(observed.output.certified.atol, 1e-9);
+    }
+
+    #[test]
+    fn a_tighter_tolerance_costs_more_steps() {
+        // Measured rather than asserted: the certificate is not decoration,
+        // the solver really works harder for it.
+        let loose = AdaptiveCatalogSimulator::new()
+            .run(&adaptive(1e-4, 1e-6), 0)
+            .unwrap();
+        let tight = AdaptiveCatalogSimulator::new()
+            .run(&adaptive(1e-10, 1e-12), 0)
+            .unwrap();
+        assert!(
+            tight.output.certified.accepted_steps > loose.output.certified.accepted_steps,
+            "{} vs {}",
+            tight.output.certified.accepted_steps,
+            loose.output.certified.accepted_steps
+        );
+    }
+
+    #[test]
+    fn the_adaptive_solution_agrees_with_the_fixed_step_one() {
+        // Both integrate the same catalogued model, so they must land in the
+        // same place — the point of the catalogue being shared.
+        let spec = ModelSpec::new(ModelKind::SpringMassDamper, [1.0, 0.3, 4.0]);
+        let fixed = CatalogSimulator::new()
+            .run(&ModelRun::new(spec.clone(), [1.0, 0.0], 0.0, 10.0, 1e-4), 0)
+            .unwrap();
+        let adaptive_run = AdaptiveCatalogSimulator::new()
+            .run(
+                &AdaptiveModelRun::new(spec, [1.0, 0.0], 0.0, 10.0, 1e-10, 1e-12, 0.01),
+                0,
+            )
+            .unwrap();
+
+        let (_, last_fixed) = fixed.output.trajectory.last().unwrap();
+        let (_, last_adaptive) = adaptive_run.output.certified.trajectory.last().unwrap();
+        for (a, b) in last_fixed.iter().zip(last_adaptive)
+        {
+            assert!((a - b).abs() < 1e-4, "{a} vs {b}");
+        }
+    }
+
+    #[test]
+    fn a_mismatched_initial_state_names_the_model() {
+        let bad = AdaptiveModelRun::new(
+            ModelSpec::new(ModelKind::Sir, [0.6, 0.2]),
+            [0.99, 0.01],
+            0.0,
+            1.0,
+            1e-6,
+            1e-9,
+            0.01,
+        );
+        let err = AdaptiveCatalogSimulator::new().run(&bad, 0).unwrap_err();
+        assert!(err.to_string().contains("sir"), "{err}");
+        assert!(err.to_string().contains("dimension 3"), "{err}");
+    }
+
+    #[test]
+    fn an_adaptive_run_and_its_certificate_survive_a_file() {
+        // The tolerances are the *claim*; a lossy round-trip would certify
+        // something other than what ran.
+        let run = adaptive(1e-7, 1e-11);
+        let json = serde_json::to_string(&run).unwrap();
+        let back: AdaptiveModelRun = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, run);
+        assert_eq!(back.rtol, 1e-7);
+
+        let observed = AdaptiveCatalogSimulator::new().run(&run, 5).unwrap();
+        let body = CertifiedModeledTrajectoryBody::from_observation(observed);
+        let json = serde_json::to_string(&body).unwrap();
+        let back: CertifiedModeledTrajectoryBody = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, body);
+        assert_eq!(back.level, DeterminismLevel::L2);
+    }
+
+    #[test]
+    fn the_tolerance_is_part_of_the_content_address() {
+        // Two runs of one model differing only in what they certify to must
+        // not share a cache entry: they are different claims.
+        assert_ne!(
+            adaptive(1e-6, 1e-9).canonical_bytes(),
+            adaptive(1e-10, 1e-12).canonical_bytes()
+        );
     }
 }

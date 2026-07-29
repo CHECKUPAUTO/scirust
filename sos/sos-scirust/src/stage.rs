@@ -135,7 +135,10 @@ use sos_simulation::{Observation, SimDescriptor, Simulate};
 use sos_store::{ObjectStore, TypedStore};
 use sos_workflow::{Stage, StageExecutor, WorkflowError};
 
-use crate::model::{CatalogSimulator, ModelRun, ModelSpec, ModeledTrajectoryBody};
+use crate::model::{
+    AdaptiveCatalogSimulator, AdaptiveModelRun, CatalogSimulator, CertifiedModeledTrajectoryBody,
+    ModelRun, ModelSpec, ModeledTrajectoryBody,
+};
 use crate::ode::{OdeConfig, Rk4OdeSimulator, Trajectory};
 use crate::pipeline::{
     TrajectorySpectrumBody, TrajectorySpectrumConfig, TrajectorySpectrumSimulator,
@@ -839,6 +842,142 @@ impl<S: ObjectStore> StageExecutor for WelchStageHandler<S> {
             .parents(stage.inputs.clone())
             .repro(repro)
             .seal();
+
+        let id = self.store.borrow_mut().put_object(&object).map_err(|e| {
+            WorkflowError::StageFailed {
+                stage: stage.id.clone(),
+                reason: e.to_string(),
+            }
+        })?;
+        Ok(vec![id])
+    }
+}
+
+/// Domain-separation prefix for an adaptive catalogue run's content address.
+const ADAPTIVE_MODEL_CONFIG_DOMAIN: &[u8] = b"sos-scirust:adaptive-model-stage-config:v1";
+
+/// The content address of `run` — what a [`Stage`] must carry in its
+/// `config_hash` for [`AdaptiveCatalogStageHandler`] to run it.
+#[must_use]
+pub fn adaptive_model_config_address(run: &AdaptiveModelRun) -> Digest {
+    HashAlgo::Sha256.hash(ADAPTIVE_MODEL_CONFIG_DOMAIN, &run.canonical_bytes())
+}
+
+/// Binds [`AdaptiveCatalogSimulator`] as a workflow stage — **the first `L2`
+/// result a study file can produce**.
+///
+/// Every other CLI-reachable handler is `L3`: bit-reproducible, and saying
+/// nothing about accuracy. This one integrates a catalogued model adaptively
+/// and stores a [`CertifiedTrajectory`](crate::ode::CertifiedTrajectory), so the
+/// object carries the tolerances
+/// it is certified to and the accepted/rejected step counts it took to get
+/// there.
+///
+/// That matters beyond the numerics. `sos-repro`'s reproduction contract
+/// treats `L2` differently from `L3` — an `L2` node cannot be verified by
+/// comparing object ids, because two runs meeting the same tolerance need not
+/// be bit-identical, and must instead be judged by a `Certifier` that
+/// understands the quantity. Until this handler existed, no `L2` node was
+/// reachable from `sos run`, so that whole branch of the contract was
+/// unexercised from the command line.
+pub struct AdaptiveCatalogStageHandler<S> {
+    simulator: AdaptiveCatalogSimulator,
+    store: Rc<RefCell<S>>,
+    configs: BTreeMap<Digest, AdaptiveModelRun>,
+    backend: BackendVersion,
+}
+
+impl<S: ObjectStore> AdaptiveCatalogStageHandler<S> {
+    /// A handler sealing its results into `store`.
+    #[must_use]
+    pub fn new(store: Rc<RefCell<S>>, backend: BackendVersion) -> Self {
+        Self {
+            simulator: AdaptiveCatalogSimulator::new(),
+            store,
+            configs: BTreeMap::new(),
+            backend,
+        }
+    }
+
+    /// Offer a run, returning its content address.
+    pub fn offer(&mut self, run: AdaptiveModelRun) -> Digest {
+        let address = adaptive_model_config_address(&run);
+        self.configs.insert(address, run);
+        address
+    }
+
+    /// The content addresses currently on offer, sorted.
+    #[must_use]
+    pub fn offered(&self) -> Vec<Digest> {
+        self.configs.keys().copied().collect()
+    }
+
+    /// Which model the run at `address` integrates, and to what tolerances —
+    /// the audit [`CatalogStageHandler::model_at`] offers, plus the numbers
+    /// that make this an `L2` claim rather than an `L3` one.
+    #[must_use]
+    pub fn run_at(&self, address: &Digest) -> Option<(ModelSpec, f64, f64)> {
+        self.configs
+            .get(address)
+            .map(|r| (r.model.clone(), r.rtol, r.atol))
+    }
+
+    fn env(&self) -> EnvRecord {
+        EnvRecord::new(
+            "unspecified",
+            vec![self.backend.clone()],
+            "unspecified",
+            "unspecified",
+        )
+    }
+
+    fn producer(&self) -> ProducerRef {
+        let descriptor = self.simulator.descriptor();
+        ProducerRef::new(
+            descriptor.name.clone(),
+            descriptor.version,
+            HashAlgo::Sha256.hash(b"sos-producer", &descriptor.canonical_bytes()),
+        )
+    }
+}
+
+impl<S: ObjectStore> StageExecutor for AdaptiveCatalogStageHandler<S> {
+    fn run(&mut self, stage: &Stage) -> core::result::Result<Vec<ObjectId>, WorkflowError> {
+        let config = self
+            .configs
+            .get(&stage.config_hash)
+            .ok_or_else(|| WorkflowError::StageFailed {
+                stage: stage.id.clone(),
+                reason: format!(
+                    "no adaptive model run is on offer at content address {}",
+                    stage.config_hash
+                ),
+            })?
+            .clone();
+
+        let observation =
+            self.simulator
+                .run(&config, stage.seed)
+                .map_err(|e| WorkflowError::StageFailed {
+                    stage: stage.id.clone(),
+                    reason: e.to_string(),
+                })?;
+
+        let level = observation.level();
+        let repro = ReproMeta::new(
+            stage.seed,
+            RngId::new("none"),
+            self.env().digest(HashAlgo::Sha256),
+        )
+        .with_inputs(stage.inputs.clone());
+        let object = Object::builder(CertifiedModeledTrajectoryBody::from_observation(
+            observation,
+        ))
+        .level(level)
+        .producer(self.producer())
+        .parents(stage.inputs.clone())
+        .repro(repro)
+        .seal();
 
         let id = self.store.borrow_mut().put_object(&object).map_err(|e| {
             WorkflowError::StageFailed {
