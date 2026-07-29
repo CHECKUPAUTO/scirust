@@ -3,6 +3,7 @@
 
 mod battery;
 mod double_pendulum;
+mod grid;
 mod heat_rod;
 mod hvac_zone;
 mod laser;
@@ -21,6 +22,7 @@ mod two_body;
 
 pub use battery::BatteryAdapter;
 pub use double_pendulum::DoublePendulumAdapter;
+pub use grid::SwingEquationAdapter;
 pub use heat_rod::HeatRodAdapter;
 pub use hvac_zone::HvacZoneAdapter;
 pub use laser::SemiconductorLaserAdapter;
@@ -67,6 +69,7 @@ pub fn all_adapters() -> Vec<Box<dyn CapabilityAdapter>> {
         Box::new(OralOneCompartmentAdapter),
         Box::new(BatteryAdapter),
         Box::new(SemiconductorLaserAdapter),
+        Box::new(SwingEquationAdapter),
     ]
 }
 
@@ -180,6 +183,11 @@ const TUTORIAL_SCENARIOS: &[(&str, &str, &str)] = &[
         "sim.optoelectronics.semiconductor_laser",
         "semiconductor_laser.scirust.toml",
         include_str!("../../../docs/studio/tutorials/semiconductor_laser.scirust.toml"),
+    ),
+    (
+        "sim.power.swing_equation",
+        "swing_equation.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/swing_equation.scirust.toml"),
     ),
 ];
 
