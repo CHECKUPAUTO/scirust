@@ -3,6 +3,7 @@
 
 mod apd;
 mod battery;
+mod consecutive_reactions;
 mod double_pendulum;
 mod grid;
 mod heat_rod;
@@ -14,15 +15,20 @@ mod oral_dose;
 mod ornstein_uhlenbeck;
 mod pendulum;
 mod photodiode;
+mod projectile;
+mod rc_circuit;
+mod reversible_reaction;
 mod rigid_body;
 mod rlc;
 mod robertson;
+mod seir;
 mod sir;
 mod spring_mass_damper;
 mod two_body;
 
 pub use apd::AvalanchePhotodiodeAdapter;
 pub use battery::BatteryAdapter;
+pub use consecutive_reactions::ConsecutiveReactionsAdapter;
 pub use double_pendulum::DoublePendulumAdapter;
 pub use grid::SwingEquationAdapter;
 pub use heat_rod::HeatRodAdapter;
@@ -34,9 +40,13 @@ pub use oral_dose::OralOneCompartmentAdapter;
 pub use ornstein_uhlenbeck::OrnsteinUhlenbeckAdapter;
 pub use pendulum::PendulumAdapter;
 pub use photodiode::PhotodiodeAdapter;
+pub use projectile::ProjectileAdapter;
+pub use rc_circuit::RcCircuitAdapter;
+pub use reversible_reaction::ReversibleReactionAdapter;
 pub use rigid_body::RigidBodyAdapter;
 pub use rlc::RlcAdapter;
 pub use robertson::RobertsonAdapter;
+pub use seir::SeirAdapter;
 pub use sir::SirAdapter;
 pub use spring_mass_damper::SpringMassDamperAdapter;
 pub use two_body::TwoBodyAdapter;
@@ -73,6 +83,11 @@ pub fn all_adapters() -> Vec<Box<dyn CapabilityAdapter>> {
         Box::new(SemiconductorLaserAdapter),
         Box::new(SwingEquationAdapter),
         Box::new(AvalanchePhotodiodeAdapter),
+        Box::new(SeirAdapter),
+        Box::new(ConsecutiveReactionsAdapter),
+        Box::new(ReversibleReactionAdapter),
+        Box::new(RcCircuitAdapter),
+        Box::new(ProjectileAdapter),
     ]
 }
 
@@ -196,6 +211,31 @@ const TUTORIAL_SCENARIOS: &[(&str, &str, &str)] = &[
         "sim.optoelectronics.avalanche_photodiode",
         "avalanche_photodiode.scirust.toml",
         include_str!("../../../docs/studio/tutorials/avalanche_photodiode.scirust.toml"),
+    ),
+    (
+        "sim.epidemiology.seir",
+        "seir_epidemic.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/seir_epidemic.scirust.toml"),
+    ),
+    (
+        "sim.chemistry.consecutive_reactions",
+        "consecutive_reactions.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/consecutive_reactions.scirust.toml"),
+    ),
+    (
+        "sim.chemistry.reversible_reaction",
+        "reversible_reaction.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/reversible_reaction.scirust.toml"),
+    ),
+    (
+        "sim.electrical.rc",
+        "rc_circuit.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/rc_circuit.scirust.toml"),
+    ),
+    (
+        "sim.mechanics.projectile",
+        "projectile.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/projectile.scirust.toml"),
     ),
 ];
 

@@ -1,0 +1,79 @@
+# SciRust Studio tutorial scenario: an intermediate that rises and falls.
+#
+# Run it with:
+#
+#   scirust run docs/studio/tutorials/consecutive_reactions.scirust.toml
+#
+# A -> B -> C with first-order kinetics. A decays away, C accumulates, and B —
+# the intermediate — does the only interesting thing in the run: it rises,
+# peaks, and falls back toward zero.
+#
+# This is the shape of every radioactive decay chain, every two-step
+# synthesis, and the absorption half of a pharmacokinetic model. It is worth
+# having as its own capability because the intermediate's peak is what a
+# chemist actually cares about: when to stop the reaction if B is the product
+# you want.
+#
+# What is verified:
+#
+#   * matches_the_bateman_closed_form — all three species against the analytic
+#     solution at EVERY recorded sample, not just at the end. The reference is
+#     exact, so the 1e-9 measured here is RK4's truncation error and nothing
+#     else.
+#   * mass_is_conserved — a + b + c never moves, because the three
+#     derivatives sum to zero identically. The threshold is the run's own
+#     accumulated round-off, `samples * f64::EPSILON`, not a chosen number.
+#
+# The two are not redundant. A trajectory can drift off the analytic curve
+# while still conserving mass perfectly, and a stencil that leaked mass could
+# still track two of the three species. Each catches what the other misses.
+#
+# ---------------------------------------------------------------------------
+# Why k1 and k2 must differ
+# ---------------------------------------------------------------------------
+#
+# The Bateman form divides by k2 - k1. At equal rates the limit exists —
+# b(t) = a0*k*t*exp(-k*t) — but the model does not state it, so this
+# capability REFUSES the scenario (SRST-VAL-0298) rather than integrating
+# something it could not then verify against anything. That is the same call
+# `sim.pharmacology.oral_one_compartment` makes about k_a == k_e.
+#
+# Here k1 = 1.0 and k2 = 0.3: the first step is fast and the second slow, so B
+# builds up to a substantial peak before draining. Reverse them (k1 = 0.3,
+# k2 = 1.0) and B barely appears — it is consumed as fast as it is made, which
+# is the "steady-state approximation" every kinetics course teaches.
+
+schema_version = 1
+
+[experiment]
+name = "Consecutive first-order reactions"
+description = "A -> B -> C with a fast first step and a slow second, so the intermediate accumulates."
+
+[capability]
+id = "sim.chemistry.consecutive_reactions"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+# Fast first step.
+k1 = { value = 1.0, unit = "1/s" }
+# Slow second step, so B piles up. Must differ from k1 — see above.
+k2 = { value = 0.3, unit = "1/s" }
+
+[initial_state]
+# All of the material starts as A. B and C start at zero, which is what the
+# closed form assumes, so the capability takes only this one component.
+a = [{ value = 1.0, unit = "1" }]
+
+[solver]
+id = "rk4"
+start = { value = 0.0, unit = "s" }
+# Long enough for B to peak (around t = 1.7) and drain almost completely.
+end = { value = 30.0, unit = "s" }
+step = { value = 0.002, unit = "s" }
+
+[outputs]
+record = ["a", "b", "c", "exact_b", "mass"]
