@@ -377,6 +377,10 @@ pub struct ProvenanceView {
     pub completed_at: String,
     /// Elapsed seconds.
     pub elapsed_seconds: f64,
+    /// The seed the computation consumed, when it consumed one. `None` for
+    /// every capability whose result does not depend on a seed — showing a
+    /// number there would imply it mattered.
+    pub seed: Option<u64>,
 }
 
 /// The outcome of a store-integrity check.
@@ -519,6 +523,7 @@ pub fn run_view(
             started_at: result.provenance().started_at_rfc3339.clone(),
             completed_at: result.provenance().completed_at_rfc3339.clone(),
             elapsed_seconds: result.provenance().elapsed_seconds,
+            seed: result.provenance().seed,
         },
         scenario_source,
         integrity,

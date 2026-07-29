@@ -18,6 +18,8 @@ pub const CODE_UNSUPPORTED_SOLVER: ErrorCode = ErrorCode::new(ErrorFamily::Valid
 pub const CODE_MISSING_STEP: ErrorCode = ErrorCode::new(ErrorFamily::Validation, 92);
 pub const CODE_MISSING_TOLERANCE: ErrorCode = ErrorCode::new(ErrorFamily::Validation, 93);
 pub const CODE_SUM_CONSTRAINT: ErrorCode = ErrorCode::new(ErrorFamily::Validation, 94);
+/// A stochastic capability was given no `experiment.seed`.
+pub const CODE_MISSING_SEED: ErrorCode = ErrorCode::new(ErrorFamily::Validation, 95);
 
 fn field_error(
     field: &FieldDescriptor,
@@ -296,6 +298,34 @@ pub fn resolve_solver<'a>(
         });
     }
     Ok(solver)
+}
+
+/// Resolve the seed a stochastic capability must run with.
+///
+/// A deterministic capability never calls this: its result does not depend on
+/// a seed, and demanding one would be theatre.
+///
+/// A stochastic capability calls it and is **refused without a seed**. That is
+/// a deliberate constraint rather than a convenience default. A result is only
+/// evidence if someone else can obtain it again, and for a single sample from
+/// a distribution the seed is the entire difference between "here is a
+/// trajectory" and "here is *the* trajectory these inputs produce". Picking
+/// one silently — from the clock, from the OS, from a hard-coded constant —
+/// would either make the run unreproducible or make every run identical while
+/// looking as though it had been sampled; both are worse than asking.
+pub fn resolve_seed(scenario: &Scenario) -> Result<u64, CatalogedError> {
+    scenario.experiment.seed.ok_or_else(|| CatalogedError {
+        code: CODE_MISSING_SEED,
+        title: "Missing seed".to_string(),
+        explanation: "this capability is stochastic: its result is one sample from a \
+                      distribution, and without `experiment.seed` that sample cannot be \
+                      reproduced"
+            .to_string(),
+        recoverable: true,
+        suggested_action: Some(
+            "add `seed = 42` (or any integer you choose) under [experiment]".to_string(),
+        ),
+    })
 }
 
 /// Check that a set of SI-coherent values sums to `expected` within
