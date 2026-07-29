@@ -219,6 +219,7 @@ const RK4: SolverDescriptor = SolverDescriptor {
               which this capability checks.",
     fixed_step: true,
     adaptive_tolerance: false,
+    reports_progress: true,
 };
 
 const STEADY_STATE_CHECK: VerificationCheckDescriptor = VerificationCheckDescriptor {
@@ -607,6 +608,7 @@ impl CapabilityAdapter for HeatRodAdapter {
                 columns,
                 values,
             }],
+            distributions: vec![],
             metrics: vec![
                 Metric {
                     id: "nodes".to_string(),

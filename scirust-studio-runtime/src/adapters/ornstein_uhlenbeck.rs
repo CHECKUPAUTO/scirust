@@ -159,6 +159,7 @@ const EXACT_TRANSITION: SolverDescriptor = SolverDescriptor {
               error, only sampling error.",
     fixed_step: true,
     adaptive_tolerance: false,
+    reports_progress: true,
 };
 
 const STATIONARY_CHECK: VerificationCheckDescriptor = VerificationCheckDescriptor {
@@ -579,6 +580,7 @@ impl CapabilityAdapter for OrnsteinUhlenbeckAdapter {
             }],
             series,
             fields: vec![],
+            distributions: vec![],
             metrics,
             warnings: vec![],
             verifications,

@@ -206,6 +206,23 @@ Validation codes currently in use:
 - `SRST-VAL-0278`..`0285`: `sim.optoelectronics.avalanche_photodiode` field
   errors, including `0285` for a sweep starting below unity gain — which
   would be attenuation, not amplification.
+- `SRST-VAL-0286`..`0292`: `sim.epidemiology.seir` field errors.
+- `SRST-VAL-0293`..`0298`: `sim.chemistry.consecutive_reactions` field
+  errors, including `0298` for `k1 == k2` — refused because the Bateman form
+  divides by `k2 - k1` and the limit, though it exists, is not one the model
+  states.
+- `SRST-VAL-0299`..`0302`: `sim.chemistry.reversible_reaction` field errors.
+- `SRST-VAL-0303`..`0306`: `sim.electrical.rc` field errors.
+- `SRST-VAL-0307`..`0310`: `sim.mechanics.projectile` field errors.
+- `SRST-VAL-0311`..`0313`: `sim.electrical.van_der_pol` field errors.
+- `SRST-VAL-0314`..`0318`: `sim.pharmacology.two_compartment_iv` field
+  errors.
+- `SRST-VAL-0319`..`0321`: `sim.stochastic.mm1_queue` field errors,
+  including `0321` for an unstable queue — the simulation stays well defined
+  at `rho >= 1`, but every check compares against a steady state that does
+  not exist there.
+- `SRST-VAL-0322`..`0324`: `sim.stochastic.geometric_brownian_motion` field
+  errors.
 
 Each capability's exact field-to-code mapping is in that capability's
 adapter module (the `FieldDescriptor.error_code` on each `const`). A new
@@ -213,6 +230,49 @@ capability should claim the next unused block and record it here. The
 ten-number blocks stopped being ten-wide at `0250`: a capability with twelve
 fields needs twelve codes, and stretching one to fit a round number would
 mean two fields sharing a code, which is worse than an untidy table.
+
+## Progress
+
+`SolverDescriptor::reports_progress` says whether a run driven by that solver
+emits fractions a reader can trust.
+
+It is **declared**, not inferred. It used to be read off `fixed_step`, on the
+reasoning that a fixed-step solver is driven through `scirust-sim`'s per-step
+observer. That proxy was wrong in both directions, and both errors were real:
+
+- the Ornstein-Uhlenbeck process declares a fixed step and emits no per-step
+  fractions, so the desktop drew a determinate bar that never moved (found
+  and fixed in Phase 3B-3, by taking the *realisation* as the unit);
+- `sim.stochastic.mm1_queue` has no step size anywhere — it is a
+  discrete-event simulation — and reports one unit per realisation perfectly
+  well.
+
+`every_capability_emits_the_progress_it_declares` walks the registry, runs
+each capability's own tutorial, and asserts that a capability declaring
+progress emits some and one declining it emits none. It also asserts the
+fractions are inside `[0, 1]` and never go backwards — which caught
+`sim.electrical.van_der_pol` reaching one hundred percent and starting again,
+because it integrates two trajectories and each was reporting its own span.
+
+`sink::SubRangeSink` is the fix for that class: it maps a phase's
+`0.0..=1.0` onto a window of the whole run's, and swallows the phase's
+`Started` and `Completed` because those are the run's events and not a
+phase's. The earlier workaround — handing the second trajectory a
+`NullEventSink` — removed the reset and replaced it with a bar that reached
+the end at the halfway point, which is a fraction a reader still cannot
+trust.
+
+## Distributions
+
+`RunResult::distributions` carries histograms: `n` counts delimited by
+`n + 1` edges, with samples outside the range counted rather than clamped
+into the end bins.
+
+Neither a `Series` nor a `Field` could hold one — both are aligned
+one-to-one with an axis, and a histogram's edges outnumber its bins by one.
+`validate_result` enforces four structural rules (unique id, edge count,
+finite strictly-increasing edges, at least one bin) and no statistical ones.
+See `docs/studio/adr/0011-distributions.md`.
 
 ## Run domains
 

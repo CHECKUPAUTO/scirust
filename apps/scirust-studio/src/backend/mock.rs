@@ -29,10 +29,10 @@
 use core::cell::RefCell;
 
 use super::wire::{
-    BootstrapWire, CapabilityWire, CheckWire, ErrorWire, EventBatchWire, EventWire, FieldWire,
-    IntegrityWire, JobStateWire, JobWire, LocationWire, MetricWire, OutputWire, ProblemWire,
-    ProvenanceWire, RunWire, ScenarioFileWire, ScenarioWire, SeriesRoleWire, SeriesWire,
-    StoredRunWire, ValidationWire, VerificationWire, XAxisKindWire,
+    BootstrapWire, CapabilityWire, CheckWire, DistributionWire, ErrorWire, EventBatchWire,
+    EventWire, FieldWire, IntegrityWire, JobStateWire, JobWire, LocationWire, MetricWire,
+    OutputWire, ProblemWire, ProvenanceWire, RunWire, ScenarioFileWire, ScenarioWire,
+    SeriesRoleWire, SeriesWire, StoredRunWire, ValidationWire, VerificationWire, XAxisKindWire,
 };
 use super::{FrontendError, StudioBackend};
 
@@ -164,6 +164,23 @@ impl MockBackend {
             }],
             // The fabricated capability produces curves, not a field.
             fields: Vec::new(),
+            // A histogram, though — deliberately, and not because the
+            // fabricated spring-mass-damper has one. The mock exists so the
+            // interface can be developed and demonstrated without a backend,
+            // and a rendering path it never exercises is a rendering path
+            // nobody notices breaking. The overflow count is non-zero for the
+            // same reason: the "samples outside the binned range" line is
+            // exactly the sort of thing that is only ever seen when it is
+            // already too late.
+            distributions: vec![DistributionWire {
+                id: "mock_distribution".to_string(),
+                display_name: "Fabricated distribution (MOCK)".to_string(),
+                unit: "1".to_string(),
+                edges: vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+                counts: vec![3, 11, 24, 9, 2],
+                underflow: 0,
+                overflow: 1,
+            }],
             metrics: vec![MetricWire {
                 id: "mock".to_string(),
                 display_name: "Fabricated metric".to_string(),

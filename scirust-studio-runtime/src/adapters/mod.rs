@@ -3,43 +3,61 @@
 
 mod apd;
 mod battery;
+mod consecutive_reactions;
 mod double_pendulum;
+mod gbm;
 mod grid;
 mod heat_rod;
 mod hvac_zone;
 mod laser;
 mod logistic_growth;
 mod lotka_volterra;
+mod mm1_queue;
 mod oral_dose;
 mod ornstein_uhlenbeck;
 mod pendulum;
 mod photodiode;
+mod projectile;
+mod rc_circuit;
+mod reversible_reaction;
 mod rigid_body;
 mod rlc;
 mod robertson;
+mod seir;
 mod sir;
 mod spring_mass_damper;
 mod two_body;
+mod two_compartment_iv;
+mod van_der_pol;
 
 pub use apd::AvalanchePhotodiodeAdapter;
 pub use battery::BatteryAdapter;
+pub use consecutive_reactions::ConsecutiveReactionsAdapter;
 pub use double_pendulum::DoublePendulumAdapter;
+pub use gbm::GeometricBrownianMotionAdapter;
 pub use grid::SwingEquationAdapter;
 pub use heat_rod::HeatRodAdapter;
 pub use hvac_zone::HvacZoneAdapter;
 pub use laser::SemiconductorLaserAdapter;
 pub use logistic_growth::LogisticGrowthAdapter;
 pub use lotka_volterra::LotkaVolterraAdapter;
+pub use mm1_queue::Mm1QueueAdapter;
 pub use oral_dose::OralOneCompartmentAdapter;
 pub use ornstein_uhlenbeck::OrnsteinUhlenbeckAdapter;
 pub use pendulum::PendulumAdapter;
 pub use photodiode::PhotodiodeAdapter;
+pub use projectile::ProjectileAdapter;
+pub use rc_circuit::RcCircuitAdapter;
+pub use reversible_reaction::ReversibleReactionAdapter;
 pub use rigid_body::RigidBodyAdapter;
 pub use rlc::RlcAdapter;
 pub use robertson::RobertsonAdapter;
+pub use seir::SeirAdapter;
 pub use sir::SirAdapter;
 pub use spring_mass_damper::SpringMassDamperAdapter;
 pub use two_body::TwoBodyAdapter;
+pub use two_compartment_iv::TwoCompartmentIvAdapter;
+pub use van_der_pol::VanDerPolAdapter;
 
 use scirust_studio_registry::CapabilityRegistry;
 
@@ -73,6 +91,15 @@ pub fn all_adapters() -> Vec<Box<dyn CapabilityAdapter>> {
         Box::new(SemiconductorLaserAdapter),
         Box::new(SwingEquationAdapter),
         Box::new(AvalanchePhotodiodeAdapter),
+        Box::new(SeirAdapter),
+        Box::new(ConsecutiveReactionsAdapter),
+        Box::new(ReversibleReactionAdapter),
+        Box::new(RcCircuitAdapter),
+        Box::new(ProjectileAdapter),
+        Box::new(VanDerPolAdapter),
+        Box::new(TwoCompartmentIvAdapter),
+        Box::new(Mm1QueueAdapter),
+        Box::new(GeometricBrownianMotionAdapter),
     ]
 }
 
@@ -196,6 +223,51 @@ const TUTORIAL_SCENARIOS: &[(&str, &str, &str)] = &[
         "sim.optoelectronics.avalanche_photodiode",
         "avalanche_photodiode.scirust.toml",
         include_str!("../../../docs/studio/tutorials/avalanche_photodiode.scirust.toml"),
+    ),
+    (
+        "sim.epidemiology.seir",
+        "seir_epidemic.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/seir_epidemic.scirust.toml"),
+    ),
+    (
+        "sim.chemistry.consecutive_reactions",
+        "consecutive_reactions.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/consecutive_reactions.scirust.toml"),
+    ),
+    (
+        "sim.chemistry.reversible_reaction",
+        "reversible_reaction.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/reversible_reaction.scirust.toml"),
+    ),
+    (
+        "sim.electrical.rc",
+        "rc_circuit.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/rc_circuit.scirust.toml"),
+    ),
+    (
+        "sim.mechanics.projectile",
+        "projectile.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/projectile.scirust.toml"),
+    ),
+    (
+        "sim.electrical.van_der_pol",
+        "van_der_pol.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/van_der_pol.scirust.toml"),
+    ),
+    (
+        "sim.pharmacology.two_compartment_iv",
+        "two_compartment_iv.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/two_compartment_iv.scirust.toml"),
+    ),
+    (
+        "sim.stochastic.mm1_queue",
+        "mm1_queue.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/mm1_queue.scirust.toml"),
+    ),
+    (
+        "sim.stochastic.geometric_brownian_motion",
+        "geometric_brownian_motion.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/geometric_brownian_motion.scirust.toml"),
     ),
 ];
 
@@ -435,6 +507,87 @@ mod tests {
                         .errors
                         .iter()
                         .any(|e| e.code == crate::validate_support::CODE_UNSUPPORTED_BACKEND)
+                );
+            }
+        }
+    }
+
+    /// A capability's declared `reports_progress` must match what it
+    /// actually emits.
+    ///
+    /// This is the assertion the old `fixed_step` proxy could not make. That
+    /// proxy was wrong in both directions and produced two real defects: the
+    /// Ornstein-Uhlenbeck process declared a fixed step and emitted no
+    /// fractions, so the desktop drew a determinate bar that never moved;
+    /// and the discrete-event queue has no step size at all while reporting
+    /// one unit per realisation perfectly well.
+    ///
+    /// Driven by the registry, so a capability that declares progress and
+    /// forgets to emit it — or emits it while declaring it cannot — fails
+    /// here rather than in an interface nobody is watching.
+    #[test]
+    fn every_capability_emits_the_progress_it_declares() {
+        use crate::control::ExecutionControl;
+        use crate::sink::{CollectingEventSink, RunEvent};
+
+        for adapter in all_adapters()
+        {
+            let descriptor = adapter.descriptor();
+            let id = descriptor.id.0;
+            let declared = descriptor
+                .supported_solvers
+                .iter()
+                .any(|s| s.reports_progress);
+
+            let toml = tutorial_scenario_for(id).expect("tutorial");
+            let scenario = scirust_studio_schema::parse_toml(toml).expect("parses");
+            let validated = adapter.validate(&scenario).expect("validates");
+            let mut sink = CollectingEventSink::new();
+            adapter
+                .execute(&validated, &ExecutionControl::new(), &mut sink)
+                .unwrap_or_else(|e| panic!("{id} failed to execute: {e}"));
+
+            let fractions: Vec<f64> = sink
+                .events()
+                .iter()
+                .filter_map(|e| match e
+                {
+                    RunEvent::Progress { fraction, .. } => Some(*fraction),
+                    _ => None,
+                })
+                .collect();
+
+            if declared
+            {
+                assert!(
+                    !fractions.is_empty(),
+                    "{id} declares that it reports progress and emitted none; the interface \
+                     would draw a determinate bar that never moves"
+                );
+                // A fraction a reader can trust: forward-only and inside
+                // [0, 1]. An emitter that went backwards or past one would be
+                // worse than none at all.
+                let mut previous = 0.0_f64;
+                for fraction in &fractions
+                {
+                    assert!(
+                        (0.0..=1.0).contains(fraction),
+                        "{id} emitted a fraction of {fraction}"
+                    );
+                    assert!(
+                        *fraction >= previous,
+                        "{id} emitted {fraction} after {previous}; progress does not go backwards"
+                    );
+                    previous = *fraction;
+                }
+            }
+            else
+            {
+                assert!(
+                    fractions.is_empty(),
+                    "{id} declares that it cannot report progress and emitted {} fractions; the \
+                     interface would show indeterminate activity for a run that knows where it is",
+                    fractions.len()
                 );
             }
         }

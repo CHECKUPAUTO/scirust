@@ -236,6 +236,32 @@ pub struct GridView {
     pub values: Vec<f64>,
 }
 
+/// A histogram, for the frontend.
+///
+/// Carries the **edges** rather than the bin centres, for exactly the reason
+/// `scirust_studio_runtime::Distribution` does: a reader given centres has to
+/// infer the width, and a reader given `n` values for `n` bins has to guess
+/// what they are aligned to. Under- and overflow travel with it because a
+/// histogram whose range was chosen badly must be able to say so in the
+/// interface as well as on the command line.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DistributionView {
+    /// Stable id.
+    pub id: String,
+    /// Display name.
+    pub display_name: String,
+    /// Unit of the binned quantity, not of the counts.
+    pub unit: String,
+    /// Bin edges: one more than there are counts.
+    pub edges: Vec<f64>,
+    /// One count per bin.
+    pub counts: Vec<u64>,
+    /// Samples below the first edge.
+    pub underflow: u64,
+    /// Samples above the last.
+    pub overflow: u64,
+}
+
 /// A scenario file the user chose, as text.
 ///
 /// Deliberately carries **no path**. The frontend gets the contents and a
@@ -349,6 +375,8 @@ pub struct RunView {
     /// outputs are curves.
     #[serde(default)]
     pub fields: Vec<GridView>,
+    /// Histograms this run produced.
+    pub distributions: Vec<DistributionView>,
     /// Metrics.
     pub metrics: Vec<MetricView>,
     /// Scientific checks.
@@ -538,87 +566,108 @@ pub fn run_view(
 ) -> RunView {
     let target = format!("{}-{}", manifest.environment.os, manifest.environment.arch);
 
-    let (x_axis_kind, x_axis_label, x_axis_unit, x_values, series, fields) = match result
-    {
-        LoadedRunResult::V2(r) =>
+    let (x_axis_kind, x_axis_label, x_axis_unit, x_values, series, fields, distributions) =
+        match result
         {
-            // The axis the result's own summary names — which is `t` for
-            // every capability that integrates forward, and the swept
-            // parameter for one that does not (ADR 0010). The fallback is
-            // for a result whose summary names an axis it does not carry,
-            // which `validate_result` rejects at the source; keeping it
-            // means a corrupt stored result still charts something rather
-            // than showing an empty panel.
-            let axis = r.summary_axis().or_else(|| r.axes.first());
-            let (label, unit, values) = match axis
+            LoadedRunResult::V2(r) =>
             {
-                Some(a) => (a.display_name.clone(), a.unit.clone(), a.values.clone()),
-                None => (String::new(), String::new(), Vec::new()),
-            };
-            let series = r
-                .series
-                .iter()
-                .map(|s| SeriesView {
-                    id: s.id.clone(),
-                    display_name: s.display_name.clone(),
-                    unit: s.unit.clone(),
-                    role: s.role.into(),
-                    values: s.values.clone(),
-                })
-                .collect();
-            // The field is the *result* for a capability like the heat rod;
-            // the series beside it are summaries of it. Dropping it here
-            // would be the interface silently showing less than the run
-            // produced.
-            let fields = r
-                .fields
-                .iter()
-                .map(|f| GridView {
-                    id: f.id.clone(),
-                    display_name: f.display_name.clone(),
-                    unit: f.unit.clone(),
-                    row_axis_id: f.row_axis_id.clone(),
-                    column_axis_id: f.column_axis_id.clone(),
-                    columns: f.columns,
-                    values: f.values.clone(),
-                })
-                .collect();
-            (
-                XAxisKind::PhysicalCoordinates,
-                label,
-                unit,
-                values,
-                series,
-                fields,
-            )
-        },
-        LoadedRunResult::V1(r) =>
-        {
-            let length = r.series.first().map(|s| s.values.len()).unwrap_or(0);
-            let series = r
-                .series
-                .iter()
-                .map(|s| SeriesView {
-                    id: s.id.clone(),
-                    display_name: s.display_name.clone(),
-                    unit: s.unit.clone(),
-                    // Schema v1 predates roles entirely; every v1 series is a
-                    // plain trajectory, which is what the default says.
-                    role: SeriesRoleView::Trajectory,
-                    values: s.values.clone(),
-                })
-                .collect();
-            (
-                XAxisKind::SampleIndex,
-                "Sample index".to_string(),
-                String::new(),
-                (0..length).map(|i| i as f64).collect(),
-                series,
-                // Schema v1 has no notion of a field.
-                Vec::new(),
-            )
-        },
-    };
+                // The axis the result's own summary names — which is `t` for
+                // every capability that integrates forward, and the swept
+                // parameter for one that does not (ADR 0010). The fallback is
+                // for a result whose summary names an axis it does not carry,
+                // which `validate_result` rejects at the source; keeping it
+                // means a corrupt stored result still charts something rather
+                // than showing an empty panel.
+                let axis = r.summary_axis().or_else(|| r.axes.first());
+                let (label, unit, values) = match axis
+                {
+                    Some(a) => (a.display_name.clone(), a.unit.clone(), a.values.clone()),
+                    None => (String::new(), String::new(), Vec::new()),
+                };
+                let series = r
+                    .series
+                    .iter()
+                    .map(|s| SeriesView {
+                        id: s.id.clone(),
+                        display_name: s.display_name.clone(),
+                        unit: s.unit.clone(),
+                        role: s.role.into(),
+                        values: s.values.clone(),
+                    })
+                    .collect();
+                // The field is the *result* for a capability like the heat rod;
+                // the series beside it are summaries of it. Dropping it here
+                // would be the interface silently showing less than the run
+                // produced.
+                let fields = r
+                    .fields
+                    .iter()
+                    .map(|f| GridView {
+                        id: f.id.clone(),
+                        display_name: f.display_name.clone(),
+                        unit: f.unit.clone(),
+                        row_axis_id: f.row_axis_id.clone(),
+                        column_axis_id: f.column_axis_id.clone(),
+                        columns: f.columns,
+                        values: f.values.clone(),
+                    })
+                    .collect();
+                // Same argument as the field above: for the M/M/1 queue the
+                // histograms ARE the result, and the per-replicate series beside
+                // them are the raw sample. Dropping them here would be the
+                // interface showing less than the run produced.
+                let distributions = r
+                    .distributions
+                    .iter()
+                    .map(|d| DistributionView {
+                        id: d.id.clone(),
+                        display_name: d.display_name.clone(),
+                        unit: d.unit.clone(),
+                        edges: d.edges.clone(),
+                        counts: d.counts.clone(),
+                        underflow: d.underflow,
+                        overflow: d.overflow,
+                    })
+                    .collect();
+                (
+                    XAxisKind::PhysicalCoordinates,
+                    label,
+                    unit,
+                    values,
+                    series,
+                    fields,
+                    distributions,
+                )
+            },
+            LoadedRunResult::V1(r) =>
+            {
+                let length = r.series.first().map(|s| s.values.len()).unwrap_or(0);
+                let series = r
+                    .series
+                    .iter()
+                    .map(|s| SeriesView {
+                        id: s.id.clone(),
+                        display_name: s.display_name.clone(),
+                        unit: s.unit.clone(),
+                        // Schema v1 predates roles entirely; every v1 series is a
+                        // plain trajectory, which is what the default says.
+                        role: SeriesRoleView::Trajectory,
+                        values: s.values.clone(),
+                    })
+                    .collect();
+                (
+                    XAxisKind::SampleIndex,
+                    "Sample index".to_string(),
+                    String::new(),
+                    (0..length).map(|i| i as f64).collect(),
+                    series,
+                    // Schema v1 has no notion of a field...
+                    Vec::new(),
+                    // ...nor of a distribution.
+                    Vec::new(),
+                )
+            },
+        };
 
     RunView {
         run_id: run_id.to_string(),
@@ -632,6 +681,7 @@ pub fn run_view(
         x_values,
         series,
         fields,
+        distributions,
         metrics: result.metrics().iter().map(MetricView::from).collect(),
         verifications: result
             .verifications()

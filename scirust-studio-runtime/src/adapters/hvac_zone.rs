@@ -400,6 +400,7 @@ impl CapabilityAdapter for HvacZoneAdapter {
                 },
             ],
             fields: vec![],
+            distributions: vec![],
             metrics: vec![
                 Metric {
                     id: "air_equilibrium".to_string(),

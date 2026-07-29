@@ -269,6 +269,11 @@ const STRINGS: &[(&str, &str, &str)] = &[
         "This field could not be drawn: its shape or its values are not usable.",
         "Ce champ n'a pas pu être tracé : sa forme ou ses valeurs sont inutilisables.",
     ),
+    (
+        "distribution.all-outside",
+        "Every sample fell outside the binned range, so there is nothing to draw.",
+        "Tous les échantillons sont tombés hors de la plage des classes : il n'y a rien à tracer.",
+    ),
     ("chart.of", "of", "sur"),
     ("chart.points", "points", "points"),
     ("chart.table_view", "Show as table", "Afficher en tableau"),

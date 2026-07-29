@@ -446,6 +446,67 @@ fn print_field(result: &RunResult, field: &Field) {
     }
 }
 
+/// Draw a histogram as horizontal bars, one row per bin.
+///
+/// Bars rather than the field renderer's density map, because a distribution
+/// is one-dimensional and a row of shaded cells would make the reader
+/// estimate a count from a shade when a length is available and exact.
+///
+/// The bin's **interval** is printed rather than its centre. A histogram's
+/// whole content is "this much fell between these two values", and a centre
+/// makes a reader guess the width — which is the same off-by-one that made
+/// `Distribution` its own type instead of a one-row `Field`.
+fn print_distribution(distribution: &scirust_studio_runtime::Distribution) {
+    const BAR_WIDTH: usize = 40;
+
+    println!(
+        "  {} ({} samples, unit {})",
+        distribution.display_name,
+        distribution.total(),
+        distribution.unit
+    );
+
+    let peak = distribution.counts.iter().copied().max().unwrap_or(0);
+    if peak == 0
+    {
+        println!("  (every sample fell outside the binned range)");
+    }
+    for (index, count) in distribution.counts.iter().enumerate()
+    {
+        let (lo, hi) = (distribution.edges[index], distribution.edges[index + 1]);
+        // `peak` is non-zero here whenever any bar is drawn, so this scales
+        // the largest bin to the full width.
+        let filled = if peak == 0
+        {
+            0
+        }
+        else
+        {
+            (*count as usize * BAR_WIDTH).div_ceil(peak as usize)
+        };
+        let bar: String = "#".repeat(filled);
+        println!("  [{:>10.4}, {:>10.4}) {bar:<BAR_WIDTH$} {count}", lo, hi);
+    }
+
+    // Never silently: a sample outside the range is a statement about the
+    // range being wrong, and hiding it would turn a badly chosen histogram
+    // into a plausible-looking one.
+    if distribution.underflow > 0 || distribution.overflow > 0
+    {
+        println!(
+            "  outside the binned range: {} below, {} above",
+            distribution.underflow, distribution.overflow
+        );
+    }
+    if let Some(mean) = distribution.estimated_mean()
+    {
+        println!(
+            "  mean (estimated from bin centres) {}",
+            format_scalar(mean)
+        );
+    }
+}
+
 fn print_result_text(result: &RunResult) {
     println!("{}", ux::heading(&result.summary.capability_display_name));
     println!("  scenario      {}", result.summary.scenario_name);
@@ -527,6 +588,13 @@ fn print_result_text(result: &RunResult) {
         println!();
         println!("{}", ux::heading("FIELD"));
         print_field(result, field);
+    }
+
+    for distribution in &result.distributions
+    {
+        println!();
+        println!("{}", ux::heading("DISTRIBUTION"));
+        print_distribution(distribution);
     }
 
     println!();
