@@ -3,7 +3,7 @@
 //!
 //! # Scope
 //!
-//! Ten capabilities:
+//! Eleven capabilities:
 //!
 //! 1. an exactly invertible **strictly lower-triangular cubic map**
 //!    ([`TriangularCubicFlow`]);
@@ -111,7 +111,24 @@
 //!     a causal claim but a statement about what a causal claim would cost.
 //!     It has no cost model and no opinion on whether an experiment is worth
 //!     running; see the private `experiment_design` module's docs for the
-//!     perfect-intervention idealisation it assumes and states.
+//!     perfect-intervention idealisation it assumes and states; and
+//! 11. **theory revision** ([`revise_assumptions`], [`audit_certificate`]) —
+//!     the mechanism by which everything above can be *withdrawn*. Every
+//!     certificate in this crate is a conditional statement resting on named
+//!     assumptions; until this capability existed, nothing happened when one
+//!     of those assumptions later turned out to be wrong. Evidence revises
+//!     the [`AssumptionRegistry`], and the revision re-audits certificates:
+//!     a claim whose ground has moved reports
+//!     [`CertificateStanding::Retracted`] or
+//!     [`CertificateStanding::InDoubt`], and in both cases its estimate stops
+//!     being usable. The distinction between those two is the capability's
+//!     whole substance — evidence naming several assumptions falsified their
+//!     *conjunction* and cannot say which member broke, so it puts a claim in
+//!     doubt without attributing blame. [`evidence_from_invariance`] applies
+//!     that rule to capability 8, whose own docs say it detects that
+//!     something is wrong and cannot say what. The crate's tests run the
+//!     whole loop: capability 6's confidently wrong estimate, capability 8
+//!     detecting the misspecification, and the certificate ceasing to stand.
 //!
 //! # Causal interpretation — read before using the discovery API
 //!
@@ -166,7 +183,10 @@
 //! answers change when a Markov-equivalent alternative is substituted.
 //! Capability 10 says which experiment would settle that substitution, but
 //! plans it only; nothing here runs an experiment, and a plan is not
-//! evidence.
+//! evidence. Capability 11 withdraws claims whose assumptions evidence has
+//! undermined, but it re-derives nothing and establishes nothing as true:
+//! corroboration there means a check that could have failed did not, which is
+//! weaker than every other guarantee in this list.
 //!
 //! # Cubic-flow mathematical properties
 //!
@@ -220,6 +240,7 @@ mod scm;
 mod sensitivity;
 mod skeleton_discovery;
 mod synthetic;
+mod theory_revision;
 mod triangular_cubic;
 mod variable;
 
@@ -269,5 +290,10 @@ pub use sensitivity::{
     benchmark_covariate, bound_effect_under_confounder,
 };
 pub use synthetic::{SyntheticDataConfig, generate_causal_samples, generate_noise_matrix};
+pub use theory_revision::{
+    AssumptionEvidence, AssumptionOutcome, AssumptionRevision, CertificateAudit,
+    CertificateStanding, EvidenceDirection, RevisionVerdict, audit_certificate,
+    evidence_from_invariance, revise_assumptions,
+};
 pub use triangular_cubic::TriangularCubicFlow;
 pub use variable::{CausalVariable, VariableKind, VariableRole, validate_variable_set};
