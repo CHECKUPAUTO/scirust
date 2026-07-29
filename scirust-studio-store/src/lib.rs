@@ -44,7 +44,7 @@ mod tests {
     use super::*;
     use scirust_studio_runtime::{
         Axis, AxisMonotonicity, DeterminismClass, Metric, MetricValue, RESULT_SCHEMA_VERSION,
-        RunProvenance, RunResult, RunSummary, Series,
+        RunProvenance, RunResult, RunSummary, Series, SeriesRole,
     };
 
     const SCENARIO: &str = "schema_version = 1\n[capability]\nid = \"demo\"\n";
@@ -72,6 +72,7 @@ mod tests {
                 display_name: "X".to_string(),
                 unit: "m".to_string(),
                 axis_id: "t".to_string(),
+                role: SeriesRole::Trajectory,
                 values: vec![1.0, 0.5, 0.25],
             }],
             metrics: vec![Metric {

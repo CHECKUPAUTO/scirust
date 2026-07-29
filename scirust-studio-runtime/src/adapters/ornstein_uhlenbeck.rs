@@ -44,14 +44,15 @@ use scirust_studio_schema::Scenario;
 
 use crate::adapter::{CapabilityAdapter, ExecutionError, ValidatedScenario, ValidationReport};
 use crate::control::ExecutionControl;
+use crate::ensemble::{EnsembleAccumulator, MAX_RETAINED_MEMBERS, replicate_seeds};
 use crate::result::{
     Axis, AxisMonotonicity, Metric, MetricValue, RESULT_SCHEMA_VERSION, RunProvenance, RunResult,
-    RunSummary, Series, TIME_AXIS_ID, VerificationResult, VerificationStatus,
+    RunSummary, Series, SeriesRole, TIME_AXIS_ID, VerificationResult, VerificationStatus,
 };
 use crate::sink::{EventSink, RunEvent};
 use crate::validate_support::{
-    check_unknown_model_fields, check_unknown_state_fields, resolve_model_scalar, resolve_seed,
-    resolve_solver, resolve_state_vector,
+    check_unknown_model_fields, check_unknown_state_fields, resolve_model_scalar,
+    resolve_replicates, resolve_seed, resolve_solver, resolve_state_vector,
 };
 
 /// How many relaxation times `1/θ` to discard before measuring the stationary
@@ -69,6 +70,15 @@ const BURN_IN_RELAXATION_TIMES: f64 = 5.0;
 /// a run that fails one time in three hundred is a nuisance that gets
 /// suppressed, and a suppressed check is worse than no check.
 const SIGMA_BAND: f64 = 4.0;
+
+/// How many across-replicate standard deviations the shaded band spans.
+///
+/// Two, not four. This one is not a pass/fail threshold but a picture of
+/// where the realisations are: a `±2σ` band contains about 95% of them, which
+/// is the reading most people already have for a spread band. `SIGMA_BAND`
+/// above answers a different question — how far the *mean of many* may stray
+/// before the run is wrong — and the two would be confusing to share.
+const BAND_SIGMAS: f64 = 2.0;
 
 const THETA: FieldDescriptor = FieldDescriptor {
     canonical_name: "theta",
@@ -166,6 +176,24 @@ const REPRODUCIBILITY_CHECK: VerificationCheckDescriptor = VerificationCheckDesc
                   the run itself demonstrates.",
 };
 
+const ENSEMBLE_MOMENTS_CHECK: VerificationCheckDescriptor = VerificationCheckDescriptor {
+    id: "ensemble_moments",
+    description: "Only for a run with `experiment.replicates` above 1. Compares the mean and \
+                  variance *across* the independent realisations at the final time against the \
+                  stationary law N(mu, sigma^2/(2*theta)). Stronger than the single-path check: \
+                  the realisations are independent, so n of them carry n samples' worth of \
+                  information and the tolerance needs no autocorrelation correction.",
+};
+
+const ENSEMBLE_DERIVATION_CHECK: VerificationCheckDescriptor = VerificationCheckDescriptor {
+    id: "ensemble_derived_from_seed",
+    description: "Only for a run with `experiment.replicates` above 1. Re-derives the \
+                  replicates' seeds from the single recorded seed, checks them against the ones \
+                  the run consumed, and re-runs one realisation from its derived seed to compare \
+                  bit for bit. Turns the claim that one number regenerates the whole ensemble \
+                  into evidence.",
+};
+
 /// The capability descriptor for `sim.stochastic.ornstein_uhlenbeck`.
 pub static DESCRIPTOR: CapabilityDescriptor = CapabilityDescriptor {
     id: CapabilityId("sim.stochastic.ornstein_uhlenbeck"),
@@ -200,7 +228,12 @@ pub static DESCRIPTOR: CapabilityDescriptor = CapabilityDescriptor {
         },
     ],
     verification: VerificationDescriptor {
-        checks: &[STATIONARY_CHECK, REPRODUCIBILITY_CHECK],
+        checks: &[
+            STATIONARY_CHECK,
+            REPRODUCIBILITY_CHECK,
+            ENSEMBLE_MOMENTS_CHECK,
+            ENSEMBLE_DERIVATION_CHECK,
+        ],
     },
 };
 
@@ -240,6 +273,12 @@ impl CapabilityAdapter for OrnsteinUhlenbeckAdapter {
         }
         // The constraint that makes this capability reproducible at all.
         if let Err(e) = resolve_seed(scenario)
+        {
+            errors.push(e);
+        }
+        // Every adapter checks this, including the deterministic ones — see
+        // `resolve_replicates`.
+        if let Err(e) = resolve_replicates(scenario, DESCRIPTOR.determinism)
         {
             errors.push(e);
         }
@@ -306,32 +345,215 @@ impl CapabilityAdapter for OrnsteinUhlenbeckAdapter {
         let wall_start = std::time::Instant::now();
         let started_at = chrono::Utc::now();
 
-        // `ou_path` samples the whole path in one call, seeding its generator
-        // once. It cannot be chunked: each call re-seeds, so splitting the
-        // span would produce a different — and differently distributed —
-        // sample. Cancellation is therefore pre-execution only, exactly as
-        // for the adaptive stiff path, and the capability reports no
-        // progress rather than an invented fraction. See
-        // `docs/studio/RUNTIME_CONTRACT.md`.
-        let path = ou_path(x0, theta, mu, sigma, dt, steps, seed)
-            .map_err(|e| ExecutionError::InvalidModelState(e.to_string()))?;
+        let replicates = resolve_replicates(s, DESCRIPTOR.determinism).expect("validated");
+        let seeds = replicate_seeds(seed, replicates);
 
-        let coordinates: Vec<f64> = (0..path.len()).map(|k| t0 + k as f64 * dt).collect();
-        let mean_line = vec![mu; path.len()];
+        // `ou_path` samples one whole realisation per call, seeding its
+        // generator once. A *single* realisation cannot be chunked: each call
+        // re-seeds, so splitting the span would produce a different — and
+        // differently distributed — sample.
+        //
+        // An ensemble can be, because the realisation is its atom. Progress
+        // is counted in completed realisations and cancellation is honoured
+        // between them. A one-replicate run has exactly one indivisible unit
+        // of work and so reports a single step from nothing to done — which
+        // is not an invented fraction but an accurate description of a job
+        // with one part. See `docs/studio/adr/0008-ensembles.md`.
+        let mut ensemble = EnsembleAccumulator::new(steps + 1);
+        let mut retained: Vec<(u64, Vec<f64>)> = Vec::new();
+        // Bounded to the 20 emissions per run that `RunEvent::Progress`
+        // promises, however many replicates were asked for.
+        let progress_every = replicates.div_ceil(20).max(1);
+        let t_end = t0 + steps as f64 * dt;
 
-        let stationary = stationary_check(&path, dt, theta, mu, sigma);
-        let reproducibility = reproducibility_check(x0, theta, mu, sigma, dt, seed, &path);
+        for (k, &replicate_seed) in seeds.iter().enumerate()
+        {
+            if control.is_cancelled()
+            {
+                sink.emit(RunEvent::Cancelled);
+                return Err(ExecutionError::Cancelled);
+            }
+            let path = ou_path(x0, theta, mu, sigma, dt, steps, replicate_seed)
+                .map_err(|e| ExecutionError::InvalidModelState(e.to_string()))?;
+            ensemble
+                .push(&path)
+                .map_err(|e| ExecutionError::Internal(e.to_string()))?;
+            if retained.len() < MAX_RETAINED_MEMBERS
+            {
+                retained.push((replicate_seed, path));
+            }
+            if (k + 1) % progress_every == 0 || k + 1 == replicates
+            {
+                sink.emit(RunEvent::Progress {
+                    fraction: (k + 1) as f64 / replicates as f64,
+                    t: t_end,
+                });
+            }
+        }
 
-        let last = *path
+        let samples = steps + 1;
+        let coordinates: Vec<f64> = (0..samples).map(|k| t0 + k as f64 * dt).collect();
+        let first_path = &retained
+            .first()
+            .expect("at least one replicate is always drawn")
+            .1;
+
+        // The single-path check is kept whatever the replicate count: it
+        // measures a different thing from the across-replicate one (the
+        // ergodic average along one realisation, rather than the ensemble
+        // average across many) and costs nothing once the path exists.
+        let stationary = stationary_check(first_path, dt, theta, mu, sigma);
+        let reproducibility = reproducibility_check(x0, theta, mu, sigma, dt, seeds[0], first_path);
+
+        let last = *first_path
             .last()
             .expect("ou_path returns at least the initial value");
+
+        let mut series = Vec::new();
+        let mut metrics = Vec::new();
+        let mut verifications = vec![stationary, reproducibility];
+
+        if replicates == 1
+        {
+            series.push(Series {
+                id: "value".to_string(),
+                display_name: "Value".to_string(),
+                unit: "1".to_string(),
+                axis_id: TIME_AXIS_ID.to_string(),
+                role: SeriesRole::Trajectory,
+                values: first_path.clone(),
+            });
+        }
+        else
+        {
+            // The summary first, so a consumer that draws series in order
+            // puts the ensemble's answer underneath its exemplars rather than
+            // hiding it behind them.
+            series.push(Series {
+                id: "ensemble_mean".to_string(),
+                display_name: format!("Ensemble mean of {replicates} realisations"),
+                unit: "1".to_string(),
+                axis_id: TIME_AXIS_ID.to_string(),
+                role: SeriesRole::EnsembleMean,
+                values: ensemble.mean().to_vec(),
+            });
+            let (lower, upper) = ensemble.band(BAND_SIGMAS);
+            series.push(Series {
+                id: "ensemble_band_lower".to_string(),
+                display_name: format!("Ensemble mean minus {BAND_SIGMAS} standard deviations"),
+                unit: "1".to_string(),
+                axis_id: TIME_AXIS_ID.to_string(),
+                role: SeriesRole::EnsembleBandLower,
+                values: lower,
+            });
+            series.push(Series {
+                id: "ensemble_band_upper".to_string(),
+                display_name: format!("Ensemble mean plus {BAND_SIGMAS} standard deviations"),
+                unit: "1".to_string(),
+                axis_id: TIME_AXIS_ID.to_string(),
+                role: SeriesRole::EnsembleBandUpper,
+                values: upper,
+            });
+            for (k, (member_seed, member_path)) in retained.iter().enumerate()
+            {
+                series.push(Series {
+                    id: format!("member_{k}"),
+                    // The seed is in the label because it is what makes this
+                    // particular curve retrievable on its own.
+                    display_name: format!("Realisation {k} (seed {member_seed})"),
+                    unit: "1".to_string(),
+                    axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::EnsembleMember,
+                    values: member_path.clone(),
+                });
+            }
+        }
+
+        series.push(Series {
+            id: "mean".to_string(),
+            display_name: "Long-run mean".to_string(),
+            unit: "1".to_string(),
+            axis_id: TIME_AXIS_ID.to_string(),
+            role: SeriesRole::Reference,
+            values: vec![mu; samples],
+        });
+
+        if replicates > 1
+        {
+            metrics.push(Metric {
+                id: "replicates".to_string(),
+                display_name: "Realisations drawn".to_string(),
+                value: MetricValue::Integer(replicates as i64),
+                unit: None,
+            });
+            // Reported even when nothing was dropped, so the number a reader
+            // sees is the number of curves in front of them either way.
+            metrics.push(Metric {
+                id: "retained_members".to_string(),
+                display_name: "Realisations kept in the result".to_string(),
+                value: MetricValue::Integer(retained.len() as i64),
+                unit: None,
+            });
+            metrics.push(Metric {
+                id: "ensemble_final_mean".to_string(),
+                display_name: "Ensemble mean at the final time".to_string(),
+                value: MetricValue::Scalar(ensemble.mean()[samples - 1]),
+                unit: Some("1".to_string()),
+            });
+            metrics.push(Metric {
+                id: "ensemble_final_standard_error".to_string(),
+                display_name: "Standard error of that mean".to_string(),
+                value: MetricValue::Scalar(ensemble.standard_error()[samples - 1]),
+                unit: Some("1".to_string()),
+            });
+            verifications.push(ensemble_check(&ensemble, t_end - t0, theta, mu, sigma));
+            verifications.push(derivation_check(x0, theta, mu, sigma, dt, seed, &retained));
+        }
+
+        metrics.extend([
+            Metric {
+                id: "final_value".to_string(),
+                display_name: if replicates == 1
+                {
+                    "Final value".to_string()
+                }
+                else
+                {
+                    "Final value of realisation 0".to_string()
+                },
+                value: MetricValue::Scalar(last),
+                unit: Some("1".to_string()),
+            },
+            Metric {
+                id: "relaxation_time".to_string(),
+                display_name: "Relaxation time 1/theta".to_string(),
+                value: MetricValue::Scalar(1.0 / theta),
+                unit: Some("s".to_string()),
+            },
+            Metric {
+                id: "stationary_stddev".to_string(),
+                display_name: "Stationary standard deviation sigma/sqrt(2*theta)".to_string(),
+                value: MetricValue::Scalar(stationary_stddev(sigma, theta)),
+                unit: Some("1".to_string()),
+            },
+            Metric {
+                id: "seed".to_string(),
+                display_name: "Seed".to_string(),
+                // Integer, not Scalar: a seed is an identifier, and
+                // rendering it as a float would eventually show one in
+                // exponential notation, which nobody can type back in.
+                value: MetricValue::Integer(seed as i64),
+                unit: None,
+            },
+        ]);
+
         let result = RunResult {
             schema_version: RESULT_SCHEMA_VERSION,
             capability_id: DESCRIPTOR.id.0.to_string(),
             summary: RunSummary {
                 capability_display_name: DESCRIPTOR.display_name.to_string(),
                 scenario_name: s.experiment.name.clone(),
-                steps: path.len() - 1,
+                steps,
                 t_start: coordinates[0],
                 t_end: *coordinates.last().expect("at least one coordinate"),
             },
@@ -342,53 +564,10 @@ impl CapabilityAdapter for OrnsteinUhlenbeckAdapter {
                 monotonicity: AxisMonotonicity::StrictlyIncreasing,
                 values: coordinates,
             }],
-            series: vec![
-                Series {
-                    id: "value".to_string(),
-                    display_name: "Value".to_string(),
-                    unit: "1".to_string(),
-                    axis_id: TIME_AXIS_ID.to_string(),
-                    values: path.clone(),
-                },
-                Series {
-                    id: "mean".to_string(),
-                    display_name: "Long-run mean".to_string(),
-                    unit: "1".to_string(),
-                    axis_id: TIME_AXIS_ID.to_string(),
-                    values: mean_line,
-                },
-            ],
-            metrics: vec![
-                Metric {
-                    id: "final_value".to_string(),
-                    display_name: "Final value".to_string(),
-                    value: MetricValue::Scalar(last),
-                    unit: Some("1".to_string()),
-                },
-                Metric {
-                    id: "relaxation_time".to_string(),
-                    display_name: "Relaxation time 1/theta".to_string(),
-                    value: MetricValue::Scalar(1.0 / theta),
-                    unit: Some("s".to_string()),
-                },
-                Metric {
-                    id: "stationary_stddev".to_string(),
-                    display_name: "Stationary standard deviation sigma/sqrt(2*theta)".to_string(),
-                    value: MetricValue::Scalar(stationary_stddev(sigma, theta)),
-                    unit: Some("1".to_string()),
-                },
-                Metric {
-                    id: "seed".to_string(),
-                    display_name: "Seed".to_string(),
-                    // Integer, not Scalar: a seed is an identifier, and
-                    // rendering it as a float would eventually show one in
-                    // exponential notation, which nobody can type back in.
-                    value: MetricValue::Integer(seed as i64),
-                    unit: None,
-                },
-            ],
+            series,
+            metrics,
             warnings: vec![],
-            verifications: vec![stationary, reproducibility],
+            verifications,
             provenance: RunProvenance {
                 capability_id: DESCRIPTOR.id.0.to_string(),
                 determinism: DESCRIPTOR.determinism,
@@ -413,6 +592,187 @@ impl CapabilityAdapter for OrnsteinUhlenbeckAdapter {
 /// The standard deviation of the stationary distribution, `σ/√(2θ)`.
 fn stationary_stddev(sigma: f64, theta: f64) -> f64 {
     sigma / (2.0 * theta).sqrt()
+}
+
+/// Compare the ensemble's moments at the final time against the exact
+/// stationary law.
+///
+/// This is the check an ensemble exists to make possible, and it is stronger
+/// than the single-path one in a specific way. Along one realisation the
+/// samples are autocorrelated, so `n` of them carry only about `n·dt·θ/2`
+/// samples' worth of information and the tolerance has to be widened to
+/// match. Across replicates they are independent by construction, so `n`
+/// realisations carry `n` realisations' worth and the standard error is
+/// `σ/√(2θ)/√n` with no correction at all. The shipped tutorial's 256
+/// replicates therefore pin the mean about sixteen times more tightly than
+/// its 39 001 correlated samples do.
+///
+/// Both tolerances are derived rather than chosen — including the variance
+/// band, where the sample variance of `n` normal draws has relative standard
+/// deviation `√(2/(n−1))`.
+fn ensemble_check(
+    ensemble: &EnsembleAccumulator,
+    span: f64,
+    theta: f64,
+    mu: f64,
+    sigma: f64,
+) -> VerificationResult {
+    let id = "ensemble_moments".to_string();
+    let not_applicable = |explanation: String| VerificationResult {
+        id: id.clone(),
+        status: VerificationStatus::NotApplicable,
+        measured: None,
+        threshold: None,
+        explanation,
+    };
+
+    if sigma == 0.0
+    {
+        return not_applicable(
+            "sigma = 0: every realisation is the same deterministic decay, so the ensemble has \
+             no distribution to compare against"
+                .to_string(),
+        );
+    }
+    let n = ensemble.replicates();
+    if n < 2
+    {
+        return not_applicable(
+            "an ensemble of one realisation has no across-replicate spread to measure".to_string(),
+        );
+    }
+    // The stationary law only describes the process once the initial
+    // condition has been forgotten. Measuring before that and calling the
+    // difference a failure would be blaming the process for the transient.
+    let relaxation_times = span * theta;
+    if relaxation_times < BURN_IN_RELAXATION_TIMES
+    {
+        return not_applicable(format!(
+            "the run spans only {relaxation_times:.1} relaxation times, short of the \
+             {BURN_IN_RELAXATION_TIMES} needed before the initial condition is forgotten; the \
+             ensemble at the final time is not yet a sample from the stationary law"
+        ));
+    }
+
+    let last = ensemble.samples() - 1;
+    let sample_mean = ensemble.mean()[last];
+    let sample_variance = ensemble.variance()[last];
+
+    let stationary_variance = sigma * sigma / (2.0 * theta);
+    let standard_error = (stationary_variance / n as f64).sqrt();
+    let sigmas = (sample_mean - mu).abs() / standard_error;
+
+    let variance_ratio = sample_variance / stationary_variance;
+    let variance_tolerance = SIGMA_BAND * (2.0 / (n as f64 - 1.0)).sqrt();
+    let variance_ok = (variance_ratio - 1.0).abs() <= variance_tolerance;
+
+    let passed = sigmas <= SIGMA_BAND && variance_ok;
+    VerificationResult {
+        id,
+        status: if passed
+        {
+            VerificationStatus::Passed
+        }
+        else
+        {
+            VerificationStatus::Failed
+        },
+        measured: Some(sigmas),
+        threshold: Some(SIGMA_BAND),
+        explanation: format!(
+            "across {n} independent realisations at the final time: mean {sample_mean:.6} \
+             against mu = {mu} — {sigmas:.2} standard errors of {standard_error:.6}, with no \
+             autocorrelation correction because the realisations are independent; variance \
+             {sample_variance:.6} against sigma^2/(2*theta) = {stationary_variance:.6} \
+             (ratio {variance_ratio:.3}, tolerance {variance_tolerance:.3})"
+        ),
+    }
+}
+
+/// Re-derive the ensemble from the one seed in the provenance and check it
+/// comes back.
+///
+/// The single-path check shows that a recorded seed reproduces its path. For
+/// an ensemble there is a second link in the chain — the base seed has to
+/// reproduce the *replicates' seeds* too — and a claim about the second is
+/// worth exactly as little as a claim about the first was. So this re-derives
+/// the seed list from the base, checks it against the seeds the run actually
+/// consumed, and then re-runs one member from its re-derived seed and
+/// compares bit for bit.
+///
+/// It re-derives only `retained.len()` seeds rather than all of them, which
+/// is correct because a shorter derivation is a prefix of a longer one — a
+/// property [`replicate_seeds`] guarantees and its own tests pin.
+fn derivation_check(
+    x0: f64,
+    theta: f64,
+    mu: f64,
+    sigma: f64,
+    dt: f64,
+    base_seed: u64,
+    retained: &[(u64, Vec<f64>)],
+) -> VerificationResult {
+    let id = "ensemble_derived_from_seed".to_string();
+    let failed = |explanation: String| VerificationResult {
+        id: id.clone(),
+        status: VerificationStatus::Failed,
+        measured: None,
+        threshold: None,
+        explanation,
+    };
+
+    let rederived = replicate_seeds(base_seed, retained.len());
+    for (k, ((used, _), &again)) in retained.iter().zip(rederived.iter()).enumerate()
+    {
+        if *used != again
+        {
+            return failed(format!(
+                "re-deriving the replicate seeds from base seed {base_seed} gave {again} for \
+                 realisation {k} where the run consumed {used}: the recorded seed does not \
+                 identify this ensemble"
+            ));
+        }
+    }
+
+    // The last retained member rather than the first, so this exercises a
+    // seed that was *derived* rather than the base seed the single-path
+    // check already covers.
+    let (member_seed, member_path) = retained.last().expect("at least one member is retained");
+    let steps = member_path.len().saturating_sub(1).min(1000);
+    let Ok(replay) = ou_path(x0, theta, mu, sigma, dt, steps, *member_seed)
+    else
+    {
+        return failed(format!(
+            "replaying realisation {} from its derived seed {member_seed} failed outright",
+            retained.len() - 1
+        ));
+    };
+
+    match replay
+        .iter()
+        .zip(member_path.iter())
+        .position(|(a, b)| a.to_bits() != b.to_bits())
+    {
+        None => VerificationResult {
+            id,
+            status: VerificationStatus::Passed,
+            measured: Some(rederived.len() as f64),
+            threshold: None,
+            explanation: format!(
+                "all {} retained realisations' seeds re-derive from base seed {base_seed}, and \
+                 the first {} samples of realisation {} re-run from its derived seed \
+                 {member_seed} match bit for bit",
+                rederived.len(),
+                replay.len(),
+                retained.len() - 1
+            ),
+        },
+        Some(index) => failed(format!(
+            "replaying realisation {} from its derived seed {member_seed} diverged at sample \
+             {index}",
+            retained.len() - 1
+        )),
+    }
 }
 
 /// Compare the path's tail against the exact stationary moments.
@@ -575,6 +935,31 @@ mod tests {
 
     fn run() -> RunResult {
         run_scenario(&parse_toml(TUTORIAL).unwrap())
+    }
+
+    /// The tutorial, shortened so an ensemble of many replicates runs in test
+    /// time, but still spanning enough relaxation times for the stationary
+    /// law to apply at the final coordinate.
+    fn ensemble_scenario(replicates: u32) -> Scenario {
+        let mut scenario = parse_toml(TUTORIAL).unwrap();
+        scenario.experiment.replicates = Some(replicates);
+        scenario.solver.end = scirust_studio_schema::ValueWithUnit {
+            value: 40.0,
+            unit: "s".to_string(),
+        };
+        scenario
+    }
+
+    fn series<'a>(result: &'a RunResult, id: &str) -> &'a Series {
+        result
+            .series
+            .iter()
+            .find(|s| s.id == id)
+            .unwrap_or_else(|| panic!("no series {id}"))
+    }
+
+    fn roles(result: &RunResult, role: SeriesRole) -> Vec<&Series> {
+        result.series.iter().filter(|s| s.role == role).collect()
     }
 
     fn check<'a>(result: &'a RunResult, id: &str) -> &'a VerificationResult {
@@ -850,32 +1235,310 @@ mod tests {
         assert_eq!(sink.events().last(), Some(&RunEvent::Completed));
     }
 
-    /// This capability cannot report progress — `ou_path` samples in one
-    /// call and cannot be chunked without changing the sample. That must be
-    /// declared, so the interface draws indeterminate activity rather than an
-    /// invented percentage.
-    #[test]
-    fn the_capability_declares_that_it_cannot_report_progress() {
-        assert!(
-            !DESCRIPTOR
-                .supported_solvers
-                .iter()
-                .any(|s| s.fixed_step && s.id == "rk4"),
-            "this capability is not an ODE integration"
-        );
+    fn progress_fractions(replicates: Option<u32>) -> Vec<f64> {
         let mut sink = crate::sink::CollectingEventSink::new();
-        let scenario = parse_toml(TUTORIAL).unwrap();
+        let mut scenario = parse_toml(TUTORIAL).unwrap();
+        scenario.experiment.replicates = replicates;
         let adapter = OrnsteinUhlenbeckAdapter;
         let validated = adapter.validate(&scenario).unwrap();
         adapter
             .execute(&validated, &ExecutionControl::new(), &mut sink)
             .unwrap();
+        sink.events()
+            .iter()
+            .filter_map(|e| match e
+            {
+                RunEvent::Progress { fraction, .. } => Some(*fraction),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The unit of progress here is the *realisation*, not the time step:
+    /// `ou_path` samples a whole path in one call and cannot be chunked
+    /// without changing the sample.
+    ///
+    /// A one-replicate run therefore has exactly one indivisible unit of
+    /// work, and reports it — one step from nothing to done. That is not an
+    /// invented fraction; it is an accurate description of a job with one
+    /// part. The version of this test before ensembles asserted the opposite,
+    /// while the descriptor's `fixed_step: true` had the app service telling
+    /// the interface that progress *was* coming — so a single run drew a
+    /// determinate bar that never moved. The two agree now.
+    #[test]
+    fn a_single_realisation_reports_one_indivisible_unit_of_work() {
+        assert_eq!(progress_fractions(None), vec![1.0]);
+        assert_eq!(progress_fractions(Some(1)), vec![1.0]);
+    }
+
+    /// An ensemble has as many units as it has realisations, so it reports
+    /// genuine intermediate progress — the thing a single path could not.
+    #[test]
+    fn an_ensemble_reports_progress_that_rises_to_exactly_one() {
+        let fractions = progress_fractions(Some(64));
         assert!(
-            !sink
-                .events()
-                .iter()
-                .any(|e| matches!(e, RunEvent::Progress { .. })),
-            "no progress may be reported when none can be measured"
+            fractions.len() > 1,
+            "an ensemble of 64 reported {} progress events; it has 64 units of work to \
+             report on",
+            fractions.len()
         );
+        assert!(
+            fractions.windows(2).all(|w| w[1] > w[0]),
+            "progress went backwards: {fractions:?}"
+        );
+        assert_eq!(fractions.last(), Some(&1.0), "progress must end at done");
+        assert!(fractions.iter().all(|f| (0.0..=1.0).contains(f)));
+    }
+
+    /// `RunEvent::Progress` promises at most twenty emissions per run,
+    /// whatever the replicate count. Reporting must not cost more than the
+    /// work being reported on.
+    #[test]
+    fn a_large_ensemble_still_reports_at_most_twenty_times() {
+        assert!(progress_fractions(Some(500)).len() <= 20);
+    }
+
+    // ---------------------------------------------------------------
+    // Ensembles
+    // ---------------------------------------------------------------
+
+    /// A single-replicate run must be exactly the run this capability did
+    /// before ensembles existed — same series, same values, same seed.
+    /// Otherwise this phase silently changed what every stored OU result
+    /// means.
+    #[test]
+    fn one_replicate_is_the_run_this_capability_already_did() {
+        let mut explicit = parse_toml(TUTORIAL).unwrap();
+        explicit.experiment.replicates = Some(1);
+
+        let implicit = run();
+        let explicit = run_scenario(&explicit);
+
+        assert_eq!(
+            series(&implicit, "value").values,
+            series(&explicit, "value").values
+        );
+        assert_eq!(implicit.provenance.seed, Some(42));
+        // No ensemble apparatus appears for a single realisation.
+        assert!(implicit.series.iter().all(|s| !s.role.is_ensemble()));
+        assert!(implicit.metrics.iter().all(|m| m.id != "replicates"));
+    }
+
+    #[test]
+    fn an_ensemble_carries_a_mean_a_band_and_a_bounded_number_of_exemplars() {
+        let result = run_scenario(&ensemble_scenario(64));
+
+        assert_eq!(roles(&result, SeriesRole::EnsembleMean).len(), 1);
+        assert_eq!(roles(&result, SeriesRole::EnsembleBandLower).len(), 1);
+        assert_eq!(roles(&result, SeriesRole::EnsembleBandUpper).len(), 1);
+        assert_eq!(
+            roles(&result, SeriesRole::EnsembleMember).len(),
+            MAX_RETAINED_MEMBERS,
+            "64 realisations were drawn; only {MAX_RETAINED_MEMBERS} are kept"
+        );
+        // The raw single trajectory is not among them: an ensemble's answer
+        // is the summary, and a lone unlabelled path beside it would read as
+        // the result.
+        assert!(roles(&result, SeriesRole::Trajectory).is_empty());
+
+        // Every series still shares the one axis and its length.
+        let axis_len = result.axes[0].values.len();
+        assert!(result.series.iter().all(|s| s.values.len() == axis_len));
+    }
+
+    /// Dropping realisations from the result is a real loss of information,
+    /// so both numbers are reported and a reader can see it happened.
+    #[test]
+    fn the_ensemble_says_how_many_it_drew_and_how_many_it_kept() {
+        let result = run_scenario(&ensemble_scenario(64));
+        let metric = |id: &str| {
+            result
+                .metrics
+                .iter()
+                .find(|m| m.id == id)
+                .unwrap_or_else(|| panic!("no metric {id}"))
+                .value
+                .clone()
+        };
+        assert_eq!(metric("replicates"), MetricValue::Integer(64));
+        assert_eq!(
+            metric("retained_members"),
+            MetricValue::Integer(MAX_RETAINED_MEMBERS as i64)
+        );
+    }
+
+    #[test]
+    fn the_band_brackets_the_mean_everywhere() {
+        let result = run_scenario(&ensemble_scenario(32));
+        let mean = &series(&result, "ensemble_mean").values;
+        let lower = &series(&result, "ensemble_band_lower").values;
+        let upper = &series(&result, "ensemble_band_upper").values;
+        for i in 0..mean.len()
+        {
+            assert!(
+                lower[i] <= mean[i] && mean[i] <= upper[i],
+                "band does not bracket the mean at {i}: {} <= {} <= {}",
+                lower[i],
+                mean[i],
+                upper[i]
+            );
+        }
+        // The band has real width once the process has moved away from its
+        // deterministic initial condition.
+        assert!(upper[mean.len() - 1] - lower[mean.len() - 1] > 0.0);
+    }
+
+    #[test]
+    fn the_ensemble_moments_match_the_stationary_law() {
+        let result = run_scenario(&ensemble_scenario(256));
+        let check = check(&result, "ensemble_moments");
+        assert_eq!(
+            check.status,
+            VerificationStatus::Passed,
+            "{}",
+            check.explanation
+        );
+        assert!(check.explanation.contains("256 independent realisations"));
+    }
+
+    /// The whole reason to draw an ensemble: its mean is pinned far more
+    /// tightly than one path's, because the realisations are independent and
+    /// no autocorrelation correction eats the sample size.
+    #[test]
+    fn the_ensemble_mean_is_tighter_than_a_single_paths() {
+        let result = run_scenario(&ensemble_scenario(256));
+        let scenario = &result;
+        let standard_error = scenario
+            .metrics
+            .iter()
+            .find(|m| m.id == "ensemble_final_standard_error")
+            .map(|m| match m.value
+            {
+                MetricValue::Scalar(v) => v,
+                _ => panic!("expected a scalar"),
+            })
+            .expect("the ensemble reports its standard error");
+
+        // theta = 0.5, sigma = 0.3 in the tutorial, so the stationary spread
+        // is sigma/sqrt(2*theta) = 0.3. Across 256 independent realisations
+        // the mean's standard error is that over sqrt(256) = 16.
+        let stationary_spread = 0.3;
+        let expected = stationary_spread / 16.0;
+        assert!(
+            (standard_error - expected).abs() < 0.25 * expected,
+            "standard error was {standard_error}, expected about {expected}"
+        );
+    }
+
+    /// A check that cannot fail is decoration. This displaces the true mean
+    /// and asserts the ensemble check notices — the same guarantee the
+    /// single-path check carries.
+    #[test]
+    fn the_ensemble_check_catches_a_mean_that_is_in_the_wrong_place() {
+        let mut acc = EnsembleAccumulator::new(2);
+        // theta = 0.5, sigma = 0.3 => stationary sd 0.3, so an ensemble of
+        // 100 pins the mean to 0.03. Sitting the whole ensemble a full unit
+        // away from mu is over thirty standard errors out.
+        for _ in 0..100
+        {
+            acc.push(&[0.0, 2.0]).unwrap();
+        }
+        let verdict = ensemble_check(&acc, 100.0, 0.5, 1.0, 0.3);
+        assert_eq!(
+            verdict.status,
+            VerificationStatus::Failed,
+            "{}",
+            verdict.explanation
+        );
+    }
+
+    /// Measuring the stationary law before the transient has decayed would
+    /// blame the process for its initial condition, so the check declines
+    /// rather than failing.
+    #[test]
+    fn the_ensemble_check_declines_a_run_that_is_too_short_to_have_settled() {
+        let mut acc = EnsembleAccumulator::new(2);
+        for _ in 0..10
+        {
+            acc.push(&[0.0, 1.0]).unwrap();
+        }
+        // theta = 0.5 => a relaxation time of 2 s; one second is half of one.
+        let verdict = ensemble_check(&acc, 1.0, 0.5, 1.0, 0.3);
+        assert_eq!(verdict.status, VerificationStatus::NotApplicable);
+        assert!(verdict.explanation.contains("relaxation times"));
+    }
+
+    /// The provenance records one number. This is the run demonstrating that
+    /// the number regenerates the whole ensemble, not just the first path.
+    #[test]
+    fn the_ensemble_re_derives_itself_from_the_recorded_seed() {
+        let result = run_scenario(&ensemble_scenario(16));
+        let check = check(&result, "ensemble_derived_from_seed");
+        assert_eq!(
+            check.status,
+            VerificationStatus::Passed,
+            "{}",
+            check.explanation
+        );
+        assert_eq!(result.provenance.seed, Some(42));
+    }
+
+    #[test]
+    fn the_same_ensemble_run_twice_is_bit_identical() {
+        let first = run_scenario(&ensemble_scenario(16));
+        let second = run_scenario(&ensemble_scenario(16));
+        for (a, b) in first.series.iter().zip(second.series.iter())
+        {
+            assert_eq!(a.id, b.id);
+            assert!(
+                a.values
+                    .iter()
+                    .zip(b.values.iter())
+                    .all(|(x, y)| x.to_bits() == y.to_bits()),
+                "series {} differed between two runs of the same ensemble",
+                a.id
+            );
+        }
+    }
+
+    /// Realisations must genuinely differ. If the seed derivation collapsed —
+    /// every replicate drawing the same stream — the mean, the band and the
+    /// checks would all still look plausible while measuring one sample.
+    #[test]
+    fn the_realisations_are_not_copies_of_each_other() {
+        let result = run_scenario(&ensemble_scenario(8));
+        let members = roles(&result, SeriesRole::EnsembleMember);
+        assert!(members.len() >= 2);
+        for (i, a) in members.iter().enumerate()
+        {
+            for b in &members[i + 1..]
+            {
+                assert!(
+                    a.values
+                        .iter()
+                        .zip(b.values.iter())
+                        .any(|(x, y)| x.to_bits() != y.to_bits()),
+                    "realisations {} and {} are identical",
+                    a.id,
+                    b.id
+                );
+            }
+        }
+    }
+
+    /// A long ensemble is the first thing in this capability that is worth
+    /// interrupting, so it must actually stop.
+    #[test]
+    fn an_ensemble_can_be_cancelled_between_realisations() {
+        let adapter = OrnsteinUhlenbeckAdapter;
+        let validated = adapter.validate(&ensemble_scenario(64)).unwrap();
+        let control = ExecutionControl::new();
+        control.cancel();
+        let mut sink = crate::sink::CollectingEventSink::new();
+        assert!(matches!(
+            adapter.execute(&validated, &control, &mut sink),
+            Err(ExecutionError::Cancelled)
+        ));
+        assert_eq!(sink.events().last(), Some(&RunEvent::Cancelled));
     }
 }

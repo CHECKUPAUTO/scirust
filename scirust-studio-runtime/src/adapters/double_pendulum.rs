@@ -40,13 +40,13 @@ use crate::adapter::{CapabilityAdapter, ExecutionError, ValidatedScenario, Valid
 use crate::control::ExecutionControl;
 use crate::result::{
     Axis, AxisMonotonicity, Metric, MetricValue, RESULT_SCHEMA_VERSION, RunProvenance, RunResult,
-    RunSummary, RunWarning, Series, TIME_AXIS_ID, VerificationResult, VerificationStatus,
-    WarningCategory,
+    RunSummary, RunWarning, Series, SeriesRole, TIME_AXIS_ID, VerificationResult,
+    VerificationStatus, WarningCategory,
 };
 use crate::sink::{EventSink, RunEvent};
 use crate::validate_support::{
-    check_unknown_model_fields, check_unknown_state_fields, resolve_model_scalar, resolve_solver,
-    resolve_state_vector,
+    check_unknown_model_fields, check_unknown_state_fields, resolve_model_scalar,
+    resolve_replicates, resolve_solver, resolve_state_vector,
 };
 
 /// How far the shadow trajectory's first angle is displaced, in radians.
@@ -322,6 +322,12 @@ impl CapabilityAdapter for DoublePendulumAdapter {
         {
             errors.push(e);
         }
+        // Every adapter checks this, including the deterministic ones — see
+        // `resolve_replicates`.
+        if let Err(e) = resolve_replicates(scenario, DESCRIPTOR.determinism)
+        {
+            errors.push(e);
+        }
         if !errors.is_empty()
         {
             return Err(ValidationReport { errors });
@@ -537,6 +543,7 @@ impl CapabilityAdapter for DoublePendulumAdapter {
                     display_name: "Upper angle".to_string(),
                     unit: "rad".to_string(),
                     axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::Trajectory,
                     values: theta1_series,
                 },
                 Series {
@@ -544,6 +551,7 @@ impl CapabilityAdapter for DoublePendulumAdapter {
                     display_name: "Lower angle".to_string(),
                     unit: "rad".to_string(),
                     axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::Trajectory,
                     values: theta2_series,
                 },
                 Series {
@@ -551,6 +559,7 @@ impl CapabilityAdapter for DoublePendulumAdapter {
                     display_name: "Energy".to_string(),
                     unit: "J".to_string(),
                     axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::Trajectory,
                     values: energy_series,
                 },
                 Series {
@@ -558,6 +567,7 @@ impl CapabilityAdapter for DoublePendulumAdapter {
                     display_name: "Separation from the perturbed twin".to_string(),
                     unit: "rad".to_string(),
                     axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::Trajectory,
                     values: separation_series,
                 },
             ],

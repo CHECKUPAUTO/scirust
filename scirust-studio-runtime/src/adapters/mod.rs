@@ -159,6 +159,121 @@ mod tests {
         }
     }
 
+    /// Every adapter must answer for `experiment.replicates`, and the answer
+    /// must be the one its determinism class implies.
+    ///
+    /// This is driven by [`all_adapters`] rather than by a list, so an
+    /// eleventh capability that forgets to call `resolve_replicates` fails
+    /// here instead of silently ignoring the field. The previous phase landed
+    /// a break precisely because one construction site was not reached by
+    /// anything that compiled it; a registry-driven assertion is the cheap
+    /// version of that lesson.
+    #[test]
+    fn every_capability_answers_for_replicates_according_to_its_class() {
+        for adapter in all_adapters()
+        {
+            let descriptor = adapter.descriptor();
+            let id = descriptor.id.0;
+            let source =
+                tutorial_scenario_for(id).unwrap_or_else(|| panic!("{id} ships no tutorial"));
+            let mut scenario =
+                scirust_studio_schema::parse_toml(source).unwrap_or_else(|e| panic!("{id}: {e}"));
+
+            // One realisation must mean the same thing stated as omitted.
+            scenario.experiment.replicates = Some(1);
+            assert!(
+                adapter.validate(&scenario).is_ok(),
+                "{id} rejected an explicit `replicates = 1`, which is what every scenario \
+                 without the field already asks for"
+            );
+
+            scenario.experiment.replicates = Some(4);
+            let outcome = adapter.validate(&scenario);
+            if descriptor.determinism.draws_a_sample()
+            {
+                assert!(
+                    outcome.is_ok(),
+                    "{id} draws a sample but refused an ensemble of 4: {:?}",
+                    outcome.err()
+                );
+            }
+            else
+            {
+                let report = outcome.err().unwrap_or_else(|| {
+                    panic!(
+                        "{id} accepted `replicates = 4` although its class is {:?}; it would \
+                         have run the same computation four times and called it a distribution",
+                        descriptor.determinism
+                    )
+                });
+                assert!(
+                    report
+                        .errors
+                        .iter()
+                        .any(|e| e.code == crate::validate_support::CODE_REPLICATES_UNSUPPORTED),
+                    "{id} rejected the ensemble but not with the code that explains why: {:?}",
+                    report.errors.iter().map(|e| e.code).collect::<Vec<_>>()
+                );
+            }
+
+            // Zero is refused everywhere: it asks for a run with no result.
+            scenario.experiment.replicates = Some(0);
+            assert!(
+                adapter.validate(&scenario).is_err(),
+                "{id} accepted `replicates = 0`"
+            );
+        }
+    }
+
+    /// A capability may not emit a verification the catalogue does not list.
+    ///
+    /// The catalogue is what a user reads to decide whether a capability's
+    /// claims are worth anything, so a check that appears only in the output
+    /// is a claim made after the fact. Nothing enforced this before; the
+    /// ensemble checks are the first additions since, and they would have
+    /// gone undeclared without it.
+    ///
+    /// The converse — every declared check appears in every run — is
+    /// deliberately not asserted here: some checks apply only to some
+    /// scenarios (the ensemble ones need more than one replicate), and
+    /// demanding they appear anyway would push adapters into emitting
+    /// `NotApplicable` filler.
+    #[test]
+    fn no_adapter_emits_a_verification_its_catalogue_entry_does_not_declare() {
+        for adapter in all_adapters()
+        {
+            let descriptor = adapter.descriptor();
+            let id = descriptor.id.0;
+            let declared: Vec<&str> = descriptor
+                .verification
+                .checks
+                .iter()
+                .map(|c| c.id)
+                .collect();
+
+            let source = tutorial_scenario_for(id).expect("every capability ships a tutorial");
+            let scenario = scirust_studio_schema::parse_toml(source).expect("the tutorial parses");
+            let validated = adapter.validate(&scenario).expect("the tutorial validates");
+            let result = adapter
+                .execute(
+                    &validated,
+                    &crate::control::ExecutionControl::new(),
+                    &mut crate::sink::NullEventSink,
+                )
+                .unwrap_or_else(|e| panic!("{id} failed to execute its own tutorial: {e}"));
+
+            for emitted in &result.verifications
+            {
+                assert!(
+                    declared.contains(&emitted.id.as_str()),
+                    "{id} emitted the check `{}`, which its catalogue entry does not declare; \
+                     a reader deciding whether to trust this capability would never see it",
+                    emitted.id
+                );
+            }
+        }
+    }
+
     #[test]
     fn find_adapter_matches_the_registry() {
         let registry = build_registry();
