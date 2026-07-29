@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "SOS Computational Backend Adapter (Invariant VIII): the sole SOS crate permitted to depend on scirust-* crates, wrapping them behind the engine syscalls that need real numerics. Capabilities: a closed-form expected-information-gain estimator wrapping scirust-gp's exact Gaussian-process posterior variance (L3, zero standard error); a continuous-design-box Bayesian-optimization search reusing scirust-automl's seeded EI loop to maximize sos-planner's own utility policy (L1, seeded); a seeded nested-Monte-Carlo EIG estimator over finite scirust-stats discrete-hypothesis likelihoods, with a real, non-fabricated standard error (L1); a real sos-simulation Simulate backend wrapping scirust-solvers' fixed-step RK4 ODE integrator (L3, seedless-deterministic); and an exact log10 Bayes factor over scirust-stats discrete likelihoods, supplying the weight of evidence sos-theory ranks rivals by but refuses to compute (L3). Pure Rust, no FFI, no unsafe."
+description = "SOS Computational Backend Adapter (Invariant VIII): the sole SOS crate permitted to depend on scirust-* crates, wrapping them behind the engine syscalls that need real numerics. Expected-information-gain estimation in three tiers — closed-form over scirust-gp's exact Gaussian-process posterior variance (L3, zero standard error), a continuous-design-box Bayesian-optimization search reusing scirust-automl's seeded EI loop to maximize sos-planner's own utility policy (L1), and a seeded nested-Monte-Carlo estimator over finite scirust-stats discrete-hypothesis likelihoods with a real, non-fabricated standard error (L1). Five sos-simulation Simulate backends: fixed-step RK4 (L3), adaptive Dormand-Prince 5(4) and adaptive Simpson quadrature and Broyden root-finding (L2, each carrying a real certificate in its output type), and a windowed periodogram over scirust-signal's FFT (L3 — bit-reproducible, and documented and tested as being no accuracy claim). Plus an exact log10 Bayes factor over scirust-stats discrete likelihoods, supplying the weight of evidence sos-theory ranks rivals by but refuses to compute (L3); the reproduction verdicts sos-repro defers to a backend; and the first real workflow stage handler. Pure Rust, no FFI, no unsafe."
 keywords = ["scirust", "backend", "adapter", "gaussian-process", "science"]
 categories = ["science"]
 
@@ -23,6 +23,7 @@ scirust-gp = { path = "../../scirust-gp" }
 scirust-automl = { path = "../../scirust-automl" }
 scirust-stats = { path = "../../scirust-stats" }
 scirust-solvers = { path = "../../scirust-solvers" }
+scirust-signal = { path = "../../scirust-signal" }
 
 [dev-dependencies]
 serde_json = { workspace = true }
