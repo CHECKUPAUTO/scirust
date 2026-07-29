@@ -764,6 +764,7 @@ dependencies = [
  "sos-core",
  "sos-planner",
  "sos-registry",
+ "sos-repro",
  "sos-simulation",
  "sos-store",
  "sos-workflow",
