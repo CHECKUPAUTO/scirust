@@ -3,7 +3,7 @@
 //!
 //! # Scope
 //!
-//! Eight capabilities:
+//! Nine capabilities:
 //!
 //! 1. an exactly invertible **strictly lower-triangular cubic map**
 //!    ([`TriangularCubicFlow`]);
@@ -83,7 +83,22 @@
 //!    misspecification, not an absence of findings. The crate's tests exhibit
 //!    a hidden confounder that capability 6 certifies as `Identifiable` and
 //!    this one flags. The trade is directness: it answers *which* variables
-//!    are causes, never *how large* the effect is.
+//!    are causes, never *how large* the effect is; and
+//! 9. **structural simulation and counterfactuals** ([`LinearScm`]) — the
+//!    third rung of Pearl's ladder. Given a *fully specified* linear
+//!    structural causal model, [`LinearScm::simulate`] evaluates
+//!    interventional worlds (rung 2) and [`LinearScm::counterfactual`]
+//!    answers unit-level "what would `Y` have been for *this* unit, had `X`
+//!    been `x`?" (rung 3) by abduction–action–prediction. Its epistemic
+//!    position is the exact inverse of capabilities 5 and 8: it assumes the
+//!    whole model — direction, coefficients, functional form — and asks
+//!    questions no amount of data can answer without one. The crate's tests
+//!    make the cost explicit with two Markov-equivalent models whose joint
+//!    distributions are provably identical, on which capability 5 correctly
+//!    returns an *unoriented* edge, and which then answer the same
+//!    counterfactual query `3` versus `1`. Its certificates therefore carry
+//!    zero *computational* uncertainty and an assumption load that no
+//!    observational procedure in this crate can discharge.
 //!
 //! # Causal interpretation — read before using the discovery API
 //!
@@ -124,13 +139,18 @@
 //! capability 6 identifies effects **relative to a graph the caller
 //! supplies** — it assumes causal sufficiency rather than establishing it,
 //! so a latent confounder yields a confidently wrong estimate. Front-door
-//! and instrumental-variable identification, latent-confounding-robust
-//! discovery (e.g. FCI) and counterfactual simulation remain **out of scope
-//! for this crate as it stands** and are the subject of later work.
+//! and instrumental-variable identification and latent-confounding-robust
+//! discovery (e.g. FCI) remain **out of scope for this crate as it stands**
+//! and are the subject of later work.
 //! Capability 7 quantifies how badly a latent confounder *could* distort an
 //! estimate; it does not detect or remove one. Capability 8 can detect that
 //! *something* is wrong with the model when multiple environments are
-//! available, but does not say what, and cannot repair it.
+//! available, but does not say what, and cannot repair it. Capability 9
+//! simulates interventions and counterfactuals, but only **relative to a
+//! structural model the caller supplies**: it neither discovers that model
+//! nor validates it, and no procedure in this crate can single one out from
+//! observational data alone — which is why it is the one capability whose
+//! answers change when a Markov-equivalent alternative is substituted.
 //!
 //! # Cubic-flow mathematical properties
 //!
@@ -179,6 +199,7 @@ mod partial_correlation;
 mod permutation;
 mod permutation_calibration;
 mod robust_partial_correlation;
+mod scm;
 mod sensitivity;
 mod skeleton_discovery;
 mod synthetic;
@@ -221,6 +242,7 @@ pub use objective::{AugmentedLagrangianConfig, CausalObjective, ObjectiveEvaluat
 pub use optimize::{CausalOptimizationResult, OptimizerConfig, TerminationReason, optimize_causal};
 pub use permutation::{VariablePermutation, triangularize_from_dag};
 pub use robust_partial_correlation::RobustCalibration;
+pub use scm::{CounterfactualOutcome, CounterfactualQuery, InterventionAssignment, LinearScm};
 pub use sensitivity::{
     AdjustedEffect, ConfounderScenario, SensitivityAnalysis, analyze_sensitivity,
     benchmark_covariate, bound_effect_under_confounder,
