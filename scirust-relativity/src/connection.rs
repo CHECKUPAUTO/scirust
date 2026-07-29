@@ -83,6 +83,34 @@ where
         }
     }
 
+    Ok(christoffel_from_derivatives(&contravariant, &derivatives))
+}
+
+/// The Levi-Civita Christoffel symbols from an **already-known** inverse metric
+/// and metric gradient:
+///
+/// ```text
+/// Gamma^rho_(mu nu) = 1/2 g^(rho sigma)
+///     ( d_mu g_(sigma nu) + d_nu g_(sigma mu) - d_sigma g_(mu nu) )
+/// ```
+///
+/// `derivatives[k][i][j]` is `d_k g_ij`.
+///
+/// This is the algebraic core of [`numerical_christoffel`], which obtains the
+/// gradient by central differences and then calls this. Exposing it lets a
+/// caller that already has the gradient — a grid, for instance, which can
+/// difference its own stored arrays with a compact stencil — reuse the identical
+/// algebra instead of restating it. There is exactly one implementation of this
+/// formula in the crate.
+///
+/// Purely algebraic: no differencing, no validation, and no failure mode. A
+/// non-finite input produces a non-finite output rather than an error, so
+/// callers that need validation should validate their inputs.
+#[must_use]
+pub fn christoffel_from_derivatives<const D: usize>(
+    inverse_metric: &[[f64; D]; D],
+    derivatives: &[[[f64; D]; D]; D],
+) -> [[[f64; D]; D]; D] {
     let mut symbols = [[[0.0_f64; D]; D]; D];
 
     for rho in 0..D
@@ -95,7 +123,7 @@ where
 
                 for sigma in 0..D
                 {
-                    value += contravariant[rho][sigma]
+                    value += inverse_metric[rho][sigma]
                         * (derivatives[mu][sigma][nu] + derivatives[nu][sigma][mu]
                             - derivatives[sigma][mu][nu]);
                 }
@@ -105,5 +133,5 @@ where
         }
     }
 
-    Ok(symbols)
+    symbols
 }

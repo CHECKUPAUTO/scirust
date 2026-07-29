@@ -39,24 +39,53 @@ use std::error::Error;
 use std::fmt;
 use std::str::FromStr;
 
+mod adaptive;
+mod adaptive_control;
+mod adaptive_stepper;
 mod charts;
+mod curved_transport;
+mod geometric_error;
 mod modulation;
+mod nonuniform_kernel;
+mod nonuniform_memory;
 mod proper_time;
 mod transport;
 
+pub use adaptive::{
+    AdaptiveNonlocalConfig, AdaptiveSimulationPolicy, simulate_nonlocal_worldline_adaptive,
+    simulate_nonlocal_worldline_adaptive_with_policy,
+};
+pub use adaptive_control::{AdaptiveTolerance, scaled_local_error_norm};
+pub use adaptive_stepper::{
+    AdaptiveStepperPolicy, HistoryRetention, simulate_nonlocal_worldline_adaptive_with_stepper,
+    simulate_nonlocal_worldline_adaptive_with_stepper_policy,
+    simulate_nonlocal_worldline_adaptive_with_stepper_policy_retention,
+};
 pub use charts::{
     CylindricalMinkowski, cartesian_to_cylindrical_coordinates, cartesian_to_cylindrical_velocity,
     cylindrical_to_cartesian_coordinates, cylindrical_to_cartesian_velocity,
+    exact_cylindrical_minkowski_transport,
+};
+pub use curved_transport::{
+    exact_schwarzschild_circular_orbit_transport, schwarzschild_circular_orbit_angular_velocity,
+    schwarzschild_circular_orbit_four_velocity,
+};
+pub use geometric_error::{
+    OrthonormalTetrad, TetradStateError, TimelikeStateError, build_orthonormal_tetrad,
+    tetrad_state_error, timelike_state_error,
 };
 pub use modulation::{
     HistoryModulator, IdentityHistoryModulator, ModulatedCaputoCoordinateMemory,
-    SchwarzschildKretschmannModulator,
+    ReissnerNordstromFieldModulator, SchwarzschildKretschmannModulator,
+};
+pub use nonuniform_memory::{
+    NonuniformCaputoCoordinateMemory, NonuniformModulatedCaputoCoordinateMemory,
 };
 pub use proper_time::{
     ParameterizationMode, ProperTimeDiagnostics, affine_trajectory_proper_time,
-    simulate_nonlocal_worldline_with_mode,
+    proper_time_caputo_velocity_memory, simulate_nonlocal_worldline_with_mode,
 };
-pub use transport::{DiscreteConnectionTransport, HistoryEntry};
+pub use transport::{DiscreteConnectionTransport, HistoryEntry, transport_vector_along_polyline};
 
 /// Result type used by this experimental crate.
 pub type NonlocalResult<T> = Result<T, NonlocalRelativityError>;
@@ -561,7 +590,18 @@ pub struct StepperContext<'a, B, H, L, T, const D: usize> {
     pub transport: &'a T,
     /// Metric norm at the initial sample.
     pub initial_metric_norm: f64,
+    /// True accumulated affine parameter at the current accepted `state`.
+    ///
+    /// A stepper that needs the provisional (post-step) affine parameter must
+    /// compute it as `current_parameter + config.step`, **not** by
+    /// reconstructing it from `step_index`, which is only valid under uniform
+    /// spacing. This lets a stepper participate soundly in an adaptive loop
+    /// where accepted step sizes vary.
+    pub current_parameter: f64,
     /// Current accepted step index.
+    ///
+    /// Retained for diagnostics and error reporting only; it must not be used
+    /// to reconstruct an absolute affine parameter (see `current_parameter`).
     pub step_index: usize,
     /// Validated nonlocal simulation configuration.
     pub config: NonlocalConfig,
@@ -622,7 +662,11 @@ impl<const D: usize> WorldlineStepper<D> for HeunPeceStepper {
         }
 
         let predicted_state = WorldlineState::new(predicted_coordinates, predicted_velocity);
-        let predicted_parameter = (context.step_index + 1) as f64 * context.config.step;
+        // The provisional point is one trial step past the current accepted
+        // parameter. This is exact for both uniform and non-uniform accepted
+        // spacing, unlike the previous `step_index * step` reconstruction,
+        // which assumed every accepted step shared one size.
+        let predicted_parameter = context.current_parameter + context.config.step;
         let mut provisional_history = context.history.clone();
         provisional_history.push_entry(
             context.background,
@@ -640,7 +684,7 @@ impl<const D: usize> WorldlineStepper<D> for HeunPeceStepper {
             memory_law: context.memory_law,
             transport: context.transport,
             initial_metric_norm: context.initial_metric_norm,
-            affine_parameter: (context.step_index + 1) as f64 * context.config.step,
+            affine_parameter: predicted_parameter,
             step_index: context.step_index + 1,
             config: context.config,
         })?;
@@ -883,7 +927,7 @@ pub struct NonlocalTrajectory<const D: usize> {
 }
 
 impl<const D: usize> NonlocalTrajectory<D> {
-    fn new(
+    pub(crate) fn new(
         states: Vec<WorldlineState<D>>,
         diagnostics: Vec<StepDiagnostics>,
         history_diagnostics: Vec<HistoryDiagnostics>,
@@ -1088,6 +1132,9 @@ pub enum NonlocalRelativityError {
     /// A discrete-transport segment step is not finite.
     InvalidTransportSegmentStep(f64),
 
+    /// A transport polyline has no waypoints.
+    EmptyTransportPolyline,
+
     /// A Christoffel symbol evaluated during discrete parallel transport is
     /// not finite.
     NonFiniteTransportChristoffel {
@@ -1290,6 +1337,82 @@ pub enum NonlocalRelativityError {
         /// Fractional-calculus error.
         source: FractionalError,
     },
+
+    /// A circular-orbit radius is non-finite or does not exceed the
+    /// existence bound `3 M` for a circular equatorial geodesic.
+    InvalidCircularOrbitRadius(f64),
+
+    /// An adaptive-stepping configuration parameter is non-finite or outside
+    /// its required range.
+    InvalidAdaptiveConfiguration {
+        /// Name of the offending configuration field.
+        field: &'static str,
+        /// Rejected value.
+        value: f64,
+    },
+
+    /// The adaptive integrator accepted its configured maximum number of
+    /// steps without reaching the target affine parameter.
+    AdaptiveStepBudgetExhausted {
+        /// Number of accepted steps taken.
+        accepted_steps: usize,
+        /// Affine parameter actually reached.
+        reached_parameter: f64,
+        /// Requested target affine parameter.
+        target_affine_parameter: f64,
+    },
+
+    /// The adaptive integrator rejected a single accepted step more times than
+    /// the configured `max_rejections_per_step` retry budget while shrinking
+    /// toward the tolerance.
+    ///
+    /// Distinct from [`NonlocalRelativityError::AdaptiveMinimumStepExhausted`]:
+    /// here the retry *count* was reached; there the proposed shrink would have
+    /// crossed `min_step`.
+    AdaptiveRejectionBudgetExhausted {
+        /// Accepted step index at which the retry budget was exhausted.
+        accepted_step: usize,
+        /// Number of rejections that were counted against the budget.
+        rejections: usize,
+        /// Most recently attempted step size.
+        attempted_step: f64,
+        /// Most recent local error estimate (scaled RMS norm; `1.0` is at
+        /// tolerance).
+        error_estimate: f64,
+    },
+
+    /// The adaptive integrator could not bring a single accepted step within
+    /// tolerance without proposing a step below the configured `min_step`.
+    ///
+    /// Distinct from
+    /// [`NonlocalRelativityError::AdaptiveRejectionBudgetExhausted`]: here the
+    /// step-size floor was reached before the retry count.
+    AdaptiveMinimumStepExhausted {
+        /// Accepted step index at which shrinking hit the floor.
+        accepted_step: usize,
+        /// Step size that was rejected before the proposed shrink fell below
+        /// `min_step`.
+        attempted_step: f64,
+        /// The proposed shrunk step that fell below the floor.
+        proposed_step: f64,
+        /// Configured minimum step size.
+        min_step: f64,
+        /// Most recent local error estimate (scaled RMS norm; `1.0` is at
+        /// tolerance).
+        error_estimate: f64,
+    },
+
+    /// A local orthonormal frame (tetrad) could not be built at a point: after
+    /// the timelike leg, fewer than `D - 1` independent spacelike legs survived
+    /// metric Gram-Schmidt, so the observer frame is degenerate there.
+    DegenerateObserverFrame {
+        /// Number of orthonormal legs successfully constructed (including the
+        /// timelike leg) before the construction ran out of independent
+        /// directions.
+        legs_found: usize,
+        /// Total number of legs required (the spacetime dimension `D`).
+        dimension: usize,
+    },
 }
 
 impl fmt::Display for NonlocalRelativityError {
@@ -1367,6 +1490,10 @@ impl fmt::Display for NonlocalRelativityError {
             Self::InvalidTransportSegmentStep(step) => write!(
                 formatter,
                 "discrete-transport segment step must be finite; got {step}"
+            ),
+            Self::EmptyTransportPolyline => write!(
+                formatter,
+                "transport polyline must contain at least one waypoint"
             ),
             Self::NonFiniteTransportChristoffel { rho, mu, nu, value } => write!(
                 formatter,
@@ -1517,6 +1644,54 @@ impl fmt::Display for NonlocalRelativityError {
             } => write!(
                 formatter,
                 "Caputo memory evaluation failed at step {step}, component {component}: {source}"
+            ),
+            Self::InvalidCircularOrbitRadius(radius) => write!(
+                formatter,
+                "circular-orbit radius must be finite and exceed 3 M; got {radius}"
+            ),
+            Self::InvalidAdaptiveConfiguration { field, value } => write!(
+                formatter,
+                "adaptive configuration field '{field}' is invalid; got {value}"
+            ),
+            Self::AdaptiveStepBudgetExhausted {
+                accepted_steps,
+                reached_parameter,
+                target_affine_parameter,
+            } => write!(
+                formatter,
+                "adaptive integrator exhausted its budget of {accepted_steps} accepted steps at \
+                 affine parameter {reached_parameter}, short of target {target_affine_parameter}"
+            ),
+            Self::AdaptiveRejectionBudgetExhausted {
+                accepted_step,
+                rejections,
+                attempted_step,
+                error_estimate,
+            } => write!(
+                formatter,
+                "adaptive integrator exhausted its rejection budget after accepted step \
+                 {accepted_step} ({rejections} rejections), last attempted step {attempted_step} \
+                 with scaled error estimate {error_estimate}"
+            ),
+            Self::AdaptiveMinimumStepExhausted {
+                accepted_step,
+                attempted_step,
+                proposed_step,
+                min_step,
+                error_estimate,
+            } => write!(
+                formatter,
+                "adaptive integrator could not meet tolerance after accepted step \
+                 {accepted_step} without shrinking step {attempted_step} to {proposed_step}, \
+                 below the minimum {min_step} (scaled error estimate {error_estimate})"
+            ),
+            Self::DegenerateObserverFrame {
+                legs_found,
+                dimension,
+            } => write!(
+                formatter,
+                "could not build a local orthonormal frame: found {legs_found} of {dimension} \
+                 independent orthonormal legs"
             ),
         }
     }
@@ -1885,6 +2060,7 @@ where
             memory_law: &memory_law,
             transport: &history_transport,
             initial_metric_norm,
+            current_parameter: affine_parameter,
             step_index,
             config,
         })?;
@@ -1996,9 +2172,9 @@ where
     })
 }
 
-struct StepEvaluation<const D: usize> {
-    acceleration: [f64; D],
-    diagnostics: StepDiagnostics,
+pub(crate) struct StepEvaluation<const D: usize> {
+    pub(crate) acceleration: [f64; D],
+    pub(crate) diagnostics: StepDiagnostics,
 }
 
 fn semi_implicit_euler_step<const D: usize>(
@@ -2022,7 +2198,11 @@ fn semi_implicit_euler_step<const D: usize>(
     Ok(WorldlineState::new(next_coordinates, next_velocity))
 }
 
-fn validate_generated_velocity(value: f64, step: usize, index: usize) -> NonlocalResult<()> {
+pub(crate) fn validate_generated_velocity(
+    value: f64,
+    step: usize,
+    index: usize,
+) -> NonlocalResult<()> {
     if !value.is_finite()
     {
         return Err(NonlocalRelativityError::NonFiniteGeneratedVelocity { step, index, value });
@@ -2031,7 +2211,11 @@ fn validate_generated_velocity(value: f64, step: usize, index: usize) -> Nonloca
     Ok(())
 }
 
-fn validate_generated_coordinate(value: f64, step: usize, index: usize) -> NonlocalResult<()> {
+pub(crate) fn validate_generated_coordinate(
+    value: f64,
+    step: usize,
+    index: usize,
+) -> NonlocalResult<()> {
     if !value.is_finite()
     {
         return Err(NonlocalRelativityError::NonFiniteGeneratedCoordinate { step, index, value });
@@ -2100,7 +2284,7 @@ fn refinement_endpoint<const D: usize>(
     })
 }
 
-fn checked_l2_distance<const D: usize>(
+pub(crate) fn checked_l2_distance<const D: usize>(
     left: &[f64; D],
     right: &[f64; D],
     quantity: &'static str,
@@ -2182,7 +2366,7 @@ where
     Ok(metric)
 }
 
-fn validated_metric_norm<const D: usize>(
+pub(crate) fn validated_metric_norm<const D: usize>(
     metric: &[[f64; D]; D],
     velocity: &[f64; D],
     floor: f64,
@@ -2207,7 +2391,7 @@ fn validated_metric_norm<const D: usize>(
     Ok(norm)
 }
 
-fn validated_christoffel<B, const D: usize>(
+pub(crate) fn validated_christoffel<B, const D: usize>(
     background: &B,
     coordinates: &[f64; D],
     step: usize,
@@ -2371,19 +2555,19 @@ pub(crate) fn validate_history_velocity<const D: usize>(
     Ok(())
 }
 
-struct StepEvaluationInput<'a, B, H, L, T, const D: usize> {
-    background: &'a B,
-    state: &'a WorldlineState<D>,
-    history: &'a H,
-    memory_law: &'a L,
-    transport: &'a T,
-    initial_metric_norm: f64,
-    affine_parameter: f64,
-    step_index: usize,
-    config: NonlocalConfig,
+pub(crate) struct StepEvaluationInput<'a, B, H, L, T, const D: usize> {
+    pub(crate) background: &'a B,
+    pub(crate) state: &'a WorldlineState<D>,
+    pub(crate) history: &'a H,
+    pub(crate) memory_law: &'a L,
+    pub(crate) transport: &'a T,
+    pub(crate) initial_metric_norm: f64,
+    pub(crate) affine_parameter: f64,
+    pub(crate) step_index: usize,
+    pub(crate) config: NonlocalConfig,
 }
 
-fn evaluate_step_with_policy<B, H, L, T, const D: usize>(
+pub(crate) fn evaluate_step_with_policy<B, H, L, T, const D: usize>(
     input: StepEvaluationInput<'_, B, H, L, T, D>,
 ) -> NonlocalResult<StepEvaluation<D>>
 where
@@ -2483,7 +2667,7 @@ where
     })
 }
 
-fn validate_vector<const D: usize, F>(
+pub(crate) fn validate_vector<const D: usize, F>(
     vector: &[f64; D],
     step: usize,
     error: F,
@@ -2502,7 +2686,7 @@ where
     Ok(())
 }
 
-fn validate_diagnostics(
+pub(crate) fn validate_diagnostics(
     diagnostics: &StepDiagnostics,
     step: usize,
 ) -> Result<(), NonlocalRelativityError> {
@@ -2534,7 +2718,11 @@ fn validate_diagnostics(
     Ok(())
 }
 
-fn validate_scalar(quantity: &'static str, value: f64, step: usize) -> NonlocalResult<()> {
+pub(crate) fn validate_scalar(
+    quantity: &'static str,
+    value: f64,
+    step: usize,
+) -> NonlocalResult<()> {
     if !value.is_finite()
     {
         return Err(NonlocalRelativityError::NonFiniteDiagnostic {
