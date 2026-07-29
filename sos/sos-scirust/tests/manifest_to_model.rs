@@ -20,8 +20,8 @@
 //!   so "it ran" means "it integrated the epidemic it said it would".
 //!
 //! Scope, stated as narrowly as it deserves: this is one wired plugin and a
-//! hand-assembled `Dispatch`. `sos-cli` has no handler registry, so `sos run`
-//! is still not real.
+//! hand-assembled `Dispatch`. `sos run` reaches the same handler from the
+//! command line, but through files rather than this Rust API.
 
 use std::cell::RefCell;
 use std::rc::Rc;
