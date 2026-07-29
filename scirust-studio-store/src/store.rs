@@ -3,7 +3,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use scirust_studio_runtime::{RESULT_SCHEMA_VERSION, RunResult};
+use scirust_studio_runtime::{
+    RESULT_SCHEMA_VERSION, RESULT_SCHEMA_VERSION_V1, RunResult, RunResultV1, XAxisMeaning,
+};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 use crate::error::StoreError;
@@ -216,7 +219,7 @@ impl RunStore {
     /// Fails with [`StoreError::NoResult`] for a run that was cancelled or
     /// failed — those genuinely have no result, and returning an empty one
     /// would be a lie the caller could not detect.
-    pub fn load_result(&self, run_id: &str) -> Result<RunResult, StoreError> {
+    pub fn load_result(&self, run_id: &str) -> Result<LoadedRunResult, StoreError> {
         let manifest = self.load_manifest(run_id)?;
         if !manifest.status.has_result()
         {
@@ -227,10 +230,52 @@ impl RunStore {
         }
         let path = self.run_dir(run_id).join(RESULT_FILE);
         let text = fs::read_to_string(&path).map_err(|e| StoreError::io(&path, e))?;
-        serde_json::from_str(&text).map_err(|e| StoreError::Corrupt {
+
+        // Dispatch on the version recorded *inside the file*, not on the
+        // manifest's copy. A manifest and its result are written together,
+        // but the file is what is actually being decoded, and trusting the
+        // other one would turn a corrupted pair into a silent mis-parse.
+        let probe: VersionProbe = serde_json::from_str(&text).map_err(|e| StoreError::Corrupt {
             path: path.clone(),
             reason: e.to_string(),
-        })
+        })?;
+
+        let corrupt = |e: serde_json::Error| StoreError::Corrupt {
+            path: path.clone(),
+            reason: e.to_string(),
+        };
+        match probe.schema_version
+        {
+            RESULT_SCHEMA_VERSION_V1 => serde_json::from_str(&text)
+                .map(LoadedRunResult::V1)
+                .map_err(corrupt),
+            v if v == RESULT_SCHEMA_VERSION => serde_json::from_str(&text)
+                .map(LoadedRunResult::V2)
+                .map_err(corrupt),
+            other => Err(StoreError::UnsupportedResultSchema {
+                run_id: run_id.to_string(),
+                found: other,
+                supported: vec![RESULT_SCHEMA_VERSION_V1, RESULT_SCHEMA_VERSION],
+            }),
+        }
+    }
+
+    /// Load a run's result, requiring the current schema version.
+    ///
+    /// For callers that genuinely cannot work with a legacy result — a chart
+    /// that must plot against physical coordinates, for instance. Returns
+    /// [`StoreError::UnsupportedResultSchema`] for a v1 run rather than
+    /// fabricating the coordinates v1 does not contain.
+    pub fn load_result_v2(&self, run_id: &str) -> Result<RunResult, StoreError> {
+        match self.load_result(run_id)?
+        {
+            LoadedRunResult::V2(result) => Ok(*result),
+            LoadedRunResult::V1(_) => Err(StoreError::UnsupportedResultSchema {
+                run_id: run_id.to_string(),
+                found: RESULT_SCHEMA_VERSION_V1,
+                supported: vec![RESULT_SCHEMA_VERSION],
+            }),
+        }
     }
 
     /// Recompute a run's stored hashes and check them against its manifest.
@@ -411,4 +456,136 @@ pub struct InterruptedRun {
     pub path: PathBuf,
     /// The scenario that was being attempted, if it had been written.
     pub scenario_toml: Option<String>,
+}
+
+/// Just enough of a stored result to learn which schema it uses.
+#[derive(Deserialize)]
+struct VersionProbe {
+    schema_version: u32,
+}
+
+/// A stored result, tagged with the schema version it was written under.
+///
+/// Existing stores predate result schema v2, and a run store is immutable —
+/// so upgrading a stored file in place is not an option: it would invalidate
+/// the hash recorded for it and destroy exactly the property the store
+/// exists to provide. Legacy runs are therefore read as what they are, and
+/// callers are made to acknowledge the difference rather than having a
+/// plausible-looking time axis invented for them.
+///
+/// Boxed variants: a `RunResult` carrying long time-courses is far larger
+/// than the enum's discriminant, and an unboxed variant would make every
+/// value of this type that size.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LoadedRunResult {
+    /// A result stored before axes carried their coordinates.
+    V1(Box<RunResultV1>),
+    /// A current result, with exact axis coordinates.
+    V2(Box<RunResult>),
+}
+
+impl LoadedRunResult {
+    /// The schema version this result was stored under.
+    pub fn schema_version(&self) -> u32 {
+        match self
+        {
+            LoadedRunResult::V1(_) => RESULT_SCHEMA_VERSION_V1,
+            LoadedRunResult::V2(_) => RESULT_SCHEMA_VERSION,
+        }
+    }
+
+    /// What a consumer may truthfully claim the horizontal axis represents.
+    ///
+    /// The whole point of routing this through one method: a caller asks the
+    /// same question of either version and cannot forget that v1 has no
+    /// coordinates.
+    pub fn x_axis_meaning(&self) -> XAxisMeaning {
+        match self
+        {
+            LoadedRunResult::V1(r) => r.x_axis_meaning(),
+            LoadedRunResult::V2(_) => XAxisMeaning::PhysicalCoordinates,
+        }
+    }
+
+    /// The current-schema result, if this is one.
+    pub fn as_v2(&self) -> Option<&RunResult> {
+        match self
+        {
+            LoadedRunResult::V2(r) => Some(r),
+            LoadedRunResult::V1(_) => None,
+        }
+    }
+
+    /// The legacy result, if this is one.
+    pub fn as_v1(&self) -> Option<&RunResultV1> {
+        match self
+        {
+            LoadedRunResult::V1(r) => Some(r),
+            LoadedRunResult::V2(_) => None,
+        }
+    }
+
+    /// The capability that produced this result, whichever version it is.
+    pub fn capability_id(&self) -> &str {
+        match self
+        {
+            LoadedRunResult::V1(r) => &r.capability_id,
+            LoadedRunResult::V2(r) => &r.capability_id,
+        }
+    }
+
+    /// The run summary, whichever version it is.
+    pub fn summary(&self) -> &scirust_studio_runtime::RunSummary {
+        match self
+        {
+            LoadedRunResult::V1(r) => &r.summary,
+            LoadedRunResult::V2(r) => &r.summary,
+        }
+    }
+
+    /// The metrics, which both versions record identically.
+    pub fn metrics(&self) -> &[scirust_studio_runtime::Metric] {
+        match self
+        {
+            LoadedRunResult::V1(r) => &r.metrics,
+            LoadedRunResult::V2(r) => &r.metrics,
+        }
+    }
+
+    /// The scientific verification checks, which both versions record
+    /// identically.
+    pub fn verifications(&self) -> &[scirust_studio_runtime::VerificationResult] {
+        match self
+        {
+            LoadedRunResult::V1(r) => &r.verifications,
+            LoadedRunResult::V2(r) => &r.verifications,
+        }
+    }
+
+    /// The warnings, which both versions record identically.
+    pub fn warnings(&self) -> &[scirust_studio_runtime::RunWarning] {
+        match self
+        {
+            LoadedRunResult::V1(r) => &r.warnings,
+            LoadedRunResult::V2(r) => &r.warnings,
+        }
+    }
+
+    /// Provenance, which both versions record identically.
+    pub fn provenance(&self) -> &scirust_studio_runtime::RunProvenance {
+        match self
+        {
+            LoadedRunResult::V1(r) => &r.provenance,
+            LoadedRunResult::V2(r) => &r.provenance,
+        }
+    }
+
+    /// How many series this result carries.
+    pub fn series_len(&self) -> usize {
+        match self
+        {
+            LoadedRunResult::V1(r) => r.series.len(),
+            LoadedRunResult::V2(r) => r.series.len(),
+        }
+    }
 }

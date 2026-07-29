@@ -37,13 +37,13 @@ pub use error::StoreError;
 pub use manifest::{
     EnvironmentFingerprint, MANIFEST_SCHEMA_VERSION, RunManifest, RunStatus, manifests_to_json,
 };
-pub use store::{InterruptedRun, PendingRun, RunStore};
+pub use store::{InterruptedRun, LoadedRunResult, PendingRun, RunStore};
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use scirust_studio_runtime::{
-        AxisDescriptor, DeterminismClass, Metric, MetricValue, RESULT_SCHEMA_VERSION,
+        Axis, AxisMonotonicity, DeterminismClass, Metric, MetricValue, RESULT_SCHEMA_VERSION,
         RunProvenance, RunResult, RunSummary, Series,
     };
 
@@ -60,15 +60,18 @@ mod tests {
                 t_start: 0.0,
                 t_end: 1.0,
             },
-            axes: vec![AxisDescriptor {
+            axes: vec![Axis {
                 id: "t".to_string(),
                 display_name: "time".to_string(),
                 unit: "s".to_string(),
+                monotonicity: AxisMonotonicity::StrictlyIncreasing,
+                values: vec![0.0, 0.5, 1.0],
             }],
             series: vec![Series {
                 id: "x".to_string(),
                 display_name: "X".to_string(),
                 unit: "m".to_string(),
+                axis_id: "t".to_string(),
                 values: vec![1.0, 0.5, 0.25],
             }],
             metrics: vec![Metric {
@@ -106,7 +109,7 @@ mod tests {
         let run_id = pending.complete(&result).unwrap();
 
         assert_eq!(store.load_scenario(&run_id).unwrap(), SCENARIO);
-        assert_eq!(store.load_result(&run_id).unwrap(), result);
+        assert_eq!(store.load_result(&run_id).unwrap().as_v2(), Some(&result));
 
         let manifest = store.load_manifest(&run_id).unwrap();
         assert_eq!(manifest.run_id, run_id);
@@ -128,6 +131,7 @@ mod tests {
     fn a_stored_result_loads_back_bit_for_bit() {
         let (_dir, store) = temp_store();
         let mut result = sample_result();
+        result.axes[0].values = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0];
         result.series[0].values = vec![
             0.998969729210804,
             0.1 + 0.2,
@@ -136,6 +140,8 @@ mod tests {
             -1.0e-300,
             std::f64::consts::PI,
         ];
+        result.summary.t_start = 0.0;
+        result.summary.t_end = 5.0;
         result.metrics[0].value = MetricValue::Scalar(0.9988752100232527);
 
         let run_id = store
@@ -144,6 +150,7 @@ mod tests {
             .complete(&result)
             .unwrap();
         let loaded = store.load_result(&run_id).unwrap();
+        let loaded = loaded.as_v2().expect("a run written now is v2").clone();
 
         for (a, b) in result.series[0]
             .values

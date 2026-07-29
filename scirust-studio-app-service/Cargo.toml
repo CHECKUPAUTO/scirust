@@ -1,0 +1,25 @@
+[package]
+name = "scirust-studio-app-service"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust Studio: platform-neutral application orchestration — worker supervision, job lifecycle, bounded event fan-out, run-store selection and scenario validation. Knows nothing about any GUI toolkit."
+
+[dependencies]
+scirust-studio-ipc = { path = "../scirust-studio-ipc" }
+scirust-studio-registry = { path = "../scirust-studio-registry" }
+scirust-studio-runtime = { path = "../scirust-studio-runtime" }
+scirust-studio-schema = { path = "../scirust-studio-schema" }
+scirust-studio-store = { path = "../scirust-studio-store" }
+serde = { version = "1", features = ["derive"] }
+# `float_roundtrip` for the same reason every other Studio crate needs it:
+# a result that crosses this layer must not lose its last bit.
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[dev-dependencies]
+# `scirust-studio-worker` is a binary-only crate, so it cannot be a path
+# dependency here. The integration tests locate the compiled worker beside
+# the test executable in Cargo's target directory and fail with an explicit
+# instruction if it is absent — see tests/worker_supervision.rs. The gate
+# command builds it first.
+tempfile = "3"

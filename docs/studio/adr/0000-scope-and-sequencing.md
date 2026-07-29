@@ -180,3 +180,33 @@ health checks) belongs with the application that owns the window; store
 retention/pruning; anything Tauri/Dioxus (step 4); the remaining 11
 `scirust-sim` model families (step 5); legacy CLI migration (step 6); and
 Windows installer/signing/updater (step 7).
+
+## Update (Phase 3A-1 landed — foundations for the desktop slice)
+
+Step (4), the first desktop vertical slice, needs two things the headless
+core did not yet provide. Both are now in place, as a separate increment so
+the non-GUI logic could be reviewed on its own:
+
+- **Result schema v2.** Axes now carry their coordinates and series name the
+  axis they belong to. v1 stored only axis *labels*, which silently forced
+  every consumer to assume uniform sample spacing — false for any adaptive
+  solver, and measurably so: Robertson's steps span a 26 391x range over the
+  shipped tutorial. Stored v1 runs stay readable and verifiable and are never
+  given a reconstructed time axis. See
+  `docs/studio/adr/0006-result-axis-coordinates.md`.
+- **`scirust-studio-app-service`.** The orchestration Phase 2B deliberately
+  left to the application: worker supervision and restart, job lifecycle,
+  bounded event fan-out, run-store selection, editor-shaped validation, and
+  shutdown that does not orphan a worker. It has no GUI dependency — a test
+  asserts that against its manifest — so the desktop shell is one caller of
+  it rather than its owner. See `docs/studio/APP_SERVICE.md`.
+
+The policies encoded there are product decisions, recorded so they are
+reviewable: one active job at a time; an interrupted job is never re-run
+automatically; cancelling the adaptive stiff capability terminates the worker
+(the only mechanism that stops it) and is still reported as *cancelled*, not
+as a failure.
+
+Still to come in Phase 3A-2: the Tauri 2 shell, the Dioxus Web frontend, the
+sidecar packaging, the native CI matrix and the unsigned Windows preview
+artifact.
