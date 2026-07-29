@@ -30,6 +30,90 @@ pub enum XAxisKind {
     SampleIndex,
 }
 
+/// What a curve represents, as far as drawing it is concerned.
+///
+/// Declared here rather than reused from `backend::wire` for the same reason
+/// [`XAxisKind`] is: this module is the chart's geometry and is compiled and
+/// tested on the host, independent of the bridge's types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PlotRole {
+    /// One computed trajectory.
+    #[default]
+    Trajectory,
+    /// A comparison line the solver did not compute.
+    Reference,
+    /// One realisation out of an ensemble.
+    EnsembleMember,
+    /// The across-replicate mean.
+    EnsembleMean,
+    /// An edge of the ensemble's spread band.
+    EnsembleBandEdge,
+}
+
+/// How a curve is drawn.
+///
+/// The point of varying this is not decoration. An ensemble puts a mean over
+/// hundreds of realisations on the same axes as eight individual ones, and
+/// drawing them identically would present a summary statistic and a single
+/// noisy sample as the same kind of evidence — a reader would have no way to
+/// see which line is the answer.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StrokeStyle {
+    /// Stroke width in user units.
+    pub width: f64,
+    /// Stroke opacity in `0.0..=1.0`.
+    pub opacity: f64,
+    /// Whether the line is dashed.
+    pub dashed: bool,
+    /// Whether the curve takes its own colour from the palette.
+    ///
+    /// False for ensemble members and band edges, which share one muted
+    /// colour: eight differently-coloured realisations read as eight
+    /// different quantities rather than eight draws of one.
+    pub own_colour: bool,
+}
+
+/// The treatment a role gets.
+pub fn stroke_for(role: PlotRole) -> StrokeStyle {
+    match role
+    {
+        PlotRole::Trajectory => StrokeStyle {
+            width: 1.8,
+            opacity: 1.0,
+            dashed: false,
+            own_colour: true,
+        },
+        // Dashed and dimmed: it was not computed by the solver, and a solid
+        // line of equal weight would claim it was.
+        PlotRole::Reference => StrokeStyle {
+            width: 1.2,
+            opacity: 0.65,
+            dashed: true,
+            own_colour: true,
+        },
+        // The heaviest line on the chart, because it is the one the run is
+        // evidence for.
+        PlotRole::EnsembleMean => StrokeStyle {
+            width: 2.4,
+            opacity: 1.0,
+            dashed: false,
+            own_colour: true,
+        },
+        PlotRole::EnsembleBandEdge => StrokeStyle {
+            width: 1.0,
+            opacity: 0.5,
+            dashed: false,
+            own_colour: false,
+        },
+        PlotRole::EnsembleMember => StrokeStyle {
+            width: 0.8,
+            opacity: 0.35,
+            dashed: false,
+            own_colour: false,
+        },
+    }
+}
+
 /// A series ready to plot.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlotSeries {
@@ -39,6 +123,8 @@ pub struct PlotSeries {
     pub display_name: String,
     /// Unit.
     pub unit: String,
+    /// What this curve represents.
+    pub role: PlotRole,
     /// Values, aligned with the chart's x coordinates.
     pub values: Vec<f64>,
     /// Whether the user has it switched on.
@@ -203,6 +289,7 @@ pub fn build_chart(
             id: s.id.clone(),
             display_name: s.display_name.clone(),
             unit: s.unit.clone(),
+            role: s.role,
             values: indices.iter().map(|&i| s.values[i]).collect(),
             visible: true,
         })
@@ -410,9 +497,29 @@ pub fn accessible_summary(chart: &ChartModel) -> String {
         .iter()
         .map(|s| s.display_name.as_str())
         .collect();
+
+    // The visual distinction between a mean over hundreds of realisations and
+    // one of them is carried by stroke weight and colour, neither of which
+    // reaches a screen reader. Without this sentence the text alternative
+    // lists them as peers, which is the same misreading the styling exists to
+    // prevent.
+    let members = count_role(chart, PlotRole::EnsembleMember);
+    let ensemble = if members > 0 || count_role(chart, PlotRole::EnsembleMean) > 0
+    {
+        format!(
+            " This is an ensemble: the mean over all realisations is drawn heaviest, \
+             {members} individual realisations and the spread band are drawn faintly \
+             behind it."
+        )
+    }
+    else
+    {
+        String::new()
+    };
+
     format!(
         "{} series ({}) over {} from {:.6} to {:.6}; values range {:.6} to {:.6}; \
-         showing {} of {} points.",
+         showing {} of {} points.{ensemble}",
         chart.series.len(),
         names.join(", "),
         axis,
@@ -425,6 +532,11 @@ pub fn accessible_summary(chart: &ChartModel) -> String {
     )
 }
 
+/// How many visible curves carry a role.
+fn count_role(chart: &ChartModel, role: PlotRole) -> usize {
+    chart.series.iter().filter(|s| s.role == role).count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -434,6 +546,7 @@ mod tests {
             id: id.to_string(),
             display_name: id.to_uppercase(),
             unit: "m".to_string(),
+            role: PlotRole::Trajectory,
             values,
             visible: true,
         }
@@ -647,5 +760,142 @@ mod tests {
     fn an_empty_chart_summary_says_why() {
         let chart = build_chart(&[], &[], XAxisKind::PhysicalCoordinates, "t", "s");
         assert!(accessible_summary(&chart).contains("no_series"));
+    }
+}
+
+#[cfg(test)]
+mod role_tests {
+    use super::*;
+
+    fn roled(id: &str, role: PlotRole) -> PlotSeries {
+        PlotSeries {
+            id: id.to_string(),
+            display_name: id.to_uppercase(),
+            unit: "1".to_string(),
+            role,
+            values: vec![0.0, 1.0, 0.5],
+            visible: true,
+        }
+    }
+
+    fn ensemble_chart() -> ChartModel {
+        let series = vec![
+            roled("ensemble_mean", PlotRole::EnsembleMean),
+            roled("ensemble_band_lower", PlotRole::EnsembleBandEdge),
+            roled("ensemble_band_upper", PlotRole::EnsembleBandEdge),
+            roled("member_0", PlotRole::EnsembleMember),
+            roled("member_1", PlotRole::EnsembleMember),
+            roled("mean", PlotRole::Reference),
+        ];
+        build_chart(
+            &[0.0, 1.0, 2.0],
+            &series,
+            XAxisKind::PhysicalCoordinates,
+            "time",
+            "s",
+        )
+    }
+
+    /// The ensemble mean is what the run is evidence for, so it must be the
+    /// most prominent line on the chart — heavier than any realisation and
+    /// than the reference.
+    #[test]
+    fn the_mean_is_drawn_more_prominently_than_anything_else() {
+        let mean = stroke_for(PlotRole::EnsembleMean);
+        for other in [
+            PlotRole::EnsembleMember,
+            PlotRole::EnsembleBandEdge,
+            PlotRole::Reference,
+            PlotRole::Trajectory,
+        ]
+        {
+            let other = stroke_for(other);
+            assert!(
+                mean.width > other.width,
+                "the ensemble mean is not the heaviest line"
+            );
+            assert!(mean.opacity >= other.opacity);
+        }
+    }
+
+    /// A single realisation must not read as strongly as a summary over all
+    /// of them, or the chart presents one noisy sample as the answer.
+    #[test]
+    fn a_realisation_is_drawn_faintly() {
+        let member = stroke_for(PlotRole::EnsembleMember);
+        assert!(member.opacity < 0.5);
+        assert!(member.width < stroke_for(PlotRole::Trajectory).width);
+    }
+
+    /// Realisations and band edges share one colour: eight colours would read
+    /// as eight different quantities rather than eight draws of one.
+    #[test]
+    fn only_summary_curves_take_their_own_colour() {
+        assert!(stroke_for(PlotRole::EnsembleMean).own_colour);
+        assert!(stroke_for(PlotRole::Trajectory).own_colour);
+        assert!(stroke_for(PlotRole::Reference).own_colour);
+        assert!(!stroke_for(PlotRole::EnsembleMember).own_colour);
+        assert!(!stroke_for(PlotRole::EnsembleBandEdge).own_colour);
+    }
+
+    /// A line the solver did not compute must not be drawn as though it had.
+    #[test]
+    fn a_reference_line_is_dashed_and_nothing_computed_is() {
+        assert!(stroke_for(PlotRole::Reference).dashed);
+        for computed in [
+            PlotRole::Trajectory,
+            PlotRole::EnsembleMean,
+            PlotRole::EnsembleMember,
+            PlotRole::EnsembleBandEdge,
+        ]
+        {
+            assert!(!stroke_for(computed).dashed, "{computed:?} is dashed");
+        }
+    }
+
+    /// Stroke weight and colour do not reach a screen reader, so the text
+    /// alternative has to carry the same distinction in words.
+    #[test]
+    fn the_text_alternative_says_the_chart_is_an_ensemble() {
+        let summary = accessible_summary(&ensemble_chart());
+        assert!(summary.contains("ensemble"), "{summary}");
+        assert!(summary.contains("2 individual realisations"), "{summary}");
+        assert!(summary.contains("heaviest"), "{summary}");
+    }
+
+    /// …and must not say so for the nine capabilities that have no ensemble.
+    #[test]
+    fn an_ordinary_chart_gains_no_ensemble_sentence() {
+        let series = vec![roled("position", PlotRole::Trajectory)];
+        let chart = build_chart(
+            &[0.0, 1.0, 2.0],
+            &series,
+            XAxisKind::PhysicalCoordinates,
+            "time",
+            "s",
+        );
+        assert!(!accessible_summary(&chart).contains("ensemble"));
+    }
+
+    /// Reduction is display-only and must not change what a curve *is*.
+    #[test]
+    fn roles_survive_the_reduction_of_a_long_series() {
+        let n = MAX_POINTS_PER_SERIES * 3;
+        let x: Vec<f64> = (0..n).map(|i| i as f64).collect();
+        let mut mean = roled("ensemble_mean", PlotRole::EnsembleMean);
+        mean.values = x.clone();
+        let mut member = roled("member_0", PlotRole::EnsembleMember);
+        member.values = x.clone();
+
+        let chart = build_chart(
+            &x,
+            &[mean, member],
+            XAxisKind::PhysicalCoordinates,
+            "time",
+            "s",
+        );
+        assert!(chart.drawn_points < n, "the fixture must actually reduce");
+        assert_eq!(chart.series[0].role, PlotRole::EnsembleMean);
+        assert_eq!(chart.series[1].role, PlotRole::EnsembleMember);
     }
 }

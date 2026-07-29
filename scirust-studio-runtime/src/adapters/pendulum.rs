@@ -26,12 +26,12 @@ use crate::adapter::{CapabilityAdapter, ExecutionError, ValidatedScenario, Valid
 use crate::control::ExecutionControl;
 use crate::result::{
     Axis, AxisMonotonicity, Metric, MetricValue, RESULT_SCHEMA_VERSION, RunProvenance, RunResult,
-    RunSummary, Series, TIME_AXIS_ID, VerificationResult, VerificationStatus,
+    RunSummary, Series, SeriesRole, TIME_AXIS_ID, VerificationResult, VerificationStatus,
 };
 use crate::sink::{EventSink, RunEvent};
 use crate::validate_support::{
-    check_unknown_model_fields, check_unknown_state_fields, resolve_model_scalar, resolve_solver,
-    resolve_state_vector,
+    check_unknown_model_fields, check_unknown_state_fields, resolve_model_scalar,
+    resolve_replicates, resolve_solver, resolve_state_vector,
 };
 
 const LENGTH: FieldDescriptor = FieldDescriptor {
@@ -214,6 +214,12 @@ impl CapabilityAdapter for PendulumAdapter {
             errors.push(e);
         }
         if let Err(e) = resolve_solver(scenario, DESCRIPTOR.supported_solvers)
+        {
+            errors.push(e);
+        }
+        // Every adapter checks this, including the deterministic ones — see
+        // `resolve_replicates`.
+        if let Err(e) = resolve_replicates(scenario, DESCRIPTOR.determinism)
         {
             errors.push(e);
         }
@@ -427,6 +433,7 @@ impl CapabilityAdapter for PendulumAdapter {
                     display_name: "Angle".to_string(),
                     unit: "rad".to_string(),
                     axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::Trajectory,
                     values: angle_series,
                 },
                 Series {
@@ -434,6 +441,7 @@ impl CapabilityAdapter for PendulumAdapter {
                     display_name: "Angular velocity".to_string(),
                     unit: "rad/s".to_string(),
                     axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::Trajectory,
                     values: velocity_series,
                 },
                 Series {
@@ -441,6 +449,7 @@ impl CapabilityAdapter for PendulumAdapter {
                     display_name: "Energy per unit mass".to_string(),
                     unit: "J".to_string(),
                     axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::Trajectory,
                     values: energy_series,
                 },
             ],

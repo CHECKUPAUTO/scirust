@@ -4,6 +4,13 @@
 
 Accepted and implemented (Phase 3B-2).
 
+Two consequences below are superseded by
+[ADR 0008](0008-ensembles.md), both under *No progress reporting*: an
+ensemble's atom is the realisation, so the capability does report progress and
+does honour cancellation between realisations. Everything about the seed
+itself still holds. The "What this does not address" note at the end is what
+0008 acts on.
+
 ## Context
 
 The scenario schema has had an `experiment.seed` field since Phase 1. Every

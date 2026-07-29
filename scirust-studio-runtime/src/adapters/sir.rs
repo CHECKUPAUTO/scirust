@@ -23,12 +23,12 @@ use crate::adapter::{CapabilityAdapter, ExecutionError, ValidatedScenario, Valid
 use crate::control::ExecutionControl;
 use crate::result::{
     Axis, AxisMonotonicity, Metric, MetricValue, RESULT_SCHEMA_VERSION, RunProvenance, RunResult,
-    RunSummary, Series, TIME_AXIS_ID, VerificationResult, VerificationStatus,
+    RunSummary, Series, SeriesRole, TIME_AXIS_ID, VerificationResult, VerificationStatus,
 };
 use crate::sink::{EventSink, RunEvent};
 use crate::validate_support::{
-    check_unknown_model_fields, check_unknown_state_fields, resolve_model_scalar, resolve_solver,
-    resolve_state_vector,
+    check_unknown_model_fields, check_unknown_state_fields, resolve_model_scalar,
+    resolve_replicates, resolve_solver, resolve_state_vector,
 };
 
 const BETA: FieldDescriptor = FieldDescriptor {
@@ -203,6 +203,12 @@ impl CapabilityAdapter for SirAdapter {
         {
             errors.push(e);
         }
+        // Every adapter checks this, including the deterministic ones — see
+        // `resolve_replicates`.
+        if let Err(e) = resolve_replicates(scenario, DESCRIPTOR.determinism)
+        {
+            errors.push(e);
+        }
         if !errors.is_empty()
         {
             return Err(ValidationReport { errors });
@@ -323,6 +329,7 @@ impl CapabilityAdapter for SirAdapter {
                     display_name: "Susceptible".to_string(),
                     unit: "1".to_string(),
                     axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::Trajectory,
                     values: s_series,
                 },
                 Series {
@@ -330,6 +337,7 @@ impl CapabilityAdapter for SirAdapter {
                     display_name: "Infected".to_string(),
                     unit: "1".to_string(),
                     axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::Trajectory,
                     values: i_series,
                 },
                 Series {
@@ -337,6 +345,7 @@ impl CapabilityAdapter for SirAdapter {
                     display_name: "Recovered".to_string(),
                     unit: "1".to_string(),
                     axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::Trajectory,
                     values: r_series,
                 },
             ],

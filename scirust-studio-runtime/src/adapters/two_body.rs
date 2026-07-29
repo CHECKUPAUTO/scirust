@@ -25,12 +25,12 @@ use crate::adapter::{CapabilityAdapter, ExecutionError, ValidatedScenario, Valid
 use crate::control::ExecutionControl;
 use crate::result::{
     Axis, AxisMonotonicity, Metric, MetricValue, RESULT_SCHEMA_VERSION, RunProvenance, RunResult,
-    RunSummary, Series, TIME_AXIS_ID, VerificationResult, VerificationStatus,
+    RunSummary, Series, SeriesRole, TIME_AXIS_ID, VerificationResult, VerificationStatus,
 };
 use crate::sink::{EventSink, RunEvent};
 use crate::validate_support::{
-    check_unknown_model_fields, check_unknown_state_fields, resolve_model_scalar, resolve_solver,
-    resolve_state_vector,
+    check_unknown_model_fields, check_unknown_state_fields, resolve_model_scalar,
+    resolve_replicates, resolve_solver, resolve_state_vector,
 };
 
 const MU: FieldDescriptor = FieldDescriptor {
@@ -194,6 +194,12 @@ impl CapabilityAdapter for TwoBodyAdapter {
         {
             errors.push(e);
         }
+        // Every adapter checks this, including the deterministic ones — see
+        // `resolve_replicates`.
+        if let Err(e) = resolve_replicates(scenario, DESCRIPTOR.determinism)
+        {
+            errors.push(e);
+        }
         if !errors.is_empty()
         {
             return Err(ValidationReport { errors });
@@ -341,6 +347,7 @@ impl CapabilityAdapter for TwoBodyAdapter {
                     display_name: "Position x".to_string(),
                     unit: "m".to_string(),
                     axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::Trajectory,
                     values: position_x,
                 },
                 Series {
@@ -348,6 +355,7 @@ impl CapabilityAdapter for TwoBodyAdapter {
                     display_name: "Position y".to_string(),
                     unit: "m".to_string(),
                     axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::Trajectory,
                     values: position_y,
                 },
                 Series {
@@ -355,6 +363,7 @@ impl CapabilityAdapter for TwoBodyAdapter {
                     display_name: "Velocity x".to_string(),
                     unit: "m/s".to_string(),
                     axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::Trajectory,
                     values: velocity_x,
                 },
                 Series {
@@ -362,6 +371,7 @@ impl CapabilityAdapter for TwoBodyAdapter {
                     display_name: "Velocity y".to_string(),
                     unit: "m/s".to_string(),
                     axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::Trajectory,
                     values: velocity_y,
                 },
             ],

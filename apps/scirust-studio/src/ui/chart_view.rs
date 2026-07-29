@@ -17,8 +17,10 @@ use std::collections::BTreeSet;
 
 use dioxus::prelude::*;
 
+use crate::backend::SeriesRoleWire;
 use crate::chart::{
-    ChartModel, PlotSeries, XAxisKind, accessible_summary, build_chart, polyline_points,
+    ChartModel, PlotRole, PlotSeries, XAxisKind, accessible_summary, build_chart, polyline_points,
+    stroke_for,
 };
 use crate::ui::Ui;
 
@@ -37,6 +39,25 @@ const PADDING: f64 = 48.0;
 const SERIES_COLOURS: [&str; 6] = [
     "#2f6fed", "#d1610b", "#0f8f6a", "#9b30d9", "#c02b52", "#5a6b7a",
 ];
+
+/// The one colour every ensemble member and band edge shares.
+///
+/// Deliberately not from [`SERIES_COLOURS`]. Eight realisations in eight
+/// different colours read as eight different quantities; in one muted grey
+/// they read as what they are — eight draws of the same one.
+const ENSEMBLE_GREY: &str = "#8b98a5";
+
+/// The colour a curve is drawn in.
+fn stroke_colour(role: PlotRole, index: usize) -> &'static str {
+    if stroke_for(role).own_colour
+    {
+        SERIES_COLOURS[index % SERIES_COLOURS.len()]
+    }
+    else
+    {
+        ENSEMBLE_GREY
+    }
+}
 
 /// The chart for the displayed run.
 #[component]
@@ -58,6 +79,19 @@ pub fn Chart() -> Element {
             id: s.id.clone(),
             display_name: s.display_name.clone(),
             unit: s.unit.clone(),
+            role: match s.role
+            {
+                SeriesRoleWire::Trajectory => PlotRole::Trajectory,
+                SeriesRoleWire::Reference => PlotRole::Reference,
+                SeriesRoleWire::EnsembleMember => PlotRole::EnsembleMember,
+                SeriesRoleWire::EnsembleMean => PlotRole::EnsembleMean,
+                // The two edges are drawn the same; which side an edge is on
+                // is already visible from where it is.
+                SeriesRoleWire::EnsembleBandLower | SeriesRoleWire::EnsembleBandUpper =>
+                {
+                    PlotRole::EnsembleBandEdge
+                },
+            },
             values: s.values.clone(),
             visible: !hidden.contains(&s.id),
         })
@@ -163,8 +197,10 @@ pub fn Chart() -> Element {
                                 key: "{plot.id}",
                                 points: "{polyline_points(&chart, plot, WIDTH, HEIGHT, PADDING)}",
                                 fill: "none",
-                                stroke: "{SERIES_COLOURS[index % SERIES_COLOURS.len()]}",
-                                "stroke-width": "1.8",
+                                stroke: "{stroke_colour(plot.role, index)}",
+                                "stroke-width": "{stroke_for(plot.role).width}",
+                                "stroke-opacity": "{stroke_for(plot.role).opacity}",
+                                "stroke-dasharray": if stroke_for(plot.role).dashed { "5 3" } else { "none" },
                                 "stroke-linejoin": "round",
                             }
                         }

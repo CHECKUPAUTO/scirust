@@ -33,8 +33,8 @@ pub mod bridge;
 pub use wire::{
     BootstrapWire, CapabilityWire, CheckWire, ErrorWire, EventBatchWire, EventWire, ExitClassWire,
     FieldWire, IntegrityWire, JobStateWire, JobWire, LocationWire, MetricWire, OutputWire,
-    ProblemWire, ProvenanceWire, RunWire, ScenarioWire, SeriesWire, StoredRunWire, ValidationWire,
-    VerificationWire, WarningWire, XAxisKindWire,
+    ProblemWire, ProvenanceWire, RunWire, ScenarioWire, SeriesRoleWire, SeriesWire, StoredRunWire,
+    ValidationWire, VerificationWire, WarningWire, XAxisKindWire,
 };
 
 // A shipped application must never be able to display invented data. The

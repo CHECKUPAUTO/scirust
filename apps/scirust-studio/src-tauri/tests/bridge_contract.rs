@@ -17,13 +17,13 @@ use scirust_studio_app_service::{
     AppServiceError, JobSnapshot, JobState, ValidationOutcome, validate_source,
 };
 use scirust_studio_desktop_lib::views::{
-    BootstrapView, CapabilityView, ErrorView, MetricView, RunView, StoredRunView,
+    BootstrapView, CapabilityView, ErrorView, MetricView, RunView, SeriesRoleView, StoredRunView,
     VerificationReportView, VerificationView, WarningView, XAxisKind,
 };
 use scirust_studio_runtime::{Metric, MetricValue, RunWarning, WarningCategory};
 use scirust_studio_ui::backend::wire::{
     BootstrapWire, CapabilityWire, ErrorWire, EventBatchWire, JobStateWire, JobWire, RunWire,
-    StoredRunWire, ValidationWire, XAxisKindWire,
+    SeriesRoleWire, StoredRunWire, ValidationWire, XAxisKindWire,
 };
 
 /// Serialise as the IPC does, then decode as the interface does.
@@ -282,6 +282,7 @@ fn a_run_view_crosses_with_its_coordinates_bit_for_bit() {
             id: "x".to_string(),
             display_name: "Displacement".to_string(),
             unit: "m".to_string(),
+            role: SeriesRoleView::Trajectory,
             values: series_values.clone(),
         }],
         metrics: vec![MetricView::from(&Metric {
@@ -347,6 +348,7 @@ fn a_run_view_crosses_with_its_coordinates_bit_for_bit() {
     assert_eq!(wire.metrics[0].numeric, Some(6.99e-15));
     assert_eq!(wire.verifications[0].status, "passed");
     assert!(wire.integrity.intact);
+    assert_eq!(wire.series[0].role, SeriesRoleWire::Trajectory);
 }
 
 /// A stochastic run's seed must reach the interface: it is the only thing
@@ -530,4 +532,79 @@ fn a_rejection_becomes_a_complete_frontend_error() {
     assert!(!error.explanation.is_empty());
     assert_eq!(error.recoverable, view.recoverable);
     assert_eq!(error.suggested_action, view.suggested_action);
+}
+
+/// Every series role must survive the crossing, because the interface
+/// *branches* on it: a role that decoded to the default would draw a summary
+/// statistic and one noisy realisation with the same weight, which is a
+/// misleading picture rather than a cosmetic one.
+#[test]
+fn every_series_role_crosses_the_bridge_intact() {
+    let pairs = [
+        (SeriesRoleView::Trajectory, SeriesRoleWire::Trajectory),
+        (SeriesRoleView::Reference, SeriesRoleWire::Reference),
+        (
+            SeriesRoleView::EnsembleMember,
+            SeriesRoleWire::EnsembleMember,
+        ),
+        (SeriesRoleView::EnsembleMean, SeriesRoleWire::EnsembleMean),
+        (
+            SeriesRoleView::EnsembleBandLower,
+            SeriesRoleWire::EnsembleBandLower,
+        ),
+        (
+            SeriesRoleView::EnsembleBandUpper,
+            SeriesRoleWire::EnsembleBandUpper,
+        ),
+    ];
+    for (view, expected) in pairs
+    {
+        let decoded: SeriesRoleWire = cross(&view);
+        assert_eq!(
+            decoded, expected,
+            "role {view:?} did not cross the bridge as {expected:?}"
+        );
+    }
+}
+
+/// A run recorded before roles existed has no `role` key at all. It must
+/// decode as a trajectory rather than failing, because that is what those
+/// series were — the store holds results going back to schema v1 and they
+/// are meant to stay readable.
+#[test]
+fn a_series_stored_before_roles_existed_decodes_as_a_trajectory() {
+    let legacy = serde_json::json!({
+        "id": "x",
+        "display_name": "Displacement",
+        "unit": "m",
+        "values": [1.0, 0.5]
+    });
+    let decoded: scirust_studio_ui::backend::wire::SeriesWire =
+        serde_json::from_value(legacy).expect("a series without a role still decodes");
+    assert_eq!(decoded.role, SeriesRoleWire::Trajectory);
+    assert!(!decoded.role.is_ensemble());
+}
+
+/// The two enums are mirrors, so a role added to one and forgotten on the
+/// other must not compile away quietly. `cross` goes through JSON, so this
+/// fails loudly on a name that does not match rather than on a count.
+#[test]
+fn the_shell_and_the_interface_agree_on_the_ensemble_roles() {
+    let ensemble = [
+        SeriesRoleView::EnsembleMember,
+        SeriesRoleView::EnsembleMean,
+        SeriesRoleView::EnsembleBandLower,
+        SeriesRoleView::EnsembleBandUpper,
+    ];
+    for role in ensemble
+    {
+        let decoded: SeriesRoleWire = cross(&role);
+        assert!(
+            decoded.is_ensemble(),
+            "{role:?} crossed as {decoded:?}, which the interface does not treat as an ensemble \
+             curve"
+        );
+    }
+    let decoded: SeriesRoleWire = cross(&SeriesRoleView::Reference);
+    assert!(!decoded.is_ensemble());
 }
