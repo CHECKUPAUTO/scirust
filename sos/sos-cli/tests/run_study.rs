@@ -18,7 +18,10 @@ use sos_scirust::model::{
     AdaptiveModelRun, CertifiedModeledTrajectoryBody, ModelKind, ModelRun, ModelSpec,
     ModeledTrajectoryBody,
 };
-use sos_scirust::pipeline::{TrajectorySpectrumBody, TrajectorySpectrumConfig};
+use sos_scirust::pipeline::{
+    TrajectorySpectrogramBody, TrajectorySpectrogramConfig, TrajectorySpectrumBody,
+    TrajectorySpectrumConfig,
+};
 use sos_scirust::spectrum::{
     AveragedSpectrumBody, SpectrumBody, SpectrumConfig, WelchConfig, WindowKind,
 };
@@ -1019,6 +1022,82 @@ fn an_l2_study_runs_and_certifies_through_the_cli() {
         identity.contains("OK (recomputed address matches)"),
         "{identity}"
     );
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_study_can_ask_how_a_simulated_spectrum_changes() {
+    // The sibling of the simulate-then-analyse pipeline: same trajectory, but
+    // asking how its spectrum *evolves* rather than what it averages to. Both
+    // stages consume the same simulation, so one study answers both questions.
+    let dir = temp_root("spectrogram");
+    let store_path = dir.join("store");
+    let configs = [
+        StageConfig::Model(ModelRun::new(
+            ModelSpec::new(ModelKind::VanDerPol, [3.0]),
+            [0.05, 0.0],
+            0.0,
+            163.84,
+            0.01,
+        )),
+        StageConfig::Spectrogram(TrajectorySpectrogramConfig::new(
+            0,
+            WindowKind::Hann,
+            1024,
+            512,
+        )),
+    ];
+    let runs_path = dir.join("runs.json");
+    fs::write(&runs_path, serde_json::to_string(&configs).unwrap()).unwrap();
+
+    let manifest = dir.join("study.toml");
+    fs::write(
+        &manifest,
+        format!(
+            "[study]\nname = \"van-der-pol-evolution\"\nseed = 2\n\n\
+             [[stage]]\nid       = \"simulate\"\nplugin   = \"{p0}\"\nversion  = \"1.0.0\"\n\
+             pin      = \"{pin0}\"\nconfig   = \"{c0}\"\n\n\
+             [[stage]]\nid       = \"evolve\"\nplugin   = \"{p1}\"\nversion  = \"1.0.0\"\n\
+             pin      = \"{pin1}\"\nconfig   = \"{c1}\"\nconsumes = [\"simulate\"]\n",
+            p0 = configs[0].plugin(),
+            pin0 = sos_cli::run::plugin_hash(configs[0].plugin()).to_hex(),
+            c0 = configs[0].address().to_hex(),
+            p1 = configs[1].plugin(),
+            pin1 = sos_cli::run::plugin_hash(configs[1].plugin()).to_hex(),
+            c1 = configs[1].address().to_hex(),
+        ),
+    )
+    .unwrap();
+
+    let out = sos_run(
+        &manifest,
+        &runs_path,
+        &store_path,
+        &["--allow", "effectful"],
+    )
+    .unwrap();
+    assert!(out.contains("ran 2 of 2 stage(s)"), "{out}");
+
+    let simulated = parse_reported(&out, "simulate");
+    let evolved = parse_reported(&out, "evolve");
+    let store = FileStore::open(&store_path).unwrap();
+    let stored: Object<TrajectorySpectrogramBody> = store.get_object(evolved).unwrap().unwrap();
+
+    assert!(stored.body.measured.frames.len() >= 24);
+    // Derived from the trajectory, not declared: 1/0.01, and 512 samples
+    // between frames at that rate.
+    assert!((stored.body.measured.sample_rate_hz - 100.0).abs() < 1e-6);
+    assert!((stored.body.measured.hop_seconds - 5.12).abs() < 1e-9);
+    assert_eq!(stored.parents, vec![simulated]);
+
+    // This run is exactly the one that exposed the runt-final-sample bug: a
+    // t_end of 163.84 leaves the accumulated grid a hair short, so the
+    // simulator appends a stray sample. It must be trimmed, not refused.
+    let trajectory: Object<ModeledTrajectoryBody> = store.get_object(simulated).unwrap().unwrap();
+    assert_eq!(trajectory.body.trajectory.len(), 16386);
+
+    let report = sos_verify_rerun(&store_path, evolved, &runs_path).unwrap();
+    assert!(report.contains("REPRODUCED"), "{report}");
     fs::remove_dir_all(&dir).ok();
 }
 
