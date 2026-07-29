@@ -103,8 +103,7 @@ addition specific to orchestration:
 ## Phase 6.1 — Streaming drift monitoring and the governed continual loop
 
 **Status: Done.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
-from `origin/master` at `7468b232`. Draft PR opened from this branch; the
-merge commit is recorded by the next phase, per the incremental discipline.
+from `origin/master` at `7468b232`. PR #878, merged at `f292fc42`.
 
 ### What was missing, precisely
 
@@ -270,3 +269,133 @@ All ten standing determinism witnesses rerun unchanged at this phase:
 - **Model names are labels.** The orchestrator tracks identity, not
   artifacts; storage, versioning and registry integration are deliberately
   absent.
+
+## Phase 6.2 — Group-conditional drift: what the pooled median cannot see
+
+**Status: Done.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
+from `origin/master` at `f292fc42` (the commit 6.1 merged at).
+
+### The finding this phase exists to state
+
+Phase 6.1 chose a rolling **median** and defended it on the standard ground:
+a minority of wild scores can neither fake nor mask the drift signal. That
+defence is correct. It is also, read carefully, an admission.
+
+A minority of wild scores cannot move the pooled median — *including when
+those scores are a real subpopulation whose model has genuinely collapsed*.
+Feed one monitor a stream that is three parts healthy and one part
+catastrophic and the pooled median sits calmly inside its threshold while a
+quarter of the traffic is served predictions nobody is watching. From inside
+the monitor, the breakdown point that protects against contamination is
+indistinguishable from a breakdown point that hides a stratum.
+
+**Robustness is not a free good: it buys resistance to noise by spending
+sensitivity to minorities.** That is the phase's result, and the benchmark
+demonstrates it as a head-to-head rather than asserting it — two
+orchestrators, one byte-identical score stream, opposite verdicts.
+
+This is the drift-dimension twin of the argument phase 4E.6 made for
+coverage. Marginal coverage can look perfect while a group is starved, so
+Mondrian conformal prediction conditions on the group. `GroupDriftMonitor`
+conditions the same way, for the same reason.
+
+### `group_drift` — one monitor per declared stratum
+
+Each group gets an independent [`DriftMonitor`] with **its own** calibrated
+reference scale. Sharing one scale across strata with different natural
+residual magnitudes would either keep a naturally hot group permanently
+alarmed or let a naturally cool group's collapse be averaged away; the
+`GroupDriftConfig` signature is shaped to make that mistake awkward.
+
+- The aggregate is `Alarmed` once `groups_to_alarm` groups are alarmed —
+  default `1`, because a stratum failing alone is still a failure.
+- Alarmed and warming groups are reported in **canonical (name) order**, so
+  declaration order cannot leak into output.
+- An observation carrying an **undeclared** group is a typed error, never
+  pooled into a default bucket. Silent pooling is precisely the failure this
+  module removes; re-introducing it on the ingest path would be
+  self-defeating.
+
+### Silence is not health
+
+Conditioning multiplies the warm-up cost: every group needs its own
+`minimum_samples`, and a rare group reaches that slowly — or never. A group
+with no traffic is not a quiet group, it is an **unmonitored** one, and the
+two must not render the same. So `warming_groups()` exists to make the
+residual blindness reportable, and the benchmark prints a scenario in which
+the aggregate reads `Quiet` on the strength of one stratum out of four while
+the other three have never been observed. That reading is true and nearly
+uninformative, which is exactly the point.
+
+### Composition, and one thing deliberately not decided
+
+`ContinualOrchestrator::with_group_drift` runs the group monitor **alongside**
+the pooled one rather than replacing it; either may open a `DriftAlarm`
+demand. Both are kept because they answer different questions — "did the
+stream move?" and "did any declared stratum move?" — and a diffuse drift can
+answer the first without the second.
+
+The two are **not ranked against each other**. Both say the residual scale
+moved somewhere; deciding that one is graver would be a claim neither monitor
+can support, so the orchestrator declines to make it. What it does record is
+*where*: the audit log names the alarmed groups (`opened retrain demand:
+DriftAlarm (groups: south)`), carrying localization without carrying an
+explanation.
+
+A group-conditioned orchestrator refuses ungrouped observations
+(`ContinualError::MissingGroup`), for the same reason the monitor refuses
+undeclared ones.
+
+### Deterministic benchmark
+
+`group_drift_benchmark` runs the conditioned and pooled orchestrators side by
+side on an identical stream. The decisive row: with `south` collapsed to four
+times its calibrated scale, conditioning demands a retrain at tick 83 naming
+`south`, while the pooled median sits at **1.40×** its reference — less than
+half its 3.0 threshold — and never reacts. Coverage reads `1.000000`
+throughout on both sides: this is drift, not yet damage, and conditioning
+moves the warning earlier without manufacturing a failure.
+
+Fingerprint (two debug runs, one release run, all byte-identical):
+
+    5138643f69ce62047aadbe1930ca726f11e8c014bce05dc8e3d00fed1c70e42c
+
+### Prior fingerprints reverified
+
+All eleven standing witnesses rerun unchanged at this phase — the ten from
+6.1's table plus phase 6.1's own `2bac7e09…`. That last one is the load-
+bearing check for this phase specifically: it proves the ungrouped path is
+byte-for-byte what it was before the group monitor was added.
+
+### Compatibility note
+
+`ContinualError` gains three variants (`MissingGroup`, `UnexpectedGroup`,
+`GroupDrift`). Adding a variant can break an exhaustive external `match`;
+the crate is workspace-internal at `0.1.0` and no workspace consumer matches
+exhaustively. The alternative — folding group failures into the existing
+`Drift` variant — would discard the group name that makes the error
+actionable, which is a worse trade. Everything else is additive: `observe`,
+`new`, `ContinualConfig`, `ServiceStatus` and `ObservationOutcome` are
+untouched, and an orchestrator built with `new` behaves exactly as it did in
+6.1.
+
+### Known limitations
+
+- **The partition is the caller's claim, and nothing checks it.** A grouping
+  that does not separate the failure mode leaves the monitor exactly as blind
+  as the pooled one. Conditioning buys localization *within* the declared
+  partition and nothing outside it — and no signal here can report that the
+  partition was the wrong one. This is the phase's sharpest limitation and it
+  is not fixable from inside the monitor.
+- **Still no cause attribution.** Naming a stratum says *where*, never *why*;
+  phase 6.1's rule stands unchanged.
+- **Warm-up cost scales with the partition.** Splitting a stream into `k`
+  groups splits the evidence too. A fine partition detects narrower failures
+  and takes longer to say anything about any of them; the trade is the
+  caller's to make and is not automated here.
+- **Groups are flat and fixed at construction.** No hierarchy, no nesting, no
+  groups discovered at runtime. A partition that must change requires a new
+  monitor, which — deliberately — means starting its evidence over.
+- **Per-group scales are inputs, not estimates.** Nothing here calibrates
+  them; supplying a wrong reference scale produces a confidently wrong
+  verdict for that stratum alone.
