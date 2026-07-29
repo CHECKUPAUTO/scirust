@@ -15,6 +15,7 @@ sos-planner = { workspace = true }
 sos-simulation = { workspace = true }
 sos-store = { workspace = true }
 sos-workflow = { workspace = true }
+sos-repro = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 scirust-gp = { path = "../../scirust-gp" }
