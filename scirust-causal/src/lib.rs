@@ -3,7 +3,7 @@
 //!
 //! # Scope
 //!
-//! Eleven capabilities:
+//! Twelve capabilities:
 //!
 //! 1. an exactly invertible **strictly lower-triangular cubic map**
 //!    ([`TriangularCubicFlow`]);
@@ -128,7 +128,25 @@
 //!     that rule to capability 8, whose own docs say it detects that
 //!     something is wrong and cannot say what. The crate's tests run the
 //!     whole loop: capability 6's confidently wrong estimate, capability 8
-//!     detecting the misspecification, and the certificate ceasing to stand.
+//!     detecting the misspecification, and the certificate ceasing to stand;
+//!     and
+//! 12. **claim audit** ([`audit_claim_set`]) — the crate checked against its
+//!     own contract. Given a set of [`CausalCertificate`]s and an
+//!     [`AssumptionRegistry`], it reports fingerprints that no longer match
+//!     their content, assumptions cited after evidence contradicted them,
+//!     methods whose stated requirements are undeclared, two claims answering
+//!     one question differently, and estimates resting on provenance that is
+//!     nothing but assertion. It reads **no data**: a `Compliant` verdict is
+//!     about the claims' form and provenance, and a uniformly wrong claim set
+//!     can pass it.
+//!
+//!     This capability also closed two holes in capability 3's central rule.
+//!     [`CausalCertificateBuilder::finalize`] forbids attaching an estimate to
+//!     a non-`Identifiable` status, but a derived `Deserialize` let any JSON
+//!     produce a certificate the builder would have rejected — so
+//!     `CausalCertificate` now validates on parse as well as on construction.
+//!     And the fingerprint was a stored string nothing recomputed, so
+//!     [`CausalCertificate::verify_fingerprint`] exists to check it.
 //!
 //! # Causal interpretation — read before using the discovery API
 //!
@@ -186,7 +204,9 @@
 //! evidence. Capability 11 withdraws claims whose assumptions evidence has
 //! undermined, but it re-derives nothing and establishes nothing as true:
 //! corroboration there means a check that could have failed did not, which is
-//! weaker than every other guarantee in this list.
+//! weaker than every other guarantee in this list. Capability 12 is weaker
+//! still: it checks that claims are *well formed and honestly provenanced*,
+//! which is a statement about paperwork, not about the world.
 //!
 //! # Cubic-flow mathematical properties
 //!
@@ -214,6 +234,7 @@ mod acyclicity;
 mod adjustment;
 mod assumptions;
 mod certificate;
+mod claim_audit;
 mod conditional_independence;
 mod cpdag;
 mod cubic_score;
@@ -251,6 +272,10 @@ pub use adjustment::{
 };
 pub use assumptions::{AssumptionBasis, AssumptionRecord, AssumptionRegistry, CausalAssumption};
 pub use certificate::{CausalCertificate, CausalCertificateBuilder, IdentifiabilityStatus};
+pub use claim_audit::{
+    ClaimAudit, ClaimAuditConfig, ClaimAuditVerdict, ClaimFinding, FindingSeverity,
+    MethodRequirement, audit_claim_set,
+};
 pub use conditional_independence::{
     CalibrationMethod, ConditionalIndependenceConfig, ConditionalIndependenceMethod,
     ConditionalIndependenceResult, ConditionalIndependenceTest, IndependenceDecision,
