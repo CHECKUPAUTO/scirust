@@ -525,11 +525,37 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   than recomputed, and the ledger records behaviour honestly rather than
   claiming the same history.)
 
-  Wiring `verify_object` into `sos verify` itself is left, and for a stated
-  reason rather than an omission: the re-execution's stage handlers hold the
-  store through `Rc<RefCell<_>>` while `verify_object` wants `&Store` at the
-  same instant, which would panic on the borrow. That is an API question, not
-  plumbing.
+  That record is what `sos verify --rerun` needs, and it
+  is now wired: the command finds the run that produced an object, re-executes
+  its plan, and checks the reproduction contract node by node through
+  `sos-repro`'s `verify_object`. Without the flag, `sos verify` still answers
+  the *identity* question — is this object what it says it is — and the two are
+  now distinguished in the docs rather than conflated.
+
+  ```sh
+  $ sos verify sos1:a6d68756… --store .sos --rerun runs.json --allow effectful
+  sos1:a6d68756…
+    re-executed: 1 node(s)
+    contract level: L3
+    sos1:a6d68756… L3 Reproduced
+    REPRODUCED (every node matched at its declared level)
+  ```
+
+  Two things about that path are load-bearing and tested. **The re-run must
+  not be served from the cache** — `sos run` persists a memo, and reusing it
+  here would replay the recorded outputs and "verify" nothing, the strongest
+  possible false pass. `--rerun` always starts from an empty `MemoTable`, and
+  a test poisons the persisted memo to prove the verification never consults
+  it. **Two store handles, deliberately** — the re-execution's handlers hold
+  the store through `Rc<RefCell<_>>` to write while `verify_object` wants
+  `&Store` to read, and borrowing one `RefCell` for both would panic. A second
+  `FileStore` over the same path is safe for reasons specific to that type: it
+  caches no objects (every read hits the directory) and writes are
+  content-addressed and first-wins, so the reader sees the re-run's output as
+  it lands and no write can conflict. Certification uses `NoCertifier`, which
+  *refuses* every `L2`/`L1` node rather than certifying one no backend
+  examined — all three CLI-bindable backends are `L3`, so anything `sos run`
+  produced passes, and a study that somehow contained an `L2` node is told so.
 
   `sos verify` also learned the four kinds `sos run` writes. Their absence
   meant the binary reported *"unrecognized kind"* for objects it had just
