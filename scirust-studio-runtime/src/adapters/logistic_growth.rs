@@ -396,6 +396,7 @@ impl CapabilityAdapter for LogisticGrowthAdapter {
                     values: exact_series,
                 },
             ],
+            fields: vec![],
             metrics: vec![
                 Metric {
                     id: "final_population".to_string(),

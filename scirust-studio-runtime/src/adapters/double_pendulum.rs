@@ -582,6 +582,7 @@ impl CapabilityAdapter for DoublePendulumAdapter {
                     values: separation_series,
                 },
             ],
+            fields: vec![],
             metrics: vec![
                 Metric {
                     id: "final_separation".to_string(),

@@ -454,6 +454,7 @@ impl CapabilityAdapter for LotkaVolterraAdapter {
                     values: first_integral_series,
                 },
             ],
+            fields: vec![],
             metrics: vec![
                 Metric {
                     id: "final_prey".to_string(),

@@ -113,6 +113,7 @@ Columns:
 | `sim.mechanics.pendulum` | Yes | Yes | Yes | Yes | Yes | Yes |
 | `sim.mechanics.double_pendulum` | Yes | Yes | Yes | Yes | Yes | Yes |
 | `sim.stochastic.ornstein_uhlenbeck` | Yes | Yes | Yes | Yes (per realisation) | Yes | Yes |
+| `sim.thermal.heat_rod_1d` | Yes | Yes | Yes | Yes | Yes | Yes |
 | Every other `scirust-sim` model family | No | No | No | No | No | No |
 | Every other workspace crate | No | No | No | No | No | No |
 
@@ -224,9 +225,9 @@ both with a conversion factor of exactly 1), and the registry gained an
 
 ## Summary counts (Phase 3B-2)
 
-- Operational: **10** — the nine above plus
-  `sim.stochastic.ornstein_uhlenbeck`.
-- `scirust-sim` module families with at least one adapter: **7 of 16**.
+- Operational: **11** — the nine above plus
+  `sim.stochastic.ornstein_uhlenbeck` and `sim.thermal.heat_rod_1d`.
+- `scirust-sim` module families with at least one adapter: **8 of 16**.
 - **Determinism classes in use: 2.** Nine capabilities are
   `StrictSameBinarySameTarget`; the Ornstein-Uhlenbeck process is
   `InherentlyStochasticRecordedSeed`, the first whose result is not a function
@@ -261,3 +262,25 @@ their count suggests, while independent realisations carry exactly their
 count. Every capability — not only the stochastic ones — now answers for
 `replicates`, and one that draws no sample refuses rather than running the
 same computation `n` times. See `docs/studio/adr/0008-ensembles.md`.
+
+
+### What the field capability changes
+
+`sim.thermal.heat_rod_1d` is the first capability whose result is a **field**
+rather than a set of curves, and the first with two axes. `RunResult` gained
+`fields: Vec<Field>` — a row-major buffer naming a row axis and a column axis
+— because a `Series` is aligned one-to-one with a single axis and can only
+hold a slice of a field.
+
+The audit had said for four updates that schema v2 could already express this.
+It could not; ADR 0009 records the correction. The blocker was never only
+presentation.
+
+Both interfaces render it: the CLI as a coarse ASCII map, the desktop as a
+heat map. Both reduce by keeping the source sample **furthest from the mean**
+in each cell rather than the cell's average, which is the two-dimensional form
+of the chart's existing "reduction never hides a peak" rule — an average is
+exactly the operation that makes a spike disappear.
+
+Two of its series are plotted against *position* rather than time, also a
+first. See `docs/studio/adr/0009-fields.md`.

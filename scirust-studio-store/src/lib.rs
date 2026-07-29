@@ -75,6 +75,7 @@ mod tests {
                 role: SeriesRole::Trajectory,
                 values: vec![1.0, 0.5, 0.25],
             }],
+            fields: vec![],
             metrics: vec![Metric {
                 id: "final".to_string(),
                 display_name: "Final".to_string(),

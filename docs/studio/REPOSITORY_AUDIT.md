@@ -604,3 +604,54 @@ same way.
 it needs; a result axis whose coordinates are bins; code signing and the
 updater that depends on it; and the remaining unadapted `scirust-sim`
 families.
+
+## 19. Update — fields, and a claim this document repeated four times
+
+`sim.thermal.heat_rod_1d` is adapted. **11 capabilities across 8 of 16 module
+families.**
+
+**The correction first.** §13 through §16 each carried the same note about
+`thermal`'s `HeatRod1d`:
+
+> Result schema v2 can already express it — `axes` is a vector and every
+> series names its axis — but a line chart is the wrong presentation and the
+> interface has no other.
+
+The first half is wrong. `axes` being a vector means a result may have several
+axes; it does not mean one quantity may span two. A `Series` is aligned
+one-to-one with the axis it names, so the most it holds is a slice of a field:
+one node's history, or one instant's profile. `u(x, t)` could be n series or m
+series, and neither is the field.
+
+That claim survived four updates without being checked, which is worth
+recording rather than quietly fixing — it was believed because it sounded
+right and nobody had tried it. `RunResult` now carries `fields`, and ADR 0009
+records the design.
+
+**Everything else this capability turned on:**
+
+- Its checks are facts the model states in closed form: the steady state is
+  *exactly* the linear profile, and the slowest mode decays at exactly
+  `(2a/dx^2)(1 - cos(pi/(n+1)))`. The run measures its own decay and matches
+  to ratio 1.000. The third check, the discrete maximum principle, exists
+  because the first two can both pass on a wrong stencil that still relaxes to
+  something plausible.
+- The RK4 stability limit is a **validation error**, not a discovery. Above
+  `0.7*dx^2/alpha` the run does not degrade, it produces NaN — so it is
+  refused with the limit and a usable step in the message.
+- Reduction to a drawable size keeps, per cell, the sample **furthest from the
+  mean** rather than the cell's average. This is the two-dimensional form of
+  the chart's existing "reduction never hides a peak"; a test plants one hot
+  cell in a flat field sixteen times over budget and asserts it survives.
+- `every_adapter_emits_exact_axis_coordinates` asserted every series is on the
+  time axis. Two of this capability's series are profiles against *position*,
+  so the assertion was generalised to the property that was always meant
+  rather than special-cased.
+
+**Still outstanding**: a result axis whose coordinates are bins (ADR 0008's
+first-passage distributions — a histogram is not a field with one row); fields
+over three axes or on unstructured meshes; code signing and the updater that
+depends on it; and the remaining unadapted families — `pharmacokinetics`,
+`rigid_body`, `battery`, `hvac`, `grid`, `laser`, `photodiode`, `apd`, `envs`,
+plus SEIR, the two non-stiff chemistry models, the projectile, Van der Pol,
+GBM and the M/M/1 queue.

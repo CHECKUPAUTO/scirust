@@ -57,6 +57,8 @@ pub fn lookup(symbol: &str) -> Option<UnitEntry> {
         "1/s" => Dimension::FREQUENCY,
         // Gravitational parameter mu = G*M (orbital two-body problem).
         "m^3/s^2" => Dimension::LENGTH.powi(3).div(Dimension::TIME.powi(2)),
+        // Thermal diffusivity alpha = k/(rho*c_p) (1-D heat equation).
+        "m^2/s" => Dimension::LENGTH.powi(2).div(Dimension::TIME),
         // Henry (inductance): H = J/A^2 (from E = 1/2 L I^2).
         "H" => Dimension::ENERGY.div(Dimension::CURRENT.powi(2)),
         // Farad (capacitance): F = C/V.
@@ -109,8 +111,8 @@ mod tests {
     fn no_symbol_carries_a_hidden_conversion() {
         for symbol in [
             "1", "m", "kg", "s", "A", "K", "mol", "cd", "m/s", "m/s^2", "N", "J", "W", "Pa", "Hz",
-            "C", "V", "Ohm", "kg/s", "kg/s^2", "kg/m^3", "1/s", "m^3/s^2", "H", "F", "rad",
-            "rad/s",
+            "C", "V", "Ohm", "kg/s", "kg/s^2", "kg/m^3", "1/s", "m^3/s^2", "m^2/s", "H", "F",
+            "rad", "rad/s",
         ]
         {
             let entry = lookup(symbol).unwrap_or_else(|| panic!("{symbol} must be in the table"));
