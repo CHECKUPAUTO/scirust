@@ -458,4 +458,54 @@ has changed since §14:
   single path answers "what does one realisation look like". Questions like
   "what is the distribution of the first passage time" need many paths and a
   result model that can hold them, which is a larger change than a seed field.
-  ADR 0007 records this as explicitly not attempted.
+  ADR 0007 records this as explicitly not attempted. *(Addressed in §16.)*
+
+## 16. Update — Phase 3B-3 (ensembles)
+
+Closes the gap §15 ended on, and the one ADR 0007 named as not attempted.
+
+`experiment.replicates` asks a stochastic capability for many independent
+realisations, seeded by derivation from the scenario's single seed. The result
+carries the across-replicate mean, a two-sigma spread band and a bounded
+number of individual paths; `Series.role` distinguishes them, so no consumer
+has to infer from an id which curve is a summary over 256 realisations and
+which is one of them.
+
+The catalogue is unchanged at **10 capabilities across 7 of 16 module
+families**. This phase added no adapters — it changed what an existing one can
+be asked.
+
+**What the phase actually turned on.** Three things worth recording because
+none of them was the obvious version:
+
+- **The seed derivation is scrambled, and the reason is specific to this
+  codebase's generator.** SplitMix64 takes its seed *as* its state and
+  advances by a fixed increment, so every seed sits on one shared 2^64 cycle.
+  Two replicates whose seeds differ by a multiple of that increment draw the
+  same noise offset by a few steps — independent-looking realisations sharing
+  their randomness. Counting seeds happens not to trigger it; scrambling makes
+  the safety a stated property rather than an accident. A test inverts the
+  increment modulo 2^64 to recover the separation of every pair.
+- **The across-replicate check is materially stronger than the single-path
+  one**, and the run now prints both side by side: the shipped tutorial's
+  39 001 correlated samples are worth about 98 independent ones, while 256
+  realisations are worth 256.
+- **A pre-existing bug surfaced.** The Ornstein-Uhlenbeck capability declared
+  `fixed_step: true`, from which the app service derives
+  `supports_progress: true`, while the adapter emitted no progress — so the
+  desktop drew a determinate bar that never moved. The test that should have
+  caught it checked a proxy (`!any(fixed_step && id == "rk4")`) that passed
+  trivially. Fixed by taking the *realisation* as the unit of progress, which
+  is honest for both an ensemble and a single run.
+
+**Still catalogue-only**: unchanged from §15, minus the ensemble question.
+`thermal`'s `HeatRod1d` remains the one entry that needs interface design
+rather than another adapter — a spatially discretised field is expressible in
+schema v2 but a line chart is the wrong presentation for it.
+
+**What ensembles now make worth wanting**: a result whose axis is *bins*
+rather than time. The ensemble here summarises realisations pointwise in time,
+which answers "where is the process at each moment". A histogram of first
+passage times is a distribution over a scalar, and needs an axis kind the
+schema does not have. ADR 0008 records it as the next thing, and as not
+attempted.

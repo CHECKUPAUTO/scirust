@@ -30,6 +30,35 @@
 #
 # Change `seed` and re-run: the path changes completely, both checks still
 # pass, and that is exactly what "inherently stochastic, recorded seed" means.
+#
+# ---------------------------------------------------------------------------
+# Asking for many realisations instead of one
+# ---------------------------------------------------------------------------
+#
+# One path is one sample. To ask what the process does *on average* — and how
+# far from the average it strays — uncomment `replicates` below:
+#
+#   replicates = 256
+#
+# The result then carries the mean over all 256 realisations, a band two
+# standard deviations wide, and eight of the individual paths so you can see
+# they genuinely differ. Two further checks appear:
+#
+#   * ensemble_moments — the mean and variance ACROSS the realisations at the
+#     final time, against the same exact stationary law. This is the stronger
+#     check: samples along one path are autocorrelated, so the 39 001 in this
+#     run are worth about 98 independent ones, while 256 realisations are
+#     worth 256. It pins the mean roughly sixteen times more tightly.
+#   * ensemble_derived_from_seed — every replicate's seed is re-derived from
+#     the single `seed` below, and one realisation is re-run from its derived
+#     seed bit for bit. The whole ensemble comes back from one number.
+#
+# 256 realisations of a 400 s run take a while; shorten `end` to 40 s to try
+# it quickly. The stationary law needs at least five relaxation times
+# (5 / theta = 10 s) to have taken hold, and the check declines rather than
+# fails if you go below that.
+#
+# See docs/studio/adr/0008-ensembles.md.
 
 schema_version = 1
 
@@ -38,6 +67,8 @@ name = "Ornstein-Uhlenbeck process"
 description = "A mean-reverting process sampled from a recorded seed, verified against its exact stationary moments."
 # Required for this capability. Change it to draw a different sample.
 seed = 42
+# Uncomment for an ensemble; see the note above.
+# replicates = 256
 
 [capability]
 id = "sim.stochastic.ornstein_uhlenbeck"

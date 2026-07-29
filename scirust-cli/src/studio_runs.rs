@@ -4,6 +4,7 @@
 //! operation, `runs discard`, removes a *never-finalized* leftover and is
 //! refused for anything else (see `scirust-studio-store`).
 
+use scirust_studio_runtime::SeriesRole;
 use scirust_studio_store::{LoadedRunResult, RunStore, StoreError};
 
 use crate::studio::{resolve_store, take_option};
@@ -225,11 +226,24 @@ fn show(store_arg: Option<String>, format: &str, run_id: Option<&String>) -> u8 
                         for s in &result.series
                         {
                             println!(
-                                "  {:<18} {} points, unit {} (axis `{}`)",
+                                "  {:<30} {} points, unit {} (axis `{}`){}",
                                 s.id,
                                 s.values.len(),
                                 s.unit,
-                                s.axis_id
+                                s.axis_id,
+                                // Same reason as in `scirust run`: a stored
+                                // ensemble lists a mean next to eight
+                                // realisations, and only the role says which
+                                // is which.
+                                match s.role
+                                {
+                                    SeriesRole::Trajectory => "",
+                                    SeriesRole::Reference => "  reference",
+                                    SeriesRole::EnsembleMean => "  mean over the ensemble",
+                                    SeriesRole::EnsembleBandLower => "  band, lower edge",
+                                    SeriesRole::EnsembleBandUpper => "  band, upper edge",
+                                    SeriesRole::EnsembleMember => "  one realisation",
+                                }
                             );
                         }
                     },

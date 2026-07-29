@@ -777,9 +777,25 @@ fn check_ensemble(result: &RunResult, defects: &mut Vec<ResultDefect>) {
         };
         for (index, (e, m)) in edge.values.iter().zip(mean.values.iter()).enumerate()
         {
-            // `!(e <= m)` rather than `e > m` so a NaN is caught here too,
-            // rather than silently comparing false and passing.
-            let wrong_side = if is_lower { !(e <= m) } else { !(e >= m) };
+            // `partial_cmp` rather than `>` / `<` so a NaN edge is a defect
+            // rather than something that compares false against everything and
+            // passes: an edge that cannot be ordered against the mean has not
+            // been shown to bracket it.
+            let wrong_side = match e.partial_cmp(m)
+            {
+                None => true,
+                Some(ordering) =>
+                {
+                    if is_lower
+                    {
+                        ordering == std::cmp::Ordering::Greater
+                    }
+                    else
+                    {
+                        ordering == std::cmp::Ordering::Less
+                    }
+                },
+            };
             if wrong_side
             {
                 defects.push(ResultDefect::EnsembleBandDoesNotBracketMean {
