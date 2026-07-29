@@ -146,13 +146,13 @@
 //! to swap implementations. Within the signal family, spectrograms are
 //! follow-on work.
 //!
-//! Five of the seven [`Simulate`](sos_simulation::Simulate) backends have
+//! Six of the eight [`Simulate`](sos_simulation::Simulate) backends have
 //! stage handlers ([`ode::Rk4OdeSimulator`], [`model::CatalogSimulator`],
-//! [`spectrum::PeriodogramSimulator`], [`spectrum::WelchSimulator`] and
-//! [`pipeline::TrajectorySpectrumSimulator`]);
+//! [`model::AdaptiveCatalogSimulator`], [`spectrum::PeriodogramSimulator`],
+//! [`spectrum::WelchSimulator`] and [`pipeline::TrajectorySpectrumSimulator`]);
 //! [`ode::Dopri5OdeSimulator`], [`quadrature`] and [`root`] do not, and no
-//! other engine's stages have handlers at all. Four of those five are
-//! reachable from `sos run` — the four whose configuration is data. The
+//! other engine's stages have handlers at all. Five of those six are
+//! reachable from `sos run` — the five whose configuration is data. The
 //! others take a *function*, and no file can name a function, so a CLI
 //! binding for them needs a transport that ships code (RFC-0002 §10's WASM or
 //! MCP), not more plumbing here.

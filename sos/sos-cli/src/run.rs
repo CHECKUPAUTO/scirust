@@ -85,11 +85,12 @@ use std::rc::Rc;
 
 use sos_core::{Author, Digest, HashAlgo, Object, ObjectId, SemVer};
 use sos_registry::{Capability, Grant, PluginDescriptor, Registry};
-use sos_scirust::model::ModelRun;
+use sos_scirust::model::{AdaptiveModelRun, ModelRun};
 use sos_scirust::pipeline::TrajectorySpectrumConfig;
 use sos_scirust::spectrum::{SpectrumConfig, WelchConfig};
 use sos_scirust::stage::{
-    CatalogStageHandler, SpectrumStageHandler, TrajectorySpectrumStageHandler, WelchStageHandler,
+    AdaptiveCatalogStageHandler, CatalogStageHandler, SpectrumStageHandler,
+    TrajectorySpectrumStageHandler, WelchStageHandler, adaptive_model_config_address,
     model_config_address, signal_backend, sim_backend, spectrum_config_address,
     trajectory_config_address, welch_config_address,
 };
@@ -117,11 +118,15 @@ pub const WELCH_PLUGIN: &str = "signal-welch";
 /// The plugin name a stage measuring an **upstream trajectory** must pin.
 pub const TRAJECTORY_PLUGIN: &str = "trajectory-spectrum";
 
+/// The plugin name an **adaptively integrated** catalogue run must pin — the
+/// only one whose results are `L2`.
+pub const ADAPTIVE_CATALOG_PLUGIN: &str = "sim-catalog-adaptive";
+
 /// Every plugin name this binary can bind, with a one-line description — the
 /// CLI's handler table, and the thing whose absence kept `sos run` from
 /// existing.
 ///
-/// Four entries. See the module docs on why it is four and not seven.
+/// Five entries. See the module docs on why it is five and not seven.
 pub const HANDLERS: &[(&str, &str)] = &[
     (
         CATALOG_PLUGIN,
@@ -138,6 +143,10 @@ pub const HANDLERS: &[(&str, &str)] = &[
     (
         TRAJECTORY_PLUGIN,
         "the spectrum of a consumed trajectory (L3, sample rate derived from its time grid)",
+    ),
+    (
+        ADAPTIVE_CATALOG_PLUGIN,
+        "scirust-sim's catalogued models, adaptively (L2, carries a tolerance certificate)",
     ),
 ];
 
@@ -156,6 +165,10 @@ pub enum StageConfig {
     Spectrum(SpectrumConfig),
     /// A Welch averaged-periodogram measurement, for [`WELCH_PLUGIN`].
     Welch(WelchConfig),
+    /// A catalogued model integrated **adaptively**, for
+    /// [`ADAPTIVE_CATALOG_PLUGIN`] — the only variant whose result is `L2`,
+    /// carrying the tolerances it is certified to.
+    AdaptiveModel(AdaptiveModelRun),
     /// A measurement of an **upstream stage's** trajectory, for
     /// [`TRAJECTORY_PLUGIN`].
     ///
@@ -176,6 +189,7 @@ impl StageConfig {
             Self::Spectrum(config) => spectrum_config_address(config),
             Self::Welch(config) => welch_config_address(config),
             Self::Trajectory(config) => trajectory_config_address(config),
+            Self::AdaptiveModel(run) => adaptive_model_config_address(run),
         }
     }
 
@@ -188,6 +202,7 @@ impl StageConfig {
             Self::Spectrum(_) => SPECTRUM_PLUGIN,
             Self::Welch(_) => WELCH_PLUGIN,
             Self::Trajectory(_) => TRAJECTORY_PLUGIN,
+            Self::AdaptiveModel(_) => ADAPTIVE_CATALOG_PLUGIN,
         }
     }
 
@@ -207,6 +222,13 @@ impl StageConfig {
                 "component {} of a consumed trajectory, {} window, {}-sample segments",
                 c.component, c.window, c.segment_len
             ),
+            Self::AdaptiveModel(r) =>
+            {
+                format!(
+                    "{} adaptively, rtol {}, atol {}",
+                    r.model.kind, r.rtol, r.atol
+                )
+            },
         }
     }
 }
@@ -240,6 +262,7 @@ pub fn run(args: &Args) -> Result<String> {
     let mut welch = WelchStageHandler::new(Rc::clone(&store), signal_backend_version());
     let mut trajectories =
         TrajectorySpectrumStageHandler::new(Rc::clone(&store), signal_backend_version());
+    let mut adaptive = AdaptiveCatalogStageHandler::new(Rc::clone(&store), sim_backend_version());
     let offered: Vec<Digest> = configs
         .into_iter()
         .map(|c| match c
@@ -248,6 +271,7 @@ pub fn run(args: &Args) -> Result<String> {
             StageConfig::Spectrum(config) => spectra.offer(config),
             StageConfig::Welch(config) => welch.offer(config),
             StageConfig::Trajectory(config) => trajectories.offer(config),
+            StageConfig::AdaptiveModel(run) => adaptive.offer(run),
         })
         .collect();
 
@@ -258,6 +282,10 @@ pub fn run(args: &Args) -> Result<String> {
     dispatch.register(
         TRAJECTORY_PLUGIN,
         Box::new(trajectories) as Box<dyn StageExecutor>,
+    );
+    dispatch.register(
+        ADAPTIVE_CATALOG_PLUGIN,
+        Box::new(adaptive) as Box<dyn StageExecutor>,
     );
 
     let env = env_digest(args.flag("env").unwrap_or(DEFAULT_ENV_LABEL));

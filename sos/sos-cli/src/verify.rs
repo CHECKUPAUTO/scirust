@@ -40,20 +40,36 @@
 //! first-wins, so the reading handle sees the re-run's output the moment it
 //! lands and no write can conflict with another.
 //!
-//! Certification uses [`NoCertifier`], which refuses
-//! every `L2`/`L1` node rather than certifying one no backend examined. All
-//! three backends `sos run` can bind are `L3`, so this passes for anything it
-//! produced — and a study that somehow contained an `L2` node is *told* so
-//! instead of quietly passing.
+//! ## Certifying an `L2` node
+//!
+//! An `L2` node cannot be verified the way an `L3` one is. `L3` means
+//! bit-identical, so comparing object ids settles it. `L2` means *within a
+//! declared tolerance*, and two adaptive runs that both meet `rtol` need not
+//! agree bit for bit — demanding they do would fail correct reproductions.
+//!
+//! So this command carries a [`TrajectoryCertifier`]: it loads both certified
+//! trajectories and asks `sos-scirust` whether they agree within the tolerance
+//! the original certified itself to. The backend that made the claim is the
+//! one that judges it. Anything it cannot certify is refused rather than waved
+//! through — [`NoCertifier`](sos_repro::NoCertifier)'s behaviour, kept for
+//! every kind this CLI does not understand.
+//!
+//! That branch was unreachable until the adaptive catalogue backend existed:
+//! every CLI-bindable backend was `L3`, so `NoCertifier` was the honest
+//! choice. It is no longer.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use sos_core::{EnvRecord, ObjectId, SemVer};
-use sos_repro::{EnvLock, NoCertifier, verify_object};
+use sos_core::{DeterminismLevel, EnvRecord, ObjectId, SemVer};
+use sos_repro::{Certifier, EnvLock, Reproduced, verify_object};
+use sos_scirust::model::CertifiedModeledTrajectoryBody;
+use sos_scirust::ode::CertifiedTrajectory;
 use sos_scirust::stage::{
-    CatalogStageHandler, SpectrumStageHandler, TrajectorySpectrumStageHandler, WelchStageHandler,
+    AdaptiveCatalogStageHandler, CatalogStageHandler, SpectrumStageHandler,
+    TrajectorySpectrumStageHandler, WelchStageHandler,
 };
+use sos_scirust::verdict::{certify_trajectory_endpoint, certify_trajectory_pointwise};
 use sos_store::TypedStore;
 use sos_workflow::{Dispatch, MemoTable, StageExecutor};
 
@@ -61,10 +77,67 @@ use crate::args::Args;
 use crate::error::Result;
 use crate::header::GenericHeader;
 use crate::run::{
-    CATALOG_PLUGIN, SPECTRUM_PLUGIN, StageConfig, TRAJECTORY_PLUGIN, WELCH_PLUGIN, load_registry,
-    parse_grant, signal_backend_version, sim_backend_version,
+    ADAPTIVE_CATALOG_PLUGIN, CATALOG_PLUGIN, SPECTRUM_PLUGIN, StageConfig, TRAJECTORY_PLUGIN,
+    WELCH_PLUGIN, load_registry, parse_grant, signal_backend_version, sim_backend_version,
 };
 use crate::store;
+
+/// A [`Certifier`] that judges an `L2` node by the tolerance it declared.
+///
+/// [`NoCertifier`] refuses every `L2`/`L1` node, which was the honest answer
+/// while no `L2` result was reachable from `sos run`: certifying a node no
+/// backend had examined would be a lie. Now that the adaptive catalogue
+/// backend exists, that branch of the reproduction contract is real, and
+/// refusing it would make `--rerun` unable to verify the one kind of result
+/// that most needs it.
+///
+/// An `L2` node cannot be verified the way an `L3` one is. Comparing object
+/// ids is exactly wrong: two adaptive runs that both meet `rtol` need not be
+/// bit-identical, and demanding they be would fail correct reproductions.
+/// This loads both trajectories and asks `sos-scirust` whether they agree
+/// **within the tolerance the original certified itself to** — the backend
+/// that made the claim is the one that gets to judge it.
+///
+/// Anything that is not a kind this CLI can certify is still refused rather
+/// than waved through.
+struct TrajectoryCertifier<'s, S> {
+    store: &'s S,
+}
+
+impl<S: sos_store::ObjectStore> Certifier for TrajectoryCertifier<'_, S> {
+    fn certify(
+        &mut self,
+        stage: &sos_workflow::StageId,
+        level: DeterminismLevel,
+        original: ObjectId,
+        rerun: ObjectId,
+    ) -> core::result::Result<bool, String> {
+        if level != DeterminismLevel::L2
+        {
+            return Err(format!(
+                "stage {stage} produced a {level:?} node; this CLI can certify L2                  trajectories only"
+            ));
+        }
+        let load = |id: ObjectId| -> core::result::Result<CertifiedTrajectory, String> {
+            self.store
+                .get_object::<CertifiedModeledTrajectoryBody>(id)
+                .map_err(|e| format!("{id}: {e}"))?
+                .map(|o| o.body.certified)
+                .ok_or_else(|| format!("{id} is not in the store"))
+        };
+        let (a, b) = (load(original)?, load(rerun)?);
+        // Pointwise where the grids line up; the endpoint otherwise, since two
+        // adaptive runs are entitled to choose different grids.
+        let agreement =
+            match certify_trajectory_pointwise(&a, &b)
+            {
+                Ok(agreement) => agreement,
+                Err(_) => certify_trajectory_endpoint(&a, &b)
+                    .map_err(|e| format!("stage {stage}: {e}"))?,
+            };
+        Ok(matches!(agreement.verdict(), Reproduced::Certified(true)))
+    }
+}
 
 /// Run `sos verify --rerun <object> <runs.json>` — re-execute the run that
 /// produced `id` and check the reproduction contract.
@@ -92,6 +165,7 @@ pub fn rerun(path: Option<&str>, id: ObjectId, args: &Args) -> Result<String> {
     let mut welch = WelchStageHandler::new(Rc::clone(&writer), signal_backend_version());
     let mut trajectories =
         TrajectorySpectrumStageHandler::new(Rc::clone(&writer), signal_backend_version());
+    let mut adaptive = AdaptiveCatalogStageHandler::new(Rc::clone(&writer), sim_backend_version());
     for config in configs
     {
         match config
@@ -100,6 +174,7 @@ pub fn rerun(path: Option<&str>, id: ObjectId, args: &Args) -> Result<String> {
             StageConfig::Spectrum(c) => drop(spectra.offer(c)),
             StageConfig::Welch(c) => drop(welch.offer(c)),
             StageConfig::Trajectory(c) => drop(trajectories.offer(c)),
+            StageConfig::AdaptiveModel(r) => drop(adaptive.offer(r)),
         }
     }
     let mut dispatch = Dispatch::new(&registry, grant);
@@ -109,6 +184,10 @@ pub fn rerun(path: Option<&str>, id: ObjectId, args: &Args) -> Result<String> {
     dispatch.register(
         TRAJECTORY_PLUGIN,
         Box::new(trajectories) as Box<dyn StageExecutor>,
+    );
+    dispatch.register(
+        ADAPTIVE_CATALOG_PLUGIN,
+        Box::new(adaptive) as Box<dyn StageExecutor>,
     );
 
     // An empty memo, always. Reusing `sos run`'s persisted one would replay
@@ -125,14 +204,8 @@ pub fn rerun(path: Option<&str>, id: ObjectId, args: &Args) -> Result<String> {
         "unspecified",
     ));
 
-    let report = verify_object(
-        id,
-        &reader,
-        &lock,
-        &mut memo,
-        &mut dispatch,
-        &mut NoCertifier,
-    )?;
+    let mut certifier = TrajectoryCertifier { store: &reader };
+    let report = verify_object(id, &reader, &lock, &mut memo, &mut dispatch, &mut certifier)?;
 
     let mut out = format!(
         "{id}\n  re-executed: {} node(s)\n  contract level: {}\n",
@@ -220,6 +293,10 @@ fn typed_check<S: sos_store::ObjectStore>(s: &S, header: &GenericHeader) -> Stri
         "Spectrum" => check!(sos_scirust::spectrum::SpectrumBody),
         "AveragedSpectrum" => check!(sos_scirust::spectrum::AveragedSpectrumBody),
         "TrajectorySpectrum" => check!(sos_scirust::pipeline::TrajectorySpectrumBody),
+        "CertifiedModeledTrajectory" =>
+        {
+            check!(sos_scirust::model::CertifiedModeledTrajectoryBody)
+        },
         other => format!("  content hash: not checked (unrecognized kind `{other}`)"),
     }
 }
