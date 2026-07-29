@@ -31,10 +31,12 @@
 //! [`verify_rerun`] now joins them: it pairs an original run's ledger against a
 //! re-run's, reads each node's declared level from the store, decides `L3`/`L0`
 //! by id and routes `L2`/`L1` to that backend through a [`Certifier`]. What
-//! remains is porcelain — a `verify(object)` that starts from a *root object*
-//! rather than the two ledgers has to resolve which ledger produced it, which
-//! is a store-indexing concern, not a reproduction one. No stub crosses that
-//! line.
+//! [`verify_object`] closes the loop from the store side: it finds the run
+//! that recorded an object, loads the [`Plan`](sos_workflow::Plan) that run's
+//! digest names — a `Plan` is a storable object now, precisely so a recorded
+//! run can be re-executed — re-runs it, and verifies. It refuses rather than
+//! guesses when nothing produced the object, when several runs did, or when
+//! the plan was never stored. No stub crosses that line.
 //!
 //! ## Example — a lock binds, or declares its drift
 //!
@@ -78,7 +80,7 @@ pub use contract::{
     MatchRule, NodeClaim, NodeReport, NodeVerdict, Reproduced, VerifyReport, verify_node,
     verify_reproduction,
 };
-pub use driver::{Certifier, NoCertifier, verify_rerun};
+pub use driver::{Certifier, NoCertifier, verify_object, verify_rerun};
 pub use error::{ReproError, Result};
 pub use lock::{Drift, EnvLock};
 pub use rerun::rerun;

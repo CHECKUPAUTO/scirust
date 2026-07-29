@@ -58,6 +58,24 @@ pub enum ReproError {
         /// Why, when the object was present but unparsable.
         detail: Option<String>,
     },
+    /// No recorded run in the store produced this object, so there is nothing
+    /// to re-execute.
+    #[error("no stored RunLedger records producing {0}")]
+    NoProducingLedger(sos_core::ObjectId),
+    /// More than one recorded run produced this object. Which run to verify is
+    /// the caller's question, not one to guess at — pass the intended ledger to
+    /// [`crate::verify_rerun`] directly.
+    #[error("{count} stored runs produced {id}; verify a specific one with verify_rerun")]
+    AmbiguousProducer {
+        /// The object with more than one recorded producer.
+        id: sos_core::ObjectId,
+        /// How many runs claim it.
+        count: usize,
+    },
+    /// The producing run's plan is not in the store, so it cannot be
+    /// re-executed. A ledger records a plan's *digest*, not the plan.
+    #[error("the plan {0} that produced this object is not stored")]
+    PlanNotStored(sos_core::Digest),
     /// The numeric backend failed to certify an `L2`/`L1` node.
     #[error("certifier failed for stage {stage}: {detail}")]
     Certifier {
