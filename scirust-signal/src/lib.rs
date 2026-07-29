@@ -8,7 +8,14 @@
 //! - **Windows** — Hanning, Hamming, Blackman, Blackman-Harris, Flat-top
 //! - **Feature extraction** — time-domain (RMS, crest factor, kurtosis, skewness,
 //!   zero-crossing rate, autocorrelation), frequency-domain (PSD, spectral centroid,
-//!   spectral entropy, band power)
+//!   spectral entropy, band power), and [`welch_psd`] — the *averaged*
+//!   periodogram, which is the only estimator here whose variance actually
+//!   falls with more data. A single [`psd`] is biased and high-variance: a
+//!   longer record buys frequency resolution, not stability. Welch's method
+//!   trades resolution back for stability by averaging overlapping windowed
+//!   segments, cutting the standard deviation by roughly `√K` for `K`
+//!   segments, and [`WelchPsd`] reports `K` and the dropped tail beside the
+//!   numbers so a caller can tell how much the estimate is worth.
 //! - **Bearing diagnostics** — BPFO, BPFI, BSF, FTF calculation, fault frequency
 //!   detection for rolling-element bearings
 //! - **Order analysis** — order tracking, resampling for variable-speed rotating machinery
@@ -115,8 +122,8 @@ pub use denoise::{
 };
 pub use envelope::{dominant_envelope_freq, envelope_spectrum, hilbert_envelope};
 pub use features::spectral::{
-    band_power, psd, spectral_centroid, spectral_entropy, spectral_flatness, spectral_rolloff,
-    spectral_spread,
+    WelchPsd, band_power, psd, spectral_centroid, spectral_entropy, spectral_flatness,
+    spectral_rolloff, spectral_spread, welch_psd,
 };
 pub use features::{
     autocorrelation, crest_factor, energy, entropy, kurtosis, peak_to_peak, rms, skewness,
