@@ -61,26 +61,40 @@
 //!   [`quadrature::CertifiedIntegral`] needs no accepted/rejected bookkeeping
 //!   the way [`ode::CertifiedTrajectory`] does: a *successful* strict call is
 //!   by construction guaranteed to have met the declared tolerance.
+//! * [`root`] — [`root::BroydenRootSimulator`] solves `F(x) = 0` with
+//!   `scirust_solvers`' quasi-Newton Broyden iteration. Also `L2`, and the
+//!   certificate it carries is unusually load-bearing: a root solve is
+//!   *basin-dependent*, so [`root::CertifiedRoot`] records
+//!   [`started_from`](root::CertifiedRoot::started_from) alongside the residual
+//!   — a root reported without its starting point cannot be reproduced or even
+//!   correctly interpreted.
+//! * [`spectrum`] — [`spectrum::PeriodogramSimulator`] computes a windowed
+//!   periodogram with `scirust-signal`'s FFT: the first backend here whose
+//!   observation answers *"what is in this signal?"* rather than *"what does
+//!   this system do?"*. `L3` — and its module docs are explicit that `L3`
+//!   asserts bit-reproducibility and **not** accuracy, since a single
+//!   periodogram is a biased, high-variance PSD estimator whose variance does
+//!   not shrink with record length. Like [`root::CertifiedRoot`], its output
+//!   carries the choice that shaped it: [`spectrum::Spectrum::window`].
 //!
-//! [`ode`] and [`quadrature`] share their `f64`-quantization and
-//! `scirust-solvers`-error-mapping helpers via [`solver`] rather than
-//! duplicating them.
+//! [`ode`], [`quadrature`], [`root`] and [`spectrum`] share their
+//! `f64`-quantization helpers — and the solver backends their
+//! `scirust-solvers`-error mapping — via [`solver`] rather than duplicating
+//! them.
+//!
+//! **Gaps #2, #4–8** — the `sos-workflow` `StageExecutor` now dispatches real
+//! work through [`stage::OdeStageHandler`], and [`verdict`] supplies the
+//! agreement predicates `sos-repro` re-execution checks against.
 //!
 //! ## What is deliberately not here yet
 //!
-//! Gap #2 (the `sos-workflow` `StageExecutor`) needs a dispatch/registry
-//! mechanism first — a materially different, larger increment — and gaps
-//! #4–8 are untouched; each is its own increment, not stubbed here.
 //! Registry-mediated resolution (binding a `sos-registry` `PluginDescriptor`
-//! to any capability above) is also deferred: `sos-scirust` is documented as
+//! to any capability above) is deferred: `sos-scirust` is documented as
 //! the in-process "Static Rust... the default" transport (RFC-0002 §10 §1),
 //! so direct construction is the expected shape until a caller actually needs
-//! to swap implementations. Within gap #3 itself, `scirust-solvers`' nonlinear
-//! (Newton/Broyden) is a separate follow-on backend — root-finding does not
-//! obviously fit `Simulate`'s "observe an experiment" framing the way
-//! integration does, so it needs its own look rather than a mechanical
-//! repeat of this pattern — and `scirust-signal`/`scirust-sim`'s executor
-//! kinds (SDE §08 §2) are untouched.
+//! to swap implementations. Within the signal family, Welch averaging and
+//! spectrograms are follow-on work rather than something [`spectrum`] pretends
+//! to; `scirust-sim`'s executor kinds (SDE §08 §2) are untouched.
 //!
 //! ## Example
 //!
@@ -122,6 +136,7 @@ pub mod ode;
 pub mod quadrature;
 pub mod root;
 mod solver;
+pub mod spectrum;
 pub mod stage;
 pub mod verdict;
 
@@ -133,5 +148,6 @@ pub use nmc::NestedMcEigEstimator;
 pub use ode::{Dopri5OdeSimulator, Rk4OdeSimulator};
 pub use quadrature::QuadratureSimulator;
 pub use root::{BroydenRootSimulator, CertifiedRoot, RootConfig};
+pub use spectrum::{PeriodogramSimulator, Spectrum, SpectrumConfig, WindowKind};
 pub use stage::{OdeStageHandler, TrajectoryBody, config_address};
 pub use verdict::{Agreement, VerdictError, certify_root};
