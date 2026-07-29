@@ -889,8 +889,8 @@ enumeration proves no larger valid set exists.
 ## Phase 5C.5 — Quantify sensitivity to unmeasured confounding
 
 **Status: Draft.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
-from `origin/master` at `8f777520`. Additive to `scirust-causal` (no existing
-public API changed).
+from `origin/master` at `8f777520`. PR #850. Additive to `scirust-causal` (no
+existing public API changed).
 
 **This phase was inserted ahead of the planned invariance work, and the
 roadmap renumbered accordingly** (invariance moves 5C.5 → 5C.6, and the rest
