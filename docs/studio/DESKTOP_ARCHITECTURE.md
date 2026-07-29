@@ -66,7 +66,7 @@ name it — the shell owns its whole lifecycle.
 
 | Layer | May | May not |
 |---|---|---|
-| `scirust-studio-ui` (WASM) | Render, hold interface state, call the 17 commands | Touch the filesystem, spawn anything, make network requests, contain scientific logic |
+| `scirust-studio-ui` (WASM) | Render, hold interface state, call the 19 commands | Touch the filesystem, spawn anything, make network requests, contain scientific logic |
 | `src-tauri` (native shell) | Own the window, supervise the sidecar, expose typed commands, run native file operations on its own behalf | Contain scientific logic, expose a generic file/process/network command |
 | `scirust-studio-app-service` and below | Everything scientific | Know that a GUI exists |
 
@@ -162,6 +162,4 @@ the CLI is readable by the desktop and the reverse.
 
 * The other eleven simulation adapters (Phase 3B).
 * Migration of the legacy CLI commands.
-* Opening and saving scenario files — needs a native file picker; the actions
-  are shown disabled with that reason.
 * Code signing, an updater, licensing enforcement, installer publication.

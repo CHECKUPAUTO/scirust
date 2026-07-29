@@ -31,8 +31,8 @@ use core::cell::RefCell;
 use super::wire::{
     BootstrapWire, CapabilityWire, CheckWire, ErrorWire, EventBatchWire, EventWire, FieldWire,
     IntegrityWire, JobStateWire, JobWire, LocationWire, MetricWire, OutputWire, ProblemWire,
-    ProvenanceWire, RunWire, ScenarioWire, SeriesRoleWire, SeriesWire, StoredRunWire,
-    ValidationWire, VerificationWire, XAxisKindWire,
+    ProvenanceWire, RunWire, ScenarioFileWire, ScenarioWire, SeriesRoleWire, SeriesWire,
+    StoredRunWire, ValidationWire, VerificationWire, XAxisKindWire,
 };
 use super::{FrontendError, StudioBackend};
 
@@ -353,6 +353,18 @@ impl StudioBackend for MockBackend {
         })
     }
 
+    /// The mock never shows a dialog — there is no host to show one — so it
+    /// reports the outcome a user who cancelled would produce. That keeps the
+    /// preview honest: `dx serve` cannot open a real file, and pretending it
+    /// had would mean fabricating a scenario the user did not choose.
+    async fn open_scenario(&self) -> Result<Option<ScenarioFileWire>, FrontendError> {
+        Ok(None)
+    }
+
+    async fn save_scenario(&self, _source: &str) -> Result<Option<String>, FrontendError> {
+        Ok(None)
+    }
+
     async fn validate_scenario(&self, source: &str) -> Result<ValidationWire, FrontendError> {
         Ok(validate(source))
     }
@@ -636,5 +648,20 @@ mod tests {
         assert!(run.series[0].display_name.contains("MOCK"));
         assert_eq!(run.verifications[0].status, "not_applicable");
         assert_eq!(run.provenance.adapter_crate, "mock");
+    }
+
+    /// The mock must not invent a file the user did not pick.
+    ///
+    /// `dx serve` runs the interface outside a Tauri host, so there is no
+    /// native dialog to show. Reporting the cancelled outcome is the honest
+    /// answer; fabricating a scenario here would make the preview show a
+    /// file-open working when the shipped path is what actually has to work.
+    #[test]
+    fn the_mock_reports_a_cancelled_dialog_rather_than_inventing_a_file() {
+        let backend = MockBackend::new();
+        let opened = block_on(backend.open_scenario());
+        assert_eq!(opened.unwrap(), None);
+        let saved = block_on(backend.save_scenario("schema_version = 1"));
+        assert_eq!(saved.unwrap(), None);
     }
 }

@@ -49,13 +49,21 @@ asserts that none of them appears:
 * `fs:*` — no path-taking read or write of any kind.
 * `http:*` — no outbound request. The application does not phone home, check
   for updates, or fetch anything.
-* `dialog:*` — not granted, which is why opening and saving scenario files is
-  shown disabled with the reason "it needs a native file picker" rather than
-  wired to something weaker.
+* `dialog:*` — **not granted, although the shell now links the plugin.**
+  `studio_open_scenario` and `studio_save_scenario` show a native picker from
+  Rust and exchange the file's *contents* with the frontend. Granting the
+  webview `dialog:*` would let it open its own picker and keep the resulting
+  path, which is the one thing those two commands exist to prevent: "the file
+  the user just picked" is not a smaller permission than "any file" once the
+  frontend holds the location. `tests/security_audit.rs` asserts the absence,
+  and the assertion was checked by granting it and watching the test fail.
+* `tauri-plugin-fs` appears in `Cargo.lock` as a dependency of the dialog
+  plugin. The crate is linked; its permissions are not granted, which is what
+  the `fs:*` line above is asserting.
 * `process:*`, `os:*`, `store:*` — absent.
 
 There is also no *general-purpose* command hiding behind an innocuous name.
-The 17 commands are enumerated in `FRONTEND_BRIDGE.md`; none of them takes a
+The 19 commands are enumerated in `FRONTEND_BRIDGE.md`; none of them takes a
 path, a program name, a URL or an environment variable.
 
 ## Input the shell does not trust

@@ -560,3 +560,47 @@ editing them.
 `HeatRod1d`, which needs a presentation the interface does not have; a
 result axis whose coordinates are bins; code signing and everything that
 depends on it; and the remaining unadapted `scirust-sim` families.
+
+## 18. Update — the native file picker
+
+`studio_open_scenario` and `studio_save_scenario` show a real dialog. The
+desktop can open a user's own scenario for the first time; until now the only
+sources were the tutorials compiled into the binary and whatever was typed.
+
+**The design constraint is the interesting part**, and it is the one §17's
+corrected comment recorded before the feature existed: the dialog runs in the
+shell and the frontend exchanges **contents**, never a path. It supplies no
+destination and receives no location it could name again, so it cannot re-read
+a file the user picked once, and cannot reach a file the user never picked.
+`dialog:*` and `fs:*` stay ungranted for exactly that reason — they would let
+the webview go around the two commands and hold the path itself. A command
+taking a path would be `read_file(path)` with a friendlier name.
+
+The audit test now forbids `dialog:` alongside `shell:`, `fs:` and the rest,
+and that assertion was checked by granting the permission and watching the
+test fail rather than by trusting it.
+
+**Two things were removed rather than left inert.** `Unavailable::NotWired`
+and `actions::is_wired` existed to say "this build has no command behind the
+action" — the honest answer while the picker was missing, and dead the moment
+it landed. An enum variant nothing can produce is a state the interface claims
+exists and cannot reach, which is the same category of untruth as §17's two
+items. The test that pinned the disabled behaviour was inverted, not deleted:
+it is the only record that those actions were once refused for a reason other
+than application state.
+
+`Model::source_path` became `source_name` for the same reason. The frontend
+holds a file *name*, for a title bar; leaving the field called `path` would
+invite the first reader who needs a location to assume one is there.
+
+**A note on how the wasm gate paid for itself.** `bridge.rs` is
+`cfg(target_arch = "wasm32")`, so the host build never compiles it. The new
+wire type's missing import was invisible to every host check and to
+`cargo test`, and was caught by the wasm32 clippy step added two changes
+earlier — the step that existed because a feature-gated file broke master the
+same way.
+
+**Still outstanding**: `thermal`'s `HeatRod1d` and the heat-map presentation
+it needs; a result axis whose coordinates are bins; code signing and the
+updater that depends on it; and the remaining unadapted `scirust-sim`
+families.

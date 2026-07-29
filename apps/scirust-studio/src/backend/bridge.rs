@@ -34,7 +34,7 @@ use wasm_bindgen_futures::JsFuture;
 
 use super::wire::{
     BootstrapWire, CapabilityWire, ErrorWire, EventBatchWire, IntegrityWire, JobWire, RunWire,
-    ScenarioWire, StoredRunWire, ValidationWire,
+    ScenarioFileWire, ScenarioWire, StoredRunWire, ValidationWire,
 };
 use super::{FrontendError, StudioBackend};
 
@@ -170,6 +170,14 @@ impl StudioBackend for TauriBridge {
             one_arg("capabilityId", capability_id),
         )
         .await
+    }
+
+    async fn open_scenario(&self) -> Result<Option<ScenarioFileWire>, FrontendError> {
+        call("studio_open_scenario", Object::new()).await
+    }
+
+    async fn save_scenario(&self, source: &str) -> Result<Option<String>, FrontendError> {
+        call("studio_save_scenario", one_arg("source", source)).await
     }
 
     async fn validate_scenario(&self, source: &str) -> Result<ValidationWire, FrontendError> {

@@ -135,7 +135,9 @@ impl Ui {
             {
                 self.send(Msg::ScenarioLoaded {
                     source: scenario.source,
-                    path: scenario.path,
+                    // A tutorial's `path` is the file it ships as, which is
+                    // exactly the kind of display name this field wants.
+                    name: scenario.path,
                 });
                 self.send(Msg::Navigate(View::Experiment));
             },
@@ -152,6 +154,42 @@ impl Ui {
                 valid: outcome.valid,
                 problems: outcome.problems.iter().map(problem_line).collect(),
             }),
+            Err(e) => self.fail(e),
+        }
+    }
+
+    /// Ask the shell for a scenario file and put its contents in the editor.
+    ///
+    /// A cancelled dialog is not an error and must not look like one: the
+    /// user chose to close it, and reporting a failure for a deliberate act
+    /// is how an interface teaches people to ignore its messages.
+    pub async fn open_scenario(&self) {
+        match self.backend.open_scenario().await
+        {
+            Ok(Some(file)) =>
+            {
+                self.send(Msg::ScenarioLoaded {
+                    source: file.source,
+                    name: Some(file.file_name),
+                });
+                self.send(Msg::Navigate(View::Experiment));
+            },
+            Ok(None) =>
+            {},
+            Err(e) => self.fail(e),
+        }
+    }
+
+    /// Ask the shell where to save the editor's contents.
+    pub async fn save_scenario(&self) {
+        let source = self.model.read().source.clone();
+        match self.backend.save_scenario(&source).await
+        {
+            Ok(Some(file_name)) => self.send(Msg::Saved {
+                name: Some(file_name),
+            }),
+            Ok(None) =>
+            {},
             Err(e) => self.fail(e),
         }
     }
@@ -304,7 +342,7 @@ impl Ui {
             {
                 self.send(Msg::ScenarioLoaded {
                     source: String::new(),
-                    path: None,
+                    name: None,
                 });
             }
             self.send(Msg::Navigate(view));
@@ -337,6 +375,14 @@ impl Ui {
                 spawn(async move {
                     match action
                     {
+                        Action::OpenScenario => ui.open_scenario().await,
+                        // Both save actions go through the same dialog. This
+                        // build has no "the file it came from" to save back
+                        // to — the frontend never learns a path — so "Save"
+                        // and "Save as" genuinely are the same operation, and
+                        // pretending otherwise would be a menu entry that
+                        // lies about what it does.
+                        Action::SaveScenario | Action::SaveScenarioAs => ui.save_scenario().await,
                         Action::ValidateScenario => ui.validate().await,
                         Action::RunExperiment => ui.start_run().await,
                         Action::CancelRun => ui.cancel_run().await,
