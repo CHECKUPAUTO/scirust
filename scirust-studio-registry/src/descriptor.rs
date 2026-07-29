@@ -122,6 +122,18 @@ pub enum PrecisionKind {
     /// 64-bit IEEE-754 (the only precision any current adapter actually
     /// computes in — `scirust-sim`'s models are `f64` throughout).
     F64,
+    /// 32-bit IEEE-754.
+    ///
+    /// Declared by no capability in this build. The variant exists because
+    /// the scenario schema accepts `precision = "f32"`, and without somewhere
+    /// for a descriptor to say whether it supports that, the request could
+    /// only be silently ignored — which is what happened until
+    /// `validate_support::resolve_precision` started comparing the two.
+    ///
+    /// An empty vocabulary slot is not the same as a lie: this says "no
+    /// capability here computes in f32 yet", where declaring only `F64` and
+    /// accepting `"f32"` anyway said "you got what you asked for".
+    F32,
 }
 
 /// A solver a capability can be integrated with.

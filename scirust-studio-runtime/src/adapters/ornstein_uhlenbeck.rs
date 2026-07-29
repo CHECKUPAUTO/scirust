@@ -51,8 +51,9 @@ use crate::result::{
 };
 use crate::sink::{EventSink, RunEvent};
 use crate::validate_support::{
-    check_unknown_model_fields, check_unknown_state_fields, resolve_model_scalar,
-    resolve_replicates, resolve_seed, resolve_solver, resolve_state_vector,
+    check_unknown_model_fields, check_unknown_state_fields, resolve_backend_kind,
+    resolve_model_scalar, resolve_precision, resolve_replicates, resolve_seed, resolve_solver,
+    resolve_state_vector,
 };
 
 /// How many relaxation times `1/θ` to discard before measuring the stationary
@@ -279,6 +280,16 @@ impl CapabilityAdapter for OrnsteinUhlenbeckAdapter {
         // Every adapter checks this, including the deterministic ones — see
         // `resolve_replicates`.
         if let Err(e) = resolve_replicates(scenario, DESCRIPTOR.determinism)
+        {
+            errors.push(e);
+        }
+        // The scenario's declared backend and precision must be ones this
+        // capability actually has — see `resolve_precision`.
+        if let Err(e) = resolve_backend_kind(scenario, &DESCRIPTOR)
+        {
+            errors.push(e);
+        }
+        if let Err(e) = resolve_precision(scenario, &DESCRIPTOR)
         {
             errors.push(e);
         }

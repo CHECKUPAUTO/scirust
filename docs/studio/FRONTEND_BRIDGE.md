@@ -47,6 +47,8 @@ hatch to reach for instead.
 | `studio_tutorials` | — | `Vec<CapabilityView>` |
 | `studio_load_tutorial` | `capabilityId` | `ScenarioView` |
 | `studio_validate_scenario` | `source` | `ValidationOutcome` |
+| `studio_open_scenario` | — | `Option<ScenarioFileView>` |
+| `studio_save_scenario` | `source` | `Option<String>` (the file's name) |
 | `studio_start_run` | `source` | `JobSnapshot` |
 | `studio_cancel_run` | `jobId` | `()` |
 | `studio_job_snapshot` | `jobId` | `JobSnapshot` |

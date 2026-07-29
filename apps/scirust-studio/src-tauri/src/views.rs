@@ -210,6 +210,20 @@ pub struct ScenarioView {
     pub capability_id: Option<String>,
 }
 
+/// A scenario file the user chose, as text.
+///
+/// Deliberately carries **no path**. The frontend gets the contents and a
+/// bare name to put in a title; it cannot reconstruct a location from either,
+/// and so cannot ask for the same file again without the user picking it
+/// again. See `commands::studio_open_scenario`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScenarioFileView {
+    /// The file's own name, for display only.
+    pub file_name: String,
+    /// Its contents.
+    pub source: String,
+}
+
 /// A run in progress or settled.
 pub type JobView = JobSnapshot;
 

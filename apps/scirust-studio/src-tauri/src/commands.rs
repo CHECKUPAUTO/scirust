@@ -4,8 +4,21 @@
 //! `read_file(path)`, `write_file(path, bytes)`, `spawn(program)`,
 //! `shell(command)`, `http(url)` or `env(name)` — a webview that can ask for
 //! any of those is a webview that can do anything the user can, and the
-//! frontend needs none of them. File dialogs are native, run here, and hand
-//! back only the selected file's *contents*.
+//! frontend needs none of them.
+//!
+//! **The file dialogs are native and run here.** `studio_open_scenario` and
+//! `studio_save_scenario` show a real picker on this thread and exchange the
+//! file's *contents* with the frontend — never a path. The frontend supplies
+//! no destination and receives no location it could name again later, so it
+//! cannot re-read a file the user picked once, and cannot reach a file the
+//! user never picked at all. `dialog:*` and `fs:*` stay ungranted in the
+//! capability file for exactly this reason: they would let the webview go
+//! around these two commands. `tests/security_audit.rs` asserts both.
+//!
+//! The distinction is the whole argument. A command taking a path would be
+//! `read_file(path)` with a friendlier name, and "the file the user just
+//! picked" is not a smaller permission than "any file" once the frontend
+//! holds the path.
 //!
 //! Each command delegates to `scirust-studio-app-service` and returns a view
 //! type. None of them contains scientific logic.
@@ -16,8 +29,8 @@ use scirust_studio_app_service::StudioAppService;
 
 use crate::state::AppState;
 use crate::views::{
-    BootstrapView, CapabilityView, ErrorView, JobView, RunView, ScenarioView, StoredRunView,
-    VerificationReportView, run_view,
+    BootstrapView, CapabilityView, ErrorView, JobView, RunView, ScenarioFileView, ScenarioView,
+    StoredRunView, VerificationReportView, run_view,
 };
 
 /// The result every command returns: a view, or a renderable error.
@@ -66,14 +79,19 @@ fn check_id(kind: &str, value: &str) -> Result<(), Box<ErrorView>> {
     }
 }
 
+/// The largest scenario source this shell will accept, from the frontend or
+/// from a file the user picks. A scenario is a short configuration file; the
+/// bound exists so neither route can hand this process an arbitrarily large
+/// allocation.
+const MAX_SOURCE_BYTES: usize = 1024 * 1024;
+
 /// Reject scenario source that is implausibly large.
 ///
 /// The bound is generous — a scenario is a short configuration file — and
 /// exists so a runaway frontend cannot hand this process an arbitrarily
 /// large allocation.
 fn check_source(source: &str) -> Result<(), Box<ErrorView>> {
-    const MAX_BYTES: usize = 1024 * 1024;
-    if source.len() <= MAX_BYTES
+    if source.len() <= MAX_SOURCE_BYTES
     {
         Ok(())
     }
@@ -83,7 +101,7 @@ fn check_source(source: &str) -> Result<(), Box<ErrorView>> {
             code: "SCENARIO_TOO_LARGE".to_string(),
             title: "Scenario too large".to_string(),
             explanation: format!(
-                "A scenario file may be at most {MAX_BYTES} bytes; this one is {}.",
+                "A scenario file may be at most {MAX_SOURCE_BYTES} bytes; this one is {}.",
                 source.len()
             ),
             recoverable: true,
@@ -271,6 +289,149 @@ pub fn studio_active_job(state: State<'_, AppState>) -> CommandResult<Option<Job
 pub fn frontend_ready(state: State<'_, AppState>) -> CommandResult<BootstrapView> {
     state.mark_frontend_ready();
     Ok(state.bootstrap_view())
+}
+
+/// Ask the user for a scenario file, and return **its contents**.
+///
+/// The dialog is native and runs here, in the shell. The frontend supplies no
+/// path, receives no path, and cannot ask for this file again later: what
+/// comes back is the text and a bare file name for the title bar. That
+/// distinction is the whole security argument. A command that took a path
+/// would be `read_file(path)` with a friendlier name, and the `dialog:*` and
+/// `fs:*` permissions stay ungranted to the webview precisely so the webview
+/// cannot reach around this one.
+///
+/// `Ok(None)` means the user cancelled, which is not an error.
+#[tauri::command]
+pub fn studio_open_scenario(app: tauri::AppHandle) -> CommandResult<Option<ScenarioFileView>> {
+    use tauri_plugin_dialog::DialogExt;
+
+    // Blocking is correct here: Tauri runs synchronous commands off the main
+    // thread, and the alternative — resolving a channel inside an async
+    // command — buys nothing but a chance to get the main-thread rule wrong.
+    let Some(picked) = app
+        .dialog()
+        .file()
+        .add_filter("SciRust scenario", &["toml"])
+        .blocking_pick_file()
+    else
+    {
+        return Ok(None);
+    };
+
+    let path = picked.into_path().map_err(|e| {
+        Box::new(ErrorView {
+            code: "FILE_NOT_READABLE".to_string(),
+            title: "Cannot open that selection".to_string(),
+            explanation: format!("The chosen item is not a file this application can read: {e}"),
+            recoverable: true,
+            suggested_action: Some("Choose a `.toml` scenario file.".to_string()),
+            validation: None,
+        })
+    })?;
+
+    // Read the length before the contents. A scenario is a short
+    // configuration file; pointing the picker at a multi-gigabyte file should
+    // not make this process try to hold it.
+    if let Ok(meta) = std::fs::metadata(&path)
+    {
+        if meta.len() > MAX_SOURCE_BYTES as u64
+        {
+            return Err(too_large(meta.len()));
+        }
+    }
+
+    let source = std::fs::read_to_string(&path).map_err(|e| {
+        Box::new(ErrorView {
+            code: "FILE_NOT_READABLE".to_string(),
+            title: "Cannot read that file".to_string(),
+            // The path is in the message because the *user* chose it and is
+            // looking at it; it is not being handed back to the frontend as
+            // data it could reuse.
+            explanation: format!("{}: {e}", path.display()),
+            recoverable: true,
+            suggested_action: Some("Check the file is readable text.".to_string()),
+            validation: None,
+        })
+    })?;
+    check_source(&source)?;
+
+    Ok(Some(ScenarioFileView {
+        file_name: file_name_of(&path),
+        source,
+    }))
+}
+
+/// Ask the user where to save the scenario currently being edited.
+///
+/// Same shape as opening, in reverse: the frontend hands over *text*, never a
+/// destination. `Ok(None)` means the user cancelled.
+#[tauri::command]
+pub fn studio_save_scenario(
+    app: tauri::AppHandle,
+    source: String,
+) -> CommandResult<Option<String>> {
+    use tauri_plugin_dialog::DialogExt;
+
+    check_source(&source)?;
+
+    let Some(picked) = app
+        .dialog()
+        .file()
+        .add_filter("SciRust scenario", &["toml"])
+        .set_file_name("scenario.scirust.toml")
+        .blocking_save_file()
+    else
+    {
+        return Ok(None);
+    };
+
+    let path = picked.into_path().map_err(|e| {
+        Box::new(ErrorView {
+            code: "FILE_NOT_WRITABLE".to_string(),
+            title: "Cannot save there".to_string(),
+            explanation: format!("The chosen destination is not a file path: {e}"),
+            recoverable: true,
+            suggested_action: None,
+            validation: None,
+        })
+    })?;
+
+    std::fs::write(&path, source.as_bytes()).map_err(|e| {
+        Box::new(ErrorView {
+            code: "FILE_NOT_WRITABLE".to_string(),
+            title: "Cannot write that file".to_string(),
+            explanation: format!("{}: {e}", path.display()),
+            recoverable: true,
+            suggested_action: Some("Choose a location you can write to.".to_string()),
+            validation: None,
+        })
+    })?;
+
+    Ok(Some(file_name_of(&path)))
+}
+
+/// The last component of a path, for display only.
+///
+/// Never the path itself. The frontend shows this in a title and must not be
+/// able to reconstruct a location from it.
+fn file_name_of(path: &std::path::Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "scenario.toml".to_string())
+}
+
+fn too_large(actual: u64) -> Box<ErrorView> {
+    Box::new(ErrorView {
+        code: "SCENARIO_TOO_LARGE".to_string(),
+        title: "Scenario too large".to_string(),
+        explanation: format!(
+            "A scenario file may be at most {MAX_SOURCE_BYTES} bytes; that one is {actual}."
+        ),
+        recoverable: true,
+        suggested_action: Some("Choose a scenario file.".to_string()),
+        validation: None,
+    })
 }
 
 #[cfg(test)]

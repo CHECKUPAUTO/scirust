@@ -291,6 +291,19 @@ impl SeriesRoleWire {
     }
 }
 
+/// A scenario file the user picked, as text.
+///
+/// No path, by design — the shell hands over contents and a display name and
+/// nothing that could be used to reach the file again. See
+/// `src-tauri/src/commands.rs`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScenarioFileWire {
+    /// The file's own name, for the title only.
+    pub file_name: String,
+    /// Its contents.
+    pub source: String,
+}
+
 /// One plottable series.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SeriesWire {

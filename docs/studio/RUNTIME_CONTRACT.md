@@ -182,6 +182,10 @@ Validation codes currently in use:
   no sample, so every realisation would be the same curve.
 - `SRST-VAL-0097`: `experiment.replicates` is zero, or above the limit of
   4 096 (see `docs/studio/adr/0008-ensembles.md`).
+- `SRST-VAL-0098`: `backend.precision` names a precision the capability does
+  not compute in.
+- `SRST-VAL-0099`: `backend.kind` names a backend the capability does not run
+  on.
 
 Each capability's exact field-to-code mapping is in that capability's
 adapter module (the `FieldDescriptor.error_code` on each `const`). A new
@@ -280,6 +284,34 @@ Adding another stochastic capability means calling
 and setting `RunProvenance::seed`. Skipping any of the three produces a result
 nobody can reproduce, which is why the first two are enforced by the type
 system and the third by the bridge contract test.
+
+## Backend and precision
+
+`backend.kind` and `backend.precision` are checked **against the capability's
+own declaration**, not only against the schema's list of legal strings. Every
+adapter calls `validate_support::resolve_backend_kind` and
+`resolve_precision`, and two registry-driven tests walk `all_adapters()` to
+assert each one does.
+
+This closed a gap of the same shape as `experiment.seed` before Phase 3B-2.
+The schema accepted `precision = "f32"`; every descriptor declares
+`supported_precisions: &[PrecisionKind::F64]`; and nothing compared the two.
+A scenario asking for single precision passed validation and was computed in
+double, recording a stated precision it did not have — which is worse than a
+field nobody reads, because it looks like the user got what they asked for.
+`f32` is not a smaller `f64`: someone selecting it is usually asking about
+conditioning, or matching another implementation's arithmetic, and answering
+in `f64` answers a different question.
+
+`PrecisionKind::F32` exists as a vocabulary entry that no capability declares.
+That is not the same as a lie: it lets a descriptor say "not here yet", where
+declaring only `F64` and accepting `"f32"` anyway said "you got what you asked
+for". When a capability grows an `f32` path, the checks and their tests follow
+the descriptor with no edit.
+
+`backend.kind` refuses nothing today — the schema allows only `"cpu"` and
+every capability declares `Cpu`. It is there so the first capability that is
+not CPU-only fails loudly instead of running somewhere it never claimed to.
 
 ## Ensembles
 

@@ -509,3 +509,98 @@ which answers "where is the process at each moment". A histogram of first
 passage times is a distribution over a scalar, and needs an axis kind the
 schema does not have. ADR 0008 records it as the next thing, and as not
 attempted.
+
+## 17. Update — two promises nothing kept
+
+Not a phase; a correction. Both items were found by asking the question ADR
+0007 asked about `experiment.seed` — *does anything actually read this?* — of
+the fields around it.
+
+**`backend.precision` was accepted and ignored.** The schema validated
+`"f32"`, every descriptor declared `supported_precisions:
+&[PrecisionKind::F64]`, and **nothing compared the two**. A scenario asking
+for single precision passed validation and was computed in double, recording
+a stated precision it did not have.
+
+That is worse than a field nobody reads. An ignored `seed` produced a result
+that was merely unreproducible; an ignored `precision` produces a result that
+looks like the user got what they asked for. And `f32` is not a smaller
+`f64` — someone selecting it is usually asking about conditioning or matching
+another implementation's arithmetic, so answering in `f64` answers a different
+question and says nothing about having done so.
+
+Closed by `validate_support::resolve_precision`, called by every adapter, with
+`SRST-VAL-0098`. `PrecisionKind` gained an `F32` variant that no capability
+declares — a vocabulary entry, not a claim, so a descriptor can say "not here
+yet" instead of the schema saying "yes" on its behalf.
+`resolve_backend_kind`/`SRST-VAL-0099` closes the identical hole in
+`backend.kind` before it can matter, which will be the first time a capability
+is not CPU-only.
+
+**`commands.rs` documented a feature that does not exist.** Its module comment
+read *"File dialogs are native, run here, and hand back only the selected
+file's contents"* — a description of the intended design, written as though it
+had been built. There is no dialog command; `dialog:*` is not granted; the
+only scenario sources are the compiled-in tutorials and what the user types.
+
+`DESKTOP_SECURITY.md` and `DESKTOP_ARCHITECTURE.md` were both accurate about
+this, which is the interesting part: the inaccuracy survived because it was in
+the one place a reader would take most literally — the source. Corrected to
+state the absence, and to record the constraint the picker must satisfy when
+it is built, since that constraint is the reason the comment was written in
+the first place: a `read_file(path)` reintroduced as "the file the user just
+picked" is still `read_file(path)`.
+
+**Two registry-driven tests** walk `all_adapters()` and assert each honours
+the precision and backend it declares, following the descriptor rather than
+today's answer — so a capability that grows an `f32` path is covered without
+editing them.
+
+**Still outstanding**, unchanged: the native file picker itself; `thermal`'s
+`HeatRod1d`, which needs a presentation the interface does not have; a
+result axis whose coordinates are bins; code signing and everything that
+depends on it; and the remaining unadapted `scirust-sim` families.
+
+## 18. Update — the native file picker
+
+`studio_open_scenario` and `studio_save_scenario` show a real dialog. The
+desktop can open a user's own scenario for the first time; until now the only
+sources were the tutorials compiled into the binary and whatever was typed.
+
+**The design constraint is the interesting part**, and it is the one §17's
+corrected comment recorded before the feature existed: the dialog runs in the
+shell and the frontend exchanges **contents**, never a path. It supplies no
+destination and receives no location it could name again, so it cannot re-read
+a file the user picked once, and cannot reach a file the user never picked.
+`dialog:*` and `fs:*` stay ungranted for exactly that reason — they would let
+the webview go around the two commands and hold the path itself. A command
+taking a path would be `read_file(path)` with a friendlier name.
+
+The audit test now forbids `dialog:` alongside `shell:`, `fs:` and the rest,
+and that assertion was checked by granting the permission and watching the
+test fail rather than by trusting it.
+
+**Two things were removed rather than left inert.** `Unavailable::NotWired`
+and `actions::is_wired` existed to say "this build has no command behind the
+action" — the honest answer while the picker was missing, and dead the moment
+it landed. An enum variant nothing can produce is a state the interface claims
+exists and cannot reach, which is the same category of untruth as §17's two
+items. The test that pinned the disabled behaviour was inverted, not deleted:
+it is the only record that those actions were once refused for a reason other
+than application state.
+
+`Model::source_path` became `source_name` for the same reason. The frontend
+holds a file *name*, for a title bar; leaving the field called `path` would
+invite the first reader who needs a location to assume one is there.
+
+**A note on how the wasm gate paid for itself.** `bridge.rs` is
+`cfg(target_arch = "wasm32")`, so the host build never compiles it. The new
+wire type's missing import was invisible to every host check and to
+`cargo test`, and was caught by the wasm32 clippy step added two changes
+earlier — the step that existed because a feature-gated file broke master the
+same way.
+
+**Still outstanding**: `thermal`'s `HeatRod1d` and the heat-map presentation
+it needs; a result axis whose coordinates are bins; code signing and the
+updater that depends on it; and the remaining unadapted `scirust-sim`
+families.

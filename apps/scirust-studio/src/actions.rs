@@ -201,16 +201,6 @@ pub enum Unavailable {
     NoLoadedRun,
     /// A worker is already running.
     WorkerAlreadyRunning,
-    /// This build has no command behind the action.
-    ///
-    /// Distinct from every other reason here, which is about the *state* of
-    /// the application. This one is about the shell: opening and saving a
-    /// scenario file needs a native file picker, and this build's command
-    /// surface does not include one. Showing the action disabled with that
-    /// reason is the honest answer — hiding it would leave a user hunting
-    /// for a menu entry that was never there, and enabling it would produce
-    /// a button that does nothing.
-    NotWired,
 }
 
 impl Unavailable {
@@ -230,37 +220,23 @@ impl Unavailable {
             Unavailable::NothingToSave => "No unsaved changes",
             Unavailable::NoLoadedRun => "No run is displayed",
             Unavailable::WorkerAlreadyRunning => "The calculation engine is already running",
-            Unavailable::NotWired => "Not available in this build: it needs a native file picker",
         }
     }
 }
 
-/// Whether this build has a command behind an action at all.
+/// Whether an action can be performed right now, and why not when it cannot.
 ///
-/// Separate from [`availability`], which answers a question about the
-/// model's *state*. This answers one about the shell: every action here maps
-/// to a typed Tauri command, and the two file actions map to a native file
-/// dialog that this phase does not ship.
+/// Every action in this build maps to a typed Tauri command, so this is now
+/// exactly [`availability`] — a question about the model's *state*. It kept a
+/// second half until the native file dialogs landed: `is_wired` answered a
+/// question about the shell, because opening and saving a scenario had no
+/// command behind them at all and the honest thing was to show the actions
+/// disabled with that reason rather than hide them or let them do nothing.
 ///
-/// It is a function rather than a constant list on purpose — when the dialog
-/// commands land, this returns `true` and the palette, the shortcuts and the
-/// menus all start working together, because they all consult it.
-pub fn is_wired(action: Action) -> bool {
-    !matches!(
-        action,
-        Action::OpenScenario | Action::SaveScenario | Action::SaveScenarioAs
-    )
-}
-
-/// Whether an action can be performed right now, for any reason.
-///
-/// The combination the interface uses: an action must both exist in this
-/// build and be permitted by the current state.
+/// That distinction is gone rather than left inert. An `Unavailable` variant
+/// nothing can produce is a state the interface claims exists and cannot
+/// reach, which is the same category of untruth as a field nothing reads.
 pub fn resolve(action: Action, context: ActionContext) -> Result<(), Unavailable> {
-    if !is_wired(action)
-    {
-        return Err(Unavailable::NotWired);
-    }
     availability(action, context)
 }
 
@@ -574,7 +550,6 @@ mod tests {
             Unavailable::NothingToSave,
             Unavailable::NoLoadedRun,
             Unavailable::WorkerAlreadyRunning,
-            Unavailable::NotWired,
         ]
         {
             assert!(!reason.reason().is_empty(), "{reason:?}");
@@ -633,10 +608,12 @@ mod tests {
         }
     }
 
-    /// An action with no command behind it must be reported as such, not
-    /// silently offered and then found to do nothing.
+    /// The three file actions were disabled in every earlier build because
+    /// no command stood behind them. They now do, and this is the test that
+    /// was inverted rather than deleted — deleting it would have removed the
+    /// only record that they were ever refused for a reason other than state.
     #[test]
-    fn an_unwired_action_is_refused_with_its_own_reason() {
+    fn the_file_actions_are_available_once_there_is_something_to_act_on() {
         let context = ActionContext {
             worker_running: true,
             run_active: false,
@@ -650,13 +627,27 @@ mod tests {
             Action::SaveScenarioAs,
         ]
         {
-            assert!(!is_wired(action), "{action:?}");
-            assert_eq!(
-                resolve(action, context),
-                Err(Unavailable::NotWired),
-                "{action:?} must say why it cannot be performed"
-            );
+            assert_eq!(resolve(action, context), Ok(()), "{action:?}");
         }
+    }
+
+    /// Opening a file needs nothing from the model: it is how a user with an
+    /// empty editor and no engine gets started.
+    #[test]
+    fn opening_a_scenario_needs_no_state_at_all() {
+        let empty = ActionContext {
+            worker_running: false,
+            run_active: false,
+            has_scenario: false,
+            dirty: false,
+            has_loaded_run: false,
+        };
+        assert_eq!(resolve(Action::OpenScenario, empty), Ok(()));
+        // Saving still needs something to save.
+        assert_eq!(
+            resolve(Action::SaveScenario, empty),
+            Err(Unavailable::NoScenario)
+        );
     }
 
     /// Everything else resolves exactly as the state machine says.
@@ -671,14 +662,11 @@ mod tests {
         };
         for action in Action::all()
         {
-            if is_wired(*action)
-            {
-                assert_eq!(
-                    resolve(*action, context),
-                    availability(*action, context),
-                    "{action:?}"
-                );
-            }
+            assert_eq!(
+                resolve(*action, context),
+                availability(*action, context),
+                "{action:?}"
+            );
         }
         assert_eq!(resolve(Action::RunExperiment, context), Ok(()));
         assert_eq!(
