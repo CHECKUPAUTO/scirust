@@ -560,6 +560,7 @@ impl CapabilityAdapter for SemiconductorLaserAdapter {
                 },
             ],
             fields: vec![],
+            distributions: vec![],
             metrics: vec![
                 Metric {
                     id: "threshold_density".to_string(),

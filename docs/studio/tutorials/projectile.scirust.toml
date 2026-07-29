@@ -1,0 +1,88 @@
+# SciRust Studio tutorial scenario: a falling body that stops accelerating.
+#
+# Run it with:
+#
+#   scirust run docs/studio/tutorials/projectile.scirust.toml
+#
+# A projectile launched at 40 m/s, 45 degrees up, from 100 m, into air that
+# drags on it in proportion to its speed. Linear (Stokes) drag rather than the
+# quadratic law — that is the assumption that makes the problem exactly
+# solvable, and it is what lets both checks here be exact statements instead
+# of approximations.
+#
+# What is verified:
+#
+#   * horizontal_velocity_decays_exactly — the horizontal equation
+#     vx' = -drag*vx is DECOUPLED. It mentions nothing but vx, so
+#     vx(t) = vx0*exp(-drag*t) regardless of gravity, of the vertical motion,
+#     or of where the projectile is. That reference is one the integrator
+#     cannot influence.
+#   * approaches_terminal_velocity — the vertical equation has a fixed point
+#     at vy = -gravity/drag = -49.05 m/s. It is read off the model's own
+#     stated derivative rather than looked up.
+#
+# The horizontal check's threshold is not chosen. RK4's amplification factor
+# on a linear decay is the degree-four Taylor polynomial R(z) with z = -drag*h,
+# against the exact exp(z); their difference is the entire error, in closed
+# form, and multiplying it by the step count bounds the run. A test asserts
+# that halving the step shrinks it by about eight — sixteen per step against
+# twice as many steps — which is the fourth-order signature and confirms the
+# formula is describing the method rather than a coincidence.
+#
+# The two checks fail independently: a wrong drag moves both, a wrong gravity
+# moves only the terminal velocity, and an integrator that lost the decoupling
+# moves only the horizontal one. A test doubles gravity and asserts the
+# horizontal trajectory is bit-for-bit identical, because that decoupling is
+# what the first check's exactness rests on.
+#
+# Try it: set `drag` to something tiny like 1e-6. The terminal velocity blows
+# up to 9.8 million m/s, the run gets nowhere near it, and the second check
+# fails loudly instead of quietly comparing against a number the run never
+# approached — which is what a fixed tolerance would have done.
+
+schema_version = 1
+
+[experiment]
+name = "Projectile with linear drag"
+description = "A 45-degree launch into Stokes drag, decaying horizontally and settling at terminal velocity vertically."
+
+[capability]
+id = "sim.mechanics.projectile"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+gravity = { value = 9.81, unit = "m/s^2" }
+# Drag per unit mass, so a rate: 1/0.2 = 5 s of drag time constant.
+drag = { value = 0.2, unit = "1/s" }
+
+[initial_state]
+# Launched from 100 m up, so there is room to reach terminal velocity before
+# the ground would matter. (This model has no ground; the run simply ends.)
+position = [{ value = 0.0, unit = "m" }, { value = 100.0, unit = "m" }]
+# 40 m/s at 45 degrees: 28.284 m/s in each component.
+velocity = [
+    { value = 28.2842712474619, unit = "m/s" },
+    { value = 28.2842712474619, unit = "m/s" },
+]
+
+[solver]
+id = "rk4"
+start = { value = 0.0, unit = "s" }
+# Ten drag time constants, so the vertical velocity is within exp(-10) of
+# terminal and the horizontal velocity has decayed by the same factor.
+end = { value = 50.0, unit = "s" }
+step = { value = 0.001, unit = "s" }
+
+[outputs]
+record = [
+    "position_x",
+    "position_y",
+    "velocity_x",
+    "velocity_y",
+    "exact_velocity_x",
+    "terminal_velocity",
+]

@@ -811,8 +811,108 @@ blocks stopped being ten wide at `0250`. A capability with twelve fields
 needs twelve codes; stretching one to fit a round number would mean two
 fields sharing a code, which is worse than an untidy table.
 
-**Still outstanding**: a result axis whose coordinates are bins (ADR 0008's
-first-passage distributions — a histogram is not a field with one row);
-fields over three axes or on unstructured meshes; code signing and the
-updater that depends on it; and the model families listed at the top of this
-section, none of which is now the last of its module.
+**Still outstanding at the time of writing** — every item here is revisited
+in §21, which closes or reduces all of them: a result axis whose coordinates
+are bins (ADR 0008's first-passage distributions — a histogram is not a field
+with one row); fields over three axes or on unstructured meshes; code signing
+and the updater that depends on it; and the model families listed at the top
+of this section, none of which is now the last of its module.
+
+## 21. Update — the three outstanding lists, closed
+
+§20 ended with three groups of outstanding items: unadapted model families,
+limits of the result model, and desktop code signing. Each was reopened with
+the intent of finishing it. Two were finished; the third was finished as far
+as it can be without a certificate, and the remainder is named rather than
+implied. Two items inside the first two groups were **closed by decision**,
+which is a different thing from being deferred and is recorded as such in ADR
+0012.
+
+### Model families: 28 capabilities, and one decided non-goal
+
+Nine more adapters: SEIR, consecutive reactions, the reversible reaction, the
+RC circuit, the projectile, Van der Pol, the two-compartment IV bolus, the
+M/M/1 queue and geometric Brownian motion. Every `scirust-sim` model family
+that implements `System` now has one.
+
+`envs` does not, and will not. It implements `Environment` — `reset` /
+`step(action)` — so it needs an agent the scenario schema cannot express. The
+workable encoding was `solver.id` as the policy name, which makes `solver`
+mean "numerical method" for twenty-six capabilities and "controller" for two.
+That cost might have been worth paying; what settled it was reading
+`CartPole`: bang-bang ±10 N with no null action, explicit Euler, no invariant
+and no closed form. Nothing about its *physics* is checkable. What remains —
+that `done` fires exactly at the bounds, that the return equals the episode
+length — tests the harness, and a capability whose checks verify the
+bookkeeping would be the first in this catalogue that does not carry an oracle
+its own model states.
+
+### The result model: distributions, and a corrected assumption
+
+`RunResult` gains `distributions`. A histogram's `n` bins need `n + 1` edges,
+so it fits neither a `Series` nor a `Field`, both of which are aligned
+one-to-one with an axis. Storing one as a single-row field was the tempting
+wrong answer and ADR 0011 says why: a field's rows are point-sampled, so a
+reader would have to guess whether the coordinates were centres or edges, and
+the type has nowhere to put the answer.
+
+The other item, "fields over three axes", was drafted as speculative — no
+model produces one — and that draft was **wrong**. Grepping for a producer
+found `scirust-itd::field3::Field3`, a dense 3-D scalar field with an
+oracle-validated test suite. The assumption is recorded in ADR 0012 rather
+than quietly corrected, because a right conclusion reached from a wrong
+premise is still a thing to notice.
+
+The conclusion held for a different reason. `scirust-itd` uses `Field3` for
+6-connected component labelling and region topology — an *analysis input* —
+while its simulation driver returns per-interval time series and 2-D fields,
+which the schema already expresses exactly. So the schema stays two-axis until
+a capability's **output** varies over three.
+
+Adapting `scirust-itd` itself is real open work, and the first capability that
+would come from outside `scirust-sim`.
+
+### Desktop: a pipeline that refuses to be half-signed
+
+The signing material is a purchase, a private key and a URL somebody has to
+own. None of it can live here, and no amount of code changes that. What could
+be built was everything else, and it was.
+
+`release-config` decides the signing posture from the environment and
+**refuses to build** when that decision is partial. Each partial state
+produces a build that completes, an artifact that runs, and a security
+property that silently is not there: a public key with no private key checks
+for updates it can never verify; a private key with no public key ships signed
+artifacts nothing verifies; a certificate with no timestamp URL produces a
+signature that stops working the day it expires. Fourteen tests, none of which
+need a certificate.
+
+The updater *plugin* is deliberately not registered. It would put outbound
+network into a webview whose entire posture is that it holds no general
+network, filesystem or process capability, and it would be a grant that could
+not be exercised end-to-end here — there is no key to sign with and no
+endpoint to talk to. An untested capability grant is the kind this project
+refuses everywhere else. `docs/studio/DESKTOP_SIGNING.md` names every variable
+a maintainer must supply and the order the work has to happen in.
+
+### One defect found by a test written this pass
+
+Replacing the `fixed_step` proxy for "reports progress" with a declared
+`reports_progress`, and adding a registry-driven test that runs every
+capability's tutorial and compares declaration against emission, immediately
+found `sim.electrical.van_der_pol` reporting progress that reached one hundred
+percent and started again — it integrates two trajectories and each reported
+its own span. `double_pendulum` had the same shape and had worked around it
+with a `NullEventSink`, which trades a resetting bar for one that finishes
+halfway through the work.
+
+`sink::SubRangeSink` fixes the class. The proxy it replaced had already caused
+one live defect in the other direction (the Ornstein-Uhlenbeck determinate bar
+that never moved), so this is the second time inferring that property from an
+adjacent one has been wrong — which is the argument for declaring it.
+
+**Still outstanding**, and now genuinely so: a first-passage-time capability
+(ADR 0008 named the distribution; the representation now exists, the
+capability does not); adapting `scirust-itd`; three-axis or unstructured
+fields, gated on a capability that produces one; and the signing credentials
+themselves.

@@ -89,6 +89,7 @@ const SYMPLECTIC_EULER: SolverDescriptor = SolverDescriptor {
     summary: "Fixed-step semi-implicit Euler; energy error stays bounded over long horizons.",
     fixed_step: true,
     adaptive_tolerance: false,
+    reports_progress: true,
 };
 
 const RK4: SolverDescriptor = SolverDescriptor {
@@ -96,6 +97,7 @@ const RK4: SolverDescriptor = SolverDescriptor {
     summary: "Fixed-step classical 4th-order Runge-Kutta; more accurate short-horizon, but energy drifts secularly over many orbits.",
     fixed_step: true,
     adaptive_tolerance: false,
+    reports_progress: true,
 };
 
 const ENERGY_CHECK: VerificationCheckDescriptor = VerificationCheckDescriptor {
@@ -389,6 +391,7 @@ impl CapabilityAdapter for TwoBodyAdapter {
                 },
             ],
             fields: vec![],
+            distributions: vec![],
             metrics: vec![
                 Metric {
                     id: "final_x".to_string(),

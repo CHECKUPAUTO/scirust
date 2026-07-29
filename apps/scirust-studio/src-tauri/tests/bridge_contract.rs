@@ -17,8 +17,9 @@ use scirust_studio_app_service::{
     AppServiceError, JobSnapshot, JobState, ValidationOutcome, validate_source,
 };
 use scirust_studio_desktop_lib::views::{
-    BootstrapView, CapabilityView, ErrorView, GridView, MetricView, RunView, SeriesRoleView,
-    StoredRunView, VerificationReportView, VerificationView, WarningView, XAxisKind,
+    BootstrapView, CapabilityView, DistributionView, ErrorView, GridView, MetricView, RunView,
+    SeriesRoleView, StoredRunView, VerificationReportView, VerificationView, WarningView,
+    XAxisKind,
 };
 use scirust_studio_runtime::{Metric, MetricValue, RunWarning, WarningCategory};
 use scirust_studio_ui::backend::wire::{
@@ -293,6 +294,18 @@ fn a_run_view_crosses_with_its_coordinates_bit_for_bit() {
             column_axis_id: "x".to_string(),
             columns: 2,
             values: vec![1.0, 2.0, 3.0, 4.0],
+        }],
+        // Edge counts, under- and overflow all cross the bridge: a histogram
+        // whose range was chosen badly must be able to say so in the
+        // interface, not only on the command line.
+        distributions: vec![DistributionView {
+            id: "queue_length".to_string(),
+            display_name: "Time-average number in system".to_string(),
+            unit: "1".to_string(),
+            edges: vec![0.0, 1.0, 2.0, 3.0],
+            counts: vec![2, 5, 1],
+            underflow: 1,
+            overflow: 3,
         }],
         metrics: vec![MetricView::from(&Metric {
             id: "energy_drift".to_string(),

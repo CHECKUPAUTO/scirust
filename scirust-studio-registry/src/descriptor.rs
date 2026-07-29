@@ -79,6 +79,15 @@ pub enum RunDomain {
     /// Closed forms evaluated across a swept parameter; results carry that
     /// parameter's axis and no time axis.
     ParameterSweep,
+    /// Independent realisations of a stochastic process, *indexed* rather
+    /// than swept; results carry a `replicate` axis with one point per
+    /// realisation and no time axis.
+    ///
+    /// Distinct from [`Self::ParameterSweep`] because nothing varies between
+    /// the points except the seed. A sweep's axis is a quantity the user
+    /// chose and can reason about; an ensemble's axis is a bookkeeping index,
+    /// and reading a trend along it would be reading noise.
+    Ensemble,
 }
 
 /// The scientific maturity of the *underlying model*, as documented by its
@@ -179,6 +188,22 @@ pub struct SolverDescriptor {
     pub fixed_step: bool,
     /// Whether this solver needs `solver.rtol`/`solver.atol` (adaptive).
     pub adaptive_tolerance: bool,
+    /// Whether a run driven by this solver reports genuine intermediate
+    /// progress.
+    ///
+    /// Declared rather than inferred from [`Self::fixed_step`], which is what
+    /// this used to be read off. That proxy was wrong in both directions and
+    /// had already produced one live defect: the Ornstein-Uhlenbeck process
+    /// declared a fixed step, so the interface drew a determinate bar for a
+    /// run that emitted no fractions at all. The discrete-event queue is the
+    /// mirror image — no step size anywhere, and a realisation is a perfectly
+    /// good unit of progress.
+    ///
+    /// "Progress" here means a fraction a reader can trust, not merely
+    /// evidence of life. A capability that cannot supply one says so, and the
+    /// interface shows indeterminate activity rather than an invented
+    /// percentage.
+    pub reports_progress: bool,
 }
 
 /// Scalar vs. fixed-length-vector shape of a parameter or state field.

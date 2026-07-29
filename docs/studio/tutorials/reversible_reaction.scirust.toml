@@ -1,0 +1,70 @@
+# SciRust Studio tutorial scenario: a reaction that stops before it finishes.
+#
+# Run it with:
+#
+#   scirust run docs/studio/tutorials/reversible_reaction.scirust.toml
+#
+# A <-> B. Forward and backward rates compete, so the flask never empties: the
+# system relaxes to an equilibrium RATIO. That ratio is the equilibrium
+# constant K = kf/kr, and it is the whole content of the model.
+#
+# Here kf = 0.8 and kr = 0.2, so K = 4: at equilibrium there is four times as
+# much B as A, whatever you started with. The run starts with all A and none
+# of B, so the entire approach is inside the window.
+#
+# What is verified:
+#
+#   * matches_the_closed_form — both species against the analytic solution at
+#     every recorded sample. The reference is exact, so the measurement is
+#     RK4's truncation error alone.
+#   * settles_at_the_equilibrium_constant — the final b/a must equal K.
+#
+# These fail independently, which is why both are here. A model with the right
+# relaxation rate and the wrong balance point would be wrong throughout AND at
+# the end. But a model with the right equilibrium and the wrong rate would
+# land in exactly the right place while being wrong at every intermediate
+# time — and only the trajectory-wide check sees that.
+#
+# The equilibrium tolerance is derived rather than chosen. The approach is a
+# single exponential at rate kf + kr = 1.0, so after a span of 30 the
+# remaining deviation is exp(-30) of the initial one. That residual is the
+# floor no correct run can beat, so it is what the check compares against.
+#
+# Try it: swap kf and kr. K becomes 0.25, the equilibrium flips to four parts
+# A per part B, and the relaxation rate — which is their SUM — does not change
+# at all. The two checks move independently, which is the point.
+
+schema_version = 1
+
+[experiment]
+name = "Reversible first-order reaction"
+description = "A <-> B relaxing to a four-to-one equilibrium from an all-A start."
+
+[capability]
+id = "sim.chemistry.reversible_reaction"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+kf = { value = 0.8, unit = "1/s" }
+kr = { value = 0.2, unit = "1/s" }
+
+[initial_state]
+# All A, so the whole transient is in the run and the derived threshold
+# accounts for exactly that much of it.
+a = [{ value = 1.0, unit = "1" }]
+b = [{ value = 0.0, unit = "1" }]
+
+[solver]
+id = "rk4"
+start = { value = 0.0, unit = "s" }
+# Thirty relaxation time constants. Deliberately far past settling: it makes
+# the derived threshold tiny (exp(-30) ~ 1e-13) and therefore sharp.
+end = { value = 30.0, unit = "s" }
+step = { value = 0.002, unit = "s" }
+
+[outputs]
+record = ["a", "b", "exact_a", "equilibrium_a", "mass"]

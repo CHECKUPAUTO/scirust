@@ -102,6 +102,7 @@ const SYMPLECTIC_EULER: SolverDescriptor = SolverDescriptor {
     summary: "Fixed-step semi-implicit Euler. First order in the trajectory, second order in the oscillation frequency, and — for the undamped machine — energy-bounded rather than energy-drifting. Requires `solver.step`.",
     fixed_step: true,
     adaptive_tolerance: false,
+    reports_progress: true,
 };
 
 const FREQUENCY_HZ: FieldDescriptor = FieldDescriptor {
@@ -546,6 +547,7 @@ impl CapabilityAdapter for SwingEquationAdapter {
             }],
             series,
             fields: vec![],
+            distributions: vec![],
             metrics,
             warnings,
             verifications: vec![energy_result, period_result],

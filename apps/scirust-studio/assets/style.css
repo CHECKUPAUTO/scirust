@@ -851,3 +851,59 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------------------------------------------------------------------
+ * Histograms.
+ *
+ * Bars rather than shaded cells: a distribution is one-dimensional, so a
+ * length is available and exact where a shade would make the reader
+ * estimate a count. The interval is labelled rather than the bin centre,
+ * for the same reason the type carries edges — a centre makes the reader
+ * infer the width.
+ * ------------------------------------------------------------------ */
+
+.histogram-bins {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.histogram-bin {
+  display: grid;
+  /* The range column is fixed so every bar starts at the same offset:
+     a bar chart whose baseline moves is not a bar chart. */
+  grid-template-columns: 14rem 1fr 4rem;
+  align-items: center;
+  gap: 0.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.histogram-range {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.8rem;
+  color: var(--muted, #667);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.histogram-bar {
+  display: block;
+  min-width: 1px;
+  height: 0.9rem;
+  border-radius: 2px;
+  background: var(--accent, #4a7);
+}
+
+.histogram-count {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.8rem;
+  text-align: right;
+}
+
+.histogram-outside {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+}

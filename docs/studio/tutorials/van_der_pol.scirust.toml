@@ -1,0 +1,88 @@
+# SciRust Studio tutorial scenario: an oscillator that chooses its own
+# amplitude.
+#
+# Run it with:
+#
+#   scirust run docs/studio/tutorials/van_der_pol.scirust.toml
+#
+# x'' - mu*(1 - x^2)*x' + x = 0. The damping term changes SIGN at |x| = 1:
+# negative (energy flowing in) near the origin, positive (energy flowing out)
+# far from it. Everything is therefore pushed toward one particular orbit —
+# a limit cycle — and it does not matter where you start.
+#
+# That is the whole difference between this and a spring. Give a spring a
+# bigger push and you get a bigger oscillation forever. Give this a bigger
+# push and it comes back to the same one.
+#
+# What is verified:
+#
+#   * energy_balance — the model states its own energy rate,
+#     dE/dt = mu*(1-x^2)*v^2. Integrating that rate along the run must
+#     reproduce the change in E computed from its endpoints. Two numbers from
+#     the same trajectory by different routes, one differenced and one
+#     integrated.
+#   * limit_cycle_is_independent_of_the_start — a SECOND trajectory is
+#     integrated from well outside the cycle (the scenario's own start is
+#     inside it) and the two late amplitudes are compared. They approach from
+#     opposite directions and still agree.
+#
+# The second check is the one an energy identity cannot replace. A
+# conservative oscillator satisfies its own energy balance perfectly and still
+# has a different orbit for every initial condition.
+#
+# ---------------------------------------------------------------------------
+# One threshold is derived and the other is not, and the difference is stated
+# ---------------------------------------------------------------------------
+#
+# The energy balance's threshold is the composite trapezoid rule's own leading
+# error, which Euler-Maclaurin gives in closed form as (h^2/12)*(f'(end) -
+# f'(start)) for the integrand. Both endpoint derivatives come from the run,
+# so nothing is fitted.
+#
+# The amplitude tolerance is CHOSEN. The rate at which trajectories converge
+# onto the cycle is set by its Floquet multiplier, which the model does not
+# state and which has no elementary closed form — so unlike every other
+# settling threshold in this catalogue, there is no exact residual to compare
+# against. What is available instead is a test asserting that a longer run
+# agrees more closely, and that is what is there.
+#
+# Try it: set `mu` to 0.05. The cycle becomes near-circular with amplitude
+# almost exactly 2 — the classical Lienard result — and a test asserts it.
+# Set `mu` to 5 instead and the orbit turns into the sawtooth relaxation
+# oscillation the model is famous for.
+
+schema_version = 1
+
+[experiment]
+name = "Van der Pol limit cycle"
+description = "A self-sustaining oscillator settling onto the same orbit from inside and from outside."
+
+[capability]
+id = "sim.electrical.van_der_pol"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+# Moderately nonlinear: the cycle is visibly non-circular but not yet
+# relaxational.
+mu = { value = 1.0, unit = "1" }
+
+[initial_state]
+# Inside the cycle, so this trajectory spirals outward while the adapter's
+# probe trajectory spirals inward.
+position = [{ value = 0.1, unit = "1" }]
+velocity = [{ value = 0.0, unit = "1/s" }]
+
+[solver]
+id = "rk4"
+start = { value = 0.0, unit = "s" }
+# About sixteen cycles. The amplitude is measured over the final quarter, by
+# which point the transient is long gone.
+end = { value = 100.0, unit = "s" }
+step = { value = 0.001, unit = "s" }
+
+[outputs]
+record = ["position", "velocity", "energy", "energy_rate", "probe_position"]

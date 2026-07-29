@@ -291,6 +291,31 @@ impl SeriesRoleWire {
     }
 }
 
+/// A histogram, over the bridge.
+///
+/// Carries the **edges** rather than the centres, for the reason
+/// `scirust_studio_runtime::Distribution` does: `n` values for `n` bins
+/// leaves a reader guessing what they are aligned to, and a centre leaves
+/// them inferring the width. Under- and overflow travel with it because a
+/// badly chosen range must be visible in the interface too.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DistributionWire {
+    /// Stable id.
+    pub id: String,
+    /// Display name.
+    pub display_name: String,
+    /// Unit of the binned quantity.
+    pub unit: String,
+    /// Bin edges: one more than there are counts.
+    pub edges: Vec<f64>,
+    /// One count per bin.
+    pub counts: Vec<u64>,
+    /// Samples below the first edge.
+    pub underflow: u64,
+    /// Samples above the last.
+    pub overflow: u64,
+}
+
 /// A quantity sampled on a two-axis grid — what
 /// `scirust_studio_runtime::Field` carries.
 ///
@@ -374,6 +399,9 @@ pub struct RunWire {
     /// outputs are curves.
     #[serde(default)]
     pub fields: Vec<GridWire>,
+    /// Histograms this run produced.
+    #[serde(default)]
+    pub distributions: Vec<DistributionWire>,
     /// Metrics.
     pub metrics: Vec<MetricWire>,
     /// Scientific checks.

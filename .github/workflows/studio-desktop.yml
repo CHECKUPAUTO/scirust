@@ -129,7 +129,7 @@ jobs:
 
       - name: Build tooling tests
         working-directory: apps/scirust-studio
-        run: cargo test -p prepare-sidecar -p stage-frontend --locked
+        run: cargo test -p prepare-sidecar -p release-config -p stage-frontend --locked
 
   # ---------------------------------------------------------------------
   # The WebAssembly bundle. Built once and reused by the platform jobs.
@@ -307,19 +307,46 @@ jobs:
           cargo binstall -y --force "tauri-cli@${env:TAURI_CLI_VERSION}" || cargo install tauri-cli --locked --force --version "${env:TAURI_CLI_VERSION}"
           cargo tauri --version
 
-      # One build, producing both the executable and the installer. Unsigned
-      # on purpose: code signing needs a certificate this repository does not
-      # hold, and shipping a preview that pretends to be signed would be
-      # worse than shipping one that plainly is not. The SmartScreen warning
+      # Decide how this build is signed, from the environment alone, and
+      # REFUSE to build at all if that decision is half-configured — an
+      # updater public key with no private key, a certificate with no
+      # timestamp URL, and so on. Each of those produces a build that
+      # completes, an artifact that runs, and a security property that
+      # silently is not there. See the tool's own header for why every one of
+      # them is worse than plainly unsigned.
+      #
+      # With nothing configured — which is this repository today — the tool
+      # emits an empty patch and says so, and the build below is unsigned on
+      # purpose. Shipping a preview that pretended to be signed would be
+      # worse than shipping one that plainly is not; the SmartScreen warning
       # a reviewer will see is documented in
       # docs/studio/WINDOWS_DESKTOP_ACCEPTANCE.md.
-      #
-      # The config is discovered from `src-tauri/`, not passed with
-      # `--config`: that flag *merges* a patch over the discovered config, so
-      # handing it the main file applies it twice.
-      - name: Build the unsigned bundle and installer
+      - name: Decide the signing posture
         working-directory: apps/scirust-studio
-        run: cargo tauri build --bundles nsis
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          SCIRUST_UPDATER_PUBKEY: ${{ secrets.SCIRUST_UPDATER_PUBKEY }}
+          SCIRUST_UPDATER_ENDPOINTS: ${{ vars.SCIRUST_UPDATER_ENDPOINTS }}
+          SCIRUST_WINDOWS_CERT_THUMBPRINT: ${{ secrets.SCIRUST_WINDOWS_CERT_THUMBPRINT }}
+          SCIRUST_WINDOWS_TIMESTAMP_URL: ${{ vars.SCIRUST_WINDOWS_TIMESTAMP_URL }}
+        run: |
+          $patch = cargo run --quiet -p release-config
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Set-Content -Path release-patch.json -Value $patch -NoNewline
+          Write-Host "config patch: $patch"
+
+      # One build, producing both the executable and the installer.
+      #
+      # `--config` MERGES a patch over the config discovered in `src-tauri/`,
+      # which is why the patch carries only the signing blocks and never the
+      # whole file — handing it the main file would apply it twice.
+      - name: Build the bundle and installer
+        working-directory: apps/scirust-studio
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: cargo tauri build --bundles nsis --config release-patch.json
 
       # Runs the built application, not a copy of the source: the artifact
       # is only worth publishing if the artifact itself works.
