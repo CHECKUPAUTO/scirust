@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -176,6 +177,79 @@ class RealWorkspaceIntegrationTest(unittest.TestCase):
         packages = lint.workspace_packages(metadata)
         self.assertGreaterEqual(len(packages), 16)
         self.assertEqual(lint.run_all_checks(packages), [])
+
+
+class NarrowEdgeUsageTests(unittest.TestCase):
+    """The `sos-theory -> sos-planner` edge is sanctioned for one purpose.
+
+    These pin that the rule actually bites, since a guard that cannot fail is
+    decoration rather than an invariant.
+    """
+
+    EDGE = ("sos-theory", "sos-planner")
+
+    def _crate(self, tmp: Path, source: str) -> Path:
+        src = tmp / "sos-theory" / "src"
+        src.mkdir(parents=True)
+        (src / "discriminate.rs").write_text(source, encoding="utf-8")
+        return tmp
+
+    def test_allowlisted_items_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = self._crate(
+                Path(raw),
+                "use sos_planner::{Candidate, GreedyPlanner, Planner, UtilityPolicy};\n"
+                "fn f(p: sos_planner::Plan) -> sos_planner::StopVerdict { p.verdict }\n",
+            )
+            packages = {"sos-theory": pkg(("sos-planner", None)), "sos-planner": pkg()}
+            self.assertEqual(lint.check_narrow_edge_usage(packages, root), [])
+
+    def test_reaching_for_the_stopping_rules_fails(self) -> None:
+        # The drift the rule exists to catch: running its own exhaustion logic.
+        with tempfile.TemporaryDirectory() as raw:
+            root = self._crate(Path(raw), "use sos_planner::StoppingRule;\n")
+            packages = {"sos-theory": pkg(("sos-planner", None)), "sos-planner": pkg()}
+            errors = lint.check_narrow_edge_usage(packages, root)
+            self.assertEqual(len(errors), 1)
+            self.assertIn("StoppingRule", errors[0])
+            self.assertIn("discriminating-experiment planning only", errors[0])
+
+    def test_reaching_for_the_utility_internals_fails(self) -> None:
+        # Naming the fixed-point scale means computing utility by hand.
+        with tempfile.TemporaryDirectory() as raw:
+            root = self._crate(Path(raw), "let u = x * sos_planner::UTILITY_SCALE;\n")
+            packages = {"sos-theory": pkg(("sos-planner", None)), "sos-planner": pkg()}
+            errors = lint.check_narrow_edge_usage(packages, root)
+            self.assertEqual(len(errors), 1)
+            self.assertIn("UTILITY_SCALE", errors[0])
+
+    def test_renamed_imports_are_still_caught(self) -> None:
+        # `use ... as ...` must not launder a forbidden item.
+        with tempfile.TemporaryDirectory() as raw:
+            root = self._crate(Path(raw), "use sos_planner::{StoppingRule as Rule};\n")
+            packages = {"sos-theory": pkg(("sos-planner", None)), "sos-planner": pkg()}
+            errors = lint.check_narrow_edge_usage(packages, root)
+            self.assertEqual(len(errors), 1)
+            self.assertIn("StoppingRule", errors[0])
+
+    def test_a_crate_without_the_edge_is_not_checked(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            packages = {"sos-planner": pkg()}
+            self.assertEqual(lint.check_narrow_edge_usage(packages, Path(raw)), [])
+
+    def test_the_sanctioned_edge_is_documented_with_its_purpose(self) -> None:
+        # The purpose is the thing a reviewer reads when this rule fires, so
+        # it has to exist and say what the edge is for.
+        rule = lint.NARROW_EDGES[self.EDGE]
+        self.assertIn("discriminating-experiment", rule["purpose"])
+        self.assertTrue(rule["may_name"])
+        # The items a reimplementation would need must stay off the list.
+        for forbidden in ("StoppingRule", "StopSignals", "UTILITY_SCALE", "EXCLUDED"):
+            self.assertNotIn(forbidden, rule["may_name"])
+
+    def test_the_edge_is_also_allowed_at_the_crate_level(self) -> None:
+        # Confinement is meaningless if the dependency itself is rejected.
+        self.assertIn(self.EDGE, lint.ALLOWED_ENGINE_EDGES)
 
 
 if __name__ == "__main__":

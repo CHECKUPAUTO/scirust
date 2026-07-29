@@ -27,8 +27,12 @@
 //! * **Bayes-factor ranking.** [`compare`](TheoryEngine::compare) ranks by
 //!   retained evidential balance ([`RankBasis::EvidentialBalance`]); posterior-odds
 //!   `Confidence` ranking awaits the statistics backend.
-//! * **Discriminating-experiment planning.** "Which experiment best separates two
-//!   rivals" is an expected-information-gain query to `sos-planner`.
+//!
+//! **Discriminating-experiment planning** is no longer among them: see
+//! [`discriminate`], which states which rivals a design would separate and
+//! delegates the expected-information-gain ranking to `sos-planner` — the
+//! split the deferral note described. This crate still estimates no
+//! information gain of its own.
 //!
 //! ## Example
 //!
@@ -66,11 +70,13 @@
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
+pub mod discriminate;
 pub mod engine;
 pub mod error;
 pub mod scope;
 pub mod theory;
 
+pub use discriminate::{DiscriminatingCandidate, Discrimination, DiscriminationPlan, discriminate};
 pub use engine::{RankBasis, RankedTheory, Ranking, Theories, TheoryEngine};
 pub use error::{Result, TheoryError};
 pub use scope::Scope;
