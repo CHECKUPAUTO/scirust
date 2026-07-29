@@ -2,7 +2,8 @@
 //! gap #3 of the `sos-scirust` scoping plan (`sos-simulation` backends).
 //!
 //! `sos-simulation` ships the backend-independent [`Simulate`] syscall,
-//! [`Observation`]'s honest determinism stamping, and the [`Vcr`] record/replay
+//! [`Observation`]'s honest determinism stamping, and the
+//! [`Vcr`](sos_simulation::Vcr) record/replay
 //! memo — but implements no solver itself, by the same Invariant VIII boundary
 //! gap #1 respected for `sos-planner`. Two real computations live here, both
 //! integrating `dy/dt = f(t, y)`, at the two determinism levels SDE §08 §2

@@ -434,6 +434,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-bench-schema"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "scirust-core"
 version = "0.1.0"
 dependencies = [
@@ -458,6 +466,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-estimation"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "scirust-evo"
 version = "0.1.0"
 dependencies = [
@@ -479,6 +494,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "scirust-signal"
+version = "0.1.0"
+dependencies = [
+ "scirust-bench-schema",
+ "scirust-core",
+ "scirust-estimation",
+ "scirust-solvers",
+ "scirust-stats",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]
@@ -757,6 +785,7 @@ version = "0.1.0"
 dependencies = [
  "scirust-automl",
  "scirust-gp",
+ "scirust-signal",
  "scirust-solvers",
  "scirust-stats",
  "serde",
