@@ -429,6 +429,38 @@ pub enum ResultDefect {
         /// What the axis says.
         axis: String,
     },
+    /// More than one series claims the same singular ensemble role.
+    DuplicateEnsembleRole {
+        /// The role claimed twice.
+        role: String,
+        /// The second series to claim it.
+        series_id: String,
+    },
+    /// An ensemble band edge is present with no mean to be an edge of.
+    EnsembleBandWithoutMean {
+        /// The band edge.
+        series_id: String,
+    },
+    /// An ensemble band edge crosses the mean it brackets.
+    EnsembleBandDoesNotBracketMean {
+        /// The band edge.
+        series_id: String,
+        /// Where it crosses.
+        index: usize,
+        /// The edge's value there.
+        edge: String,
+        /// The mean's value there.
+        mean: String,
+    },
+    /// Two series of one ensemble are plotted against different axes.
+    EnsembleAxisMismatch {
+        /// The series that disagrees.
+        series_id: String,
+        /// The axis it names.
+        axis_id: String,
+        /// The axis the rest of the ensemble uses.
+        expected_axis_id: String,
+    },
 }
 
 impl std::fmt::Display for ResultDefect {
@@ -499,6 +531,34 @@ impl std::fmt::Display for ResultDefect {
             ResultDefect::SummaryEndMismatch { summary, axis } => write!(
                 f,
                 "summary.t_end is {summary} but the time axis ends at {axis}"
+            ),
+            ResultDefect::DuplicateEnsembleRole { role, series_id } => write!(
+                f,
+                "series `{series_id}` is a second `{role}`; an ensemble has one of each"
+            ),
+            ResultDefect::EnsembleBandWithoutMean { series_id } => write!(
+                f,
+                "series `{series_id}` is an ensemble band edge, but the result has no ensemble \
+                 mean for it to be an edge of"
+            ),
+            ResultDefect::EnsembleBandDoesNotBracketMean {
+                series_id,
+                index,
+                edge,
+                mean,
+            } => write!(
+                f,
+                "ensemble band edge `{series_id}` is {edge} at index {index}, on the wrong side \
+                 of the mean's {mean}"
+            ),
+            ResultDefect::EnsembleAxisMismatch {
+                series_id,
+                axis_id,
+                expected_axis_id,
+            } => write!(
+                f,
+                "ensemble series `{series_id}` is plotted against axis `{axis_id}` while the \
+                 rest of the ensemble uses `{expected_axis_id}`"
             ),
         }
     }
@@ -609,6 +669,8 @@ pub fn validate_result(result: &RunResult) -> Result<(), Vec<ResultDefect>> {
         }
     }
 
+    check_ensemble(result, &mut defects);
+
     if let Some(axis) = result.time_axis()
     {
         if let (Some(first), Some(last)) = (axis.values.first(), axis.values.last())
@@ -637,6 +699,101 @@ pub fn validate_result(result: &RunResult) -> Result<(), Vec<ResultDefect>> {
     else
     {
         Err(defects)
+    }
+}
+
+/// The internal consistency of an ensemble's presentation.
+///
+/// Nothing here is about the *statistics* — whether the mean is in the right
+/// place is a question for a capability's own verification checks, which know
+/// the distribution being sampled. These are the structural claims that hold
+/// for any ensemble whatever it is sampling: there is one mean, a band edge
+/// is an edge of something, the edges are on the sides they say they are on,
+/// and the whole ensemble is drawn against one axis.
+///
+/// A result with no ensemble series passes trivially, which is every result
+/// from every deterministic capability.
+fn check_ensemble(result: &RunResult, defects: &mut Vec<ResultDefect>) {
+    let mut mean: Option<&Series> = None;
+    let mut lower: Option<&Series> = None;
+    let mut upper: Option<&Series> = None;
+    let mut axis: Option<&str> = None;
+
+    for series in result.series.iter().filter(|s| s.role.is_ensemble())
+    {
+        match axis
+        {
+            None => axis = Some(&series.axis_id),
+            Some(expected) if expected != series.axis_id =>
+            {
+                defects.push(ResultDefect::EnsembleAxisMismatch {
+                    series_id: series.id.clone(),
+                    axis_id: series.axis_id.clone(),
+                    expected_axis_id: expected.to_string(),
+                });
+            },
+            Some(_) =>
+            {},
+        }
+
+        let slot = match series.role
+        {
+            SeriesRole::EnsembleMean => Some((&mut mean, "ensemble mean")),
+            SeriesRole::EnsembleBandLower => Some((&mut lower, "lower band edge")),
+            SeriesRole::EnsembleBandUpper => Some((&mut upper, "upper band edge")),
+            // Members are the one ensemble role there can be many of.
+            _ => None,
+        };
+        if let Some((slot, name)) = slot
+        {
+            if slot.is_some()
+            {
+                defects.push(ResultDefect::DuplicateEnsembleRole {
+                    role: name.to_string(),
+                    series_id: series.id.clone(),
+                });
+            }
+            else
+            {
+                *slot = Some(series);
+            }
+        }
+    }
+
+    for (edge, is_lower) in [(lower, true), (upper, false)]
+    {
+        let Some(edge) = edge
+        else
+        {
+            continue;
+        };
+        let Some(mean) = mean
+        else
+        {
+            defects.push(ResultDefect::EnsembleBandWithoutMean {
+                series_id: edge.id.clone(),
+            });
+            continue;
+        };
+        for (index, (e, m)) in edge.values.iter().zip(mean.values.iter()).enumerate()
+        {
+            // `!(e <= m)` rather than `e > m` so a NaN is caught here too,
+            // rather than silently comparing false and passing.
+            let wrong_side = if is_lower { !(e <= m) } else { !(e >= m) };
+            if wrong_side
+            {
+                defects.push(ResultDefect::EnsembleBandDoesNotBracketMean {
+                    series_id: edge.id.clone(),
+                    index,
+                    edge: e.to_string(),
+                    mean: m.to_string(),
+                });
+                // One report per edge: a band that has crossed once has
+                // usually crossed everywhere, and thousands of identical
+                // defects would bury every other problem in the list.
+                break;
+            }
+        }
     }
 }
 
@@ -688,6 +845,39 @@ pub fn describe_defects(defects: &[ResultDefect]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A three-point ensemble on the standard fixture's axis.
+    fn ensemble_result() -> RunResult {
+        let mut result = sample_result();
+        let s = |id: &str, role: SeriesRole, values: Vec<f64>| Series {
+            id: id.to_string(),
+            display_name: id.to_string(),
+            unit: "m".to_string(),
+            axis_id: TIME_AXIS_ID.to_string(),
+            role,
+            values,
+        };
+        result.series = vec![
+            s(
+                "ensemble_mean",
+                SeriesRole::EnsembleMean,
+                vec![1.0, 0.9, 0.8],
+            ),
+            s(
+                "ensemble_band_lower",
+                SeriesRole::EnsembleBandLower,
+                vec![0.5, 0.4, 0.3],
+            ),
+            s(
+                "ensemble_band_upper",
+                SeriesRole::EnsembleBandUpper,
+                vec![1.5, 1.4, 1.3],
+            ),
+            s("member_0", SeriesRole::EnsembleMember, vec![1.1, 0.7, 0.9]),
+            s("member_1", SeriesRole::EnsembleMember, vec![0.9, 1.1, 0.7]),
+        ];
+        result
+    }
 
     fn sample_result() -> RunResult {
         RunResult {
@@ -755,6 +945,108 @@ mod tests {
     #[test]
     fn a_well_formed_result_validates() {
         assert!(validate_result(&sample_result()).is_ok());
+    }
+
+    #[test]
+    fn a_well_formed_ensemble_validates() {
+        assert!(validate_result(&ensemble_result()).is_ok());
+    }
+
+    /// The ensemble rules must not fire on the nine capabilities that have
+    /// no ensemble, which is what `sample_result` is.
+    #[test]
+    fn a_result_with_no_ensemble_is_not_subject_to_the_ensemble_rules() {
+        let mut defects = Vec::new();
+        check_ensemble(&sample_result(), &mut defects);
+        assert!(defects.is_empty(), "{defects:?}");
+    }
+
+    #[test]
+    fn a_second_ensemble_mean_is_rejected() {
+        let mut result = ensemble_result();
+        let mut twin = result.series[0].clone();
+        twin.id = "ensemble_mean_again".to_string();
+        result.series.push(twin);
+        let defects = validate_result(&result).unwrap_err();
+        assert!(matches!(
+            defects.as_slice(),
+            [ResultDefect::DuplicateEnsembleRole { .. }]
+        ));
+    }
+
+    #[test]
+    fn a_band_edge_with_no_mean_is_rejected() {
+        let mut result = ensemble_result();
+        result.series.retain(|s| s.role != SeriesRole::EnsembleMean);
+        let defects = validate_result(&result).unwrap_err();
+        assert_eq!(
+            defects
+                .iter()
+                .filter(|d| matches!(d, ResultDefect::EnsembleBandWithoutMean { .. }))
+                .count(),
+            2,
+            "both edges are orphaned: {defects:?}"
+        );
+    }
+
+    #[test]
+    fn a_band_edge_on_the_wrong_side_of_the_mean_is_rejected() {
+        let mut result = ensemble_result();
+        // Push the lower edge above the mean at one coordinate.
+        result.series[1].values[1] = 99.0;
+        let defects = validate_result(&result).unwrap_err();
+        assert!(
+            matches!(
+                defects.as_slice(),
+                [ResultDefect::EnsembleBandDoesNotBracketMean { index: 1, .. }]
+            ),
+            "{defects:?}"
+        );
+    }
+
+    /// A crossed band is reported once, not once per coordinate: a defect
+    /// list thousands long buries every other problem in it.
+    #[test]
+    fn a_band_that_is_wrong_everywhere_is_reported_once_per_edge() {
+        let mut result = ensemble_result();
+        result.series[1].values = vec![9.0, 9.0, 9.0];
+        result.series[2].values = vec![-9.0, -9.0, -9.0];
+        let defects = validate_result(&result).unwrap_err();
+        assert_eq!(defects.len(), 2, "{defects:?}");
+    }
+
+    #[test]
+    fn an_ensemble_split_across_two_axes_is_rejected() {
+        let mut result = ensemble_result();
+        result.axes.push(Axis {
+            id: "other".to_string(),
+            display_name: "other".to_string(),
+            unit: "s".to_string(),
+            monotonicity: AxisMonotonicity::StrictlyIncreasing,
+            values: vec![0.0, 1.0, 2.0],
+        });
+        result.series[3].axis_id = "other".to_string();
+        let defects = validate_result(&result).unwrap_err();
+        assert!(
+            defects
+                .iter()
+                .any(|d| matches!(d, ResultDefect::EnsembleAxisMismatch { .. })),
+            "{defects:?}"
+        );
+    }
+
+    /// A NaN edge must not slip past by comparing false against everything.
+    #[test]
+    fn a_band_edge_that_is_not_a_number_is_rejected() {
+        let mut result = ensemble_result();
+        result.series[1].values[0] = f64::NAN;
+        let defects = validate_result(&result).unwrap_err();
+        assert!(
+            defects
+                .iter()
+                .any(|d| matches!(d, ResultDefect::EnsembleBandDoesNotBracketMean { .. })),
+            "a NaN band edge was accepted as bracketing the mean: {defects:?}"
+        );
     }
 
     #[test]

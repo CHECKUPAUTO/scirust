@@ -31,8 +31,8 @@ use core::cell::RefCell;
 use super::wire::{
     BootstrapWire, CapabilityWire, CheckWire, ErrorWire, EventBatchWire, EventWire, FieldWire,
     IntegrityWire, JobStateWire, JobWire, LocationWire, MetricWire, OutputWire, ProblemWire,
-    ProvenanceWire, RunWire, ScenarioWire, SeriesWire, StoredRunWire, ValidationWire,
-    VerificationWire, XAxisKindWire,
+    ProvenanceWire, RunWire, ScenarioWire, SeriesRoleWire, SeriesWire, StoredRunWire,
+    ValidationWire, VerificationWire, XAxisKindWire,
 };
 use super::{FrontendError, StudioBackend};
 
@@ -157,6 +157,9 @@ impl MockBackend {
                 id: "x".to_string(),
                 display_name: "Displacement (MOCK)".to_string(),
                 unit: "m".to_string(),
+                // The fabricated capability is a spring-mass-damper, which
+                // draws no sample; there is no ensemble to be a member of.
+                role: SeriesRoleWire::Trajectory,
                 values: MOCK_Y.to_vec(),
             }],
             metrics: vec![MetricWire {
