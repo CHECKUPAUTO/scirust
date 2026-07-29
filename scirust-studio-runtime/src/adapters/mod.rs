@@ -3,11 +3,13 @@
 
 mod double_pendulum;
 mod heat_rod;
+mod hvac_zone;
 mod logistic_growth;
 mod lotka_volterra;
 mod ornstein_uhlenbeck;
 mod pendulum;
 mod photodiode;
+mod rigid_body;
 mod rlc;
 mod robertson;
 mod sir;
@@ -16,11 +18,13 @@ mod two_body;
 
 pub use double_pendulum::DoublePendulumAdapter;
 pub use heat_rod::HeatRodAdapter;
+pub use hvac_zone::HvacZoneAdapter;
 pub use logistic_growth::LogisticGrowthAdapter;
 pub use lotka_volterra::LotkaVolterraAdapter;
 pub use ornstein_uhlenbeck::OrnsteinUhlenbeckAdapter;
 pub use pendulum::PendulumAdapter;
 pub use photodiode::PhotodiodeAdapter;
+pub use rigid_body::RigidBodyAdapter;
 pub use rlc::RlcAdapter;
 pub use robertson::RobertsonAdapter;
 pub use sir::SirAdapter;
@@ -52,6 +56,8 @@ pub fn all_adapters() -> Vec<Box<dyn CapabilityAdapter>> {
         Box::new(OrnsteinUhlenbeckAdapter),
         Box::new(HeatRodAdapter),
         Box::new(PhotodiodeAdapter),
+        Box::new(HvacZoneAdapter),
+        Box::new(RigidBodyAdapter),
     ]
 }
 
@@ -135,6 +141,16 @@ const TUTORIAL_SCENARIOS: &[(&str, &str, &str)] = &[
         "sim.thermal.heat_rod_1d",
         "heat_rod.scirust.toml",
         include_str!("../../../docs/studio/tutorials/heat_rod.scirust.toml"),
+    ),
+    (
+        "sim.mechanics.rigid_body",
+        "rigid_body.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/rigid_body.scirust.toml"),
+    ),
+    (
+        "sim.thermal.hvac_zone",
+        "hvac_zone.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/hvac_zone.scirust.toml"),
     ),
     (
         "sim.optoelectronics.photodiode",

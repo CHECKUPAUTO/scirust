@@ -1,0 +1,78 @@
+# SciRust Studio tutorial scenario: the Dzhanibekov effect.
+#
+# Run it with:
+#
+#   scirust run docs/studio/tutorials/rigid_body.scirust.toml
+#
+# A torque-free rigid body with three different principal moments, spun almost
+# exactly about its INTERMEDIATE axis. That axis is unstable: the rotation
+# does not stay there. It flips, periodically and without any external torque
+# — the tennis-racket theorem, and the effect the cosmonaut Dzhanibekov
+# famously filmed with a wingnut aboard Salyut 7 in 1985.
+#
+# Nothing drives the flip. It comes out of Euler's equations alone, which is
+# why this is the scenario that ships: a body spun about its largest or
+# smallest axis just sits there, and conserving invariants along a motion that
+# barely moves proves very little.
+#
+# What is verified:
+#
+#   * energy_drift — rotational kinetic energy is conserved EXACTLY by the
+#     torque-free equations, so any drift is RK4's own error.
+#   * angular_momentum_drift — the magnitude of the angular momentum is the
+#     second exact invariant.
+#
+# Both, not one. The trajectory is confined to the intersection of an energy
+# ellipsoid and a momentum sphere; a wrong moment of inertia can leave a body
+# on the right sphere while drifting off the ellipsoid, so checking either
+# alone would miss it. Together they pin the motion.
+#
+# The `intermediate_axis` metric reports whether the run is the unstable case,
+# because a reader needs to know whether the invariants were tested against a
+# tumbling motion or a placid one.
+#
+# Try it: swap the initial spin onto axis 3 (the largest moment) — the
+# invariants still hold, but omega1 and omega2 stay near zero and the run
+# stops being evidence about anything hard.
+
+schema_version = 1
+
+[experiment]
+name = "Intermediate-axis instability"
+description = "A torque-free body spun near its intermediate principal axis, tumbling while conserving both invariants exactly."
+
+[capability]
+id = "sim.mechanics.rigid_body"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+# Three distinct moments. The instability needs I1 < I2 < I3 strictly: with
+# any two equal the body is a symmetric top and precesses placidly instead.
+i1 = { value = 1.0, unit = "kg*m^2" }
+i2 = { value = 2.0, unit = "kg*m^2" }
+i3 = { value = 3.0, unit = "kg*m^2" }
+
+[initial_state]
+# Almost all the spin on axis 2 — the intermediate one — with a small nudge on
+# the others. The nudge is what the instability amplifies; with none at all
+# the body would balance on the unstable axis forever, which is a real
+# solution and a useless demonstration.
+omega = [
+  { value = 0.05, unit = "rad/s" },
+  { value = 5.0, unit = "rad/s" },
+  { value = 0.05, unit = "rad/s" },
+]
+
+[solver]
+id = "rk4"
+start = { value = 0.0, unit = "s" }
+# Long enough for several flips.
+end = { value = 40.0, unit = "s" }
+step = { value = 0.001, unit = "s" }
+
+[outputs]
+record = ["omega1", "omega2", "omega3", "energy", "angular_momentum"]
