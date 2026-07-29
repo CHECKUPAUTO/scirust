@@ -122,8 +122,8 @@ pub use denoise::{
 };
 pub use envelope::{dominant_envelope_freq, envelope_spectrum, hilbert_envelope};
 pub use features::spectral::{
-    WelchPsd, band_power, psd, spectral_centroid, spectral_entropy, spectral_flatness,
-    spectral_rolloff, spectral_spread, welch_psd,
+    WelchPsd, band_power, psd, psd_centroid, psd_flatness, psd_spread, spectral_centroid,
+    spectral_entropy, spectral_flatness, spectral_rolloff, spectral_spread, welch_psd,
 };
 pub use features::{
     autocorrelation, crest_factor, energy, entropy, kurtosis, peak_to_peak, rms, skewness,
