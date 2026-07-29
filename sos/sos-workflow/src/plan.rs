@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use sos_core::canonical::{Canonical, CanonicalEncoder};
-use sos_core::{Digest, HashAlgo, ObjectId};
+use sos_core::{Body, Digest, HashAlgo, ObjectId};
 
 use crate::cache::CacheKey;
 use crate::descriptor::StageDescriptor;
@@ -111,9 +111,47 @@ impl Canonical for Stage {
 ///
 /// Constructed through [`Plan::new`], which rejects duplicate ids, dangling
 /// dependencies, and cycles — so a `Plan` is always a schedulable DAG.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// A `Plan` is also a storable [`Body`], so the plan a study ran can live in
+/// the object store beside the [`RunLedger`](crate::RunLedger) that recorded
+/// the run — the same "control flow is data too" argument the ledger already
+/// makes. Re-executing a recorded run needs the plan back, and a digest alone
+/// cannot supply it.
+///
+/// **Deserialization re-validates.** It routes through [`Plan::new`] rather
+/// than filling the field directly, so the type's invariant survives a
+/// round-trip through bytes nobody controls: a stored plan whose stages were
+/// tampered into a cycle fails to load rather than becoming a `Plan` that is
+/// not a DAG.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Plan {
     stages: Vec<Stage>,
+}
+
+impl<'de> Deserialize<'de> for Plan {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> core::result::Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Raw {
+            stages: Vec<Stage>,
+        }
+        let raw = Raw::deserialize(d)?;
+        Self::new(raw.stages).map_err(serde::de::Error::custom)
+    }
+}
+
+impl Canonical for Plan {
+    fn encode(&self, enc: &mut CanonicalEncoder) {
+        // Sorted by id so the encoding — and therefore [`Plan::digest`] — does
+        // not depend on the order stages were supplied in.
+        let mut ordered: Vec<&Stage> = self.stages.iter().collect();
+        ordered.sort_by(|a, b| a.id.cmp(&b.id));
+        enc.seq(&ordered);
+    }
+}
+
+impl Body for Plan {
+    const KIND: &'static str = "Plan";
+    const SCHEMA_VERSION: u32 = 1;
 }
 
 impl Plan {
@@ -179,11 +217,7 @@ impl Plan {
     /// to bind a [`crate::RunLedger`] to the plan it ran.
     #[must_use]
     pub fn digest(&self) -> Digest {
-        let mut ordered: Vec<&Stage> = self.stages.iter().collect();
-        ordered.sort_by(|a, b| a.id.cmp(&b.id));
-        let mut enc = CanonicalEncoder::new();
-        enc.seq(&ordered);
-        HashAlgo::Sha256.hash(PLAN_DOMAIN, &enc.finish())
+        HashAlgo::Sha256.hash(PLAN_DOMAIN, &self.canonical_bytes())
     }
 
     /// Kahn's algorithm with a sorted ready-set — deterministic, and returns a
@@ -236,6 +270,51 @@ impl Plan {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_plan_round_trips_through_its_stored_form() {
+        let plan = Plan::new(vec![stage("b", &["a"]), stage("a", &[])]).unwrap();
+        let json = serde_json::to_string(&plan).unwrap();
+        let back: Plan = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, plan);
+        assert_eq!(back.digest(), plan.digest());
+        assert_eq!(back.schedule(), plan.schedule());
+    }
+
+    #[test]
+    fn deserializing_re_validates_rather_than_trusting_the_bytes() {
+        // A `Plan` is documented as always being a schedulable DAG. Bytes from
+        // a store are not under this crate's control, so loading must re-run
+        // the same checks `Plan::new` does — otherwise a tampered record would
+        // become a `Plan` that is not a DAG, and every downstream guarantee
+        // built on that invariant would quietly rest on nothing.
+        let cyclic = r#"{"stages":[
+            {"id":"a","descriptor":{"name":"p","version":{"major":1,"minor":0,"patch":0},
+             "content_hash":"0000000000000000000000000000000000000000000000000000000000000000"},
+             "inputs":[],"config_hash":"0000000000000000000000000000000000000000000000000000000000000000",
+             "seed":0,"deps":["b"]},
+            {"id":"b","descriptor":{"name":"p","version":{"major":1,"minor":0,"patch":0},
+             "content_hash":"0000000000000000000000000000000000000000000000000000000000000000"},
+             "inputs":[],"config_hash":"0000000000000000000000000000000000000000000000000000000000000000",
+             "seed":0,"deps":["a"]}]}"#;
+        let err = serde_json::from_str::<Plan>(cyclic).unwrap_err();
+        assert!(err.to_string().contains("cycle"), "{err}");
+
+        // Likewise a dangling dependency.
+        let dangling = cyclic.replace(r#""deps":["b"]"#, r#""deps":["ghost"]"#);
+        assert!(serde_json::from_str::<Plan>(&dangling).is_err());
+    }
+
+    #[test]
+    fn the_canonical_encoding_and_the_digest_agree_on_ordering() {
+        // `digest` is defined in terms of the `Canonical` impl, so a plan
+        // built in either order is the same object — which is what lets a
+        // stored plan be found by the `plan_digest` a ledger recorded.
+        let forward = Plan::new(vec![stage("a", &[]), stage("b", &["a"])]).unwrap();
+        let reverse = Plan::new(vec![stage("b", &["a"]), stage("a", &[])]).unwrap();
+        assert_eq!(forward.digest(), reverse.digest());
+        assert_eq!(forward.canonical_bytes(), reverse.canonical_bytes());
+    }
     use sos_core::SemVer;
 
     fn digest(tag: &[u8]) -> Digest {
