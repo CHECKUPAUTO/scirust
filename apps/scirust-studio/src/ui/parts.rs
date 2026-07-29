@@ -303,6 +303,13 @@ pub fn Inspector() -> Element {
                         dd { class: "mono", "{run.provenance.started_at}" }
                         dt { "Elapsed" }
                         dd { class: "mono", "{run.provenance.elapsed_seconds:.3} s" }
+                        // Only when one was consumed: a seed shown against a
+                        // result that does not depend on it would be a lie
+                        // told in a provenance panel.
+                        if let Some(seed) = run.provenance.seed {
+                            dt { "Seed" }
+                            dd { class: "mono", "{seed}" }
+                        }
                     }
                 },
             }

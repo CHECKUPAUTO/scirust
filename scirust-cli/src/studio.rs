@@ -305,6 +305,16 @@ fn print_result_text(result: &RunResult) {
     let axis_unit = result.axes.first().map(|a| a.unit.as_str()).unwrap_or("");
     println!("  t final       {} {axis_unit}", result.summary.t_end);
 
+    // Printed only when the computation actually consumed one, and printed
+    // next to the determinism class it qualifies: for a stochastic result the
+    // seed is not decoration, it is the difference between a trajectory and
+    // *the* trajectory these inputs produce.
+    if let Some(seed) = result.provenance.seed
+    {
+        println!("  determinism   {:?}", result.provenance.determinism);
+        println!("  seed          {seed}  (re-run with this seed to obtain the same sample)");
+    }
+
     println!();
     println!("{}", ux::heading("SERIES"));
     for s in &result.series

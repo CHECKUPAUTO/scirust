@@ -45,6 +45,8 @@ pub enum CapabilityCategory {
     Chemistry,
     /// Population dynamics.
     Ecology,
+    /// Stochastic processes.
+    Stochastic,
 }
 
 /// The scientific maturity of the *underlying model*, as documented by its

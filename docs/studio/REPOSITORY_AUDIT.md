@@ -420,3 +420,42 @@ Several of the remaining ones need work beyond an adapter: `thermal`'s
 a line chart, and `stochastic` is the first model whose determinism class
 would not be `StrictSameBinarySameTarget`. Both are worth doing deliberately
 rather than folding into a tranche of lumped-parameter models.
+
+## 15. Update — Phase 3B-2 (the seed becomes real)
+
+§14 listed `stochastic` among the families still needing work "beyond an
+adapter", on the grounds that it would be the first model whose determinism
+class was not `StrictSameBinarySameTarget`. That turned out to understate it:
+adapting it surfaced a promise the product had been making and not keeping.
+
+`experiment.seed` has been in the scenario schema since Phase 1 and is set by
+every shipped tutorial. Before this phase, a search for `.seed` across every
+Studio crate returned exactly one hit — a schema unit test asserting the field
+parses. Nothing read it. Meanwhile `DeterminismClass` had carried a variant
+named `InherentlyStochasticRecordedSeed`, describing a recording that did not
+happen.
+
+Both are now true statements. `RunProvenance` records the seed the computation
+consumed (`None` when it consumed none), a stochastic capability is refused
+without one, and the CLI and desktop display it. The reasoning, including the
+three ways of picking a seed silently that were rejected, is in ADR 0007.
+
+`sim.stochastic.ornstein_uhlenbeck` is the capability that forced it: 10
+capabilities across 7 of 16 module families.
+
+**Still catalogue-only**: `thermal`, `pharmacokinetics`, `rigid_body`,
+`battery`, `hvac`, `grid`, `laser`, `photodiode`, `apd`, `envs`, plus SEIR,
+the two non-stiff chemistry models, the projectile, Van der Pol, GBM and the
+M/M/1 queue.
+
+Of those, two still need design work rather than another adapter, and the list
+has changed since §14:
+
+- `thermal`'s `HeatRod1d` is a spatially discretised field. Result schema v2
+  can already express it — `axes` is a vector and every series names its axis
+  — but a line chart is the wrong presentation and the interface has no other.
+- `stochastic`'s remaining models raise the **ensemble** question. A seeded
+  single path answers "what does one realisation look like". Questions like
+  "what is the distribution of the first passage time" need many paths and a
+  result model that can hold them, which is a larger change than a seed field.
+  ADR 0007 records this as explicitly not attempted.

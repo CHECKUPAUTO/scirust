@@ -40,20 +40,21 @@ callback.
 
 | Module | Catalogued | Descriptor | Adapter | Scenario tested | Oracle tested | CLI exposed | Desktop exposed |
 |---|---|---|---|---|---|---|---|
-| `mechanics` (spring-mass-damper) | Yes | Yes | Yes | Yes | Yes (energy conservation) | Yes | NoSee desktop table |
+| `mechanics` (spring-mass-damper) | Yes | Yes | Yes | Yes | Yes (energy conservation) | Yes | See desktop table |
 | `mechanics` (pendulum) | Yes | Yes | Yes | Yes | Yes (energy conservation, small-angle period) | Yes | See desktop table |
 | `mechanics` (double pendulum) | Yes | Yes | Yes | Yes | Yes (energy conservation) | Yes | See desktop table |
 | `mechanics` (projectile) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
-| `orbital` (two-body) | Yes | Yes | Yes | Yes | Yes (energy + angular momentum) | Yes | NoSee desktop table |
-| `epidemiology` (SIR) | Yes | Yes | Yes | Yes | Yes (population conservation, final-size relation) | Yes | NoSee desktop table |
+| `orbital` (two-body) | Yes | Yes | Yes | Yes | Yes (energy + angular momentum) | Yes | See desktop table |
+| `epidemiology` (SIR) | Yes | Yes | Yes | Yes | Yes (population conservation, final-size relation) | Yes | See desktop table |
 | `epidemiology` (SEIR) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
 | `ecology` (Lotka-Volterra, logistic growth) | Yes | Yes | Yes | Yes | Yes (exact first integral; closed-form solution) | Yes | See desktop table |
 | `chemistry` (consecutive/reversible reactions) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
-| `chemistry` (Robertson, stiff) | Yes | Yes | Yes | Yes | Yes (mass conservation, published reference values) | Yes | NoSee desktop table |
+| `chemistry` (Robertson, stiff) | Yes | Yes | Yes | Yes | Yes (mass conservation, published reference values) | Yes | See desktop table |
 | `thermal` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
-| `electrical` (RC, series RLC) | Yes | Yes (RLC only) | Yes (RLC only) | Yes (RLC only) | Yes (passivity, closed-form match) | Yes (RLC only) | NoSee desktop table |
+| `electrical` (RC, series RLC) | Yes | Yes (RLC only) | Yes (RLC only) | Yes (RLC only) | Yes (passivity, closed-form match) | Yes (RLC only) | See desktop table |
 | `electrical` (Van der Pol) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
-| `stochastic` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
+| `stochastic` (Ornstein-Uhlenbeck) | Yes | Yes | Yes | Yes | Yes (exact stationary moments) | Yes | See desktop table |
+| `stochastic` (GBM, M/M/1 queue) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
 | `pharmacokinetics` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
 | `rigid_body` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
 | `battery` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
@@ -72,11 +73,11 @@ the way it did for the adapted models. That distinction matters — do not read
 "Oracle tested: Yes" here as "Studio verified this," only as "the owning crate
 verifies this."
 
-**6 of 16 modules have a real Studio adapter**, covering 9 capabilities. The
-other 10 (plus 4 model families within already-partially-adapted modules —
-SEIR, the two non-stiff chemistry models, the projectile and Van der Pol) are
-real, tested code that Studio does not yet expose. Building their adapters is
-the remainder of Phase 3B.
+**7 of 16 modules have a real Studio adapter**, covering 10 capabilities. The
+other 9 (plus 6 model families within already-partially-adapted modules —
+SEIR, the two non-stiff chemistry models, the projectile, Van der Pol, and
+stochastic's GBM and M/M/1 queue) are real, tested code that Studio does not
+yet expose. Building their adapters is the remainder of Phase 3B.
 
 ## Desktop exposure (Phase 3A)
 
@@ -111,6 +112,7 @@ Columns:
 | `sim.ecology.logistic_growth` | Yes | Yes | Yes | Yes | Yes | Yes |
 | `sim.mechanics.pendulum` | Yes | Yes | Yes | Yes | Yes | Yes |
 | `sim.mechanics.double_pendulum` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.stochastic.ornstein_uhlenbeck` | Yes | Yes | Yes | Yes (indeterminate progress) | Yes | Yes |
 | Every other `scirust-sim` model family | No | No | No | No | No | No |
 | Every other workspace crate | No | No | No | No | No | No |
 
@@ -219,3 +221,25 @@ Two smaller things were needed to support them, both deliberately minimal: the
 unit table gained `rad` and `rad/s` (dimensionless and frequency respectively,
 both with a conversion factor of exactly 1), and the registry gained an
 `Ecology` category.
+
+## Summary counts (Phase 3B-2)
+
+- Operational: **10** — the nine above plus
+  `sim.stochastic.ornstein_uhlenbeck`.
+- `scirust-sim` module families with at least one adapter: **7 of 16**.
+- **Determinism classes in use: 2.** Nine capabilities are
+  `StrictSameBinarySameTarget`; the Ornstein-Uhlenbeck process is
+  `InherentlyStochasticRecordedSeed`, the first whose result is not a function
+  of its parameters alone.
+
+### What the stochastic capability changes
+
+It is the first capability for which `experiment.seed` — a scenario field that
+had existed since Phase 1 and was read by nothing — actually does something.
+It is required, recorded in the result's provenance, shown by the CLI and the
+desktop's provenance panel, and re-derived inside the run as a verification
+check. See `docs/studio/adr/0007-seeded-stochastic-capabilities.md`.
+
+It is also the second capability that cannot report progress, after
+`sim.chemistry.robertson`. That matters for the interface: its indeterminate
+path is no longer a special case built for a single model.

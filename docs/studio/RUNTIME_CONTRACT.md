@@ -103,6 +103,7 @@ Not every capability can do this, and the table below says which:
 | `sim.ecology.logistic_growth` | every step | yes |
 | `sim.mechanics.pendulum` | every step | yes |
 | `sim.mechanics.double_pendulum` | every step | yes (the main run only) |
+| `sim.stochastic.ornstein_uhlenbeck` | **before execution only** | **none** |
 
 Robertson integrates through `scirust_sim::stiff_bridge`'s adaptive
 Rosenbrock-W solver, which exposes no per-step callback. It is given no
@@ -127,6 +128,7 @@ this for all of them.
 | `sim.ecology.logistic_growth` | `scirust_sim::ecology::LogisticGrowth` | `rk4` | `analytic_error`, `stays_below_capacity` |
 | `sim.mechanics.pendulum` | `scirust_sim::mechanics::Pendulum` | `rk4` | `energy_drift`, `amplitude_bounded` |
 | `sim.mechanics.double_pendulum` | `scirust_sim::mechanics::DoublePendulum` | `rk4` | `energy_drift`, `sensitive_dependence` |
+| `sim.stochastic.ornstein_uhlenbeck` | `scirust_sim::stochastic::ou_path` | `exact_gaussian_transition` | `stationary_moments`, `reproducible_from_seed` |
 
 Every row is a real, tested adapter with a shipped, executed tutorial
 scenario under `docs/studio/tutorials/`. See `docs/studio/CAPABILITY_MATRIX.md`
@@ -156,6 +158,9 @@ Validation codes currently in use:
 - `SRST-VAL-0160`..`0169`: `sim.ecology.logistic_growth` field errors.
 - `SRST-VAL-0170`..`0179`: `sim.mechanics.pendulum` field errors.
 - `SRST-VAL-0180`..`0189`: `sim.mechanics.double_pendulum` field errors.
+- `SRST-VAL-0190`..`0199`: `sim.stochastic.ornstein_uhlenbeck` field errors.
+- `SRST-VAL-0095`: a stochastic capability was given no `experiment.seed`
+  (see `docs/studio/adr/0007-seeded-stochastic-capabilities.md`).
 
 Each capability's exact field-to-code mapping is in that capability's
 adapter module (the `FieldDescriptor.error_code` on each `const`). A new
@@ -227,3 +232,30 @@ meant for tests, scripts, and — eventually — a desktop client, and is a
 direct serialization of `CapabilityRegistry`'s entries or a `RunResult`
 with stable field names (see the two ADRs for why the field types are
 shaped the way they are).
+
+## Seeds and determinism
+
+Until Phase 3B-2 every capability was
+`DeterminismClass::StrictSameBinarySameTarget`: the result was a function of
+the parameters alone, and `experiment.seed` was read by nothing.
+
+`sim.stochastic.ornstein_uhlenbeck` is
+`InherentlyStochasticRecordedSeed`. For such a capability:
+
+- **`experiment.seed` is required.** Validation fails with `SRST-VAL-0095`
+  without one. A single sample from a distribution is not evidence unless
+  someone else can obtain the same sample.
+- **The seed is recorded** in `RunProvenance::seed`, which is `None` for every
+  capability that did not consume one — recording a scenario's seed against a
+  result that ignored it would imply it mattered.
+- **The verification is statistical.** No individual trajectory can be right
+  or wrong; the distribution can. See ADR 0007 for how the tolerance is
+  derived rather than chosen.
+- **The run re-derives itself** from the recorded seed and compares bit for
+  bit, so the reproducibility claim is demonstrated and not just asserted.
+
+Adding another stochastic capability means calling
+`validate_support::resolve_seed` in `validate`, passing the seed to the model,
+and setting `RunProvenance::seed`. Skipping any of the three produces a result
+nobody can reproduce, which is why the first two are enforced by the type
+system and the third by the bridge contract test.

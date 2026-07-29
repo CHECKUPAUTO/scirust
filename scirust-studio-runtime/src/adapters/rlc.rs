@@ -485,6 +485,9 @@ impl CapabilityAdapter for RlcAdapter {
                 started_at_rfc3339: started_at.to_rfc3339(),
                 completed_at_rfc3339: chrono::Utc::now().to_rfc3339(),
                 elapsed_seconds: wall_start.elapsed().as_secs_f64(),
+                // This capability's result does not depend on a seed, so
+                // recording one would imply it did.
+                seed: None,
             },
         };
         crate::result::validate_result(&result)
