@@ -222,12 +222,12 @@ fn a_study_pinned_to_a_different_plugin_build_is_refused() {
 }
 
 #[test]
-fn rerunning_the_same_study_lands_on_the_same_objects() {
-    // `L3` all the way down: the store does not grow, because the second run
-    // produces byte-identical objects at the same addresses.
+fn rerunning_the_same_study_is_served_from_the_persisted_memo() {
+    // The point of persisting: the second invocation is a different process
+    // (a different `FileMemo::open`), and it still does no work.
     let dir = temp_root("rerun");
     let store_path = dir.join("store");
-    let (manifest, runs_file) = write_study(&dir, &[growth(100.0)]);
+    let (manifest, runs_file) = write_study(&dir, &[growth(100.0), growth(50.0)]);
 
     let first = sos_run(
         &manifest,
@@ -236,6 +236,12 @@ fn rerunning_the_same_study_lands_on_the_same_objects() {
         &["--allow", "effectful"],
     )
     .unwrap();
+    assert!(first.contains("ran 2 of 2 stage(s)"), "{first}");
+    assert!(
+        store_path.join(sos_cli::memo::MEMO_FILE).is_file(),
+        "the memo must be written beside the store"
+    );
+
     let ids_after_first = FileStore::open(&store_path).unwrap().object_ids();
     let second = sos_run(
         &manifest,
@@ -244,14 +250,46 @@ fn rerunning_the_same_study_lands_on_the_same_objects() {
         &["--allow", "effectful"],
     )
     .unwrap();
-    let ids_after_second = FileStore::open(&store_path).unwrap().object_ids();
+    assert!(
+        second.contains("ran 0 of 2 stage(s)"),
+        "the second run must be entirely cached, got: {second}"
+    );
 
-    assert_eq!(ids_after_first, ids_after_second);
-    assert_eq!(ids_after_first.len(), 1);
-    // Same reported output ids too, not merely the same count.
+    // Same reported outputs, and the store is unchanged.
     assert_eq!(
-        first.lines().nth(1).unwrap(),
-        second.lines().nth(1).unwrap()
+        first.lines().skip(1).collect::<Vec<_>>(),
+        second.lines().skip(1).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        ids_after_first,
+        FileStore::open(&store_path).unwrap().object_ids()
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_corrupt_memo_stops_the_run_rather_than_silently_recomputing() {
+    let dir = temp_root("corrupt-memo");
+    let store_path = dir.join("store");
+    let (manifest, runs_file) = write_study(&dir, &[growth(100.0)]);
+    sos_run(
+        &manifest,
+        &runs_file,
+        &store_path,
+        &["--allow", "effectful"],
+    )
+    .unwrap();
+
+    fs::write(store_path.join(sos_cli::memo::MEMO_FILE), b"{not json").unwrap();
+    assert!(
+        sos_run(
+            &manifest,
+            &runs_file,
+            &store_path,
+            &["--allow", "effectful"]
+        )
+        .is_err(),
+        "an unreadable memo must be surfaced, not reset"
     );
     fs::remove_dir_all(&dir).ok();
 }
@@ -279,8 +317,9 @@ fn a_different_environment_label_is_a_different_run() {
     )
     .unwrap();
     // The object is content-addressed and host-independent by construction, so
-    // the store still holds one — what changes is the cache key, and the run
-    // happens again rather than being skipped.
+    // the store still holds one — what changes is the cache key, so the run
+    // happens again rather than being served from the memo the first
+    // invocation just persisted.
     assert!(out.contains("ran 1 of 1 stage(s)"), "{out}");
     assert_eq!(FileStore::open(&store_path).unwrap().object_ids().len(), 1);
     fs::remove_dir_all(&dir).ok();

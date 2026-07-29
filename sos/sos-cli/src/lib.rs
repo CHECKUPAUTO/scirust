@@ -92,6 +92,7 @@ pub mod header;
 pub mod init;
 pub mod know;
 pub mod log;
+pub mod memo;
 pub mod plan;
 pub mod plugins;
 pub mod publish;
