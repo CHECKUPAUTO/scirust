@@ -141,8 +141,8 @@ shift with what's true at the time).
 | 5C.2 | Distinguish association from causal evidence | **Done** — deterministic robust conditional-independence testing |
 | 5C.3 | Discover equivalence classes | **Done** — PC-Stable, CPDAG-returning (no PAG/latent-confounding-robust discovery) |
 | 5C.4 | Estimate identifiable effects | **Done** — backdoor identification + linear adjustment estimation |
-| 5C.5 | Quantify sensitivity to unmeasured confounding | **Draft** — Cinelli–Hazlett omitted-variable-bias bounds |
-| 5C.6 | Test invariance | Planned — cross-environment invariant prediction |
+| 5C.5 | Quantify sensitivity to unmeasured confounding | **Done** — Cinelli–Hazlett omitted-variable-bias bounds |
+| 5C.6 | Test invariance | **Draft** — Invariant Causal Prediction across environments |
 | 5C.7 | Simulate interventions | Planned — SCM-based counterfactual simulation |
 | 5C.8 | Choose the next experiment | Planned — experimental design / value of information |
 | 5C.9 | Update theories | Planned — assumption-registry revision under new evidence |
@@ -889,8 +889,8 @@ enumeration proves no larger valid set exists.
 ## Phase 5C.5 — Quantify sensitivity to unmeasured confounding
 
 **Status: Draft.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
-from `origin/master` at `8f777520`. PR #850. Additive to `scirust-causal` (no
-existing public API changed).
+from `origin/master` at `8f777520`. PR #850, merged at `9b43bf34`. Additive to
+`scirust-causal` (no existing public API changed).
 
 **This phase was inserted ahead of the planned invariance work, and the
 roadmap renumbered accordingly** (invariance moves 5C.5 → 5C.6, and the rest
@@ -1053,3 +1053,150 @@ misspecification other than an omitted linear term.
   strong as covariate j" multiplier form of Cinelli–Hazlett is not
   implemented.
 - No formal significance-adjusted robustness value (`RV_{q,α}`).
+
+## Phase 5C.6 — Test invariance (Invariant Causal Prediction)
+
+**Status: Draft.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
+from `origin/master` at `9b43bf34`. Additive to `scirust-causal` (no existing
+public API changed).
+
+Implements Invariant Causal Prediction (Peters, Bühlmann & Meinshausen 2016,
+*Causal inference using invariant prediction*, JRSS-B 78(5)). Phase 5C.1's
+`Environment` type was written for exactly this — its docs said so at the
+time: *"Tagging data by environment is the precondition later invariance
+testing needs to operate on; this phase only defines the type."*
+
+### Scientific scope
+
+If `S` is the set of direct causes of `Y`, the mechanism `Y ← f(X_S) + ε` is a
+property of nature, not of the collection regime. Intervening elsewhere
+changes the `X` distribution but not `Y | X_S`. So: regress `Y` on each
+candidate subset, pooled across environments, and test whether the residuals
+look the same in every environment. Surviving subsets are plausible; the
+**intersection** of all survivors is, with probability at least `1 − α`, a
+**subset of the true direct causes**.
+
+Requires: invariance of the mechanism
+([`CausalAssumption::InvarianceAcrossEnvironments`], already defined in 5C.1);
+**no environment intervening directly on the target** (if one does, invariance
+fails for the true causal set too and ICP cannot be right); and linearity.
+The environment labels say which variables were intervened on, but nothing in
+the data verifies the labels — that assumption is named and unchecked.
+
+### What makes this different from 5C.4
+
+Backdoor adjustment needs a caller-supplied graph and *assumes* causal
+sufficiency; 5C.4's own adversarial test shows it certifying a badly wrong
+number with no way to notice. ICP needs **no graph** and has a property
+backdoor adjustment structurally cannot have: **when its core assumption
+fails, it can say so.** No surviving subset is a positive finding
+([`InvariantPredictionOutcome::AssumptionsViolated`]), not a weak result.
+
+The trade is directness — ICP answers *which* variables are direct causes,
+never *how large* the effect is, and is conservative by construction.
+
+### The three-way outcome
+
+| Outcome | Meaning |
+| --- | --- |
+| `CausalPredictorsIdentified` | Subsets survived and their intersection is non-empty: those variables are direct causes at the stated confidence |
+| `NoPredictorConfirmed` | Subsets survived but their intersection is empty: no single variable is required by every surviving explanation — usually too few or too similar environments |
+| `AssumptionsViolated` | **No** subset survived: evidence the assumptions themselves fail |
+
+### Design
+
+`src/invariance.rs`. For each candidate subset: pooled regression via 5C.2's
+`residualize`, then per environment compare inside-vs-outside residuals in
+**mean** (Welch two-sample t, reusing `scirust_stats::htest::t_test_two_sample`)
+and in **variance** (two-sided F, built on `scirust_stats::dist::FisherF`).
+Bonferroni-combine the two, then Bonferroni-combine across environments.
+Subset enumeration reuses `skeleton_discovery::combinations`, so the order is
+lexicographic and deterministic. No RNG anywhere.
+
+The search is exponential in the candidate count;
+`max_predictor_set_size` bounds it, and a bounded search that still reports an
+intersection **records a warning saying it was bounded** rather than
+presenting a partial search as complete.
+
+### Two fixture findings, both discovered by running the tests
+
+Neither was predicted correctly on the first attempt, and both are real
+properties of invariance testing rather than implementation artefacts. They
+are recorded in the test file's own documentation:
+
+1. **A pure mean shift cannot expose a child of the target.** The first
+   fixture intervened by shifting the true cause's mean. The target and its
+   child then move by the same amount, so a pooled regression of target on
+   child picks a slope near 1 that absorbs the shift exactly — no mean or
+   variance difference survives, and the child is accepted. Switching to a
+   **scale** intervention breaks that collinearity.
+2. **A near-noiseless child still cannot be exposed.** Even under a scale
+   intervention, a child with small independent noise is an almost-perfect
+   proxy: the pooled slope goes to 1, the residual collapses to the child's
+   own *invariant* noise, and the target's differing variance never reaches
+   the residual. The child needs substantial independent noise for the slope
+   to sit meaningfully below 1.
+
+Both say the same thing: **which environments you have determines what they
+can distinguish.** ICP's power is a property of the interventions available,
+not only of the algorithm.
+
+### A third finding, from the benchmark
+
+At `α = 0.01` the same dataset that yields `CausalPredictorsIdentified` at
+`α = 0.05` yields `NoPredictorConfirmed` — because rejecting is *harder* at a
+stricter level, **more** subsets survive (5 vs 4), and the extra survivor
+omits the true cause, so the intersection empties. This is correct: the
+confidence guarantee attaches to the subset claim, so demanding higher
+confidence yields a smaller, possibly empty, confirmed set. Recorded in the
+benchmark as two adjacent rows so the effect is visible rather than
+surprising.
+
+### Tests
+
+356 tests existed before this phase; **14** added, for **370** in-crate: 4
+unit tests (the F-test flagging and not flagging variance differences,
+degenerate-input refusal, Bonferroni scaling, and mean-shift detection) and 10
+integration tests — recovery of the single true cause, the certificate's
+subset caveat and named assumptions, **the headline contrast against 5C.4**,
+the empty-intersection outcome, bounded-search honesty, the single-environment
+and malformed-query errors, level monotonicity, determinism and JSON
+round-trip.
+
+### Benchmark
+
+`examples/invariance_benchmark.rs`, 6 rows, oracle-checked. The headline row
+prints both methods on the same data: backdoor reports `1.4949` against a
+truth of `0.7` — a **74.8-standard-error** bias, certified `Identifiable` —
+while ICP reports `AssumptionsViolated` with zero accepted subsets.
+
+Run-twice SHA-256:
+`e1f0b99feabc2bf9e1428d53656305cd8e953c08f7431b45e4b4c7412201f63d`.
+All five prior fingerprints reverified unchanged: `167c13de…`, `c1449177…`,
+`79e57e69…`, `7ac0dc76…`, `1bc59a1d…`.
+
+### Compatibility
+
+Purely additive. No existing public item changed; no new `pub(crate)`
+widenings needed. Crate root goes seven → eight capabilities.
+
+### Supported and unsupported claims
+
+May claim: a deterministic, conservative subset of the direct causes from
+multi-environment data with no graph input; detection of model
+misspecification when no subset survives; a three-way outcome in which two of
+the three are honest non-answers.
+
+Must **not** claim: a *complete* parent set (the result is always a subset);
+any effect size; that an empty intersection means nothing is causal; that a
+detected misspecification says *what* is wrong; validity when an environment
+intervened directly on the target, which is assumed and unchecked.
+
+### Known limitations / deferred
+
+- Linear mechanisms only, matching 5C.2 and 5C.4.
+- Exponential subset search; no greedy or variable-screening shortcut.
+- No confidence intervals for the individual coefficients (Peters et al. give
+  these; only the variable-selection half is implemented here).
+- Requires labelled environments — it cannot manufacture them, and with two
+  similar environments it will usually return an empty intersection.
