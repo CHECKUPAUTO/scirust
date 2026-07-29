@@ -109,6 +109,7 @@ const DISCRETE_EVENT: SolverDescriptor = SolverDescriptor {
     summary: "Exact discrete-event simulation: the state changes only at arrivals and departures, whose times are drawn from the model's exponential distributions. There is no step size to choose and no truncation error to bound — `solver.start` and `solver.end` bracket the simulated horizon of each realisation.",
     fixed_step: false,
     adaptive_tolerance: false,
+    reports_progress: true,
 };
 
 const ARRIVAL_RATE: FieldDescriptor = FieldDescriptor {

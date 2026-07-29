@@ -431,6 +431,96 @@ pub fn FieldMaps() -> Element {
     }
 }
 
+/// The histograms for a run's distributions, when it has any.
+///
+/// Horizontal bars rather than the field renderer's shaded cells: a
+/// distribution is one-dimensional, so a *length* is available and exact
+/// where a shade would make the reader estimate a count.
+///
+/// The bin's interval is labelled, not its centre. A histogram's whole
+/// content is "this much fell between these two values", and printing a
+/// centre makes the reader infer the width — the same off-by-one that made
+/// `Distribution` its own type rather than a one-row field.
+#[component]
+pub fn Histograms() -> Element {
+    let ui = use_context::<Ui>();
+    let Some(run) = ui.run.read().clone()
+    else
+    {
+        return rsx! {};
+    };
+    if run.distributions.is_empty()
+    {
+        return rsx! {};
+    }
+
+    rsx! {
+        for distribution in run.distributions.iter() {
+            {
+                let peak = distribution.counts.iter().copied().max().unwrap_or(0);
+                let total: u64 = distribution.counts.iter().sum::<u64>()
+                    + distribution.underflow
+                    + distribution.overflow;
+                let outside = distribution.underflow + distribution.overflow;
+                rsx! {
+                    section { key: "{distribution.id}", class: "chart histogram",
+                        h3 { class: "chart-title",
+                            "{distribution.display_name}"
+                            span { class: "muted", " ({total} samples, {distribution.unit})" }
+                        }
+                        // A count of zero everywhere means every sample fell
+                        // outside the range; drawing empty bars would look
+                        // like an empty run rather than a mis-chosen range.
+                        if peak == 0 {
+                            p { class: "muted chart-empty", "{ui.t(\"distribution.all-outside\")}" }
+                        } else {
+                            ul { class: "histogram-bins",
+                                for (index, count) in distribution.counts.iter().enumerate() {
+                                    li { key: "{index}", class: "histogram-bin",
+                                        span { class: "histogram-range",
+                                            "{format_edge(distribution.edges[index])}..{format_edge(distribution.edges[index + 1])}"
+                                        }
+                                        span { class: "histogram-bar",
+                                            style: "width: {(*count as f64 / peak as f64) * 100.0}%",
+                                            "aria-hidden": "true",
+                                        }
+                                        span { class: "histogram-count", "{count}" }
+                                    }
+                                }
+                            }
+                        }
+                        // Never silently: a sample outside the range is a
+                        // statement about the range, and hiding it turns a
+                        // badly chosen histogram into a plausible one.
+                        if outside > 0 {
+                            p { class: "warn histogram-outside",
+                                "{distribution.underflow} below and {distribution.overflow} above the binned range"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Render a bin edge compactly enough to sit in a narrow column.
+fn format_edge(value: f64) -> String {
+    let magnitude = value.abs();
+    if value == 0.0
+    {
+        "0".to_string()
+    }
+    else if (1e-3..1e6).contains(&magnitude)
+    {
+        format!("{value:.4}")
+    }
+    else
+    {
+        format!("{value:.2e}")
+    }
+}
+
 /// An axis's label and unit, for a field's edge captions.
 fn field_axis_label(run: &crate::backend::RunWire, axis_id: &str) -> String {
     // The interface holds the primary axis flattened onto the run, so only

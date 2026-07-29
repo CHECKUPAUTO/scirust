@@ -79,6 +79,7 @@ const EXACT_TRANSITION: SolverDescriptor = SolverDescriptor {
     summary: "Samples the process's exact log-normal transition rather than discretising the stochastic differential equation. There is no truncation error to bound: `solver.step` is the sampling interval, not an approximation parameter.",
     fixed_step: true,
     adaptive_tolerance: false,
+    reports_progress: true,
 };
 
 const INITIAL_VALUE: FieldDescriptor = FieldDescriptor {

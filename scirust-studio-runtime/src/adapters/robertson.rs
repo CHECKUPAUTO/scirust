@@ -133,6 +133,7 @@ const STIFF_ROSENBROCK: SolverDescriptor = SolverDescriptor {
     summary: "Adaptive, linearly-implicit Rosenbrock-W(2,3) from scirust-stiff — the recommended stiff integrator; `solver.step` is used as its initial step guess h0.",
     fixed_step: false,
     adaptive_tolerance: true,
+    reports_progress: false,
 };
 
 const MASS_CONSERVATION_CHECK: VerificationCheckDescriptor = VerificationCheckDescriptor {

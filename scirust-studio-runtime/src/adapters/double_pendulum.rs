@@ -43,7 +43,7 @@ use crate::result::{
     RunSummary, RunWarning, Series, SeriesRole, TIME_AXIS_ID, VerificationResult,
     VerificationStatus, WarningCategory,
 };
-use crate::sink::{EventSink, RunEvent};
+use crate::sink::{EventSink, RunEvent, SubRangeSink};
 use crate::validate_support::{
     check_unknown_model_fields, check_unknown_state_fields, resolve_backend_kind,
     resolve_model_scalar, resolve_precision, resolve_replicates, resolve_solver,
@@ -212,6 +212,7 @@ const RK4: SolverDescriptor = SolverDescriptor {
     summary: "Fixed-step classical 4th-order Runge-Kutta.",
     fixed_step: true,
     adaptive_tolerance: false,
+    reports_progress: true,
 };
 
 const ENERGY_DRIFT_CHECK: VerificationCheckDescriptor = VerificationCheckDescriptor {
@@ -405,7 +406,16 @@ impl CapabilityAdapter for DoublePendulumAdapter {
         let started_at = chrono::Utc::now();
 
         let energy0 = model.energy(&y0);
-        let traj = simulate_cancellable(&model, &y0, span, control, sink)?;
+        // Half the progress window each: the shadow is the same length as
+        // the trajectory, so a bar driven by the first alone would reach one
+        // hundred percent halfway through the work. See `SubRangeSink`.
+        let traj = simulate_cancellable(
+            &model,
+            &y0,
+            span,
+            control,
+            &mut SubRangeSink::new(sink, 0.0, 0.5),
+        )?;
 
         // The shadow run. Deliberately *not* reported through the sink: the
         // user asked for one run and should see one run's progress, and this
@@ -417,7 +427,7 @@ impl CapabilityAdapter for DoublePendulumAdapter {
             &perturbed_start,
             span,
             control,
-            &mut crate::sink::NullEventSink,
+            &mut SubRangeSink::new(sink, 0.5, 1.0),
         )?;
 
         let last = traj

@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 
 use crate::actions::{Action, resolve};
 use crate::model::{Msg, RunDisplay, View};
-use crate::ui::chart_view::{Chart, FieldMaps};
+use crate::ui::chart_view::{Chart, FieldMaps, Histograms};
 use crate::ui::parts::status_key;
 use crate::ui::{Ui, progress_label};
 
@@ -344,6 +344,10 @@ pub fn Experiment() -> Element {
             // Only renders for a run that has fields; for the heat rod the
             // field is the result and the curves beside it are summaries.
             FieldMaps {}
+            // Only renders for a run that has distributions; for the
+            // M/M/1 queue they ARE the result and the per-replicate series
+            // beside them are the raw sample.
+            Histograms {}
         }
     }
 }

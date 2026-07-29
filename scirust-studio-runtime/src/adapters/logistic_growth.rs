@@ -93,6 +93,7 @@ const RK4: SolverDescriptor = SolverDescriptor {
     summary: "Fixed-step classical 4th-order Runge-Kutta.",
     fixed_step: true,
     adaptive_tolerance: false,
+    reports_progress: true,
 };
 
 const ANALYTIC_CHECK: VerificationCheckDescriptor = VerificationCheckDescriptor {

@@ -105,6 +105,7 @@ const SWEEP_SOLVER: SolverDescriptor = SolverDescriptor {
     summary: "Evaluates the receiver's closed forms at each of a uniform range of avalanche gains. Nothing is integrated; `solver.start`, `solver.end` and `solver.step` are gains, not times.",
     fixed_step: true,
     adaptive_tolerance: false,
+    reports_progress: true,
 };
 
 const RESPONSIVITY: FieldDescriptor = FieldDescriptor {
