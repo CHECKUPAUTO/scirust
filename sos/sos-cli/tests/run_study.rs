@@ -12,9 +12,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use sos_cli::args::Args;
-use sos_cli::run::{CATALOG_PLUGIN, catalog_plugin_hash, run_address};
+use sos_cli::run::{CATALOG_PLUGIN, StageConfig, catalog_plugin_hash};
 use sos_core::Object;
 use sos_scirust::model::{ModelKind, ModelRun, ModelSpec, ModeledTrajectoryBody};
+use sos_scirust::spectrum::{SpectrumBody, SpectrumConfig, WindowKind};
 use sos_store::{FileStore, ObjectStore, TypedStore};
 
 fn temp_root(name: &str) -> PathBuf {
@@ -26,27 +27,28 @@ fn temp_root(name: &str) -> PathBuf {
 }
 
 /// A logistic-growth study: two populations at different carrying capacities.
-fn growth(capacity: f64) -> ModelRun {
-    ModelRun::new(
+fn growth(capacity: f64) -> StageConfig {
+    StageConfig::Model(ModelRun::new(
         ModelSpec::new(ModelKind::LogisticGrowth, [0.8, capacity]),
         [5.0],
         0.0,
         6.0,
         0.001,
-    )
+    ))
 }
 
 /// Write `study.toml` and `runs.json` into `dir`, exactly as an author would.
-fn write_study(dir: &Path, runs: &[ModelRun]) -> (PathBuf, PathBuf) {
+fn write_study(dir: &Path, runs: &[StageConfig]) -> (PathBuf, PathBuf) {
     let stages: String = runs
         .iter()
         .enumerate()
         .map(|(i, r)| {
             format!(
-                "\n[[stage]]\nid      = \"stage-{i}\"\nplugin  = \"{CATALOG_PLUGIN}\"\n\
+                "\n[[stage]]\nid      = \"stage-{i}\"\nplugin  = \"{plugin}\"\n\
                  version = \"1.0.0\"\npin     = \"{pin}\"\nconfig  = \"{cfg}\"\n",
-                pin = catalog_plugin_hash().to_hex(),
-                cfg = run_address(r).to_hex(),
+                plugin = r.plugin(),
+                pin = sos_cli::run::plugin_hash(r.plugin()).to_hex(),
+                cfg = r.address().to_hex(),
             )
         })
         .collect();
@@ -195,7 +197,7 @@ fn a_study_pinned_to_a_different_plugin_build_is_refused() {
             wrong = sos_core::HashAlgo::Sha256
                 .hash(b"some-other", b"build")
                 .to_hex(),
-            cfg = run_address(&runs[0]).to_hex(),
+            cfg = runs[0].address().to_hex(),
         ),
     )
     .unwrap();
@@ -300,7 +302,7 @@ fn sos_address_emits_the_fields_a_study_must_pin() {
     // Paste-ready, and the addresses are the ones `sos run` will resolve.
     for r in &runs
     {
-        assert!(out.contains(&run_address(r).to_hex()), "{out}");
+        assert!(out.contains(&r.address().to_hex()), "{out}");
     }
     assert!(out.contains(&catalog_plugin_hash().to_hex()), "{out}");
     assert!(out.contains("ecology/logistic-growth"), "{out}");
@@ -350,7 +352,7 @@ fn a_runs_file_naming_an_unknown_model_is_refused_by_sos_address() {
     let runs_path = dir.join("runs.json");
     fs::write(
         &runs_path,
-        r#"[{"model":{"model":"ecology/logistic-decay","params":["0.5"]},
+        r#"[{"kind":"model","model":{"model":"ecology/logistic-decay","params":["0.5"]},
              "y0":["1"],"t0":"0","t_end":"1","step":"0.1"}]"#,
     )
     .unwrap();
@@ -358,6 +360,111 @@ fn a_runs_file_naming_an_unknown_model_is_refused_by_sos_address() {
     let argv = vec![runs_path.to_str().unwrap().to_owned()];
     let err = sos_cli::run::address(&Args::parse(&argv).unwrap()).unwrap_err();
     assert!(err.to_string().contains("ecology/logistic-decay"), "{err}");
+    fs::remove_dir_all(&dir).ok();
+}
+
+/// A 64 Hz tone sampled at 1024 Hz over 1024 samples — bin 64 exactly.
+fn tone() -> StageConfig {
+    StageConfig::Spectrum(SpectrumConfig::new(
+        (0..1024)
+            .map(|i| (std::f64::consts::TAU * 64.0 * f64::from(i) / 1024.0).sin())
+            .collect(),
+        1024.0,
+        WindowKind::Hann,
+    ))
+}
+
+#[test]
+fn one_study_can_mix_both_backends() {
+    // The point of tagging the runs file: a study is not restricted to one
+    // kind of science. Here it simulates a population and measures a signal,
+    // and each stage is routed to the plugin its configuration names.
+    let dir = temp_root("mixed");
+    let store_path = dir.join("store");
+    let configs = [growth(100.0), tone()];
+    let (manifest, runs_file) = write_study(&dir, &configs);
+
+    let out = sos_run(
+        &manifest,
+        &runs_file,
+        &store_path,
+        &["--allow", "effectful"],
+    )
+    .unwrap();
+    assert!(out.contains("ran 2 of 2 stage(s)"), "{out}");
+
+    // Two objects of two different kinds, each real.
+    let store = FileStore::open(&store_path).unwrap();
+    let ids = store.object_ids();
+    assert_eq!(ids.len(), 2);
+    let mut saw_trajectory = false;
+    let mut saw_spectrum = false;
+    for id in ids
+    {
+        if let Ok(Some(obj)) = store.get_object::<ModeledTrajectoryBody>(id)
+        {
+            assert_eq!(obj.body.model.kind, ModelKind::LogisticGrowth);
+            saw_trajectory = true;
+        }
+        else if let Ok(Some(obj)) = store.get_object::<SpectrumBody>(id)
+        {
+            // Real spectral analysis: the tone is in its own bin.
+            let peak = obj
+                .body
+                .spectrum
+                .psd
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+                .unwrap()
+                .0;
+            assert_eq!(peak, 64, "the tone must land in bin 64");
+            assert_eq!(obj.body.spectrum.window, WindowKind::Hann);
+            saw_spectrum = true;
+        }
+    }
+    assert!(saw_trajectory && saw_spectrum, "both kinds must be stored");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn sos_address_routes_each_config_to_its_own_plugin() {
+    let dir = temp_root("routing");
+    let runs_path = dir.join("runs.json");
+    fs::write(
+        &runs_path,
+        serde_json::to_string(&[growth(100.0), tone()]).unwrap(),
+    )
+    .unwrap();
+
+    let out =
+        sos_cli::run::address(&Args::parse(&[runs_path.to_str().unwrap().to_owned()]).unwrap())
+            .unwrap();
+    assert!(out.contains("sim-catalog"), "{out}");
+    assert!(out.contains("signal-periodogram"), "{out}");
+    assert!(out.contains("hann window over 1024 samples"), "{out}");
+    // Different plugins, so different pins.
+    assert!(out.contains(&sos_cli::run::catalog_plugin_hash().to_hex()));
+    assert!(out.contains(&sos_cli::run::spectrum_plugin_hash().to_hex()));
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn an_untagged_configuration_is_refused() {
+    // The tag is what routes a config to a backend; guessing from shape would
+    // be exactly the silent substitution the rest of this system refuses.
+    let dir = temp_root("untagged");
+    let runs_path = dir.join("runs.json");
+    fs::write(
+        &runs_path,
+        r#"[{"model":{"model":"epidemiology/sir","params":["0.6","0.2"]},
+             "y0":["0.99","0.01","0"],"t0":"0","t_end":"1","step":"0.1"}]"#,
+    )
+    .unwrap();
+
+    let argv = vec![runs_path.to_str().unwrap().to_owned()];
+    let err = sos_cli::run::address(&Args::parse(&argv).unwrap()).unwrap_err();
+    assert!(err.to_string().contains("kind"), "{err}");
     fs::remove_dir_all(&dir).ok();
 }
 

@@ -98,13 +98,14 @@
 //! them.
 //!
 //! **Gaps #2, #4–8** — the `sos-workflow` `StageExecutor` now dispatches real
-//! work through [`stage::OdeStageHandler`] and [`stage::CatalogStageHandler`],
-//! and [`verdict`] supplies the agreement predicates `sos-repro` re-execution
-//! checks against. The two handlers are the same mechanism with different
-//! guarantees, which is the clearest statement of what [`model`] adds: the
-//! catalogue one can be asked
-//! [`model_at`](stage::CatalogStageHandler::model_at) — *which model will this
-//! stage integrate?* — from a [`Plan`](sos_workflow::Plan) alone, before
+//! work through [`stage::OdeStageHandler`], [`stage::CatalogStageHandler`] and
+//! [`stage::SpectrumStageHandler`], and [`verdict`] supplies the agreement
+//! predicates `sos-repro` re-execution checks against. Those handlers are the
+//! same mechanism with different guarantees, which is the clearest statement
+//! of what a data-only configuration buys: the catalogue and spectral ones can
+//! be asked [`model_at`](stage::CatalogStageHandler::model_at) /
+//! [`measurement_at`](stage::SpectrumStageHandler::measurement_at) — *what will
+//! this stage actually do?* — from a [`Plan`](sos_workflow::Plan) alone, before
 //! anything runs, and the closure-based one has no such answer to give.
 //!
 //! ## What is deliberately not here yet
@@ -117,13 +118,14 @@
 //! spectrograms are follow-on work rather than something [`spectrum`] pretends
 //! to.
 //!
-//! Only two of the five [`Simulate`](sos_simulation::Simulate) backends have
-//! stage handlers ([`ode::Rk4OdeSimulator`] and
-//! [`model::CatalogSimulator`]); [`ode::Dopri5OdeSimulator`], [`quadrature`],
-//! [`root`] and [`spectrum`] do not, and no other engine's stages have
-//! handlers at all. `sos-cli` still has no handler registry, so nothing in
-//! that binary can bind a study's plugins to code — `sos run` is not real
-//! yet, and that is the remaining gap rather than anything in this crate.
+//! Three of the five [`Simulate`](sos_simulation::Simulate) backends have
+//! stage handlers ([`ode::Rk4OdeSimulator`], [`model::CatalogSimulator`] and
+//! [`spectrum::PeriodogramSimulator`]); [`ode::Dopri5OdeSimulator`],
+//! [`quadrature`] and [`root`] do not, and no other engine's stages have
+//! handlers at all. Two of those three are reachable from `sos run` — the
+//! two whose configuration is data. The other three take a *function*, and no
+//! file can name a function, so a CLI binding for them needs a transport that
+//! ships code (RFC-0002 §10's WASM or MCP), not more plumbing here.
 //!
 //! ## Example
 //!
@@ -182,6 +184,6 @@ pub use nmc::NestedMcEigEstimator;
 pub use ode::{Dopri5OdeSimulator, Rk4OdeSimulator};
 pub use quadrature::QuadratureSimulator;
 pub use root::{BroydenRootSimulator, CertifiedRoot, RootConfig};
-pub use spectrum::{PeriodogramSimulator, Spectrum, SpectrumConfig, WindowKind};
+pub use spectrum::{PeriodogramSimulator, Spectrum, SpectrumBody, SpectrumConfig, WindowKind};
 pub use stage::{OdeStageHandler, TrajectoryBody, config_address};
 pub use verdict::{Agreement, VerdictError, certify_root};
