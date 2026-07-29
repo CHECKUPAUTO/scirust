@@ -579,6 +579,7 @@ impl CapabilityAdapter for OrnsteinUhlenbeckAdapter {
             }],
             series,
             fields: vec![],
+            distributions: vec![],
             metrics,
             warnings: vec![],
             verifications,

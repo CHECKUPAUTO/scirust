@@ -228,6 +228,7 @@ fn a_store_can_hold_both_versions_at_once() {
             values: vec![1.0, 0.5],
         }],
         fields: vec![],
+        distributions: vec![],
         metrics: vec![],
         warnings: vec![],
         verifications: vec![],

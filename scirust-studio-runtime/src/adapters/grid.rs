@@ -546,6 +546,7 @@ impl CapabilityAdapter for SwingEquationAdapter {
             }],
             series,
             fields: vec![],
+            distributions: vec![],
             metrics,
             warnings,
             verifications: vec![energy_result, period_result],

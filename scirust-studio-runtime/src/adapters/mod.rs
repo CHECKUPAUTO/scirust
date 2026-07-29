@@ -11,6 +11,7 @@ mod hvac_zone;
 mod laser;
 mod logistic_growth;
 mod lotka_volterra;
+mod mm1_queue;
 mod oral_dose;
 mod ornstein_uhlenbeck;
 mod pendulum;
@@ -38,6 +39,7 @@ pub use hvac_zone::HvacZoneAdapter;
 pub use laser::SemiconductorLaserAdapter;
 pub use logistic_growth::LogisticGrowthAdapter;
 pub use lotka_volterra::LotkaVolterraAdapter;
+pub use mm1_queue::Mm1QueueAdapter;
 pub use oral_dose::OralOneCompartmentAdapter;
 pub use ornstein_uhlenbeck::OrnsteinUhlenbeckAdapter;
 pub use pendulum::PendulumAdapter;
@@ -94,6 +96,7 @@ pub fn all_adapters() -> Vec<Box<dyn CapabilityAdapter>> {
         Box::new(ProjectileAdapter),
         Box::new(VanDerPolAdapter),
         Box::new(TwoCompartmentIvAdapter),
+        Box::new(Mm1QueueAdapter),
     ]
 }
 
@@ -252,6 +255,11 @@ const TUTORIAL_SCENARIOS: &[(&str, &str, &str)] = &[
         "sim.pharmacology.two_compartment_iv",
         "two_compartment_iv.scirust.toml",
         include_str!("../../../docs/studio/tutorials/two_compartment_iv.scirust.toml"),
+    ),
+    (
+        "sim.stochastic.mm1_queue",
+        "mm1_queue.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/mm1_queue.scirust.toml"),
     ),
 ];
 

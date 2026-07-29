@@ -533,6 +533,7 @@ impl CapabilityAdapter for BatteryAdapter {
                 },
             ],
             fields: vec![],
+            distributions: vec![],
             metrics: vec![
                 Metric {
                     id: "polarization_time_constant".to_string(),

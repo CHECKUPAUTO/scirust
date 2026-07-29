@@ -457,6 +457,7 @@ impl CapabilityAdapter for LotkaVolterraAdapter {
                 },
             ],
             fields: vec![],
+            distributions: vec![],
             metrics: vec![
                 Metric {
                     id: "final_prey".to_string(),

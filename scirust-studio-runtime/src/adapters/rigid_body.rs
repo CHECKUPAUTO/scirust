@@ -350,6 +350,7 @@ impl CapabilityAdapter for RigidBodyAdapter {
                 },
             ],
             fields: vec![],
+            distributions: vec![],
             metrics: vec![
                 Metric {
                     id: "initial_energy".to_string(),

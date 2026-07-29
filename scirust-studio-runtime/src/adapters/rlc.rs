@@ -442,6 +442,7 @@ impl CapabilityAdapter for RlcAdapter {
                 },
             ],
             fields: vec![],
+            distributions: vec![],
             metrics: vec![
                 Metric {
                     id: "final_current".to_string(),

@@ -360,6 +360,7 @@ impl CapabilityAdapter for PhotodiodeAdapter {
                 },
             ],
             fields: vec![],
+            distributions: vec![],
             metrics: vec![
                 Metric {
                     id: "photocurrent".to_string(),

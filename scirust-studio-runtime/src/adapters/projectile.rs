@@ -364,6 +364,7 @@ impl CapabilityAdapter for ProjectileAdapter {
                 },
             ],
             fields: vec![],
+            distributions: vec![],
             metrics: vec![
                 Metric {
                     id: "terminal_velocity".to_string(),

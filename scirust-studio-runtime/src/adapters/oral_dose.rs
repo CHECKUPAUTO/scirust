@@ -388,6 +388,7 @@ impl CapabilityAdapter for OralOneCompartmentAdapter {
                 },
             ],
             fields: vec![],
+            distributions: vec![],
             metrics: vec![
                 Metric {
                     id: "peak_time".to_string(),
