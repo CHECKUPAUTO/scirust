@@ -3,7 +3,7 @@
 //!
 //! # Scope
 //!
-//! Nine capabilities:
+//! Ten capabilities:
 //!
 //! 1. an exactly invertible **strictly lower-triangular cubic map**
 //!    ([`TriangularCubicFlow`]);
@@ -98,7 +98,20 @@
 //!    returns an *unoriented* edge, and which then answer the same
 //!    counterfactual query `3` versus `1`. Its certificates therefore carry
 //!    zero *computational* uncertainty and an assumption load that no
-//!    observational procedure in this crate can discharge.
+//!    observational procedure in this crate can discharge; and
+//! 10. **experimental design** ([`plan_next_experiment`],
+//!     [`greedy_experiment_sequence`]) — the reply to capability 9's bill.
+//!     Given a [`Cpdag`] (from capability 5, or hand-built via
+//!     [`Cpdag::from_edges`]), it ranks the feasible single-variable
+//!     interventions by how much of the equivalence class each would settle,
+//!     and reports a **worst-case guarantee** rather than a best case: an
+//!     experiment that resolves an edge only on some outcomes is not reported
+//!     as resolving it. This is the one capability that needs no data at all —
+//!     the answer is a function of the graph — and the one whose output is not
+//!     a causal claim but a statement about what a causal claim would cost.
+//!     It has no cost model and no opinion on whether an experiment is worth
+//!     running; see the private `experiment_design` module's docs for the
+//!     perfect-intervention idealisation it assumes and states.
 //!
 //! # Causal interpretation — read before using the discovery API
 //!
@@ -151,6 +164,9 @@
 //! nor validates it, and no procedure in this crate can single one out from
 //! observational data alone — which is why it is the one capability whose
 //! answers change when a Markov-equivalent alternative is substituted.
+//! Capability 10 says which experiment would settle that substitution, but
+//! plans it only; nothing here runs an experiment, and a plan is not
+//! evidence.
 //!
 //! # Cubic-flow mathematical properties
 //!
@@ -187,6 +203,7 @@ mod effect_estimation;
 mod environment;
 mod equivalence_class;
 mod error;
+mod experiment_design;
 mod fingerprint;
 mod graph;
 mod graph_constraints;
@@ -230,6 +247,10 @@ pub use equivalence_class::{
     EquivalenceClassConfig, EquivalenceClassDiscovery, EquivalenceClassResult, PcStable,
 };
 pub use error::CausalError;
+pub use experiment_design::{
+    ExperimentCandidate, ExperimentDesignConfig, ExperimentPlan, ExperimentPlanOutcome,
+    ExperimentSequence, greedy_experiment_sequence, plan_next_experiment,
+};
 pub use fingerprint::sha256_hex;
 pub use graph::{GraphExtractionConfig, extract_causal_dag};
 pub use graph_constraints::{ConstraintViolation, GraphConstraints};
