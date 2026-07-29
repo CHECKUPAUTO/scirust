@@ -1057,8 +1057,8 @@ misspecification other than an omitted linear term.
 ## Phase 5C.6 — Test invariance (Invariant Causal Prediction)
 
 **Status: Draft.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
-from `origin/master` at `9b43bf34`. Additive to `scirust-causal` (no existing
-public API changed).
+from `origin/master` at `9b43bf34`. PR #853. Additive to `scirust-causal` (no
+existing public API changed).
 
 Implements Invariant Causal Prediction (Peters, Bühlmann & Meinshausen 2016,
 *Causal inference using invariant prediction*, JRSS-B 78(5)). Phase 5C.1's
