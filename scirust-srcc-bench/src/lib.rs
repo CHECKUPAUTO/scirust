@@ -20,8 +20,10 @@ pub mod certified_pipeline;
 pub mod conditional_conformal;
 pub mod conformal;
 pub mod contamination;
+pub mod continual;
 pub mod dataset;
 pub mod deployment_policy;
+pub mod drift_monitor;
 pub mod loaders;
 pub mod manifest;
 pub mod metrics;
@@ -50,11 +52,16 @@ pub use contamination::{
     ContaminationConfig, ContaminationError, ContaminationKind, ContaminationManifest,
     apply_contamination,
 };
+pub use continual::{
+    CandidateOutcome, ContinualConfig, ContinualError, ContinualOrchestrator, ObservationOutcome,
+    RetrainReason, ServicePhase, ServiceStatus, TransitionRecord,
+};
 pub use dataset::{DatasetError, TabularDataset};
 pub use deployment_policy::{
     DeploymentAction, DeploymentDecision, DeploymentPolicy, DeploymentPolicyError, MonitorState,
     RollbackMonitor, decide_deployment,
 };
+pub use drift_monitor::{DriftMonitor, DriftMonitorConfig, DriftMonitorError, DriftState};
 pub use loaders::{LoaderError, clip_rul_targets, parse_cmapss_training, parse_obd2, parse_secom};
 pub use manifest::{DatasetManifest, FeatureDescriptor, ManifestError};
 pub use metrics::{
