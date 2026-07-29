@@ -24,9 +24,12 @@
 //!
 //! Per Invariant VIII (RFC-0002 §01), the parts that need a backend are deferred
 //! — **no stub**:
-//! * **Bayes-factor ranking.** [`compare`](TheoryEngine::compare) ranks by
-//!   retained evidential balance ([`RankBasis::EvidentialBalance`]); posterior-odds
-//!   `Confidence` ranking awaits the statistics backend.
+//! * **Bayes-factor ranking** is now available as
+//!   [`compare_by_evidence`](TheoryEngine::compare_by_evidence), which ranks
+//!   by a weight of evidence in millibans *supplied* by the statistics
+//!   backend (`sos-scirust`'s `bayes` module). This crate still computes no
+//!   Bayes factor of its own — [`compare`](TheoryEngine::compare) remains the
+//!   ranking it can derive from the graph alone.
 //!
 //! **Discriminating-experiment planning** is no longer among them: see
 //! [`discriminate`], which states which rivals a design would separate and
@@ -77,7 +80,7 @@ pub mod scope;
 pub mod theory;
 
 pub use discriminate::{DiscriminatingCandidate, Discrimination, DiscriminationPlan, discriminate};
-pub use engine::{RankBasis, RankedTheory, Ranking, Theories, TheoryEngine};
+pub use engine::{RankBasis, RankedTheory, Ranking, Theories, TheoryEngine, WeightOfEvidence};
 pub use error::{Result, TheoryError};
 pub use scope::Scope;
 pub use theory::{Theory, TheoryBuilder, seal_theory};
