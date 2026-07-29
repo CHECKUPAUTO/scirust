@@ -70,6 +70,25 @@
 //!   the fallback — unless it is the one that latched a rollback, in which
 //!   case it is retired and the fallback slot stays empty.
 //!
+//! # Group-conditioned drift (phase 6.2)
+//!
+//! [`Self::with_group_drift`](ContinualOrchestrator::with_group_drift) adds a
+//! [`GroupDriftMonitor`] alongside the pooled one; either may open a
+//! `DriftAlarm` demand. Both are kept because they answer different questions
+//! — "did the stream move?" and "did any declared stratum move?" — and a
+//! pooled median is provably blind to a minority stratum's collapse, which is
+//! the whole argument of [`crate::group_drift`].
+//!
+//! The two are **not** ranked against each other. Both say the residual scale
+//! moved somewhere; deciding that one is graver would be a claim neither
+//! monitor can support. The audit log records which groups were alarmed, so
+//! the demand carries its localization without carrying an explanation.
+//!
+//! A group-conditioned orchestrator refuses ungrouped observations
+//! ([`ContinualError::MissingGroup`]). Attributing them to a default stratum
+//! would re-introduce, on the ingest path, exactly the pooling blindness the
+//! grouping was configured to remove.
+//!
 //! # What none of this certifies
 //!
 //! The orchestrator sequences certificates; it does not strengthen them. A
@@ -87,6 +106,7 @@ use crate::deployment_policy::{
     RollbackMonitor,
 };
 use crate::drift_monitor::{DriftMonitor, DriftMonitorConfig, DriftMonitorError, DriftState};
+use crate::group_drift::{GroupDriftConfig, GroupDriftError, GroupDriftMonitor, GroupDriftState};
 
 /// Configuration for a [`ContinualOrchestrator`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -236,10 +256,25 @@ pub enum ContinualError {
         /// The tick of the unsolicited evaluation.
         tick: u64,
     },
+    /// An ungrouped observation arrived at a group-conditioned orchestrator.
+    /// Attributing it to some default stratum would re-introduce exactly the
+    /// pooling blindness the grouping was configured to remove.
+    MissingGroup {
+        /// The tick of the ungrouped observation.
+        tick: u64,
+    },
+    /// A grouped observation arrived at an orchestrator with no declared
+    /// partition.
+    UnexpectedGroup {
+        /// The tick of the grouped observation.
+        tick: u64,
+    },
     /// The deployment policy was invalid.
     Policy(DeploymentPolicyError),
     /// The drift configuration or an observed score was invalid.
     Drift(DriftMonitorError),
+    /// The group partition, or a grouped observation, was invalid.
+    GroupDrift(GroupDriftError),
 }
 
 impl fmt::Display for ContinualError {
@@ -263,8 +298,19 @@ impl fmt::Display for ContinualError {
                     "candidate evaluation at tick {tick} arrived with no retrain demand open"
                 )
             },
+            Self::MissingGroup { tick } => write!(
+                formatter,
+                "the observation at tick {tick} carried no group, but this orchestrator is \
+                 group-conditioned; an unattributed observation is refused rather than pooled"
+            ),
+            Self::UnexpectedGroup { tick } => write!(
+                formatter,
+                "the observation at tick {tick} carried a group, but this orchestrator declared \
+                 no partition"
+            ),
             Self::Policy(error) => write!(formatter, "deployment policy: {error}"),
             Self::Drift(error) => write!(formatter, "drift monitor: {error}"),
+            Self::GroupDrift(error) => write!(formatter, "group drift monitor: {error}"),
         }
     }
 }
@@ -275,6 +321,7 @@ impl std::error::Error for ContinualError {
         {
             Self::Policy(error) => Some(error),
             Self::Drift(error) => Some(error),
+            Self::GroupDrift(error) => Some(error),
             _ => None,
         }
     }
@@ -292,6 +339,12 @@ impl From<DriftMonitorError> for ContinualError {
     }
 }
 
+impl From<GroupDriftError> for ContinualError {
+    fn from(error: GroupDriftError) -> Self {
+        Self::GroupDrift(error)
+    }
+}
+
 /// The deterministic continual-service orchestrator. See the module docs for
 /// the exact loop semantics.
 #[derive(Clone, Debug, PartialEq)]
@@ -302,6 +355,8 @@ pub struct ContinualOrchestrator {
     fallback: Option<String>,
     coverage: RollbackMonitor,
     drift: DriftMonitor,
+    group_drift: Option<GroupDriftMonitor>,
+    group_drift_config: Option<GroupDriftConfig>,
     open_demand: Option<RetrainReason>,
     consecutive_blocks: usize,
     last_tick: u64,
@@ -336,6 +391,8 @@ impl ContinualOrchestrator {
             fallback: None,
             coverage,
             drift,
+            group_drift: None,
+            group_drift_config: None,
             open_demand: None,
             consecutive_blocks: 0,
             last_tick: 0,
@@ -343,6 +400,34 @@ impl ContinualOrchestrator {
             last_demand_close: None,
             log: Vec::new(),
         })
+    }
+
+    /// Starts orchestration with an additional **group-conditioned** drift
+    /// monitor (phase 6.2) alongside the pooled one.
+    ///
+    /// Both monitors run on every observation and either may open a
+    /// `DriftAlarm` demand. The pooled monitor is kept rather than replaced
+    /// because the two answer different questions — "did the stream move?"
+    /// and "did any declared stratum move?" — and a stream can do the first
+    /// without the second when the drift is diffuse.
+    ///
+    /// A group-conditioned orchestrator only accepts
+    /// [`observe_in_group`](Self::observe_in_group); plain
+    /// [`observe`](Self::observe) becomes [`ContinualError::MissingGroup`].
+    ///
+    /// # Errors
+    ///
+    /// [`ContinualError`] under the same conditions as [`Self::new`], plus
+    /// [`ContinualError::GroupDrift`] when the partition is invalid.
+    pub fn with_group_drift(
+        config: ContinualConfig,
+        initial_model: &str,
+        groups: GroupDriftConfig,
+    ) -> Result<Self, ContinualError> {
+        let mut orchestrator = Self::new(config, initial_model)?;
+        orchestrator.group_drift = Some(GroupDriftMonitor::new(groups.clone())?);
+        orchestrator.group_drift_config = Some(groups);
+        Ok(orchestrator)
     }
 
     /// Feeds one live observation of the serving model: whether its interval
@@ -359,10 +444,54 @@ impl ContinualOrchestrator {
         covered: bool,
         residual_score: f64,
     ) -> Result<ObservationOutcome, ContinualError> {
+        if self.group_drift.is_some()
+        {
+            return Err(ContinualError::MissingGroup { tick });
+        }
+        self.ingest(tick, None, covered, residual_score)
+    }
+
+    /// Feeds one live observation attributed to a declared group. Requires an
+    /// orchestrator built with [`Self::with_group_drift`].
+    ///
+    /// # Errors
+    ///
+    /// [`ContinualError::UnexpectedGroup`] when no partition was declared,
+    /// [`ContinualError::GroupDrift`] for an undeclared group or an invalid
+    /// score, plus the errors [`Self::observe`] documents. In every error case
+    /// the orchestrator's state is left untouched.
+    pub fn observe_in_group(
+        &mut self,
+        tick: u64,
+        group: &str,
+        covered: bool,
+        residual_score: f64,
+    ) -> Result<ObservationOutcome, ContinualError> {
+        if self.group_drift.is_none()
+        {
+            return Err(ContinualError::UnexpectedGroup { tick });
+        }
+        self.ingest(tick, Some(group), covered, residual_score)
+    }
+
+    fn ingest(
+        &mut self,
+        tick: u64,
+        group: Option<&str>,
+        covered: bool,
+        residual_score: f64,
+    ) -> Result<ObservationOutcome, ContinualError> {
         self.check_tick(tick)?;
-        // The drift monitor validates the score without mutating on error, and
-        // the coverage monitor has not been touched yet — so an invalid score
-        // leaves the whole orchestrator exactly as it was.
+        // Both drift monitors validate the score without mutating on error,
+        // and the coverage monitor has not been touched yet — so an invalid
+        // score leaves the whole orchestrator exactly as it was. The grouped
+        // monitor goes first: it is the one that can reject an undeclared
+        // stratum, and rejecting it after the pooled monitor had already
+        // recorded the score would leave the two disagreeing.
+        if let (Some(monitor), Some(name)) = (self.group_drift.as_mut(), group)
+        {
+            monitor.observe(name, residual_score)?;
+        }
         let drift_state = self.drift.observe(residual_score)?;
         self.last_tick = tick;
 
@@ -377,7 +506,7 @@ impl ContinualOrchestrator {
             self.execute_rollback(tick);
             opened = self.open_demand_at(tick, RetrainReason::CoverageRollback);
         }
-        else if drift_state == DriftState::Alarmed
+        else if self.drift_alarm_active(drift_state)
             && self.open_demand.is_none()
             && self.cooldown_elapsed(tick)
         {
@@ -502,6 +631,24 @@ impl ContinualOrchestrator {
         &self.log
     }
 
+    /// The group-conditioned drift monitor, when one was declared.
+    pub fn group_drift(&self) -> Option<&GroupDriftMonitor> {
+        self.group_drift.as_ref()
+    }
+
+    /// Whether either drift monitor is alarmed. The orchestrator deliberately
+    /// does **not** rank a group alarm against a pooled one: both say the
+    /// residual scale moved somewhere, and inventing a hierarchy between them
+    /// would be a claim neither monitor can support. Which groups are alarmed
+    /// is recorded in the audit log and readable from [`Self::group_drift`].
+    fn drift_alarm_active(&self, pooled: DriftState) -> bool {
+        pooled == DriftState::Alarmed
+            || self
+                .group_drift
+                .as_ref()
+                .is_some_and(|monitor| monitor.state() == GroupDriftState::Alarmed)
+    }
+
     fn check_tick(&self, tick: u64) -> Result<(), ContinualError> {
         if tick < self.last_tick
         {
@@ -538,10 +685,11 @@ impl ContinualOrchestrator {
                 {
                     "opened"
                 };
+                let detail = self.demand_detail(reason);
                 self.record(
                     tick,
                     self.phase,
-                    format!("{verb} retrain demand: {reason:?}"),
+                    format!("{verb} retrain demand: {reason:?}{detail}"),
                 );
                 Some(reason)
             },
@@ -614,13 +762,33 @@ impl ContinualOrchestrator {
         }
     }
 
+    /// Names the alarmed groups on a drift demand, so the audit log localizes
+    /// the alarm within the declared partition. It says *where*, never *why*.
+    fn demand_detail(&self, reason: RetrainReason) -> String {
+        if reason != RetrainReason::DriftAlarm
+        {
+            return String::new();
+        }
+        match self.group_drift.as_ref()
+        {
+            Some(monitor) if !monitor.alarmed_groups().is_empty() =>
+            {
+                format!(" (groups: {})", monitor.alarmed_groups().join(", "))
+            },
+            _ => String::new(),
+        }
+    }
+
     fn reset_monitors(&mut self) {
-        // Both constructors re-validate configurations already validated in
-        // `new`, so these cannot fail.
+        // All three constructors re-validate configurations already validated
+        // in `new` / `with_group_drift`, so these cannot fail.
         self.coverage = RollbackMonitor::from_policy(&self.config.policy)
             .expect("policy was validated at construction");
         self.drift = DriftMonitor::new(self.config.drift)
             .expect("drift config was validated at construction");
+        self.group_drift = self.group_drift_config.clone().map(|groups| {
+            GroupDriftMonitor::new(groups).expect("group partition was validated at construction")
+        });
     }
 
     fn record(&mut self, tick: u64, phase_before: ServicePhase, reason: String) {
@@ -656,6 +824,14 @@ mod tests {
                 consecutive_normals_to_clear: 4,
             },
         }
+    }
+
+    fn partition() -> GroupDriftConfig {
+        GroupDriftConfig::uniform(
+            config().drift,
+            &[("east", 1.0), ("north", 1.0), ("south", 1.0), ("west", 1.0)],
+        )
+        .unwrap()
     }
 
     fn deploy(name: &str) -> DeploymentDecision {
@@ -1017,6 +1193,145 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(first.audit_log(), second.audit_log());
         assert!(!first.audit_log().is_empty());
+    }
+
+    // ─── Phase 6.2: group-conditioned drift ──────────────────────────────
+
+    #[test]
+    fn a_group_collapse_opens_a_demand_the_pooled_monitor_would_have_missed() {
+        let mut grouped =
+            ContinualOrchestrator::with_group_drift(config(), "v1", partition()).unwrap();
+        let mut pooled = ContinualOrchestrator::new(config(), "v1").unwrap();
+
+        // One stratum in four collapses; the other three stay healthy. Both
+        // orchestrators see the identical score stream.
+        let mut tick = 1;
+        let mut grouped_demand = None;
+        for round in 0..15
+        {
+            for group in ["east", "north", "south", "west"]
+            {
+                let score = if group == "west" { 12.0 } else { 0.9 };
+                let outcome = grouped.observe_in_group(tick, group, true, score).unwrap();
+                pooled.observe(tick, true, score).unwrap();
+                if grouped_demand.is_none()
+                    && outcome.opened_demand == Some(RetrainReason::DriftAlarm)
+                {
+                    grouped_demand = Some((tick, round));
+                }
+                tick += 1;
+            }
+        }
+
+        assert!(
+            grouped_demand.is_some(),
+            "conditioning must catch the collapsed stratum"
+        );
+        assert_eq!(
+            grouped.group_drift().unwrap().alarmed_groups(),
+            vec!["west"]
+        );
+        assert_eq!(
+            pooled.status().open_demand,
+            None,
+            "the pooled monitor stayed quiet at ratio {} — the blindness this phase closes",
+            pooled.status().drift_ratio
+        );
+        assert_eq!(pooled.status().drift, DriftState::Quiet);
+    }
+
+    #[test]
+    fn the_audit_log_localizes_a_group_alarm_without_explaining_it() {
+        let mut orchestrator =
+            ContinualOrchestrator::with_group_drift(config(), "v1", partition()).unwrap();
+        let mut tick = 1;
+        for _ in 0..15
+        {
+            for group in ["east", "north", "south", "west"]
+            {
+                let score = if group == "west" { 12.0 } else { 0.9 };
+                orchestrator
+                    .observe_in_group(tick, group, true, score)
+                    .unwrap();
+                tick += 1;
+            }
+        }
+        let localized = orchestrator
+            .audit_log()
+            .iter()
+            .find(|record| record.reason.contains("DriftAlarm"))
+            .expect("a drift demand must have been recorded");
+        assert!(
+            localized.reason.contains("(groups: west)"),
+            "the record must name the stratum, got: {}",
+            localized.reason
+        );
+    }
+
+    #[test]
+    fn a_grouped_orchestrator_refuses_ungrouped_observations() {
+        let mut orchestrator =
+            ContinualOrchestrator::with_group_drift(config(), "v1", partition()).unwrap();
+        assert_eq!(
+            orchestrator.observe(1, true, 0.9),
+            Err(ContinualError::MissingGroup { tick: 1 })
+        );
+        // And the converse: no partition declared, no grouped ingest.
+        let mut ungrouped = ContinualOrchestrator::new(config(), "v1").unwrap();
+        assert_eq!(
+            ungrouped.observe_in_group(1, "east", true, 0.9),
+            Err(ContinualError::UnexpectedGroup { tick: 1 })
+        );
+    }
+
+    #[test]
+    fn an_undeclared_group_is_refused_and_leaves_the_orchestrator_untouched() {
+        let mut orchestrator =
+            ContinualOrchestrator::with_group_drift(config(), "v1", partition()).unwrap();
+        orchestrator.observe_in_group(1, "east", true, 0.9).unwrap();
+        let before = orchestrator.clone();
+        assert!(matches!(
+            orchestrator.observe_in_group(2, "northeast", true, 0.9),
+            Err(ContinualError::GroupDrift(
+                GroupDriftError::UnknownGroup { .. }
+            ))
+        ));
+        assert_eq!(
+            orchestrator, before,
+            "a refused stratum must not reach the pooled monitor either"
+        );
+    }
+
+    #[test]
+    fn a_promotion_resets_the_group_monitor_too() {
+        let mut orchestrator =
+            ContinualOrchestrator::with_group_drift(config(), "v1", partition()).unwrap();
+        let mut tick = 1;
+        for _ in 0..15
+        {
+            for group in ["east", "north", "south", "west"]
+            {
+                let score = if group == "west" { 12.0 } else { 0.9 };
+                orchestrator
+                    .observe_in_group(tick, group, true, score)
+                    .unwrap();
+                tick += 1;
+            }
+        }
+        assert_eq!(
+            orchestrator.group_drift().unwrap().alarmed_groups(),
+            vec!["west"]
+        );
+        orchestrator
+            .candidate_evaluated(tick, &deploy("v2"))
+            .unwrap();
+        let monitor = orchestrator.group_drift().unwrap();
+        assert!(
+            monitor.alarmed_groups().is_empty(),
+            "the successor's record must start empty"
+        );
+        assert_eq!(monitor.warming_groups().len(), 4);
+        assert_eq!(monitor.observations("west"), Some(0));
     }
 
     #[test]
