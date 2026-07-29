@@ -1,0 +1,74 @@
+# SciRust Studio tutorial scenario: an Ornstein-Uhlenbeck process.
+#
+# Run it with:
+#
+#   scirust run docs/studio/tutorials/ornstein_uhlenbeck.scirust.toml
+#
+# A mean-reverting stochastic process: dX = theta*(mu - X)*dt + sigma*dW.
+# It is pulled back toward mu at rate theta while noise of amplitude sigma
+# knocks it about. Physically it is a particle in a viscous fluid, or a
+# velocity under friction; in finance it is the Vasicek short rate.
+#
+# This is the first capability in the catalogue whose result is NOT a function
+# of its parameters alone. Run it with a different seed and you get a different
+# path — and neither is wrong. Both are samples from the same distribution.
+#
+# Which is why `seed` below is REQUIRED, not decorative. Every other tutorial
+# in this directory carries a seed that nothing reads; this capability refuses
+# to run without one, records it in the result's provenance, and then
+# re-derives the start of the path from it as a verification check. A
+# reproducibility claim you can check beats one you have to trust.
+#
+# What is verified, given that no individual trajectory can be:
+#
+#   * stationary_moments — the stationary distribution is exactly
+#     N(mu, sigma^2/(2*theta)). After discarding five relaxation times of
+#     transient, the sample mean is compared against mu with a tolerance
+#     derived from the sample size and the process's own autocorrelation.
+#   * reproducible_from_seed — the first 1000 samples are regenerated from
+#     the recorded seed and compared bit for bit.
+#
+# Change `seed` and re-run: the path changes completely, both checks still
+# pass, and that is exactly what "inherently stochastic, recorded seed" means.
+
+schema_version = 1
+
+[experiment]
+name = "Ornstein-Uhlenbeck process"
+description = "A mean-reverting process sampled from a recorded seed, verified against its exact stationary moments."
+# Required for this capability. Change it to draw a different sample.
+seed = 42
+
+[capability]
+id = "sim.stochastic.ornstein_uhlenbeck"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+# Relaxation time 1/theta = 2 s.
+theta = { value = 0.5, unit = "1/s" }
+mu = { value = 1.0, unit = "1" }
+sigma = { value = 0.3, unit = "1" }
+
+[initial_state]
+# Started well away from mu so the transient is visible before the process
+# settles into its stationary distribution.
+value = [{ value = 3.0, unit = "1" }]
+
+[solver]
+# Not an ODE integrator: the process is stepped by its exact Gaussian
+# transition, so there is no discretisation error to trade against the step
+# size — only sampling error.
+id = "exact_gaussian_transition"
+start = { value = 0.0, unit = "s" }
+# 200 relaxation times, so the tail carries enough independent samples for the
+# moments to mean something.
+end = { value = 400.0, unit = "s" }
+step = { value = 0.01, unit = "s" }
+
+[outputs]
+record = ["value", "mean"]
+sample_every = 1

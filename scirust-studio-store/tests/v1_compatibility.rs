@@ -236,6 +236,7 @@ fn a_store_can_hold_both_versions_at_once() {
             started_at_rfc3339: "2026-01-01T00:00:00Z".to_string(),
             completed_at_rfc3339: "2026-01-01T00:00:01Z".to_string(),
             elapsed_seconds: 1.0,
+            seed: None,
         },
     };
     let v2_id = store

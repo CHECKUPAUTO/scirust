@@ -369,6 +369,9 @@ pub struct ProvenanceWire {
     pub completed_at: String,
     /// Elapsed seconds.
     pub elapsed_seconds: f64,
+    /// The seed the computation consumed, when it consumed one.
+    #[serde(default)]
+    pub seed: Option<u64>,
 }
 
 /// The outcome of a store-integrity check.

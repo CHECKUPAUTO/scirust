@@ -264,6 +264,29 @@ pub struct RunProvenance {
     pub completed_at_rfc3339: String,
     /// Monotonic elapsed wall-clock duration, in seconds.
     pub elapsed_seconds: f64,
+    /// The seed the computation actually **consumed**, when it consumed one.
+    ///
+    /// `None` for a capability whose result does not depend on a seed — which
+    /// is every capability whose determinism is
+    /// [`DeterminismClass::StrictSameBinarySameTarget`]. Recording a scenario's
+    /// `experiment.seed` there would imply the number mattered, and it did
+    /// not; the scenario source is stored verbatim beside the result, so
+    /// nothing is lost by leaving this empty.
+    ///
+    /// For a stochastic capability this is the whole reproducibility story:
+    /// the result is one sample from a distribution, and this is the only
+    /// input that makes it the *same* sample twice. Validation refuses to run
+    /// such a capability without one.
+    ///
+    /// Added after schema v2 shipped, as an optional field with a default
+    /// rather than as v3. That is sound in both directions here: a v2 file
+    /// written before this field simply has no `seed` and reads back as
+    /// `None`, and no type in this crate or the store uses
+    /// `deny_unknown_fields`, so a v2 reader built before the field ignores
+    /// it rather than failing. A version bump would have bought a second
+    /// compatibility path and no additional guarantee.
+    #[serde(default)]
+    pub seed: Option<u64>,
 }
 
 /// A way in which a [`RunResult`] is internally inconsistent.
@@ -664,6 +687,7 @@ mod tests {
                 started_at_rfc3339: "2026-01-01T00:00:00Z".to_string(),
                 completed_at_rfc3339: "2026-01-01T00:00:01Z".to_string(),
                 elapsed_seconds: 1.0,
+                seed: None,
             },
         }
     }
