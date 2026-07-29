@@ -14,6 +14,7 @@ sos-core = { workspace = true }
 sos-registry = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
+toml = { workspace = true }
 
 [dev-dependencies]
 sos-store = { workspace = true }
