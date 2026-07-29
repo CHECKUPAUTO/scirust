@@ -12,10 +12,12 @@
 //! This module is a plain graph data structure with an invariant: a pair of
 //! nodes carries **at most one** edge, which is either directed (in exactly
 //! one direction) or undirected, never both and never both directions at
-//! once. Fields are private and mutation goes through methods that preserve
-//! this invariant; `crate::skeleton_discovery` and `crate::orientation` are
-//! the only callers that mutate a `Cpdag` (both `pub(crate)`).
+//! once. Fields are private and mutation goes through `pub(crate)` methods
+//! that preserve this invariant; `crate::skeleton_discovery`,
+//! `crate::orientation` and `crate::experiment_design` are the only callers
+//! that mutate a `Cpdag`.
 
+use crate::error::CausalError;
 use std::collections::BTreeSet;
 
 /// Canonicalizes an unordered pair as `(min, max)`.
@@ -50,6 +52,105 @@ impl Cpdag {
             directed: BTreeSet::new(),
             undirected,
         }
+    }
+
+    /// Builds a graph from an explicit edge list.
+    ///
+    /// This is the entry point for a caller who already *has* a partially
+    /// oriented graph — background knowledge, a published structure, or a
+    /// hypothesis — and wants to reason about it (for instance to ask
+    /// `crate::experiment_design` which experiment would resolve it) without
+    /// running discovery. Nothing about the result is claimed to be correct;
+    /// this constructor validates the data structure's invariant, not the
+    /// science. A `Cpdag` built here carries exactly the authority of whatever
+    /// the caller put in it.
+    ///
+    /// # Errors
+    ///
+    /// [`CausalError::UnknownVariableIndex`] for an endpoint outside
+    /// `0..n_nodes`; [`CausalError::SameVariable`] for a self-loop;
+    /// [`CausalError::InvalidContract`] if any pair carries more than one
+    /// edge — listed twice, in both directions, or as both directed and
+    /// undirected. Duplicate identical entries are also rejected rather than
+    /// silently collapsed, since a caller writing one has probably made a
+    /// mistake about the rest.
+    ///
+    /// [`CausalError::CyclicGraph`] if the directed edges contain a cycle.
+    /// This one is not mere hygiene: the orientation rules in
+    /// `crate::orientation` derive orientations from the premise that closing
+    /// a directed cycle is impossible, so a cyclic input would make them draw
+    /// conclusions from a contradiction.
+    pub fn from_edges(
+        n_nodes: usize,
+        directed: &[(usize, usize)],
+        undirected: &[(usize, usize)],
+    ) -> Result<Self, CausalError> {
+        let mut seen: BTreeSet<(usize, usize)> = BTreeSet::new();
+        let mut check = |a: usize, b: usize| -> Result<(), CausalError> {
+            for index in [a, b]
+            {
+                if index >= n_nodes
+                {
+                    return Err(CausalError::UnknownVariableIndex { index });
+                }
+            }
+            if a == b
+            {
+                return Err(CausalError::SameVariable { variable: a });
+            }
+            if !seen.insert(canon(a, b))
+            {
+                return Err(CausalError::InvalidContract {
+                    detail: "each node pair may carry at most one edge in a Cpdag",
+                });
+            }
+            Ok(())
+        };
+        for &(from, to) in directed
+        {
+            check(from, to)?;
+        }
+        for &(a, b) in undirected
+        {
+            check(a, b)?;
+        }
+        let built = Self {
+            n_nodes,
+            directed: directed.iter().copied().collect(),
+            undirected: undirected.iter().map(|&(a, b)| canon(a, b)).collect(),
+        };
+        if built.directed_part_has_cycle()
+        {
+            return Err(CausalError::CyclicGraph);
+        }
+        Ok(built)
+    }
+
+    /// Kahn's algorithm over the directed edges only.
+    fn directed_part_has_cycle(&self) -> bool {
+        let mut in_degree = vec![0usize; self.n_nodes];
+        for &(_, to) in &self.directed
+        {
+            in_degree[to] += 1;
+        }
+        let mut queue: Vec<usize> = (0..self.n_nodes).filter(|&n| in_degree[n] == 0).collect();
+        let mut removed = 0usize;
+        while let Some(node) = queue.pop()
+        {
+            removed += 1;
+            for &(from, to) in &self.directed
+            {
+                if from == node
+                {
+                    in_degree[to] -= 1;
+                    if in_degree[to] == 0
+                    {
+                        queue.push(to);
+                    }
+                }
+            }
+        }
+        removed != self.n_nodes
     }
 
     /// An edgeless graph over `n_nodes` — used directly by unit tests that
@@ -224,5 +325,79 @@ mod tests {
         assert_eq!(g.directed_edges(), vec![(1, 2)]);
         assert_eq!(g.undirected_edges(), vec![(0, 1), (0, 2)]);
         assert_eq!(g.n_edges(), 3);
+    }
+    // ─── from_edges ─────────────────────────────────────────────────────
+
+    #[test]
+    fn from_edges_builds_the_graph_it_was_given() {
+        let g = Cpdag::from_edges(4, &[(0, 1), (1, 2)], &[(2, 3)]).unwrap();
+        assert_eq!(g.n_nodes(), 4);
+        assert_eq!(g.n_edges(), 3);
+        assert!(g.is_directed(0, 1));
+        assert!(!g.is_directed(1, 0));
+        assert!(g.is_undirected(2, 3));
+        assert_eq!(g.directed_edges(), vec![(0, 1), (1, 2)]);
+        assert_eq!(g.undirected_edges(), vec![(2, 3)]);
+    }
+
+    #[test]
+    fn from_edges_canonicalizes_undirected_pairs() {
+        let a = Cpdag::from_edges(2, &[], &[(1, 0)]).unwrap();
+        let b = Cpdag::from_edges(2, &[], &[(0, 1)]).unwrap();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn from_edges_rejects_out_of_range_and_self_loops() {
+        assert!(matches!(
+            Cpdag::from_edges(2, &[(0, 5)], &[]),
+            Err(CausalError::UnknownVariableIndex { index: 5 })
+        ));
+        assert!(matches!(
+            Cpdag::from_edges(2, &[], &[(3, 1)]),
+            Err(CausalError::UnknownVariableIndex { index: 3 })
+        ));
+        assert!(matches!(
+            Cpdag::from_edges(2, &[(1, 1)], &[]),
+            Err(CausalError::SameVariable { variable: 1 })
+        ));
+    }
+
+    #[test]
+    fn from_edges_rejects_a_pair_carrying_more_than_one_edge() {
+        // Both directions.
+        assert!(matches!(
+            Cpdag::from_edges(2, &[(0, 1), (1, 0)], &[]),
+            Err(CausalError::InvalidContract { .. })
+        ));
+        // Directed and undirected at once — the invariant this type exists to
+        // hold.
+        assert!(matches!(
+            Cpdag::from_edges(2, &[(0, 1)], &[(0, 1)]),
+            Err(CausalError::InvalidContract { .. })
+        ));
+        // An exact duplicate, rejected rather than silently collapsed.
+        assert!(matches!(
+            Cpdag::from_edges(2, &[], &[(0, 1), (0, 1)]),
+            Err(CausalError::InvalidContract { .. })
+        ));
+    }
+
+    #[test]
+    fn from_edges_rejects_a_directed_cycle() {
+        assert!(matches!(
+            Cpdag::from_edges(3, &[(0, 1), (1, 2), (2, 0)], &[]),
+            Err(CausalError::CyclicGraph)
+        ));
+        // An undirected edge closing the loop is fine: it is exactly the
+        // ambiguity a CPDAG is meant to carry.
+        assert!(Cpdag::from_edges(3, &[(0, 1), (1, 2)], &[(0, 2)]).is_ok());
+    }
+
+    #[test]
+    fn from_edges_accepts_an_isolated_node_set() {
+        let g = Cpdag::from_edges(3, &[], &[]).unwrap();
+        assert_eq!(g.n_edges(), 0);
+        assert_eq!(g.neighbors(1), Vec::<usize>::new());
     }
 }
