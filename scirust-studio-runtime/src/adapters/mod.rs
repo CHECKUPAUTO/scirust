@@ -4,6 +4,7 @@
 mod double_pendulum;
 mod logistic_growth;
 mod lotka_volterra;
+mod ornstein_uhlenbeck;
 mod pendulum;
 mod rlc;
 mod robertson;
@@ -14,6 +15,7 @@ mod two_body;
 pub use double_pendulum::DoublePendulumAdapter;
 pub use logistic_growth::LogisticGrowthAdapter;
 pub use lotka_volterra::LotkaVolterraAdapter;
+pub use ornstein_uhlenbeck::OrnsteinUhlenbeckAdapter;
 pub use pendulum::PendulumAdapter;
 pub use rlc::RlcAdapter;
 pub use robertson::RobertsonAdapter;
@@ -43,6 +45,7 @@ pub fn all_adapters() -> Vec<Box<dyn CapabilityAdapter>> {
         Box::new(LogisticGrowthAdapter),
         Box::new(PendulumAdapter),
         Box::new(DoublePendulumAdapter),
+        Box::new(OrnsteinUhlenbeckAdapter),
     ]
 }
 
@@ -116,6 +119,11 @@ const TUTORIAL_SCENARIOS: &[(&str, &str, &str)] = &[
         "sim.mechanics.double_pendulum",
         "double_pendulum.scirust.toml",
         include_str!("../../../docs/studio/tutorials/double_pendulum.scirust.toml"),
+    ),
+    (
+        "sim.stochastic.ornstein_uhlenbeck",
+        "ornstein_uhlenbeck.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/ornstein_uhlenbeck.scirust.toml"),
     ),
 ];
 

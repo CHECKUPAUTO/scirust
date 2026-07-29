@@ -311,6 +311,7 @@ fn a_run_view_crosses_with_its_coordinates_bit_for_bit() {
             started_at: "2026-07-28T21:51:09Z".to_string(),
             completed_at: "2026-07-28T21:51:10Z".to_string(),
             elapsed_seconds: 1.5,
+            seed: None,
         },
         scenario_source: "schema_version = 1\n".to_string(),
         integrity: VerificationReportView {
@@ -346,6 +347,60 @@ fn a_run_view_crosses_with_its_coordinates_bit_for_bit() {
     assert_eq!(wire.metrics[0].numeric, Some(6.99e-15));
     assert_eq!(wire.verifications[0].status, "passed");
     assert!(wire.integrity.intact);
+}
+
+/// A stochastic run's seed must reach the interface: it is the only thing
+/// that makes the result reproducible, and a provenance panel that omits it
+/// is showing a run nobody can repeat.
+///
+/// The `None` case matters just as much. A deterministic capability consumed
+/// no seed, and a number displayed there would claim it had.
+#[test]
+fn a_consumed_seed_crosses_and_an_unconsumed_one_stays_absent() {
+    use scirust_studio_desktop_lib::views::ProvenanceView;
+    use scirust_studio_ui::backend::wire::ProvenanceWire;
+
+    let base = ProvenanceView {
+        capability_id: "sim.stochastic.ornstein_uhlenbeck".to_string(),
+        determinism: "InherentlyStochasticRecordedSeed".to_string(),
+        adapter_crate: "scirust-studio-runtime".to_string(),
+        adapter_version: "0.1.0".to_string(),
+        result_schema_version: 2,
+        target: "linux-x86_64".to_string(),
+        started_at: "2026-07-29T00:00:00Z".to_string(),
+        completed_at: "2026-07-29T00:00:01Z".to_string(),
+        elapsed_seconds: 1.0,
+        seed: Some(u64::MAX),
+    };
+    // u64::MAX on purpose: a seed routed through a JSON number that some
+    // reader turns into an f64 would come back as 18446744073709552000.
+    let wire: ProvenanceWire = cross(&base);
+    assert_eq!(wire.seed, Some(u64::MAX));
+
+    let unseeded = ProvenanceView { seed: None, ..base };
+    let wire: ProvenanceWire = cross(&unseeded);
+    assert_eq!(wire.seed, None);
+}
+
+/// And a provenance written before the field existed must still decode, since
+/// the field was added to schema v2 rather than bumping to v3.
+#[test]
+fn a_provenance_without_a_seed_field_still_decodes() {
+    use scirust_studio_ui::backend::wire::ProvenanceWire;
+
+    let json = r#"{
+        "capability_id": "sim.mechanics.spring_mass_damper",
+        "determinism": "StrictSameBinarySameTarget",
+        "adapter_crate": "scirust-studio-runtime",
+        "adapter_version": "0.1.0",
+        "result_schema_version": 2,
+        "target": "linux-x86_64",
+        "started_at": "2026-07-28T21:51:09Z",
+        "completed_at": "2026-07-28T21:51:10Z",
+        "elapsed_seconds": 1.5
+    }"#;
+    let wire: ProvenanceWire = serde_json::from_str(json).expect("an older provenance");
+    assert_eq!(wire.seed, None);
 }
 
 #[test]
