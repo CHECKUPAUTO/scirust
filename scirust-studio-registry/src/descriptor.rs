@@ -43,6 +43,8 @@ pub enum CapabilityCategory {
     Electrical,
     /// Chemical kinetics.
     Chemistry,
+    /// Population dynamics.
+    Ecology,
 }
 
 /// The scientific maturity of the *underlying model*, as documented by its

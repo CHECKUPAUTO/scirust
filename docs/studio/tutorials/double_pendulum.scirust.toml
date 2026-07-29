@@ -1,0 +1,69 @@
+# SciRust Studio tutorial scenario: the chaotic double pendulum.
+#
+# Run it with:
+#
+#   scirust run docs/studio/tutorials/double_pendulum.scirust.toml
+#
+# Two rods, two bobs, both released from horizontal. There is nothing random
+# in this scenario and nothing random in the solver: run it a thousand times
+# and you get the same numbers, bit for bit.
+#
+# And yet the answer is not a prediction.
+#
+# The run integrates a second, hidden trajectory from a start displaced by
+# 1e-9 radians in the upper angle — a nanoradian, roughly the angle a metre
+# rule subtends at the distance of the Moon — and plots how far the two
+# separate. Within a few seconds they are in completely different places.
+#
+# That is deterministic chaos. It is a property of the physics, not a defect
+# of the integrator, so the run reports it as a measurement rather than as an
+# error, and attaches a warning naming the time after which the angles stop
+# meaning anything about the real system.
+#
+# Energy is still exactly conserved by the true dynamics, and the drift check
+# still applies. For a chaotic run that check is the *only* thing about the
+# late trajectory that stays meaningful.
+
+schema_version = 1
+
+[experiment]
+name = "Double pendulum released from horizontal"
+description = "Both rods released from rest at 90 degrees. Deterministic, energy-conserving, and unpredictable after a few seconds."
+seed = 42
+
+[capability]
+id = "sim.mechanics.double_pendulum"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+m1 = { value = 1.0, unit = "kg" }
+m2 = { value = 1.0, unit = "kg" }
+l1 = { value = 1.0, unit = "m" }
+l2 = { value = 1.0, unit = "m" }
+gravity = { value = 9.81, unit = "m/s^2" }
+
+[initial_state]
+# Both rods horizontal (pi/2 rad), released from rest: high energy, deep in
+# the chaotic regime.
+theta1 = [{ value = 1.5707963267948966, unit = "rad" }]
+omega1 = [{ value = 0.0, unit = "rad/s" }]
+theta2 = [{ value = 1.5707963267948966, unit = "rad" }]
+omega2 = [{ value = 0.0, unit = "rad/s" }]
+
+[solver]
+id = "rk4"
+start = { value = 0.0, unit = "s" }
+# Long enough for the nanoradian perturbation to grow into a visibly
+# different motion.
+end = { value = 45.0, unit = "s" }
+# A small step: the accelerations are large and the energy check is the only
+# guard against the integration quietly going wrong.
+step = { value = 0.0002, unit = "s" }
+
+[outputs]
+record = ["theta1", "theta2", "energy", "separation"]
+sample_every = 1
