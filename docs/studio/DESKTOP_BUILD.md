@@ -163,9 +163,13 @@ cd apps/scirust-studio
 cargo test -p scirust-studio-ui
 cargo test -p scirust-studio-ui --features mock-backend
 
-# The components, type-checked against that logic.
+# The components, type-checked against that logic. Both feature settings:
+# `ActiveBackend` is a cfg-resolved type alias, so the mock build binds every
+# component to a different backend type and is a different compilation.
 cargo clippy -p scirust-studio-ui --all-targets \
     --target wasm32-unknown-unknown -- -D warnings
+cargo clippy -p scirust-studio-ui --all-targets \
+    --target wasm32-unknown-unknown --features mock-backend -- -D warnings
 
 # The shell: commands, views, the security audit, the bridge contract.
 cargo test -p scirust-studio-desktop
