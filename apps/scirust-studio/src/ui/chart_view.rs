@@ -19,8 +19,8 @@ use dioxus::prelude::*;
 
 use crate::backend::SeriesRoleWire;
 use crate::chart::{
-    ChartModel, PlotRole, PlotSeries, XAxisKind, accessible_summary, build_chart, polyline_points,
-    stroke_for,
+    ChartModel, FieldModel, PlotRole, PlotSeries, XAxisKind, accessible_field_summary,
+    accessible_summary, build_chart, build_field, polyline_points, stroke_for,
 };
 use crate::ui::Ui;
 
@@ -388,4 +388,151 @@ fn axis_label(chart: &ChartModel) -> String {
         },
         _ => chart.x_label.clone(),
     }
+}
+
+/// The heat map for a run's fields, when it has any.
+///
+/// Rendered beside the chart rather than instead of it: for the heat rod the
+/// field is the result and the three curves are summaries of it, and a reader
+/// wants both.
+#[component]
+pub fn FieldMaps() -> Element {
+    let ui = use_context::<Ui>();
+    let Some(run) = ui.run.read().clone()
+    else
+    {
+        return rsx! {};
+    };
+    if run.fields.is_empty()
+    {
+        return rsx! {};
+    }
+
+    rsx! {
+        for grid in run.fields.iter() {
+            match build_field(&grid.values, grid.columns) {
+                None => rsx! {
+                    section { key: "{grid.id}", class: "chart",
+                        p { class: "muted chart-empty", "{ui.t(\"field.unreadable\")}" }
+                    }
+                },
+                Some(model) => rsx! {
+                    FieldMap {
+                        key: "{grid.id}",
+                        model: model,
+                        name: grid.display_name.clone(),
+                        unit: grid.unit.clone(),
+                        row_label: field_axis_label(&run, &grid.row_axis_id),
+                        column_label: field_axis_label(&run, &grid.column_axis_id),
+                    }
+                },
+            }
+        }
+    }
+}
+
+/// An axis's label and unit, for a field's edge captions.
+fn field_axis_label(run: &crate::backend::RunWire, axis_id: &str) -> String {
+    // The interface holds the primary axis flattened onto the run, so only
+    // its id can be matched; any other axis is named by its id, which is what
+    // the shell would have shown anyway.
+    if axis_id == "t" && !run.x_axis_label.is_empty()
+    {
+        if run.x_axis_unit.is_empty()
+        {
+            run.x_axis_label.clone()
+        }
+        else
+        {
+            format!("{} ({})", run.x_axis_label, run.x_axis_unit)
+        }
+    }
+    else
+    {
+        axis_id.to_string()
+    }
+}
+
+/// One field, drawn as a grid of rectangles.
+#[component]
+fn FieldMap(
+    model: FieldModel,
+    name: String,
+    unit: String,
+    row_label: String,
+    column_label: String,
+) -> Element {
+    let ui = use_context::<Ui>();
+    let summary = accessible_field_summary(&model, &name, &unit);
+
+    // A fixed viewbox scaled by CSS, like the line chart's: the geometry is
+    // resolution-independent and needs no layout measurement.
+    let cell_w = 100.0 / model.columns as f64;
+    let cell_h = 100.0 / model.rows as f64;
+
+    rsx! {
+        section { class: "chart", "aria-label": name.clone(),
+            header { class: "chart-head",
+                h3 { {name.clone()} }
+                span { class: "chart-caption",
+                    "{model.source_rows} x {model.source_columns} {ui.t(\"field.reduced_to\")} "
+                    "{model.rows} x {model.columns}"
+                }
+            }
+            svg {
+                class: "field-map",
+                view_box: "0 0 100 100",
+                preserve_aspect_ratio: "none",
+                role: "img",
+                "aria-label": summary.clone(),
+
+                for r in 0..model.rows {
+                    for c in 0..model.columns {
+                        rect {
+                            key: "{r}-{c}",
+                            x: "{c as f64 * cell_w}",
+                            y: "{r as f64 * cell_h}",
+                            width: "{cell_w * 1.02}",
+                            height: "{cell_h * 1.02}",
+                            fill: "{heat_colour(model.level(model.cells[r * model.columns + c]))}",
+                        }
+                    }
+                }
+            }
+            p { class: "chart-caption",
+                "{column_label} \u{2192}  |  {row_label} \u{2193}  |  "
+                "{model.min:.4} \u{2013} {model.max:.4} {unit}"
+            }
+            p { class: "visually-hidden", {summary.clone()} }
+        }
+    }
+}
+
+/// The colour for a level in `0.0..=1.0`.
+///
+/// A blue-to-red ramp through a light middle. Not a rainbow: a rainbow has no
+/// perceptual ordering, so a reader cannot tell which of two colours is the
+/// larger value without consulting the legend — which is the one thing a heat
+/// map is supposed to make unnecessary.
+fn heat_colour(level: f64) -> String {
+    let level = level.clamp(0.0, 1.0);
+    let (r, g, b) = if level < 0.5
+    {
+        let k = level / 0.5;
+        (
+            (40.0 + k * 215.0) as u8,
+            (90.0 + k * 145.0) as u8,
+            (200.0 + k * 35.0) as u8,
+        )
+    }
+    else
+    {
+        let k = (level - 0.5) / 0.5;
+        (
+            (255.0 - k * 15.0) as u8,
+            (235.0 - k * 190.0) as u8,
+            (235.0 - k * 195.0) as u8,
+        )
+    };
+    format!("rgb({r},{g},{b})")
 }

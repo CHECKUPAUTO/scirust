@@ -162,6 +162,8 @@ impl MockBackend {
                 role: SeriesRoleWire::Trajectory,
                 values: MOCK_Y.to_vec(),
             }],
+            // The fabricated capability produces curves, not a field.
+            fields: Vec::new(),
             metrics: vec![MetricWire {
                 id: "mock".to_string(),
                 display_name: "Fabricated metric".to_string(),

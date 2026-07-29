@@ -263,6 +263,12 @@ const STRINGS: &[(&str, &str, &str)] = &[
     ),
     ("chart.title", "Trajectory", "Trajectoire"),
     ("chart.showing", "Showing", "Affichage de"),
+    ("field.reduced_to", "reduced to", "réduit à"),
+    (
+        "field.unreadable",
+        "This field could not be drawn: its shape or its values are not usable.",
+        "Ce champ n'a pas pu être tracé : sa forme ou ses valeurs sont inutilisables.",
+    ),
     ("chart.of", "of", "sur"),
     ("chart.points", "points", "points"),
     ("chart.table_view", "Show as table", "Afficher en tableau"),

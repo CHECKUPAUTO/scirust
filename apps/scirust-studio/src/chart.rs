@@ -899,3 +899,234 @@ mod role_tests {
         assert_eq!(chart.series[1].role, PlotRole::EnsembleMember);
     }
 }
+
+/// The largest heat map drawn, in cells.
+///
+/// One SVG rectangle per cell, and a browser diffing tens of thousands of
+/// them is slower than the run that produced them. These bounds keep the
+/// picture at roughly display resolution.
+pub const MAX_FIELD_ROWS: usize = 48;
+/// The column half of that bound.
+pub const MAX_FIELD_COLUMNS: usize = 96;
+
+/// A field reduced to a drawable grid.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldModel {
+    /// Rows actually drawn.
+    pub rows: usize,
+    /// Columns actually drawn.
+    pub columns: usize,
+    /// Row-major cell values.
+    pub cells: Vec<f64>,
+    /// The lowest value in the *source* field, not in the reduction.
+    pub min: f64,
+    /// The highest value in the source field.
+    pub max: f64,
+    /// How many rows the source had.
+    pub source_rows: usize,
+    /// How many columns the source had.
+    pub source_columns: usize,
+}
+
+impl FieldModel {
+    /// Where a cell sits in `min..=max`, as `0.0..=1.0`.
+    ///
+    /// A field of one constant value has no extent to place anything in;
+    /// putting it in the middle of the ramp is the only answer that does not
+    /// divide by zero or claim the constant is an extreme.
+    pub fn level(&self, value: f64) -> f64 {
+        let extent = self.max - self.min;
+        if !extent.is_finite() || extent.abs() < f64::EPSILON
+        {
+            0.5
+        }
+        else
+        {
+            ((value - self.min) / extent).clamp(0.0, 1.0)
+        }
+    }
+}
+
+/// Reduce a row-major field to at most [`MAX_FIELD_ROWS`] x
+/// [`MAX_FIELD_COLUMNS`] cells.
+///
+/// Each cell keeps the source sample **furthest from the field's mean**,
+/// not the block's average. This is the two-dimensional form of the rule
+/// `reduction_indices` already follows for series: an average is exactly the
+/// operation that makes a spike vanish, and a heat map that smooths away the
+/// hot spot is a picture of a different experiment.
+///
+/// `min` and `max` are taken from the *source*, so the colour scale still
+/// describes the data even where the reduction did not land on the extreme.
+pub fn build_field(values: &[f64], columns: usize) -> Option<FieldModel> {
+    if columns == 0 || values.is_empty() || !values.len().is_multiple_of(columns)
+    {
+        return None;
+    }
+    let source_rows = values.len() / columns;
+
+    // Refused outright, not drawn around. `validate_result` guarantees a
+    // stored field is finite throughout, so a non-finite value means
+    // something upstream is wrong — and a heat map with the bad cells
+    // quietly painted at the mean would hide exactly that.
+    if values.iter().any(|v| !v.is_finite())
+    {
+        return None;
+    }
+    let (min, max) = values
+        .iter()
+        .copied()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
+            (lo.min(v), hi.max(v))
+        });
+    let mean = values.iter().sum::<f64>() / values.len() as f64;
+
+    let rows = source_rows.min(MAX_FIELD_ROWS);
+    let drawn_columns = columns.min(MAX_FIELD_COLUMNS);
+    let mut cells = Vec::with_capacity(rows * drawn_columns);
+
+    for r in 0..rows
+    {
+        // Half-open blocks, so every source row lands in exactly one cell
+        // and none lands in two.
+        let row_lo = r * source_rows / rows;
+        let row_hi = ((r + 1) * source_rows / rows)
+            .max(row_lo + 1)
+            .min(source_rows);
+        for c in 0..drawn_columns
+        {
+            let col_lo = c * columns / drawn_columns;
+            let col_hi = ((c + 1) * columns / drawn_columns)
+                .max(col_lo + 1)
+                .min(columns);
+            let mut chosen = mean;
+            let mut furthest = -1.0_f64;
+            for rr in row_lo..row_hi
+            {
+                for cc in col_lo..col_hi
+                {
+                    let v = values[rr * columns + cc];
+                    let distance = (v - mean).abs();
+                    if distance > furthest
+                    {
+                        furthest = distance;
+                        chosen = v;
+                    }
+                }
+            }
+            cells.push(chosen);
+        }
+    }
+
+    Some(FieldModel {
+        rows,
+        columns: drawn_columns,
+        cells,
+        min,
+        max,
+        source_rows,
+        source_columns: columns,
+    })
+}
+
+/// A text alternative for a heat map.
+///
+/// A picture with no reading is unavailable to a screen reader and
+/// uncheckable by a reviewer, which is the same argument
+/// [`accessible_summary`] makes for a line chart.
+pub fn accessible_field_summary(field: &FieldModel, name: &str, unit: &str) -> String {
+    format!(
+        "{name}: a field of {} rows by {} columns, drawn as {} by {}; values range {:.6} to \
+         {:.6} {unit}. Each drawn cell is the source sample furthest from the mean, so an \
+         extreme is never averaged away.",
+        field.source_rows, field.source_columns, field.rows, field.columns, field.min, field.max
+    )
+}
+
+#[cfg(test)]
+mod field_tests {
+    use super::*;
+
+    #[test]
+    fn a_small_field_is_drawn_at_full_resolution() {
+        let model = build_field(&[1.0, 2.0, 3.0, 4.0], 2).expect("a model");
+        assert_eq!((model.rows, model.columns), (2, 2));
+        assert_eq!(model.cells, vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!((model.min, model.max), (1.0, 4.0));
+    }
+
+    #[test]
+    fn a_malformed_field_is_refused_rather_than_guessed() {
+        assert!(
+            build_field(&[1.0, 2.0, 3.0], 2).is_none(),
+            "not a rectangle"
+        );
+        assert!(build_field(&[1.0], 0).is_none(), "no columns");
+        assert!(build_field(&[], 2).is_none(), "no values");
+        assert!(
+            build_field(&[f64::NAN, 1.0], 2).is_none(),
+            "no finite range"
+        );
+    }
+
+    #[test]
+    fn a_large_field_is_reduced_within_the_budget() {
+        let columns = MAX_FIELD_COLUMNS * 3;
+        let rows = MAX_FIELD_ROWS * 5;
+        let values: Vec<f64> = (0..rows * columns).map(|i| i as f64).collect();
+        let model = build_field(&values, columns).expect("a model");
+        assert_eq!(model.rows, MAX_FIELD_ROWS);
+        assert_eq!(model.columns, MAX_FIELD_COLUMNS);
+        assert_eq!(model.cells.len(), MAX_FIELD_ROWS * MAX_FIELD_COLUMNS);
+        // The colour scale describes the source, not the reduction.
+        assert_eq!(model.min, 0.0);
+        assert_eq!(model.max, (rows * columns - 1) as f64);
+        assert_eq!(model.source_rows, rows);
+        assert_eq!(model.source_columns, columns);
+    }
+
+    /// The property the whole reduction exists for: a single hot cell in an
+    /// otherwise flat field must survive being shrunk.
+    #[test]
+    fn reduction_never_hides_a_hot_spot() {
+        let columns = MAX_FIELD_COLUMNS * 4;
+        let rows = MAX_FIELD_ROWS * 4;
+        let mut values = vec![10.0; rows * columns];
+        values[(rows / 2) * columns + columns / 2] = 1000.0;
+
+        let model = build_field(&values, columns).expect("a model");
+        assert!(
+            model.cells.contains(&1000.0),
+            "the hot spot was averaged away, which is the one thing this must not do"
+        );
+        assert_eq!(model.max, 1000.0);
+    }
+
+    #[test]
+    fn a_constant_field_sits_in_the_middle_of_the_scale() {
+        let model = build_field(&[7.0; 16], 4).expect("a model");
+        assert_eq!(model.level(7.0), 0.5);
+    }
+
+    #[test]
+    fn the_level_is_clamped_to_the_scale() {
+        let model = build_field(&[0.0, 10.0], 2).expect("a model");
+        assert_eq!(model.level(0.0), 0.0);
+        assert_eq!(model.level(10.0), 1.0);
+        assert_eq!(model.level(-5.0), 0.0);
+        assert_eq!(model.level(50.0), 1.0);
+    }
+
+    #[test]
+    fn the_text_alternative_states_both_shapes_and_the_range() {
+        let values: Vec<f64> = (0..MAX_FIELD_ROWS * 4 * 8).map(|i| i as f64).collect();
+        let model = build_field(&values, 8).expect("a model");
+        let summary = accessible_field_summary(&model, "Temperature", "K");
+        assert!(
+            summary.contains(&format!("{} rows", model.source_rows)),
+            "{summary}"
+        );
+        assert!(summary.contains(&format!("drawn as {} by {}", model.rows, model.columns)));
+        assert!(summary.contains("furthest from the mean"));
+    }
+}
