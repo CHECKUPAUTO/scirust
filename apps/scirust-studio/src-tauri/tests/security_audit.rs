@@ -224,3 +224,91 @@ fn no_updater_is_configured() {
     assert!(!CONFIG.contains("\"endpoints\""), "{CONFIG}");
     assert!(!CONFIG.contains("pubkey"), "{CONFIG}");
 }
+
+/// Every icon the configuration names must exist, and a Windows resource
+/// icon must be among them.
+///
+/// This is here because the failure it prevents is invisible on the
+/// platform most of this is developed on. `tauri-build` only demands
+/// `icons/icon.ico` when it is building a Windows resource, so a missing
+/// one compiles perfectly on Linux and macOS and then fails on a Windows
+/// runner with `` `icons/icon.ico` not found ``. It cost a red CI job once;
+/// asserting it here means the next time it fails in a second, locally, on
+/// whatever platform the change was written on.
+#[test]
+fn every_configured_icon_exists_including_the_windows_resource() {
+    let icons_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let config = config();
+    let icons = config["bundle"]["icon"]
+        .as_array()
+        .expect("the bundle must name its icons");
+    assert!(!icons.is_empty(), "an application needs an icon");
+
+    for entry in icons
+    {
+        let relative = entry.as_str().expect("an icon path is a string");
+        let path = icons_dir.join(relative);
+        let metadata = std::fs::metadata(&path)
+            .unwrap_or_else(|e| panic!("{relative} is configured but missing: {e}"));
+        // A one-pixel placeholder satisfies "exists" and satisfies nobody
+        // else; the smallest real icon here is several hundred bytes.
+        assert!(
+            metadata.len() > 256,
+            "{relative} is {} bytes — that is a placeholder, not an icon. \
+             Regenerate with scripts/studio/generate-icons.py",
+            metadata.len()
+        );
+    }
+
+    let ico = icons
+        .iter()
+        .filter_map(|i| i.as_str())
+        .find(|i| i.ends_with(".ico"));
+    assert!(
+        ico.is_some(),
+        "tauri-build requires a .ico to embed as the Windows executable's \
+         resource; without one the Windows build fails and no other platform \
+         notices"
+    );
+}
+
+/// The Windows resource icon must be a real multi-size ICO.
+///
+/// Checked by reading the directory rather than by trusting the extension:
+/// a PNG renamed to `.ico` passes an existence check and fails the actual
+/// Windows build.
+#[test]
+fn the_windows_icon_is_a_real_multi_size_ico() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("icons/icon.ico");
+    let bytes = std::fs::read(&path).expect("icons/icon.ico");
+
+    assert!(
+        bytes.len() > 22,
+        "an ICO has a header and at least one entry"
+    );
+    assert_eq!(&bytes[0..2], &[0, 0], "reserved field");
+    assert_eq!(&bytes[2..4], &[1, 0], "type 1 = icon");
+
+    let count = u16::from_le_bytes([bytes[4], bytes[5]]) as usize;
+    assert!(
+        count >= 4,
+        "an application icon needs several sizes; found {count}"
+    );
+
+    // Windows picks 16 for the title bar and 32 for the taskbar; an icon
+    // without them is upscaled and looks it.
+    let mut sizes: Vec<u32> = Vec::new();
+    for index in 0..count
+    {
+        let entry = 6 + index * 16;
+        let width = bytes[entry];
+        sizes.push(if width == 0 { 256 } else { u32::from(width) });
+    }
+    for required in [16, 32]
+    {
+        assert!(
+            sizes.contains(&required),
+            "icon.ico has {sizes:?} but needs {required}"
+        );
+    }
+}
