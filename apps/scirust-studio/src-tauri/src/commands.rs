@@ -21,7 +21,17 @@ use crate::views::{
 };
 
 /// The result every command returns: a view, or a renderable error.
-type CommandResult<T> = Result<T, ErrorView>;
+///
+/// The error is boxed. An `ErrorView` carries a full validation outcome when
+/// it is a validation failure, which makes it several times larger than most
+/// of the success values here — and an unboxed error would make every
+/// command's `Result` that size whether or not anything failed.
+type CommandResult<T> = Result<T, Box<ErrorView>>;
+
+/// Wrap a service error for a command's return type.
+fn error(e: scirust_studio_app_service::AppServiceError) -> Box<ErrorView> {
+    Box::new(ErrorView::from(e))
+}
 
 /// Reject an identifier that is not one this application issued.
 ///
@@ -29,7 +39,7 @@ type CommandResult<T> = Result<T, ErrorView>;
 /// process handles. Bounding the length and the alphabet costs nothing and
 /// removes a whole class of "what if it contains a path separator" question
 /// from every downstream use.
-fn check_id(kind: &str, value: &str) -> Result<(), ErrorView> {
+fn check_id(kind: &str, value: &str) -> Result<(), Box<ErrorView>> {
     const MAX: usize = 128;
     let ok = !value.is_empty()
         && value.len() <= MAX
@@ -42,7 +52,7 @@ fn check_id(kind: &str, value: &str) -> Result<(), ErrorView> {
     }
     else
     {
-        Err(ErrorView {
+        Err(Box::new(ErrorView {
             code: "INVALID_IDENTIFIER".to_string(),
             title: format!("Invalid {kind}"),
             explanation: format!(
@@ -52,7 +62,7 @@ fn check_id(kind: &str, value: &str) -> Result<(), ErrorView> {
             recoverable: true,
             suggested_action: None,
             validation: None,
-        })
+        }))
     }
 }
 
@@ -61,7 +71,7 @@ fn check_id(kind: &str, value: &str) -> Result<(), ErrorView> {
 /// The bound is generous — a scenario is a short configuration file — and
 /// exists so a runaway frontend cannot hand this process an arbitrarily
 /// large allocation.
-fn check_source(source: &str) -> Result<(), ErrorView> {
+fn check_source(source: &str) -> Result<(), Box<ErrorView>> {
     const MAX_BYTES: usize = 1024 * 1024;
     if source.len() <= MAX_BYTES
     {
@@ -69,7 +79,7 @@ fn check_source(source: &str) -> Result<(), ErrorView> {
     }
     else
     {
-        Err(ErrorView {
+        Err(Box::new(ErrorView {
             code: "SCENARIO_TOO_LARGE".to_string(),
             title: "Scenario too large".to_string(),
             explanation: format!(
@@ -79,12 +89,12 @@ fn check_source(source: &str) -> Result<(), ErrorView> {
             recoverable: true,
             suggested_action: Some("Open a smaller scenario file.".to_string()),
             validation: None,
-        })
+        }))
     }
 }
 
-fn service(state: &AppState) -> Result<&StudioAppService, ErrorView> {
-    state.service().map_err(ErrorView::from)
+fn service(state: &AppState) -> Result<&StudioAppService, Box<ErrorView>> {
+    state.service().map_err(error)
 }
 
 /// What the interface needs at start-up.
@@ -124,9 +134,7 @@ pub fn studio_load_tutorial(
 ) -> CommandResult<ScenarioView> {
     check_id("capability id", &capability_id)?;
     let service = service(&state)?;
-    let doc = service
-        .load_tutorial(&capability_id)
-        .map_err(ErrorView::from)?;
+    let doc = service.load_tutorial(&capability_id).map_err(error)?;
     Ok(ScenarioView {
         source: doc.source,
         path: doc.path,
@@ -150,7 +158,7 @@ pub fn studio_validate_scenario(
 pub fn studio_start_run(state: State<'_, AppState>, source: String) -> CommandResult<JobView> {
     check_source(&source)?;
     let service = service(&state)?;
-    service.start_run(&source).map_err(ErrorView::from)
+    service.start_run(&source).map_err(error)
 }
 
 /// Cancel a run.
@@ -158,7 +166,7 @@ pub fn studio_start_run(state: State<'_, AppState>, source: String) -> CommandRe
 pub fn studio_cancel_run(state: State<'_, AppState>, job_id: String) -> CommandResult<()> {
     check_id("job id", &job_id)?;
     let service = service(&state)?;
-    service.cancel_run(&job_id).map_err(ErrorView::from)
+    service.cancel_run(&job_id).map_err(error)
 }
 
 /// The current state of a run.
@@ -166,7 +174,7 @@ pub fn studio_cancel_run(state: State<'_, AppState>, job_id: String) -> CommandR
 pub fn studio_job_snapshot(state: State<'_, AppState>, job_id: String) -> CommandResult<JobView> {
     check_id("job id", &job_id)?;
     let service = service(&state)?;
-    service.job_snapshot(&job_id).map_err(ErrorView::from)
+    service.job_snapshot(&job_id).map_err(error)
 }
 
 /// Everything recorded in the run store.
@@ -175,7 +183,7 @@ pub fn studio_list_runs(state: State<'_, AppState>) -> CommandResult<Vec<StoredR
     let service = service(&state)?;
     Ok(service
         .list_runs()
-        .map_err(ErrorView::from)?
+        .map_err(error)?
         .into_iter()
         .map(StoredRunView::from)
         .collect())
@@ -191,9 +199,8 @@ pub fn studio_list_runs(state: State<'_, AppState>) -> CommandResult<Vec<StoredR
 pub fn studio_load_run(state: State<'_, AppState>, run_id: String) -> CommandResult<RunView> {
     check_id("run id", &run_id)?;
     let service = service(&state)?;
-    let loaded = service.load_run(&run_id).map_err(ErrorView::from)?;
-    let integrity: VerificationReportView =
-        service.verify_run(&run_id).map_err(ErrorView::from)?.into();
+    let loaded = service.load_run(&run_id).map_err(error)?;
+    let integrity: VerificationReportView = service.verify_run(&run_id).map_err(error)?.into();
     Ok(run_view(
         &run_id,
         &loaded.manifest,
@@ -211,7 +218,7 @@ pub fn studio_verify_run(
 ) -> CommandResult<VerificationReportView> {
     check_id("run id", &run_id)?;
     let service = service(&state)?;
-    Ok(service.verify_run(&run_id).map_err(ErrorView::from)?.into())
+    Ok(service.verify_run(&run_id).map_err(error)?.into())
 }
 
 /// Drain buffered application events.
@@ -238,7 +245,7 @@ pub fn studio_store_path(state: State<'_, AppState>) -> CommandResult<String> {
 #[tauri::command]
 pub fn studio_restart_worker(state: State<'_, AppState>) -> CommandResult<BootstrapView> {
     let service = service(&state)?;
-    service.start_worker().map_err(ErrorView::from)?;
+    service.start_worker().map_err(error)?;
     Ok(state.bootstrap_view())
 }
 

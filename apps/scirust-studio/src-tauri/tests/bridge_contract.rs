@@ -254,7 +254,9 @@ fn a_run_view_crosses_with_its_coordinates_bit_for_bit() {
     let x_values = vec![
         0.0,
         1.0 / 3.0,
-        0.100_000_000_000_000_005,
+        // The next representable f64 above 1.0: a value that survives only
+        // if the crossing is exact.
+        1.000_000_000_000_000_2,
         1.234_567_890_123_456_7e-9,
         9.999_999_999_999_998e5,
     ];
