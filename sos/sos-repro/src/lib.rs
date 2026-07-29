@@ -25,7 +25,9 @@
 //!
 //! The numeric / statistical evaluation behind an `L2`/`L1` node's verdict is the
 //! backend's job (`sos-scirust`), supplied to the contract as a
-//! [`Reproduced::Certified`] outcome — this crate never fabricates it. A full
+//! [`Reproduced::Certified`] outcome — this crate never fabricates it, and now
+//! does not have to: `sos-scirust`'s `verdict` module supplies real ones
+//! (certificate-sum agreement for `L2`, a two-sample test for `L1`). A full
 //! store-driven `verify(object)` that walks an object's sub-DAG, re-executes it,
 //! and auto-diffs composes [`rerun`] with [`verify_reproduction`]; the piece it
 //! awaits is the object-graph re-execution driver. No stub crosses that line.

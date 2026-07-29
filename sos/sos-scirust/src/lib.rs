@@ -121,6 +121,7 @@ pub mod ode;
 pub mod quadrature;
 mod solver;
 pub mod stage;
+pub mod verdict;
 
 pub use bo::BoResult;
 pub use eig::GpEigEstimator;
@@ -129,3 +130,4 @@ pub use nmc::NestedMcEigEstimator;
 pub use ode::{Dopri5OdeSimulator, Rk4OdeSimulator};
 pub use quadrature::QuadratureSimulator;
 pub use stage::{OdeStageHandler, TrajectoryBody, config_address};
+pub use verdict::{Agreement, VerdictError};
