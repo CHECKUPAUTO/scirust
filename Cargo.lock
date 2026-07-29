@@ -1915,6 +1915,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nonlocal-relativity-experiments"
+version = "0.1.0"
+dependencies = [
+ "scirust-fractional",
+ "scirust-nonlocal-relativity",
+ "scirust-relativity",
+]
+
+[[package]]
 name = "num-bigint"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3514,6 +3523,7 @@ dependencies = [
 name = "scirust-nonlocal-relativity"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "scirust-fractional",
  "scirust-relativity",
 ]
@@ -3577,6 +3587,7 @@ dependencies = [
 name = "scirust-relativity"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "scirust-sim",
 ]
 

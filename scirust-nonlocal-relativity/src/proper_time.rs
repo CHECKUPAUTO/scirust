@@ -17,6 +17,7 @@ use crate::{
     WorldlineState, WorldlineStepper, metric_contraction, simulate_nonlocal_worldline_with_policy,
     validate_initial_state, validated_metric,
 };
+use scirust_fractional::{FractionalOrder, caputo_l1_nonuniform};
 
 /// Explicit parameterization mode for a worldline simulation.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -191,4 +192,87 @@ pub fn affine_trajectory_proper_time<const D: usize>(
     }
 
     Ok(output)
+}
+
+/// Estimated proper-time value at every sampled state of an affine-parameter
+/// trajectory (length equal to `trajectory.len()`, with `axis[0] == 0.0`),
+/// built from [`affine_trajectory_proper_time`]'s cumulative estimates.
+///
+/// Because each accepted step's proper-time increment
+/// `Delta tau_n ~= h * sqrt(-g(u,u)_n)` depends on that step's own metric
+/// norm, this axis is generally non-uniform even though the affine parameter
+/// itself is uniform; a strictly negative metric norm makes each increment
+/// strictly positive, so the axis is always strictly increasing.
+fn proper_time_axis<const D: usize>(
+    trajectory: &NonlocalTrajectory<D>,
+    step: f64,
+) -> NonlocalResult<Vec<f64>> {
+    let increments = affine_trajectory_proper_time(trajectory, step)?;
+    let mut axis = Vec::with_capacity(trajectory.len());
+    axis.push(0.0);
+
+    for entry in &increments
+    {
+        axis.push(entry.cumulative_proper_time);
+    }
+
+    Ok(axis)
+}
+
+/// Evaluate the Caputo velocity-memory vector of an affine-parameter
+/// trajectory with respect to its own estimated **proper time** rather than
+/// the affine parameter, using [`scirust_fractional::caputo_l1_nonuniform`]
+/// on the (generally non-uniform) axis from [`affine_trajectory_proper_time`].
+///
+/// This is a pure post-hoc diagnostic over an already-computed trajectory: it
+/// does not feed back into the live integration loop, does not change any
+/// accepted state, and is unrelated to [`ParameterizationMode::NormalizedTimelikeProperTime`],
+/// which advances the state equation using a *uniform* proper-time step by
+/// construction. This function instead asks what the Caputo memory *would
+/// have been* if evaluated against the trajectory's own non-uniform elapsed
+/// proper time — meaningful for any timelike affine-parameter trajectory,
+/// including ones whose proper time does not advance uniformly with the
+/// affine parameter (for example, a non-circular orbit).
+///
+/// `step` is the trajectory's uniform affine-parameter step, used only to
+/// estimate the proper-time axis; every sampled state must be timelike
+/// (`g(u,u) < 0`).
+pub fn proper_time_caputo_velocity_memory<const D: usize>(
+    trajectory: &NonlocalTrajectory<D>,
+    step: f64,
+    order: FractionalOrder,
+) -> NonlocalResult<[f64; D]> {
+    let proper_times = proper_time_axis(trajectory, step)?;
+    let final_step = trajectory.len().saturating_sub(1);
+    let mut memory = [0.0_f64; D];
+
+    for (component, memory_component) in memory.iter_mut().enumerate()
+    {
+        let samples: Vec<f64> = trajectory
+            .states()
+            .iter()
+            .map(|state| state.velocity[component])
+            .collect();
+
+        let value = caputo_l1_nonuniform(&samples, &proper_times, order).map_err(|source| {
+            NonlocalRelativityError::FractionalMemory {
+                step: final_step,
+                component,
+                source,
+            }
+        })?;
+
+        if !value.is_finite()
+        {
+            return Err(NonlocalRelativityError::NonFiniteMemory {
+                step: final_step,
+                component,
+                value,
+            });
+        }
+
+        *memory_component = value;
+    }
+
+    Ok(memory)
 }

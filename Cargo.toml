@@ -164,6 +164,7 @@ members = [
     "scirust-fractional",
     "scirust-relativity",
     "scirust-nonlocal-relativity",
+    "experiments/nonlocal-relativity-v2",
     "scirust-stats",
     "scirust-interp",
     "scirust-sparse",
