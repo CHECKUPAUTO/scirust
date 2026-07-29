@@ -439,6 +439,7 @@ impl CapabilityAdapter for RlcAdapter {
                     values: capacitor_voltage_series,
                 },
             ],
+            fields: vec![],
             metrics: vec![
                 Metric {
                     id: "final_current".to_string(),

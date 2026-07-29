@@ -26,7 +26,7 @@ pub use adapter::{CapabilityAdapter, ExecutionError, ValidatedScenario, Validati
 pub use control::ExecutionControl;
 
 pub use result::{
-    Axis, AxisMonotonicity, Metric, MetricValue, RESULT_SCHEMA_VERSION, ResultDefect,
+    Axis, AxisMonotonicity, Field, Metric, MetricValue, RESULT_SCHEMA_VERSION, ResultDefect,
     RunProvenance, RunResult, RunSummary, RunWarning, Series, SeriesRole, TIME_AXIS_ID,
     VerificationResult, VerificationStatus, WarningCategory, describe_defects, validate_result,
 };

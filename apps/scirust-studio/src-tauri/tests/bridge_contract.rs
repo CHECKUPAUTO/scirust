@@ -17,8 +17,8 @@ use scirust_studio_app_service::{
     AppServiceError, JobSnapshot, JobState, ValidationOutcome, validate_source,
 };
 use scirust_studio_desktop_lib::views::{
-    BootstrapView, CapabilityView, ErrorView, MetricView, RunView, SeriesRoleView, StoredRunView,
-    VerificationReportView, VerificationView, WarningView, XAxisKind,
+    BootstrapView, CapabilityView, ErrorView, GridView, MetricView, RunView, SeriesRoleView,
+    StoredRunView, VerificationReportView, VerificationView, WarningView, XAxisKind,
 };
 use scirust_studio_runtime::{Metric, MetricValue, RunWarning, WarningCategory};
 use scirust_studio_ui::backend::wire::{
@@ -285,6 +285,15 @@ fn a_run_view_crosses_with_its_coordinates_bit_for_bit() {
             role: SeriesRoleView::Trajectory,
             values: series_values.clone(),
         }],
+        fields: vec![GridView {
+            id: "temperature".to_string(),
+            display_name: "Temperature".to_string(),
+            unit: "K".to_string(),
+            row_axis_id: "t".to_string(),
+            column_axis_id: "x".to_string(),
+            columns: 2,
+            values: vec![1.0, 2.0, 3.0, 4.0],
+        }],
         metrics: vec![MetricView::from(&Metric {
             id: "energy_drift".to_string(),
             display_name: "Energy drift".to_string(),
@@ -349,6 +358,15 @@ fn a_run_view_crosses_with_its_coordinates_bit_for_bit() {
     assert_eq!(wire.verifications[0].status, "passed");
     assert!(wire.integrity.intact);
     assert_eq!(wire.series[0].role, SeriesRoleWire::Trajectory);
+
+    // The field is the whole result for a capability like the heat rod, so
+    // it has to survive the crossing shape-intact — a transposed or
+    // truncated grid still renders as a convincing picture.
+    assert_eq!(wire.fields.len(), 1);
+    assert_eq!(wire.fields[0].columns, 2);
+    assert_eq!(wire.fields[0].values, vec![1.0, 2.0, 3.0, 4.0]);
+    assert_eq!(wire.fields[0].row_axis_id, "t");
+    assert_eq!(wire.fields[0].column_axis_id, "x");
 }
 
 /// A stochastic run's seed must reach the interface: it is the only thing

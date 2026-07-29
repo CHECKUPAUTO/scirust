@@ -210,6 +210,32 @@ pub struct ScenarioView {
     pub capability_id: Option<String>,
 }
 
+/// A quantity sampled on a two-axis grid — what
+/// `scirust_studio_runtime::Field` carries.
+///
+/// Named `Grid`, not `Field`, because `FieldView`/`FieldWire` were already
+/// taken by a *form* field: the description of one `model.*` parameter a
+/// scenario may set. Two unrelated meanings of the word met here, and the
+/// newcomer yields — renaming the older one would touch the catalogue panel,
+/// the bridge contract and every capability view for a naming preference.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GridView {
+    /// Stable id.
+    pub id: String,
+    /// Display name.
+    pub display_name: String,
+    /// Unit.
+    pub unit: String,
+    /// The axis the rows run along.
+    pub row_axis_id: String,
+    /// The axis the columns run along.
+    pub column_axis_id: String,
+    /// How many columns each row has.
+    pub columns: usize,
+    /// Row-major values.
+    pub values: Vec<f64>,
+}
+
 /// A scenario file the user chose, as text.
 ///
 /// Deliberately carries **no path**. The frontend gets the contents and a
@@ -319,6 +345,10 @@ pub struct RunView {
     pub x_values: Vec<f64>,
     /// The series.
     pub series: Vec<SeriesView>,
+    /// Fields, each spanning two axes. Empty for every capability whose
+    /// outputs are curves.
+    #[serde(default)]
+    pub fields: Vec<GridView>,
     /// Metrics.
     pub metrics: Vec<MetricView>,
     /// Scientific checks.
@@ -508,7 +538,7 @@ pub fn run_view(
 ) -> RunView {
     let target = format!("{}-{}", manifest.environment.os, manifest.environment.arch);
 
-    let (x_axis_kind, x_axis_label, x_axis_unit, x_values, series) = match result
+    let (x_axis_kind, x_axis_label, x_axis_unit, x_values, series, fields) = match result
     {
         LoadedRunResult::V2(r) =>
         {
@@ -529,7 +559,31 @@ pub fn run_view(
                     values: s.values.clone(),
                 })
                 .collect();
-            (XAxisKind::PhysicalCoordinates, label, unit, values, series)
+            // The field is the *result* for a capability like the heat rod;
+            // the series beside it are summaries of it. Dropping it here
+            // would be the interface silently showing less than the run
+            // produced.
+            let fields = r
+                .fields
+                .iter()
+                .map(|f| GridView {
+                    id: f.id.clone(),
+                    display_name: f.display_name.clone(),
+                    unit: f.unit.clone(),
+                    row_axis_id: f.row_axis_id.clone(),
+                    column_axis_id: f.column_axis_id.clone(),
+                    columns: f.columns,
+                    values: f.values.clone(),
+                })
+                .collect();
+            (
+                XAxisKind::PhysicalCoordinates,
+                label,
+                unit,
+                values,
+                series,
+                fields,
+            )
         },
         LoadedRunResult::V1(r) =>
         {
@@ -553,6 +607,8 @@ pub fn run_view(
                 String::new(),
                 (0..length).map(|i| i as f64).collect(),
                 series,
+                // Schema v1 has no notion of a field.
+                Vec::new(),
             )
         },
     };
@@ -568,6 +624,7 @@ pub fn run_view(
         x_axis_unit,
         x_values,
         series,
+        fields,
         metrics: result.metrics().iter().map(MetricView::from).collect(),
         verifications: result
             .verifications()

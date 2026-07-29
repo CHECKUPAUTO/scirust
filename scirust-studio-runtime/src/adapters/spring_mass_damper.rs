@@ -372,6 +372,7 @@ impl CapabilityAdapter for SpringMassDamperAdapter {
                     values: energy_series,
                 },
             ],
+            fields: vec![],
             metrics: vec![
                 Metric {
                     id: "final_position".to_string(),

@@ -291,6 +291,32 @@ impl SeriesRoleWire {
     }
 }
 
+/// A quantity sampled on a two-axis grid — what
+/// `scirust_studio_runtime::Field` carries.
+///
+/// Named `Grid`, not `Field`, because `FieldView`/`FieldWire` were already
+/// taken by a *form* field: the description of one `model.*` parameter a
+/// scenario may set. Two unrelated meanings of the word met here, and the
+/// newcomer yields — renaming the older one would touch the catalogue panel,
+/// the bridge contract and every capability view for a naming preference.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GridWire {
+    /// Stable id.
+    pub id: String,
+    /// Label.
+    pub display_name: String,
+    /// Unit.
+    pub unit: String,
+    /// The axis the rows run along.
+    pub row_axis_id: String,
+    /// The axis the columns run along.
+    pub column_axis_id: String,
+    /// How many columns each row has.
+    pub columns: usize,
+    /// Row-major values.
+    pub values: Vec<f64>,
+}
+
 /// A scenario file the user picked, as text.
 ///
 /// No path, by design — the shell hands over contents and a display name and
@@ -344,6 +370,10 @@ pub struct RunWire {
     pub x_values: Vec<f64>,
     /// The series.
     pub series: Vec<SeriesWire>,
+    /// Fields, each spanning two axes. Empty for every capability whose
+    /// outputs are curves.
+    #[serde(default)]
+    pub fields: Vec<GridWire>,
     /// Metrics.
     pub metrics: Vec<MetricWire>,
     /// Scientific checks.
