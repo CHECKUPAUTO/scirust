@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -59,8 +60,51 @@ ALLOWED_ENGINE_EDGES = frozenset(
         ("sos-curiosity", "sos-reasoning"),
         ("sos-curiosity", "sos-planner"),
         ("sos-theory", "sos-reasoning"),
+        ("sos-theory", "sos-planner"),
     }
 )
+
+# Some edges are sanctioned for one *purpose*, not as a general dependency.
+# Listing an edge above permits the crate-level dependency; listing it here
+# additionally confines which of the target's items the source may name, so
+# the edge cannot quietly broaden into general use of the other engine.
+#
+# The check is deliberately syntactic (it reads `use`/path mentions in the
+# source) rather than semantic. That is enough to catch the drift it exists to
+# catch — a later contributor reaching for the planner's ranking internals —
+# and it fails closed: an item not on the list is a violation until someone
+# adds it deliberately, which is the review moment this rule is trying to
+# create.
+NARROW_EDGES = {
+    ("sos-theory", "sos-planner"): {
+        "purpose": (
+            "discriminating-experiment planning only: sos-theory may state which "
+            "rival theories a design would separate and consume the planner's "
+            "ranking of those designs. It must not estimate expected information "
+            "gain itself, nor reimplement the planner's utility policy, its "
+            "admission floor, or its stopping rules."
+        ),
+        # Types passed through the boundary, plus the planner entry point the
+        # ranking is delegated to. Notably absent, and meant to stay absent:
+        # StoppingRule / StopSignals (running its own exhaustion logic) and
+        # UTILITY_SCALE / EXCLUDED / MILLIBITS_PER_BIT (computing utility or
+        # information by hand). Reaching for those is the drift this forbids.
+        "may_name": frozenset(
+            {
+                "Candidate",
+                "Cost",
+                "Estimate",
+                "GreedyPlanner",
+                "Plan",
+                "Planner",
+                "PlannerError",
+                "RankedDesign",
+                "StopVerdict",
+                "UtilityPolicy",
+            }
+        ),
+    }
+}
 # Discovery stages (sde-question .. sde-ranking, not yet landed) are also
 # documented to compose with sos-reasoning; any future crate named `sde-*`
 # gets this one exception without needing a per-crate list entry.
@@ -196,6 +240,38 @@ def check_backend_confinement(packages: dict[str, CargoPkg]) -> list[str]:
     return errors
 
 
+def _crate_sources(manifest_dir: Path, crate: str) -> Iterable[Path]:
+    root = manifest_dir / crate / "src"
+    return sorted(root.rglob("*.rs")) if root.is_dir() else []
+
+
+def check_narrow_edge_usage(packages: dict[str, CargoPkg], manifest_dir: Path) -> list[str]:
+    """Confine a narrowly-sanctioned edge to the items it was sanctioned for."""
+    errors: list[str] = []
+    for (source, target), rule in NARROW_EDGES.items():
+        if source not in packages:
+            continue
+        module = target.replace("-", "_")
+        named: set[str] = set()
+        for path in _crate_sources(manifest_dir, source):
+            text = path.read_text(encoding="utf-8")
+            # `use sos_planner::{A, B as C};` and bare `sos_planner::A` paths.
+            for match in re.finditer(rf"\b{module}::(\{{[^}}]*\}}|\w+)", text):
+                group = match.group(1)
+                items = group.strip("{}").split(",") if group.startswith("{") else [group]
+                for item in items:
+                    item = item.strip().split(" as ")[0].strip()
+                    if item and item[0].isupper():
+                        named.add(item)
+        stray = sorted(named - rule["may_name"])
+        if stray:
+            errors.append(
+                f"{source} names {stray} from {target}, outside the purpose this "
+                f"edge was sanctioned for ({rule['purpose']})"
+            )
+    return errors
+
+
 CHECKS = (
     check_core_is_sink,
     check_no_cycles,
@@ -204,10 +280,12 @@ CHECKS = (
 )
 
 
-def run_all_checks(packages: dict[str, CargoPkg]) -> list[str]:
+def run_all_checks(packages: dict[str, CargoPkg], manifest_dir: Path | None = None) -> list[str]:
     errors: list[str] = []
     for check in CHECKS:
         errors.extend(check(packages))
+    if manifest_dir is not None:
+        errors.extend(check_narrow_edge_usage(packages, manifest_dir))
     return errors
 
 
@@ -222,14 +300,15 @@ def main(argv: Iterable[str] | None = None) -> int:
         print("error: no workspace members found — wrong --manifest-path?", file=sys.stderr)
         return 2
 
-    errors = run_all_checks(packages)
+    errors = run_all_checks(packages, args.manifest_path.resolve().parent)
     if errors:
         for error in errors:
             print(f"FAIL: {error}", file=sys.stderr)
         print(f"\n{len(errors)} dependency-invariant violation(s).", file=sys.stderr)
         return 1
 
-    print(f"OK: {len(packages)} sos-* crates satisfy all 4 dependency invariants.")
+    print(f"OK: {len(packages)} sos-* crates satisfy all 4 dependency invariants, "
+          f"and {len(NARROW_EDGES)} narrowly-sanctioned edge(s) stay within their purpose.")
     return 0
 
 
