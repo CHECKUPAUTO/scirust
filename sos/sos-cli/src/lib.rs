@@ -32,12 +32,14 @@
 //!
 //! ## What is deliberately not here
 //!
-//! [`mod@run`] executes a study for real, but binds exactly **one** plugin — the
-//! model catalogue — and that limit is worth stating precisely because it is
-//! not arbitrary. `sos-scirust`'s other stage handler integrates a Rust
-//! closure, and no file can name a closure, so no CLI plumbing could let a
-//! user supply one. Only a backend whose configuration is *data* can be driven
-//! from a command line at all; see [`mod@run`]'s module docs.
+//! [`mod@run`] executes a study for real, but binds **two** of `sos-scirust`'s
+//! five backends — the model catalogue and the periodogram — and that limit is
+//! worth stating precisely because it is not arbitrary. The other three take a
+//! *function* (a right-hand side, an integrand, a residual), and no file can
+//! name a function, so no CLI plumbing could let a user supply one; they need
+//! a transport that ships code (RFC-0002 §10's WASM or MCP), not more work
+//! here. Only a backend whose configuration is *data* can be driven from a
+//! command line at all; see [`mod@run`]'s module docs.
 //!
 //! A true `sos merge` (reconciling two labs' divergent graphs) is still not
 //! implemented: it needs conflict-resolution semantics no crate in this

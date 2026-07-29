@@ -48,12 +48,15 @@
 //! shape of care the rest of this crate applies to solver errors, for the same
 //! reason.
 
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
 use scirust_signal::features::spectral::{
     psd, spectral_centroid, spectral_flatness, spectral_spread,
 };
 use scirust_signal::{apply_window, blackman, fft_real, flattop, hamming, hanning};
-use sos_core::DeterminismLevel;
 use sos_core::canonical::{Canonical, CanonicalEncoder};
+use sos_core::{Body, DeterminismLevel};
 use sos_simulation::{Observation, Result, SimDescriptor, SimError, Simulate};
 
 use crate::solver::{ExactF64Seq, encode_f64};
@@ -105,11 +108,47 @@ impl WindowKind {
             Self::FlatTop => flattop(n),
         }
     }
+
+    /// The window named by `code`, or `None` — the inverse of
+    /// [`code`](Self::code), so a window survives a file.
+    #[must_use]
+    pub fn from_code(code: &str) -> Option<Self> {
+        [
+            Self::Rectangular,
+            Self::Hann,
+            Self::Hamming,
+            Self::Blackman,
+            Self::FlatTop,
+        ]
+        .into_iter()
+        .find(|w| w.code() == code)
+    }
+}
+
+impl std::fmt::Display for WindowKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.code())
+    }
 }
 
 impl Canonical for WindowKind {
     fn encode(&self, enc: &mut CanonicalEncoder) {
         enc.str(self.code());
+    }
+}
+
+impl Serialize for WindowKind {
+    fn serialize<S: Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        s.serialize_str(self.code())
+    }
+}
+
+impl<'de> Deserialize<'de> for WindowKind {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let code = String::deserialize(d)?;
+        // An unknown window is an error, never a default: a spectrum shaped by
+        // a window this build does not have must not load as a different one.
+        Self::from_code(&code).ok_or_else(|| D::Error::custom(format!("no window named {code:?}")))
     }
 }
 
@@ -147,6 +186,52 @@ impl Canonical for SpectrumConfig {
     }
 }
 
+/// The serialized shape of a [`SpectrumConfig`]: every sample an exact
+/// shortest round-trip decimal string.
+///
+/// Same reasoning as [`crate::model::ModelRun`]'s — `serde_json`'s `f64`
+/// round-trip is not bit-exact, and a sample that came back changed would move
+/// the config's content address, so a manifest pinning it would stop
+/// resolving. This is also what makes a spectral measurement *authorable*: a
+/// `SpectrumConfig` in a file is the whole experiment.
+#[derive(Serialize, Deserialize)]
+struct ConfigRepr {
+    signal: Vec<String>,
+    sample_rate_hz: String,
+    window: WindowKind,
+}
+
+impl Serialize for SpectrumConfig {
+    fn serialize<S: Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        ConfigRepr {
+            signal: self
+                .signal
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
+            sample_rate_hz: self.sample_rate_hz.to_string(),
+            window: self.window,
+        }
+        .serialize(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for SpectrumConfig {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let repr = ConfigRepr::deserialize(d)?;
+        let parse = |s: &str| s.parse::<f64>().map_err(D::Error::custom);
+        Ok(SpectrumConfig {
+            signal: repr
+                .signal
+                .iter()
+                .map(|v| parse(v))
+                .collect::<std::result::Result<Vec<f64>, _>>()?,
+            sample_rate_hz: parse(&repr.sample_rate_hz)?,
+            window: repr.window,
+        })
+    }
+}
+
 /// A computed spectrum, with the context needed to read it correctly.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Spectrum {
@@ -167,6 +252,55 @@ pub struct Spectrum {
     pub flatness: f64,
 }
 
+/// The serialized shape of a [`Spectrum`] — exact decimal text throughout,
+/// for the same round-trip reason [`ConfigRepr`] uses it.
+#[derive(Serialize, Deserialize)]
+struct SpectrumRepr {
+    psd: Vec<String>,
+    bin_width_hz: String,
+    window: WindowKind,
+    centroid_hz: String,
+    spread_hz: String,
+    flatness: String,
+}
+
+impl Serialize for Spectrum {
+    fn serialize<S: Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        SpectrumRepr {
+            psd: self
+                .psd
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
+            bin_width_hz: self.bin_width_hz.to_string(),
+            window: self.window,
+            centroid_hz: self.centroid_hz.to_string(),
+            spread_hz: self.spread_hz.to_string(),
+            flatness: self.flatness.to_string(),
+        }
+        .serialize(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for Spectrum {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let r = SpectrumRepr::deserialize(d)?;
+        let parse = |s: &str| s.parse::<f64>().map_err(D::Error::custom);
+        Ok(Spectrum {
+            psd: r
+                .psd
+                .iter()
+                .map(|v| parse(v))
+                .collect::<std::result::Result<Vec<f64>, _>>()?,
+            bin_width_hz: parse(&r.bin_width_hz)?,
+            window: r.window,
+            centroid_hz: parse(&r.centroid_hz)?,
+            spread_hz: parse(&r.spread_hz)?,
+            flatness: parse(&r.flatness)?,
+        })
+    }
+}
+
 impl Canonical for Spectrum {
     fn encode(&self, enc: &mut CanonicalEncoder) {
         enc.value(&ExactF64Seq(&self.psd));
@@ -176,6 +310,54 @@ impl Canonical for Spectrum {
         encode_f64(enc, self.spread_hz);
         encode_f64(enc, self.flatness);
     }
+}
+
+/// The body of a stored spectral measurement: the spectrum, the level the
+/// backend realized, and the seed it ran under.
+///
+/// Like [`crate::model::ModeledTrajectoryBody`], this makes the result a
+/// first-class SOS object — and like [`Spectrum`] itself, it keeps the window
+/// beside the numbers, so a stored spectrum can still say what shaped it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpectrumBody {
+    /// The measured spectrum.
+    pub spectrum: Spectrum,
+    /// The determinism level the backend realized.
+    pub level: DeterminismLevel,
+    /// The seed the run used.
+    pub seed: u64,
+}
+
+impl SpectrumBody {
+    /// Flatten an observation into a storable body.
+    #[must_use]
+    pub fn from_observation(observation: Observation<Spectrum>) -> Self {
+        let (level, seed) = (observation.level(), observation.seed);
+        Self {
+            spectrum: observation.output,
+            level,
+            seed,
+        }
+    }
+
+    /// Rebuild the [`Observation`] this body was stored from.
+    #[must_use]
+    pub fn observation(&self) -> Observation<Spectrum> {
+        Observation::new(self.spectrum.clone(), self.level, self.seed)
+    }
+}
+
+impl Canonical for SpectrumBody {
+    fn encode(&self, enc: &mut CanonicalEncoder) {
+        enc.value(&self.spectrum);
+        enc.value(&self.level);
+        enc.u64(self.seed);
+    }
+}
+
+impl Body for SpectrumBody {
+    const KIND: &'static str = "Spectrum";
+    const SCHEMA_VERSION: u32 = 1;
 }
 
 /// A real [`Simulate`] backend: computes a windowed periodogram with
