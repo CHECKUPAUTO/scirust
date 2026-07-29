@@ -37,10 +37,10 @@
 //!
 //! * **The study** (`<manifest.toml>`) — stages, their plugin pins, and the
 //!   content address of each stage's configuration.
-//! * **The runs** (`<runs.json>`) — a JSON array of [`ModelRun`]s, the same
-//!   "consume already-known data from a file" convention `sos plan` and
-//!   `sos plugins` already use, since there is no other persistence format to
-//!   point at. The manifest pins each stage's config *by address*, so
+//! * **The runs** (`<runs.json>`) — a JSON array of tagged [`StageConfig`]s,
+//!   the same "consume already-known data from a file" convention `sos plan`
+//!   and `sos plugins` already use, since there is no other persistence format
+//!   to point at. The manifest pins each stage's config *by address*, so
 //!   supplying the wrong file cannot silently substitute a different
 //!   experiment: the address will not be on offer and the stage fails.
 //! * **The plugins** (`--plugins <descriptors.json>`) — the registry the
@@ -53,14 +53,15 @@
 //!   Defaults to a fixed label, so the same study memoizes identically on
 //!   every machine, matching the host-independence the stage handlers already
 //!   record. Pass `--env` when results should be bound to a specific host.
+//!   This binary's version is folded in either way ([`env_digest`]).
 //!
-//! ## What this does not do
+//! ## Memoization survives the process
 //!
-//! Memoization is per-invocation: a second `sos run` recomputes rather than
-//! reading a persisted memo table. It is not *wrong* — the backends are `L3`,
-//! so a re-run produces byte-identical objects at the same addresses and the
-//! store does not grow — but the CPU is spent again. A persistent memo table
-//! is separate work, not stubbed here.
+//! Results are remembered in a [`FileMemo`] beside the object store, so
+//! re-running an unchanged study is nearly free rather than a full recompute
+//! onto the same object ids. Persisting a cache introduces a staleness hazard
+//! an in-memory one cannot have — see [`crate::memo`]'s docs — which is why
+//! the environment digest binds this binary's own version.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -73,10 +74,11 @@ use sos_scirust::stage::{
     CatalogStageHandler, SpectrumStageHandler, model_config_address, signal_backend, sim_backend,
     spectrum_config_address,
 };
-use sos_workflow::{Dispatch, MemoTable, StageExecutor, resolve_manifest, run_plan};
+use sos_workflow::{Dispatch, StageExecutor, resolve_manifest, run_plan};
 
 use crate::args::Args;
 use crate::error::{CliError, Result};
+use crate::memo::{DEFAULT_ENV_LABEL, FileMemo, env_digest};
 use crate::store;
 
 /// The plugin name `sos run` binds to the model catalogue.
@@ -199,11 +201,10 @@ pub fn run(args: &Args) -> Result<String> {
     dispatch.register(CATALOG_PLUGIN, Box::new(models) as Box<dyn StageExecutor>);
     dispatch.register(SPECTRUM_PLUGIN, Box::new(spectra) as Box<dyn StageExecutor>);
 
-    let env = HashAlgo::Sha256.hash(
-        b"sos-cli:env",
-        args.flag("env").unwrap_or("unspecified").as_bytes(),
-    );
-    let ledger = run_plan(&plan, &env, &mut MemoTable::new(), &mut dispatch)?;
+    let env = env_digest(args.flag("env").unwrap_or(DEFAULT_ENV_LABEL));
+    let mut memo = FileMemo::open(&root)?;
+    let ledger = run_plan(&plan, &env, &mut memo, &mut dispatch)?;
+    memo.flush()?;
 
     let mut out = format!(
         "ran {} of {} stage(s) from {manifest_path} ({} config(s) on offer)\n",
