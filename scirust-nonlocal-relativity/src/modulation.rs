@@ -20,6 +20,7 @@ use crate::{
     NonlocalConfig, NonlocalRelativityError, NonlocalResult, WorldlineState,
     caputo_velocity_memory_at_step, validate_history_velocity,
 };
+use scirust_relativity::ReissnerNordstrom;
 
 /// Deterministic, dimensionless scalar modulation of one retained history
 /// entry.
@@ -143,6 +144,129 @@ impl HistoryModulator<4> for SchwarzschildKretschmannModulator {
         }
 
         let weight = 1.0 + self.beta * self.reference_length.powi(4) * kretschmann;
+
+        if !weight.is_finite() || weight <= 0.0
+        {
+            return Err(NonlocalRelativityError::NonFiniteModulationWeight(weight));
+        }
+
+        Ok(weight)
+    }
+}
+
+/// Experimental phenomenological modulation of retained history vectors by
+/// the electromagnetic field invariant `|F_(mu nu) F^(mu nu)| = 2 Q^2 / r^4`
+/// of a Reissner-Nordström background's radial Coulomb field.
+///
+/// Unlike [`SchwarzschildKretschmannModulator`], this is not a *curvature*
+/// invariant: it is the invariant of the electromagnetic field that, in the
+/// full Einstein-Maxwell theory this crate does not implement, would source
+/// the spacetime's curvature. This crate uses the Reissner-Nordström metric
+/// purely as fixed, externally specified background data, exactly as it uses
+/// Schwarzschild elsewhere; nothing here solves the Einstein or Maxwell
+/// equations, or computes the electromagnetic field's backreaction on the
+/// metric.
+///
+/// The weight is `q = 1 + beta * L^2 * |F^2|`, where `L` is a strictly
+/// positive reference length that makes the modulation dimensionless. Note
+/// the power `L^2`, not `L^4`: in the geometric units this crate uses
+/// (charge carries the same dimension as mass, i.e. length), `|F^2| = 2
+/// Q^2 / r^4` has dimension `length^-2`, unlike the Kretschmann scalar's
+/// `length^-4`, so a different reference-length power is required to make
+/// the product dimensionless.
+///
+/// This describes a Caputo derivative of a dimensionless *modulated*
+/// velocity history. It is **never** to be described as:
+///
+/// - a unique consequence of general relativity or electromagnetism;
+/// - a quantum-gravity or quantum-electrodynamics prediction;
+/// - an experimentally derived law;
+/// - a modification of the Einstein field equations or Maxwell's equations.
+///
+/// It is a deliberately simple, explicitly phenomenological research hook.
+/// When `beta == 0.0`, evaluation bypasses the field-invariant computation
+/// entirely and returns exactly `1.0`, so a pipeline using this modulator
+/// reproduces the unmodulated baseline bit-for-bit.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReissnerNordstromFieldModulator {
+    background: ReissnerNordstrom,
+    reference_length: f64,
+    beta: f64,
+}
+
+impl ReissnerNordstromFieldModulator {
+    /// Validate and construct a Reissner-Nordström field modulator.
+    ///
+    /// `reference_length` must be finite and strictly positive. `beta` must
+    /// be finite and non-negative.
+    pub fn try_new(
+        background: ReissnerNordstrom,
+        reference_length: f64,
+        beta: f64,
+    ) -> NonlocalResult<Self> {
+        if !reference_length.is_finite() || reference_length <= 0.0
+        {
+            return Err(NonlocalRelativityError::InvalidModulationReferenceLength(
+                reference_length,
+            ));
+        }
+
+        if !beta.is_finite() || beta < 0.0
+        {
+            return Err(NonlocalRelativityError::InvalidModulationBeta(beta));
+        }
+
+        Ok(Self {
+            background,
+            reference_length,
+            beta,
+        })
+    }
+
+    /// Return the wrapped Reissner-Nordström background.
+    #[must_use]
+    pub const fn background(&self) -> &ReissnerNordstrom {
+        &self.background
+    }
+
+    /// Return the dimensionless-reference length `L`.
+    #[must_use]
+    pub const fn reference_length(&self) -> f64 {
+        self.reference_length
+    }
+
+    /// Return the phenomenological coefficient `beta`.
+    #[must_use]
+    pub const fn beta(&self) -> f64 {
+        self.beta
+    }
+}
+
+impl HistoryModulator<4> for ReissnerNordstromFieldModulator {
+    fn weight(&self, entry: &HistoryEntry<4>) -> NonlocalResult<f64> {
+        if self.beta == 0.0
+        {
+            return Ok(1.0);
+        }
+
+        let radius = entry.coordinates[1];
+
+        if !radius.is_finite() || radius <= self.background.outer_horizon_radius()
+        {
+            return Err(NonlocalRelativityError::InvalidModulationRadius(radius));
+        }
+
+        let charge = self.background.charge();
+        let field_invariant = 2.0 * charge * charge / radius.powi(4);
+
+        if !field_invariant.is_finite()
+        {
+            return Err(NonlocalRelativityError::NonFiniteModulationWeight(
+                field_invariant,
+            ));
+        }
+
+        let weight = 1.0 + self.beta * self.reference_length.powi(2) * field_invariant;
 
         if !weight.is_finite() || weight <= 0.0
         {
