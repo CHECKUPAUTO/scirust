@@ -1,6 +1,7 @@
 //! One module per capability adapter, plus the bootstrap that wires them
 //! into a [`CapabilityRegistry`] and makes them dispatchable by id.
 
+mod apd;
 mod battery;
 mod double_pendulum;
 mod grid;
@@ -20,6 +21,7 @@ mod sir;
 mod spring_mass_damper;
 mod two_body;
 
+pub use apd::AvalanchePhotodiodeAdapter;
 pub use battery::BatteryAdapter;
 pub use double_pendulum::DoublePendulumAdapter;
 pub use grid::SwingEquationAdapter;
@@ -70,6 +72,7 @@ pub fn all_adapters() -> Vec<Box<dyn CapabilityAdapter>> {
         Box::new(BatteryAdapter),
         Box::new(SemiconductorLaserAdapter),
         Box::new(SwingEquationAdapter),
+        Box::new(AvalanchePhotodiodeAdapter),
     ]
 }
 
@@ -188,6 +191,11 @@ const TUTORIAL_SCENARIOS: &[(&str, &str, &str)] = &[
         "sim.power.swing_equation",
         "swing_equation.scirust.toml",
         include_str!("../../../docs/studio/tutorials/swing_equation.scirust.toml"),
+    ),
+    (
+        "sim.optoelectronics.avalanche_photodiode",
+        "avalanche_photodiode.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/avalanche_photodiode.scirust.toml"),
     ),
 ];
 
@@ -480,6 +488,7 @@ mod tests {
         use crate::control::ExecutionControl;
         use crate::result::{AxisMonotonicity, RESULT_SCHEMA_VERSION, TIME_AXIS_ID};
         use crate::sink::NullEventSink;
+        use scirust_studio_registry::RunDomain;
 
         for adapter in all_adapters()
         {
@@ -493,9 +502,37 @@ mod tests {
 
             assert_eq!(result.schema_version, RESULT_SCHEMA_VERSION, "{id}");
 
-            let axis = result
-                .time_axis()
-                .unwrap_or_else(|| panic!("{id} has no `{TIME_AXIS_ID}` axis"));
+            // Which axis to demand is the capability's own declaration, not
+            // an assumption about all of them. `RunDomain::ParameterSweep`
+            // exists because a receiver analysis genuinely has no time in it;
+            // weakening this to "some axis" for everybody would have let a
+            // time-integrating capability quietly stop emitting `t`.
+            let domain = adapter.descriptor().domain;
+            if domain == RunDomain::Time
+            {
+                assert!(
+                    result.time_axis().is_some(),
+                    "{id} declares RunDomain::Time but emitted no `{TIME_AXIS_ID}` axis"
+                );
+                assert_eq!(
+                    result.summary.axis_id, TIME_AXIS_ID,
+                    "{id}: a time-domain run's summary must describe its time axis"
+                );
+            }
+            else
+            {
+                assert!(
+                    result.time_axis().is_none(),
+                    "{id} declares RunDomain::{domain:?} but emitted a `{TIME_AXIS_ID}` axis,                      which a reader would take as a trajectory"
+                );
+            }
+
+            let axis = result.summary_axis().unwrap_or_else(|| {
+                panic!(
+                    "{id}: summary names axis `{}`, which this result does not have",
+                    result.summary.axis_id
+                )
+            });
             assert!(
                 !axis.values.is_empty(),
                 "{id}: the axis must carry its coordinates"
@@ -503,7 +540,7 @@ mod tests {
             assert_eq!(
                 axis.monotonicity,
                 AxisMonotonicity::StrictlyIncreasing,
-                "{id}: a forward integration's time axis is strictly increasing"
+                "{id}: the independent variable only ever goes forward"
             );
 
             // Exact, not approximate: the summary must be the same numbers
@@ -540,12 +577,14 @@ mod tests {
                 );
             }
 
-            // Whatever else it has, at least one series must be against time:
-            // a capability that integrates forward and shows nothing over
-            // time has lost the run's shape.
+            // Whatever else it has, at least one series must be plotted
+            // against the run's own independent variable: a capability that
+            // sweeps something and shows nothing over it has lost the run's
+            // shape.
             assert!(
-                result.series.iter().any(|s| s.axis_id == TIME_AXIS_ID),
-                "{id}: no series is plotted against time"
+                result.series.iter().any(|s| s.axis_id == axis.id),
+                "{id}: no series is plotted against `{}`",
+                axis.id
             );
 
             // The adapters call this themselves before returning; asserting

@@ -15,6 +15,7 @@
 /// crossing to the nearest sample quantises every period measurement to the
 /// step size, which for a run with a few thousand steps per period is a
 /// larger error than everything the measurement is trying to see.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn crossing_times(t: &[f64], values: &[f64], level: f64) -> Vec<f64> {
     let mut crossings = Vec::new();
     for i in 1..values.len().min(t.len())

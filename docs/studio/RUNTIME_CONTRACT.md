@@ -192,11 +192,58 @@ Validation codes currently in use:
   `0206` for a `solver.step` above the explicit diffusion stability limit —
   refused rather than run, because above it RK4 on that stencil diverges
   rather than losing accuracy.
+- `SRST-VAL-0210`..`0219`: `sim.optoelectronics.photodiode` field errors.
+- `SRST-VAL-0220`..`0229`: `sim.thermal.hvac_zone` field errors.
+- `SRST-VAL-0230`..`0239`: `sim.mechanics.rigid_body` field errors.
+- `SRST-VAL-0240`..`0249`: `sim.pharmacology.oral_one_compartment` field
+  errors, including `0245` for `k_a == k_e` — refused rather than evaluated,
+  because the Bateman closed form has a removable singularity there and the
+  capability's whole claim is that it matches that form.
+- `SRST-VAL-0250`..`0261`: `sim.energy.battery_thevenin` field errors.
+- `SRST-VAL-0262`..`0270`: `sim.optoelectronics.semiconductor_laser` field
+  errors.
+- `SRST-VAL-0271`..`0277`: `sim.power.swing_equation` field errors.
+- `SRST-VAL-0278`..`0285`: `sim.optoelectronics.avalanche_photodiode` field
+  errors, including `0285` for a sweep starting below unity gain — which
+  would be attenuation, not amplification.
 
 Each capability's exact field-to-code mapping is in that capability's
 adapter module (the `FieldDescriptor.error_code` on each `const`). A new
-capability should claim the next unused ten-number block and record it
-here.
+capability should claim the next unused block and record it here. The
+ten-number blocks stopped being ten-wide at `0250`: a capability with twelve
+fields needs twelve codes, and stretching one to fit a round number would
+mean two fields sharing a code, which is worse than an untidy table.
+
+## Run domains
+
+Every capability up to `sim.optoelectronics.avalanche_photodiode` integrated
+forward in time, so "the independent variable is time" was true of all of
+them and therefore never written down. An APD receiver analysis is algebraic:
+it evaluates closed forms across a swept avalanche gain and there is no time
+in it anywhere.
+
+`CapabilityDescriptor::domain` states which a capability is.
+
+- **`RunDomain::Time`** — the result carries a `t` axis
+  (`result::TIME_AXIS_ID`), strictly increasing, and `RunSummary::axis_id` is
+  `"t"`.
+- **`RunDomain::ParameterSweep`** — the result carries the swept parameter's
+  axis, strictly increasing, and **no** `t` axis. `RunSummary::axis_id` names
+  that axis instead. `solver.start`/`end`/`step` are in the parameter's units,
+  which the capability's solver descriptor says explicitly.
+
+`RunSummary::axis_id` is `#[serde(default)]`ed to `"t"`, so every result
+stored before the field existed decodes unchanged and means what it always
+meant.
+
+`validate_result` compares the summary's bounds against the axis it names,
+with exact equality, as it always has — the change is only that it now knows
+*which* axis that is rather than assuming. The registry-driven test
+`every_adapter_emits_exact_axis_coordinates` demands a `t` axis of exactly
+the capabilities that declared one, and demands its absence from the ones
+that did not. That matters: the alternative was to weaken the assertion to
+"some axis" for everybody, which would have let a time-integrating capability
+quietly stop emitting `t` without anything going red.
 
 ## CLI exit codes
 

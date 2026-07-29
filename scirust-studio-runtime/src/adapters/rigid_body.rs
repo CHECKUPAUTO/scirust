@@ -24,7 +24,7 @@ use scirust_sim::rigid_body::RigidBody;
 use scirust_studio_command::{ErrorCode, ErrorFamily};
 use scirust_studio_registry::{
     BackendKind, CapabilityCategory, CapabilityDescriptor, CapabilityId, CapabilityMaturity,
-    Cardinality, DeterminismClass, FieldDescriptor, OutputDescriptor, PrecisionKind,
+    Cardinality, DeterminismClass, FieldDescriptor, OutputDescriptor, PrecisionKind, RunDomain,
     VerificationCheckDescriptor, VerificationDescriptor,
 };
 use scirust_studio_schema::Scenario;
@@ -134,6 +134,7 @@ pub static DESCRIPTOR: CapabilityDescriptor = CapabilityDescriptor {
     summary: "Torque-free rotation of a rigid body about its principal axes, with two exact invariants and the intermediate-axis instability.",
     maturity: CapabilityMaturity::Stable,
     determinism: DeterminismClass::StrictSameBinarySameTarget,
+    domain: RunDomain::Time,
     supported_backends: &[BackendKind::Cpu],
     supported_precisions: &[PrecisionKind::F64],
     supported_solvers: &[RK4_SOLVER],
@@ -294,6 +295,7 @@ impl CapabilityAdapter for RigidBodyAdapter {
             summary: RunSummary {
                 capability_display_name: DESCRIPTOR.display_name.to_string(),
                 scenario_name: s.experiment.name.clone(),
+                axis_id: TIME_AXIS_ID.to_string(),
                 steps: traj.t.len() - 1,
                 t_start: traj.t[0],
                 t_end: *traj.t.last().expect("at least one sample"),

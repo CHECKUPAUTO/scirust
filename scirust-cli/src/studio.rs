@@ -451,8 +451,23 @@ fn print_result_text(result: &RunResult) {
     println!("  scenario      {}", result.summary.scenario_name);
     println!("  capability    {}", result.capability_id);
     println!("  steps         {}", result.summary.steps);
-    let axis_unit = result.axes.first().map(|a| a.unit.as_str()).unwrap_or("");
-    println!("  t final       {} {axis_unit}", result.summary.t_end);
+    // Not every capability integrates in time: a parameter sweep's summary
+    // describes the parameter it swept, so the label comes from the axis
+    // rather than being hardcoded to "t".
+    let axis = result.summary_axis().or_else(|| result.axes.first());
+    // The axis *id* rather than its display name: "t final" and "gain final"
+    // both read correctly and both fit the column, where "time final" would
+    // only have changed every existing line for no gain.
+    let (label, unit) = match axis
+    {
+        Some(a) => (a.id.as_str(), a.unit.as_str()),
+        None => ("axis", ""),
+    };
+    println!(
+        "  {:<13} {} {unit}",
+        format!("{label} final"),
+        result.summary.t_end
+    );
 
     // Printed only when the computation actually consumed one, and printed
     // next to the determinism class it qualifies: for a stochastic result the

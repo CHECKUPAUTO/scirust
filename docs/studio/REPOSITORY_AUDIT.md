@@ -655,3 +655,164 @@ depends on it; and the remaining unadapted families — `pharmacokinetics`,
 `rigid_body`, `battery`, `hvac`, `grid`, `laser`, `photodiode`, `apd`, `envs`,
 plus SEIR, the two non-stiff chemistry models, the projectile, Van der Pol,
 GBM and the M/M/1 queue.
+
+## 20. Update — 16 of 16, and the first capability with no time in it
+
+Eight more adapters. `scirust-sim` now has **no model module that Studio
+cannot execute**: 16 of 16 module families, 19 capabilities. What remains
+unadapted are model *families inside* adapted modules — SEIR, the two
+non-stiff chemistry models, the projectile, Van der Pol, GBM, the M/M/1
+queue, and pharmacokinetics' IV-bolus and two-compartment variants — plus
+`envs`, which implements `Environment` rather than `System` and is a
+different shape of thing entirely.
+
+The number is the least interesting part. What the eight capabilities forced
+is below.
+
+### Tolerances stopped being chosen
+
+`sim.optoelectronics.photodiode` was written with `LEVEL_TOLERANCE = 1e-3`
+and it failed. The run was correct; the measurement was `6.738e-3`, which is
+`exp(-5)` — the residual a run spanning five time constants necessarily
+leaves behind. The fix was not a bigger number, it was the realisation that
+the number was derivable all along:
+
+```rust
+let residual = (-span / tau).exp();
+let threshold = residual * LEVEL_MARGIN;
+```
+
+Every capability since has followed that rule, and each one made it sharper:
+
+- **`sim.thermal.hvac_zone`** — a 2R2C network's slow time constant is an
+  exact root of a quadratic, 46.2 h, not the naive `R*C` sum's 57.8 h. Using
+  the naive value would have been a 25 % over-estimate of how much of the
+  transient the run had left, i.e. a silently loosened threshold.
+- **`sim.energy.battery_thevenin`** — with two first-order states the
+  threshold takes the residual of the *slower*, and a test pins that down.
+  Holding the run to `R1*C1` = 20 s when `R_th*C_th` = 200 s governs would
+  have failed a perfectly correct integration.
+- **`sim.power.swing_equation`** — the period tolerance is the *computed*
+  leading nonlinear correction, `a²·(1/16 + 5·tan²δ*/48)`, from Lindstedt.
+  Measured lengthening `2.408e-4` against a predicted `2.431e-4`: 1 %
+  agreement with a perturbation-theory coefficient. And the energy threshold
+  is `h·ω_n`, which falls out of symplectic Euler's modified Hamiltonian with
+  the swing amplitude cancelling entirely — measured `1.485e-3` against a
+  derived `1.475e-3`.
+
+That last one is worth stating plainly: the correction is used to **size the
+tolerance**, not to shift the prediction. Correcting the prediction would
+make the check depend on the coefficient being exactly right; sizing the
+tolerance with it means the check survives the coefficient being wrong by a
+factor of two and still fails a frequency error the nonlinearity cannot
+explain. A separate test asserts the swing comes out *longer* than the
+small-signal limit — a direction, which no tolerance can fake.
+
+### A capability can be checked against its own Jacobian
+
+`sim.optoelectronics.semiconductor_laser`'s second check does not compare
+against a closed-form trajectory. It linearises the rate equations about the
+clamped operating point, reads `ω_n²` and `−2γ` off the Jacobian's
+determinant and trace, and compares the run's own measured ringing period
+against `2π/√(ω_n² − γ²)`.
+
+Numerical integration and linear stability analysis are different routes to
+the same equations. A model with the right fixed point and the wrong
+curvature there passes the operating-point check and fails this one, which is
+the entire reason for having two.
+
+The damping correction is not cosmetic: the damped period is 0.57 % longer
+than the undamped `1/f_r` usually quoted, against a 0.1 % tolerance, so a
+version of the check that compared against `1/f_r` would fail. A test asserts
+the two periods stay far enough apart for the check to be able to tell them
+apart — because if they ever converge, the check has silently stopped testing
+the correction.
+
+### A measurement was biased, and it said so by pointing the wrong way
+
+The period measurement extracted from the laser adapter into `measure.rs`
+averaged over crossings in **both** directions, treating each consecutive
+pair as a half-period. That is true only for an oscillation symmetric about
+the level it is measured against.
+
+A finite-amplitude swing in an asymmetric potential acquires a second
+harmonic and a DC offset, so its crossings alternate short-long — and an
+*odd* number of them carries the full bias while an even number cancels it.
+The generator rotor measured `4.4e-4` **faster** than its small-signal limit,
+which is the wrong side of a result that only ever goes one way. That is what
+caught it: not a failing tolerance but a sign.
+
+Counting upward crossings only removes the failure mode rather than making it
+rarer, since crossings in one direction are a full period apart whatever the
+waveform looks like. A test builds an offset sine, shows the fix is exact,
+and shows the old average is 6 % wrong over an odd count and right over an
+even one — which is what made it intermittent instead of obvious.
+
+### Not every capability integrates in time
+
+`scirust_sim::apd` has no `impl System`. An avalanche photodiode's receiver
+analysis is algebraic, so
+`sim.optoelectronics.avalanche_photodiode` sweeps the *gain* and its result
+carries a `gain` axis and no `t`.
+
+That is declared rather than inferred: `CapabilityDescriptor::domain`, and
+`RunSummary::axis_id` naming which axis the summary's bounds describe
+(defaulting to `"t"`, so every stored result decodes unchanged). The
+registry-driven test now demands a time axis of exactly the capabilities that
+promised one and demands its absence from the one that did not — instead of
+being weakened to "some axis" for everybody, which would have let a
+time-integrating capability quietly stop emitting `t`. ADR 0010 records the
+alternatives, including the cheap one that was rejected.
+
+It is also the first capability whose checks have **no tolerance at all**,
+which is not a coincidence — an algebraic model admits exact statements an
+integrated one does not. Both of its checks are theorems: the SNR at the
+analytic optimum must beat the SNR at every swept gain, and the curve must
+turn exactly once. The optimum comes from bisecting a stationary condition
+whose left side is provably monotone, so there is no derivative, no initial
+guess, and no chance of converging to the wrong root.
+
+A sweep that does not bracket the optimum reports both checks as
+`NotApplicable` and warns. That distinction is why the check locates the
+optimum analytically instead of taking the sweep's `argmax`: an `argmax`
+always returns something, and an `argmax` at an endpoint looks exactly like
+an `argmax` at a peak.
+
+### Abstaining became a normal thing to do
+
+Three of the eight capabilities have configurations in which their oracle
+does not apply, and all three say so rather than failing, passing vacuously,
+or refusing to run:
+
+- the laser with `β > 0` or below threshold — the closed forms are the
+  `β → 0` above-threshold limit, and the model does not state the `β > 0`
+  operating point. Re-deriving it in the adapter would put a second copy of
+  the physics there and leave the verification checking the adapter against
+  itself.
+- the swing equation with damping (the transient energy is genuinely
+  dissipated) or with `P_m > P_max` (loss of synchronism — no equilibrium
+  exists to swing about, which is the failure mode the model is *for*).
+- the APD sweep that misses its optimum.
+
+In each case the run is valid and the *oracle* is what does not apply. Every
+one carries a `RunWarning` naming the reason, and every one has a test that
+also asserts the run still did the right thing physically — the damped rotor
+really settles, the runaway rotor really runs away.
+
+### Two smaller things
+
+The unit table gained `pu` (per-unit), dimensionless with a factor of exactly
+one, for the same reason it carries `rad`: a per-unit power written
+`unit = "1"` reads as a mistake. `PrecisionKind::F32` remains a vocabulary
+entry no capability declares.
+
+Error codes now run to `SRST-VAL-0285`, and the ten-number-per-capability
+blocks stopped being ten wide at `0250`. A capability with twelve fields
+needs twelve codes; stretching one to fit a round number would mean two
+fields sharing a code, which is worse than an untidy table.
+
+**Still outstanding**: a result axis whose coordinates are bins (ADR 0008's
+first-passage distributions — a histogram is not a field with one row);
+fields over three axes or on unstructured meshes; code signing and the
+updater that depends on it; and the model families listed at the top of this
+section, none of which is now the last of its module.
