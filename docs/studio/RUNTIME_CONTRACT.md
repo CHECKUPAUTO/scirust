@@ -104,6 +104,7 @@ Not every capability can do this, and the table below says which:
 | `sim.mechanics.pendulum` | every step | yes |
 | `sim.mechanics.double_pendulum` | every step | yes (the main run only) |
 | `sim.stochastic.ornstein_uhlenbeck` | **between realisations** | **per realisation** |
+| `sim.thermal.heat_rod_1d` | every step | yes |
 
 Robertson integrates through `scirust_sim::stiff_bridge`'s adaptive
 Rosenbrock-W solver, which exposes no per-step callback. It is given no
@@ -138,6 +139,7 @@ this for all of them.
 | `sim.ecology.logistic_growth` | `scirust_sim::ecology::LogisticGrowth` | `rk4` | `analytic_error`, `stays_below_capacity` |
 | `sim.mechanics.pendulum` | `scirust_sim::mechanics::Pendulum` | `rk4` | `energy_drift`, `amplitude_bounded` |
 | `sim.mechanics.double_pendulum` | `scirust_sim::mechanics::DoublePendulum` | `rk4` | `energy_drift`, `sensitive_dependence` |
+| `sim.thermal.heat_rod_1d` | `scirust_sim::thermal::HeatRod1d` | `rk4` | `approaches_steady_state`, `slowest_mode_decay_rate`, `maximum_principle` |
 | `sim.stochastic.ornstein_uhlenbeck` | `scirust_sim::stochastic::ou_path` | `exact_gaussian_transition` | `stationary_moments`, `reproducible_from_seed`, `ensemble_moments`*, `ensemble_derived_from_seed`* |
 
 Every row is a real, tested adapter with a shipped, executed tutorial
@@ -186,6 +188,10 @@ Validation codes currently in use:
   not compute in.
 - `SRST-VAL-0099`: `backend.kind` names a backend the capability does not run
   on.
+- `SRST-VAL-0200`..`0209`: `sim.thermal.heat_rod_1d` field errors, including
+  `0206` for a `solver.step` above the explicit diffusion stability limit —
+  refused rather than run, because above it RK4 on that stencil diverges
+  rather than losing accuracy.
 
 Each capability's exact field-to-code mapping is in that capability's
 adapter module (the `FieldDescriptor.error_code` on each `const`). A new
@@ -312,6 +318,23 @@ the descriptor with no edit.
 `backend.kind` refuses nothing today — the schema allows only `"cpu"` and
 every capability declares `Cpu`. It is there so the first capability that is
 not CPU-only fails loudly instead of running somewhere it never claimed to.
+
+## Fields
+
+A [`Field`] is a quantity spanning **two** axes, row-major, naming a row axis
+and a column axis and declaring its own column count. `RunResult::fields` is
+defaulted and empty for every capability whose outputs are curves.
+
+`validate_result` checks a field's shape twice — against the declared column
+count *and* against both axes — because a shape error is the one field defect
+that leaves every number finite and plausible. A row-major buffer read with
+the wrong stride is still a buffer of doubles and renders as a convincing
+picture of nothing.
+
+A `Series` could not carry a field: it is aligned one-to-one with a single
+axis, so the most it holds is a slice. See `docs/studio/adr/0009-fields.md`,
+which also corrects the claim in `REPOSITORY_AUDIT.md` that schema v2 already
+expressed one.
 
 ## Ensembles
 
