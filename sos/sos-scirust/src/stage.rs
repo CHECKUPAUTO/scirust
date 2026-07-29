@@ -34,26 +34,29 @@
 //!
 //! ## The third handler, and the line it falls on
 //!
-//! [`SpectrumStageHandler`] joins [`CatalogStageHandler`] on the data side:
-//! a [`SpectrumConfig`] is samples, a rate and a named window, so it too can
-//! be written down, audited before it runs
-//! ([`measurement_at`](SpectrumStageHandler::measurement_at)) and driven from
+//! [`SpectrumStageHandler`] and [`WelchStageHandler`] join
+//! [`CatalogStageHandler`] on the data side: a [`SpectrumConfig`] is samples,
+//! a rate and a named window, and a [`WelchConfig`] adds a segment length and
+//! an overlap, so both can be written down, audited before they run
+//! ([`measurement_at`](SpectrumStageHandler::measurement_at),
+//! [`segmentation_at`](WelchStageHandler::segmentation_at)) and driven from
 //! `sos run`.
 //!
 //! That is the whole partition, and it is worth stating because it is not a
-//! matter of effort. Of this crate's five `Simulate` backends, exactly **two**
-//! take configurations a file can express. [`crate::ode::Dopri5OdeSimulator`],
-//! [`crate::quadrature`] and [`crate::root`] each take a *function* — a
-//! right-hand side, an integrand, a residual — and no file can name a
-//! function. They can gain handlers; they can never gain a CLI binding
-//! without a transport that ships code (RFC-0002 §10's WASM or MCP
-//! transports), which is a different thing from more plumbing here.
+//! matter of effort. Of this crate's six `Simulate` backends, exactly
+//! **three** take configurations a file can express.
+//! [`crate::ode::Dopri5OdeSimulator`], [`crate::quadrature`] and
+//! [`crate::root`] each take a *function* — a right-hand side, an integrand,
+//! a residual — and no file can name a function. They can gain handlers; they
+//! can never gain a CLI binding without a transport that ships code
+//! (RFC-0002 §10's WASM or MCP transports), which is a different thing from
+//! more plumbing here.
 //!
 //! ## Only what these demonstrate
 //!
-//! Three of the five backends have handlers, and no other engine's stages
-//! have any. What can be claimed is precise: a plan — hand-built, or resolved
-//! from a TOML study, or run from `sos run` for the two data-configured
+//! Four of the six backends have handlers, and no other engine's stages have
+//! any. What can be claimed is precise: a plan — hand-built, or resolved from
+//! a TOML study, or run from `sos run` for the three data-configured
 //! backends — whose stages name one of these plugins runs, memoizes, and
 //! records real results.
 //!
@@ -128,7 +131,10 @@ use sos_workflow::{Stage, StageExecutor, WorkflowError};
 use crate::model::{CatalogSimulator, ModelRun, ModelSpec, ModeledTrajectoryBody};
 use crate::ode::{OdeConfig, Rk4OdeSimulator, Trajectory};
 use crate::solver::{ExactF64Seq, encode_f64};
-use crate::spectrum::{PeriodogramSimulator, SpectrumBody, SpectrumConfig, WindowKind};
+use crate::spectrum::{
+    AveragedSpectrumBody, PeriodogramSimulator, SpectrumBody, SpectrumConfig, WelchConfig,
+    WelchSimulator, WindowKind,
+};
 
 /// Domain-separation prefix for an ODE stage configuration's content address.
 /// Distinct from every object kind's prefix, so a config address can never
@@ -687,6 +693,137 @@ impl<S: ObjectStore> StageExecutor for SpectrumStageHandler<S> {
         )
         .with_inputs(stage.inputs.clone());
         let object = Object::builder(SpectrumBody::from_observation(observation))
+            .level(level)
+            .producer(self.producer())
+            .parents(stage.inputs.clone())
+            .repro(repro)
+            .seal();
+
+        let id = self.store.borrow_mut().put_object(&object).map_err(|e| {
+            WorkflowError::StageFailed {
+                stage: stage.id.clone(),
+                reason: e.to_string(),
+            }
+        })?;
+        Ok(vec![id])
+    }
+}
+
+/// Domain-separation prefix for a Welch measurement's content address.
+const WELCH_CONFIG_DOMAIN: &[u8] = b"sos-scirust:welch-stage-config:v1";
+
+/// The content address of `config` — what a [`Stage`] must carry in its
+/// `config_hash` for [`WelchStageHandler`] to run it.
+#[must_use]
+pub fn welch_config_address(config: &WelchConfig) -> Digest {
+    HashAlgo::Sha256.hash(WELCH_CONFIG_DOMAIN, &config.canonical_bytes())
+}
+
+/// The determinism level every [`WelchStageHandler`] output carries: `L3`.
+///
+/// Identical to [`SPECTRUM_STAGE_LEVEL`], and the equality is the point — the
+/// two backends differ in *estimator quality*, which a determinism tag does
+/// not and should not express. What says how good a Welch estimate is lives in
+/// its output, as [`crate::spectrum::AveragedSpectrum::segments`].
+pub const WELCH_STAGE_LEVEL: DeterminismLevel = DeterminismLevel::L3;
+
+/// A [`StageExecutor`] running Welch averaged-periodogram measurements.
+pub struct WelchStageHandler<S> {
+    simulator: WelchSimulator,
+    store: Rc<RefCell<S>>,
+    configs: BTreeMap<Digest, WelchConfig>,
+    backend: BackendVersion,
+}
+
+impl<S: ObjectStore> WelchStageHandler<S> {
+    /// A handler sealing its results into `store`.
+    #[must_use]
+    pub fn new(store: Rc<RefCell<S>>, backend: BackendVersion) -> Self {
+        Self {
+            simulator: WelchSimulator::new(SimDescriptor::new(
+                "scirust-signal/welch",
+                SemVer::new(1, 0, 0),
+            )),
+            store,
+            configs: BTreeMap::new(),
+            backend,
+        }
+    }
+
+    /// Make `config` available to stages, returning its content address.
+    pub fn offer(&mut self, config: WelchConfig) -> Digest {
+        let address = welch_config_address(&config);
+        self.configs.insert(address, config);
+        address
+    }
+
+    /// The content addresses currently on offer, sorted.
+    #[must_use]
+    pub fn offered(&self) -> Vec<Digest> {
+        self.configs.keys().copied().collect()
+    }
+
+    /// How the measurement at `address` will be segmented — window, segment
+    /// length and overlap — answerable before the stage runs.
+    ///
+    /// The pre-run audit again, and here it answers the question that decides
+    /// whether the result will be worth anything: how many segments a reader
+    /// should expect to be averaged.
+    #[must_use]
+    pub fn segmentation_at(&self, address: &Digest) -> Option<(WindowKind, usize, usize)> {
+        self.configs
+            .get(address)
+            .map(|c| (c.window, c.segment_len, c.overlap))
+    }
+
+    fn env(&self) -> EnvRecord {
+        EnvRecord::new(
+            "unspecified",
+            vec![self.backend.clone()],
+            "unspecified",
+            "unspecified",
+        )
+    }
+
+    fn producer(&self) -> ProducerRef {
+        let descriptor = self.simulator.descriptor();
+        ProducerRef::new(
+            descriptor.name.clone(),
+            descriptor.version,
+            HashAlgo::Sha256.hash(b"sos-producer", &descriptor.canonical_bytes()),
+        )
+    }
+}
+
+impl<S: ObjectStore> StageExecutor for WelchStageHandler<S> {
+    fn run(&mut self, stage: &Stage) -> Result<Vec<ObjectId>, WorkflowError> {
+        let config =
+            self.configs
+                .get(&stage.config_hash)
+                .ok_or_else(|| WorkflowError::StageFailed {
+                    stage: stage.id.clone(),
+                    reason: format!(
+                        "no Welch measurement is on offer at content address {}",
+                        stage.config_hash
+                    ),
+                })?;
+
+        let observation =
+            self.simulator
+                .run(config, stage.seed)
+                .map_err(|e| WorkflowError::StageFailed {
+                    stage: stage.id.clone(),
+                    reason: e.to_string(),
+                })?;
+
+        let level = observation.level();
+        let repro = ReproMeta::new(
+            stage.seed,
+            RngId::new("none"),
+            self.env().digest(HashAlgo::Sha256),
+        )
+        .with_inputs(stage.inputs.clone());
+        let object = Object::builder(AveragedSpectrumBody::from_observation(observation))
             .level(level)
             .producer(self.producer())
             .parents(stage.inputs.clone())

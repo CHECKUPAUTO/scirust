@@ -54,7 +54,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use scirust_signal::features::spectral::{
     psd, spectral_centroid, spectral_flatness, spectral_spread,
 };
-use scirust_signal::{apply_window, blackman, fft_real, flattop, hamming, hanning};
+use scirust_signal::{apply_window, blackman, fft_real, flattop, hamming, hanning, welch_psd};
 use sos_core::canonical::{Canonical, CanonicalEncoder};
 use sos_core::{Body, DeterminismLevel};
 use sos_simulation::{Observation, Result, SimDescriptor, SimError, Simulate};
@@ -442,6 +442,299 @@ impl Simulate for PeriodogramSimulator {
     }
 }
 
+/// One Welch measurement: the record, how it was sampled and shaped, and how
+/// it is to be segmented.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WelchConfig {
+    /// The observed samples. Must be at least `segment_len` long.
+    pub signal: Vec<f64>,
+    /// The sampling rate in hertz. Must be finite and positive.
+    pub sample_rate_hz: f64,
+    /// The window applied to each segment.
+    pub window: WindowKind,
+    /// Samples per segment. Must be a power of two of at least 2 — the
+    /// resolution/stability dial: smaller segments mean more of them.
+    pub segment_len: usize,
+    /// Samples shared between consecutive segments. Must be `< segment_len`.
+    pub overlap: usize,
+}
+
+impl WelchConfig {
+    /// Construct a Welch configuration. Validity is checked by
+    /// [`WelchSimulator::run`], not here — a config is just data.
+    #[must_use]
+    pub fn new(
+        signal: Vec<f64>,
+        sample_rate_hz: f64,
+        window: WindowKind,
+        segment_len: usize,
+        overlap: usize,
+    ) -> Self {
+        Self {
+            signal,
+            sample_rate_hz,
+            window,
+            segment_len,
+            overlap,
+        }
+    }
+}
+
+impl Canonical for WelchConfig {
+    fn encode(&self, enc: &mut CanonicalEncoder) {
+        enc.value(&ExactF64Seq(&self.signal));
+        encode_f64(enc, self.sample_rate_hz);
+        enc.value(&self.window);
+        enc.u64(self.segment_len as u64);
+        enc.u64(self.overlap as u64);
+    }
+}
+
+/// Serialized form of a [`WelchConfig`] — exact decimal text for the floats,
+/// same reasoning as [`ConfigRepr`].
+#[derive(Serialize, Deserialize)]
+struct WelchConfigRepr {
+    signal: Vec<String>,
+    sample_rate_hz: String,
+    window: WindowKind,
+    segment_len: usize,
+    overlap: usize,
+}
+
+impl Serialize for WelchConfig {
+    fn serialize<S: Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        WelchConfigRepr {
+            signal: self
+                .signal
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
+            sample_rate_hz: self.sample_rate_hz.to_string(),
+            window: self.window,
+            segment_len: self.segment_len,
+            overlap: self.overlap,
+        }
+        .serialize(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for WelchConfig {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let r = WelchConfigRepr::deserialize(d)?;
+        let parse = |s: &str| s.parse::<f64>().map_err(D::Error::custom);
+        Ok(WelchConfig {
+            signal: r
+                .signal
+                .iter()
+                .map(|v| parse(v))
+                .collect::<std::result::Result<Vec<f64>, _>>()?,
+            sample_rate_hz: parse(&r.sample_rate_hz)?,
+            window: r.window,
+            segment_len: r.segment_len,
+            overlap: r.overlap,
+        })
+    }
+}
+
+/// A Welch power-spectral-density estimate, with the descriptor that says how
+/// much it is worth.
+///
+/// ## A third kind of metadata
+///
+/// This crate's `L2` backends carry a **tolerance certificate**: the answer is
+/// within a declared ε ([`crate::ode::CertifiedTrajectory`],
+/// [`crate::quadrature::CertifiedIntegral`]). Its `L1` estimator carries a
+/// **standard error** from sampling ([`crate::nmc`]). This is neither. A Welch
+/// estimate is `L3` — bit-reproducible, no tolerance, nothing sampled — and
+/// yet its *quality as an estimate* still varies, with `1/segments`. So
+/// [`segments`](Self::segments) is a **statistical quality descriptor on an
+/// otherwise exactly-reproducible result**, and it belongs in the output for
+/// the same reason the other two do: a number reported without it cannot be
+/// read correctly.
+///
+/// [`dropped_samples`](Self::dropped_samples) is here for the adjacent
+/// reason — a record that does not divide evenly into segments loses its tail,
+/// and a result that quietly used less data than it was given overstates
+/// itself.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(from = "AveragedSpectrumRepr", into = "AveragedSpectrumRepr")]
+pub struct AveragedSpectrum {
+    /// Averaged power spectral density, DC to Nyquist, on the same scale as
+    /// [`Spectrum::psd`].
+    pub psd: Vec<f64>,
+    /// Bin spacing in hertz — `sample_rate / segment_len`. Coarser than a
+    /// whole-record periodogram's: that is the resolution traded for stability.
+    pub bin_width_hz: f64,
+    /// The window applied to each segment.
+    pub window: WindowKind,
+    /// How many segments were averaged. See the type docs.
+    pub segments: usize,
+    /// Trailing samples that did not fill a segment and were not used.
+    pub dropped_samples: usize,
+}
+
+/// Serialized form of an [`AveragedSpectrum`].
+#[derive(Serialize, Deserialize, Clone)]
+struct AveragedSpectrumRepr {
+    psd: Vec<String>,
+    bin_width_hz: String,
+    window: WindowKind,
+    segments: usize,
+    dropped_samples: usize,
+}
+
+impl From<AveragedSpectrum> for AveragedSpectrumRepr {
+    fn from(a: AveragedSpectrum) -> Self {
+        Self {
+            psd: a.psd.iter().map(std::string::ToString::to_string).collect(),
+            bin_width_hz: a.bin_width_hz.to_string(),
+            window: a.window,
+            segments: a.segments,
+            dropped_samples: a.dropped_samples,
+        }
+    }
+}
+
+impl From<AveragedSpectrumRepr> for AveragedSpectrum {
+    fn from(r: AveragedSpectrumRepr) -> Self {
+        // `serde(from = ...)` cannot fail, so an unparsable float would have to
+        // become a silent default here. It cannot occur through this crate's
+        // own writer, and a corrupted record is caught by the store's content
+        // check on the way out — the id will not match.
+        let parse = |s: &String| s.parse::<f64>().unwrap_or(f64::NAN);
+        Self {
+            psd: r.psd.iter().map(parse).collect(),
+            bin_width_hz: parse(&r.bin_width_hz),
+            window: r.window,
+            segments: r.segments,
+            dropped_samples: r.dropped_samples,
+        }
+    }
+}
+
+impl Canonical for AveragedSpectrum {
+    fn encode(&self, enc: &mut CanonicalEncoder) {
+        enc.value(&ExactF64Seq(&self.psd));
+        encode_f64(enc, self.bin_width_hz);
+        enc.value(&self.window);
+        enc.u64(self.segments as u64);
+        enc.u64(self.dropped_samples as u64);
+    }
+}
+
+/// A real [`Simulate`] backend computing Welch's averaged periodogram.
+///
+/// `L3`, exactly as [`PeriodogramSimulator`] is, and for the same reason: a
+/// fixed sequence of `f64` operations with no iteration, tolerance or
+/// sampling. What differs is not reproducibility but *estimator quality* —
+/// this one's variance falls as `1/segments`, where a single periodogram's
+/// does not fall at all. That is the whole reason to reach for it, and
+/// [`AveragedSpectrum::segments`] is how a result says how much of it it got.
+#[derive(Debug, Clone)]
+pub struct WelchSimulator {
+    descriptor: SimDescriptor,
+}
+
+impl WelchSimulator {
+    /// A named, versioned Welch backend.
+    #[must_use]
+    pub fn new(descriptor: SimDescriptor) -> Self {
+        Self { descriptor }
+    }
+}
+
+impl Simulate for WelchSimulator {
+    type Config = WelchConfig;
+    type Output = AveragedSpectrum;
+
+    fn descriptor(&self) -> SimDescriptor {
+        self.descriptor.clone()
+    }
+
+    fn level(&self) -> DeterminismLevel {
+        DeterminismLevel::L3
+    }
+
+    fn run(&self, config: &WelchConfig, seed: u64) -> Result<Observation<AveragedSpectrum>> {
+        if !(config.sample_rate_hz.is_finite() && config.sample_rate_hz > 0.0)
+        {
+            return Err(SimError::InvalidConfig(format!(
+                "sample rate must be finite and positive (got {})",
+                config.sample_rate_hz
+            )));
+        }
+        // Every remaining precondition is `welch_psd`'s own, and it reports
+        // them as structured errors rather than asserting — so they are mapped
+        // rather than re-checked here. That is the opposite of what
+        // `PeriodogramSimulator` must do for `fft_real`, which panics.
+        let coefficients = config.window.coefficients(config.segment_len);
+        let estimate = welch_psd(
+            &config.signal,
+            config.segment_len,
+            config.overlap,
+            &coefficients,
+        )
+        .map_err(|e| SimError::InvalidConfig(e.to_string()))?;
+
+        #[allow(clippy::cast_precision_loss)] // segment lengths are far below 2^53
+        let bin_width_hz = config.sample_rate_hz / config.segment_len as f64;
+        Ok(Observation::new(
+            AveragedSpectrum {
+                psd: estimate.psd,
+                bin_width_hz,
+                window: config.window,
+                segments: estimate.segments,
+                dropped_samples: estimate.dropped_samples,
+            },
+            self.level(),
+            seed,
+        ))
+    }
+}
+
+/// The body of a stored Welch measurement.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AveragedSpectrumBody {
+    /// The averaged spectrum, with its quality descriptor.
+    pub spectrum: AveragedSpectrum,
+    /// The determinism level the backend realized.
+    pub level: DeterminismLevel,
+    /// The seed the run used.
+    pub seed: u64,
+}
+
+impl AveragedSpectrumBody {
+    /// Flatten an observation into a storable body.
+    #[must_use]
+    pub fn from_observation(observation: Observation<AveragedSpectrum>) -> Self {
+        let (level, seed) = (observation.level(), observation.seed);
+        Self {
+            spectrum: observation.output,
+            level,
+            seed,
+        }
+    }
+
+    /// Rebuild the [`Observation`] this body was stored from.
+    #[must_use]
+    pub fn observation(&self) -> Observation<AveragedSpectrum> {
+        Observation::new(self.spectrum.clone(), self.level, self.seed)
+    }
+}
+
+impl Canonical for AveragedSpectrumBody {
+    fn encode(&self, enc: &mut CanonicalEncoder) {
+        enc.value(&self.spectrum);
+        enc.value(&self.level);
+        enc.u64(self.seed);
+    }
+}
+
+impl Body for AveragedSpectrumBody {
+    const KIND: &'static str = "AveragedSpectrum";
+    const SCHEMA_VERSION: u32 = 1;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -754,6 +1047,178 @@ mod tests {
                 assert_ne!(a.canonical_bytes(), b.canonical_bytes(), "{a:?} vs {b:?}");
             }
             assert_eq!(a.coefficients(8).len(), 8);
+        }
+    }
+
+    // ---- Welch: the estimator whose variance actually falls -------------
+
+    fn welch(config: &WelchConfig) -> AveragedSpectrum {
+        WelchSimulator::new(descriptor("test/welch"))
+            .run(config, 0)
+            .expect("a valid config must measure")
+            .output
+    }
+
+    #[test]
+    fn welch_averaging_delivers_the_stability_a_periodogram_cannot() {
+        // The pair of claims `PeriodogramSimulator`'s docs make, now both
+        // testable against real backends rather than a hand-rolled average.
+        let noisy = white_noise(4096, 0x5EED);
+        let single = measure(&SpectrumConfig::new(
+            noisy[..256].to_vec(),
+            1024.0,
+            WindowKind::Rectangular,
+        ));
+        let averaged = welch(&WelchConfig::new(
+            noisy,
+            1024.0,
+            WindowKind::Rectangular,
+            256,
+            0,
+        ));
+
+        assert_eq!(averaged.segments, 16);
+        assert_eq!(averaged.dropped_samples, 0);
+        let (one, many) = (
+            relative_dispersion(&single.psd),
+            relative_dispersion(&averaged.psd),
+        );
+        assert!(
+            many < one / 2.5,
+            "16 segments must visibly stabilize the estimate: {one} -> {many}"
+        );
+        // And the resolution paid for it: same bin width as one 256-sample
+        // periodogram, not the 4096-sample one the record could have bought.
+        assert!((averaged.bin_width_hz - 4.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_single_rectangular_segment_agrees_with_the_plain_periodogram() {
+        // The two backends compute the same quantity; Welch just averages it.
+        let signal = tone(64.0, 1024.0, 1024);
+        let direct = measure(&SpectrumConfig::new(
+            signal.clone(),
+            1024.0,
+            WindowKind::Rectangular,
+        ));
+        let averaged = welch(&WelchConfig::new(
+            signal,
+            1024.0,
+            WindowKind::Rectangular,
+            1024,
+            0,
+        ));
+        assert_eq!(averaged.segments, 1);
+        assert_eq!(averaged.bin_width_hz, direct.bin_width_hz);
+        for (i, (a, b)) in averaged.psd.iter().zip(&direct.psd).enumerate()
+        {
+            assert!((a - b).abs() < 1e-12, "bin {i}: {a} vs {b}");
+        }
+    }
+
+    #[test]
+    fn a_tone_survives_the_averaging() {
+        let averaged = welch(&WelchConfig::new(
+            tone(64.0, 1024.0, 4096),
+            1024.0,
+            WindowKind::Hann,
+            1024,
+            512,
+        ));
+        let peak = averaged
+            .psd
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .unwrap()
+            .0;
+        assert_eq!(peak, 64);
+        assert_eq!(averaged.segments, 7, "50% overlap over 4096 samples");
+    }
+
+    #[test]
+    fn a_dropped_tail_is_reported_rather_than_hidden() {
+        let averaged = welch(&WelchConfig::new(
+            white_noise(300, 1),
+            1024.0,
+            WindowKind::Rectangular,
+            256,
+            0,
+        ));
+        assert_eq!(averaged.segments, 1);
+        assert_eq!(averaged.dropped_samples, 44);
+    }
+
+    #[test]
+    fn welch_rejects_bad_configurations_as_structured_errors() {
+        let sim = WelchSimulator::new(descriptor("test/welch-guard"));
+        let signal = white_noise(1024, 2);
+        let bad = [
+            // Sample rate is this adapter's own check.
+            WelchConfig::new(signal.clone(), 0.0, WindowKind::Hann, 256, 0),
+            WelchConfig::new(signal.clone(), f64::NAN, WindowKind::Hann, 256, 0),
+            // The rest are `welch_psd`'s, mapped rather than re-checked.
+            WelchConfig::new(signal.clone(), 1024.0, WindowKind::Hann, 300, 0),
+            WelchConfig::new(signal.clone(), 1024.0, WindowKind::Hann, 256, 256),
+            WelchConfig::new(vec![0.5; 100], 1024.0, WindowKind::Hann, 256, 0),
+        ];
+        for config in bad
+        {
+            assert!(
+                matches!(sim.run(&config, 0), Err(SimError::InvalidConfig(_))),
+                "{config:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn welch_is_l3_and_bit_reproducible() {
+        let sim = WelchSimulator::new(descriptor("test/welch-level"));
+        let config = WelchConfig::new(white_noise(2048, 9), 1024.0, WindowKind::Hann, 256, 128);
+        assert_eq!(sim.level(), DeterminismLevel::L3);
+        let a = sim.run(&config, 4).unwrap();
+        let b = sim.run(&config, 4).unwrap();
+        assert_eq!(a.output.canonical_bytes(), b.output.canonical_bytes());
+        assert_eq!(a.seed, 4);
+    }
+
+    #[test]
+    fn the_segmentation_is_part_of_the_content_address() {
+        // Two Welch estimates of the same record at different segmentations
+        // are different measurements, and must not share a cache entry.
+        let signal = white_noise(2048, 3);
+        let base = WelchConfig::new(signal.clone(), 1024.0, WindowKind::Hann, 256, 0);
+        for other in [
+            WelchConfig::new(signal.clone(), 1024.0, WindowKind::Hann, 512, 0),
+            WelchConfig::new(signal.clone(), 1024.0, WindowKind::Hann, 256, 128),
+            WelchConfig::new(signal.clone(), 1024.0, WindowKind::Blackman, 256, 0),
+            WelchConfig::new(signal, 2048.0, WindowKind::Hann, 256, 0),
+        ]
+        {
+            assert_ne!(base.canonical_bytes(), other.canonical_bytes(), "{other:?}");
+        }
+    }
+
+    #[test]
+    fn a_welch_config_and_result_survive_a_file() {
+        let config = WelchConfig::new(white_noise(1024, 7), 1024.0, WindowKind::FlatTop, 256, 64);
+        let back: WelchConfig = serde_json::from_str(&serde_json::to_string(&config).unwrap())
+            .expect("a config must round-trip");
+        assert_eq!(back, config);
+        assert_eq!(back.canonical_bytes(), config.canonical_bytes());
+
+        let body = AveragedSpectrumBody::from_observation(
+            WelchSimulator::new(descriptor("test/welch-file"))
+                .run(&config, 2)
+                .unwrap(),
+        );
+        let reloaded: AveragedSpectrumBody =
+            serde_json::from_str(&serde_json::to_string(&body).unwrap()).unwrap();
+        assert_eq!(reloaded.canonical_bytes(), body.canonical_bytes());
+        assert_eq!(reloaded.spectrum.segments, body.spectrum.segments);
+        for (a, b) in body.spectrum.psd.iter().zip(&reloaded.spectrum.psd)
+        {
+            assert_eq!(a.to_bits(), b.to_bits());
         }
     }
 
