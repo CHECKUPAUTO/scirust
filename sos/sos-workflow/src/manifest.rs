@@ -27,9 +27,13 @@
 //! version = "1.0.0"
 //! pin     = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
 //! config  = "fcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9"
-//! needs   = ["coarse"]
-//! seed    = 7                      # overrides the study seed for this stage
+//! consumes = ["coarse"]            # run after `coarse` *and* read its outputs
+//! seed     = 7                     # overrides the study seed for this stage
 //! ```
+//!
+//! `needs` is the ordering-only sibling of `consumes`: use it when a stage
+//! must run after another without reading what it produced, so a study that
+//! only wants sequencing does not acquire provenance parents it never read.
 //!
 //! ## Why it names things by content address
 //!
@@ -167,8 +171,21 @@ pub struct StageSpec {
     #[serde(default)]
     pub inputs: Vec<ObjectId>,
     /// Stage ids that must run before this one. Defaults to none.
+    ///
+    /// **Ordering only.** `needs` says "run after", not "read the output of";
+    /// for dataflow use [`consumes`](Self::consumes), which implies ordering
+    /// as well. Keeping the two separate means a study that genuinely only
+    /// wants sequencing does not acquire provenance parents it never read.
     #[serde(default)]
     pub needs: Vec<String>,
+    /// Stage ids whose **outputs this stage reads**. Defaults to none.
+    ///
+    /// A consumed stage's output object ids become this stage's inputs, which
+    /// is the only way a manifest can express dataflow: `inputs` takes literal
+    /// object ids, and an upstream stage's ids do not exist until it has run.
+    /// Consuming implies `needs`, so an id here need not be repeated there.
+    #[serde(default)]
+    pub consumes: Vec<String>,
     /// This stage's seed. Defaults to the study's.
     #[serde(default)]
     pub seed: Option<u64>,
@@ -212,13 +229,14 @@ impl Manifest {
                     stage: spec.id.clone(),
                     version: spec.version.clone(),
                 })?;
-        Ok(Stage::new(
+        Ok(Stage::consuming(
             StageId::new(spec.id.clone()),
             StageDescriptor::new(spec.plugin.clone(), version, spec.pin),
             spec.inputs.clone(),
             spec.config,
             spec.seed.unwrap_or(self.study.seed),
             spec.needs.iter().cloned().map(StageId::new).collect(),
+            spec.consumes.iter().cloned().map(StageId::new).collect(),
         ))
     }
 }

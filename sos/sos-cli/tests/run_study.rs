@@ -821,6 +821,65 @@ fn verifying_an_object_no_stored_run_produced_is_an_error() {
 }
 
 #[test]
+fn a_consuming_stage_records_its_upstream_as_a_provenance_parent() {
+    // The payoff, seen from the outside: before `consumes`, every object a
+    // study produced had zero parents, so a workflow engine emitted a
+    // provenance graph with no edges between its own nodes. A study written
+    // in TOML can now say a stage reads another's output, and the stored
+    // object records it — with no change to any stage handler, because they
+    // already copy `stage.inputs` into parents.
+    let dir = temp_root("consumes");
+    let store_path = dir.join("store");
+    let configs = [growth(100.0), growth(50.0)];
+    let runs_path = dir.join("runs.json");
+    fs::write(&runs_path, serde_json::to_string(&configs).unwrap()).unwrap();
+
+    let manifest = dir.join("study.toml");
+    fs::write(
+        &manifest,
+        format!(
+            "[study]\nname = \"chained\"\nseed = 3\n\n\
+             [[stage]]\nid       = \"first\"\nplugin   = \"{p0}\"\nversion  = \"1.0.0\"\n\
+             pin      = \"{pin0}\"\nconfig   = \"{c0}\"\n\n\
+             [[stage]]\nid       = \"second\"\nplugin   = \"{p1}\"\nversion  = \"1.0.0\"\n\
+             pin      = \"{pin1}\"\nconfig   = \"{c1}\"\nconsumes = [\"first\"]\n",
+            p0 = configs[0].plugin(),
+            pin0 = sos_cli::run::plugin_hash(configs[0].plugin()).to_hex(),
+            c0 = configs[0].address().to_hex(),
+            p1 = configs[1].plugin(),
+            pin1 = sos_cli::run::plugin_hash(configs[1].plugin()).to_hex(),
+            c1 = configs[1].address().to_hex(),
+        ),
+    )
+    .unwrap();
+
+    let out = sos_run(
+        &manifest,
+        &runs_path,
+        &store_path,
+        &["--allow", "effectful"],
+    )
+    .unwrap();
+    assert!(out.contains("ran 2 of 2 stage(s)"), "{out}");
+
+    let first = parse_reported(&out, "first");
+    let second = parse_reported(&out, "second");
+    let store = FileStore::open(&store_path).unwrap();
+    let downstream: Object<ModeledTrajectoryBody> = store.get_object(second).unwrap().unwrap();
+    assert_eq!(
+        downstream.parents,
+        vec![first],
+        "the consuming stage's output must name what it read"
+    );
+    assert_eq!(downstream.repro.inputs, vec![first]);
+
+    // And the upstream, which consumed nothing, still has none.
+    let upstream: Object<ModeledTrajectoryBody> = store.get_object(first).unwrap().unwrap();
+    assert!(upstream.parents.is_empty());
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn no_two_body_kinds_collide() {
     // The guard for the defect `sos verify` surfaced: sos-planner's `Plan` and
     // sos-workflow's `Plan` both declared kind "Plan". Two structurally
