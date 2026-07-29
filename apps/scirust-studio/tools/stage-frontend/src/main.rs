@@ -7,15 +7,22 @@
 //! and no error anywhere — this searches for the built bundle and verifies
 //! it before staging it.
 //!
+//! Its contract is **"`dist/` holds a real bundle when this exits zero"**,
+//! not "a copy just happened" — because it runs as Tauri's
+//! `beforeBuildCommand`, and on a packaging machine the bundle arrives as a
+//! CI artifact unpacked straight into `dist/`, with no `target/dx` anywhere.
+//! An already-staged bundle is therefore verified and kept.
+//!
 //! What it refuses to do:
 //!
 //! - **Stage something that is not a frontend.** A directory without an
 //!   `index.html` and a `.wasm` module is not a bundle; copying it would
 //!   produce an application that opens a blank window.
-//! - **Leave the previous build behind.** `dist/` is emptied first, so a
-//!   removed file cannot survive into the next bundle.
-//! - **Invent a bundle.** A missing input is a hard failure naming the
-//!   command that produces it.
+//! - **Leave the previous build behind.** When there is a fresh build,
+//!   `dist/` is emptied first, so a file the new build no longer produces
+//!   cannot survive into the next bundle.
+//! - **Invent a bundle.** Neither a build nor a staged bundle is a hard
+//!   failure naming the command that produces one.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -47,47 +54,109 @@ fn run() -> Result<String, String> {
 
     let profile = option(&args, "--profile").unwrap_or_else(|| "release".to_string());
     let app_root = app_root()?;
+    let destination = app_root.join("dist");
+    let dx_root = app_root.join("target").join("dx");
 
-    let source = match option(&args, "--source")
+    let explicit = option(&args, "--source").map(PathBuf::from);
+    match plan(explicit, &dx_root, &destination, &profile)?
     {
-        Some(path) => PathBuf::from(path),
-        None => find_bundle(&app_root.join("target").join("dx"), &profile).ok_or_else(|| {
-            format!(
-                "no Dioxus web build was found under {}\n\
+        Plan::KeepStaged => describe(&destination, None),
+        Plan::Copy(source) =>
+        {
+            clear_dist(&destination)?;
+            let copied = copy_tree(&source, &destination)?;
+            describe(&destination, Some((&source, copied)))
+        },
+    }
+}
+
+/// What staging should do.
+#[derive(Debug, PartialEq)]
+enum Plan {
+    /// Copy this bundle over `dist/`.
+    Copy(PathBuf),
+    /// `dist/` already holds a verified bundle; leave it alone.
+    KeepStaged,
+}
+
+/// Decide what to do, or explain why nothing can be done.
+///
+/// The "keep staged" case is not a convenience. This runs as Tauri's
+/// `beforeBuildCommand`, and on a packaging machine the bundle legitimately
+/// arrives as a CI artifact unpacked straight into `dist/`: there is no
+/// `target/dx` there and never will be. So the question this tool answers is
+/// **"does `dist/` hold a real bundle"**, not "has a build just happened".
+///
+/// What it still refuses is the case that matters: neither a fresh build nor
+/// an already-staged one. That is the path to an application that opens a
+/// blank window, and it fails here with the command that fixes it.
+fn plan(
+    explicit: Option<PathBuf>,
+    dx_root: &Path,
+    destination: &Path,
+    profile: &str,
+) -> Result<Plan, String> {
+    let source = match explicit
+    {
+        Some(path) => Some(path),
+        None => find_bundle(dx_root, profile),
+    };
+
+    let Some(source) = source
+    else
+    {
+        return match bundle_problems(destination).as_slice()
+        {
+            [] => Ok(Plan::KeepStaged),
+            problems => Err(format!(
+                "there is no Dioxus build under {}, and {} does not already \
+                 hold a usable bundle:\n  - {}\n\
                  Build it first:\n    dx build --{profile} --platform web",
-                app_root.join("target").join("dx").display()
-            )
-        })?,
+                dx_root.display(),
+                destination.display(),
+                problems.join("\n  - ")
+            )),
+        };
     };
 
     let problems = bundle_problems(&source);
-    if !problems.is_empty()
+    if problems.is_empty()
     {
-        return Err(format!(
+        Ok(Plan::Copy(source))
+    }
+    else
+    {
+        Err(format!(
             "{} is not a usable web bundle:\n  - {}",
             source.display(),
             problems.join("\n  - ")
-        ));
+        ))
     }
+}
 
-    let destination = app_root.join("dist");
-    clear_dist(&destination)?;
-    let copied = copy_tree(&source, &destination)?;
-
+/// Report what `dist/` now holds.
+fn describe(destination: &Path, staged: Option<(&Path, usize)>) -> Result<String, String> {
     let index = destination.join("index.html");
     let digest = sha256_of(&index)?;
-    let wasm_bytes: u64 = wasm_files(&destination)
+    let wasm_bytes: u64 = wasm_files(destination)
         .iter()
         .filter_map(|p| std::fs::metadata(p).ok().map(|m| m.len()))
         .sum();
 
+    let provenance = match staged
+    {
+        Some((source, copied)) =>
+        {
+            format!("source      {}\nfiles       {copied}\n", source.display())
+        },
+        None => "source      already staged (no local Dioxus build to copy)\n".to_string(),
+    };
+
     Ok(format!(
-        "source      {}\n\
+        "{provenance}\
          destination {}\n\
-         files       {copied}\n\
          wasm        {wasm_bytes} bytes\n\
          index sha256 {digest}",
-        source.display(),
         destination.display()
     ))
 }
@@ -380,6 +449,87 @@ mod tests {
 
         let debug = find_bundle(&scratch.path().join("dx"), "debug").expect("a debug bundle");
         assert!(debug.ends_with("debug/web/public"), "{debug:?}");
+    }
+
+    /// The packaging case: the bundle came from a CI artifact, so there is
+    /// no `target/dx` and there never will be. Staging must accept it.
+    #[test]
+    fn an_already_staged_bundle_is_kept_when_there_is_no_build() {
+        let scratch = Scratch::new("staged");
+        scratch.write("dist/index.html", "<html>");
+        scratch.write("dist/assets/app.wasm", "\0asm");
+        let dx = scratch.path().join("target/dx");
+
+        let decision = plan(None, &dx, &scratch.path().join("dist"), "release");
+        assert_eq!(decision, Ok(Plan::KeepStaged));
+    }
+
+    /// ...but only if it is genuinely a bundle. A `dist/` holding an index
+    /// and no module is the blank-window failure, and it must not pass.
+    #[test]
+    fn a_half_staged_bundle_is_refused_not_kept() {
+        let scratch = Scratch::new("half-staged");
+        scratch.write("dist/index.html", "<html>");
+        let dx = scratch.path().join("target/dx");
+
+        let error = plan(None, &dx, &scratch.path().join("dist"), "release")
+            .expect_err("a bundle with no module must be refused");
+        assert!(error.contains(".wasm"), "{error}");
+        assert!(error.contains("dx build"), "{error}");
+    }
+
+    #[test]
+    fn nothing_staged_and_nothing_built_names_the_command_that_fixes_it() {
+        let scratch = Scratch::new("nothing");
+        let error = plan(
+            None,
+            &scratch.path().join("target/dx"),
+            &scratch.path().join("dist"),
+            "release",
+        )
+        .expect_err("neither source is an error");
+        assert!(
+            error.contains("dx build --release --platform web"),
+            "{error}"
+        );
+    }
+
+    /// A fresh build wins over whatever happens to be staged, so a rebuild
+    /// is never silently ignored.
+    #[test]
+    fn a_fresh_build_is_preferred_over_an_already_staged_bundle() {
+        let scratch = Scratch::new("fresh");
+        scratch.write("dist/index.html", "<html>old");
+        scratch.write("dist/old.wasm", "\0asm");
+        scratch.write("target/dx/app/release/web/public/index.html", "<html>new");
+        scratch.write("target/dx/app/release/web/public/new.wasm", "\0asm");
+
+        let decision = plan(
+            None,
+            &scratch.path().join("target/dx"),
+            &scratch.path().join("dist"),
+            "release",
+        )
+        .expect("a plan");
+        match decision
+        {
+            Plan::Copy(source) => assert!(source.ends_with("release/web/public"), "{source:?}"),
+            other => panic!("a fresh build must be staged, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_explicit_source_that_is_not_a_bundle_is_refused() {
+        let scratch = Scratch::new("explicit");
+        scratch.write("elsewhere/index.html", "<html>");
+        let error = plan(
+            Some(scratch.path().join("elsewhere")),
+            &scratch.path().join("target/dx"),
+            &scratch.path().join("dist"),
+            "release",
+        )
+        .expect_err("an explicit source is still verified");
+        assert!(error.contains(".wasm"), "{error}");
     }
 
     #[test]

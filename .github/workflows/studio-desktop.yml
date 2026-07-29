@@ -43,6 +43,13 @@ env:
   # apps/scirust-studio/Cargo.toml. A mismatched CLI produces a bundle whose
   # bootstrap does not match the compiled module.
   DIOXUS_CLI_VERSION: '0.7.9'
+  # The Tauri CLI is a *separate crate* from the `tauri` library and is
+  # versioned independently: the library pinned in Cargo.toml is 2.11.5 and
+  # the newest CLI is 2.11.4. Assuming they move together produces
+  # `could not find tauri-cli in registry crates-io with version =2.11.5`,
+  # which is a confusing way to learn this. The crate is `tauri-cli`; the
+  # binary it installs is `cargo-tauri`.
+  TAURI_CLI_VERSION: '2.11.4'
 
 jobs:
   # ---------------------------------------------------------------------
@@ -141,9 +148,11 @@ jobs:
       # Both install the exact version pinned above; neither accepts
       # "whatever is latest", because the CLI writes the bootstrap that loads
       # the compiled module.
+      # `-y` is `--no-confirm`; passing both is rejected by binstall, which
+      # sends the step silently down the source-build fallback.
       - name: Install the Dioxus CLI
         run: |
-          cargo binstall -y --no-confirm "dioxus-cli@${DIOXUS_CLI_VERSION}" \
+          cargo binstall -y "dioxus-cli@${DIOXUS_CLI_VERSION}" \
             || cargo install dioxus-cli --locked --version "${DIOXUS_CLI_VERSION}"
           dx --version
 
@@ -261,26 +270,32 @@ jobs:
         working-directory: apps/scirust-studio
         run: cargo run -p prepare-sidecar --locked -- --profile release
 
-      - name: Install the Tauri CLI
+      - name: Install cargo-binstall
         uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # v2
         with:
           tool: cargo-binstall
 
-      - name: Install cargo-tauri
-        run: cargo binstall -y --no-confirm cargo-tauri@2.11.5 || cargo install tauri-cli --locked --version 2.11.5
+      # One line on purpose: this step runs under pwsh, and a backtick
+      # continuation combined with `||` is one more thing that can be subtly
+      # wrong on a runner and nowhere else.
+      - name: Install the Tauri CLI
+        run: |
+          cargo binstall -y "tauri-cli@${env:TAURI_CLI_VERSION}" || cargo install tauri-cli --locked --version "${env:TAURI_CLI_VERSION}"
+          cargo tauri --version
 
-      # Unsigned on purpose. Code signing needs a certificate this repository
-      # does not hold, and shipping a preview that pretends to be signed
-      # would be worse than shipping one that plainly is not. The
-      # SmartScreen warning a reviewer will see is documented in
+      # One build, producing both the executable and the installer. Unsigned
+      # on purpose: code signing needs a certificate this repository does not
+      # hold, and shipping a preview that pretends to be signed would be
+      # worse than shipping one that plainly is not. The SmartScreen warning
+      # a reviewer will see is documented in
       # docs/studio/WINDOWS_DESKTOP_ACCEPTANCE.md.
-      - name: Build the unsigned bundle
+      #
+      # The config is discovered from `src-tauri/`, not passed with
+      # `--config`: that flag *merges* a patch over the discovered config, so
+      # handing it the main file applies it twice.
+      - name: Build the unsigned bundle and installer
         working-directory: apps/scirust-studio
-        run: cargo tauri build --no-bundle --config src-tauri/tauri.conf.json
-
-      - name: Build the NSIS installer
-        working-directory: apps/scirust-studio
-        run: cargo tauri build --bundles nsis --config src-tauri/tauri.conf.json
+        run: cargo tauri build --bundles nsis
 
       # Runs the built application, not a copy of the source: the artifact
       # is only worth publishing if the artifact itself works.

@@ -13,15 +13,26 @@ staging steps are tools that verify what they stage.
 | Rust | stable (nightly for `cargo fmt`) | The root `rustfmt.toml` uses unstable options |
 | `wasm32-unknown-unknown` target | — | `rustup target add wasm32-unknown-unknown` |
 | Dioxus CLI (`dx`) | **0.7.9** | Must match the `dioxus` crate version; the CLI writes the bootstrap that loads the compiled module |
-| Tauri CLI (`cargo-tauri`) | **2.11.5** | Must match the `tauri` crate version |
+| Tauri CLI (`cargo-tauri`) | **2.11.4** | The newest CLI compatible with the pinned `tauri` 2.11.5 — see below |
 
 ```bash
 rustup target add wasm32-unknown-unknown
-cargo binstall dioxus-cli@0.7.9 cargo-tauri@2.11.5
+cargo binstall -y dioxus-cli@0.7.9 tauri-cli@2.11.4
 # or, from source:
 cargo install dioxus-cli --locked --version 0.7.9
-cargo install tauri-cli  --locked --version 2.11.5
+cargo install tauri-cli  --locked --version 2.11.4
 ```
+
+Two traps in those two lines, both of which cost a red CI job:
+
+* **The Tauri CLI is a different crate from the `tauri` library, versioned
+  independently.** The crate is `tauri-cli` (the *binary* it installs is
+  `cargo-tauri`, which is not a crate at all), and its latest release is
+  2.11.4 while the library is 2.11.5. Assuming they move together produces
+  `could not find tauri-cli in registry crates-io with version =2.11.5`.
+* **`-y` is `--no-confirm`.** `cargo binstall -y --no-confirm …` is rejected
+  for repeating an argument — which, behind a `||` fallback, silently turns
+  a thirty-second prebuilt install into a several-minute source build.
 
 ### Linux system dependencies
 
@@ -52,13 +63,16 @@ dx build --release --platform web
 # 4. Stage the bundle into dist/, which is what tauri.conf.json bundles.
 cargo run -p stage-frontend -- --profile release
 
-# 5. The application.
-cargo tauri build --config src-tauri/tauri.conf.json
+# 5. The application. The config is discovered from src-tauri/; do not pass
+#    it with --config, which *merges* a patch over the discovered config and
+#    would apply the whole file twice.
+cargo tauri build
 ```
 
 Step 4 also runs automatically as the `beforeBuildCommand` in step 5, so a
-`cargo tauri build` with no frontend built fails loudly — naming `dx build` —
-rather than bundling whatever happens to be in `dist/`.
+`cargo tauri build` with neither a frontend build nor a staged bundle fails
+loudly — naming `dx build` — rather than bundling whatever happens to be in
+`dist/`.
 
 ### What the staging tools refuse
 
@@ -71,11 +85,17 @@ rather than bundling whatever happens to be in `dist/`.
 * makes the copy executable on Unix, and reports its size and SHA-256;
 * never downloads anything and never invokes a shell string.
 
-`stage-frontend`:
+`stage-frontend`, whose contract is *"`dist/` holds a real bundle when this
+exits zero"* rather than *"a copy just happened"*:
 
 * searches for the built bundle rather than hard-coding a path, because the
   Dioxus CLI's output layout is its own business and has changed between
   versions;
+* accepts an **already-staged** `dist/` when there is no local build to copy,
+  after verifying it — on a packaging machine the bundle arrives as a CI
+  artifact unpacked straight into `dist/` and there is no `target/dx` at all.
+  A fresh build always wins over a staged one, so a rebuild is never silently
+  ignored;
 * refuses to stage a directory with no `index.html` (nothing to load) or no
   `.wasm` module (nothing to run), reporting which half is missing;
 * empties `dist/` first, so a file the new build no longer produces cannot
@@ -174,8 +194,9 @@ application's toolchain is part of the artifact a user installs.
 
 ## Troubleshooting
 
-**`cargo tauri build` fails at `stage-frontend`.** The frontend has not been
-built. Run `dx build --release --platform web` first.
+**`cargo tauri build` fails at `stage-frontend`.** There is neither a local
+Dioxus build nor an already-staged bundle in `dist/`. Run
+`dx build --release --platform web` first.
 
 **The application opens but the window is blank.** `dist/` has an
 `index.html` with no WebAssembly module, or the module failed to instantiate.
