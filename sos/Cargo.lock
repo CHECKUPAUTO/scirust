@@ -654,6 +654,7 @@ dependencies = [
  "sos-reasoning",
  "sos-registry",
  "sos-repro",
+ "sos-scirust",
  "sos-store",
  "sos-theory",
  "sos-workflow",
