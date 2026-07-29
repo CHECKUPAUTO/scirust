@@ -141,6 +141,7 @@ use crate::model::{
 };
 use crate::ode::{OdeConfig, Rk4OdeSimulator, Trajectory};
 use crate::pipeline::{
+    TrajectorySpectrogramBody, TrajectorySpectrogramConfig, TrajectorySpectrogramSimulator,
     TrajectorySpectrumBody, TrajectorySpectrumConfig, TrajectorySpectrumSimulator,
 };
 use crate::solver::{ExactF64Seq, encode_f64};
@@ -853,6 +854,196 @@ impl<S: ObjectStore> StageExecutor for WelchStageHandler<S> {
     }
 }
 
+/// Load the one trajectory a stage consumed.
+///
+/// Reads both trajectory kinds this crate produces — a bare
+/// [`TrajectoryBody`] from the ODE backends and a [`ModeledTrajectoryBody`]
+/// from the catalogue — by dispatching on the stored record's kind, the
+/// same body-type-erased trick provenance reading uses. A stage should not
+/// have to care which backend made the signal it is measuring.
+fn consumed_trajectory<S: ObjectStore>(
+    store: &Rc<RefCell<S>>,
+    stage: &Stage,
+) -> core::result::Result<Trajectory, String> {
+    let [input] = stage.inputs.as_slice()
+    else
+    {
+        return Err(match stage.inputs.len()
+        {
+            0 => "this stage measures a trajectory but consumed none — a \
+                  `consumes = [\"<stage>\"]` edge is missing from the study"
+                .to_owned(),
+            n => format!(
+                "this stage measures *a* trajectory but consumed {n}; which one is meant \
+                 cannot be guessed"
+            ),
+        });
+    };
+    let store = store.borrow();
+    let record = store
+        .get_raw(*input)
+        .ok_or_else(|| format!("the consumed object {input} is not in the store"))?;
+    let name = record.kind.name.as_str();
+    if name == <TrajectoryBody as sos_core::Body>::KIND
+    {
+        store
+            .get_object::<TrajectoryBody>(*input)
+            .map_err(|e| e.to_string())?
+            .map(|o| o.body.trajectory)
+            .ok_or_else(|| format!("{input} vanished mid-read"))
+    }
+    else if name == <ModeledTrajectoryBody as sos_core::Body>::KIND
+    {
+        store
+            .get_object::<ModeledTrajectoryBody>(*input)
+            .map_err(|e| e.to_string())?
+            .map(|o| o.body.trajectory)
+            .ok_or_else(|| format!("{input} vanished mid-read"))
+    }
+    else
+    {
+        Err(format!(
+            "this stage measures a trajectory, but the object it consumed is a `{name}`"
+        ))
+    }
+}
+
+/// Domain-separation prefix for a trajectory spectrogram's content address.
+const SPECTROGRAM_CONFIG_DOMAIN: &[u8] = b"sos-scirust:spectrogram-stage-config:v1";
+
+/// The content address of `config` — what a [`Stage`] must carry in its
+/// `config_hash` for [`TrajectorySpectrogramStageHandler`] to run it.
+///
+/// Distinct from [`trajectory_config_address`] even though the two
+/// configurations have the same fields: they are different measurements, and a
+/// shared address would let a stage route to the wrong backend.
+#[must_use]
+pub fn spectrogram_config_address(config: &TrajectorySpectrogramConfig) -> Digest {
+    HashAlgo::Sha256.hash(SPECTROGRAM_CONFIG_DOMAIN, &config.canonical_bytes())
+}
+
+/// Binds [`TrajectorySpectrogramSimulator`] as a workflow stage: how a
+/// simulated system's spectrum changes, rather than what it averages to.
+///
+/// Reads its input the same way [`TrajectorySpectrumStageHandler`] does — one
+/// consumed trajectory, either kind, dispatched on the stored record's kind —
+/// and differs only in what it computes from it.
+pub struct TrajectorySpectrogramStageHandler<S> {
+    simulator: TrajectorySpectrogramSimulator,
+    store: Rc<RefCell<S>>,
+    configs: BTreeMap<Digest, TrajectorySpectrogramConfig>,
+    backend: BackendVersion,
+}
+
+impl<S: ObjectStore> TrajectorySpectrogramStageHandler<S> {
+    /// A handler reading trajectories from, and sealing results into, `store`.
+    #[must_use]
+    pub fn new(store: Rc<RefCell<S>>, backend: BackendVersion) -> Self {
+        Self {
+            simulator: TrajectorySpectrogramSimulator::new(SimDescriptor::new(
+                "sos-scirust/trajectory-spectrogram",
+                SemVer::new(1, 0, 0),
+            )),
+            store,
+            configs: BTreeMap::new(),
+            backend,
+        }
+    }
+
+    /// Offer a configuration, returning its content address.
+    pub fn offer(&mut self, config: TrajectorySpectrogramConfig) -> Digest {
+        let address = spectrogram_config_address(&config);
+        self.configs.insert(address, config);
+        address
+    }
+
+    /// The content addresses currently on offer, sorted.
+    #[must_use]
+    pub fn offered(&self) -> Vec<Digest> {
+        self.configs.keys().copied().collect()
+    }
+
+    /// Which component the spectrogram at `address` reads, and how it is
+    /// framed — the choices that set its time and frequency resolution.
+    #[must_use]
+    pub fn framing_at(&self, address: &Digest) -> Option<(usize, WindowKind, usize, usize)> {
+        self.configs
+            .get(address)
+            .map(|c| (c.component, c.window, c.segment_len, c.overlap))
+    }
+
+    fn env(&self) -> EnvRecord {
+        EnvRecord::new(
+            "unspecified",
+            vec![self.backend.clone()],
+            "unspecified",
+            "unspecified",
+        )
+    }
+
+    fn producer(&self) -> ProducerRef {
+        let descriptor = self.simulator.descriptor();
+        ProducerRef::new(
+            descriptor.name.clone(),
+            descriptor.version,
+            HashAlgo::Sha256.hash(b"sos-producer", &descriptor.canonical_bytes()),
+        )
+    }
+}
+
+impl<S: ObjectStore> StageExecutor for TrajectorySpectrogramStageHandler<S> {
+    fn run(&mut self, stage: &Stage) -> core::result::Result<Vec<ObjectId>, WorkflowError> {
+        let config = self
+            .configs
+            .get(&stage.config_hash)
+            .ok_or_else(|| WorkflowError::StageFailed {
+                stage: stage.id.clone(),
+                reason: format!(
+                    "no trajectory spectrogram is on offer at content address {}",
+                    stage.config_hash
+                ),
+            })?
+            .clone();
+
+        let trajectory = consumed_trajectory(&self.store, stage).map_err(|reason| {
+            WorkflowError::StageFailed {
+                stage: stage.id.clone(),
+                reason,
+            }
+        })?;
+
+        let observation = self
+            .simulator
+            .measure(&config, &trajectory, stage.seed)
+            .map_err(|e| WorkflowError::StageFailed {
+                stage: stage.id.clone(),
+                reason: e.to_string(),
+            })?;
+
+        let level = observation.level();
+        let repro = ReproMeta::new(
+            stage.seed,
+            RngId::new("none"),
+            self.env().digest(HashAlgo::Sha256),
+        )
+        .with_inputs(stage.inputs.clone());
+        let object = Object::builder(TrajectorySpectrogramBody::from_observation(observation))
+            .level(level)
+            .producer(self.producer())
+            .parents(stage.inputs.clone())
+            .repro(repro)
+            .seal();
+
+        let id = self.store.borrow_mut().put_object(&object).map_err(|e| {
+            WorkflowError::StageFailed {
+                stage: stage.id.clone(),
+                reason: e.to_string(),
+            }
+        })?;
+        Ok(vec![id])
+    }
+}
+
 /// Domain-separation prefix for an adaptive catalogue run's content address.
 const ADAPTIVE_MODEL_CONFIG_DOMAIN: &[u8] = b"sos-scirust:adaptive-model-stage-config:v1";
 
@@ -1059,57 +1250,6 @@ impl<S: ObjectStore> TrajectorySpectrumStageHandler<S> {
             .map(|c| (c.component, c.window, c.segment_len))
     }
 
-    /// Load the one trajectory a stage consumed.
-    ///
-    /// Reads both trajectory kinds this crate produces — a bare
-    /// [`TrajectoryBody`] from the ODE backends and a [`ModeledTrajectoryBody`]
-    /// from the catalogue — by dispatching on the stored record's kind, the
-    /// same body-type-erased trick provenance reading uses. A stage should not
-    /// have to care which backend made the signal it is measuring.
-    fn consumed_trajectory(&self, stage: &Stage) -> core::result::Result<Trajectory, String> {
-        let [input] = stage.inputs.as_slice()
-        else
-        {
-            return Err(match stage.inputs.len()
-            {
-                0 => "this stage measures a trajectory but consumed none — a \
-                      `consumes = [\"<stage>\"]` edge is missing from the study"
-                    .to_owned(),
-                n => format!(
-                    "this stage measures *a* trajectory but consumed {n}; which one is meant \
-                     cannot be guessed"
-                ),
-            });
-        };
-        let store = self.store.borrow();
-        let record = store
-            .get_raw(*input)
-            .ok_or_else(|| format!("the consumed object {input} is not in the store"))?;
-        let name = record.kind.name.as_str();
-        if name == <TrajectoryBody as sos_core::Body>::KIND
-        {
-            store
-                .get_object::<TrajectoryBody>(*input)
-                .map_err(|e| e.to_string())?
-                .map(|o| o.body.trajectory)
-                .ok_or_else(|| format!("{input} vanished mid-read"))
-        }
-        else if name == <ModeledTrajectoryBody as sos_core::Body>::KIND
-        {
-            store
-                .get_object::<ModeledTrajectoryBody>(*input)
-                .map_err(|e| e.to_string())?
-                .map(|o| o.body.trajectory)
-                .ok_or_else(|| format!("{input} vanished mid-read"))
-        }
-        else
-        {
-            Err(format!(
-                "this stage measures a trajectory, but the object it consumed is a `{name}`"
-            ))
-        }
-    }
-
     fn env(&self) -> EnvRecord {
         EnvRecord::new(
             "unspecified",
@@ -1143,12 +1283,12 @@ impl<S: ObjectStore> StageExecutor for TrajectorySpectrumStageHandler<S> {
             })?
             .clone();
 
-        let trajectory =
-            self.consumed_trajectory(stage)
-                .map_err(|reason| WorkflowError::StageFailed {
-                    stage: stage.id.clone(),
-                    reason,
-                })?;
+        let trajectory = consumed_trajectory(&self.store, stage).map_err(|reason| {
+            WorkflowError::StageFailed {
+                stage: stage.id.clone(),
+                reason,
+            }
+        })?;
 
         let observation = self
             .simulator

@@ -493,7 +493,7 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   manifest pins each config *by address*, so pointing the command at a
   different experiment's runs fails rather than computing something else.
 
-  It binds **five** of `sos-scirust`'s eight backends, and that partition is a
+  It binds **six** of `sos-scirust`'s nine backends, and that partition is a
   consequence rather than a shortcut worth apologising for. `Dopri5`,
   quadrature and root-finding each take a *function* — a right-hand side, an
   integrand, a residual — and no file can name a function, so no amount of CLI
@@ -650,6 +650,36 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   $ sos verify <spectrum> --store .sos --rerun runs.json --allow effectful
     re-executed: 2 node(s) … REPRODUCED
   ```
+
+  **And it can ask how a simulated spectrum *changes*.** Welch summarizes a
+  signal with one number per frequency, which is right for a system in a
+  steady state and wrong for one still getting there. `trajectory-spectrogram`
+  keeps the time axis, and records `hop_seconds` beside the frames because
+  that axis is the one thing a stored spectrogram could not reconstruct from
+  itself — it depends on the configuration, a separate object that may not be
+  at hand.
+
+  Building it surfaced a **real bug shipped with the trajectory-spectrum
+  backend**. A fixed-step solver advances by accumulating `t += step`, so its
+  grid drifts a few parts in `10^12`; when that drift leaves the last sample
+  just short of `t_end`, `scirust-sim` appends one extra point *at* `t_end`
+  and the gap before it is four picoseconds rather than ten milliseconds. The
+  uniformity guard — correctly refusing adaptive trajectories, whose steps
+  vary throughout — was refusing these too, which meant **the spectral
+  backends rejected trajectories `sos run` itself produced**. It is
+  data-dependent, so a `t_end` of `40.96` passed and `163.84` did not, which
+  is why the original tests missed it. A short *final* gap is now recognised
+  as the boundary artifact it is and its stray sample trimmed; a longer one,
+  or any interior deviation, is still refused.
+
+  The intended demonstration also failed, usefully. A Van der Pol oscillator
+  was supposed to show harmonics developing as it approached its limit cycle —
+  but measurement showed it reaches the cycle before the first frame ends, and
+  the variation across frames is the **frame boundary sliding through the
+  cycle**, a smooth periodic artifact with no trend. Reading that as physics
+  would have been exactly the error this system exists to prevent, so it is
+  pinned by a test *as* an artifact and documented as the caveat it is: frames
+  must span many periods, or the framing shows up as signal.
 
   **A kind-name collision, found by using the tool.** `sos-planner`'s `Plan`
   and `sos-workflow`'s `Plan` both declared `Body::KIND = "Plan"`. Two
