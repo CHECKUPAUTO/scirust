@@ -3,7 +3,7 @@
 //!
 //! # Scope
 //!
-//! Six capabilities:
+//! Seven capabilities:
 //!
 //! 1. an exactly invertible **strictly lower-triangular cubic map**
 //!    ([`TriangularCubicFlow`]);
@@ -60,7 +60,18 @@
 //!    assumption list, and the crate's adversarial tests for a latent
 //!    confounder producing a confidently wrong estimate through an
 //!    adjustment set that is perfectly valid for the graph it was checked
-//!    against.
+//!    against; and
+//! 7. quantitative **sensitivity analysis** ([`analyze_sensitivity`],
+//!    [`bound_effect_under_confounder`], [`benchmark_covariate`]) — the
+//!    omitted-variable-bias framework of Cinelli & Hazlett (2020), answering
+//!    *how strong would an unmeasured confounder have to be to overturn this
+//!    estimate?* This exists precisely because capability 6 assumes causal
+//!    sufficiency rather than establishing it: it converts that assumption
+//!    from a prose caveat into a number the reader can compare against
+//!    domain knowledge. It quantifies a stated assumption; it does **not**
+//!    test whether a confounder exists, which no data can do. See the
+//!    private `sensitivity` module's own docs — in particular the recorded
+//!    finding that a high robustness value is not by itself reassurance.
 //!
 //! # Causal interpretation — read before using the discovery API
 //!
@@ -102,9 +113,10 @@
 //! supplies** — it assumes causal sufficiency rather than establishing it,
 //! so a latent confounder yields a confidently wrong estimate. Front-door
 //! and instrumental-variable identification, latent-confounding-robust
-//! discovery (e.g. FCI), invariance testing, counterfactual simulation, and
-//! quantitative sensitivity analysis remain **out of scope for this crate as
-//! it stands** and are the subject of later work.
+//! discovery (e.g. FCI), invariance testing, and counterfactual simulation
+//! remain **out of scope for this crate as it stands** and are the subject of
+//! later work. Capability 7 quantifies how badly a latent confounder *could*
+//! distort an estimate; it does not detect or remove one.
 //!
 //! # Cubic-flow mathematical properties
 //!
@@ -152,6 +164,7 @@ mod partial_correlation;
 mod permutation;
 mod permutation_calibration;
 mod robust_partial_correlation;
+mod sensitivity;
 mod skeleton_discovery;
 mod synthetic;
 mod triangular_cubic;
@@ -189,6 +202,10 @@ pub use objective::{AugmentedLagrangianConfig, CausalObjective, ObjectiveEvaluat
 pub use optimize::{CausalOptimizationResult, OptimizerConfig, TerminationReason, optimize_causal};
 pub use permutation::{VariablePermutation, triangularize_from_dag};
 pub use robust_partial_correlation::RobustCalibration;
+pub use sensitivity::{
+    AdjustedEffect, ConfounderScenario, SensitivityAnalysis, analyze_sensitivity,
+    benchmark_covariate, bound_effect_under_confounder,
+};
 pub use synthetic::{SyntheticDataConfig, generate_causal_samples, generate_noise_matrix};
 pub use triangular_cubic::TriangularCubicFlow;
 pub use variable::{CausalVariable, VariableKind, VariableRole, validate_variable_set};
