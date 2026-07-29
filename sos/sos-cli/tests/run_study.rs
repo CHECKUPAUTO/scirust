@@ -15,7 +15,9 @@ use sos_cli::args::Args;
 use sos_cli::run::{CATALOG_PLUGIN, StageConfig, catalog_plugin_hash};
 use sos_core::Object;
 use sos_scirust::model::{ModelKind, ModelRun, ModelSpec, ModeledTrajectoryBody};
-use sos_scirust::spectrum::{SpectrumBody, SpectrumConfig, WindowKind};
+use sos_scirust::spectrum::{
+    AveragedSpectrumBody, SpectrumBody, SpectrumConfig, WelchConfig, WindowKind,
+};
 use sos_store::{FileStore, ObjectStore, TypedStore};
 
 fn temp_root(name: &str) -> PathBuf {
@@ -411,6 +413,91 @@ fn tone() -> StageConfig {
         1024.0,
         WindowKind::Hann,
     ))
+}
+
+/// The same tone, measured by averaging 7 overlapping segments.
+fn averaged_tone() -> StageConfig {
+    StageConfig::Welch(WelchConfig::new(
+        (0..4096)
+            .map(|i| (std::f64::consts::TAU * 64.0 * f64::from(i) / 1024.0).sin())
+            .collect(),
+        1024.0,
+        WindowKind::Hann,
+        1024,
+        512,
+    ))
+}
+
+#[test]
+fn a_welch_stage_stores_its_segment_count_beside_the_numbers() {
+    // The descriptor that says how much the estimate is worth has to survive
+    // into the store, or a reader cannot tell an average of 7 from an average
+    // of 1.
+    let dir = temp_root("welch");
+    let store_path = dir.join("store");
+    let (manifest, runs_file) = write_study(&dir, &[averaged_tone()]);
+
+    let out = sos_run(
+        &manifest,
+        &runs_file,
+        &store_path,
+        &["--allow", "effectful"],
+    )
+    .unwrap();
+    assert!(out.contains("ran 1 of 1 stage(s)"), "{out}");
+
+    let store = FileStore::open(&store_path).unwrap();
+    let id = store.object_ids()[0];
+    let obj: Object<AveragedSpectrumBody> = store.get_object(id).unwrap().unwrap();
+    assert_eq!(obj.body.spectrum.segments, 7);
+    assert_eq!(obj.body.spectrum.dropped_samples, 0);
+    assert_eq!(obj.body.spectrum.window, WindowKind::Hann);
+    // And it really measured the tone.
+    let peak = obj
+        .body
+        .spectrum
+        .psd
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+        .unwrap()
+        .0;
+    assert_eq!(peak, 64);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn all_three_bindable_backends_run_in_one_study() {
+    // The handler table is a table, not a special case: simulate a
+    // population, measure a signal, and average a signal, in one study.
+    let dir = temp_root("all-three");
+    let store_path = dir.join("store");
+    let configs = [growth(100.0), tone(), averaged_tone()];
+    let (manifest, runs_file) = write_study(&dir, &configs);
+
+    let out = sos_run(
+        &manifest,
+        &runs_file,
+        &store_path,
+        &["--allow", "effectful"],
+    )
+    .unwrap();
+    assert!(out.contains("ran 3 of 3 stage(s)"), "{out}");
+    assert_eq!(FileStore::open(&store_path).unwrap().object_ids().len(), 3);
+
+    // Three distinct plugins, three distinct pins.
+    let stages =
+        sos_cli::run::address(&Args::parse(&[runs_file.to_str().unwrap().to_owned()]).unwrap())
+            .unwrap();
+    for plugin in ["sim-catalog", "signal-periodogram", "signal-welch"]
+    {
+        assert!(stages.contains(plugin), "{stages}");
+        assert!(
+            stages.contains(&sos_cli::run::plugin_hash(plugin).to_hex()),
+            "{stages}"
+        );
+    }
+    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
