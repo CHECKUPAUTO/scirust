@@ -53,6 +53,11 @@ pub enum CliError {
     /// A registry error.
     #[error(transparent)]
     Registry(#[from] sos_registry::RegistryError),
+
+    /// A workflow execution error — a refused plugin, a drifted pin, or a
+    /// stage that failed while running.
+    #[error(transparent)]
+    Workflow(#[from] sos_workflow::WorkflowError),
 }
 
 /// Convenience alias for command results.

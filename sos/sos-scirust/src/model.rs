@@ -414,6 +414,58 @@ impl Canonical for ModelRun {
     }
 }
 
+/// The serialized shape of a [`ModelRun`]: every float an exact shortest
+/// round-trip decimal string, for the same reason [`SpecRepr`] uses them —
+/// a run that came back from a file with a bit changed would have a different
+/// content address, and a manifest pinning the original would stop resolving.
+///
+/// This is what lets a run be *written down*: a `ModelRun` in a JSON file is
+/// the whole experiment, which is the practical payoff of the model having an
+/// identity at all.
+#[derive(Serialize, Deserialize)]
+struct RunRepr {
+    model: ModelSpec,
+    y0: Vec<String>,
+    t0: String,
+    t_end: String,
+    step: String,
+}
+
+impl Serialize for ModelRun {
+    fn serialize<S: Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        RunRepr {
+            model: self.model.clone(),
+            y0: self
+                .y0
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
+            t0: self.t0.to_string(),
+            t_end: self.t_end.to_string(),
+            step: self.step.to_string(),
+        }
+        .serialize(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for ModelRun {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let repr = RunRepr::deserialize(d)?;
+        let parse = |s: &str| s.parse::<f64>().map_err(D::Error::custom);
+        Ok(ModelRun {
+            model: repr.model,
+            y0: repr
+                .y0
+                .iter()
+                .map(|v| parse(v))
+                .collect::<std::result::Result<Vec<f64>, _>>()?,
+            t0: parse(&repr.t0)?,
+            t_end: parse(&repr.t_end)?,
+            step: parse(&repr.step)?,
+        })
+    }
+}
+
 /// A trajectory that names the model it came from.
 ///
 /// [`crate::ode::Rk4OdeSimulator`] cannot offer this — its model is a closure
@@ -1033,6 +1085,38 @@ mod tests {
                        "trajectory":[["0",["1"]]],"level":"L3","seed":0}"#;
         let err = serde_json::from_str::<ModeledTrajectoryBody>(json).unwrap_err();
         assert!(err.to_string().contains("epidemiology/sirs"), "{err}");
+    }
+
+    #[test]
+    fn a_run_can_be_written_down_and_read_back_at_the_same_address() {
+        // What makes a run authorable outside Rust: it survives a file with
+        // its content address intact, so a manifest pinning it still resolves.
+        let run = ModelRun::new(
+            ModelSpec::new(ModelKind::Seir, [0.6, 0.3, 0.2]),
+            [0.99, 0.0, 0.01, 0.0],
+            0.0,
+            120.0,
+            0.01,
+        );
+        let json = serde_json::to_string(&run).unwrap();
+        assert!(json.contains("epidemiology/seir"), "{json}");
+        assert!(json.contains("\"0.99\""), "{json}");
+
+        let back: ModelRun = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, run);
+        assert_eq!(back.canonical_bytes(), run.canonical_bytes());
+        for (a, b) in run.y0.iter().zip(&back.y0)
+        {
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
+    }
+
+    #[test]
+    fn a_written_down_run_naming_an_unknown_model_fails_to_load() {
+        let json = r#"{"model":{"model":"ecology/logistic-decay","params":["0.5"]},
+                       "y0":["1"],"t0":"0","t_end":"1","step":"0.1"}"#;
+        let err = serde_json::from_str::<ModelRun>(json).unwrap_err();
+        assert!(err.to_string().contains("ecology/logistic-decay"), "{err}");
     }
 
     #[test]

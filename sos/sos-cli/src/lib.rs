@@ -17,6 +17,10 @@
 //! sos diff [--store <path>] <a> <b>        compare two studies' ancestor sets
 //! sos plan <candidates.json> [--floor N]   recommend the next experiment
 //!          [--budget N]
+//! sos run <manifest.toml> <runs.json>      execute a study to completion
+//!          [--plugins <f>] [--allow <caps>]
+//!          [--env <label>] [--store <path>]
+//! sos address <runs.json>                  print the stage fields a study must pin
 //! sos publish <publication.json>           seal (and render) a publication
 //!          [--author <n>] [--format <f>]
 //!          [--store <path>]
@@ -28,15 +32,19 @@
 //!
 //! ## What is deliberately not here
 //!
-//! `sos run <manifest>` (executing a discovery workflow) and a true `sos
-//! merge` (reconciling two labs' divergent graphs) are not implemented: the
-//! former needs a real [`sos_workflow::StageExecutor`] backend — which is
-//! `sos-scirust`'s job and does not exist yet — and inventing one here would
-//! either be fake execution or a stub, both forbidden. The latter needs
-//! conflict-resolution semantics no crate in this workspace has designed yet.
-//! `sos clone`/`sos push` cover the local, no-network sharing case (mirroring
-//! how `git clone`/`git push` already work against a local path); a real
-//! network remote is `sos-mcp`'s domain, not this one.
+//! [`mod@run`] executes a study for real, but binds exactly **one** plugin — the
+//! model catalogue — and that limit is worth stating precisely because it is
+//! not arbitrary. `sos-scirust`'s other stage handler integrates a Rust
+//! closure, and no file can name a closure, so no CLI plumbing could let a
+//! user supply one. Only a backend whose configuration is *data* can be driven
+//! from a command line at all; see [`mod@run`]'s module docs.
+//!
+//! A true `sos merge` (reconciling two labs' divergent graphs) is still not
+//! implemented: it needs conflict-resolution semantics no crate in this
+//! workspace has designed yet. `sos clone`/`sos push` cover the local,
+//! no-network sharing case (mirroring how `git clone`/`git push` already work
+//! against a local path); a real network remote is `sos-mcp`'s domain, not
+//! this one.
 //!
 //! ## Example
 //!
@@ -85,6 +93,7 @@ pub mod log;
 pub mod plan;
 pub mod plugins;
 pub mod publish;
+pub mod run;
 pub mod store;
 pub mod verify;
 pub mod why;
@@ -94,8 +103,8 @@ use error::CliError;
 
 /// Every dispatchable command name, for the "unknown command" message.
 const ALL_COMMANDS: &[&str] = &[
-    "init", "clone", "push", "log", "know", "ask", "why", "verify", "diff", "plan", "publish",
-    "plugins", "help", "version",
+    "init", "clone", "push", "log", "know", "ask", "why", "verify", "diff", "plan", "run",
+    "address", "publish", "plugins", "help", "version",
 ];
 
 /// Run the `sos` command line (`args` excludes the program name) and return
@@ -194,6 +203,16 @@ fn dispatch(args: &[String]) -> error::Result<String> {
             let a = Args::parse(&rest)?;
             plan::run(&a)
         },
+        Some("run") =>
+        {
+            let a = Args::parse(&rest)?;
+            run::run(&a)
+        },
+        Some("address") =>
+        {
+            let a = Args::parse(&rest)?;
+            run::address(&a)
+        },
         Some("publish") =>
         {
             let a = Args::parse(&rest)?;
@@ -229,6 +248,10 @@ fn help_text() -> String {
         "  sos diff [--store <path>] <a> <b>        compare two studies\n",
         "  sos plan <candidates.json> [--floor N]   recommend the next experiment\n",
         "           [--budget N]\n",
+        "  sos run <manifest.toml> <runs.json>      execute a study to completion\n",
+        "           [--plugins <descriptors.json>] [--allow <caps>] [--env <label>]\n",
+        "           [--store <path>]\n",
+        "  sos address <runs.json>                  print the stage fields a study must pin\n",
         "  sos publish <publication.json>           seal (and render) a publication\n",
         "           [--author <name>] [--format md|html|json] [--store <path>]\n",
         "  sos plugins <descriptors.json>           list/find plugins\n",
