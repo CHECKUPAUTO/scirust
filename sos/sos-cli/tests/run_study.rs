@@ -15,6 +15,7 @@ use sos_cli::args::Args;
 use sos_cli::run::{CATALOG_PLUGIN, StageConfig, catalog_plugin_hash};
 use sos_core::Object;
 use sos_scirust::model::{ModelKind, ModelRun, ModelSpec, ModeledTrajectoryBody};
+use sos_scirust::pipeline::{TrajectorySpectrumBody, TrajectorySpectrumConfig};
 use sos_scirust::spectrum::{
     AveragedSpectrumBody, SpectrumBody, SpectrumConfig, WelchConfig, WindowKind,
 };
@@ -876,6 +877,85 @@ fn a_consuming_stage_records_its_upstream_as_a_provenance_parent() {
     // And the upstream, which consumed nothing, still has none.
     let upstream: Object<ModeledTrajectoryBody> = store.get_object(first).unwrap().unwrap();
     assert!(upstream.parents.is_empty());
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_study_simulates_a_system_and_then_analyses_what_it_produced() {
+    // The arc this closes. Before `consumes` a study could simulate *or*
+    // analyse; before the trajectory backend it could pass an object to a
+    // stage that had no idea what to do with it. Now one study does both, and
+    // the signal being analysed was computed rather than typed in.
+    let dir = temp_root("pipeline");
+    let store_path = dir.join("store");
+
+    // A Lotka-Volterra system sampled every 0.01 s, then the spectrum of its
+    // predator component.
+    let configs = [
+        StageConfig::Model(ModelRun::new(
+            ModelSpec::new(ModelKind::LotkaVolterra, [1.1, 0.4, 0.4, 0.1]),
+            [10.0, 5.0],
+            0.0,
+            40.96,
+            0.01,
+        )),
+        StageConfig::Trajectory(TrajectorySpectrumConfig::new(
+            1,
+            WindowKind::Hann,
+            1024,
+            512,
+        )),
+    ];
+    let runs_path = dir.join("runs.json");
+    fs::write(&runs_path, serde_json::to_string(&configs).unwrap()).unwrap();
+
+    let manifest = dir.join("study.toml");
+    fs::write(
+        &manifest,
+        format!(
+            "[study]\nname = \"predator-prey-spectrum\"\nseed = 11\n\n\
+             [[stage]]\nid       = \"simulate\"\nplugin   = \"{p0}\"\nversion  = \"1.0.0\"\n\
+             pin      = \"{pin0}\"\nconfig   = \"{c0}\"\n\n\
+             [[stage]]\nid       = \"analyse\"\nplugin   = \"{p1}\"\nversion  = \"1.0.0\"\n\
+             pin      = \"{pin1}\"\nconfig   = \"{c1}\"\nconsumes = [\"simulate\"]\n",
+            p0 = configs[0].plugin(),
+            pin0 = sos_cli::run::plugin_hash(configs[0].plugin()).to_hex(),
+            c0 = configs[0].address().to_hex(),
+            p1 = configs[1].plugin(),
+            pin1 = sos_cli::run::plugin_hash(configs[1].plugin()).to_hex(),
+            c1 = configs[1].address().to_hex(),
+        ),
+    )
+    .unwrap();
+
+    let out = sos_run(
+        &manifest,
+        &runs_path,
+        &store_path,
+        &["--allow", "effectful"],
+    )
+    .unwrap();
+    assert!(out.contains("ran 2 of 2 stage(s)"), "{out}");
+
+    let simulated = parse_reported(&out, "simulate");
+    let analysed = parse_reported(&out, "analyse");
+    let store = FileStore::open(&store_path).unwrap();
+
+    let spectrum: Object<TrajectorySpectrumBody> = store.get_object(analysed).unwrap().unwrap();
+    // Nobody wrote 100 Hz anywhere: it is 1/0.01, read off the trajectory.
+    assert!(
+        (spectrum.body.measured.sample_rate_hz - 100.0).abs() < 1e-6,
+        "derived rate was {}",
+        spectrum.body.measured.sample_rate_hz
+    );
+    assert_eq!(spectrum.body.measured.component, 1);
+    assert!(spectrum.body.measured.spectrum.segments >= 2);
+    // And it names the trajectory it measured.
+    assert_eq!(spectrum.parents, vec![simulated]);
+
+    // The whole pipeline verifies by re-execution, not just by identity.
+    let report = sos_verify_rerun(&store_path, analysed, &runs_path).unwrap();
+    assert!(report.contains("REPRODUCED"), "{report}");
     fs::remove_dir_all(&dir).ok();
 }
 

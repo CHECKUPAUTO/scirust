@@ -493,7 +493,7 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   manifest pins each config *by address*, so pointing the command at a
   different experiment's runs fails rather than computing something else.
 
-  It binds **three** of `sos-scirust`'s six backends, and that partition is a
+  It binds **four** of `sos-scirust`'s seven backends, and that partition is a
   consequence rather than a shortcut worth apologising for. `Dopri5`,
   quadrature and root-finding each take a *function* — a right-hand side, an
   integrand, a residual — and no file can name a function, so no amount of CLI
@@ -582,6 +582,41 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   A true `sos merge` needs conflict-resolution semantics no crate has designed
   yet; it is not stubbed. A network remote for `clone`/`push` is `sos-mcp`'s
   domain.
+  **A study can simulate a system and then analyse what it produced.** That
+  is the arc `consumes` began and `sos-scirust`'s `pipeline` module finishes:
+  being handed an upstream object is not the same as knowing what to do with
+  it, and every backend before this one carried its own data. A
+  `TrajectorySpectrumConfig` carries **no signal** — it names a *component* of
+  whatever trajectory the stage consumed:
+
+  ```toml
+  [[stage]]
+  id       = "analyse"
+  plugin   = "trajectory-spectrum"
+  consumes = ["simulate"]        # the signal is what `simulate` computed
+  ```
+
+  It does not take a sample rate either, and that is the part worth reading
+  twice. A trajectory is a sequence of `(t, y(t))` pairs — it carries its own
+  time grid — so the rate is *derived*. Not for convenience: an FFT assumes
+  uniform sampling, and `Dopri5OdeSimulator` is **adaptive**, taking short
+  steps where the solution moves fast. A spectrum of such a trajectory looks
+  entirely plausible and means nothing, and if the rate were restated by hand
+  nothing in the system could notice. Deriving it forces the check — every
+  consecutive gap must agree, with a tolerance relative to the step so that a
+  fixed-step solver's accumulated float drift passes and a solver's genuinely
+  varying step never does. The result records the component and the derived
+  rate, because "the spectrum of the trajectory" is not a statement about a
+  multi-compartment model: susceptible, infected and recovered have different
+  ones.
+
+  ```
+  $ sos log <spectrum> --store .sos
+  …  TrajectorySpectrum@v1  L3  parents=1     # the trajectory it measured
+  $ sos verify <spectrum> --store .sos --rerun runs.json --allow effectful
+    re-executed: 2 node(s) … REPRODUCED
+  ```
+
   **A kind-name collision, found by using the tool.** `sos-planner`'s `Plan`
   and `sos-workflow`'s `Plan` both declared `Body::KIND = "Plan"`. Two
   structurally different types under one kind is incoherent in a

@@ -127,6 +127,18 @@
 //!
 //! ## What is deliberately not here yet
 //!
+//! * [`pipeline`] — [`pipeline::TrajectorySpectrumSimulator`], the first
+//!   backend whose input is **another stage's output** rather than data
+//!   written into its own configuration. A
+//!   [`pipeline::TrajectorySpectrumConfig`] names a *component* of whatever
+//!   trajectory the stage consumed and nothing else; in particular it does not
+//!   take a sample rate, because a [`ode::Trajectory`] carries its own time
+//!   grid. Deriving the rate is not convenience — it is the only way to catch
+//!   the error that matters, since an FFT assumes uniform sampling and
+//!   [`ode::Dopri5OdeSimulator`] is adaptive. A hand-declared rate would let a
+//!   spectrum of an unevenly sampled trajectory look entirely plausible and
+//!   mean nothing; [`pipeline::uniform_sample_rate`] refuses it instead. `L3`.
+//!
 //! Registry-mediated resolution (binding a `sos-registry` `PluginDescriptor`
 //! to any capability above) is deferred: `sos-scirust` is documented as
 //! the in-process "Static Rust... the default" transport (RFC-0002 §10 §1),
@@ -134,12 +146,13 @@
 //! to swap implementations. Within the signal family, spectrograms are
 //! follow-on work.
 //!
-//! Four of the six [`Simulate`](sos_simulation::Simulate) backends have stage
-//! handlers ([`ode::Rk4OdeSimulator`], [`model::CatalogSimulator`],
-//! [`spectrum::PeriodogramSimulator`] and [`spectrum::WelchSimulator`]);
+//! Five of the seven [`Simulate`](sos_simulation::Simulate) backends have
+//! stage handlers ([`ode::Rk4OdeSimulator`], [`model::CatalogSimulator`],
+//! [`spectrum::PeriodogramSimulator`], [`spectrum::WelchSimulator`] and
+//! [`pipeline::TrajectorySpectrumSimulator`]);
 //! [`ode::Dopri5OdeSimulator`], [`quadrature`] and [`root`] do not, and no
-//! other engine's stages have handlers at all. Three of those four are
-//! reachable from `sos run` — the three whose configuration is data. The
+//! other engine's stages have handlers at all. Four of those five are
+//! reachable from `sos run` — the four whose configuration is data. The
 //! others take a *function*, and no file can name a function, so a CLI
 //! binding for them needs a transport that ships code (RFC-0002 §10's WASM or
 //! MCP), not more plumbing here.
@@ -182,6 +195,7 @@ pub mod error;
 pub mod model;
 pub mod nmc;
 pub mod ode;
+pub mod pipeline;
 pub mod quadrature;
 pub mod root;
 mod solver;

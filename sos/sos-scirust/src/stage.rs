@@ -42,9 +42,16 @@
 //! [`segmentation_at`](WelchStageHandler::segmentation_at)) and driven from
 //! `sos run`.
 //!
+//! [`TrajectorySpectrumStageHandler`] is the one that breaks the pattern, and
+//! deliberately: its configuration names a component and a segmentation but
+//! carries **no signal**, because the signal is whatever trajectory the stage
+//! `consumes`. That makes it the first handler for which the store is a
+//! genuine *input* rather than only a sink — and the first stage that can
+//! analyse something an earlier stage computed.
+//!
 //! That is the whole partition, and it is worth stating because it is not a
-//! matter of effort. Of this crate's six `Simulate` backends, exactly
-//! **three** take configurations a file can express.
+//! matter of effort. Of this crate's seven `Simulate` backends, exactly
+//! **four** take configurations a file can express.
 //! [`crate::ode::Dopri5OdeSimulator`], [`crate::quadrature`] and
 //! [`crate::root`] each take a *function* — a right-hand side, an integrand,
 //! a residual — and no file can name a function. They can gain handlers; they
@@ -54,9 +61,9 @@
 //!
 //! ## Only what these demonstrate
 //!
-//! Four of the six backends have handlers, and no other engine's stages have
+//! Five of the seven backends have handlers, and no other engine's stages have
 //! any. What can be claimed is precise: a plan — hand-built, or resolved from
-//! a TOML study, or run from `sos run` for the three data-configured
+//! a TOML study, or run from `sos run` for the four data-configured
 //! backends — whose stages name one of these plugins runs, memoizes, and
 //! records real results.
 //!
@@ -130,6 +137,9 @@ use sos_workflow::{Stage, StageExecutor, WorkflowError};
 
 use crate::model::{CatalogSimulator, ModelRun, ModelSpec, ModeledTrajectoryBody};
 use crate::ode::{OdeConfig, Rk4OdeSimulator, Trajectory};
+use crate::pipeline::{
+    TrajectorySpectrumBody, TrajectorySpectrumConfig, TrajectorySpectrumSimulator,
+};
 use crate::solver::{ExactF64Seq, encode_f64};
 use crate::spectrum::{
     AveragedSpectrumBody, PeriodogramSimulator, SpectrumBody, SpectrumConfig, WelchConfig,
@@ -840,6 +850,199 @@ impl<S: ObjectStore> StageExecutor for WelchStageHandler<S> {
     }
 }
 
+/// Domain-separation prefix for a trajectory measurement's content address.
+const TRAJECTORY_CONFIG_DOMAIN: &[u8] = b"sos-scirust:trajectory-stage-config:v1";
+
+/// The content address of `config` — what a [`Stage`] must carry in its
+/// `config_hash` for [`TrajectorySpectrumStageHandler`] to run it.
+#[must_use]
+pub fn trajectory_config_address(config: &TrajectorySpectrumConfig) -> Digest {
+    HashAlgo::Sha256.hash(TRAJECTORY_CONFIG_DOMAIN, &config.canonical_bytes())
+}
+
+/// Binds [`TrajectorySpectrumSimulator`] as a workflow stage — the first
+/// handler whose input is another stage's output.
+///
+/// Every other handler here is a pure function of its configuration: offer a
+/// [`ModelRun`] or a [`SpectrumConfig`], and running the stage needs nothing
+/// else. This one is different by design. A [`TrajectorySpectrumConfig`]
+/// carries no signal, so the handler must *read* the trajectory the stage
+/// consumed out of the store before it can compute anything.
+///
+/// That makes the store a genuine input rather than only a sink, and it is
+/// why the stage's `inputs` must be exactly one object: "the trajectory this
+/// measures" is singular, and picking one of several silently would be the
+/// kind of guess the rest of this system refuses. Zero inputs means the study
+/// forgot the `consumes` edge — the error says so, because that mistake is
+/// otherwise puzzling.
+pub struct TrajectorySpectrumStageHandler<S> {
+    simulator: TrajectorySpectrumSimulator,
+    store: Rc<RefCell<S>>,
+    configs: BTreeMap<Digest, TrajectorySpectrumConfig>,
+    backend: BackendVersion,
+}
+
+impl<S: ObjectStore> TrajectorySpectrumStageHandler<S> {
+    /// A handler reading trajectories from, and sealing results into, `store`.
+    #[must_use]
+    pub fn new(store: Rc<RefCell<S>>, backend: BackendVersion) -> Self {
+        Self {
+            simulator: TrajectorySpectrumSimulator::new(SimDescriptor::new(
+                "sos-scirust/trajectory-spectrum",
+                SemVer::new(1, 0, 0),
+            )),
+            store,
+            configs: BTreeMap::new(),
+            backend,
+        }
+    }
+
+    /// Offer a configuration, returning its content address.
+    pub fn offer(&mut self, config: TrajectorySpectrumConfig) -> Digest {
+        let address = trajectory_config_address(&config);
+        self.configs.insert(address, config);
+        address
+    }
+
+    /// The content addresses currently on offer, sorted.
+    #[must_use]
+    pub fn offered(&self) -> Vec<Digest> {
+        self.configs.keys().copied().collect()
+    }
+
+    /// Which component the measurement at `address` reads, and how it is
+    /// segmented — the audit the other handlers offer, for the choices that
+    /// shape this result.
+    #[must_use]
+    pub fn measurement_at(&self, address: &Digest) -> Option<(usize, WindowKind, usize)> {
+        self.configs
+            .get(address)
+            .map(|c| (c.component, c.window, c.segment_len))
+    }
+
+    /// Load the one trajectory a stage consumed.
+    ///
+    /// Reads both trajectory kinds this crate produces — a bare
+    /// [`TrajectoryBody`] from the ODE backends and a [`ModeledTrajectoryBody`]
+    /// from the catalogue — by dispatching on the stored record's kind, the
+    /// same body-type-erased trick provenance reading uses. A stage should not
+    /// have to care which backend made the signal it is measuring.
+    fn consumed_trajectory(&self, stage: &Stage) -> core::result::Result<Trajectory, String> {
+        let [input] = stage.inputs.as_slice()
+        else
+        {
+            return Err(match stage.inputs.len()
+            {
+                0 => "this stage measures a trajectory but consumed none — a \
+                      `consumes = [\"<stage>\"]` edge is missing from the study"
+                    .to_owned(),
+                n => format!(
+                    "this stage measures *a* trajectory but consumed {n}; which one is meant \
+                     cannot be guessed"
+                ),
+            });
+        };
+        let store = self.store.borrow();
+        let record = store
+            .get_raw(*input)
+            .ok_or_else(|| format!("the consumed object {input} is not in the store"))?;
+        let name = record.kind.name.as_str();
+        if name == <TrajectoryBody as sos_core::Body>::KIND
+        {
+            store
+                .get_object::<TrajectoryBody>(*input)
+                .map_err(|e| e.to_string())?
+                .map(|o| o.body.trajectory)
+                .ok_or_else(|| format!("{input} vanished mid-read"))
+        }
+        else if name == <ModeledTrajectoryBody as sos_core::Body>::KIND
+        {
+            store
+                .get_object::<ModeledTrajectoryBody>(*input)
+                .map_err(|e| e.to_string())?
+                .map(|o| o.body.trajectory)
+                .ok_or_else(|| format!("{input} vanished mid-read"))
+        }
+        else
+        {
+            Err(format!(
+                "this stage measures a trajectory, but the object it consumed is a `{name}`"
+            ))
+        }
+    }
+
+    fn env(&self) -> EnvRecord {
+        EnvRecord::new(
+            "unspecified",
+            vec![self.backend.clone()],
+            "unspecified",
+            "unspecified",
+        )
+    }
+
+    fn producer(&self) -> ProducerRef {
+        let descriptor = self.simulator.descriptor();
+        ProducerRef::new(
+            descriptor.name.clone(),
+            descriptor.version,
+            HashAlgo::Sha256.hash(b"sos-producer", &descriptor.canonical_bytes()),
+        )
+    }
+}
+
+impl<S: ObjectStore> StageExecutor for TrajectorySpectrumStageHandler<S> {
+    fn run(&mut self, stage: &Stage) -> core::result::Result<Vec<ObjectId>, WorkflowError> {
+        let config = self
+            .configs
+            .get(&stage.config_hash)
+            .ok_or_else(|| WorkflowError::StageFailed {
+                stage: stage.id.clone(),
+                reason: format!(
+                    "no trajectory measurement is on offer at content address {}",
+                    stage.config_hash
+                ),
+            })?
+            .clone();
+
+        let trajectory =
+            self.consumed_trajectory(stage)
+                .map_err(|reason| WorkflowError::StageFailed {
+                    stage: stage.id.clone(),
+                    reason,
+                })?;
+
+        let observation = self
+            .simulator
+            .measure(&config, &trajectory, stage.seed)
+            .map_err(|e| WorkflowError::StageFailed {
+                stage: stage.id.clone(),
+                reason: e.to_string(),
+            })?;
+
+        let level = observation.level();
+        let repro = ReproMeta::new(
+            stage.seed,
+            RngId::new("none"),
+            self.env().digest(HashAlgo::Sha256),
+        )
+        .with_inputs(stage.inputs.clone());
+        let object = Object::builder(TrajectorySpectrumBody::from_observation(observation))
+            .level(level)
+            .producer(self.producer())
+            .parents(stage.inputs.clone())
+            .repro(repro)
+            .seal();
+
+        let id = self.store.borrow_mut().put_object(&object).map_err(|e| {
+            WorkflowError::StageFailed {
+                stage: stage.id.clone(),
+                reason: e.to_string(),
+            }
+        })?;
+        Ok(vec![id])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use sos_store::MemoryStore;
@@ -1396,5 +1599,163 @@ mod tests {
             let err = serde_json::from_str::<SpectrumConfig>(json).unwrap_err();
             assert!(err.to_string().contains("kaiser"), "{err}");
         }
+    }
+
+    // ---- the simulate-then-analyse pipeline --------------------------------
+
+    fn pipeline_backend() -> BackendVersion {
+        signal_backend(
+            SemVer::new(0, 1, 0),
+            HashAlgo::Sha256.hash(b"test-backend", b"scirust-signal"),
+        )
+    }
+
+    fn trajectory_handler(
+        store: &Rc<RefCell<MemoryStore>>,
+    ) -> TrajectorySpectrumStageHandler<MemoryStore> {
+        TrajectorySpectrumStageHandler::new(Rc::clone(store), pipeline_backend())
+    }
+
+    /// A stage consuming `inputs`, at `address`.
+    fn consuming_stage(id: &str, address: Digest, inputs: Vec<ObjectId>) -> Stage {
+        Stage::new(
+            StageId::new(id),
+            StageDescriptor::new(
+                "trajectory-spectrum",
+                SemVer::new(1, 0, 0),
+                HashAlgo::default().hash(b"pin", b"trajectory-spectrum"),
+            ),
+            inputs,
+            address,
+            0,
+            vec![],
+        )
+    }
+
+    /// Store a uniformly sampled trajectory and return its id.
+    fn stored_trajectory(store: &Rc<RefCell<MemoryStore>>, n: usize) -> ObjectId {
+        let trajectory: Trajectory = (0..n)
+            .map(|i| {
+                let t = f64::from(u32::try_from(i).unwrap()) / 1024.0;
+                (t, vec![(std::f64::consts::TAU * 64.0 * t).sin(), 0.25 * t])
+            })
+            .collect();
+        let object = Object::builder(TrajectoryBody {
+            trajectory,
+            level: DeterminismLevel::L3,
+            seed: 0,
+        })
+        .level(DeterminismLevel::L3)
+        .seal();
+        store.borrow_mut().put_object(&object).unwrap()
+    }
+
+    #[test]
+    fn a_stage_measures_the_trajectory_it_consumed() {
+        // The whole point: a signal that was *computed* by an earlier stage,
+        // not written into a file by hand.
+        let store = Rc::new(RefCell::new(MemoryStore::new()));
+        let upstream = stored_trajectory(&store, 4096);
+        let mut handler = trajectory_handler(&store);
+        let address = handler.offer(TrajectorySpectrumConfig::new(
+            0,
+            WindowKind::Hann,
+            1024,
+            512,
+        ));
+
+        let out = handler
+            .run(&consuming_stage("measure", address, vec![upstream]))
+            .unwrap();
+        assert_eq!(out.len(), 1);
+
+        let stored: Object<TrajectorySpectrumBody> =
+            store.borrow().get_object(out[0]).unwrap().unwrap();
+        // The rate was read off the trajectory, not declared anywhere.
+        assert!((stored.body.measured.sample_rate_hz - 1024.0).abs() < 1e-9);
+        assert_eq!(stored.body.measured.component, 0);
+        assert_eq!(stored.body.measured.spectrum.segments, 7);
+        // And the provenance names what it measured.
+        assert_eq!(stored.parents, vec![upstream]);
+    }
+
+    #[test]
+    fn a_stage_that_consumed_nothing_is_told_what_is_missing() {
+        // The likeliest authoring mistake, and an otherwise puzzling one.
+        let store = Rc::new(RefCell::new(MemoryStore::new()));
+        let mut handler = trajectory_handler(&store);
+        let address = handler.offer(TrajectorySpectrumConfig::new(0, WindowKind::Hann, 512, 0));
+
+        let err = handler
+            .run(&consuming_stage("measure", address, vec![]))
+            .unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("consumes"), "{message}");
+    }
+
+    #[test]
+    fn consuming_two_trajectories_is_refused_rather_than_guessed() {
+        let store = Rc::new(RefCell::new(MemoryStore::new()));
+        let a = stored_trajectory(&store, 2048);
+        let b = stored_trajectory(&store, 4096);
+        let mut handler = trajectory_handler(&store);
+        let address = handler.offer(TrajectorySpectrumConfig::new(0, WindowKind::Hann, 512, 0));
+
+        let err = handler
+            .run(&consuming_stage("measure", address, vec![a, b]))
+            .unwrap_err();
+        assert!(err.to_string().contains("cannot be guessed"), "{err}");
+    }
+
+    #[test]
+    fn consuming_something_that_is_not_a_trajectory_is_refused() {
+        // A `consumes` edge can point at any object; this one says what went
+        // wrong rather than failing to decode.
+        let store = Rc::new(RefCell::new(MemoryStore::new()));
+        let mut spectra = SpectrumStageHandler::new(Rc::clone(&store), pipeline_backend());
+        let signal: Vec<f64> = (0..1024)
+            .map(|i| (std::f64::consts::TAU * 64.0 * f64::from(i) / 1024.0).sin())
+            .collect();
+        let spectrum_address = spectra.offer(SpectrumConfig::new(signal, 1024.0, WindowKind::Hann));
+        let not_a_trajectory = spectra.run(&stage_at(spectrum_address)).unwrap()[0];
+
+        let mut handler = trajectory_handler(&store);
+        let address = handler.offer(TrajectorySpectrumConfig::new(0, WindowKind::Hann, 512, 0));
+        let err = handler
+            .run(&consuming_stage("measure", address, vec![not_a_trajectory]))
+            .unwrap_err();
+        assert!(err.to_string().contains("Spectrum"), "{err}");
+    }
+
+    #[test]
+    fn a_catalogue_trajectory_can_be_measured_too() {
+        // Both trajectory kinds this crate produces are readable — a stage
+        // should not care which backend made the signal.
+        let store = Rc::new(RefCell::new(MemoryStore::new()));
+        let mut models = CatalogStageHandler::new(Rc::clone(&store), pipeline_backend());
+        let model_address = models.offer(ModelRun::new(
+            ModelSpec::new(crate::model::ModelKind::LotkaVolterra, [1.1, 0.4, 0.4, 0.1]),
+            [10.0, 5.0],
+            0.0,
+            40.96,
+            0.01,
+        ));
+        let trajectory = models.run(&stage_at(model_address)).unwrap()[0];
+
+        let mut handler = trajectory_handler(&store);
+        let address = handler.offer(TrajectorySpectrumConfig::new(1, WindowKind::Hann, 512, 256));
+        let out = handler
+            .run(&consuming_stage("measure", address, vec![trajectory]))
+            .unwrap();
+
+        let stored: Object<TrajectorySpectrumBody> =
+            store.borrow().get_object(out[0]).unwrap().unwrap();
+        // 0.01 s between samples.
+        assert!((stored.body.measured.sample_rate_hz - 100.0).abs() < 1e-6);
+        assert_eq!(
+            stored.body.measured.component, 1,
+            "the predator, not the prey"
+        );
+        assert_eq!(stored.parents, vec![trajectory]);
     }
 }
