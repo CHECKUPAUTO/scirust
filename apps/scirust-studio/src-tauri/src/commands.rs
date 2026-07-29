@@ -4,8 +4,18 @@
 //! `read_file(path)`, `write_file(path, bytes)`, `spawn(program)`,
 //! `shell(command)`, `http(url)` or `env(name)` — a webview that can ask for
 //! any of those is a webview that can do anything the user can, and the
-//! frontend needs none of them. File dialogs are native, run here, and hand
-//! back only the selected file's *contents*.
+//! frontend needs none of them.
+//!
+//! **There is no file dialog either, yet.** Nothing here opens or saves a
+//! scenario file; the only sources are the tutorials compiled into the binary
+//! and whatever the user types. `dialog:*` is not granted in the capability
+//! file, and `DESKTOP_ARCHITECTURE.md` lists the picker as outstanding work.
+//!
+//! When it arrives it must keep the property the list above is protecting:
+//! the dialog runs *here*, in the shell, and returns the selected file's
+//! **contents** — never a path the frontend chose, and never a path the
+//! frontend can name again later. A `read_file(path)` reintroduced as
+//! "the file the user just picked" is still `read_file(path)`.
 //!
 //! Each command delegates to `scirust-studio-app-service` and returns a view
 //! type. None of them contains scientific logic.
