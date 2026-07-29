@@ -41,7 +41,6 @@ use crate::sink::{EventSink, RunEvent};
 use crate::validate_support::{
     RK4_SOLVER, check_unknown_model_fields, check_unknown_state_fields, resolve_backend_kind,
     resolve_model_scalar, resolve_precision, resolve_replicates, resolve_solver,
-    resolve_state_vector,
 };
 
 /// Relative error allowed between the integrated and exact trajectories.

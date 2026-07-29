@@ -1,6 +1,7 @@
 //! One module per capability adapter, plus the bootstrap that wires them
 //! into a [`CapabilityRegistry`] and makes them dispatchable by id.
 
+mod battery;
 mod double_pendulum;
 mod heat_rod;
 mod hvac_zone;
@@ -17,6 +18,7 @@ mod sir;
 mod spring_mass_damper;
 mod two_body;
 
+pub use battery::BatteryAdapter;
 pub use double_pendulum::DoublePendulumAdapter;
 pub use heat_rod::HeatRodAdapter;
 pub use hvac_zone::HvacZoneAdapter;
@@ -61,6 +63,7 @@ pub fn all_adapters() -> Vec<Box<dyn CapabilityAdapter>> {
         Box::new(HvacZoneAdapter),
         Box::new(RigidBodyAdapter),
         Box::new(OralOneCompartmentAdapter),
+        Box::new(BatteryAdapter),
     ]
 }
 
@@ -164,6 +167,11 @@ const TUTORIAL_SCENARIOS: &[(&str, &str, &str)] = &[
         "sim.optoelectronics.photodiode",
         "photodiode.scirust.toml",
         include_str!("../../../docs/studio/tutorials/photodiode.scirust.toml"),
+    ),
+    (
+        "sim.energy.battery_thevenin",
+        "battery_discharge.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/battery_discharge.scirust.toml"),
     ),
 ];
 
