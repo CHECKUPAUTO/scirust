@@ -25,6 +25,8 @@ mod seir;
 mod sir;
 mod spring_mass_damper;
 mod two_body;
+mod two_compartment_iv;
+mod van_der_pol;
 
 pub use apd::AvalanchePhotodiodeAdapter;
 pub use battery::BatteryAdapter;
@@ -50,6 +52,8 @@ pub use seir::SeirAdapter;
 pub use sir::SirAdapter;
 pub use spring_mass_damper::SpringMassDamperAdapter;
 pub use two_body::TwoBodyAdapter;
+pub use two_compartment_iv::TwoCompartmentIvAdapter;
+pub use van_der_pol::VanDerPolAdapter;
 
 use scirust_studio_registry::CapabilityRegistry;
 
@@ -88,6 +92,8 @@ pub fn all_adapters() -> Vec<Box<dyn CapabilityAdapter>> {
         Box::new(ReversibleReactionAdapter),
         Box::new(RcCircuitAdapter),
         Box::new(ProjectileAdapter),
+        Box::new(VanDerPolAdapter),
+        Box::new(TwoCompartmentIvAdapter),
     ]
 }
 
@@ -236,6 +242,16 @@ const TUTORIAL_SCENARIOS: &[(&str, &str, &str)] = &[
         "sim.mechanics.projectile",
         "projectile.scirust.toml",
         include_str!("../../../docs/studio/tutorials/projectile.scirust.toml"),
+    ),
+    (
+        "sim.electrical.van_der_pol",
+        "van_der_pol.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/van_der_pol.scirust.toml"),
+    ),
+    (
+        "sim.pharmacology.two_compartment_iv",
+        "two_compartment_iv.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/two_compartment_iv.scirust.toml"),
     ),
 ];
 
