@@ -24,8 +24,8 @@ use scirust_studio_schema::Scenario;
 use crate::adapter::{CapabilityAdapter, ExecutionError, ValidatedScenario, ValidationReport};
 use crate::control::ExecutionControl;
 use crate::result::{
-    AxisDescriptor, Metric, MetricValue, RESULT_SCHEMA_VERSION, RunProvenance, RunResult,
-    RunSummary, Series, VerificationResult, VerificationStatus,
+    Axis, AxisMonotonicity, Metric, MetricValue, RESULT_SCHEMA_VERSION, RunProvenance, RunResult,
+    RunSummary, Series, TIME_AXIS_ID, VerificationResult, VerificationStatus,
 };
 use crate::sink::{EventSink, RunEvent};
 use crate::validate_support::{
@@ -383,31 +383,39 @@ impl CapabilityAdapter for RlcAdapter {
                 capability_display_name: DESCRIPTOR.display_name.to_string(),
                 scenario_name: scn.experiment.name.clone(),
                 steps: traj.len() - 1,
-                t_start: t0,
+                t_start: traj.t.first().copied().unwrap_or(t0),
                 t_end: traj.last_time().unwrap_or(t1),
             },
-            axes: vec![AxisDescriptor {
-                id: "t".to_string(),
+            // The integrator's own coordinates, carried through unchanged.
+            // Never regenerated from (start, end, count): that is right only
+            // for a fixed step and silently wrong for any adaptive solver.
+            axes: vec![Axis {
+                id: TIME_AXIS_ID.to_string(),
                 display_name: "time".to_string(),
                 unit: "s".to_string(),
+                monotonicity: AxisMonotonicity::StrictlyIncreasing,
+                values: traj.t.clone(),
             }],
             series: vec![
                 Series {
                     id: "charge".to_string(),
                     display_name: "Charge".to_string(),
                     unit: "C".to_string(),
+                    axis_id: TIME_AXIS_ID.to_string(),
                     values: charge_series,
                 },
                 Series {
                     id: "current".to_string(),
                     display_name: "Current".to_string(),
                     unit: "A".to_string(),
+                    axis_id: TIME_AXIS_ID.to_string(),
                     values: current_series,
                 },
                 Series {
                     id: "capacitor_voltage".to_string(),
                     display_name: "Capacitor voltage".to_string(),
                     unit: "V".to_string(),
+                    axis_id: TIME_AXIS_ID.to_string(),
                     values: capacitor_voltage_series,
                 },
             ],
@@ -479,7 +487,8 @@ impl CapabilityAdapter for RlcAdapter {
                 elapsed_seconds: wall_start.elapsed().as_secs_f64(),
             },
         };
-        crate::result::assert_finite(&result).map_err(ExecutionError::Internal)?;
+        crate::result::validate_result(&result)
+            .map_err(|d| ExecutionError::Internal(crate::result::describe_defects(&d)))?;
         sink.emit(RunEvent::Completed);
         Ok(result)
     }

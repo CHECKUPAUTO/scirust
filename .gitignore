@@ -62,6 +62,11 @@ systemd/turboquant-*.service
 *.tmp
 *.bak
 *.lock
+# …but a workspace's Cargo.lock is part of the build it reproduces, and CI
+# builds the desktop application with `--locked`. Without this negation the
+# blanket `*.lock` above would drop it and every desktop CI job would fail
+# on a lock file it was told not to update.
+!apps/scirust-studio/Cargo.lock
 
 # CycloneDX SBOMs are generated from Cargo.lock in CI/release and uploaded.
 *.cdx.json

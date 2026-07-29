@@ -1,0 +1,9 @@
+[package]
+name = "prepare-sidecar"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "Copies the already-built scirust-studio-worker into src-tauri/binaries under the target-triple name Tauri requires for an external binary."
+
+[dependencies]
+sha2 = "=0.10.9"

@@ -3911,6 +3911,20 @@ name = "scirust-stiff"
 version = "0.1.0"
 
 [[package]]
+name = "scirust-studio-app-service"
+version = "0.1.0"
+dependencies = [
+ "scirust-studio-ipc",
+ "scirust-studio-registry",
+ "scirust-studio-runtime",
+ "scirust-studio-schema",
+ "scirust-studio-store",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "scirust-studio-command"
 version = "0.1.0"
 dependencies = [

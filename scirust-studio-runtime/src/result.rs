@@ -10,6 +10,21 @@
 //! serialization in the crate that owns the type, so callers such as
 //! `scirust-cli` do not need a direct `serde_json` dependency just to expose
 //! `--format json`.
+//!
+//! ## Schema version 2: axes carry their coordinates
+//!
+//! Version 1 described axes but did not store their values, which silently
+//! forced every consumer into the same wrong assumption — that samples are
+//! uniformly spaced. That is false for any adaptive solver: Robertson's
+//! Rosenbrock-W integrator chooses its own steps, spanning several decades of
+//! time in a single run, and a chart drawn against a regenerated linear axis
+//! would be a picture of a different experiment.
+//!
+//! Version 2 therefore stores the integrator's real coordinates in
+//! [`Axis::values`], and every [`Series`] names the axis it belongs to
+//! through [`Series::axis_id`]. Nothing infers spacing, and nothing
+//! reconstructs a time vector. See
+//! `docs/studio/adr/0006-result-axis-coordinates.md`.
 
 use serde::{Deserialize, Serialize};
 
@@ -18,7 +33,61 @@ use scirust_studio_registry::DeterminismClass;
 /// The schema version of [`RunResult`] itself, independent of the scenario
 /// schema version (`scirust_studio_schema::CURRENT_SCHEMA_VERSION`) and of
 /// any individual capability's own versioning.
-pub const RESULT_SCHEMA_VERSION: u32 = 1;
+pub const RESULT_SCHEMA_VERSION: u32 = 2;
+
+/// What an axis promises about the ordering of its coordinates.
+///
+/// Declared by the capability that produced the axis — the adapter is the
+/// capability's own code — and enforced by [`validate_result`]. A time axis
+/// from a forward integration is strictly increasing; an axis that merely
+/// enumerates samples promises nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AxisMonotonicity {
+    /// Each coordinate is strictly greater than the one before it.
+    StrictlyIncreasing,
+    /// Each coordinate is greater than or equal to the one before it.
+    NonDecreasing,
+    /// No ordering is claimed, and none is checked.
+    Unspecified,
+}
+
+/// One shared axis, *including its coordinates*.
+///
+/// `values` are the integrator's own coordinates, carried through
+/// unmodified. They are never regenerated from a start, an end and a count —
+/// doing so would be correct only for fixed-step solvers and quietly wrong
+/// for every adaptive one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Axis {
+    /// Stable id, e.g. `"t"`, referenced by [`Series::axis_id`].
+    pub id: String,
+    /// Human-facing label, e.g. `"time"`.
+    pub display_name: String,
+    /// Unit symbol, e.g. `"s"`.
+    pub unit: String,
+    /// What this axis promises about its ordering.
+    pub monotonicity: AxisMonotonicity,
+    /// The coordinates themselves, in order.
+    pub values: Vec<f64>,
+}
+
+/// One named output time-course, bound to the axis it is plotted against.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Series {
+    /// Stable id, e.g. `"position"`.
+    pub id: String,
+    /// Human-facing label.
+    pub display_name: String,
+    /// Unit symbol of the values.
+    pub unit: String,
+    /// The [`Axis::id`] these values are plotted against. Required: a
+    /// consumer must never have to guess, and a run with more than one axis
+    /// would make guessing wrong.
+    pub axis_id: String,
+    /// The values, aligned one-to-one with that axis's coordinates.
+    pub values: Vec<f64>,
+}
 
 /// The full, versioned result of one capability execution.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -29,10 +98,9 @@ pub struct RunResult {
     pub capability_id: String,
     /// Human-facing summary.
     pub summary: RunSummary,
-    /// Shared axes the series are plotted against (almost always exactly
-    /// one: time).
-    pub axes: Vec<AxisDescriptor>,
-    /// Named output series, each a flat time-course.
+    /// Shared axes the series are plotted against, with their coordinates.
+    pub axes: Vec<Axis>,
+    /// Named output series, each bound to an axis by id.
     pub series: Vec<Series>,
     /// Named scalar/derived metrics.
     pub metrics: Vec<Metric>,
@@ -49,7 +117,20 @@ impl RunResult {
     pub fn to_json_pretty(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
     }
+
+    /// The axis a series is plotted against, if it exists.
+    pub fn axis_for(&self, series: &Series) -> Option<&Axis> {
+        self.axes.iter().find(|a| a.id == series.axis_id)
+    }
+
+    /// The primary time axis (`id == "t"`), if this result has one.
+    pub fn time_axis(&self) -> Option<&Axis> {
+        self.axes.iter().find(|a| a.id == TIME_AXIS_ID)
+    }
 }
+
+/// The id every capability in this crate uses for its time axis.
+pub const TIME_AXIS_ID: &str = "t";
 
 /// Human-facing summary of a run.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -60,36 +141,12 @@ pub struct RunSummary {
     pub scenario_name: String,
     /// Number of integration steps taken (excluding the initial condition).
     pub steps: usize,
-    /// Start time, in the axis's unit.
+    /// Start time, in the axis's unit. Must equal the time axis's first
+    /// coordinate exactly — both come from the same trajectory.
     pub t_start: f64,
-    /// End time actually reached, in the axis's unit.
+    /// End time actually reached, in the axis's unit. Must equal the time
+    /// axis's last coordinate exactly.
     pub t_end: f64,
-}
-
-/// One shared axis (almost always time) that series are plotted against.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AxisDescriptor {
-    /// Stable id, e.g. `"t"`.
-    pub id: String,
-    /// Human-facing label, e.g. `"time"`.
-    pub display_name: String,
-    /// Unit symbol, e.g. `"s"`.
-    pub unit: String,
-}
-
-/// One named output time-course. Every value in `values` must be finite —
-/// see [`assert_finite`], which every adapter calls before returning a
-/// [`RunResult`].
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Series {
-    /// Stable id, e.g. `"position"`.
-    pub id: String,
-    /// Human-facing label.
-    pub display_name: String,
-    /// Unit symbol of the values.
-    pub unit: String,
-    /// The time-course itself, aligned with the run's single time axis.
-    pub values: Vec<f64>,
 }
 
 /// A metric's value. Three kinds cover every metric an adapter in this
@@ -99,7 +156,7 @@ pub struct Series {
 #[serde(rename_all = "snake_case")]
 pub enum MetricValue {
     /// A finite floating-point value. Never `NaN`/infinite — see
-    /// [`assert_finite`].
+    /// [`validate_result`].
     Scalar(f64),
     /// An integer count.
     Integer(i64),
@@ -184,10 +241,9 @@ pub struct VerificationResult {
 
 /// What produced a [`RunResult`] and when.
 ///
-/// This is deliberately minimal: a content-addressed run manifest, a
-/// scenario hash, a result hash, and a full hardware/OS fingerprint belong
-/// to the run-storage system (Phase 2B), which does not exist yet. Nothing
-/// here is fabricated to look more complete than that.
+/// Content hashing, the run manifest and the environment fingerprint live in
+/// `scirust-studio-store`, which owns storage; this is what the *execution*
+/// can report about itself.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunProvenance {
     /// The capability that produced this result.
@@ -200,7 +256,7 @@ pub struct RunProvenance {
     /// `scirust-studio-runtime` itself — the one version this crate can
     /// stamp robustly; a per-dependency version for `scirust-sim` would
     /// need a build script to stay honest as that crate's version moves, so
-    /// it is not included here — see Phase 2B's manifest/provenance work).
+    /// it is not included here).
     pub adapter_version: String,
     /// Wall-clock start time, RFC 3339 UTC.
     pub started_at_rfc3339: String,
@@ -210,46 +266,351 @@ pub struct RunProvenance {
     pub elapsed_seconds: f64,
 }
 
-/// Every value in `result`'s series and every `Scalar` metric must be
-/// finite. Called by every adapter immediately before returning a
-/// successful [`RunResult`], so a `NaN`/infinite value from a derived
-/// computation (a division the model's own domain doesn't protect against)
-/// can never reach a "successful" result — it becomes an
-/// [`crate::ExecutionError`] instead.
+/// A way in which a [`RunResult`] is internally inconsistent.
 ///
-/// `scirust_sim`'s own blow-ups are already caught earlier, by
-/// `SimError::NonFinite` from the integrator itself; this guard is for
-/// values *derived* from an otherwise-finite trajectory (a ratio, a log)
-/// that could still individually divide by zero or take a negative log.
-pub fn assert_finite(result: &RunResult) -> Result<(), String> {
-    for series in &result.series
-    {
-        if let Some((i, v)) = series
-            .values
-            .iter()
-            .enumerate()
-            .find(|(_, v)| !v.is_finite())
+/// Every variant names the specific thing that is wrong, because "invalid
+/// result" tells whoever is debugging an adapter nothing at all.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ResultDefect {
+    /// An axis coordinate is `NaN` or infinite.
+    NonFiniteAxisValue {
+        /// The axis.
+        axis_id: String,
+        /// Index of the offending coordinate.
+        index: usize,
+        /// The offending value, rendered.
+        value: String,
+    },
+    /// A series value is `NaN` or infinite.
+    NonFiniteSeriesValue {
+        /// The series.
+        series_id: String,
+        /// Index of the offending value.
+        index: usize,
+        /// The offending value, rendered.
+        value: String,
+    },
+    /// A `Scalar` metric is `NaN` or infinite.
+    NonFiniteMetric {
+        /// The metric.
+        metric_id: String,
+        /// The offending value, rendered.
+        value: String,
+    },
+    /// A series names an axis that does not exist.
+    MissingAxis {
+        /// The series.
+        series_id: String,
+        /// The axis it asked for.
+        axis_id: String,
+    },
+    /// Two axes share an id.
+    DuplicateAxisId {
+        /// The repeated id.
+        axis_id: String,
+    },
+    /// Two series share an id.
+    DuplicateSeriesId {
+        /// The repeated id.
+        series_id: String,
+    },
+    /// A series and its axis have different lengths.
+    LengthMismatch {
+        /// The series.
+        series_id: String,
+        /// How many values the series has.
+        series_len: usize,
+        /// The axis.
+        axis_id: String,
+        /// How many coordinates the axis has.
+        axis_len: usize,
+    },
+    /// An axis has no coordinates although a series depends on it.
+    EmptyAxisWithData {
+        /// The axis.
+        axis_id: String,
+        /// A series that depends on it.
+        series_id: String,
+    },
+    /// An axis broke the ordering it declared.
+    NotMonotonic {
+        /// The axis.
+        axis_id: String,
+        /// Index of the coordinate that broke the order.
+        index: usize,
+        /// The previous coordinate, rendered.
+        previous: String,
+        /// The offending coordinate, rendered.
+        value: String,
+    },
+    /// `summary.t_start` disagrees with the time axis's first coordinate.
+    SummaryStartMismatch {
+        /// What the summary says.
+        summary: String,
+        /// What the axis says.
+        axis: String,
+    },
+    /// `summary.t_end` disagrees with the time axis's last coordinate.
+    SummaryEndMismatch {
+        /// What the summary says.
+        summary: String,
+        /// What the axis says.
+        axis: String,
+    },
+}
+
+impl std::fmt::Display for ResultDefect {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self
         {
-            return Err(format!(
-                "series `{}`[{i}] is {v} (non-finite), not a valid result value",
-                series.id
-            ));
+            ResultDefect::NonFiniteAxisValue {
+                axis_id,
+                index,
+                value,
+            } => write!(
+                f,
+                "axis `{axis_id}`[{index}] is {value}, not a finite coordinate"
+            ),
+            ResultDefect::NonFiniteSeriesValue {
+                series_id,
+                index,
+                value,
+            } => write!(
+                f,
+                "series `{series_id}`[{index}] is {value}, not a valid result value"
+            ),
+            ResultDefect::NonFiniteMetric { metric_id, value } =>
+            {
+                write!(
+                    f,
+                    "metric `{metric_id}` is {value}, not a valid result value"
+                )
+            },
+            ResultDefect::MissingAxis { series_id, axis_id } => write!(
+                f,
+                "series `{series_id}` is plotted against axis `{axis_id}`, which this result does not contain"
+            ),
+            ResultDefect::DuplicateAxisId { axis_id } =>
+            {
+                write!(f, "two axes share the id `{axis_id}`")
+            },
+            ResultDefect::DuplicateSeriesId { series_id } =>
+            {
+                write!(f, "two series share the id `{series_id}`")
+            },
+            ResultDefect::LengthMismatch {
+                series_id,
+                series_len,
+                axis_id,
+                axis_len,
+            } => write!(
+                f,
+                "series `{series_id}` has {series_len} values but its axis `{axis_id}` has {axis_len} coordinates"
+            ),
+            ResultDefect::EmptyAxisWithData { axis_id, series_id } => write!(
+                f,
+                "axis `{axis_id}` has no coordinates although series `{series_id}` depends on it"
+            ),
+            ResultDefect::NotMonotonic {
+                axis_id,
+                index,
+                previous,
+                value,
+            } => write!(
+                f,
+                "axis `{axis_id}` declares an increasing order but [{index}] = {value} follows {previous}"
+            ),
+            ResultDefect::SummaryStartMismatch { summary, axis } => write!(
+                f,
+                "summary.t_start is {summary} but the time axis starts at {axis}"
+            ),
+            ResultDefect::SummaryEndMismatch { summary, axis } => write!(
+                f,
+                "summary.t_end is {summary} but the time axis ends at {axis}"
+            ),
         }
     }
+}
+
+/// Check that a [`RunResult`] is internally consistent, returning every
+/// defect found rather than only the first.
+///
+/// Called by every adapter immediately before returning a successful result,
+/// so a malformed one can never reach a caller. The checks exist because
+/// each corresponds to a way a consumer would otherwise be silently
+/// misled — a non-finite value becomes JSON `null`, a missing axis becomes
+/// an unplottable series, a length mismatch becomes points drawn against
+/// the wrong coordinates, and a non-monotonic time axis becomes a chart
+/// that doubles back on itself.
+///
+/// `summary.t_start`/`t_end` are compared to the time axis with **exact**
+/// equality, because both are read out of the same stored trajectory: any
+/// difference at all means one of them was recomputed rather than carried
+/// through, which is precisely the bug this schema version exists to
+/// prevent.
+pub fn validate_result(result: &RunResult) -> Result<(), Vec<ResultDefect>> {
+    let mut defects = Vec::new();
+
+    let mut seen_axes = std::collections::BTreeSet::new();
+    for axis in &result.axes
+    {
+        if !seen_axes.insert(axis.id.as_str())
+        {
+            defects.push(ResultDefect::DuplicateAxisId {
+                axis_id: axis.id.clone(),
+            });
+        }
+        for (index, value) in axis.values.iter().enumerate()
+        {
+            if !value.is_finite()
+            {
+                defects.push(ResultDefect::NonFiniteAxisValue {
+                    axis_id: axis.id.clone(),
+                    index,
+                    value: value.to_string(),
+                });
+            }
+        }
+        check_monotonicity(axis, &mut defects);
+    }
+
+    let mut seen_series = std::collections::BTreeSet::new();
+    for series in &result.series
+    {
+        if !seen_series.insert(series.id.as_str())
+        {
+            defects.push(ResultDefect::DuplicateSeriesId {
+                series_id: series.id.clone(),
+            });
+        }
+        for (index, value) in series.values.iter().enumerate()
+        {
+            if !value.is_finite()
+            {
+                defects.push(ResultDefect::NonFiniteSeriesValue {
+                    series_id: series.id.clone(),
+                    index,
+                    value: value.to_string(),
+                });
+            }
+        }
+
+        match result.axes.iter().find(|a| a.id == series.axis_id)
+        {
+            None => defects.push(ResultDefect::MissingAxis {
+                series_id: series.id.clone(),
+                axis_id: series.axis_id.clone(),
+            }),
+            Some(axis) =>
+            {
+                if axis.values.is_empty() && !series.values.is_empty()
+                {
+                    defects.push(ResultDefect::EmptyAxisWithData {
+                        axis_id: axis.id.clone(),
+                        series_id: series.id.clone(),
+                    });
+                }
+                else if axis.values.len() != series.values.len()
+                {
+                    defects.push(ResultDefect::LengthMismatch {
+                        series_id: series.id.clone(),
+                        series_len: series.values.len(),
+                        axis_id: axis.id.clone(),
+                        axis_len: axis.values.len(),
+                    });
+                }
+            },
+        }
+    }
+
     for metric in &result.metrics
     {
         if let MetricValue::Scalar(v) = &metric.value
         {
             if !v.is_finite()
             {
-                return Err(format!(
-                    "metric `{}` is {v} (non-finite), not a valid result value",
-                    metric.id
-                ));
+                defects.push(ResultDefect::NonFiniteMetric {
+                    metric_id: metric.id.clone(),
+                    value: v.to_string(),
+                });
             }
         }
     }
-    Ok(())
+
+    if let Some(axis) = result.time_axis()
+    {
+        if let (Some(first), Some(last)) = (axis.values.first(), axis.values.last())
+        {
+            if result.summary.t_start != *first
+            {
+                defects.push(ResultDefect::SummaryStartMismatch {
+                    summary: result.summary.t_start.to_string(),
+                    axis: first.to_string(),
+                });
+            }
+            if result.summary.t_end != *last
+            {
+                defects.push(ResultDefect::SummaryEndMismatch {
+                    summary: result.summary.t_end.to_string(),
+                    axis: last.to_string(),
+                });
+            }
+        }
+    }
+
+    if defects.is_empty()
+    {
+        Ok(())
+    }
+    else
+    {
+        Err(defects)
+    }
+}
+
+fn check_monotonicity(axis: &Axis, defects: &mut Vec<ResultDefect>) {
+    let strict = match axis.monotonicity
+    {
+        AxisMonotonicity::StrictlyIncreasing => true,
+        AxisMonotonicity::NonDecreasing => false,
+        AxisMonotonicity::Unspecified => return,
+    };
+    for (index, pair) in axis.values.windows(2).enumerate()
+    {
+        // A non-finite coordinate is already reported separately; comparing
+        // it here would add a second, less useful defect for one cause.
+        if !pair[0].is_finite() || !pair[1].is_finite()
+        {
+            continue;
+        }
+        let ok = if strict
+        {
+            pair[1] > pair[0]
+        }
+        else
+        {
+            pair[1] >= pair[0]
+        };
+        if !ok
+        {
+            defects.push(ResultDefect::NotMonotonic {
+                axis_id: axis.id.clone(),
+                index: index + 1,
+                previous: pair[0].to_string(),
+                value: pair[1].to_string(),
+            });
+        }
+    }
+}
+
+/// Render a defect list as one message, for an error type that carries a
+/// string.
+pub fn describe_defects(defects: &[ResultDefect]) -> String {
+    defects
+        .iter()
+        .map(|d| d.to_string())
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 #[cfg(test)]
@@ -263,19 +624,22 @@ mod tests {
             summary: RunSummary {
                 capability_display_name: "Spring-mass-damper".to_string(),
                 scenario_name: "test".to_string(),
-                steps: 10,
+                steps: 2,
                 t_start: 0.0,
-                t_end: 1.0,
+                t_end: 2.0,
             },
-            axes: vec![AxisDescriptor {
-                id: "t".to_string(),
+            axes: vec![Axis {
+                id: TIME_AXIS_ID.to_string(),
                 display_name: "time".to_string(),
                 unit: "s".to_string(),
+                monotonicity: AxisMonotonicity::StrictlyIncreasing,
+                values: vec![0.0, 1.0, 2.0],
             }],
             series: vec![Series {
                 id: "position".to_string(),
                 display_name: "Position".to_string(),
                 unit: "m".to_string(),
+                axis_id: TIME_AXIS_ID.to_string(),
                 values: vec![1.0, 0.9, 0.8],
             }],
             metrics: vec![Metric {
@@ -304,32 +668,219 @@ mod tests {
         }
     }
 
-    #[test]
-    fn assert_finite_accepts_a_well_formed_result() {
-        assert!(assert_finite(&sample_result()).is_ok());
+    fn defects_of(result: &RunResult) -> Vec<ResultDefect> {
+        validate_result(result).unwrap_err()
     }
 
     #[test]
-    fn assert_finite_rejects_a_nan_series_value() {
-        let mut result = sample_result();
-        result.series[0].values[1] = f64::NAN;
-        let err = assert_finite(&result).unwrap_err();
-        assert!(err.contains("position"), "{err}");
+    fn the_schema_version_is_two() {
+        assert_eq!(RESULT_SCHEMA_VERSION, 2);
+        assert_eq!(sample_result().schema_version, 2);
     }
 
     #[test]
-    fn assert_finite_rejects_an_infinite_metric() {
-        let mut result = sample_result();
-        result.metrics[0].value = MetricValue::Scalar(f64::INFINITY);
-        let err = assert_finite(&result).unwrap_err();
-        assert!(err.contains("final_position"), "{err}");
+    fn a_well_formed_result_validates() {
+        assert!(validate_result(&sample_result()).is_ok());
     }
 
     #[test]
-    fn assert_finite_ignores_non_scalar_metrics() {
-        let mut result = sample_result();
-        result.metrics[0].value = MetricValue::Text("underdamped".to_string());
-        assert!(assert_finite(&result).is_ok());
+    fn a_non_finite_axis_coordinate_is_rejected() {
+        let mut r = sample_result();
+        r.axes[0].values[1] = f64::NAN;
+        // Rebuild the summary so the only defect under test is the axis.
+        let defects = defects_of(&r);
+        assert!(
+            defects
+                .iter()
+                .any(|d| matches!(d, ResultDefect::NonFiniteAxisValue { axis_id, index: 1, .. } if axis_id == "t")),
+            "{defects:?}"
+        );
+    }
+
+    #[test]
+    fn a_non_finite_series_value_is_rejected() {
+        let mut r = sample_result();
+        r.series[0].values[1] = f64::INFINITY;
+        let defects = defects_of(&r);
+        assert!(
+            defects
+                .iter()
+                .any(|d| matches!(d, ResultDefect::NonFiniteSeriesValue { series_id, .. } if series_id == "position")),
+            "{defects:?}"
+        );
+    }
+
+    #[test]
+    fn an_infinite_metric_is_rejected() {
+        let mut r = sample_result();
+        r.metrics[0].value = MetricValue::Scalar(f64::INFINITY);
+        let defects = defects_of(&r);
+        assert!(
+            defects
+                .iter()
+                .any(|d| matches!(d, ResultDefect::NonFiniteMetric { .. })),
+            "{defects:?}"
+        );
+    }
+
+    #[test]
+    fn a_text_metric_is_not_checked_for_finiteness() {
+        let mut r = sample_result();
+        r.metrics[0].value = MetricValue::Text("underdamped".to_string());
+        assert!(validate_result(&r).is_ok());
+    }
+
+    #[test]
+    fn a_series_naming_a_missing_axis_is_rejected() {
+        let mut r = sample_result();
+        r.series[0].axis_id = "no_such_axis".to_string();
+        let defects = defects_of(&r);
+        assert!(
+            defects
+                .iter()
+                .any(|d| matches!(d, ResultDefect::MissingAxis { axis_id, .. } if axis_id == "no_such_axis")),
+            "{defects:?}"
+        );
+    }
+
+    #[test]
+    fn duplicate_axis_ids_are_rejected() {
+        let mut r = sample_result();
+        let duplicate = r.axes[0].clone();
+        r.axes.push(duplicate);
+        let defects = defects_of(&r);
+        assert!(
+            defects
+                .iter()
+                .any(|d| matches!(d, ResultDefect::DuplicateAxisId { .. })),
+            "{defects:?}"
+        );
+    }
+
+    #[test]
+    fn duplicate_series_ids_are_rejected() {
+        let mut r = sample_result();
+        let duplicate = r.series[0].clone();
+        r.series.push(duplicate);
+        let defects = defects_of(&r);
+        assert!(
+            defects
+                .iter()
+                .any(|d| matches!(d, ResultDefect::DuplicateSeriesId { .. })),
+            "{defects:?}"
+        );
+    }
+
+    #[test]
+    fn a_series_shorter_than_its_axis_is_rejected() {
+        let mut r = sample_result();
+        r.series[0].values.pop();
+        let defects = defects_of(&r);
+        assert!(
+            defects.iter().any(|d| matches!(
+                d,
+                ResultDefect::LengthMismatch {
+                    series_len: 2,
+                    axis_len: 3,
+                    ..
+                }
+            )),
+            "{defects:?}"
+        );
+    }
+
+    #[test]
+    fn an_empty_axis_with_a_populated_series_is_rejected() {
+        let mut r = sample_result();
+        r.axes[0].values.clear();
+        let defects = defects_of(&r);
+        assert!(
+            defects
+                .iter()
+                .any(|d| matches!(d, ResultDefect::EmptyAxisWithData { .. })),
+            "{defects:?}"
+        );
+    }
+
+    #[test]
+    fn a_time_axis_that_goes_backwards_is_rejected() {
+        let mut r = sample_result();
+        r.axes[0].values = vec![0.0, 2.0, 1.0];
+        r.summary.t_end = 1.0;
+        let defects = defects_of(&r);
+        assert!(
+            defects
+                .iter()
+                .any(|d| matches!(d, ResultDefect::NotMonotonic { index: 2, .. })),
+            "{defects:?}"
+        );
+    }
+
+    #[test]
+    fn a_repeated_coordinate_breaks_strict_but_not_non_decreasing() {
+        let mut r = sample_result();
+        r.axes[0].values = vec![0.0, 1.0, 1.0];
+        r.summary.t_end = 1.0;
+        assert!(
+            defects_of(&r)
+                .iter()
+                .any(|d| matches!(d, ResultDefect::NotMonotonic { .. })),
+            "strictly-increasing must reject a repeat"
+        );
+
+        r.axes[0].monotonicity = AxisMonotonicity::NonDecreasing;
+        assert!(
+            validate_result(&r).is_ok(),
+            "non-decreasing must accept a repeat"
+        );
+    }
+
+    #[test]
+    fn an_unspecified_axis_is_not_order_checked() {
+        let mut r = sample_result();
+        r.axes[0].monotonicity = AxisMonotonicity::Unspecified;
+        r.axes[0].values = vec![5.0, 1.0, 3.0];
+        r.summary.t_start = 5.0;
+        r.summary.t_end = 3.0;
+        assert!(validate_result(&r).is_ok());
+    }
+
+    /// The check that makes "the summary was carried through, not
+    /// recomputed" enforceable: exact equality, not a tolerance.
+    #[test]
+    fn a_summary_start_one_ulp_off_the_axis_is_rejected() {
+        let mut r = sample_result();
+        r.summary.t_start = f64::from_bits(r.axes[0].values[0].to_bits() + 1);
+        let defects = defects_of(&r);
+        assert!(
+            defects
+                .iter()
+                .any(|d| matches!(d, ResultDefect::SummaryStartMismatch { .. })),
+            "{defects:?}"
+        );
+    }
+
+    #[test]
+    fn a_summary_end_that_disagrees_with_the_axis_is_rejected() {
+        let mut r = sample_result();
+        r.summary.t_end = 2.5;
+        let defects = defects_of(&r);
+        assert!(
+            defects
+                .iter()
+                .any(|d| matches!(d, ResultDefect::SummaryEndMismatch { .. })),
+            "{defects:?}"
+        );
+    }
+
+    #[test]
+    fn every_defect_is_reported_not_just_the_first() {
+        let mut r = sample_result();
+        r.series[0].values[0] = f64::NAN;
+        r.metrics[0].value = MetricValue::Scalar(f64::NAN);
+        r.summary.t_end = 99.0;
+        let defects = defects_of(&r);
+        assert!(defects.len() >= 3, "{defects:?}");
     }
 
     #[test]
@@ -340,14 +891,52 @@ mod tests {
         assert_eq!(result, parsed);
     }
 
+    /// Adaptive solvers produce coordinates that no linear reconstruction
+    /// could reproduce; they must survive serialization exactly.
+    #[test]
+    fn adaptive_axis_coordinates_survive_json_bit_for_bit() {
+        let mut r = sample_result();
+        r.axes[0].values = vec![0.0, 1.234_567_890_123_456_7e-8, 4.9e-3, 0.4];
+        r.series[0].values = vec![1.0, 0.999, 0.5, 0.25];
+        r.summary.t_start = 0.0;
+        r.summary.t_end = 0.4;
+        r.summary.steps = 3;
+        validate_result(&r).expect("valid");
+
+        let json = serde_json::to_string(&r).unwrap();
+        let parsed: RunResult = serde_json::from_str(&json).unwrap();
+        for (a, b) in r.axes[0].values.iter().zip(parsed.axes[0].values.iter())
+        {
+            assert_eq!(a.to_bits(), b.to_bits(), "{a:?} became {b:?}");
+        }
+    }
+
     #[test]
     fn json_uses_stable_snake_case_variant_names() {
-        let result = sample_result();
-        let json = serde_json::to_string(&result).unwrap();
+        let json = serde_json::to_string(&sample_result()).unwrap();
         assert!(json.contains("\"passed\""), "{json}");
+        assert!(json.contains("\"strictly_increasing\""), "{json}");
         assert!(
             json.contains("\"scalar\":0.8") || json.contains("\"scalar\": 0.8"),
             "{json}"
         );
+    }
+
+    #[test]
+    fn axis_for_resolves_a_series_to_its_axis() {
+        let r = sample_result();
+        let axis = r.axis_for(&r.series[0]).expect("resolves");
+        assert_eq!(axis.id, TIME_AXIS_ID);
+        assert_eq!(r.time_axis().map(|a| a.id.as_str()), Some(TIME_AXIS_ID));
+    }
+
+    #[test]
+    fn describe_defects_joins_every_message() {
+        let mut r = sample_result();
+        r.series[0].values[0] = f64::NAN;
+        r.summary.t_end = 99.0;
+        let text = describe_defects(&defects_of(&r));
+        assert!(text.contains("position"), "{text}");
+        assert!(text.contains("t_end"), "{text}");
     }
 }

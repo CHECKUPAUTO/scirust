@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<!--
+  The document the Tauri shell loads from the bundle.
+
+  Deliberately empty of behaviour. There is no inline script and no inline
+  style, because the content security policy in
+  `src-tauri/tauri.conf.json` allows neither, and because the only code this
+  application runs is the WebAssembly module `dx` links in below `<div
+  id="main">`.
+
+  No external origin appears anywhere in this file. A font, an icon set or an
+  analytics tag fetched from a CDN would be blocked by the policy at runtime,
+  and shipping a reference to one would mean shipping a broken page that only
+  looks fine on a developer's machine.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SciRust Studio</title>
+  </head>
+  <body>
+    <div id="main"></div>
+  </body>
+</html>

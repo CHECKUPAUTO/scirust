@@ -1,0 +1,3 @@
+The Dioxus Web build output (`dx build --platform web`) lands here. Its
+contents are generated and git-ignored; the directory itself is tracked so
+`tauri::generate_context!` can resolve `frontendDist` in a fresh checkout.

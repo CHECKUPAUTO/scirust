@@ -1,0 +1,315 @@
+name: Studio Desktop
+
+# The desktop application lives in its own Cargo workspace
+# (`apps/scirust-studio`, listed under the root workspace's `exclude`), so the
+# root CI never builds it and this workflow is the only thing that does.
+#
+# The split into four jobs is deliberate. The first is fast and needs no GUI
+# toolchain at all, so a mistake in the reducers or the wire types fails in
+# about a minute rather than after a twenty-minute native build. The others
+# do the work that genuinely requires a platform.
+
+on:
+  push:
+    branches: [master, main, develop]
+    paths:
+      - 'apps/scirust-studio/**'
+      - 'scirust-studio-*/**'
+      - 'scripts/studio/**'
+      - '.github/workflows/studio-desktop.yml'
+  pull_request:
+    branches: [master, main, develop]
+    paths:
+      - 'apps/scirust-studio/**'
+      - 'scirust-studio-*/**'
+      - 'scripts/studio/**'
+      - '.github/workflows/studio-desktop.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: studio-desktop-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege, as in the root CI: nothing here writes to the repository.
+# The artifacts are uploaded through `actions/upload-artifact`, which needs no
+# extra token scope.
+permissions:
+  contents: read
+
+env:
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+  # The Dioxus CLI version must match the `dioxus` crate version pinned in
+  # apps/scirust-studio/Cargo.toml. A mismatched CLI produces a bundle whose
+  # bootstrap does not match the compiled module.
+  DIOXUS_CLI_VERSION: '0.7.9'
+  # The Tauri CLI is a *separate crate* from the `tauri` library and is
+  # versioned independently: the library pinned in Cargo.toml is 2.11.5 and
+  # the newest CLI is 2.11.4. Assuming they move together produces
+  # `could not find tauri-cli in registry crates-io with version =2.11.5`,
+  # which is a confusing way to learn this. The crate is `tauri-cli`; the
+  # binary it installs is `cargo-tauri`.
+  TAURI_CLI_VERSION: '2.11.4'
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Everything that can be checked without a GUI toolchain.
+  # ---------------------------------------------------------------------
+  logic:
+    name: Interface logic and wasm type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # Pinned to the same nightly as the root CI: this repository's
+      # rustfmt.toml uses unstable options, and a floating nightly would
+      # reformat merged code out from under open pull requests.
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: apps/scirust-studio
+
+      - name: Check formatting
+        working-directory: apps/scirust-studio
+        run: cargo +nightly-2026-07-02 fmt --all -- --check
+
+      # The interface's Dioxus, wasm-bindgen and web-sys dependencies are
+      # gated on `cfg(target_arch = "wasm32")`, so this compiles the
+      # reducers, the chart geometry, the action registry and the wire
+      # decoding — and none of the GUI stack.
+      - name: Host tests (real backend build)
+        working-directory: apps/scirust-studio
+        run: cargo test -p scirust-studio-ui --locked
+
+      - name: Host tests (mock backend, exercising the run lifecycle)
+        working-directory: apps/scirust-studio
+        run: cargo test -p scirust-studio-ui --locked --features mock-backend
+
+      # The mock must never be able to reach a user. This asserts the
+      # `compile_error!` fires rather than trusting that it is still there.
+      - name: The mock backend must refuse to build for release
+        working-directory: apps/scirust-studio
+        run: |
+          if cargo check -p scirust-studio-ui --release --features mock-backend 2>/dev/null; then
+            echo "::error::a release build with the mock backend compiled; the guard is gone"
+            exit 1
+          fi
+          echo "the mock backend correctly refuses to compile in a release build"
+
+      - name: Clippy (host)
+        working-directory: apps/scirust-studio
+        run: |
+          cargo clippy -p scirust-studio-ui --locked --all-targets -- -D warnings
+          cargo clippy -p scirust-studio-ui --locked --all-targets \
+            --features mock-backend -- -D warnings
+
+      # Type-checks every Dioxus component against the tested logic.
+      - name: Clippy (wasm32, the target the interface actually runs on)
+        working-directory: apps/scirust-studio
+        run: |
+          cargo clippy -p scirust-studio-ui --locked --all-targets \
+            --target wasm32-unknown-unknown -- -D warnings
+
+      - name: Build tooling tests
+        working-directory: apps/scirust-studio
+        run: cargo test -p prepare-sidecar -p stage-frontend --locked
+
+  # ---------------------------------------------------------------------
+  # The WebAssembly bundle. Built once and reused by the platform jobs.
+  # ---------------------------------------------------------------------
+  frontend:
+    name: WebAssembly bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: apps/scirust-studio
+
+      - name: Install cargo-binstall
+        uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # v2
+        with:
+          tool: cargo-binstall
+
+      # A prebuilt CLI when one exists, a source build when it does not.
+      # Both install the exact version pinned above; neither accepts
+      # "whatever is latest", because the CLI writes the bootstrap that loads
+      # the compiled module.
+      # `-y` is `--no-confirm`; passing both is rejected by binstall, which
+      # sends the step silently down the source-build fallback.
+      - name: Install the Dioxus CLI
+        run: |
+          cargo binstall -y "dioxus-cli@${DIOXUS_CLI_VERSION}" \
+            || cargo install dioxus-cli --locked --version "${DIOXUS_CLI_VERSION}"
+          dx --version
+
+      - name: Build the web bundle
+        working-directory: apps/scirust-studio
+        run: dx build --release --platform web
+
+      # Refuses to stage anything that is not a real bundle, so a frontend
+      # build that silently produced nothing fails here rather than becoming
+      # an application that opens a blank window.
+      - name: Stage the bundle into dist/
+        working-directory: apps/scirust-studio
+        run: cargo run -p stage-frontend --locked -- --profile release
+
+      - name: Upload the bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: studio-web-bundle
+          path: apps/scirust-studio/dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------
+  # The native shell, on every platform it claims to support.
+  # ---------------------------------------------------------------------
+  shell:
+    name: Native shell (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: stable
+          components: clippy
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: |
+            .
+            apps/scirust-studio
+
+      # Tauri 2 links against the system WebView. On Linux that is
+      # WebKitGTK 4.1; the other two platforms ship theirs.
+      - name: Install Linux WebView dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      # The sidecar is the worker this repository builds, never a download.
+      - name: Build the worker
+        run: cargo build --release -p scirust-studio-worker --locked
+
+      - name: Stage the sidecar under its target-triple name
+        working-directory: apps/scirust-studio
+        run: cargo run -p prepare-sidecar --locked -- --profile release
+
+      - name: Shell tests, including the bridge contract
+        working-directory: apps/scirust-studio
+        run: cargo test -p scirust-studio-desktop --locked
+
+      - name: Clippy
+        working-directory: apps/scirust-studio
+        run: cargo clippy -p scirust-studio-desktop --locked --all-targets -- -D warnings
+
+      # End to end through the real worker, the real store and the real
+      # adapters, with no window involved: the scientific path either works
+      # on this platform or it does not.
+      - name: Backend smoke test
+        working-directory: apps/scirust-studio
+        run: cargo run --release -p scirust-studio-desktop --locked -- --smoke-test-backend
+
+  # ---------------------------------------------------------------------
+  # The unsigned Windows preview a reviewer can actually run.
+  # ---------------------------------------------------------------------
+  windows-preview:
+    name: Windows preview (unsigned)
+    runs-on: windows-latest
+    needs: [logic, frontend, shell]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: |
+            .
+            apps/scirust-studio
+
+      - name: Download the web bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: studio-web-bundle
+          path: apps/scirust-studio/dist
+
+      - name: Build the worker
+        run: cargo build --release -p scirust-studio-worker --locked
+
+      - name: Stage the sidecar
+        working-directory: apps/scirust-studio
+        run: cargo run -p prepare-sidecar --locked -- --profile release
+
+      - name: Install cargo-binstall
+        uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # v2
+        with:
+          tool: cargo-binstall
+
+      # One line on purpose: this step runs under pwsh, and a backtick
+      # continuation combined with `||` is one more thing that can be subtly
+      # wrong on a runner and nowhere else.
+      - name: Install the Tauri CLI
+        run: |
+          cargo binstall -y "tauri-cli@${env:TAURI_CLI_VERSION}" || cargo install tauri-cli --locked --version "${env:TAURI_CLI_VERSION}"
+          cargo tauri --version
+
+      # One build, producing both the executable and the installer. Unsigned
+      # on purpose: code signing needs a certificate this repository does not
+      # hold, and shipping a preview that pretends to be signed would be
+      # worse than shipping one that plainly is not. The SmartScreen warning
+      # a reviewer will see is documented in
+      # docs/studio/WINDOWS_DESKTOP_ACCEPTANCE.md.
+      #
+      # The config is discovered from `src-tauri/`, not passed with
+      # `--config`: that flag *merges* a patch over the discovered config, so
+      # handing it the main file applies it twice.
+      - name: Build the unsigned bundle and installer
+        working-directory: apps/scirust-studio
+        run: cargo tauri build --bundles nsis
+
+      # Runs the built application, not a copy of the source: the artifact
+      # is only worth publishing if the artifact itself works.
+      - name: Acceptance check
+        shell: pwsh
+        run: ./scripts/studio/test-desktop-artifact.ps1 -Verbose
+
+      - name: Upload the preview
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: scirust-studio-windows-preview-unsigned
+          path: |
+            apps/scirust-studio/target/release/scirust-studio.exe
+            apps/scirust-studio/target/release/bundle/nsis/*.exe
+            apps/scirust-studio/target/release/studio-acceptance.json
+          if-no-files-found: error
+          retention-days: 14
