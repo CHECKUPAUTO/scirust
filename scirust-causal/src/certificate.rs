@@ -41,7 +41,7 @@ pub enum IdentifiabilityStatus {
 /// the only way to build one is [`CausalCertificate::builder`] followed by
 /// [`CausalCertificateBuilder::finalize`], which is where the coherence rule
 /// and the fingerprint are enforced together.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct CausalCertificate {
     query: String,
     status: IdentifiabilityStatus,
@@ -125,9 +125,123 @@ impl CausalCertificate {
 
     /// The deterministic fingerprint of this certificate's content (see
     /// [`CausalCertificateBuilder::finalize`]).
+    ///
+    /// A stored string. It attests nothing on its own — call
+    /// [`Self::verify_fingerprint`] to check that it still matches the content
+    /// it commits to.
     #[must_use]
     pub fn fingerprint(&self) -> &str {
         &self.fingerprint
+    }
+
+    /// Recomputes the fingerprint from this certificate's current content and
+    /// compares it against the stored one.
+    ///
+    /// A `false` means the content and its fingerprint disagree: the
+    /// certificate was altered after it was issued, or it was produced by a
+    /// build whose canonical encoding differs from this one.
+    ///
+    /// This is deliberately an **explicit** check rather than something
+    /// enforced at deserialization. Fingerprint reproducibility carries the
+    /// caveat documented at the crate root — a fixed implementation, build and
+    /// environment — so rejecting a mismatch automatically would turn a
+    /// cross-version comparison into a hard failure. The coherence rule *is*
+    /// enforced automatically, because it is a property of the content alone
+    /// and holds across builds.
+    #[must_use]
+    pub fn verify_fingerprint(&self) -> bool {
+        self.recompute_fingerprint() == self.fingerprint
+    }
+
+    fn recompute_fingerprint(&self) -> String {
+        let pre_image = CertificatePreImage {
+            query: &self.query,
+            status: self.status,
+            assumptions_used: &self.assumptions_used,
+            evidence_summary: &self.evidence_summary,
+            method: &self.method,
+            estimate: self.estimate,
+            uncertainty: self.uncertainty,
+            sensitivity_note: &self.sensitivity_note,
+            unresolved_alternatives: &self.unresolved_alternatives,
+        };
+        let canonical = serde_json::to_vec(&pre_image)
+            .expect("CertificatePreImage serialization is infallible");
+        sha256_hex(&canonical)
+    }
+}
+
+/// Deserialization re-checks the coherence rule.
+///
+/// [`CausalCertificateBuilder::finalize`] is the only way to *construct* a
+/// certificate, and it makes "an estimate on a status other than
+/// `Identifiable`" impossible. A derived `Deserialize` would have silently
+/// reopened that door: serde populates private fields directly, so any JSON
+/// could produce a certificate the builder would have rejected — and every
+/// phase of this crate serializes certificates.
+///
+/// So this impl deserializes into a shadow struct and re-runs the rule. The
+/// guarantee now holds for *every* certificate in the program, not only the
+/// ones that were built rather than parsed.
+///
+/// The fingerprint is **not** verified here; see [`CausalCertificate::verify_fingerprint`]
+/// for why that check is explicit.
+impl<'de> serde::Deserialize<'de> for CausalCertificate {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        struct Raw {
+            query: String,
+            status: IdentifiabilityStatus,
+            assumptions_used: Vec<CausalAssumption>,
+            evidence_summary: String,
+            method: Option<String>,
+            estimate: Option<f64>,
+            uncertainty: Option<f64>,
+            sensitivity_note: Option<String>,
+            unresolved_alternatives: Vec<String>,
+            fingerprint: String,
+        }
+
+        let raw = Raw::deserialize(deserializer)?;
+        if raw.status != IdentifiabilityStatus::Identifiable && raw.estimate.is_some()
+        {
+            return Err(serde::de::Error::custom(
+                "only Identifiable may carry a numeric estimate",
+            ));
+        }
+        if raw.estimate.is_some_and(|v| !v.is_finite())
+        {
+            return Err(serde::de::Error::custom(
+                "certificate estimate must be finite",
+            ));
+        }
+        if raw.uncertainty.is_some_and(|v| !v.is_finite() || v < 0.0)
+        {
+            return Err(serde::de::Error::custom(
+                "certificate uncertainty must be finite and non-negative",
+            ));
+        }
+        if raw.query.trim().is_empty()
+        {
+            return Err(serde::de::Error::custom(
+                "certificate query must not be empty",
+            ));
+        }
+        Ok(CausalCertificate {
+            query: raw.query,
+            status: raw.status,
+            assumptions_used: raw.assumptions_used,
+            evidence_summary: raw.evidence_summary,
+            method: raw.method,
+            estimate: raw.estimate,
+            uncertainty: raw.uncertainty,
+            sensitivity_note: raw.sensitivity_note,
+            unresolved_alternatives: raw.unresolved_alternatives,
+            fingerprint: raw.fingerprint,
+        })
     }
 }
 
