@@ -112,7 +112,7 @@ Columns:
 | `sim.ecology.logistic_growth` | Yes | Yes | Yes | Yes | Yes | Yes |
 | `sim.mechanics.pendulum` | Yes | Yes | Yes | Yes | Yes | Yes |
 | `sim.mechanics.double_pendulum` | Yes | Yes | Yes | Yes | Yes | Yes |
-| `sim.stochastic.ornstein_uhlenbeck` | Yes | Yes | Yes | Yes (indeterminate progress) | Yes | Yes |
+| `sim.stochastic.ornstein_uhlenbeck` | Yes | Yes | Yes | Yes (per realisation) | Yes | Yes |
 | Every other `scirust-sim` model family | No | No | No | No | No | No |
 | Every other workspace crate | No | No | No | No | No | No |
 
@@ -240,6 +240,24 @@ It is required, recorded in the result's provenance, shown by the CLI and the
 desktop's provenance panel, and re-derived inside the run as a verification
 check. See `docs/studio/adr/0007-seeded-stochastic-capabilities.md`.
 
-It is also the second capability that cannot report progress, after
-`sim.chemistry.robertson`. That matters for the interface: its indeterminate
-path is no longer a special case built for a single model.
+It is also the only capability whose unit of progress is not the time step.
+A single realisation cannot be chunked, but an ensemble's atom is the
+realisation, so it reports one unit per realisation and can be cancelled
+between them. `sim.chemistry.robertson` remains the only capability that
+reports no progress at all, so the interface's indeterminate path is still
+exercised — by one model rather than two.
+
+### What ensembles change
+
+`experiment.replicates` asks a stochastic capability for many independent
+realisations, whose seeds are derived from the scenario's single seed. The
+result then carries the across-replicate mean, a spread band and a bounded
+number of individual paths, distinguished by `Series.role` so no consumer has
+to infer from an id which curve is a summary and which is one sample.
+
+The across-replicate check is materially stronger than the single-path one:
+samples along one path are autocorrelated and carry less information than
+their count suggests, while independent realisations carry exactly their
+count. Every capability — not only the stochastic ones — now answers for
+`replicates`, and one that draws no sample refuses rather than running the
+same computation `n` times. See `docs/studio/adr/0008-ensembles.md`.
