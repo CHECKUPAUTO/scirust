@@ -9,7 +9,10 @@
 use scirust_tensor_core::TensorND;
 
 mod canonical;
+mod memory;
+
 pub use canonical::{CanonicalCompiler, CompileError, CompileStats, ExecutionPlan, Instruction};
+pub use memory::{BufferSlot, BufferSlotSpec, MemoryPlan, ValueAllocation, ValueStorage};
 
 // Re-export the contraction planner so multi-operand contractions and
 // element-wise fusion share one entry point.
