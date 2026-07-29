@@ -93,6 +93,11 @@ pub fn run() -> i32 {
     let ready = state.frontend_ready_flag();
 
     let builder = tauri::Builder::default()
+        // The dialog plugin is registered so the *shell* can show a native
+        // picker from `commands::studio_open_scenario`. Its permissions are
+        // deliberately not granted to the webview — see
+        // `capabilities/main-window.json` and `tests/security_audit.rs`.
+        .plugin(tauri_plugin_dialog::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             commands::studio_bootstrap,
@@ -111,6 +116,8 @@ pub fn run() -> i32 {
             commands::studio_restart_worker,
             commands::studio_worker_diagnostics,
             commands::studio_active_job,
+            commands::studio_open_scenario,
+            commands::studio_save_scenario,
             commands::frontend_ready,
         ]);
 

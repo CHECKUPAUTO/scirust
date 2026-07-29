@@ -33,8 +33,8 @@ pub mod bridge;
 pub use wire::{
     BootstrapWire, CapabilityWire, CheckWire, ErrorWire, EventBatchWire, EventWire, ExitClassWire,
     FieldWire, IntegrityWire, JobStateWire, JobWire, LocationWire, MetricWire, OutputWire,
-    ProblemWire, ProvenanceWire, RunWire, ScenarioWire, SeriesRoleWire, SeriesWire, StoredRunWire,
-    ValidationWire, VerificationWire, WarningWire, XAxisKindWire,
+    ProblemWire, ProvenanceWire, RunWire, ScenarioFileWire, ScenarioWire, SeriesRoleWire,
+    SeriesWire, StoredRunWire, ValidationWire, VerificationWire, WarningWire, XAxisKindWire,
 };
 
 // A shipped application must never be able to display invented data. The
@@ -198,6 +198,18 @@ pub trait StudioBackend {
 
     /// Load a capability's tutorial scenario.
     async fn load_tutorial(&self, capability_id: &str) -> Result<ScenarioWire, FrontendError>;
+
+    /// Ask the user for a scenario file and return its **contents**.
+    ///
+    /// `None` means the user cancelled, which is an outcome and not an error.
+    /// No path crosses in either direction: this build cannot re-open a file
+    /// without the user choosing it again, and that is deliberate.
+    async fn open_scenario(&self) -> Result<Option<ScenarioFileWire>, FrontendError>;
+
+    /// Ask the user where to save `source`, returning the chosen file's name.
+    ///
+    /// `None` means the user cancelled.
+    async fn save_scenario(&self, source: &str) -> Result<Option<String>, FrontendError>;
 
     /// Validate scenario source without running it.
     async fn validate_scenario(&self, source: &str) -> Result<ValidationWire, FrontendError>;

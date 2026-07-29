@@ -102,7 +102,7 @@ fn the_default_source_is_self() {
 
 /// The frontend must not be able to reach any of these. File dialogs, the
 /// sidecar and every filesystem access run in native Rust, behind typed
-/// commands.
+/// commands that exchange *contents* rather than paths.
 #[test]
 fn the_main_window_has_no_dangerous_permission() {
     let text = MAIN_WINDOW_CAPABILITY;
@@ -114,6 +114,12 @@ fn the_main_window_has_no_dangerous_permission() {
         "os:allow-exec",
         "updater:",
         "deep-link:",
+        // The shell links `tauri-plugin-dialog` (and, transitively,
+        // `tauri-plugin-fs`) so `studio_open_scenario` can show a native
+        // picker from Rust. Granting the webview `dialog:*` would let it open
+        // its own picker and hold the resulting path — which is the one thing
+        // that command's design exists to prevent.
+        "dialog:",
     ]
     {
         assert!(

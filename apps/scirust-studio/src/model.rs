@@ -230,7 +230,7 @@ pub struct AppModel {
     /// The last saved contents, for the dirty flag.
     pub saved_source: String,
     /// Where the scenario came from.
-    pub source_path: Option<String>,
+    pub source_name: Option<String>,
     /// The last validation outcome.
     pub problems: Vec<ProblemLine>,
     /// Whether the last validation passed.
@@ -303,7 +303,7 @@ impl Default for AppModel {
             capability_count: 0,
             source: String::new(),
             saved_source: String::new(),
-            source_path: None,
+            source_name: None,
             problems: Vec::new(),
             validated_ok: false,
             job_id: None,
@@ -383,13 +383,19 @@ pub enum Msg {
     ScenarioLoaded {
         /// The text.
         source: String,
-        /// Where from.
-        path: Option<String>,
+        /// The file's *name*, for the title — never a path.
+        ///
+        /// The shell's `studio_open_scenario` returns contents and a bare
+        /// name, deliberately: the frontend cannot re-open a file the user
+        /// picked, because it never learns where it was. Naming this `path`
+        /// would invite the first reader who needs a location to assume one
+        /// is here.
+        name: Option<String>,
     },
     /// The scenario was saved.
     Saved {
-        /// Where to.
-        path: Option<String>,
+        /// The file's name, when one was chosen.
+        name: Option<String>,
     },
     /// Validation finished.
     Validated {
@@ -503,22 +509,22 @@ pub fn update(mut model: AppModel, message: Msg) -> AppModel {
             // "valid" tick against changed text would be a lie.
             model.validated_ok = false;
         },
-        Msg::ScenarioLoaded { source, path } =>
+        Msg::ScenarioLoaded { source, name } =>
         {
             model.saved_source = source.clone();
             model.source = source;
-            model.source_path = path;
+            model.source_name = name;
             model.problems.clear();
             model.validated_ok = false;
             model.view = View::Experiment;
             model.log(ActivityLevel::Info, "Scenario opened");
         },
-        Msg::Saved { path } =>
+        Msg::Saved { name } =>
         {
             model.saved_source = model.source.clone();
-            if path.is_some()
+            if name.is_some()
             {
-                model.source_path = path;
+                model.source_name = name;
             }
             model.log(ActivityLevel::Info, "Scenario saved");
         },
@@ -756,7 +762,7 @@ mod tests {
         assert!(!model.dirty());
         model = update(model, Msg::EditSource("schema_version = 1".into()));
         assert!(model.dirty());
-        model = update(model, Msg::Saved { path: None });
+        model = update(model, Msg::Saved { name: None });
         assert!(!model.dirty());
     }
 
@@ -782,12 +788,12 @@ mod tests {
             bootstrapped(),
             Msg::ScenarioLoaded {
                 source: "schema_version = 1".into(),
-                path: Some("/tmp/a.toml".into()),
+                name: Some("a.toml".into()),
             },
         );
         assert!(!model.dirty());
         assert_eq!(model.view, View::Experiment);
-        assert_eq!(model.source_path.as_deref(), Some("/tmp/a.toml"));
+        assert_eq!(model.source_name.as_deref(), Some("a.toml"));
     }
 
     #[test]
@@ -1137,5 +1143,57 @@ mod tests {
             assert!(!tag.is_empty());
             assert!(!tag.contains('\u{1b}'), "no ANSI escapes: {tag:?}");
         }
+    }
+
+    /// Opening a file must leave the editor clean. A scenario that arrives
+    /// already marked as changed would offer to save it back before the user
+    /// has touched anything.
+    #[test]
+    fn an_opened_scenario_starts_clean_and_carries_its_name() {
+        let mut model = bootstrapped();
+        model = update(model, Msg::EditSource("unsaved work".into()));
+        assert!(model.dirty());
+
+        model = update(
+            model,
+            Msg::ScenarioLoaded {
+                source: "schema_version = 1".into(),
+                name: Some("damped.scirust.toml".into()),
+            },
+        );
+        assert!(!model.dirty());
+        assert_eq!(model.source, "schema_version = 1");
+        assert_eq!(model.source_name.as_deref(), Some("damped.scirust.toml"));
+        assert_eq!(model.view, View::Experiment);
+    }
+
+    /// Saving under a new name keeps that name; a save that reported none —
+    /// which cannot happen through the dialog, but the message allows it —
+    /// must not blank the one already shown.
+    #[test]
+    fn saving_updates_the_name_only_when_one_was_chosen() {
+        let mut model = bootstrapped();
+        model = update(
+            model,
+            Msg::ScenarioLoaded {
+                source: "schema_version = 1".into(),
+                name: Some("first.toml".into()),
+            },
+        );
+        model = update(model, Msg::EditSource("schema_version = 1 # edited".into()));
+        assert!(model.dirty());
+
+        model = update(
+            model,
+            Msg::Saved {
+                name: Some("second.toml".into()),
+            },
+        );
+        assert!(!model.dirty());
+        assert_eq!(model.source_name.as_deref(), Some("second.toml"));
+
+        model = update(model, Msg::EditSource("more".into()));
+        model = update(model, Msg::Saved { name: None });
+        assert_eq!(model.source_name.as_deref(), Some("second.toml"));
     }
 }

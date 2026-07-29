@@ -8,7 +8,10 @@
 //! supported — still lives entirely in each adapter module.
 
 use scirust_studio_command::{CatalogedError, ErrorCode, ErrorFamily};
-use scirust_studio_registry::{Cardinality, DeterminismClass, FieldDescriptor, SolverDescriptor};
+use scirust_studio_registry::{
+    BackendKind, CapabilityDescriptor, Cardinality, DeterminismClass, FieldDescriptor,
+    PrecisionKind, SolverDescriptor,
+};
 use scirust_studio_schema::Scenario;
 
 use crate::ensemble::MAX_REPLICATES;
@@ -27,6 +30,10 @@ pub const CODE_MISSING_SEED: ErrorCode = ErrorCode::new(ErrorFamily::Validation,
 pub const CODE_REPLICATES_UNSUPPORTED: ErrorCode = ErrorCode::new(ErrorFamily::Validation, 96);
 /// `experiment.replicates` was zero, or above [`MAX_REPLICATES`].
 pub const CODE_REPLICATES_OUT_OF_RANGE: ErrorCode = ErrorCode::new(ErrorFamily::Validation, 97);
+/// `backend.precision` names a precision this capability does not compute in.
+pub const CODE_UNSUPPORTED_PRECISION: ErrorCode = ErrorCode::new(ErrorFamily::Validation, 98);
+/// `backend.kind` names a backend this capability does not run on.
+pub const CODE_UNSUPPORTED_BACKEND: ErrorCode = ErrorCode::new(ErrorFamily::Validation, 99);
 
 fn field_error(
     field: &FieldDescriptor,
@@ -424,6 +431,127 @@ pub fn resolve_replicates(
     }
 
     Ok(requested as usize)
+}
+
+/// Check `backend.precision` against the precisions the capability declares.
+///
+/// The schema already restricts the field to `"f32"` and `"f64"`, which is
+/// what made this gap easy to miss: a scenario asking for `f32` passed
+/// validation, and then every adapter computed in `f64` regardless, because
+/// nothing compared the scenario's request against
+/// [`CapabilityDescriptor::supported_precisions`]. The result was correct
+/// arithmetic carrying a stated precision it did not have.
+///
+/// That is the same shape of defect as `experiment.seed` before Phase 3B-2 —
+/// a field the schema accepts and nothing reads — and it is worse here,
+/// because a silently-upgraded precision looks like the user got what they
+/// asked for. `f32` is not a smaller `f64`; someone selecting it is usually
+/// asking a question about conditioning or about matching another
+/// implementation's arithmetic, and answering in `f64` answers a different
+/// question.
+///
+/// Refusing costs the user one line. Every current capability declares `f64`
+/// only, so today this always refuses `f32` — and when a capability grows an
+/// `f32` path, this starts accepting it with no change here.
+pub fn resolve_precision(
+    scenario: &Scenario,
+    descriptor: &CapabilityDescriptor,
+) -> Result<PrecisionKind, CatalogedError> {
+    let requested = match scenario.backend.precision.as_str()
+    {
+        "f64" => PrecisionKind::F64,
+        "f32" => PrecisionKind::F32,
+        // Unreachable through `scirust_studio_schema::validate`, which rejects
+        // anything else first. Reported rather than asserted, because an
+        // adapter can be driven directly.
+        other =>
+        {
+            return Err(CatalogedError {
+                code: CODE_UNSUPPORTED_PRECISION,
+                title: "Unknown precision".to_string(),
+                explanation: format!("`backend.precision = \"{other}\"` is not a precision"),
+                recoverable: true,
+                suggested_action: Some("use \"f64\", or \"f32\" where supported".to_string()),
+            });
+        },
+    };
+
+    if descriptor.supported_precisions.contains(&requested)
+    {
+        return Ok(requested);
+    }
+
+    let available: Vec<&str> = descriptor
+        .supported_precisions
+        .iter()
+        .map(|p| match p
+        {
+            PrecisionKind::F64 => "f64",
+            PrecisionKind::F32 => "f32",
+        })
+        .collect();
+    Err(CatalogedError {
+        code: CODE_UNSUPPORTED_PRECISION,
+        title: "Unsupported precision".to_string(),
+        explanation: format!(
+            "`backend.precision = \"{}\"` was requested, but `{}` computes in {} only. \
+             Running it anyway would record a result whose stated precision is not the \
+             precision it was computed at",
+            scenario.backend.precision,
+            descriptor.id.0,
+            available.join(" or ")
+        ),
+        recoverable: true,
+        suggested_action: Some(format!(
+            "set `precision = \"{}\"` under [backend], or remove the field to take the default",
+            available.first().copied().unwrap_or("f64")
+        )),
+    })
+}
+
+/// Check `backend.kind` against the backends the capability declares.
+///
+/// The same gap as [`resolve_precision`], and closed at the same time for the
+/// same reason rather than waiting for it to matter. The schema restricts the
+/// field to `"cpu"` and every capability declares `Cpu`, so this refuses
+/// nothing today; it is what makes the first GPU-only — or CPU-only, once a
+/// GPU worker exists — capability fail loudly instead of running somewhere it
+/// never claimed to.
+pub fn resolve_backend_kind(
+    scenario: &Scenario,
+    descriptor: &CapabilityDescriptor,
+) -> Result<BackendKind, CatalogedError> {
+    let requested = match scenario.backend.kind.as_str()
+    {
+        "cpu" => BackendKind::Cpu,
+        other =>
+        {
+            return Err(CatalogedError {
+                code: CODE_UNSUPPORTED_BACKEND,
+                title: "Unknown backend".to_string(),
+                explanation: format!(
+                    "`backend.kind = \"{other}\"` is not a backend this build has"
+                ),
+                recoverable: true,
+                suggested_action: Some("use \"cpu\"".to_string()),
+            });
+        },
+    };
+
+    if descriptor.supported_backends.contains(&requested)
+    {
+        return Ok(requested);
+    }
+    Err(CatalogedError {
+        code: CODE_UNSUPPORTED_BACKEND,
+        title: "Unsupported backend".to_string(),
+        explanation: format!(
+            "`backend.kind = \"{}\"` was requested, but `{}` does not declare it",
+            scenario.backend.kind, descriptor.id.0
+        ),
+        recoverable: true,
+        suggested_action: Some("remove the field to take the default".to_string()),
+    })
 }
 
 /// Check that a set of SI-coherent values sums to `expected` within

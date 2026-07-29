@@ -23,6 +23,9 @@ publish = false
 # ship or to reproduce a bug against.
 [workspace.dependencies]
 tauri = "=2.11.5"
+# The native file dialog. Pinned like the rest: a dialog plugin is a
+# privileged surface and should not float.
+tauri-plugin-dialog = "=2.4.1"
 tauri-build = "=2.6.3"
 dioxus = "=0.7.9"
 serde = { version = "=1.0.228", features = ["derive"] }
