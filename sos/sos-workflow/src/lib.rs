@@ -34,10 +34,14 @@
 //! *logic* (running a sweep, a derivation, a simulation) is supplied by the
 //! engine crates and backend adapters through the [`StageExecutor`] trait
 //! (Invariant VIII); this crate binds and schedules that logic but never
-//! implements it. Also deferred, with **no stub**: manifest resolution (TOML
-//! study → `Plan`, a domain frontend) and information-theoretic stopping rules
-//! (`sos-planner` / statistics). The pieces here are the deterministic heart —
-//! cache keys, scheduling, memoization, binding, ledger — fully implemented and
+//! implements it. [`Manifest`] now supplies the other half of RFC-0002 §08
+//! §1's `resolve(&manifest, &graph)` — a TOML study resolves to a validated
+//! `Plan` — but only the manifest half: naming inputs symbolically through the
+//! knowledge graph needs a query language this crate will not invent alone, so
+//! a stage's inputs are content addresses. Still deferred, with **no stub**:
+//! that graph half, and information-theoretic stopping rules (`sos-planner` /
+//! statistics). The pieces here are the deterministic heart —
+//! cache keys, scheduling, memoization, binding, resolution, ledger — fully implemented and
 //! tested.
 //!
 //! ## Example — memoization makes an unchanged re-run free
@@ -92,6 +96,7 @@ pub mod dispatch;
 pub mod engine;
 pub mod error;
 pub mod ledger;
+pub mod manifest;
 pub mod plan;
 
 pub use cache::CacheKey;
@@ -100,4 +105,5 @@ pub use dispatch::Dispatch;
 pub use engine::{Memo, MemoTable, StageExecutor, run_plan};
 pub use error::{Result, WorkflowError};
 pub use ledger::{LedgerStep, RunLedger, StepOutcome};
+pub use manifest::{Manifest, ManifestError, StageSpec, Study, resolve_manifest};
 pub use plan::{Plan, Stage, StageId};
