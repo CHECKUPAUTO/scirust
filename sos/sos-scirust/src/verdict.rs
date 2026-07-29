@@ -79,6 +79,7 @@ use thiserror::Error;
 
 use crate::ode::CertifiedTrajectory;
 use crate::quadrature::CertifiedIntegral;
+use crate::root::CertifiedRoot;
 use sos_core::DeterminismLevel;
 
 /// The default number of combined standard errors
@@ -356,6 +357,58 @@ pub fn certify_estimate_in_distribution(
     // the band collapses to nothing rather than becoming a free pass.
     let allowed = sigma.max(0.0) * se_a.hypot(se_b);
     Ok(Agreement::decide(deviation, allowed, None))
+}
+
+/// Certify an `L2` re-run of a root solve against the original.
+///
+/// Compares the roots componentwise against the summed certificates, in the
+/// same mixed `abs_tol + rel_tol·|value|` form the tolerances were requested
+/// in.
+///
+/// # Errors
+/// [`VerdictError::NotComparable`] if the two solves started from different
+/// points, or reached roots of different dimension. A root is
+/// basin-dependent (see [`crate::root`]): two solves from different starts
+/// are answering different questions, so a disagreement between them is not
+/// a failed reproduction of either — the same reason
+/// [`certify_integral`] refuses differing integration bounds.
+pub fn certify_root(
+    original: &CertifiedRoot,
+    rerun: &CertifiedRoot,
+) -> Result<Agreement, VerdictError> {
+    if original.started_from.len() != rerun.started_from.len()
+        || original
+            .started_from
+            .iter()
+            .zip(&rerun.started_from)
+            .any(|(a, b)| a.to_bits() != b.to_bits())
+    {
+        return Err(VerdictError::NotComparable(format!(
+            "solves started from different points: {:?} vs {:?}",
+            original.started_from, rerun.started_from
+        )));
+    }
+    if original.root.len() != rerun.root.len()
+    {
+        return Err(VerdictError::NotComparable(format!(
+            "roots have different dimensions: {} vs {}",
+            original.root.len(),
+            rerun.root.len()
+        )));
+    }
+
+    let mut worst = Agreement::decide(0.0, 0.0, None);
+    for (i, (a, b)) in original.root.iter().zip(&rerun.root).enumerate()
+    {
+        let allowed = certified_error(*a, original.rel_tol, original.abs_tol)
+            + certified_error(*b, rerun.rel_tol, rerun.abs_tol);
+        let here = Agreement::decide((a - b).abs(), allowed, Some(i));
+        if !here.agrees && worst.agrees || (here.agrees == worst.agrees && exceeds(&here, &worst))
+        {
+            worst = here;
+        }
+    }
+    Ok(worst)
 }
 
 #[cfg(test)]
@@ -683,5 +736,54 @@ mod tests {
             .unwrap()
             .verdict();
         assert_eq!(verify_node(&claim, &reproduced), NodeVerdict::Reproduced);
+    }
+
+    // ---- L2: roots ----------------------------------------------------------
+
+    fn root(value: &[f64], from: &[f64], abs_tol: f64) -> CertifiedRoot {
+        CertifiedRoot {
+            root: value.to_vec(),
+            started_from: from.to_vec(),
+            residual: 0.0,
+            iterations: 3,
+            abs_tol,
+            rel_tol: 0.0,
+        }
+    }
+
+    #[test]
+    fn two_roots_within_their_summed_tolerances_agree() {
+        let a = root(&[2.0], &[1.0], 1e-9);
+        let b = root(&[2.0 + 1.5e-9], &[1.0], 1e-9);
+        assert!(certify_root(&a, &b).unwrap().agrees);
+    }
+
+    #[test]
+    fn a_root_beyond_the_summed_tolerance_diverges() {
+        let a = root(&[2.0], &[1.0], 1e-9);
+        let b = root(&[2.0 + 3e-9], &[1.0], 1e-9);
+        assert!(!certify_root(&a, &b).unwrap().agrees);
+    }
+
+    #[test]
+    fn solves_from_different_starts_are_not_comparable() {
+        // A root is basin-dependent. Reaching -2 from -1 does not fail to
+        // reproduce reaching +2 from +1 — they answered different questions,
+        // and calling that a divergence would misreport the science.
+        let a = root(&[2.0], &[1.0], 1e-9);
+        let b = root(&[-2.0], &[-1.0], 1e-9);
+        assert!(matches!(
+            certify_root(&a, &b),
+            Err(VerdictError::NotComparable(_))
+        ));
+    }
+
+    #[test]
+    fn a_multi_dimensional_root_is_judged_by_its_worst_component() {
+        let a = root(&[1.0, 2.0], &[0.5, 2.5], 1e-9);
+        let b = root(&[1.0, 2.5], &[0.5, 2.5], 1e-9);
+        let agreement = certify_root(&a, &b).unwrap();
+        assert!(!agreement.agrees);
+        assert_eq!(agreement.at, Some(1), "the second component diverged");
     }
 }
