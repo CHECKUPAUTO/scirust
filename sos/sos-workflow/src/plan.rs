@@ -55,22 +55,65 @@ pub struct Stage {
     pub seed: u64,
     /// The stages this one depends on (must run after; stored as a sorted set).
     pub deps: Vec<StageId>,
+    /// The stages whose **outputs this one reads** (stored as a sorted set).
+    ///
+    /// [`deps`](Self::deps) is ordering only — "must run after" — and says
+    /// nothing about data. Until this field existed there was no way to
+    /// express dataflow between stages at all: [`inputs`](Self::inputs) takes
+    /// literal [`ObjectId`]s, and an upstream stage's output ids do not exist
+    /// until it has run, so a plan could sequence its stages but never feed
+    /// one into the next. Every stage's output recorded zero provenance
+    /// parents as a result — a workflow engine producing a graph with no edges
+    /// between its own nodes.
+    ///
+    /// Consuming a stage implies depending on it, so an id listed here does
+    /// not also need to appear in `deps`; [`Stage::consuming`] folds it in.
+    ///
+    /// Defaulted on deserialization: a plan written before this field existed
+    /// consumed nothing, which is exactly what an empty set means. No stored
+    /// plan is invalidated by its arrival.
+    #[serde(default)]
+    pub consumes: Vec<StageId>,
 }
 
 impl Stage {
     /// Construct a stage, normalizing `inputs` and `deps` to sorted, deduplicated
     /// sets so a stage's identity and schedule position do not depend on order.
+    ///
+    /// Consumes nothing; use [`consuming`](Self::consuming) for a stage that
+    /// reads an upstream stage's output.
     #[must_use]
     pub fn new(
+        id: StageId,
+        descriptor: StageDescriptor,
+        inputs: Vec<ObjectId>,
+        config_hash: Digest,
+        seed: u64,
+        deps: Vec<StageId>,
+    ) -> Self {
+        Self::consuming(id, descriptor, inputs, config_hash, seed, deps, Vec::new())
+    }
+
+    /// The same, plus the stages whose outputs this one reads.
+    ///
+    /// `consumes` implies ordering: every id in it is folded into `deps`, so
+    /// a caller never has to state the dependency twice and cannot state it
+    /// inconsistently.
+    #[must_use]
+    pub fn consuming(
         id: StageId,
         descriptor: StageDescriptor,
         mut inputs: Vec<ObjectId>,
         config_hash: Digest,
         seed: u64,
         mut deps: Vec<StageId>,
+        mut consumes: Vec<StageId>,
     ) -> Self {
         inputs.sort_unstable();
         inputs.dedup();
+        consumes.sort();
+        consumes.dedup();
+        deps.extend(consumes.iter().cloned());
         deps.sort();
         deps.dedup();
         Self {
@@ -80,6 +123,24 @@ impl Stage {
             config_hash,
             seed,
             deps,
+            consumes,
+        }
+    }
+
+    /// This stage with `resolved` as its inputs — what the scheduler hands to
+    /// an executor once every consumed stage's outputs are known.
+    ///
+    /// Returning a new `Stage` rather than mutating is what keeps memoization
+    /// correct: [`cache_key`](Self::cache_key) reads `inputs`, so the key is
+    /// computed from the *resolved* set and a stage whose upstream changed
+    /// necessarily misses the cache.
+    #[must_use]
+    pub fn with_resolved_inputs(&self, mut resolved: Vec<ObjectId>) -> Self {
+        resolved.sort_unstable();
+        resolved.dedup();
+        Self {
+            inputs: resolved,
+            ..self.clone()
         }
     }
 
@@ -104,6 +165,7 @@ impl Canonical for Stage {
         enc.bytes(self.config_hash.as_bytes());
         enc.u64(self.seed);
         enc.seq(&self.deps);
+        enc.seq(&self.consumes);
     }
 }
 
