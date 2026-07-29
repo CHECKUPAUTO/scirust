@@ -68,14 +68,23 @@
 //!   [`started_from`](root::CertifiedRoot::started_from) alongside the residual
 //!   — a root reported without its starting point cannot be reproduced or even
 //!   correctly interpreted.
-//! * [`spectrum`] — [`spectrum::PeriodogramSimulator`] computes a windowed
-//!   periodogram with `scirust-signal`'s FFT: the first backend here whose
-//!   observation answers *"what is in this signal?"* rather than *"what does
-//!   this system do?"*. `L3` — and its module docs are explicit that `L3`
-//!   asserts bit-reproducibility and **not** accuracy, since a single
-//!   periodogram is a biased, high-variance PSD estimator whose variance does
-//!   not shrink with record length. Like [`root::CertifiedRoot`], its output
-//!   carries the choice that shaped it: [`spectrum::Spectrum::window`].
+//! * [`spectrum`] — two backends over `scirust-signal`, both answering
+//!   *"what is in this signal?"* rather than *"what does this system do?"*,
+//!   and both `L3`:
+//!     * [`spectrum::PeriodogramSimulator`] — a windowed periodogram over the
+//!       FFT. Its module docs are explicit that `L3` asserts
+//!       bit-reproducibility and **not** accuracy: a single periodogram is a
+//!       biased, high-variance PSD estimator whose variance does not shrink
+//!       with record length. Like [`root::CertifiedRoot`], its output carries
+//!       the choice that shaped it ([`spectrum::Spectrum::window`]).
+//!     * [`spectrum::WelchSimulator`] — the averaged periodogram, whose
+//!       variance *does* fall, as `1/segments`. Also `L3`, and that equality
+//!       is the point: the two differ in **estimator quality**, which a
+//!       determinism tag does not express. So
+//!       [`spectrum::AveragedSpectrum`] carries `segments` and
+//!       `dropped_samples` — a *statistical quality descriptor on an exactly
+//!       reproducible result*, a third kind of metadata beside `L2`'s
+//!       tolerance certificate and `L1`'s standard error.
 //!
 //! * [`model`] — [`model::CatalogSimulator`] runs `scirust-sim`'s
 //!   oracle-tested domain models (SIR/SEIR, Lotka-Volterra, RC circuits, Van
@@ -114,18 +123,22 @@
 //! to any capability above) is deferred: `sos-scirust` is documented as
 //! the in-process "Static Rust... the default" transport (RFC-0002 §10 §1),
 //! so direct construction is the expected shape until a caller actually needs
-//! to swap implementations. Within the signal family, Welch averaging and
-//! spectrograms are follow-on work rather than something [`spectrum`] pretends
-//! to.
+//! to swap implementations. Within the signal family, spectrograms are
+//! follow-on work; PSD-domain feature functions (a power-weighted centroid,
+//! say) belong in `scirust-signal` rather than here, which is why
+//! [`spectrum::AveragedSpectrum`] carries no features where
+//! [`spectrum::Spectrum`] does — `scirust-signal`'s existing ones read a
+//! complex spectrum, and a Welch estimate is not one.
 //!
-//! Three of the five [`Simulate`](sos_simulation::Simulate) backends have
-//! stage handlers ([`ode::Rk4OdeSimulator`], [`model::CatalogSimulator`] and
-//! [`spectrum::PeriodogramSimulator`]); [`ode::Dopri5OdeSimulator`],
-//! [`quadrature`] and [`root`] do not, and no other engine's stages have
-//! handlers at all. Two of those three are reachable from `sos run` — the
-//! two whose configuration is data. The other three take a *function*, and no
-//! file can name a function, so a CLI binding for them needs a transport that
-//! ships code (RFC-0002 §10's WASM or MCP), not more plumbing here.
+//! Four of the six [`Simulate`](sos_simulation::Simulate) backends have stage
+//! handlers ([`ode::Rk4OdeSimulator`], [`model::CatalogSimulator`],
+//! [`spectrum::PeriodogramSimulator`] and [`spectrum::WelchSimulator`]);
+//! [`ode::Dopri5OdeSimulator`], [`quadrature`] and [`root`] do not, and no
+//! other engine's stages have handlers at all. Three of those four are
+//! reachable from `sos run` — the three whose configuration is data. The
+//! others take a *function*, and no file can name a function, so a CLI
+//! binding for them needs a transport that ships code (RFC-0002 §10's WASM or
+//! MCP), not more plumbing here.
 //!
 //! ## Example
 //!
@@ -184,6 +197,9 @@ pub use nmc::NestedMcEigEstimator;
 pub use ode::{Dopri5OdeSimulator, Rk4OdeSimulator};
 pub use quadrature::QuadratureSimulator;
 pub use root::{BroydenRootSimulator, CertifiedRoot, RootConfig};
-pub use spectrum::{PeriodogramSimulator, Spectrum, SpectrumBody, SpectrumConfig, WindowKind};
+pub use spectrum::{
+    AveragedSpectrum, AveragedSpectrumBody, PeriodogramSimulator, Spectrum, SpectrumBody,
+    SpectrumConfig, WelchConfig, WelchSimulator, WindowKind,
+};
 pub use stage::{OdeStageHandler, TrajectoryBody, config_address};
 pub use verdict::{Agreement, VerdictError, certify_root};
