@@ -146,8 +146,8 @@ shift with what's true at the time).
 | 5C.7 | Simulate interventions | **Done** — SCM-based intervention simulation and unit-level counterfactuals |
 | 5C.8 | Choose the next experiment | **Done** — worst-case-guaranteed experimental design over a CPDAG |
 | 5C.9 | Update theories | **Done** — assumption-registry revision and certificate retraction under new evidence |
-| 5C.10 | Verify causal claims | **Draft** — certificate integrity plus end-to-end claim-set audit |
-| 5C.11 | Closing synthesis | Planned |
+| 5C.10 | Verify causal claims | **Done** — certificate integrity plus end-to-end claim-set audit |
+| 5C.11 | Closing synthesis | **Draft** — closing assessment of the whole program |
 
 ## Phase 5C.1 — Typed causal contracts and data model
 
@@ -1674,8 +1674,9 @@ revises beliefs accordingly.
 
 ## Phase 5C.10 — Verify causal claims (integrity and claim-set audit)
 
-**Status: Draft.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
-from `origin/master` at `107818da` (the commit 5C.9 merged at).
+**Status: Done.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
+from `origin/master` at `107818da` (the commit 5C.9 merged at). PR #865,
+merged at `a97972d6`.
 
 ### Two holes, found by probing
 
@@ -1814,3 +1815,184 @@ honestly provenanced passes.
 - Fingerprint verification inherits the fixed-build caveat, so a mismatch across
   toolchains is indistinguishable from tampering. The finding says the content
   and fingerprint disagree, not that anyone edited anything.
+
+## Phase 5C.11 — Closing synthesis
+
+**Status: Draft.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
+from `origin/master` at `a97972d6` (the commit 5C.10 merged at). Documentation
+only; no code changes.
+
+### What the program set out to enforce
+
+One rule, written at the top of this document before any code existed:
+*predictive or optimization success must never be converted into an unjustified
+causal claim.* Every capability had to be able to say either "under assumptions
+A, property Q is identifiable, estimated by M with uncertainty U" or "not
+identifiable / equivalence class only / inconclusive" — and stop there.
+
+Ten phases later `scirust-causal` carries **twelve capabilities** and **469
+tests**. What follows assesses what that bought, in the terms the mandate set,
+and is deliberately as specific about the failures as about the results.
+
+### The arc the measurements produced
+
+The roadmap was provisional past 5C.1 and changed under measurement rather than
+under preference — sensitivity analysis was pulled forward ahead of invariance
+because 5C.4 produced a concrete number that demanded quantifying. What emerged
+is one thread, and it is clearest told as a single claim's life cycle.
+
+**5C.4 made a wrong claim, honestly.** Backdoor adjustment on a fixture with a
+latent confounder returns **≈1.497** against a truth of **0.7**, and certifies
+it `Identifiable`. Nothing about that is a bug: the backdoor criterion is
+*satisfied* for the graph supplied — `X` has no parents there, so there is no
+backdoor path — and the graph is what was wrong. A tight interval around a
+badly wrong number is exactly what violating causal sufficiency produces.
+
+The size of that error depends on the fixture, and the tracker records three:
+**121.5 standard errors** in 5C.4's own adversarial test, **74.8** in 5C.6's
+two-environment fixture, **75.5** in the observational-only variant 5C.9 and
+5C.10 reuse. The estimate is ≈1.497 in all three because the bias is a property
+of the generating equations; only the standard error moves with the design.
+
+**5C.5 quantified it.** Cinelli–Hazlett bounds predicted the bias to within
+**2.09%** of the realised value, agreeing across three independent routes — the
+closed-form formula, empirical measurement, and a hand derivation from the
+generating equations. That phase's recorded finding is the uncomfortable half:
+`RV₁ = 0.9335` reads as "you would need a confounder explaining 93% of both
+residual variances to overturn this", and the confounder actually present
+explained **90.1%**. It was very nearly that strong, and it was real. A high
+robustness value is a threshold, not reassurance.
+
+**5C.6 detected it.** Invariant Causal Prediction, given the same data and no
+graph at all, reports `AssumptionsViolated` where backdoor reports
+`Identifiable`. That is a capability 5C.4 structurally cannot have: when its
+own core assumption fails, ICP can *say so*.
+
+**5C.7 priced the remaining ambiguity.** Two structural models whose joint
+distributions are provably identical — verified empirically, and confirmed by
+running PC-Stable and getting the undirected edge back — answer the same
+counterfactual **3** and **1**. That gap is what the Markov-equivalence class
+costs, denominated in the units of the question actually being asked.
+
+**5C.8 named the experiment that closes it.** One intervention, guaranteed
+whatever it finds. Its honesty burden was that Meek propagation is
+outcome-dependent, so every candidate reports a worst-case guarantee beside its
+best case; on the undirected triangle those are **2** and **3**, and a planner
+ranking on the best case would call an experiment decisive when two of its four
+outcomes are not.
+
+**5C.9 withdrew the claim.** ICP's finding, fed back as evidence, moves the
+certificate to `InDoubt` with its estimate no longer usable. Not `Retracted` —
+ICP falsifies a *conjunction* and its own documentation says it cannot name the
+member that broke, so blaming causal sufficiency would invent an attribution
+the test never made.
+
+**5C.10 showed it was flaggable from provenance alone.** The same certificate
+quotes a number while every assumption beneath it is the analyst's word. That
+fires a warning with **no data read at all** — the weakest signal in the
+program, and the earliest.
+
+Five capabilities, five kinds of evidence, converging on one wrong number. That
+convergence is the program's actual result.
+
+### What is now enforceable rather than merely documented
+
+- **Only `Identifiable` may carry an estimate** — enforced on construction and,
+  since 5C.10, on deserialization.
+- **A certificate's fingerprint is checkable**, so it attests something.
+- **Abstention is reachable and tested** in every capability that could
+  overclaim: `NotIdentifiable`, `EquivalenceClassOnly`, `Inconclusive`,
+  `AssumptionsViolated`, `NoInformativeExperiment`, `Unauditable`.
+- **Determinism**: ten benchmarks with SHA-256 fingerprints, each reverified
+  unchanged in every subsequent phase.
+
+### The program's own predictions were wrong seven times
+
+This is the part worth recording most carefully, because a summary would
+naturally omit it. In seven places a phase's stated expectation was
+contradicted by running it, and every time the fix went to the expectation:
+
+1. **5C.3** — a small-sample fixture predicted to produce warnings produced
+   **zero**. Diagnosed with a temporary debug test; fixed with a
+   fully-connected 4-variable structure at `n = 3`.
+2. **5C.4** — a benchmark oracle failed at a tolerance *tighter than the
+   estimator's own noise* (~1.25 SE). The oracle was wrong, not the estimator;
+   tolerances are now in standard-error units.
+3. **5C.5** — a test asserted the adjusted range must contain the truth. The
+   Cinelli–Hazlett bias is **exact** for given partial R², a bound only over
+   direction and not conservative in its inputs, which are measured from finite
+   data.
+4. **5C.6** — the fixture was wrong twice: a pure mean shift cannot expose a
+   child of the target (the pooled slope absorbs it exactly), and a
+   near-noiseless child resists even a scale intervention. Both are real
+   properties of invariance testing — **which environments you have determines
+   what they can distinguish**.
+5. **5C.8** — the undirected triangle's third edge was predicted to be forced
+   under every outcome. It is not: when both edges at the target point the same
+   way, it stays genuinely free.
+6. **5C.8 again** — writing the benchmark exposed that the planner credited
+   experiments with edges the *graph alone* already forced. Fixed by closing the
+   input first and reporting `forced_by_graph_alone` separately.
+7. **5C.10** — the assumption that a certificate reaching an auditor still
+   satisfied its builder's rules was probed with a scratch crate and turned out
+   false in two independent ways.
+
+Six of the seven were found by writing a test or a benchmark and reading what
+came out. The seventh was found by deliberately probing a premise before
+building on it. **None was found by reasoning about the code.**
+
+One related defect deserves its own line. In PR #846 a refactor left a doc
+comment describing a *function* attached to a *struct*, with the function
+undocumented. It compiled, passed clippy, and passed 338 tests. **Nothing in
+the validation gate verifies that documentation describes the item it sits on**,
+and that gap is still open.
+
+### What the twelve capabilities may and may not claim
+
+May claim, jointly: conditional-independence decisions with stated calibration;
+a Markov-equivalence class with compelled and reversible edges marked; an effect
+estimate *relative to a supplied graph*; how strong an unmeasured confounder
+would have to be to overturn it; a conservative subset of direct causes from
+multi-environment data, plus detection when that model is misspecified; exact
+interventional and counterfactual evaluation *relative to a supplied SCM*; a
+worst-case-guaranteed ranking of experiments; automatic withdrawal of claims
+whose assumptions evidence has undermined; and contract compliance across a
+claim set.
+
+May **not** claim — and this list is not shorter than the one above: that any
+discovered graph is the true causal graph; that any estimate is unconfounded;
+that a high robustness value means an estimate is safe; that an empty ICP
+intersection means nothing is causal, or that a detected misspecification says
+*what* is wrong; that any SCM is correct; that an experiment is worth its cost;
+that corroboration establishes an assumption; or that a `Compliant` audit is
+evidence about the world.
+
+### What remains out of scope
+
+Front-door and instrumental-variable identification. Latent-confounding-robust
+discovery (FCI, PAGs). Non-linear and non-additive mechanisms throughout.
+Probabilistic, path-specific and mediation counterfactuals. Multi-variable
+experimental design and any real cost model. Cross-claim dependency tracking, so
+a retraction upstream is not detected downstream. Evidence emission from
+capabilities other than ICP.
+
+Every one of these is named in some phase's own "Known limitations" section.
+None was discovered late; all were scoped out deliberately and recorded when the
+decision was made.
+
+### The honest bottom line
+
+This program did not make causal inference reliable. It made one specific
+dishonesty harder: quoting a number without saying what it rests on, and
+continuing to quote it after the ground has moved.
+
+The wrong estimate at the centre of this document is still wrong, and no
+capability here fixes it. Five of them, in five different ways, decline to let
+it stand unqualified — one bounds it, one detects it, one prices what is still
+unresolved, one withdraws it, and one would have raised a hand from its
+paperwork before any statistics ran.
+
+That is a smaller claim than "we built causal AI". It is the one the evidence
+supports.
+
+**Program 5 (Causal and Experimental Structural Intelligence) ends here.**
