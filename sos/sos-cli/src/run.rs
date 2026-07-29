@@ -9,9 +9,9 @@
 //!
 //! ## Which backends can be bound, and why it is not a matter of effort
 //!
-//! `sos-scirust` ships five `Simulate` backends. Exactly **two** can be driven
-//! from a command line, and that follows from what a *file* can say rather
-//! than from how much plumbing is here.
+//! `sos-scirust` ships six `Simulate` backends. Exactly **three** can be
+//! driven from a command line, and that follows from what a *file* can say
+//! rather than from how much plumbing is here.
 //!
 //! [`OdeStageHandler`](sos_scirust::stage::OdeStageHandler) integrates
 //! `dy/dt = f(t, y)` where `f` is a Rust closure; `Dopri5OdeSimulator`,
@@ -22,12 +22,14 @@
 //! or MCP transports), which is a different mechanism, not a bigger version of
 //! this one.
 //!
-//! The two that can be bound are the two whose configuration is data:
+//! The three that can be bound are the three whose configuration is data:
 //!
 //! * [`CatalogStageHandler`] runs [`ModelRun`]s — a model name, its
 //!   parameters, an initial state.
 //! * [`SpectrumStageHandler`] runs [`SpectrumConfig`]s — samples, a sample
 //!   rate, a named window.
+//! * [`WelchStageHandler`] runs [`WelchConfig`]s — the same, plus a segment
+//!   length and an overlap.
 //!
 //! Both are written down in the same file, tagged by kind (see
 //! [`StageConfig`]), and both appear in [`HANDLERS`].
@@ -69,10 +71,10 @@ use std::rc::Rc;
 use sos_core::{Digest, HashAlgo, SemVer};
 use sos_registry::{Capability, Grant, PluginDescriptor, Registry};
 use sos_scirust::model::ModelRun;
-use sos_scirust::spectrum::SpectrumConfig;
+use sos_scirust::spectrum::{SpectrumConfig, WelchConfig};
 use sos_scirust::stage::{
-    CatalogStageHandler, SpectrumStageHandler, model_config_address, signal_backend, sim_backend,
-    spectrum_config_address,
+    CatalogStageHandler, SpectrumStageHandler, WelchStageHandler, model_config_address,
+    signal_backend, sim_backend, spectrum_config_address, welch_config_address,
 };
 use sos_workflow::{Dispatch, StageExecutor, resolve_manifest, run_plan};
 
@@ -91,11 +93,14 @@ pub const CATALOG_PLUGIN: &str = "sim-catalog";
 /// The plugin name `sos run` binds to the spectral backend.
 pub const SPECTRUM_PLUGIN: &str = "signal-periodogram";
 
+/// The plugin name `sos run` binds to the Welch averaged-periodogram backend.
+pub const WELCH_PLUGIN: &str = "signal-welch";
+
 /// Every plugin name this binary can bind, with a one-line description — the
 /// CLI's handler table, and the thing whose absence kept `sos run` from
 /// existing.
 ///
-/// Two entries. See the module docs on why it is two and not five.
+/// Three entries. See the module docs on why it is three and not six.
 pub const HANDLERS: &[(&str, &str)] = &[
     (
         CATALOG_PLUGIN,
@@ -104,6 +109,10 @@ pub const HANDLERS: &[(&str, &str)] = &[
     (
         SPECTRUM_PLUGIN,
         "scirust-signal's windowed periodogram (L3, reproducible not accurate)",
+    ),
+    (
+        WELCH_PLUGIN,
+        "scirust-signal's Welch averaged periodogram (L3, variance falls as 1/segments)",
     ),
 ];
 
@@ -120,6 +129,8 @@ pub enum StageConfig {
     Model(ModelRun),
     /// A spectral measurement, for [`SPECTRUM_PLUGIN`].
     Spectrum(SpectrumConfig),
+    /// A Welch averaged-periodogram measurement, for [`WELCH_PLUGIN`].
+    Welch(WelchConfig),
 }
 
 impl StageConfig {
@@ -131,6 +142,7 @@ impl StageConfig {
         {
             Self::Model(run) => model_config_address(run),
             Self::Spectrum(config) => spectrum_config_address(config),
+            Self::Welch(config) => welch_config_address(config),
         }
     }
 
@@ -141,6 +153,7 @@ impl StageConfig {
         {
             Self::Model(_) => CATALOG_PLUGIN,
             Self::Spectrum(_) => SPECTRUM_PLUGIN,
+            Self::Welch(_) => WELCH_PLUGIN,
         }
     }
 
@@ -152,6 +165,10 @@ impl StageConfig {
         {
             Self::Model(run) => run.model.kind.to_string(),
             Self::Spectrum(c) => format!("{} window over {} samples", c.window, c.signal.len()),
+            Self::Welch(c) => format!(
+                "{} window, {}-sample segments, {} overlap",
+                c.window, c.segment_len, c.overlap
+            ),
         }
     }
 }
@@ -188,18 +205,24 @@ pub fn run(args: &Args) -> Result<String> {
         Rc::clone(&store),
         signal_backend(SemVer::new(0, 1, 0), backend_hash()),
     );
+    let mut welch = WelchStageHandler::new(
+        Rc::clone(&store),
+        signal_backend(SemVer::new(0, 1, 0), backend_hash()),
+    );
     let offered: Vec<Digest> = configs
         .into_iter()
         .map(|c| match c
         {
             StageConfig::Model(run) => models.offer(run),
             StageConfig::Spectrum(config) => spectra.offer(config),
+            StageConfig::Welch(config) => welch.offer(config),
         })
         .collect();
 
     let mut dispatch = Dispatch::new(&registry, grant);
     dispatch.register(CATALOG_PLUGIN, Box::new(models) as Box<dyn StageExecutor>);
     dispatch.register(SPECTRUM_PLUGIN, Box::new(spectra) as Box<dyn StageExecutor>);
+    dispatch.register(WELCH_PLUGIN, Box::new(welch) as Box<dyn StageExecutor>);
 
     let env = env_digest(args.flag("env").unwrap_or(DEFAULT_ENV_LABEL));
     let mut memo = FileMemo::open(&root)?;
