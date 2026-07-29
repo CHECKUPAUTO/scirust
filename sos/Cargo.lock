@@ -728,9 +728,14 @@ dependencies = [
  "scirust-gp",
  "scirust-solvers",
  "scirust-stats",
+ "serde",
+ "serde_json",
  "sos-core",
  "sos-planner",
+ "sos-registry",
  "sos-simulation",
+ "sos-store",
+ "sos-workflow",
  "thiserror",
 ]
 
