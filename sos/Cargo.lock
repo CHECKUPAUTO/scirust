@@ -767,6 +767,7 @@ dependencies = [
  "sos-repro",
  "sos-simulation",
  "sos-store",
+ "sos-theory",
  "sos-workflow",
  "thiserror",
 ]
