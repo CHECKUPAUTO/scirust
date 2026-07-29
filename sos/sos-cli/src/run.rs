@@ -86,10 +86,12 @@ use std::rc::Rc;
 use sos_core::{Author, Digest, HashAlgo, Object, ObjectId, SemVer};
 use sos_registry::{Capability, Grant, PluginDescriptor, Registry};
 use sos_scirust::model::ModelRun;
+use sos_scirust::pipeline::TrajectorySpectrumConfig;
 use sos_scirust::spectrum::{SpectrumConfig, WelchConfig};
 use sos_scirust::stage::{
-    CatalogStageHandler, SpectrumStageHandler, WelchStageHandler, model_config_address,
-    signal_backend, sim_backend, spectrum_config_address, welch_config_address,
+    CatalogStageHandler, SpectrumStageHandler, TrajectorySpectrumStageHandler, WelchStageHandler,
+    model_config_address, signal_backend, sim_backend, spectrum_config_address,
+    trajectory_config_address, welch_config_address,
 };
 use sos_store::TypedStore;
 use sos_workflow::{Dispatch, StageExecutor, resolve_manifest, run_plan};
@@ -112,11 +114,14 @@ pub const SPECTRUM_PLUGIN: &str = "signal-periodogram";
 /// The plugin name `sos run` binds to the Welch averaged-periodogram backend.
 pub const WELCH_PLUGIN: &str = "signal-welch";
 
+/// The plugin name a stage measuring an **upstream trajectory** must pin.
+pub const TRAJECTORY_PLUGIN: &str = "trajectory-spectrum";
+
 /// Every plugin name this binary can bind, with a one-line description — the
 /// CLI's handler table, and the thing whose absence kept `sos run` from
 /// existing.
 ///
-/// Three entries. See the module docs on why it is three and not six.
+/// Four entries. See the module docs on why it is four and not seven.
 pub const HANDLERS: &[(&str, &str)] = &[
     (
         CATALOG_PLUGIN,
@@ -129,6 +134,10 @@ pub const HANDLERS: &[(&str, &str)] = &[
     (
         WELCH_PLUGIN,
         "scirust-signal's Welch averaged periodogram (L3, variance falls as 1/segments)",
+    ),
+    (
+        TRAJECTORY_PLUGIN,
+        "the spectrum of a consumed trajectory (L3, sample rate derived from its time grid)",
     ),
 ];
 
@@ -147,6 +156,13 @@ pub enum StageConfig {
     Spectrum(SpectrumConfig),
     /// A Welch averaged-periodogram measurement, for [`WELCH_PLUGIN`].
     Welch(WelchConfig),
+    /// A measurement of an **upstream stage's** trajectory, for
+    /// [`TRAJECTORY_PLUGIN`].
+    ///
+    /// The only variant that carries no data of its own: the signal comes from
+    /// whatever object the stage `consumes`, and the sample rate is derived
+    /// from that trajectory's time grid rather than declared here.
+    Trajectory(TrajectorySpectrumConfig),
 }
 
 impl StageConfig {
@@ -159,6 +175,7 @@ impl StageConfig {
             Self::Model(run) => model_config_address(run),
             Self::Spectrum(config) => spectrum_config_address(config),
             Self::Welch(config) => welch_config_address(config),
+            Self::Trajectory(config) => trajectory_config_address(config),
         }
     }
 
@@ -170,6 +187,7 @@ impl StageConfig {
             Self::Model(_) => CATALOG_PLUGIN,
             Self::Spectrum(_) => SPECTRUM_PLUGIN,
             Self::Welch(_) => WELCH_PLUGIN,
+            Self::Trajectory(_) => TRAJECTORY_PLUGIN,
         }
     }
 
@@ -184,6 +202,10 @@ impl StageConfig {
             Self::Welch(c) => format!(
                 "{} window, {}-sample segments, {} overlap",
                 c.window, c.segment_len, c.overlap
+            ),
+            Self::Trajectory(c) => format!(
+                "component {} of a consumed trajectory, {} window, {}-sample segments",
+                c.component, c.window, c.segment_len
             ),
         }
     }
@@ -216,6 +238,8 @@ pub fn run(args: &Args) -> Result<String> {
     let mut models = CatalogStageHandler::new(Rc::clone(&store), sim_backend_version());
     let mut spectra = SpectrumStageHandler::new(Rc::clone(&store), signal_backend_version());
     let mut welch = WelchStageHandler::new(Rc::clone(&store), signal_backend_version());
+    let mut trajectories =
+        TrajectorySpectrumStageHandler::new(Rc::clone(&store), signal_backend_version());
     let offered: Vec<Digest> = configs
         .into_iter()
         .map(|c| match c
@@ -223,6 +247,7 @@ pub fn run(args: &Args) -> Result<String> {
             StageConfig::Model(run) => models.offer(run),
             StageConfig::Spectrum(config) => spectra.offer(config),
             StageConfig::Welch(config) => welch.offer(config),
+            StageConfig::Trajectory(config) => trajectories.offer(config),
         })
         .collect();
 
@@ -230,6 +255,10 @@ pub fn run(args: &Args) -> Result<String> {
     dispatch.register(CATALOG_PLUGIN, Box::new(models) as Box<dyn StageExecutor>);
     dispatch.register(SPECTRUM_PLUGIN, Box::new(spectra) as Box<dyn StageExecutor>);
     dispatch.register(WELCH_PLUGIN, Box::new(welch) as Box<dyn StageExecutor>);
+    dispatch.register(
+        TRAJECTORY_PLUGIN,
+        Box::new(trajectories) as Box<dyn StageExecutor>,
+    );
 
     let env = env_digest(args.flag("env").unwrap_or(DEFAULT_ENV_LABEL));
     let mut memo = FileMemo::open(&root)?;

@@ -51,7 +51,9 @@ use std::rc::Rc;
 
 use sos_core::{EnvRecord, ObjectId, SemVer};
 use sos_repro::{EnvLock, NoCertifier, verify_object};
-use sos_scirust::stage::{CatalogStageHandler, SpectrumStageHandler, WelchStageHandler};
+use sos_scirust::stage::{
+    CatalogStageHandler, SpectrumStageHandler, TrajectorySpectrumStageHandler, WelchStageHandler,
+};
 use sos_store::TypedStore;
 use sos_workflow::{Dispatch, MemoTable, StageExecutor};
 
@@ -59,8 +61,8 @@ use crate::args::Args;
 use crate::error::Result;
 use crate::header::GenericHeader;
 use crate::run::{
-    CATALOG_PLUGIN, SPECTRUM_PLUGIN, StageConfig, WELCH_PLUGIN, load_registry, parse_grant,
-    signal_backend_version, sim_backend_version,
+    CATALOG_PLUGIN, SPECTRUM_PLUGIN, StageConfig, TRAJECTORY_PLUGIN, WELCH_PLUGIN, load_registry,
+    parse_grant, signal_backend_version, sim_backend_version,
 };
 use crate::store;
 
@@ -88,6 +90,8 @@ pub fn rerun(path: Option<&str>, id: ObjectId, args: &Args) -> Result<String> {
     let mut models = CatalogStageHandler::new(Rc::clone(&writer), sim_backend_version());
     let mut spectra = SpectrumStageHandler::new(Rc::clone(&writer), signal_backend_version());
     let mut welch = WelchStageHandler::new(Rc::clone(&writer), signal_backend_version());
+    let mut trajectories =
+        TrajectorySpectrumStageHandler::new(Rc::clone(&writer), signal_backend_version());
     for config in configs
     {
         match config
@@ -95,12 +99,17 @@ pub fn rerun(path: Option<&str>, id: ObjectId, args: &Args) -> Result<String> {
             StageConfig::Model(run) => drop(models.offer(run)),
             StageConfig::Spectrum(c) => drop(spectra.offer(c)),
             StageConfig::Welch(c) => drop(welch.offer(c)),
+            StageConfig::Trajectory(c) => drop(trajectories.offer(c)),
         }
     }
     let mut dispatch = Dispatch::new(&registry, grant);
     dispatch.register(CATALOG_PLUGIN, Box::new(models) as Box<dyn StageExecutor>);
     dispatch.register(SPECTRUM_PLUGIN, Box::new(spectra) as Box<dyn StageExecutor>);
     dispatch.register(WELCH_PLUGIN, Box::new(welch) as Box<dyn StageExecutor>);
+    dispatch.register(
+        TRAJECTORY_PLUGIN,
+        Box::new(trajectories) as Box<dyn StageExecutor>,
+    );
 
     // An empty memo, always. Reusing `sos run`'s persisted one would replay
     // the recorded outputs and verify nothing.
@@ -210,6 +219,7 @@ fn typed_check<S: sos_store::ObjectStore>(s: &S, header: &GenericHeader) -> Stri
         "ModeledTrajectory" => check!(sos_scirust::model::ModeledTrajectoryBody),
         "Spectrum" => check!(sos_scirust::spectrum::SpectrumBody),
         "AveragedSpectrum" => check!(sos_scirust::spectrum::AveragedSpectrumBody),
+        "TrajectorySpectrum" => check!(sos_scirust::pipeline::TrajectorySpectrumBody),
         other => format!("  content hash: not checked (unrecognized kind `{other}`)"),
     }
 }
