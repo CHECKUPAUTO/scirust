@@ -5,6 +5,7 @@ mod battery;
 mod double_pendulum;
 mod heat_rod;
 mod hvac_zone;
+mod laser;
 mod logistic_growth;
 mod lotka_volterra;
 mod oral_dose;
@@ -22,6 +23,7 @@ pub use battery::BatteryAdapter;
 pub use double_pendulum::DoublePendulumAdapter;
 pub use heat_rod::HeatRodAdapter;
 pub use hvac_zone::HvacZoneAdapter;
+pub use laser::SemiconductorLaserAdapter;
 pub use logistic_growth::LogisticGrowthAdapter;
 pub use lotka_volterra::LotkaVolterraAdapter;
 pub use oral_dose::OralOneCompartmentAdapter;
@@ -64,6 +66,7 @@ pub fn all_adapters() -> Vec<Box<dyn CapabilityAdapter>> {
         Box::new(RigidBodyAdapter),
         Box::new(OralOneCompartmentAdapter),
         Box::new(BatteryAdapter),
+        Box::new(SemiconductorLaserAdapter),
     ]
 }
 
@@ -172,6 +175,11 @@ const TUTORIAL_SCENARIOS: &[(&str, &str, &str)] = &[
         "sim.energy.battery_thevenin",
         "battery_discharge.scirust.toml",
         include_str!("../../../docs/studio/tutorials/battery_discharge.scirust.toml"),
+    ),
+    (
+        "sim.optoelectronics.semiconductor_laser",
+        "semiconductor_laser.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/semiconductor_laser.scirust.toml"),
     ),
 ];
 
