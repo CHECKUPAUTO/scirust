@@ -17,6 +17,7 @@ mod adapters;
 mod control;
 mod ensemble;
 mod execute_support;
+mod measure;
 mod result;
 mod result_v1;
 mod sink;

@@ -66,6 +66,7 @@ use scirust_studio_schema::Scenario;
 use crate::adapter::{CapabilityAdapter, ExecutionError, ValidatedScenario, ValidationReport};
 use crate::control::ExecutionControl;
 use crate::execute_support::{TimeSpan, simulate_cancellable};
+use crate::measure::{crossing_times, period_from_second_half};
 use crate::result::{
     Axis, AxisMonotonicity, Metric, MetricValue, RESULT_SCHEMA_VERSION, RunProvenance, RunResult,
     RunSummary, RunWarning, Series, SeriesRole, TIME_AXIS_ID, VerificationResult,
@@ -473,7 +474,7 @@ impl CapabilityAdapter for SemiconductorLaserAdapter {
             decay,
             oracle_applies,
         );
-        let measured_period = measure_period(&traj.t, &photon, s_ss);
+        let measured_period = period_from_second_half(&traj.t, &photon, s_ss);
         let predicted_period = damped_period(model.relaxation_frequency(), decay);
         let ringing = ringing_check(measured_period, predicted_period, oracle_applies);
 
@@ -634,47 +635,6 @@ fn damped_period(relaxation_frequency: f64, decay: f64) -> Option<f64> {
     {
         None
     }
-}
-
-/// Where a series crosses a level, located by linear interpolation between
-/// the two samples that straddle the crossing.
-fn crossing_times(t: &[f64], values: &[f64], level: f64) -> Vec<f64> {
-    let mut crossings = Vec::new();
-    for i in 1..values.len()
-    {
-        let (a, b) = (values[i - 1] - level, values[i] - level);
-        if (a < 0.0 && b >= 0.0) || (a > 0.0 && b <= 0.0)
-        {
-            let span = b - a;
-            let fraction = if span != 0.0 { -a / span } else { 0.0 };
-            crossings.push(t[i - 1] + fraction * (t[i] - t[i - 1]));
-        }
-    }
-    crossings
-}
-
-/// The ringing period, averaged over the crossings in the run's second half.
-///
-/// The second half specifically: the closed form being compared against is a
-/// *linearisation*, and by then the oscillation is small enough for that to be
-/// an excellent description. Measuring over the whole run would fold in the
-/// large-amplitude early cycles, where the nonlinear correction is real, and
-/// then need a tolerance loose enough to hide it.
-fn measure_period(t: &[f64], values: &[f64], level: f64) -> Option<f64> {
-    let (first, last) = (*t.first()?, *t.last()?);
-    let midpoint = first + (last - first) / 2.0;
-    let late: Vec<f64> = crossing_times(t, values, level)
-        .into_iter()
-        .filter(|c| *c >= midpoint)
-        .collect();
-    // Two crossings is one half-period and no averaging at all; three is the
-    // least that measures a full period.
-    if late.len() < 3
-    {
-        return None;
-    }
-    let half_periods = (late.len() - 1) as f64;
-    Some(2.0 * (late[late.len() - 1] - late[0]) / half_periods)
 }
 
 /// How far a series ends from a level, relative to how far it started —
@@ -1001,24 +961,5 @@ mod tests {
             "net gain ended at {end}, which is {} of the cavity loss",
             end.abs() / loss
         );
-    }
-
-    #[test]
-    fn a_period_measured_from_too_few_crossings_is_none() {
-        // One crossing in the second half is not a period.
-        let t: Vec<f64> = (0..10).map(|i| i as f64).collect();
-        let v = vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0];
-        assert_eq!(measure_period(&t, &v, 0.0), None);
-    }
-
-    #[test]
-    fn crossings_are_interpolated_not_snapped_to_samples() {
-        // A straight line from -1 to 1 across [0, 2] crosses zero at t = 1,
-        // which is not a sample.
-        let t = [0.0, 2.0];
-        let v = [-1.0, 1.0];
-        let crossings = crossing_times(&t, &v, 0.0);
-        assert_eq!(crossings.len(), 1);
-        assert!((crossings[0] - 1.0).abs() < 1e-15, "{}", crossings[0]);
     }
 }
