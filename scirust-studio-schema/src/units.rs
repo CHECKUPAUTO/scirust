@@ -61,6 +61,15 @@ pub fn lookup(symbol: &str) -> Option<UnitEntry> {
         "H" => Dimension::ENERGY.div(Dimension::CURRENT.powi(2)),
         // Farad (capacitance): F = C/V.
         "F" => Dimension::CHARGE.div(Dimension::VOLTAGE),
+        // The radian is the SI-coherent angular unit and is dimensionless by
+        // construction (arc length over radius). It is listed separately from
+        // "1" because an angle written `unit = "1"` reads as a mistake, and
+        // because a reader of a pendulum scenario should be able to see that
+        // the value is in radians and not degrees. The conversion factor is
+        // genuinely 1, so nothing here is a hidden rescale.
+        "rad" => Dimension::DIMENSIONLESS,
+        // Angular velocity. Dimensionally a frequency, exactly as "1/s" is.
+        "rad/s" => Dimension::FREQUENCY,
         _ => return None,
     };
     Some(UnitEntry {
@@ -72,6 +81,42 @@ pub fn lookup(symbol: &str) -> Option<UnitEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An angle is dimensionless and an angular velocity is a frequency, so
+    /// the pendulum capabilities can be dimension-checked like everything
+    /// else. Both factors must be exactly 1: a symbol that silently rescaled
+    /// a scenario's numbers would be far worse than one that is missing.
+    #[test]
+    fn angular_units_are_dimensionless_and_unscaled() {
+        let rad = lookup("rad").expect("rad");
+        assert_eq!(rad.dimension, Dimension::DIMENSIONLESS);
+        assert_eq!(rad.to_si_factor, 1.0);
+
+        let rate = lookup("rad/s").expect("rad/s");
+        assert_eq!(rate.dimension, Dimension::FREQUENCY);
+        assert_eq!(rate.to_si_factor, 1.0);
+
+        // Same dimension as the plain forms, so a scenario may write either.
+        assert_eq!(rad.dimension, lookup("1").unwrap().dimension);
+        assert_eq!(rate.dimension, lookup("1/s").unwrap().dimension);
+    }
+
+    /// Every symbol in the table converts to SI by a factor of exactly one.
+    /// The table is a *dimension* table; the moment an entry needs a real
+    /// conversion (mg, litre, hour) that is a deliberate change with its own
+    /// tests, not something to slip in beside these.
+    #[test]
+    fn no_symbol_carries_a_hidden_conversion() {
+        for symbol in [
+            "1", "m", "kg", "s", "A", "K", "mol", "cd", "m/s", "m/s^2", "N", "J", "W", "Pa", "Hz",
+            "C", "V", "Ohm", "kg/s", "kg/s^2", "kg/m^3", "1/s", "m^3/s^2", "H", "F", "rad",
+            "rad/s",
+        ]
+        {
+            let entry = lookup(symbol).unwrap_or_else(|| panic!("{symbol} must be in the table"));
+            assert_eq!(entry.to_si_factor, 1.0, "{symbol}");
+        }
+    }
 
     #[test]
     fn recognises_the_symbols_the_spring_mass_damper_example_uses() {

@@ -446,8 +446,25 @@ fn events_are_ordered_and_the_buffer_is_bounded() {
 fn tutorials_and_the_catalogue_come_from_the_real_registry() {
     let (_dir, service) = service_with_store();
 
+    // Against the registry rather than a number written here: a hard-coded
+    // count turns adding a capability into a chore, and a chore gets updated
+    // without anyone asking whether the change was intended. What matters is
+    // that the service exposes exactly what the runtime can execute.
     let catalog = service.catalog();
-    assert_eq!(catalog.len(), 5, "this build exposes five capabilities");
+    let registry = scirust_studio_runtime::build_registry();
+    assert_eq!(
+        catalog.len(),
+        registry.len(),
+        "the service must expose every executable capability and nothing else"
+    );
+    for descriptor in registry.iter()
+    {
+        assert!(
+            catalog.iter().any(|c| c.id == descriptor.id),
+            "{} is executable but the service does not expose it",
+            descriptor.id
+        );
+    }
 
     let tutorials = service.tutorials();
     assert_eq!(tutorials.len(), catalog.len());
