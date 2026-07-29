@@ -13,16 +13,34 @@
 //! a content-addressed object whose [`ObjectId`] the scheduler records in its
 //! ledger.
 //!
-//! ## Exactly one path, and only what it demonstrates
+//! ## Two handlers, and the difference between them
 //!
-//! This wires **one** backend ([`Rk4OdeSimulator`], `L3`) into **one**
-//! dispatcher. It is a working vertical slice, not a general capability: the
-//! other backends this crate ships ([`crate::ode::Dopri5OdeSimulator`],
-//! [`crate::quadrature`]) are not wired, nothing turns a study manifest into
-//! a [`Plan`](sos_workflow::Plan) (that frontend concern is still deferred),
-//! and no other engine's stages have handlers. What can be claimed after this
-//! module is precise: a hand-constructed plan whose stages name this ODE
-//! backend runs, memoizes, and records real results.
+//! [`OdeStageHandler`] runs [`Rk4OdeSimulator`], whose model is a Rust closure
+//! the handler closes over. [`CatalogStageHandler`] runs
+//! [`CatalogSimulator`], whose model is
+//! *data*. The mechanics are nearly identical; the guarantee is not.
+//!
+//! A [`Stage`]'s `config_hash` is all a [`Plan`](sos_workflow::Plan) records
+//! about what a stage computes. For the ODE handler that address does not
+//! determine the physics — it pins the span, the step and the initial state,
+//! while the right-hand side comes from whichever closure this handler was
+//! constructed with, so the same plan run against two differently-built
+//! handlers computes two different things. For the catalogue handler the model
+//! is inside the address, so it cannot. That is also why
+//! [`CatalogStageHandler`] can answer
+//! [`model_at`](CatalogStageHandler::model_at) — *what science is this plan
+//! about to do?* — before running anything, and [`OdeStageHandler`] has no
+//! such method to offer.
+//!
+//! ## Only what these demonstrate
+//!
+//! Two backends of the five this crate ships are wired
+//! ([`crate::ode::Dopri5OdeSimulator`], [`crate::quadrature`],
+//! [`crate::root`] and [`crate::spectrum`] are not), and no other engine's
+//! stages have handlers. `sos-cli` is connected to neither, so `sos run` is
+//! still not real. What can be claimed is precise: a plan — hand-built, or
+//! resolved from a TOML study — whose stages name one of these two plugins
+//! runs, memoizes, and records real results.
 //!
 //! ## The seams this module closes
 //!
@@ -92,6 +110,7 @@ use sos_simulation::{Observation, Simulate};
 use sos_store::{ObjectStore, TypedStore};
 use sos_workflow::{Stage, StageExecutor, WorkflowError};
 
+use crate::model::{CatalogSimulator, ModelRun, ModelSpec, ModeledTrajectoryBody};
 use crate::ode::{OdeConfig, Rk4OdeSimulator, Trajectory};
 use crate::solver::{ExactF64Seq, encode_f64};
 
@@ -381,6 +400,151 @@ pub fn solvers_backend(version: SemVer, content_hash: Digest) -> BackendVersion 
     BackendVersion::new("scirust-solvers", version, content_hash)
 }
 
+/// The same, naming `scirust-sim` — the backend behind
+/// [`CatalogStageHandler`].
+#[must_use]
+pub fn sim_backend(version: SemVer, content_hash: Digest) -> BackendVersion {
+    BackendVersion::new("scirust-sim", version, content_hash)
+}
+
+/// Domain-separation prefix for a catalogue run's content address. Distinct
+/// from [`CONFIG_DOMAIN`] so an ODE config and a model run can never collide,
+/// even if their encodings ever coincided.
+const MODEL_CONFIG_DOMAIN: &[u8] = b"sos-scirust:model-stage-config:v1";
+
+/// The content address of `run` — the value a [`Stage`] must carry in its
+/// `config_hash` for [`CatalogStageHandler`] to run it.
+///
+/// Unlike [`config_address`], this address covers the **model** as well as the
+/// integration parameters, which is what makes a plan referencing it
+/// well-determined.
+#[must_use]
+pub fn model_config_address(run: &ModelRun) -> Digest {
+    HashAlgo::Sha256.hash(MODEL_CONFIG_DOMAIN, &run.canonical_bytes())
+}
+
+/// The determinism level every [`CatalogStageHandler`] output carries:
+/// [`CatalogSimulator`] is `L3`, seedless-deterministic.
+pub const CATALOG_STAGE_LEVEL: DeterminismLevel = DeterminismLevel::L3;
+
+/// A [`StageExecutor`] that runs workflow stages on
+/// [`CatalogSimulator`] — `scirust-sim`'s catalogued models.
+///
+/// Note what is *absent* compared to [`OdeStageHandler`]: no type parameter
+/// for a right-hand side, because there is no closure to carry. Every
+/// difference between two runs lives in their [`ModelRun`]s, and therefore in
+/// their content addresses.
+pub struct CatalogStageHandler<S> {
+    simulator: CatalogSimulator,
+    store: Rc<RefCell<S>>,
+    runs: BTreeMap<Digest, ModelRun>,
+    backend: BackendVersion,
+}
+
+impl<S: ObjectStore> CatalogStageHandler<S> {
+    /// A handler sealing its results into `store`, recording `backend` in
+    /// every stored object's [`ReproMeta`].
+    #[must_use]
+    pub fn new(store: Rc<RefCell<S>>, backend: BackendVersion) -> Self {
+        Self {
+            simulator: CatalogSimulator::new(),
+            store,
+            runs: BTreeMap::new(),
+            backend,
+        }
+    }
+
+    /// Make `run` available to stages, returning the content address that
+    /// selects it. The address is computed, never supplied.
+    pub fn offer(&mut self, run: ModelRun) -> Digest {
+        let address = model_config_address(&run);
+        self.runs.insert(address, run);
+        address
+    }
+
+    /// The content addresses currently on offer, sorted.
+    #[must_use]
+    pub fn offered(&self) -> Vec<Digest> {
+        self.runs.keys().copied().collect()
+    }
+
+    /// Which model the run at `address` will integrate — answerable *before*
+    /// the stage runs.
+    ///
+    /// This is the audit that model identity buys and that
+    /// [`OdeStageHandler`] cannot offer: given a [`Plan`](sos_workflow::Plan),
+    /// a reviewer can ask what science it is about to do rather than reading
+    /// the source of whatever closure was compiled in.
+    #[must_use]
+    pub fn model_at(&self, address: &Digest) -> Option<&ModelSpec> {
+        self.runs.get(address).map(|run| &run.model)
+    }
+
+    /// See [`OdeStageHandler::env`] — same reasoning, different backend.
+    fn env(&self) -> EnvRecord {
+        EnvRecord::new(
+            "unspecified",
+            vec![self.backend.clone()],
+            "unspecified",
+            "unspecified",
+        )
+    }
+
+    fn producer(&self) -> ProducerRef {
+        let descriptor = self.simulator.descriptor();
+        ProducerRef::new(
+            descriptor.name.clone(),
+            descriptor.version,
+            HashAlgo::Sha256.hash(b"sos-producer", &descriptor.canonical_bytes()),
+        )
+    }
+}
+
+impl<S: ObjectStore> StageExecutor for CatalogStageHandler<S> {
+    fn run(&mut self, stage: &Stage) -> Result<Vec<ObjectId>, WorkflowError> {
+        let run = self
+            .runs
+            .get(&stage.config_hash)
+            .ok_or_else(|| WorkflowError::StageFailed {
+                stage: stage.id.clone(),
+                reason: format!(
+                    "no model run is on offer at content address {}",
+                    stage.config_hash
+                ),
+            })?;
+
+        let observation =
+            self.simulator
+                .run(run, stage.seed)
+                .map_err(|e| WorkflowError::StageFailed {
+                    stage: stage.id.clone(),
+                    reason: e.to_string(),
+                })?;
+
+        let level = observation.level();
+        let repro = ReproMeta::new(
+            stage.seed,
+            RngId::new("none"),
+            self.env().digest(HashAlgo::Sha256),
+        )
+        .with_inputs(stage.inputs.clone());
+        let object = Object::builder(ModeledTrajectoryBody::from_observation(observation))
+            .level(level)
+            .producer(self.producer())
+            .parents(stage.inputs.clone())
+            .repro(repro)
+            .seal();
+
+        let id = self.store.borrow_mut().put_object(&object).map_err(|e| {
+            WorkflowError::StageFailed {
+                stage: stage.id.clone(),
+                reason: e.to_string(),
+            }
+        })?;
+        Ok(vec![id])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use sos_simulation::SimDescriptor;
@@ -625,5 +789,158 @@ mod tests {
     fn a_corrupted_float_field_is_an_error_not_a_silent_zero() {
         let json = r#"{"trajectory":[["not-a-number",["1.0"]]],"level":"L3","seed":0}"#;
         assert!(serde_json::from_str::<TrajectoryBody>(json).is_err());
+    }
+
+    // ---- the catalogue handler -------------------------------------------
+
+    mod catalogue {
+        use super::super::*;
+        use super::stage_at;
+        use crate::model::ModelKind;
+        use sos_store::MemoryStore;
+
+        fn handler() -> CatalogStageHandler<MemoryStore> {
+            CatalogStageHandler::new(
+                Rc::new(RefCell::new(MemoryStore::new())),
+                sim_backend(
+                    SemVer::new(0, 1, 0),
+                    HashAlgo::Sha256.hash(b"test-backend", b"scirust-sim"),
+                ),
+            )
+        }
+
+        /// Logistic growth toward carrying capacity — a model with a closed
+        /// form, so the stage's output can be checked against real physics.
+        fn logistic() -> ModelRun {
+            ModelRun::new(
+                ModelSpec::new(ModelKind::LogisticGrowth, [0.8, 100.0]),
+                [5.0],
+                0.0,
+                6.0,
+                0.001,
+            )
+        }
+
+        #[test]
+        fn running_a_stage_integrates_the_named_model_and_stores_it() {
+            let mut h = handler();
+            let store = Rc::clone(&h.store);
+            let address = h.offer(logistic());
+
+            let ids = h.run(&stage_at(address)).unwrap();
+            assert_eq!(ids.len(), 1);
+
+            let stored: Object<ModeledTrajectoryBody> =
+                store.borrow().get_object(ids[0]).unwrap().unwrap();
+            // The physics: x(6) for r = 0.8, K = 100, x0 = 5 is ~86.478.
+            let x_end = stored.body.trajectory.last().unwrap().1[0];
+            let exact = 100.0 / (1.0 + 19.0 * (-0.8 * 6.0_f64).exp());
+            assert!((x_end - exact).abs() < 1e-6, "{x_end} vs {exact}");
+            // And the object knows what produced it.
+            assert_eq!(stored.body.model, logistic().model);
+            assert_eq!(stored.level, CATALOG_STAGE_LEVEL);
+            assert_eq!(stored.producer.name, "scirust-sim/catalog-rk4");
+        }
+
+        #[test]
+        fn a_plan_can_be_audited_before_it_runs() {
+            // The capability model identity buys, and the one `OdeStageHandler`
+            // cannot offer: given only a stage's `config_hash`, say which
+            // science the stage will do.
+            let mut h = handler();
+            let address = h.offer(logistic());
+            assert_eq!(
+                h.model_at(&address).map(|m| m.kind),
+                Some(ModelKind::LogisticGrowth)
+            );
+            assert_eq!(h.model_at(&address).unwrap().params, vec![0.8, 100.0]);
+            assert_eq!(h.offered(), vec![address]);
+
+            let never_offered = model_config_address(&ModelRun::new(
+                ModelSpec::new(ModelKind::Sir, [0.6, 0.2]),
+                [0.99, 0.01, 0.0],
+                0.0,
+                1.0,
+                0.01,
+            ));
+            assert!(h.model_at(&never_offered).is_none());
+        }
+
+        #[test]
+        fn two_models_are_two_addresses_even_with_identical_run_parameters() {
+            // The property the ODE handler cannot have: the plan itself
+            // distinguishes the experiments.
+            let growth = logistic();
+            let mut cooling = growth.clone();
+            cooling.model.kind = ModelKind::NewtonCooling;
+            assert_ne!(
+                model_config_address(&growth),
+                model_config_address(&cooling)
+            );
+            // And neither collides with an ODE config address, which uses a
+            // different domain prefix.
+            let ode = config_address(&OdeConfig::new(0.0, 6.0, vec![5.0], 0.001));
+            assert_ne!(model_config_address(&growth), ode);
+        }
+
+        #[test]
+        fn an_unoffered_address_fails_the_stage() {
+            let mut h = handler();
+            let never = model_config_address(&logistic());
+            let err = h.run(&stage_at(never)).unwrap_err();
+            assert!(matches!(err, WorkflowError::StageFailed { .. }), "{err:?}");
+            assert!(err.to_string().contains("no model run is on offer"));
+        }
+
+        #[test]
+        fn an_invalid_run_fails_the_stage_rather_than_storing_anything() {
+            let mut h = handler();
+            let store = Rc::clone(&h.store);
+            // A state vector of the wrong length for this model — rejected by
+            // the backend, not by `offer`, since a config is just data.
+            let address = h.offer(ModelRun::new(
+                ModelSpec::new(ModelKind::Sir, [0.6, 0.2]),
+                [0.99, 0.01],
+                0.0,
+                1.0,
+                0.01,
+            ));
+            assert!(matches!(
+                h.run(&stage_at(address)),
+                Err(WorkflowError::StageFailed { .. })
+            ));
+            assert!(
+                store.borrow().object_ids().is_empty(),
+                "a failed stage must store nothing"
+            );
+        }
+
+        #[test]
+        fn the_same_stage_run_twice_produces_the_same_object_id() {
+            let mut h = handler();
+            let address = h.offer(logistic());
+            let first = h.run(&stage_at(address)).unwrap();
+            let second = h.run(&stage_at(address)).unwrap();
+            assert_eq!(first, second, "an L3 backend must be bit-reproducible");
+        }
+
+        #[test]
+        fn the_stage_seed_and_inputs_reach_the_stored_object() {
+            let mut h = handler();
+            let store = Rc::clone(&h.store);
+            let input = ObjectId::compute(HashAlgo::Sha256, b"test", b"upstream");
+            let address = h.offer(logistic());
+            let mut stage = stage_at(address);
+            stage.seed = 4242;
+            stage.inputs = vec![input];
+
+            let ids = h.run(&stage).unwrap();
+            let stored: Object<ModeledTrajectoryBody> =
+                store.borrow().get_object(ids[0]).unwrap().unwrap();
+            assert_eq!(stored.body.seed, 4242);
+            assert_eq!(stored.repro.seed, 4242);
+            assert_eq!(stored.parents, vec![input]);
+            assert_eq!(stored.repro.inputs, vec![input]);
+        }
     }
 }
