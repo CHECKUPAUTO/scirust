@@ -67,7 +67,7 @@ use sos_scirust::model::CertifiedModeledTrajectoryBody;
 use sos_scirust::ode::CertifiedTrajectory;
 use sos_scirust::stage::{
     AdaptiveCatalogStageHandler, CatalogStageHandler, SpectrumStageHandler,
-    TrajectorySpectrumStageHandler, WelchStageHandler,
+    TrajectorySpectrogramStageHandler, TrajectorySpectrumStageHandler, WelchStageHandler,
 };
 use sos_scirust::verdict::{certify_trajectory_endpoint, certify_trajectory_pointwise};
 use sos_store::TypedStore;
@@ -77,8 +77,9 @@ use crate::args::Args;
 use crate::error::Result;
 use crate::header::GenericHeader;
 use crate::run::{
-    ADAPTIVE_CATALOG_PLUGIN, CATALOG_PLUGIN, SPECTRUM_PLUGIN, StageConfig, TRAJECTORY_PLUGIN,
-    WELCH_PLUGIN, load_registry, parse_grant, signal_backend_version, sim_backend_version,
+    ADAPTIVE_CATALOG_PLUGIN, CATALOG_PLUGIN, SPECTROGRAM_PLUGIN, SPECTRUM_PLUGIN, StageConfig,
+    TRAJECTORY_PLUGIN, WELCH_PLUGIN, load_registry, parse_grant, signal_backend_version,
+    sim_backend_version,
 };
 use crate::store;
 
@@ -166,6 +167,8 @@ pub fn rerun(path: Option<&str>, id: ObjectId, args: &Args) -> Result<String> {
     let mut trajectories =
         TrajectorySpectrumStageHandler::new(Rc::clone(&writer), signal_backend_version());
     let mut adaptive = AdaptiveCatalogStageHandler::new(Rc::clone(&writer), sim_backend_version());
+    let mut spectrograms =
+        TrajectorySpectrogramStageHandler::new(Rc::clone(&writer), signal_backend_version());
     for config in configs
     {
         match config
@@ -175,6 +178,7 @@ pub fn rerun(path: Option<&str>, id: ObjectId, args: &Args) -> Result<String> {
             StageConfig::Welch(c) => drop(welch.offer(c)),
             StageConfig::Trajectory(c) => drop(trajectories.offer(c)),
             StageConfig::AdaptiveModel(r) => drop(adaptive.offer(r)),
+            StageConfig::Spectrogram(c) => drop(spectrograms.offer(c)),
         }
     }
     let mut dispatch = Dispatch::new(&registry, grant);
@@ -188,6 +192,10 @@ pub fn rerun(path: Option<&str>, id: ObjectId, args: &Args) -> Result<String> {
     dispatch.register(
         ADAPTIVE_CATALOG_PLUGIN,
         Box::new(adaptive) as Box<dyn StageExecutor>,
+    );
+    dispatch.register(
+        SPECTROGRAM_PLUGIN,
+        Box::new(spectrograms) as Box<dyn StageExecutor>,
     );
 
     // An empty memo, always. Reusing `sos run`'s persisted one would replay
@@ -293,6 +301,7 @@ fn typed_check<S: sos_store::ObjectStore>(s: &S, header: &GenericHeader) -> Stri
         "Spectrum" => check!(sos_scirust::spectrum::SpectrumBody),
         "AveragedSpectrum" => check!(sos_scirust::spectrum::AveragedSpectrumBody),
         "TrajectorySpectrum" => check!(sos_scirust::pipeline::TrajectorySpectrumBody),
+        "TrajectorySpectrogram" => check!(sos_scirust::pipeline::TrajectorySpectrogramBody),
         "CertifiedModeledTrajectory" =>
         {
             check!(sos_scirust::model::CertifiedModeledTrajectoryBody)

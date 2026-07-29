@@ -65,7 +65,9 @@ use sos_core::{Body, DeterminismLevel};
 use sos_simulation::{Observation, Result, SimDescriptor, SimError, Simulate};
 
 use crate::ode::Trajectory;
-use crate::solver::encode_f64;
+use crate::solver::{ExactF64Seq, encode_f64};
+use scirust_signal::spectrogram_psd;
+
 use crate::spectrum::{AveragedSpectrum, WelchConfig, WelchSimulator, WindowKind};
 
 /// How closely consecutive time steps must agree to count as a uniform grid.
@@ -183,14 +185,44 @@ impl Body for TrajectorySpectrumBody {
     const SCHEMA_VERSION: u32 = 1;
 }
 
-/// The sampling rate implied by a trajectory's time grid, in hertz.
+/// A trajectory's time grid, once checked for uniformity.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UniformGrid {
+    /// The sampling rate the grid implies, in hertz.
+    pub sample_rate_hz: f64,
+    /// How many leading samples sit on the uniform grid.
+    ///
+    /// Usually the whole trajectory. One fewer when a **runt final sample**
+    /// was trimmed — see [`uniform_grid`].
+    pub usable_samples: usize,
+}
+
+/// A trajectory's time grid, refusing anything an FFT cannot honestly read.
+///
+/// # The runt final sample
+///
+/// A fixed-step solver advances by accumulating `t += step`, so its grid
+/// drifts by a few parts in `10^12` over a long run. When that drift leaves
+/// the last accumulated `t` just short of `t_end`, `scirust-sim` appends one
+/// extra sample *at* `t_end` — and the gap before it is the leftover, four
+/// picoseconds rather than ten milliseconds.
+///
+/// That is a boundary artifact of clipping to `t_end`, not a varying step, and
+/// it must not be confused with one. It is also **data-dependent**: whether it
+/// happens at all depends on how the drift lands, which is why a `t_end` of
+/// `40.96` produces a clean grid and `163.84` does not. This function accepts
+/// it and reports `usable_samples` one short, so callers analyse the uniform
+/// part and leave the stray sample out.
+///
+/// A *longer* final gap, or any deviation between interior samples, is still
+/// refused: an adaptive solver varies its step throughout, which is exactly
+/// what this exists to catch.
 ///
 /// # Errors
 /// [`SimError::InvalidConfig`] if the trajectory has fewer than two samples,
-/// if its time steps are not uniform (see the module docs — this is the check
-/// that stops an adaptive solver's output being spectrally analysed as though
-/// it were evenly sampled), or if the step is not finite and positive.
-pub fn uniform_sample_rate(trajectory: &Trajectory) -> Result<f64> {
+/// if the step is not finite and positive, or if the grid is not uniform in
+/// the sense above.
+pub fn uniform_grid(trajectory: &Trajectory) -> Result<UniformGrid> {
     if trajectory.len() < 2
     {
         return Err(SimError::InvalidConfig(format!(
@@ -206,20 +238,44 @@ pub fn uniform_sample_rate(trajectory: &Trajectory) -> Result<f64> {
         )));
     }
     let tolerance = UNIFORMITY_TOLERANCE * step;
+    let last = trajectory.len() - 2;
+    let mut usable = trajectory.len();
     for (i, pair) in trajectory.windows(2).enumerate()
     {
         let gap = pair[1].0 - pair[0].0;
-        if (gap - step).abs() > tolerance
+        if (gap - step).abs() <= tolerance
         {
-            return Err(SimError::InvalidConfig(format!(
-                "the trajectory is not uniformly sampled, so a spectrum of it would be \
-                 meaningless: step {step} at the start but {gap} between samples {i} and {} \
-                 (an adaptive solver produces trajectories like this; use a fixed-step one)",
-                i + 1
-            )));
+            continue;
         }
+        // A short *final* gap is the clipped-to-`t_end` artifact; drop the
+        // stray sample. Anything else is a genuinely non-uniform grid.
+        if i == last && gap < step
+        {
+            usable = trajectory.len() - 1;
+            continue;
+        }
+        return Err(SimError::InvalidConfig(format!(
+            "the trajectory is not uniformly sampled, so a spectrum of it would be \
+             meaningless: step {step} at the start but {gap} between samples {i} and {} \
+             (an adaptive solver produces trajectories like this; use a fixed-step one)",
+            i + 1
+        )));
     }
-    Ok(1.0 / step)
+    Ok(UniformGrid {
+        sample_rate_hz: 1.0 / step,
+        usable_samples: usable,
+    })
+}
+
+/// The sampling rate implied by a trajectory's time grid, in hertz.
+///
+/// A thin reading of [`uniform_grid`] for callers that do not need the sample
+/// count.
+///
+/// # Errors
+/// As [`uniform_grid`].
+pub fn uniform_sample_rate(trajectory: &Trajectory) -> Result<f64> {
+    uniform_grid(trajectory).map(|g| g.sample_rate_hz)
 }
 
 /// One component of a trajectory, as a signal.
@@ -247,6 +303,257 @@ pub fn component_of(trajectory: &Trajectory, component: usize) -> Result<Vec<f64
         signal.push(*value);
     }
     Ok(signal)
+}
+
+/// What to measure, given a trajectory — keeping **time** rather than
+/// averaging it away.
+///
+/// The fields are the same four [`TrajectorySpectrumConfig`] takes, and they
+/// mean something different here, which is why this is a separate type rather
+/// than a shared one. For Welch, `segment_len` and `overlap` trade frequency
+/// resolution against *variance*: more segments, a steadier estimate, no
+/// notion of when. Here they trade frequency resolution against **time**
+/// resolution: shorter segments follow a changing spectrum more closely and
+/// resolve it more coarsely. Same knobs, different question.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TrajectorySpectrogramConfig {
+    /// Which component of `y(t)` to measure, 0-based.
+    pub component: usize,
+    /// The window applied to each frame.
+    pub window: WindowKind,
+    /// Samples per frame. Must be a power of two of at least 2.
+    pub segment_len: usize,
+    /// Samples shared between consecutive frames. Must be `< segment_len`.
+    pub overlap: usize,
+}
+
+impl TrajectorySpectrogramConfig {
+    /// Construct a configuration. Validity is checked at run time.
+    #[must_use]
+    pub fn new(component: usize, window: WindowKind, segment_len: usize, overlap: usize) -> Self {
+        Self {
+            component,
+            window,
+            segment_len,
+            overlap,
+        }
+    }
+}
+
+impl Canonical for TrajectorySpectrogramConfig {
+    fn encode(&self, enc: &mut CanonicalEncoder) {
+        enc.u64(self.component as u64);
+        enc.value(&self.window);
+        enc.u64(self.segment_len as u64);
+        enc.u64(self.overlap as u64);
+    }
+}
+
+/// How a simulated signal's spectrum changes over the run.
+///
+/// # Why it carries `hop_seconds`
+///
+/// A spectrogram has two axes. The frequency one is recoverable from
+/// `sample_rate_hz` alone, as it is for [`TrajectorySpectrum`]. The **time**
+/// one is not: it depends on the hop between frames, which is
+/// `(segment_len - overlap) / sample_rate` — a function of the configuration,
+/// not of the result. A stored spectrogram without it would be a matrix of
+/// numbers whose rows could not be placed in time, and the configuration that
+/// would explain them is a separate object that may not be at hand.
+///
+/// Same reasoning as `component`: the result should be readable on its own.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TrajectorySpectrogram {
+    /// One one-sided PSD per frame, earliest first.
+    pub frames: Vec<Vec<f64>>,
+    /// Which component of `y(t)` this measures.
+    pub component: usize,
+    /// The sampling rate derived from the trajectory's time grid, in hertz.
+    pub sample_rate_hz: f64,
+    /// Seconds between the start of consecutive frames — the time axis.
+    pub hop_seconds: f64,
+    /// Trailing samples that did not fill a frame and were not used.
+    pub dropped_samples: usize,
+    /// The window applied to each frame.
+    pub window: WindowKind,
+}
+
+impl Canonical for TrajectorySpectrogram {
+    fn encode(&self, enc: &mut CanonicalEncoder) {
+        enc.u64(self.frames.len() as u64);
+        for frame in &self.frames
+        {
+            enc.value(&ExactF64Seq(frame));
+        }
+        enc.u64(self.component as u64);
+        encode_f64(enc, self.sample_rate_hz);
+        encode_f64(enc, self.hop_seconds);
+        enc.u64(self.dropped_samples as u64);
+        enc.value(&self.window);
+    }
+}
+
+/// The storable form.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TrajectorySpectrogramBody {
+    /// The measurement.
+    pub measured: TrajectorySpectrogram,
+    /// The determinism level the backend realized.
+    pub level: DeterminismLevel,
+    /// The seed the run used.
+    pub seed: u64,
+}
+
+impl TrajectorySpectrogramBody {
+    /// Flatten an observation into a storable body.
+    #[must_use]
+    pub fn from_observation(observation: Observation<TrajectorySpectrogram>) -> Self {
+        Self {
+            level: observation.level(),
+            seed: observation.seed,
+            measured: observation.output,
+        }
+    }
+}
+
+impl Canonical for TrajectorySpectrogramBody {
+    fn encode(&self, enc: &mut CanonicalEncoder) {
+        enc.value(&self.measured);
+        enc.value(&self.level);
+        enc.u64(self.seed);
+    }
+}
+
+impl Body for TrajectorySpectrogramBody {
+    const KIND: &'static str = "TrajectorySpectrogram";
+    const SCHEMA_VERSION: u32 = 1;
+}
+
+/// Measures how one component of a simulated trajectory's spectrum evolves.
+///
+/// The counterpart of [`TrajectorySpectrumSimulator`], and the reason both
+/// exist: a Welch estimate assumes the spectrum is worth summarizing with one
+/// number per frequency, which is true of a system in a steady state and false
+/// of one whose behaviour is still changing.
+///
+/// # Frames must cover many periods, or the framing shows up as signal
+///
+/// A caveat learned by measuring rather than by reasoning, and the one most
+/// likely to be misread. When a frame spans only a couple of the signal's
+/// periods, each frame's statistics vary with **where the frame boundary falls
+/// within the cycle** — a smooth, periodic rise and fall across frames that
+/// looks exactly like a system slowly changing, and is not.
+///
+/// Measured on a Van der Pol oscillator at `mu = 3` sampled at 100 Hz, whose
+/// limit cycle is reached before the first frame ends: 1024-sample frames span
+/// about two periods, and the share of power in the strongest bin swings by
+/// ~0.17 with a period of about seven frames, with no trend whatever. A test
+/// pins that, precisely so the artifact is on record instead of being
+/// rediscovered as a false result.
+///
+/// So: choose `segment_len` to cover many periods of the slowest component
+/// worth resolving, and treat frame-to-frame variation at the edge of that as
+/// framing rather than physics.
+#[derive(Debug, Clone)]
+pub struct TrajectorySpectrogramSimulator {
+    descriptor: SimDescriptor,
+}
+
+impl TrajectorySpectrogramSimulator {
+    /// A simulator identified by `descriptor`.
+    #[must_use]
+    pub fn new(descriptor: SimDescriptor) -> Self {
+        Self { descriptor }
+    }
+
+    /// Measure `trajectory` under `config`.
+    ///
+    /// # Errors
+    /// [`SimError::InvalidConfig`] if the trajectory is not uniformly sampled,
+    /// lacks the requested component, or is too short for the framing.
+    pub fn measure(
+        &self,
+        config: &TrajectorySpectrogramConfig,
+        trajectory: &Trajectory,
+        seed: u64,
+    ) -> Result<Observation<TrajectorySpectrogram>> {
+        // The same two guards the Welch path uses, and for the same reason:
+        // an FFT assumes uniform sampling, and an adaptive solver does not
+        // provide it. Shared rather than repeated.
+        let grid = uniform_grid(trajectory)?;
+        let sample_rate_hz = grid.sample_rate_hz;
+        let mut signal = component_of(trajectory, config.component)?;
+        signal.truncate(grid.usable_samples);
+        let window = config.window.coefficients(config.segment_len);
+        let spectrogram = spectrogram_psd(&signal, config.segment_len, config.overlap, &window)
+            .map_err(|e| SimError::InvalidConfig(e.to_string()))?;
+
+        let hop = config.segment_len - config.overlap;
+        Ok(Observation::new(
+            TrajectorySpectrogram {
+                frames: spectrogram.frames,
+                component: config.component,
+                sample_rate_hz,
+                hop_seconds: hop as f64 / sample_rate_hz,
+                dropped_samples: spectrogram.dropped_samples,
+                window: config.window,
+            },
+            self.level(),
+            seed,
+        ))
+    }
+}
+
+/// A spectrogram configuration paired with the trajectory it reads.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TrajectorySpectrogramMeasurement {
+    /// What to measure.
+    pub config: TrajectorySpectrogramConfig,
+    /// The trajectory to measure it on.
+    pub trajectory: Trajectory,
+}
+
+impl TrajectorySpectrogramMeasurement {
+    /// Pair a configuration with its trajectory.
+    #[must_use]
+    pub fn new(config: TrajectorySpectrogramConfig, trajectory: Trajectory) -> Self {
+        Self { config, trajectory }
+    }
+}
+
+impl Canonical for TrajectorySpectrogramMeasurement {
+    fn encode(&self, enc: &mut CanonicalEncoder) {
+        enc.value(&self.config);
+        enc.u64(self.trajectory.len() as u64);
+        for (t, state) in &self.trajectory
+        {
+            encode_f64(enc, *t);
+            enc.value(&ExactF64Seq(state));
+        }
+    }
+}
+
+impl Simulate for TrajectorySpectrogramSimulator {
+    type Config = TrajectorySpectrogramMeasurement;
+    type Output = TrajectorySpectrogram;
+
+    fn descriptor(&self) -> SimDescriptor {
+        self.descriptor.clone()
+    }
+
+    fn level(&self) -> DeterminismLevel {
+        // The periodogram's reasoning again: a fixed sequence of f64
+        // operations, no iteration to a tolerance and no sampling.
+        DeterminismLevel::L3
+    }
+
+    fn run(
+        &self,
+        config: &TrajectorySpectrogramMeasurement,
+        seed: u64,
+    ) -> Result<Observation<TrajectorySpectrogram>> {
+        self.measure(&config.config, &config.trajectory, seed)
+    }
 }
 
 /// A configuration paired with the trajectory it reads.
@@ -322,8 +629,10 @@ impl TrajectorySpectrumSimulator {
         trajectory: &Trajectory,
         seed: u64,
     ) -> Result<Observation<TrajectorySpectrum>> {
-        let sample_rate_hz = uniform_sample_rate(trajectory)?;
-        let signal = component_of(trajectory, config.component)?;
+        let grid = uniform_grid(trajectory)?;
+        let sample_rate_hz = grid.sample_rate_hz;
+        let mut signal = component_of(trajectory, config.component)?;
+        signal.truncate(grid.usable_samples);
         let welch = WelchConfig::new(
             signal,
             sample_rate_hz,
@@ -592,5 +901,265 @@ mod tests {
         let a = TrajectoryMeasurement::new(first.clone(), tone_trajectory(32.0, 512.0, 1024));
         let b = TrajectoryMeasurement::new(first, tone_trajectory(64.0, 512.0, 1024));
         assert_ne!(a.canonical_bytes(), b.canonical_bytes());
+    }
+
+    // ---- keeping time: the spectrogram -----------------------------------
+
+    fn spectrogram_descriptor() -> SimDescriptor {
+        SimDescriptor::new(
+            "sos-scirust/trajectory-spectrogram",
+            sos_core::SemVer::new(1, 0, 0),
+        )
+    }
+
+    /// Integrate a catalogued model on a fixed grid, as `sos run` would.
+    fn simulated(
+        kind: crate::model::ModelKind,
+        params: &[f64],
+        y0: &[f64],
+        t_end: f64,
+        step: f64,
+    ) -> Trajectory {
+        use crate::model::{CatalogSimulator, ModelRun, ModelSpec};
+        CatalogSimulator::new()
+            .run(
+                &ModelRun::new(
+                    ModelSpec::new(kind, params.to_vec()),
+                    y0.to_vec(),
+                    0.0,
+                    t_end,
+                    step,
+                ),
+                0,
+            )
+            .unwrap()
+            .output
+            .trajectory
+    }
+
+    /// The share of a frame's power sitting in its single strongest bin.
+    ///
+    /// Near 1 for a pure sinusoid, lower as harmonics appear — the statistic
+    /// that separates a near-sinusoidal Van der Pol transient from the
+    /// harmonic-rich relaxation oscillation it settles into. Chosen after an
+    /// earlier attempt measured a fixed high-frequency band, which read ~1e-11
+    /// at both ends because the fundamental here is well under 1 Hz.
+    fn fundamental_share(frame: &[f64]) -> f64 {
+        let total: f64 = frame.iter().sum();
+        if total <= 0.0
+        {
+            return 0.0;
+        }
+        frame.iter().copied().fold(0.0_f64, f64::max) / total
+    }
+
+    #[test]
+    fn a_changing_spectrum_is_visible_where_an_average_would_hide_it() {
+        // What the backend is for, on a signal whose non-stationarity is
+        // constructed rather than hoped for: a trajectory-shaped record whose
+        // instantaneous frequency climbs. The peak bin must climb with it.
+        let rate = 256.0;
+        let n = 8192;
+        let sweep: Trajectory = (0..n)
+            .map(|i| {
+                let t = f64::from(u32::try_from(i).unwrap()) / rate;
+                let f = 8.0 + 56.0 * (i as f64 / n as f64);
+                (t, vec![(TAU * f * t).sin()])
+            })
+            .collect();
+
+        let sim = TrajectorySpectrogramSimulator::new(spectrogram_descriptor());
+        let measured = sim
+            .measure(
+                &TrajectorySpectrogramConfig::new(0, WindowKind::Hann, 512, 256),
+                &sweep,
+                0,
+            )
+            .unwrap()
+            .output;
+
+        let peak = |frame: &Vec<f64>| {
+            frame
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+                .unwrap()
+                .0
+        };
+        let first = peak(&measured.frames[0]);
+        let last = peak(&measured.frames[measured.frames.len() - 1]);
+        assert!(last > first + 20, "the peak must climb: {first} -> {last}");
+    }
+
+    #[test]
+    fn a_van_der_pol_limit_cycle_varies_with_frame_phase_not_with_time() {
+        // Documented rather than asserted away, because measuring it is what
+        // corrected the assumption this test was written under. A Van der Pol
+        // oscillator at mu = 3 reaches its limit cycle well before the first
+        // frame ends, so there is *no* transient to see. What remains is a
+        // clean periodic variation in each frame's statistics as the frame
+        // boundary slides through the cycle — an artifact of framing a slow
+        // oscillator, not a change in the system.
+        //
+        // Reading it as physics would be exactly the mistake: the shares rise
+        // and fall by ~0.17 with a period of about seven frames and no trend.
+        let trajectory = simulated(
+            crate::model::ModelKind::VanDerPol,
+            &[3.0],
+            &[0.05, 0.0],
+            163.84,
+            0.01,
+        );
+        let sim = TrajectorySpectrogramSimulator::new(spectrogram_descriptor());
+        let measured = sim
+            .measure(
+                &TrajectorySpectrogramConfig::new(0, WindowKind::Hann, 1024, 512),
+                &trajectory,
+                0,
+            )
+            .unwrap()
+            .output;
+
+        let shares: Vec<f64> = measured
+            .frames
+            .iter()
+            .map(|f| fundamental_share(f))
+            .collect();
+        let n = shares.len();
+        assert!(n >= 24, "{n} frames");
+
+        // No trend: the first and last thirds have the same mean, well within
+        // the swing of the oscillation itself.
+        let mean = |r: &[f64]| r.iter().sum::<f64>() / r.len() as f64;
+        let head = mean(&shares[..n / 3]);
+        let tail = mean(&shares[n - n / 3..]);
+        let swing = shares.iter().copied().fold(0.0_f64, f64::max)
+            - shares.iter().copied().fold(1.0_f64, f64::min);
+        assert!(
+            (head - tail).abs() < swing / 3.0,
+            "no trend expected: head {head}, tail {tail}, swing {swing}"
+        );
+        assert!(swing > 0.1, "the frame-phase variation is real: {swing}");
+    }
+
+    #[test]
+    fn a_steady_oscillator_shows_no_drift_at_all() {
+        // The control. An undamped spring-mass system is stationary from the
+        // first sample, so its frames should look alike throughout — the
+        // spectrogram must not manufacture change that is not there.
+        let trajectory = simulated(
+            crate::model::ModelKind::SpringMassDamper,
+            &[1.0, 0.0, 4.0],
+            &[1.0, 0.0],
+            81.92,
+            0.01,
+        );
+        let sim = TrajectorySpectrogramSimulator::new(spectrogram_descriptor());
+        let measured = sim
+            .measure(
+                &TrajectorySpectrogramConfig::new(0, WindowKind::Hann, 1024, 512),
+                &trajectory,
+                0,
+            )
+            .unwrap()
+            .output;
+
+        let peak = |frame: &Vec<f64>| {
+            frame
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+                .unwrap()
+                .0
+        };
+        let peaks: Vec<usize> = measured.frames.iter().map(peak).collect();
+        assert!(peaks.windows(2).all(|w| w[0] == w[1]), "{peaks:?}");
+    }
+
+    #[test]
+    fn the_time_axis_is_recorded_not_left_to_be_recomputed() {
+        // hop_seconds is the one thing a stored spectrogram could not
+        // reconstruct from itself: it depends on the configuration, which is a
+        // separate object that may not be at hand.
+        let trajectory = tone_trajectory(64.0, 1024.0, 4096);
+        let sim = TrajectorySpectrogramSimulator::new(spectrogram_descriptor());
+        let measured = sim
+            .measure(
+                &TrajectorySpectrogramConfig::new(0, WindowKind::Hann, 1024, 512),
+                &trajectory,
+                0,
+            )
+            .unwrap()
+            .output;
+
+        // 512 samples between frames at 1024 Hz.
+        assert!(
+            (measured.hop_seconds - 0.5).abs() < 1e-12,
+            "{}",
+            measured.hop_seconds
+        );
+        assert!((measured.sample_rate_hz - 1024.0).abs() < 1e-9);
+        assert_eq!(measured.window, WindowKind::Hann);
+    }
+
+    #[test]
+    fn an_adaptive_trajectory_is_refused_here_too() {
+        // The guard is shared with the Welch path, not reimplemented — but it
+        // has to actually be reached, so this checks it is.
+        let uneven: Trajectory = vec![
+            (0.0, vec![0.0]),
+            (0.1, vec![1.0]),
+            (0.15, vec![0.5]),
+            (0.25, vec![0.2]),
+        ];
+        let sim = TrajectorySpectrogramSimulator::new(spectrogram_descriptor());
+        let err = sim
+            .measure(
+                &TrajectorySpectrogramConfig::new(0, WindowKind::Hann, 2, 0),
+                &uneven,
+                0,
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("not uniformly sampled"), "{err}");
+    }
+
+    #[test]
+    fn a_frame_too_long_for_the_record_is_an_error() {
+        let sim = TrajectorySpectrogramSimulator::new(spectrogram_descriptor());
+        let err = sim
+            .measure(
+                &TrajectorySpectrogramConfig::new(0, WindowKind::Hann, 4096, 0),
+                &tone_trajectory(64.0, 1024.0, 512),
+                0,
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("fewer than one segment"), "{err}");
+    }
+
+    #[test]
+    fn the_spectrogram_is_l3_and_survives_a_file() {
+        let sim = TrajectorySpectrogramSimulator::new(spectrogram_descriptor());
+        let config = TrajectorySpectrogramConfig::new(0, WindowKind::Hamming, 512, 256);
+        let trajectory = tone_trajectory(32.0, 512.0, 2048);
+
+        let a = sim.measure(&config, &trajectory, 1).unwrap();
+        let b = sim.measure(&config, &trajectory, 1).unwrap();
+        assert_eq!(a.level(), DeterminismLevel::L3);
+        assert_eq!(a.output, b.output);
+
+        let body = TrajectorySpectrogramBody::from_observation(a);
+        let json = serde_json::to_string(&body).unwrap();
+        let back: TrajectorySpectrogramBody = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.measured.frames.len(), body.measured.frames.len());
+        assert_eq!(back.measured.hop_seconds, body.measured.hop_seconds);
+    }
+
+    #[test]
+    fn the_framing_is_part_of_the_content_address() {
+        // Two spectrograms of one trajectory differing only in time resolution
+        // are different measurements.
+        let fine = TrajectorySpectrogramConfig::new(0, WindowKind::Hann, 256, 128);
+        let coarse = TrajectorySpectrogramConfig::new(0, WindowKind::Hann, 1024, 512);
+        assert_ne!(fine.canonical_bytes(), coarse.canonical_bytes());
     }
 }
