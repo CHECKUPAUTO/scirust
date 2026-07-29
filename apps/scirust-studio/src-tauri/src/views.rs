@@ -542,7 +542,14 @@ pub fn run_view(
     {
         LoadedRunResult::V2(r) =>
         {
-            let axis = r.time_axis().or_else(|| r.axes.first());
+            // The axis the result's own summary names — which is `t` for
+            // every capability that integrates forward, and the swept
+            // parameter for one that does not (ADR 0010). The fallback is
+            // for a result whose summary names an axis it does not carry,
+            // which `validate_result` rejects at the source; keeping it
+            // means a corrupt stored result still charts something rather
+            // than showing an empty panel.
+            let axis = r.summary_axis().or_else(|| r.axes.first());
             let (label, unit, values) = match axis
             {
                 Some(a) => (a.display_name.clone(), a.unit.clone(), a.values.clone()),

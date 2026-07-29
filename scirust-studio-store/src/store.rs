@@ -534,12 +534,18 @@ impl LoadedRunResult {
         }
     }
 
-    /// The run summary, whichever version it is.
-    pub fn summary(&self) -> &scirust_studio_runtime::RunSummary {
+    /// The run summary, whichever version it is, widened to the current
+    /// shape.
+    ///
+    /// By value rather than by reference because v1 has its own summary type
+    /// now: sharing one struct across a frozen format and a living one meant
+    /// every field added to v2 appeared in re-serialized v1 JSON. A summary
+    /// is six small fields, so the clone costs nothing worth the coupling.
+    pub fn summary(&self) -> scirust_studio_runtime::RunSummary {
         match self
         {
-            LoadedRunResult::V1(r) => &r.summary,
-            LoadedRunResult::V2(r) => &r.summary,
+            LoadedRunResult::V1(r) => (&r.summary).into(),
+            LoadedRunResult::V2(r) => r.summary.clone(),
         }
     }
 

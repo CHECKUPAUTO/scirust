@@ -115,7 +115,8 @@ impl CapabilityRegistry {
 mod tests {
     use super::*;
     use crate::descriptor::{
-        BackendKind, CapabilityMaturity, DeterminismClass, PrecisionKind, VerificationDescriptor,
+        BackendKind, CapabilityMaturity, DeterminismClass, PrecisionKind, RunDomain,
+        VerificationDescriptor,
     };
 
     #[test]
@@ -128,6 +129,7 @@ mod tests {
             summary: "s",
             maturity: CapabilityMaturity::Stable,
             determinism: DeterminismClass::StrictSameBinarySameTarget,
+            domain: RunDomain::Time,
             supported_backends: &[BackendKind::Cpu],
             supported_precisions: &[PrecisionKind::F64],
             supported_solvers: &[],
@@ -153,6 +155,7 @@ mod tests {
             summary: "s",
             maturity: CapabilityMaturity::Stable,
             determinism: DeterminismClass::StrictSameBinarySameTarget,
+            domain: RunDomain::Time,
             supported_backends: &[BackendKind::Cpu],
             supported_precisions: &[PrecisionKind::F64],
             supported_solvers: &[],
@@ -178,6 +181,7 @@ mod tests {
             summary: "z summary",
             maturity: CapabilityMaturity::Stable,
             determinism: DeterminismClass::StrictSameBinarySameTarget,
+            domain: RunDomain::Time,
             supported_backends: &[BackendKind::Cpu],
             supported_precisions: &[PrecisionKind::F64],
             supported_solvers: &[],
@@ -194,6 +198,7 @@ mod tests {
             summary: "a summary",
             maturity: CapabilityMaturity::Stable,
             determinism: DeterminismClass::StrictSameBinarySameTarget,
+            domain: RunDomain::Time,
             supported_backends: &[BackendKind::Cpu],
             supported_precisions: &[PrecisionKind::F64],
             supported_solvers: &[],
@@ -222,6 +227,7 @@ mod tests {
             summary: "s",
             maturity: CapabilityMaturity::Stable,
             determinism: DeterminismClass::StrictSameBinarySameTarget,
+            domain: RunDomain::Time,
             supported_backends: &[BackendKind::Cpu],
             supported_precisions: &[PrecisionKind::F64],
             supported_solvers: &[],
@@ -238,6 +244,7 @@ mod tests {
             summary: "s",
             maturity: CapabilityMaturity::Stable,
             determinism: DeterminismClass::StrictSameBinarySameTarget,
+            domain: RunDomain::Time,
             supported_backends: &[BackendKind::Cpu],
             supported_precisions: &[PrecisionKind::F64],
             supported_solvers: &[],
@@ -264,6 +271,7 @@ mod tests {
             summary: "s",
             maturity: CapabilityMaturity::Stable,
             determinism: DeterminismClass::StrictSameBinarySameTarget,
+            domain: RunDomain::Time,
             supported_backends: &[BackendKind::Cpu],
             supported_precisions: &[PrecisionKind::F64],
             supported_solvers: &[],

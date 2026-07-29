@@ -19,7 +19,7 @@ use scirust_sim::photodiode::{Photodiode, PhotodiodeParams};
 use scirust_studio_command::{ErrorCode, ErrorFamily};
 use scirust_studio_registry::{
     BackendKind, CapabilityCategory, CapabilityDescriptor, CapabilityId, CapabilityMaturity,
-    Cardinality, DeterminismClass, FieldDescriptor, OutputDescriptor, PrecisionKind,
+    Cardinality, DeterminismClass, FieldDescriptor, OutputDescriptor, PrecisionKind, RunDomain,
     VerificationCheckDescriptor, VerificationDescriptor,
 };
 use scirust_studio_schema::Scenario;
@@ -180,6 +180,7 @@ pub static DESCRIPTOR: CapabilityDescriptor = CapabilityDescriptor {
               capacitance — a first-order RC whose level and time constant are both closed form.",
     maturity: CapabilityMaturity::Stable,
     determinism: DeterminismClass::StrictSameBinarySameTarget,
+    domain: RunDomain::Time,
     supported_backends: &[BackendKind::Cpu],
     supported_precisions: &[PrecisionKind::F64],
     supported_solvers: &[RK4_SOLVER],
@@ -328,6 +329,7 @@ impl CapabilityAdapter for PhotodiodeAdapter {
             summary: RunSummary {
                 capability_display_name: DESCRIPTOR.display_name.to_string(),
                 scenario_name: s.experiment.name.clone(),
+                axis_id: TIME_AXIS_ID.to_string(),
                 steps: traj.t.len() - 1,
                 t_start: traj.t[0],
                 t_end: *traj.t.last().expect("at least one sample"),

@@ -59,6 +59,28 @@ pub enum CapabilityCategory {
     Pharmacology,
 }
 
+/// What a capability varies along its results' single independent axis.
+///
+/// Every capability up to now integrated forward in time, so "the x axis is
+/// time" was true and therefore never stated. It is not true of a receiver
+/// analysis that evaluates closed forms across a swept gain: that run has an
+/// axis, a summary and series like any other, but no time in it at all.
+///
+/// Declaring this in the catalogue rather than inferring it from the result
+/// means two things. A reader browsing capabilities can tell, before running
+/// anything, whether they will get a trajectory or a curve. And the
+/// registry-driven test that demands a `t` axis can demand it of exactly the
+/// capabilities that promised one, instead of being weakened to "some axis"
+/// for everybody because one capability is different.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RunDomain {
+    /// Integrated forward in time; results carry a `t` axis.
+    Time,
+    /// Closed forms evaluated across a swept parameter; results carry that
+    /// parameter's axis and no time axis.
+    ParameterSweep,
+}
+
 /// The scientific maturity of the *underlying model*, as documented by its
 /// own source crate — not the maturity of the Studio adapter around it (a
 /// capability is never registered at all unless its adapter is tested; see
@@ -259,6 +281,8 @@ pub struct CapabilityDescriptor {
     pub maturity: CapabilityMaturity,
     /// Reproducibility class of this capability's output.
     pub determinism: DeterminismClass,
+    /// What this capability's independent variable is.
+    pub domain: RunDomain,
     /// Backends this capability can run on.
     pub supported_backends: &'static [BackendKind],
     /// Precisions this capability can run at.

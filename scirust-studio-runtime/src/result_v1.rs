@@ -22,7 +22,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::result::{Metric, RunProvenance, RunSummary, RunWarning, VerificationResult};
+use crate::result::{Metric, RunProvenance, RunWarning, VerificationResult};
 
 /// The schema version these types describe.
 pub const RESULT_SCHEMA_VERSION_V1: u32 = 1;
@@ -51,6 +51,52 @@ pub struct SeriesV1 {
     pub values: Vec<f64>,
 }
 
+/// A v1 run summary.
+///
+/// This deliberately does **not** reuse [`crate::RunSummary`], although the
+/// two were identical when v1 was frozen and are still nearly so.
+///
+/// They were shared once, and that coupling meant every field added to the v2
+/// summary silently appeared in re-serialized v1 JSON — which is exactly what
+/// `v1_round_trips_without_gaining_fields` exists to forbid, and exactly what
+/// it caught when `RunSummary` gained `axis_id` for parameter sweeps (ADR
+/// 0010). A frozen format must not track a living one's evolution, so the
+/// duplication is the point rather than an oversight: v1 has these four
+/// fields because v1 has always had these four fields, and nothing that
+/// happens to v2 can change that.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunSummaryV1 {
+    /// The capability's display name at the time of the run.
+    pub capability_display_name: String,
+    /// The scenario's `experiment.name`.
+    pub scenario_name: String,
+    /// Number of integration steps taken.
+    pub steps: usize,
+    /// Start time.
+    pub t_start: f64,
+    /// End time reached.
+    pub t_end: f64,
+}
+
+impl From<&RunSummaryV1> for crate::result::RunSummary {
+    /// Widen a v1 summary to the current one.
+    ///
+    /// `axis_id` becomes `t` because a v1 result is always a time run: v1
+    /// predates parameter sweeps entirely, and predates axis coordinates at
+    /// all. Nothing is guessed — it is the only thing v1 could ever have
+    /// meant.
+    fn from(v1: &RunSummaryV1) -> Self {
+        crate::result::RunSummary {
+            capability_display_name: v1.capability_display_name.clone(),
+            scenario_name: v1.scenario_name.clone(),
+            axis_id: crate::result::TIME_AXIS_ID.to_string(),
+            steps: v1.steps,
+            t_start: v1.t_start,
+            t_end: v1.t_end,
+        }
+    }
+}
+
 /// A result stored under schema version 1.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunResultV1 {
@@ -59,7 +105,7 @@ pub struct RunResultV1 {
     /// The capability that produced this result.
     pub capability_id: String,
     /// Human-facing summary.
-    pub summary: RunSummary,
+    pub summary: RunSummaryV1,
     /// Axis labels, without coordinates.
     pub axes: Vec<AxisDescriptorV1>,
     /// Series values, without a declared axis.
