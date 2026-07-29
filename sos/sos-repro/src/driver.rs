@@ -52,11 +52,14 @@
 
 use serde::Deserialize;
 use sos_core::{DeterminismLevel, ObjectId};
-use sos_store::ObjectStore;
-use sos_workflow::{RunLedger, StageId};
+use sos_store::{ObjectStore, TypedStore};
+use sos_workflow::{Memo, Plan, RunLedger, StageExecutor, StageId};
 
 use crate::contract::{MatchRule, NodeClaim, Reproduced, VerifyReport, verify_reproduction};
 use crate::error::{ReproError, Result};
+use crate::lock::EnvLock;
+use crate::rerun::rerun;
+use sos_core::Digest;
 
 /// Supplies the verdict for nodes the contract cannot decide from ids alone —
 /// `L2` (within certificate) and `L1` (in distribution).
@@ -210,6 +213,114 @@ fn declared_level<S: ObjectStore>(store: &S, id: ObjectId) -> Result<Determinism
             id,
             detail: Some(e.to_string()),
         })
+}
+
+/// Verify an object by finding the run that produced it, re-executing that
+/// run, and comparing — the store-driven entry point.
+///
+/// This is [`verify_rerun`] with its two ledgers resolved from the store
+/// rather than supplied: it locates the [`RunLedger`] that recorded `root`
+/// among its outputs, loads the [`Plan`] that ledger's `plan_digest` names,
+/// re-runs it under `lock`, and verifies. Both the ledger and the plan must
+/// therefore be *stored* — a ledger records a plan's digest, not the plan, so
+/// a run whose plan was never written cannot be re-executed from the store
+/// alone.
+///
+/// Ambiguity is refused rather than resolved. If two recorded runs both
+/// produced `root`, which one the caller means is a real question about their
+/// intent, and picking one would silently verify a run they did not ask
+/// about; [`verify_rerun`] takes the ledger explicitly for exactly that case.
+///
+/// # Errors
+/// [`ReproError::NoProducingLedger`] if nothing recorded producing `root`;
+/// [`ReproError::AmbiguousProducer`] if several runs did;
+/// [`ReproError::PlanNotStored`] if the producing run's plan is absent;
+/// plus anything [`rerun`] or [`verify_rerun`] reports.
+pub fn verify_object<S: ObjectStore, M: Memo, E: StageExecutor, C: Certifier>(
+    root: ObjectId,
+    store: &S,
+    lock: &EnvLock,
+    memo: &mut M,
+    executor: &mut E,
+    certifier: &mut C,
+) -> Result<VerifyReport> {
+    let producers = ledgers_producing(store, root)?;
+    let original = match producers.len()
+    {
+        0 => return Err(ReproError::NoProducingLedger(root)),
+        1 => producers.into_iter().next().expect("length checked"),
+        count => return Err(ReproError::AmbiguousProducer { id: root, count }),
+    };
+    let plan = stored_plan(store, original.plan_digest)?;
+    let fresh = rerun(&plan, lock, memo, executor)?;
+    verify_rerun(&original, &fresh, store, certifier)
+}
+
+/// Every stored run that recorded `id` among its outputs.
+fn ledgers_producing<S: ObjectStore>(store: &S, id: ObjectId) -> Result<Vec<RunLedger>> {
+    let mut found = Vec::new();
+    for candidate in store.object_ids()
+    {
+        let Some(record) = store.get_raw(candidate)
+        else
+        {
+            continue;
+        };
+        if record.kind != <RunLedger as sos_core::Body>::kind()
+        {
+            continue;
+        }
+        // A record of the right kind that will not load is corruption worth
+        // surfacing, not a candidate to skip past.
+        let ledger = store
+            .get_object::<RunLedger>(candidate)
+            .map_err(|e| ReproError::UnreadableClaim {
+                id: candidate,
+                detail: Some(e.to_string()),
+            })?
+            .ok_or(ReproError::UnreadableClaim {
+                id: candidate,
+                detail: None,
+            })?;
+        if ledger.body.steps.iter().any(|s| s.outputs.contains(&id))
+        {
+            found.push(ledger.body);
+        }
+    }
+    Ok(found)
+}
+
+/// The stored [`Plan`] whose [`Plan::digest`] is `digest`.
+fn stored_plan<S: ObjectStore>(store: &S, digest: Digest) -> Result<Plan> {
+    for candidate in store.object_ids()
+    {
+        let Some(record) = store.get_raw(candidate)
+        else
+        {
+            continue;
+        };
+        if record.kind != <Plan as sos_core::Body>::kind()
+        {
+            continue;
+        }
+        // `Plan`'s own `Deserialize` re-validates, so a stored plan that is
+        // not a DAG fails here rather than being re-executed.
+        let plan = store
+            .get_object::<Plan>(candidate)
+            .map_err(|e| ReproError::UnreadableClaim {
+                id: candidate,
+                detail: Some(e.to_string()),
+            })?
+            .ok_or(ReproError::UnreadableClaim {
+                id: candidate,
+                detail: None,
+            })?;
+        if plan.body.digest() == digest
+        {
+            return Ok(plan.body);
+        }
+    }
+    Err(ReproError::PlanNotStored(digest))
 }
 
 #[cfg(test)]
@@ -508,5 +619,207 @@ mod tests {
         let report = verify_rerun(&original, &swapped, &store, &mut NoCertifier).unwrap();
         assert!(!report.reproduced());
         assert_eq!(report.nodes.len(), 2);
+    }
+
+    // ---- verify_object: the store-driven entry point ------------------------
+
+    /// A trivial executor that re-emits a fixed output per stage, so
+    /// `verify_object` can drive a real `rerun` without a backend.
+    struct Fixed1 {
+        output: ObjectId,
+        ran: usize,
+    }
+
+    impl sos_workflow::StageExecutor for Fixed1 {
+        fn run(
+            &mut self,
+            _stage: &sos_workflow::Stage,
+        ) -> core::result::Result<Vec<ObjectId>, sos_workflow::WorkflowError> {
+            self.ran += 1;
+            Ok(vec![self.output])
+        }
+    }
+
+    fn one_stage_plan() -> sos_workflow::Plan {
+        sos_workflow::Plan::new(vec![sos_workflow::Stage::new(
+            StageId::new("only"),
+            StageDescriptor::new("p", SemVer::new(1, 0, 0), digest(b"plugin")),
+            vec![],
+            digest(b"cfg"),
+            0,
+            vec![],
+        )])
+        .unwrap()
+    }
+
+    fn lock() -> crate::EnvLock {
+        crate::EnvLock::pin(sos_core::EnvRecord::new(
+            "toolchain",
+            vec![],
+            "hardware",
+            "os",
+        ))
+    }
+
+    /// Run `plan` once, storing the plan, the ledger, and the output object.
+    fn seed_store() -> (MemoryStore, ObjectId, sos_workflow::Plan) {
+        let mut store = MemoryStore::new();
+        let plan = one_stage_plan();
+        let out = put(&mut store, "result", DeterminismLevel::L3);
+        let mut exec = Fixed1 {
+            output: out,
+            ran: 0,
+        };
+        let ledger = crate::rerun(
+            &plan,
+            &lock(),
+            &mut sos_workflow::MemoTable::new(),
+            &mut exec,
+        )
+        .unwrap();
+
+        let plan_obj = Object::builder(plan.clone()).seal();
+        store.put_object(&plan_obj).unwrap();
+        let ledger_obj = Object::builder(ledger).seal();
+        store.put_object(&ledger_obj).unwrap();
+        (store, out, plan)
+    }
+
+    #[test]
+    fn verify_object_finds_the_run_reexecutes_it_and_verifies() {
+        let (store, out, _) = seed_store();
+        let mut exec = Fixed1 {
+            output: out,
+            ran: 0,
+        };
+        let report = verify_object(
+            out,
+            &store,
+            &lock(),
+            &mut sos_workflow::MemoTable::new(),
+            &mut exec,
+            &mut NoCertifier,
+        )
+        .unwrap();
+        assert!(report.reproduced());
+        assert_eq!(exec.ran, 1, "the run was really re-executed");
+    }
+
+    #[test]
+    fn verify_object_catches_a_re_execution_that_produces_something_else() {
+        let (mut store, out, _) = seed_store();
+        let other = put(&mut store, "different", DeterminismLevel::L3);
+        let mut exec = Fixed1 {
+            output: other,
+            ran: 0,
+        };
+        let report = verify_object(
+            out,
+            &store,
+            &lock(),
+            &mut sos_workflow::MemoTable::new(),
+            &mut exec,
+            &mut NoCertifier,
+        )
+        .unwrap();
+        assert!(!report.reproduced());
+        assert_eq!(report.first_deviation().unwrap().node, out);
+    }
+
+    #[test]
+    fn an_object_no_stored_run_produced_is_reported_as_such() {
+        let (mut store, _, _) = seed_store();
+        let orphan = put(&mut store, "orphan", DeterminismLevel::L3);
+        let mut exec = Fixed1 {
+            output: orphan,
+            ran: 0,
+        };
+        assert!(matches!(
+            verify_object(
+                orphan,
+                &store,
+                &lock(),
+                &mut sos_workflow::MemoTable::new(),
+                &mut exec,
+                &mut NoCertifier,
+            ),
+            Err(ReproError::NoProducingLedger(id)) if id == orphan
+        ));
+    }
+
+    #[test]
+    fn an_unstored_plan_is_reported_rather_than_guessed_at() {
+        // A ledger records a plan's *digest*, not the plan. Without the plan
+        // there is nothing to re-execute, and inventing one is not an option.
+        let mut store = MemoryStore::new();
+        let plan = one_stage_plan();
+        let out = put(&mut store, "result", DeterminismLevel::L3);
+        let mut exec = Fixed1 {
+            output: out,
+            ran: 0,
+        };
+        let ledger = crate::rerun(
+            &plan,
+            &lock(),
+            &mut sos_workflow::MemoTable::new(),
+            &mut exec,
+        )
+        .unwrap();
+        store.put_object(&Object::builder(ledger).seal()).unwrap();
+        // ...deliberately not storing the plan.
+
+        assert!(matches!(
+            verify_object(
+                out,
+                &store,
+                &lock(),
+                &mut sos_workflow::MemoTable::new(),
+                &mut exec,
+                &mut NoCertifier,
+            ),
+            Err(ReproError::PlanNotStored(_))
+        ));
+    }
+
+    #[test]
+    fn two_runs_producing_the_same_object_are_refused_not_guessed_between() {
+        // Which run the caller meant is a question about their intent;
+        // picking one would silently verify a run they did not ask about.
+        let (mut store, out, plan) = seed_store();
+        // A second, differently-seeded run that happens to emit the same id.
+        let other_plan = sos_workflow::Plan::new(vec![sos_workflow::Stage::new(
+            StageId::new("only"),
+            StageDescriptor::new("p", SemVer::new(1, 0, 0), digest(b"plugin")),
+            vec![],
+            digest(b"cfg"),
+            99,
+            vec![],
+        )])
+        .unwrap();
+        assert_ne!(other_plan.digest(), plan.digest());
+        let mut exec = Fixed1 {
+            output: out,
+            ran: 0,
+        };
+        let second = crate::rerun(
+            &other_plan,
+            &lock(),
+            &mut sos_workflow::MemoTable::new(),
+            &mut exec,
+        )
+        .unwrap();
+        store.put_object(&Object::builder(second).seal()).unwrap();
+
+        assert!(matches!(
+            verify_object(
+                out,
+                &store,
+                &lock(),
+                &mut sos_workflow::MemoTable::new(),
+                &mut exec,
+                &mut NoCertifier,
+            ),
+            Err(ReproError::AmbiguousProducer { count: 2, .. })
+        ));
     }
 }
