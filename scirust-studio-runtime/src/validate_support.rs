@@ -35,6 +35,20 @@ pub const CODE_UNSUPPORTED_PRECISION: ErrorCode = ErrorCode::new(ErrorFamily::Va
 /// `backend.kind` names a backend this capability does not run on.
 pub const CODE_UNSUPPORTED_BACKEND: ErrorCode = ErrorCode::new(ErrorFamily::Validation, 99);
 
+/// The fixed-step RK4 descriptor most capabilities declare.
+///
+/// Eight adapters had been repeating the same four fields with the same
+/// summary. A capability whose RK4 needs saying something *particular* — the
+/// heat rod's stability bound, the two-body's symplectic alternative — still
+/// declares its own; this is only for the ones where the honest summary is
+/// the generic one.
+pub const RK4_SOLVER: SolverDescriptor = SolverDescriptor {
+    id: "rk4",
+    summary: "Classical fixed-step Runge-Kutta 4. Requires `solver.step`.",
+    fixed_step: true,
+    adaptive_tolerance: false,
+};
+
 fn field_error(
     field: &FieldDescriptor,
     explanation: String,

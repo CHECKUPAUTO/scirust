@@ -7,6 +7,7 @@ mod logistic_growth;
 mod lotka_volterra;
 mod ornstein_uhlenbeck;
 mod pendulum;
+mod photodiode;
 mod rlc;
 mod robertson;
 mod sir;
@@ -19,6 +20,7 @@ pub use logistic_growth::LogisticGrowthAdapter;
 pub use lotka_volterra::LotkaVolterraAdapter;
 pub use ornstein_uhlenbeck::OrnsteinUhlenbeckAdapter;
 pub use pendulum::PendulumAdapter;
+pub use photodiode::PhotodiodeAdapter;
 pub use rlc::RlcAdapter;
 pub use robertson::RobertsonAdapter;
 pub use sir::SirAdapter;
@@ -49,6 +51,7 @@ pub fn all_adapters() -> Vec<Box<dyn CapabilityAdapter>> {
         Box::new(DoublePendulumAdapter),
         Box::new(OrnsteinUhlenbeckAdapter),
         Box::new(HeatRodAdapter),
+        Box::new(PhotodiodeAdapter),
     ]
 }
 
@@ -132,6 +135,11 @@ const TUTORIAL_SCENARIOS: &[(&str, &str, &str)] = &[
         "sim.thermal.heat_rod_1d",
         "heat_rod.scirust.toml",
         include_str!("../../../docs/studio/tutorials/heat_rod.scirust.toml"),
+    ),
+    (
+        "sim.optoelectronics.photodiode",
+        "photodiode.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/photodiode.scirust.toml"),
     ),
 ];
 

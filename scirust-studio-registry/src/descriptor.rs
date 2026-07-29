@@ -49,6 +49,14 @@ pub enum CapabilityCategory {
     Stochastic,
     /// Heat transfer and thermal fields.
     Thermal,
+    /// Light-emitting and light-detecting devices.
+    Optoelectronics,
+    /// Energy storage.
+    Energy,
+    /// Electrical power systems.
+    Power,
+    /// Drug absorption and distribution.
+    Pharmacology,
 }
 
 /// The scientific maturity of the *underlying model*, as documented by its
