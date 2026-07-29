@@ -721,6 +721,105 @@ fn sos_verify_can_check_the_objects_sos_run_produced() {
     fs::remove_dir_all(&dir).ok();
 }
 
+/// Invoke `sos verify --rerun` the way the binary does.
+fn sos_verify_rerun(
+    store: &Path,
+    id: sos_core::ObjectId,
+    runs: &Path,
+) -> sos_cli::error::Result<String> {
+    let argv = vec![
+        id.to_string(),
+        "--store".to_owned(),
+        store.to_str().unwrap().to_owned(),
+        "--rerun".to_owned(),
+        runs.to_str().unwrap().to_owned(),
+        "--allow".to_owned(),
+        "effectful".to_owned(),
+    ];
+    let a = Args::parse(&argv)?;
+    sos_cli::verify::rerun(a.flag("store"), id, &a)
+}
+
+#[test]
+fn sos_verify_rerun_re_executes_and_reports_reproduction() {
+    // The check RFC-0002 §10.4 describes, as opposed to the identity check:
+    // find the run that made this object, run its plan again, and compare.
+    let dir = temp_root("rerun-verify");
+    let store_path = dir.join("store");
+    let (manifest, runs_file) = write_study(&dir, &[growth(100.0), tone()]);
+    let out = sos_run(
+        &manifest,
+        &runs_file,
+        &store_path,
+        &["--allow", "effectful"],
+    )
+    .unwrap();
+
+    let target = parse_reported(&out, "stage-0");
+    let report = sos_verify_rerun(&store_path, target, &runs_file).unwrap();
+    assert!(report.contains("REPRODUCED"), "{report}");
+    assert!(report.contains("re-executed: 2 node(s)"), "{report}");
+    assert!(report.contains("L3"), "{report}");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_rerun_verification_does_not_read_the_persisted_memo() {
+    // The failure mode that would make this whole command a lie: reusing
+    // `sos run`'s memo would replay the recorded outputs and "verify"
+    // nothing. Checked by making the memo claim an absurd answer — if the
+    // verification consulted it, the re-run would return that instead of
+    // recomputing, and the report would not say REPRODUCED.
+    let dir = temp_root("rerun-memo");
+    let store_path = dir.join("store");
+    let (manifest, runs_file) = write_study(&dir, &[growth(100.0)]);
+    let out = sos_run(
+        &manifest,
+        &runs_file,
+        &store_path,
+        &["--allow", "effectful"],
+    )
+    .unwrap();
+
+    // Poison the persisted memo: every entry now points at nothing real.
+    let memo_path = store_path.join(sos_cli::memo::MEMO_FILE);
+    let poisoned = fs::read_to_string(&memo_path)
+        .unwrap()
+        .replace("sos1:", "sos1:ff");
+    fs::write(&memo_path, poisoned).unwrap();
+
+    // The verification still reproduces, because it never looks there.
+    let target = parse_reported(&out, "stage-0");
+    let report = sos_verify_rerun(&store_path, target, &runs_file).unwrap();
+    assert!(report.contains("REPRODUCED"), "{report}");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn verifying_an_object_no_stored_run_produced_is_an_error() {
+    // An object with no producing ledger cannot be re-executed, and saying so
+    // is the honest answer rather than reporting a vacuous success.
+    let dir = temp_root("rerun-orphan");
+    let store_path = dir.join("store");
+    let (manifest, runs_file) = write_study(&dir, &[growth(100.0)]);
+    let out = sos_run(
+        &manifest,
+        &runs_file,
+        &store_path,
+        &["--allow", "effectful"],
+    )
+    .unwrap();
+
+    // The plan object is stored, but no run *produced* it as a stage output.
+    let plan_id = parse_reported(&out, "plan");
+    let err = sos_verify_rerun(&store_path, plan_id, &runs_file).unwrap_err();
+    assert!(
+        err.to_string().contains("no") || err.to_string().contains("ledger"),
+        "{err}"
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
 #[test]
 fn no_two_body_kinds_collide() {
     // The guard for the defect `sos verify` surfaced: sos-planner's `Plan` and
