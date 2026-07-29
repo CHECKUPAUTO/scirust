@@ -12,7 +12,9 @@ categories = ["science", "data-structures"]
 [dependencies]
 sos-core = { workspace = true }
 sos-workflow = { workspace = true }
+sos-store = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
