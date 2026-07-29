@@ -77,6 +77,7 @@ mod tests {
                 values: vec![1.0, 0.5, 0.25],
             }],
             fields: vec![],
+            distributions: vec![],
             metrics: vec![Metric {
                 id: "final".to_string(),
                 display_name: "Final".to_string(),

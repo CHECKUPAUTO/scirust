@@ -359,6 +359,7 @@ impl CapabilityAdapter for ConsecutiveReactionsAdapter {
                 },
             ],
             fields: vec![],
+            distributions: vec![],
             metrics: vec![
                 Metric {
                     id: "peak_intermediate".to_string(),

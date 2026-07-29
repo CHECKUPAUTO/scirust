@@ -607,6 +607,7 @@ impl CapabilityAdapter for HeatRodAdapter {
                 columns,
                 values,
             }],
+            distributions: vec![],
             metrics: vec![
                 Metric {
                     id: "nodes".to_string(),

@@ -353,6 +353,7 @@ impl CapabilityAdapter for ReversibleReactionAdapter {
                 },
             ],
             fields: vec![],
+            distributions: vec![],
             metrics: vec![
                 Metric {
                     id: "equilibrium_constant".to_string(),

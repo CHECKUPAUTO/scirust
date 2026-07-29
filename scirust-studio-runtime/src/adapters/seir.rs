@@ -401,6 +401,7 @@ impl CapabilityAdapter for SeirAdapter {
                 },
             ],
             fields: vec![],
+            distributions: vec![],
             metrics: vec![
                 Metric {
                     id: "r0".to_string(),

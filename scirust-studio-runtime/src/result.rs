@@ -204,6 +204,130 @@ impl Field {
     }
 }
 
+/// A **distribution**: how many samples fell into each of a set of bins.
+///
+/// # Why neither a [`Series`] nor a [`Field`] could do this
+///
+/// Both of those are aligned *one-to-one* with an [`Axis`]: `n` coordinates,
+/// `n` values. A histogram is not. Its `n` bins are delimited by `n + 1`
+/// edges, and the off-by-one is not a detail — it is the difference between
+/// "the value at this point" and "how much fell between these two points".
+///
+/// It was tempting to store one as a [`Field`] with a single row, which is
+/// why this type carries the argument rather than only the code. A field's
+/// rows and columns are both point-sampled, so a one-row field with `n`
+/// values needs an axis of `n` coordinates, and a reader would have to guess
+/// whether those were bin centres, left edges, or something else. Recording
+/// the edges is the only representation in which "which bin is this?" has one
+/// answer.
+///
+/// The bins carry no [`Axis`] reference for the same reason: a distribution
+/// is self-describing, and binding it to a shared axis would reintroduce
+/// exactly the alignment it does not have.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Distribution {
+    /// Stable id, unique within the result.
+    pub id: String,
+    /// Human-facing name.
+    pub display_name: String,
+    /// Unit of the *binned quantity*, not of the counts.
+    pub unit: String,
+    /// Bin edges, strictly increasing. There are `counts.len() + 1` of them.
+    pub edges: Vec<f64>,
+    /// How many samples fell in each bin. `counts[i]` covers
+    /// `edges[i]..=edges[i + 1]`, the last bin including its right edge.
+    pub counts: Vec<u64>,
+    /// Samples below `edges[0]`.
+    ///
+    /// Recorded rather than clamped into the first bin: a distribution whose
+    /// range was chosen badly should say so, not quietly grow a spike at its
+    /// own edge.
+    pub underflow: u64,
+    /// Samples above the last edge, for the same reason.
+    pub overflow: u64,
+}
+
+impl Distribution {
+    /// Bin `samples` into `bin_count` equal-width bins spanning `lo..=hi`.
+    ///
+    /// Samples outside the range are counted as under/overflow rather than
+    /// clamped. A non-finite sample counts as overflow, because a run that
+    /// produced one has a problem the histogram must not hide.
+    pub fn from_samples(
+        id: &str,
+        display_name: &str,
+        unit: &str,
+        samples: &[f64],
+        lo: f64,
+        hi: f64,
+        bin_count: usize,
+    ) -> Distribution {
+        let bin_count = bin_count.max(1);
+        let width = (hi - lo) / bin_count as f64;
+        let edges: Vec<f64> = (0..=bin_count).map(|i| lo + i as f64 * width).collect();
+        let mut counts = vec![0u64; bin_count];
+        let (mut underflow, mut overflow) = (0u64, 0u64);
+        for sample in samples
+        {
+            if !sample.is_finite() || *sample > hi
+            {
+                overflow += 1;
+            }
+            else if *sample < lo
+            {
+                underflow += 1;
+            }
+            else
+            {
+                // The last bin is closed on the right, so a sample exactly at
+                // `hi` lands in it rather than falling off the end.
+                let index = (((sample - lo) / width) as usize).min(bin_count - 1);
+                counts[index] += 1;
+            }
+        }
+        Distribution {
+            id: id.to_string(),
+            display_name: display_name.to_string(),
+            unit: unit.to_string(),
+            edges,
+            counts,
+            underflow,
+            overflow,
+        }
+    }
+
+    /// Total number of samples, including those outside the binned range.
+    pub fn total(&self) -> u64 {
+        self.counts.iter().sum::<u64>() + self.underflow + self.overflow
+    }
+
+    /// The centre of each bin, for plotting.
+    pub fn centres(&self) -> Vec<f64> {
+        self.edges.windows(2).map(|w| 0.5 * (w[0] + w[1])).collect()
+    }
+
+    /// The mean of the binned samples, estimated from the bin centres.
+    ///
+    /// An estimate, and named as one: the individual samples are gone by the
+    /// time a distribution exists, so this is accurate to within half a bin
+    /// width. A capability that needs the exact mean computes it from the
+    /// samples and records it as a [`Metric`].
+    pub fn estimated_mean(&self) -> Option<f64> {
+        let binned: u64 = self.counts.iter().sum();
+        if binned == 0
+        {
+            return None;
+        }
+        let sum: f64 = self
+            .centres()
+            .iter()
+            .zip(self.counts.iter())
+            .map(|(c, n)| c * *n as f64)
+            .sum();
+        Some(sum / binned as f64)
+    }
+}
+
 /// The full, versioned result of one capability execution.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunResult {
@@ -223,6 +347,12 @@ pub struct RunResult {
     /// with none — which is what those results had.
     #[serde(default)]
     pub fields: Vec<Field>,
+    /// Named distributions, each with its own bin edges.
+    ///
+    /// Defaulted, so every result written before distributions existed reads
+    /// back with none — which is what those results had.
+    #[serde(default)]
+    pub distributions: Vec<Distribution>,
     /// Named scalar/derived metrics.
     pub metrics: Vec<Metric>,
     /// Non-fatal warnings raised during validation or execution.
@@ -507,6 +637,36 @@ pub enum ResultDefect {
         /// The offending coordinate, rendered.
         value: String,
     },
+    /// Two distributions share an id.
+    DuplicateDistributionId {
+        /// The repeated id.
+        distribution_id: String,
+    },
+    /// A distribution's edge count is not one more than its bin count.
+    DistributionEdgeCountMismatch {
+        /// The distribution.
+        distribution_id: String,
+        /// How many edges it has.
+        edges: usize,
+        /// How many bins it has.
+        bins: usize,
+    },
+    /// A distribution's edges are not strictly increasing, or not finite.
+    DistributionEdgesNotIncreasing {
+        /// The distribution.
+        distribution_id: String,
+        /// Index of the edge that broke the order.
+        index: usize,
+        /// The previous edge, rendered.
+        previous: String,
+        /// The offending edge, rendered.
+        value: String,
+    },
+    /// A distribution has no bins at all.
+    DistributionHasNoBins {
+        /// The distribution.
+        distribution_id: String,
+    },
     /// `summary.t_start` disagrees with its axis's first coordinate.
     SummaryStartMismatch {
         /// What the summary says.
@@ -657,6 +817,33 @@ impl std::fmt::Display for ResultDefect {
                 f,
                 "axis `{axis_id}` declares an increasing order but [{index}] = {value} follows {previous}"
             ),
+            ResultDefect::DuplicateDistributionId { distribution_id } =>
+            {
+                write!(f, "two distributions share the id `{distribution_id}`")
+            },
+            ResultDefect::DistributionEdgeCountMismatch {
+                distribution_id,
+                edges,
+                bins,
+            } => write!(
+                f,
+                "distribution `{distribution_id}` has {edges} edges for {bins} bins; a \
+                 histogram needs exactly one more edge than bin"
+            ),
+            ResultDefect::DistributionEdgesNotIncreasing {
+                distribution_id,
+                index,
+                previous,
+                value,
+            } => write!(
+                f,
+                "distribution `{distribution_id}` edge {index} is {value} after {previous}; \
+                 edges must be finite and strictly increasing or a sample has no unique bin"
+            ),
+            ResultDefect::DistributionHasNoBins { distribution_id } =>
+            {
+                write!(f, "distribution `{distribution_id}` has no bins")
+            },
             ResultDefect::SummaryStartMismatch { summary, axis } => write!(
                 f,
                 "summary.t_start is {summary} but its axis starts at {axis}"
@@ -838,6 +1025,7 @@ pub fn validate_result(result: &RunResult) -> Result<(), Vec<ResultDefect>> {
     }
 
     check_fields(result, &mut defects);
+    check_distributions(result, &mut defects);
     check_ensemble(result, &mut defects);
 
     if let Some(axis) = result.summary_axis()
@@ -879,6 +1067,61 @@ pub fn validate_result(result: &RunResult) -> Result<(), Vec<ResultDefect>> {
 /// plausible-looking picture of nothing. So the shape is checked twice —
 /// against the declared column count and against both axes — rather than
 /// trusted from either.
+/// Structural rules for [`Distribution`]s.
+///
+/// Deliberately only structural. That the counts are a *plausible* sample of
+/// anything is the capability's own business — `validate_result` is the last
+/// gate before a result reaches a consumer, and its job is that nothing
+/// downstream can be misled about the shape of what it received. A histogram
+/// with the wrong number of edges is a picture drawn against the wrong bins;
+/// a histogram of an unlikely-looking sample is a scientific question.
+fn check_distributions(result: &RunResult, defects: &mut Vec<ResultDefect>) {
+    let mut seen = std::collections::BTreeSet::new();
+    for distribution in &result.distributions
+    {
+        if !seen.insert(distribution.id.as_str())
+        {
+            defects.push(ResultDefect::DuplicateDistributionId {
+                distribution_id: distribution.id.clone(),
+            });
+        }
+
+        if distribution.counts.is_empty()
+        {
+            defects.push(ResultDefect::DistributionHasNoBins {
+                distribution_id: distribution.id.clone(),
+            });
+            continue;
+        }
+
+        if distribution.edges.len() != distribution.counts.len() + 1
+        {
+            defects.push(ResultDefect::DistributionEdgeCountMismatch {
+                distribution_id: distribution.id.clone(),
+                edges: distribution.edges.len(),
+                bins: distribution.counts.len(),
+            });
+            // Every later check indexes the edges, so reporting them too
+            // would be one mistake described several ways.
+            continue;
+        }
+
+        for (index, pair) in distribution.edges.windows(2).enumerate()
+        {
+            let ordered = pair[0].is_finite() && pair[1].is_finite() && pair[1] > pair[0];
+            if !ordered
+            {
+                defects.push(ResultDefect::DistributionEdgesNotIncreasing {
+                    distribution_id: distribution.id.clone(),
+                    index: index + 1,
+                    previous: pair[0].to_string(),
+                    value: pair[1].to_string(),
+                });
+            }
+        }
+    }
+}
+
 fn check_fields(result: &RunResult, defects: &mut Vec<ResultDefect>) {
     let mut seen = std::collections::BTreeSet::new();
     for field in &result.fields
@@ -1174,6 +1417,7 @@ mod tests {
                 values: vec![1.0, 0.9, 0.8],
             }],
             fields: vec![],
+            distributions: vec![],
             metrics: vec![Metric {
                 id: "final_position".to_string(),
                 display_name: "Final position".to_string(),

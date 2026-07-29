@@ -587,6 +587,7 @@ impl CapabilityAdapter for AvalanchePhotodiodeAdapter {
                 ),
             ],
             fields: vec![],
+            distributions: vec![],
             metrics,
             warnings,
             verifications: checks,

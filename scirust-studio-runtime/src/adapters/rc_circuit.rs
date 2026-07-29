@@ -336,6 +336,7 @@ impl CapabilityAdapter for RcCircuitAdapter {
                 },
             ],
             fields: vec![],
+            distributions: vec![],
             metrics: vec![
                 Metric {
                     id: "time_constant".to_string(),

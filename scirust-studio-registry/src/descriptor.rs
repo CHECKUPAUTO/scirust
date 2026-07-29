@@ -79,6 +79,15 @@ pub enum RunDomain {
     /// Closed forms evaluated across a swept parameter; results carry that
     /// parameter's axis and no time axis.
     ParameterSweep,
+    /// Independent realisations of a stochastic process, *indexed* rather
+    /// than swept; results carry a `replicate` axis with one point per
+    /// realisation and no time axis.
+    ///
+    /// Distinct from [`Self::ParameterSweep`] because nothing varies between
+    /// the points except the seed. A sweep's axis is a quantity the user
+    /// chose and can reason about; an ensemble's axis is a bookkeeping index,
+    /// and reading a trend along it would be reading noise.
+    Ensemble,
 }
 
 /// The scientific maturity of the *underlying model*, as documented by its

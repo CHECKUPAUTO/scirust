@@ -363,6 +363,7 @@ impl CapabilityAdapter for SirAdapter {
                 },
             ],
             fields: vec![],
+            distributions: vec![],
             metrics: vec![
                 Metric {
                     id: "peak_infected".to_string(),

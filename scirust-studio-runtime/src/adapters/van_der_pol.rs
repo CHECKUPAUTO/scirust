@@ -354,6 +354,7 @@ impl CapabilityAdapter for VanDerPolAdapter {
                 },
             ],
             fields: vec![],
+            distributions: vec![],
             metrics: vec![
                 Metric {
                     id: "mu".to_string(),

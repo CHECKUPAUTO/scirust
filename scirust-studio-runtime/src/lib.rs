@@ -27,9 +27,10 @@ pub use adapter::{CapabilityAdapter, ExecutionError, ValidatedScenario, Validati
 pub use control::ExecutionControl;
 
 pub use result::{
-    Axis, AxisMonotonicity, Field, Metric, MetricValue, RESULT_SCHEMA_VERSION, ResultDefect,
-    RunProvenance, RunResult, RunSummary, RunWarning, Series, SeriesRole, TIME_AXIS_ID,
-    VerificationResult, VerificationStatus, WarningCategory, describe_defects, validate_result,
+    Axis, AxisMonotonicity, Distribution, Field, Metric, MetricValue, RESULT_SCHEMA_VERSION,
+    ResultDefect, RunProvenance, RunResult, RunSummary, RunWarning, Series, SeriesRole,
+    TIME_AXIS_ID, VerificationResult, VerificationStatus, WarningCategory, describe_defects,
+    validate_result,
 };
 pub use result_v1::{
     AxisDescriptorV1, RESULT_SCHEMA_VERSION_V1, RunResultV1, RunSummaryV1, SeriesV1, XAxisMeaning,

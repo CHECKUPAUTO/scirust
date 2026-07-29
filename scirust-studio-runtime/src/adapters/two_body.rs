@@ -389,6 +389,7 @@ impl CapabilityAdapter for TwoBodyAdapter {
                 },
             ],
             fields: vec![],
+            distributions: vec![],
             metrics: vec![
                 Metric {
                     id: "final_x".to_string(),
