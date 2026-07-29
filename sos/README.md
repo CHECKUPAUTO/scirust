@@ -493,7 +493,7 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   manifest pins each config *by address*, so pointing the command at a
   different experiment's runs fails rather than computing something else.
 
-  It binds **four** of `sos-scirust`'s seven backends, and that partition is a
+  It binds **five** of `sos-scirust`'s eight backends, and that partition is a
   consequence rather than a shortcut worth apologising for. `Dopri5`,
   quadrature and root-finding each take a *function* — a right-hand side, an
   integrand, a residual — and no file can name a function, so no amount of CLI
@@ -582,6 +582,40 @@ stubs, no TODOs, no placeholders cross a phase boundary.
   A true `sos merge` needs conflict-resolution semantics no crate has designed
   yet; it is not stubbed. A network remote for `clone`/`push` is `sos-mcp`'s
   domain.
+  **`L2` results are reachable from a study file, and certified on re-run.**
+  This corrects a claim made earlier in this document. `Dopri5OdeSimulator`
+  takes a right-hand side *function*, which was read as "the adaptive solver
+  can never be driven from a file". Wrong: the catalogue already turns a
+  **name** into a system, so the right-hand side is built inside `sos-scirust`
+  from a token a manifest wrote — the closure never crosses the file boundary.
+  What genuinely cannot be bound is an *arbitrary user function*, and a
+  catalogued model is not one.
+
+  It matters because every other CLI-bindable backend is `L3`:
+  bit-reproducible, asserting nothing about accuracy. `sim-catalog-adaptive`
+  is `L2` and stores a `CertifiedTrajectory` — the tolerances it is certified
+  to, plus the accepted and rejected step counts it took. A test measures that
+  the certificate is not decoration: a tighter tolerance really does cost more
+  steps.
+
+  And it unlocks the other half. `sos-repro`'s contract treats `L2`
+  differently from `L3` on purpose — comparing object ids is *exactly wrong*
+  for a tolerance claim, since two adaptive runs that both meet `rtol` need not
+  be bit-identical, and demanding they be would fail correct reproductions.
+  Until an `L2` node could come out of `sos run`, that branch was unreachable
+  and `--rerun` honestly used `NoCertifier`. It now carries a
+  `TrajectoryCertifier` that asks `sos-scirust` whether two trajectories agree
+  within the tolerance the original declared — the backend that made the claim
+  judges it — while still refusing any kind it does not understand.
+
+  ```
+  $ sos verify <trajectory> --store .sos --rerun runs.json --allow effectful
+    re-executed: 1 node(s)
+    contract level: L2
+    … L2 Reproduced
+    REPRODUCED (every node matched at its declared level)
+  ```
+
   **A study can simulate a system and then analyse what it produced.** That
   is the arc `consumes` began and `sos-scirust`'s `pipeline` module finishes:
   being handed an upstream object is not the same as knowing what to do with
