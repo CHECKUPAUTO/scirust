@@ -40,16 +40,18 @@ callback.
 
 | Module | Catalogued | Descriptor | Adapter | Scenario tested | Oracle tested | CLI exposed | Desktop exposed |
 |---|---|---|---|---|---|---|---|
-| `mechanics` (spring-mass-damper) | Yes | Yes | Yes | Yes | Yes (energy conservation) | Yes | No |
-| `mechanics` (pendulum, projectile, double pendulum) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
-| `orbital` (two-body) | Yes | Yes | Yes | Yes | Yes (energy + angular momentum) | Yes | No |
-| `epidemiology` (SIR) | Yes | Yes | Yes | Yes | Yes (population conservation, final-size relation) | Yes | No |
+| `mechanics` (spring-mass-damper) | Yes | Yes | Yes | Yes | Yes (energy conservation) | Yes | NoSee desktop table |
+| `mechanics` (pendulum) | Yes | Yes | Yes | Yes | Yes (energy conservation, small-angle period) | Yes | See desktop table |
+| `mechanics` (double pendulum) | Yes | Yes | Yes | Yes | Yes (energy conservation) | Yes | See desktop table |
+| `mechanics` (projectile) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
+| `orbital` (two-body) | Yes | Yes | Yes | Yes | Yes (energy + angular momentum) | Yes | NoSee desktop table |
+| `epidemiology` (SIR) | Yes | Yes | Yes | Yes | Yes (population conservation, final-size relation) | Yes | NoSee desktop table |
 | `epidemiology` (SEIR) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
-| `ecology` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
+| `ecology` (Lotka-Volterra, logistic growth) | Yes | Yes | Yes | Yes | Yes (exact first integral; closed-form solution) | Yes | See desktop table |
 | `chemistry` (consecutive/reversible reactions) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
-| `chemistry` (Robertson, stiff) | Yes | Yes | Yes | Yes | Yes (mass conservation, published reference values) | Yes | No |
+| `chemistry` (Robertson, stiff) | Yes | Yes | Yes | Yes | Yes (mass conservation, published reference values) | Yes | NoSee desktop table |
 | `thermal` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
-| `electrical` (RC, series RLC) | Yes | Yes (RLC only) | Yes (RLC only) | Yes (RLC only) | Yes (passivity, closed-form match) | Yes (RLC only) | No |
+| `electrical` (RC, series RLC) | Yes | Yes (RLC only) | Yes (RLC only) | Yes (RLC only) | Yes (passivity, closed-form match) | Yes (RLC only) | NoSee desktop table |
 | `electrical` (Van der Pol) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
 | `stochastic` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
 | `pharmacokinetics` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
@@ -66,13 +68,15 @@ callback.
 pass)" means: the audit read the module's own doc comments and knows tests
 exist (per `cargo test -p scirust-sim` passing in CI), but this Studio pass
 did not open the source and independently confirm the oracle's correctness
-the way it did for the five adapted models. That distinction matters — do
-not read "Oracle tested: Yes" here as "Studio verified this," only as "the
-owning crate verifies this."
+the way it did for the adapted models. That distinction matters — do not read
+"Oracle tested: Yes" here as "Studio verified this," only as "the owning crate
+verifies this."
 
-**5 of 16 modules have a real Studio adapter.** The other 11 (plus 3 model
-families within already-partially-adapted modules) are real, tested code
-that Studio does not yet expose. Building their adapters is Phase 3 work.
+**6 of 16 modules have a real Studio adapter**, covering 9 capabilities. The
+other 10 (plus 4 model families within already-partially-adapted modules —
+SEIR, the two non-stiff chemistry models, the projectile and Van der Pol) are
+real, tested code that Studio does not yet expose. Building their adapters is
+the remainder of Phase 3B.
 
 ## Desktop exposure (Phase 3A)
 
@@ -103,6 +107,10 @@ Columns:
 | `sim.epidemiology.sir` | Yes | Yes | Yes | Yes | Yes | Yes |
 | `sim.electrical.rlc` | Yes | Yes | Yes | Yes | Yes | Yes |
 | `sim.chemistry.robertson` | Yes | Yes | Yes | Yes (indeterminate progress) | Yes | Yes |
+| `sim.ecology.lotka_volterra` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.ecology.logistic_growth` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.mechanics.pendulum` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.mechanics.double_pendulum` | Yes | Yes | Yes | Yes | Yes | Yes |
 | Every other `scirust-sim` model family | No | No | No | No | No | No |
 | Every other workspace crate | No | No | No | No | No | No |
 
@@ -123,10 +131,15 @@ Three notes, because a table like this is easy to over-read:
    Help view says so in its own first line rather than implying it documents a
    complete product.
 
-**Desktop-exposed: 5 of 16 `scirust-sim` module families**, identical to
-adapter coverage. Adapting the remaining eleven is Phase 3B; it requires no
-desktop work, because the catalogue, the run view and the chart are all driven
-from the registry.
+**Desktop-exposed: 9 capabilities across 6 of 16 `scirust-sim` module
+families**, identical to adapter coverage.
+
+Phase 3B-1 added four of these (Lotka-Volterra, logistic growth, pendulum,
+double pendulum) and **changed nothing in the desktop application** — no
+change to the shell, the interface, the bridge or the chart. That was the
+claim this table made at the end of Phase 3A, and it held: the catalogue, the
+run view, the verification panel and the chart are all driven from the
+registry, so adapting a model is the whole of the work.
 
 ## The rest of the workspace
 
@@ -163,3 +176,46 @@ The number that did not change is the point. Phase 3A built a shell, an
 interface and a bridge; it deliberately did not begin the remaining eleven
 adapters, because doing both at once is how an application ends up with a
 capability nobody tested.
+
+## Summary counts (Phase 3B-1)
+
+- Operational (descriptor + adapter + scenario-tested + CLI-exposed +
+  desktop-exposed): **9** — the original five plus
+  `sim.ecology.lotka_volterra`, `sim.ecology.logistic_growth`,
+  `sim.mechanics.pendulum` and `sim.mechanics.double_pendulum`.
+- `scirust-sim` module families with at least one adapter: **6 of 16**
+  (mechanics, orbital, epidemiology, electrical, chemistry, ecology).
+- Still catalogue-only: `thermal`, `stochastic`, `pharmacokinetics`,
+  `rigid_body`, `battery`, `hvac`, `grid`, `laser`, `photodiode`, `apd`,
+  `envs`, plus SEIR, the two non-stiff chemistry models, the projectile and
+  Van der Pol within already-adapted families — and every other workspace
+  crate.
+
+### What the four new capabilities add beyond a bigger number
+
+Each was chosen to exercise something the first five did not:
+
+- **`sim.ecology.logistic_growth`** is the first capability with a
+  **one-component state**, and the first whose verification compares against a
+  **closed-form solution** at every recorded point rather than against a
+  conservation law. Measured error over the tutorial: `1.1e-13` relative to
+  the carrying capacity.
+- **`sim.ecology.lotka_volterra`** has an **exact first integral**, which is a
+  sharper oracle than "the curve looks periodic": a trajectory can look right
+  and still have drifted off its orbit. Measured drift: `8.1e-16`.
+- **`sim.mechanics.pendulum`** solves the equation **without the small-angle
+  approximation**, and reports the period measured from the trajectory next to
+  the textbook `2*pi*sqrt(L/g)`. At the tutorial's 90-degree release the two
+  differ by 18% (`2.368 s` against `2.006 s`) — the capability exists to make
+  that disagreement visible rather than to hide it.
+- **`sim.mechanics.double_pendulum`** is **deterministic but not
+  predictable**. It integrates a second trajectory from a start perturbed by
+  `1e-9 rad` and reports how far the two separate: over the tutorial they end
+  `3.0 rad` apart, having decorrelated at `t = 25.1 s`, and the result carries
+  a warning saying so. Divergence is reported as a measurement and never as a
+  failed check, because it is the physics behaving correctly.
+
+Two smaller things were needed to support them, both deliberately minimal: the
+unit table gained `rad` and `rad/s` (dimensionless and frequency respectively,
+both with a conversion factor of exactly 1), and the registry gained an
+`Ecology` category.

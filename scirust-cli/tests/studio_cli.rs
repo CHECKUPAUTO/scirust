@@ -126,11 +126,41 @@ fn catalog_json_is_parseable() {
     assert!(out.status.success());
     let parsed: serde_json::Value =
         serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).expect("valid JSON");
+    let catalogued = parsed.as_array().expect("an array");
+
+    // Compared against the registry rather than against a number written
+    // here. A hard-coded count has to be edited every time a capability is
+    // added, which makes it a chore rather than a check — and a chore gets
+    // updated without anyone asking whether the change was intended. This
+    // asserts the property that actually matters: what the CLI prints is
+    // exactly what the runtime can execute.
+    let expected = scirust_studio_runtime::build_registry();
     assert_eq!(
-        parsed.as_array().expect("an array").len(),
-        5,
-        "this build exposes five executable capabilities"
+        catalogued.len(),
+        expected.len(),
+        "the catalogue must list every executable capability and nothing else"
     );
+    for descriptor in expected.iter()
+    {
+        assert!(
+            catalogued.iter().any(|c| c["id"] == descriptor.id.0),
+            "{} is executable but missing from `catalog --format json`",
+            descriptor.id
+        );
+    }
+
+    // Every entry must carry the fields a caller reads, so "parseable" is
+    // not satisfied by an array of empty objects.
+    for capability in catalogued
+    {
+        for field in ["id", "display_name", "summary", "category"]
+        {
+            assert!(
+                capability[field].as_str().is_some_and(|s| !s.is_empty()),
+                "{field} missing from {capability}"
+            );
+        }
+    }
 }
 
 #[test]

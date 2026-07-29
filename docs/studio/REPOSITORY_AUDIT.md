@@ -367,3 +367,56 @@ families, exactly as in §12. The desktop reads the same registry, so its
 coverage is the adapter coverage; see `CAPABILITY_MATRIX.md` for the per-
 capability desktop columns. Adapting the remaining eleven is Phase 3B and
 needs no desktop work.
+
+## 14. Update — Phase 3B-1 (four more adapters)
+
+§13 closed by saying capability coverage was unchanged at 5 of 16 module
+families and that adapting more "needs no desktop work, because the catalogue,
+the run view and the chart are all driven from the registry". This phase tests
+that claim by doing it.
+
+Four capabilities were added — `sim.ecology.lotka_volterra`,
+`sim.ecology.logistic_growth`, `sim.mechanics.pendulum` and
+`sim.mechanics.double_pendulum` — bringing the catalogue to **9 capabilities
+across 6 of 16 module families**. Nothing in `apps/scirust-studio` changed:
+not the shell, not the interface, not the bridge, not the chart. The claim
+held.
+
+**What each was chosen to exercise**, beyond raising a count:
+
+- Logistic growth is the first **one-component state** in the catalogue, and
+  the first capability verified against a **closed-form solution** at every
+  recorded point rather than against a conservation law.
+- Lotka-Volterra has an **exact first integral** — a sharper oracle than
+  periodicity, because a trajectory can look periodic and still have drifted
+  off its orbit.
+- The pendulum solves the nonlinear equation and reports the period measured
+  from its own trajectory beside the small-angle formula, which at the
+  tutorial's 90-degree release is wrong by 18%.
+- The double pendulum is **deterministic but not predictable**, and measures
+  that: it integrates a perturbed twin and reports the separation, with a
+  warning naming the time after which the angles stop being predictions.
+
+**Two supporting changes**, both deliberately minimal. The unit table gained
+`rad` and `rad/s`; both are SI-coherent with a conversion factor of exactly 1,
+and a test now asserts that *no* symbol in the table carries a hidden
+conversion — the moment one needs a real factor (mg, litre, hour) that is a
+separate change with its own tests. The registry gained an `Ecology` category.
+
+**A measurement bug this phase found and fixed.** The double pendulum's energy
+check was first written to report drift relative to the *initial* energy, as
+the other mechanics adapters do. That is wrong for this model: potential
+energy is measured from the pivot, so a pendulum released from horizontal
+starts at exactly zero energy, and an absolute drift of two picojoules was
+reported as a relative drift of `1.8e3`. The check now normalises by the
+system's gravitational energy scale, `(m1+m2)*g*l1 + m2*g*l2`, which is
+strictly positive for any valid model. A test pins the reason.
+
+**Still catalogue-only**: `thermal`, `stochastic`, `pharmacokinetics`,
+`rigid_body`, `battery`, `hvac`, `grid`, `laser`, `photodiode`, `apd`, `envs`,
+plus SEIR, the two non-stiff chemistry models, the projectile and Van der Pol.
+Several of the remaining ones need work beyond an adapter: `thermal`'s
+`HeatRod1d` is a spatially discretised field whose natural presentation is not
+a line chart, and `stochastic` is the first model whose determinism class
+would not be `StrictSameBinarySameTarget`. Both are worth doing deliberately
+rather than folding into a tranche of lumped-parameter models.

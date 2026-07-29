@@ -170,9 +170,18 @@ mod tests {
             view.worker_problem.is_some(),
             "the reason must be reported, not hidden"
         );
+        // Against the registry, not a number written here. The property is
+        // "the catalogue is compiled in and stays accurate without a worker",
+        // and a hard-coded count states it less precisely while also having
+        // to be edited every time a capability is added.
         assert_eq!(
-            view.capability_count, 5,
+            view.capability_count,
+            scirust_studio_runtime::build_registry().len(),
             "the catalogue is compiled in and stays accurate without a worker"
+        );
+        assert!(
+            view.capability_count >= 5,
+            "and it is not empty just because the registry happened to be"
         );
         assert!(!view.app_version.is_empty());
         assert!(state.service().is_err());

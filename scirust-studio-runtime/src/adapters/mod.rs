@@ -1,12 +1,20 @@
 //! One module per capability adapter, plus the bootstrap that wires them
 //! into a [`CapabilityRegistry`] and makes them dispatchable by id.
 
+mod double_pendulum;
+mod logistic_growth;
+mod lotka_volterra;
+mod pendulum;
 mod rlc;
 mod robertson;
 mod sir;
 mod spring_mass_damper;
 mod two_body;
 
+pub use double_pendulum::DoublePendulumAdapter;
+pub use logistic_growth::LogisticGrowthAdapter;
+pub use lotka_volterra::LotkaVolterraAdapter;
+pub use pendulum::PendulumAdapter;
 pub use rlc::RlcAdapter;
 pub use robertson::RobertsonAdapter;
 pub use sir::SirAdapter;
@@ -31,6 +39,10 @@ pub fn all_adapters() -> Vec<Box<dyn CapabilityAdapter>> {
         Box::new(TwoBodyAdapter),
         Box::new(RlcAdapter),
         Box::new(RobertsonAdapter),
+        Box::new(LotkaVolterraAdapter),
+        Box::new(LogisticGrowthAdapter),
+        Box::new(PendulumAdapter),
+        Box::new(DoublePendulumAdapter),
     ]
 }
 
@@ -84,6 +96,26 @@ const TUTORIAL_SCENARIOS: &[(&str, &str, &str)] = &[
         "sim.chemistry.robertson",
         "robertson_stiff.scirust.toml",
         include_str!("../../../docs/studio/tutorials/robertson_stiff.scirust.toml"),
+    ),
+    (
+        "sim.ecology.lotka_volterra",
+        "lotka_volterra.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/lotka_volterra.scirust.toml"),
+    ),
+    (
+        "sim.ecology.logistic_growth",
+        "logistic_growth.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/logistic_growth.scirust.toml"),
+    ),
+    (
+        "sim.mechanics.pendulum",
+        "pendulum.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/pendulum.scirust.toml"),
+    ),
+    (
+        "sim.mechanics.double_pendulum",
+        "double_pendulum.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/double_pendulum.scirust.toml"),
     ),
 ];
 

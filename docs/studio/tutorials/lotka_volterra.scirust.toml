@@ -1,0 +1,59 @@
+# SciRust Studio tutorial scenario: Lotka-Volterra predator-prey.
+#
+# Run it with:
+#
+#   scirust run docs/studio/tutorials/lotka_volterra.scirust.toml
+#
+# The classic predator-prey model. Populations do not settle; they orbit the
+# coexistence equilibrium (gamma/delta, alpha/beta) = (0.5, 1.0) forever.
+#
+# What makes this a good check rather than a pretty picture: the quantity
+#
+#   V = delta*x - gamma*ln x + beta*y - alpha*ln y
+#
+# is *exactly* constant along every true trajectory. RK4 does not conserve it
+# exactly, so the reported drift is a direct measure of how far the computed
+# orbit has wandered from the real one. The run also plots V, so the drift is
+# visible where it happens rather than only summarised at the end.
+#
+# Units: populations are dimensionless counts ("1") and every rate is a
+# per-unit-time frequency ("1/s"). Time is in seconds because that is the
+# scenario schema's time unit; read it as "generations" if that is more
+# natural for the ecology — the numbers are the same either way.
+
+schema_version = 1
+
+[experiment]
+name = "Lotka-Volterra predator-prey"
+description = "Prey and predators orbiting their coexistence equilibrium over roughly three periods, with the conserved first integral reported."
+seed = 42
+
+[capability]
+id = "sim.ecology.lotka_volterra"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+alpha = { value = 1.0, unit = "1/s" }
+beta = { value = 1.0, unit = "1/s" }
+delta = { value = 1.0, unit = "1/s" }
+gamma = { value = 0.5, unit = "1/s" }
+
+[initial_state]
+# Displaced from the equilibrium (0.5, 1.0), so the trajectory is a real
+# orbit and not a fixed point that would conserve everything trivially.
+prey = [{ value = 1.0, unit = "1" }]
+predator = [{ value = 0.5, unit = "1" }]
+
+[solver]
+id = "rk4"
+start = { value = 0.0, unit = "s" }
+end = { value = 20.0, unit = "s" }
+step = { value = 0.001, unit = "s" }
+
+[outputs]
+record = ["prey", "predator", "first_integral"]
+sample_every = 1
