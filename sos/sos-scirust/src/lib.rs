@@ -120,6 +120,7 @@ pub mod nmc;
 pub mod ode;
 pub mod quadrature;
 mod solver;
+pub mod stage;
 
 pub use bo::BoResult;
 pub use eig::GpEigEstimator;
@@ -127,3 +128,4 @@ pub use error::{Result, ScirustError};
 pub use nmc::NestedMcEigEstimator;
 pub use ode::{Dopri5OdeSimulator, Rk4OdeSimulator};
 pub use quadrature::QuadratureSimulator;
+pub use stage::{OdeStageHandler, TrajectoryBody, config_address};
