@@ -142,8 +142,8 @@ shift with what's true at the time).
 | 5C.3 | Discover equivalence classes | **Done** — PC-Stable, CPDAG-returning (no PAG/latent-confounding-robust discovery) |
 | 5C.4 | Estimate identifiable effects | **Done** — backdoor identification + linear adjustment estimation |
 | 5C.5 | Quantify sensitivity to unmeasured confounding | **Done** — Cinelli–Hazlett omitted-variable-bias bounds |
-| 5C.6 | Test invariance | **Draft** — Invariant Causal Prediction across environments |
-| 5C.7 | Simulate interventions | Planned — SCM-based counterfactual simulation |
+| 5C.6 | Test invariance | **Done** — Invariant Causal Prediction across environments |
+| 5C.7 | Simulate interventions | **Draft** — SCM-based intervention simulation and unit-level counterfactuals |
 | 5C.8 | Choose the next experiment | Planned — experimental design / value of information |
 | 5C.9 | Update theories | Planned — assumption-registry revision under new evidence |
 | 5C.10 | Verify causal claims | Planned — end-to-end certificate audit |
@@ -1056,8 +1056,8 @@ misspecification other than an omitted linear term.
 
 ## Phase 5C.6 — Test invariance (Invariant Causal Prediction)
 
-**Status: Draft.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
-from `origin/master` at `9b43bf34`. PR #853. Additive to `scirust-causal` (no
+**Status: Done.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
+from `origin/master` at `9b43bf34`. PR #853, merged at `20c4aa6c`. Additive to `scirust-causal` (no
 existing public API changed).
 
 Implements Invariant Causal Prediction (Peters, Bühlmann & Meinshausen 2016,
@@ -1200,3 +1200,151 @@ intervened directly on the target, which is assumed and unchecked.
   these; only the variable-selection half is implemented here).
 - Requires labelled environments — it cannot manufacture them, and with two
   similar environments it will usually return an empty intersection.
+
+## Phase 5C.7 — Simulate interventions (structural counterfactuals)
+
+**Status: Draft.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
+from `origin/master` at `20c4aa6c` (the commit 5C.6 merged at). Additive to
+`scirust-causal` (no existing public API changed).
+
+Implements the third rung of Pearl's ladder: given a *fully specified* linear
+additive-noise structural causal model, simulate interventional worlds and
+answer unit-level counterfactual queries by abduction–action–prediction.
+
+### Where this sits relative to every prior phase
+
+Phases 5C.2–5C.6 all move in one direction: from data, under assumptions,
+toward a claim, abstaining when the assumptions do not license one. This phase
+moves the other way. It **assumes the entire model** — direction,
+coefficients, functional form, noise additivity — and answers questions that
+no amount of data can answer without one.
+
+That inversion is the point. It makes the assumption load visible as a
+quantity rather than a caveat, and it is why this phase's honesty burden is
+different in kind from its predecessors': the abstention machinery of 5C.4
+has nothing to abstain *about*, because conditional on the SCM the answer is
+exact. The risk moved entirely into the conditional.
+
+### The decisive measurement
+
+Two models, both two-variable, zero intercepts:
+
+- **Model A**: `X = ε₁`, `Y = X + ε₂`, with `var(ε₁) = var(ε₂) = 1`.
+- **Model B**: `Y = ε₂`, `X = 0.5·Y + ε₁`, with `var(ε₂) = 2`, `var(ε₁) = 0.5`.
+
+Both induce `(var X, var Y, cov) = (1, 2, 1)`. They are the same joint
+distribution — not approximately, by construction. The benchmark verifies it
+empirically (40 000 simulated worlds each; `9.94e-1 / 1.989 / 9.93e-1` and
+`9.95e-1 / 1.986 / 9.89e-1`), and an integration test runs `PcStable` on data
+from one of them and confirms the discovery layer returns the edge
+**undirected** — capability 5 correctly reporting that it cannot tell them
+apart.
+
+Asked the same counterfactual — *this unit had `X = 1, Y = 1`; what would `Y`
+have been had `X` been 3?* — they answer **3** and **1**.
+
+That gap is the price of the Markov-equivalence class, denominated in the
+units of the question actually being asked. It is not a statistical error more
+data would close. Under model B, `X` is a *descendant* of `Y`, so intervening
+on `X` leaves `Y` at its abducted value; under model A, `Y` tracks `X`
+exactly. Both are consistent with every observation ever collectable from
+this system.
+
+A second contrast separates rung 2 from rung 3 on a single model: the
+population mean `E[Y | do(X=3)] = 3`, but for a unit that carried `ε₂ = 1`
+the counterfactual is `4`. Averaging over units and reasoning about one unit
+are different questions, and only the second requires abduction.
+
+### Implementation
+
+`src/scm.rs` (630 lines). [`LinearScm::new`] validates squareness, finiteness,
+and **acyclicity** — deliberately not lower-triangularity, so callers need not
+present variables in topological order; the order is computed once at
+construction and stored. A coefficient counts as an edge iff it is exactly
+non-zero, so the induced graph is a function of the matrix supplied rather
+than of a tolerance that was not.
+
+- `simulate(noise, interventions)` — rung 2. Severs each intervened variable
+  from its parents, then evaluates in topological order.
+- `abduct(observation)` — for additive noise this is exact and needs no
+  inversion: `ε_i = x_i − c_i − Σ_j B[i,j]·x_j`, read straight off the
+  structural equations. It requires the factual world to be **fully
+  observed**; a partial factual leaves the noise underdetermined, and the
+  counterfactual entry point rejects it rather than imputing.
+- `counterfactual(query)` — abduction, then action, then prediction with the
+  abducted noise **held fixed**. Holding the same noise is exactly what makes
+  the answer about the observed unit rather than a fresh draw.
+- `to_dag()` — the induced `CausalDag`, so a model can be handed to
+  capability 6 for comparison against what identification-from-data recovers.
+
+### Certificate discipline
+
+`CounterfactualOutcome` carries a `CausalCertificate` with status
+`Identifiable` and uncertainty **`0.0`**. This is the one place in the crate
+where a zero is honest and also the one most open to misreading, so both the
+module docs and the certificate's own sensitivity note state that the zero is
+**computational, not epistemic**: conditional on the SCM the computation is
+exact, and the note records that the result is identified only *relative to
+the supplied structural causal model, which is assumed and is not identified
+by data*. A no-op query (no interventions) is answered rather than rejected —
+the counterfactual world correctly equals the factual one — but is flagged
+with a warning, since a caller writing one has probably made a mistake.
+
+### Tests
+
+371 tests existed for `scirust-causal` before this phase. This phase adds
+**20** (10 unit, 10 integration), total **391**.
+
+The integration battery leads with the three-way verification of the headline
+result — the distributions are the same, discovery says so, the answers still
+differ — then covers the rung-2/rung-3 contrast, intervening on the outcome
+itself (flagged), certificate content, determinism and JSON round-trip, the
+partially-sized and non-finite factual errors, and an abduct-then-simulate
+round trip on a four-variable model given out of topological order.
+
+### Benchmark
+
+`examples/counterfactual_benchmark.rs`, 5 rows plus 3 derived comment lines,
+oracle-checked. It prints both empirical covariance structures side by side
+before printing the diverging answers, so the "identical distribution" claim
+is visible in the output rather than asserted in prose.
+
+Run-twice SHA-256:
+`f34e1cfa9696083853480862d9a5c2594a469bfeb0f112f7c6e751844ffc5ae3`, verified
+identical between debug and release builds. All six prior fingerprints
+reverified unchanged: `167c13de…`, `c1449177…`, `79e57e69…`, `7ac0dc76…`,
+`1bc59a1d…`, `e1f0b99f…`.
+
+### Compatibility
+
+Purely additive. No existing public item changed; no new `pub(crate)`
+widenings needed. Crate root goes eight → nine capabilities.
+
+### Supported and unsupported claims
+
+May claim: exact interventional and counterfactual evaluation **conditional on
+a supplied linear additive-noise SCM**; a measured, reproducible demonstration
+that the Markov-equivalence gap has a *quantitative* cost at rung 3; the
+distinction between a population interventional mean and a unit-level
+counterfactual.
+
+Must **not** claim: that the SCM is correct, or that anything in this crate
+can select one from observational data; that zero certificate uncertainty
+means confidence; validity under non-additive noise, non-linear mechanisms,
+latent confounding, or a mis-specified direction — under which the outputs
+remain exact arithmetic on the wrong model.
+
+### Known limitations / deferred
+
+- Linear additive-noise mechanisms only, matching every prior phase.
+- Counterfactuals require a **fully observed** factual world. Partial
+  observation is a typed error, not an imputation; the general case needs
+  distributional assumptions on the unobserved noise, deliberately not made.
+- No probabilistic counterfactuals — a distribution over counterfactual
+  outcomes given a partially specified unit would follow from noise
+  distributions this API does not take.
+- No path-specific or mediation counterfactuals (natural direct/indirect
+  effects); these need path-blocking machinery beyond the present severing.
+- The SCM must be supplied whole. Fitting one from data — even up to the
+  equivalence class 5C.3 returns — is not attempted here, and would inherit
+  every assumption 5C.4 already documents.
