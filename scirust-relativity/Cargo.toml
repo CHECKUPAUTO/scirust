@@ -7,3 +7,38 @@ description = "Deterministic differential-geometry and geodesic simulation primi
 
 [dependencies]
 scirust-sim = { path = "../scirust-sim" }
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false }
+
+[[bench]]
+name = "geometry_core"
+harness = false
+
+[[bench]]
+name = "ppn"
+harness = false
+
+[[bench]]
+name = "action"
+harness = false
+
+[[bench]]
+name = "adm"
+harness = false
+
+[[bench]]
+name = "adm_evolution"
+harness = false
+
+[[bench]]
+name = "adm_homogeneous"
+harness = false
+
+[[bench]]
+name = "bssn"
+harness = false
+
+[[bench]]
+name = "bssn_grid"
+harness = false
