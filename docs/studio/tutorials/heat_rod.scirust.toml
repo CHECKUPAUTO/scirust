@@ -1,0 +1,90 @@
+# SciRust Studio tutorial scenario: heat diffusing along a rod.
+#
+# Run it with:
+#
+#   scirust run docs/studio/tutorials/heat_rod.scirust.toml
+#
+# A copper rod half a metre long, starting at a uniform 300 K, with its left
+# end clamped to 300 K and its right end to 400 K. Heat flows in from the hot
+# end until the rod settles into a straight line between the two.
+#
+# This is the first capability whose result is a FIELD rather than a set of
+# curves. Every other tutorial here produces quantities that vary along one
+# axis; this one produces u(x, t), which varies along two. The result
+# therefore carries `axes = [t, x]` and a `temperature` field shaped by both —
+# see docs/studio/adr/0009-fields.md.
+#
+# It is also the first with series plotted against something other than time:
+# `final_profile` and `steady_state` are profiles along the rod.
+#
+# What is verified, and why these three:
+#
+#   * approaches_steady_state — with both ends fixed and no source, the
+#     semi-discrete system's steady state is EXACTLY the linear profile
+#     between the boundary temperatures. Not approximately.
+#   * slowest_mode_decay_rate — after the transient, the deviation from that
+#     steady state is dominated by the slowest sine mode, which decays at
+#     lambda_1 = (2*alpha/dx^2)*(1 - cos(pi/(n+1))). Here that is
+#     4.34e-3 1/s, a relaxation time of about 230 s. The run measures its own
+#     decay and compares.
+#   * maximum_principle — diffusion with no source creates no new extremes.
+#     No interior node may leave [300 K, 400 K]. This is what catches a
+#     stencil or index error that a run still relaxing to a plausible-looking
+#     profile would hide.
+#
+# ---------------------------------------------------------------------------
+# The step size is not a preference here
+# ---------------------------------------------------------------------------
+#
+# RK4 on an explicit diffusion stencil is unstable above h = 0.7*dx^2/alpha.
+# With dx = length/(nodes + 1) = 1.22e-2 m and alpha = 1.1e-4 m^2/s that limit
+# is 0.946 s, and the step below is half of it. Above the limit the run does
+# not get less accurate — it diverges to NaN in a few hundred steps, so the
+# capability refuses the scenario rather than running it.
+#
+# Try it: set `step` to 2.0 and you get the limit, the reason, and a suggested
+# value, instead of a wall of `null`.
+#
+# Note how the limit scales. It grows as dx^2, so doubling `nodes` quarters
+# the largest usable step AND doubles the work per step: resolving the profile
+# twice as finely costs about eight times as much. That is the explicit
+# diffusion bargain, and it is why implicit methods exist.
+
+schema_version = 1
+
+[experiment]
+name = "Heat diffusion along a copper rod"
+description = "A uniform rod with its ends held at different temperatures, relaxing to the linear steady state."
+
+[capability]
+id = "sim.thermal.heat_rod_1d"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+# Copper. Stainless steel would be about 4e-6 and take ~25x longer to settle.
+diffusivity = { value = 1.1e-4, unit = "m^2/s" }
+length = { value = 0.5, unit = "m" }
+nodes = { value = 40, unit = "1" }
+t_left = { value = 300.0, unit = "K" }
+t_right = { value = 400.0, unit = "K" }
+
+[initial_state]
+# A single number: the whole interior starts uniform. `initial_state` has a
+# fixed shape per capability, and this one's node count is a parameter.
+temperature = [{ value = 300.0, unit = "K" }]
+
+[solver]
+id = "rk4"
+start = { value = 0.0, unit = "s" }
+# Five relaxation times (5 / lambda_1 = 1152 s), by which point the initial
+# condition's influence has decayed by a factor of about 148.
+end = { value = 1150.0, unit = "s" }
+# Half the stability limit of 0.946 s. See the note above.
+step = { value = 0.47, unit = "s" }
+
+[outputs]
+record = ["temperature", "deviation_norm", "final_profile", "steady_state"]

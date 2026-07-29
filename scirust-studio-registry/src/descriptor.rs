@@ -47,6 +47,8 @@ pub enum CapabilityCategory {
     Ecology,
     /// Stochastic processes.
     Stochastic,
+    /// Heat transfer and thermal fields.
+    Thermal,
 }
 
 /// The scientific maturity of the *underlying model*, as documented by its

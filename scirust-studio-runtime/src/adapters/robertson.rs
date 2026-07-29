@@ -413,6 +413,7 @@ impl CapabilityAdapter for RobertsonAdapter {
                     values: c_series,
                 },
             ],
+            fields: vec![],
             metrics: vec![
                 Metric {
                     id: "final_a".to_string(),

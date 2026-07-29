@@ -138,6 +138,72 @@ pub struct Series {
     pub values: Vec<f64>,
 }
 
+/// A quantity that varies over **two** axes at once — a field.
+///
+/// # Why a [`Series`] could not do this
+///
+/// `REPOSITORY_AUDIT.md` said for two phases that schema v2 could already
+/// express a spatially discretised field, because `axes` is a vector and
+/// every series names its axis. Reading it again while adapting one showed
+/// that is not so. A `Series` is aligned *one-to-one* with a single axis, so
+/// the most it can hold is a slice: one node's history, or one instant's
+/// profile. Representing `u(x, t)` meant `n` series and losing the fact they
+/// are one quantity, or `m` series and losing it the other way.
+///
+/// So the field is its own thing. Nothing else in the result model changes,
+/// and a capability that has no field carries an empty vector.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Field {
+    /// Stable id, e.g. `"temperature"`.
+    pub id: String,
+    /// Human-facing label.
+    pub display_name: String,
+    /// Unit symbol of the values.
+    pub unit: String,
+    /// The [`Axis::id`] the **rows** run along — time, for an evolving field.
+    pub row_axis_id: String,
+    /// The [`Axis::id`] the **columns** run along — position, for a rod.
+    pub column_axis_id: String,
+    /// How many columns each row has.
+    ///
+    /// Redundant with the column axis's length, and deliberately so:
+    /// [`validate_result`] checks the two agree, and in exchange a consumer
+    /// holding only the field — a downsampler, a renderer — knows its shape
+    /// without being handed the axes as well. A shape that can be checked is
+    /// worth more than one that must be inferred.
+    pub columns: usize,
+    /// The values, row-major: `values[row * columns + column]`.
+    pub values: Vec<f64>,
+}
+
+impl Field {
+    /// How many rows this field has.
+    pub fn rows(&self) -> usize {
+        // A zero-column field is a defect `validate_result` reports; this
+        // just declines to divide by it.
+        self.values.len().checked_div(self.columns).unwrap_or(0)
+    }
+
+    /// The value at `(row, column)`, or `None` when either is out of range.
+    pub fn at(&self, row: usize, column: usize) -> Option<f64> {
+        if column >= self.columns || row >= self.rows()
+        {
+            return None;
+        }
+        self.values.get(row * self.columns + column).copied()
+    }
+
+    /// One row, i.e. the field's profile at a single row coordinate.
+    pub fn row(&self, row: usize) -> Option<&[f64]> {
+        if row >= self.rows()
+        {
+            return None;
+        }
+        self.values
+            .get(row * self.columns..(row + 1) * self.columns)
+    }
+}
+
 /// The full, versioned result of one capability execution.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunResult {
@@ -151,6 +217,12 @@ pub struct RunResult {
     pub axes: Vec<Axis>,
     /// Named output series, each bound to an axis by id.
     pub series: Vec<Series>,
+    /// Named output fields, each spanning two axes.
+    ///
+    /// Defaulted, so every result written before fields existed reads back
+    /// with none — which is what those results had.
+    #[serde(default)]
+    pub fields: Vec<Field>,
     /// Named scalar/derived metrics.
     pub metrics: Vec<Metric>,
     /// Non-fatal warnings raised during validation or execution.
@@ -452,6 +524,47 @@ pub enum ResultDefect {
         /// The mean's value there.
         mean: String,
     },
+    /// Two fields share an id.
+    DuplicateFieldId {
+        /// The repeated id.
+        field_id: String,
+    },
+    /// A field names an axis that does not exist.
+    FieldMissingAxis {
+        /// The field.
+        field_id: String,
+        /// The axis it asked for.
+        axis_id: String,
+    },
+    /// A field's declared column count disagrees with its column axis.
+    FieldShapeMismatch {
+        /// The field.
+        field_id: String,
+        /// What the field says.
+        declared: usize,
+        /// What the axis says.
+        axis_len: usize,
+    },
+    /// A field's value count is not `rows x columns`.
+    FieldValueCountMismatch {
+        /// The field.
+        field_id: String,
+        /// How many values it has.
+        values: usize,
+        /// How many it should have.
+        expected: usize,
+    },
+    /// A field value is `NaN` or infinite.
+    NonFiniteFieldValue {
+        /// The field.
+        field_id: String,
+        /// The row.
+        row: usize,
+        /// The column.
+        column: usize,
+        /// The offending value, rendered.
+        value: String,
+    },
     /// Two series of one ensemble are plotted against different axes.
     EnsembleAxisMismatch {
         /// The series that disagrees.
@@ -550,6 +663,40 @@ impl std::fmt::Display for ResultDefect {
                 f,
                 "ensemble band edge `{series_id}` is {edge} at index {index}, on the wrong side \
                  of the mean's {mean}"
+            ),
+            ResultDefect::DuplicateFieldId { field_id } =>
+            {
+                write!(f, "two fields share the id `{field_id}`")
+            },
+            ResultDefect::FieldMissingAxis { field_id, axis_id } => write!(
+                f,
+                "field `{field_id}` names axis `{axis_id}`, which this result does not have"
+            ),
+            ResultDefect::FieldShapeMismatch {
+                field_id,
+                declared,
+                axis_len,
+            } => write!(
+                f,
+                "field `{field_id}` declares {declared} columns but its column axis has \
+                 {axis_len} coordinates"
+            ),
+            ResultDefect::FieldValueCountMismatch {
+                field_id,
+                values,
+                expected,
+            } => write!(
+                f,
+                "field `{field_id}` has {values} values where its two axes require {expected}"
+            ),
+            ResultDefect::NonFiniteFieldValue {
+                field_id,
+                row,
+                column,
+                value,
+            } => write!(
+                f,
+                "field `{field_id}` value at row {row}, column {column} is {value}"
             ),
             ResultDefect::EnsembleAxisMismatch {
                 series_id,
@@ -669,6 +816,7 @@ pub fn validate_result(result: &RunResult) -> Result<(), Vec<ResultDefect>> {
         }
     }
 
+    check_fields(result, &mut defects);
     check_ensemble(result, &mut defects);
 
     if let Some(axis) = result.time_axis()
@@ -699,6 +847,88 @@ pub fn validate_result(result: &RunResult) -> Result<(), Vec<ResultDefect>> {
     else
     {
         Err(defects)
+    }
+}
+
+/// The internal consistency of every field.
+///
+/// A field is the one thing in a result whose shape can be wrong in a way
+/// that is invisible in the numbers: a row-major buffer read with the wrong
+/// column count is still a buffer of finite doubles, and would render as a
+/// plausible-looking picture of nothing. So the shape is checked twice —
+/// against the declared column count and against both axes — rather than
+/// trusted from either.
+fn check_fields(result: &RunResult, defects: &mut Vec<ResultDefect>) {
+    let mut seen = std::collections::BTreeSet::new();
+    for field in &result.fields
+    {
+        if !seen.insert(field.id.as_str())
+        {
+            defects.push(ResultDefect::DuplicateFieldId {
+                field_id: field.id.clone(),
+            });
+        }
+
+        let row_axis = result.axes.iter().find(|a| a.id == field.row_axis_id);
+        let column_axis = result.axes.iter().find(|a| a.id == field.column_axis_id);
+        for (axis, id) in [
+            (row_axis, &field.row_axis_id),
+            (column_axis, &field.column_axis_id),
+        ]
+        {
+            if axis.is_none()
+            {
+                defects.push(ResultDefect::FieldMissingAxis {
+                    field_id: field.id.clone(),
+                    axis_id: id.clone(),
+                });
+            }
+        }
+        let (Some(row_axis), Some(column_axis)) = (row_axis, column_axis)
+        else
+        {
+            continue;
+        };
+
+        if field.columns != column_axis.values.len()
+        {
+            defects.push(ResultDefect::FieldShapeMismatch {
+                field_id: field.id.clone(),
+                declared: field.columns,
+                axis_len: column_axis.values.len(),
+            });
+            // Every later check derives from the column count, so reporting
+            // them too would be one mistake described five ways.
+            continue;
+        }
+
+        let expected = row_axis.values.len() * column_axis.values.len();
+        if field.values.len() != expected
+        {
+            defects.push(ResultDefect::FieldValueCountMismatch {
+                field_id: field.id.clone(),
+                values: field.values.len(),
+                expected,
+            });
+            continue;
+        }
+
+        for (index, value) in field.values.iter().enumerate()
+        {
+            if !value.is_finite()
+            {
+                defects.push(ResultDefect::NonFiniteFieldValue {
+                    field_id: field.id.clone(),
+                    row: index / field.columns.max(1),
+                    column: index % field.columns.max(1),
+                    value: value.to_string(),
+                });
+                // One report per field: a diverged field is usually
+                // non-finite from some point onward, and thousands of
+                // identical defects would bury every other problem.
+                break;
+            }
+        }
     }
 }
 
@@ -921,6 +1151,7 @@ mod tests {
                 role: SeriesRole::Trajectory,
                 values: vec![1.0, 0.9, 0.8],
             }],
+            fields: vec![],
             metrics: vec![Metric {
                 id: "final_position".to_string(),
                 display_name: "Final position".to_string(),
@@ -1320,5 +1551,152 @@ mod tests {
         let text = describe_defects(&defects_of(&r));
         assert!(text.contains("position"), "{text}");
         assert!(text.contains("t_end"), "{text}");
+    }
+
+    fn field_result() -> RunResult {
+        let mut result = sample_result();
+        result.axes.push(Axis {
+            id: "x".to_string(),
+            display_name: "position".to_string(),
+            unit: "m".to_string(),
+            monotonicity: AxisMonotonicity::StrictlyIncreasing,
+            values: vec![0.0, 0.5],
+        });
+        result.fields = vec![Field {
+            id: "temperature".to_string(),
+            display_name: "Temperature".to_string(),
+            unit: "K".to_string(),
+            row_axis_id: TIME_AXIS_ID.to_string(),
+            column_axis_id: "x".to_string(),
+            columns: 2,
+            // 3 rows (the time axis) x 2 columns.
+            values: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        }];
+        result
+    }
+
+    #[test]
+    fn a_well_formed_field_validates() {
+        assert!(validate_result(&field_result()).is_ok());
+    }
+
+    /// The accessors have to agree with the packing, or every consumer reads
+    /// a transposed picture that still looks like data.
+    #[test]
+    fn the_field_reads_back_row_major() {
+        let result = field_result();
+        let field = &result.fields[0];
+        assert_eq!(field.rows(), 3);
+        assert_eq!(field.at(0, 0), Some(1.0));
+        assert_eq!(field.at(0, 1), Some(2.0));
+        assert_eq!(field.at(1, 0), Some(3.0));
+        assert_eq!(field.at(2, 1), Some(6.0));
+        assert_eq!(field.row(1), Some(&[3.0, 4.0][..]));
+        assert_eq!(field.at(3, 0), None);
+        assert_eq!(field.at(0, 2), None);
+        assert_eq!(field.row(3), None);
+    }
+
+    /// A shape error is the one field defect that leaves every number finite
+    /// and plausible, so it is the one most worth catching.
+    #[test]
+    fn a_column_count_disagreeing_with_its_axis_is_rejected() {
+        let mut result = field_result();
+        result.fields[0].columns = 3;
+        let defects = validate_result(&result).unwrap_err();
+        assert!(
+            matches!(
+                defects.as_slice(),
+                [ResultDefect::FieldShapeMismatch {
+                    declared: 3,
+                    axis_len: 2,
+                    ..
+                }]
+            ),
+            "{defects:?}"
+        );
+    }
+
+    #[test]
+    fn a_field_with_the_wrong_number_of_values_is_rejected() {
+        let mut result = field_result();
+        result.fields[0].values.pop();
+        let defects = validate_result(&result).unwrap_err();
+        assert!(
+            matches!(
+                defects.as_slice(),
+                [ResultDefect::FieldValueCountMismatch {
+                    values: 5,
+                    expected: 6,
+                    ..
+                }]
+            ),
+            "{defects:?}"
+        );
+    }
+
+    #[test]
+    fn a_field_naming_a_missing_axis_is_rejected() {
+        let mut result = field_result();
+        result.fields[0].column_axis_id = "nowhere".to_string();
+        let defects = validate_result(&result).unwrap_err();
+        assert!(
+            defects
+                .iter()
+                .any(|d| matches!(d, ResultDefect::FieldMissingAxis { .. })),
+            "{defects:?}"
+        );
+    }
+
+    #[test]
+    fn a_non_finite_field_value_is_rejected_with_its_position() {
+        let mut result = field_result();
+        result.fields[0].values[3] = f64::NAN;
+        let defects = validate_result(&result).unwrap_err();
+        assert!(
+            matches!(
+                defects.as_slice(),
+                [ResultDefect::NonFiniteFieldValue {
+                    row: 1,
+                    column: 1,
+                    ..
+                }]
+            ),
+            "{defects:?}"
+        );
+    }
+
+    #[test]
+    fn duplicate_field_ids_are_rejected() {
+        let mut result = field_result();
+        let twin = result.fields[0].clone();
+        result.fields.push(twin);
+        let defects = validate_result(&result).unwrap_err();
+        assert!(
+            defects
+                .iter()
+                .any(|d| matches!(d, ResultDefect::DuplicateFieldId { .. })),
+            "{defects:?}"
+        );
+    }
+
+    /// Results written before fields existed have no `fields` key at all and
+    /// must keep reading back.
+    #[test]
+    fn a_result_stored_before_fields_existed_decodes_with_none() {
+        let mut json: serde_json::Value =
+            serde_json::to_value(sample_result()).expect("serialises");
+        json.as_object_mut().expect("an object").remove("fields");
+        let decoded: RunResult = serde_json::from_value(json).expect("decodes without `fields`");
+        assert!(decoded.fields.is_empty());
+        assert!(validate_result(&decoded).is_ok());
+    }
+
+    #[test]
+    fn a_field_round_trips_through_json_bit_for_bit() {
+        let result = field_result();
+        let text = result.to_json_pretty().expect("serialises");
+        let back: RunResult = serde_json::from_str(&text).expect("decodes");
+        assert_eq!(back.fields, result.fields);
     }
 }

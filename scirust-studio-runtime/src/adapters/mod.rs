@@ -2,6 +2,7 @@
 //! into a [`CapabilityRegistry`] and makes them dispatchable by id.
 
 mod double_pendulum;
+mod heat_rod;
 mod logistic_growth;
 mod lotka_volterra;
 mod ornstein_uhlenbeck;
@@ -13,6 +14,7 @@ mod spring_mass_damper;
 mod two_body;
 
 pub use double_pendulum::DoublePendulumAdapter;
+pub use heat_rod::HeatRodAdapter;
 pub use logistic_growth::LogisticGrowthAdapter;
 pub use lotka_volterra::LotkaVolterraAdapter;
 pub use ornstein_uhlenbeck::OrnsteinUhlenbeckAdapter;
@@ -46,6 +48,7 @@ pub fn all_adapters() -> Vec<Box<dyn CapabilityAdapter>> {
         Box::new(PendulumAdapter),
         Box::new(DoublePendulumAdapter),
         Box::new(OrnsteinUhlenbeckAdapter),
+        Box::new(HeatRodAdapter),
     ]
 }
 
@@ -124,6 +127,11 @@ const TUTORIAL_SCENARIOS: &[(&str, &str, &str)] = &[
         "sim.stochastic.ornstein_uhlenbeck",
         "ornstein_uhlenbeck.scirust.toml",
         include_str!("../../../docs/studio/tutorials/ornstein_uhlenbeck.scirust.toml"),
+    ),
+    (
+        "sim.thermal.heat_rod_1d",
+        "heat_rod.scirust.toml",
+        include_str!("../../../docs/studio/tutorials/heat_rod.scirust.toml"),
     ),
 ];
 
@@ -455,14 +463,34 @@ mod tests {
             assert!(!result.series.is_empty(), "{id}");
             for series in &result.series
             {
-                assert_eq!(series.axis_id, TIME_AXIS_ID, "{id}/{}", series.id);
+                // Not necessarily the *time* axis. `sim.thermal.heat_rod_1d`
+                // is the first capability with two, and plots two of its
+                // series against position — this used to assert `t` and had
+                // to be generalised rather than special-cased, because "every
+                // series names an axis this result has, and matches its
+                // length" is the property that was always meant.
+                let named = result
+                    .axes
+                    .iter()
+                    .find(|a| a.id == series.axis_id)
+                    .unwrap_or_else(|| {
+                        panic!("{id}/{}: names absent axis `{}`", series.id, series.axis_id)
+                    });
                 assert_eq!(
                     series.values.len(),
-                    axis.values.len(),
+                    named.values.len(),
                     "{id}/{}: series and axis lengths must agree",
                     series.id
                 );
             }
+
+            // Whatever else it has, at least one series must be against time:
+            // a capability that integrates forward and shows nothing over
+            // time has lost the run's shape.
+            assert!(
+                result.series.iter().any(|s| s.axis_id == TIME_AXIS_ID),
+                "{id}: no series is plotted against time"
+            );
 
             // The adapters call this themselves before returning; asserting
             // it here too means a future adapter that forgets is caught.
