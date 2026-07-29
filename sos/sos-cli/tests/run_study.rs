@@ -66,6 +66,17 @@ fn write_study(dir: &Path, runs: &[StageConfig]) -> (PathBuf, PathBuf) {
     (manifest, runs_path)
 }
 
+/// The stored ids whose kind is `kind` — the store now holds the run's own
+/// record (a `Plan` and a `RunLedger`) beside the stage outputs, so a test
+/// about results has to say which it means.
+fn ids_of_kind(store: &FileStore, kind: &str) -> Vec<sos_core::ObjectId> {
+    store
+        .object_ids()
+        .into_iter()
+        .filter(|id| store.get_raw(*id).is_some_and(|r| r.kind.name == kind))
+        .collect()
+}
+
 /// Invoke `sos run` the way the binary does: through `Args::parse`.
 fn sos_run(
     manifest: &Path,
@@ -103,8 +114,9 @@ fn a_study_on_disk_runs_and_stores_its_results() {
 
     // The results are really in the store, and still name their model.
     let store = FileStore::open(&store_path).unwrap();
-    let ids = store.object_ids();
-    assert_eq!(ids.len(), 2, "one object per stage");
+    let ids = ids_of_kind(&store, "ModeledTrajectory");
+    assert_eq!(ids.len(), 2, "one result per stage");
+    assert_eq!(store.object_ids().len(), 4, "results plus plan and ledger");
     let mut capacities: Vec<f64> = Vec::new();
     for id in ids
     {
@@ -257,14 +269,40 @@ fn rerunning_the_same_study_is_served_from_the_persisted_memo() {
         "the second run must be entirely cached, got: {second}"
     );
 
-    // Same reported outputs, and the store is unchanged.
-    assert_eq!(
-        first.lines().skip(1).collect::<Vec<_>>(),
-        second.lines().skip(1).collect::<Vec<_>>()
+    // The *results* are identical — but the ledgers are not, and that is
+    // correct: a `RunLedger` records the schedule actually taken, including
+    // whether each stage ran or was reused. The second run legitimately did
+    // something different (it reused), so it honestly records a different
+    // history for the same outputs.
+    let results = |out: &str| -> Vec<String> {
+        out.lines()
+            .filter(|l| l.trim_start().starts_with("stage-"))
+            .map(str::to_owned)
+            .collect()
+    };
+    assert_eq!(results(&first), results(&second));
+    let ledger_line = |out: &str| parse_reported(out, "ledger");
+    assert_ne!(
+        ledger_line(&first),
+        ledger_line(&second),
+        "a run that reused rather than recomputed must not claim the same history"
     );
+    // The plan is the same object, though — it is what was asked for, not
+    // what happened.
     assert_eq!(
-        ids_after_first,
-        FileStore::open(&store_path).unwrap().object_ids()
+        parse_reported(&first, "plan"),
+        parse_reported(&second, "plan")
+    );
+    let ids_after_second = FileStore::open(&store_path).unwrap().object_ids();
+    assert_eq!(
+        ids_after_second.len(),
+        ids_after_first.len() + 1,
+        "only the second run's own ledger is new"
+    );
+    assert!(
+        ids_after_first
+            .iter()
+            .all(|id| ids_after_second.contains(id))
     );
     fs::remove_dir_all(&dir).ok();
 }
@@ -323,7 +361,8 @@ fn a_different_environment_label_is_a_different_run() {
     // happens again rather than being served from the memo the first
     // invocation just persisted.
     assert!(out.contains("ran 1 of 1 stage(s)"), "{out}");
-    assert_eq!(FileStore::open(&store_path).unwrap().object_ids().len(), 1);
+    let store = FileStore::open(&store_path).unwrap();
+    assert_eq!(ids_of_kind(&store, "ModeledTrajectory").len(), 1);
     fs::remove_dir_all(&dir).ok();
 }
 
@@ -447,7 +486,7 @@ fn a_welch_stage_stores_its_segment_count_beside_the_numbers() {
     assert!(out.contains("ran 1 of 1 stage(s)"), "{out}");
 
     let store = FileStore::open(&store_path).unwrap();
-    let id = store.object_ids()[0];
+    let id = ids_of_kind(&store, "AveragedSpectrum")[0];
     let obj: Object<AveragedSpectrumBody> = store.get_object(id).unwrap().unwrap();
     assert_eq!(obj.body.spectrum.segments, 7);
     assert_eq!(obj.body.spectrum.dropped_samples, 0);
@@ -483,7 +522,12 @@ fn all_three_bindable_backends_run_in_one_study() {
     )
     .unwrap();
     assert!(out.contains("ran 3 of 3 stage(s)"), "{out}");
-    assert_eq!(FileStore::open(&store_path).unwrap().object_ids().len(), 3);
+    let store = FileStore::open(&store_path).unwrap();
+    assert_eq!(
+        store.object_ids().len(),
+        5,
+        "3 results plus plan and ledger"
+    );
 
     // Three distinct plugins, three distinct pins.
     let stages =
@@ -522,7 +566,7 @@ fn one_study_can_mix_both_backends() {
     // Two objects of two different kinds, each real.
     let store = FileStore::open(&store_path).unwrap();
     let ids = store.object_ids();
-    assert_eq!(ids.len(), 2);
+    assert_eq!(ids.len(), 4, "2 results plus plan and ledger");
     let mut saw_trajectory = false;
     let mut saw_spectrum = false;
     for id in ids
@@ -592,6 +636,130 @@ fn an_untagged_configuration_is_refused() {
     let err = sos_cli::run::address(&Args::parse(&argv).unwrap()).unwrap_err();
     assert!(err.to_string().contains("kind"), "{err}");
     fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_run_records_its_plan_and_ledger_beside_the_results() {
+    // Without these a result exists but the record of how it came to exist
+    // does not — and `sos-repro`'s verify_object, which finds the producing
+    // run by scanning stored ledgers, could never find anything.
+    let dir = temp_root("ledger");
+    let store_path = dir.join("store");
+    let (manifest, runs_file) = write_study(&dir, &[growth(100.0), growth(50.0)]);
+
+    let out = sos_run(
+        &manifest,
+        &runs_file,
+        &store_path,
+        &["--allow", "effectful"],
+    )
+    .unwrap();
+    assert!(out.contains("plan "), "{out}");
+    assert!(out.contains("ledger "), "{out}");
+
+    // Two results plus the plan and the ledger.
+    let store = FileStore::open(&store_path).unwrap();
+    assert_eq!(store.object_ids().len(), 4);
+
+    // The ledger really describes this run.
+    let ledger_id = parse_reported(&out, "ledger");
+    let ledger: Object<sos_workflow::RunLedger> = store.get_object(ledger_id).unwrap().unwrap();
+    assert_eq!(ledger.body.steps.len(), 2);
+    assert_eq!(ledger.body.ran_count(), 2);
+    assert_eq!(ledger.body.steps[0].stage.0, "stage-0");
+
+    // And the plan it names is the one that was stored.
+    let plan_id = parse_reported(&out, "plan");
+    let plan: Object<sos_workflow::Plan> = store.get_object(plan_id).unwrap().unwrap();
+    assert_eq!(plan.body.digest(), ledger.body.plan_digest);
+    fs::remove_dir_all(&dir).ok();
+}
+
+/// Pull the object id `sos run` reported on the line labelled `label`.
+fn parse_reported(out: &str, label: &str) -> sos_core::ObjectId {
+    let line = out
+        .lines()
+        .find(|l| l.trim_start().starts_with(label))
+        .unwrap_or_else(|| panic!("no `{label}` line in:\n{out}"));
+    let hex = line.split_whitespace().nth(1).expect("id after the label");
+    sos_cli::args::parse_object_id(hex).expect("a reported id must parse")
+}
+
+#[test]
+fn sos_verify_can_check_the_objects_sos_run_produced() {
+    // It could not before: the four kinds `sos run` writes were not in
+    // `verify`'s table, so the same binary reported "unrecognized kind" for
+    // its own output.
+    let dir = temp_root("verify");
+    let store_path = dir.join("store");
+    let (manifest, runs_file) = write_study(&dir, &[growth(100.0), tone(), averaged_tone()]);
+    let out = sos_run(
+        &manifest,
+        &runs_file,
+        &store_path,
+        &["--allow", "effectful"],
+    )
+    .unwrap();
+
+    let store = FileStore::open(&store_path).unwrap();
+    let mut checked = 0;
+    for id in store.object_ids()
+    {
+        let report = sos_cli::verify::run(store_path.to_str(), id).unwrap();
+        assert!(
+            !report.contains("unrecognized kind"),
+            "every kind this binary writes must be verifiable:\n{report}"
+        );
+        assert!(
+            report.contains("OK (recomputed address matches)"),
+            "{report}"
+        );
+        checked += 1;
+    }
+    // Three results, plus the plan and the ledger.
+    assert_eq!(checked, 5, "{out}");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn no_two_body_kinds_collide() {
+    // The guard for the defect `sos verify` surfaced: sos-planner's `Plan` and
+    // sos-workflow's `Plan` both declared kind "Plan". Two structurally
+    // different types under one kind defeats the store's own KindMismatch
+    // check — the very thing that stops a record being decoded as the wrong
+    // type — and it fails loudly only when the layouts happen to be
+    // incompatible. Here it produced `missing field 'policy'`; with
+    // overlapping shapes it could have silently "verified" the wrong type.
+    use sos_core::Body;
+    let kinds: Vec<&'static str> = vec![
+        <sos_reasoning::Derivation as Body>::KIND,
+        <sos_reasoning::Contradiction as Body>::KIND,
+        <sos_theory::Theory as Body>::KIND,
+        <sos_workflow::RunLedger as Body>::KIND,
+        <sos_workflow::Plan as Body>::KIND,
+        <sos_repro::EnvLock as Body>::KIND,
+        <sos_planner::Plan as Body>::KIND,
+        <sos_publication::Publication as Body>::KIND,
+        <sos_publication::ReleaseManifest as Body>::KIND,
+        <sos_ccos::Proposal as Body>::KIND,
+        <sos_ccos::Admission as Body>::KIND,
+        <sos_knowledge::Edge as Body>::KIND,
+        <sos_curiosity::ScientificQuestion as Body>::KIND,
+        <sos_curiosity::CuriosityPolicy as Body>::KIND,
+        <sos_scirust::stage::TrajectoryBody as Body>::KIND,
+        <sos_scirust::model::ModeledTrajectoryBody as Body>::KIND,
+        <sos_scirust::spectrum::SpectrumBody as Body>::KIND,
+        <sos_scirust::spectrum::AveragedSpectrumBody as Body>::KIND,
+    ];
+    let mut seen = std::collections::BTreeSet::new();
+    for kind in &kinds
+    {
+        assert!(
+            seen.insert(*kind),
+            "two Body types both declare kind `{kind}`"
+        );
+    }
+    assert_eq!(seen.len(), kinds.len());
 }
 
 #[test]
