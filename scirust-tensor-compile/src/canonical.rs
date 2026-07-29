@@ -7,6 +7,8 @@ use core::fmt;
 
 use scirust_tensor_ir::{Graph, GraphError, NodeId, Operation, TensorType};
 
+use crate::memory::{MemoryPlan, ValueStorage};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompileError {
     InvalidGraph(GraphError),
@@ -47,6 +49,9 @@ pub struct CompileStats {
     pub original_nodes: usize,
     pub retained_nodes: usize,
     pub eliminated_nodes: usize,
+    pub allocated_buffer_slots: usize,
+    pub reused_buffer_values: usize,
+    pub peak_live_buffers: usize,
 }
 
 /// Plan topologique immuable prêt pour les passes de lowering suivantes.
@@ -54,6 +59,7 @@ pub struct CompileStats {
 pub struct ExecutionPlan {
     instructions: Vec<Instruction>,
     outputs: Vec<NodeId>,
+    memory: MemoryPlan,
     stats: CompileStats,
 }
 
@@ -64,6 +70,10 @@ impl ExecutionPlan {
 
     pub fn outputs(&self) -> &[NodeId] {
         &self.outputs
+    }
+
+    pub const fn memory_plan(&self) -> &MemoryPlan {
+        &self.memory
     }
 
     pub const fn stats(&self) -> CompileStats {
@@ -118,6 +128,13 @@ impl CanonicalCompiler {
 
         let original_nodes = graph.nodes().len();
         let retained_nodes = instructions.len();
+        let memory = MemoryPlan::build(&instructions, graph.outputs());
+        let buffered_values = memory
+            .allocations()
+            .iter()
+            .filter(|allocation| matches!(allocation.storage, ValueStorage::Buffer(_)))
+            .count();
+        let allocated_buffer_slots = memory.slots().len();
 
         Ok(ExecutionPlan {
             instructions,
@@ -126,7 +143,11 @@ impl CanonicalCompiler {
                 original_nodes,
                 retained_nodes,
                 eliminated_nodes: original_nodes - retained_nodes,
+                allocated_buffer_slots,
+                reused_buffer_values: buffered_values - allocated_buffer_slots,
+                peak_live_buffers: memory.peak_live_buffers(),
             },
+            memory,
         })
     }
 }
@@ -192,6 +213,9 @@ mod tests {
                 original_nodes: 4,
                 retained_nodes: 2,
                 eliminated_nodes: 2,
+                allocated_buffer_slots: 1,
+                reused_buffer_values: 0,
+                peak_live_buffers: 1,
             }
         );
     }
