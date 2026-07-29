@@ -14,7 +14,10 @@ use std::path::{Path, PathBuf};
 use sos_cli::args::Args;
 use sos_cli::run::{CATALOG_PLUGIN, StageConfig, catalog_plugin_hash};
 use sos_core::Object;
-use sos_scirust::model::{ModelKind, ModelRun, ModelSpec, ModeledTrajectoryBody};
+use sos_scirust::model::{
+    AdaptiveModelRun, CertifiedModeledTrajectoryBody, ModelKind, ModelRun, ModelSpec,
+    ModeledTrajectoryBody,
+};
 use sos_scirust::pipeline::{TrajectorySpectrumBody, TrajectorySpectrumConfig};
 use sos_scirust::spectrum::{
     AveragedSpectrumBody, SpectrumBody, SpectrumConfig, WelchConfig, WindowKind,
@@ -956,6 +959,66 @@ fn a_study_simulates_a_system_and_then_analyses_what_it_produced() {
     // The whole pipeline verifies by re-execution, not just by identity.
     let report = sos_verify_rerun(&store_path, analysed, &runs_path).unwrap();
     assert!(report.contains("REPRODUCED"), "{report}");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn an_l2_study_runs_and_certifies_through_the_cli() {
+    // Both limits this closes, in one test. Dopri5 takes a right-hand side
+    // *function* and was long read as un-bindable from a file; the catalogue
+    // builds one from a name, so it is bindable after all. And because it is
+    // the first L2 result a study can produce, `--rerun` finally exercises the
+    // tolerance branch of the reproduction contract instead of NoCertifier
+    // refusing it.
+    let dir = temp_root("l2");
+    let store_path = dir.join("store");
+    let configs = [StageConfig::AdaptiveModel(AdaptiveModelRun::new(
+        ModelSpec::new(ModelKind::SpringMassDamper, [1.0, 0.3, 4.0]),
+        [1.0, 0.0],
+        0.0,
+        10.0,
+        1e-8,
+        1e-10,
+        0.01,
+    ))];
+    let runs_path = dir.join("runs.json");
+    fs::write(&runs_path, serde_json::to_string(&configs).unwrap()).unwrap();
+    let (manifest, _) = write_study(&dir, &configs);
+
+    let out = sos_run(
+        &manifest,
+        &runs_path,
+        &store_path,
+        &["--allow", "effectful"],
+    )
+    .unwrap();
+    assert!(out.contains("ran 1 of 1 stage(s)"), "{out}");
+
+    let id = parse_reported(&out, "stage-0");
+    let store = FileStore::open(&store_path).unwrap();
+    let stored: Object<CertifiedModeledTrajectoryBody> = store.get_object(id).unwrap().unwrap();
+
+    // The object carries its claim, which no L3 result does.
+    assert_eq!(stored.level, sos_core::DeterminismLevel::L2);
+    assert_eq!(stored.body.certified.rtol, 1e-8);
+    assert_eq!(stored.body.certified.atol, 1e-10);
+    assert!(stored.body.certified.accepted_steps > 0);
+    assert_eq!(stored.body.model.kind, ModelKind::SpringMassDamper);
+
+    // And the reproduction contract certifies it by tolerance, not by id.
+    let report = sos_verify_rerun(&store_path, id, &runs_path).unwrap();
+    assert!(report.contains("REPRODUCED"), "{report}");
+    assert!(
+        report.contains("L2"),
+        "the contract level must be L2: {report}"
+    );
+
+    // Identity verification still works on it too.
+    let identity = sos_cli::verify::run(store_path.to_str(), id).unwrap();
+    assert!(
+        identity.contains("OK (recomputed address matches)"),
+        "{identity}"
+    );
     fs::remove_dir_all(&dir).ok();
 }
 
