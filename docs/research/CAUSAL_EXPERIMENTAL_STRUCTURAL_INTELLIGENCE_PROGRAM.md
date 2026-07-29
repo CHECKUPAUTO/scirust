@@ -143,8 +143,8 @@ shift with what's true at the time).
 | 5C.4 | Estimate identifiable effects | **Done** — backdoor identification + linear adjustment estimation |
 | 5C.5 | Quantify sensitivity to unmeasured confounding | **Done** — Cinelli–Hazlett omitted-variable-bias bounds |
 | 5C.6 | Test invariance | **Done** — Invariant Causal Prediction across environments |
-| 5C.7 | Simulate interventions | **Draft** — SCM-based intervention simulation and unit-level counterfactuals |
-| 5C.8 | Choose the next experiment | Planned — experimental design / value of information |
+| 5C.7 | Simulate interventions | **Done** — SCM-based intervention simulation and unit-level counterfactuals |
+| 5C.8 | Choose the next experiment | **Draft** — worst-case-guaranteed experimental design over a CPDAG |
 | 5C.9 | Update theories | Planned — assumption-registry revision under new evidence |
 | 5C.10 | Verify causal claims | Planned — end-to-end certificate audit |
 | 5C.11 | Closing synthesis | Planned |
@@ -1203,8 +1203,9 @@ intervened directly on the target, which is assumed and unchecked.
 
 ## Phase 5C.7 — Simulate interventions (structural counterfactuals)
 
-**Status: Draft.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
-from `origin/master` at `20c4aa6c` (the commit 5C.6 merged at). Additive to
+**Status: Done.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
+from `origin/master` at `20c4aa6c` (the commit 5C.6 merged at). PR #858,
+merged at `5936d21f`. Additive to
 `scirust-causal` (no existing public API changed).
 
 Implements the third rung of Pearl's ladder: given a *fully specified* linear
@@ -1348,3 +1349,167 @@ remain exact arithmetic on the wrong model.
 - The SCM must be supplied whole. Fitting one from data — even up to the
   equivalence class 5C.3 returns — is not attempted here, and would inherit
   every assumption 5C.4 already documents.
+
+## Phase 5C.8 — Choose the next experiment (experimental design)
+
+**Status: Draft.** Branch `claude/scirust-srcc-robust-stats-6ue9xc`, restarted
+from `origin/master` at `5936d21f` (the commit 5C.7 merged at). Additive to
+`scirust-causal`.
+
+Phase 5C.7 ended on a bill. Two structural models whose joint distributions are
+provably identical — the discovery layer correctly returns the edge between
+them *undirected* — answer the same counterfactual `3` and `1`. This phase is
+the reply: given that CPDAG, **which experiment settles it?**
+
+### Why this question is different from every prior one
+
+5C.2 through 5C.7 all take data and, under assumptions, produce or withhold a
+claim. This one takes a *graph* and produces a *plan*. It needs no data at all,
+because the answer is a function of the structure: under a perfect intervention
+on `v`, cutting `v` off from its parents changes the distribution of its
+children and leaves its parents alone, so every edge incident to `v` becomes
+orientable. How many edges that settles is computable before anything is run.
+
+Its output is therefore not a causal claim but a statement about what a causal
+claim would *cost*. The certificate reflects that: it never carries an
+estimate, an uncertainty, or a method, because there is no effect here to
+estimate.
+
+### The honesty problem specific to planning
+
+Orienting the edges *at* the target happens whatever the experiment finds.
+What propagates from them through Meek's rules does not — `x -> v` and
+`v -> x` propagate differently. A planner that scored candidates by their best
+outcome would call experiments decisive that are not.
+
+So every candidate reports two numbers: a **guaranteed** count that holds for
+every possible outcome, and an **optimistic** count for the luckiest one.
+Ranking uses the guarantee. The guarantee is computed by *enumerating* the
+`2^k` outcomes rather than by arguing about them; past a configurable cap the
+enumeration is abandoned and the candidate falls back to edges-at-target alone
+— still a true lower bound, since propagation only adds — with a warning. A
+capped candidate is never ranked as if it had been fully evaluated.
+
+The smallest case where the two numbers come apart is the undirected triangle,
+and it is in the benchmark for that reason. Intervening anywhere orients two
+edges for certain; the third follows only when the two land in a chain
+(`2 -> 0 -> 1`), and not when they both point the same way. Guarantee `2`,
+best case `3`. The worst-case greedy sequence consequently needs **two**
+experiments where an optimist would promise one.
+
+### Meek's rule 4, and a prediction that had to be checked
+
+Phase 5C.3 implemented Meek's R1–R3 and recorded why R4 was omitted: Meek
+proves R1–R3 complete *when every directed edge came from v-structure
+detection*, which was that phase's setting. It also recorded the condition
+under which that stops holding — orientations injected for some other reason.
+
+Planning an intervention injects exactly such orientations, so this phase
+implements R4. It is reached through a **separate entry point**
+(`apply_meek_rules_with_background`); the discovery pipeline keeps calling the
+R1–R3 version, so its behaviour is unchanged by construction rather than by
+assertion. Two checks back that up: a unit test runs both fixpoints on five
+v-structure-only CPDAGs and asserts they agree — Meek's theorem as an
+executable prediction — and `pc_stable_benchmark`'s fingerprint `79e57e69…` is
+unchanged.
+
+The R4 derivation is recorded in the code rather than cited, because working
+it through showed the usual statement carries a premise it does not need. From
+`a - b`, `a - c`, `c -> d`, `d -> b` with `c`, `b` non-adjacent: orienting
+`b -> a` forces `a - c` one way or the other; `a -> c` closes the cycle
+`a -> c -> d -> b -> a`, and `c -> a` creates the unshielded collider
+`c -> a <- b`, which cannot be evidenced or `a - b` and `a - c` would already
+be directed. Both excluded, so `a -> b`. The argument never uses the adjacency
+of `a` and `d`, so no such premise is imposed here.
+
+### A defect the benchmark caught
+
+The first working version scored candidates against the graph *as supplied*.
+Writing the R4 benchmark row exposed the problem: a hand-built graph need not
+be closed under the orientation rules, and any edge the rules force from the
+graph *alone* was being credited to an experiment that had not earned it. On
+the R4 shape, three edges are written as undirected but only two are genuinely
+open.
+
+`plan_next_experiment` now closes its input first and reports
+`forced_by_graph_alone` separately, with a warning when it is non-zero. A
+CPDAG from discovery is already closed, so this changes nothing there — but
+the API accepts hand-built graphs, and it is exactly those that would have
+been scored wrong.
+
+### Implementation
+
+`src/experiment_design.rs`. `plan_next_experiment` closes the input, scores
+every feasible target, and ranks by (guaranteed, optimistic, ascending index)
+— a total order, so the ranking never depends on iteration accidents. Three
+outcomes: `Recommended`, `AlreadyDetermined` (nothing left to learn, which is
+a result), and `NoInformativeExperiment` (something is open but no feasible
+target touches it — reported, not rounded away).
+
+`greedy_experiment_sequence` repeats that, advancing each time to the **worst**
+outcome its chosen experiment could have produced. The length is therefore an
+upper bound valid however the experiments turn out. It is greedy and labelled
+as such; no claim is made that a shorter sequence does not exist.
+
+`Cpdag::from_edges` is added as a public validating constructor, so a caller
+with background knowledge or a published structure can plan against it without
+running discovery. It rejects out-of-range endpoints, self-loops, any pair
+carrying more than one edge, and — not mere hygiene — a directed cycle, since
+the orientation rules derive conclusions from the premise that a cycle cannot
+be closed.
+
+### Tests
+
+391 tests existed for `scirust-causal` before this phase; this phase adds
+**33** (13 experiment-design unit, 4 orientation/R4, 6 `from_edges`, 10
+integration), total **424**.
+
+The integration battery leads with the end-to-end loop closure: simulate from
+one of the 5C.7 models, run PC-Stable, get the undirected edge, plan against
+it, and confirm the named experiment resolves it — with the counterfactual
+disagreement (`3` vs `1`) restated in the same test so the thing being bought
+is visible next to its price.
+
+### Benchmark
+
+`examples/experiment_design_benchmark.rs`, 8 rows plus 5 derived comment
+lines, oracle-checked. Run-twice SHA-256:
+`c368798e05ef745c1f65a9a702f6adc3aa565e553dd655d641c319f2286e3413`, identical
+between debug and release. All seven prior fingerprints reverified unchanged:
+`167c13de…`, `c1449177…`, `79e57e69…`, `7ac0dc76…`, `1bc59a1d…`, `e1f0b99f…`,
+`f34e1cfa…`.
+
+### Compatibility
+
+Purely additive. No existing public item changed; `apply_meek_rules` keeps its
+exact behaviour. Crate root goes nine → ten capabilities.
+
+### Supported and unsupported claims
+
+May claim: a deterministic, worst-case-guaranteed ranking of single-variable
+interventions by how much of a CPDAG's ambiguity each would remove; an upper
+bound on the number of experiments needed to orient a graph, valid whatever
+they find; explicit reporting when the remaining ambiguity is out of reach of
+the feasible targets.
+
+Must **not** claim: that an experiment is worth running — there is no cost,
+ethics, or sample-size model here; that the input CPDAG is correct; that real
+interventions are perfect, target-only, and read without error; that the
+greedy sequence is the shortest; that any of these counts is an effect size.
+
+### Known limitations / deferred
+
+- Single-variable targets only. Simultaneous multi-variable interventions can
+  orient more per experiment and are not searched.
+- No cost model, so no genuine value-of-information trade-off — only a
+  structural count. A real design problem weighs cost against information;
+  this weighs nothing.
+- Soft/imperfect interventions are out of scope; the idealisation is hard
+  interventions read without error.
+- The outcome enumeration is exponential in the target's undirected degree.
+  The cap keeps it bounded and discloses itself, but a high-degree hub in a
+  large graph will be scored by a lower bound rather than exactly.
+- Greedy, not minimal. The minimum-size experiment set is not computed.
+- No sample-size guidance: how much interventional data is needed to *read*
+  an orientation reliably is a statistical question this structural layer does
+  not touch.
