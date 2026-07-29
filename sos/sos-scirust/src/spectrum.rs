@@ -52,7 +52,8 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use scirust_signal::features::spectral::{
-    psd, spectral_centroid, spectral_flatness, spectral_spread,
+    psd, psd_centroid, psd_flatness, psd_spread, spectral_centroid, spectral_flatness,
+    spectral_spread,
 };
 use scirust_signal::{apply_window, blackman, fft_real, flattop, hamming, hanning, welch_psd};
 use sos_core::canonical::{Canonical, CanonicalEncoder};
@@ -243,12 +244,20 @@ pub struct Spectrum {
     /// The window that shaped this spectrum. Carried here deliberately: see
     /// the module docs.
     pub window: WindowKind,
-    /// Spectral centroid in hertz — the power-weighted mean frequency.
+    /// Spectral centroid in hertz — the **magnitude**-weighted mean
+    /// frequency, which is what `scirust-signal`'s `spectral_centroid`
+    /// computes.
+    ///
+    /// Not the same statistic as [`AveragedSpectrum::centroid_hz`], which is
+    /// power-weighted; the two must not be compared. (This doc previously
+    /// said "power-weighted" and was simply wrong about the function it
+    /// describes.)
     pub centroid_hz: f64,
-    /// Spectral spread in hertz about the centroid.
+    /// Magnitude-weighted spectral spread in hertz about the centroid.
     pub spread_hz: f64,
-    /// Spectral flatness in `[0, 1]`: near `1` is noise-like, near `0` is
-    /// tonal.
+    /// Spectral flatness in `[0, 1]` over **magnitudes**: near `1` is
+    /// noise-like, near `0` is tonal. Not comparable with
+    /// [`AveragedSpectrum::flatness`], which is taken over power.
     pub flatness: f64,
 }
 
@@ -571,6 +580,21 @@ pub struct AveragedSpectrum {
     pub segments: usize,
     /// Trailing samples that did not fill a segment and were not used.
     pub dropped_samples: usize,
+    /// Spectral centroid in hertz — the **power**-weighted mean frequency,
+    /// from `scirust-signal`'s `psd_centroid`.
+    ///
+    /// Power-weighted rather than magnitude-weighted because a Welch estimate
+    /// *is* a power spectral density: the magnitude-domain functions
+    /// [`Spectrum`] uses take a complex spectrum, which this is not. The two
+    /// are different statistics and must not be compared — see
+    /// [`Spectrum::centroid_hz`].
+    pub centroid_hz: f64,
+    /// Power-weighted spectral spread in hertz about the centroid.
+    pub spread_hz: f64,
+    /// Spectral flatness in `[0, 1]` over **power** — the textbook Wiener
+    /// entropy. Saturates at exactly `0` for a spectrum with any empty bin;
+    /// `scirust-signal`'s `psd_flatness` documents why.
+    pub flatness: f64,
 }
 
 /// Serialized form of an [`AveragedSpectrum`].
@@ -581,6 +605,9 @@ struct AveragedSpectrumRepr {
     window: WindowKind,
     segments: usize,
     dropped_samples: usize,
+    centroid_hz: String,
+    spread_hz: String,
+    flatness: String,
 }
 
 impl From<AveragedSpectrum> for AveragedSpectrumRepr {
@@ -591,6 +618,9 @@ impl From<AveragedSpectrum> for AveragedSpectrumRepr {
             window: a.window,
             segments: a.segments,
             dropped_samples: a.dropped_samples,
+            centroid_hz: a.centroid_hz.to_string(),
+            spread_hz: a.spread_hz.to_string(),
+            flatness: a.flatness.to_string(),
         }
     }
 }
@@ -608,6 +638,9 @@ impl From<AveragedSpectrumRepr> for AveragedSpectrum {
             window: r.window,
             segments: r.segments,
             dropped_samples: r.dropped_samples,
+            centroid_hz: parse(&r.centroid_hz),
+            spread_hz: parse(&r.spread_hz),
+            flatness: parse(&r.flatness),
         }
     }
 }
@@ -619,6 +652,9 @@ impl Canonical for AveragedSpectrum {
         enc.value(&self.window);
         enc.u64(self.segments as u64);
         enc.u64(self.dropped_samples as u64);
+        encode_f64(enc, self.centroid_hz);
+        encode_f64(enc, self.spread_hz);
+        encode_f64(enc, self.flatness);
     }
 }
 
@@ -680,6 +716,9 @@ impl Simulate for WelchSimulator {
         let bin_width_hz = config.sample_rate_hz / config.segment_len as f64;
         Ok(Observation::new(
             AveragedSpectrum {
+                centroid_hz: psd_centroid(&estimate.psd, config.sample_rate_hz),
+                spread_hz: psd_spread(&estimate.psd, config.sample_rate_hz),
+                flatness: psd_flatness(&estimate.psd),
                 psd: estimate.psd,
                 bin_width_hz,
                 window: config.window,
@@ -1197,6 +1236,65 @@ mod tests {
         {
             assert_ne!(base.canonical_bytes(), other.canonical_bytes(), "{other:?}");
         }
+    }
+
+    #[test]
+    fn the_averaged_spectrum_summarizes_itself_in_the_power_domain() {
+        // The gap this closes: `Spectrum` carried features and
+        // `AveragedSpectrum` did not, because `scirust-signal`'s
+        // magnitude-domain functions cannot read a PSD at all.
+        let averaged = welch(&WelchConfig::new(
+            tone(64.0, 1024.0, 4096),
+            1024.0,
+            WindowKind::Hann,
+            1024,
+            512,
+        ));
+        assert!(
+            (averaged.centroid_hz - 64.0).abs() < 5.0,
+            "the centroid must find the tone: {}",
+            averaged.centroid_hz
+        );
+        assert!(averaged.spread_hz > 0.0);
+        assert!((0.0..=1.0).contains(&averaged.flatness));
+        assert!(averaged.flatness < 0.5, "a tone is not flat");
+    }
+
+    #[test]
+    fn the_two_backends_report_different_statistics_under_the_same_name() {
+        // Deliberate, and the reason both types document it: `Spectrum`'s
+        // features are magnitude-weighted (that is what
+        // `scirust-signal::spectral_centroid` computes) and
+        // `AveragedSpectrum`'s are power-weighted. On a signal that is not a
+        // single tone they disagree, so the two must not be compared.
+        let rate = 1024.0;
+        let mixed: Vec<f64> = tone(64.0, rate, 1024)
+            .iter()
+            .zip(tone(320.0, rate, 1024))
+            .map(|(lo, hi)| 4.0 * lo + hi)
+            .collect();
+
+        let magnitude = measure(&SpectrumConfig::new(
+            mixed.clone(),
+            rate,
+            WindowKind::Rectangular,
+        ));
+        let power = welch(&WelchConfig::new(
+            mixed,
+            rate,
+            WindowKind::Rectangular,
+            1024,
+            0,
+        ));
+
+        // Same record, same window, one segment — only the weighting differs.
+        assert_eq!(power.segments, 1);
+        assert!(
+            power.centroid_hz < magnitude.centroid_hz - 5.0,
+            "power weighting must favour the loud low tone: {} vs {}",
+            power.centroid_hz,
+            magnitude.centroid_hz
+        );
     }
 
     #[test]

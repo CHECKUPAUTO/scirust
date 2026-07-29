@@ -86,6 +86,14 @@
 //!       reproducible result*, a third kind of metadata beside `L2`'s
 //!       tolerance certificate and `L1`'s standard error.
 //!
+//!   Both outputs carry a centroid, spread and flatness, and **they are not
+//!   the same statistics**: [`spectrum::Spectrum`]'s are magnitude-weighted
+//!   (what `scirust-signal`'s complex-spectrum functions compute) and
+//!   [`spectrum::AveragedSpectrum`]'s are power-weighted (what its PSD-domain
+//!   functions compute, since a Welch estimate is a real PSD and the
+//!   complex-spectrum ones cannot read it at all). Both types say so on every
+//!   affected field.
+//!
 //! * [`model`] — [`model::CatalogSimulator`] runs `scirust-sim`'s
 //!   oracle-tested domain models (SIR/SEIR, Lotka-Volterra, RC circuits, Van
 //!   der Pol, damped oscillators, ...) on its fixed-step RK4. `L3`, and the
@@ -124,11 +132,7 @@
 //! the in-process "Static Rust... the default" transport (RFC-0002 §10 §1),
 //! so direct construction is the expected shape until a caller actually needs
 //! to swap implementations. Within the signal family, spectrograms are
-//! follow-on work; PSD-domain feature functions (a power-weighted centroid,
-//! say) belong in `scirust-signal` rather than here, which is why
-//! [`spectrum::AveragedSpectrum`] carries no features where
-//! [`spectrum::Spectrum`] does — `scirust-signal`'s existing ones read a
-//! complex spectrum, and a Welch estimate is not one.
+//! follow-on work.
 //!
 //! Four of the six [`Simulate`](sos_simulation::Simulate) backends have stage
 //! handlers ([`ode::Rk4OdeSimulator`], [`model::CatalogSimulator`],
