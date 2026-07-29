@@ -33,5 +33,11 @@ scirust-studio-store = { path = "../../../scirust-studio-store" }
 [dev-dependencies]
 tempfile = "=3.27.0"
 
+# The frontend, for the bridge contract test. Cheap on the host: the
+# interface crate's Dioxus, wasm-bindgen and web-sys dependencies are gated
+# on `cfg(target_arch = "wasm32")`, so building it here pulls in serde and
+# nothing else.
+scirust-studio-ui = { path = ".." }
+
 [features]
 default = []

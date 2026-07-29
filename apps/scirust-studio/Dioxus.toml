@@ -1,0 +1,26 @@
+[application]
+name = "scirust-studio-ui"
+
+[web.app]
+title = "SciRust Studio"
+
+# The Tauri shell serves the bundle from the root of a custom protocol, so
+# assets are addressed from `/`. A relative base path would break the moment
+# a view is opened from anywhere other than the root document.
+base_path = ""
+
+[web.watcher]
+reload_html = true
+watch_path = ["src", "assets"]
+
+[web.resource]
+# One stylesheet, shipped inside the bundle. No CDN, no web font, no
+# analytics: the content security policy in `src-tauri/tauri.conf.json`
+# refuses every external origin, and an asset that cannot load is a broken
+# interface rather than a degraded one.
+style = ["/assets/style.css"]
+script = []
+
+[web.resource.dev]
+style = []
+script = []

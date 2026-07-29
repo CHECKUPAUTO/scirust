@@ -31,7 +31,6 @@ serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = { version = "=1.0.145", features = ["float_roundtrip"] }
 wasm-bindgen = "=0.2.104"
 wasm-bindgen-futures = "=0.4.54"
-serde-wasm-bindgen = "=0.6.5"
 js-sys = "=0.3.81"
 web-sys = "=0.3.81"
 
@@ -53,23 +52,34 @@ name = "scirust-studio-ui"
 path = "src/main.rs"
 
 [dependencies]
-# `dioxus` with the `web` feature only. Never `desktop`: Tauri is the shell,
-# and a second one would be a second application.
-dioxus = { workspace = true, features = ["web"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+# The interface toolchain is needed only where the interface runs. Gating it
+# on the target keeps two properties that matter every day:
+#
+#  * `cargo test` on the host builds the reducers, the chart geometry, the
+#    action registry and the wire decoding — and nothing else — so the logic
+#    is tested in seconds without a browser or a WebAssembly toolchain.
+#  * The root workspace's gates cannot be slowed down or broken by a GUI
+#    dependency they never link.
+#
+# `dioxus` carries the `web` feature only. Never `desktop`: Tauri is the
+# shell, and a second one would be a second application.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+dioxus = { workspace = true, features = ["web"] }
 wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
-serde-wasm-bindgen = { workspace = true }
 js-sys = { workspace = true }
 web-sys = { workspace = true, features = [
     "Window",
     "Document",
     "Element",
+    "EventTarget",
     "HtmlElement",
     "HtmlTextAreaElement",
     "KeyboardEvent",
-    "Storage",
+    "Navigator",
 ] }
 
 [features]
