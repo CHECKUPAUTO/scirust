@@ -202,6 +202,144 @@ pub fn spectral_spread(spectrum: &[Complex], sample_rate: f64) -> f64 {
     f64::sqrt(numer / denom)
 }
 
+/// Spectral centroid computed from a **power spectral density** — the
+/// power-weighted mean frequency.
+///
+/// # Not the same statistic as [`spectral_centroid`]
+///
+/// [`spectral_centroid`] weights each bin by its **magnitude** `|X[k]|`; this
+/// weights by **power** `|X[k]|^2`, which is what a PSD holds. Both are called
+/// "the spectral centroid" in the literature and neither is wrong, but they
+/// are different numbers for any signal that is not a single tone — power
+/// weighting leans harder on the strongest bins. Values from the two must not
+/// be compared with each other.
+///
+/// This exists because a Welch estimate ([`welch_psd`]) is a real PSD, not a
+/// complex spectrum, so [`spectral_centroid`] cannot read it at all.
+///
+/// `psd` is the positive half-spectrum, DC first, as [`psd`] returns. DC is
+/// **excluded** from the weighting, matching [`spectral_centroid`]: a constant
+/// offset is not a frequency present in the signal, and including it would
+/// drag the centroid toward zero in proportion to a value that carries no
+/// spectral information.
+pub fn psd_centroid(psd: &[f64], sample_rate: f64) -> f64 {
+    if psd.len() <= 1
+    {
+        return 0.0;
+    }
+    let n = psd.len() - 1;
+    let mut numer = 0.0;
+    let mut denom = 0.0;
+    for (k, &p) in psd.iter().enumerate().skip(1)
+    {
+        let freq = k as f64 * sample_rate / (2.0 * n as f64);
+        numer += freq * p;
+        denom += p;
+    }
+    if denom < f64::EPSILON
+    {
+        return 0.0;
+    }
+    numer / denom
+}
+
+/// Power-weighted spectral spread about [`psd_centroid`], in hertz.
+///
+/// The PSD-domain counterpart of [`spectral_spread`], and different from it
+/// for the same reason [`psd_centroid`] differs from [`spectral_centroid`].
+pub fn psd_spread(psd: &[f64], sample_rate: f64) -> f64 {
+    if psd.len() <= 1
+    {
+        return 0.0;
+    }
+    let centroid = psd_centroid(psd, sample_rate);
+    let n = psd.len() - 1;
+    let mut numer = 0.0;
+    let mut denom = 0.0;
+    for (k, &p) in psd.iter().enumerate().skip(1)
+    {
+        let freq = k as f64 * sample_rate / (2.0 * n as f64);
+        let diff = freq - centroid;
+        numer += diff * diff * p;
+        denom += p;
+    }
+    if denom < f64::EPSILON
+    {
+        return 0.0;
+    }
+    f64::sqrt(numer / denom)
+}
+
+/// Spectral flatness (Wiener entropy) of a **power spectral density**: the
+/// ratio of the geometric to the arithmetic mean, in `[0, 1]`. Near `1` is
+/// noise-like, near `0` is tonal.
+///
+/// # Not the same statistic as [`spectral_flatness`]
+///
+/// [`spectral_flatness`] takes the ratio over **magnitudes**; this takes it
+/// over **power**, which is the textbook definition of Wiener entropy. They
+/// are related but not by squaring: the geometric mean commutes with squaring
+/// while the arithmetic mean does not, so the power-domain value is at most
+/// the square of the magnitude-domain one, with equality only for a perfectly
+/// flat spectrum. Do not compare values from the two.
+///
+/// Every bin is included here, DC among them — flatness asks how evenly the
+/// energy is spread across the spectrum, and a large DC offset genuinely does
+/// make a spectrum less flat.
+///
+/// # An empty bin saturates the answer at zero
+///
+/// The geometric mean of a set containing zero *is* zero, so a spectrum with
+/// any empty bin has flatness exactly `0` no matter what the other bins do.
+/// That is arithmetically correct and worth knowing before reading the number:
+/// a pure tone landing exactly on a bin has true zeros everywhere else, so it
+/// scores `0` — maximally tonal. Flatness discriminates among spectra that are
+/// everywhere non-zero (noise, mixtures, real measurements); it does not rank
+/// synthetic signals with exact spectral holes against each other.
+///
+/// Both this and [`spectral_flatness`] guard the logarithm with an
+/// `f64::EPSILON` floor, and **the floor bites at different signals in the two
+/// domains**, which is a third reason not to compare their values. Power is
+/// magnitude squared, so a bin whose magnitude is a merely-tiny `1e-13`
+/// survives the magnitude-domain floor and becomes `~1e-29` in the power
+/// domain, well underneath it. Measured on an exactly-on-bin 64 Hz tone over
+/// 1024 samples: this function returns `0`, while [`spectral_flatness`]
+/// returns `1.16e-13`. Both are "maximally tonal"; only one says so exactly.
+pub fn psd_flatness(psd: &[f64]) -> f64 {
+    let n = psd.len();
+    if n == 0
+    {
+        return 0.0;
+    }
+    let am: f64 = psd.iter().sum::<f64>() / n as f64;
+    if am < f64::EPSILON
+    {
+        return 0.0;
+    }
+    let sum_log: f64 = psd
+        .iter()
+        .map(|&p| {
+            if p > f64::EPSILON
+            {
+                p.ln()
+            }
+            else
+            {
+                f64::NEG_INFINITY
+            }
+        })
+        .sum();
+    let gm = if sum_log.is_finite()
+    {
+        (sum_log / n as f64).exp()
+    }
+    else
+    {
+        0.0
+    };
+    gm / am
+}
+
 /// Spectral entropy (normalized, 0..1).
 /// 0 = pure tone, 1 = white noise.
 pub fn spectral_entropy(spectrum: &[Complex]) -> f64 {
@@ -311,6 +449,205 @@ pub fn spectral_flatness(spectrum: &[Complex]) -> f64 {
         }
     };
     gm / am
+}
+
+#[cfg(test)]
+mod psd_feature_tests {
+    use super::*;
+    use crate::fft::fft_real;
+    use std::f64::consts::TAU;
+
+    fn tone(freq: f64, rate: f64, n: usize) -> Vec<f64> {
+        (0..n)
+            .map(|i| (TAU * freq * i as f64 / rate).sin())
+            .collect()
+    }
+
+    fn spectrum_of(x: &[f64]) -> Vec<Complex> {
+        fft_real(x)
+    }
+
+    #[test]
+    fn a_pure_tone_puts_the_centroid_on_its_own_frequency() {
+        // The sanity anchor: for a single tone, magnitude and power weighting
+        // agree, because there is only one bin with any weight.
+        let rate = 1024.0;
+        let x = tone(64.0, rate, 1024);
+        let spec = spectrum_of(&x);
+        let p = psd(&spec, 1024);
+
+        let power = psd_centroid(&p, rate);
+        let magnitude = spectral_centroid(&spec, rate);
+        assert!((power - 64.0).abs() < 1.0, "power centroid {power}");
+        assert!(
+            (magnitude - 64.0).abs() < 1.0,
+            "magnitude centroid {magnitude}"
+        );
+    }
+
+    #[test]
+    fn power_and_magnitude_weighting_disagree_on_a_two_tone_signal() {
+        // The reason these functions exist as separate names. A loud low tone
+        // and a quiet high one: power weighting leans harder on the loud one,
+        // so its centroid sits lower than the magnitude-weighted answer.
+        let rate = 1024.0;
+        let x: Vec<f64> = tone(64.0, rate, 1024)
+            .iter()
+            .zip(tone(320.0, rate, 1024))
+            .map(|(lo, hi)| 4.0 * lo + hi)
+            .collect();
+        let spec = spectrum_of(&x);
+        let p = psd(&spec, 1024);
+
+        let power = psd_centroid(&p, rate);
+        let magnitude = spectral_centroid(&spec, rate);
+        assert!(
+            power < magnitude - 5.0,
+            "power weighting must favour the loud low tone: {power} vs {magnitude}"
+        );
+        // Both still land between the two tones.
+        assert!((64.0..320.0).contains(&power), "{power}");
+        assert!((64.0..320.0).contains(&magnitude), "{magnitude}");
+    }
+
+    #[test]
+    fn the_spread_is_wider_for_two_tones_than_for_one() {
+        let rate = 1024.0;
+        let one = psd(&spectrum_of(&tone(192.0, rate, 1024)), 1024);
+        let two: Vec<f64> = tone(64.0, rate, 1024)
+            .iter()
+            .zip(tone(320.0, rate, 1024))
+            .map(|(a, b)| a + b)
+            .collect();
+        let two = psd(&spectrum_of(&two), 1024);
+
+        assert!(
+            psd_spread(&two, rate) > psd_spread(&one, rate) + 10.0,
+            "{} vs {}",
+            psd_spread(&two, rate),
+            psd_spread(&one, rate)
+        );
+    }
+
+    #[test]
+    fn flatness_separates_a_tone_from_an_impulse() {
+        // Both directions of the scale, on signals whose spectra are known.
+        // A single non-zero sample has a flat spectrum; a tone does not.
+        let tonal = psd(&spectrum_of(&tone(64.0, 1024.0, 1024)), 1024);
+        let mut impulse = vec![0.0; 1024];
+        impulse[0] = 1.0;
+        let flat = psd(&spectrum_of(&impulse), 1024);
+
+        assert!(psd_flatness(&tonal) < psd_flatness(&flat));
+        assert!(psd_flatness(&flat) > 0.99, "an impulse is maximally flat");
+        assert!((0.0..=1.0).contains(&psd_flatness(&tonal)));
+    }
+
+    #[test]
+    fn power_flatness_is_at_most_the_square_of_magnitude_flatness() {
+        // The documented relationship, checked: GM commutes with squaring but
+        // AM does not, so the power-domain ratio cannot exceed the square of
+        // the magnitude-domain one.
+        for x in [tone(64.0, 1024.0, 1024), broadband(1024)]
+        {
+            let spec = spectrum_of(&x);
+            let power = psd_flatness(&psd(&spec, 1024));
+            let magnitude = spectral_flatness(&spec);
+            assert!(
+                power <= magnitude * magnitude + 1e-12,
+                "{power} must not exceed {magnitude}^2"
+            );
+        }
+    }
+
+    /// A spectrum with no empty bins, so flatness is not saturated at zero.
+    fn broadband(n: usize) -> Vec<f64> {
+        (0..n).map(|i| ((i * 37) % 11) as f64 - 5.0).collect()
+    }
+
+    #[test]
+    fn a_dc_offset_moves_flatness_but_not_the_centroid() {
+        // The two conventions this module documents: the centroid excludes DC
+        // (a constant is not a frequency), flatness includes it (a constant
+        // genuinely makes a spectrum less even).
+        //
+        // Measured on a broadband signal rather than a tone, because a tone
+        // landing exactly on a bin has true zeros elsewhere and its flatness is
+        // already saturated at 0 — see `psd_flatness`'s docs. That saturation
+        // is what this test found first.
+        let rate = 1024.0;
+        let plain = broadband(1024);
+        let offset: Vec<f64> = plain.iter().map(|v| v + 50.0).collect();
+        let p0 = psd(&spectrum_of(&plain), 1024);
+        let p1 = psd(&spectrum_of(&offset), 1024);
+
+        assert!(
+            psd_flatness(&p0) > 0.0,
+            "the baseline must not be saturated"
+        );
+        assert!(
+            (psd_centroid(&p0, rate) - psd_centroid(&p1, rate)).abs() < 1e-6,
+            "DC must not move the centroid"
+        );
+        assert!(
+            psd_flatness(&p1) < psd_flatness(&p0),
+            "a DC spike makes the spectrum less flat: {} -> {}",
+            psd_flatness(&p0),
+            psd_flatness(&p1)
+        );
+    }
+
+    #[test]
+    fn an_exact_spectral_zero_saturates_flatness_at_zero() {
+        // The geometric mean of a set containing zero is zero, so any empty
+        // bin drives flatness to exactly 0 regardless of the rest.
+        let spec = spectrum_of(&tone(64.0, 1024.0, 1024));
+        let tonal = psd(&spec, 1024);
+        assert!(tonal.iter().any(|&p| p <= f64::EPSILON), "has empty bins");
+        assert_eq!(psd_flatness(&tonal), 0.0);
+    }
+
+    #[test]
+    fn the_epsilon_floor_bites_at_different_signals_in_the_two_domains() {
+        // A third reason the two flatness functions must not be compared, and
+        // one this test found rather than predicted. Power is magnitude
+        // squared, so an off-peak bin at magnitude ~1e-13 clears the
+        // magnitude-domain epsilon guard while its ~1e-29 power does not.
+        let spec = spectrum_of(&tone(64.0, 1024.0, 1024));
+        let magnitude = spectral_flatness(&spec);
+        let power = psd_flatness(&psd(&spec, 1024));
+
+        assert_eq!(power, 0.0, "the power domain saturates");
+        assert!(
+            magnitude > 0.0 && magnitude < 1e-9,
+            "the magnitude domain returns a tiny non-zero: {magnitude}"
+        );
+    }
+
+    #[test]
+    fn degenerate_inputs_return_zero_rather_than_nan() {
+        assert_eq!(psd_centroid(&[], 1024.0), 0.0);
+        assert_eq!(psd_centroid(&[1.0], 1024.0), 0.0);
+        assert_eq!(psd_spread(&[], 1024.0), 0.0);
+        assert_eq!(psd_spread(&[1.0], 1024.0), 0.0);
+        assert_eq!(psd_flatness(&[]), 0.0);
+        // An all-zero spectrum has no centroid to speak of.
+        assert_eq!(psd_centroid(&[0.0; 8], 1024.0), 0.0);
+        assert_eq!(psd_spread(&[0.0; 8], 1024.0), 0.0);
+        assert_eq!(psd_flatness(&[0.0; 8]), 0.0);
+    }
+
+    #[test]
+    fn a_welch_estimate_can_be_summarized_which_is_the_point() {
+        // `spectral_centroid` cannot read a Welch result at all — it takes a
+        // complex spectrum, and a PSD is not one. These can.
+        let rate = 1024.0;
+        let x = tone(64.0, rate, 4096);
+        let w = welch_psd(&x, 1024, 512, &crate::windows::hanning(1024)).unwrap();
+        let centroid = psd_centroid(&w.psd, rate);
+        assert!((centroid - 64.0).abs() < 5.0, "{centroid}");
+        assert!(psd_flatness(&w.psd) < 0.5, "a tone is not flat");
+    }
 }
 
 #[cfg(test)]
