@@ -3,7 +3,7 @@
 //!
 //! # Scope
 //!
-//! Seven capabilities:
+//! Eight capabilities:
 //!
 //! 1. an exactly invertible **strictly lower-triangular cubic map**
 //!    ([`TriangularCubicFlow`]);
@@ -71,7 +71,19 @@
 //!    domain knowledge. It quantifies a stated assumption; it does **not**
 //!    test whether a confounder exists, which no data can do. See the
 //!    private `sensitivity` module's own docs — in particular the recorded
-//!    finding that a high robustness value is not by itself reassurance.
+//!    finding that a high robustness value is not by itself reassurance; and
+//! 8. **Invariant Causal Prediction** ([`invariant_causal_prediction`]) —
+//!    Peters, Bühlmann & Meinshausen (2016). Given data from two or more
+//!    labelled [`Environment`]s and **no graph at all**, finds the predictor
+//!    subsets whose relationship to the target is invariant across
+//!    environments; their intersection is, with the stated confidence, a
+//!    *subset* of the target's direct causes. Its distinguishing property is
+//!    one capability 6 structurally cannot have: when its own core assumption
+//!    fails, it can **say so** — no surviving subset is positive evidence of
+//!    misspecification, not an absence of findings. The crate's tests exhibit
+//!    a hidden confounder that capability 6 certifies as `Identifiable` and
+//!    this one flags. The trade is directness: it answers *which* variables
+//!    are causes, never *how large* the effect is.
 //!
 //! # Causal interpretation — read before using the discovery API
 //!
@@ -113,10 +125,12 @@
 //! supplies** — it assumes causal sufficiency rather than establishing it,
 //! so a latent confounder yields a confidently wrong estimate. Front-door
 //! and instrumental-variable identification, latent-confounding-robust
-//! discovery (e.g. FCI), invariance testing, and counterfactual simulation
-//! remain **out of scope for this crate as it stands** and are the subject of
-//! later work. Capability 7 quantifies how badly a latent confounder *could*
-//! distort an estimate; it does not detect or remove one.
+//! discovery (e.g. FCI) and counterfactual simulation remain **out of scope
+//! for this crate as it stands** and are the subject of later work.
+//! Capability 7 quantifies how badly a latent confounder *could* distort an
+//! estimate; it does not detect or remove one. Capability 8 can detect that
+//! *something* is wrong with the model when multiple environments are
+//! available, but does not say what, and cannot repair it.
 //!
 //! # Cubic-flow mathematical properties
 //!
@@ -157,6 +171,7 @@ mod fingerprint;
 mod graph;
 mod graph_constraints;
 mod intervention;
+mod invariance;
 mod objective;
 mod optimize;
 mod orientation;
@@ -198,6 +213,10 @@ pub use fingerprint::sha256_hex;
 pub use graph::{GraphExtractionConfig, extract_causal_dag};
 pub use graph_constraints::{ConstraintViolation, GraphConstraints};
 pub use intervention::{Intervention, InterventionKind};
+pub use invariance::{
+    AcceptedSet, InvarianceConfig, InvariantPredictionOutcome, InvariantPredictionResult,
+    invariant_causal_prediction,
+};
 pub use objective::{AugmentedLagrangianConfig, CausalObjective, ObjectiveEvaluation};
 pub use optimize::{CausalOptimizationResult, OptimizerConfig, TerminationReason, optimize_causal};
 pub use permutation::{VariablePermutation, triangularize_from_dag};
