@@ -37,7 +37,7 @@ use scirust_sim::stochastic::ou_path;
 use scirust_studio_command::{ErrorCode, ErrorFamily};
 use scirust_studio_registry::{
     BackendKind, CapabilityCategory, CapabilityDescriptor, CapabilityId, CapabilityMaturity,
-    Cardinality, DeterminismClass, FieldDescriptor, OutputDescriptor, PrecisionKind,
+    Cardinality, DeterminismClass, FieldDescriptor, OutputDescriptor, PrecisionKind, RunDomain,
     SolverDescriptor, VerificationCheckDescriptor, VerificationDescriptor,
 };
 use scirust_studio_schema::Scenario;
@@ -208,6 +208,7 @@ pub static DESCRIPTOR: CapabilityDescriptor = CapabilityDescriptor {
     // its parameters alone. Same seed and same binary reproduce it exactly;
     // a different seed is a different, equally valid sample.
     determinism: DeterminismClass::InherentlyStochasticRecordedSeed,
+    domain: RunDomain::Time,
     supported_backends: &[BackendKind::Cpu],
     supported_precisions: &[PrecisionKind::F64],
     supported_solvers: &[EXACT_TRANSITION],
@@ -564,6 +565,7 @@ impl CapabilityAdapter for OrnsteinUhlenbeckAdapter {
             summary: RunSummary {
                 capability_display_name: DESCRIPTOR.display_name.to_string(),
                 scenario_name: s.experiment.name.clone(),
+                axis_id: TIME_AXIS_ID.to_string(),
                 steps,
                 t_start: coordinates[0],
                 t_end: *coordinates.last().expect("at least one coordinate"),

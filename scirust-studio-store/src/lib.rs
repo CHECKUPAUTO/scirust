@@ -56,6 +56,7 @@ mod tests {
             summary: RunSummary {
                 capability_display_name: "Demo".to_string(),
                 scenario_name: "demo".to_string(),
+                axis_id: "t".to_string(),
                 steps: 2,
                 t_start: 0.0,
                 t_end: 1.0,

@@ -14,7 +14,7 @@ use scirust_sim::stiff_bridge::simulate_rosenbrock;
 use scirust_studio_command::{CatalogedError, ErrorCode, ErrorFamily};
 use scirust_studio_registry::{
     BackendKind, CapabilityCategory, CapabilityDescriptor, CapabilityId, CapabilityMaturity,
-    Cardinality, DeterminismClass, FieldDescriptor, OutputDescriptor, PrecisionKind,
+    Cardinality, DeterminismClass, FieldDescriptor, OutputDescriptor, PrecisionKind, RunDomain,
     SolverDescriptor, VerificationCheckDescriptor, VerificationDescriptor,
 };
 use scirust_studio_schema::Scenario;
@@ -159,6 +159,7 @@ pub static DESCRIPTOR: CapabilityDescriptor = CapabilityDescriptor {
     summary: "The canonical Robertson autocatalytic stiff-ODE benchmark, integrated with the adaptive Rosenbrock-W stiff solver.",
     maturity: CapabilityMaturity::Stable,
     determinism: DeterminismClass::StrictSameBinarySameTarget,
+    domain: RunDomain::Time,
     supported_backends: &[BackendKind::Cpu],
     supported_precisions: &[PrecisionKind::F64],
     supported_solvers: &[STIFF_ROSENBROCK],
@@ -373,6 +374,7 @@ impl CapabilityAdapter for RobertsonAdapter {
             summary: RunSummary {
                 capability_display_name: DESCRIPTOR.display_name.to_string(),
                 scenario_name: scn.experiment.name.clone(),
+                axis_id: TIME_AXIS_ID.to_string(),
                 steps: accepted_steps,
                 t_start: traj.t.first().copied().unwrap_or(t0),
                 t_end: traj.last_time().unwrap_or(t1),

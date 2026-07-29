@@ -19,7 +19,7 @@ mod registry;
 
 pub use descriptor::{
     BackendKind, CapabilityCategory, CapabilityDescriptor, CapabilityId, CapabilityMaturity,
-    Cardinality, DeterminismClass, FieldDescriptor, OutputDescriptor, PrecisionKind,
+    Cardinality, DeterminismClass, FieldDescriptor, OutputDescriptor, PrecisionKind, RunDomain,
     SolverDescriptor, VerificationCheckDescriptor, VerificationDescriptor,
 };
 pub use registry::{CapabilityRegistry, RegistryError};

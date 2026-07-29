@@ -17,6 +17,7 @@ mod adapters;
 mod control;
 mod ensemble;
 mod execute_support;
+mod measure;
 mod result;
 mod result_v1;
 mod sink;
@@ -31,7 +32,7 @@ pub use result::{
     VerificationResult, VerificationStatus, WarningCategory, describe_defects, validate_result,
 };
 pub use result_v1::{
-    AxisDescriptorV1, RESULT_SCHEMA_VERSION_V1, RunResultV1, SeriesV1, XAxisMeaning,
+    AxisDescriptorV1, RESULT_SCHEMA_VERSION_V1, RunResultV1, RunSummaryV1, SeriesV1, XAxisMeaning,
 };
 /// Re-exported because [`RunProvenance::determinism`] is a public field of a
 /// public type: a caller cannot name the type of something it can read

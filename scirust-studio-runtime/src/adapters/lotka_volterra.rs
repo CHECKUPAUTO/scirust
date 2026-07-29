@@ -20,7 +20,7 @@ use crate::execute_support::{TimeSpan, simulate_cancellable};
 use scirust_studio_command::{ErrorCode, ErrorFamily};
 use scirust_studio_registry::{
     BackendKind, CapabilityCategory, CapabilityDescriptor, CapabilityId, CapabilityMaturity,
-    Cardinality, DeterminismClass, FieldDescriptor, OutputDescriptor, PrecisionKind,
+    Cardinality, DeterminismClass, FieldDescriptor, OutputDescriptor, PrecisionKind, RunDomain,
     SolverDescriptor, VerificationCheckDescriptor, VerificationDescriptor,
 };
 use scirust_studio_schema::Scenario;
@@ -167,6 +167,7 @@ pub static DESCRIPTOR: CapabilityDescriptor = CapabilityDescriptor {
               integrated with fixed-step RK4.",
     maturity: CapabilityMaturity::Stable,
     determinism: DeterminismClass::StrictSameBinarySameTarget,
+    domain: RunDomain::Time,
     supported_backends: &[BackendKind::Cpu],
     supported_precisions: &[PrecisionKind::F64],
     supported_solvers: &[RK4],
@@ -417,6 +418,7 @@ impl CapabilityAdapter for LotkaVolterraAdapter {
             summary: RunSummary {
                 capability_display_name: DESCRIPTOR.display_name.to_string(),
                 scenario_name: s.experiment.name.clone(),
+                axis_id: TIME_AXIS_ID.to_string(),
                 steps: traj.len() - 1,
                 t_start: traj.t.first().copied().unwrap_or(t0),
                 t_end: traj.last_time().unwrap_or(t1),
