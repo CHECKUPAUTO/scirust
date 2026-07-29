@@ -5,7 +5,7 @@
   "identifier": "com.memorithm.scirust-studio",
   "build": {
     "frontendDist": "../dist",
-    "beforeBuildCommand": "cargo run --manifest-path ../../../apps/scirust-studio/Cargo.toml --bin scirust-studio-ui --help >/dev/null 2>&1 || true",
+    "beforeBuildCommand": "cargo run -p stage-frontend -- --profile release",
     "beforeDevCommand": ""
   },
   "app": {

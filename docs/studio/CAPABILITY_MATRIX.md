@@ -20,8 +20,11 @@ Columns, exactly as specified for this matrix:
 - **Oracle tested** — the underlying model has an analytic-solution or
   conservation-law test *in its own crate* (independent of Studio).
 - **CLI exposed** — reachable through `scirust catalog`/`scirust run`.
-- **Desktop exposed** — reachable from a desktop application. **Always
-  "No" at this stage** — no desktop shell exists yet (Phase 5+).
+- **Desktop exposed** — reachable from the desktop application. Since Phase
+  3A this is no longer uniformly "No"; the desktop dimensions are broken out
+  per capability in [the desktop table below](#desktop-exposure-phase-3a),
+  because "the application can list it" and "the application can chart it"
+  are different claims and collapsing them would hide which is true.
 
 Since Phase 2B, every capability in the table below is also reachable
 out-of-process through `scirust-studio-worker` (see
@@ -71,6 +74,60 @@ owning crate verifies this."
 families within already-partially-adapted modules) are real, tested code
 that Studio does not yet expose. Building their adapters is Phase 3 work.
 
+## Desktop exposure (Phase 3A)
+
+The desktop application (`apps/scirust-studio`, see
+`docs/studio/DESKTOP_ARCHITECTURE.md`) reads the same registry the CLI does,
+so its coverage is exactly the adapter coverage above — nothing is
+hard-coded in the interface, and nothing appears there that is not real.
+
+Columns:
+
+- **CLI executable** — `scirust run` executes it in-process.
+- **Worker executable** — `scirust-studio-worker` executes it
+  out-of-process, which is the path the desktop uses.
+- **Desktop catalogue visible** — appears in the desktop's Catalogue view
+  with its parameters, initial state, outputs, checks and solvers.
+- **Desktop runnable** — can be started, watched and settled from the
+  desktop's Experiment view.
+- **Desktop chartable** — its stored result is plotted against the
+  coordinates the integrator produced (result schema v2, ADR 0006).
+- **Desktop help available** — the desktop's Help view documents the
+  workflow that reaches it, and its shipped tutorial opens from Home or
+  Catalogue.
+
+| Capability | CLI executable | Worker executable | Desktop catalogue visible | Desktop runnable | Desktop chartable | Desktop help available |
+|---|---|---|---|---|---|---|
+| `sim.mechanics.spring_mass_damper` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.orbital.two_body` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.epidemiology.sir` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.electrical.rlc` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.chemistry.robertson` | Yes | Yes | Yes | Yes (indeterminate progress) | Yes | Yes |
+| Every other `scirust-sim` model family | No | No | No | No | No | No |
+| Every other workspace crate | No | No | No | No | No | No |
+
+Three notes, because a table like this is easy to over-read:
+
+1. **"Desktop runnable (indeterminate progress)"** for Robertson is not a
+   caveat about correctness. Its adaptive Rosenbrock-W solver exposes no
+   per-step callback, so there is no genuine fraction to report; the interface
+   shows indeterminate activity rather than an invented percentage, and
+   cancellation works by terminating the worker process. Both paths are
+   reported to the user as *cancelled*, because that is what was asked for.
+2. **"Desktop chartable"** is a claim about *coordinates*, not pixels. A run
+   recorded before result schema v2 is still openable and still charted, but
+   against sample ordinals and labelled as such — the application will not
+   invent an axis for a result that does not carry one. See
+   `docs/studio/adr/0006-result-axis-coordinates.md`.
+3. **"Desktop help available"** covers the shipped preview features only. The
+   Help view says so in its own first line rather than implying it documents a
+   complete product.
+
+**Desktop-exposed: 5 of 16 `scirust-sim` module families**, identical to
+adapter coverage. Adapting the remaining eleven is Phase 3B; it requires no
+desktop work, because the catalogue, the run view and the chart are all driven
+from the registry.
+
 ## The rest of the workspace
 
 `docs/studio/REPOSITORY_AUDIT.md` §10 already classifies the ~120 other
@@ -91,4 +148,18 @@ public API, per the audit's own rule, not this matrix.
   `sim.orbital.two_body`, `sim.electrical.rlc`, `sim.chemistry.robertson`.
 - Catalogued, no tested Studio adapter: the other 11 `scirust-sim` model
   families, plus every other workspace crate.
-- Desktop-exposed: **0**, by design — no desktop shell exists yet.
+- Desktop-exposed: **0**, by design — no desktop shell existed at Phase 2A.
+
+## Summary counts (Phase 3A)
+
+- Operational, and now reachable from a native desktop application: the same
+  **5**. The desktop added a window, not a capability.
+- Desktop-exposed: **5** — catalogue-visible, runnable, chartable and
+  documented, per the desktop table above.
+- Still catalogue-only: the other 11 `scirust-sim` model families and every
+  other workspace crate.
+
+The number that did not change is the point. Phase 3A built a shell, an
+interface and a bridge; it deliberately did not begin the remaining eleven
+adapters, because doing both at once is how an application ends up with a
+capability nobody tested.

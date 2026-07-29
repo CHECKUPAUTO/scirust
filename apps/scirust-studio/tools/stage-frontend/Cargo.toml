@@ -1,0 +1,13 @@
+[package]
+name = "stage-frontend"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "Copy the Dioxus web build into the directory Tauri bundles, verifying it is a real bundle first."
+
+[[bin]]
+name = "stage-frontend"
+path = "src/main.rs"
+
+[dependencies]
+sha2 = "=0.10.9"

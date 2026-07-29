@@ -300,3 +300,70 @@ pendulum, SEIR, ecology, the two non-stiff chemistry models, thermal, RC/Van
 der Pol, stochastic, pharmacokinetics, rigid-body, battery, HVAC, grid,
 laser, photodiode, APD) are unchanged: real and tested in `scirust-sim`'s
 own suite, not yet wired to a Studio scenario. Adapting them is Phase 3.
+
+## 13. Update — Phase 3A (desktop shell, WebAssembly interface, typed bridge)
+
+§4's Windows reality check said this repository contained "no Tauri, no
+Dioxus, no WebView2 integration, and no `apps/` directory". That is no longer
+true, and the parts of §4 that remain true are worth restating precisely,
+because they bound what this phase may claim.
+
+**What now exists.** `apps/scirust-studio` is a second Cargo workspace
+(excluded from the root one) holding four crates:
+
+| Crate | What it is |
+|---|---|
+| `scirust-studio-desktop` (`src-tauri`) | The Tauri 2.11.5 native shell: window, sidecar supervision, 17 typed commands, no scientific code |
+| `scirust-studio-ui` | The Dioxus 0.7.9 **Web** interface, compiled to `wasm32-unknown-unknown` |
+| `prepare-sidecar` | Stages the locally-built worker under the target-triple name Tauri resolves |
+| `stage-frontend` | Stages the WebAssembly bundle into the directory Tauri bundles, refusing anything that is not one |
+
+Alongside them, `scirust-studio-app-service` was added to the **root**
+workspace: the application-facing layer (bootstrap, worker supervision, job
+lifecycle, bounded events) that both the shell and any future host calls. It
+is the reason the shell contains no scientific logic — every command
+delegates to it.
+
+Documentation: `docs/studio/adr/0005-tauri-dioxus-desktop-architecture.md`,
+`DESKTOP_ARCHITECTURE.md`, `DESKTOP_SECURITY.md`, `DESKTOP_BUILD.md`,
+`FRONTEND_BRIDGE.md`, `WINDOWS_DESKTOP_ACCEPTANCE.md`.
+
+**What §4's constraint still means.** This session still runs in a Linux
+container. The following were verified here, on Linux, with commands that
+exited zero:
+
+- the interface's logic (reducers, chart geometry, action registry, string
+  table, wire decoding) — host tests;
+- every Dioxus component — `cargo clippy --target wasm32-unknown-unknown
+  --all-targets -D warnings`;
+- the Tauri shell, its command surface and its security audit — host tests;
+- the bridge contract between the shell's view types and the interface's wire
+  types — host tests over real values;
+- the scientific path end to end through the real worker, adapters and store
+  — `--smoke-test-backend`.
+
+The following were **not** run here and must not be reported as tested until
+CI or a real Windows host runs them:
+
+- `dx build --platform web` (the Dioxus CLI is not installed in this
+  container, so no WebAssembly bundle was produced);
+- `cargo tauri build` and the NSIS installer;
+- launching a WebView window on any platform;
+- `scripts/studio/test-desktop-artifact.ps1`.
+
+`.github/workflows/studio-desktop.yml` runs all four, on
+`ubuntu-latest`/`windows-latest`/`macos-latest`, and publishes the unsigned
+Windows preview. Its results — not this document — are the evidence that the
+packaged application works.
+
+**What §4's licensing and platform notes still govern.** Nothing in this phase
+changed the licensing position (§3) or added a Windows-specific dependency
+beyond WebView2, which ships with Windows 11 and recent Windows 10. Code
+signing, an updater, licensing enforcement and installer publication remain
+out of scope and unimplemented.
+
+**Capability coverage did not change.** Still 5 of 16 `scirust-sim` model
+families, exactly as in §12. The desktop reads the same registry, so its
+coverage is the adapter coverage; see `CAPABILITY_MATRIX.md` for the per-
+capability desktop columns. Adapting the remaining eleven is Phase 3B and
+needs no desktop work.
