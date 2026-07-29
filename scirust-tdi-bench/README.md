@@ -39,11 +39,24 @@ Ten reproducibility executables carry over verbatim (run with
 
 ## Provenance & scope
 
-A faithful re-homing of TDI's `tdi-bench`. As the reference project reports
-honestly, within the tested synthetic families the signal challenges
-entropy-only sufficiency, but TDI-1 was fully subsumed by the orbital baseline
-and no universal law or cross-size invariance is claimed. What transfers is the
-deterministic, exact evaluation machinery — holdouts, ridge, deterministic
-bootstrap CIs and preregistration discipline.
+A faithful re-homing of TDI's `tdi-bench`. What transfers is the deterministic,
+exact evaluation machinery — holdouts, ridge, deterministic bootstrap CIs and
+preregistration discipline.
+
+**This port is a snapshot, and the snapshot is old.** The ten binaries above
+carry the upstream evaluators through `tdi-continuous-deficit-geometry-v51`,
+i.e. **TDI-5.1**. Upstream has since built, frozen and merged thirteen further
+evaluators (TDI-5.2 → 5.9 and TDI-6.1 → 6.5), of which seven have produced real
+confirmatory results. None of that is present here. In particular, the headline
+findings that now characterise the hypothesis — survival against exact spectral
+moments (TDI-5.6), replication across four generator families (TDI-5.7),
+survival against the *literal* spectral gap and mixing time (TDI-6.1), and
+descriptor saturation (TDI-5.9) — were all obtained with evaluators that this
+crate does not contain. See `scirust-tdi`'s README for the current result table
+and the open questions.
+
+TDI-1 was fully subsumed by the orbital baseline (incremental gain `0`); that
+negative result stands. No universal law or cross-size invariance is claimed,
+and cross-width invariance specifically (upstream TDI-5.8) has not yet been run.
 
 > Note: the upstream TDI project has not yet selected a license.
