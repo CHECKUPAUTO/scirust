@@ -52,6 +52,7 @@ mod compute_adapter;
 #[cfg(test)]
 mod compute_conformance;
 mod compute_dispatch;
+mod cpu_reference;
 
 #[cfg(feature = "wgpu")]
 mod chain;
