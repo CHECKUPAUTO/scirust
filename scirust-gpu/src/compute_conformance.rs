@@ -176,9 +176,14 @@ impl ConformanceProfile for CpuProfile {
         buffer.memory_space()
     }
 
+    /// A genuine Reference artefact.
+    ///
+    /// This used to be nine arbitrary bytes (`b"reference"`), which passed only
+    /// because `compile` did not parse its payload. Now that the CPU adapter
+    /// decodes and validates Reference modules, the conformance suite has to
+    /// supply a real one.
     fn supported_module() -> KernelModule {
-        KernelModule::new(KernelFormat::Reference, "main", b"reference".to_vec())
-            .expect("valid reference module")
+        crate::cpu_reference::test_support::canonical_reference_module()
     }
 
     fn unsupported_module() -> KernelModule {
