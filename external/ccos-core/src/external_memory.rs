@@ -456,14 +456,28 @@ impl Default for CcosMemory {
 impl CcosMemory {
     /// An empty in-memory kernel with no checkpoint path.
     ///
-    /// The paging knobs come from the environment (`CCOS_MAX_RESIDENT`,
-    /// `CCOS_PAGING_THRESHOLD`), falling back to the historical defaults, so the
-    /// façade and the MCP server honour the same tuning as the `runtime` command
-    /// (`commands_runtime.rs`). Documented as env-tunable, previously hard-coded
-    /// on this path.
+    /// The paging cap is **fixed here on purpose**, not read from the
+    /// environment. `CCOS_MAX_RESIDENT` / `CCOS_PAGING_THRESHOLD` tune
+    /// `commands_runtime`, and wiring them in here through `new_from_env` looks
+    /// like the obvious consistency fix — it was tried and reverted, because it
+    /// buys nothing and breaks certification:
+    ///
+    /// * it is inert where it would matter. [`open`](Self::open) only constructs
+    ///   when the file is absent, and `max_in_memory_nodes` is a serialised
+    ///   field, so an existing workspace keeps its own cap regardless (measured:
+    ///   60 resident / 0 cold when reopening under `CCOS_MAX_RESIDENT=5`, versus
+    ///   5 / 55 for a fresh one);
+    /// * it makes the first-run self-test environment-sensitive. With
+    ///   `CCOS_MAX_RESIDENT=3` in the ambient environment, `ccos setup` drops
+    ///   from `6/6 checks passed` to `4/6 — NOT certified` (`causal recall` and
+    ///   `failure propagation` both fail), contradicting the
+    ///   deterministic-by-construction contract in `setup.rs`.
+    ///
+    /// Retuning a live workspace is [`set_max_resident`](Self::set_max_resident),
+    /// which re-pages explicitly instead of depending on ambient state.
     pub fn new() -> Self {
         CcosMemory {
-            graph: MemoryGraph::new_from_env(0.2, 5000),
+            graph: MemoryGraph::new(0.2, 5000),
             engine: IncrementalGraphEngine::new(),
             event_log: EventLog::new("ccos-external-memory".to_string()),
             dist_log: DistributedEventLog::new(),
@@ -1800,10 +1814,6 @@ impl ExternalMemory for CcosMemory {
 mod tests {
     use super::*;
 
-    // `CCOS_MAX_RESIDENT` is process-global, so the test that toggles it must not
-    // run in parallel with another reading it (same convention as `mcp.rs`).
-    static RESIDENT_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     // ── B2-batch: deferred whole-graph resolution ────────────────────────────────
     // A structural fingerprint of the resolved graph (sorted edges), so the eager
     // and deferred-batch paths can be compared edge-for-edge.
@@ -2898,31 +2908,6 @@ mod tests {
             "after the page fault the anchor is back in the window: {:?}",
             win.items.iter().map(|i| &i.uri).collect::<Vec<_>>()
         );
-    }
-
-    #[test]
-    fn new_honours_the_resident_cap_from_the_environment() {
-        // `CCOS_MAX_RESIDENT` is documented as the env-tunable resident cap, and
-        // `commands_runtime` already honours it; the façade / MCP constructor
-        // hard-coded 5000 and silently ignored it.
-        let _guard = RESIDENT_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let restore = std::env::var("CCOS_MAX_RESIDENT").ok();
-
-        std::env::set_var("CCOS_MAX_RESIDENT", "7");
-        let mem = CcosMemory::new();
-        assert_eq!(mem.graph.max_in_memory_nodes, 7);
-
-        std::env::remove_var("CCOS_MAX_RESIDENT");
-        let default_mem = CcosMemory::new();
-        assert_eq!(
-            default_mem.graph.max_in_memory_nodes, 5000,
-            "an unset var keeps the historical default"
-        );
-
-        match restore {
-            Some(v) => std::env::set_var("CCOS_MAX_RESIDENT", v),
-            None => std::env::remove_var("CCOS_MAX_RESIDENT"),
-        }
     }
 
 }

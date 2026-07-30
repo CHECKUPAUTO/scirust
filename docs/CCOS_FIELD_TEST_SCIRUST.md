@@ -26,6 +26,7 @@ renvoyait 31 éléments.
 | 5. Robustesse adversariale | ✅ injection notée 1.0, dégénérés sans crash |
 | 6. Suite de tests amont | ✅ 758 tests, 0 échec (avec le correctif) |
 | — Défaut trouvé | ⚠️ page-in COLD absent de la façade CLI → **corrigé** |
+| — Bug amont trouvé | ⚠️ le paging perd des arêtes causales → **signalé, non corrigé** |
 
 ## 1. Continuité d'état
 
@@ -125,18 +126,17 @@ un cap de 1, `page_in` ramène 3 nœuds et le re-paging en redémote 2, ce qui e
 le comportement correct d'un cache borné. Le défaut était l'absence d'appel, pas
 la valeur du plafond.
 
-**Second point, mineur.** `CcosMemory::new()` codait `MemoryGraph::new(0.2, 5000)`
-en dur alors que `CCOS_MAX_RESIDENT` est documenté comme le réglage du plafond et
-que `commands_runtime.rs` l'honore déjà via `new_from_env`. La façade et le MCP
-ignoraient donc silencieusement la variable.
+**Second point : un correctif tenté, puis retiré.** `CcosMemory::new()` code
+`MemoryGraph::new(0.2, 5000)` en dur alors que `CCOS_MAX_RESIDENT` est documenté
+comme le réglage du plafond et que `commands_runtime.rs` l'honore déjà via
+`new_from_env`. La façade et le MCP ignorent donc la variable. La correction
+« évidente » — faire lire l'environnement à `new()` — a été implémentée, testée,
+**puis annulée** : elle n'apporte rien et casse la certification. Voir §7.
 
-**Correctifs** (`external/ccos-core`, deux tests de non-régression) :
-
-1. `main.rs` — la façade appelle `ensure_resident` avant un recall `Around`,
-   comme la session. `ensure_resident` n'ajoute aucun événement, donc ne
-   déclenche pas de checkpoint parasite.
-2. `external_memory.rs` — `CcosMemory::new()` utilise `new_from_env(0.2, 5000)`,
-   défaut inchangé quand la variable est absente.
+**Correctif retenu** (`external/ccos-core/src/main.rs`, un test de
+non-régression) : la façade appelle `ensure_resident` avant un recall `Around`,
+comme la session. Le correctif couvre ses **deux** appelants, `ccos memory` et
+`ccos stdin`, qui partagent `run_op_stream`.
 
 **Vérification.** Même workspace, même ancre, même budget :
 
@@ -145,8 +145,80 @@ CLI avant : items =  0, tokens =    0
 CLI après : items = 31, tokens = 2048   ← parité avec MCP
 ```
 
-`CCOS_MAX_RESIDENT=500` → 500 résidents / 4 048 COLD ; `=20000` → aucune
-démotion. Suite amont complète : **758 tests, 0 échec**.
+Suite amont complète : **626 tests, 0 échec** (625 amont + le test ajouté).
+
+## 7. Ce qu'une revue adversariale du correctif a donné
+
+Le correctif ci-dessus a été soumis à une revue en fan-out (inventaire des
+points d'appel, risque replay/persistance, portée du réglage, conventions
+amont), puis chaque constat sérieux a été soumis à un réfutateur indépendant.
+Deux constats étaient annoncés comme **bloquants**. Les deux se sont révélés
+faux **à configuration égale**, et le vérifier a mis au jour un vrai bug amont.
+
+**« Le page-in détruit la timeline » — réfuté.** Mesuré : la timeline passe de
+8 à 0 opérations **aussi avec le binaire vierge et sans aucun recall**. La cause
+est le conflit « deux écrivains » déjà documenté (`docs/CCOS_MEMORY.md`) : un
+flux CLI mutant sur un workspace tenu par MCP fait diverger le snapshot de
+l'op-log, et le garde de cohérence d'`AgentSession::open` repart du snapshot.
+Le correctif n'y est pour rien.
+
+**« Le page-in détruit des arêtes causales » — réfuté, mais révélateur.**
+À plafond identique (20, persisté dans le snapshot), sur le même workspace :
+
+| Binaire | Flux | items | arêtes |
+|---|---|---|---|
+| vierge | ingest seul | — | 16 → **11** |
+| vierge | ingest + recall | 0 | 16 → **11** |
+| corrigé | ingest seul | — | 16 → **11** |
+| corrigé | ingest + recall | 3 | 16 → **12** |
+
+La perte de 5 arêtes est **identique sans le correctif et sans recall** : elle
+vient de la démotion elle-même, pas du page-in. Le correctif en préserve même
+une de plus (12 vs 11), puisque le page-in ramène une arête.
+
+**Le vrai défaut, lui, est amont et préexistant : le paging perd des arêtes.**
+Démoter puis repaginer ne restaure une arête archivée que si ses deux extrémités
+sont résidentes (`memory.rs`, `page_in`) ; une arête dont l'autre extrémité est
+encore COLD est supprimée du seul endroit où elle existait. Cela contredit le
+contrat annoncé du tier COLD (« non-destructif : le nœud et ses liens sont
+conservés »). C'est indépendant de ce correctif, cela affecte aussi le chemin
+MCP, et cela mérite un rapport amont séparé.
+
+**Constat retenu, et il a tué la moitié du correctif.** Le second volet du
+patch — faire lire `CCOS_MAX_RESIDENT` à `CcosMemory::new()` via `new_from_env`
+— a été **annulé** après vérification. Trois raisons, toutes mesurées :
+
+1. **Inerte là où ça compte.** `open()` n'appelle `new()` que si le fichier est
+   absent, et le plafond est un champ sérialisé : un workspace existant garde le
+   sien. Mesuré : 60 résidents / 0 COLD en rouvrant sous `CCOS_MAX_RESIDENT=5`,
+   contre 5 / 55 pour un workspace neuf. Mes vérifications initiales
+   (« cap 500 → 500 résidents ») portaient à chaque fois sur un workspace
+   **neuf** — un faux positif que je n'avais pas vu.
+2. **Casse la certification.** Avec `CCOS_MAX_RESIDENT=3` dans l'environnement,
+   `ccos setup` tombe de `6/6 checks passed` à **`4/6 — NOT certified`**
+   (`causal recall` et `failure propagation` échouent), alors que le binaire
+   vierge reste à 6/6. Cela contredit frontalement le contrat
+   « deterministic by construction » de `setup.rs`.
+3. **Rend le replay sensible à l'environnement ambiant**, et le test associé
+   était un faux-ami : son mutex ne protégeait que lui, alors qu'une centaine de
+   constructeurs du même binaire de test lisent désormais la variable.
+
+Le défaut d'origine — la façade ignore `CCOS_MAX_RESIDENT` — est donc **réel et
+non corrigé**. Il est documenté à l'endroit du code, avec la raison pour laquelle
+la correction évidente est pire que le mal.
+
+**Reste à couvrir (non corrigé, signalé).** `recall_what_if` fait un recall
+`Around` sans page-in (`agent_session.rs`), donc l'outil MCP `recall_what_if` et
+la commande `around` de `ccos postmortem` renvoient toujours une fenêtre vide sur
+une ancre démotée. C'est la même asymétrie que celle corrigée ici, à un autre
+point d'entrée ; comme ces chemins opèrent sur une mémoire rejouée jetable, y
+paginer serait sans risque pour le snapshot.
+
+Leçon de méthode : ma propre vérification empirique initiale — « le partage
+résident/COLD persisté est identique » — comparait les compteurs de nœuds et
+**pas les arêtes**, donc elle était trop grossière pour voir quoi que ce soit.
+C'est la comparaison à configuration égale, pas l'analyse statique seule, qui a
+tranché dans les deux sens.
 
 ## Limites connues, à l'échelle du monorepo
 
