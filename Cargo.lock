@@ -3274,6 +3274,7 @@ dependencies = [
  "scirust-tensor-compile",
  "scirust-tensor-ir",
  "scirust-tensor-reference",
+ "scirust-tensor-runtime",
  "wgpu",
 ]
 

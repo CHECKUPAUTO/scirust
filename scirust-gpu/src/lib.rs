@@ -78,6 +78,11 @@ mod tensor;
 mod wgpu_backend;
 #[cfg(feature = "wgpu")]
 mod wgpu_compute_adapter;
+// The canonical Reference path on WGPU. Separate from `wgpu_compute_adapter`,
+// which implements the WGSL contract: the two accept different kernel modules
+// and different placement conventions, and merging them would weaken both.
+#[cfg(feature = "wgpu")]
+mod wgpu_reference;
 
 #[cfg(feature = "wgpu")]
 pub use chain::{
@@ -103,6 +108,12 @@ pub use wgpu_backend::{GpuMatrix, WgpuContext, wgpu_scale_causal_mask, wgpu_soft
 #[cfg(feature = "wgpu")]
 pub use wgpu_compute_adapter::{
     WgpuComputeAdapter, WgpuComputeBuffer, WgpuComputeEvent, WgpuComputeKernel, WgpuComputeStream,
+};
+#[cfg(feature = "wgpu")]
+pub use wgpu_reference::{
+    WgpuDeviceClass, WgpuPowerPreference, WgpuReferenceAdapter, WgpuReferenceAdapterInfo,
+    WgpuReferenceBuffer, WgpuReferenceEvent, WgpuReferenceKernel, WgpuReferenceOptions,
+    WgpuReferenceStream,
 };
 
 /// Error returned when a compute backend cannot service a request.

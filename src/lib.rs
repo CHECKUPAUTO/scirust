@@ -84,6 +84,26 @@ pub mod tensor_canonical {
     //! The name is misleading and the feature is named after what it actually
     //! provides: its default build carries no GPU code at all.
     //!
+    //! `tensor-canonical-wgpu` re-exports `WgpuReferenceAdapter`, which runs the
+    //! same canonical plans on a WGPU device by generating one specialised WGSL
+    //! shader per logical kernel:
+    //!
+    //! ```ignore
+    //! let adapter = WgpuReferenceAdapter::new()?;   // fallible: a device may not exist
+    //! let runtime = ReferencePlanRuntime::new(adapter);
+    //! ```
+    //!
+    //! Acquiring a device is deliberately fallible and never falls back to the
+    //! CPU: no adapter means an error, not a quietly host-computed result. This
+    //! feature pulls the full wgpu stack, so it is a considered opt-in. A
+    //! software Vulkan adapter such as Mesa lavapipe is a valid WGPU device and
+    //! is reported as `WgpuDeviceClass::SoftwareCpu` rather than passed off as
+    //! hardware.
+    //!
+    //! Reproducibility differs between the two backends and is stated plainly:
+    //! `reshape` and `permute` move raw words and are bit-identical across them,
+    //! while the six arithmetic operations are `f32` and are not promised to be.
+    //!
     //! # Usage
     //!
     //! ```ignore
@@ -146,6 +166,16 @@ pub mod tensor_canonical {
         CanonicalProgram, CanonicalSession, CanonicalValue, ReferencePlanRuntime,
     };
 
-    #[cfg(feature = "tensor-canonical-cpu")]
+    // Both backend features pull the same crate, and the CPU adapter is in its
+    // default build either way — so it comes with both. That is what lets a
+    // caller compare a WGPU result against the CPU oracle without a third
+    // feature, and it costs nothing extra.
+    #[cfg(any(feature = "tensor-canonical-cpu", feature = "tensor-canonical-wgpu"))]
     pub use scirust_gpu::CpuComputeAdapter;
+
+    #[cfg(feature = "tensor-canonical-wgpu")]
+    pub use scirust_gpu::{
+        WgpuDeviceClass, WgpuPowerPreference, WgpuReferenceAdapter, WgpuReferenceAdapterInfo,
+        WgpuReferenceOptions,
+    };
 }

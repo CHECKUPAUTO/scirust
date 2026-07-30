@@ -312,6 +312,9 @@ jobs:
       # example and runs the real end-to-end test.
       - name: Check canonical tensor facade (caller-supplied backend)
         run: cargo +stable check -p scirust --features tensor-canonical --locked
+      # Compiled here; executed on lavapipe by the gpu-wgpu job below.
+      - name: Check canonical tensor facade (WGPU backend)
+        run: cargo +stable check -p scirust --all-targets --features tensor-canonical-wgpu --locked
       - name: Test canonical tensor facade on the CPU adapter
         run: cargo +stable test -p scirust --all-targets --features tensor-canonical-cpu --locked
       # Guards the promise the feature makes: the CPU adapter pulls neither wgpu
@@ -613,8 +616,19 @@ jobs:
           sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
       - name: Cache cargo
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      # SCIRUST_REQUIRE_WGPU turns "no adapter -> skip" into "no adapter ->
+      # fail". Without it a driverless runner would report a green wgpu job
+      # having executed nothing at all.
       - name: Test wgpu backend on lavapipe
+        env:
+          SCIRUST_REQUIRE_WGPU: "1"
         run: cargo +nightly-2026-07-02 test -p scirust-gpu --features wgpu --locked
+      # The same canonical plans, driven end to end through the public facade:
+      # CanonicalProgram -> WgpuReferenceAdapter -> generated WGSL -> TensorND.
+      - name: Test the canonical WGPU pipeline on lavapipe
+        env:
+          SCIRUST_REQUIRE_WGPU: "1"
+        run: cargo +nightly-2026-07-02 test -p scirust --features tensor-canonical-wgpu --locked
 
   # The CUDA feature uses dynamic loading. Hosted runners have no CUDA runtime,
   # which makes them the right place to enforce the public no-device contract:
