@@ -20,14 +20,14 @@
 //! every [`crate::ReferenceDecodeError`] variant, reachable by feeding the
 //! decoder deliberately malformed bytes — is tested below.
 
-use scirust_compute::{DType, KernelFormat, Shape};
+use scirust_compute::{DType, KernelFormat, KernelModule, Shape};
 use scirust_tensor_compile::{CanonicalCompiler, ExternalBindings, KernelLowerer, LoweredPlan};
 use scirust_tensor_ir::{Graph, Operation, Scalar, TensorType};
 
 use crate::{
-    REFERENCE_FORMAT_VERSION, REFERENCE_MAGIC, REFERENCE_MAX_RANK, ReferenceAttributes,
-    ReferenceDecodeError, ReferenceGenerationError, ReferenceKernelArtifact,
-    ReferenceKernelGenerator, ReferenceOpcode,
+    PreparedReferenceKernel, REFERENCE_FORMAT_VERSION, REFERENCE_MAGIC, REFERENCE_MAX_RANK,
+    ReferenceAttributes, ReferenceDecodeError, ReferenceExecutionError, ReferenceGenerationError,
+    ReferenceInterpreter, ReferenceKernelArtifact, ReferenceKernelGenerator, ReferenceOpcode,
 };
 
 // ---------------------------------------------------------------------------
@@ -828,5 +828,739 @@ fn decoder_rejects_an_unknown_attribute_tag() {
     assert_eq!(
         ReferenceKernelArtifact::decode(&bytes),
         Err(ReferenceDecodeError::UnknownAttributeTag { tag: 0x00FF })
+    );
+}
+
+// ===========================================================================
+// CPU interpreter
+// ===========================================================================
+//
+// Bit-level assertions use `to_bits()` wherever the semantics demand it: signed
+// zeros, infinities and NaN payloads are indistinguishable under `==` (or
+// compare unequal, for NaN), so value equality would silently pass where the
+// contract requires an exact bit pattern.
+//
+// NaN payload expectations follow the crate's stated contract: exact bits are
+// asserted only for operations that return or copy a value without arithmetic
+// (the `Relu` NaN branch, `ShapeCopy`, `Permute`). For `Add`/`Sub`/`Mul`/`Div`/
+// `Scale` a NaN operand is asserted to produce *some* NaN via `is_nan()`, never
+// a specific payload, because IEEE 754 leaves the propagated payload
+// unspecified.
+
+/// A NaN with a non-trivial payload, distinguishable from any canonical NaN.
+const PAYLOAD_NAN_BITS: u32 = 0x7FC0_1234;
+
+/// A second, different NaN payload.
+const OTHER_NAN_BITS: u32 = 0x7FE0_5678;
+
+fn prepared_from(plan: &LoweredPlan) -> PreparedReferenceKernel {
+    PreparedReferenceKernel::from_artifact(&only_artifact(plan)).expect("preparable kernel")
+}
+
+fn run(
+    prepared: &PreparedReferenceKernel,
+    operands: &[&[f32]],
+    output: &mut [f32],
+) -> Result<(), ReferenceExecutionError> {
+    ReferenceInterpreter::new().execute(prepared, operands, output)
+}
+
+fn bits(values: &[f32]) -> Vec<u32> {
+    values.iter().map(|value| value.to_bits()).collect()
+}
+
+/// Runs a single-operand kernel and returns the output bits.
+fn run_unary_bits(plan: &LoweredPlan, input: &[f32]) -> Vec<u32> {
+    let prepared = prepared_from(plan);
+    let mut output = vec![0.0f32; prepared.result_length()];
+    run(&prepared, &[input], &mut output).expect("valid invocation");
+    bits(&output)
+}
+
+/// Runs a two-operand kernel and returns the raw output.
+fn run_binary(plan: &LoweredPlan, left: &[f32], right: &[f32]) -> Vec<f32> {
+    let prepared = prepared_from(plan);
+    let mut output = vec![0.0f32; prepared.result_length()];
+    run(&prepared, &[left, right], &mut output).expect("valid invocation");
+    output
+}
+
+// ---------------------------------------------------------------------------
+// Preparation
+// ---------------------------------------------------------------------------
+
+#[test]
+fn prepares_from_a_valid_artifact() {
+    let plan = single_unary_plan(Operation::Relu, f32_type(vec![2, 3]));
+    let artifact = only_artifact(&plan);
+
+    let prepared = PreparedReferenceKernel::from_artifact(&artifact).unwrap();
+
+    assert_eq!(prepared.kernel_id(), artifact.kernel_id());
+    assert_eq!(prepared.opcode(), ReferenceOpcode::Relu);
+    assert_eq!(prepared.dtype(), DType::F32);
+    assert_eq!(prepared.operand_lengths(), &[6]);
+    assert_eq!(prepared.result_length(), 6);
+}
+
+#[test]
+fn prepares_from_a_valid_reference_kernel_module() {
+    let plan = single_binary_plan(Operation::Add, f32_type(vec![2, 2]));
+    let artifact = only_artifact(&plan);
+    let module = artifact.to_kernel_module().unwrap();
+
+    let prepared = PreparedReferenceKernel::from_kernel_module(&module).unwrap();
+
+    assert_eq!(prepared.opcode(), ReferenceOpcode::Add);
+    assert_eq!(prepared.operand_lengths(), &[4, 4]);
+    assert_eq!(prepared.result_length(), 4);
+}
+
+#[test]
+fn rejects_a_wgsl_kernel_module() {
+    let module = KernelModule::new(
+        KernelFormat::Wgsl,
+        "main",
+        b"@compute fn main() {}".to_vec(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        PreparedReferenceKernel::from_kernel_module(&module).unwrap_err(),
+        ReferenceExecutionError::WrongKernelFormat {
+            found: KernelFormat::Wgsl
+        }
+    );
+}
+
+#[test]
+fn rejects_a_ptx_kernel_module() {
+    let module = KernelModule::new(KernelFormat::Ptx, "main", b".version 8.0".to_vec()).unwrap();
+
+    assert_eq!(
+        PreparedReferenceKernel::from_kernel_module(&module).unwrap_err(),
+        ReferenceExecutionError::WrongKernelFormat {
+            found: KernelFormat::Ptx
+        }
+    );
+}
+
+#[test]
+fn rejects_a_spirv_kernel_module() {
+    let module = KernelModule::new(KernelFormat::SpirV, "main", b"\x03\x02#\x07".to_vec()).unwrap();
+
+    assert_eq!(
+        PreparedReferenceKernel::from_kernel_module(&module).unwrap_err(),
+        ReferenceExecutionError::WrongKernelFormat {
+            found: KernelFormat::SpirV
+        }
+    );
+}
+
+#[test]
+fn rejects_a_module_whose_entry_point_disagrees_with_the_artifact() {
+    let plan = single_unary_plan(Operation::Relu, f32_type(vec![2]));
+    let artifact = only_artifact(&plan);
+
+    // Same valid Reference payload, deliberately mislabelled.
+    let module = KernelModule::new(
+        KernelFormat::Reference,
+        "not_the_derived_name",
+        artifact.encode(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        PreparedReferenceKernel::from_kernel_module(&module).unwrap_err(),
+        ReferenceExecutionError::EntryPointMismatch {
+            expected: artifact.entry_point(),
+            found: "not_the_derived_name".to_string(),
+        }
+    );
+}
+
+#[test]
+fn rejects_a_module_with_corrupted_encoding() {
+    let plan = single_unary_plan(Operation::Relu, f32_type(vec![2]));
+    let artifact = only_artifact(&plan);
+    let mut code = artifact.encode();
+    code[0] ^= 0xFF; // break the magic
+
+    let module = KernelModule::new(KernelFormat::Reference, artifact.entry_point(), code).unwrap();
+
+    assert_eq!(
+        PreparedReferenceKernel::from_kernel_module(&module).unwrap_err(),
+        ReferenceExecutionError::InvalidEncoding(ReferenceDecodeError::InvalidMagic)
+    );
+}
+
+#[test]
+fn invalid_encoding_exposes_its_decode_error_as_a_source() {
+    let error = ReferenceExecutionError::InvalidEncoding(ReferenceDecodeError::InvalidMagic);
+
+    assert!(core::error::Error::source(&error).is_some());
+    assert!(core::error::Error::source(&ReferenceExecutionError::IndexOverflow).is_none());
+}
+
+#[test]
+fn rejects_exp_at_preparation() {
+    let plan = single_unary_plan(Operation::Exp, f32_type(vec![4]));
+    let artifact = only_artifact(&plan);
+
+    assert_eq!(
+        PreparedReferenceKernel::from_artifact(&artifact).unwrap_err(),
+        ReferenceExecutionError::DeterministicMathUnavailable {
+            opcode: ReferenceOpcode::Exp
+        }
+    );
+
+    // And through the module path too, so a caller cannot slip past it.
+    let module = artifact.to_kernel_module().unwrap();
+    assert_eq!(
+        PreparedReferenceKernel::from_kernel_module(&module).unwrap_err(),
+        ReferenceExecutionError::DeterministicMathUnavailable {
+            opcode: ReferenceOpcode::Exp
+        }
+    );
+}
+
+#[test]
+fn rejects_log_at_preparation() {
+    let plan = single_unary_plan(Operation::Log, f32_type(vec![4]));
+    let artifact = only_artifact(&plan);
+
+    assert_eq!(
+        PreparedReferenceKernel::from_artifact(&artifact).unwrap_err(),
+        ReferenceExecutionError::DeterministicMathUnavailable {
+            opcode: ReferenceOpcode::Log
+        }
+    );
+
+    let module = artifact.to_kernel_module().unwrap();
+    assert_eq!(
+        PreparedReferenceKernel::from_kernel_module(&module).unwrap_err(),
+        ReferenceExecutionError::DeterministicMathUnavailable {
+            opcode: ReferenceOpcode::Log
+        }
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Relu — bit-exact on every f32 class
+// ---------------------------------------------------------------------------
+
+#[test]
+fn relu_maps_every_float_class_exactly() {
+    let plan = single_unary_plan(Operation::Relu, f32_type(vec![8]));
+
+    let input = [
+        2.5f32,                           // positive        -> unchanged
+        -2.5f32,                          // negative        -> +0.0
+        0.0f32,                           // +0.0            -> +0.0
+        -0.0f32,                          // -0.0            -> +0.0
+        f32::from_bits(PAYLOAD_NAN_BITS), // NaN w/ payload  -> same bits
+        f32::INFINITY,                    // +inf            -> +inf
+        f32::NEG_INFINITY,                // -inf            -> +0.0
+        f32::from_bits(1),                // subnormal > 0   -> unchanged
+    ];
+
+    let observed = run_unary_bits(&plan, &input);
+
+    assert_eq!(
+        observed,
+        vec![
+            2.5f32.to_bits(),
+            0.0f32.to_bits(),
+            0.0f32.to_bits(),
+            0.0f32.to_bits(),
+            PAYLOAD_NAN_BITS,
+            f32::INFINITY.to_bits(),
+            0.0f32.to_bits(),
+            1u32,
+        ]
+    );
+
+    // `-0.0` must become `+0.0`, not merely "a zero": the two compare equal
+    // under `==`, so only the bits distinguish them.
+    assert_ne!(observed[3], (-0.0f32).to_bits());
+}
+
+#[test]
+fn relu_preserves_distinct_nan_payloads_bit_for_bit() {
+    let plan = single_unary_plan(Operation::Relu, f32_type(vec![2]));
+    let input = [
+        f32::from_bits(PAYLOAD_NAN_BITS),
+        f32::from_bits(OTHER_NAN_BITS),
+    ];
+
+    assert_eq!(
+        run_unary_bits(&plan, &input),
+        vec![PAYLOAD_NAN_BITS, OTHER_NAN_BITS]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Arithmetic
+// ---------------------------------------------------------------------------
+
+#[test]
+fn scale_multiplies_by_the_bit_exact_factor() {
+    let plan = scale_plan(f32_type(vec![4]), Scalar::f32(0.5));
+    let input = [1.0f32, -2.0, 3.5, 0.0];
+
+    assert_eq!(
+        run_unary_bits(&plan, &input),
+        bits(&[0.5f32, -1.0, 1.75, 0.0])
+    );
+}
+
+#[test]
+fn scale_by_negative_zero_produces_signed_zeros() {
+    let plan = scale_plan(f32_type(vec![3]), Scalar::f32(-0.0));
+    let input = [1.0f32, -1.0, 0.0];
+
+    // IEEE 754: 1.0 * -0.0 = -0.0, -1.0 * -0.0 = +0.0, 0.0 * -0.0 = -0.0.
+    assert_eq!(run_unary_bits(&plan, &input), bits(&[-0.0f32, 0.0, -0.0]));
+}
+
+#[test]
+fn add_sums_elementwise() {
+    let plan = single_binary_plan(Operation::Add, f32_type(vec![4]));
+    let output = run_binary(&plan, &[1.0, 2.0, -3.0, 0.5], &[10.0, 20.0, 3.0, 0.25]);
+
+    assert_eq!(bits(&output), bits(&[11.0f32, 22.0, 0.0, 0.75]));
+}
+
+#[test]
+fn sub_subtracts_elementwise() {
+    let plan = single_binary_plan(Operation::Sub, f32_type(vec![3]));
+    let output = run_binary(&plan, &[1.0, 5.0, -2.0], &[1.0, 2.0, 3.0]);
+
+    assert_eq!(bits(&output), bits(&[0.0f32, 3.0, -5.0]));
+}
+
+#[test]
+fn mul_multiplies_elementwise() {
+    let plan = single_binary_plan(Operation::Mul, f32_type(vec![3]));
+    let output = run_binary(&plan, &[2.0, -3.0, 0.5], &[4.0, 5.0, 0.5]);
+
+    assert_eq!(bits(&output), bits(&[8.0f32, -15.0, 0.25]));
+}
+
+#[test]
+fn div_divides_elementwise() {
+    let plan = single_binary_plan(Operation::Div, f32_type(vec![3]));
+    let output = run_binary(&plan, &[8.0, -9.0, 1.0], &[2.0, 3.0, 4.0]);
+
+    assert_eq!(bits(&output), bits(&[4.0f32, -3.0, 0.25]));
+}
+
+#[test]
+fn division_by_signed_zero_follows_ieee_754() {
+    let plan = single_binary_plan(Operation::Div, f32_type(vec![4]));
+    let output = run_binary(&plan, &[1.0, -1.0, 1.0, -1.0], &[0.0, 0.0, -0.0, -0.0]);
+
+    assert_eq!(
+        bits(&output),
+        bits(&[
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+            f32::INFINITY,
+        ])
+    );
+}
+
+#[test]
+fn zero_divided_by_zero_is_nan() {
+    let plan = single_binary_plan(Operation::Div, f32_type(vec![2]));
+    let output = run_binary(&plan, &[0.0, -0.0], &[0.0, 0.0]);
+
+    // A NaN is required; its payload is deliberately not asserted.
+    assert!(output[0].is_nan());
+    assert!(output[1].is_nan());
+}
+
+#[test]
+fn nan_operands_propagate_a_nan_without_a_payload_guarantee() {
+    let payload_nan = f32::from_bits(PAYLOAD_NAN_BITS);
+
+    for operation in [
+        Operation::Add,
+        Operation::Sub,
+        Operation::Mul,
+        Operation::Div,
+    ]
+    {
+        let plan = single_binary_plan(operation, f32_type(vec![2]));
+        let output = run_binary(&plan, &[payload_nan, 1.0], &[1.0, payload_nan]);
+
+        assert!(output[0].is_nan());
+        assert!(output[1].is_nan());
+    }
+
+    // Scale follows the same rule: NaN in, NaN out, payload unspecified.
+    let scale = scale_plan(f32_type(vec![1]), Scalar::f32(2.0));
+    let prepared = prepared_from(&scale);
+    let mut output = [0.0f32; 1];
+    run(&prepared, &[&[payload_nan]], &mut output).unwrap();
+    assert!(output[0].is_nan());
+}
+
+#[test]
+fn subnormal_and_near_limit_values_are_computed_exactly() {
+    let plan = single_binary_plan(Operation::Add, f32_type(vec![4]));
+
+    let smallest_subnormal = f32::from_bits(1);
+    let output = run_binary(
+        &plan,
+        &[smallest_subnormal, f32::MIN_POSITIVE, f32::MAX, f32::MAX],
+        &[smallest_subnormal, 0.0, 0.0, f32::MAX],
+    );
+
+    assert_eq!(output[0].to_bits(), f32::from_bits(2).to_bits());
+    assert_eq!(output[1].to_bits(), f32::MIN_POSITIVE.to_bits());
+    assert_eq!(output[2].to_bits(), f32::MAX.to_bits());
+    // MAX + MAX overflows to +inf under round-to-nearest.
+    assert_eq!(output[3].to_bits(), f32::INFINITY.to_bits());
+}
+
+#[test]
+fn repeated_execution_reproduces_identical_bits() {
+    let plan = single_binary_plan(Operation::Div, f32_type(vec![5]));
+    let prepared = prepared_from(&plan);
+
+    let left = [1.0f32, 3.0, -7.0, f32::from_bits(1), 1e30];
+    let right = [3.0f32, 7.0, 11.0, 3.0, 7.0];
+
+    let mut first = vec![0.0f32; prepared.result_length()];
+    let mut second = vec![0.0f32; prepared.result_length()];
+
+    run(&prepared, &[&left, &right], &mut first).unwrap();
+    run(&prepared, &[&left, &right], &mut second).unwrap();
+
+    assert_eq!(bits(&first), bits(&second));
+}
+
+// ---------------------------------------------------------------------------
+// Structural opcodes
+// ---------------------------------------------------------------------------
+
+#[test]
+fn shape_copy_copies_in_linear_order_without_touching_the_source() {
+    let plan = reshape_plan(f32_type(vec![2, 3]), f32_type(vec![6]), Shape::new(vec![6]));
+    let prepared = prepared_from(&plan);
+
+    let source = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+    let mut output = vec![0.0f32; prepared.result_length()];
+    run(&prepared, &[&source], &mut output).unwrap();
+
+    assert_eq!(bits(&output), bits(&source));
+    // The source is borrowed immutably and must be untouched.
+    assert_eq!(bits(&source), bits(&[1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]));
+}
+
+#[test]
+fn shape_copy_preserves_nan_payloads_and_signed_zeros_exactly() {
+    let plan = reshape_plan(f32_type(vec![2, 2]), f32_type(vec![4]), Shape::new(vec![4]));
+    let source = [
+        f32::from_bits(PAYLOAD_NAN_BITS),
+        f32::from_bits(OTHER_NAN_BITS),
+        -0.0f32,
+        f32::NEG_INFINITY,
+    ];
+
+    assert_eq!(
+        run_unary_bits(&plan, &source),
+        vec![
+            PAYLOAD_NAN_BITS,
+            OTHER_NAN_BITS,
+            (-0.0f32).to_bits(),
+            f32::NEG_INFINITY.to_bits(),
+        ]
+    );
+}
+
+#[test]
+fn permute_transposes_a_2d_tensor() {
+    // [2, 3] with permutation [1, 0] -> [3, 2].
+    let plan = transpose_plan(f32_type(vec![2, 3]), f32_type(vec![3, 2]), vec![1, 0]);
+
+    // Row-major [[1,2,3],[4,5,6]] transposes to [[1,4],[2,5],[3,6]].
+    let source = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+
+    assert_eq!(
+        run_unary_bits(&plan, &source),
+        bits(&[1.0f32, 4.0, 2.0, 5.0, 3.0, 6.0])
+    );
+}
+
+#[test]
+fn permute_reorders_a_3d_tensor() {
+    // [2, 3, 4] with permutation [2, 0, 1] -> [4, 2, 3].
+    let plan = transpose_plan(
+        f32_type(vec![2, 3, 4]),
+        f32_type(vec![4, 2, 3]),
+        vec![2, 0, 1],
+    );
+    let prepared = prepared_from(&plan);
+
+    // source[i, j, k] = 100*i + 10*j + k, so every element is identifiable.
+    let mut source = vec![0.0f32; 24];
+    for i in 0..2
+    {
+        for j in 0..3
+        {
+            for k in 0..4
+            {
+                source[i * 12 + j * 4 + k] = (i * 100 + j * 10 + k) as f32;
+            }
+        }
+    }
+
+    let mut output = vec![0.0f32; prepared.result_length()];
+    run(&prepared, &[&source], &mut output).unwrap();
+
+    // Convention: output.shape[i] == input.shape[permutation[i]], so with
+    // permutation [2, 0, 1] the output axes are (k, i, j) and
+    // output[k, i, j] == input[i, j, k].
+    let mut expected = vec![0.0f32; 24];
+    for k in 0..4
+    {
+        for i in 0..2
+        {
+            for j in 0..3
+            {
+                expected[k * 6 + i * 3 + j] = (i * 100 + j * 10 + k) as f32;
+            }
+        }
+    }
+
+    assert_eq!(bits(&output), bits(&expected));
+}
+
+#[test]
+fn identity_permutation_copies_unchanged() {
+    let plan = transpose_plan(f32_type(vec![2, 3]), f32_type(vec![2, 3]), vec![0, 1]);
+    let source = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+
+    assert_eq!(run_unary_bits(&plan, &source), bits(&source));
+}
+
+#[test]
+fn permute_handles_a_rank_zero_scalar() {
+    let plan = transpose_plan(f32_type(vec![]), f32_type(vec![]), vec![]);
+    let prepared = prepared_from(&plan);
+
+    // A rank-0 tensor holds exactly one element (the empty product).
+    assert_eq!(prepared.result_length(), 1);
+    assert_eq!(prepared.operand_lengths(), &[1]);
+
+    assert_eq!(
+        run_unary_bits(&plan, &[f32::from_bits(PAYLOAD_NAN_BITS)]),
+        vec![PAYLOAD_NAN_BITS]
+    );
+}
+
+#[test]
+fn permute_handles_a_zero_dimension_without_dividing_by_zero() {
+    // [0, 3] with permutation [1, 0] -> [3, 0]: zero elements either way.
+    let plan = transpose_plan(f32_type(vec![0, 3]), f32_type(vec![3, 0]), vec![1, 0]);
+    let prepared = prepared_from(&plan);
+
+    assert_eq!(prepared.result_length(), 0);
+    assert_eq!(prepared.operand_lengths(), &[0]);
+
+    let mut output: Vec<f32> = Vec::new();
+    // Must succeed, and in particular must not divide by a zero stride.
+    run(&prepared, &[&[]], &mut output).unwrap();
+    assert!(output.is_empty());
+}
+
+#[test]
+fn shape_copy_handles_a_zero_dimension() {
+    let plan = reshape_plan(
+        f32_type(vec![0, 5]),
+        f32_type(vec![5, 0]),
+        Shape::new(vec![5, 0]),
+    );
+    let prepared = prepared_from(&plan);
+
+    assert_eq!(prepared.result_length(), 0);
+
+    let mut output: Vec<f32> = Vec::new();
+    run(&prepared, &[&[]], &mut output).unwrap();
+    assert!(output.is_empty());
+}
+
+#[test]
+fn permute_preserves_nan_payloads_bit_for_bit() {
+    let plan = transpose_plan(f32_type(vec![2, 2]), f32_type(vec![2, 2]), vec![1, 0]);
+    let source = [
+        f32::from_bits(PAYLOAD_NAN_BITS),
+        -0.0f32,
+        f32::from_bits(OTHER_NAN_BITS),
+        f32::INFINITY,
+    ];
+
+    // Transposing [[a,b],[c,d]] gives [[a,c],[b,d]].
+    assert_eq!(
+        run_unary_bits(&plan, &source),
+        vec![
+            PAYLOAD_NAN_BITS,
+            f32::from_bits(OTHER_NAN_BITS).to_bits(),
+            (-0.0f32).to_bits(),
+            f32::INFINITY.to_bits(),
+        ]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Invocation validation — output must stay untouched on every rejection
+// ---------------------------------------------------------------------------
+
+/// Distinctive sentinel: a NaN payload no operation below could produce.
+const SENTINEL_BITS: u32 = 0x7F80_5A5A;
+
+fn sentinel(length: usize) -> Vec<f32> {
+    vec![f32::from_bits(SENTINEL_BITS); length]
+}
+
+fn assert_untouched(output: &[f32]) {
+    assert!(
+        output.iter().all(|value| value.to_bits() == SENTINEL_BITS),
+        "a rejected invocation must not write any output element"
+    );
+}
+
+#[test]
+fn too_few_operands_is_rejected_and_leaves_the_output_untouched() {
+    let plan = single_binary_plan(Operation::Add, f32_type(vec![4]));
+    let prepared = prepared_from(&plan);
+    let mut output = sentinel(prepared.result_length());
+
+    let error = run(&prepared, &[&[1.0, 2.0, 3.0, 4.0]], &mut output);
+
+    assert_eq!(
+        error,
+        Err(ReferenceExecutionError::OperandCountMismatch {
+            expected: 2,
+            actual: 1,
+        })
+    );
+    assert_untouched(&output);
+}
+
+#[test]
+fn too_many_operands_is_rejected_and_leaves_the_output_untouched() {
+    let plan = single_unary_plan(Operation::Relu, f32_type(vec![2]));
+    let prepared = prepared_from(&plan);
+    let mut output = sentinel(prepared.result_length());
+
+    let error = run(&prepared, &[&[1.0, 2.0], &[3.0, 4.0]], &mut output);
+
+    assert_eq!(
+        error,
+        Err(ReferenceExecutionError::OperandCountMismatch {
+            expected: 1,
+            actual: 2,
+        })
+    );
+    assert_untouched(&output);
+}
+
+#[test]
+fn an_operand_that_is_too_short_is_rejected_and_leaves_the_output_untouched() {
+    let plan = single_unary_plan(Operation::Relu, f32_type(vec![4]));
+    let prepared = prepared_from(&plan);
+    let mut output = sentinel(prepared.result_length());
+
+    let error = run(&prepared, &[&[1.0, 2.0, 3.0]], &mut output);
+
+    assert_eq!(
+        error,
+        Err(ReferenceExecutionError::OperandLengthMismatch {
+            operand_index: 0,
+            expected: 4,
+            actual: 3,
+        })
+    );
+    assert_untouched(&output);
+}
+
+#[test]
+fn an_operand_that_is_too_long_is_rejected_and_leaves_the_output_untouched() {
+    let plan = single_binary_plan(Operation::Mul, f32_type(vec![2]));
+    let prepared = prepared_from(&plan);
+    let mut output = sentinel(prepared.result_length());
+
+    // The second operand is the one at fault, so `operand_index` must say 1.
+    let error = run(&prepared, &[&[1.0, 2.0], &[1.0, 2.0, 3.0]], &mut output);
+
+    assert_eq!(
+        error,
+        Err(ReferenceExecutionError::OperandLengthMismatch {
+            operand_index: 1,
+            expected: 2,
+            actual: 3,
+        })
+    );
+    assert_untouched(&output);
+}
+
+#[test]
+fn an_output_that_is_too_short_is_rejected_and_leaves_the_output_untouched() {
+    let plan = single_unary_plan(Operation::Relu, f32_type(vec![4]));
+    let prepared = prepared_from(&plan);
+    let mut output = sentinel(3);
+
+    let error = run(&prepared, &[&[1.0, 2.0, 3.0, 4.0]], &mut output);
+
+    assert_eq!(
+        error,
+        Err(ReferenceExecutionError::OutputLengthMismatch {
+            expected: 4,
+            actual: 3,
+        })
+    );
+    assert_untouched(&output);
+}
+
+#[test]
+fn an_output_that_is_too_long_is_rejected_and_leaves_the_output_untouched() {
+    let plan = single_unary_plan(Operation::Relu, f32_type(vec![2]));
+    let prepared = prepared_from(&plan);
+    let mut output = sentinel(5);
+
+    let error = run(&prepared, &[&[1.0, 2.0]], &mut output);
+
+    assert_eq!(
+        error,
+        Err(ReferenceExecutionError::OutputLengthMismatch {
+            expected: 2,
+            actual: 5,
+        })
+    );
+    assert_untouched(&output);
+}
+
+#[test]
+fn execution_errors_have_stable_messages() {
+    assert_eq!(
+        ReferenceExecutionError::DeterministicMathUnavailable {
+            opcode: ReferenceOpcode::Exp
+        }
+        .to_string(),
+        "opcode Exp needs a transcendental function with no cross-platform \
+         bit-identical implementation available to this crate"
+    );
+
+    assert_eq!(
+        ReferenceExecutionError::OutputLengthMismatch {
+            expected: 4,
+            actual: 3
+        }
+        .to_string(),
+        "output must hold 4 element(s) but holds 3"
     );
 }

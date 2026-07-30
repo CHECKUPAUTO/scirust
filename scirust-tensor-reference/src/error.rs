@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use scirust_compute::{ComputeError, DType};
+use scirust_compute::{ComputeError, DType, KernelFormat};
 use scirust_tensor_compile::LogicalKernelId;
 
 use crate::format::ReferenceOpcode;
@@ -409,3 +409,185 @@ impl fmt::Display for ReferenceDecodeError {
 }
 
 impl std::error::Error for ReferenceDecodeError {}
+
+/// A failure while preparing or executing a Reference kernel on the CPU.
+///
+/// No variant carries a bare [`String`] as a free-form message: `String` appears
+/// only in [`Self::EntryPointMismatch`], where both sides of a concrete
+/// comparison are reported.
+///
+/// Four variants are **defensive** and not reachable through the current public
+/// API — each says so in its own documentation. They exist so a future
+/// relaxation of an upstream guarantee fails loudly with a typed error instead
+/// of panicking or silently computing the wrong result. This crate contains no
+/// `panic!`, `unwrap()`, `expect()` or unchecked indexing on any preparation or
+/// execution path, so these variants are the mechanism by which a "cannot
+/// happen" state is reported rather than hit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ReferenceExecutionError {
+    /// The module is not [`scirust_compute::KernelFormat::Reference`]: WGSL,
+    /// PTX, SPIR-V and any future format are rejected here.
+    WrongKernelFormat { found: KernelFormat },
+    /// The module's `code` is not a valid Reference-format stream.
+    InvalidEncoding(ReferenceDecodeError),
+    /// The module's `entry_point` differs from the name canonically derived from
+    /// the decoded artefact's `LogicalKernelId`.
+    EntryPointMismatch { expected: String, found: String },
+    /// The opcode has no CPU implementation in this interpreter.
+    ///
+    /// Reserved for a future opcode. Not constructed today: this crate matches
+    /// [`ReferenceOpcode`] exhaustively, so adding a variant to that enum
+    /// produces a **compile error** here rather than a runtime rejection —
+    /// a stronger guarantee than this variant provides, and the reason it stays
+    /// unreachable.
+    UnsupportedOpcode { opcode: ReferenceOpcode },
+    /// The opcode needs a transcendental function this crate cannot evaluate
+    /// with a cross-platform bit-identical result.
+    ///
+    /// Returned for `Exp` and `Log`. See the crate documentation for why they
+    /// are rejected rather than approximated.
+    DeterministicMathUnavailable { opcode: ReferenceOpcode },
+    /// The kernel's element type is not `DType::F32`.
+    UnsupportedDType { dtype: DType },
+    /// The invocation supplied the wrong number of operand slices.
+    OperandCountMismatch { expected: usize, actual: usize },
+    /// An operand slice's length does not match the length the kernel declares.
+    OperandLengthMismatch {
+        operand_index: usize,
+        expected: usize,
+        actual: usize,
+    },
+    /// The output slice's length does not match the length the kernel declares.
+    OutputLengthMismatch { expected: usize, actual: usize },
+    /// The artefact's attribute payload is inconsistent with its opcode.
+    ///
+    /// Defensive: `codec` and `generator` already establish this coherence
+    /// before a [`crate::ReferenceKernelArtifact`] can exist.
+    AttributeMismatch { opcode: ReferenceOpcode },
+    /// A `u64` dimension or element count does not fit in the host's `usize`.
+    ///
+    /// Defensive: unreachable on any platform Rust targets today, where `usize`
+    /// is at least 32 and at most 64 bits and the value was already produced
+    /// from a `usize` upstream.
+    DimensionConversionOverflow { dimension: u64 },
+    /// A stride or linear index computation overflowed `usize`.
+    ///
+    /// Defensive: the element count that bounds every index was itself already
+    /// converted from a `usize` upstream, so no in-range index can overflow.
+    IndexOverflow,
+    /// An internal bounds check failed while indexing an already-validated
+    /// buffer, shape or stride table.
+    ///
+    /// Defensive: reported instead of panicking. Every access on an execution
+    /// path goes through `get`/`get_mut`, so a broken internal invariant
+    /// surfaces as this error rather than as an abort.
+    InternalIndexOutOfBounds,
+}
+
+impl fmt::Display for ReferenceExecutionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self
+        {
+            Self::WrongKernelFormat { found } =>
+            {
+                write!(
+                    formatter,
+                    "kernel module has format {found:?}; the Reference interpreter requires Reference"
+                )
+            },
+            Self::InvalidEncoding(error) =>
+            {
+                write!(
+                    formatter,
+                    "kernel module code is not a valid Reference stream: {error}"
+                )
+            },
+            Self::EntryPointMismatch { expected, found } =>
+            {
+                write!(
+                    formatter,
+                    "kernel module entry point is {found:?} but the artefact derives {expected:?}"
+                )
+            },
+            Self::UnsupportedOpcode { opcode } =>
+            {
+                write!(formatter, "opcode {opcode:?} has no CPU implementation")
+            },
+            Self::DeterministicMathUnavailable { opcode } =>
+            {
+                write!(
+                    formatter,
+                    "opcode {opcode:?} needs a transcendental function with no cross-platform bit-identical implementation available to this crate"
+                )
+            },
+            Self::UnsupportedDType { dtype } =>
+            {
+                write!(
+                    formatter,
+                    "the Reference interpreter executes F32 only, not {dtype:?}"
+                )
+            },
+            Self::OperandCountMismatch { expected, actual } =>
+            {
+                write!(
+                    formatter,
+                    "kernel expects {expected} operand(s) but the invocation supplied {actual}"
+                )
+            },
+            Self::OperandLengthMismatch {
+                operand_index,
+                expected,
+                actual,
+            } =>
+            {
+                write!(
+                    formatter,
+                    "operand {operand_index} must hold {expected} element(s) but holds {actual}"
+                )
+            },
+            Self::OutputLengthMismatch { expected, actual } =>
+            {
+                write!(
+                    formatter,
+                    "output must hold {expected} element(s) but holds {actual}"
+                )
+            },
+            Self::AttributeMismatch { opcode } =>
+            {
+                write!(
+                    formatter,
+                    "attribute payload is inconsistent with opcode {opcode:?}"
+                )
+            },
+            Self::DimensionConversionOverflow { dimension } =>
+            {
+                write!(formatter, "dimension {dimension} does not fit in usize")
+            },
+            Self::IndexOverflow =>
+            {
+                formatter.write_str("a stride or linear index computation overflowed usize")
+            },
+            Self::InternalIndexOutOfBounds =>
+            {
+                formatter.write_str("an internal bounds check failed on a validated buffer")
+            },
+        }
+    }
+}
+
+impl core::error::Error for ReferenceExecutionError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self
+        {
+            Self::InvalidEncoding(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+impl From<ReferenceDecodeError> for ReferenceExecutionError {
+    fn from(error: ReferenceDecodeError) -> Self {
+        Self::InvalidEncoding(error)
+    }
+}
