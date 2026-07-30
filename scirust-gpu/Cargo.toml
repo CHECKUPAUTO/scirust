@@ -62,3 +62,9 @@ required-features = ["wgpu"]
 [dev-dependencies]
 scirust-tensor-compile = { path = "../scirust-tensor-compile" }
 scirust-tensor-ir = { path = "../scirust-tensor-ir" }
+# Test-only: the canonical plan runtime, so the WGPU Reference adapter is
+# exercised through the real Graph -> ... -> ReferencePlanRuntime path instead
+# of a hand-built plan. `scirust-tensor-runtime` dev-depends on this crate in
+# return; the cycle runs through dev-dependencies only, which Cargo permits and
+# which never reaches either crate's production graph.
+scirust-tensor-runtime = { path = "../scirust-tensor-runtime" }
