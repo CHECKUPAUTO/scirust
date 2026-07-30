@@ -1,15 +1,24 @@
-//! Typed failures of the Reference plan runtime.
+//! Typed failures of the Reference plan runtime and of the graph session.
 //!
-//! Preparation and execution fail through two separate enums, so a caller can
-//! tell "this plan can never run here" from "this run did not work out". Both
-//! keep a backend [`ComputeError`] as a `source()` rather than flattening it
-//! into a message, and neither has a variant that is only a free-form string.
+//! Each layer splits preparation from execution, so a caller can tell "this can
+//! never run here" from "this run did not work out":
+//!
+//! * [`PlanPreparationError`] / [`PlanExecutionError`] for a `LoweredPlan`;
+//! * [`GraphSessionPreparationError`] / [`GraphSessionExecutionError`] for a
+//!   canonical `Graph`.
+//!
+//! Every encapsulated failure — a backend [`ComputeError`], a compiler, lowerer
+//! or plan-runtime error — is kept whole and reachable through
+//! [`core::error::Error::source`] rather than flattened into a message, and no
+//! variant anywhere is only a free-form string.
 
 use core::fmt;
 
 use scirust_compute::ComputeError;
-use scirust_tensor_compile::{BufferSlot, LogicalBindingId, LogicalKernelId};
-use scirust_tensor_ir::NodeId;
+use scirust_tensor_compile::{
+    BufferSlot, CompileError, ExternalValueKind, LogicalBindingId, LogicalKernelId, LoweringError,
+};
+use scirust_tensor_ir::{ConstantId, DType, NodeId, TensorType};
 use scirust_tensor_reference::{ReferenceGenerationError, ReferenceOpcode};
 
 /// A failure while turning a `LoweredPlan` into a runnable plan.
@@ -97,7 +106,28 @@ pub enum PlanPreparationError {
     /// value that is *only* a plan output — never consumed by any dispatch —
     /// therefore has no type anywhere, and this runtime rejects the plan instead
     /// of inventing a shape from whatever the caller happens to supply.
+    ///
+    /// A caller holding the canonical `Graph` can supply the missing type to
+    /// `ReferencePlanRuntime::prepare_with_external_types`.
     UndeterminedValueType { node: NodeId },
+    /// An external type hint names a node that is not an external binding of the
+    /// plan.
+    ///
+    /// Hints complete existing metadata; they never add a binding.
+    UnknownExternalTypeNode { node: NodeId },
+    /// The same node is given an external type hint more than once.
+    DuplicateExternalType { node: NodeId },
+    /// An external type hint disagrees with the type the plan itself states for
+    /// that value through a kernel argument.
+    ///
+    /// `expected` is the hint, `actual` the occurrence found in the plan. A hint
+    /// may fill a gap; it may never overrule the plan.
+    ExternalTypeContradiction {
+        binding: LogicalBindingId,
+        node: NodeId,
+        expected: TensorType,
+        actual: TensorType,
+    },
     /// The plan uses an element type this runtime cannot execute.
     UnsupportedDType { node: NodeId },
     /// The backend does not advertise support for `F32`.
@@ -310,6 +340,37 @@ impl fmt::Display for PlanPreparationError {
                     formatter,
                     "node {} has no tensor type anywhere in the plan",
                     node.get()
+                )
+            },
+            Self::UnknownExternalTypeNode { node } =>
+            {
+                write!(
+                    formatter,
+                    "external type supplied for node {}, which the plan does not bind",
+                    node.get()
+                )
+            },
+            Self::DuplicateExternalType { node } =>
+            {
+                write!(
+                    formatter,
+                    "external type supplied more than once for node {}",
+                    node.get()
+                )
+            },
+            Self::ExternalTypeContradiction {
+                binding,
+                node,
+                expected,
+                actual,
+            } =>
+            {
+                write!(
+                    formatter,
+                    "external type {expected:?} supplied for node {} contradicts {actual:?}, \
+                     the type binding {} carries in the plan",
+                    node.get(),
+                    binding.get()
                 )
             },
             Self::UnsupportedDType { node } =>
@@ -677,6 +738,411 @@ impl core::error::Error for PlanExecutionError {
             | Self::EventWait { source, .. }
             | Self::Synchronization { source }
             | Self::BufferRead { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Graph session
+// ---------------------------------------------------------------------------
+
+/// A failure while turning a canonical `Graph` into a reusable session.
+///
+/// The three encapsulating variants keep the underlying compiler, lowerer and
+/// plan-runtime errors intact and reachable through [`core::error::Error::source`]
+/// rather than flattening them into a message.
+///
+/// Several variants guard invariants the canonical pipeline already establishes
+/// — a binding always names an `Input` or `Constant` node of the graph, and the
+/// plan's outputs are the graph's outputs, copied verbatim. They are checked
+/// anyway rather than assumed, and each says so in its own documentation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum GraphSessionPreparationError {
+    /// `CanonicalCompiler` rejected the graph.
+    GraphCompilation { source: CompileError },
+    /// `KernelLowerer` rejected the execution plan.
+    KernelLowering { source: LoweringError },
+    /// The Reference plan runtime rejected the lowered plan.
+    PlanPreparation { source: PlanPreparationError },
+    /// A binding names a node the graph does not declare as an external value:
+    /// either absent from the graph, or carrying an operation that is neither
+    /// `Input` nor `Constant`.
+    ///
+    /// Defensive: the binding table is derived from the graph's own memory plan,
+    /// which classifies a value as external exactly when its operation is
+    /// `Input` or `Constant`.
+    UnknownExternalNode { node: NodeId },
+    /// The graph and the plan disagree on whether a value is an input or a
+    /// constant.
+    ///
+    /// `expected` is the graph's classification, `actual` the plan's.
+    ///
+    /// Defensive, for the same reason as [`Self::UnknownExternalNode`].
+    ExternalKindMismatch {
+        node: NodeId,
+        expected: ExternalValueKind,
+        actual: ExternalValueKind,
+    },
+    /// A binding declares an external kind this session does not handle.
+    ///
+    /// `ExternalValueKind` is `#[non_exhaustive]`: a variant added to it later is
+    /// rejected here instead of being silently treated as an input or a
+    /// constant.
+    UnsupportedExternalKind { node: NodeId },
+    /// A graph input uses an element type this session cannot supply.
+    UnsupportedInputDType { node: NodeId, dtype: DType },
+    /// A graph constant uses an element type this session cannot supply.
+    UnsupportedConstantDType { node: NodeId, dtype: DType },
+    /// An input's element count overflows `usize`.
+    InputSizeOverflow { node: NodeId },
+    /// A constant's element count overflows `usize`.
+    ConstantSizeOverflow { node: NodeId },
+    /// A constant survives dead-code elimination but no payload was supplied for
+    /// its `ConstantId`.
+    MissingConstantPayload { node: NodeId, constant: ConstantId },
+    /// A payload was supplied for a `ConstantId` no node of the graph
+    /// references.
+    ///
+    /// A payload for a constant the graph *does* declare but dead-code
+    /// elimination removed is accepted and ignored; this variant catches a
+    /// mistyped identifier, which silence would hide.
+    UnexpectedConstantPayload { constant: ConstantId },
+    /// Two payloads were supplied for the same `ConstantId`.
+    DuplicateConstantPayload { constant: ConstantId },
+    /// A constant's payload does not hold the number of elements its node
+    /// declares.
+    ///
+    /// One payload serves every surviving node sharing the `ConstantId`, so it
+    /// must satisfy all of them.
+    ConstantLengthMismatch {
+        node: NodeId,
+        constant: ConstantId,
+        expected: usize,
+        actual: usize,
+    },
+    /// The prepared plan does not expose the number of external values the
+    /// session resolved from the binding table.
+    ///
+    /// Defensive: preparation supplies the plan's own bindings, and hints never
+    /// add or remove one.
+    PreparedExternalCountMismatch { expected: usize, actual: usize },
+    /// The prepared plan's external value at this position does not match the
+    /// binding the session resolved for it.
+    ///
+    /// Defensive, for the same reason as
+    /// [`Self::PreparedExternalCountMismatch`].
+    PreparedExternalMismatch {
+        binding: LogicalBindingId,
+        node: NodeId,
+    },
+    /// A declared output names a node absent from the graph.
+    ///
+    /// Defensive: `Graph::validate`, which `CanonicalCompiler` runs first,
+    /// rejects an output outside the node range.
+    UnknownOutputNode { node: NodeId },
+    /// The graph and the prepared plan declare different numbers of outputs.
+    ///
+    /// Defensive: the plan's outputs are the graph's, copied verbatim.
+    OutputCountMismatch { graph: usize, plan: usize },
+    /// The graph and the prepared plan disagree on an output's node.
+    ///
+    /// Defensive, for the same reason as [`Self::OutputCountMismatch`].
+    OutputNodeMismatch {
+        index: usize,
+        graph: NodeId,
+        plan: NodeId,
+    },
+    /// The graph and the prepared plan disagree on an output's tensor type.
+    ///
+    /// Defensive: both descend from the same `Node::output`.
+    OutputTypeMismatch {
+        index: usize,
+        node: NodeId,
+        graph: TensorType,
+        plan: TensorType,
+    },
+}
+
+impl fmt::Display for GraphSessionPreparationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self
+        {
+            Self::GraphCompilation { source } =>
+            {
+                write!(formatter, "canonical compilation failed: {source}")
+            },
+            Self::KernelLowering { source } =>
+            {
+                write!(formatter, "kernel lowering failed: {source}")
+            },
+            Self::PlanPreparation { source } =>
+            {
+                write!(formatter, "reference plan preparation failed: {source}")
+            },
+            Self::UnknownExternalNode { node } =>
+            {
+                write!(
+                    formatter,
+                    "binding names node {}, which the graph does not declare as an external value",
+                    node.get()
+                )
+            },
+            Self::ExternalKindMismatch {
+                node,
+                expected,
+                actual,
+            } =>
+            {
+                write!(
+                    formatter,
+                    "node {} is an external {expected:?} in the graph but {actual:?} in the plan",
+                    node.get()
+                )
+            },
+            Self::UnsupportedExternalKind { node } =>
+            {
+                write!(
+                    formatter,
+                    "node {} declares an external kind this session does not handle",
+                    node.get()
+                )
+            },
+            Self::UnsupportedInputDType { node, dtype } =>
+            {
+                write!(
+                    formatter,
+                    "input node {} uses {dtype:?}; this session supplies F32 only",
+                    node.get()
+                )
+            },
+            Self::UnsupportedConstantDType { node, dtype } =>
+            {
+                write!(
+                    formatter,
+                    "constant node {} uses {dtype:?}; this session supplies F32 only",
+                    node.get()
+                )
+            },
+            Self::InputSizeOverflow { node } =>
+            {
+                write!(
+                    formatter,
+                    "element count of input node {} overflows usize",
+                    node.get()
+                )
+            },
+            Self::ConstantSizeOverflow { node } =>
+            {
+                write!(
+                    formatter,
+                    "element count of constant node {} overflows usize",
+                    node.get()
+                )
+            },
+            Self::MissingConstantPayload { node, constant } =>
+            {
+                write!(
+                    formatter,
+                    "constant node {} needs a payload for constant {}, and none was supplied",
+                    node.get(),
+                    constant.get()
+                )
+            },
+            Self::UnexpectedConstantPayload { constant } =>
+            {
+                write!(
+                    formatter,
+                    "a payload was supplied for constant {}, which no node of the graph references",
+                    constant.get()
+                )
+            },
+            Self::DuplicateConstantPayload { constant } =>
+            {
+                write!(
+                    formatter,
+                    "constant {} was supplied more than once",
+                    constant.get()
+                )
+            },
+            Self::ConstantLengthMismatch {
+                node,
+                constant,
+                expected,
+                actual,
+            } =>
+            {
+                write!(
+                    formatter,
+                    "constant node {} expects {expected} element(s) but constant {} supplies \
+                     {actual}",
+                    node.get(),
+                    constant.get()
+                )
+            },
+            Self::PreparedExternalCountMismatch { expected, actual } =>
+            {
+                write!(
+                    formatter,
+                    "the prepared plan exposes {actual} external value(s) for {expected} binding(s)"
+                )
+            },
+            Self::PreparedExternalMismatch { binding, node } =>
+            {
+                write!(
+                    formatter,
+                    "the prepared plan's external value {} does not describe node {}",
+                    binding.get(),
+                    node.get()
+                )
+            },
+            Self::UnknownOutputNode { node } =>
+            {
+                write!(
+                    formatter,
+                    "declared output {} is absent from the graph",
+                    node.get()
+                )
+            },
+            Self::OutputCountMismatch { graph, plan } =>
+            {
+                write!(
+                    formatter,
+                    "the graph declares {graph} output(s) and the prepared plan {plan}"
+                )
+            },
+            Self::OutputNodeMismatch { index, graph, plan } =>
+            {
+                write!(
+                    formatter,
+                    "output {index} is node {} in the graph and node {} in the prepared plan",
+                    graph.get(),
+                    plan.get()
+                )
+            },
+            Self::OutputTypeMismatch {
+                index,
+                node,
+                graph,
+                plan,
+            } =>
+            {
+                write!(
+                    formatter,
+                    "output {index} (node {}) is {graph:?} in the graph and {plan:?} in the \
+                     prepared plan",
+                    node.get()
+                )
+            },
+        }
+    }
+}
+
+impl core::error::Error for GraphSessionPreparationError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self
+        {
+            Self::GraphCompilation { source } => Some(source),
+            Self::KernelLowering { source } => Some(source),
+            Self::PlanPreparation { source } => Some(source),
+            _ => None,
+        }
+    }
+}
+
+/// A failure while running a prepared session.
+///
+/// Every input fault is named by the caller's own vocabulary — the graph
+/// `NodeId` — never by the internal `LogicalBindingId` the session resolves it
+/// to. All four are raised before any backend call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum GraphSessionExecutionError {
+    /// The session needs a value for this input node and none was supplied.
+    MissingInput { node: NodeId },
+    /// A value was supplied for a node that is not a required input of this
+    /// session.
+    ///
+    /// That covers a node the graph does not declare as an input, a constant —
+    /// constants are never supplied per execution — and an input dead-code
+    /// elimination removed from the prepared plan.
+    UnexpectedInput { node: NodeId },
+    /// The same input node was supplied more than once.
+    DuplicateInput { node: NodeId },
+    /// A supplied value does not hold the number of elements the input's tensor
+    /// type declares.
+    InputLengthMismatch {
+        node: NodeId,
+        expected: usize,
+        actual: usize,
+    },
+    /// A constant binding of the session has no stored payload.
+    ///
+    /// Defensive: preparation stores exactly one payload per surviving constant
+    /// binding and never mutates the table afterwards.
+    UnresolvedConstantPayload { binding: LogicalBindingId },
+    /// The prepared plan failed to run.
+    PlanExecution { source: PlanExecutionError },
+}
+
+impl fmt::Display for GraphSessionExecutionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self
+        {
+            Self::MissingInput { node } =>
+            {
+                write!(formatter, "input node {} was not supplied", node.get())
+            },
+            Self::UnexpectedInput { node } =>
+            {
+                write!(
+                    formatter,
+                    "node {} is not a required input of this session",
+                    node.get()
+                )
+            },
+            Self::DuplicateInput { node } =>
+            {
+                write!(
+                    formatter,
+                    "input node {} was supplied more than once",
+                    node.get()
+                )
+            },
+            Self::InputLengthMismatch {
+                node,
+                expected,
+                actual,
+            } =>
+            {
+                write!(
+                    formatter,
+                    "input node {} expects {expected} element(s) but received {actual}",
+                    node.get()
+                )
+            },
+            Self::UnresolvedConstantPayload { binding } =>
+            {
+                write!(
+                    formatter,
+                    "constant binding {} has no stored payload",
+                    binding.get()
+                )
+            },
+            Self::PlanExecution { source } =>
+            {
+                write!(formatter, "prepared plan execution failed: {source}")
+            },
+        }
+    }
+}
+
+impl core::error::Error for GraphSessionExecutionError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self
+        {
+            Self::PlanExecution { source } => Some(source),
             _ => None,
         }
     }

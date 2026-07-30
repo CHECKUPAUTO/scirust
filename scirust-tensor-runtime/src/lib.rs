@@ -1,7 +1,55 @@
 //! Tensor runtimes for SciRust.
 //!
-//! This crate holds two separate, non-overlapping runtimes. Neither replaces
-//! the other and no migration happens implicitly between them.
+//! This crate holds three layers. The first two are the canonical pipeline, one
+//! stacked on the other; the third is the historical runtime, unrelated to
+//! either. Nothing migrates implicitly between them.
+//!
+//! ```text
+//! ReferenceGraphSession   canonical Graph -> prepared, reusable session
+//!   ReferencePlanRuntime  prepared LoweredPlan -> executions
+//!
+//! TensorRuntime           the historical named-register machine
+//! ```
+//!
+//! # [`ReferenceGraphSession`] — the canonical graph façade
+//!
+//! Compiles, lowers and prepares a `scirust_tensor_ir::Graph` **once**, then
+//! runs it as often as wanted:
+//!
+//! ```text
+//! Graph + GraphConstants
+//!   -> ReferenceGraphSession::prepare
+//!   -> GraphInputs keyed by NodeId
+//!   -> ReferenceGraphSession::execute
+//!   -> PlanOutputs, in the graph's output order
+//! ```
+//!
+//! What it changes for a caller:
+//!
+//! * inputs are addressed by `scirust_tensor_ir::NodeId`, never by the internal
+//!   `LogicalBindingId`, which stays entirely inside the session;
+//! * constants are never asked for per execution — see below;
+//! * outputs come back as [`PlanOutputs`], reused as is, in the graph's declared
+//!   order, duplicated outputs included;
+//! * nothing in [`ReferenceGraphSession::execute`] recompiles, re-lowers,
+//!   regenerates an artefact or rebuilds binding metadata;
+//! * the session holds no execution state at all, so two runs are independent
+//!   and a failed one leaves it immediately reusable.
+//!
+//! ## Constant payloads live outside the graph
+//!
+//! `scirust_tensor_ir` stores no tensor payload: an `Operation::Constant`
+//! carries a `ConstantId` and a `TensorType`, and that is the IR's deliberate
+//! design. Values therefore come from the caller through [`GraphConstants`],
+//! **once, at preparation**. The session clones only the constants that survive
+//! dead-code elimination, owns them for its whole life, and injects them itself
+//! on every execution. Bits are preserved verbatim — signed zeros, NaN payloads,
+//! infinities and subnormals included.
+//!
+//! Likewise, an input eliminated as dead is not a required input of the session:
+//! the prepared plan, not the source graph, decides what a caller must supply.
+//!
+//! Same limits as the plan runtime below: `F32` only, `Exp` and `Log` rejected.
 //!
 //! # [`ReferencePlanRuntime`] — the canonical plan runtime
 //!
@@ -64,9 +112,17 @@
 //! phase migrates it.
 
 mod error;
+mod graph_session;
 mod reference_plan;
 
-pub use error::{PlanExecutionError, PlanPreparationError};
+pub use error::{
+    GraphSessionExecutionError, GraphSessionPreparationError, PlanExecutionError,
+    PlanPreparationError,
+};
+pub use graph_session::{
+    GraphConstantSpec, GraphConstants, GraphInputSpec, GraphInputs, GraphOutputSpec,
+    ReferenceGraphSession,
+};
 pub use reference_plan::{
     BufferSlotSpecification, ExternalValueSpec, PlanExternalValues, PlanOutputSpec,
     PlanOutputValue, PlanOutputs, PreparedReferencePlan, ReferencePlanRuntime,
