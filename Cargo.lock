@@ -4096,6 +4096,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-tensor-reference"
+version = "0.1.0"
+dependencies = [
+ "scirust-compute",
+ "scirust-tensor-compile",
+ "scirust-tensor-ir",
+]
+
+[[package]]
 name = "scirust-tensor-runtime"
 version = "0.1.0"
 dependencies = [
