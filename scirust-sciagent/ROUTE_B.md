@@ -395,6 +395,32 @@ warm-started from `step_60000`, `SCIAGENT_TOTAL_STEPS` for a multi-epoch pass). 
 re-eval at ~step_130000 — if `syn::parse` is still 0% with 1B tokens *and* a 512 context,
 the cause is deeper than data/context.
 
+- **B22 — the 16M truncation bug (`SCIAGENT_MAX_TOKENS`).** `cuda_pretrain` capped the
+  corpus at **16M tokens by default** and threw the rest away *silently* — the
+  `streaming N tokens` line printed the **full** corpus size, then `.take(max_tokens)`
+  kept 1.6% of it. Worse, the shard walk is **alphabetical**, so the surviving 16M was a
+  *prefix*, not a sample: on the crates.io corpus the model only ever saw crates
+  starting with **"a"**. The `step_130000` eval samples are the smoking gun — wall-to-wall
+  `AhoCorasick`, `antlr`, `amethyst`, `a2ml`. The cap is now **off by default** and any
+  truncation prints what fraction was dropped and why a prefix is not a sample.
+
+## The real diagnosis — it was never data starvation
+
+This invalidates the earlier "×70 under Chinchilla, needs more unique data" reading. Every
+run — v1, v3, and v4 — trained on the **same 16M-token prefix**, no matter how big the
+corpus on disk got. The v4 numbers at `step_130000` say it plainly: **train 4.86** (ppl 129)
+vs **val 6.95**, a generalization gap of **+2.09** that widened from +0.84 at step 78k. A
+304M model cannot overfit a billion tokens; it overfits 16M of them easily (~0.05 tok/param,
+several epochs deep). So the 0%-`syn::parse` result was **memorization of a narrow slice**,
+not a model too small or a corpus too thin. The corpus work (B15/B19/B20/B21, 1.03B tokens)
+was necessary but was never actually reaching the trainer. With the cap lifted and
+`shuffle=true`, each step now samples a window from the **whole** 1.03B corpus.
+
+Still open, and now the binding constraint: **throughput**. `batch=1` at 512 tokens/step
+(~15.5 steps/min, ~132 tok/s) means one pass over 1.03B tokens would take ~88 days. The
+`step_130000` weights remain a usable initialization, but a real multi-epoch run needs the
+batching work (batch dimension through the resident model) before it is worth starting.
+
 ## Risks / honesty
 
 - **Toolchain gate (highest risk):** if the Thor's installed CUDA can't emit sm_110,
