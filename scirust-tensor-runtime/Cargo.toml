@@ -3,8 +3,28 @@ name = "scirust-tensor-runtime"
 version = "0.1.0"
 edition = "2021"
 publish = false
+rust-version = "1.89"
 
 [dependencies]
 scirust-tensor-core = { path = "../scirust-tensor-core" }
 scirust-tensor-compile = { path = "../scirust-tensor-compile" }
 scirust-tensor-einsum = { path = "../scirust-tensor-einsum" }
+# Reference plan runtime: the backend-neutral compute contract, plus artefact
+# generation and the prepared-kernel types it compiles through that contract.
+scirust-compute = { path = "../scirust-compute" }
+scirust-tensor-reference = { path = "../scirust-tensor-reference" }
+# `LoweredPlan`'s public surface is expressed in `scirust-tensor-ir` vocabulary
+# — `LoweredInstruction::node` is a `NodeId`, `KernelArgument::tensor_type` is a
+# `TensorType` — and `scirust-tensor-compile` re-exports neither. Naming those
+# types in this crate's own public metadata therefore requires depending on the
+# IR crate directly. It is already present transitively, through
+# scirust-tensor-compile, so this adds no crate to the dependency graph.
+scirust-tensor-ir = { path = "../scirust-tensor-ir" }
+
+# Test-only. `scirust-gpu` supplies the one real backend able to execute
+# Reference kernels, so the integration tests drive the genuine
+# Graph -> ... -> CpuComputeAdapter -> ReferenceInterpreter path rather than a
+# mock. It does not depend on this crate, so no cycle is introduced, and it
+# never reaches the production dependency graph.
+[dev-dependencies]
+scirust-gpu = { path = "../scirust-gpu" }
