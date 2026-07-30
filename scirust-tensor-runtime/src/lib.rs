@@ -1,15 +1,57 @@
 //! Tensor runtimes for SciRust.
 //!
-//! This crate holds three layers. The first two are the canonical pipeline, one
-//! stacked on the other; the third is the historical runtime, unrelated to
-//! either. Nothing migrates implicitly between them.
+//! This crate holds four layers. The first three are the canonical pipeline,
+//! each stacked on the one below; the fourth is the historical runtime,
+//! unrelated to any of them. Nothing migrates implicitly between them.
 //!
 //! ```text
-//! ReferenceGraphSession   canonical Graph -> prepared, reusable session
-//!   ReferencePlanRuntime  prepared LoweredPlan -> executions
+//! CanonicalProgram / CanonicalSession   TensorND in, TensorND out
+//!   ReferenceGraphSession               canonical Graph -> prepared session
+//!     ReferencePlanRuntime              prepared LoweredPlan -> executions
 //!
-//! TensorRuntime           the historical named-register machine
+//! TensorRuntime                         the historical named-register machine
 //! ```
+//!
+//! Start at the top. The two layers under it exist for callers who already hold
+//! a `scirust_tensor_ir::Graph` or a `scirust_tensor_compile::LoweredPlan`.
+//!
+//! # [`CanonicalProgram`] — the user-facing façade
+//!
+//! Builds a computation from opaque handles, prepares it once, and runs it as
+//! often as wanted, speaking only [`scirust_tensor_core::TensorND`]:
+//!
+//! ```text
+//! CanonicalProgram          input / constant / add / relu / … / set_outputs
+//!   -> prepare(runtime)     compile, lower, prepare — once
+//!   -> CanonicalSession
+//!   -> CanonicalInputs      TensorND keyed by handle
+//!   -> execute
+//!   -> CanonicalOutputs     owned TensorND, in the declared output order
+//! ```
+//!
+//! A caller of this layer never names a `Graph`, a `NodeId`, a `TensorType`, a
+//! `DType`, a `ConstantId`, a `LogicalBindingId`, a [`GraphInputs`], a
+//! [`GraphConstants`] or a [`PlanOutputs`], and never sees a backend buffer,
+//! stream or event.
+//!
+//! Points worth knowing before using it:
+//!
+//! * **Tensor type.** [`scirust_tensor_core::TensorND`] — dense row-major `f32`,
+//!   no device, no dtype field. The eager 2-D
+//!   `scirust_core::autodiff::reverse::Tensor` is untouched and unrelated; it
+//!   could not express a scalar, a rank-3 value or a zero dimension anyway.
+//! * **Conversions are free.** An input lends `&tensor.data[..]`; an output
+//!   moves its `Vec<f32>` into a new tensor. No copy, no byte reinterpretation.
+//! * **Eight operations.** `add`, `sub`, `mul`, `div`, `relu`, `scale`,
+//!   `reshape`, `permute`. `exp`, `log` and `matmul` are deliberately absent —
+//!   the layers below reject them, so exposing them would advertise a capability
+//!   that does not exist.
+//! * **No broadcasting.** Binary operations require identical shapes, because
+//!   the canonical IR compares whole tensor types.
+//! * **Constants are owned by the program** and injected on every execution; a
+//!   caller supplies them once, at construction, and never again.
+//! * **Preparation consumes the program**, which makes single preparation
+//!   structural rather than merely documented.
 //!
 //! # [`ReferenceGraphSession`] — the canonical graph façade
 //!
@@ -111,11 +153,17 @@
 //! `OptimizedContraction` path in [`TensorRuntime::run_graph`]. Nothing in this
 //! phase migrates it.
 
+mod canonical;
 mod error;
 mod graph_session;
 mod reference_plan;
 
+pub use canonical::{
+    CanonicalInput, CanonicalInputSpec, CanonicalInputs, CanonicalOutputSpec, CanonicalOutputs,
+    CanonicalProgram, CanonicalSession, CanonicalValue,
+};
 pub use error::{
+    CanonicalBuildError, CanonicalExecutionError, CanonicalPreparationError,
     GraphSessionExecutionError, GraphSessionPreparationError, PlanExecutionError,
     PlanPreparationError,
 };
