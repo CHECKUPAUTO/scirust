@@ -52,6 +52,12 @@ tensor-canonical = ["dep:scirust-tensor-runtime", "dep:scirust-tensor-core", "de
 # box: `ReferencePlanRuntime::new(CpuComputeAdapter::new())`. Named `-cpu`
 # because that is honestly what it provides; it activates neither wgpu nor CUDA.
 tensor-canonical-cpu = ["tensor-canonical", "dep:scirust-gpu"]
+# The facade plus the WGPU adapter, which executes the same canonical plans on a
+# GPU — or on a software Vulkan adapter such as Mesa lavapipe, which is still a
+# genuine WGPU device and is reported as such. This pulls the full wgpu stack
+# (~100 crates), so it is a deliberate opt-in and stays out of `default`. It
+# activates `scirust-gpu/wgpu` only; CUDA remains untouched.
+tensor-canonical-wgpu = ["tensor-canonical", "dep:scirust-gpu", "scirust-gpu/wgpu"]
 
 [dev-dependencies]
 rand = "0.8"

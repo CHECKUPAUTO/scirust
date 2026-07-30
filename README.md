@@ -295,13 +295,22 @@ prepare it once, run it many times — and is **off by default**:
 | --- | --- |
 | `tensor-canonical` | The facade, with a `ComputeBackend` you supply yourself. |
 | `tensor-canonical-cpu` | The above plus `CpuComputeAdapter`, the deterministic CPU interpreter. |
+| `tensor-canonical-wgpu` | The above plus `WgpuReferenceAdapter`, which runs the same plans on a GPU by generating one specialised WGSL shader per logical kernel. |
 
-Both pull only pure-Rust workspace crates — no external dependency, **no wgpu and no
-CUDA** — and leave the default build byte-for-byte unchanged. The CPU adapter happens to
-live in a crate named `scirust-gpu` for historical reasons; the feature is named after
-what it actually provides. `f32` only, no broadcasting, no autograd. See
-`examples/canonical_tensor_cpu.rs`, runnable with
-`cargo run --features tensor-canonical-cpu --example canonical_tensor_cpu`.
+The first two pull only pure-Rust workspace crates — no external dependency, **no wgpu and
+no CUDA** — and leave the default build byte-for-byte unchanged. The CPU adapter happens to
+live in a crate named `scirust-gpu` for historical reasons; the features are named after
+what they actually provide. `tensor-canonical-wgpu` does pull the wgpu stack, which is why
+it is a separate opt-in; it still never enables CUDA.
+
+Acquiring a WGPU device is fallible and **never falls back to the CPU**: no adapter means an
+error, not a quietly host-computed result. A software Vulkan adapter (Mesa lavapipe) is a
+valid WGPU device and is reported as such rather than passed off as hardware. `reshape` and
+`permute` move raw words and are bit-identical between the two backends; the six arithmetic
+operations are `f32` and are not promised to be.
+
+`f32` only, no broadcasting, no autograd. See `examples/canonical_tensor_cpu.rs`, runnable
+with `cargo run --features tensor-canonical-cpu --example canonical_tensor_cpu`.
 
 The repository also bundles a small **experimental autonomous-agent binary**,
 `openclaw-u` (`src/main.rs`, run with `cargo run --features openclaw --bin openclaw-u`). It is *not* a
