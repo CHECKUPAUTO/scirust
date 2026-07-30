@@ -1,6 +1,11 @@
 # Ephemeral agent workflow worktrees (transient, auto-managed)
 .claude/worktrees/
 
+# CCOS causal-memory runtime (workspace snapshot + oplog, fed by the
+# .claude PostToolUse hook — see docs/CCOS_MEMORY.md). Per-session state.
+.ccos/
+external/ccos-core/target/
+
 # obd2_api runtime feedback archive (generated locally, not a static asset)
 examples/obd2_diagnostic/data/feedback.jsonl
 
