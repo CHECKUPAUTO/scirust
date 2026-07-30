@@ -26,7 +26,7 @@ renvoyait 31 éléments.
 | 5. Robustesse adversariale | ✅ injection notée 1.0, dégénérés sans crash |
 | 6. Suite de tests amont | ✅ 758 tests, 0 échec (avec le correctif) |
 | — Défaut trouvé | ⚠️ page-in COLD absent de la façade CLI → **corrigé** |
-| — Bug amont trouvé | ⚠️ le paging perd des arêtes causales → **signalé, non corrigé** |
+| — Bug amont trouvé | ⚠️ le paging perd des arêtes causales → **corrigé en amont** (§8) |
 
 ## 1. Continuité d'état
 
@@ -207,12 +207,39 @@ Le défaut d'origine — la façade ignore `CCOS_MAX_RESIDENT` — est donc **r�
 non corrigé**. Il est documenté à l'endroit du code, avec la raison pour laquelle
 la correction évidente est pire que le mal.
 
-**Reste à couvrir (non corrigé, signalé).** `recall_what_if` fait un recall
-`Around` sans page-in (`agent_session.rs`), donc l'outil MCP `recall_what_if` et
-la commande `around` de `ccos postmortem` renvoient toujours une fenêtre vide sur
-une ancre démotée. C'est la même asymétrie que celle corrigée ici, à un autre
-point d'entrée ; comme ces chemins opèrent sur une mémoire rejouée jetable, y
-paginer serait sans risque pour le snapshot.
+## 8. Les défauts restants, corrigés en amont
+
+Les constats laissés ouverts au §7 ont été traités dans
+[`Memorithm/CCOS-Core#2`](https://github.com/Memorithm/CCOS-Core/pull/2).
+
+**Le tier COLD n'était pas non-destructif.** `demote` archive une arête d'un
+**seul** côté ; `page_in` ne la reliait que si ses deux extrémités étaient
+résidentes et la jetait sinon — alors que le `ColdNode` qui la portait venait
+d'être retiré, donc c'était la dernière copie. Mesuré sur un graphe de 4 nœuds
+(tout démoter, tout repaginer) : **4 arêtes avant, 3 après**. Une arête dont
+l'autre bout est encore COLD est désormais confiée à ce voisin, et l'entrée
+d'adjacence inverse conservée.
+
+**`ensure_resident` ne garantissait pas sa propre postcondition.** Le swap de
+capacité de `page_in` ne protège que le nœud qu'il vient de restaurer : sous un
+plafond trop serré, paginer un voisin pouvait réévincer l'ancre demandée.
+L'ancre est maintenant restaurée en dernier. Ce n'était pas théorique — un test
+amont existant s'est mis à échouer dès que le page fault a commencé à paginer la
+région.
+
+**Le débogueur post-mortem voyait tout sauf les nœuds démotés.**
+`recall_what_if` : **0 élément** là où le recall vivant en rendait **31**, même
+ancre et même budget. L'asymétrie était à l'envers — rejouer une op `Around`
+*enregistrée* repasse par `ensure_resident`, donc le what-if fonctionnait pour
+une ancre déjà consultée et échouait pour celle qui ne l'avait pas été,
+c'est-à-dire exactement la question à laquelle la fonctionnalité sert à répondre.
+
+**`page_fault` et le self-test `setup.rs`** reçoivent le même page-in, par
+cohérence. Honnêtement : sur un gros workspace réel, cela ne change aucun
+résultat, la propagation de panne ayant déjà ramené les nœuds utiles. Mon
+observation « 26 vs 32 » mesurait en fait un écart de **scoring**, pas de
+pagination — vérifié après correctif, le chiffre est inchangé. Seul le test
+unitaire, qui échoue sans l'appel, prouve le défaut.
 
 Leçon de méthode : ma propre vérification empirique initiale — « le partage
 résident/COLD persisté est identique » — comparait les compteurs de nœuds et

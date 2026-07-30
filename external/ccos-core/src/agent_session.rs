@@ -1356,6 +1356,23 @@ impl AgentSession {
             .first()
             .map(|f| Recall::around(format!("file:{f}")))
             .unwrap_or(Recall::WorkingSet);
+        // `signal_failure` above resurrects the faulting node itself, but nothing
+        // pages its COLD neighbours, so a cross-file cause sitting in the cold tier
+        // could stay invisible to the very window meant to surface it. Page the
+        // region in, exactly as `recall` does — reaching that cause is the whole
+        // point of a page fault.
+        //
+        // Scope, measured honestly: on a large real workspace this changed no
+        // result, because `signal_failure`'s propagation had already pulled the
+        // relevant nodes back. It bites when a linked neighbour is cold and the
+        // failure pressure does not reach it — the case
+        // `page_fault_pages_the_whole_region_not_just_the_faulting_file` pins, and
+        // which fails without this call.
+        //
+        // `apply_op` mirrors this for `Op::PageFault`, so `replay == live` holds.
+        if let Recall::Around(uri) = &recall {
+            self.live.ensure_resident(uri);
+        }
         let window = self.live.recall(&recall, budget);
         self.record(Op::PageFault { files, depth });
         window
@@ -1425,7 +1442,21 @@ impl AgentSession {
     /// then run a recall with (possibly) different parameters — does the agent get
     /// a better window? `step` is clamped to the timeline length.
     pub fn recall_what_if(&self, step: usize, recall: &Recall, budget: usize) -> RecallWindow {
-        self.replay_to(step).recall(recall, budget)
+        let mut replayed = self.replay_to(step);
+        // Same read-path page fault as the live `recall`. Without it a
+        // counterfactual `around` on a demoted anchor returned an EMPTY window
+        // while the live recall on the same anchor and budget returned a full one
+        // (measured: 0 items vs 31 on a 300-file workspace). That asymmetry hit
+        // the post-mortem debugger hardest: the tool whose whole job is to explain
+        // why a node left the budgeted window could not see demoted nodes at all.
+        //
+        // Paging here is unconditionally safe — `replay_to` hands back an owned,
+        // throwaway `CcosMemory` that is never checkpointed — so unlike the live
+        // path this cannot alter any persisted snapshot.
+        if let Recall::Around(uri) = recall {
+            replayed.ensure_resident(uri);
+        }
+        replayed.recall(recall, budget)
     }
 
     /// **Belief/tension timeline** — the dynamic, conflict-resolution view of this session's history:
@@ -1791,6 +1822,14 @@ fn apply_op(m: &mut CcosMemory, op: &Op, dirty: &mut bool) {
             }
             for f in files {
                 let _ = m.signal_failure(&format!("file:{f}"), *depth);
+            }
+            // The live `page_fault` pages the faulting region in before its
+            // recall (the neighbours `signal_failure` leaves behind in COLD).
+            // Reproduce that here or the replayed resident/cold partition would
+            // drift from the live one and `timeline_reproduces_memory` would
+            // start discarding perfectly good timelines.
+            if let Some(f) = files.first() {
+                m.ensure_resident(&format!("file:{f}"));
             }
         }
         Op::Recall { recall, .. } => {
@@ -3209,5 +3248,89 @@ mod tests {
             assert_eq!(s.signing_pubkey(), Some(pk1));
             cleanup_keyed(&path);
         }
+    }
+
+    #[test]
+    fn recall_what_if_pages_a_demoted_anchor_like_the_live_recall() {
+        // The post-mortem debugger was blind to exactly the nodes it exists to
+        // explain. `recall_what_if` is a `&self` recall over a replayed memory, so
+        // with no page-in it returned an EMPTY window for a demoted anchor while
+        // the live recall on the same anchor returned a full one (measured 0 vs 31
+        // on a 300-file workspace).
+        //
+        // The counterfactual case is the one that matters and the one that broke:
+        // replaying a *recorded* Around op re-runs `ensure_resident` through
+        // `apply_op`, so what-if already worked for an anchor the agent had asked
+        // about — and silently failed for the anchor it had not. That is backwards,
+        // since asking "what if I had looked here instead" is the whole feature.
+        // Reproducing it needs a session whose BASELINE already holds cold nodes,
+        // i.e. one reopened from a snapshot, because the resident cap is not a
+        // logged op and a fresh replay would page nothing.
+        let dir = std::env::temp_dir().join(format!("ccos-whatif-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("workspace.ccos");
+        let _ = std::fs::remove_file(&path);
+
+        {
+            let mut s = AgentSession::open(&path).expect("fresh session");
+            s.ingest("src/cfg.rs", "pub fn limit() -> u8 { 7 }\n");
+            s.ingest(
+                "src/api.rs",
+                "use crate::cfg;\npub fn h() -> u8 { cfg::limit() }\n",
+            );
+            for i in 0..6 {
+                s.ingest(&format!("src/pad{i}.rs"), "pub fn pad() -> u8 { 1 }\n");
+            }
+            s.live.set_max_resident(6);
+            assert!(s.live.graph().cold_count() > 0, "fixture must demote");
+            s.checkpoint().expect("checkpoint");
+        }
+
+        let reopened = AgentSession::open(&path).expect("reopen");
+        // No Around op was ever recorded for this anchor: a pure counterfactual.
+        let what_if = reopened.recall_what_if(0, &Recall::around("file:src/api.rs"), 2048);
+        assert!(
+            !what_if.items.is_empty(),
+            "a counterfactual window on a demoted anchor must not come back empty"
+        );
+        assert!(
+            what_if.items.iter().any(|i| i.uri.contains("src/api.rs")),
+            "and it must contain the anchor itself: {:?}",
+            what_if.items.iter().map(|i| &i.uri).collect::<Vec<_>>()
+        );
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn page_fault_pages_the_whole_region_not_just_the_faulting_file() {
+        // `signal_failure` resurrects the faulting node but leaves its COLD
+        // neighbours behind, so the window came back degraded rather than empty —
+        // measured on a real tree as 26 items over 4 files where `recall around`
+        // on the same anchor gave 32 over 5. A page fault exists to reach the
+        // cross-file cause, so a half-paged region is the one case it must not hit.
+        let mut s = AgentSession::new();
+        s.ingest("src/cfg.rs", "pub fn limit() -> u8 { 7 }\n");
+        s.ingest(
+            "src/api.rs",
+            "use crate::cfg;\npub fn h() -> u8 { cfg::limit() }\n",
+        );
+        for i in 0..6 {
+            s.ingest(&format!("src/pad{i}.rs"), "pub fn pad() -> u8 { 1 }\n");
+        }
+        s.live.set_max_resident(6);
+        assert!(s.live.graph().cold_count() > 0, "fixture must demote");
+
+        let win = s.page_fault("thread 'main' panicked at src/api.rs:2:1:\nboom\n", 4096);
+        let uris: Vec<&str> = win.items.iter().map(|i| i.uri.as_str()).collect();
+        assert!(
+            uris.iter().any(|u| u.contains("src/api.rs")),
+            "the faulting file is in the window: {uris:?}"
+        );
+        assert!(
+            uris.iter().any(|u| u.contains("src/cfg.rs")),
+            "its cross-file dependency is paged in too, not left in COLD: {uris:?}"
+        );
     }
 }

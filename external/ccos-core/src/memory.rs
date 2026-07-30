@@ -1452,34 +1452,49 @@ impl MemoryGraph {
         let Some(mut cold) = self.cold.remove(id) else {
             return false;
         };
-        // The node leaves the cold tier, so drop its reverse-adjacency entries.
-        let others: Vec<NodeId> = cold
-            .edges
-            .iter()
-            .map(|e| {
-                if &e.source == id {
-                    e.target.clone()
-                } else {
-                    e.source.clone()
-                }
-            })
-            .collect();
         cold.node.recency = 1.0;
         cold.node.last_accessed = self.clock;
         cold.node.access_count = cold.node.access_count.saturating_add(1);
         self.nodes.insert(id.clone(), cold.node);
+        // Re-home every archived edge. `demote` removes an edge from `self.edges`
+        // and stores it on the node being demoted, so it is archived on exactly
+        // ONE side — and this `ColdNode` was just removed from `self.cold`, which
+        // makes this the last place the edge exists. Dropping it here because the
+        // far endpoint happens to still be cold destroyed it permanently and broke
+        // the tier's documented "nothing is lost" contract: a demote/page-in cycle
+        // lost 5 of 16 edges, including cross-file `DependsOn` and `Calls` links.
         for e in cold.edges {
-            if self.nodes.contains_key(&e.source)
-                && self.nodes.contains_key(&e.target)
-                && !self.edges.iter().any(|x| {
+            let other = if &e.source == id {
+                e.target.clone()
+            } else {
+                e.source.clone()
+            };
+            if self.nodes.contains_key(&e.source) && self.nodes.contains_key(&e.target) {
+                // Both endpoints resident again: re-link it, and the pair no longer
+                // has anything archived, so its reverse-adjacency entry can go.
+                let known = self.edges.iter().any(|x| {
                     x.source == e.source && x.target == e.target && x.edge_type == e.edge_type
-                })
-            {
-                self.edges.push(e);
+                });
+                if !known {
+                    self.edges.push(e);
+                }
+                self.radj_del_edge(id, &other);
+            } else if let Some(neighbour) = self.cold.get_mut(&other) {
+                // Far end still cold: hand the edge to it, so paging *that* node
+                // in later restores the link. The reverse-adjacency entry stays on
+                // purpose — `cold_neighbours` filters on "still cold", and that
+                // entry is what lets `ensure_resident` pull this neighbour back.
+                let known = neighbour.edges.iter().any(|x| {
+                    x.source == e.source && x.target == e.target && x.edge_type == e.edge_type
+                });
+                if !known {
+                    neighbour.edges.push(e);
+                }
+            } else {
+                // Neither resident nor cold: the far endpoint has left the graph
+                // entirely, so the edge is genuinely stale.
+                self.radj_del_edge(id, &other);
             }
-        }
-        for other in others {
-            self.radj_del_edge(id, &other);
         }
         // Swap: while over capacity, demote the lowest-scored node *other* than
         // the one just paged in (deterministic tie-break on id).
@@ -7185,5 +7200,74 @@ mod tests {
         assert!(!g.page_in(&bid), "missing deep body ⇒ cold-miss");
         assert!(g.is_cold(&bid), "node stays cold, not half-restored");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn paging_a_node_in_never_destroys_an_edge_to_a_still_cold_node() {
+        // The COLD tier is documented as non-destructive ("the node and its links
+        // are kept, just no longer resident"). `demote` archives an edge on ONE
+        // side only, so when that side is paged back in while the far end is still
+        // cold, the edge used to be dropped from the only place it existed — an
+        // unrecoverable loss of causal structure that `verify` cannot see, because
+        // it attests the hash chain and never that the graph derives from it.
+        //
+        // Round-trip invariant: demote everything, page everything back, and the
+        // edge set must be exactly what it was.
+        let mut g = MemoryGraph::new(0.2, usize::MAX);
+        for n in ["a", "b", "c", "d"] {
+            g.upsert_node(
+                NodeId(n.into()),
+                n.into(),
+                format!("fn {n}() {{}}"),
+                NodeType::Symbol,
+            );
+        }
+        // A path plus a chord, so several edges have both endpoints demoted.
+        g.add_edge(
+            NodeId("a".into()),
+            NodeId("b".into()),
+            1.0,
+            EdgeType::DependsOn,
+        );
+        g.add_edge(NodeId("b".into()), NodeId("c".into()), 1.0, EdgeType::Calls);
+        g.add_edge(
+            NodeId("c".into()),
+            NodeId("d".into()),
+            1.0,
+            EdgeType::DependsOn,
+        );
+        g.add_edge(NodeId("a".into()), NodeId("d".into()), 1.0, EdgeType::Calls);
+
+        let fingerprint = |g: &MemoryGraph| {
+            let mut v: Vec<String> = g
+                .edges
+                .iter()
+                .map(|e| format!("{}->{}:{:?}", e.source.0, e.target.0, e.edge_type))
+                .collect();
+            v.sort();
+            v
+        };
+        let before = fingerprint(&g);
+        assert_eq!(before.len(), 4, "fixture starts with four edges");
+
+        // Squeeze every node into the COLD tier, then lift the cap and pull them
+        // all back one at a time — the order that used to lose the cold<->cold
+        // edges, since each page-in saw its neighbour still cold.
+        g.max_in_memory_nodes = 1;
+        g.enforce_paging();
+        assert!(g.cold_count() > 0, "fixture must actually demote");
+
+        g.max_in_memory_nodes = usize::MAX;
+        let cold: Vec<NodeId> = g.cold_ids().collect();
+        for id in cold {
+            g.page_in(&id);
+        }
+
+        assert_eq!(g.cold_count(), 0, "everything is resident again");
+        assert_eq!(
+            fingerprint(&g),
+            before,
+            "a demote/page-in round trip must preserve every edge"
+        );
     }
 }
