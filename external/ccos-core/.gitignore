@@ -1,0 +1,24 @@
+/target
+
+# External benchmark datasets (BEIR etc.) — fetched locally, never committed
+# (size + licensing; see examples/beir_eval.rs for the download one-liner).
+/data/
+
+# Causal-validation harness output (reproducible)
+scripts/causal_validation/results*.jsonl
+
+# Local agent memory accumulated by the self-analysis dogfood loop (see
+# docs/SELF_ANALYSIS.md) — local state, never committed.
+*.ccos
+*.ccos.oplog
+
+# Python bytecode cache
+__pycache__/
+*.pyc
+
+# Embedded CCOS_EXTENDED — premium source, never committed to free repo
+CCOS_EXTENDED/
+
+# Backup / temporary files
+*.bak
+workspace.ccos.oplog.bak.*

@@ -1,0 +1,47 @@
+name: Security Audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 4 * * *"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  supply-chain:
+    name: dependency + license + SBOM
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo deny (advisories, licenses, bans, sources)
+        run: |
+          cargo install cargo-deny --locked
+          cargo deny check
+      - name: SBOM
+        run: |
+          cargo install cargo-sbom --locked
+          cargo sbom > sbom.cyclonedx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.cyclonedx.json
+          retention-days: 30
+
+  secrets:
+    name: secret detection
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

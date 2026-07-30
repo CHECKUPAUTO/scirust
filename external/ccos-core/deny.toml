@@ -1,0 +1,60 @@
+[graph]
+all-features = true
+targets = [
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-gnu",
+]
+
+[advisories]
+ignore = []
+
+[licenses]
+confidence-threshold = 0.93
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-1-Clause",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "PolyForm-Noncommercial-1.0.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+exceptions = []
+
+[licenses.private]
+# Workspace crates carry the repository's source-available/custom commercial
+# terms. They are reviewed in THIRD_PARTY_NOTICES.md rather than treated as
+# third-party OSI dependencies by cargo-deny.
+ignore = true
+registries = []
+
+[bans]
+multiple-versions = "warn"
+wildcards = "warn"
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+allow = []
+allow-workspace = true
+deny = []
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = [
+    "https://github.com/Memorithm/scirust",
+]
+
+[sources.allow-org]
+github = []
+gitlab = []
+bitbucket = []
