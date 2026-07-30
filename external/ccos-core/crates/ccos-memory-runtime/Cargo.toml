@@ -1,0 +1,13 @@
+[package]
+name = "ccos-memory-runtime"
+version = "0.1.0"
+edition = "2021"
+description = "Neutral cognitive-memory middleware: MemoryProvider trait + self-contained SLHAv2 tile backend. Zero dependencies (no scirust)."
+license = "LicenseRef-CheckupAuto-Dual"
+
+# Intentionally ZERO dependencies. The SLHAv2 tile is a 128-byte ABI decoded with
+# minimal in-crate grouped-INT4 logic, so neither CCOS nor this crate ever
+# depends on `scirust` — not even as an optional dep (an optional dep would still
+# pull `scirust` into CCOS's resolution graph). The exact-kernel decode is an
+# opt-in *patch*, documented in INTEGRATION.md → "Optional exact-kernel decode".
+[dependencies]
