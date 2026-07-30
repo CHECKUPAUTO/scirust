@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ccos": {
+      "command": "ccos",
+      "args": ["mcp", ".ccos/workspace.ccos"]
+    }
+  }
+}

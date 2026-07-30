@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  hygiene:
+    name: Repository hygiene + author policy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Author policy (single human contributor)
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            scripts/check-author-policy.sh "origin/${{ github.base_ref }}..HEAD"
+          else
+            scripts/check-author-policy.sh HEAD
+          fi
+      - name: Forbidden research components
+        run: scripts/check-no-research-components.sh
+      - name: No trailing whitespace / conflict markers
+        run: |
+          ! git grep -nE '^(<{7}|={7}|>{7})' -- ':!.git' ':!docs/paper'
+          ! git grep -nE ' +$' -- '*.rs' '*.toml' ':!docs/paper'
+
+  fmt:
+    name: cargo fmt
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  check:
+    name: cargo check (${{ matrix.features }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        features: ["--no-default-features", "", "--all-features"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo check ${{ matrix.features }} --locked
+
+  clippy:
+    name: cargo clippy -D warnings
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo clippy --workspace --all-features --locked -- -D warnings
+
+  test:
+    name: tests (${{ matrix.profile }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [debug, release]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # SLH-DSA (post-quantum) tests are prohibitively slow in debug builds;
+      # the license-pq suite runs in release. Everything else runs in both.
+      - name: unit + integration (non-pq, ${{ matrix.profile }})
+        run: |
+          if [ "${{ matrix.profile }}" = "release" ]; then
+            cargo test --release --all-features --locked
+          else
+            cargo test --all-features --locked -- \
+              --skip license::tests::slh_dsa --skip ed25519_verifier_rejects_a_slh_dsa \
+              --skip detect_dispatches_on_the_scheme_tag
+          fi
+      - name: doctests
+        run: cargo test --doc --all-features --locked
+
+  msrv:
+    name: MSRV 1.89
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.89.0
+      - run: cargo check --workspace --all-features --locked
+
+  cognitive:
+    name: Cognitive core tests (offline, deterministic)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cognitive suite
+        run: cargo test --release --locked --test cognitive -- --nocapture
+      - name: replay equivalence
+        run: cargo test --release --locked --test replay_equivalence_property --test replay_vectors
+      - name: snapshot roundtrip + differential
+        run: cargo test --release --locked --test snapshot_roundtrip_property --test snapshot_differential
+      - name: schema / serialization compatibility
+        run: cargo test --release --locked --test persistence --test event_graph_consistency
+
+  docs:
+    name: documentation build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo doc --no-deps --all-features --locked

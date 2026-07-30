@@ -199,6 +199,10 @@ exclude = [
     # normal workspace build times from the GUI toolchain — see
     # docs/studio/adr/0005-tauri-dioxus-desktop-architecture.md.
     "apps/scirust-studio",
+    # CCOS Core (the agent's causal memory) is vendored with its own Cargo
+    # workspace and lockfile; built separately via scripts/ccos/install.sh —
+    # see docs/CCOS_MEMORY.md.
+    "external/ccos-core",
     "examples/simd_views_demo",
     "examples/benchmarks",
     # Fuzz harness: its own nightly-only workspace (libfuzzer-sys), built only

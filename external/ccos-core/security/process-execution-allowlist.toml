@@ -1,0 +1,17 @@
+# process-execution-allowlist.toml — versioned allowlist for
+# scripts/check-no-research-components.sh, step 4 (process execution).
+#
+# CCOS Core policy (mission §4.1): no runtime process execution. The scan
+# covers src/ and crates/ only (tests are permitted to spawn the CLI under
+# test). Every entry is a literal substring suppressing one grep match line
+# and MUST be justified.
+#
+# SECURITY_SCHEMA = 1
+
+# src/agents.rs — a string literal inside adversarial-detection *fixtures*:
+# the injection classifier is trained to RECOGNIZE shell execution in
+# ingested code; it never executes it.
+src/agents.rs
+
+# No other allowlisted entries. Any addition requires a comment citing the
+# approving decision of ZEKRITI Tarek.
