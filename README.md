@@ -286,6 +286,23 @@ The `scirust` package exposes the framework as a **library** (`src/lib.rs`), re-
 the member crates under `scirust::{core, simd, symbolic, learning, solvers}`. The
 deep-learning and scientific-computing capabilities described here live in those crates.
 
+### Optional feature: the canonical tensor facade
+
+`scirust::tensor_canonical` is a compile-time-planned tensor pipeline — build a program,
+prepare it once, run it many times — and is **off by default**:
+
+| Feature | What it adds |
+| --- | --- |
+| `tensor-canonical` | The facade, with a `ComputeBackend` you supply yourself. |
+| `tensor-canonical-cpu` | The above plus `CpuComputeAdapter`, the deterministic CPU interpreter. |
+
+Both pull only pure-Rust workspace crates — no external dependency, **no wgpu and no
+CUDA** — and leave the default build byte-for-byte unchanged. The CPU adapter happens to
+live in a crate named `scirust-gpu` for historical reasons; the feature is named after
+what it actually provides. `f32` only, no broadcasting, no autograd. See
+`examples/canonical_tensor_cpu.rs`, runnable with
+`cargo run --features tensor-canonical-cpu --example canonical_tensor_cpu`.
+
 The repository also bundles a small **experimental autonomous-agent binary**,
 `openclaw-u` (`src/main.rs`, run with `cargo run --features openclaw --bin openclaw-u`). It is *not* a
 component of the framework, is not required to build or use it, and can be ignored
