@@ -4111,9 +4111,13 @@ dependencies = [
 name = "scirust-tensor-runtime"
 version = "0.1.0"
 dependencies = [
+ "scirust-compute",
+ "scirust-gpu",
  "scirust-tensor-compile",
  "scirust-tensor-core",
  "scirust-tensor-einsum",
+ "scirust-tensor-ir",
+ "scirust-tensor-reference",
 ]
 
 [[package]]
