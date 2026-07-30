@@ -300,9 +300,45 @@ impl<B: ComputeBackend> ReferencePlanRuntime<B> {
 
     /// Validates `plan`, generates its Reference artefacts once, and compiles
     /// each logical kernel exactly once.
+    ///
+    /// Equivalent to [`Self::prepare_with_external_types`] with an empty hint
+    /// list: a plan whose external value has no tensor type anywhere is rejected
+    /// with [`PlanPreparationError::UndeterminedValueType`], exactly as before
+    /// hints existed.
     pub fn prepare(
         &self,
         plan: &LoweredPlan,
+    ) -> Result<PreparedReferencePlan<B::Kernel>, PlanPreparationError> {
+        self.prepare_with_external_types(plan, &[])
+    }
+
+    /// Prepares `plan`, completing missing external metadata from
+    /// `external_types`.
+    ///
+    /// A `LoweredPlan` carries a tensor type only on kernel arguments, so an
+    /// external value that is *only* a plan output — never consumed by any
+    /// dispatch — has no type anywhere in the plan. A caller that holds the
+    /// canonical `Graph` does know that type, and supplies it here as a
+    /// `(NodeId, TensorType)` pair.
+    ///
+    /// Hints complete metadata; they never invent or override anything:
+    ///
+    /// * the node must already be an external binding of `plan`
+    ///   ([`PlanPreparationError::UnknownExternalTypeNode`] otherwise);
+    /// * a node may be supplied at most once
+    ///   ([`PlanPreparationError::DuplicateExternalType`] otherwise);
+    /// * the type must be `F32` ([`PlanPreparationError::UnsupportedDType`]
+    ///   otherwise);
+    /// * where the plan already states a type through a kernel argument, both
+    ///   must be *exactly* equal
+    ///   ([`PlanPreparationError::ExternalTypeContradiction`] otherwise).
+    ///
+    /// No hint adds a binding, changes a binding's kind or `NodeId`, or reorders
+    /// the binding table: the table is `plan`'s, untouched.
+    pub fn prepare_with_external_types(
+        &self,
+        plan: &LoweredPlan,
+        external_types: &[(NodeId, TensorType)],
     ) -> Result<PreparedReferencePlan<B::Kernel>, PlanPreparationError> {
         let capabilities = self.backend.capabilities();
         if !capabilities.supports_dtype(DType::F32)
@@ -320,7 +356,7 @@ impl<B: ComputeBackend> ReferencePlanRuntime<B> {
         }
         let max_buffer_bytes = capabilities.max_buffer_bytes;
 
-        let types = collect_value_types(plan)?;
+        let types = collect_value_types(plan, external_types)?;
         let dispatches = resolve_dispatches(plan, &types)?;
         let (slots, slot_sizes) = build_slot_specifications(&types, max_buffer_bytes)?;
         let (externals, external_sizes) =
@@ -497,12 +533,19 @@ impl<B: ComputeBackend> ReferencePlanRuntime<B> {
 /// are therefore reconstructed from every argument occurrence, and every
 /// occurrence must agree. That is sound because the memory planner reuses a slot
 /// only for a value whose tensor type is *exactly* equal.
+///
+/// External types may additionally be *seeded* from caller-supplied hints before
+/// the argument scan; the scan then confronts every occurrence with the seed
+/// instead of replacing it.
 struct ValueTypes {
     slots: Vec<Option<TensorType>>,
     externals: Vec<Option<TensorType>>,
 }
 
-fn collect_value_types(plan: &LoweredPlan) -> Result<ValueTypes, PlanPreparationError> {
+fn collect_value_types(
+    plan: &LoweredPlan,
+    external_types: &[(NodeId, TensorType)],
+) -> Result<ValueTypes, PlanPreparationError> {
     let mut highest_slot: Option<usize> = None;
     for instruction in plan.instructions()
     {
@@ -527,6 +570,38 @@ fn collect_value_types(plan: &LoweredPlan) -> Result<ValueTypes, PlanPreparation
     let slot_count = highest_slot.map_or(0, |highest| highest.saturating_add(1));
     let mut slots: Vec<Option<TensorType>> = vec![None; slot_count];
     let mut externals: Vec<Option<TensorType>> = vec![None; plan.bindings().len()];
+
+    // Seed the external table with the caller's hints, in the caller's order.
+    // The order is irrelevant: every hint is placed at its binding's position,
+    // and a repeated node is rejected rather than allowed to overwrite.
+    let mut seeded = vec![false; plan.bindings().len()];
+    for (node, tensor_type) in external_types
+    {
+        let index = plan
+            .bindings()
+            .iter()
+            .position(|entry| entry.node == *node)
+            .ok_or(PlanPreparationError::UnknownExternalTypeNode { node: *node })?;
+
+        if tensor_type.dtype != DType::F32
+        {
+            return Err(PlanPreparationError::UnsupportedDType { node: *node });
+        }
+
+        let marker = seeded
+            .get_mut(index)
+            .ok_or(PlanPreparationError::UnknownExternalTypeNode { node: *node })?;
+        if *marker
+        {
+            return Err(PlanPreparationError::DuplicateExternalType { node: *node });
+        }
+        *marker = true;
+
+        let entry = externals
+            .get_mut(index)
+            .ok_or(PlanPreparationError::UnknownExternalTypeNode { node: *node })?;
+        *entry = Some(tensor_type.clone());
+    }
 
     for (dispatch_index, instruction) in plan.instructions().iter().enumerate()
     {
@@ -571,8 +646,30 @@ fn collect_value_types(plan: &LoweredPlan) -> Result<ValueTypes, PlanPreparation
                             binding,
                         },
                     )?;
-                    record_type(entry, &argument.tensor_type)
-                        .map_err(|()| PlanPreparationError::InconsistentExternalType { binding })?;
+
+                    match entry
+                    {
+                        Some(existing) if *existing == argument.tensor_type =>
+                        {},
+                        Some(existing) =>
+                        {
+                            // A seeded entry means the caller's hint disagrees
+                            // with the plan; an inferred one means the plan
+                            // disagrees with itself. Two different faults, two
+                            // different diagnostics.
+                            if matches!(seeded.get(binding.get() as usize), Some(true))
+                            {
+                                return Err(PlanPreparationError::ExternalTypeContradiction {
+                                    binding,
+                                    node: declared.node,
+                                    expected: existing.clone(),
+                                    actual: argument.tensor_type.clone(),
+                                });
+                            }
+                            return Err(PlanPreparationError::InconsistentExternalType { binding });
+                        },
+                        None => *entry = Some(argument.tensor_type.clone()),
+                    }
                 },
                 // `KernelArgumentSource` is `#[non_exhaustive]`: a future source
                 // kind is rejected, never guessed at.
@@ -839,6 +936,9 @@ fn build_external_specifications(
             },
         )?;
 
+        // Every external type reaching this point is already known to be `F32`:
+        // an inferred one was checked by `resolve_dispatches`, a seeded one by
+        // `collect_value_types`. No third source exists.
         let bytes = byte_size(element_count(&tensor_type)?)?;
         check_backend_limit(bytes, max_buffer_bytes)?;
 
@@ -1094,34 +1194,31 @@ fn index_as_u32(index: usize) -> u32 {
 }
 
 #[cfg(test)]
-mod tests {
-    //! Unit tests driven by a recording backend.
+pub(crate) mod test_backend {
+    //! A `ComputeBackend` that records how it is driven.
     //!
-    //! The real CPU path is covered end to end in
-    //! `tests/reference_cpu_plan.rs`. What a real backend cannot show is *how*
-    //! the runtime drives the contract: how many times `compile` is called, in
-    //! which order buffers are allocated and written, that every launch is
-    //! followed by a wait, that `synchronize` happens once after the last
-    //! dispatch, and that a mid-plan failure stops everything. This backend
-    //! records those calls and can fail a chosen dispatch on demand.
+    //! The real CPU path is covered end to end in this crate's integration
+    //! tests. What a real backend cannot show is *how* a runtime drives the
+    //! contract: how many times `compile` is called, in which order buffers are
+    //! allocated and written, that every launch is followed by a wait, that
+    //! `synchronize` happens once after the last dispatch, and that a failure
+    //! stops everything. This backend records those calls and can fail a chosen
+    //! dispatch on demand.
     //!
-    //! It is a private test fixture: it never becomes public API, and it
-    //! computes nothing — only ordering and bookkeeping are asserted here.
+    //! It is `pub(crate)` so the graph-session tests reuse it instead of
+    //! duplicating it, and `#[cfg(test)]` so it never becomes public API. It
+    //! computes nothing: only ordering and bookkeeping are observable.
 
     use super::*;
 
     use core::cell::{Cell, RefCell};
-    use core::error::Error as _;
 
     use scirust_compute::{
         ComputeError, ComputeResult, DeviceCapabilities, DeviceId, KernelFormat, KernelModule,
-        Shape,
     };
-    use scirust_tensor_compile::{CanonicalCompiler, ExternalBindings, KernelLowerer};
-    use scirust_tensor_ir::{Graph, Operation, Scalar};
 
     #[derive(Debug, Clone, PartialEq, Eq)]
-    enum Call {
+    pub(crate) enum Call {
         Allocate { bytes: usize },
         Write { bytes: usize },
         Compile { entry_point: String },
@@ -1133,12 +1230,12 @@ mod tests {
     }
 
     #[derive(Debug)]
-    struct RecordingBuffer {
+    pub(crate) struct RecordingBuffer {
         bytes: RefCell<Vec<u8>>,
     }
 
     #[derive(Debug)]
-    struct RecordingBackend {
+    pub(crate) struct RecordingBackend {
         capabilities: DeviceCapabilities,
         calls: RefCell<Vec<Call>>,
         launches: Cell<usize>,
@@ -1146,7 +1243,7 @@ mod tests {
     }
 
     impl RecordingBackend {
-        fn new() -> Self {
+        pub(crate) fn new() -> Self {
             Self::with_capabilities(DeviceCapabilities {
                 device: DeviceId::cpu(),
                 name: "recording".to_string(),
@@ -1157,7 +1254,7 @@ mod tests {
             })
         }
 
-        fn with_capabilities(capabilities: DeviceCapabilities) -> Self {
+        pub(crate) fn with_capabilities(capabilities: DeviceCapabilities) -> Self {
             Self {
                 capabilities,
                 calls: RefCell::new(Vec::new()),
@@ -1166,20 +1263,26 @@ mod tests {
             }
         }
 
-        fn fail_launch_at(self, dispatch_index: usize) -> Self {
+        pub(crate) fn fail_launch_at(self, dispatch_index: usize) -> Self {
             self.fail_launch_at.set(Some(dispatch_index));
             self
+        }
+
+        /// Stops injecting launch failures, so the same backend can prove that a
+        /// prepared plan or session survives one.
+        pub(crate) fn clear_launch_failure(&self) {
+            self.fail_launch_at.set(None);
         }
 
         fn record(&self, call: Call) {
             self.calls.borrow_mut().push(call);
         }
 
-        fn calls(&self) -> Vec<Call> {
+        pub(crate) fn calls(&self) -> Vec<Call> {
             self.calls.borrow().clone()
         }
 
-        fn count<F: Fn(&Call) -> bool>(&self, predicate: F) -> usize {
+        pub(crate) fn count<F: Fn(&Call) -> bool>(&self, predicate: F) -> usize {
             self.calls
                 .borrow()
                 .iter()
@@ -1290,6 +1393,22 @@ mod tests {
             Ok(())
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests of the plan runtime, driven by the recording backend.
+
+    use super::test_backend::{Call, RecordingBackend, RecordingBuffer};
+    use super::*;
+
+    use core::error::Error as _;
+
+    use scirust_compute::{
+        ComputeError, ComputeResult, DeviceCapabilities, DeviceId, KernelModule, Shape,
+    };
+    use scirust_tensor_compile::{CanonicalCompiler, ExternalBindings, KernelLowerer};
+    use scirust_tensor_ir::{Graph, Operation, Scalar};
 
     // -----------------------------------------------------------------------
     // Fixtures
@@ -1489,7 +1608,7 @@ mod tests {
         assert!(runtime.execute(&prepared, &values).is_err());
 
         // Stop injecting failures; the same prepared plan runs.
-        runtime.backend().fail_launch_at.set(None);
+        runtime.backend().clear_launch_failure();
         assert!(runtime.execute(&prepared, &values).is_ok());
     }
 
@@ -1683,5 +1802,145 @@ mod tests {
 
         assert_eq!(prepared.external_values().len(), 1);
         assert_eq!(prepared.kernel_count(), 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // External type hints
+    // -----------------------------------------------------------------------
+
+    /// `x -> output`: the input is the only output and never a kernel argument,
+    /// so its tensor type appears nowhere in the lowered plan.
+    fn untyped_external_plan() -> (LoweredPlan, NodeId, TensorType) {
+        let ty = f32_type(vec![4]);
+        let mut graph = Graph::new();
+        let input = graph.add_input("x", ty.clone()).expect("input");
+        graph.set_outputs(vec![input]).expect("outputs");
+        (lower(&graph), input, ty)
+    }
+
+    #[test]
+    fn prepare_still_rejects_an_external_whose_type_is_undeterminable() {
+        let (plan, node, _) = untyped_external_plan();
+        let runtime = ReferencePlanRuntime::new(RecordingBackend::new());
+
+        assert_eq!(
+            runtime.prepare(&plan).err(),
+            Some(PlanPreparationError::UndeterminedValueType { node })
+        );
+        assert!(
+            runtime.backend().calls().is_empty(),
+            "a rejected plan must not reach the backend"
+        );
+    }
+
+    #[test]
+    fn an_external_type_hint_completes_missing_metadata() {
+        let (plan, node, ty) = untyped_external_plan();
+        let runtime = ReferencePlanRuntime::new(RecordingBackend::new());
+
+        let prepared = runtime
+            .prepare_with_external_types(&plan, &[(node, ty.clone())])
+            .expect("hint completes the missing type");
+
+        assert_eq!(prepared.kernel_count(), 0);
+        assert_eq!(prepared.dispatch_count(), 0);
+        assert_eq!(
+            prepared.external_values(),
+            &[ExternalValueSpec {
+                binding: LogicalBindingId::new(0),
+                node,
+                kind: ExternalValueKind::Input,
+                tensor_type: ty.clone(),
+            }]
+        );
+        assert_eq!(
+            prepared.outputs(),
+            vec![PlanOutputSpec {
+                node,
+                tensor_type: ty
+            }]
+        );
+        assert!(
+            runtime.backend().calls().is_empty(),
+            "a plan without kernels compiles nothing"
+        );
+    }
+
+    #[test]
+    fn an_unknown_hint_node_is_rejected() {
+        let (plan, _, ty) = untyped_external_plan();
+        let stranger = NodeId::new(9);
+
+        assert_eq!(
+            ReferencePlanRuntime::new(RecordingBackend::new())
+                .prepare_with_external_types(&plan, &[(stranger, ty)])
+                .err(),
+            Some(PlanPreparationError::UnknownExternalTypeNode { node: stranger })
+        );
+    }
+
+    #[test]
+    fn a_duplicated_hint_is_rejected() {
+        let (plan, node, ty) = untyped_external_plan();
+
+        assert_eq!(
+            ReferencePlanRuntime::new(RecordingBackend::new())
+                .prepare_with_external_types(&plan, &[(node, ty.clone()), (node, ty)])
+                .err(),
+            Some(PlanPreparationError::DuplicateExternalType { node })
+        );
+    }
+
+    #[test]
+    fn a_non_f32_hint_is_rejected() {
+        let (plan, node, _) = untyped_external_plan();
+        let wrong = TensorType::new(DType::F64, Shape::new(vec![4]));
+
+        assert_eq!(
+            ReferencePlanRuntime::new(RecordingBackend::new())
+                .prepare_with_external_types(&plan, &[(node, wrong)])
+                .err(),
+            Some(PlanPreparationError::UnsupportedDType { node })
+        );
+    }
+
+    #[test]
+    fn a_hint_contradicting_the_plan_is_rejected() {
+        // Here the input *is* a kernel argument, so the plan states its type and
+        // the hint can only agree or contradict.
+        let plan = shared_kernel_plan();
+        let node = NodeId::new(0);
+        let observed = f32_type(vec![2]);
+        let claimed = f32_type(vec![8]);
+
+        assert_eq!(
+            ReferencePlanRuntime::new(RecordingBackend::new())
+                .prepare_with_external_types(&plan, &[(node, claimed.clone())])
+                .err(),
+            Some(PlanPreparationError::ExternalTypeContradiction {
+                binding: LogicalBindingId::new(0),
+                node,
+                expected: claimed,
+                actual: observed,
+            })
+        );
+    }
+
+    #[test]
+    fn a_hint_agreeing_with_the_plan_changes_nothing() {
+        let plan = shared_kernel_plan();
+        let node = NodeId::new(0);
+        let runtime = ReferencePlanRuntime::new(RecordingBackend::new());
+
+        let hinted = runtime
+            .prepare_with_external_types(&plan, &[(node, f32_type(vec![2]))])
+            .expect("agreeing hint");
+        let plain = runtime.prepare(&plan).expect("no hint");
+
+        assert_eq!(hinted.external_values(), plain.external_values());
+        assert_eq!(hinted.buffer_slots(), plain.buffer_slots());
+        assert_eq!(hinted.outputs(), plain.outputs());
+        assert_eq!(hinted.dispatch_count(), plain.dispatch_count());
+        assert_eq!(hinted.kernel_count(), plain.kernel_count());
     }
 }
