@@ -2859,6 +2859,15 @@ fn run_op_stream(mem: &mut CcosMemory) -> (bool, bool) {
                     "hybrid" => Recall::hybrid(s("text")),
                     _ => Recall::working_set(),
                 };
+                // Page fault on the read path, exactly as `AgentSession::recall` does:
+                // an `around` recall whose anchor was demoted to the COLD tier pages it
+                // (and its cold neighbours) back first. Without this the façade returns
+                // an empty window for any anchor past the resident cap, while the same
+                // anchor recalls fine over MCP — the cold tier must be transparent on
+                // both paths. `ensure_resident` adds no event, so it never sets `dirty`.
+                if let Recall::Around(uri) = &recall {
+                    mem.ensure_resident(uri);
+                }
                 serde_json::to_value(mem.recall(&recall, budget)).unwrap()
             }
             "impact" | "causes" => {
