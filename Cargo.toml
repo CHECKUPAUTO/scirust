@@ -26,9 +26,32 @@ rand = { version = "0.8", optional = true }
 # transitively via scirust-trader, so this adds no new download to the lockfile.
 sha2 = { version = "0.10", optional = true }
 
+# The canonical tensor facade (`scirust::tensor_canonical`), off by default.
+# All four are workspace path crates and none pulls a single external crate, so
+# enabling them adds no download and no new lockfile package — only edges.
+# `scirust-tensor-core` and `scirust-compute` are direct because the runtime
+# re-exports neither `TensorND` nor `ComputeBackend`, and no transitive path to
+# them exists.
+scirust-tensor-runtime = { path = "scirust-tensor-runtime", optional = true }
+scirust-tensor-core = { path = "scirust-tensor-core", optional = true }
+scirust-compute = { path = "scirust-compute", optional = true }
+# The CPU Reference adapter. The crate is named `scirust-gpu` for historical
+# reasons, but its default features are `std` alone: 8 workspace crates, zero
+# external ones, no wgpu and no CUDA. Those stay behind `scirust-gpu/wgpu` and
+# `scirust-gpu/cuda`, which nothing here activates.
+scirust-gpu = { path = "scirust-gpu", optional = true }
+
 [features]
 default = []
 openclaw = ["dep:tokio", "dep:serde", "dep:serde_json", "dep:chrono", "dep:rand", "dep:sha2"]
+# The canonical tensor facade with a backend the caller supplies:
+# `scirust::tensor_canonical::{CanonicalProgram, TensorND, ReferencePlanRuntime, …}`.
+# Deliberately backend-free — it imposes no adapter and no GPU stack.
+tensor-canonical = ["dep:scirust-tensor-runtime", "dep:scirust-tensor-core", "dep:scirust-compute"]
+# The facade plus the deterministic CPU adapter, so a program runs out of the
+# box: `ReferencePlanRuntime::new(CpuComputeAdapter::new())`. Named `-cpu`
+# because that is honestly what it provides; it activates neither wgpu nor CUDA.
+tensor-canonical-cpu = ["tensor-canonical", "dep:scirust-gpu"]
 
 [dev-dependencies]
 rand = "0.8"
@@ -40,6 +63,14 @@ rand = "0.8"
 name = "openclaw-u"
 path = "src/main.rs"
 required-features = ["openclaw"]
+
+# End-to-end demonstration of the canonical tensor facade on the CPU adapter,
+# importing nothing but `scirust::…`. Declared explicitly rather than
+# auto-discovered so `required-features` keeps it out of a default build.
+[[example]]
+name = "canonical_tensor_cpu"
+path = "examples/canonical_tensor_cpu.rs"
+required-features = ["tensor-canonical-cpu"]
 
 [workspace]
 members = [

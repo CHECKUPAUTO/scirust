@@ -305,6 +305,22 @@ jobs:
       - name: Check OpenClaw demo feature
         run: cargo +stable check -p scirust --bin openclaw-u --features openclaw --locked
 
+      # The canonical tensor facade (`scirust::tensor_canonical`) is optional:
+      # `default = []` keeps it out of every `--workspace` build above, so
+      # without these two steps it would never be compiled in CI. The generic
+      # feature must build with no backend at all; the CPU one builds the
+      # example and runs the real end-to-end test.
+      - name: Check canonical tensor facade (caller-supplied backend)
+        run: cargo +stable check -p scirust --features tensor-canonical --locked
+      - name: Test canonical tensor facade on the CPU adapter
+        run: cargo +stable test -p scirust --all-targets --features tensor-canonical-cpu --locked
+      # Guards the promise the feature makes: the CPU adapter pulls neither wgpu
+      # nor CUDA. `scirust-gpu` is a historical crate name, not a GPU build.
+      - name: Assert the CPU facade pulls no GPU stack
+        run: |
+          cargo +stable tree -p scirust --features tensor-canonical-cpu --edges normal --locked > /tmp/canonical-cpu-tree.txt
+          ! grep -qE '(^|[^-])wgpu v|cudarc v|scirust-cuda v' /tmp/canonical-cpu-tree.txt
+
   msrv:
     name: Check (MSRV 1.89.0)
     runs-on: ubuntu-latest
