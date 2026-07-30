@@ -81,6 +81,7 @@ members = [
     "scirust-tensor-einsum",
     "scirust-tensor-contraction",
     "scirust-tensor-compile",
+    "scirust-tensor-reference",
     "scirust-tensor-runtime",
     "scirust-tensor-examples",
     "scirust-onnx",
