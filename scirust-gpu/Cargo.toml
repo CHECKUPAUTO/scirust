@@ -20,6 +20,14 @@ wgpu = ["std", "dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:scirust-core"]
 
 [dependencies]
 scirust-compute = { path = "../scirust-compute", default-features = false }
+# Decodes and executes `KernelFormat::Reference` modules on the CPU adapter.
+# Depends only on scirust-compute and scirust-tensor-compile, neither of which
+# reaches scirust-gpu, so this edge introduces no dependency cycle. It is
+# unconditional: scirust-gpu carries no `#![no_std]` attribute and always links
+# std, so its `std` feature only forwards `scirust-compute/std`. One consequence
+# is documented and accepted: `--no-default-features` now also builds
+# scirust-compute with std, through feature unification.
+scirust-tensor-reference = { path = "../scirust-tensor-reference" }
 scirust-core = { path = "../scirust-core", optional = true }
 scirust-cuda = { path = "../scirust-cuda", optional = true }
 scirust-license = { path = "../scirust-license", optional = true }
@@ -45,3 +53,12 @@ required-features = ["wgpu"]
 [[example]]
 name = "gpu_model_bench"
 required-features = ["wgpu"]
+
+# Test-only: build genuine Reference artefacts through the real
+# Graph -> ExecutionPlan -> LoweredPlan -> artefact pipeline, so the CPU
+# adapter's tests exercise the same bytes a production caller would produce
+# instead of re-encoding the wire format a second time inside this crate.
+# Neither crate depends on scirust-gpu, so no cycle is introduced.
+[dev-dependencies]
+scirust-tensor-compile = { path = "../scirust-tensor-compile" }
+scirust-tensor-ir = { path = "../scirust-tensor-ir" }
