@@ -1,0 +1,22 @@
+[package]
+name = "scirust-tensor-reference"
+version = "0.1.0"
+edition = "2021"
+publish = false
+rust-version = "1.89"
+description = "Deterministic Reference-format kernel artefacts generated from a SciRust lowered tensor plan"
+license-file = "../LICENSE.md"
+
+[dependencies]
+scirust-compute = { path = "../scirust-compute" }
+scirust-tensor-compile = { path = "../scirust-tensor-compile" }
+
+# Test-only: builds the `Graph` fixtures that exercise `ReferenceKernelGenerator`
+# against a real `LoweredPlan`. `scirust-tensor-compile` does not re-export the
+# graph-construction types (`Graph`, `TensorType`, `Operation`, `Scalar`,
+# `ConstantId`), and `LogicalKernel` has no public constructor of its own, so a
+# genuine `LoweredPlan` is the only way to obtain one — this is already a
+# transitive dependency via `scirust-tensor-compile -> scirust-tensor-ir`.
+# Never used outside `#[cfg(test)]`.
+[dev-dependencies]
+scirust-tensor-ir = { path = "../scirust-tensor-ir" }
