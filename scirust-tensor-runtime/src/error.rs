@@ -1,11 +1,14 @@
-//! Typed failures of the Reference plan runtime and of the graph session.
+//! Typed failures of every canonical layer of this crate.
 //!
-//! Each layer splits preparation from execution, so a caller can tell "this can
-//! never run here" from "this run did not work out":
+//! Each layer splits its phases, so a caller can tell "this can never run here"
+//! from "this run did not work out":
 //!
 //! * [`PlanPreparationError`] / [`PlanExecutionError`] for a `LoweredPlan`;
 //! * [`GraphSessionPreparationError`] / [`GraphSessionExecutionError`] for a
-//!   canonical `Graph`.
+//!   canonical `Graph`;
+//! * [`CanonicalBuildError`] / [`CanonicalPreparationError`] /
+//!   [`CanonicalExecutionError`] for the user-facing façade, which additionally
+//!   separates *building* a computation from preparing it.
 //!
 //! Every encapsulated failure — a backend [`ComputeError`], a compiler, lowerer
 //! or plan-runtime error — is kept whole and reachable through
@@ -18,8 +21,10 @@ use scirust_compute::ComputeError;
 use scirust_tensor_compile::{
     BufferSlot, CompileError, ExternalValueKind, LogicalBindingId, LogicalKernelId, LoweringError,
 };
-use scirust_tensor_ir::{ConstantId, DType, NodeId, TensorType};
+use scirust_tensor_ir::{ConstantId, DType, GraphError, NodeId, TensorType};
 use scirust_tensor_reference::{ReferenceGenerationError, ReferenceOpcode};
+
+use crate::canonical::{CanonicalInput, CanonicalValue};
 
 /// A failure while turning a `LoweredPlan` into a runnable plan.
 ///
@@ -1143,6 +1148,314 @@ impl core::error::Error for GraphSessionExecutionError {
         match self
         {
             Self::PlanExecution { source } => Some(source),
+            _ => None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Canonical façade
+// ---------------------------------------------------------------------------
+
+/// A failure while building a `CanonicalProgram`.
+///
+/// Every variant names the fault in the caller's own vocabulary — shapes,
+/// names, opaque handles — never a `NodeId`, a `TensorType` or a `DType`.
+///
+/// Three failures a reader might expect are **absent because they cannot
+/// happen**: `scirust_tensor_core::TensorND` is `f32` by construction and this
+/// façade builds every tensor type itself, so no dtype can be wrong; that same
+/// tensor carries no device or memory space, so no placement can be wrong; and
+/// `Scalar::f32` stores raw bits, so every `f32` scale factor is representable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CanonicalBuildError {
+    /// The handle does not name a value of this program.
+    ///
+    /// Detected by position, which catches every handle from a larger program
+    /// and every handle built after the values it names. A handle from another
+    /// program whose position also exists here cannot be distinguished; see
+    /// `CanonicalValue`'s documentation.
+    ForeignValue { value: CanonicalValue },
+    /// Another input already carries this name.
+    DuplicateInputName { name: String },
+    /// The shape's element count overflows `usize`.
+    ShapeOverflow { shape: Vec<usize> },
+    /// A binary operation received operands of different shapes.
+    ///
+    /// There is no broadcasting: the canonical IR compares whole tensor types.
+    ShapeMismatch {
+        expected: Vec<usize>,
+        actual: Vec<usize>,
+    },
+    /// A reshape would change the number of elements.
+    ElementCountMismatch { expected: usize, actual: usize },
+    /// The permutation is not a permutation of `0..rank`, or has the wrong
+    /// length.
+    InvalidPermutation {
+        permutation: Vec<usize>,
+        rank: usize,
+    },
+    /// A constant tensor is not dense row-major.
+    ///
+    /// `TensorND`'s fields are public, so its data length and strides can
+    /// contradict its shape. This façade lends the data directly and therefore
+    /// checks rather than assumes.
+    NonContiguousTensor { shape: Vec<usize>, elements: usize },
+    /// An empty output list was declared.
+    NoOutputs,
+    /// The canonical graph rejected the node.
+    ///
+    /// Mostly defensive: this façade validates arity, operand shapes and
+    /// reference direction before building a node. `GraphError::TooManyNodes`
+    /// stays genuinely reachable.
+    GraphConstruction { source: GraphError },
+}
+
+impl fmt::Display for CanonicalBuildError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self
+        {
+            Self::ForeignValue { value } =>
+            {
+                write!(formatter, "{value:?} does not belong to this program")
+            },
+            Self::DuplicateInputName { name } =>
+            {
+                write!(formatter, "an input named '{name}' already exists")
+            },
+            Self::ShapeOverflow { shape } =>
+            {
+                write!(
+                    formatter,
+                    "element count of shape {shape:?} overflows usize"
+                )
+            },
+            Self::ShapeMismatch { expected, actual } =>
+            {
+                write!(
+                    formatter,
+                    "operands must have the same shape, got {expected:?} and {actual:?}; \
+                     broadcasting is not supported"
+                )
+            },
+            Self::ElementCountMismatch { expected, actual } =>
+            {
+                write!(
+                    formatter,
+                    "reshape must preserve the element count: {expected} cannot become {actual}"
+                )
+            },
+            Self::InvalidPermutation { permutation, rank } =>
+            {
+                write!(
+                    formatter,
+                    "{permutation:?} is not a permutation of the {rank} axes of this value"
+                )
+            },
+            Self::NonContiguousTensor { shape, elements } =>
+            {
+                write!(
+                    formatter,
+                    "tensor of shape {shape:?} holding {elements} value(s) is not dense row-major"
+                )
+            },
+            Self::NoOutputs => formatter.write_str("a program must declare at least one output"),
+            Self::GraphConstruction { source } =>
+            {
+                write!(formatter, "canonical graph construction failed: {source}")
+            },
+        }
+    }
+}
+
+impl core::error::Error for CanonicalBuildError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self
+        {
+            Self::GraphConstruction { source } => Some(source),
+            _ => None,
+        }
+    }
+}
+
+/// A failure while preparing a `CanonicalProgram`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CanonicalPreparationError {
+    /// The program never declared its outputs.
+    NoOutputs,
+    /// The canonical graph rejected the declared outputs.
+    ///
+    /// Defensive: every output handle was checked against the program when it
+    /// was declared.
+    GraphOutputs { source: GraphError },
+    /// The prepared session requires an input this program never declared.
+    ///
+    /// Defensive: the session's inputs come from the very graph this program
+    /// built.
+    UnknownSessionInput { input: CanonicalInput },
+    /// The prepared session produces a different number of outputs than the
+    /// program declared.
+    ///
+    /// Defensive: the session already checks its outputs against the graph's.
+    OutputCountMismatch { expected: usize, actual: usize },
+    /// Compilation, lowering or plan preparation failed.
+    GraphSessionPreparation {
+        source: GraphSessionPreparationError,
+    },
+}
+
+impl fmt::Display for CanonicalPreparationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self
+        {
+            Self::NoOutputs =>
+            {
+                formatter.write_str("the program declared no output; nothing can be prepared")
+            },
+            Self::GraphOutputs { source } =>
+            {
+                write!(formatter, "declaring the graph outputs failed: {source}")
+            },
+            Self::UnknownSessionInput { input } =>
+            {
+                write!(
+                    formatter,
+                    "the prepared session requires {input:?}, which this program never declared"
+                )
+            },
+            Self::OutputCountMismatch { expected, actual } =>
+            {
+                write!(
+                    formatter,
+                    "the program declared {expected} output(s) and the prepared session produces \
+                     {actual}"
+                )
+            },
+            Self::GraphSessionPreparation { source } =>
+            {
+                write!(formatter, "session preparation failed: {source}")
+            },
+        }
+    }
+}
+
+impl core::error::Error for CanonicalPreparationError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self
+        {
+            Self::GraphOutputs { source } => Some(source),
+            Self::GraphSessionPreparation { source } => Some(source),
+            _ => None,
+        }
+    }
+}
+
+/// A failure while running a `CanonicalSession`.
+///
+/// The first five are raised before any backend call, so a rejected set of
+/// inputs allocates nothing and launches nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CanonicalExecutionError {
+    /// A required input was not supplied.
+    MissingInput { input: CanonicalInput, name: String },
+    /// A value was supplied for something that is not a required input of this
+    /// session — a handle from elsewhere, or an input preparation eliminated.
+    UnexpectedInput { input: CanonicalInput },
+    /// The same input was supplied more than once.
+    DuplicateInput { input: CanonicalInput },
+    /// A supplied tensor does not have the declared shape.
+    ///
+    /// Shapes are compared whole, not merely element counts: `[2, 3]` is not
+    /// `[6]`.
+    InputShapeMismatch {
+        input: CanonicalInput,
+        name: String,
+        expected: Vec<usize>,
+        actual: Vec<usize>,
+    },
+    /// A supplied tensor is not dense row-major.
+    NonContiguousInput {
+        input: CanonicalInput,
+        name: String,
+        shape: Vec<usize>,
+        elements: usize,
+    },
+    /// A produced value could not be rebuilt as a tensor.
+    ///
+    /// Defensive: the plan sizes every output as `elements * 4` bytes and
+    /// reports its shape from the same tensor type.
+    OutputConstruction { shape: Vec<usize>, elements: usize },
+    /// The prepared session failed to run.
+    GraphSessionExecution { source: GraphSessionExecutionError },
+}
+
+impl fmt::Display for CanonicalExecutionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self
+        {
+            Self::MissingInput { input, name } =>
+            {
+                write!(formatter, "input '{name}' ({input:?}) was not supplied")
+            },
+            Self::UnexpectedInput { input } =>
+            {
+                write!(
+                    formatter,
+                    "{input:?} is not a required input of this session"
+                )
+            },
+            Self::DuplicateInput { input } =>
+            {
+                write!(formatter, "{input:?} was supplied more than once")
+            },
+            Self::InputShapeMismatch {
+                input,
+                name,
+                expected,
+                actual,
+            } =>
+            {
+                write!(
+                    formatter,
+                    "input '{name}' ({input:?}) expects shape {expected:?} but received {actual:?}"
+                )
+            },
+            Self::NonContiguousInput {
+                input,
+                name,
+                shape,
+                elements,
+            } =>
+            {
+                write!(
+                    formatter,
+                    "input '{name}' ({input:?}) of shape {shape:?} holding {elements} value(s) is \
+                     not dense row-major"
+                )
+            },
+            Self::OutputConstruction { shape, elements } =>
+            {
+                write!(
+                    formatter,
+                    "an output of {elements} value(s) does not fit shape {shape:?}"
+                )
+            },
+            Self::GraphSessionExecution { source } =>
+            {
+                write!(formatter, "session execution failed: {source}")
+            },
+        }
+    }
+}
+
+impl core::error::Error for CanonicalExecutionError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self
+        {
+            Self::GraphSessionExecution { source } => Some(source),
             _ => None,
         }
     }
