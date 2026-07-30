@@ -3267,6 +3267,9 @@ dependencies = [
  "scirust-core",
  "scirust-cuda",
  "scirust-license",
+ "scirust-tensor-compile",
+ "scirust-tensor-ir",
+ "scirust-tensor-reference",
  "wgpu",
 ]
 
