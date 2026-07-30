@@ -455,9 +455,15 @@ impl Default for CcosMemory {
 
 impl CcosMemory {
     /// An empty in-memory kernel with no checkpoint path.
+    ///
+    /// The paging knobs come from the environment (`CCOS_MAX_RESIDENT`,
+    /// `CCOS_PAGING_THRESHOLD`), falling back to the historical defaults, so the
+    /// façade and the MCP server honour the same tuning as the `runtime` command
+    /// (`commands_runtime.rs`). Documented as env-tunable, previously hard-coded
+    /// on this path.
     pub fn new() -> Self {
         CcosMemory {
-            graph: MemoryGraph::new(0.2, 5000),
+            graph: MemoryGraph::new_from_env(0.2, 5000),
             engine: IncrementalGraphEngine::new(),
             event_log: EventLog::new("ccos-external-memory".to_string()),
             dist_log: DistributedEventLog::new(),
@@ -1794,6 +1800,10 @@ impl ExternalMemory for CcosMemory {
 mod tests {
     use super::*;
 
+    // `CCOS_MAX_RESIDENT` is process-global, so the test that toggles it must not
+    // run in parallel with another reading it (same convention as `mcp.rs`).
+    static RESIDENT_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     // ── B2-batch: deferred whole-graph resolution ────────────────────────────────
     // A structural fingerprint of the resolved graph (sorted edges), so the eager
     // and deferred-batch paths can be compared edge-for-edge.
@@ -2841,4 +2851,78 @@ mod tests {
         );
         assert!(!mem.graph.is_cold(&NodeId(cold_id)), "no longer cold");
     }
+
+    #[test]
+    fn ensure_resident_makes_an_around_recall_on_a_demoted_anchor_non_empty() {
+        // The read-path page fault, stated as an invariant rather than a comment:
+        // `recall` takes `&self` and cannot page, so once the anchor has been
+        // demoted to COLD every entry point must call `ensure_resident` first.
+        // Measured on a real tree (300 files, cap 5000): the façade skipping this
+        // returned an empty window where MCP — which goes through
+        // `AgentSession::recall` — returned 31 items for the same anchor and budget.
+        let mut mem = CcosMemory::new();
+        mem.ingest_source("src/cfg.rs", "pub fn limit() -> u8 { 7 }\n");
+        mem.ingest_source(
+            "src/api.rs",
+            "use crate::cfg;\npub fn h() -> u8 { cfg::limit() }\n",
+        );
+        for i in 0..8 {
+            mem.ingest_source(&format!("src/pad{i}.rs"), "pub fn pad() -> u8 { 1 }\n");
+        }
+
+        // A cap that demotes the anchor but still leaves room for it and its
+        // region once paged back — the real deployment shape. (A cap so tight
+        // that the region cannot fit is the cap doing its job, not a bug.)
+        mem.graph.max_in_memory_nodes = 8;
+        mem.graph.enforce_paging();
+        let anchor = NodeId("file:src/api.rs".into());
+        assert!(
+            mem.graph.is_cold(&anchor),
+            "fixture must demote the anchor to COLD to be meaningful"
+        );
+
+        let cold_window = mem.recall(&Recall::around("file:src/api.rs"), 2048);
+        assert!(
+            cold_window.items.is_empty(),
+            "a demoted anchor is invisible without a page-in: {:?}",
+            cold_window.items
+        );
+
+        assert!(
+            mem.ensure_resident("file:src/api.rs") > 0,
+            "anchor paged in"
+        );
+        let win = mem.recall(&Recall::around("file:src/api.rs"), 2048);
+        assert!(
+            win.items.iter().any(|i| i.uri.contains("src/api.rs")),
+            "after the page fault the anchor is back in the window: {:?}",
+            win.items.iter().map(|i| &i.uri).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn new_honours_the_resident_cap_from_the_environment() {
+        // `CCOS_MAX_RESIDENT` is documented as the env-tunable resident cap, and
+        // `commands_runtime` already honours it; the façade / MCP constructor
+        // hard-coded 5000 and silently ignored it.
+        let _guard = RESIDENT_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let restore = std::env::var("CCOS_MAX_RESIDENT").ok();
+
+        std::env::set_var("CCOS_MAX_RESIDENT", "7");
+        let mem = CcosMemory::new();
+        assert_eq!(mem.graph.max_in_memory_nodes, 7);
+
+        std::env::remove_var("CCOS_MAX_RESIDENT");
+        let default_mem = CcosMemory::new();
+        assert_eq!(
+            default_mem.graph.max_in_memory_nodes, 5000,
+            "an unset var keeps the historical default"
+        );
+
+        match restore {
+            Some(v) => std::env::set_var("CCOS_MAX_RESIDENT", v),
+            None => std::env::remove_var("CCOS_MAX_RESIDENT"),
+        }
+    }
+
 }
