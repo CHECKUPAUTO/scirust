@@ -386,6 +386,14 @@ pub fn run_self_test() -> Vec<SelfTest> {
 
     // 2 — the core promise: the cross-file dependency is paged into a bounded
     // window anchored on the dependent file (no K to tune).
+    //
+    // Page the anchor's region in first, like every other `around` entry point.
+    // The fixture is small enough that nothing is demoted today, so this changes
+    // no result — it keeps the battery measuring what it claims to measure. A cap
+    // low enough to demote the fixture used to turn this check and the propagation
+    // one below into failures, reporting "NOT certified" for a kernel that was
+    // working correctly.
+    mem.ensure_resident("file:src/service.rs");
     let window = mem.recall(&Recall::around("file:src/service.rs"), 2048);
     let dep_recalled = window.items.iter().any(|i| i.uri == "file:src/db.rs");
     results.push(SelfTest::new(

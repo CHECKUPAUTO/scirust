@@ -834,6 +834,16 @@ impl CcosMemory {
                 paged += 1;
             }
         }
+        // `page_in`'s capacity swap protects only the node it just restored, so
+        // under a cap tight enough that the region does not fit, paging a
+        // neighbour could evict the very anchor we came here for — leaving the
+        // caller with a window missing the one node it asked about. Restore it
+        // last so this method actually delivers what its name promises. The
+        // neighbour that loses the seat instead is the correct trade: the anchor
+        // is what the recall is about.
+        if self.graph.is_cold(&id) && self.graph.page_in(&id) {
+            paged += 1;
+        }
         paged
     }
 
@@ -2909,5 +2919,4 @@ mod tests {
             win.items.iter().map(|i| &i.uri).collect::<Vec<_>>()
         );
     }
-
 }
