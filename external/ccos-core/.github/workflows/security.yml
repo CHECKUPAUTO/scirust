@@ -1,0 +1,41 @@
+name: Periodic Security Validation
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  process-execution-policy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: forbidden research components
+        run: scripts/check-no-research-components.sh
+      - name: fuzz smoke (persistent envelope parser, 60s)
+        run: |
+          cargo install cargo-fuzz --locked
+          timeout 120 cargo fuzz run persistence_blob -- -max_total_time=60 || true
+
+  reproducibility:
+    name: two clean builds compared
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: build A
+        run: |
+          cargo build --release --locked
+          sha256sum target/release/ccos > /tmp/build_a.sha
+      - name: build B (clean)
+        run: |
+          cargo clean
+          cargo build --release --locked
+          sha256sum target/release/ccos > /tmp/build_b.sha
+      - name: compare
+        run: |
+          diff /tmp/build_a.sha /tmp/build_b.sha && echo "REPRODUCIBLE" || { echo "BUILD DIFFERS — investigate before claiming reproducibility"; exit 1; }

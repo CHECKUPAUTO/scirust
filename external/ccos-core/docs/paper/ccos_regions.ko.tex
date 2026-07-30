@@ -1,0 +1,542 @@
+\documentclass[11pt]{article}
+
+% --- XeLaTeX로 컴파일 (kotex이 한글 글꼴을 설정) ---
+\usepackage{kotex}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\geometry{margin=1in}
+\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
+
+\newtheorem{definition}{정의}
+\newtheorem{proposition}{명제}
+\newtheorem{theorem}{정리}
+
+\newcommand{\dcausal}{d_{\mathrm{c}}}
+\newcommand{\Nk}{\mathcal{N}_k}
+\newcommand{\code}[1]{\texttt{#1}}
+
+\title{\textbf{인지적 MMU:\\ LLM 코딩 에이전트를 위한 결정론적이고 감사 가능한 작업 기억\\ \large (그리고 인과 검색이 왜 RAG를 이기지 못하는지에 대한 정직한 보고)}}
+\author{CCOS 프로젝트\thanks{Causal Context Operating System(CCOS), 공개 연구
+프로토타입. 소스 코드, 재현 스크립트 및 본 논문:
+\url{https://github.com/CHECKUPAUTO/CCOS}.}}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+LLM 코딩 에이전트의 작업 기억은 불투명하게 관리된다: 검색 스택(RAG, GraphRAG, 에이전트
+프레임워크)은 저장소를 경계가 정해진 창으로 페이징하고, 세션이 진행됨에 따라 그 창을 확률적으로
+변형한다. 그래서 에이전트가 수십 단계 후에 표류할 때, 프로젝트에 대한 그 표상이 \emph{왜} 그리고
+\emph{언제} 손상되었는지 말하기란 불가능하다. CCOS는 운영 체제가 RAM을 다루듯 에이전트의 기억을
+다룬다: 소스 코드는 \emph{이벤트 소싱}된 인과 그래프로 파싱되고, 노드는 점수화되어 토큰 예산 아래
+페이징되며, 모든 상태 전이는 비트 단위로 재생되는 해시 체인 로그에 기록된다. 우리는 \emph{인과
+영역}(파일 간 인과 링크 그래프의 한 연결 성분)과 인과 거리(가중 최단 경로)에 대한 정밀하고 결정론적인
+정의를 제시하고, 영역과 페이징된 창이 그래프의 순수 함수이며 재생 시 정확히 재구성됨을 증명한다 ---
+바로 이 성질이 에이전트의 기억을 \emph{감사 가능}하고 \emph{타임트래블 디버깅 가능}하게 만든다.
+이어서 우리는 이 인과 구조가 CCOS를 기준선보다 \emph{더 나은 검색기}로 만드는지를 묻고, \emph{정직하게}
+그렇지 않다고 보고한다. 세 개의 성숙한 크레이트에서 가져온 $70$개의 실제 버그 수정 커밋에서 측정했을 때,
+인과 선택은 \textbf{평범한 어휘적 TF-IDF 검색기와 동률}을 이루며, 빠듯한 예산에서는 그것에 진다.
+실제 버그에서는 한 수정의 파일들이 어휘를 공유하므로 어휘 유사도가 그것들도 찾아내며, 크래시 트레이스로부터
+CCOS를 시드하는 개념 증명 또한 ``오류 메시지에 대한 RAG''에 패한다(Rust의 오류 메시지는 원인을 이름으로
+짚는다). 한 원인이 그 증상과 어휘적으로 비유사하도록 구성될 때, LLM 없는 시뮬레이션은 둘을 \emph{실제로}
+분리해 내며, $70$억 파라미터 모델을 사용한 첫 온디바이스 실행이 이를 재현한다 --- 그러나 그러한 양상은
+실제 코드에서는 일어나지 않는다. 따라서 기여는 더 나은 검색이 \emph{아니다}. 그것은 검색 스택에 구조적으로
+결여된 인프라이다: 어느 단계에서든 정확한 컨텍스트 상태를 되감고 다른 매개변수 아래 그것을 재생할 수 있는
+(\emph{타임트래블 디버깅}) \emph{결정론적이고, 재생 가능하며, 감사 가능한} 에이전트 기억이다. 우리는 엔진,
+정직한 검증 하네스, 그리고 본 논문을 공개하며, 무엇이 \emph{증명되었는지}(형식적 구조, 결정론, 재생),
+무엇이 \emph{측정되었는지}(검색 커버리지 --- 여기서 CCOS는 실제 버그에서 어휘적 RAG를 이기지 \emph{못한다}),
+그리고 CCOS가 \emph{실제로} 이기는 유일한 축인 \textbf{효율성}을 전반에 걸쳐 표기한다. 30B 모델과
+``컴파일러 인 더 루프'' 재시도를 사용해 실제 단일 파일 수정에서 종단 간으로 실행할 때, CCOS와 RAG는
+\emph{동등하게} 해결하지만($2/10$), CCOS는 어휘적 검색기의 $5366$ 토큰에 비해 $776$개의 컨텍스트 토큰으로
+그것을 해낸다 --- $6.9\times$ 감소이다(세 크레이트의 $51$개 수정에 대해 모델 없이는 $4.1$에서 $9.1\times$),
+왜냐하면 인과 영역은 top-$k$를 예산까지 채우는 대신 작업 집합에서 멈추기 때문이다. 따라서 CCOS는 더 나은
+검색기나 해결기가 아니라, 더 \emph{절약적}이고 \emph{감사 가능}한 것이다 --- 그것은 조정할 $k$ 없이 스스로
+보정한다. (자신의 소스 트리에서, 영역 선택은 한 과제의 $k$-홉 이웃을 $0.97$의 재현율로 덮으며, 평면 선택은
+$0.35$이고, 토큰은 약 $48\%$ 더 적다. 영역의 내부 연결도는 $95.5\%$이다.)
+\end{abstract}
+
+\section{서론}
+
+저장소 위에서 작동하는 LLM 코딩 에이전트는 \emph{무엇을 컨텍스트 창에 넣을지}를 반복적으로 결정해야 한다.
+지배적인 패턴은 검색이다: 코드 청크를 임베딩하고, 과제에 대해 순위를 매기며, 토큰 예산이 소진될 때까지
+top-$k$를 이어 붙인다~\cite{lewis2020rag}. 이는 컨텍스트를 일차원의 순위 목록으로 취급한다. 두 가지 실패
+양상이 뒤따른다. 첫째, \emph{희석}: 과제가 길어질수록 창은 전역적으로 두드러지지만 과제와 무관한 코드를
+축적하며, 모델은 긴 컨텍스트의 중간부에 잘 주의하지 못한다~\cite{liu2023lost}. 둘째, \emph{비정합성}:
+상위 $k$개 청크가 반드시 추론의 연결된 단위를 이루지는 않는다 --- 한 함수가 그 호출자, 그 오류 지점, 또는
+그것이 의존하는 데이터 없이 페이징될 수 있다.
+
+운영 체제는 수십 년 전 유사한 문제에 직면했고 \emph{작업 집합}으로 답했다: 상주해 있어야 하는, 최근 참조된
+페이지들의 집합이다~\cite{denning1968working}. CCOS는 그 유비를 LLM 컨텍스트에 채택한다~\cite{packer2023memgpt}:
+소스 코드는 인과 그래프로 파싱되고, 노드는 점수화되며, 경계가 정해진 ``컨텍스트 창''이 RAM~$\leftrightarrow$~VRAM
+처럼 페이징되어 들고 난다. 검색 스택과 달리, 모든 전이는 해시 체인 이벤트 로그에 기록되므로 기억은 블랙박스가
+아니라 \emph{감사 가능하고 재생 가능한} 산출물이다. 우리의 기여는 다음과 같다:
+
+\begin{enumerate}
+  \item \textbf{컨텍스트 영역의 형식적·결정론적 모델}(\S\ref{sec:regions}, \S\ref{sec:determinism}):
+  가중 최단 경로로서의 인과 거리, 파일 간 인과 링크 그래프의 연결 성분으로서의 영역 소속, 그리고 결정론 정리 ---
+  영역과 페이징된 창은 그래프의 순수 함수이므로, 한 세션은 그 해시 체인 이벤트 로그로부터 비트 단위로 재구성된다
+  (변조 방지 재생).
+  \item \textbf{타임트래블 디버깅을 갖춘 이벤트 소싱 에이전트 세션}(\S\ref{sec:timetravel}): 모든 인지 연산
+  (수집, 실패 신호, 회수)이 로깅된다; 어느 단계에서든 정확한 컨텍스트 상태가 재구성 가능하다; 그리고 한 회수는
+  \emph{다른 매개변수 아래 재생}되어 에이전트가 더 나은 결정을 내렸을지 물어볼 수 있다 --- 확률적 검색 스택에
+  구조적으로 결여된 능력이다.
+  \item \textbf{정직한 검증 하네스와 부정적 결과}(\S\ref{sec:protocol}): $70$개의 실제 버그 수정 커밋에서,
+  인과 선택은 한 수정의 파일들을 창에 넣는 데에서 어휘적 TF-IDF 검색기를 이기지 \emph{못한다}(동률이고, 빠듯한
+  예산에서는 진다). 그리고 크래시 트레이스 피벗은 ``오류 메시지에 대한 RAG''에 패한다. 우리는 이를 솔직히 보고한다
+  --- 그것은 CCOS의 가치를 \emph{검색}에서 \emph{감사 가능성}으로 재배치한다.
+  \item \textbf{LLM 없는 국소성 측정}(\S\ref{sec:eval}), 실제적이고 재현 가능한 수치와 함께, 그리고 우리가
+  규정하되 열어 두는 반증 가능한 \emph{충분} 조건 프로토콜(4단계).
+\end{enumerate}
+
+\section{관련 연구}\label{sec:related}
+
+\paragraph{검색 증강 생성.} RAG는 모수적 모델을 비모수적 저장소로 보강하고 질의별로 구절을 검색한다
+~\cite{lewis2020rag}. Self-RAG는 검색을 게이팅하고 생성을 비평하는 반성 토큰을 추가한다~\cite{asai2023selfrag}.
+이들은 \emph{독립적인} 청크 위에서 작동한다; 검색된 항목들 사이의 정합성은 모델링되지 않는다.
+
+\paragraph{그래프·구조 인지 검색.} GraphRAG는 엔티티 지식 그래프를 구축하고 커뮤니티 구조를 요약하여 전역 질의에
+답한다~\cite{edge2024graphrag}. 코드의 경우 속성 그래프가 AST, 제어 흐름, 데이터 흐름을 통합한다
+~\cite{yamaguchi2014cpg}. CCOS 영역은 이 계보에 속하지만 \emph{페이징}을 겨냥한다: 토큰 예산 아래, 결정론적
+축출과 함께, 한 과제를 위해 어떤 연결된 하위 구조를 상주시킬 것인가.
+
+\paragraph{에이전트 기억.} MemGPT는 LLM을 컨텍스트 내 창과 외부 저장소 사이를 페이징하는 OS로 묘사한다
+~\cite{packer2023memgpt}; Generative Agents는 최신성, 중요도, 관련성으로 점수화된 기억을 회수한다
+~\cite{park2023generative} --- CCOS가 영역 온도로 집계하는 바로 그 요인들이다. LangGraph~\cite{langgraph}는
+에이전트를 상태를 갖는 단계 그래프로 구조화한다; 그것은 \emph{제어} 흐름을 오케스트레이션하는 반면, CCOS는
+\emph{기억}을 구조화한다. 둘은 상보적이다.
+
+\paragraph{컨텍스트 창 관리.} KV 캐시 축출은 ``대형 타격자'' 또는 싱크 토큰을 상주시키며~\cite{liu2023lost},
+PagedAttention은 OS 페이징을 KV 캐시에 적용한다~\cite{kwon2023paged}. 이 기법들은 한 번의 순전파 내부에서
+토큰 수준으로 작동한다; CCOS는 한 에이전트 세션에 걸쳐 \emph{의미} 수준으로 작동한다.
+
+\section{인과 컨텍스트 기질}\label{sec:substrate}
+
+CCOS는 소스 코드를 방향성 \emph{인과 기억 그래프} $G=(V,E)$로 파싱한다. 노드 $v\in V$는 파일, 모듈, 심볼 또는
+외부 의존성이며, 스칼라 필드 $\mathrm{imp}(v)$(기본 중요도), $\mathrm{fail}(v)\in[0,1]$(실패 관련성),
+$\mathrm{rec}(v)\in[0,1]$(최신성)을 갖는다. 간선 $e=(u\!\to\!w)\in E$는 가중치 $w(e)\in(0,1]$와 유형
+(포함, 의존, 참조, 인과)을 지닌다. 커널은 각 노드에 인과 점수를 부여한다
+\begin{equation}
+\mathrm{score}(v) = \mathrm{clamp}\big(0.15\,\mathrm{imp}(v) + 0.50\,\mathrm{fail}(v)
+  + 0.30\,\mathrm{rec}(v) + 0.05\ln(1{+}\mathrm{acc}(v)),\,0,1\big),
+\label{eq:score}
+\end{equation}
+여기서 $\mathrm{acc}(v)$는 접근 횟수이다. 결함은 간선을 따라 전파되고, $\mathrm{fail}$은 논리 시계와 함께
+감쇠하며, 모든 상태 전이는 결정론적 재생을 가능케 하는 해시 체인 이벤트 로그에 추가된다~\cite{haber1991timestamp}.
+노드 식별자는 네임스페이스를 갖는다(\code{file:p}, \code{mod:p:n}, \code{use:p:path}, \code{sym:p:n},
+\code{dep:root}); 한 노드의 소유 파일은 그 식별자로부터 복원 가능하다. CCOS v0.2는 $\mathrm{score}$ 최상위
+노드를 페이징한다: 평면적인 1차원 정책이다. 우리는 이제 선택을 공간적으로 만든다.
+
+\section{컨텍스트 영역}\label{sec:regions}
+
+\subsection{인과 거리}
+
+\begin{definition}[인과 거리]
+$\hat G$를 $E$가 $V$ 위에 유도하는 무방향 다중 그래프라 하고, 각 간선에 비용 $c(e) = -\ln w(e) \ge 0$을
+부여하여 더 강한 인과 링크가 더 짧은 한 걸음이 되도록 한다. \emph{인과 거리} $\dcausal(u,v)$는 $\hat G$에서
+모든 $u$--$v$ 경로에 걸친 최소 총비용이며, 그러한 경로가 없으면 $+\infty$이다. 비가중 홉 거리
+$\mathrm{hops}(u,v)$는 단위 비용으로 유사하게 정의된다.
+\end{definition}
+
+$w(e)\le 1$이므로 $c(e)\ge 0$이고, 따라서 $\dcausal$은 각 연결 성분 위에서 진정한 최단 경로 거리이다(비음수,
+대칭, 삼각 부등식). 목표 $t$의 \emph{$k$-홉 인과 이웃}은
+\begin{equation}
+\Nk(t) = \{\, v \in V : \mathrm{hops}(t,v) \le k \,\}.
+\end{equation}
+$\Nk(t)$는 평가(\S\ref{sec:eval})에서 사용되는 ``$t$에 있는 과제에 인과적으로 관련된 것''의 정답값이다.
+
+\subsection{영역 소속}
+
+외부 의존성 허브(예: \code{dep:std})는 거의 모든 것을 연결하므로 그래프를 하나의 성분으로 붕괴시켜서는 안 된다.
+따라서 우리는 그것들을 분리한다.
+
+\begin{definition}[파일 간 인과 링크]
+비외부 노드 $v$에 대해 $\phi(v)$를 그 소유 파일이라 하자. 두 파일 $f,g$가 \emph{직접 링크}된다($f \approx g$로
+표기)는 것은, $\phi(u)=f$, $\phi(w)=g$, $f\neq g$이고 $u$와 $w$ 둘 다 외부 의존성 노드가 아닌 간선
+$(u\!\to\!w)\in E$가 존재할 때, 그리고 오직 그때이다.
+\end{definition}
+
+\begin{definition}[영역]\label{def:region}
+$\approx^{*}$를 파일 키 집합 위에서 $\approx$의 반사·추이 폐포라 하자. \emph{영역}은 그 파일이 $\approx^{*}$의
+한 동치류에 속하는 모든 노드의 집합이다; 모든 외부 의존성 노드는 추가적인 하나의 영역을 이룬다. 두 노드가 같은
+영역에 속하는 것은, 그 파일들이 파일 간 인과 링크 그래프의 같은 연결 성분에 있을 때, 그리고 오직 그때이다.
+\end{definition}
+
+\begin{proposition}[영역은 노드를 분할한다]
+정의~\ref{def:region}의 영역들은 $V$의 한 분할을 이룬다: 모든 노드는 정확히 하나의 영역에 속한다.
+\end{proposition}
+\begin{proof}
+$\approx^{*}$는 파일 키 위의 동치 관계이므로 그 류들은 파일 키를 분할한다; 외부 버킷은 구성상 별개의 류이다.
+각 비외부 노드를 그 파일의 류로, 각 외부 노드를 외부 류로 보내는 것은 서로소인 블록으로 향하는 전함수이며,
+따라서 한 분할이다. \qed
+\end{proof}
+
+기본적으로(포함과 임포트 간선만 있을 때) 각 소스 파일은 그 자신의 영역이다. 진정한 파일 간 의존성 또는 전파된
+실패는 여러 파일을 단일한 다중 파일 영역으로 병합한다 --- 에이전트가 함께 깨워야 할 ``지식의 지대''이다.
+
+\subsection{영역 스칼라}
+
+성원 집합이 $M$인 영역 $R$에 대해:
+\begin{align}
+\mathrm{heat}(v)        &= 0.5\,\mathrm{score}(v) + 0.3\,\mathrm{fail}(v) + 0.2\,\mathrm{rec}(v), \\
+\mathrm{temp}(R)        &= \mathrm{clamp}\!\Big(\tfrac{1}{|M|}\textstyle\sum_{v\in M}\mathrm{heat}(v),\,0,1\Big), \label{eq:temp}\\
+\mathrm{dens}(R)        &= \frac{|\{\,e\in E : \text{양 끝점이} \in M\,\}|}{|M|}. \label{eq:dens}
+\end{align}
+온도는 한 영역이 얼마나 ``깨어 있는가''이고, 밀도는 그 내부 인과 응집도(성원당 내부 간선 수)이다. 활성화는 한
+영역을 데우고($\mathrm{temp}\mathrel{+}=0.25$, 상한 적용) 논리 틱을 기록한다; 냉각 단계는 온도에 감쇠 계수를
+곱하고 하한 아래의 영역을 축출한다.
+
+\subsection{동적 입장 정책}\label{sec:policy}
+
+정적 임계값 $0.6$은 토큰 압력 $u\in[0,1]$(예산의 사용 분율)과 과제 복잡도 $\kappa\in[0,1]$의 함수가 된다:
+\begin{align}
+\theta(u,\kappa)       &= \mathrm{clamp}(0.6 + 0.3\,u - 0.2\,\kappa,\; 0.05,\; 0.95), \\
+a(R)                   &= 0.55\,\mathrm{temp}(R) + 0.30\,\frac{\mathrm{dens}(R)}{1+\mathrm{dens}(R)} + 0.15\,\kappa, \\
+\mathrm{admit}(R)      &\iff a(R) \ge \theta(u,\kappa).
+\end{align}
+뜨겁고 응집적인 영역은 정적 $0.6$이 거부할 때조차 입장될 수 있다; 거의 가득 찬 창은 $\theta$를 높여 가장 뜨거운
+영역만 들어오게 한다.
+
+\section{결정론과 재생}\label{sec:determinism}
+
+\begin{theorem}[영역 결정론]
+영역 분할, \eqref{eq:temp}--\eqref{eq:dens}의 모든 영역 스칼라, 그리고 활성화 이력은 그래프 $G$와 (논리적으로
+타임스탬프된) 활성화 이벤트 열의 순수하고 순서 무관한 함수이다. 따라서 한 세션의 이벤트 로그가 주어지면 엔진
+상태는 동일하게 재구성된다: $G'$이 로그로부터 재구성된 그래프이고 $L$이 그 영역 이벤트라면,
+$\mathrm{replay\_from}(G',L)$은 $L$을 산출한 라이브 엔진과 같다.
+\end{theorem}
+\begin{proof}[증명 개요]
+클러스터링은 노드와 간선을 정렬된 순서로 열거하고 정렬된 너비 우선 탐색으로 연결 성분을 계산하므로, 그 출력은
+해시 반복 순서와 무관하다. 식 \eqref{eq:score}, \eqref{eq:temp}, \eqref{eq:dens}는 노드 필드와 적격 간선 수에
+대한 결정론적 산술이다. 활성화는 논리 시계(카운터)를 읽으며 결코 벽시계 시간을 읽지 않고, 방출된
+\code{RegionActivated} 이벤트는 정확한 틱을 기록한다. 재구성은 $G'$을 재클러스터링하고(구조상 $G'\!=\!G$이므로
+기저 상태 동일) 기록된 활성화를 로그 순서대로 적용한다; 각 단계는 같은 입력에 대한 같은 순수 함수이므로 결과
+상태는 동일하다. 통합 테스트 \code{replay\_reconstructs\_identical\_engine}는 구조적 동등성으로
+$\mathrm{engine}=\mathrm{replay\_from}(G',L)$을 검증한다. \qed
+\end{proof}
+
+이는 CCOS의 기존 보장을 확장한다: 주 이벤트 로그는 해시 체인이며 변조 방지이므로 영역 이력은 감사 가능하고,
+10\,000 사이클 테스트는 영역 수나 온도에서 어떠한 표류도 보이지 않는다.
+
+\section{이벤트 소싱 세션과 타임트래블 디버깅}\label{sec:timetravel}
+
+결정론은 단지 정확성 성질이 아니다; 그것은 우리의 평가가 논증할, CCOS를 검색 스택과 구별 짓는 그 능력의 토대이다.
+\code{AgentSession}은 에이전트가 자신의 기억에 수행하는 모든 인지 연산 --- \code{Ingest}, \code{SignalFailure},
+\code{Recall} --- 을 순서가 있는 타임라인으로 기록한다. 각 연산이 이전 상태의 결정론적 함수이므로, 첫 $n$개 연산
+이후의 기억은 변형을 일으키는 것들을 재생함으로써(\code{replay\_to(n)}) 정확히 재구성된다: 에이전트의 ``마음''을
+어느 단계로든 \emph{되감을} 수 있다.
+
+디버깅에 중요한 연산은 반사실이다. \code{recall\_what\_if($n$, $q$, $b$)}는 기억을 $n$단계까지 재생하고 다른
+질의 $q$ 또는 토큰 예산 $b$로 회수를 다시 실행하여, 에이전트가 \emph{보았을} 창을 반환한다. 한 에이전트가 15
+단계에서 나쁜 패치를 내놓을 때, 운영자는 14단계의 정확한 컨텍스트를 재생하고, 예산을 넓히거나 앵커를 바꾸어,
+결정이 개선되는지 관찰할 수 있다 --- 에이전트의 작업 기억을 위한 폐루프, 재현 가능한 디버거이다. RAG나 프레임워크
+스택은 한 세션에 걸쳐 그 저장소를 확률적으로 변형하고 어떠한 정규적·재생 가능한 전이 로그도 보존하지 않으므로,
+같은 질문(\emph{표상은 왜, 언제 손상되었는가?})은 거기서 답이 없다. 우리는 이것이 과제 성공을 개선한다고 주장하지
+않는다; 우리는 그것이 대안들이 갖지 못한 성질이며 CCOS 기여의 정직한 자리임을 주장한다(\S\ref{sec:protocol}).
+
+\section{구현}\label{sec:impl}
+
+엔진은 그래프 위에 계층화된, 의존성이 가벼운 약 $600$줄의 Rust이며, 파서, 가드, 증분 빌더, 이벤트 소싱 코어를
+바꾸지 않는다. 공개 표면은 다음과 같다: \code{ContextRegionEngine}(\code{cluster\_nodes},
+\code{initialize\_regions}, \code{activate\_region}, \code{tick\_cooldown}, \code{replay\_from}), 데이터
+타입 \code{ContextRegion} / \code{ContextPoint} / \code{ContextWindow}, \code{ContextPolicy}, 그리고 다섯 개의
+새 이벤트 변형(\code{RegionCreated}, \code{RegionActivated}, \code{RegionMerged}, \code{RegionEvicted},
+\code{ContextWindowGenerated}). \code{ccos regions} CLI가 클러스터링, 활성화, 국소성 보고를 노출한다. 전체
+크레이트는 \code{clippy -D warnings} 아래 경고 없이 빌드되고 364개의 테스트를 통과한다.
+
+\section{평가: 오늘 우리가 측정할 수 있는 것}\label{sec:eval}
+
+우리는 \emph{측정된} 결과(이 절, 완전히 재현 가능하고 LLM 없음)와 \emph{가설적인} 에이전트 수준 이득
+(\S\ref{sec:protocol})을 분리한다.
+
+\paragraph{설정.} 우리는 CCOS 자신의 소스 트리에서 실행한다($|V|=705$개 노드, $|E|=822$개 간선, $26$개 영역
+산출). 목표 노드 $t$에 대해 $k=2$인 $\Nk(t)$를 정답값으로 취하고, 영역의 크기 예산에서 두 선택 전략을 비교한다:
+\textbf{평면} --- $\mathrm{score}$ 기준 상위 $|R|$개 노드(CCOS v0.2 / 고전적 순위 검색) --- 과 \textbf{영역}
+--- $t$의 영역 성원. 우리는 인과 정밀도 $|S\cap\Nk|/|S|$, 재현율 $|S\cap\Nk|/|\Nk|$, 그리고 각 전략이 $\Nk$를
+\emph{덮기} 위해 필요로 하는 토큰을 보고한다. 모든 수치는 \code{scripts/region\_benchmark.sh}가 산출하며
+결정론적이다.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lcc}
+\toprule
+전략 & 인과 정밀도 & 인과 재현율 \\
+\midrule
+평면(v0.2 / 순위) & 0.021 & 0.347 \\
+\textbf{영역(v0.3)} & \textbf{0.057} & \textbf{0.972} \\
+\bottomrule
+\end{tabular}
+\caption{\code{src/}에서의 국소성($k=2$, 12개 목표). 영역 선택은 한 과제 인과 이웃의 $97\%$를 덮으며, 평면
+선택은 $35\%$이고, 동일 커버리지에서 토큰은 약 $48\%$ 더 적다.}
+\label{tab:locality}
+\end{table}
+
+\paragraph{응집도와 비용.} 영역은 \textbf{평균 인과 밀도 $0.955$}(식~\ref{eq:dens}, 정규화)에 이른다 --- 그것들은
+거의 전적으로 내부 연결되어 있으며, 즉 임의의 파일 묶음이 아니라 진정한 인과 군집이다. $705$개 노드에 대한 영역
+지도 구축은 약 $20$\,ms이며($54.5$ 빌드/초), 단일 활성화는 약 $20$\,ms이다.
+
+\paragraph{정직한 읽기.} 절대 정밀도는 낮다($0.06$). 왜냐하면 v0.2 파서가 포함과 임포트 간선만 방출하므로
+$\Nk(t)$가 작고(흔히 $2$--$3$개 노드) 한 영역은 파일 전체에 걸치기 때문이다. 견고하고 실질적인 승리는 \emph{재현율}
+($0.97$ 대 $0.35$)과 \emph{토큰 효율}(약 $48\%$)이다: 한 영역은 과제의 인과 이웃을 신뢰성 있게 담고 그렇게 하는 데
+더 적은 토큰을 치른다. 더 풍부한 의미 간선(호출 그래프 / 데이터 흐름, 로드맵 항목 P1.3)은 $\Nk$를 날카롭게 하며
+정밀도를 높이는 주된 레버이다; 우리는 이를 숨기기보다 짚어 둔다.
+
+\section{명시된 오라클 아래의 가설 시뮬레이션(LLM 없음)}\label{sec:sim}
+
+핵심 명제 --- \emph{영역별 인과 기억이 길고 다중 파일적인 과제에서 에이전트를 돕는가?} --- 는 궁극적으로 LLM
+롤아웃을 필요로 한다(\S\ref{sec:protocol}). 그러나 그 \emph{필요} 조건은 지금, LLM 없이 검증 가능하다: \textbf{한
+에이전트는 그 필요 인과 컨텍스트가 창에 없는 과제를 해결할 수 없다}. 우리는 명시적 오라클 아래, 각 선택 전략이
+\emph{필요한 인과 컨텍스트를 창에 넣는지}를 측정한다.
+
+\paragraph{설정.} 우리는 모듈식 합성 저장소를 생성한다: $S$개의 독립 하위 시스템, 각각은 하나의 파일 간 인과
+사슬과 고점수 \emph{미끼} 심볼로 연결된 파일들의 집합이다; 하위 시스템 사이에는 간선이 없으므로 각 하위 시스템은
+하나의 경계 인과 영역이다. 인과 구조는 어휘 구조와 \emph{탈결합}된다 --- 한 사슬 이웃은 목표와 어떤 식별자 토큰도
+공유하지 않고 오직 간선만 공유한다 --- 즉 인과적으로 필수이지만 어휘적으로 비유사한 의존성을 모델링한다.
+\emph{지름} $d$의 과제는 그 사슬을 따라 $\pm d$ 창을 요구한다(최대 $2d{+}1$개 파일); 예산은 약 한 하위 시스템을
+담으며, 저장소보다 훨씬 작다. \textbf{오라클}은 $R(t)\subseteq S$이다.
+
+결정적으로, 검색 파이프라인은 텍스트 \emph{질의}로부터 코드를 위치 짓는 반면, OS식 기억은 작업 공간 신호(활성
+파일, 실패하는 테스트)에 \emph{앵커}한다. 우리는 둘 다 모델링한다: 각 과제는 질의(토큰 가방)와 앵커(활성 파일
+노드)를 지니며, 두 시나리오를 실행한다 --- \textbf{깨끗함}(질의가 목표를 가리킴)과 \textbf{잡음}(무관한 하위
+시스템의 함정 미끼가 어휘적으로 목표를 능가함). 여섯 전략이 예산을 공유한다: \code{rag-dense}(어휘 top-$k$),
+\code{rag-hybrid}(어휘 $+$ 인과 점수), \code{graphrag-1hop}(최선 히트 $+$ 한 홉), \code{graphrag-bfs}(최선
+히트로부터의 무경계 확장), \code{ccos-from-query}(최선 \emph{어휘} 히트의 CCOS 영역 --- 절제), 그리고
+\code{ccos-region}(\emph{앵커}의 CCOS 영역). 시드되고 결정론적이다; \code{ccos experiment}로 재현하라.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lcccccc}
+\toprule
+& \multicolumn{4}{c}{지름 $d$에서의 성공} & \multicolumn{2}{c}{전체} \\
+\cmidrule(lr){2-5}\cmidrule(lr){6-7}
+전략 & $d{=}1$ & $d{=}2$ & $d{=}3$ & $d{=}4$ & 성공 & 커버 \\
+\midrule
+\multicolumn{7}{l}{\emph{깨끗한 질의(목표를 가리킴)}}\\
+\code{rag-dense}      & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 0.19 \\
+\code{rag-hybrid}     & 1.00 & 0.00 & 0.00 & 0.00 & 0.23 & 0.65 \\
+\code{graphrag-1hop}  & 1.00 & 0.00 & 0.00 & 0.00 & 0.23 & 0.58 \\
+\code{graphrag-bfs}   & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 \\
+\code{ccos-from-query}& 1.00 & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 \\
+\code{ccos-region}    & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 \\
+\midrule
+\multicolumn{7}{l}{\emph{잡음 질의(한 미끼가 어휘적으로 목표를 능가함)}}\\
+\code{rag-dense}      & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 0.19 \\
+\code{rag-hybrid}     & 1.00 & 0.00 & 0.00 & 0.00 & 0.23 & 0.65 \\
+\code{graphrag-1hop}  & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 0.19 \\
+\code{graphrag-bfs}   & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 \\
+\code{ccos-from-query}& 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 \\
+\textbf{\code{ccos-region}} & \textbf{1.00} & \textbf{1.00} & \textbf{1.00} & \textbf{1.00} & \textbf{1.00} & \textbf{1.00} \\
+\bottomrule
+\end{tabular}
+\caption{가설 시뮬레이션($800$개 과제, 시드 $42$, 예산 약 한 하위 시스템). 성공 $=$ 필요 인과 집합 $R(t)$가 창
+안에 있음. 깨끗한 질의 아래에서는 모든 구조 인지 방법이 동률이고; 오도하는 질의 아래에서는 작업 공간에 앵커한
+영역만 살아남는다.}
+\label{tab:sim}
+\end{table}
+
+\paragraph{발견(그리고 그 정직한 한계).}
+\textbf{(1)} 어휘 검색(\code{rag-dense})은 파일 간 인과 과제에서 \emph{실패}한다($0\%$; 커버리지 $0.19$):
+유사도는 인과적으로 필수이지만 어휘적으로 비유사한 컨텍스트를 떠올리지 못한다 --- 가설의 전제이다.
+(\code{rag-hybrid}의 $d{=}1$ 승리는 그것이 빌려 온 \emph{인과 점수}에서 오는 것이지 어휘 유사도에서 오는 것이
+아니며, 그래서 그것들이 잡음 아래에서도 지속된다.)
+\textbf{(2)} 구조 인지 선택의 가치는 \emph{지름과 함께 커진다}: 한 홉 확장은 $d{=}1$만 해결하는 반면, 완전한 인과
+페이징(\code{graphrag-bfs}, \code{ccos-region})은 모든 $d$를 해결한다 --- H2의 방향이다.
+\textbf{(3) 깨끗할 때의 동률.} 깨끗한 질의 아래에서 \code{graphrag-bfs}, \code{ccos-from-query},
+\code{ccos-region}은 모두 $1.00$에 이른다: 레버는 인과 \emph{구조}이지 \textbf{CCOS 그 자체가 아니다}.
+\textbf{(4) 잡음일 때의 분리.} \emph{오도하는} 질의 아래에서, 코드를 어휘적으로 위치 짓는 모든 방법은 $0\%$로
+붕괴한다 --- 강력한 \code{graphrag-bfs} \emph{와} \code{ccos-from-query} 절제(질의에 시드된 CCOS)를 포함하여.
+질의가 아니라 작업 공간 신호에 앵커하는 \code{ccos-region}만이 $1.00$으로 살아남는다. 그 절제는 구별자를 분리해
+낸다: 그것은 \emph{앵커 출처}(구조적 작업 공간 신호 대 어휘적 질의)이지 영역 기계장치가 아니다. 이것이 현실적인
+양상이다 --- 과제 설명은 정확한 먼 원인을 좀처럼 이름으로 짚지 않으며, 활성 작업 집합을 추적하는 OS식 기억은 질의
+시점 검색이 오도되는 곳에서 견고하다.
+\textbf{(5) 명시된 가정.} 이는 CCOS에 신뢰할 만한 앵커(활성 파일 / 실패하는 테스트)를 인정하는데, 이는 OS 수준
+기억은 갖지만 순수 검색 파이프라인은 갖지 못한다; 또한 분리 가능한 영역을 가진 \emph{모듈식} 저장소를 가정한다
+(실제 코드에서 밀도 $0.955$, \S\ref{sec:eval}) --- 예산을 초과하는 단일 거대 영역은 그 이점을 붕괴시킨다(관찰됨,
+보고됨).
+\textbf{(6)} 전반에 걸쳐 이것은 \emph{명시된 오라클 아래의 시뮬레이션}이다: 그것은 \emph{필요}(검색) 조건을
+검증하며 \S\ref{sec:protocol}의 \emph{충분}(생성) 조건이 아니다.
+
+\section{실제 LLM 평가: 첫 온디바이스 측정}\label{sec:protocol}
+
+시뮬레이션(\S\ref{sec:sim})은 필요 조건을 확립했다. 충분 조건 --- LLM 에이전트가 그 다음 영역 기억으로 청크
+검색보다 더 많은 과제를 \emph{해결}한다는 것 --- 은 모델 롤아웃을 필요로 한다. 우리는 \textbf{하네스를 구현}하고
+(\code{ccos eval}) 로컬 모델에 대한 \textbf{첫 실제 LLM 실행}을 보고한다.
+
+\paragraph{구현된 하네스.} 각 과제는 \emph{산술 인과 사슬}을 인코딩하는 작은 다중 파일 프로젝트이다: 한 파일의 기본
+상수가 별개의 파일들에 걸친 한 줄 함수 사슬을 거쳐 변환되고, ``마지막 함수가 어떤 정수를 반환하는가?''라는 질문은
+사슬 전체(먼 원인 포함)를 읽어야만 답할 수 있다. 따라서 채점은 한 정수에 대한 정확 일치이다 --- 객관적이고 자동화
+가능하며 코드 실행이 없다. \S\ref{sec:sim}의 같은 여섯 전략이 토큰 예산 아래 컨텍스트 창을 조립하고(깨끗/잡음 질의
+분할 포함), 그 창은 모델(OpenAI, Anthropic-Messages, Ollama 호환 엔드포인트)에 보내지며, 우리는 지름별로 세 지표를
+기록한다: \textbf{과제 성공}(정확한 정수), \textbf{오라클 커버리지}(필요 사슬 $\subseteq$ 창 --- 모델 독립),
+그리고 \textbf{심볼 환각}(답이 프로젝트에 없는 함수를 인용함).
+
+\paragraph{설정.} 우리는 NVIDIA Jetson AGX Thor에서 Ollama가 서빙하는 \code{qwen2.5:7b-instruct}(온도 $0$)에
+대해 \code{ccos eval}을 온디바이스로 실행한다. $20$개 과제, 시드 $7$, $600$ 토큰 예산, 지름 $1$--$4$, 깨끗과 잡음
+두 양상 모두에서이다. 표~\ref{tab:real}이 그 실행을 보고한다.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lcccccr}
+\toprule
+& \multicolumn{4}{c}{지름 $d$에서의 성공} & & \\
+\cmidrule(lr){2-5}
+전략 & $d{=}1$ & $d{=}2$ & $d{=}3$ & $d{=}4$ & 커버 & 토큰 \\
+\midrule
+\multicolumn{7}{l}{\emph{깨끗한 질의(목표 함수를 이름으로 짚음)}}\\
+\code{rag-dense}      & 0.12 & 0.00 & 0.00 & 0.00 & 0.00 & 519 \\
+\code{rag-hybrid}     & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 521 \\
+\code{graphrag-1hop}  & 1.00 & 0.00 & 0.00 & 0.00 & 0.40 & 270 \\
+\code{graphrag-bfs}   & 1.00 & 0.00 & 0.17 & 0.00 & 1.00 & 402 \\
+\code{ccos-from-query}& 1.00 & 0.00 & 0.17 & 0.00 & 1.00 & 402 \\
+\code{ccos-region}    & 1.00 & 0.00 & 0.17 & 0.00 & 1.00 & 402 \\
+\midrule
+\multicolumn{7}{l}{\emph{잡음 질의(한 미끼가 어휘적으로 목표를 능가함)}}\\
+\code{rag-dense}      & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 531 \\
+\code{rag-hybrid}     & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 521 \\
+\code{graphrag-1hop}  & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 165 \\
+\code{graphrag-bfs}   & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 165 \\
+\code{ccos-from-query}& 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 165 \\
+\textbf{\code{ccos-region}} & \textbf{1.00} & \textbf{0.00} & \textbf{0.17} & \textbf{0.00} & \textbf{1.00} & \textbf{402} \\
+\bottomrule
+\end{tabular}
+\caption{첫 실제 LLM 실행: Ollama를 통한 \code{qwen2.5:7b-instruct}, 온디바이스(NVIDIA Jetson AGX Thor),
+$20$개 과제, 시드 $7$, 예산 $600$ 토큰. ``커버''는 모델 독립 오라클 커버리지; ``토큰''은 평균 입력 토큰. 성공은
+정확 일치 정수 답이다.}
+\label{tab:real}
+\end{table}
+
+\paragraph{발견.}
+\textbf{(1) 커버리지가 시뮬레이션에서 실제 텍스트로 이전된다.} 모델 독립 커버리지 열은 실제 파일 내용에서
+표~\ref{tab:sim}을 재현한다: 어휘 RAG는 $0$을 덮고, 구조 인지 방법은 깨끗한 질의 아래 $1.00$을 덮으며, 잡음 아래에서
+\emph{오직} \code{ccos-region}만이 $1.00$을 유지한다 --- 시뮬레이터 밖에서 확인된 필요 조건이다.
+\textbf{(2) 성공은 컨텍스트가 아니라 모델에 의해 제한된다.} 커버리지가 $1.00$인 곳에서, $7$B 모델은 여전히 $d{=}1$
+($1.00$)과 $d{=}3$의 일부($0.17$)만 해결하고 $d{=}2,4$를 놓친다: 사슬 전체가 창에 있을 때 잔여 실패는 \emph{산술
+추론}이다 --- 선택 실패가 아니라 모델 능력의 천장이다. 결정적으로, 어떤 방법도 \emph{커버리지 없이} 성공한 적이 없으며
+(성공 $\subseteq$ 커버리지), 이는 하네스가 검증하도록 만들어진 주장이다.
+\textbf{(3) 잡음일 때의 분리가 실제 LLM에서 유지된다.} 오도하는 질의 아래에서, 모든 질의 주도 방법은 $0\%$ 성공으로
+붕괴한다 --- \code{graphrag-bfs}와 \code{ccos-from-query} 절제를 포함하여 --- 반면 작업 공간 신호에 앵커한
+\code{ccos-region}은 \emph{유일하게} 성공이 0이 아닌 전략이다($d{=}1$에서 $1.00$). 질의 주도 방법은 잡음 아래에서
+오히려 \emph{더 싸} 보이는데($165$ 대 $402$ 토큰) 이는 바로 그것들이 더 작고 잘못된 파일을 자신 있게 검색하기
+때문이다; \code{ccos-region}은 그 예산을 인과적으로 옳은 사슬에 쓴다.
+\textbf{(4) 정직한 한계.} $20$개 과제(지름당 약 $5$개)는 작은 표본이고, $7$B 모델은 충분 조건을 바닥으로 만든다.
+프런티어 모델(\code{deepseek-v4-pro}, 진행 중) 또는 $70$B 로컬 모델은 커버리지가 $1.00$인 모든 곳에서 성공을
+끌어올려, 그 분리를 바꾸지 않고 \emph{날카롭게} 할 것으로 기대된다. 커버리지가 이미 천장을 고정하기 때문이다.
+
+\paragraph{외부 벤치마크를 향하여.} 산술 사슬 모음은 선택이라는 질문을 격리한다; 결정적인 외부 시험은
+SWE-bench~\cite{jimenez2023swebench} 이슈 해결(한 패치가 숨겨진 테스트를 통과)과, 결함 지점·그 원인·그 폭발 반경이
+서로 다른 파일에 놓이는 통제된 \emph{다중 파일 버그} 모음이다. 기준선들은 기반 LLM과 토큰 예산을 공유한다: 고전 RAG
+~\cite{lewis2020rag}(청크에 대한 top-$k$ 코사인), GraphRAG~\cite{edge2024graphrag}(코드 그래프에 대한 커뮤니티
+요약), MemGPT~\cite{packer2023memgpt}(OS식 페이징 기억), 벡터 저장소를 갖춘 LangGraph~\cite{langgraph} 에이전트,
+그리고 CCOS 영역. 지표: 해결률, 성공까지의 입력 토큰, 그리고 정답 그래프에 대조해 검사한 인용 접지 환각률. 우리는 이를
+실제 이력에서 시작했다: \code{scripts/causal\_validation}은 수정 커밋을 채굴하고, 수정 전 트리를 체크아웃하며, 결함을
+주입하고,
+$R_{\mathrm{cov}} = |F_{\mathrm{target}} \cap \mathrm{WorkingSet}_K| / |F_{\mathrm{target}}|$
+을 채점한다 --- 한 수정이 건드린 파일 중 경계 작업 집합이 복원하는 것의 비율이다. 이 저장소의 이력에서, 첫 실행은 한
+한계와 그 수정을 드러냈으며 둘 다 측정되었다: 하류 전용 실패 전파에서 $R_{\mathrm{cov}}$는 $0.33$에 평평히 머물렀다
+(시드 파일만 복원되었는데, 공동 변경된 파일은 의존성 허브를 통해서만 도달되는 \emph{상류} 임포터이기 때문이다).
+크레이트 내 임포트를 파일$\to$파일 간선으로 해소하고 실패를 \emph{양방향}으로 전파하는 것이 이를 고친다. 세 성숙
+크레이트 --- \code{fd}, \code{bat}, \code{hyperfine}, $70$개의 채굴된 수정 커밋 --- 에 걸쳐 그 효과는 일관된다:
+충분한 예산($K{\ge}50$)에서 두 변경은 $R_{\mathrm{cov}}$를 $0.85$--$1.0$로 끌어올린다(하류 전용 $0.50$--$0.84$에서),
+반면 빠듯한 $K{=}20$ 예산에서는 $0.19$--$0.28$로 \emph{희석}된다. \textbf{그러나 명백한 기준선에 대해 이것은 승리가
+아니다.} \emph{동일한 파일 예산}에서 고전 어휘 RAG(파일 텍스트에 대한 TF-IDF 코사인, 결함 파일로 질의)를 실행하면,
+CCOS\,/\,RAG의 $R_{\mathrm{cov}}$는 $K{=}50$에서 $0.92/0.94$, $1.00/0.98$, $0.87/0.92$이고 $K{=}100$에서 동률이며,
+$K{=}20$에서는 RAG가 분명히 앞선다(\code{bat}에서 $0.20/0.56$, \code{hyperfine}에서 $0.20/0.73$). 따라서 인과 선택은
+여기서 어휘 유사도에 대해 \emph{순 커버리지 이점이 없}고 빠듯한 예산에서는 더 나쁘다: 실제 버그에서 한 수정의 파일들은
+서로 어휘적으로 유사하므로 TF-IDF도 그것들을 복원한다 --- 원인이 그 증상과 어휘적으로 비유사하다는 \S\ref{sec:sim}의
+전제는 이 저장소들에서 재현되지 않는다. 정직한 읽기는 \emph{필요} 조건이 대다수에 대해 성립하지만 \emph{CCOS에
+특유하지 않}다는 것이다; 실제 이점은 이 설정이 검증하지 않는 양상에서 와야 한다 --- 저하/부재 질의(\S\ref{sec:sim}),
+원인에서 어휘적으로 먼 증상(실패하는 테스트)(최고 차수 휴리스틱이 아니라 진정한 테스트 주도 시드가 필요), 또는
+\emph{충분} 조건(4단계). 이제 링크 가능한 다중 크레이트 작업 공간 또한 규모에서 측정되어야 한다.
+
+\paragraph{충분 조건(4단계): 해결은 동률, 효율은 그렇지 않다.} 우리는 \code{fd}의 실제 단일 파일 수정에서 생성
+절반을 실행한다: 한 에이전트에 두 방식으로 구성된 동일 예산 컨텍스트 --- CCOS의 인과 영역 대 top-$k$ 어휘 RAG --- 가
+주어지고, 버그 있는 파일을 다시 쓰도록 요청받으며, \code{cargo test} 통과 여부로 채점된다. 이때 \emph{컴파일러 인 더
+루프} 재시도가 있다(실패 시, \emph{컨텍스트 페이지 폴트}가 트레이스 층으로 오류를 파싱하고, 결함 파일에 압력을 주입하며,
+갱신된 창으로 다시 프롬프트한다). 약한 $7$B 모델과 단일 시도에서 둘 다 $0/15$를 해결한다; \code{qwen3-coder-30B}와 세
+번의 시도에서 그 루프는 둘을 $2/10$($20\%$)로 끌어올린다 --- 해결을 푸는 것은 검색기가 아니라 페이지 폴트 피드백이며,
+CCOS는 RAG에 대해 \textbf{해결 이점이 없}고, 이는 검색 결과와 일치한다. \emph{효율}이 둘을 가른다: 동일 해결에서
+CCOS의 자기 경계 영역은 평균 $776$개의 컨텍스트 토큰인 반면, 예산을 채우는 어휘 검색기는 $5366$이다 ---
+$\mathbf{6.9\times}$ 감소. 같은 것이 모델 없이도 규모에서 성립한다: \code{fd}, \code{bat}, \code{hyperfine}의
+$51$개 단일 파일 수정 시나리오에 걸쳐 CCOS는 $700$--$1600$개의 컨텍스트 토큰을 조립하는 반면 RAG는 약 $6000$이며,
+$\mathbf{4.1}$--$\mathbf{9.1\times}$ 감소이다. 이것이 CCOS가 지배하는 유일한 축이다: 그것이 \emph{무엇을} 검색하는가
+(기준선이 이를 맞먹는다)가 아니라 \emph{얼마나 적게} 필요로 하는가이다. 인과 영역이 top-$k$를 예산까지 채우는 대신 작업
+집합에서 멈추기 때문이다. 우리는 유보를 명시한다: \emph{해결} 표본은 작고($n{=}10$, 두 패스), 기준선은 구성상 예산을
+채운다(주의 깊게 $k$를 조정한 RAG도 더 희소할 것이다). 변호 가능한 주장은 더 좁지만 실질적이다: CCOS는 \emph{스스로
+보정}한다 --- 조정할 $k$나 예산 없이 인과 영역에서 스스로를 경계 짓는다 --- 따라서 결코 창을 낭비하지 않으며, 이것이
+바로 요구 페이징의 요점이다.
+
+\paragraph{가설.}
+\textbf{H1}(효율): CCOS는 RAG/GraphRAG보다 더 적은 입력 토큰으로 동등한 과제 성공에 이른다. 한 영역이 인과 이웃을 더
+높은 재현율로 덮기 때문이다(표~\ref{tab:locality}).
+\textbf{H2}(장기 성공): 다중 파일 과제에서 CCOS의 해결률은 과제의 인과 지름과 함께 커지는 폭으로 청크 RAG를 능가한다.
+\textbf{H3}(접지): CCOS는 심볼 환각률을 낮춘다. 입장된 창이 \emph{실제} 노드들의 연결된 하위 그래프이기 때문이다.
+
+\paragraph{타당성에 대한 위협.} 한 영역의 품질은 간선 품질에 의해 제한된다(\S\ref{sec:eval}); 결과는 영역 \emph{정책}을
+기저 \emph{그래프}와 혼동할 수 있다. 따라서 절제는 그래프를 고정하고 선택 전략만 변화시켜야 하며, 과제별 인과 지름을
+보고하여 이득이 더 많은 텍스트 검색이 아니라 정합성에 귀속되도록 해야 한다. 표~\ref{tab:real}의 \code{ccos-from-query}
+절제가 바로 이 통제이며 --- 같은 그래프와 예산, 앵커만 교체 --- 그것은 잡음 아래 어휘 기준선과 함께 붕괴한다. H1--H3에
+대한 긍정적 결과는 연구 기여를 구성할 것이고; 영(null) 결과조차도 그 결정론적·감사 가능 인프라를 입증할 것이다.
+
+\section{한계}
+
+우리는 무엇이 \emph{보여지지 않았}는지를 의도적으로 명시한다.
+\textbf{(1) 실제 버그에서 RAG에 대한 커버리지 이점 없음.} 대표 실제 데이터 지표($R_{\mathrm{cov}}$,
+\S\ref{sec:protocol})는 충분한 예산에서 평범한 어휘 TF-IDF 검색기와 동률이고 빠듯한 예산에서는 진다; 실제 수정 커밋에서
+한 수정이 건드리는 파일은 어휘적으로 유사하므로, 어휘적으로 비유사한 원인이라는 시뮬레이션의 전제는 성립하지 않는다.
+강한 절대 수치는 기준선도 만족하는 \emph{필요} 조건이지 CCOS의 승리가 아니다.
+(엔진 자체 소스에 대한 보완적 측정은 다른, 구조적으로 정의된 관계를 분리해 낸다: 어휘적 TF-IDF 검색기는 AST로 해소된 임포트 의존성의 $49\%$(recall@10)만 회수하는데 --- 이 쌍들은 으레 어휘를 전혀 공유하지 않으며, 의존성 코사인은 무작위의 $0.43$ 대비 $0.53$이다 --- 따라서 RAG의 맹점은 실재하지만, 그것은 헤드라인 지표가 측정하는 수정 응집 축, 즉 한 수정의 파일들이 실제로 어휘를 공유하는 그 축에서 벗어나 있다. 구조 계층은 그 간선들을 구성적으로 회수하며, 이제 기본값이 된 AST가 그 회수를 완전하게 만든다.)
+\textbf{(2) 필요 $\neq$ 충분.} 우리는 한 영역이 \emph{에이전트가 버그를 고치도록 돕는지}(4단계: 숨겨진 테스트를
+통과하는 패치)를 결코 측정하지 않는다 --- 오직 관련 파일이 검색 가능한지만 측정한다.
+\textbf{(3) 시드 휴리스틱.} 하네스는 결함을 실제 실패하는 테스트가 아니라 출력 차수가 가장 높은 변경된 파일에 주입하므로,
+증상이 그 원인에서 어휘적으로 먼 양상 --- 인과 선택에 가장 유리한 양상 --- 을 연습하지 않는다.
+\textbf{(4) 규모와 통계.} 세 개의 단일 크레이트 저장소, 각 $n\!\approx\!20$; 차이는 그 표준편차와 함께 보고되지만 교차
+검증되지 않았다.
+\textbf{(5) 엔진.} 파서는 이제 실제 \code{syn} AST를 기본값으로 사용하며 --- 엔진 자체 소스에서 종전의 줄 휴리스틱보다 $36.5\%$ 더 정확하다고 측정되었고(임포트 회수에서 3분의 2 대 전체), 휴리스틱은 비-Rust 입력을 위한 폴백으로만 남겨 두었다 --- 인제스천은 프로세스를 가로질러 비트 단위로 동일하게 재구성하도록 견고화되었다(정렬된 임포트 해소; 순서 무관 중심성). 영역은 여전히 파일 단위이고 명시적 파일 간 간선에서만 병합된다; 점수 가중치는 손으로 조정되었으나, 기본값으로 꺼져 있는 고유벡터 중심성과 노드 생애주기(Stable/Working/Orphan) 정련이 이제 제공된다. 이들 중 어느 것도 \emph{증명된} 성질(분할, 결정론, 재생)
+이나 측정된 국소성에 영향을 주지 않는다 --- 그러나 하류 에이전트 이익에 대한 경험적 사례는, 이 시점에서 \emph{증명되지
+않았}다.
+
+\section{결론}
+
+우리는 한 에이전트의 기억을 \emph{인과 영역}으로 조직하는 것이 청크 검색보다 장기 컨텍스트를 더 잘 검색함을 보이려
+출발했고, 그 구성에 정밀하고 결정론적인 정의를 부여했으며, 그것이 재생 시 비트 단위로 재구성됨을 증명했다. 이어서 우리는
+실제 데이터에서 명백한 기준선에 대해 그 검색 주장을 검증했다 --- 그리고 그것은 성립하지 않았다: $70$개의 실제 버그 수정
+커밋에 걸쳐 평범한 어휘 TF-IDF 검색기가 인과 선택과 동률이고 빠듯한 예산에서는 그것을 이기며, 크래시 트레이스 피벗은
+``오류 메시지에 대한 RAG''에 진다. 실제 코드에서 한 수정의 파일들과 그 오류 메시지가 어휘를 공유하기 때문이다. 우리는 그
+부정적 결과를 묻기보다 보고한다. 살아남는 것은 더 나은 검색기가 아니라 다른 종류의 객체이다: 에이전트의 정확한 컨텍스트
+상태를 되감고 다른 매개변수 아래 재생할 수 있는 \emph{결정론적이고, 재생 가능하며, 감사 가능한} 작업 기억 --- 확률적 검색
+스택이 제공할 수 없는 타임트래블 디버깅이다. 그 감사 가능성, 또는 \emph{생성} 시점의 구조화 컨텍스트 이점(4단계)이
+측정 가능한 하류 이득을 낳는지는 열려 있다. 우리는 무엇이 증명되었고, 무엇이 측정되었으며, 무엇이 반박되었는지의 구분이
+단언이 아니라 검증될 수 있도록, 엔진과 정직한 검증 하네스, 그리고 본 논문을 공개한다.
+
+\begin{thebibliography}{99}
+\bibitem{lewis2020rag} P.~Lewis et al. Retrieval-Augmented Generation for
+Knowledge-Intensive NLP Tasks. \emph{NeurIPS}, 2020. arXiv:2005.11401.
+\bibitem{asai2023selfrag} A.~Asai et al. Self-RAG: Learning to Retrieve, Generate
+and Critique through Self-Reflection. \emph{ICLR}, 2024. arXiv:2310.11511.
+\bibitem{edge2024graphrag} D.~Edge et al. From Local to Global: A Graph RAG
+Approach to Query-Focused Summarization. 2024. arXiv:2404.16130.
+\bibitem{yamaguchi2014cpg} F.~Yamaguchi et al. Modeling and Discovering
+Vulnerabilities with Code Property Graphs. \emph{IEEE S\&P}, 2014.
+\bibitem{packer2023memgpt} C.~Packer et al. MemGPT: Towards LLMs as Operating
+Systems. 2023. arXiv:2310.08560.
+\bibitem{park2023generative} J.~S.~Park et al. Generative Agents: Interactive
+Simulacra of Human Behavior. \emph{UIST}, 2023. arXiv:2304.03442.
+\bibitem{langgraph} LangChain. LangGraph: Building Stateful, Multi-Actor
+Applications with LLMs. 소프트웨어 프레임워크, 2023--2024.
+\url{https://github.com/langchain-ai/langgraph}.
+\bibitem{denning1968working} P.~J.~Denning. The Working Set Model for Program
+Behavior. \emph{Communications of the ACM}, 11(5), 1968.
+\bibitem{liu2023lost} N.~F.~Liu et al. Lost in the Middle: How Language Models Use
+Long Contexts. \emph{TACL}, 2024. arXiv:2307.03172.
+\bibitem{kwon2023paged} W.~Kwon et al. Efficient Memory Management for Large
+Language Model Serving with PagedAttention. \emph{SOSP}, 2023. arXiv:2309.06180.
+\bibitem{haber1991timestamp} S.~Haber and W.~S.~Stornetta. How to Time-Stamp a
+Digital Document. \emph{Journal of Cryptology}, 3(2), 1991.
+\bibitem{jimenez2023swebench} C.~E.~Jimenez et al. SWE-bench: Can Language Models
+Resolve Real-World GitHub Issues? \emph{ICLR}, 2024. arXiv:2310.06770.
+\end{thebibliography}
+
+\end{document}
