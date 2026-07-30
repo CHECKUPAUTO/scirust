@@ -5,7 +5,8 @@
 Ce dépôt embarque **CCOS Core** (Causal Context Operating System, vendorisé sous
 `external/ccos-core/`, commit amont `9c1b7d9`) comme mémoire causale de l'agent :
 graphe causal event-sourcé, log hash-chaîné, recall auto-borné, replay
-déterministe et débogueur post-mortem. Doc complète : `docs/CCOS_MEMORY.md`.
+déterministe et débogueur post-mortem. Doc complète : `docs/CCOS_MEMORY.md` ;
+épreuve terrain mesurée sur ce dépôt : `docs/CCOS_FIELD_TEST_SCIRUST.md`.
 
 - **Binaire** : `ccos` (si absent : `sh scripts/ccos/install.sh` — build release
   + install + `ccos doctor`).
