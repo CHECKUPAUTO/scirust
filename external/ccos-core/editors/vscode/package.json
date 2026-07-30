@@ -1,0 +1,36 @@
+{
+  "name": "ccos-focus",
+  "displayName": "CCOS Attentional Shield",
+  "description": "On a failing `cargo test`, show the causal region (likely root cause + its dependencies) and hide the backtrace noise — powered by the `ccos focus` binary.",
+  "version": "0.1.0",
+  "publisher": "ccos",
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Other"],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "ccos.focus", "title": "Focus on failure", "category": "CCOS" }
+    ],
+    "configuration": {
+      "title": "CCOS Focus",
+      "properties": {
+        "ccos.binary": { "type": "string", "default": "ccos", "description": "Path to the ccos binary." },
+        "ccos.src": { "type": "string", "default": "src", "description": "Source directory, relative to the crate root." },
+        "ccos.workspace": { "type": "string", "default": ".ccos/ws.ccos", "description": "Persisted workspace checkpoint, for O(Δ) re-parse." },
+        "ccos.budget": { "type": "number", "default": 2048, "description": "Recall token budget." },
+        "ccos.testCommand": { "type": "string", "default": "cargo test", "description": "Command whose failure is focused." }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "tsc -p ./ && node --test out/render.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.75.0",
+    "typescript": "^5.4.0"
+  }
+}

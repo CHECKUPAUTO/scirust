@@ -1,0 +1,27 @@
+name: cognitive-benchmark-nightly
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cognitive-persistence-benchmark:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: run benchmark (offline scenarios)
+        run: |
+          cargo test --release --locked --test cognitive -- --nocapture --test-threads=1 \
+            | tee cognitive_benchmark.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cognitive-benchmark-${{ github.run_number }}
+          path: cognitive_benchmark.txt
+          retention-days: 90
+      # Publication of results requires explicit approval from ZEKRITI Tarek.
+      # This workflow never edits the README, never creates a release, never pushes.
