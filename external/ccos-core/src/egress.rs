@@ -602,14 +602,35 @@ mod tests {
         };
         let address = listener.local_addr().unwrap();
         let server = thread::spawn(move || {
-            for response in [
+            const RESPONSES: [&str; 2] = [
                 "HTTP/1.1 302 Found\r\nLocation: https://example.com/\r\nContent-Length: 0\r\n\r\n",
                 "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n12345",
-            ] {
-                let (mut stream, _) = listener.accept().unwrap();
-                let mut request = [0u8; 1024];
-                let _ = stream.read(&mut request);
-                stream.write_all(response.as_bytes()).unwrap();
+            ];
+            // Serve both replies whether the client reuses one keep-alive
+            // connection or opens a fresh one per request. Accepting exactly one
+            // connection per reply raced the pool: `stream` was dropped at the end
+            // of each iteration, closing the socket, so a client that reused it for
+            // the second request could hit the close first and fail with
+            // "Connection reset by peer" — which is exactly how this test flaked in
+            // CI (`tests (release)` on run 30592290332) while passing 20/20 locally.
+            let mut served = 0usize;
+            while served < RESPONSES.len() {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    break;
+                };
+                // Keep this connection open and answer on it for as long as the
+                // client keeps sending, so a reused socket is never closed early.
+                while served < RESPONSES.len() {
+                    let mut request = [0u8; 1024];
+                    match stream.read(&mut request) {
+                        Ok(0) | Err(_) => break, // client closed: wait for the next one
+                        Ok(_) => {}
+                    }
+                    if stream.write_all(RESPONSES[served].as_bytes()).is_err() {
+                        break;
+                    }
+                    served += 1;
+                }
             }
         });
         let url = format!("http://{address}/");
