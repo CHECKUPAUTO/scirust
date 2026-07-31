@@ -58,6 +58,14 @@ tensor-canonical-cpu = ["tensor-canonical", "dep:scirust-gpu"]
 # (~100 crates), so it is a deliberate opt-in and stays out of `default`. It
 # activates `scirust-gpu/wgpu` only; CUDA remains untouched.
 tensor-canonical-wgpu = ["tensor-canonical", "dep:scirust-gpu", "scirust-gpu/wgpu"]
+# The facade plus the CUDA adapter, which executes the same canonical plans on
+# an NVIDIA device: one specialised CUDA C kernel per logical kernel, compiled
+# by NVRTC at preparation. It adds no external crate beyond the `cudarc` the
+# workspace already vendors, and it activates `scirust-gpu/cuda` only; wgpu
+# remains untouched. Building it needs no CUDA toolkit; *running* it needs the
+# CUDA driver and NVRTC libraries plus a real device, and it never falls back to
+# the CPU when they are absent.
+tensor-canonical-cuda = ["tensor-canonical", "dep:scirust-gpu", "scirust-gpu/cuda"]
 
 [dev-dependencies]
 rand = "0.8"

@@ -11,6 +11,16 @@ on:
       - "scirust-nonlocal-relativity/**"
       - "scirust-sim/**"
       - "scirust-special/**"
+      - "scirust-compute/**"
+      - "scirust-cuda/**"
+      - "scirust-gpu/**"
+      - "scirust-tensor-compile/**"
+      - "scirust-tensor-core/**"
+      - "scirust-tensor-ir/**"
+      - "scirust-tensor-reference/**"
+      - "scirust-tensor-runtime/**"
+      - "src/lib.rs"
+      - "tests/**"
       - ".github/workflows/native-arm64.yml"
   push:
     branches: [master, main, develop]
@@ -22,6 +32,16 @@ on:
       - "scirust-nonlocal-relativity/**"
       - "scirust-sim/**"
       - "scirust-special/**"
+      - "scirust-compute/**"
+      - "scirust-cuda/**"
+      - "scirust-gpu/**"
+      - "scirust-tensor-compile/**"
+      - "scirust-tensor-core/**"
+      - "scirust-tensor-ir/**"
+      - "scirust-tensor-reference/**"
+      - "scirust-tensor-runtime/**"
+      - "src/lib.rs"
+      - "tests/**"
       - ".github/workflows/native-arm64.yml"
   workflow_dispatch:
 
@@ -97,6 +117,44 @@ jobs:
       - name: Test experimental nonlocal relativity
         run: cargo test -p scirust-nonlocal-relativity
 
+      # -------------------------------------------------------------------
+      # Real CUDA execution. This runner is the only place in the project
+      # where a CUDA device exists, so it is the only place the canonical
+      # CUDA path can be proved rather than merely compiled.
+      # -------------------------------------------------------------------
+
+      - name: Report the CUDA device
+        run: |
+          nvidia-smi
+          nvidia-smi --query-gpu=name,driver_version,compute_cap,memory.total \
+            --format=csv,noheader
+
+      # `SCIRUST_REQUIRE_CUDA=1` turns "no device, so skip" into a hard
+      # failure. Without it a machine with no driver would report a green
+      # run having executed nothing at all — which is exactly the kind of
+      # silent pass this job exists to prevent. The job therefore fails if
+      # CUDA or NVRTC is missing, if no test actually ran, if a kernel does
+      # not launch, if the readback is wrong, or if a result disagrees with
+      # the CPU reference.
+      - name: Test the canonical Reference kernels on CUDA
+        env:
+          SCIRUST_REQUIRE_CUDA: "1"
+        run: |
+          cargo test -p scirust-gpu --features cuda --test cuda_reference \
+            -- --nocapture
+
+      - name: Test the canonical facade on CUDA
+        env:
+          SCIRUST_REQUIRE_CUDA: "1"
+        run: |
+          cargo test -p scirust --features tensor-canonical-cuda \
+            --test canonical_tensor_cuda -- --nocapture
+
+      - name: Test the CUDA raw runtime
+        env:
+          SCIRUST_REQUIRE_CUDA: "1"
+        run: cargo test -p scirust-cuda --features cuda -- --nocapture
+
       - name: Run Clippy
         run: |
           cargo clippy \
@@ -106,3 +164,6 @@ jobs:
             --all-targets \
             -- \
             -D warnings
+          cargo clippy -p scirust-cuda --features cuda --all-targets -- -D warnings
+          cargo clippy -p scirust-gpu --features cuda --all-targets -- -D warnings
+          cargo clippy -p scirust --features tensor-canonical-cuda --all-targets -- -D warnings
