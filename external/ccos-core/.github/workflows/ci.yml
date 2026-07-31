@@ -23,7 +23,12 @@ jobs:
       - name: Author policy (single human contributor)
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            scripts/check-author-policy.sh "origin/${{ github.base_ref }}..HEAD"
+            # Check the PR's own commits, not HEAD. On a pull_request event HEAD is
+            # GitHub's synthetic merge commit — authored by whoever opened the PR
+            # and committed by "GitHub" — so it can never satisfy the policy, and
+            # every PR failed this job no matter who wrote the real commits.
+            scripts/check-author-policy.sh \
+              "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
           else
             scripts/check-author-policy.sh HEAD
           fi

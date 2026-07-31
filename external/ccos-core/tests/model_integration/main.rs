@@ -36,11 +36,12 @@ fn live_model_switching_preserves_state() {
             },
         );
         assert!(log.verify_integrity().valid);
-        return;
+    } else {
+        // Live path (CCOS_TEST_LIVE=1): issue the same structured-extraction
+        // prompt to each configured provider, journal both, and assert state
+        // equality. Implemented by the benchmark harness
+        // (docs/benchmarks/METRICS.md).
     }
-    // Live path (CCOS_TEST_LIVE=1): issue the same structured-extraction prompt
-    // to each configured provider, journal both, and assert state equality.
-    // Implemented by the benchmark harness (docs/benchmarks/METRICS.md).
 }
 
 /// Provider usage accounting must be journaled (token counts, latency).
