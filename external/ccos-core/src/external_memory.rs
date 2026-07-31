@@ -97,6 +97,15 @@ pub enum MemoryError {
     /// untouched (forensic evidence); `ccos verify <workspace>` shows the broken
     /// links, and deleting the sidecar explicitly restarts the timeline.
     TimelineTampered(String),
+    /// The workspace changed on disk since this session read it, so checkpointing
+    /// would have discarded another writer's work.
+    ///
+    /// CCOS is **single-writer per workspace** by contract. Before this existed
+    /// the contract was documentation only: a second writer's checkpoint silently
+    /// overwrote the first's, and every operation it had already acknowledged
+    /// vanished with it. This is what breaking the contract now feels like — a
+    /// refusal naming the collision, not a success hiding it.
+    WorkspaceChangedOnDisk(String),
 }
 
 impl std::fmt::Display for MemoryError {
@@ -109,6 +118,12 @@ impl std::fmt::Display for MemoryError {
             MemoryError::TimelineTampered(detail) => {
                 write!(f, "timeline sidecar failed its hash-chain check: {detail}")
             }
+            MemoryError::WorkspaceChangedOnDisk(detail) => write!(
+                f,
+                "workspace changed on disk since this session read it — refusing to \
+                 overwrite another writer ({detail}). CCOS allows one writer per \
+                 workspace: run the MCP server or the CLI against it, not both"
+            ),
         }
     }
 }
@@ -338,8 +353,19 @@ pub trait ExternalMemory {
     /// [`MemoryError::NodeNotFound`] if the node is absent.
     fn signal_failure(&mut self, node: &str, depth: u32) -> Result<usize, MemoryError>;
 
-    /// Select a bounded context window under a [`Recall`] strategy and a token
-    /// budget. Deterministic: ties break on the node id.
+    /// Select a context window under a [`Recall`] strategy and a token budget.
+    /// Deterministic: ties break on the node id.
+    ///
+    /// `budget_tokens` is a target, **not a hard cap**. One item is always
+    /// returned when the strategy finds any, even if that single item is larger
+    /// than the whole budget — an empty window helps no caller, and the only
+    /// alternative to overshooting is returning nothing. Measured on a real
+    /// workspace: `budget: 256` against a large anchor yields one item and
+    /// [`RecallWindow::tokens`] `= 328`.
+    ///
+    /// Past that first item the budget is respected. A caller sizing a prompt
+    /// against a hard context limit must therefore read `tokens` rather than
+    /// assume the budget it passed; that field always reports the real total.
     fn recall(&self, recall: &Recall, budget_tokens: usize) -> RecallWindow;
 
     /// Verify the hash chain is intact (tamper-evidence over the whole history).
@@ -384,6 +410,48 @@ const LSA_LAMBDA_AUTHORITY: f64 = 1.0;
 /// causally-weighted LSA model (see [`CcosMemory::weighted_lsa_cache`]).
 type WeightedLsaModel = (u64, crate::embeddings::TfidfEmbedder, Vec<Vec<f32>>);
 
+/// Cheap identity of a snapshot file: enough to tell "nobody touched this since I
+/// last looked" from "somebody did".
+///
+/// Deliberately `stat`, not a content hash. The check runs on the hot path — every
+/// checkpoint, i.e. every MCP ingest — and re-reading a multi-megabyte workspace to
+/// hash it would cost as much as writing it. `write_durable` renames a freshly
+/// created temp file into place, so every write lands a new mtime; length moves
+/// with almost any real edit.
+///
+/// This is a **collision detector, not a lock**. It cannot order two writers, and
+/// two writes landing in the same filesystem timestamp tick with the same length
+/// would slip past it. It exists to turn the common, silent failure — a second
+/// writer overwriting the first — into a loud one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct SnapshotStamp {
+    len: u64,
+    mtime: std::time::SystemTime,
+}
+
+impl SnapshotStamp {
+    /// The stamp of `p`, or `None` when there is no readable file there.
+    fn of(p: &Path) -> Option<Self> {
+        let meta = std::fs::metadata(p).ok()?;
+        Some(Self {
+            len: meta.len(),
+            mtime: meta.modified().ok()?,
+        })
+    }
+
+    /// How the two differ, in a form worth putting in an error message.
+    fn describe(expected: Option<Self>, found: Option<Self>) -> String {
+        match (expected, found) {
+            (None, Some(f)) => format!("another writer created it ({} bytes)", f.len),
+            (Some(_), None) => "another writer removed it".to_string(),
+            (Some(e), Some(f)) if e.len != f.len => {
+                format!("{} bytes on disk, {} when we read it", f.len, e.len)
+            }
+            _ => "same size, newer modification time".to_string(),
+        }
+    }
+}
+
 /// The in-process [`ExternalMemory`] implementation backed by the CCOS kernel.
 pub struct CcosMemory {
     graph: MemoryGraph,
@@ -394,6 +462,12 @@ pub struct CcosMemory {
     sources: BTreeMap<String, String>,
     /// Bound checkpoint path, if any.
     path: Option<PathBuf>,
+    /// What the snapshot at [`path`](Self::path) looked like when this session last
+    /// read or wrote it — the guard that makes a concurrent overwrite a refusal
+    /// instead of silent loss. `None` means "there was no file", which is itself a
+    /// state worth matching: a second writer that creates the file first is just as
+    /// much a collision as one that replaces it.
+    seen: std::cell::Cell<Option<SnapshotStamp>>,
     /// Monotonic counter bumped on every mutation of the resident graph. The
     /// per-recall caches below are keyed on it: a recall reuses the cached region
     /// clustering / embedding store iff the graph hasn't changed since they were
@@ -483,6 +557,7 @@ impl CcosMemory {
             dist_log: DistributedEventLog::new(),
             sources: BTreeMap::new(),
             path: None,
+            seen: std::cell::Cell::new(None),
             version: 0,
             needs_resolution: false,
             region_cache: RefCell::new(None),
@@ -578,6 +653,9 @@ impl CcosMemory {
         } else {
             Self::new()
         };
+        // Record what we read (or that there was nothing) so a later checkpoint can
+        // tell whether anyone else wrote in the meantime — see `SnapshotStamp`.
+        mem.seen.set(SnapshotStamp::of(&p));
         mem.path = Some(p);
         Ok(mem)
     }
@@ -644,6 +722,7 @@ impl CcosMemory {
             dist_log: p.dist_log,
             sources: p.sources,
             path: None,
+            seen: std::cell::Cell::new(None),
             version: 0,
             needs_resolution: false,
             region_cache: RefCell::new(None),
@@ -945,8 +1024,43 @@ impl CcosMemory {
         self.sources.get(&key).map(String::as_str)
     }
 
+    /// Write the snapshot to `p`, refusing if someone else wrote there first.
+    ///
+    /// The guard is skipped when `p` is not the bound path: `checkpoint_to` is an
+    /// explicit "put it here" from the caller, and honouring that is the point.
     fn write_to(&self, p: &Path) -> Result<(), MemoryError> {
-        crate::util::write_durable(p, self.to_json()?.as_bytes())?;
+        let guarded = self.path.as_deref() == Some(p);
+        let expected = if guarded { self.seen.get() } else { None };
+        if guarded {
+            let found = SnapshotStamp::of(p);
+            if found != expected {
+                return Err(MemoryError::WorkspaceChangedOnDisk(
+                    SnapshotStamp::describe(expected, found),
+                ));
+            }
+        }
+        let json = self.to_json()?;
+        // When we believe there is no file yet, say so to the filesystem and let it
+        // arbitrate: `write_durable_new` links rather than renames, so of any number
+        // of processes racing to create the same fresh workspace exactly one wins.
+        // The `stat` above cannot cover that race — the window between looking and
+        // renaming is real, and four writers starting together all land inside it.
+        let write = if guarded && expected.is_none() {
+            crate::util::write_durable_new(p, json.as_bytes())
+        } else {
+            crate::util::write_durable(p, json.as_bytes())
+        };
+        if let Err(e) = write {
+            if guarded && e.kind() == std::io::ErrorKind::AlreadyExists {
+                return Err(MemoryError::WorkspaceChangedOnDisk(
+                    "another writer created it first".to_string(),
+                ));
+            }
+            return Err(e.into());
+        }
+        // Our own write is now the state we have seen, so the next checkpoint
+        // compares against it rather than against the file we originally loaded.
+        self.seen.set(SnapshotStamp::of(p));
         Ok(())
     }
 
@@ -2508,6 +2622,50 @@ mod tests {
         assert!(mem.verify().valid);
     }
 
+    /// The token budget is a target, not a hard cap — and the window says so.
+    ///
+    /// One item is always returned when the strategy finds any, so a single item
+    /// larger than the whole budget overshoots it. That is deliberate (an empty
+    /// window helps no caller), but the trait doc called the result "bounded ...
+    /// under a token budget", which reads as a guarantee a caller can size a
+    /// prompt against. It cannot. What it *can* rely on is `tokens`, which always
+    /// reports the real total — pinned here so the two never drift apart again.
+    #[test]
+    fn the_recall_budget_is_a_target_and_tokens_reports_the_truth() {
+        let mut mem = CcosMemory::new();
+        // A file with many symbols: its node carries a synthesized summary of every
+        // signature, which is what makes a single item outgrow a small budget.
+        let big: String = (0..200)
+            .map(|i| format!("pub fn some_reasonably_named_function_{i}(x: u64) -> u64 {{ x }}\n"))
+            .collect();
+        mem.ingest_source("src/big.rs", &big);
+
+        let tiny_budget = 64;
+        let win = mem.recall(&Recall::around("file:src/big.rs"), tiny_budget);
+        assert!(
+            !win.items.is_empty(),
+            "a window with something to say is never empty, whatever the budget"
+        );
+        assert!(
+            win.tokens > tiny_budget,
+            "this fixture must actually overshoot, or it pins nothing: {} tokens",
+            win.tokens
+        );
+
+        // The honesty that makes the overshoot survivable: `tokens` is the real
+        // size of what was handed back, not the budget that was asked for.
+        let real: usize = win
+            .items
+            .iter()
+            .map(|i| i.content.chars().count() / 4)
+            .sum();
+        assert_eq!(win.tokens, real, "tokens must count what is actually there");
+
+        // And with room to work in, the budget is respected.
+        let roomy = mem.recall(&Recall::around("file:src/big.rs"), 100_000);
+        assert!(roomy.tokens <= 100_000);
+    }
+
     #[test]
     fn checkpoint_roundtrips_through_a_file() {
         let path = std::env::temp_dir().join(format!("ccos-mem-ckpt-{}.json", std::process::id()));
@@ -2519,6 +2677,105 @@ mod tests {
         let reloaded = CcosMemory::open(&path).unwrap();
         assert!(reloaded.stats().nodes >= 1, "graph survived the round-trip");
         assert!(reloaded.verify().valid, "chain still verifies after reload");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// A second writer must be refused, not silently allowed to erase the first.
+    ///
+    /// CCOS is single-writer per workspace, but that was documentation only: the
+    /// later checkpoint overwrote the earlier one and every operation the loser
+    /// had already acknowledged vanished with it. Measured on the shipped CLI, four
+    /// concurrent `ccos memory` writers of 25 ingests each: **100 acknowledged,
+    /// zero bytes on stderr, 25 files in the workspace** — 75 acked writes gone,
+    /// with nothing anywhere saying so.
+    #[test]
+    fn a_second_writer_is_refused_instead_of_silently_overwriting() {
+        let path =
+            std::env::temp_dir().join(format!("ccos-mem-twowriters-{}.json", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+
+        // Establish the workspace, then open it twice — two live sessions holding
+        // the same file, exactly what the golden rule forbids.
+        let mut first = CcosMemory::open(&path).unwrap();
+        first.ingest_source("src/base.rs", "pub fn base() {}\n");
+        first.checkpoint().unwrap();
+
+        let mut a = CcosMemory::open(&path).unwrap();
+        let mut b = CcosMemory::open(&path).unwrap();
+        a.ingest_source("src/a.rs", "pub fn from_a() {}\n");
+        b.ingest_source("src/b.rs", "pub fn from_b() {}\n");
+
+        a.checkpoint().expect("the first writer through still wins");
+        let refused = b.checkpoint();
+        assert!(
+            matches!(refused, Err(MemoryError::WorkspaceChangedOnDisk(_))),
+            "the second writer must be told, got {refused:?}"
+        );
+
+        // A's work is intact — the refusal protected it rather than the reverse.
+        let reloaded = CcosMemory::open(&path).unwrap();
+        assert!(
+            reloaded.sources.contains_key("file:src/a.rs"),
+            "the writer that won kept its data"
+        );
+        assert!(
+            !reloaded.sources.contains_key("file:src/b.rs"),
+            "the refused writer wrote nothing"
+        );
+
+        // …and once B re-reads the world it is allowed to write again: the guard
+        // refuses stale writes, it does not brick the session.
+        let mut b2 = CcosMemory::open(&path).unwrap();
+        b2.ingest_source("src/b.rs", "pub fn from_b() {}\n");
+        b2.checkpoint().expect("a re-read session writes normally");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// The same protection on a **fresh** workspace, where the `stat` check alone
+    /// cannot help: every racer sees no file, so every one of them believes it is
+    /// the only writer. Creation goes through `write_durable_new`, whose
+    /// `hard_link` lets the kernel pick the single winner.
+    #[test]
+    fn two_creators_of_a_fresh_workspace_cannot_both_win() {
+        let path =
+            std::env::temp_dir().join(format!("ccos-mem-tworace-{}.json", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+
+        let mut a = CcosMemory::open(&path).unwrap();
+        let mut b = CcosMemory::open(&path).unwrap();
+        assert!(!path.exists(), "neither session saw a file");
+        a.ingest_source("src/a.rs", "pub fn from_a() {}\n");
+        b.ingest_source("src/b.rs", "pub fn from_b() {}\n");
+
+        a.checkpoint().expect("first creator wins");
+        let refused = b.checkpoint();
+        assert!(
+            matches!(refused, Err(MemoryError::WorkspaceChangedOnDisk(_))),
+            "the losing creator must be told, got {refused:?}"
+        );
+
+        let reloaded = CcosMemory::open(&path).unwrap();
+        assert!(reloaded.sources.contains_key("file:src/a.rs"));
+        assert!(!reloaded.sources.contains_key("file:src/b.rs"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// The guard must not fire on the ordinary path: one session checkpointing
+    /// repeatedly compares against its own last write, not against the file it
+    /// originally loaded.
+    #[test]
+    fn repeated_checkpoints_from_one_session_are_not_a_conflict() {
+        let path =
+            std::env::temp_dir().join(format!("ccos-mem-repeat-{}.json", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut mem = CcosMemory::open(&path).unwrap();
+        for i in 0..5 {
+            mem.ingest_source(&format!("src/f{i}.rs"), &format!("pub fn f{i}() {{}}\n"));
+            mem.checkpoint()
+                .unwrap_or_else(|e| panic!("checkpoint {i} must succeed: {e}"));
+        }
+        assert_eq!(CcosMemory::open(&path).unwrap().sources.len(), 5);
         let _ = std::fs::remove_file(&path);
     }
 
