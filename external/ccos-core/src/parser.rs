@@ -125,7 +125,7 @@ pub enum SymbolKind {
     Other,
 }
 
-/// Everything [`ASTParser::extract_all`] produces for one source file.
+/// Everything `ASTParser::extract_all` produces for one source file.
 type Extracted = (
     Vec<ModuleDecl>,
     Vec<UseStatement>,
@@ -151,7 +151,7 @@ type Extracted = (
 /// hand-written file at 20. 128 is therefore ~3× the worst real file observed and
 /// still an order of magnitude below the overflow.
 ///
-/// Over the limit, [`ASTParser::extract_all`] falls back to the line-based
+/// Over the limit, `ASTParser::extract_all` falls back to the line-based
 /// heuristic, which is iterative and cannot overflow: a pathological file
 /// degrades to a coarser graph instead of killing the process.
 pub const MAX_PARSE_NESTING: usize = 128;
@@ -960,12 +960,149 @@ fn header_symbol_cap() -> usize {
         .unwrap_or(24)
 }
 
+/// Lexer state that has to survive a line break: Rust block comments nest, and
+/// both plain and raw strings can span lines. Carrying this between lines is what
+/// lets [`symbol_span`] scan a file line-by-line without losing its place.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ScanState {
+    Code,
+    /// Inside `/* … */`, with the current nesting count (Rust's block comments nest).
+    BlockComment(usize),
+    /// Inside `"…"`.
+    Str,
+    /// Inside `r#…"…"#…`, with the number of hashes that will close it.
+    RawStr(usize),
+}
+
+/// Feed the **code** bytes of `line` to `on_code`, skipping everything that only
+/// looks like code: comments, strings, raw strings, byte strings and char
+/// literals. Returns the state the next line starts in.
+///
+/// Same discipline as [`max_nesting_depth`], applied per line so the caller can
+/// keep track of line numbers. Whitespace is not reported.
+fn scan_code_line(line: &str, entry: ScanState, mut on_code: impl FnMut(u8)) -> ScanState {
+    let b = line.as_bytes();
+    let mut i = 0usize;
+    let mut state = entry;
+    while i < b.len() {
+        match state {
+            ScanState::BlockComment(depth) => {
+                if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
+                    state = ScanState::BlockComment(depth + 1);
+                    i += 2;
+                } else if b[i] == b'*' && b.get(i + 1) == Some(&b'/') {
+                    state = if depth <= 1 {
+                        ScanState::Code
+                    } else {
+                        ScanState::BlockComment(depth - 1)
+                    };
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+            ScanState::Str => match b[i] {
+                b'\\' => i += 2,
+                b'"' => {
+                    state = ScanState::Code;
+                    i += 1;
+                }
+                _ => i += 1,
+            },
+            ScanState::RawStr(hashes) => {
+                if b[i] == b'"'
+                    && b[i + 1..]
+                        .iter()
+                        .take(hashes)
+                        .filter(|c| **c == b'#')
+                        .count()
+                        == hashes
+                {
+                    state = ScanState::Code;
+                    i += 1 + hashes;
+                } else {
+                    i += 1;
+                }
+            }
+            ScanState::Code => match b[i] {
+                b'/' if b.get(i + 1) == Some(&b'/') => return ScanState::Code,
+                b'/' if b.get(i + 1) == Some(&b'*') => {
+                    state = ScanState::BlockComment(1);
+                    i += 2;
+                }
+                b'b' | b'r'
+                    if i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_') =>
+                {
+                    let mut j = i;
+                    let byte_prefix = b[j] == b'b';
+                    if byte_prefix {
+                        j += 1;
+                    }
+                    if b.get(j) == Some(&b'r') {
+                        j += 1;
+                        let hash_start = j;
+                        while b.get(j) == Some(&b'#') {
+                            j += 1;
+                        }
+                        if b.get(j) == Some(&b'"') {
+                            state = ScanState::RawStr(j - hash_start);
+                            i = j + 1;
+                            continue;
+                        }
+                    } else if byte_prefix {
+                        match b.get(j) {
+                            Some(&b'"') => {
+                                state = ScanState::Str;
+                                i = j + 1;
+                                continue;
+                            }
+                            Some(&b'\'') => {
+                                i = quote_end(b, j);
+                                continue;
+                            }
+                            _ => {}
+                        }
+                    }
+                    on_code(b[i]);
+                    i += 1;
+                }
+                b'"' => {
+                    state = ScanState::Str;
+                    i += 1;
+                }
+                b'\'' => {
+                    let end = quote_end(b, i);
+                    // A lifetime is code; a char literal is not. `quote_end`
+                    // returns `i + 1` for the former.
+                    if end == i + 1 {
+                        on_code(b[i]);
+                    }
+                    i = end;
+                }
+                c => {
+                    if !c.is_ascii_whitespace() {
+                        on_code(c);
+                    }
+                    i += 1;
+                }
+            },
+        }
+    }
+    state
+}
+
 /// Inclusive 1-based `[start, end]` line span of the item beginning at
 /// `start_line`. Brace-matched for `{}`-bodied items (fn/struct/enum/trait/impl);
 /// semicolon-terminated for the rest (const/static/type/use); a lone start line
-/// otherwise. Capped at end-of-file. `//`-comment and string aware via
-/// [`strip_comments`]; braces inside strings and multi-line `/* … */` share the
-/// line parser's documented fragility — `--features syn-parser` parses exactly.
+/// otherwise. Capped at end-of-file.
+///
+/// Counts only braces that are **code**. It used to strip line comments and then
+/// count every remaining brace, so a `}` inside a string, a raw string or a char
+/// literal closed the item early: `pub fn a() { let c = '}'; … }` reported a
+/// one-line body and the graph stored a fragment of the function under the
+/// function's name. A stray `{` in a literal made the opposite error, swallowing
+/// whatever followed. Multi-line strings and `/* … */` are handled too — the
+/// scanner carries its state across lines instead of restarting on each one.
 fn symbol_span(lines: &[&str], start_line: usize) -> (usize, usize) {
     let n = lines.len();
     if start_line == 0 || start_line > n {
@@ -975,35 +1112,41 @@ fn symbol_span(lines: &[&str], start_line: usize) -> (usize, usize) {
         return (line, line);
     }
     let s0 = start_line - 1; // 0-based
-                             // Within a short signature window, find the body's opening brace — or a
-                             // semicolon that terminates a brace-less item (const/static/type/use).
-    let mut open = None;
-    for (off, line) in lines[s0..(s0 + 8).min(n)].iter().enumerate() {
-        let stripped = strip_comments(line);
-        if stripped.contains('{') {
-            open = Some(s0 + off);
-            break;
-        }
-        if stripped.trim_end().ends_with(';') {
-            return (start_line, s0 + off + 1);
-        }
-    }
-    let Some(open) = open else {
-        return (start_line, start_line);
-    };
+    let mut state = ScanState::Code;
     let mut depth: i32 = 0;
-    for (i, line) in lines.iter().enumerate().skip(open) {
-        for c in strip_comments(line).chars() {
+    let mut opened = false;
+    for (i, line) in lines.iter().enumerate().skip(s0) {
+        // The body's opening brace is looked for in a short signature window; an
+        // item that has not opened one by the end of it is a lone line.
+        let in_signature_window = i < s0 + 8;
+        if !opened && !in_signature_window {
+            return (start_line, start_line);
+        }
+        let mut ends_here = None;
+        let mut last_code = None;
+        state = scan_code_line(line, state, |c| {
+            last_code = Some(c);
             match c {
-                '{' => depth += 1,
-                '}' => {
+                b'{' => {
+                    depth += 1;
+                    opened = true;
+                }
+                b'}' if opened => {
                     depth -= 1;
-                    if depth == 0 {
-                        return (start_line, i + 1);
+                    if depth == 0 && ends_here.is_none() {
+                        ends_here = Some(i + 1);
                     }
                 }
                 _ => {}
             }
+        });
+        if let Some(end) = ends_here {
+            return (start_line, end);
+        }
+        // A brace-less item (const/static/type/use) ends at the line whose last
+        // code character is its terminating semicolon.
+        if !opened && last_code == Some(b';') {
+            return (start_line, i + 1);
         }
     }
     (start_line, n)
@@ -2182,6 +2325,83 @@ mod tests {
             !header.contains("f49"),
             "header must not list every symbol of a large file"
         );
+    }
+
+    /// A brace that is not code must not close the item.
+    ///
+    /// The span used to be measured by stripping line comments and counting every
+    /// remaining brace, so `'}'`, `"}"` and `r#"}"#` all ended the function at the
+    /// line they appeared on. Measured before the fix, each of the first three
+    /// cases below reported `(1, 2)` where the body runs to line 4 — the graph
+    /// stored two lines of a four-line function under that function's name, and a
+    /// recall returned the fragment with nothing marking it as one.
+    #[test]
+    fn a_brace_inside_a_literal_does_not_end_the_symbol() {
+        let cases: [(&str, &str, (usize, usize)); 9] = [
+            (
+                "char literal",
+                "pub fn a() {\n    let c = '}';\n    let d = 1;\n}\nfn after() {}\n",
+                (1, 4),
+            ),
+            (
+                "string",
+                "pub fn a() {\n    let s = \"}\";\n    let d = 1;\n}\nfn after() {}\n",
+                (1, 4),
+            ),
+            (
+                "raw string",
+                "pub fn a() {\n    let s = r#\"}\"#;\n    let d = 1;\n}\nfn after() {}\n",
+                (1, 4),
+            ),
+            (
+                "byte string",
+                "pub fn a() {\n    let s = b\"}\";\n    let d = 1;\n}\nfn after() {}\n",
+                (1, 4),
+            ),
+            (
+                "byte char",
+                "pub fn a() {\n    let s = b'}';\n    let d = 1;\n}\nfn after() {}\n",
+                (1, 4),
+            ),
+            (
+                // The opposite error: a stray `{` used to extend the span past the
+                // real end and swallow whatever followed.
+                "unbalanced opener in a literal",
+                "pub fn a() {\n    let s = \"{\";\n}\nfn after() {}\n",
+                (1, 3),
+            ),
+            (
+                "escaped quote before a brace",
+                "pub fn a() {\n    let s = \"\\\"}\";\n    let d = 1;\n}\nfn after() {}\n",
+                (1, 4),
+            ),
+            (
+                // A lifetime is code, and its quote must not open a char literal
+                // that then eats the rest of the line.
+                "lifetime, not a char literal",
+                "pub fn a<'t>(x: &'t u8) {\n    let d = 1;\n}\nfn after() {}\n",
+                (1, 3),
+            ),
+            (
+                "nested block comment on one line",
+                "pub fn a() {\n    /* /* } */ } */\n    let d = 1;\n}\nfn after() {}\n",
+                (1, 4),
+            ),
+        ];
+        for (name, src, want) in cases {
+            let lines: Vec<&str> = src.lines().collect();
+            assert_eq!(symbol_span(&lines, 1), want, "{name}: {src:?}");
+        }
+    }
+
+    /// Multi-line literals must not lose the scanner its place either: the state
+    /// is carried across lines rather than reset on each one.
+    #[test]
+    fn a_multi_line_literal_keeps_its_place() {
+        let src =
+            "pub fn a() {\n    let s = r#\"\n      }\n      }\n    \"#;\n    let d = 1;\n}\nfn after() {}\n";
+        let lines: Vec<&str> = src.lines().collect();
+        assert_eq!(symbol_span(&lines, 1), (1, 7));
     }
 
     #[test]

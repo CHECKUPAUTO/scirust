@@ -23,7 +23,23 @@ fn stress_100k_cycles_stays_bounded() {
         "node drift {} indicates a leak",
         report.node_drift
     );
-    assert!(report.cycles_per_second > 1_000.0, "unexpectedly slow");
+    // Throughput is a property of the *optimised* build; in an unoptimised one the
+    // number measures rustc, not the kernel. Measured on one machine, same commit,
+    // same code: ~6 700 cycles/s in release against ~940 in debug — landing either
+    // side of a flat 1 000 threshold, so `cargo test` failed for a reason that had
+    // nothing to do with CCOS while `cargo test --release` passed. Keep a floor
+    // that means something where it does, and one that only catches a true
+    // collapse where it does not. The bounds above are the real assertions here.
+    let floor = if cfg!(debug_assertions) {
+        100.0
+    } else {
+        1_000.0
+    };
+    assert!(
+        report.cycles_per_second > floor,
+        "unexpectedly slow: {:.0} cycles/s (floor {floor})",
+        report.cycles_per_second
+    );
 }
 
 #[test]

@@ -56,6 +56,28 @@ pub fn from_hex32(s: &str) -> Option<[u8; 32]> {
 /// cache, so a power loss or daemon crash can corrupt or truncate the file. The
 /// extra cost is one `fsync`, negligible at an agent's inference cadence.
 pub fn write_durable(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_durable_inner(path, bytes, false)
+}
+
+/// [`write_durable`], but it must **create** `path` — never replace it.
+///
+/// Same durability, different final step: a `hard_link` instead of a `rename`.
+/// `rename` clobbers unconditionally, so two processes that both find no file and
+/// both write leave only the later one's data, with no way for either to notice.
+/// `hard_link` fails with [`io::ErrorKind::AlreadyExists`] if the target exists,
+/// and does so atomically in the kernel — so exactly one of any number of racing
+/// creators wins and the rest are told they lost.
+///
+/// This is what a `stat`-based check cannot give you: between reading the metadata
+/// and renaming, another process can slip in. Creation has no such window.
+/// Replacement still does, which is why [`write_durable`] is not simply replaced
+/// by this — an atomic compare-and-swap on an existing file is not expressible
+/// with POSIX rename.
+pub fn write_durable_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_durable_inner(path, bytes, true)
+}
+
+fn write_durable_inner(path: &Path, bytes: &[u8], exclusive: bool) -> io::Result<()> {
     // Ensure the target directory exists — a workspace path like `.ccos/ws.ccos`
     // (an editor's default) must not fail to persist just because `.ccos/` was
     // never created. Without this the checkpoint silently fails and every run is
@@ -72,14 +94,21 @@ pub fn write_durable(path: &Path, bytes: &[u8]) -> io::Result<()> {
     #[cfg(unix)]
     file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
     file.write_all(bytes)?;
-    file.sync_all()?; // flush contents + metadata to disk before we rename
+    file.sync_all()?; // flush contents + metadata to disk before we publish
     drop(file);
 
-    std::fs::rename(&tmp.path, path)?; // atomic replace on a POSIX filesystem
-    tmp.keep(); // renamed away: there is nothing left to unlink
+    if exclusive {
+        // The link makes `path` a second name for the bytes we just synced, so the
+        // guard's `Drop` unlinking the temp name leaves the file itself in place —
+        // which is why `keep` is deliberately *not* called here.
+        std::fs::hard_link(&tmp.path, path)?;
+    } else {
+        std::fs::rename(&tmp.path, path)?; // atomic replace on a POSIX filesystem
+        tmp.keep(); // renamed away: there is nothing left to unlink
+    }
 
-    // Make the rename itself durable by fsync-ing the directory entry. Opening a
-    // directory for fsync is not portable everywhere, so this is best-effort.
+    // Make the publication itself durable by fsync-ing the directory entry.
+    // Opening a directory for fsync is not portable everywhere, so best-effort.
     let dir = match path.parent() {
         Some(p) if !p.as_os_str().is_empty() => p,
         _ => Path::new("."),

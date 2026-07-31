@@ -241,11 +241,11 @@ fn tool_specs() -> Value {
         },
         {
             "name": "sync",
-            "description": "Boot/refresh ack: checkpoint the session so in-memory state is durable, and report the current timeline step. OpenClaw calls this at gateway boot and on explicit refresh. Read-only to the index (the causal graph is derived state); `force` flushes even when no oplog path is bound (a no-op there).",
+            "description": "Boot/refresh ack: checkpoint the session so in-memory state is durable, and report the current timeline step. OpenClaw calls this at gateway boot and on explicit refresh. Read-only to the index (the causal graph is derived state) — it writes the snapshot, it does not change the graph. Fails visibly if the workspace could not be written; a no-op when no workspace is bound.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "force": {"type": "boolean", "description": "flush even when no persistence path is bound (default false)"},
+                    "force": {"type": "boolean", "description": "accepted for compatibility; the checkpoint is unconditional, so this changes nothing"},
                     "reason": {"type": "string", "description": "free-text reason for the sync (e.g. 'boot'); recorded for diagnostics only"}
                 }
             }
@@ -337,6 +337,106 @@ fn normalize_node(s: &str) -> String {
     } else {
         format!("file:{s}")
     }
+}
+
+/// Name of the argument a strategy needs, when it is missing or blank.
+///
+/// An anchored or free-text strategy without its query is not a recall that found
+/// nothing — it is a request that was never asked. Answering it with a well-formed
+/// empty window makes a caller's typo look like an empty memory: the window has
+/// the right shape, the right strategy label, and zero items, so nothing
+/// downstream has any reason to doubt it. Naming the missing field instead is the
+/// difference between "you asked wrong" and "there is nothing there".
+fn missing_recall_arg(args: &Value) -> Option<&'static str> {
+    let blank = |k: &str| str_arg(args, k).trim().is_empty();
+    match args
+        .get("strategy")
+        .and_then(Value::as_str)
+        .unwrap_or("working_set")
+    {
+        "around" if blank("anchor") => Some("anchor"),
+        "task" | "semantic" | "hybrid" | "octa-semantic" | "octa_semantic" if blank("text") => {
+            Some("text")
+        }
+        _ => None,
+    }
+}
+
+/// The first argument a tool's own advertised schema marks `required` and the
+/// call did not supply, if any.
+///
+/// The catalogue in [`tool_specs`] is a promise: `"required": ["output"]` tells a
+/// client the call is invalid without it. Nothing enforced that promise, and three
+/// tools quietly took the omission as a default — `page_fault` with no compiler
+/// output recalled a plain working set and labelled it a page-fault result,
+/// `recall_what_if` with no step replayed step 0 and returned an empty window,
+/// `signal_failure` with no node reported "node not found: file:" as though the
+/// caller had named a node that was missing.
+///
+/// Enforcing the declaration rather than hand-writing a check per tool means the
+/// schema stays the single statement of what a call needs, and any tool added
+/// later is covered the moment it declares.
+///
+/// Presence only — that is what `required` means in JSON Schema. Whether an
+/// *empty* value is also meaningless is a per-tool question: `ingest` with
+/// `source: ""` is a legitimately empty file, `page_fault` with `output: ""` is
+/// not a page fault.
+fn missing_required_arg(tool: &str, args: &Value) -> Option<String> {
+    static SPECS: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    let specs = SPECS.get_or_init(tool_specs);
+    let required = specs
+        .as_array()?
+        .iter()
+        .find(|t| t["name"] == tool)?
+        .get("inputSchema")?
+        .get("required")?
+        .as_array()?;
+    required
+        .iter()
+        .filter_map(Value::as_str)
+        .find(|key| args.get(*key).is_none())
+        .map(str::to_string)
+}
+
+/// Why `step` cannot be replayed faithfully, or `None` when it can.
+///
+/// `replay_to` clamps in both directions and cannot say that it did — it returns
+/// a memory, not a `Result`. Past the end it hands back the present; below the
+/// compaction floor it hands back the state *at* the floor. Either way the caller
+/// gets a well-formed window for a moment that is not the one it named, and for
+/// the tool whose entire job is answering "what did memory look like then" that is
+/// the one failure mode that matters. Measured on a 3-op timeline: `step: 9999`
+/// returned exactly what `step: 3` returned, with nothing marking the difference.
+fn unreplayable_step(session: &AgentSession, step: usize) -> Option<String> {
+    let (len, floor) = (session.len(), session.floor());
+    if step > len {
+        return Some(format!(
+            "step {step} is past the end of the timeline ({len} op(s) recorded)"
+        ));
+    }
+    // Step 0 is the empty baseline and always means "before anything happened".
+    if step > 0 && step < floor {
+        return Some(format!(
+            "step {step} is below the compaction floor ({floor}): that history has \
+             been folded into the baseline and cannot be replayed separately. The \
+             earliest faithful step is {floor} (raise CCOS_OPLOG_MAX to keep more)"
+        ));
+    }
+    None
+}
+
+/// The JSON-RPC refusal for a recall whose query argument is missing or blank.
+/// Names both the strategy and the field, since the usual cause is a caller that
+/// used the wrong key and has no way to see that from an empty window.
+fn refuse_blank_recall(args: &Value, arg: &str) -> (i64, String) {
+    let strategy = args
+        .get("strategy")
+        .and_then(Value::as_str)
+        .unwrap_or("working_set");
+    (
+        -32602,
+        format!("recall strategy '{strategy}' requires a non-empty '{arg}'"),
+    )
 }
 
 /// Build a [`Recall`] strategy from `{strategy, anchor, text}` arguments. Shared
@@ -565,12 +665,28 @@ fn call_tool(
         .cloned()
         .unwrap_or_else(|| json!({}));
     let budget = args.get("budget").and_then(Value::as_u64).unwrap_or(2048) as usize;
+    // Hold the catalogue to its own word before dispatching — see
+    // `missing_required_arg`.
+    if let Some(arg) = missing_required_arg(name, &args) {
+        return Err((-32602, format!("{name} requires '{arg}'")));
+    }
 
     let text = match name {
         "ingest" => {
             let uri = str_arg(&args, "uri");
             if uri.is_empty() {
                 return Err((-32602, "ingest requires 'uri' and 'source'".into()));
+            }
+            // The message has always claimed both are required; only `uri` was
+            // checked, so an `ingest` with no `source` succeeded and put an empty
+            // node in the graph — a file that exists, in the memory, with no
+            // content, which nothing downstream can tell from a real empty file.
+            // `source: ""` stays legal; the absent key is what is refused.
+            if args.get("source").is_none() {
+                return Err((
+                    -32602,
+                    "ingest requires 'source' (pass \"\" for an empty file)".into(),
+                ));
             }
             serde_json::to_string(&session.ingest(&uri, &str_arg(&args, "source")))
                 .unwrap_or_default()
@@ -588,6 +704,9 @@ fn call_tool(
             }
         }
         "recall" => {
+            if let Some(arg) = missing_recall_arg(&args) {
+                return Err(refuse_blank_recall(&args, arg));
+            }
             #[cfg(feature = "octasoma")]
             if args.get("strategy").and_then(Value::as_str) == Some("octa-semantic") {
                 return octa_semantic_recall(session, state, &args, budget);
@@ -598,6 +717,12 @@ fn call_tool(
         #[cfg(feature = "octasoma")]
         "octa_feedback" => return octa_feedback_tool(session, state, &args),
         "page_fault" => {
+            // Presence is not enough here: an empty compiler output names no
+            // faulting file, so the fault degrades to a plain working-set recall
+            // that still comes back looking like a page-fault result.
+            if str_arg(&args, "output").trim().is_empty() {
+                return Err((-32602, "page_fault requires a non-empty 'output'".into()));
+            }
             serde_json::to_string(&session.page_fault(&str_arg(&args, "output"), budget))
                 .unwrap_or_default()
         }
@@ -605,7 +730,17 @@ fn call_tool(
         "verify" => serde_json::to_string(&session.memory().verify()).unwrap_or_default(),
         "timeline" => json!({ "timeline": session.timeline() }).to_string(),
         "recall_what_if" => {
-            let step = args.get("step").and_then(Value::as_u64).unwrap_or(0) as usize;
+            if let Some(arg) = missing_recall_arg(&args) {
+                return Err(refuse_blank_recall(&args, arg));
+            }
+            // A `step` that is present but not a number would fall through
+            // `as_u64` to 0 and silently replay the empty baseline.
+            let Some(step) = args.get("step").and_then(Value::as_u64).map(|s| s as usize) else {
+                return Err((-32602, "recall_what_if 'step' must be a number".into()));
+            };
+            if let Some(why) = unreplayable_step(session, step) {
+                return Err((-32602, why));
+            }
             let window = session.recall_what_if(step, &recall_from_args(&args), budget);
             serde_json::to_string(&window).unwrap_or_default()
         }
@@ -788,8 +923,27 @@ fn call_tool(
             }
         }
         "sync" => {
-            if args.get("force").and_then(Value::as_bool).unwrap_or(false) {
-                let _ = session.checkpoint();
+            // `sync` is the boot/refresh acknowledgement a gateway calls to confirm
+            // the session is durable — making it durable is the whole job. Two
+            // things were wrong with that.
+            //
+            // It discarded the checkpoint result (`let _ = session.checkpoint()`)
+            // and answered `ok: true` regardless, so a gateway got a clean boot ack
+            // for a session that had persisted nothing; the only trace was a stderr
+            // line no MCP client reads.
+            //
+            // And it only checkpointed under `force`, while its description has
+            // always said it checkpoints — so the default call, the one a gateway
+            // actually makes at boot, persisted nothing at all. The description is
+            // the contract worth keeping, so the checkpoint is now unconditional
+            // and `force` stays accepted but inert rather than quietly deciding
+            // whether the promise holds. `NoPath` is still success: a session with
+            // no workspace bound was never asked to persist anything.
+            if let Err(e) = persist(session) {
+                return Err((
+                    -32603,
+                    format!("sync could not make the session durable: {e}"),
+                ));
             }
             json!({
                 "step": session.timeline().len(),
@@ -1842,6 +1996,391 @@ mod tests {
             stats["result"]["isError"].is_null(),
             "read-only calls stay unmarked: {stats}"
         );
+    }
+
+    /// A recall missing its query must be refused, not answered with an empty
+    /// window.
+    ///
+    /// The window a blank query produced was perfectly well-formed — right
+    /// strategy label, zero items, zero tokens — so a caller that used the wrong
+    /// argument name could not tell its typo from an empty memory. Measured on a
+    /// real 165-file workspace: `{"strategy":"task","task":"NdLinear"}` (the field
+    /// is `text`) returned nothing, while the same query under `text` returned 15
+    /// items and filled the whole 2048-token budget.
+    #[test]
+    fn a_recall_without_its_query_is_refused_not_answered_with_an_empty_window() {
+        let mut s = AgentSession::new();
+        s.ingest("src/db.rs", "pub fn query() {}\n");
+
+        let call = |name: &str, args: Value| {
+            req(1, "tools/call", json!({ "name": name, "arguments": args }))
+        };
+
+        for (strategy, present, absent) in [
+            ("around", "anchor", "text"),
+            ("task", "text", "anchor"),
+            ("semantic", "text", "anchor"),
+            ("hybrid", "text", "anchor"),
+        ] {
+            // The wrong key, which is what a caller actually gets wrong.
+            let mut s2 = AgentSession::new();
+            s2.ingest("src/db.rs", "pub fn query() {}\n");
+            let wrong = handle(
+                &mut s2,
+                &call("recall", json!({ "strategy": strategy, absent: "query" })),
+            )
+            .unwrap();
+            assert_eq!(
+                wrong["error"]["code"], -32602,
+                "{strategy} with only '{absent}' must be refused: {wrong}"
+            );
+            let msg = wrong["error"]["message"].as_str().unwrap_or_default();
+            assert!(
+                msg.contains(present) && msg.contains(strategy),
+                "the refusal must name the strategy and the field it wants: {msg}"
+            );
+
+            // Blank is the same as absent — a caller passing "" asked nothing.
+            let blank = handle(
+                &mut s2,
+                &call("recall", json!({ "strategy": strategy, present: "   " })),
+            )
+            .unwrap();
+            assert_eq!(blank["error"]["code"], -32602, "{strategy} blank: {blank}");
+        }
+
+        // The strategy that genuinely needs no query is untouched.
+        let ws = handle(
+            &mut s,
+            &call("recall", json!({ "strategy": "working_set" })),
+        )
+        .unwrap();
+        assert!(
+            ws["result"]["content"][0]["text"].is_string(),
+            "working_set still answers without a query: {ws}"
+        );
+
+        // And `recall_what_if` guards the same way — it takes the same arguments.
+        let what_if = handle(
+            &mut s,
+            &call("recall_what_if", json!({ "strategy": "around", "step": 0 })),
+        )
+        .unwrap();
+        assert_eq!(what_if["error"]["code"], -32602, "{what_if}");
+    }
+
+    /// `ingest` must not accept a request with no `source`.
+    ///
+    /// Its own refusal message named both `uri` and `source`, but only `uri` was
+    /// checked, so the call succeeded and put an empty node in the graph — a file
+    /// that exists, in the memory, with no content, indistinguishable downstream
+    /// from a genuinely empty file. An explicit `""` still means exactly that and
+    /// stays legal.
+    #[test]
+    fn ingest_requires_the_source_its_error_message_has_always_claimed() {
+        let mut s = AgentSession::new();
+        let call = |args: Value| {
+            req(
+                1,
+                "tools/call",
+                json!({ "name": "ingest", "arguments": args }),
+            )
+        };
+
+        let no_source = handle(&mut s, &call(json!({ "uri": "file:x.rs" }))).unwrap();
+        assert_eq!(no_source["error"]["code"], -32602, "{no_source}");
+        assert!(
+            no_source["error"]["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("source"),
+            "the refusal must name the missing field: {no_source}"
+        );
+
+        // An empty file is a real thing and must still ingest.
+        let empty = handle(
+            &mut s,
+            &call(json!({ "uri": "file:empty.rs", "source": "" })),
+        )
+        .unwrap();
+        assert!(
+            empty["result"]["content"][0]["text"].is_string(),
+            "an explicitly empty source is legal: {empty}"
+        );
+    }
+
+    /// Time travel must refuse a moment it cannot reconstruct.
+    ///
+    /// `replay_to` clamps in both directions and cannot report that it did — it
+    /// returns a memory, not a `Result`. Past the end it hands back the present;
+    /// below the compaction floor it hands back the state *at* the floor. Either
+    /// way `recall_what_if` answered with a well-formed window for a moment that
+    /// is not the one it was asked about. Measured on a 3-op timeline before this
+    /// guard: `step: 9999` returned byte-for-byte what `step: 3` returned. For the
+    /// tool whose entire job is "what did memory look like then", that is the one
+    /// failure mode that matters.
+    #[test]
+    fn time_travel_refuses_a_step_it_cannot_reconstruct() {
+        let mut s = AgentSession::new();
+        for i in 0..3 {
+            s.ingest(&format!("src/f{i}.rs"), &format!("pub fn f{i}() {{}}\n"));
+        }
+        let what_if = |step: usize| {
+            req(
+                1,
+                "tools/call",
+                json!({ "name": "recall_what_if",
+                        "arguments": { "strategy": "working_set", "step": step } }),
+            )
+        };
+
+        // Every step that exists replays, including both ends. `recall_what_if` is
+        // read-only — it replays into a throwaway memory — so one session serves.
+        let last = s.len();
+        for step in 0..=last {
+            let r = handle(&mut s, &what_if(step)).unwrap();
+            assert!(
+                r["result"]["content"][0]["text"].is_string(),
+                "step {step} is in range and must replay: {r}"
+            );
+        }
+
+        // One past the end is already a moment that never happened.
+        let past_end = handle(&mut s, &what_if(last + 1)).unwrap();
+        assert_eq!(past_end["error"]["code"], -32602, "{past_end}");
+        assert!(
+            past_end["error"]["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("past the end"),
+            "{past_end}"
+        );
+
+        // Below the compaction floor the answer would be the floor's state wearing
+        // the requested step's name — the quieter and more misleading of the two.
+        let mut compacted = AgentSession::new();
+        for i in 0..40 {
+            compacted.ingest(&format!("src/g{i}.rs"), &format!("pub fn g{i}() {{}}\n"));
+        }
+        compacted.compact(10);
+        let floor = compacted.floor();
+        assert!(floor > 1, "fixture must actually compact, floor={floor}");
+
+        let below = handle(&mut compacted, &what_if(1)).unwrap();
+        assert_eq!(below["error"]["code"], -32602, "{below}");
+        let msg = below["error"]["message"].as_str().unwrap_or_default();
+        assert!(
+            msg.contains("compaction floor") && msg.contains(&floor.to_string()),
+            "the refusal must name the floor so the caller can pick a real step: {msg}"
+        );
+
+        // Step 0 stays legal: "before anything happened" is always reconstructible,
+        // and the floor never swallows it.
+        let zero = handle(&mut compacted, &what_if(0)).unwrap();
+        assert!(zero["result"]["content"][0]["text"].is_string(), "{zero}");
+        // And the floor itself is exactly the baseline, so it replays.
+        let at_floor = handle(&mut compacted, &what_if(floor)).unwrap();
+        assert!(
+            at_floor["result"]["content"][0]["text"].is_string(),
+            "{at_floor}"
+        );
+    }
+
+    /// `sync` must persist, and must not answer `ok: true` when it could not.
+    ///
+    /// `sync` is the boot/refresh acknowledgement a gateway calls to confirm the
+    /// session is durable — making it durable is the whole job — and it failed at
+    /// that job twice over. It discarded the checkpoint result
+    /// (`let _ = session.checkpoint()`) and answered `{"ok":true,…}` regardless,
+    /// so a gateway got a clean boot ack for a session that had persisted nothing;
+    /// the only trace was a stderr line no MCP client reads. And it only
+    /// checkpointed under `force`, while its description has always said it
+    /// checkpoints — so the *default* call, the one a gateway actually makes at
+    /// boot, wrote nothing at all.
+    ///
+    /// Same shape as the `ingest` case, but worse: for `ingest`, durability is a
+    /// side effect; here it is the entire contract.
+    #[test]
+    fn sync_persists_and_reports_a_flush_that_failed() {
+        let root = std::env::temp_dir().join(format!("ccos-sync-force-{}", std::process::id()));
+        let dir = root.join("ws");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut session = AgentSession::open(dir.join("workspace.ccos")).unwrap();
+        session.ingest("src/a.rs", "pub fn a() {}\n");
+
+        let sync = req(
+            1,
+            "tools/call",
+            json!({ "name": "sync", "arguments": { "force": true } }),
+        );
+        // The default call — no `force` — is the one a gateway makes at boot, and
+        // it is the one that used to write nothing.
+        let plain_sync = req(1, "tools/call", json!({ "name": "sync" }));
+
+        let acked = handle(&mut session, &plain_sync).unwrap();
+        assert!(
+            acked["result"]["content"][0]["text"].is_string(),
+            "a plain sync acks: {acked}"
+        );
+        assert!(
+            dir.join("workspace.ccos").is_file(),
+            "…and it must actually have written the workspace"
+        );
+
+        let healthy = handle(&mut session, &sync).unwrap();
+        assert!(
+            healthy["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("\"ok\":true"),
+            "a healthy flush still acks: {healthy}"
+        );
+
+        // Break the workspace the same way as elsewhere in this file: a regular
+        // file where the directory was, so `create_dir_all` fails outright and no
+        // chmod is involved (CI may run as root).
+        std::fs::remove_dir_all(&dir).unwrap();
+        std::fs::write(&dir, b"not a directory").unwrap();
+
+        for (label, call) in [("force", &sync), ("plain", &plain_sync)] {
+            let refused = handle(&mut session, call).unwrap();
+            assert_eq!(
+                refused["error"]["code"], -32603,
+                "{label} sync must not ack a failed flush: {refused}"
+            );
+        }
+        let broken = handle(&mut session, &sync).unwrap();
+        assert_eq!(
+            broken["error"]["code"], -32603,
+            "a failed flush must not ack: {broken}"
+        );
+        assert!(
+            broken["error"]["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("durable"),
+            "{broken}"
+        );
+
+        // A session with nothing bound is not a failure: `force` is documented as
+        // a no-op there, and it must stay one.
+        let mut unbound = AgentSession::new();
+        unbound.ingest("src/a.rs", "pub fn a() {}\n");
+        let no_path = handle(&mut unbound, &sync).unwrap();
+        assert!(
+            no_path["result"]["content"][0]["text"].is_string(),
+            "an unbound session still acks: {no_path}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Every argument the catalogue marks `required` must actually be required.
+    ///
+    /// `"required": ["output"]` in an advertised schema tells a client the call is
+    /// invalid without it. Nothing enforced that, and three tools took the
+    /// omission as a default instead: `page_fault` with no compiler output
+    /// recalled a plain working set and returned it looking like a page-fault
+    /// result, `recall_what_if` with no step replayed step 0 and returned an empty
+    /// window, `signal_failure` with no node answered "node not found: file:" as
+    /// though a node had been named and was missing.
+    ///
+    /// Driven off the catalogue rather than a hand-written list, so a tool added
+    /// later cannot quietly opt out of its own declaration.
+    #[test]
+    fn every_declared_required_argument_is_enforced() {
+        let specs = tool_specs();
+        let mut checked = 0;
+        for spec in specs.as_array().expect("catalogue is an array") {
+            let name = spec["name"].as_str().expect("tool has a name");
+            let Some(required) = spec["inputSchema"]["required"].as_array() else {
+                continue;
+            };
+            for key in required.iter().filter_map(Value::as_str) {
+                // Supply every *other* required key, so the refusal can only be
+                // about the one left out.
+                let mut args = serde_json::Map::new();
+                for other in required.iter().filter_map(Value::as_str) {
+                    if other != key {
+                        args.insert(other.to_string(), json!("x"));
+                    }
+                }
+                let mut s = AgentSession::new();
+                s.ingest("src/a.rs", "pub fn a() {}\n");
+                let r = handle(
+                    &mut s,
+                    &req(
+                        1,
+                        "tools/call",
+                        json!({ "name": name, "arguments": Value::Object(args) }),
+                    ),
+                )
+                .unwrap();
+                assert_eq!(
+                    r["error"]["code"], -32602,
+                    "{name} declares '{key}' required but accepted the call: {r}"
+                );
+                assert!(
+                    r["error"]["message"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .contains(key),
+                    "the refusal must name the missing argument: {r}"
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked >= 9, "expected the whole catalogue, saw {checked}");
+    }
+
+    /// Presence is not always enough, and emptiness does not always mean absent.
+    #[test]
+    fn empty_values_are_judged_per_tool_not_uniformly() {
+        let mut s = AgentSession::new();
+
+        // An empty compiler output names no faulting file, so the "page fault"
+        // would be an ordinary working-set recall wearing the wrong label.
+        let blank_fault = handle(
+            &mut s,
+            &req(
+                1,
+                "tools/call",
+                json!({ "name": "page_fault", "arguments": { "output": "   " } }),
+            ),
+        )
+        .unwrap();
+        assert_eq!(blank_fault["error"]["code"], -32602, "{blank_fault}");
+
+        // An empty *file* is a real thing and must still ingest.
+        let empty_file = handle(
+            &mut s,
+            &req(
+                1,
+                "tools/call",
+                json!({ "name": "ingest",
+                        "arguments": { "uri": "file:empty.rs", "source": "" } }),
+            ),
+        )
+        .unwrap();
+        assert!(
+            empty_file["result"]["content"][0]["text"].is_string(),
+            "{empty_file}"
+        );
+
+        // A `step` that is present but not a number fell through `as_u64` to 0 and
+        // silently replayed the empty baseline.
+        let bad_step = handle(
+            &mut s,
+            &req(
+                1,
+                "tools/call",
+                json!({ "name": "recall_what_if",
+                        "arguments": { "strategy": "working_set", "step": "2" } }),
+            ),
+        )
+        .unwrap();
+        assert_eq!(bad_step["error"]["code"], -32602, "{bad_step}");
     }
 
     #[test]
