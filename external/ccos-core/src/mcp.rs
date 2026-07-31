@@ -27,7 +27,7 @@
 
 use crate::agent_session::AgentSession;
 use crate::compressor::CcrRef;
-use crate::external_memory::{ExternalMemory, Recall, RecallWindow};
+use crate::external_memory::{ExternalMemory, MemoryError, Recall, RecallWindow};
 use serde_json::{json, Value};
 
 /// MCP protocol revision we speak (echoed back to the client when offered).
@@ -996,8 +996,10 @@ pub fn serve_workspace(
     Ok(())
 }
 
-/// The shared stdio JSON-RPC loop until EOF. One JSON message per line; a
-/// best-effort checkpoint follows every state-changing tool call.
+/// The shared stdio JSON-RPC loop until EOF. One JSON message per line; every
+/// state-changing tool call is checkpointed before its reply goes out, and a
+/// checkpoint that fails turns that reply into a visible error rather than a
+/// silent loss (see [`step`] and [`mark_not_durable`]).
 fn serve_session(mut session: AgentSession) {
     use std::io::{BufRead, Write};
     let stdin = std::io::stdin();
@@ -1007,31 +1009,67 @@ fn serve_session(mut session: AgentSession) {
     let mut state = ServerState::default();
     for line in stdin.lock().lines() {
         let Ok(line) = line else { break };
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let reply = match serde_json::from_str::<Value>(line) {
-            Ok(msg) => {
-                let mutated = is_mutating_call(&msg);
-                let resp = handle_with(&mut session, &mut state, &msg);
-                if mutated {
-                    persist(&mut session);
-                }
-                resp
-            }
-            Err(_) => Some(json!({
-                "jsonrpc": "2.0", "id": Value::Null,
-                "error": { "code": -32700, "message": "parse error" }
-            })),
-        };
-        if let Some(resp) = reply {
+        if let Some(resp) = step(&mut session, &mut state, line.trim()) {
             let mut out = stdout.lock();
             let _ = writeln!(out, "{resp}");
             let _ = out.flush();
         }
     }
-    persist(&mut session); // final checkpoint at close (no-op when no path is bound)
+    let _ = persist(&mut session); // final checkpoint at close; nobody left to tell
+}
+
+/// One request in, at most one reply out — the body of the stdio loop, lifted out
+/// of it so the durability contract can be tested without a real stdin.
+fn step(session: &mut AgentSession, state: &mut ServerState, line: &str) -> Option<Value> {
+    if line.is_empty() {
+        return None;
+    }
+    let Ok(msg) = serde_json::from_str::<Value>(line) else {
+        return Some(json!({
+            "jsonrpc": "2.0", "id": Value::Null,
+            "error": { "code": -32700, "message": "parse error" }
+        }));
+    };
+    let mutated = is_mutating_call(&msg);
+    let resp = handle_with(session, state, &msg);
+    // The checkpoint runs *before* the reply leaves, so a write that never reached
+    // disk must not be reported as one — see `mark_not_durable`.
+    match if mutated { persist(session) } else { Ok(()) } {
+        Ok(()) => resp,
+        Err(e) => resp.map(|r| mark_not_durable(r, &e)),
+    }
+}
+
+/// Turn an already-successful tool reply into a visible failure when the
+/// checkpoint that should have made it durable did not reach disk.
+///
+/// `serve_session` checkpoints *before* writing the reply, so without this the
+/// server answered `{"result": …}` — an unqualified success — to an `ingest`
+/// whose workspace write had just failed (read-only file, full disk, revoked
+/// permission). The stderr line the failure did emit is invisible to an MCP
+/// client: the agent was told its memory was stored, kept working on that
+/// belief, and lost everything when the process exited. Reporting the loss in
+/// the reply is the only channel the caller actually reads.
+///
+/// The original payload is kept: what happened *in memory* is still true for the
+/// rest of this session, and the caller may want it. Only the durability claim
+/// is retracted.
+fn mark_not_durable(mut resp: Value, err: &MemoryError) -> Value {
+    let note = format!(
+        "WARNING — NOT DURABLE: the operation applied to the in-memory graph, but \
+         the workspace checkpoint that should have persisted it failed ({err}). \
+         Everything above is lost when this server exits. Treat it as unsaved: fix \
+         the workspace path, permissions or free space, then replay the call."
+    );
+    let Some(result) = resp.get_mut("result") else {
+        return resp;
+    };
+    match result.get_mut("content").and_then(Value::as_array_mut) {
+        Some(items) => items.push(json!({ "type": "text", "text": note })),
+        None => result["content"] = json!([{ "type": "text", "text": note }]),
+    }
+    result["isError"] = Value::Bool(true);
+    resp
 }
 
 /// True iff the message is a `tools/call` to a state-changing tool.
@@ -1047,13 +1085,17 @@ fn is_mutating_call(msg: &Value) -> bool {
     matches!(name, "ingest" | "signal_failure" | "page_fault")
 }
 
-/// Checkpoint the session, best-effort: silent when no path is bound, a stderr
-/// line on a real IO/serialisation error (stdout is reserved for JSON-RPC).
-fn persist(session: &mut AgentSession) {
-    use crate::external_memory::MemoryError;
+/// Checkpoint the session. Having no path bound is not a failure (that server
+/// was never asked to persist anything); a real IO/serialisation error is, and
+/// is both logged to stderr (stdout is reserved for JSON-RPC) and returned so
+/// the caller's reply can carry the bad news.
+fn persist(session: &mut AgentSession) -> Result<(), MemoryError> {
     match session.checkpoint() {
-        Ok(()) | Err(MemoryError::NoPath) => {}
-        Err(e) => eprintln!("ccos mcp: checkpoint failed: {e}"),
+        Ok(()) | Err(MemoryError::NoPath) => Ok(()),
+        Err(e) => {
+            eprintln!("ccos mcp: checkpoint failed: {e}");
+            Err(e)
+        }
     }
 }
 
@@ -1733,6 +1775,73 @@ mod tests {
         )
         .unwrap();
         assert_eq!(r["error"]["code"], -32602);
+    }
+
+    /// A mutating call whose checkpoint failed must not come back as a success.
+    ///
+    /// The server checkpoints *before* it writes the reply, so it used to answer
+    /// a plain `{"result": …}` to an `ingest` whose workspace write had just
+    /// failed. The only sign was a stderr line no MCP client ever reads: the
+    /// agent was told its memory was stored, kept reasoning on that belief, and
+    /// lost the lot when the process exited.
+    #[test]
+    fn a_failed_checkpoint_is_reported_in_the_reply_not_only_on_stderr() {
+        let root = std::env::temp_dir().join(format!("ccos-mcp-durability-{}", std::process::id()));
+        let dir = root.join("ws");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut session = AgentSession::open(dir.join("workspace.ccos")).unwrap();
+        let mut state = ServerState::default();
+
+        let ingest = |n: i64, path: &str| {
+            serde_json::to_string(&req(
+                n,
+                "tools/call",
+                json!({ "name": "ingest", "arguments": {
+                    "uri": path, "source": "pub fn f() {}\n" } }),
+            ))
+            .unwrap()
+        };
+
+        // While the workspace is writable the reply is an unqualified success.
+        let ok = step(&mut session, &mut state, &ingest(1, "src/a.rs")).unwrap();
+        assert!(ok["result"]["isError"].is_null(), "durable ingest: {ok}");
+
+        // Now break the workspace for real. Deleting the directory is not enough —
+        // `write_durable` recreates it on purpose — so put a *regular file* where
+        // the directory was: `create_dir_all` then fails outright. (No chmod games:
+        // CI may well run as root, which ignores permission bits.)
+        std::fs::remove_dir_all(&dir).unwrap();
+        std::fs::write(&dir, b"not a directory").unwrap();
+
+        let lost = step(&mut session, &mut state, &ingest(2, "src/b.rs")).unwrap();
+        assert_eq!(
+            lost["result"]["isError"], true,
+            "an ingest that never reached disk must be flagged: {lost}"
+        );
+        let texts: String = lost["result"]["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|c| c["text"].as_str())
+            .collect();
+        assert!(
+            texts.contains("NOT DURABLE"),
+            "caller must be told: {texts}"
+        );
+
+        // A read-only call is not checkpointed, so a broken workspace does not
+        // make `stats` lie about itself.
+        let stats = step(
+            &mut session,
+            &mut state,
+            &serde_json::to_string(&req(3, "tools/call", json!({ "name": "stats" }))).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            stats["result"]["isError"].is_null(),
+            "read-only calls stay unmarked: {stats}"
+        );
     }
 
     #[test]

@@ -5,6 +5,9 @@
 # .claude PostToolUse hook — see docs/CCOS_MEMORY.md). Per-session state.
 .ccos/
 external/ccos-core/target/
+# Verdict written by `ccos setup` — a machine-local install report (host probe,
+# absolute paths), regenerated on every run.
+setup_report.json
 
 # obd2_api runtime feedback archive (generated locally, not a static asset)
 examples/obd2_diagnostic/data/feedback.jsonl
