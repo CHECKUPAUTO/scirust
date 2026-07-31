@@ -453,39 +453,59 @@ DONE:
         adapter.synchronize(&stream).expect("CUDA synchronization");
     }
 
-    #[test]
-    fn duplicate_binding_slots_are_rejected() {
-        let Some(adapter) = adapter_or_skip()
-        else
-        {
-            return;
-        };
-
-        const PTX: &str = r#"
+    /// A no-op taking **two** pointer parameters.
+    ///
+    /// Two parameters, not one, because the aliasing cases below bind slots `0`
+    /// and `1`: the adapter pushes one pointer argument per binding, so a
+    /// one-parameter kernel would be handed an argument it never declared. The
+    /// kernel's own signature decides how many bindings a launch may carry, and
+    /// these tests match it rather than over-supplying arguments. The body stays
+    /// a bare `ret;` — what is under test is the binding contract, not the
+    /// kernel's semantics.
+    const NO_OP_PAIR_PTX: &str = r#"
 .version 8.0
 .target sm_80
 .address_size 64
 
-.visible .entry no_op(
-    .param .u64 no_op_param_0
+.visible .entry no_op_pair(
+    .param .u64 no_op_pair_param_0,
+    .param .u64 no_op_pair_param_1
 )
 {
     ret;
 }
 "#;
 
+    fn no_op_pair_kernel(adapter: &CudaComputeAdapter) -> CudaComputeKernel {
+        let module = KernelModule::new(
+            KernelFormat::Ptx,
+            "no_op_pair",
+            NO_OP_PAIR_PTX.as_bytes().to_vec(),
+        )
+        .expect("valid PTX module");
+
+        adapter.compile(&module).expect("PTX loading")
+    }
+
+    #[test]
+    fn duplicate_slots_are_rejected_but_read_only_aliasing_is_allowed() {
+        let Some(adapter) = adapter_or_skip()
+        else
+        {
+            return;
+        };
+
         let buffer = adapter
             .allocate(4, 1, MemorySpace::Device)
             .expect("CUDA allocation");
 
-        let module = KernelModule::new(KernelFormat::Ptx, "no_op", PTX.as_bytes().to_vec())
-            .expect("valid PTX module");
-
-        let kernel = adapter.compile(&module).expect("PTX loading");
+        let kernel = no_op_pair_kernel(&adapter);
         let stream = adapter.create_stream().expect("logical CUDA stream");
         let config = LaunchConfig::new([1, 1, 1], [1, 1, 1], 0).expect("valid launch");
 
-        let bindings = [
+        // Rule one, unchanged: a slot number may appear once. This is about the
+        // slot alone — the allocation and the access mode are irrelevant to it.
+        let duplicate_slots = [
             BufferBinding {
                 slot: 0,
                 buffer: &buffer,
@@ -502,14 +522,21 @@ DONE:
             },
         ];
 
-        assert!(matches!(
-            adapter.launch(&kernel, &stream, config, &bindings),
-            Err(ComputeError::InvalidArgument(
-                "buffer binding slots must be unique"
-            ))
-        ));
+        assert!(
+            matches!(
+                adapter.launch(&kernel, &stream, config, &duplicate_slots),
+                Err(ComputeError::InvalidArgument(
+                    "buffer binding slots must be unique"
+                ))
+            ),
+            "two bindings sharing slot 0 must stay invalid"
+        );
 
-        let aliased_bindings = [
+        // Rule two: one allocation may appear at several *distinct* slots as
+        // long as every one of those bindings is read-only. That is the
+        // `add(x, x)` shape, and refusing it would break a plan the canonical
+        // pipeline legitimately produces.
+        let read_only_aliased = [
             BufferBinding {
                 slot: 0,
                 buffer: &buffer,
@@ -526,10 +553,80 @@ DONE:
             },
         ];
 
-        assert!(matches!(
-            adapter.launch(&kernel, &stream, config, &aliased_bindings),
-            Err(ComputeError::Launch(message))
-                if message.contains("same allocation")
-        ));
+        let event = adapter
+            .launch(&kernel, &stream, config, &read_only_aliased)
+            .expect(
+                "one allocation bound to two read-only slots is allowed and must launch, not be \
+                 refused",
+            );
+
+        // The launch is only half the claim: waiting proves the submission
+        // actually completed on the device instead of leaving a live CUDA event
+        // behind an `is_ok()` that never observed it.
+        adapter.wait(&event).expect(
+            "the read-only aliased launch must run to completion on the device, not merely be \
+             accepted",
+        );
+        adapter
+            .synchronize(&stream)
+            .expect("the stream must drain cleanly after a read-only aliased launch");
+    }
+
+    #[test]
+    fn aliasing_one_allocation_across_slots_is_rejected_when_a_binding_writes() {
+        let Some(adapter) = adapter_or_skip()
+        else
+        {
+            return;
+        };
+
+        let buffer = adapter
+            .allocate(4, 1, MemorySpace::Device)
+            .expect("CUDA allocation");
+
+        let kernel = no_op_pair_kernel(&adapter);
+        let stream = adapter.create_stream().expect("logical CUDA stream");
+        let config = LaunchConfig::new([1, 1, 1], [1, 1, 1], 0).expect("valid launch");
+
+        // Read-only repetition is the *only* repetition allowed. Both shapes
+        // that pair a read with a write over one allocation stay refused, and
+        // neither is quietly serialised into something that would launch.
+        for write_access in [BufferAccess::WriteOnly, BufferAccess::ReadWrite]
+        {
+            let write_aliased = [
+                BufferBinding {
+                    slot: 0,
+                    buffer: &buffer,
+                    offset_bytes: 0,
+                    length_bytes: 4,
+                    access: BufferAccess::ReadOnly,
+                },
+                BufferBinding {
+                    slot: 1,
+                    buffer: &buffer,
+                    offset_bytes: 0,
+                    length_bytes: 4,
+                    access: write_access,
+                },
+            ];
+
+            let error = adapter
+                .launch(&kernel, &stream, config, &write_aliased)
+                .expect_err(
+                    "repeating an allocation must stay refused as soon as one binding writes",
+                );
+
+            match error
+            {
+                ComputeError::Launch(message) => assert!(
+                    message.contains("only allowed when every one of its bindings is read-only"),
+                    "the refusal must state the read-only rule; got: {message}"
+                ),
+                other =>
+                {
+                    panic!("expected ComputeError::Launch for {write_access:?}, got {other:?}")
+                },
+            }
+        }
     }
 }
