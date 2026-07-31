@@ -116,7 +116,10 @@ pub mod tensor_canonical {
     //! vendors, and building it needs no CUDA toolkit. *Running* it needs three
     //! things at run time — the CUDA driver library (`libcuda`), the NVRTC
     //! runtime compiler (`libnvrtc`) and a real device — and each absence is
-    //! reported distinctly. The device ordinal is always explicit: there is no
+    //! reported distinctly, none of them with a fallback. The driver and the
+    //! device are established when the adapter is constructed; NVRTC is not
+    //! predicted at all, and an unusable one surfaces when `prepare` actually
+    //! compiles a kernel. The device ordinal is always explicit: there is no
     //! default, no fallback to device zero and no implicit selection of another
     //! device. Nothing is ever computed on the host and presented as a CUDA
     //! result.

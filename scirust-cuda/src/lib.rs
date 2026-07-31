@@ -38,7 +38,7 @@ pub use chain::{CudaChain, CudaF32, CudaMatrix};
 pub use raw_runtime::{
     CudaDeviceInfo, CudaRawAccess, CudaRawBinding, CudaRawBuffer, CudaRawCompileOptions,
     CudaRawEvent, CudaRawKernel, CudaRawLaunchConfig, CudaRawRuntime, device_count,
-    driver_available, nvrtc_available,
+    driver_available,
 };
 
 /// Whether this build includes the CUDA backend (the `cuda` feature). `false`

@@ -33,10 +33,19 @@
 //! # Runtime requirements
 //!
 //! Two shared libraries must be loadable at run time: the CUDA driver
-//! (`libcuda`) and the NVRTC runtime compiler (`libnvrtc`). Both are probed
-//! before a device is opened, and each absence is reported distinctly. The
-//! device ordinal is always explicit — there is no default, no fallback to
-//! device zero and no implicit selection of a second device.
+//! (`libcuda`) and the NVRTC runtime compiler (`libnvrtc`). They are not
+//! established the same way, and the difference is deliberate.
+//!
+//! The driver is checked before a device is opened, because opening a device is
+//! meaningless without it. NVRTC is never checked in advance: whether runtime
+//! compilation works is decided by [`ComputeBackend::compile`] actually
+//! compiling a kernel — which a session does during `prepare`. A loadable `libnvrtc` is not a working compiler, so only
+//! a completed compilation is allowed to claim one. An unusable NVRTC comes
+//! back as [`ComputeError::Compilation`], carrying the loader's own message.
+//!
+//! Each absence is still reported distinctly, and none of them is answered with
+//! a fallback. The device ordinal is always explicit — there is no default, no
+//! fallback to device zero and no implicit selection of a second device.
 //!
 //! # Determinism
 //!
@@ -162,25 +171,20 @@ impl CudaReferenceAdapter {
     ///
     /// * no CUDA driver library →
     ///   [`ComputeError::BackendUnavailable`]`(DeviceKind::Cuda)`;
-    /// * driver present, no NVRTC library → [`ComputeError::Compilation`];
     /// * driver present, no device at all → [`ComputeError::Unsupported`];
     /// * ordinal beyond the device count → [`ComputeError::InvalidArgument`];
     /// * device present but the context could not be created →
     ///   [`ComputeError::Allocation`], carrying the driver's message.
+    ///
+    /// NVRTC is deliberately absent from that list. Acquiring a device says
+    /// nothing about whether runtime compilation works, and this constructor
+    /// does not pretend otherwise: an unusable NVRTC surfaces as
+    /// [`ComputeError::Compilation`] from [`ComputeBackend::compile`], when a
+    /// kernel is actually compiled — which a session does during `prepare`.
     pub fn new(device_ordinal: usize) -> ComputeResult<Self> {
         if !scirust_cuda::driver_available()
         {
             return Err(ComputeError::BackendUnavailable(DeviceKind::Cuda));
-        }
-
-        if !scirust_cuda::nvrtc_available()
-        {
-            return Err(ComputeError::Compilation(
-                "the CUDA driver is present but the NVRTC runtime-compilation library could not \
-                 be loaded; canonical Reference kernels are compiled from CUDA C and cannot run \
-                 without it"
-                    .to_string(),
-            ));
         }
 
         let devices = scirust_cuda::device_count().map_err(ComputeError::Allocation)?;

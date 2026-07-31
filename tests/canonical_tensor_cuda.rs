@@ -11,10 +11,14 @@
 //!
 //! # Running these
 //!
-//! Without the CUDA driver, without NVRTC or without a device there is no
-//! adapter and each test skips. Set `SCIRUST_REQUIRE_CUDA=1` to turn that skip
-//! into a failure — the self-hosted Jetson job does, so a silent no-op there
-//! cannot masquerade as a pass.
+//! Without the CUDA driver or without a device there is no adapter and each
+//! test skips. Set `SCIRUST_REQUIRE_CUDA=1` to turn that skip into a failure —
+//! the self-hosted Jetson job does, so a silent no-op there cannot masquerade
+//! as a pass.
+//!
+//! NVRTC is not part of the skip condition. Its usability is not predicted
+//! anywhere; the tests compile kernels for real, and an unusable NVRTC fails
+//! them.
 
 #![cfg(feature = "tensor-canonical-cuda")]
 

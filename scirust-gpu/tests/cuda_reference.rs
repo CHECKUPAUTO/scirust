@@ -14,11 +14,15 @@
 //!
 //! # Running these
 //!
-//! A machine without the CUDA driver, without NVRTC or without a device has no
-//! adapter, and each test then **skips**. That is convenient locally and
-//! dangerous in CI, so the skip is opt-out: set `SCIRUST_REQUIRE_CUDA=1` and a
-//! missing device becomes a failure instead of a silent pass. The self-hosted
-//! Jetson job sets it.
+//! A machine without the CUDA driver or without a device has no adapter, and
+//! each test then **skips**. That is convenient locally and dangerous in CI, so
+//! the skip is opt-out: set `SCIRUST_REQUIRE_CUDA=1` and a missing device
+//! becomes a failure instead of a silent pass. The self-hosted Jetson job sets
+//! it.
+//!
+//! A missing NVRTC is *not* part of that skip condition, deliberately. Nothing
+//! here predicts whether runtime compilation works; the tests compile kernels
+//! for real, and an unusable NVRTC fails them rather than excusing them.
 //!
 //! # What is compared bitwise, and what is not
 //!
@@ -52,6 +56,12 @@ const DEVICE_ORDINAL: usize = 0;
 // ---------------------------------------------------------------------------
 
 /// Acquire an adapter, or skip — unless the caller demanded a real device.
+///
+/// This is a real acquisition, not a library probe: the driver is loaded, the
+/// device count is read and a context is opened. Acquisition deliberately says
+/// nothing about NVRTC, so a machine carrying a driver and a device but no
+/// usable runtime compiler does *not* skip here — it proceeds and fails in
+/// `prepare`, which is the honest outcome.
 fn adapter_or_skip() -> Option<CudaReferenceAdapter> {
     match CudaReferenceAdapter::new(DEVICE_ORDINAL)
     {
