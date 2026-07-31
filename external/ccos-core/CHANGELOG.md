@@ -40,6 +40,37 @@ adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   plus `signed-sync`) in both text and JSON output, so a premium deployment can
   verify at a glance that its build compiled the kernels it licensed.
 
+### Fixed
+
+- **`util::write_durable` no longer latches a transient I/O error into a
+  permanent one** — the temp sibling was named `<path>.tmp.<pid>`, opened with
+  `create_new`, and removed by no error path. Any failure between creating it
+  and renaming it (`set_permissions`, `write_all`, `sync_all`, `rename`) left the
+  file on disk, after which *every* later call in the same process failed with
+  `AlreadyExists` until a human deleted it. One ENOSPC or EIO thus became an
+  outage lasting the life of the process — for `ccos-license-server`, 500 on
+  every licence claim while `/healthz` stayed green, cleared only by a restart.
+  The temp file is now owned by an RAII guard that unlinks it unless the rename
+  succeeded (so neither `?` nor an unwind can skip cleanup), and its name is
+  unique per *attempt* (`<path>.tmp.<pid>.<n>`), so leftovers from a `SIGKILL`
+  or from a build predating the guard cannot block the next save either.
+  Durability semantics are unchanged: parent directories created, `0600` on
+  unix, `sync_all` before an atomic rename, best-effort directory fsync after.
+
+- **`license::b64url_decode` now rejects non-canonical encodings** — a partial
+  group carries its bytes in more bits than it needs (twelve for one byte,
+  eighteen for two) and the spare low bits were never checked, so every byte
+  string had several accepted spellings. An ed25519 signature encodes to 86
+  symbols and `86 % 4 == 2`, which gave **every licence token 16 wire spellings
+  that all verified as the same machine-bound licence** — and 16 different
+  SHA-256 digests, so an offline revocation list keyed on `token_sha256` revoked
+  only one of them and the holder kept the other fifteen by editing a single
+  character. **Not a wire-format change:** `b64url_encode` has only ever emitted
+  the canonical spelling, so every token, sync bundle and PQ token the vendor has
+  signed still decodes; only hand-edited spellings stop working, which is the
+  point. Brings Core in line with `ccos-enterprise-governance`'s `b64url`, which
+  was already strict.
+
 ## [0.4.0] — 2026-07-08 — CCOS_EXTENDED premium fusion
 
 The first CCOS_EXTENDED release: the CCOS 0.3 core fused with SLHAv2, OctaSoma
