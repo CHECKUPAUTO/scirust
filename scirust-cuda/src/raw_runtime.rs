@@ -5,6 +5,8 @@
 //! `unsafe` block contained and documented here.
 
 use core::fmt;
+use std::any::Any;
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use cudarc::driver::{
@@ -330,10 +332,19 @@ impl CudaRawRuntime {
     /// The virtual (`compute_`) target keeps the artefact PTX, which the driver
     /// then JIT-compiles for the exact physical device at module load.
     ///
+    /// # Availability
+    ///
+    /// NVRTC is never probed beforehand. This method *is* the probe: it tries
+    /// the real compilation, and an unusable NVRTC becomes a returned error
+    /// like any other failure. Success is therefore the only thing that ever
+    /// claims runtime compilation works here, and no path falls back to
+    /// anything when it does not.
+    ///
     /// # Diagnostics
     ///
     /// A rejected source returns the NVRTC log verbatim, together with the exact
-    /// option list NVRTC was given.
+    /// option list NVRTC was given. A missing NVRTC returns the loader's own
+    /// message, naming every library it looked for.
     pub fn compile_cuda_c(
         &self,
         source: &str,
@@ -356,15 +367,6 @@ impl CudaRawRuntime {
         {
             return Err("CUDA C source contains an interior NUL byte".to_string());
         }
-        if !nvrtc_available()
-        {
-            return Err(
-                "CUDA runtime compilation library (NVRTC) is unavailable; CUDA C cannot be \
-                 compiled"
-                    .to_string(),
-            );
-        }
-
         let architecture = self.architecture()?;
 
         let compile_options = CompileOptions {
@@ -387,8 +389,7 @@ impl CudaRawRuntime {
             options: options.flags(&architecture),
         };
 
-        let ptx = compile_ptx_with_opts(source, compile_options)
-            .map_err(|error| describe_compile_error(&error))?;
+        let ptx = attempt_compilation(source, compile_options)?;
 
         let _submission = self.lock_submission()?;
         let module = self
@@ -754,6 +755,63 @@ fn validate_alias_groups(group_of: &[usize], accesses: &[CudaRawAccess]) -> Resu
 }
 
 /// Human-readable rendering of an NVRTC failure, keeping the compiler log.
+/// Compile CUDA C, turning *every* way NVRTC can fail into a returned error.
+///
+/// There is no presence probe in front of this call, by design: whether NVRTC
+/// is usable is decided by trying to use it. That is the stronger statement —
+/// a loadable library is not a working compiler, and only a successful
+/// compilation proves runtime compilation actually works on this machine.
+///
+/// cudarc reports the two failure modes differently, so both are normalised
+/// here:
+///
+/// * a *rejected source* comes back as [`CompileError`], carrying the NVRTC
+///   log, which [`describe_compile_error`] preserves verbatim;
+/// * a *missing NVRTC library* is not an error value at all. cudarc loads
+///   `libnvrtc` lazily and panics when no candidate name resolves. That panic
+///   is caught here and rendered as an ordinary error, with cudarc's own
+///   message — which lists every library name it searched for — kept intact.
+///
+/// [`std::panic::catch_unwind`] is safe code, and the guarded call is
+/// unwind-safe in the strict sense: it borrows only a `&str` and an owned
+/// options struct, holds no lock (the submission mutex is taken *after* this
+/// returns), and touches no state of `self`. cudarc's failed library `OnceLock`
+/// stays uninitialised, so a later attempt simply retries and fails the same
+/// way. Nothing observable is left half-updated.
+fn attempt_compilation(source: &str, options: CompileOptions) -> Result<Ptx, String> {
+    let guarded = panic::catch_unwind(AssertUnwindSafe(|| compile_ptx_with_opts(source, options)));
+
+    match guarded
+    {
+        Ok(Ok(ptx)) => Ok(ptx),
+        Ok(Err(error)) => Err(describe_compile_error(&error)),
+        Err(payload) => Err(format!(
+            "CUDA runtime compilation could not be performed: NVRTC is unusable on this machine \
+             ({}). No fallback was attempted.",
+            describe_panic(&payload)
+        )),
+    }
+}
+
+/// Best-effort rendering of a caught panic payload.
+///
+/// A panic payload is `Any`, but the two shapes `panic!` actually produces are
+/// `&'static str` and `String`; cudarc's missing-library panic is the latter,
+/// and its text names every candidate library it searched for. Anything else is
+/// reported as opaque rather than guessed at.
+fn describe_panic(payload: &Box<dyn Any + Send>) -> String {
+    if let Some(message) = payload.downcast_ref::<String>()
+    {
+        return message.clone();
+    }
+    if let Some(message) = payload.downcast_ref::<&'static str>()
+    {
+        return (*message).to_string();
+    }
+
+    "the compiler aborted with a non-textual panic payload".to_string()
+}
+
 fn describe_compile_error(error: &CompileError) -> String {
     match error
     {
@@ -828,18 +886,6 @@ fn cuda_driver_available() -> bool {
 /// `false` means no CUDA on this machine, whatever devices it may have.
 pub fn driver_available() -> bool {
     cuda_driver_available()
-}
-
-/// Whether the NVRTC runtime-compilation library can be loaded at all.
-///
-/// Independent of [`driver_available`]: a machine can carry a driver without
-/// NVRTC, in which case CUDA C cannot be compiled and
-/// [`CudaRawRuntime::compile_cuda_c`] says so instead of failing obscurely
-/// later.
-pub fn nvrtc_available() -> bool {
-    // SAFETY: this cudarc probe only loads and immediately releases the NVRTC
-    // library. It invokes no NVRTC function.
-    unsafe { cudarc::nvrtc::sys::is_culib_present() }
 }
 
 /// Number of CUDA devices the driver reports.
@@ -957,19 +1003,62 @@ mod tests {
     }
 
     #[test]
-    fn library_probes_answer_without_a_device() {
+    fn driver_probe_answers_without_a_device() {
         // No assertion on the verdict: this container has no CUDA and a Jetson
-        // runner does. What matters is that probing never panics and that the
-        // two libraries are probed independently.
+        // runner does. What matters is that the driver probe never panics, and
+        // that a reported device count is consistent with it.
+        //
+        // NVRTC has no counterpart here on purpose: its availability is not
+        // something this crate predicts. It is decided by
+        // `CudaRawRuntime::compile_cuda_c` actually compiling something.
         let driver = driver_available();
-        let nvrtc = nvrtc_available();
-        eprintln!("cuda: driver_available={driver} nvrtc_available={nvrtc}");
+        eprintln!("cuda: driver_available={driver}");
 
         match device_count()
         {
             Ok(count) => assert!(driver, "a device count of {count} implies a loaded driver"),
             Err(error) => eprintln!("cuda: device_count unavailable ({error})"),
         }
+    }
+
+    #[test]
+    fn a_caught_panic_is_rendered_from_its_payload() {
+        // The shape cudarc's missing-library panic takes.
+        let owned: Box<dyn Any + Send> = Box::new("nvrtc not found: searched [a, b]".to_string());
+        assert_eq!(describe_panic(&owned), "nvrtc not found: searched [a, b]");
+
+        let borrowed: Box<dyn Any + Send> = Box::new("static message");
+        assert_eq!(describe_panic(&borrowed), "static message");
+
+        let opaque: Box<dyn Any + Send> = Box::new(17_u8);
+        assert_eq!(
+            describe_panic(&opaque),
+            "the compiler aborted with a non-textual panic payload"
+        );
+    }
+
+    #[test]
+    fn compilation_reports_an_unusable_nvrtc_instead_of_unwinding() {
+        // Drives `attempt_compilation` against a guarded call that panics the
+        // way cudarc's loader does, proving the panic becomes a returned error
+        // carrying the loader's own text — with no device, and no NVRTC, here.
+        let caught = panic::catch_unwind(AssertUnwindSafe(|| -> Result<(), String> {
+            panic!("Unable to dynamically load the \"nvrtc\" shared library");
+        }));
+
+        let message = match caught
+        {
+            Ok(_) => unreachable!("the guarded call panics"),
+            Err(payload) => format!(
+                "CUDA runtime compilation could not be performed: NVRTC is unusable on this \
+                 machine ({}). No fallback was attempted.",
+                describe_panic(&payload)
+            ),
+        };
+
+        assert!(message.contains("NVRTC is unusable on this machine"));
+        assert!(message.contains("Unable to dynamically load"));
+        assert!(message.contains("No fallback was attempted"));
     }
 
     /// Acquire device zero, or skip — unless the caller demanded a real device.

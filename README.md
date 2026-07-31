@@ -315,11 +315,16 @@ operations are `f32` and are not promised to be.
 #### The CUDA backend
 
 Building `tensor-canonical-cuda` needs **no CUDA toolkit**. *Running* it needs three things
-at run time, each of which is probed and reported distinctly when missing:
+at run time, each reported distinctly when missing:
 
-* the CUDA driver library (`libcuda`),
-* the NVRTC runtime compiler (`libnvrtc`),
-* at least one CUDA device.
+* the CUDA driver library (`libcuda`) — checked when the adapter is constructed,
+* at least one CUDA device — checked when the adapter is constructed,
+* the NVRTC runtime compiler (`libnvrtc`) — **not** checked in advance.
+
+NVRTC availability is never predicted. A loadable `libnvrtc` is not a working compiler, so
+the only thing allowed to claim runtime compilation works is a compilation that succeeded:
+`prepare` compiles the kernels for real, and an unusable NVRTC comes back as a
+`Compilation` error carrying the loader's own message.
 
 The device ordinal is always explicit — `CudaReferenceAdapter::new(0)` — with **no default,
 no fallback to device zero and no implicit selection of another device**. There is no silent

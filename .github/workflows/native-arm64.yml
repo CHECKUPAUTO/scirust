@@ -123,19 +123,29 @@ jobs:
       # CUDA path can be proved rather than merely compiled.
       # -------------------------------------------------------------------
 
-      - name: Report the CUDA device
+      # Diagnostic only. This step never gates anything and no Rust code reads
+      # it: it exists so a failure below can be read against what the machine
+      # actually carried. The proof is the test steps, not this output.
+      - name: Report the CUDA device and libraries
+        continue-on-error: true
         run: |
           nvidia-smi
           nvidia-smi --query-gpu=name,driver_version,compute_cap,memory.total \
             --format=csv,noheader
+          ldconfig -p | grep -E 'libcuda|libnvrtc' || \
+            echo "no libcuda/libnvrtc entry in the loader cache"
 
       # `SCIRUST_REQUIRE_CUDA=1` turns "no device, so skip" into a hard
       # failure. Without it a machine with no driver would report a green
       # run having executed nothing at all — which is exactly the kind of
       # silent pass this job exists to prevent. The job therefore fails if
-      # CUDA or NVRTC is missing, if no test actually ran, if a kernel does
-      # not launch, if the readback is wrong, or if a result disagrees with
-      # the CPU reference.
+      # the driver or a device is missing, if no test actually ran, if a
+      # kernel does not launch, if the readback is wrong, or if a result
+      # disagrees with the CPU reference.
+      #
+      # A missing NVRTC is not part of that variable's job and needs no
+      # special handling: the tests compile kernels for real, so an unusable
+      # runtime compiler fails them on its own.
       - name: Test the canonical Reference kernels on CUDA
         env:
           SCIRUST_REQUIRE_CUDA: "1"
