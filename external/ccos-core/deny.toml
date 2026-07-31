@@ -24,6 +24,14 @@ allow = [
     "Unicode-3.0",
     "Unlicense",
     "Zlib",
+    # The org's own source-available terms. These are `LicenseRef-` identifiers,
+    # so they are not SPDX-known and cargo-deny rejects them unless listed here.
+    # `[licenses.private] ignore = true` below does NOT cover them: it only skips
+    # crates marked `publish = false`, which these are not — and it could never
+    # cover `octasoma`, which is a git dependency rather than a workspace member.
+    # Terms are reviewed in THIRD_PARTY_NOTICES.md / LICENSING.md.
+    "LicenseRef-TarekZekriti-Dual",
+    "LicenseRef-CheckupAuto-Dual",
 ]
 exceptions = []
 
@@ -52,6 +60,11 @@ unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = [
     "https://github.com/Memorithm/scirust",
+    # Pulled in by the opt-in `octasoma` feature, and `[graph] all-features = true`
+    # above means cargo-deny always resolves it. Pinned to a reviewed release tag
+    # in Cargo.toml, with the resolved commit recorded in Cargo.lock, so a moved
+    # tag cannot slip through a `--locked` build.
+    "https://github.com/Memorithm/octasoma",
 ]
 
 [sources.allow-org]

@@ -11,6 +11,16 @@
 # Ollama, …) — the project ships provider adapters (mission §30). Attribution
 # is forbidden, interoperability is not.
 #
+# MERGE COMMITS ARE SKIPPED. A pull request merged through GitHub's UI produces
+# a merge commit authored by the account that clicked the button and committed
+# by "GitHub" — an identity no contributor can influence and that can never
+# equal EXPECTED_NAME. Checking them made the policy unsatisfiable: every merge
+# to main turned CI red, e.g. the run for the merge of #1 failed with
+#   cbb2243 author/committer is 'MEMOPERF'/'GitHub', expected 'ZEKRITI Tarek'
+# while every commit it brought in was correctly authored. A merge commit
+# carries no authored content of its own, so skipping it costs no coverage —
+# the commits being merged are still each checked.
+#
 # Usage:
 #   scripts/check-author-policy.sh           # check HEAD commit
 #   scripts/check-author-policy.sh A..B      # check a commit range
@@ -42,7 +52,7 @@ while IFS=$'\t' read -r h an ae cn ce; do
     echo "::error::$h AI attribution phrase in commit message"
     fail=1
   fi
-done < <(git log --format='%H%x09%an%x09%ae%x09%cn%x09%ce' "$RANGE")
+done < <(git log --no-merges --format='%H%x09%an%x09%ae%x09%cn%x09%ce' "$RANGE")
 
 if [ "$fail" -ne 0 ]; then
   echo "AUTHOR POLICY: FAILED"

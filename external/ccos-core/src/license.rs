@@ -253,7 +253,14 @@ pub(crate) fn b64url_encode(bytes: &[u8]) -> String {
     out
 }
 
-/// Inverse of [`b64url_encode`]. `None` on any non-alphabet byte or a truncated group.
+/// Inverse of [`b64url_encode`]. `None` on any non-alphabet byte, a truncated group, or a
+/// **non-canonical** one.
+///
+/// Canonicality matters beyond tidiness: a partial group carries its bytes in more bits than it
+/// needs — twelve bits for one byte, eighteen for two — and the spare low bits must be zero. Left
+/// unchecked they give every byte string several accepted spellings, so the same licence has
+/// several wire forms with different SHA-256 digests, and digest-keyed revocation only ever
+/// revokes one of them. This decoder accepts exactly what [`b64url_encode`] emits.
 #[cfg(any(feature = "license", feature = "license-pq", feature = "signed-sync"))]
 pub(crate) fn b64url_decode(s: &str) -> Option<Vec<u8>> {
     let val = |c: u8| -> Option<u32> {
@@ -275,6 +282,18 @@ pub(crate) fn b64url_decode(s: &str) -> Option<Vec<u8>> {
         let mut n = 0u32;
         for (i, &c) in chunk.iter().enumerate() {
             n |= val(c)? << (18 - 6 * i);
+        }
+        // Bits below the bytes this group carries are padding and must be zero, or the
+        // group has more than one spelling. A 2-symbol group holds one byte in bits
+        // 16..24, leaving bits 12..16 spare; a 3-symbol group holds two in bits 8..24,
+        // leaving bits 6..8. A full group spends all 24 bits.
+        let padding = match chunk.len() {
+            2 => 0x0000_f000,
+            3 => 0x0000_00c0,
+            _ => 0,
+        };
+        if n & padding != 0 {
+            return None;
         }
         out.push((n >> 16) as u8);
         if chunk.len() > 2 {
@@ -842,6 +861,136 @@ mod tests {
             assert_eq!(b64url_decode(&b64url_encode(case)).as_deref(), Some(case));
         }
         assert!(!b64url_encode(b"any payload here").contains('='));
+    }
+
+    /// Canonical input must keep round-tripping under **every** feature that
+    /// compiles the codec — `license` signs tokens, `license-pq` signs SLH-DSA
+    /// ones, `signed-sync` signs bundles, and all three share this decoder. The
+    /// canonicality check tightened what is *accepted*; it must not have changed
+    /// what is *produced*.
+    #[cfg(any(feature = "license", feature = "license-pq", feature = "signed-sync"))]
+    #[test]
+    fn b64url_round_trips_every_length_residue() {
+        // A deterministic xorshift keeps this replayable — no rand dependency and
+        // no flaky test that only fails on some CI run.
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 24) as u8
+        };
+        for len in 0..=200usize {
+            let payload: Vec<u8> = (0..len).map(|_| next()).collect();
+            let encoded = b64url_encode(&payload);
+            assert_eq!(
+                b64url_decode(&encoded).as_deref(),
+                Some(&payload[..]),
+                "round-trip failed at length {len}"
+            );
+            assert!(!encoded.contains('='), "padding leaked at length {len}");
+        }
+    }
+
+    /// Every byte string must have exactly **one** accepted spelling.
+    ///
+    /// A partial group carries its bytes in more bits than it needs — 12 bits for
+    /// one byte, 18 for two — and the decoder used to ignore the remainder. So
+    /// `"AA"`, `"AB"` … `"AP"` all decoded to `[0]`. This walks the whole 1- and
+    /// 2-byte space and asserts the canonical spelling round-trips while every
+    /// other string over the alphabet with that length is refused.
+    #[cfg(any(feature = "license", feature = "license-pq", feature = "signed-sync"))]
+    #[test]
+    fn only_the_canonical_spelling_of_a_partial_group_decodes() {
+        const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+        // All 256 one-byte values: 2 symbols, 4 free low bits → 15 impostors each.
+        for b in 0u8..=255 {
+            let canonical = b64url_encode(&[b]);
+            assert_eq!(canonical.len(), 2);
+            assert_eq!(b64url_decode(&canonical).as_deref(), Some(&[b][..]));
+            for (i, &c0) in A.iter().enumerate() {
+                for &c1 in A.iter() {
+                    let s = format!("{}{}", c0 as char, c1 as char);
+                    if s == canonical {
+                        continue;
+                    }
+                    // Only the 16 strings sharing this leading symbol *and* the top
+                    // 4 bits of the second could collide; the rest decode to another
+                    // byte. Either way, no string but `canonical` may yield `b`.
+                    let _ = i;
+                    assert_ne!(
+                        b64url_decode(&s).as_deref(),
+                        Some(&[b][..]),
+                        "{s:?} is a second spelling of {b:#04x}"
+                    );
+                }
+            }
+        }
+
+        // All 65 536 two-byte values: 3 symbols, 2 free low bits → 3 impostors each.
+        for hi in 0u8..=255 {
+            for lo in 0u8..=255 {
+                let bytes = [hi, lo];
+                let canonical = b64url_encode(&bytes);
+                assert_eq!(canonical.len(), 3);
+                assert_eq!(b64url_decode(&canonical).as_deref(), Some(&bytes[..]));
+                // The three siblings differ only in the last symbol's low 2 bits.
+                let last = canonical.as_bytes()[2];
+                let base = A.iter().position(|&c| c == last).expect("in alphabet") & !3;
+                for k in 0..4 {
+                    let sibling = format!("{}{}", &canonical[..2], A[base + k] as char);
+                    if sibling == canonical {
+                        continue;
+                    }
+                    assert_eq!(
+                        b64url_decode(&sibling),
+                        None,
+                        "{sibling:?} is a second spelling of {bytes:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Digest-based revocation is only as good as the token having one spelling.
+    ///
+    /// An ed25519 signature is 64 bytes → 86 symbols, and `86 % 4 == 2`, so the
+    /// final group is a 2-symbol group with four unconstrained bits. Before this
+    /// was fixed, each licence had **16 wire spellings that all verified** as the
+    /// same machine-bound licence, with 16 different SHA-256 digests. An offline
+    /// revocation list keyed on `token_sha256` (see
+    /// `ccos-enterprise-governance::vendor`) revokes one of them; the holder edits
+    /// a single character and carries on with the other fifteen.
+    #[cfg(feature = "license")]
+    #[test]
+    fn a_licence_token_has_no_second_spelling_that_still_verifies() {
+        const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+        let token = sign_token(&TEST_SEED, "acme-corp", Some(NOW + 1000));
+        let verifier = test_verifier();
+        assert!(
+            verifier.verify(token.as_bytes(), NOW).is_ok(),
+            "the canonical token must keep verifying"
+        );
+
+        let (_, sig_b64) = token.rsplit_once('.').expect("payload.signature");
+        assert_eq!(sig_b64.len(), 86, "64-byte signature encodes to 86 symbols");
+
+        let last = sig_b64.as_bytes()[85];
+        let base = A.iter().position(|&c| c == last).expect("in alphabet") & !15;
+        let mut refused = 0;
+        for k in 0..16 {
+            let variant = format!("{}{}", &token[..token.len() - 1], A[base + k] as char);
+            if variant == token {
+                continue;
+            }
+            assert!(
+                verifier.verify(variant.as_bytes(), NOW).is_err(),
+                "{variant} is a second wire spelling of the same licence"
+            );
+            refused += 1;
+        }
+        assert_eq!(refused, 15, "all 15 sibling spellings must be refused");
     }
 
     #[cfg(feature = "license")]

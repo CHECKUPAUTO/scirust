@@ -563,6 +563,11 @@ type EigenCentralityCache = Option<((usize, usize), HashMap<NodeId, f64>)>;
 #[derive(Debug, Clone)]
 struct SpillConfig {
     store: ColdSpill,
+    /// Compresseur maintenu en vie tant que le store existe. Le reconstruire à
+    /// chaque blob recopierait les tables du dictionnaire et annulerait le gain de
+    /// débit (2,4 Mo/s contre 19 mesurés) ; il est donc créé une fois, quand le
+    /// dictionnaire est constitué.
+    compressor: Option<crate::lzss::Compressor>,
     /// Max bytes of COLD *content* kept inline (resident) before the coldest is
     /// flushed to disk. `usize::MAX` ⇒ never flush.
     inline_budget: usize,
@@ -579,14 +584,76 @@ struct SpillConfig {
 #[derive(Debug, Clone)]
 pub struct ColdSpill {
     dir: PathBuf,
+    /// Dictionnaire partagé du codec (format 2), s'il a déjà été constitué pour ce
+    /// store. `None` ⇒ les blobs sont écrits au format 1, ce qui reste lisible.
+    dict: Option<std::sync::Arc<crate::lzss::Dict>>,
 }
+
+/// Nom du dictionnaire et de son empreinte dans le répertoire de spill.
+const DICT_FILE: &str = "dict.v2.bin";
+const DICT_HASH_FILE: &str = "dict.v2.sha256";
+
+/// Volume de contenu froid à partir duquel constituer un dictionnaire vaut le coup.
+/// Mesuré : un dictionnaire de 32 Ko n'est amorti qu'au-delà d'environ 250 Ko de
+/// contenus spillés — en deçà il coûte plus d'octets qu'il n'en fait gagner. Le
+/// seuil est donc une condition de rentabilité, pas un réglage de confort.
+const DICT_MIN_CONTENT: usize = 256 * 1024;
 
 impl ColdSpill {
     /// Open (creating if needed) a spill directory.
     pub fn new(dir: impl Into<PathBuf>) -> std::io::Result<Self> {
         let dir = dir.into();
         std::fs::create_dir_all(&dir)?;
-        Ok(Self { dir })
+        let dict = Self::load_dict(&dir);
+        Ok(Self { dir, dict })
+    }
+
+    /// Charge le dictionnaire du répertoire s'il est présent **et intact**. Son
+    /// empreinte est vérifiée : un dictionnaire remplacé ou tronqué rendrait
+    /// illisible tout blob encodé avec lui, donc l'incompatibilité doit être
+    /// détectée et non subie. On l'ignore alors, ce qui transforme les blobs
+    /// format 2 en cold-miss — le comportement déjà retenu pour un blob altéré,
+    /// jamais une restauration silencieusement fausse.
+    fn load_dict(dir: &std::path::Path) -> Option<std::sync::Arc<crate::lzss::Dict>> {
+        let bytes = std::fs::read(dir.join(DICT_FILE)).ok()?;
+        let want = std::fs::read_to_string(dir.join(DICT_HASH_FILE)).ok()?;
+        if hex32(&sha256_bytes(&String::from_utf8_lossy(&bytes))) != want.trim() {
+            return None;
+        }
+        Some(std::sync::Arc::new(crate::lzss::Dict::new(bytes)))
+    }
+
+    /// Constitue le dictionnaire à partir d'un échantillon de contenus, puis le
+    /// **fige** : il est écrit une fois avec son empreinte et n'est plus jamais
+    /// modifié, puisque le remplacer invaliderait les blobs déjà encodés.
+    /// Sans effet si un dictionnaire existe déjà.
+    fn build_dict(&mut self, sample: &[String]) {
+        if self.dict.is_some() {
+            return;
+        }
+        let mut bytes = Vec::with_capacity(crate::lzss::V2_WINDOW);
+        for c in sample {
+            if bytes.len() >= crate::lzss::V2_WINDOW {
+                break;
+            }
+            bytes.extend_from_slice(c.as_bytes());
+        }
+        bytes.truncate(crate::lzss::V2_WINDOW);
+        if bytes.len() < 4096 {
+            return; // trop peu de matière pour que le dictionnaire serve
+        }
+        let hash = hex32(&sha256_bytes(&String::from_utf8_lossy(&bytes)));
+        if std::fs::write(self.dir.join(DICT_FILE), &bytes).is_err()
+            || std::fs::write(self.dir.join(DICT_HASH_FILE), &hash).is_err()
+        {
+            return;
+        }
+        self.dict = Some(std::sync::Arc::new(crate::lzss::Dict::new(bytes)));
+    }
+
+    /// Le dictionnaire actif, s'il y en a un.
+    fn dict(&self) -> Option<&std::sync::Arc<crate::lzss::Dict>> {
+        self.dict.as_ref()
     }
 
     /// Write `content` addressed by its SHA-256, returning the raw 32-byte key. The
@@ -594,11 +661,22 @@ impl ColdSpill {
     /// bytes (lossless; the key/integrity hash is of the *original* content, so
     /// dedup is unchanged). Idempotent — content-addressed *and* the codec is
     /// deterministic, so re-spilling the same blob is a no-op write.
-    fn put(&self, content: &str) -> std::io::Result<[u8; 32]> {
+    fn put(
+        &self,
+        content: &str,
+        comp: Option<&mut crate::lzss::Compressor>,
+    ) -> std::io::Result<[u8; 32]> {
         let hash = sha256_bytes(content);
         let path = self.dir.join(hex32(&hash));
         if !path.exists() {
-            std::fs::write(&path, crate::lzss::compress(content.as_bytes()))?;
+            let encoded = match comp {
+                // `compress_with` retient le plus petit des candidats, donc passer
+                // par le dictionnaire ne peut jamais produire un blob plus gros que
+                // le format 1 — même sur un contenu qu'il n'aide pas.
+                Some(c) => c.compress_with(content.as_bytes()),
+                None => crate::lzss::compress(content.as_bytes()),
+            };
+            std::fs::write(&path, encoded)?;
         }
         Ok(hash)
     }
@@ -610,7 +688,8 @@ impl ColdSpill {
     /// restore.
     fn get(&self, hash: &[u8; 32]) -> Option<String> {
         let blob = std::fs::read(self.dir.join(hex32(hash))).ok()?;
-        let text = String::from_utf8(crate::lzss::decompress(&blob)?).ok()?;
+        let dict = self.dict.as_ref().map(|d| d.bytes());
+        let text = String::from_utf8(crate::lzss::decompress_with(&blob, dict)?).ok()?;
         (sha256_bytes(&text) == *hash).then_some(text)
     }
 
@@ -1400,32 +1479,49 @@ impl MemoryGraph {
     /// just-requested node is never the one bounced back out. Any archived edge
     /// whose other endpoint is resident is re-linked. Returns `true` if the node
     /// was cold and is now resident. Deterministic (tie-break on id).
+    /// Remonte une entrée **deep-spillée** d'un cran : son corps sérialisé est
+    /// refaulté depuis le blob (vérifié par hachage) et réinséré dans la carte
+    /// `cold`. `false` si le blob manque, a été altéré, ou n'est pas
+    /// désérialisable — un cold-miss, jamais une demi-restauration silencieuse.
+    ///
+    /// Extrait de [`page_in`] pour être réutilisable : ré-héberger une arête chez
+    /// un voisin deep-spillé exige de le ramener d'abord dans `cold`, puisque le
+    /// husk ne porte que l'adjacence et que les arêtes de l'entrée vivent dans le
+    /// blob de son corps.
+    fn fault_in_deep(&mut self, id: &NodeId) -> bool {
+        let Some(husk) = self.deep_get(id) else {
+            return false;
+        };
+        let body_hash = husk.body.hash;
+        match self
+            .spill
+            .as_ref()
+            .and_then(|cfg| cfg.store.get(&body_hash))
+            .and_then(|s| serde_json::from_str::<ColdNode>(&s).ok())
+        {
+            Some(node) => {
+                if let Some(hs) = self.husk_store.as_mut() {
+                    let _ = hs.delete(&id.0); // the husk leaves the on-disk tier
+                }
+                self.cold.insert(id.clone(), node);
+                // The husk's body blob is now unreferenced — the node is back with
+                // its content folded inline — so reclaim it unless another husk
+                // still shares it. (Without this, page-in orphans the blob: a slow
+                // disk leak no later `remove` can find.)
+                self.release_blob_if_orphan(&body_hash);
+                true
+            }
+            None => false,
+        }
+    }
+
     pub fn page_in(&mut self, id: &NodeId) -> bool {
         // A deep-spilled entry lives as a compact husk in `cold_deep`: fault its
         // whole serialized node back (hash-verified) into the full COLD map first,
         // then the normal page-in path below runs unchanged. A missing / tampered /
         // undeserializable body is a cold-miss — never a silent half-restore.
-        if let Some(husk) = self.deep_get(id) {
-            let body_hash = husk.body.hash;
-            match self
-                .spill
-                .as_ref()
-                .and_then(|cfg| cfg.store.get(&body_hash))
-                .and_then(|s| serde_json::from_str::<ColdNode>(&s).ok())
-            {
-                Some(node) => {
-                    if let Some(hs) = self.husk_store.as_mut() {
-                        let _ = hs.delete(&id.0); // the husk leaves the on-disk tier
-                    }
-                    self.cold.insert(id.clone(), node);
-                    // The husk's body blob is now unreferenced — the node is back with
-                    // its content folded inline — so reclaim it unless another husk
-                    // still shares it. (Without this, page-in orphans the blob: a slow
-                    // disk leak no later `remove` can find.)
-                    self.release_blob_if_orphan(&body_hash);
-                }
-                None => return false,
-            }
+        if self.deep_contains(id) && !self.fault_in_deep(id) {
+            return false;
         }
         // Fault spilled content back from disk (verified by hash). A spilled entry
         // whose blob is missing/tampered, or whose store has been detached, is a
@@ -1490,9 +1586,23 @@ impl MemoryGraph {
                 if !known {
                     neighbour.edges.push(e);
                 }
+            } else if self.deep_contains(&other) && self.fault_in_deep(&other) {
+                // Far end deep-spilled: it is neither resident nor in `cold`, so
+                // without this it had nowhere to go and was destroyed — measured,
+                // 2 of 4 edges lost on a demote/deep-spill/page-in round trip.
+                // Fault it back one tier so it can take custody of the edge; the
+                // reverse-adjacency entry stays, as for a plain cold neighbour.
+                if let Some(neighbour) = self.cold.get_mut(&other) {
+                    let known = neighbour.edges.iter().any(|x| {
+                        x.source == e.source && x.target == e.target && x.edge_type == e.edge_type
+                    });
+                    if !known {
+                        neighbour.edges.push(e);
+                    }
+                }
             } else {
-                // Neither resident nor cold: the far endpoint has left the graph
-                // entirely, so the edge is genuinely stale.
+                // Neither resident, cold, nor deep-spilled: the far endpoint has
+                // left the graph entirely, so the edge is genuinely stale.
                 self.radj_del_edge(id, &other);
             }
         }
@@ -1625,8 +1735,10 @@ impl MemoryGraph {
         radj_dir.push(".radj");
         let radj = HuskStore::open(PathBuf::from(radj_dir), HUSK_BUFFER_LIMIT, HUSK_CACHE_CAP)?;
         let store = ColdSpill::new(dir)?;
+        let compressor = store.dict().cloned().map(crate::lzss::Compressor::new);
         self.spill = Some(SpillConfig {
             store,
+            compressor,
             inline_budget,
         });
         self.husk_store = Some(husk_store);
@@ -1789,6 +1901,40 @@ impl MemoryGraph {
     /// ordered coldest-first by causal score, ties broken on node id. A no-op
     /// without an attached store, or when already within budget. A blob that
     /// fails to write is left **inline** (kept in RAM) — spill never drops data.
+    /// Constitue le dictionnaire partagé du store de spill si le volume de contenu
+    /// froid justifie son coût, et arme le compresseur correspondant.
+    ///
+    /// Le seuil n'est pas arbitraire : mesuré sur un tier COLD réel, un
+    /// dictionnaire de 32 Ko n'est amorti qu'au-delà d'environ 250 Ko de contenus
+    /// spillés. L'activer plus tôt ferait *perdre* de l'espace, ce qui serait le
+    /// contraire du but recherché.
+    fn maybe_build_spill_dictionary(&mut self, candidates: &[(NodeId, f64)]) {
+        if self
+            .spill
+            .as_ref()
+            .is_none_or(|cfg| cfg.store.dict().is_some())
+        {
+            return;
+        }
+        let mut sample: Vec<String> = Vec::new();
+        let mut volume = 0usize;
+        for (id, _) in candidates {
+            if let Some(c) = self.cold.get(id) {
+                volume += c.node.content.len();
+                if sample.len() < 512 {
+                    sample.push(c.node.content.clone());
+                }
+            }
+        }
+        if volume < DICT_MIN_CONTENT {
+            return;
+        }
+        if let Some(cfg) = self.spill.as_mut() {
+            cfg.store.build_dict(&sample);
+            cfg.compressor = cfg.store.dict().cloned().map(crate::lzss::Compressor::new);
+        }
+    }
+
     fn enforce_cold_budget(&mut self) {
         let budget = match self.spill.as_ref() {
             Some(cfg) => cfg.inline_budget,
@@ -1811,6 +1957,11 @@ impl MemoryGraph {
                 .unwrap_or(Ordering::Equal)
                 .then_with(|| a.0.cmp(&b.0))
         });
+        // Constituer le dictionnaire au premier spill qui en vaut la peine, à
+        // partir des contenus sur le point d'être écrits — ils sont représentatifs
+        // de ce que ce store contiendra. En deçà du seuil on s'en passe : le
+        // dictionnaire coûterait plus d'octets qu'il n'en ferait gagner.
+        self.maybe_build_spill_dictionary(&candidates);
         for (id, _) in candidates {
             if resident <= budget {
                 break;
@@ -1819,10 +1970,12 @@ impl MemoryGraph {
                 Some(c) if c.spill.is_none() => c.node.content.clone(),
                 _ => continue,
             };
-            let written = self
-                .spill
-                .as_ref()
-                .and_then(|cfg| cfg.store.put(&content).ok());
+            let written = self.spill.as_mut().and_then(|cfg| {
+                let SpillConfig {
+                    store, compressor, ..
+                } = cfg;
+                store.put(&content, compressor.as_mut()).ok()
+            });
             if let Some(hash) = written {
                 if let Some(entry) = self.cold.get_mut(&id) {
                     let len = entry.node.content.len();
@@ -1937,6 +2090,11 @@ impl MemoryGraph {
                 .unwrap_or(Ordering::Equal)
                 .then_with(|| a.0.cmp(&b.0))
         });
+        // Constituer le dictionnaire au premier spill qui en vaut la peine, à
+        // partir des contenus sur le point d'être écrits — ils sont représentatifs
+        // de ce que ce store contiendra. En deçà du seuil on s'en passe : le
+        // dictionnaire coûterait plus d'octets qu'il n'en ferait gagner.
+        self.maybe_build_spill_dictionary(&candidates);
         for (id, _) in candidates {
             if resident <= budget {
                 break;
@@ -1992,10 +2150,13 @@ impl MemoryGraph {
             let Ok(serialized) = serde_json::to_string(&entry) else {
                 continue;
             };
-            let Some(cfg) = self.spill.as_ref() else {
+            let Some(cfg) = self.spill.as_mut() else {
                 return;
             };
-            let Some(body_hash) = cfg.store.put(&serialized).ok() else {
+            let SpillConfig {
+                store, compressor, ..
+            } = cfg;
+            let Some(body_hash) = store.put(&serialized, compressor.as_mut()).ok() else {
                 continue;
             };
             // Commit: archive the whole entry as a husk in the on-disk index, then
@@ -2177,6 +2338,11 @@ impl MemoryGraph {
                 .unwrap_or(Ordering::Equal)
                 .then_with(|| a.0.cmp(&b.0))
         });
+        // Constituer le dictionnaire au premier spill qui en vaut la peine, à
+        // partir des contenus sur le point d'être écrits — ils sont représentatifs
+        // de ce que ce store contiendra. En deçà du seuil on s'en passe : le
+        // dictionnaire coûterait plus d'octets qu'il n'en ferait gagner.
+        self.maybe_build_spill_dictionary(&candidates);
         for (id, _) in candidates {
             if total <= budget {
                 break;
@@ -7269,5 +7435,160 @@ mod tests {
             before,
             "a demote/page-in round trip must preserve every edge"
         );
+    }
+
+    #[test]
+    fn paging_in_never_destroys_an_edge_to_a_deep_spilled_node() {
+        // Variante deep-spill de `paging_a_node_in_never_destroys_an_edge_to_a_
+        // still_cold_node`. Une arête archivée l'est d'UN seul côté ; si son autre
+        // extrémité a été deep-spillée vers l'index husk, elle n'est plus ni
+        // résidente ni dans `cold`, et la rendre à personne revient à la détruire.
+        // Le husk ne porte que l'adjacence : les arêtes de l'entrée vivent dans le
+        // blob de son corps.
+        let dir = std::env::temp_dir().join(format!("ccos-deepedge-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let mut g = MemoryGraph::new(0.2, usize::MAX);
+        for n in ["a", "b", "c", "d"] {
+            g.upsert_node(
+                NodeId(n.into()),
+                n.into(),
+                format!("pub fn {n}() {{ /* corps assez long pour peser */ }}"),
+                NodeType::Symbol,
+            );
+        }
+        g.add_edge(
+            NodeId("a".into()),
+            NodeId("b".into()),
+            1.0,
+            EdgeType::DependsOn,
+        );
+        g.add_edge(NodeId("b".into()), NodeId("c".into()), 1.0, EdgeType::Calls);
+        g.add_edge(
+            NodeId("c".into()),
+            NodeId("d".into()),
+            1.0,
+            EdgeType::DependsOn,
+        );
+        g.add_edge(NodeId("a".into()), NodeId("d".into()), 1.0, EdgeType::Calls);
+
+        let fingerprint = |g: &MemoryGraph| {
+            let mut v: Vec<String> = g
+                .edges
+                .iter()
+                .map(|e| format!("{}->{}:{:?}", e.source.0, e.target.0, e.edge_type))
+                .collect();
+            v.sort();
+            v
+        };
+        let before = fingerprint(&g);
+        assert_eq!(before.len(), 4);
+
+        g.attach_cold_spill(&dir, 0).expect("attach");
+        // Tout démoter, puis pousser le tier COLD dans l'index husk : c'est la
+        // seule différence avec le test COLD résident, et elle suffisait à perdre
+        // des arêtes.
+        g.max_in_memory_nodes = 1;
+        g.enforce_paging();
+        g.set_cold_resident_budget(Some(0));
+        g.flush_cold_tier().expect("flush");
+
+        g.max_in_memory_nodes = usize::MAX;
+        for n in ["a", "b", "c", "d"] {
+            g.page_in(&NodeId(n.into()));
+        }
+
+        assert_eq!(
+            fingerprint(&g),
+            before,
+            "un aller-retour démotion/deep-spill/page-in doit préserver chaque arête"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_spill_dictionary_appears_only_once_the_volume_justifies_it() {
+        // Le seuil est une condition de rentabilité mesurée : sous ~250 Ko de
+        // contenu froid, un dictionnaire de 32 Ko coûte plus qu'il ne rapporte.
+        // Ce test épingle les deux côtés du seuil.
+        let dir = std::env::temp_dir().join(format!("ccos-dict-vol-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // Petit volume : pas de dictionnaire, et les blobs restent lisibles.
+        let mut g = MemoryGraph::new(0.2, 2);
+        for i in 0..6 {
+            g.upsert_node(
+                NodeId(format!("n{i}")),
+                format!("n{i}"),
+                format!("pub fn small_{i}() {{}}\n"),
+                NodeType::Symbol,
+            );
+        }
+        g.attach_cold_spill(&dir, 0).expect("attach");
+        g.enforce_paging();
+        assert!(
+            g.spill.as_ref().unwrap().store.dict().is_none(),
+            "sous le seuil, aucun dictionnaire ne doit être constitué"
+        );
+        assert!(!dir.join(DICT_FILE).exists());
+
+        // Gros volume : le dictionnaire est constitué et persisté.
+        let dir2 = std::env::temp_dir().join(format!("ccos-dict-vol2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir2);
+        let mut g2 = MemoryGraph::new(0.2, 2);
+        let body = "pub fn helper(input: &str) -> Result<usize> { Ok(input.len()) }\n".repeat(40);
+        for i in 0..120 {
+            g2.upsert_node(
+                NodeId(format!("m{i}")),
+                format!("m{i}"),
+                format!("// module {i}\n{body}"),
+                NodeType::Symbol,
+            );
+        }
+        g2.attach_cold_spill(&dir2, 0).expect("attach");
+        g2.enforce_paging();
+        assert!(
+            g2.spill.as_ref().unwrap().store.dict().is_some(),
+            "au-delà du seuil, le dictionnaire doit être constitué"
+        );
+        assert!(dir2.join(DICT_FILE).exists() && dir2.join(DICT_HASH_FILE).exists());
+
+        // Et le contenu revient EXACTEMENT : c'est tout l'enjeu du codec.
+        let ids: Vec<NodeId> = g2.cold_ids().collect();
+        assert!(!ids.is_empty());
+        for id in ids {
+            let before = format!("// module {}\n{}", id.0.trim_start_matches('m'), body);
+            assert!(g2.page_in(&id), "page-in de {id:?}");
+            assert_eq!(
+                g2.node(&id).expect("résident").content,
+                before,
+                "le contenu doit revenir à l'octet près"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&dir2);
+    }
+
+    #[test]
+    fn a_replaced_spill_dictionary_is_refused_rather_than_trusted() {
+        // Remplacer le dictionnaire rendrait illisibles les blobs déjà encodés.
+        // L'incompatibilité doit être détectée : on préfère perdre le tier COLD
+        // (cold-miss) que rendre un contenu faux.
+        let dir = std::env::temp_dir().join(format!("ccos-dict-tamper-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(DICT_FILE),
+            b"un dictionnaire quelconque assez long pour compter",
+        )
+        .unwrap();
+        std::fs::write(dir.join(DICT_HASH_FILE), "empreinte_qui_ne_correspond_pas").unwrap();
+
+        let store = ColdSpill::new(&dir).expect("open");
+        assert!(
+            store.dict().is_none(),
+            "un dictionnaire dont l'empreinte ne correspond pas doit être ignoré"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -125,6 +125,220 @@ pub enum SymbolKind {
     Other,
 }
 
+/// Everything [`ASTParser::extract_all`] produces for one source file.
+type Extracted = (
+    Vec<ModuleDecl>,
+    Vec<UseStatement>,
+    Vec<Symbol>,
+    Vec<CallSite>,
+    Vec<DataRef>,
+    Vec<ImportAlias>,
+    Vec<MethodDef>,
+);
+
+/// Deepest `(`/`[`/`{` nesting CCOS will hand to `syn`.
+///
+/// `syn` is a recursive-descent parser: one nested delimiter costs several stack
+/// frames, and a stack overflow is a `SIGABRT` the process cannot catch — one
+/// hostile (or merely generated) source file would abort the whole agent mid-run,
+/// taking any un-checkpointed memory with it. Measured on this crate, a *block*
+/// nest (`if true { … }`, the most expensive shape) overflows at depth ~96 on a
+/// 2 MiB stack and between 512 and 1024 on the 8 MiB main stack in a debug build.
+///
+/// Real Rust stays far below that. Scanning 14 899 `.rs` files (this crate, the
+/// `scirust` tree, and every crate in the local cargo registry) the deepest was 45
+/// — a `syn` test fixture holding a pretty-printed AST — with the deepest
+/// hand-written file at 20. 128 is therefore ~3× the worst real file observed and
+/// still an order of magnitude below the overflow.
+///
+/// Over the limit, [`ASTParser::extract_all`] falls back to the line-based
+/// heuristic, which is iterative and cannot overflow: a pathological file
+/// degrades to a coarser graph instead of killing the process.
+pub const MAX_PARSE_NESTING: usize = 128;
+
+/// At or below this depth `syn` runs inline on the caller's stack — the case for
+/// essentially every real file, so the common path pays nothing.
+#[cfg(feature = "syn-parser")]
+const INLINE_PARSE_NESTING: usize = 32;
+
+/// Stack given to the dedicated parse thread used between [`INLINE_PARSE_NESTING`]
+/// and [`MAX_PARSE_NESTING`]. Large enough that the limit above is safe *whatever*
+/// stack the caller happens to run on (a 2 MiB worker thread, say), which is what
+/// makes the threshold a property of CCOS rather than of its embedding.
+#[cfg(feature = "syn-parser")]
+const DEEP_PARSE_STACK: usize = 32 * 1024 * 1024;
+
+fn utf8_width(first: u8) -> usize {
+    match first {
+        0x00..=0x7f => 1,
+        0xc0..=0xdf => 2,
+        0xe0..=0xef => 3,
+        _ => 4,
+    }
+}
+
+/// Index just past the `"` that closes a normal string starting at `from`.
+fn string_end(b: &[u8], from: usize) -> usize {
+    let mut i = from;
+    while i < b.len() {
+        match b[i] {
+            b'\\' => i += 2,
+            b'"' => return i + 1,
+            _ => i += 1,
+        }
+    }
+    b.len()
+}
+
+/// Index just past the `"###…` that closes a raw string opened with `hashes` hashes.
+fn raw_string_end(b: &[u8], from: usize, hashes: usize) -> usize {
+    let mut i = from;
+    while i < b.len() {
+        if b[i] == b'"'
+            && b[i + 1..]
+                .iter()
+                .take(hashes)
+                .filter(|c| **c == b'#')
+                .count()
+                == hashes
+        {
+            return i + 1 + hashes;
+        }
+        i += 1;
+    }
+    b.len()
+}
+
+/// Index just past a `'…'` char literal starting at `i`, or `i + 1` when the quote
+/// opens a *lifetime* (`'a`) instead. Distinguishing the two is what keeps `'}'`
+/// and `'"'` — legal char literals — from corrupting the depth count.
+fn quote_end(b: &[u8], i: usize) -> usize {
+    let start = i + 1;
+    if start >= b.len() {
+        return b.len();
+    }
+    if b[start] == b'\\' {
+        let mut j = start + 1;
+        while j < b.len() {
+            match b[j] {
+                b'\'' => return j + 1,
+                b'\\' => j += 2,
+                _ => j += 1,
+            }
+        }
+        return b.len();
+    }
+    let w = utf8_width(b[start]);
+    if start + w < b.len() && b[start + w] == b'\'' {
+        return start + w + 1;
+    }
+    i + 1
+}
+
+/// Deepest `(`/`[`/`{` nesting in `source`, ignoring delimiters inside comments,
+/// strings, raw strings, byte strings, char literals and lifetimes.
+///
+/// A single linear pass with no recursion, so it is safe on exactly the inputs it
+/// exists to reject. It is a *bound*, not a parse: unbalanced closers saturate at
+/// zero rather than going negative, which can only ever make the answer smaller —
+/// and the answer is compared against a limit with an order of magnitude of slack.
+pub fn max_nesting_depth(source: &str) -> usize {
+    let b = source.as_bytes();
+    let (mut i, mut depth, mut max) = (0usize, 0usize, 0usize);
+    while i < b.len() {
+        match b[i] {
+            b'/' if b.get(i + 1) == Some(&b'/') => {
+                i += 2;
+                while i < b.len() && b[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            // Rust block comments nest, so `/* /* */ */` is one comment.
+            b'/' if b.get(i + 1) == Some(&b'*') => {
+                let mut open = 1usize;
+                i += 2;
+                while i < b.len() && open > 0 {
+                    if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
+                        open += 1;
+                        i += 2;
+                    } else if b[i] == b'*' && b.get(i + 1) == Some(&b'/') {
+                        open -= 1;
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+            // `b"…"`, `b'…'`, `r"…"`, `r#"…"#`, `br#"…"#` — but only when the byte
+            // starts a token, so the `r` of `char` or `arr` is left alone.
+            b'b' | b'r' if i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_') => {
+                let mut j = i;
+                let byte_prefix = b[j] == b'b';
+                if byte_prefix {
+                    j += 1;
+                }
+                let raw = b.get(j) == Some(&b'r');
+                if raw {
+                    j += 1;
+                    let hash_start = j;
+                    while b.get(j) == Some(&b'#') {
+                        j += 1;
+                    }
+                    if b.get(j) == Some(&b'"') {
+                        i = raw_string_end(b, j + 1, j - hash_start);
+                        continue;
+                    }
+                } else if byte_prefix {
+                    match b.get(j) {
+                        Some(&b'"') => {
+                            i = string_end(b, j + 1);
+                            continue;
+                        }
+                        Some(&b'\'') => {
+                            i = quote_end(b, j);
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+                i += 1;
+            }
+            b'"' => i = string_end(b, i + 1),
+            b'\'' => i = quote_end(b, i),
+            b'(' | b'[' | b'{' => {
+                depth += 1;
+                max = max.max(depth);
+                i += 1;
+            }
+            b')' | b']' | b'}' => {
+                depth = depth.saturating_sub(1);
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+    max
+}
+
+/// `syn` parse behind the nesting guard: refuse what would overflow, and give
+/// anything unusually deep a stack of its own before parsing it.
+#[cfg(feature = "syn-parser")]
+fn parse_guarded(source: &str) -> Option<Extracted> {
+    match max_nesting_depth(source) {
+        d if d > MAX_PARSE_NESTING => None,
+        d if d <= INLINE_PARSE_NESTING => syn_ast::parse(source),
+        _ => {
+            let src = source.to_string();
+            std::thread::Builder::new()
+                .stack_size(DEEP_PARSE_STACK)
+                .spawn(move || syn_ast::parse(&src))
+                .ok()?
+                .join()
+                .ok()?
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ASTParser;
 
@@ -159,21 +373,10 @@ impl ASTParser {
     /// captures nested-module bodies, multi-line signatures, grouped `use` and
     /// impl methods). If the feature is off — or the source does not parse as
     /// valid Rust — it falls back to the zero-dependency line-based heuristic.
-    #[allow(clippy::type_complexity)]
-    fn extract_all(
-        source: &str,
-    ) -> (
-        Vec<ModuleDecl>,
-        Vec<UseStatement>,
-        Vec<Symbol>,
-        Vec<CallSite>,
-        Vec<DataRef>,
-        Vec<ImportAlias>,
-        Vec<MethodDef>,
-    ) {
+    fn extract_all(source: &str) -> Extracted {
         #[cfg(feature = "syn-parser")]
         {
-            if let Some(parsed) = syn_ast::parse(source) {
+            if let Some(parsed) = parse_guarded(source) {
                 return parsed;
             }
         }
@@ -821,18 +1024,10 @@ mod syn_ast {
     use syn::spanned::Spanned;
     use syn::visit::Visit;
 
-    #[allow(clippy::type_complexity)]
-    pub fn parse(
-        source: &str,
-    ) -> Option<(
-        Vec<ModuleDecl>,
-        Vec<UseStatement>,
-        Vec<Symbol>,
-        Vec<CallSite>,
-        Vec<DataRef>,
-        Vec<ImportAlias>,
-        Vec<MethodDef>,
-    )> {
+    /// Callers must go through [`super::parse_guarded`], never here directly: this
+    /// function inherits `syn`'s unbounded recursion and will abort the process on
+    /// a deeply nested source.
+    pub fn parse(source: &str) -> Option<super::Extracted> {
         let file = syn::parse_file(source).ok()?;
         let mut out = Collected::default();
         walk(&file.items, &mut out);
@@ -1772,6 +1967,104 @@ mod syn_ast {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A source file nested past what `syn`'s recursion can survive must degrade to
+    /// the heuristic parser, not abort the process.
+    ///
+    /// Before the nesting guard this did not *fail* — it killed the whole test
+    /// binary with `thread 'main' has overflowed its stack / fatal runtime error:
+    /// stack overflow` (SIGABRT, rc=134), which is precisely the point: a stack
+    /// overflow is not catchable, so one such file ingested by an agent takes the
+    /// process — and any un-checkpointed memory — down with it.
+    #[test]
+    fn deeply_nested_source_falls_back_instead_of_overflowing() {
+        for (open, close) in [("(", ")"), ("[", "]"), ("{ (", ") }")] {
+            let source = format!(
+                "pub fn deep() {{ let x = {}1{}; }}\n",
+                open.repeat(37_251),
+                close.repeat(37_251)
+            );
+            let result = ASTParser::new().parse_source("deep.rs", &source);
+            assert!(
+                result.symbols.iter().any(|s| s.name == "deep"),
+                "heuristic fallback should still see the function for {open:?}"
+            );
+        }
+    }
+
+    /// Just over the limit, the AST is refused; just under, it is still used. The
+    /// two are told apart by `method_defs`, which only the `syn` path ever emits.
+    #[test]
+    fn the_nesting_limit_is_where_the_ast_stops() {
+        let nested = |depth: usize| {
+            format!(
+                "pub struct Foo;\npub fn top() {{ let x = {}1{}; }}\nimpl Foo {{ pub fn bar() {{}} }}\n",
+                "(".repeat(depth),
+                ")".repeat(depth)
+            )
+        };
+        let under = ASTParser::new().parse_source("u.rs", &nested(MAX_PARSE_NESTING - 4));
+        let over = ASTParser::new().parse_source("o.rs", &nested(MAX_PARSE_NESTING + 4));
+
+        // Both paths keep finding the top-level symbols; only the depth of the analysis changes.
+        assert!(under.symbols.iter().any(|s| s.name == "top"));
+        assert!(over.symbols.iter().any(|s| s.name == "top"));
+        #[cfg(feature = "syn-parser")]
+        {
+            // Under the limit the parse runs on the dedicated large-stack thread
+            // (the depth is above INLINE_PARSE_NESTING) and still yields real AST facts.
+            assert_eq!(
+                under.method_defs.len(),
+                1,
+                "AST facts expected under the limit"
+            );
+            assert!(
+                over.method_defs.is_empty(),
+                "AST must be refused over the limit"
+            );
+        }
+    }
+
+    /// The depth scan is a lexer, not a byte count: delimiters inside comments,
+    /// strings, raw strings, byte strings and char literals do not nest anything,
+    /// and `'a` is a lifetime while `'{'` is a char. Getting this wrong would
+    /// silently downgrade ordinary files to the heuristic parser.
+    #[test]
+    fn nesting_depth_ignores_delimiters_that_are_not_code() {
+        assert_eq!(max_nesting_depth(""), 0);
+        assert_eq!(max_nesting_depth("fn f() {}"), 1); // sibling delimiters, not nested
+        assert_eq!(max_nesting_depth("fn f() { g(h(1)); }"), 3);
+
+        for noise in [
+            r#"let s = "((((((((((((";"#,
+            r#"let s = r"((((((((((((";"#,
+            r##"let s = r#"(((((((((((("#;"##,
+            r#"let s = b"((((((((((((";"#,
+            "// ((((((((((((\n",
+            "/* (((((((((((( */",
+            "/* /* (((( */ (((( */",
+            r"let c = '(';",
+            r"let c = '{';",
+            r#"let c = '"';"#,
+            r"let c = '\'';",
+            r"let c = '\\';",
+            r"let c = 'é';",
+            r"let b = b'(';",
+        ] {
+            assert_eq!(
+                max_nesting_depth(&format!("fn f() {{ {noise} }}")),
+                1,
+                "delimiters inside {noise:?} must not count"
+            );
+        }
+
+        // A lifetime is not a char literal: the rest of the line must keep counting.
+        assert_eq!(max_nesting_depth("fn f<'a>(x: &'a str) { g(1); }"), 2);
+        // Identifiers ending in `b`/`r` must not be mistaken for string prefixes.
+        assert_eq!(max_nesting_depth("let arr = sub(f(1));"), 2);
+        // Unbalanced closers saturate at zero instead of wrapping around.
+        assert_eq!(max_nesting_depth(")))))))(((("), 4);
+    }
 
     #[test]
     fn test_extract_modules_basic() {
