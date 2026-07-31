@@ -60,6 +60,11 @@ mod chain;
 mod conv_gpu;
 #[cfg(feature = "cuda")]
 mod cuda_compute_adapter;
+// The canonical Reference path on CUDA. Separate from `cuda_compute_adapter`,
+// which implements the PTX contract: the two accept different kernel modules
+// and different placement conventions, and merging them would weaken both.
+#[cfg(feature = "cuda")]
+mod cuda_reference;
 #[cfg(feature = "wgpu")]
 pub mod deterministic;
 #[cfg(feature = "wgpu")]
@@ -94,6 +99,11 @@ pub use conv_gpu::{COL2IM_WGSL, IM2COL_WGSL, cpu_col2im, cpu_im2col};
 #[cfg(feature = "cuda")]
 pub use cuda_compute_adapter::{
     CudaComputeAdapter, CudaComputeBuffer, CudaComputeEvent, CudaComputeKernel, CudaComputeStream,
+};
+#[cfg(feature = "cuda")]
+pub use cuda_reference::{
+    CudaReferenceAdapter, CudaReferenceBuffer, CudaReferenceCounters, CudaReferenceEvent,
+    CudaReferenceKernel, CudaReferenceStream,
 };
 #[cfg(feature = "wgpu")]
 pub use deterministic_gpu::{DeterministicGpu, DeterministicValidator};

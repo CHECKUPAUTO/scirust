@@ -67,6 +67,9 @@ pub mod tensor_canonical {
     //! neither adds an external crate to the lockfile: every crate behind them is a
     //! pure-Rust workspace member.
     //!
+    //! Two further features add a device backend: `tensor-canonical-wgpu` and
+    //! `tensor-canonical-cuda`. They are described below.
+    //!
     //! # Which feature
     //!
     //! `tensor-canonical` gives you the whole pipeline but no backend — you pass
@@ -100,9 +103,39 @@ pub mod tensor_canonical {
     //! is reported as `WgpuDeviceClass::SoftwareCpu` rather than passed off as
     //! hardware.
     //!
-    //! Reproducibility differs between the two backends and is stated plainly:
-    //! `reshape` and `permute` move raw words and are bit-identical across them,
-    //! while the six arithmetic operations are `f32` and are not promised to be.
+    //! `tensor-canonical-cuda` re-exports `CudaReferenceAdapter`, which runs the
+    //! same canonical plans on an NVIDIA device by generating one specialised
+    //! CUDA C kernel per logical kernel and compiling it with NVRTC:
+    //!
+    //! ```ignore
+    //! let adapter = CudaReferenceAdapter::new(0)?;  // fallible, and the ordinal is explicit
+    //! let runtime = ReferencePlanRuntime::new(adapter);
+    //! ```
+    //!
+    //! It adds no external crate beyond the `cudarc` the workspace already
+    //! vendors, and building it needs no CUDA toolkit. *Running* it needs three
+    //! things at run time — the CUDA driver library (`libcuda`), the NVRTC
+    //! runtime compiler (`libnvrtc`) and a real device — and each absence is
+    //! reported distinctly, none of them with a fallback. The driver and the
+    //! device are established when the adapter is constructed; NVRTC is not
+    //! predicted at all, and an unusable one surfaces when `prepare` actually
+    //! compiles a kernel. The device ordinal is always explicit: there is no
+    //! default, no fallback to device zero and no implicit selection of another
+    //! device. Nothing is ever computed on the host and presented as a CUDA
+    //! result.
+    //!
+    //! What the CUDA path does *not* do, deliberately: no multi-GPU, no NCCL, no
+    //! graph capture, no multiple streams, no kernel fusion, no performance
+    //! tuning. One device, one ordered stream, the same eight operations, `f32`
+    //! only. Every kernel is compiled during `prepare`; execution generates,
+    //! compiles and loads nothing, and one prepared session serves any number of
+    //! executions.
+    //!
+    //! Reproducibility differs between the backends and is stated plainly:
+    //! `reshape` and `permute` move raw words and are bit-identical across all
+    //! three, as is `relu` on the CUDA path (it selects words rather than
+    //! computing), while the arithmetic operations are `f32` and are not
+    //! promised to be bit-identical across architectures.
     //!
     //! # Usage
     //!
@@ -166,13 +199,19 @@ pub mod tensor_canonical {
         CanonicalProgram, CanonicalSession, CanonicalValue, ReferencePlanRuntime,
     };
 
-    // Both backend features pull the same crate, and the CPU adapter is in its
-    // default build either way — so it comes with both. That is what lets a
-    // caller compare a WGPU result against the CPU oracle without a third
-    // feature, and it costs nothing extra.
-    #[cfg(any(feature = "tensor-canonical-cpu", feature = "tensor-canonical-wgpu"))]
+    // Every backend feature pulls the same crate, and the CPU adapter is in its
+    // default build either way — so it comes with all of them. That is what
+    // lets a caller compare a device result against the CPU oracle without a
+    // further feature, and it costs nothing extra.
+    #[cfg(any(
+        feature = "tensor-canonical-cpu",
+        feature = "tensor-canonical-wgpu",
+        feature = "tensor-canonical-cuda"
+    ))]
     pub use scirust_gpu::CpuComputeAdapter;
 
+    #[cfg(feature = "tensor-canonical-cuda")]
+    pub use scirust_gpu::CudaReferenceAdapter;
     #[cfg(feature = "tensor-canonical-wgpu")]
     pub use scirust_gpu::{
         WgpuDeviceClass, WgpuPowerPreference, WgpuReferenceAdapter, WgpuReferenceAdapterInfo,

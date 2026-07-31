@@ -296,18 +296,58 @@ prepare it once, run it many times — and is **off by default**:
 | `tensor-canonical` | The facade, with a `ComputeBackend` you supply yourself. |
 | `tensor-canonical-cpu` | The above plus `CpuComputeAdapter`, the deterministic CPU interpreter. |
 | `tensor-canonical-wgpu` | The above plus `WgpuReferenceAdapter`, which runs the same plans on a GPU by generating one specialised WGSL shader per logical kernel. |
+| `tensor-canonical-cuda` | The above plus `CudaReferenceAdapter`, which runs the same plans on an NVIDIA device by generating one specialised CUDA C kernel per logical kernel and compiling it with NVRTC. |
 
 The first two pull only pure-Rust workspace crates — no external dependency, **no wgpu and
 no CUDA** — and leave the default build byte-for-byte unchanged. The CPU adapter happens to
 live in a crate named `scirust-gpu` for historical reasons; the features are named after
 what they actually provide. `tensor-canonical-wgpu` does pull the wgpu stack, which is why
-it is a separate opt-in; it still never enables CUDA.
+it is a separate opt-in; it still never enables CUDA. `tensor-canonical-cuda` is the mirror
+image: it pulls `cudarc` (already vendored for `scirust-cuda`) and adds **no** new external
+crate to the lockfile, and it never enables wgpu.
 
 Acquiring a WGPU device is fallible and **never falls back to the CPU**: no adapter means an
 error, not a quietly host-computed result. A software Vulkan adapter (Mesa lavapipe) is a
 valid WGPU device and is reported as such rather than passed off as hardware. `reshape` and
-`permute` move raw words and are bit-identical between the two backends; the six arithmetic
+`permute` move raw words and are bit-identical between the backends; the six arithmetic
 operations are `f32` and are not promised to be.
+
+#### The CUDA backend
+
+Building `tensor-canonical-cuda` needs **no CUDA toolkit**. *Running* it needs three things
+at run time, each reported distinctly when missing:
+
+* the CUDA driver library (`libcuda`) — checked when the adapter is constructed,
+* at least one CUDA device — checked when the adapter is constructed,
+* the NVRTC runtime compiler (`libnvrtc`) — **not** checked in advance.
+
+NVRTC availability is never predicted. A loadable `libnvrtc` is not a working compiler, so
+the only thing allowed to claim runtime compilation works is a compilation that succeeded:
+`prepare` compiles the kernels for real, and an unusable NVRTC comes back as a
+`Compilation` error carrying the loader's own message.
+
+The device ordinal is always explicit — `CudaReferenceAdapter::new(0)` — with **no default,
+no fallback to device zero and no implicit selection of another device**. There is no silent
+CPU fallback anywhere: an absent device, an unsupported opcode or a rejected kernel is a
+typed error, never a host-computed result presented as CUDA.
+
+Every kernel is compiled during `prepare`; execution generates, compiles and loads nothing,
+and one prepared session serves any number of executions. NVRTC is invoked with
+`--ftz=false`, `--prec-sqrt=true`, `--prec-div=true`, `--fmad=false` and **never** with fast
+math, targeting the device's real compute capability. `reshape`, `permute` and `relu` move
+or select 32-bit words and are bit-identical to the CPU interpreter, NaN payloads included;
+the arithmetic operations are `f32` and are not promised to be bit-identical across
+architectures.
+
+Scope, stated plainly: one device, one ordered stream, the same eight operations, `f32`
+only. No multi-GPU, no NCCL, no graph capture, no multiple streams, no kernel fusion, no
+performance tuning.
+
+**Where CUDA is actually proved.** No GitHub-hosted runner has a CUDA device, so the public
+CI jobs compile and lint the CUDA paths and their device tests skip. Execution is proved
+only on the self-hosted Jetson Thor runner (`.github/workflows/native-arm64.yml`), which
+sets `SCIRUST_REQUIRE_CUDA=1` so that a skipped device test becomes a build failure rather
+than a silent green tick.
 
 `f32` only, no broadcasting, no autograd. See `examples/canonical_tensor_cpu.rs`, runnable
 with `cargo run --features tensor-canonical-cpu --example canonical_tensor_cpu`.

@@ -315,6 +315,14 @@ jobs:
       # Compiled here; executed on lavapipe by the gpu-wgpu job below.
       - name: Check canonical tensor facade (WGPU backend)
         run: cargo +stable check -p scirust --all-targets --features tensor-canonical-wgpu --locked
+      # Compiled here and NOWHERE executed: no GitHub-hosted runner has a CUDA
+      # device or an NVRTC library, so this step proves the code builds and
+      # lints, and nothing more. The only place the CUDA path actually runs is
+      # the self-hosted Jetson job in native-arm64.yml, under
+      # SCIRUST_REQUIRE_CUDA=1. A green tick here is not evidence that CUDA
+      # works.
+      - name: Check canonical tensor facade (CUDA backend, compile only)
+        run: cargo +stable check -p scirust --all-targets --features tensor-canonical-cuda --locked
       - name: Test canonical tensor facade on the CPU adapter
         run: cargo +stable test -p scirust --all-targets --features tensor-canonical-cpu --locked
       # Guards the promise the feature makes: the CPU adapter pulls neither wgpu
@@ -323,6 +331,18 @@ jobs:
         run: |
           cargo +stable tree -p scirust --features tensor-canonical-cpu --edges normal --locked > /tmp/canonical-cpu-tree.txt
           ! grep -qE '(^|[^-])wgpu v|cudarc v|scirust-cuda v' /tmp/canonical-cpu-tree.txt
+      # The mirror image: the CUDA facade must pull cudarc and must NOT pull the
+      # wgpu stack. Each backend feature stays exactly as wide as its name.
+      - name: Assert the CUDA facade pulls CUDA and not wgpu
+        run: |
+          cargo +stable tree -p scirust --features tensor-canonical-cuda --edges normal --locked > /tmp/canonical-cuda-tree.txt
+          grep -q 'cudarc v' /tmp/canonical-cuda-tree.txt
+          grep -q 'scirust-cuda v' /tmp/canonical-cuda-tree.txt
+          ! grep -qE '(^|[^-])wgpu v' /tmp/canonical-cuda-tree.txt
+      - name: Assert the WGPU facade pulls wgpu and not CUDA
+        run: |
+          cargo +stable tree -p scirust --features tensor-canonical-wgpu --edges normal --locked > /tmp/canonical-wgpu-tree.txt
+          ! grep -qE 'cudarc v|scirust-cuda v' /tmp/canonical-wgpu-tree.txt
 
   msrv:
     name: Check (MSRV 1.89.0)
@@ -633,8 +653,13 @@ jobs:
   # The CUDA feature uses dynamic loading. Hosted runners have no CUDA runtime,
   # which makes them the right place to enforce the public no-device contract:
   # construction must skip / return Unavailable, never panic in cudarc's loader.
+  # This job proves the CUDA crates COMPILE, LINT and degrade honestly on a
+  # machine with no CUDA runtime. It proves nothing whatsoever about CUDA
+  # execution: every device test below skips here, by design. Real execution is
+  # proved only by the self-hosted Jetson job in native-arm64.yml, which sets
+  # SCIRUST_REQUIRE_CUDA=1 so that skipping becomes a failure.
   gpu-cuda-fallback:
-    name: GPU (CUDA no-runtime fallback)
+    name: GPU (CUDA no-runtime fallback — compile and lint only)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -642,12 +667,21 @@ jobs:
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
           toolchain: stable
+        # Clippy ships with the stable toolchain installed above.
       - name: Cache cargo
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Test CUDA crates without a local runtime
         run: |
           cargo +stable test -p scirust-cuda --features cuda --locked
           cargo +stable test -p scirust-gpu --features cuda --locked
+      - name: Check every CUDA target compiles
+        run: |
+          cargo +stable check -p scirust-gpu --features cuda --all-targets --locked
+          cargo +stable check -p scirust --features tensor-canonical-cuda --all-targets --locked
+      - name: Lint the CUDA paths
+        run: |
+          cargo +stable clippy -p scirust-cuda --features cuda --all-targets --locked -- -D warnings
+          cargo +stable clippy -p scirust-gpu --features cuda --all-targets --locked -- -D warnings
 
   # Generate and validate a complete workspace CycloneDX SBOM.
   sbom:
