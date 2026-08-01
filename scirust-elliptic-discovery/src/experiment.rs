@@ -203,7 +203,10 @@ mod tests {
             .chain(HOLDOUT_PRIMES)
             .chain(SCALE_PRIMES)
         {
-            assert!(ToyPrime::new(modulus).is_ok(), "composite modulus: {modulus}");
+            assert!(
+                ToyPrime::new(modulus).is_ok(),
+                "composite modulus: {modulus}"
+            );
         }
     }
 
