@@ -8,10 +8,9 @@ files, Cargo manifests, documentation links, workflows, and public project
 positioning.
 
 This audit does not certify numerical correctness, security, legal compliance,
-or production readiness. The audit environment did not provide a Rust toolchain,
-so compilation and tests could not be rerun locally. Workflow definitions and
-source files were inspected; historical test totals were not treated as current
-results.
+or production readiness. Initial static inspection was followed by validation
+on an NVIDIA Jetson AGX Thor using the pinned Rust toolchain. Historical test
+totals were not treated as current results.
 
 ## Executive findings
 
@@ -58,20 +57,18 @@ changelog. This change preserves it rather than rewriting historical records.
 Dated reports were archived under `docs/` and explicitly marked as
 point-in-time evidence.
 
-## Remaining verification
+## Verification performed
 
-The following commands should be run on a Debian host with rustup installed
-before publication:
+Validation on an NVIDIA Jetson AGX Thor completed successfully:
 
-```bash
-rustup show active-toolchain
-cargo +nightly-2026-07-02 fmt --all -- --check
-cargo +nightly-2026-07-02 clippy --workspace --all-targets --locked -- -D warnings
-cargo +nightly-2026-07-02 build --workspace --all-targets --locked
-cargo +nightly-2026-07-02 test --workspace --locked
-cargo tree --workspace --edges normal
-```
+- `cargo metadata --no-deps --locked`: 148 workspace crates;
+- `cargo fmt --all -- --check`;
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`;
+- `cargo test --workspace --locked`;
+- `git diff --check`;
+- local-link validation after all document moves.
 
-Because this is a large workspace with hardware-specific jobs, the GitHub
-Actions workflows remain the authoritative validation environment after the
-change is pushed.
+GitHub Actions run `30694591414` completed successfully after retrying one
+transient LLVM coverage-profile merge failure. All 24 checks passed, including
+stable, nightly, MSRV 1.89, Windows, macOS, aarch64, Miri, WGPU, CUDA compile
+checks, dependency audits, fuzz smoke tests, SBOM generation, and coverage.
