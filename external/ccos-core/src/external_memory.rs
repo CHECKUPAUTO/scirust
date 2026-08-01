@@ -410,6 +410,10 @@ const LSA_LAMBDA_AUTHORITY: f64 = 1.0;
 /// causally-weighted LSA model (see [`CcosMemory::weighted_lsa_cache`]).
 type WeightedLsaModel = (u64, crate::embeddings::TfidfEmbedder, Vec<Vec<f32>>);
 
+/// `(graph version, undirected adjacency list)` — the cached neighbour index
+/// [`CcosMemory::hop_distances`] walks (see [`CcosMemory::adjacency_cache`]).
+type AdjacencyIndex = (u64, HashMap<NodeId, Vec<NodeId>>);
+
 /// Cheap identity of a snapshot file: enough to tell "nobody touched this since I
 /// last looked" from "somebody did".
 ///
@@ -519,6 +523,11 @@ pub struct CcosMemory {
     /// the first semantic recall after a load). Replaces the full LSA recompute the old path paid on
     /// *every* query (now an `O(1)` version-cache hit between graph mutations).
     weighted_lsa_cache: RefCell<Option<WeightedLsaModel>>,
+    /// `(graph version, undirected adjacency)` — the neighbour index
+    /// [`hop_distances`](Self::hop_distances) walks. Same versioned-cache shape as
+    /// the region and embedding caches above: rebuilt only when the graph changed,
+    /// so a run of recalls over a stable graph pays for it once.
+    adjacency_cache: RefCell<Option<AdjacencyIndex>>,
 }
 
 impl Default for CcosMemory {
@@ -565,6 +574,7 @@ impl CcosMemory {
             lsa_rerank_rank: None,
             use_slhav2: true,
             weighted_lsa_cache: RefCell::new(None),
+            adjacency_cache: RefCell::new(None),
         }
     }
 
@@ -730,6 +740,7 @@ impl CcosMemory {
             lsa_rerank_rank: None,
             use_slhav2: true,
             weighted_lsa_cache: RefCell::new(None),
+            adjacency_cache: RefCell::new(None),
         })
     }
 
@@ -1295,8 +1306,40 @@ impl CcosMemory {
     /// (or those only reachable through a hub) are simply absent.
     fn hop_distances(&self, anchor: &NodeId, max_hops: u32) -> HashMap<NodeId, u32> {
         let mut dist: HashMap<NodeId, u32> = HashMap::new();
-        let mut queue: VecDeque<NodeId> = VecDeque::new();
         dist.insert(anchor.clone(), 0);
+
+        // The neighbour lookup used to be a scan of *every* edge for *every*
+        // dequeued node, making one BFS O(V·E). Measured on a 2785-file workspace
+        // (76 065 nodes, 135 012 edges): **8.8 s** for a single `around` recall,
+        // against 20 ms for a BM25 baseline over the same corpus. That cost is
+        // what the default 5000-node resident cap has really been holding back,
+        // and it made the configuration that recalls best the one nobody can run.
+        //
+        // Indexing adjacency once per graph version turns the same walk into
+        // O(V+E). Same traversal, same distances: the index is built by iterating
+        // `edges` in order, so neighbour order is unchanged and the result is
+        // identical to the scan it replaces — pinned by a test.
+        {
+            let mut cache = self.adjacency_cache.borrow_mut();
+            if cache.as_ref().map(|(v, _)| *v) != Some(self.version) {
+                let mut adj: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+                for e in &self.graph.edges {
+                    adj.entry(e.source.clone())
+                        .or_default()
+                        .push(e.target.clone());
+                    adj.entry(e.target.clone())
+                        .or_default()
+                        .push(e.source.clone());
+                }
+                *cache = Some((self.version, adj));
+            }
+        }
+        let cache = self.adjacency_cache.borrow();
+        let Some((_, adj)) = cache.as_ref() else {
+            return dist; // unreachable: populated immediately above
+        };
+
+        let mut queue: VecDeque<NodeId> = VecDeque::new();
         queue.push_back(anchor.clone());
         while let Some(cur) = queue.pop_front() {
             let d = dist[&cur];
@@ -1305,14 +1348,10 @@ impl CcosMemory {
             if d >= max_hops || cur.0.starts_with("dep:") {
                 continue;
             }
-            for e in &self.graph.edges {
-                let nb = if e.source == cur {
-                    &e.target
-                } else if e.target == cur {
-                    &e.source
-                } else {
-                    continue;
-                };
+            let Some(neighbours) = adj.get(&cur) else {
+                continue;
+            };
+            for nb in neighbours {
                 if !dist.contains_key(nb) {
                     dist.insert(nb.clone(), d + 1);
                     queue.push_back(nb.clone());
@@ -2664,6 +2703,88 @@ mod tests {
         // And with room to work in, the budget is respected.
         let roomy = mem.recall(&Recall::around("file:src/big.rs"), 100_000);
         assert!(roomy.tokens <= 100_000);
+    }
+
+    /// The indexed neighbour walk must return exactly what the edge scan did.
+    ///
+    /// `hop_distances` used to look for neighbours by scanning every edge for
+    /// every dequeued node — O(V·E) per BFS, measured at 8.8 s for one `around`
+    /// recall on a 2785-file workspace (76 065 nodes, 135 012 edges) against 20 ms
+    /// for a BM25 baseline on the same corpus. The index makes it O(V+E). It is
+    /// only a legitimate change if the distances are unchanged, so this recomputes
+    /// them the old way and demands equality — on a graph with the shapes that
+    /// could break it: a `dep:` hub that must be reached but never relayed
+    /// through, a disconnected island, and a cycle.
+    #[test]
+    fn the_adjacency_index_walks_exactly_like_the_edge_scan() {
+        let mut mem = CcosMemory::new();
+        mem.ingest_source("src/a.rs", "use crate::b;\npub fn a() { b::go() }\n");
+        mem.ingest_source("src/b.rs", "use std::fmt;\npub fn go() { c::deep() }\n");
+        mem.ingest_source("src/c.rs", "use crate::a;\npub fn deep() { a::a() }\n");
+        mem.ingest_source("src/island.rs", "pub fn alone() {}\n");
+
+        // The scan this replaced, kept verbatim as the oracle. A free function
+        // over the edges, so it never borrows the memory the test also mutates.
+        fn scan(
+            edges: &[crate::memory::GraphEdge],
+            anchor: &NodeId,
+            max_hops: u32,
+        ) -> HashMap<NodeId, u32> {
+            let mut dist: HashMap<NodeId, u32> = HashMap::new();
+            let mut queue: VecDeque<NodeId> = VecDeque::new();
+            dist.insert(anchor.clone(), 0);
+            queue.push_back(anchor.clone());
+            while let Some(cur) = queue.pop_front() {
+                let d = dist[&cur];
+                if d >= max_hops || cur.0.starts_with("dep:") {
+                    continue;
+                }
+                for e in edges {
+                    let nb = if e.source == cur {
+                        &e.target
+                    } else if e.target == cur {
+                        &e.source
+                    } else {
+                        continue;
+                    };
+                    if !dist.contains_key(nb) {
+                        dist.insert(nb.clone(), d + 1);
+                        queue.push_back(nb.clone());
+                    }
+                }
+            }
+            dist
+        }
+
+        let anchors: Vec<NodeId> = mem.graph.nodes.keys().cloned().collect();
+        assert!(anchors.len() > 4, "fixture must have a real graph");
+        for anchor in &anchors {
+            for hops in [0u32, 1, 2, 6] {
+                assert_eq!(
+                    mem.hop_distances(anchor, hops),
+                    scan(&mem.graph.edges.clone(), anchor, hops),
+                    "anchor {anchor:?} at {hops} hop(s)"
+                );
+            }
+        }
+
+        // And the cache must not outlive the graph it indexed: ingesting again
+        // bumps the version, so the next walk sees the new edges.
+        let before = mem
+            .hop_distances(&NodeId("file:src/island.rs".into()), 6)
+            .len();
+        mem.ingest_source(
+            "src/island.rs",
+            "use crate::a;\npub fn alone() { a::a() }\n",
+        );
+        let after = mem.hop_distances(&NodeId("file:src/island.rs".into()), 6);
+        let edges = mem.graph.edges.clone();
+        assert_eq!(after, scan(&edges, &NodeId("file:src/island.rs".into()), 6));
+        assert!(
+            after.len() > before,
+            "the island joined the graph: {before} -> {}",
+            after.len()
+        );
     }
 
     #[test]
