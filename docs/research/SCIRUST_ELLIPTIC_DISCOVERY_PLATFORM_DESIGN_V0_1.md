@@ -375,6 +375,15 @@ de sortie : les mêmes plan et version produisent les mêmes octets, et toute al
 est détectée. La spécification détaillée est
 [`SCIRUST_ELLIPTIC_DISCOVERY_EXECUTION_REPLAY_V0_1.md`](SCIRUST_ELLIPTIC_DISCOVERY_EXECUTION_REPLAY_V0_1.md).
 
+### Phase 7 — Durcissement des bornes et des contrôles
+
+Faire respecter opérationnellement le budget de falsification, borner la mémoire de génération
+par le budget de candidats, normaliser les symétries syntaxiques connues et exercer le contrôle
+conditionnel \(j=0\) avec une racine cubique valide. Critère de sortie : aucune relation n'est
+évaluée au-delà de son budget, les quatre variantes de relation sont atteignables et les lois
+connues ne dépendent pas de l'ordre de construction de leur arbre. La spécification détaillée
+est [`SCIRUST_ELLIPTIC_DISCOVERY_HARDENING_V0_1.md`](SCIRUST_ELLIPTIC_DISCOVERY_HARDENING_V0_1.md).
+
 ## Validations à appliquer
 
 Après l’ajout du crate, exécuter au minimum :

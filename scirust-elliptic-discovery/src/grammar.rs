@@ -4,6 +4,13 @@ use std::collections::BTreeSet;
 
 use crate::{CurveError, RelationSignature, ToyCurve, ToyPoint};
 
+/// Maximum expression depth accepted by the local grammar.
+pub const MAX_GRAMMAR_DEPTH: u8 = 4;
+/// Maximum scalar accepted by the local grammar.
+pub const MAX_GRAMMAR_SCALAR: u64 = 32;
+/// Maximum number of relations produced by one local grammar request.
+pub const MAX_GENERATED_RELATIONS: usize = 10_000;
+
 /// A point-valued expression. Construction is finite and contains no external data.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum PointExpression {
@@ -83,7 +90,8 @@ impl Relation {
         match self
         {
             Self::PointEqual(left, right)
-                if is_double_negation_of_input(left) && matches!(right, PointExpression::Input) =>
+                if (is_double_negation_of_input(left) && is_input(right))
+                    || (is_input(left) && is_double_negation_of_input(right)) =>
             {
                 RelationSignature::NegationInvolution
             },
@@ -102,6 +110,10 @@ impl Relation {
     }
 }
 
+fn is_input(expression: &PointExpression) -> bool {
+    matches!(expression, PointExpression::Input)
+}
+
 fn is_double_negation_of_input(expression: &PointExpression) -> bool {
     matches!(
         expression,
@@ -112,13 +124,17 @@ fn is_double_negation_of_input(expression: &PointExpression) -> bool {
 }
 
 fn is_additive_inverse(left: &PointExpression, right: &PointExpression) -> bool {
-    matches!(
-        (left, right),
-        (PointExpression::Add(first, second), PointExpression::Identity)
-            if matches!(first.as_ref(), PointExpression::Input)
-                && matches!(second.as_ref(), PointExpression::Negate(point)
-                    if matches!(point.as_ref(), PointExpression::Input))
-    )
+    let (PointExpression::Add(first, second), PointExpression::Identity) = (left, right)
+    else
+    {
+        return false;
+    };
+    (is_input(first) && is_negation_of_input(second))
+        || (is_negation_of_input(first) && is_input(second))
+}
+
+fn is_negation_of_input(expression: &PointExpression) -> bool {
+    matches!(expression, PointExpression::Negate(point) if is_input(point))
 }
 
 fn is_scalar_composition(left: &PointExpression, right: &PointExpression) -> bool {
@@ -151,44 +167,184 @@ fn is_scalar_composition(left: &PointExpression, right: &PointExpression) -> boo
         && outer.checked_mul(*inner) == Some(*product)
 }
 
-/// Generates a deterministic prefix of the finite relation grammar.
+/// Generates a deterministic, resource-bounded sequence of local relations.
+///
+/// The request is clamped to the public toy-domain limits so direct callers
+/// cannot bypass `SearchPlan`. The sequence round-robins the public relation
+/// variants instead of materializing the full expression grammar.
 pub fn generate_relations(max_depth: u8, max_scalar: u64, budget: usize) -> Vec<Relation> {
+    let budget = budget.min(MAX_GENERATED_RELATIONS);
     if budget == 0
     {
         return Vec::new();
     }
-    let mut all = BTreeSet::from([PointExpression::Identity, PointExpression::Input]);
+
+    let max_depth = max_depth.min(MAX_GRAMMAR_DEPTH);
+    let max_scalar = max_scalar.min(MAX_GRAMMAR_SCALAR);
+    let expression_budget = expression_count_for_pair_budget(budget);
+    let expressions = generate_expression_prefix(max_depth, max_scalar, expression_budget);
+
+    let mut point_equalities = point_equalities(&expressions, budget).into_iter();
+    let mut infinities = expressions.into_iter().map(Relation::IsInfinity);
+    let mut curve_a_values = (0..=max_scalar).map(Relation::CurveAEquals);
+    let mut curve_j_values = j_invariant_values(max_scalar)
+        .into_iter()
+        .map(Relation::CurveJEquals);
+    let mut relations = Vec::with_capacity(budget);
+
+    while relations.len() < budget
+    {
+        let mut progressed = false;
+        if let Some(relation) = point_equalities.next()
+        {
+            relations.push(relation);
+            progressed = true;
+        }
+        if relations.len() == budget
+        {
+            break;
+        }
+        if let Some(relation) = infinities.next()
+        {
+            relations.push(relation);
+            progressed = true;
+        }
+        if relations.len() == budget
+        {
+            break;
+        }
+        if let Some(relation) = curve_a_values.next()
+        {
+            relations.push(relation);
+            progressed = true;
+        }
+        if relations.len() == budget
+        {
+            break;
+        }
+        if let Some(relation) = curve_j_values.next()
+        {
+            relations.push(relation);
+            progressed = true;
+        }
+        if !progressed
+        {
+            break;
+        }
+    }
+
+    relations
+}
+
+fn expression_count_for_pair_budget(budget: usize) -> usize {
+    let mut expressions = 0usize;
+    let mut pairs = 0usize;
+    while pairs < budget
+    {
+        expressions += 1;
+        pairs += expressions;
+    }
+    expressions
+}
+
+fn generate_expression_prefix(
+    max_depth: u8,
+    max_scalar: u64,
+    expression_budget: usize,
+) -> Vec<PointExpression> {
+    let mut all = BTreeSet::new();
+    all.insert(PointExpression::Input);
+    if all.len() < expression_budget
+    {
+        all.insert(PointExpression::Identity);
+    }
     let mut frontier = all.clone();
+
     for _ in 0..max_depth
     {
-        let previous: Vec<_> = frontier.into_iter().collect();
+        if all.len() == expression_budget || frontier.is_empty()
+        {
+            break;
+        }
         let universe: Vec<_> = all.iter().cloned().collect();
         let mut next = BTreeSet::new();
-        for point in &previous
+        'expand: for point in &frontier
         {
-            next.insert(PointExpression::Negate(Box::new(point.clone())));
-            next.insert(PointExpression::Double(Box::new(point.clone())));
+            if insert_expression(
+                &mut next,
+                &all,
+                expression_budget,
+                PointExpression::Negate(Box::new(point.clone())),
+            )
+            {
+                break 'expand;
+            }
+            if insert_expression(
+                &mut next,
+                &all,
+                expression_budget,
+                PointExpression::Double(Box::new(point.clone())),
+            )
+            {
+                break 'expand;
+            }
             for scalar in 0..=max_scalar
             {
-                next.insert(PointExpression::ScalarMultiply {
-                    scalar,
-                    point: Box::new(point.clone()),
-                });
+                if insert_expression(
+                    &mut next,
+                    &all,
+                    expression_budget,
+                    PointExpression::ScalarMultiply {
+                        scalar,
+                        point: Box::new(point.clone()),
+                    },
+                )
+                {
+                    break 'expand;
+                }
             }
             for other in &universe
             {
-                next.insert(PointExpression::Add(
-                    Box::new(point.clone()),
-                    Box::new(other.clone()),
-                ));
+                if insert_expression(
+                    &mut next,
+                    &all,
+                    expression_budget,
+                    PointExpression::Add(Box::new(point.clone()), Box::new(other.clone())),
+                )
+                {
+                    break 'expand;
+                }
             }
         }
-        next.retain(|expression| expression.depth() <= max_depth);
-        frontier = next.difference(&all).cloned().collect();
-        all.extend(frontier.iter().cloned());
+        if next.is_empty()
+        {
+            break;
+        }
+        all.extend(next.iter().cloned());
+        frontier = next;
     }
 
-    let expressions: Vec<_> = all.into_iter().collect();
+    all.into_iter().collect()
+}
+
+fn insert_expression(
+    next: &mut BTreeSet<PointExpression>,
+    all: &BTreeSet<PointExpression>,
+    expression_budget: usize,
+    expression: PointExpression,
+) -> bool {
+    if all.len() + next.len() == expression_budget
+    {
+        return true;
+    }
+    if !all.contains(&expression)
+    {
+        next.insert(expression);
+    }
+    all.len() + next.len() == expression_budget
+}
+
+fn point_equalities(expressions: &[PointExpression], budget: usize) -> Vec<Relation> {
     let mut relations = Vec::with_capacity(budget);
     'outer: for (left_index, left) in expressions.iter().enumerate()
     {
@@ -204,26 +360,72 @@ pub fn generate_relations(max_depth: u8, max_scalar: u64, budget: usize) -> Vec<
     relations
 }
 
+fn j_invariant_values(max_scalar: u64) -> Vec<u64> {
+    let mut values: Vec<_> = (0..=max_scalar).collect();
+    if !values.contains(&1728)
+    {
+        values.push(1728);
+    }
+    values
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn generation_is_bounded_sorted_and_reproducible() {
+    fn generation_is_bounded_and_reproducible() {
         let left = generate_relations(2, 3, 50);
         let right = generate_relations(2, 3, 50);
         assert_eq!(left, right);
         assert_eq!(left.len(), 50);
-        assert!(left.windows(2).all(|pair| pair[0] <= pair[1]));
+        assert_eq!(left.iter().collect::<BTreeSet<_>>().len(), left.len());
     }
 
     #[test]
-    fn known_syntax_is_recognized_before_candidate_classification() {
+    fn every_relation_variant_is_reachable_in_a_bounded_sequence() {
+        let relations = generate_relations(0, 0, 4);
+        assert_eq!(relations.len(), 4);
+        assert!(matches!(relations[0], Relation::PointEqual(_, _)));
+        assert!(matches!(relations[1], Relation::IsInfinity(_)));
+        assert!(matches!(relations[2], Relation::CurveAEquals(0)));
+        assert!(matches!(relations[3], Relation::CurveJEquals(0)));
+        assert!(generate_relations(0, 0, 20).contains(&Relation::CurveJEquals(1728)));
+    }
+
+    #[test]
+    fn direct_generation_cannot_exceed_the_local_resource_bound() {
+        let relations = generate_relations(u8::MAX, u64::MAX, MAX_GENERATED_RELATIONS + 1);
+        assert_eq!(relations.len(), MAX_GENERATED_RELATIONS);
+    }
+
+    #[test]
+    fn known_syntax_is_recognized_independently_of_tree_order() {
         let input = PointExpression::Input;
-        let relation = Relation::PointEqual(
-            PointExpression::Negate(Box::new(PointExpression::Negate(Box::new(input.clone())))),
-            input,
-        );
-        assert_eq!(relation.signature(), RelationSignature::NegationInvolution);
+        let double_negation = PointExpression::Negate(Box::new(PointExpression::Negate(
+            Box::new(input.clone()),
+        )));
+        for relation in [
+            Relation::PointEqual(double_negation.clone(), input.clone()),
+            Relation::PointEqual(input.clone(), double_negation),
+        ]
+        {
+            assert_eq!(relation.signature(), RelationSignature::NegationInvolution);
+        }
+
+        let negated_input = PointExpression::Negate(Box::new(input.clone()));
+        for relation in [
+            Relation::PointEqual(
+                PointExpression::Add(Box::new(input.clone()), Box::new(negated_input.clone())),
+                PointExpression::Identity,
+            ),
+            Relation::PointEqual(
+                PointExpression::Add(Box::new(negated_input), Box::new(input)),
+                PointExpression::Identity,
+            ),
+        ]
+        {
+            assert_eq!(relation.signature(), RelationSignature::AdditiveInverse);
+        }
     }
 }

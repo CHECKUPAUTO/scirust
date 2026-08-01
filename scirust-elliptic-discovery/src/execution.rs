@@ -49,7 +49,7 @@ pub struct ExecutionReceipt {
 }
 
 impl ExecutionReceipt {
-    pub const SCHEMA_VERSION: u32 = 1;
+    pub const SCHEMA_VERSION: u32 = 2;
 
     /// Validated search plan which can be replayed without external input.
     pub const fn plan(&self) -> SearchPlan {
@@ -74,7 +74,7 @@ impl ExecutionReceipt {
     /// Stable binary representation of the complete receipt.
     pub fn canonical_bytes(&self) -> Vec<u8> {
         let mut encoder =
-            CanonicalEncoder::with_domain(b"SCIRUST-ELLIPTIC-DISCOVERY/EXECUTION-RECEIPT/V1");
+            CanonicalEncoder::with_domain(b"SCIRUST-ELLIPTIC-DISCOVERY/EXECUTION-RECEIPT/V2");
         encoder.u32(Self::SCHEMA_VERSION);
         encoder.bytes(&self.plan.canonical_bytes());
         for (kind, fingerprint) in [
@@ -192,7 +192,7 @@ fn summarize(candidates: &[CandidateEvaluation]) -> ExecutionSummary {
 
 fn candidate_fingerprint(candidate: &CandidateEvaluation) -> [u8; 32] {
     let mut encoder =
-        CanonicalEncoder::with_domain(b"SCIRUST-ELLIPTIC-DISCOVERY/CANDIDATE-EVALUATION/V1");
+        CanonicalEncoder::with_domain(b"SCIRUST-ELLIPTIC-DISCOVERY/CANDIDATE-EVALUATION/V2");
     encode_relation(&mut encoder, candidate.relation());
     let classification = candidate.classification();
     encoder.u8(status_tag(classification.status()));
