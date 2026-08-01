@@ -8,8 +8,8 @@ use crate::canonical::{CanonicalEncoder, sha256};
 use crate::{CorpusKind, LocalResearchCase, ToyCurve, ToyPrime};
 
 const EXHAUSTIVE_PRIMES: [u64; 4] = [5, 7, 11, 13];
-const HOLDOUT_PRIMES: [u64; 21] = [
-    17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 91, 93, 97,
+const HOLDOUT_PRIMES: [u64; 19] = [
+    17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97,
 ];
 const SCALE_PRIMES: [u64; 6] = [127, 251, 509, 1021, 2039, 4093];
 
@@ -194,6 +194,17 @@ mod tests {
             LocalResearchCase::new(seed, CorpusKind::IndependentHoldout, 2, 100)
                 .expect("valid local case"),
         )
+    }
+
+    #[test]
+    fn every_built_in_modulus_is_prime() {
+        for modulus in EXHAUSTIVE_PRIMES
+            .into_iter()
+            .chain(HOLDOUT_PRIMES)
+            .chain(SCALE_PRIMES)
+        {
+            assert!(ToyPrime::new(modulus).is_ok(), "composite modulus: {modulus}");
+        }
     }
 
     #[test]
