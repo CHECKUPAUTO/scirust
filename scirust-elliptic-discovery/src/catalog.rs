@@ -48,12 +48,15 @@ const SEC1: &str = "SEC 1 v2, point representation";
 pub const fn catalog_entry(signature: RelationSignature) -> Option<CatalogEntry> {
     let entry = match signature
     {
-        RelationSignature::NegationInvolution | RelationSignature::AdditiveInverse => CatalogEntry {
-            id: "group.negation",
-            family: CatalogFamily::NegationAndIdentity,
-            conditional: false,
-            representation_artifact: false,
-            reference: SILVERMAN,
+        RelationSignature::NegationInvolution | RelationSignature::AdditiveInverse =>
+        {
+            CatalogEntry {
+                id: "group.negation",
+                family: CatalogFamily::NegationAndIdentity,
+                conditional: false,
+                representation_artifact: false,
+                reference: SILVERMAN,
+            }
         },
         RelationSignature::ScalarComposition => CatalogEntry {
             id: "group.scalar-composition",

@@ -130,23 +130,20 @@ pub fn review_candidate(
         | ClassificationStatus::RepresentationArtifact
         | ClassificationStatus::Inconclusive => automated,
         ClassificationStatus::NeedsLiteratureReview
-        | ClassificationStatus::CandidateUnclassified =>
+        | ClassificationStatus::CandidateUnclassified => match literature_review.decision
         {
-            match literature_review.decision
+            LiteratureDecision::Pending => ClassificationStatus::NeedsLiteratureReview,
+            LiteratureDecision::Known => ClassificationStatus::Known,
+            LiteratureDecision::NoConflictFound
+                if proof_was_attempted(&justification)
+                    && candidate
+                        .gates()
+                        .iter()
+                        .all(|gate| gate.state() == GateState::Passed) =>
             {
-                LiteratureDecision::Pending => ClassificationStatus::NeedsLiteratureReview,
-                LiteratureDecision::Known => ClassificationStatus::Known,
-                LiteratureDecision::NoConflictFound
-                    if proof_was_attempted(&justification)
-                        && candidate
-                            .gates()
-                            .iter()
-                            .all(|gate| gate.state() == GateState::Passed) =>
-                {
-                    ClassificationStatus::CandidateUnclassified
-                },
-                LiteratureDecision::NoConflictFound => ClassificationStatus::Inconclusive,
-            }
+                ClassificationStatus::CandidateUnclassified
+            },
+            LiteratureDecision::NoConflictFound => ClassificationStatus::Inconclusive,
         },
     };
     ReviewedCandidate {
@@ -160,9 +157,7 @@ pub fn review_candidate(
 fn proof_was_attempted(justification: &Justification) -> bool {
     matches!(
         justification,
-        Justification::Catalog(_)
-            | Justification::Proved(_)
-            | Justification::NoCertificate { .. }
+        Justification::Catalog(_) | Justification::Proved(_) | Justification::NoCertificate { .. }
     )
 }
 
@@ -181,20 +176,20 @@ impl<'a> ReviewReport<'a> {
         let mut output = String::new();
         writeln!(output, "# Elliptic discovery candidate review").expect("String write");
         writeln!(output).expect("String write");
-        writeln!(
-            output,
-            "- Final status: '{:?}'",
-            self.reviewed.final_status
-        )
-        .expect("String write");
+        writeln!(output, "- Final status: '{:?}'", self.reviewed.final_status)
+            .expect("String write");
         writeln!(
             output,
             "- Automated status: '{:?}'",
             self.reviewed.candidate.classification().status()
         )
         .expect("String write");
-        writeln!(output, "- Relation: '{:?}'", self.reviewed.candidate.relation())
-            .expect("String write");
+        writeln!(
+            output,
+            "- Relation: '{:?}'",
+            self.reviewed.candidate.relation()
+        )
+        .expect("String write");
 
         writeln!(output, "\n## Coverage gates\n").expect("String write");
         for gate in self.reviewed.candidate.gates()
@@ -223,8 +218,11 @@ impl<'a> ReviewReport<'a> {
                 )
                 .expect("String write");
             },
-            None => writeln!(output, "No counterexample was found within declared coverage.")
-                .expect("String write"),
+            None => writeln!(
+                output,
+                "No counterexample was found within declared coverage."
+            )
+            .expect("String write"),
         }
 
         writeln!(output, "\n## Known-property catalog\n").expect("String write");
@@ -236,8 +234,7 @@ impl<'a> ReviewReport<'a> {
                 entry.id, entry.reference
             )
             .expect("String write"),
-            None => writeln!(output, "No automated catalog match.")
-                .expect("String write"),
+            None => writeln!(output, "No automated catalog match.").expect("String write"),
         }
 
         writeln!(output, "\n## Exact justification\n").expect("String write");

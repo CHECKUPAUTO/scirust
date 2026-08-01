@@ -1,8 +1,8 @@
 //! Mandatory positive and negative controls for the catalog and falsifier.
 
 use crate::{
-    Classification, ClassificationStatus, Corpus, Counterexample, Fp, RelationSignature,
-    classify, first_point_counterexample,
+    Classification, ClassificationStatus, Corpus, Counterexample, Fp, RelationSignature, classify,
+    first_point_counterexample,
 };
 
 /// Built-in controls required by the research contract.
@@ -48,22 +48,25 @@ pub fn run_control(corpus: &Corpus, id: ControlId) -> ControlResult {
     {
         ControlId::TrueNegation =>
         {
-            let counterexample = first_point_counterexample(
-                corpus,
-                "control.true-negation",
-                |curve, point| {
-                    let Ok(negative) = curve.negate(point) else {
+            let counterexample =
+                first_point_counterexample(corpus, "control.true-negation", |curve, point| {
+                    let Ok(negative) = curve.negate(point)
+                    else
+                    {
                         return false;
                     };
-                    let Ok(double_negative) = curve.negate(negative) else {
+                    let Ok(double_negative) = curve.negate(negative)
+                    else
+                    {
                         return false;
                     };
-                    let Ok(sum) = curve.add(point, negative) else {
+                    let Ok(sum) = curve.add(point, negative)
+                    else
+                    {
                         return false;
                     };
                     double_negative == point && sum == curve.identity()
-                },
-            );
+                });
             (RelationSignature::NegationInvolution, counterexample)
         },
         ControlId::FalseNegationKeepsY =>
@@ -76,7 +79,9 @@ pub fn run_control(corpus: &Corpus, id: ControlId) -> ControlResult {
                     {
                         return true;
                     }
-                    let Ok(negative) = curve.negate(point) else {
+                    let Ok(negative) = curve.negate(point)
+                    else
+                    {
                         return false;
                     };
                     negative.affine_coordinates() == point.affine_coordinates()
@@ -90,10 +95,14 @@ pub fn run_control(corpus: &Corpus, id: ControlId) -> ControlResult {
                 corpus,
                 "control.false-doubling-sign",
                 |curve, point| {
-                    let Ok(double) = curve.scalar_mul(point, 2) else {
+                    let Ok(double) = curve.scalar_mul(point, 2)
+                    else
+                    {
                         return false;
                     };
-                    let Ok(negative_double) = curve.negate(double) else {
+                    let Ok(negative_double) = curve.negate(double)
+                    else
+                    {
                         return false;
                     };
                     double == negative_double
@@ -107,7 +116,9 @@ pub fn run_control(corpus: &Corpus, id: ControlId) -> ControlResult {
                 corpus,
                 "control.j-zero-claimed-universal",
                 |curve, point| {
-                    let Some((x, y)) = point.affine_coordinates() else {
+                    let Some((x, y)) = point.affine_coordinates()
+                    else
+                    {
                         return true;
                     };
                     let scaled_x = Fp::new(curve.prime(), x)
@@ -125,7 +136,9 @@ pub fn run_control(corpus: &Corpus, id: ControlId) -> ControlResult {
                 corpus,
                 "control.encoding-sign-claimed-novel",
                 |curve, point| {
-                    let Ok(negative) = curve.negate(point) else {
+                    let Ok(negative) = curve.negate(point)
+                    else
+                    {
                         return false;
                     };
                     match (point.affine_coordinates(), negative.affine_coordinates())
@@ -133,8 +146,7 @@ pub fn run_control(corpus: &Corpus, id: ControlId) -> ControlResult {
                         (None, None) => true,
                         (Some((x, y)), Some((negative_x, negative_y))) =>
                         {
-                            x == negative_x
-                                && Fp::new(curve.prime(), y).neg().value() == negative_y
+                            x == negative_x && Fp::new(curve.prime(), y).neg().value() == negative_y
                         },
                         _ => false,
                     }
@@ -144,11 +156,10 @@ pub fn run_control(corpus: &Corpus, id: ControlId) -> ControlResult {
         },
         ControlId::OverfitAZero =>
         {
-            let counterexample = first_point_counterexample(
-                corpus,
-                "control.overfit-a-zero",
-                |curve, _| curve.a() == 0,
-            );
+            let counterexample =
+                first_point_counterexample(corpus, "control.overfit-a-zero", |curve, _| {
+                    curve.a() == 0
+                });
             (RelationSignature::Unrecognized, counterexample)
         },
     };

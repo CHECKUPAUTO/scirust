@@ -54,8 +54,7 @@ impl SearchPlan {
         {
             return Err(SearchError::TupleBudget);
         }
-        if sampled_curves_per_prime == 0
-            || sampled_curves_per_prime > Self::MAX_CURVES_PER_PRIME
+        if sampled_curves_per_prime == 0 || sampled_curves_per_prime > Self::MAX_CURVES_PER_PRIME
         {
             return Err(SearchError::CurveBudget);
         }
@@ -351,9 +350,7 @@ pub fn run_search(plan: SearchPlan, corpora: &ResearchCorpora) -> Vec<CandidateE
         usize::try_from(plan.candidate_budget).expect("candidate budget fits in usize"),
     )
     .into_iter()
-    .map(|relation| {
-        evaluate_candidate(relation, corpora, plan.tuple_budget_per_candidate)
-    })
+    .map(|relation| evaluate_candidate(relation, corpora, plan.tuple_budget_per_candidate))
     .collect()
 }
 
@@ -374,7 +371,10 @@ mod tests {
             &corpora,
             plan().tuple_budget_per_candidate,
         );
-        assert_eq!(result.classification().status(), ClassificationStatus::Refuted);
+        assert_eq!(
+            result.classification().status(),
+            ClassificationStatus::Refuted
+        );
         assert_eq!(result.gates()[0].state(), GateState::Refuted);
         assert!(result.counterexample().is_some());
     }
@@ -384,19 +384,21 @@ mod tests {
         let corpora = ResearchCorpora::generate(plan());
         let input = PointExpression::Input;
         let relation = Relation::PointEqual(
-            PointExpression::Negate(Box::new(PointExpression::Negate(Box::new(
-                input.clone(),
-            )))),
+            PointExpression::Negate(Box::new(PointExpression::Negate(Box::new(input.clone())))),
             input,
         );
-        let result = evaluate_candidate(
-            relation,
-            &corpora,
-            plan().tuple_budget_per_candidate,
+        let result = evaluate_candidate(relation, &corpora, plan().tuple_budget_per_candidate);
+        assert_eq!(
+            result.classification().status(),
+            ClassificationStatus::Known
         );
-        assert_eq!(result.classification().status(), ClassificationStatus::Known);
         assert_eq!(result.gates().len(), 2);
-        assert!(result.gates().iter().all(|gate| gate.state() == GateState::Passed));
+        assert!(
+            result
+                .gates()
+                .iter()
+                .all(|gate| gate.state() == GateState::Passed)
+        );
     }
 
     #[test]
