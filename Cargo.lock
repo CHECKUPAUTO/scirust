@@ -3132,6 +3132,8 @@ name = "scirust-elliptic-discovery"
 version = "0.1.0"
 dependencies = [
  "scirust-modalg",
+ "scirust-sim",
+ "sha2",
 ]
 
 [[package]]
