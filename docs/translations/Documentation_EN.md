@@ -270,7 +270,7 @@ SciRust is the framework of choice for those who prioritize **understanding** an
 
 The N-D autograd tape now carries a complete deep-learning stack, every piece
 backed by a research paper and a test (gradient check or oracle). See
-[`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md) (14/20 delivered).
+[`docs/RESEARCH_ROADMAP.md`](../RESEARCH_ROADMAP.md) (14/20 delivered).
 
 - **Causal decoder LM**, trained end-to-end (token + positional embeddings,
   causal attention, fused softmax cross-entropy); overfits a sequence exactly.

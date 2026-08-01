@@ -179,7 +179,7 @@ Adapter SciRust aux contraintes ISO 26262 / IEC 61508 :
 ### Total
 
 - **115 nouveaux tests** pour les crates industriels (1047 dans tout le workspace, 0 échec)
-- **Documentation** : 8 langues (FR/EN/ES/DE/ZH/JA/KO/AR) mises à jour pour Documentation.md et le rapport technique
+- **Documentation** : 8 langues (FR/EN/ES/DE/ZH/JA/KO/AR) mises à jour sous `docs/translations/` et dans le rapport technique
 - **Prochaines étapes** : Intégration des crates `opcua` et `rumqttc` pour backends réels, dataset C-MAPSS, benchmark de performance edge
 
 ### Commandes de test rapide

@@ -516,7 +516,7 @@ SciRust est le framework de choix pour ceux qui privilégient la **compréhensio
 
 La tape autograd N-D porte désormais une pile d'apprentissage profond complète,
 chaque brique adossée à un papier de recherche et à un test (gradient check ou
-oracle). Voir [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md) (14/20 livrés).
+oracle). Voir [`docs/RESEARCH_ROADMAP.md`](../RESEARCH_ROADMAP.md) (14/20 livrés).
 
 - **LM décodeur causal** entraînable de bout en bout (embeddings token + position,
   attention causale, cross-entropy fusionnée) ; sur-apprend une séquence exactement.

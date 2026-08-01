@@ -237,7 +237,7 @@ SciRust는 가공되지 않은 속도나 Python의 편리함보다 **이해**와
 
 N-D 자동미분 테이프는 이제 완전한 딥러닝 스택을 갖추었으며, 각 구성 요소는
 연구 논문과 테스트(그래디언트 체크 또는 오라클)로 뒷받침됩니다.
-[`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md) 참조 (20개 중 14개 완료).
+[`docs/RESEARCH_ROADMAP.md`](../RESEARCH_ROADMAP.md) 참조 (20개 중 14개 완료).
 
 - **인과적 디코더 LM**, 엔드투엔드 학습 (토큰 + 위치 임베딩, 인과적 어텐션,
   융합 softmax 교차 엔트로피); 시퀀스를 정확히 과적합.

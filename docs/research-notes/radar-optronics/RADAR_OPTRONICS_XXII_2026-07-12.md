@@ -9,7 +9,7 @@ polar returns by a **statistical (NIS) validation gate**.
 ## What shipped — `scirust-signal::radar::mtt`
 
 - **`RadarMultiTracker`** / **`RadarTrack`** — each track is a full
-  [`RadarEkf`](../scirust-signal/src/radar/ekf.rs) fed raw `(range, bearing)`
+  [`RadarEkf`](../../../scirust-signal/src/radar/ekf.rs) fed raw `(range, bearing)`
   returns. Each `step`:
   1. predicts every track (which is also the coast for unmatched tracks);
   2. gates every (track, measurement) pair by its **normalised innovation

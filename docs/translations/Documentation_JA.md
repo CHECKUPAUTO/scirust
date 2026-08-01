@@ -237,7 +237,7 @@ SciRust は、生の速度や Python の容易さよりも、**理解** と **�
 
 N-D 自動微分テープは、研究論文とテスト（勾配チェックまたはオラクル）に裏付け
 られた完全な深層学習スタックを備えました。
-[`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md) を参照（20 件中 14 件完了）。
+[`docs/RESEARCH_ROADMAP.md`](../RESEARCH_ROADMAP.md) を参照（20 件中 14 件完了）。
 
 - **因果デコーダ LM**、エンドツーエンドで学習（トークン＋位置埋め込み、因果
   アテンション、融合 softmax クロスエントロピー）；系列を厳密に過学習できる。

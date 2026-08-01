@@ -263,7 +263,7 @@ cargo run -p industrial-monitor
 
 N-D 自动微分带现在承载了完整的深度学习栈，每个组件都有研究论文与测试支撑
 （梯度检查或参考验证）。详见
-[`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md)（已完成 14/20）。
+[`docs/RESEARCH_ROADMAP.md`](../RESEARCH_ROADMAP.md)（已完成 14/20）。
 
 - **因果解码器语言模型**，端到端训练（词元 + 位置嵌入、因果注意力、融合的
   softmax 交叉熵）；可精确过拟合一个序列。

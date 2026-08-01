@@ -23,7 +23,7 @@ it by its association probability.
      reflects the association ambiguity.
 
   `update` returns `β₀`. Reuses the shared dense-matrix helpers from
-  [`imm2d`](../scirust-signal/src/radar/imm2d.rs).
+  [`imm2d`](../../../scirust-signal/src/radar/imm2d.rs).
 
 ## The oracles
 
