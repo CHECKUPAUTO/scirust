@@ -148,7 +148,7 @@ fn is_scalar_composition(left: &PointExpression, right: &PointExpression) -> boo
     };
     matches!(inner_point.as_ref(), PointExpression::Input)
         && matches!(right_point.as_ref(), PointExpression::Input)
-        && outer.checked_mul(inner) == Some(product)
+        && outer.checked_mul(*inner) == Some(*product)
 }
 
 /// Generates a deterministic prefix of the finite relation grammar.
