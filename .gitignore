@@ -48,11 +48,21 @@ scirust-rustc-driver/target/
 .DS_Store
 Thumbs.db
 
-# Data
-/data/
+# Generated-data policy
+#
+# SCIAGENT corpora and packed shards are machine-local artifacts.  They live
+# outside the checkout (see docs/SCIAGENT_CORPUS_STORAGE.md), so a broad
+# `/data/` ignore rule would only hide an accidental in-tree corpus from Git.
+# Keep repository-root data visible instead; the location guard rejects legacy
+# SCIAGENT corpus paths in CI and the producer refuses to write below the root.
 *.bin
 *.tar.gz
 *.zip
+!/data/
+!/data/**/
+!/data/**/*.bin
+!/data/**/*.tar.gz
+!/data/**/*.zip
 
 # TurboQuant
 .turboquant-backup/
