@@ -10,3 +10,5 @@ repository = "https://github.com/Memorithm/scirust"
 
 [dependencies]
 scirust-modalg = { path = "../scirust-modalg" }
+scirust-sim = { path = "../scirust-sim", default-features = false }
+sha2 = "0.10"
