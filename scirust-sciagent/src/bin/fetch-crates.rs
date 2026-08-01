@@ -3,8 +3,8 @@
 //! extraction (no extra Rust dep for archives).
 //!
 //! Usage:
-//!   cargo run --bin fetch-crates -- --count 50 --output ./data/raw
-//!   cargo run --bin collect-data -- --input ./data/raw -o ./data/shards --tokenizer ./tokenizer/bpe.json --recursive
+//!   cargo run -p scirust-sciagent --features fetch --bin fetch-crates -- --count 50
+//!   cargo run -p scirust-sciagent --bin collect-data -- --input <external-corpus-dir> --tokenizer ./scirust-sciagent/tokenizer/bpe.json --recursive
 
 use std::fs;
 use std::io::{self, Read, Write};
@@ -13,6 +13,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use clap::Parser;
+use scirust_sciagent::corpus_paths;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
@@ -107,8 +108,10 @@ struct Args {
     #[arg(short, long, default_value_t = 50)]
     count: usize,
 
-    #[arg(short, long, default_value = "./data/raw")]
-    output: PathBuf,
+    /// External directory for downloaded crates. Defaults to the platform data
+    /// directory; paths inside the SciRust checkout are rejected.
+    #[arg(short, long, value_name = "DIR")]
+    output: Option<PathBuf>,
 
     #[arg(long, default_value = "30")]
     delay_ms: u64,
@@ -133,8 +136,11 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-    fs::create_dir_all(&args.output).expect("Cannot create output dir");
-    let out = &args.output;
+    let out = corpus_paths::resolve_external_corpus_dir(args.output).unwrap_or_else(|error| {
+        eprintln!("Cannot use corpus output directory: {error}");
+        std::process::exit(2);
+    });
+    fs::create_dir_all(&out).expect("Cannot create output dir");
 
     let crates: Vec<CrateSummary> = if let Some(list_path) = &args.crate_list
     {
@@ -167,7 +173,7 @@ fn main() {
             continue;
         }
 
-        if let Err(e) = fetch_and_extract(c, out, args.skip_extract, args.max_retries)
+        if let Err(e) = fetch_and_extract(c, &out, args.skip_extract, args.max_retries)
         {
             eprintln!("  SKIP {}: {e}", c.id);
         }
@@ -188,7 +194,7 @@ fn main() {
         out.canonicalize().unwrap_or_else(|_| out.clone())
     );
     eprintln!(
-        "Next: cargo run --bin collect-data -- --input {:?} -o ./data/shards --tokenizer ./tokenizer/bpe.json --recursive",
+        "Next: cargo run -p scirust-sciagent --bin collect-data -- --input {:?} --tokenizer ./scirust-sciagent/tokenizer/bpe.json --recursive",
         out
     );
 }

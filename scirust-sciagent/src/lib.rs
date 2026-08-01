@@ -5,6 +5,7 @@ pub mod bpe;
 pub mod ccos;
 pub mod checkpointing;
 pub mod config;
+pub mod corpus_paths;
 #[cfg(feature = "cuda")]
 pub mod cuda_model;
 pub mod flash_attention;

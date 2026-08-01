@@ -44,7 +44,7 @@ impl ExperimentReport {
     /// Stable UTF-8 JSON bytes with an explicit field order.
     pub fn canonical_bytes(&self) -> Vec<u8> {
         let mut output = String::new();
-        writeln!(output, "{").expect("writing to String cannot fail");
+        writeln!(output, "{{").expect("writing to String cannot fail");
         writeln!(
             output,
             "  \"schema\": \"scirust-elliptic-discovery-report-v1\","
@@ -77,14 +77,18 @@ impl ExperimentReport {
             .expect("writing to String cannot fail");
         writeln!(output, "  \"evaluated_tuples\": {},", self.evaluated_tuples)
             .expect("writing to String cannot fail");
-        match &self.counterexample {
-            Some(counterexample) => {
+        match &self.counterexample
+        {
+            Some(counterexample) =>
+            {
                 let (prime, a, b) = counterexample.curve_key();
-                let point = match counterexample.point().affine_coordinates() {
+                let point = match counterexample.point().affine_coordinates()
+                {
                     Some((x, y)) => format!("[{}, {}]", x, y),
                     None => "null".to_string(),
                 };
-                writeln!(output, "  \"counterexample\": {{").expect("writing to String cannot fail");
+                writeln!(output, "  \"counterexample\": {{")
+                    .expect("writing to String cannot fail");
                 writeln!(output, "    \"prime\": {prime},").expect("writing to String cannot fail");
                 writeln!(output, "    \"a\": {a},").expect("writing to String cannot fail");
                 writeln!(output, "    \"b\": {b},").expect("writing to String cannot fail");
@@ -96,10 +100,12 @@ impl ExperimentReport {
                 .expect("writing to String cannot fail");
                 writeln!(output, "    \"point\": {point}").expect("writing to String cannot fail");
                 writeln!(output, "  }}").expect("writing to String cannot fail");
-            }
-            None => {
-                writeln!(output, "  \"counterexample\": null").expect("writing to String cannot fail");
-            }
+            },
+            None =>
+            {
+                writeln!(output, "  \"counterexample\": null")
+                    .expect("writing to String cannot fail");
+            },
         }
         writeln!(output, "}}").expect("writing to String cannot fail");
         output.into_bytes()
@@ -113,16 +119,20 @@ impl ExperimentReport {
 
 fn escape_json(input: &str) -> String {
     let mut output = String::new();
-    for character in input.chars() {
-        match character {
+    for character in input.chars()
+    {
+        match character
+        {
             '"' => output.push_str("\\\""),
             '\\' => output.push_str("\\\\"),
             '\n' => output.push_str("\\n"),
             '\r' => output.push_str("\\r"),
             '\t' => output.push_str("\\t"),
-            value if value.is_control() => {
-                write!(output, "\\u{:04x}", u32::from(value)).expect("writing to String cannot fail");
-            }
+            value if value.is_control() =>
+            {
+                write!(output, "\\u{:04x}", u32::from(value))
+                    .expect("writing to String cannot fail");
+            },
             value => output.push(value),
         }
     }
