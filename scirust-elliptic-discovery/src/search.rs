@@ -2,6 +2,7 @@
 
 use core::fmt;
 
+use crate::canonical::{CanonicalEncoder, sha256};
 use crate::{
     Classification, ClassificationStatus, Corpus, CorpusKind, Counterexample, ExperimentManifest,
     LocalResearchCase, Relation, classify, first_point_counterexample, generate_relations,
@@ -71,6 +72,50 @@ impl SearchPlan {
     /// Per-candidate tuple limit shared by all dataset gates.
     pub const fn tuple_budget_per_candidate(self) -> u64 {
         self.tuple_budget_per_candidate
+    }
+
+    /// Deterministic root seed.
+    pub const fn seed(self) -> u64 {
+        self.seed
+    }
+
+    /// Maximum expression-tree depth.
+    pub const fn expression_depth(self) -> u8 {
+        self.expression_depth
+    }
+
+    /// Largest scalar emitted by the grammar.
+    pub const fn max_scalar(self) -> u64 {
+        self.max_scalar
+    }
+
+    /// Maximum number of generated candidates.
+    pub const fn candidate_budget(self) -> u32 {
+        self.candidate_budget
+    }
+
+    /// Selected curves per prime in sampled corpora.
+    pub const fn sampled_curves_per_prime(self) -> u32 {
+        self.sampled_curves_per_prime
+    }
+
+    /// Stable, domain-separated encoding of every search parameter.
+    pub fn canonical_bytes(self) -> Vec<u8> {
+        let mut encoder =
+            CanonicalEncoder::with_domain(b"SCIRUST-ELLIPTIC-DISCOVERY/SEARCH-PLAN/V1");
+        encoder.bytes(env!("CARGO_PKG_VERSION").as_bytes());
+        encoder.u64(self.seed);
+        encoder.u8(self.expression_depth);
+        encoder.u64(self.max_scalar);
+        encoder.u32(self.candidate_budget);
+        encoder.u64(self.tuple_budget_per_candidate);
+        encoder.u32(self.sampled_curves_per_prime);
+        encoder.finish()
+    }
+
+    /// Integrity fingerprint of the canonical plan.
+    pub fn fingerprint(self) -> [u8; 32] {
+        sha256(&self.canonical_bytes())
     }
 }
 
