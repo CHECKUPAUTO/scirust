@@ -367,6 +367,14 @@ Ajouter les certificats/identités exacts faisables avec `modalg::poly`, une exp
 rapport lisible et une procédure de revue de littérature humaine. Critère de sortie : les
 rapports séparent formellement preuve, contre-exemple, propriété connue et hypothèse.
 
+### Phase 6 — Exécution et rejeu locaux
+
+Ajouter une frontière d’exécution sur `SearchPlan`, un reçu canonique complet et un rejeu
+strict qui détecte toute divergence. Aucun décodeur de données externes n’est ajouté. Critère
+de sortie : les mêmes plan et version produisent les mêmes octets, et toute altération du reçu
+est détectée. La spécification détaillée est
+[`SCIRUST_ELLIPTIC_DISCOVERY_EXECUTION_REPLAY_V0_1.md`](SCIRUST_ELLIPTIC_DISCOVERY_EXECUTION_REPLAY_V0_1.md).
+
 ## Validations à appliquer
 
 Après l’ajout du crate, exécuter au minimum :
