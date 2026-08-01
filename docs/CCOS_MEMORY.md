@@ -7,7 +7,7 @@ causal, page ce graphe sous un budget de tokens, et journalise chaque transition
 dans un log **déterministe, rejouable bit-à-bit et hash-chaîné**.
 
 - Source vendorisée : [`external/ccos-core/`](../external/ccos-core/) —
-  copie du dépôt `Memorithm/CCOS-Core`, commit amont `9c1b7d99d014841adbf62b642f233e7fa6906b57`.
+  copie du dépôt `Memorithm/CCOS-Core`, commit amont `d3f499325874d848dce07e007610d55437e2c4c0`.
 - Références amont : `external/ccos-core/README.md`,
   `external/ccos-core/docs/SELF_ANALYSIS.md` (dogfooding agent),
   `external/ccos-core/docs/USAGE.md`, `external/ccos-core/docs/MEMORY_INTERFACE.md`.

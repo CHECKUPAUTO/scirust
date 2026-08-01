@@ -3,7 +3,7 @@
 ## Mémoire causale — CCOS Core
 
 Ce dépôt embarque **CCOS Core** (Causal Context Operating System, vendorisé sous
-`external/ccos-core/`, commit amont `9c1b7d9`) comme mémoire causale de l'agent :
+`external/ccos-core/`, commit amont `d3f4993`) comme mémoire causale de l'agent :
 graphe causal event-sourcé, log hash-chaîné, recall auto-borné, replay
 déterministe et débogueur post-mortem. Doc complète : `docs/CCOS_MEMORY.md` ;
 épreuve terrain mesurée sur ce dépôt : `docs/CCOS_FIELD_TEST_SCIRUST.md`.
