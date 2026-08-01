@@ -83,16 +83,14 @@ impl Corpus {
         let curves = match case.corpus()
         {
             CorpusKind::ExhaustiveSmall => exhaustive_curves(),
-            CorpusKind::IndependentHoldout => sampled_curves(
-                &HOLDOUT_PRIMES,
-                case.seed(),
-                case.curves_per_prime(),
-            ),
-            CorpusKind::ScaleLadder => sampled_curves(
-                &SCALE_PRIMES,
-                case.seed(),
-                case.curves_per_prime(),
-            ),
+            CorpusKind::IndependentHoldout =>
+            {
+                sampled_curves(&HOLDOUT_PRIMES, case.seed(), case.curves_per_prime())
+            },
+            CorpusKind::ScaleLadder =>
+            {
+                sampled_curves(&SCALE_PRIMES, case.seed(), case.curves_per_prime())
+            },
         };
         Self { manifest, curves }
     }

@@ -87,8 +87,7 @@ mod tests {
 
     #[test]
     fn cube_roots_are_exact_and_nontrivial() {
-        let curve = ToyCurve::new(ToyPrime::new(13).expect("prime"), 0, 2)
-            .expect("nonsingular");
+        let curve = ToyCurve::new(ToyPrime::new(13).expect("prime"), 0, 2).expect("nonsingular");
         assert_eq!(nontrivial_cube_roots(curve), vec![3, 9]);
     }
 }

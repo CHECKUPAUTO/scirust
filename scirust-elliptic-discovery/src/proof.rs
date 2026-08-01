@@ -148,18 +148,12 @@ fn point_coefficient(expression: &PointExpression) -> BigInt {
         PointExpression::Input => BigInt::from_i128(1),
         PointExpression::Identity => BigInt::from_i128(0),
         PointExpression::Negate(point) => point_coefficient(point).neg(),
-        PointExpression::Double(point) =>
-        {
-            point_coefficient(point).mul(&BigInt::from_i128(2))
-        },
+        PointExpression::Double(point) => point_coefficient(point).mul(&BigInt::from_i128(2)),
         PointExpression::ScalarMultiply { scalar, point } =>
         {
             point_coefficient(point).mul(&BigInt::from_i128(i128::from(*scalar)))
         },
-        PointExpression::Add(left, right) =>
-        {
-            point_coefficient(left).add(&point_coefficient(right))
-        },
+        PointExpression::Add(left, right) => point_coefficient(left).add(&point_coefficient(right)),
     }
 }
 
@@ -197,17 +191,10 @@ mod tests {
         let (plan, corpora) = corpora();
         let input = PointExpression::Input;
         let relation = Relation::PointEqual(
-            PointExpression::Add(
-                Box::new(input.clone()),
-                Box::new(PointExpression::Identity),
-            ),
+            PointExpression::Add(Box::new(input.clone()), Box::new(PointExpression::Identity)),
             input,
         );
-        let candidate = evaluate_candidate(
-            relation,
-            &corpora,
-            plan.tuple_budget_per_candidate(),
-        );
+        let candidate = evaluate_candidate(relation, &corpora, plan.tuple_budget_per_candidate());
         assert!(matches!(
             attempt_justification(&candidate),
             Justification::Proved(ProofCertificate::GroupModuleIdentity { .. })
@@ -224,8 +211,8 @@ mod tests {
 
     #[test]
     fn local_scope_type_remains_required() {
-        let case = LocalResearchCase::new(1, CorpusKind::IndependentHoldout, 1, 1)
-            .expect("local case");
+        let case =
+            LocalResearchCase::new(1, CorpusKind::IndependentHoldout, 1, 1).expect("local case");
         let manifest = ExperimentManifest::new(case);
         assert_eq!(manifest.research_case(), case);
     }

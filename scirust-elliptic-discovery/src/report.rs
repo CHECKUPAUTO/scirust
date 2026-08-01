@@ -45,8 +45,11 @@ impl ExperimentReport {
     pub fn canonical_bytes(&self) -> Vec<u8> {
         let mut output = String::new();
         writeln!(output, "{{").expect("writing to String cannot fail");
-        writeln!(output, "  \"schema\": \"scirust-elliptic-discovery-report-v1\",")
-            .expect("writing to String cannot fail");
+        writeln!(
+            output,
+            "  \"schema\": \"scirust-elliptic-discovery-report-v1\","
+        )
+        .expect("writing to String cannot fail");
         writeln!(
             output,
             "  \"manifest_sha256\": \"{}\",",
@@ -86,8 +89,7 @@ impl ExperimentReport {
                 };
                 writeln!(output, "  \"counterexample\": {{")
                     .expect("writing to String cannot fail");
-                writeln!(output, "    \"prime\": {prime},")
-                    .expect("writing to String cannot fail");
+                writeln!(output, "    \"prime\": {prime},").expect("writing to String cannot fail");
                 writeln!(output, "    \"a\": {a},").expect("writing to String cannot fail");
                 writeln!(output, "    \"b\": {b},").expect("writing to String cannot fail");
                 writeln!(
@@ -96,8 +98,7 @@ impl ExperimentReport {
                     counterexample.point_index()
                 )
                 .expect("writing to String cannot fail");
-                writeln!(output, "    \"point\": {point}")
-                    .expect("writing to String cannot fail");
+                writeln!(output, "    \"point\": {point}").expect("writing to String cannot fail");
                 writeln!(output, "  }}").expect("writing to String cannot fail");
             },
             None =>
@@ -153,9 +154,8 @@ mod tests {
     #[test]
     fn repeated_reports_are_byte_identical() {
         let corpus = corpus();
-        let counterexample = first_point_counterexample(&corpus, "not-infinity", |_, point| {
-            point.is_infinity()
-        });
+        let counterexample =
+            first_point_counterexample(&corpus, "not-infinity", |_, point| point.is_infinity());
         let left = ExperimentReport::new(&corpus, "not-infinity", 2, counterexample.clone());
         let right = ExperimentReport::new(&corpus, "not-infinity", 2, counterexample);
         assert_eq!(left.canonical_bytes(), right.canonical_bytes());

@@ -73,11 +73,8 @@ impl Relation {
             },
             Self::IsInfinity(point) => Ok(point.evaluate(curve, input)?.is_infinity()),
             Self::CurveAEquals(value) => Ok(curve.a() == value % curve.prime().value()),
-            Self::CurveJEquals(value) =>
-            {
-                Ok(crate::CurveInvariants::compute(curve).j_invariant()
-                    == value % curve.prime().value())
-            },
+            Self::CurveJEquals(value) => Ok(crate::CurveInvariants::compute(curve).j_invariant()
+                == value % curve.prime().value()),
         }
     }
 
@@ -127,7 +124,7 @@ fn is_additive_inverse(left: &PointExpression, right: &PointExpression) -> bool 
 fn is_scalar_composition(left: &PointExpression, right: &PointExpression) -> bool {
     let PointExpression::ScalarMultiply {
         scalar: outer,
-        point: inner_point,
+        point: outer_point,
     } = left
     else
     {
@@ -135,15 +132,15 @@ fn is_scalar_composition(left: &PointExpression, right: &PointExpression) -> boo
     };
     let PointExpression::ScalarMultiply {
         scalar: inner,
-        point: right_point,
-    } = point.as_ref()
+        point: inner_point,
+    } = outer_point.as_ref()
     else
     {
         return false;
     };
     let PointExpression::ScalarMultiply {
         scalar: product,
-        point,
+        point: right_point,
     } = right
     else
     {
@@ -151,7 +148,7 @@ fn is_scalar_composition(left: &PointExpression, right: &PointExpression) -> boo
     };
     matches!(inner_point.as_ref(), PointExpression::Input)
         && matches!(right_point.as_ref(), PointExpression::Input)
-        && outer.checked_mul(*inner) == Some(*product)
+        && outer.checked_mul(inner) == Some(product)
 }
 
 /// Generates a deterministic prefix of the finite relation grammar.
@@ -224,9 +221,7 @@ mod tests {
     fn known_syntax_is_recognized_before_candidate_classification() {
         let input = PointExpression::Input;
         let relation = Relation::PointEqual(
-            PointExpression::Negate(Box::new(PointExpression::Negate(Box::new(
-                input.clone(),
-            )))),
+            PointExpression::Negate(Box::new(PointExpression::Negate(Box::new(input.clone())))),
             input,
         );
         assert_eq!(relation.signature(), RelationSignature::NegationInvolution);
