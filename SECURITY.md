@@ -79,7 +79,8 @@ d'issue publique pour une faille exploitable. Accusé de réception sous
 - Les workflows GitHub utilisent des actions tierces. Le pinning se fait par
   tag de version (`@v2`, `@nightly`) ; pour durcir la chaîne d'approvisionnement,
   pinner ces actions par **SHA de commit** est recommandé
-  (cf. audit `AUDIT_COMPLET.md`, finding S4).
+  (cf. audit [`docs/audits/AUDIT_COMPLET.md`](docs/audits/AUDIT_COMPLET.md),
+  finding S4).
 - Aucun workflow n'utilise `pull_request_target` (le pattern d'élévation
   de privilèges dangereux). Le workflow `release.yml` restreint
   `permissions: contents: write` au seul besoin de créer la release.

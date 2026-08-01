@@ -18,7 +18,7 @@ completing the symmetry between the two modalities.
 - **`snr_at_range(rcs, range)`** — the delivered single-pulse SNR.
 - **`max_range(rcs, snr_min)`** — inverting the radar equation,
   `R_max = [P_t·G²·λ²·σ / ((4π)³·N·L·SNR_min)]^{1/4}`, where `snr_min` is the
-  required SNR from [`swerling`](../scirust-signal/src/radar/swerling.rs).
+  required SNR from [`swerling`](../../../scirust-signal/src/radar/swerling.rs).
 
 ## The oracles
 
