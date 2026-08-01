@@ -3128,6 +3128,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-elliptic-discovery"
+version = "0.1.0"
+dependencies = [
+ "scirust-modalg",
+]
+
+[[package]]
 name = "scirust-electrotech"
 version = "0.1.0"
 dependencies = [
