@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use clap::Parser;
 use scirust_sciagent::bpe::BpeTokenizer;
+use scirust_sciagent::corpus_paths;
 use scirust_sciagent::train::dataset::{
     content_hash, matches_extension, parse_extensions, skip_source_dir, source_quality,
 };
@@ -25,8 +26,10 @@ struct Args {
     #[arg(short, long)]
     tokenizer: String,
 
-    #[arg(short, long, default_value = "./data/shards")]
-    output: PathBuf,
+    /// External directory for generated shards. Defaults to the platform data
+    /// directory; paths inside the SciRust checkout are rejected.
+    #[arg(short, long, value_name = "DIR")]
+    output: Option<PathBuf>,
 
     /// Comma-separated source extensions to ingest (e.g. `rs,md,toml,py`).
     #[arg(long, default_value = "rs")]
@@ -135,7 +138,11 @@ impl ShardWriter {
 
 fn main() {
     let args = Args::parse();
-    fs::create_dir_all(&args.output).expect("Cannot create output dir");
+    let output = corpus_paths::resolve_external_shards_dir(args.output).unwrap_or_else(|error| {
+        eprintln!("Cannot use shard output directory: {error}");
+        std::process::exit(2);
+    });
+    fs::create_dir_all(&output).expect("Cannot create output dir");
 
     let tok = BpeTokenizer::load_json(&args.tokenizer).expect("Failed to load tokenizer");
     eprintln!("Tokenizer loaded: vocab_size={}", tok.vocab_size());
@@ -157,7 +164,7 @@ fn main() {
     );
 
     eprintln!("Packing into shards of {} tokens...", args.tokens_per_shard);
-    let mut writer = ShardWriter::new(args.output.clone(), args.tokens_per_shard);
+    let mut writer = ShardWriter::new(output.clone(), args.tokens_per_shard);
     let mut stats = CollectStats::default();
     for path in &args.input
     {
@@ -181,10 +188,7 @@ fn main() {
         stats.kept, stats.skipped, stats.reasons
     );
     eprintln!("Total tokens: {}", writer.total_tokens);
-    eprintln!(
-        "Done: {} shards written to {:?}",
-        writer.shard_idx, args.output
-    );
+    eprintln!("Done: {} shards written to {:?}", writer.shard_idx, output);
 }
 
 /// Tokenize one file into `tokens`, applying the quality filter and updating stats.

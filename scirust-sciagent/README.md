@@ -27,12 +27,18 @@ Deterministic small language model for Rust code generation, trained from scratc
 
 ### Data Pipeline
 
-1. **Download crates**: `fetch-crates --count 1000 --output data/`
-2. **Fetch HF datasets**: The Stack v2 Rust subset (9 parquet, 2.75GB)
-3. **Train tokenizer**: `train-tokenizer --input corpus.txt --vocab-size 8192`
-4. **Tokenize and shard**: `collect-data --input dir/ --tokenizer bpe.json --output shards/`
-5. **Train**: `sciagent-train --model small --data-dir shards/ --total-steps 2000`
-6. **Evaluate**: `sciagent-eval --checkpoint ckpt/final --data-dir heldout-shards/`
+Generated corpora and packed shards never belong in the source checkout. The
+collector defaults to an external platform data directory and refuses an
+in-repository `--output`; see
+[`docs/SCIAGENT_CORPUS_STORAGE.md`](../docs/SCIAGENT_CORPUS_STORAGE.md).
+
+1. **Locate storage**: `cargo run -p scirust-sciagent --bin sciagent-corpus -- location`
+2. **Download crates**: `cargo run -p scirust-sciagent --features fetch --bin fetch-crates -- --count 1000`
+3. **Fetch HF datasets**: The Stack v2 Rust subset (9 parquet, 2.75GB)
+4. **Train tokenizer**: `train-tokenizer --input corpus.txt --vocab-size 8192`
+5. **Tokenize and shard**: `collect-data --input <external-corpus-dir> --tokenizer bpe.json`
+6. **Train**: `sciagent-train --model small --data-dir <external-shards-dir> --total-steps 2000`
+7. **Evaluate**: `sciagent-eval --checkpoint ckpt/final --data-dir <external-heldout-shards-dir>`
 
 ### Reference run (small model)
 

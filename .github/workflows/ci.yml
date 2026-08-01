@@ -36,6 +36,14 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
+  corpus-location:
+    name: SCIAGENT Corpus Location
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Reject generated corpora in the source checkout
+        run: ./scripts/check-sciagent-corpus-location.sh
+
   fmt:
     name: Format Check
     runs-on: ubuntu-latest
