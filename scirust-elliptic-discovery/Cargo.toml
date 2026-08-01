@@ -1,0 +1,12 @@
+[package]
+name = "scirust-elliptic-discovery"
+version = "0.1.0"
+edition = "2021"
+publish = false
+rust-version = "1.89"
+description = "Exact, deterministic discovery experiments on locally generated toy elliptic curves"
+license-file = "../LICENSE.md"
+repository = "https://github.com/Memorithm/scirust"
+
+[dependencies]
+scirust-modalg = { path = "../scirust-modalg" }
