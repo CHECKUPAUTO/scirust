@@ -144,8 +144,9 @@ mod tests {
     #[test]
     fn repeated_reports_are_byte_identical() {
         let corpus = corpus();
-        let counterexample =
-            first_point_counterexample(&corpus, "not-infinity", |_, point| point.is_infinity());
+        let counterexample = first_point_counterexample(&corpus, "not-infinity", |_, point| {
+            point.is_infinity()
+        });
         let left = ExperimentReport::new(&corpus, "not-infinity", 2, counterexample.clone());
         let right = ExperimentReport::new(&corpus, "not-infinity", 2, counterexample);
         assert_eq!(left.canonical_bytes(), right.canonical_bytes());
