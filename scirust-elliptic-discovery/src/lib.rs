@@ -12,27 +12,37 @@ pub mod controls;
 pub mod curve;
 pub mod enumerate;
 pub mod experiment;
-pub mod field;
 pub mod falsify;
+pub mod field;
 pub mod grammar;
 pub mod invariant;
 pub mod orders;
+pub mod proof;
 pub mod report;
-pub mod search;
+pub mod review;
 pub mod scope;
+pub mod search;
 
+pub use catalog::{CatalogEntry, CatalogFamily, RelationSignature, catalog_entry};
+pub use classify::{Classification, ClassificationStatus, classify};
+pub use controls::{ControlId, ControlResult, run_control};
 pub use curve::{CurveError, ToyCurve, ToyPoint};
 pub use experiment::{Corpus, CorpusCurve, ExperimentManifest};
-pub use field::{FieldError, Fp, PrimeError, ToyPrime};
 pub use falsify::{Counterexample, first_point_counterexample};
+pub use field::{FieldError, Fp, PrimeError, ToyPrime};
 pub use grammar::{PointExpression, Relation, generate_relations};
 pub use invariant::CurveInvariants;
+pub use proof::{
+    Justification, PolynomialIdentityCertificate, ProofCertificate, attempt_justification,
+    prove_j_zero_identity,
+};
+pub use report::ExperimentReport;
+pub use review::{
+    LiteratureDecision, LiteratureReview, ReviewError, ReviewReport, ReviewedCandidate,
+    review_candidate,
+};
+pub use scope::{CorpusKind, LocalResearchCase, ScopeError};
 pub use search::{
     CandidateEvaluation, GateReport, GateState, ResearchCorpora, SearchError, SearchPlan,
     evaluate_candidate, run_search,
 };
-pub use report::ExperimentReport;
-pub use scope::{CorpusKind, LocalResearchCase, ScopeError};
-pub use catalog::{CatalogEntry, CatalogFamily, RelationSignature, catalog_entry};
-pub use classify::{Classification, ClassificationStatus, classify};
-pub use controls::{ControlId, ControlResult, run_control};

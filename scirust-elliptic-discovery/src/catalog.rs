@@ -2,8 +2,7 @@
 
 /// Families which must never be presented as new discoveries.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub enum CatalogFamily
-{
+pub enum CatalogFamily {
     NegationAndIdentity,
     GroupLinearity,
     JZeroAutomorphism,
@@ -17,8 +16,7 @@ pub enum CatalogFamily
 
 /// Typed structural signature produced before classification.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub enum RelationSignature
-{
+pub enum RelationSignature {
     NegationInvolution,
     AdditiveInverse,
     ScalarComposition,
@@ -34,8 +32,7 @@ pub enum RelationSignature
 
 /// Immutable catalog metadata.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct CatalogEntry
-{
+pub struct CatalogEntry {
     pub id: &'static str,
     pub family: CatalogFamily,
     pub conditional: bool,
@@ -48,16 +45,18 @@ const GLV: &str = "Gallant-Lambert-Vanstone, CRYPTO 2001";
 const SEC1: &str = "SEC 1 v2, point representation";
 
 /// Looks up an exact structural signature in the built-in known-property catalog.
-pub const fn catalog_entry(signature: RelationSignature) -> Option<CatalogEntry>
-{
+pub const fn catalog_entry(signature: RelationSignature) -> Option<CatalogEntry> {
     let entry = match signature
     {
-        RelationSignature::NegationInvolution | RelationSignature::AdditiveInverse => CatalogEntry {
-            id: "group.negation",
-            family: CatalogFamily::NegationAndIdentity,
-            conditional: false,
-            representation_artifact: false,
-            reference: SILVERMAN,
+        RelationSignature::NegationInvolution | RelationSignature::AdditiveInverse =>
+        {
+            CatalogEntry {
+                id: "group.negation",
+                family: CatalogFamily::NegationAndIdentity,
+                conditional: false,
+                representation_artifact: false,
+                reference: SILVERMAN,
+            }
         },
         RelationSignature::ScalarComposition => CatalogEntry {
             id: "group.scalar-composition",
@@ -121,14 +120,12 @@ pub const fn catalog_entry(signature: RelationSignature) -> Option<CatalogEntry>
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::*;
     use crate::{ClassificationStatus, classify};
 
     #[test]
-    fn every_required_known_family_has_an_executable_entry()
-    {
+    fn every_required_known_family_has_an_executable_entry() {
         let signatures = [
             RelationSignature::NegationInvolution,
             RelationSignature::AdditiveInverse,
@@ -148,8 +145,7 @@ mod tests
     }
 
     #[test]
-    fn representation_rules_cannot_be_classified_as_candidates()
-    {
+    fn representation_rules_cannot_be_classified_as_candidates() {
         for signature in [
             RelationSignature::CoordinateScale { factor: 2 },
             RelationSignature::EncodingYSign,
@@ -163,8 +159,7 @@ mod tests
     }
 
     #[test]
-    fn unknown_signature_requires_literature_review()
-    {
+    fn unknown_signature_requires_literature_review() {
         assert_eq!(
             classify(RelationSignature::Unrecognized, false).status(),
             ClassificationStatus::NeedsLiteratureReview

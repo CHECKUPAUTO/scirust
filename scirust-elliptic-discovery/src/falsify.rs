@@ -4,8 +4,7 @@ use crate::{Corpus, ToyPoint};
 
 /// First point which refutes a named relation.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Counterexample
-{
+pub struct Counterexample {
     relation_id: String,
     prime: u64,
     a: u64,
@@ -14,25 +13,20 @@ pub struct Counterexample
     point: ToyPoint,
 }
 
-impl Counterexample
-{
-    pub fn relation_id(&self) -> &str
-    {
+impl Counterexample {
+    pub fn relation_id(&self) -> &str {
         &self.relation_id
     }
 
-    pub const fn curve_key(&self) -> (u64, u64, u64)
-    {
+    pub const fn curve_key(&self) -> (u64, u64, u64) {
         (self.prime, self.a, self.b)
     }
 
-    pub const fn point_index(&self) -> u64
-    {
+    pub const fn point_index(&self) -> u64 {
         self.point_index
     }
 
-    pub const fn point(&self) -> ToyPoint
-    {
+    pub const fn point(&self) -> ToyPoint {
         self.point
     }
 }
