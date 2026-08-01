@@ -7,8 +7,7 @@ use crate::{
 
 /// Built-in controls required by the research contract.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub enum ControlId
-{
+pub enum ControlId {
     TrueNegation,
     FalseNegationKeepsY,
     FalseDoublingSign,
@@ -19,39 +18,32 @@ pub enum ControlId
 
 /// Exact result of one mandatory control.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ControlResult
-{
+pub struct ControlResult {
     id: ControlId,
     classification: Classification,
     counterexample: Option<Counterexample>,
 }
 
-impl ControlResult
-{
-    pub const fn id(&self) -> ControlId
-    {
+impl ControlResult {
+    pub const fn id(&self) -> ControlId {
         self.id
     }
 
-    pub const fn status(&self) -> ClassificationStatus
-    {
+    pub const fn status(&self) -> ClassificationStatus {
         self.classification.status()
     }
 
-    pub const fn classification(&self) -> Classification
-    {
+    pub const fn classification(&self) -> Classification {
         self.classification
     }
 
-    pub const fn counterexample(&self) -> Option<&Counterexample>
-    {
+    pub const fn counterexample(&self) -> Option<&Counterexample> {
         self.counterexample.as_ref()
     }
 }
 
 /// Executes one control in canonical corpus order.
-pub fn run_control(corpus: &Corpus, id: ControlId) -> ControlResult
-{
+pub fn run_control(corpus: &Corpus, id: ControlId) -> ControlResult {
     let (signature, counterexample) = match id
     {
         ControlId::TrueNegation =>
@@ -168,13 +160,11 @@ pub fn run_control(corpus: &Corpus, id: ControlId) -> ControlResult
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::*;
     use crate::{CorpusKind, ExperimentManifest, LocalResearchCase};
 
-    fn exhaustive() -> Corpus
-    {
+    fn exhaustive() -> Corpus {
         Corpus::generate(ExperimentManifest::new(
             LocalResearchCase::new(0, CorpusKind::ExhaustiveSmall, 1, u64::MAX)
                 .expect("valid exhaustive case"),
@@ -182,8 +172,7 @@ mod tests
     }
 
     #[test]
-    fn all_mandatory_controls_are_classified_conservatively()
-    {
+    fn all_mandatory_controls_are_classified_conservatively() {
         let corpus = exhaustive();
         assert_eq!(
             run_control(&corpus, ControlId::TrueNegation).status(),

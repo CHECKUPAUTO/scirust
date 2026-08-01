@@ -9,22 +9,19 @@ use crate::{
 
 /// Exact certificate for one polynomial identity over a toy prime field.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PolynomialIdentityCertificate
-{
+pub struct PolynomialIdentityCertificate {
     prime: ToyPrime,
     left_coefficients: Vec<u64>,
     right_coefficients: Vec<u64>,
 }
 
-impl PolynomialIdentityCertificate
-{
+impl PolynomialIdentityCertificate {
     /// Creates a certificate only if the normalized polynomial difference is zero.
     pub fn new(
         prime: ToyPrime,
         left_coefficients: Vec<u64>,
         right_coefficients: Vec<u64>,
-    ) -> Option<Self>
-    {
+    ) -> Option<Self> {
         let certificate = Self {
             prime,
             left_coefficients,
@@ -34,34 +31,29 @@ impl PolynomialIdentityCertificate
     }
 
     /// Replays the exact identity with the existing polynomial abstraction.
-    pub fn verify(&self) -> bool
-    {
+    pub fn verify(&self) -> bool {
         let modulus = self.prime.value();
         let left = Poly::from_coeffs(modulus, &self.left_coefficients);
         let right = Poly::from_coeffs(modulus, &self.right_coefficients);
         left.sub(&right).is_zero()
     }
 
-    pub const fn prime(&self) -> ToyPrime
-    {
+    pub const fn prime(&self) -> ToyPrime {
         self.prime
     }
 
-    pub fn left_coefficients(&self) -> &[u64]
-    {
+    pub fn left_coefficients(&self) -> &[u64] {
         &self.left_coefficients
     }
 
-    pub fn right_coefficients(&self) -> &[u64]
-    {
+    pub fn right_coefficients(&self) -> &[u64] {
         &self.right_coefficients
     }
 }
 
 /// Exact evidence which can be replayed independently.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ProofCertificate
-{
+pub enum ProofCertificate {
     /// Both point expressions normalize to the same integer multiple of the input.
     GroupModuleIdentity { coefficient: String },
     /// The expression always normalizes to the group identity.
@@ -72,8 +64,7 @@ pub enum ProofCertificate
 
 /// Outcome of an exact proof attempt.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Justification
-{
+pub enum Justification {
     Catalog(CatalogEntry),
     Proved(ProofCertificate),
     NoCertificate { reason: &'static str },
@@ -81,8 +72,7 @@ pub enum Justification
 }
 
 /// Attempts a proof only after falsification and coverage gates have passed.
-pub fn attempt_justification(candidate: &CandidateEvaluation) -> Justification
-{
+pub fn attempt_justification(candidate: &CandidateEvaluation) -> Justification {
     if candidate.counterexample().is_some()
     {
         return Justification::NotEligible {
@@ -152,8 +142,7 @@ pub fn attempt_justification(candidate: &CandidateEvaluation) -> Justification
     }
 }
 
-fn point_coefficient(expression: &PointExpression) -> BigInt
-{
+fn point_coefficient(expression: &PointExpression) -> BigInt {
     match expression
     {
         PointExpression::Input => BigInt::from_i128(1),
@@ -179,8 +168,7 @@ pub fn prove_j_zero_identity(
     prime: ToyPrime,
     zeta: u64,
     b: u64,
-) -> Option<PolynomialIdentityCertificate>
-{
+) -> Option<PolynomialIdentityCertificate> {
     let modulus = prime.value();
     let zeta_cubed = crate::Fp::new(prime, zeta).pow(3).value();
     PolynomialIdentityCertificate::new(
@@ -191,24 +179,21 @@ pub fn prove_j_zero_identity(
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::*;
     use crate::{
         CorpusKind, ExperimentManifest, LocalResearchCase, ResearchCorpora, SearchPlan,
         evaluate_candidate,
     };
 
-    fn corpora() -> (SearchPlan, ResearchCorpora)
-    {
+    fn corpora() -> (SearchPlan, ResearchCorpora) {
         let plan = SearchPlan::new(9, 2, 3, 1, 1_000_000, 1).expect("bounded plan");
         let corpora = ResearchCorpora::generate(plan);
         (plan, corpora)
     }
 
     #[test]
-    fn syntactic_group_identity_receives_exact_certificate()
-    {
+    fn syntactic_group_identity_receives_exact_certificate() {
         let (plan, corpora) = corpora();
         let input = PointExpression::Input;
         let relation = Relation::PointEqual(
@@ -230,8 +215,7 @@ mod tests
     }
 
     #[test]
-    fn j_zero_polynomial_certificate_replays()
-    {
+    fn j_zero_polynomial_certificate_replays() {
         let prime = ToyPrime::new(13).expect("prime");
         let certificate = prove_j_zero_identity(prime, 3, 2).expect("3 cubed is one modulo 13");
         assert!(certificate.verify());
@@ -239,8 +223,7 @@ mod tests
     }
 
     #[test]
-    fn local_scope_type_remains_required()
-    {
+    fn local_scope_type_remains_required() {
         let case = LocalResearchCase::new(1, CorpusKind::IndependentHoldout, 1, 1)
             .expect("local case");
         let manifest = ExperimentManifest::new(case);
