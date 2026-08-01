@@ -11,6 +11,7 @@ pub mod classify;
 pub mod controls;
 pub mod curve;
 pub mod enumerate;
+pub mod execution;
 pub mod experiment;
 pub mod falsify;
 pub mod field;
@@ -27,6 +28,9 @@ pub use catalog::{CatalogEntry, CatalogFamily, RelationSignature, catalog_entry}
 pub use classify::{Classification, ClassificationStatus, classify};
 pub use controls::{ControlId, ControlResult, run_control};
 pub use curve::{CurveError, ToyCurve, ToyPoint};
+pub use execution::{
+    ExecutionReceipt, ExecutionSummary, ReplayReport, execute_local, replay_local,
+};
 pub use experiment::{Corpus, CorpusCurve, ExperimentManifest};
 pub use falsify::{Counterexample, first_point_counterexample};
 pub use field::{FieldError, Fp, PrimeError, ToyPrime};
