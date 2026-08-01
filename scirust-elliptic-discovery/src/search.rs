@@ -356,12 +356,10 @@ fn evaluate_gate(
     relation_id: &str,
 ) -> (GateReport, Option<Counterexample>) {
     let required_tuples = corpus.total_points();
-    let falsification = first_point_counterexample_bounded(
-        corpus,
-        relation_id,
-        tuple_budget,
-        |curve, point| relation.evaluate(curve, point).unwrap_or(false),
-    );
+    let falsification =
+        first_point_counterexample_bounded(corpus, relation_id, tuple_budget, |curve, point| {
+            relation.evaluate(curve, point).unwrap_or(false)
+        });
     let evaluated_tuples = falsification.evaluated_tuples();
     let counterexample = falsification.into_counterexample();
     let state = if counterexample.is_some()

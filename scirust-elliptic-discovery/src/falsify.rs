@@ -153,9 +153,8 @@ mod tests {
     #[test]
     fn exhaustive_wrapper_retains_complete_search_semantics() {
         let corpus = corpus();
-        let result = first_point_counterexample_bounded(&corpus, "always-true", u64::MAX, |_, _| {
-            true
-        });
+        let result =
+            first_point_counterexample_bounded(&corpus, "always-true", u64::MAX, |_, _| true);
         assert_eq!(result.evaluated_tuples(), corpus.total_points());
         assert!(result.counterexample().is_none());
     }
