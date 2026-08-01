@@ -10,8 +10,7 @@ use crate::{
 
 /// Human decision recorded after an independent literature search.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LiteratureDecision
-{
+pub enum LiteratureDecision {
     Pending,
     Known,
     NoConflictFound,
@@ -19,18 +18,15 @@ pub enum LiteratureDecision
 
 /// Auditable literature-review record.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LiteratureReview
-{
+pub struct LiteratureReview {
     decision: LiteratureDecision,
     reviewer: String,
     sources: BTreeSet<String>,
 }
 
-impl LiteratureReview
-{
+impl LiteratureReview {
     /// Creates an explicitly pending review.
-    pub fn pending() -> Self
-    {
+    pub fn pending() -> Self {
         Self {
             decision: LiteratureDecision::Pending,
             reviewer: String::new(),
@@ -43,8 +39,7 @@ impl LiteratureReview
         decision: LiteratureDecision,
         reviewer: impl Into<String>,
         sources: impl IntoIterator<Item = String>,
-    ) -> Result<Self, ReviewError>
-    {
+    ) -> Result<Self, ReviewError> {
         if decision == LiteratureDecision::Pending
         {
             return Err(ReviewError::PendingCannotBeCompleted);
@@ -72,17 +67,14 @@ impl LiteratureReview
 
 /// Invalid human-review record.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ReviewError
-{
+pub enum ReviewError {
     PendingCannotBeCompleted,
     MissingReviewer,
     MissingSources,
 }
 
-impl fmt::Display for ReviewError
-{
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result
-    {
+impl fmt::Display for ReviewError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self
         {
             Self::PendingCannotBeCompleted =>
@@ -99,33 +91,27 @@ impl std::error::Error for ReviewError {}
 
 /// Final conservative record. CandidateUnclassified is still not a discovery claim.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ReviewedCandidate
-{
+pub struct ReviewedCandidate {
     candidate: CandidateEvaluation,
     justification: Justification,
     literature_review: LiteratureReview,
     final_status: ClassificationStatus,
 }
 
-impl ReviewedCandidate
-{
-    pub const fn candidate(&self) -> &CandidateEvaluation
-    {
+impl ReviewedCandidate {
+    pub const fn candidate(&self) -> &CandidateEvaluation {
         &self.candidate
     }
 
-    pub const fn justification(&self) -> &Justification
-    {
+    pub const fn justification(&self) -> &Justification {
         &self.justification
     }
 
-    pub const fn literature_review(&self) -> &LiteratureReview
-    {
+    pub const fn literature_review(&self) -> &LiteratureReview {
         &self.literature_review
     }
 
-    pub const fn final_status(&self) -> ClassificationStatus
-    {
+    pub const fn final_status(&self) -> ClassificationStatus {
         self.final_status
     }
 }
@@ -135,8 +121,7 @@ pub fn review_candidate(
     candidate: CandidateEvaluation,
     justification: Justification,
     literature_review: LiteratureReview,
-) -> ReviewedCandidate
-{
+) -> ReviewedCandidate {
     let automated = candidate.classification().status();
     let final_status = match automated
     {
@@ -172,8 +157,7 @@ pub fn review_candidate(
     }
 }
 
-fn proof_was_attempted(justification: &Justification) -> bool
-{
+fn proof_was_attempted(justification: &Justification) -> bool {
     matches!(
         justification,
         Justification::Catalog(_)
@@ -183,21 +167,17 @@ fn proof_was_attempted(justification: &Justification) -> bool
 }
 
 /// Stable readable report separating evidence categories.
-pub struct ReviewReport<'a>
-{
+pub struct ReviewReport<'a> {
     reviewed: &'a ReviewedCandidate,
 }
 
-impl<'a> ReviewReport<'a>
-{
-    pub const fn new(reviewed: &'a ReviewedCandidate) -> Self
-    {
+impl<'a> ReviewReport<'a> {
+    pub const fn new(reviewed: &'a ReviewedCandidate) -> Self {
         Self { reviewed }
     }
 
     /// Deterministic Markdown report.
-    pub fn canonical_bytes(&self) -> Vec<u8>
-    {
+    pub fn canonical_bytes(&self) -> Vec<u8> {
         let mut output = String::new();
         writeln!(output, "# Elliptic discovery candidate review").expect("String write");
         writeln!(output).expect("String write");
@@ -295,14 +275,12 @@ impl<'a> ReviewReport<'a>
     }
 
     /// Integrity fingerprint for the readable report.
-    pub fn fingerprint_hex(&self) -> String
-    {
+    pub fn fingerprint_hex(&self) -> String {
         hex(&sha256(&self.canonical_bytes()))
     }
 }
 
-fn write_justification(output: &mut String, justification: &Justification)
-{
+fn write_justification(output: &mut String, justification: &Justification) {
     match justification
     {
         Justification::Catalog(entry) =>
@@ -347,8 +325,7 @@ fn write_justification(output: &mut String, justification: &Justification)
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::*;
     use crate::{
         PointExpression, Relation, ResearchCorpora, SearchPlan, attempt_justification,
@@ -356,8 +333,7 @@ mod tests
     };
 
     #[test]
-    fn candidate_status_requires_completed_review_and_proof_attempt()
-    {
+    fn candidate_status_requires_completed_review_and_proof_attempt() {
         let plan = SearchPlan::new(11, 1, 2, 1, 1_000_000, 1).expect("bounded plan");
         let corpora = ResearchCorpora::generate(plan);
         let candidate = evaluate_candidate(

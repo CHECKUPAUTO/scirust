@@ -7,8 +7,7 @@ use crate::{Corpus, Counterexample};
 
 /// Deterministic report containing coverage and an optional first counterexample.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ExperimentReport
-{
+pub struct ExperimentReport {
     manifest_fingerprint: [u8; 32],
     corpus_fingerprint: [u8; 32],
     corpus_name: &'static str,
@@ -20,16 +19,14 @@ pub struct ExperimentReport
     counterexample: Option<Counterexample>,
 }
 
-impl ExperimentReport
-{
+impl ExperimentReport {
     /// Captures an immutable result from a local corpus run.
     pub fn new(
         corpus: &Corpus,
         relation_id: impl Into<String>,
         evaluated_tuples: u64,
         counterexample: Option<Counterexample>,
-    ) -> Self
-    {
+    ) -> Self {
         let research_case = corpus.manifest().research_case();
         Self {
             manifest_fingerprint: corpus.manifest().fingerprint(),
@@ -45,8 +42,7 @@ impl ExperimentReport
     }
 
     /// Stable UTF-8 JSON bytes with an explicit field order.
-    pub fn canonical_bytes(&self) -> Vec<u8>
-    {
+    pub fn canonical_bytes(&self) -> Vec<u8> {
         let mut output = String::new();
         writeln!(output, "{{").expect("writing to String cannot fail");
         writeln!(output, "  \"schema\": \"scirust-elliptic-discovery-report-v1\",")
@@ -115,14 +111,12 @@ impl ExperimentReport
     }
 
     /// SHA-256 integrity fingerprint of the complete report bytes.
-    pub fn fingerprint(&self) -> [u8; 32]
-    {
+    pub fn fingerprint(&self) -> [u8; 32] {
         sha256(&self.canonical_bytes())
     }
 }
 
-fn escape_json(input: &str) -> String
-{
+fn escape_json(input: &str) -> String {
     let mut output = String::new();
     for character in input.chars()
     {
@@ -145,13 +139,11 @@ fn escape_json(input: &str) -> String
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::*;
     use crate::{CorpusKind, ExperimentManifest, LocalResearchCase, first_point_counterexample};
 
-    fn corpus() -> Corpus
-    {
+    fn corpus() -> Corpus {
         Corpus::generate(ExperimentManifest::new(
             LocalResearchCase::new(17, CorpusKind::IndependentHoldout, 1, 100)
                 .expect("valid local case"),
@@ -159,8 +151,7 @@ mod tests
     }
 
     #[test]
-    fn repeated_reports_are_byte_identical()
-    {
+    fn repeated_reports_are_byte_identical() {
         let corpus = corpus();
         let counterexample = first_point_counterexample(&corpus, "not-infinity", |_, point| {
             point.is_infinity()
@@ -172,8 +163,7 @@ mod tests
     }
 
     #[test]
-    fn first_counterexample_is_stable()
-    {
+    fn first_counterexample_is_stable() {
         let corpus = corpus();
         let counterexample = first_point_counterexample(&corpus, "false", |_, _| false)
             .expect("false relation must be refuted");

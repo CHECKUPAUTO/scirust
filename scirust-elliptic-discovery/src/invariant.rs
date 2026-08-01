@@ -4,17 +4,14 @@ use crate::{Fp, ToyCurve};
 
 /// Exact short-Weierstrass invariants represented in the curve's prime field.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct CurveInvariants
-{
+pub struct CurveInvariants {
     discriminant: Fp,
     j_invariant: Fp,
 }
 
-impl CurveInvariants
-{
+impl CurveInvariants {
     /// Computes the discriminant and j-invariant without floating point.
-    pub fn compute(curve: ToyCurve) -> Self
-    {
+    pub fn compute(curve: ToyCurve) -> Self {
         let prime = curve.prime();
         let a = Fp::new(prime, curve.a());
         let b = Fp::new(prime, curve.b());
@@ -46,33 +43,28 @@ impl CurveInvariants
     }
 
     /// Canonical discriminant residue.
-    pub const fn discriminant(self) -> u64
-    {
+    pub const fn discriminant(self) -> u64 {
         self.discriminant.value()
     }
 
     /// Canonical j-invariant residue.
-    pub const fn j_invariant(self) -> u64
-    {
+    pub const fn j_invariant(self) -> u64 {
         self.j_invariant.value()
     }
 
     /// Whether this curve belongs to the exceptional j=0 family.
-    pub const fn is_j_zero(self) -> bool
-    {
+    pub const fn is_j_zero(self) -> bool {
         self.j_invariant.is_zero()
     }
 
     /// Whether this curve belongs to the exceptional j=1728 family.
-    pub fn is_j_1728(self) -> bool
-    {
+    pub fn is_j_1728(self) -> bool {
         self.j_invariant == Fp::new(self.j_invariant.prime(), 1728)
     }
 }
 
 /// Returns nontrivial cube roots of unity in canonical residue order.
-pub fn nontrivial_cube_roots(curve: ToyCurve) -> Vec<u64>
-{
+pub fn nontrivial_cube_roots(curve: ToyCurve) -> Vec<u64> {
     let prime = curve.prime();
     (2..prime.value())
         .filter(|&value| Fp::new(prime, value).pow(3).value() == 1)
@@ -80,14 +72,12 @@ pub fn nontrivial_cube_roots(curve: ToyCurve) -> Vec<u64>
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::*;
     use crate::ToyPrime;
 
     #[test]
-    fn exceptional_families_have_expected_j_invariant()
-    {
+    fn exceptional_families_have_expected_j_invariant() {
         let prime = ToyPrime::new(13).expect("13 is prime");
         let j_zero = ToyCurve::new(prime, 0, 2).expect("nonsingular");
         let j_1728 = ToyCurve::new(prime, 2, 0).expect("nonsingular");
@@ -96,8 +86,7 @@ mod tests
     }
 
     #[test]
-    fn cube_roots_are_exact_and_nontrivial()
-    {
+    fn cube_roots_are_exact_and_nontrivial() {
         let curve = ToyCurve::new(ToyPrime::new(13).expect("prime"), 0, 2)
             .expect("nonsingular");
         assert_eq!(nontrivial_cube_roots(curve), vec![3, 9]);

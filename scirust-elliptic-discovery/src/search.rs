@@ -12,8 +12,7 @@ const SCALE_SEED_DOMAIN: u64 = 0x5343_414c_4521_2121;
 
 /// Hard upper bounds keep the finite grammar and corpus work explicit.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct SearchPlan
-{
+pub struct SearchPlan {
     seed: u64,
     expression_depth: u8,
     max_scalar: u64,
@@ -22,8 +21,7 @@ pub struct SearchPlan
     sampled_curves_per_prime: u32,
 }
 
-impl SearchPlan
-{
+impl SearchPlan {
     pub const MAX_EXPRESSION_DEPTH: u8 = 4;
     pub const MAX_SCALAR: u64 = 32;
     pub const MAX_CANDIDATES: u32 = 10_000;
@@ -38,8 +36,7 @@ impl SearchPlan
         candidate_budget: u32,
         tuple_budget_per_candidate: u64,
         sampled_curves_per_prime: u32,
-    ) -> Result<Self, SearchError>
-    {
+    ) -> Result<Self, SearchError> {
         if expression_depth > Self::MAX_EXPRESSION_DEPTH
         {
             return Err(SearchError::ExpressionDepth);
@@ -73,16 +70,14 @@ impl SearchPlan
     }
 
     /// Per-candidate tuple limit shared by all dataset gates.
-    pub const fn tuple_budget_per_candidate(self) -> u64
-    {
+    pub const fn tuple_budget_per_candidate(self) -> u64 {
         self.tuple_budget_per_candidate
     }
 }
 
 /// Invalid or excessive search configuration.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SearchError
-{
+pub enum SearchError {
     ExpressionDepth,
     Scalar,
     CandidateBudget,
@@ -90,10 +85,8 @@ pub enum SearchError
     CurveBudget,
 }
 
-impl fmt::Display for SearchError
-{
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result
-    {
+impl fmt::Display for SearchError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self
         {
             Self::ExpressionDepth => write!(formatter, "expression depth exceeds the fixed bound"),
@@ -109,18 +102,15 @@ impl std::error::Error for SearchError {}
 
 /// Three disjoint deterministic datasets required by gates G2, G3 and G6.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ResearchCorpora
-{
+pub struct ResearchCorpora {
     exhaustive_small: Corpus,
     independent_holdout: Corpus,
     scale_ladder: Corpus,
 }
 
-impl ResearchCorpora
-{
+impl ResearchCorpora {
     /// Builds all partitions before candidate generation.
-    pub fn generate(plan: SearchPlan) -> Self
-    {
+    pub fn generate(plan: SearchPlan) -> Self {
         let exhaustive_small = corpus(
             plan.seed,
             CorpusKind::ExhaustiveSmall,
@@ -146,24 +136,20 @@ impl ResearchCorpora
         }
     }
 
-    pub const fn exhaustive_small(&self) -> &Corpus
-    {
+    pub const fn exhaustive_small(&self) -> &Corpus {
         &self.exhaustive_small
     }
 
-    pub const fn independent_holdout(&self) -> &Corpus
-    {
+    pub const fn independent_holdout(&self) -> &Corpus {
         &self.independent_holdout
     }
 
-    pub const fn scale_ladder(&self) -> &Corpus
-    {
+    pub const fn scale_ladder(&self) -> &Corpus {
         &self.scale_ladder
     }
 }
 
-fn corpus(seed: u64, kind: CorpusKind, curves: u32, tuples: u64) -> Corpus
-{
+fn corpus(seed: u64, kind: CorpusKind, curves: u32, tuples: u64) -> Corpus {
     let research_case = LocalResearchCase::new(seed, kind, curves, tuples)
         .expect("validated search plan creates a valid local case");
     Corpus::generate(ExperimentManifest::new(research_case))
@@ -171,8 +157,7 @@ fn corpus(seed: u64, kind: CorpusKind, curves: u32, tuples: u64) -> Corpus
 
 /// Outcome of one mandatory dataset gate.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum GateState
-{
+pub enum GateState {
     Passed,
     Refuted,
     InsufficientCoverage,
@@ -180,66 +165,54 @@ pub enum GateState
 
 /// Exact coverage record for one gate.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct GateReport
-{
+pub struct GateReport {
     corpus: CorpusKind,
     evaluated_tuples: u64,
     required_tuples: u64,
     state: GateState,
 }
 
-impl GateReport
-{
-    pub const fn corpus(self) -> CorpusKind
-    {
+impl GateReport {
+    pub const fn corpus(self) -> CorpusKind {
         self.corpus
     }
 
-    pub const fn evaluated_tuples(self) -> u64
-    {
+    pub const fn evaluated_tuples(self) -> u64 {
         self.evaluated_tuples
     }
 
-    pub const fn required_tuples(self) -> u64
-    {
+    pub const fn required_tuples(self) -> u64 {
         self.required_tuples
     }
 
-    pub const fn state(self) -> GateState
-    {
+    pub const fn state(self) -> GateState {
         self.state
     }
 }
 
 /// Complete automated evaluation of one candidate.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CandidateEvaluation
-{
+pub struct CandidateEvaluation {
     relation: Relation,
     classification: Classification,
     gates: Vec<GateReport>,
     counterexample: Option<Counterexample>,
 }
 
-impl CandidateEvaluation
-{
-    pub const fn relation(&self) -> &Relation
-    {
+impl CandidateEvaluation {
+    pub const fn relation(&self) -> &Relation {
         &self.relation
     }
 
-    pub const fn classification(&self) -> Classification
-    {
+    pub const fn classification(&self) -> Classification {
         self.classification
     }
 
-    pub fn gates(&self) -> &[GateReport]
-    {
+    pub fn gates(&self) -> &[GateReport] {
         &self.gates
     }
 
-    pub const fn counterexample(&self) -> Option<&Counterexample>
-    {
+    pub const fn counterexample(&self) -> Option<&Counterexample> {
         self.counterexample.as_ref()
     }
 }
@@ -249,8 +222,7 @@ pub fn evaluate_candidate(
     relation: Relation,
     corpora: &ResearchCorpora,
     tuple_budget: u64,
-) -> CandidateEvaluation
-{
+) -> CandidateEvaluation {
     let signature = relation.signature();
     let mut gates = Vec::new();
 
@@ -318,8 +290,7 @@ fn finish_early(
     gates: Vec<GateReport>,
     counterexample: Option<Counterexample>,
     state: GateState,
-) -> CandidateEvaluation
-{
+) -> CandidateEvaluation {
     let classification = match state
     {
         GateState::Refuted => classify(signature, true),
@@ -338,8 +309,7 @@ fn evaluate_gate(
     corpus: &Corpus,
     tuple_budget: u64,
     relation_id: &str,
-) -> (GateReport, Option<Counterexample>)
-{
+) -> (GateReport, Option<Counterexample>) {
     let required_tuples = corpus.total_points();
     let mut evaluated_tuples = 0u64;
     let counterexample = first_point_counterexample(corpus, relation_id, |curve, point| {
@@ -374,8 +344,7 @@ fn evaluate_gate(
 }
 
 /// Generates and evaluates the deterministic candidate prefix.
-pub fn run_search(plan: SearchPlan, corpora: &ResearchCorpora) -> Vec<CandidateEvaluation>
-{
+pub fn run_search(plan: SearchPlan, corpora: &ResearchCorpora) -> Vec<CandidateEvaluation> {
     generate_relations(
         plan.expression_depth,
         plan.max_scalar,
@@ -389,19 +358,16 @@ pub fn run_search(plan: SearchPlan, corpora: &ResearchCorpora) -> Vec<CandidateE
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::*;
     use crate::PointExpression;
 
-    fn plan() -> SearchPlan
-    {
+    fn plan() -> SearchPlan {
         SearchPlan::new(7, 2, 3, 10, 1_000_000, 1).expect("bounded plan")
     }
 
     #[test]
-    fn false_training_relation_is_refuted_at_g2()
-    {
+    fn false_training_relation_is_refuted_at_g2() {
         let corpora = ResearchCorpora::generate(plan());
         let result = evaluate_candidate(
             Relation::CurveAEquals(0),
@@ -414,8 +380,7 @@ mod tests
     }
 
     #[test]
-    fn known_relation_passes_independent_data_then_hits_catalog()
-    {
+    fn known_relation_passes_independent_data_then_hits_catalog() {
         let corpora = ResearchCorpora::generate(plan());
         let input = PointExpression::Input;
         let relation = Relation::PointEqual(
@@ -435,8 +400,7 @@ mod tests
     }
 
     #[test]
-    fn insufficient_budget_is_never_a_pass()
-    {
+    fn insufficient_budget_is_never_a_pass() {
         let corpora = ResearchCorpora::generate(plan());
         let relation = Relation::PointEqual(PointExpression::Input, PointExpression::Input);
         let result = evaluate_candidate(relation, &corpora, 1);
