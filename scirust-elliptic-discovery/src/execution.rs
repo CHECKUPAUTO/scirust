@@ -2,8 +2,8 @@
 
 use crate::canonical::{CanonicalEncoder, sha256};
 use crate::{
-    CandidateEvaluation, CatalogFamily, ClassificationStatus, CorpusKind, Counterexample, GateState,
-    PointExpression, Relation, ResearchCorpora, SearchPlan, run_search,
+    CandidateEvaluation, CatalogFamily, ClassificationStatus, CorpusKind, Counterexample,
+    GateState, PointExpression, Relation, ResearchCorpora, SearchPlan, run_search,
 };
 
 const STATUSES: [ClassificationStatus; 6] = [
