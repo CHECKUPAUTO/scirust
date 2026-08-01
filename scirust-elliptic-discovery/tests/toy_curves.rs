@@ -1,6 +1,4 @@
-use scirust_elliptic_discovery::{
-    CurveError, FieldError, Fp, PrimeError, ToyCurve, ToyPrime,
-};
+use scirust_elliptic_discovery::{CurveError, FieldError, Fp, PrimeError, ToyCurve, ToyPrime};
 
 fn curve_over_17() -> ToyCurve {
     ToyCurve::new(ToyPrime::new(17).expect("17 is a toy prime"), 2, 2)
@@ -9,18 +7,12 @@ fn curve_over_17() -> ToyCurve {
 
 #[test]
 fn toy_prime_rejects_outside_or_composite_values() {
-    assert_eq!(
-        ToyPrime::new(3),
-        Err(PrimeError::BelowMinimum { value: 3 })
-    );
+    assert_eq!(ToyPrime::new(3), Err(PrimeError::BelowMinimum { value: 3 }));
     assert_eq!(
         ToyPrime::new(4094),
         Err(PrimeError::AboveMaximum { value: 4094 })
     );
-    assert_eq!(
-        ToyPrime::new(21),
-        Err(PrimeError::Composite { value: 21 })
-    );
+    assert_eq!(ToyPrime::new(21), Err(PrimeError::Composite { value: 21 }));
 }
 
 #[test]
@@ -125,9 +117,13 @@ fn every_enumerated_sum_stays_on_its_curve() {
     let curve = curve_over_17();
     let points = curve.enumerate_points();
 
-    for left in &points {
-        for right in &points {
-            let sum = curve.add(*left, *right).expect("enumerated points are valid");
+    for left in &points
+    {
+        for right in &points
+        {
+            let sum = curve
+                .add(*left, *right)
+                .expect("enumerated points are valid");
             assert!(curve.is_on_curve(&sum));
         }
     }
@@ -135,11 +131,13 @@ fn every_enumerated_sum_stays_on_its_curve() {
 
 fn repeated_order(curve: ToyCurve, point: scirust_elliptic_discovery::ToyPoint) -> u64 {
     let mut multiple = curve.identity();
-    for scalar in 1..=curve.group_order() {
+    for scalar in 1..=curve.group_order()
+    {
         multiple = curve
             .add(multiple, point)
             .expect("enumerated points stay on their curve");
-        if multiple.is_infinity() {
+        if multiple.is_infinity()
+        {
             return scalar;
         }
     }
@@ -150,11 +148,15 @@ fn repeated_order(curve: ToyCurve, point: scirust_elliptic_discovery::ToyPoint) 
 fn exhaustive_small_corpus_validates_group_law_and_point_orders() {
     let mut nonsingular_curve_count = 0u64;
 
-    for modulus in [5u64, 7, 11, 13] {
+    for modulus in [5u64, 7, 11, 13]
+    {
         let prime = ToyPrime::new(modulus).expect("listed modulus is a toy prime");
-        for a in 0..modulus {
-            for b in 0..modulus {
-                let curve = match ToyCurve::new(prime, a, b) {
+        for a in 0..modulus
+        {
+            for b in 0..modulus
+            {
+                let curve = match ToyCurve::new(prime, a, b)
+                {
                     Ok(curve) => curve,
                     Err(CurveError::Singular) => continue,
                     Err(error) => panic!("unexpected curve construction error: {error}"),
@@ -165,7 +167,8 @@ fn exhaustive_small_corpus_validates_group_law_and_point_orders() {
                 assert_eq!(points, curve.enumerate_points());
                 assert!(curve.satisfies_hasse_bound());
 
-                for point in &points {
+                for point in &points
+                {
                     assert!(curve.is_on_curve(point));
                     assert_eq!(
                         curve
@@ -192,9 +195,13 @@ fn exhaustive_small_corpus_validates_group_law_and_point_orders() {
                     assert_eq!(curve.group_order() % computed_order, 0);
                 }
 
-                for left in &points {
-                    for right in &points {
-                        let sum = curve.add(*left, *right).expect("enumerated points are valid");
+                for left in &points
+                {
+                    for right in &points
+                    {
+                        let sum = curve
+                            .add(*left, *right)
+                            .expect("enumerated points are valid");
                         assert!(curve.is_on_curve(&sum));
                     }
                 }

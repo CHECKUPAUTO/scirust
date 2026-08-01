@@ -18,13 +18,16 @@ pub struct ToyPrime(u64);
 impl ToyPrime {
     /// Validates a prime for the bounded toy-curve domain.
     pub fn new(value: u64) -> Result<Self, PrimeError> {
-        if value < MIN_TOY_PRIME {
+        if value < MIN_TOY_PRIME
+        {
             return Err(PrimeError::BelowMinimum { value });
         }
-        if value > MAX_TOY_PRIME {
+        if value > MAX_TOY_PRIME
+        {
             return Err(PrimeError::AboveMaximum { value });
         }
-        if !is_prime(value) {
+        if !is_prime(value)
+        {
             return Err(PrimeError::Composite { value });
         }
         Ok(Self(value))
@@ -58,7 +61,8 @@ pub enum PrimeError {
 
 impl fmt::Display for PrimeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::BelowMinimum { value } => write!(
                 formatter,
                 "{value} is below the minimum toy prime {MIN_TOY_PRIME}"
@@ -132,9 +136,12 @@ impl Fp {
 
     /// Returns the additive inverse.
     pub const fn neg(self) -> Self {
-        if self.value == 0 {
+        if self.value == 0
+        {
             self
-        } else {
+        }
+        else
+        {
             Self {
                 prime: self.prime,
                 value: self.prime.value() - self.value,
@@ -167,9 +174,12 @@ impl Fp {
     /// Subtracts values known to belong to the same verified field.
     pub(crate) fn sub_same(self, other: Self) -> Self {
         debug_assert_eq!(self.prime, other.prime);
-        let value = if self.value >= other.value {
+        let value = if self.value >= other.value
+        {
             self.value - other.value
-        } else {
+        }
+        else
+        {
             self.prime.value() - (other.value - self.value)
         };
         Self {
@@ -193,9 +203,12 @@ impl Fp {
     }
 
     fn ensure_same_prime(self, other: Self) -> Result<(), FieldError> {
-        if self.prime == other.prime {
+        if self.prime == other.prime
+        {
             Ok(())
-        } else {
+        }
+        else
+        {
             Err(FieldError::DifferentPrimes)
         }
     }
@@ -212,7 +225,8 @@ pub enum FieldError {
 
 impl fmt::Display for FieldError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::DifferentPrimes => write!(formatter, "field values have different prime moduli"),
             Self::ZeroHasNoInverse => write!(formatter, "zero has no multiplicative inverse"),
         }

@@ -25,7 +25,8 @@ impl ToyCurve {
             .mul_same(a)
             .mul_same(Fp::new(prime, 4))
             .add_same(b.square().mul_same(Fp::new(prime, 27)));
-        if discriminant_core.is_zero() {
+        if discriminant_core.is_zero()
+        {
             return Err(CurveError::Singular);
         }
         Ok(Self { prime, a, b })
@@ -60,7 +61,8 @@ impl ToyCurve {
     /// satisfy the curve equation. This API intentionally does not parse byte
     /// encodings or reduce unbounded external integers.
     pub fn point_from_local_residues(self, x: u64, y: u64) -> Result<ToyPoint, CurveError> {
-        if x >= self.prime.value() || y >= self.prime.value() {
+        if x >= self.prime.value() || y >= self.prime.value()
+        {
             return Err(CurveError::CoordinateOutsideField);
         }
         let point = ToyPoint {
@@ -70,21 +72,27 @@ impl ToyCurve {
                 y: Fp::new(self.prime, y),
             },
         };
-        if self.is_on_curve(&point) {
+        if self.is_on_curve(&point)
+        {
             Ok(point)
-        } else {
+        }
+        else
+        {
             Err(CurveError::PointNotOnCurve)
         }
     }
 
     /// Returns whether point belongs to this curve and satisfies its equation.
     pub fn is_on_curve(self, point: &ToyPoint) -> bool {
-        if point.curve != self {
+        if point.curve != self
+        {
             return false;
         }
-        match point.coordinates {
+        match point.coordinates
+        {
             Coordinates::Infinity => true,
-            Coordinates::Affine { x, y } => {
+            Coordinates::Affine { x, y } =>
+            {
                 let left = y.square();
                 let right = x
                     .square()
@@ -92,14 +100,15 @@ impl ToyCurve {
                     .add_same(self.a.mul_same(x))
                     .add_same(self.b);
                 left == right
-            }
+            },
         }
     }
 
     /// Returns the inverse of point.
     pub fn negate(self, point: ToyPoint) -> Result<ToyPoint, CurveError> {
         self.validate_point(point)?;
-        match point.coordinates {
+        match point.coordinates
+        {
             Coordinates::Infinity => Ok(point),
             Coordinates::Affine { x, y } => Ok(self.affine_unchecked(x, y.neg())),
         }
@@ -110,15 +119,19 @@ impl ToyCurve {
         self.validate_point(left)?;
         self.validate_point(right)?;
 
-        match (left.coordinates, right.coordinates) {
+        match (left.coordinates, right.coordinates)
+        {
             (Coordinates::Infinity, _) => Ok(right),
             (_, Coordinates::Infinity) => Ok(left),
-            (Coordinates::Affine { x: x1, y: y1 }, Coordinates::Affine { x: x2, y: y2 }) => {
-                if x1 == x2 && (y1 != y2 || y1.is_zero()) {
+            (Coordinates::Affine { x: x1, y: y1 }, Coordinates::Affine { x: x2, y: y2 }) =>
+            {
+                if x1 == x2 && (y1 != y2 || y1.is_zero())
+                {
                     return Ok(self.identity());
                 }
 
-                let slope = if x1 == x2 {
+                let slope = if x1 == x2
+                {
                     let numerator = x1
                         .square()
                         .mul_same(Fp::new(self.prime, 3))
@@ -127,7 +140,9 @@ impl ToyCurve {
                     numerator
                         .checked_div(denominator)
                         .map_err(|_| CurveError::NonInvertibleDenominator)?
-                } else {
+                }
+                else
+                {
                     y2.sub_same(y1)
                         .checked_div(x2.sub_same(x1))
                         .map_err(|_| CurveError::NonInvertibleDenominator)?
@@ -136,7 +151,7 @@ impl ToyCurve {
                 let x3 = slope.square().sub_same(x1).sub_same(x2);
                 let y3 = slope.mul_same(x1.sub_same(x3)).sub_same(y1);
                 Ok(self.affine_unchecked(x3, y3))
-            }
+            },
         }
     }
 
@@ -146,12 +161,15 @@ impl ToyCurve {
         let mut result = self.identity();
         let mut addend = point;
 
-        while scalar != 0 {
-            if scalar & 1 == 1 {
+        while scalar != 0
+        {
+            if scalar & 1 == 1
+            {
                 result = self.add(result, addend)?;
             }
             scalar >>= 1;
-            if scalar != 0 {
+            if scalar != 0
+            {
                 addend = self.add(addend, addend)?;
             }
         }
@@ -167,10 +185,12 @@ impl ToyCurve {
     }
 
     pub(crate) fn validate_point(self, point: ToyPoint) -> Result<(), CurveError> {
-        if point.curve != self {
+        if point.curve != self
+        {
             return Err(CurveError::PointFromAnotherCurve);
         }
-        if !self.is_on_curve(&point) {
+        if !self.is_on_curve(&point)
+        {
             return Err(CurveError::PointNotOnCurve);
         }
         Ok(())
@@ -192,7 +212,8 @@ impl ToyPoint {
 
     /// Returns local affine residues, or none for the group identity.
     pub const fn affine_coordinates(self) -> Option<(u64, u64)> {
-        match self.coordinates {
+        match self.coordinates
+        {
             Coordinates::Infinity => None,
             Coordinates::Affine { x, y } => Some((x.value(), y.value())),
         }
@@ -222,16 +243,19 @@ pub enum CurveError {
 
 impl fmt::Display for CurveError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::Singular => write!(formatter, "short-Weierstrass curve is singular"),
             Self::PointFromAnotherCurve => write!(formatter, "point belongs to another toy curve"),
             Self::PointNotOnCurve => write!(formatter, "point does not satisfy the curve equation"),
-            Self::CoordinateOutsideField => {
+            Self::CoordinateOutsideField =>
+            {
                 write!(formatter, "point coordinate is outside the toy prime field")
-            }
-            Self::NonInvertibleDenominator => {
+            },
+            Self::NonInvertibleDenominator =>
+            {
                 write!(formatter, "group-law denominator is not invertible")
-            }
+            },
         }
     }
 }

@@ -17,17 +17,23 @@ impl ToyCurve {
     pub fn point_order(self, point: ToyPoint) -> Result<u64, CurveError> {
         self.validate_point(point)?;
 
-        if point.is_infinity() {
+        if point.is_infinity()
+        {
             return Ok(1);
         }
 
         let mut order = self.group_order();
-        for (prime, exponent) in factor(order) {
-            for _ in 0..exponent {
+        for (prime, exponent) in factor(order)
+        {
+            for _ in 0..exponent
+            {
                 let reduced_order = order / prime;
-                if self.scalar_mul(point, reduced_order)?.is_infinity() {
+                if self.scalar_mul(point, reduced_order)?.is_infinity()
+                {
                     order = reduced_order;
-                } else {
+                }
+                else
+                {
                     break;
                 }
             }
