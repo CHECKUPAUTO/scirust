@@ -189,7 +189,7 @@ mesure (addendum 2 du rapport).
   protocole) traduit dans les six langues AR/DE/ES/JA/KO/ZH.
 
 ### Ajouté — `denoise` round 4 : exécution des recommandations du rapport TSHF
-Toutes les recommandations codables du rapport `TSHF_RESEARCH_2026-07-16.md` (§12
+Toutes les recommandations codables du rapport `docs/project-notes/TSHF_RESEARCH_2026-07-16.md` (§12
 et feuille de route) sont exécutées ; chaque porte d'acceptation chiffrée du
 rapport a été mesurée avant intégration.
 
@@ -233,7 +233,7 @@ rapport a été mesurée avant intégration.
 - **`denoise::collab`** : filtrage collaboratif par patchs façon BM3D 1-D
   (Dabov et al. 2007 — groupement par similarité, Haar 2-D patch×groupe,
   seuillage dur 2,7σ, agrégation pondérée) — `collab1d`, `collab1d_auto`.
-- **Programme de recherche TSHF** (`TSHF_RESEARCH_2026-07-16.md`) : investigation
+- **Programme de recherche TSHF** (`docs/project-notes/TSHF_RESEARCH_2026-07-16.md`) : investigation
   sceptique des « Transformed-Scalar Hypercomplex Filters » — analyse mathématique
   (séparabilité φ/plongement, invariance de la médiane, moyennes quasi-arithmétiques),
   six blocs d'expériences de falsification reproductibles
@@ -286,7 +286,7 @@ salt-and-pepper.
 par construction, épinglée bit-à-bit contre la définition naïve) ; pas **impair**
 du cycle-spinning (le cas dégénéré n_shifts | n disparaît : +3 dB sur bord impair
 avec 8 décalages) ; `Serialize/Deserialize` sur `AutoResult`/`BestResult` ;
-sections débruitage dans `Documentation.md`/`Documentation_EN.md`/`REFERENCE.md`.
+sections débruitage dans `docs/translations/Documentation.md`/`docs/translations/Documentation_EN.md`/`docs/REFERENCE.md`.
 
 Au banc : les pipelines automatiques gagnent 5 des 7 types de bruit (cascade :
 blanc +13,0 et non-stationnaire +11,7) et ne détruisent plus jamais les références
@@ -2103,7 +2103,7 @@ du LIVESTATE sont livrés :
   binaire ; empreintes denses et exhaustives ajoutées au contrat.
 
 ### Ajouté — audit de couverture RepDL et fermeture des écarts (volet 111)
-- **`AUDIT_REPDL_2026-07-10.md`** : audit de couverture fonctionnelle
+- **`docs/audits/AUDIT_REPDL_2026-07-10.md`** : audit de couverture fonctionnelle
   élément par élément de [microsoft/RepDL](https://github.com/microsoft/RepDL)
   (MIT, arXiv:2510.09180) contre SciRust — 18/23 items déjà couverts, 2 par
   composition, 1 non applicable par conception, 3 fermés ci-dessous. Analyse

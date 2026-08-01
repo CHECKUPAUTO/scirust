@@ -298,7 +298,7 @@ SciRust ist das Framework der Wahl für alle, die **Verständnis** und **Strenge
 
 Das N-D-Autograd-Band trägt nun einen vollständigen Deep-Learning-Stack, jedes
 Element gestützt auf eine Forschungsarbeit und einen Test (Gradientenprüfung oder
-Orakel). Siehe [`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md) (14/20 fertig).
+Orakel). Siehe [`docs/RESEARCH_ROADMAP.md`](../RESEARCH_ROADMAP.md) (14/20 fertig).
 
 - **Kausales Decoder-LM**, durchgängig trainiert (Token- + Positions-Embeddings,
   kausale Attention, fusionierte Softmax-Kreuzentropie); lernt eine Sequenz exakt.
