@@ -279,7 +279,7 @@ SciRust es el framework de elección para quienes priorizan la **comprensión** 
 El grafo de autodiferenciación N-D ahora incluye una pila completa de aprendizaje
 profundo, cada pieza respaldada por un artículo de investigación y una prueba
 (comprobación de gradiente u oráculo). Véase
-[`docs/RESEARCH_ROADMAP.md`](docs/RESEARCH_ROADMAP.md) (14/20 entregados).
+[`docs/RESEARCH_ROADMAP.md`](../RESEARCH_ROADMAP.md) (14/20 entregados).
 
 - **LM decodificador causal**, entrenado de extremo a extremo (embeddings de
   token + posición, atención causal, entropía cruzada con softmax fusionado);

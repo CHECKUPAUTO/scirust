@@ -21,7 +21,7 @@ contractual, plus the substantial similarity of the copied source itself.
 
 | PR | Deliverable | Key paths |
 |---|---|---|
-| #476 | Simulated audit + anti-clone strategy | `STRATEGIE_PROTECTION_IP_2026-07-15.md` |
+| #476 | Simulated audit + anti-clone strategy | [`project-notes/STRATEGIE_PROTECTION_IP_2026-07-15.md`](project-notes/STRATEGIE_PROTECTION_IP_2026-07-15.md) |
 | #480 | Offline signing/verification of emitted artifacts | `scirust-provenance/` (`prov` binary) |
 | #482 | Reproducibility / tamper anchor (bit-exact SIMD) | `scirust-simd/tests/reproducibility_anchor.rs` |
 | #485 | Opt-in output-neutral execution-path canary | `scirust-autodiff` (feature `canary`) |

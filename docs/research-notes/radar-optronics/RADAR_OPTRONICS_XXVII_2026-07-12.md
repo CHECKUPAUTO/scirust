@@ -11,7 +11,7 @@ recognition (NCTR)**.
 
 - **`spectrogram(signal, win_len, hop)`** — a Hann-windowed short-time Fourier
   transform of the complex slow-time signal, on the crate's power-of-two
-  [`fft`](../scirust-signal/src/fft.rs): one magnitude spectrum per frame.
+  [`fft`](../../../scirust-signal/src/fft.rs): one magnitude spectrum per frame.
 - **`bin_frequencies(win_len, sample_rate)`** — the signed Doppler frequency of
   each FFT bin (natural order, negative frequencies folded).
 - Descriptors from the spectrogram:
