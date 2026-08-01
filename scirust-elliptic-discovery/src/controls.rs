@@ -1,14 +1,13 @@
 //! Mandatory positive and negative controls for the catalog and falsifier.
 
 use crate::{
-    Classification, ClassificationStatus, Corpus, Counterexample, Fp, RelationSignature,
-    classify, first_point_counterexample,
+    Classification, ClassificationStatus, Corpus, Counterexample, Fp, RelationSignature, classify,
+    first_point_counterexample,
 };
 
 /// Built-in controls required by the research contract.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub enum ControlId
-{
+pub enum ControlId {
     TrueNegation,
     FalseNegationKeepsY,
     FalseDoublingSign,
@@ -19,59 +18,55 @@ pub enum ControlId
 
 /// Exact result of one mandatory control.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ControlResult
-{
+pub struct ControlResult {
     id: ControlId,
     classification: Classification,
     counterexample: Option<Counterexample>,
 }
 
-impl ControlResult
-{
-    pub const fn id(&self) -> ControlId
-    {
+impl ControlResult {
+    pub const fn id(&self) -> ControlId {
         self.id
     }
 
-    pub const fn status(&self) -> ClassificationStatus
-    {
+    pub const fn status(&self) -> ClassificationStatus {
         self.classification.status()
     }
 
-    pub const fn classification(&self) -> Classification
-    {
+    pub const fn classification(&self) -> Classification {
         self.classification
     }
 
-    pub const fn counterexample(&self) -> Option<&Counterexample>
-    {
+    pub const fn counterexample(&self) -> Option<&Counterexample> {
         self.counterexample.as_ref()
     }
 }
 
 /// Executes one control in canonical corpus order.
-pub fn run_control(corpus: &Corpus, id: ControlId) -> ControlResult
-{
+pub fn run_control(corpus: &Corpus, id: ControlId) -> ControlResult {
     let (signature, counterexample) = match id
     {
         ControlId::TrueNegation =>
         {
-            let counterexample = first_point_counterexample(
-                corpus,
-                "control.true-negation",
-                |curve, point| {
-                    let Ok(negative) = curve.negate(point) else {
+            let counterexample =
+                first_point_counterexample(corpus, "control.true-negation", |curve, point| {
+                    let Ok(negative) = curve.negate(point)
+                    else
+                    {
                         return false;
                     };
-                    let Ok(double_negative) = curve.negate(negative) else {
+                    let Ok(double_negative) = curve.negate(negative)
+                    else
+                    {
                         return false;
                     };
-                    let Ok(sum) = curve.add(point, negative) else {
+                    let Ok(sum) = curve.add(point, negative)
+                    else
+                    {
                         return false;
                     };
                     double_negative == point && sum == curve.identity()
-                },
-            );
+                });
             (RelationSignature::NegationInvolution, counterexample)
         },
         ControlId::FalseNegationKeepsY =>
@@ -84,7 +79,9 @@ pub fn run_control(corpus: &Corpus, id: ControlId) -> ControlResult
                     {
                         return true;
                     }
-                    let Ok(negative) = curve.negate(point) else {
+                    let Ok(negative) = curve.negate(point)
+                    else
+                    {
                         return false;
                     };
                     negative.affine_coordinates() == point.affine_coordinates()
@@ -98,10 +95,14 @@ pub fn run_control(corpus: &Corpus, id: ControlId) -> ControlResult
                 corpus,
                 "control.false-doubling-sign",
                 |curve, point| {
-                    let Ok(double) = curve.scalar_mul(point, 2) else {
+                    let Ok(double) = curve.scalar_mul(point, 2)
+                    else
+                    {
                         return false;
                     };
-                    let Ok(negative_double) = curve.negate(double) else {
+                    let Ok(negative_double) = curve.negate(double)
+                    else
+                    {
                         return false;
                     };
                     double == negative_double
@@ -115,7 +116,9 @@ pub fn run_control(corpus: &Corpus, id: ControlId) -> ControlResult
                 corpus,
                 "control.j-zero-claimed-universal",
                 |curve, point| {
-                    let Some((x, y)) = point.affine_coordinates() else {
+                    let Some((x, y)) = point.affine_coordinates()
+                    else
+                    {
                         return true;
                     };
                     let scaled_x = Fp::new(curve.prime(), x)
@@ -133,7 +136,9 @@ pub fn run_control(corpus: &Corpus, id: ControlId) -> ControlResult
                 corpus,
                 "control.encoding-sign-claimed-novel",
                 |curve, point| {
-                    let Ok(negative) = curve.negate(point) else {
+                    let Ok(negative) = curve.negate(point)
+                    else
+                    {
                         return false;
                     };
                     match (point.affine_coordinates(), negative.affine_coordinates())
@@ -141,8 +146,7 @@ pub fn run_control(corpus: &Corpus, id: ControlId) -> ControlResult
                         (None, None) => true,
                         (Some((x, y)), Some((negative_x, negative_y))) =>
                         {
-                            x == negative_x
-                                && Fp::new(curve.prime(), y).neg().value() == negative_y
+                            x == negative_x && Fp::new(curve.prime(), y).neg().value() == negative_y
                         },
                         _ => false,
                     }
@@ -152,11 +156,10 @@ pub fn run_control(corpus: &Corpus, id: ControlId) -> ControlResult
         },
         ControlId::OverfitAZero =>
         {
-            let counterexample = first_point_counterexample(
-                corpus,
-                "control.overfit-a-zero",
-                |curve, _| curve.a() == 0,
-            );
+            let counterexample =
+                first_point_counterexample(corpus, "control.overfit-a-zero", |curve, _| {
+                    curve.a() == 0
+                });
             (RelationSignature::Unrecognized, counterexample)
         },
     };
@@ -168,13 +171,11 @@ pub fn run_control(corpus: &Corpus, id: ControlId) -> ControlResult
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::*;
     use crate::{CorpusKind, ExperimentManifest, LocalResearchCase};
 
-    fn exhaustive() -> Corpus
-    {
+    fn exhaustive() -> Corpus {
         Corpus::generate(ExperimentManifest::new(
             LocalResearchCase::new(0, CorpusKind::ExhaustiveSmall, 1, u64::MAX)
                 .expect("valid exhaustive case"),
@@ -182,8 +183,7 @@ mod tests
     }
 
     #[test]
-    fn all_mandatory_controls_are_classified_conservatively()
-    {
+    fn all_mandatory_controls_are_classified_conservatively() {
         let corpus = exhaustive();
         assert_eq!(
             run_control(&corpus, ControlId::TrueNegation).status(),

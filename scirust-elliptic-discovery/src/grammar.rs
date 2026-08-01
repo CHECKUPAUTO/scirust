@@ -6,8 +6,7 @@ use crate::{CurveError, RelationSignature, ToyCurve, ToyPoint};
 
 /// A point-valued expression. Construction is finite and contains no external data.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub enum PointExpression
-{
+pub enum PointExpression {
     Input,
     Identity,
     Negate(Box<Self>),
@@ -16,11 +15,9 @@ pub enum PointExpression
     Add(Box<Self>, Box<Self>),
 }
 
-impl PointExpression
-{
+impl PointExpression {
     /// Evaluates with exact group operations.
-    pub fn evaluate(&self, curve: ToyCurve, input: ToyPoint) -> Result<ToyPoint, CurveError>
-    {
+    pub fn evaluate(&self, curve: ToyCurve, input: ToyPoint) -> Result<ToyPoint, CurveError> {
         match self
         {
             Self::Input => Ok(input),
@@ -43,8 +40,7 @@ impl PointExpression
     }
 
     /// Maximum syntax-tree depth.
-    pub fn depth(&self) -> u8
-    {
+    pub fn depth(&self) -> u8 {
         match self
         {
             Self::Input | Self::Identity => 0,
@@ -59,19 +55,16 @@ impl PointExpression
 
 /// A boolean relation evaluated on one curve and one point.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub enum Relation
-{
+pub enum Relation {
     PointEqual(PointExpression, PointExpression),
     IsInfinity(PointExpression),
     CurveAEquals(u64),
     CurveJEquals(u64),
 }
 
-impl Relation
-{
+impl Relation {
     /// Exact relation evaluation. Partial point operations propagate an error.
-    pub fn evaluate(&self, curve: ToyCurve, input: ToyPoint) -> Result<bool, CurveError>
-    {
+    pub fn evaluate(&self, curve: ToyCurve, input: ToyPoint) -> Result<bool, CurveError> {
         match self
         {
             Self::PointEqual(left, right) =>
@@ -80,17 +73,13 @@ impl Relation
             },
             Self::IsInfinity(point) => Ok(point.evaluate(curve, input)?.is_infinity()),
             Self::CurveAEquals(value) => Ok(curve.a() == value % curve.prime().value()),
-            Self::CurveJEquals(value) =>
-            {
-                Ok(crate::CurveInvariants::compute(curve).j_invariant()
-                    == value % curve.prime().value())
-            },
+            Self::CurveJEquals(value) => Ok(crate::CurveInvariants::compute(curve).j_invariant()
+                == value % curve.prime().value()),
         }
     }
 
     /// Recognizes structural forms which belong to the known catalog.
-    pub fn signature(&self) -> RelationSignature
-    {
+    pub fn signature(&self) -> RelationSignature {
         match self
         {
             Self::PointEqual(left, right)
@@ -113,8 +102,7 @@ impl Relation
     }
 }
 
-fn is_double_negation_of_input(expression: &PointExpression) -> bool
-{
+fn is_double_negation_of_input(expression: &PointExpression) -> bool {
     matches!(
         expression,
         PointExpression::Negate(outer)
@@ -123,8 +111,7 @@ fn is_double_negation_of_input(expression: &PointExpression) -> bool
     )
 }
 
-fn is_additive_inverse(left: &PointExpression, right: &PointExpression) -> bool
-{
+fn is_additive_inverse(left: &PointExpression, right: &PointExpression) -> bool {
     matches!(
         (left, right),
         (PointExpression::Add(first, second), PointExpression::Identity)
@@ -134,11 +121,10 @@ fn is_additive_inverse(left: &PointExpression, right: &PointExpression) -> bool
     )
 }
 
-fn is_scalar_composition(left: &PointExpression, right: &PointExpression) -> bool
-{
+fn is_scalar_composition(left: &PointExpression, right: &PointExpression) -> bool {
     let PointExpression::ScalarMultiply {
         scalar: outer,
-        point: inner_point,
+        point: outer_point,
     } = left
     else
     {
@@ -146,15 +132,15 @@ fn is_scalar_composition(left: &PointExpression, right: &PointExpression) -> boo
     };
     let PointExpression::ScalarMultiply {
         scalar: inner,
-        point: right_point,
-    } = point.as_ref()
+        point: inner_point,
+    } = outer_point.as_ref()
     else
     {
         return false;
     };
     let PointExpression::ScalarMultiply {
         scalar: product,
-        point,
+        point: right_point,
     } = right
     else
     {
@@ -166,8 +152,7 @@ fn is_scalar_composition(left: &PointExpression, right: &PointExpression) -> boo
 }
 
 /// Generates a deterministic prefix of the finite relation grammar.
-pub fn generate_relations(max_depth: u8, max_scalar: u64, budget: usize) -> Vec<Relation>
-{
+pub fn generate_relations(max_depth: u8, max_scalar: u64, budget: usize) -> Vec<Relation> {
     if budget == 0
     {
         return Vec::new();
@@ -220,13 +205,11 @@ pub fn generate_relations(max_depth: u8, max_scalar: u64, budget: usize) -> Vec<
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use super::*;
 
     #[test]
-    fn generation_is_bounded_sorted_and_reproducible()
-    {
+    fn generation_is_bounded_sorted_and_reproducible() {
         let left = generate_relations(2, 3, 50);
         let right = generate_relations(2, 3, 50);
         assert_eq!(left, right);
@@ -235,13 +218,10 @@ mod tests
     }
 
     #[test]
-    fn known_syntax_is_recognized_before_candidate_classification()
-    {
+    fn known_syntax_is_recognized_before_candidate_classification() {
         let input = PointExpression::Input;
         let relation = Relation::PointEqual(
-            PointExpression::Negate(Box::new(PointExpression::Negate(Box::new(
-                input.clone(),
-            )))),
+            PointExpression::Negate(Box::new(PointExpression::Negate(Box::new(input.clone())))),
             input,
         );
         assert_eq!(relation.signature(), RelationSignature::NegationInvolution);

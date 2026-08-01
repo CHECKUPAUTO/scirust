@@ -4,8 +4,7 @@ use crate::{CatalogEntry, RelationSignature, catalog_entry};
 
 /// Allowed automated outcomes.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub enum ClassificationStatus
-{
+pub enum ClassificationStatus {
     Refuted,
     Known,
     RepresentationArtifact,
@@ -16,37 +15,31 @@ pub enum ClassificationStatus
 
 /// Catalog-backed classification.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Classification
-{
+pub struct Classification {
     status: ClassificationStatus,
     catalog: Option<CatalogEntry>,
 }
 
-impl Classification
-{
+impl Classification {
     /// Explicit insufficient-coverage outcome.
-    pub const fn inconclusive() -> Self
-    {
+    pub const fn inconclusive() -> Self {
         Self {
             status: ClassificationStatus::Inconclusive,
             catalog: None,
         }
     }
 
-    pub const fn status(self) -> ClassificationStatus
-    {
+    pub const fn status(self) -> ClassificationStatus {
         self.status
     }
 
-    pub const fn catalog(self) -> Option<CatalogEntry>
-    {
+    pub const fn catalog(self) -> Option<CatalogEntry> {
         self.catalog
     }
 }
 
 /// Classifies a structural signature after falsification.
-pub const fn classify(signature: RelationSignature, has_counterexample: bool) -> Classification
-{
+pub const fn classify(signature: RelationSignature, has_counterexample: bool) -> Classification {
     if has_counterexample
     {
         return Classification {
