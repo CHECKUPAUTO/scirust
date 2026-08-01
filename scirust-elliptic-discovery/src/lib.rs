@@ -17,7 +17,9 @@ pub mod falsify;
 pub mod grammar;
 pub mod invariant;
 pub mod orders;
+pub mod proof;
 pub mod report;
+pub mod review;
 pub mod search;
 pub mod scope;
 
@@ -27,6 +29,14 @@ pub use field::{FieldError, Fp, PrimeError, ToyPrime};
 pub use falsify::{Counterexample, first_point_counterexample};
 pub use grammar::{PointExpression, Relation, generate_relations};
 pub use invariant::CurveInvariants;
+pub use proof::{
+    Justification, PolynomialIdentityCertificate, ProofCertificate, attempt_justification,
+    prove_j_zero_identity,
+};
+pub use review::{
+    LiteratureDecision, LiteratureReview, ReviewError, ReviewReport, ReviewedCandidate,
+    review_candidate,
+};
 pub use search::{
     CandidateEvaluation, GateReport, GateState, ResearchCorpora, SearchError, SearchPlan,
     evaluate_candidate, run_search,

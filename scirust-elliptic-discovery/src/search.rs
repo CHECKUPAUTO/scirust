@@ -71,6 +71,12 @@ impl SearchPlan
             sampled_curves_per_prime,
         })
     }
+
+    /// Per-candidate tuple limit shared by all dataset gates.
+    pub const fn tuple_budget_per_candidate(self) -> u64
+    {
+        self.tuple_budget_per_candidate
+    }
 }
 
 /// Invalid or excessive search configuration.
