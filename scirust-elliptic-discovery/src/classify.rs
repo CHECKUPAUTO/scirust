@@ -24,6 +24,15 @@ pub struct Classification
 
 impl Classification
 {
+    /// Explicit insufficient-coverage outcome.
+    pub const fn inconclusive() -> Self
+    {
+        Self {
+            status: ClassificationStatus::Inconclusive,
+            catalog: None,
+        }
+    }
+
     pub const fn status(self) -> ClassificationStatus
     {
         self.status
