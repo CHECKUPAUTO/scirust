@@ -32,7 +32,10 @@ pub use execution::{
     ExecutionReceipt, ExecutionSummary, ReplayReport, execute_local, replay_local,
 };
 pub use experiment::{Corpus, CorpusCurve, ExperimentManifest};
-pub use falsify::{Counterexample, first_point_counterexample};
+pub use falsify::{
+    Counterexample, FalsificationResult, first_point_counterexample,
+    first_point_counterexample_bounded,
+};
 pub use field::{FieldError, Fp, PrimeError, ToyPrime};
 pub use grammar::{PointExpression, Relation, generate_relations};
 pub use invariant::CurveInvariants;
