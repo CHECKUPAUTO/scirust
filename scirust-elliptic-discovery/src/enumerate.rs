@@ -16,7 +16,8 @@ impl ToyCurve {
         let modulus = prime.value();
         let mut roots: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
 
-        for y in 0..modulus {
+        for y in 0..modulus
+        {
             let y = Fp::new(prime, y);
             roots.entry(y.square().value()).or_default().push(y.value());
         }
@@ -25,15 +26,14 @@ impl ToyCurve {
         let a = Fp::new(prime, self.a());
         let b = Fp::new(prime, self.b());
 
-        for x in 0..modulus {
+        for x in 0..modulus
+        {
             let x = Fp::new(prime, x);
-            let right = x
-                .square()
-                .mul_same(x)
-                .add_same(a.mul_same(x))
-                .add_same(b);
-            if let Some(ys) = roots.get(&right.value()) {
-                for &y in ys {
+            let right = x.square().mul_same(x).add_same(a.mul_same(x)).add_same(b);
+            if let Some(ys) = roots.get(&right.value())
+            {
+                for &y in ys
+                {
                     points.push(self.affine_unchecked(x, Fp::new(prime, y)));
                 }
             }
