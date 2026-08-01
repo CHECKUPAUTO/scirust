@@ -402,9 +402,8 @@ mod tests {
     #[test]
     fn known_syntax_is_recognized_independently_of_tree_order() {
         let input = PointExpression::Input;
-        let double_negation = PointExpression::Negate(Box::new(PointExpression::Negate(
-            Box::new(input.clone()),
-        )));
+        let double_negation =
+            PointExpression::Negate(Box::new(PointExpression::Negate(Box::new(input.clone()))));
         for relation in [
             Relation::PointEqual(double_negation.clone(), input.clone()),
             Relation::PointEqual(input.clone(), double_negation),
