@@ -1,103 +1,97 @@
-# Politique de sécurité
+# Security Policy
 
-## Signalement de vulnérabilités
+## Reporting Vulnerabilities
 
-Signalez toute vulnérabilité en privé à **zekrititarek@gmail.com**
-(mainteneur, cf. `paper/SciRust-technical-report.md`). N'ouvrez pas
-d'issue publique pour une faille exploitable. Accusé de réception sous
-7 jours.
+Please report any vulnerability privately to **zekrititarek@gmail.com**
+(maintainer; see `paper/SciRust-technical-report.md`). Do not open a public
+issue for an exploitable flaw. Reports are acknowledged within 7 days.
 
-## Surface et garanties
+## Scope and Guarantees
 
-- **Pur Rust, aucune bibliothèque C/C++ embarquée** : le workspace actif
-  n'inclut **aucune** dépendance FFI *consommée* (pas de liaison à une
-  bibliothèque C/C++ tierce). La chaîne d'approvisionnement des *crates*
-  se limite à celles listées dans `Cargo.lock` (committé) et auditées par
-  `cargo deny check` (advisories RustSec, licences, sources) à chaque CI.
+- **Pure Rust, with no embedded C/C++ library**: the active workspace includes
+  no *consumed* FFI dependency (it does not link to a third-party C/C++
+  library). The crate supply chain is limited to the dependencies listed in
+  the committed `Cargo.lock` and audited by `cargo deny check` (RustSec
+  advisories, licenses, and sources) in CI.
 
-  > **Note FFI exportée.** `scirust-runtime/src/enclave.rs` **exporte** un
-  > point d'entrée `extern "C"` (`safe_enclave_infer`) destiné à un
-  > environnement TEE / TrustZone `#![no_std]`. Il s'agit d'une ABI
-  > Rust→C *exportée* (le runtime est appelable depuis C), pas d'une
-  > bibliothèque C embarquée. Les tailles des tampons (`dims`) sont
-  > validées par rapport aux slices Rust **avant** le chemin `unsafe`
-  > (`EnclaveRuntime::infer`), de sorte qu'un `dims` incohérent est
-  > rejeté (`Err`) plutôt que de provoquer une lecture/écriture hors
-  > bornes dans l'enclave.
+  > **Exported FFI note.** `scirust-runtime/src/enclave.rs` exports an
+  > `extern "C"` entry point (`safe_enclave_infer`) intended for a TEE /
+  > TrustZone `#![no_std]` environment. This is an exported Rust-to-C ABI (the
+  > runtime can be called from C), not an embedded C library. Buffer sizes
+  > (`dims`) are validated against Rust slices before the `unsafe` path
+  > (`EnclaveRuntime::infer`), so inconsistent `dims` values are rejected
+  > (`Err`) instead of causing an out-of-bounds read or write in the enclave.
 
-  > **Note archive.** Le répertoire `archive/` contient du code plus
-  > ancien (notamment `archive/scirust-gpu/{cublas.rs,cuda_backend.rs}`,
-  > `archive/scirust-simd/sve.rs`) qui **utilise** une FFI C/CUDA. Ce code
-  > n'est **pas** membre du workspace actif (hors `Cargo.toml`), n'est pas
-  > compilé par la CI, et est conservé à titre historique. Il est donc
-  > **hors périmètre** des garanties ci-dessus.
+  > **Archive note.** The `archive/` directory contains older code (notably
+  > `archive/scirust-gpu/{cublas.rs,cuda_backend.rs}` and
+  > `archive/scirust-simd/sve.rs`) that uses C/CUDA FFI. This code is not part
+  > of the active workspace (it is outside `Cargo.toml`), is not compiled by
+  > CI, and is retained for historical purposes. It is therefore outside the
+  > scope of the guarantees above.
 
-  > **Note *features* optionnelles (réseau/TLS).** La garantie « aucune FFI
-  > consommée » vaut pour le **build par défaut**
-  > (`cargo build --workspace`, vérifiable par `cargo tree --workspace`, qui
-  > ne fait apparaître ni `ring` ni `aws-lc-sys` ni `reqwest`). Trois
-  > *features* **désactivées par défaut** tirent en revanche une pile TLS
-  > qui **relie du C/assembleur** : `scirust-trader/live` (→ `reqwest` +
-  > `rustls` + `aws-lc-sys`), `scirust-rsi/anthropic` et
-  > `scirust-sciagent/fetch` (→ `ureq` + `ring`). Ces *crates* figurent donc
-  > dans `Cargo.lock` (qui liste toutes les dépendances optionnelles) mais
-  > ne sont **compilées et liées que si l'on active explicitement la
-  > *feature*** ; `scirust-sciagent/Cargo.toml` documente déjà ce compromis.
-  > Un déploiement qui doit rester 100 % pur-Rust laisse simplement ces
-  > *features* éteintes.
+  > **Optional network/TLS features.** The “no consumed FFI” guarantee applies
+  > to the default build (`cargo build --workspace`, verifiable with
+  > `cargo tree --workspace`, which shows neither `ring`, `aws-lc-sys`, nor
+  > `reqwest`). Three features that are disabled by default instead pull in a
+  > TLS stack that links C/assembly: `scirust-trader/live` (→ `reqwest` +
+  > `rustls` + `aws-lc-sys`), `scirust-rsi/anthropic`, and
+  > `scirust-sciagent/fetch` (→ `ureq` + `ring`). These crates are therefore
+  > listed in `Cargo.lock` (which includes all optional dependencies) but are
+  > compiled and linked only when the feature is explicitly enabled;
+  > `scirust-sciagent/Cargo.toml` already documents this trade-off. A
+  > deployment that must remain 100% pure Rust should leave these features
+  > disabled.
 
-- **`unsafe` confiné et justifié** : le `unsafe` apparaît dans plusieurs
-  modules (intrinsics SIMD `scirust-simd/src/{dispatch,complex}.rs`,
-  alignement mémoire `scirust-arena/src/{slab,aligned,allocator}.rs` avec
-  backing `AlignBlock(128)`, autodiff/tenseur/matrix dans `scirust-core`,
-  et le point d'entrée enclave susmentionné). Chaque bloc est documenté par
-  un en-tête de sûreté (alignement, invariants, version anti-use-after-free).
-  Aucun `unsafe` n'est requis **de la part de l'appelant** sur les chemins
-  d'API publics de haut niveau : l'`unsafe` est interne et encapsulé.
+- **Confined and justified `unsafe` code**: `unsafe` appears in several
+  modules (SIMD intrinsics in `scirust-simd/src/{dispatch,complex}.rs`, memory
+  alignment in `scirust-arena/src/{slab,aligned,allocator}.rs` with
+  `AlignBlock(128)` backing, autodiff/tensor/matrix code in `scirust-core`, and
+  the enclave entry point described above). Each block is documented with a
+  safety header covering alignment, invariants, and the versioning scheme used
+  to prevent use-after-free. Callers do not need `unsafe` on public
+  high-level API paths; the internal `unsafe` code is encapsulated.
 
-- **Déterminisme** : l'inférence est bit-exacte et rejouable (runtime
-  SRT1) — propriété utile aux audits forensiques. Le bruit de la
-  *campagne* d'injection de fautes (`scirust-func-safety/src/fault_injection.rs`,
-  `NoiseInjection`) est lui-même déterministe (LCG à graine fixe dérivée
-  de l'indice du neurone) afin de préserver la reproductibilité ;
-  `rand::random` non seedé n'est utilisé dans aucun chemin d'inférence.
+- **Determinism**: inference is bit-exact and replayable (the SRT1 runtime), a
+  property useful for forensic audits. The noise in the fault-injection
+  campaign (`scirust-func-safety/src/fault_injection.rs`, `NoiseInjection`) is
+  deterministic as well (an LCG with a fixed seed derived from the neuron
+  index) so that runs remain reproducible; unseeded `rand::random` is not used
+  on any inference path.
 
-## SBOM (nomenclature logicielle)
+## SBOM (Software Bill of Materials)
 
-- **Format CycloneDX 1.x (JSON)** — standard consommable par les scanners
-  industriels (OWASP Dependency-Track, Grype, etc.).
-- **Génération reproductible** : `./scripts/generate-sbom.sh` (s'appuie sur
-  `cargo cyclonedx` + le `Cargo.lock` committé). Un instantané est versionné
-  dans [`docs/sbom/`](docs/sbom/) pour visibilité immédiate.
-- **CI/Release** : le job `sbom` régénère et publie le SBOM en artefact à
-  chaque build ; le workflow de release l'attache à chaque tag `v*`
-  (cf. `release v0.14`). La source de vérité reste `Cargo.lock` + la
-  régénération ; l'instantané committé ne doit pas être traité comme source.
+- **CycloneDX 1.x (JSON)** — a format consumable by industrial scanners such
+  as OWASP Dependency-Track and Grype.
+- **Reproducible generation**: `./scripts/generate-sbom.sh` uses
+  `cargo cyclonedx` and the committed `Cargo.lock`. A snapshot is versioned in
+  [`docs/sbom/`](docs/sbom/) for immediate visibility.
+- **CI/release**: the `sbom` job regenerates and publishes the SBOM as an
+  artifact for every build; the release workflow attaches it to every `v*`
+  tag (see `release v0.14`). The source of truth remains `Cargo.lock` plus
+  regeneration; the committed snapshot must not be treated as the source.
 
-## Chaîne d'approvisionnement CI
+## CI Supply Chain
 
-- Les workflows GitHub utilisent des actions tierces. Le pinning se fait par
-  tag de version (`@v2`, `@nightly`) ; pour durcir la chaîne d'approvisionnement,
-  pinner ces actions par **SHA de commit** est recommandé
-  (cf. audit [`docs/audits/AUDIT_COMPLET.md`](docs/audits/AUDIT_COMPLET.md),
-  finding S4).
-- Aucun workflow n'utilise `pull_request_target` (le pattern d'élévation
-  de privilèges dangereux). Le workflow `release.yml` restreint
-  `permissions: contents: write` au seul besoin de créer la release.
+- GitHub workflows use third-party actions. Pinning currently uses version
+  tags (`@v2`, `@nightly`); to harden the supply chain, pinning these actions
+  to commit SHAs is recommended (see the audit
+  [`docs/audits/AUDIT_COMPLET.md`](docs/audits/AUDIT_COMPLET.md), finding S4).
+- No workflow uses `pull_request_target` (the dangerous privilege-escalation
+  pattern). The `release.yml` workflow restricts `permissions: contents: write`
+  to the single operation that creates a release.
 
-## Avis connus acceptés
+## Known Accepted Advisories
 
-- RUSTSEC-2024-0436 (`paste`, unmaintained — non-vulnérabilité) :
-  dépendance transitive de nalgebra→simba, sans correctif amont ;
-  ignoré avec justification dans `deny.toml`.
+- RUSTSEC-2024-0436 (`paste`, unmaintained — not a vulnerability): a
+  transitive dependency of nalgebra → simba, with no upstream fix; it is
+  ignored with a justification in `deny.toml`.
 
-## Intégrité des artefacts de certification
+## Certification Artifact Integrity
 
-- Les dossiers d'evidence (`scirust-func-safety/src/evidence.rs`,
-  chaîne FNV-1a) sont **tamper-evident mais non tamper-resistant** :
-  ils détectent une édition naïve (champ modifié sans recalcul de la
-  chaîne) mais ne résistent pas à un attaquant qui recalcule toute la
-  chaîne (algorithme public, sans clé secrète). L'intégrité repose sur le
-  contrôle d'accès en écriture au fichier et sur l'argument de preuve
-  de la runtime (inférence vérifiable). Ne pas authentifier un dossier
-  non fiable uniquement via `from_json().verify()`.
+- The evidence records (`scirust-func-safety/src/evidence.rs`, FNV-1a hash
+  chain) are **tamper-evident but not tamper-resistant**: they detect a naive
+  edit (a field changed without recomputing the chain) but cannot resist an
+  attacker who recomputes the entire chain (the algorithm is public and uses
+  no secret key). Integrity therefore relies on write access control and on
+  the runtime's proof argument (verifiable inference). Do not authenticate an
+  untrusted record solely with `from_json().verify()`.
