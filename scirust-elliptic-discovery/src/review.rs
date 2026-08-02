@@ -63,6 +63,21 @@ impl LiteratureReview {
             sources,
         })
     }
+
+    /// Current human decision. Automated campaigns always leave it pending.
+    pub const fn decision(&self) -> LiteratureDecision {
+        self.decision
+    }
+
+    /// Recorded reviewer, empty while the review is pending.
+    pub fn reviewer(&self) -> &str {
+        &self.reviewer
+    }
+
+    /// Canonically ordered source set, empty while the review is pending.
+    pub const fn sources(&self) -> &BTreeSet<String> {
+        &self.sources
+    }
 }
 
 /// Invalid human-review record.
