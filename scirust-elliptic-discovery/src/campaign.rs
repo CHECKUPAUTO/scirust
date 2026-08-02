@@ -74,8 +74,7 @@ impl CampaignRun {
 
     /// Stable binary representation of the complete campaign evidence.
     pub fn canonical_bytes(&self) -> Vec<u8> {
-        let mut encoder =
-            CanonicalEncoder::with_domain(b"SCIRUST-ELLIPTIC-DISCOVERY/CAMPAIGN/V1");
+        let mut encoder = CanonicalEncoder::with_domain(b"SCIRUST-ELLIPTIC-DISCOVERY/CAMPAIGN/V1");
         encoder.u32(Self::SCHEMA_VERSION);
         encoder.bytes(&self.receipt.canonical_bytes());
 

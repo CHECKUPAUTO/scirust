@@ -5,8 +5,8 @@
 //! curve parameters. It has no key, address, SEC 1, network, or blockchain API.
 //! All arithmetic is exact and delegates modular primitives to scirust-modalg.
 
-pub mod canonical;
 pub mod campaign;
+pub mod canonical;
 pub mod catalog;
 pub mod classify;
 pub mod controls;
@@ -25,11 +25,11 @@ pub mod review;
 pub mod scope;
 pub mod search;
 
-pub use catalog::{CatalogEntry, CatalogFamily, RelationSignature, catalog_entry};
 pub use campaign::{
     CampaignReplayReport, CampaignReport, CampaignRun, MANDATORY_CONTROLS, execute_campaign,
     replay_campaign,
 };
+pub use catalog::{CatalogEntry, CatalogFamily, RelationSignature, catalog_entry};
 pub use classify::{Classification, ClassificationStatus, classify};
 pub use controls::{ControlId, ControlResult, run_control};
 pub use curve::{CurveError, ToyCurve, ToyPoint};
