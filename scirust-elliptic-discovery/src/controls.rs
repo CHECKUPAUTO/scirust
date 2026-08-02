@@ -116,6 +116,13 @@ pub fn run_control(corpus: &Corpus, id: ControlId) -> ControlResult {
                 corpus,
                 "control.j-zero-claimed-universal",
                 |curve, point| {
+                    // 2^3 = 1 mod 7, while 2 is not one. Restricting this
+                    // control to F_7 distinguishes the j=0 condition from an
+                    // invalid scale constant in another field.
+                    if curve.prime().value() != 7
+                    {
+                        return true;
+                    }
                     let Some((x, y)) = point.affine_coordinates()
                     else
                     {
@@ -209,5 +216,19 @@ mod tests {
             run_control(&corpus, ControlId::OverfitAZero).status(),
             ClassificationStatus::Refuted
         );
+    }
+
+    #[test]
+    fn j_zero_control_uses_a_valid_cube_root_before_refuting_non_j_zero_curves() {
+        let corpus = exhaustive();
+        let result = run_control(&corpus, ControlId::JZeroClaimedUniversal);
+        let counterexample = result
+            .counterexample()
+            .expect("a universal j=0 claim must be refuted");
+        assert_eq!(counterexample.curve_key().0, 7);
+        assert_ne!(counterexample.curve_key().1, 0);
+        let prime = crate::ToyPrime::new(7).expect("7 is a toy prime");
+        assert_eq!(Fp::new(prime, 2).pow(3).value(), 1);
+        assert_ne!(Fp::new(prime, 2).value(), 1);
     }
 }

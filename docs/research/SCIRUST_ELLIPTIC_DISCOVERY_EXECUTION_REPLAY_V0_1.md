@@ -44,9 +44,13 @@ Un `ExecutionReceipt` contient :
 - un résumé par statut autorisé ;
 - le nombre de contre-exemples enregistrés.
 
-L’encodage est binaire, big-endian, à longueurs explicites et séparé par le
-domaine `SCIRUST-ELLIPTIC-DISCOVERY/EXECUTION-RECEIPT/V1`. Les relations sont
-encodées par leur arbre syntaxique typé, jamais par `Debug` ou `Display`.
+L'encodage est binaire, big-endian, à longueurs explicites et séparé par le
+domaine `SCIRUST-ELLIPTIC-DISCOVERY/EXECUTION-RECEIPT/V1` dans la définition
+d'origine. La phase 7 fait évoluer le comportement de génération et passe les
+domaines de plan, d'évaluation et de reçu à `V2`; voir
+[`SCIRUST_ELLIPTIC_DISCOVERY_HARDENING_V0_1.md`](SCIRUST_ELLIPTIC_DISCOVERY_HARDENING_V0_1.md).
+Les relations sont encodées par leur arbre syntaxique typé, jamais par `Debug`
+ou `Display`.
 
 ### Rejeu
 

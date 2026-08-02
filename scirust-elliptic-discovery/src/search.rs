@@ -3,9 +3,10 @@
 use core::fmt;
 
 use crate::canonical::{CanonicalEncoder, sha256};
+use crate::grammar::{MAX_GENERATED_RELATIONS, MAX_GRAMMAR_DEPTH, MAX_GRAMMAR_SCALAR};
 use crate::{
     Classification, ClassificationStatus, Corpus, CorpusKind, Counterexample, ExperimentManifest,
-    LocalResearchCase, Relation, classify, first_point_counterexample, generate_relations,
+    LocalResearchCase, Relation, classify, first_point_counterexample_bounded, generate_relations,
 };
 
 const HOLDOUT_SEED_DOMAIN: u64 = 0x484f_4c44_4f55_5421;
@@ -23,9 +24,9 @@ pub struct SearchPlan {
 }
 
 impl SearchPlan {
-    pub const MAX_EXPRESSION_DEPTH: u8 = 4;
-    pub const MAX_SCALAR: u64 = 32;
-    pub const MAX_CANDIDATES: u32 = 10_000;
+    pub const MAX_EXPRESSION_DEPTH: u8 = MAX_GRAMMAR_DEPTH;
+    pub const MAX_SCALAR: u64 = MAX_GRAMMAR_SCALAR;
+    pub const MAX_CANDIDATES: u32 = MAX_GENERATED_RELATIONS as u32;
     pub const MAX_TUPLES_PER_CANDIDATE: u64 = 10_000_000;
     pub const MAX_CURVES_PER_PRIME: u32 = 64;
 
@@ -102,7 +103,7 @@ impl SearchPlan {
     /// Stable, domain-separated encoding of every search parameter.
     pub fn canonical_bytes(self) -> Vec<u8> {
         let mut encoder =
-            CanonicalEncoder::with_domain(b"SCIRUST-ELLIPTIC-DISCOVERY/SEARCH-PLAN/V1");
+            CanonicalEncoder::with_domain(b"SCIRUST-ELLIPTIC-DISCOVERY/SEARCH-PLAN/V2");
         encoder.bytes(env!("CARGO_PKG_VERSION").as_bytes());
         encoder.u64(self.seed);
         encoder.u8(self.expression_depth);
@@ -355,15 +356,12 @@ fn evaluate_gate(
     relation_id: &str,
 ) -> (GateReport, Option<Counterexample>) {
     let required_tuples = corpus.total_points();
-    let mut evaluated_tuples = 0u64;
-    let counterexample = first_point_counterexample(corpus, relation_id, |curve, point| {
-        if evaluated_tuples == tuple_budget
-        {
-            return true;
-        }
-        evaluated_tuples += 1;
-        relation.evaluate(curve, point).unwrap_or(false)
-    });
+    let falsification =
+        first_point_counterexample_bounded(corpus, relation_id, tuple_budget, |curve, point| {
+            relation.evaluate(curve, point).unwrap_or(false)
+        });
+    let evaluated_tuples = falsification.evaluated_tuples();
+    let counterexample = falsification.into_counterexample();
     let state = if counterexample.is_some()
     {
         GateState::Refuted
@@ -456,5 +454,6 @@ mod tests {
             ClassificationStatus::Inconclusive
         );
         assert_eq!(result.gates()[0].state(), GateState::InsufficientCoverage);
+        assert_eq!(result.gates()[0].evaluated_tuples(), 1);
     }
 }
