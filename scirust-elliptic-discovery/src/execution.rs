@@ -2,8 +2,8 @@
 
 use crate::canonical::{CanonicalEncoder, sha256};
 use crate::{
-    CandidateEvaluation, CatalogFamily, ClassificationStatus, CorpusKind, Counterexample,
-    GateState, PointExpression, Relation, ResearchCorpora, SearchPlan, run_search,
+    CandidateEvaluation, CatalogFamily, Classification, ClassificationStatus, CorpusKind,
+    Counterexample, GateState, PointExpression, Relation, ResearchCorpora, SearchPlan, run_search,
 };
 
 const STATUSES: [ClassificationStatus; 6] = [
@@ -140,13 +140,22 @@ impl ReplayReport {
 pub fn execute_local(plan: SearchPlan) -> ExecutionReceipt {
     let corpora = ResearchCorpora::generate(plan);
     let candidates = run_search(plan, &corpora);
+    receipt_from_results(plan, &corpora, &candidates)
+}
+
+/// Builds a receipt from the exact corpora and evaluations used by an orchestrated campaign.
+pub(crate) fn receipt_from_results(
+    plan: SearchPlan,
+    corpora: &ResearchCorpora,
+    candidates: &[CandidateEvaluation],
+) -> ExecutionReceipt {
     let corpus_fingerprints = [
         corpora.exhaustive_small().fingerprint(),
         corpora.independent_holdout().fingerprint(),
         corpora.scale_ladder().fingerprint(),
     ];
     let candidate_fingerprints = candidates.iter().map(candidate_fingerprint).collect();
-    let summary = summarize(&candidates);
+    let summary = summarize(candidates);
     ExecutionReceipt {
         plan,
         corpus_fingerprints,
@@ -190,25 +199,11 @@ fn summarize(candidates: &[CandidateEvaluation]) -> ExecutionSummary {
     }
 }
 
-fn candidate_fingerprint(candidate: &CandidateEvaluation) -> [u8; 32] {
+pub(crate) fn candidate_fingerprint(candidate: &CandidateEvaluation) -> [u8; 32] {
     let mut encoder =
         CanonicalEncoder::with_domain(b"SCIRUST-ELLIPTIC-DISCOVERY/CANDIDATE-EVALUATION/V2");
     encode_relation(&mut encoder, candidate.relation());
-    let classification = candidate.classification();
-    encoder.u8(status_tag(classification.status()));
-    match classification.catalog()
-    {
-        Some(entry) =>
-        {
-            encoder.u8(1);
-            encoder.bytes(entry.id.as_bytes());
-            encoder.u8(catalog_family_tag(entry.family));
-            encoder.u8(u8::from(entry.conditional));
-            encoder.u8(u8::from(entry.representation_artifact));
-            encoder.bytes(entry.reference.as_bytes());
-        },
-        None => encoder.u8(0),
-    }
+    encode_classification(&mut encoder, candidate.classification());
     encoder.u64(u64::try_from(candidate.gates().len()).expect("gate count fits in u64"));
     for gate in candidate.gates()
     {
@@ -227,6 +222,26 @@ fn candidate_fingerprint(candidate: &CandidateEvaluation) -> [u8; 32] {
         None => encoder.u8(0),
     }
     sha256(&encoder.finish())
+}
+
+pub(crate) fn encode_classification(
+    encoder: &mut CanonicalEncoder,
+    classification: Classification,
+) {
+    encoder.u8(status_tag(classification.status()));
+    match classification.catalog()
+    {
+        Some(entry) =>
+        {
+            encoder.u8(1);
+            encoder.bytes(entry.id.as_bytes());
+            encoder.u8(catalog_family_tag(entry.family));
+            encoder.u8(u8::from(entry.conditional));
+            encoder.u8(u8::from(entry.representation_artifact));
+            encoder.bytes(entry.reference.as_bytes());
+        },
+        None => encoder.u8(0),
+    }
 }
 
 fn encode_relation(encoder: &mut CanonicalEncoder, relation: &Relation) {
@@ -286,7 +301,10 @@ fn encode_point_expression(encoder: &mut CanonicalEncoder, expression: &PointExp
     }
 }
 
-fn encode_counterexample(encoder: &mut CanonicalEncoder, counterexample: &Counterexample) {
+pub(crate) fn encode_counterexample(
+    encoder: &mut CanonicalEncoder,
+    counterexample: &Counterexample,
+) {
     encoder.bytes(counterexample.relation_id().as_bytes());
     let (prime, a, b) = counterexample.curve_key();
     encoder.u64(prime);

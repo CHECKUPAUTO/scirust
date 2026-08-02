@@ -384,6 +384,17 @@ conditionnel \(j=0\) avec une racine cubique valide. Critère de sortie : aucune
 connues ne dépendent pas de l'ordre de construction de leur arbre. La spécification détaillée
 est [`SCIRUST_ELLIPTIC_DISCOVERY_HARDENING_V0_1.md`](SCIRUST_ELLIPTIC_DISCOVERY_HARDENING_V0_1.md).
 
+### Phase 8 — Orchestration de campagne locale
+
+Relier les contrôles obligatoires, la recherche bornée, le reçu, les tentatives
+de justification et les revues humaines en attente dans un artefact canonique
+unique. Ajouter un rapport Markdown stable et un rejeu strict de la campagne
+complète. Critère de sortie : une campagne exécute les six contrôles dans
+l'ordre, conserve toutes les évaluations et détecte toute divergence sans
+jamais fabriquer une décision de revue ou un statut de nouveauté. La
+spécification détaillée est
+[`SCIRUST_ELLIPTIC_DISCOVERY_CAMPAIGN_ORCHESTRATION_V0_1.md`](SCIRUST_ELLIPTIC_DISCOVERY_CAMPAIGN_ORCHESTRATION_V0_1.md).
+
 ## Validations à appliquer
 
 Après l’ajout du crate, exécuter au minimum :
