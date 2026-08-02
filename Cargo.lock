@@ -3019,6 +3019,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-ccos"
+version = "0.3.0"
+dependencies = [
+ "scirust-elliptic-discovery",
+ "sha2",
+]
+
+[[package]]
 name = "scirust-civil"
 version = "0.1.0"
 dependencies = [
@@ -3128,19 +3136,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "scirust-elliptic-discovery"
-version = "0.3.0"
-dependencies = [
- "scirust-modalg",
- "scirust-sim",
- "sha2",
-]
-
-[[package]]
 name = "scirust-electrotech"
 version = "0.1.0"
 dependencies = [
  "approx",
+]
+
+[[package]]
+name = "scirust-elliptic-discovery"
+version = "0.3.0"
+dependencies = [
+ "scirust-core",
+ "scirust-modalg",
+ "scirust-sim",
+ "scirust-simd",
+ "sha2",
 ]
 
 [[package]]

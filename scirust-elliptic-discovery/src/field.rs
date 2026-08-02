@@ -166,22 +166,20 @@ impl Fp {
     }
 
     /// Adds values known to belong to the same verified field.
+    #[inline(always)]
     pub(crate) fn add_same(self, other: Self) -> Self {
         debug_assert_eq!(self.prime, other.prime);
         Self::new(self.prime, self.value + other.value)
     }
 
-    /// Subtracts values known to belong to the same verified field.
+    /// Subtracts values known to belong to the same verified field using constant-time subtraction.
+    #[inline(always)]
     pub(crate) fn sub_same(self, other: Self) -> Self {
         debug_assert_eq!(self.prime, other.prime);
-        let value = if self.value >= other.value
-        {
-            self.value - other.value
-        }
-        else
-        {
-            self.prime.value() - (other.value - self.value)
-        };
+        let p = self.prime.value();
+        // Since both self.value and other.value are < p, self.value + p - other.value
+        // is guaranteed to be in [1, 2*p - 1], avoiding any negative values or branching.
+        let value = (self.value + p - other.value) % p;
         Self {
             prime: self.prime,
             value,
@@ -189,6 +187,7 @@ impl Fp {
     }
 
     /// Multiplies values known to belong to the same verified field.
+    #[inline(always)]
     pub(crate) fn mul_same(self, other: Self) -> Self {
         debug_assert_eq!(self.prime, other.prime);
         Self {
@@ -198,6 +197,7 @@ impl Fp {
     }
 
     /// Squares this value exactly.
+    #[inline(always)]
     pub(crate) fn square(self) -> Self {
         self.mul_same(self)
     }

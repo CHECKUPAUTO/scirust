@@ -773,9 +773,11 @@ mod tests {
         let tools = Tool::builtins();
         let status = tools.iter().find(|t| t.name == "status").unwrap();
         let result = (status.execute)(HashMap::new());
+        // Git status might return modified files such as Cargo.lock, Cargo.toml, or be empty.
+        // We ensure that it runs successfully and does not output a Git error or timeout.
         assert!(
-            result.contains(".rs") || result.is_empty(),
-            "Status should work"
+            !result.contains("Git error") && !result.contains("timed out"),
+            "Status should work, but got error: {result}"
         );
     }
 
