@@ -99,6 +99,10 @@ L'encodage contient, dans cet ordre :
 Les longueurs sont explicites et tous les entiers sont en ordre big-endian via
 `CanonicalEncoder`. L'empreinte de campagne est le SHA-256 de ces octets.
 
+L'ajout de cette surface publique porte le crate à `0.3.0`. Les domaines V2 du
+plan, des évaluations et du reçu restent inchangés : ils encodent déjà la
+version du crate. Le nouvel artefact reçoit son propre domaine `CAMPAIGN/V1`.
+
 La phase n'ajoute aucun décodeur de données externes. Le rejeu reçoit un objet
 `CampaignRun` déjà construit par l'API locale et recalcule la campagne à partir
 du `SearchPlan` validé qu'il contient.

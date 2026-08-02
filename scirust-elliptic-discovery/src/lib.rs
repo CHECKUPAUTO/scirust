@@ -6,6 +6,7 @@
 //! All arithmetic is exact and delegates modular primitives to scirust-modalg.
 
 pub mod canonical;
+pub mod campaign;
 pub mod catalog;
 pub mod classify;
 pub mod controls;
@@ -25,6 +26,10 @@ pub mod scope;
 pub mod search;
 
 pub use catalog::{CatalogEntry, CatalogFamily, RelationSignature, catalog_entry};
+pub use campaign::{
+    CampaignReplayReport, CampaignReport, CampaignRun, MANDATORY_CONTROLS, execute_campaign,
+    replay_campaign,
+};
 pub use classify::{Classification, ClassificationStatus, classify};
 pub use controls::{ControlId, ControlResult, run_control};
 pub use curve::{CurveError, ToyCurve, ToyPoint};
