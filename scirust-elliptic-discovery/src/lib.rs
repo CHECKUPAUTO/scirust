@@ -58,3 +58,9 @@ pub use search::{
     CandidateEvaluation, GateReport, GateState, ResearchCorpora, SearchError, SearchPlan,
     evaluate_candidate, run_search,
 };
+
+pub mod hypercomplex_curve;
+pub use hypercomplex_curve::{OctonionCurve, OctonionPoint, SedenionCurve, SedenionPoint};
+
+pub mod quantum_eval;
+pub use quantum_eval::{QuantumIsogenyEvaluator, ShorAssessment, IsogenyAssessment};
