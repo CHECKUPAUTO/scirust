@@ -178,8 +178,12 @@ impl Fp {
         debug_assert_eq!(self.prime, other.prime);
         let p = self.prime.value();
         // Since both self.value and other.value are < p, self.value + p - other.value
-        // is guaranteed to be in [1, 2*p - 1], avoiding any negative values or branching.
-        let value = (self.value + p - other.value) % p;
+        // is guaranteed to be in [1, 2*p - 1].
+        let diff = self.value + p - other.value;
+        // Branchless constant-time subtraction: if diff >= p, subtract p.
+        // We compile `% p` away to avoid variable-time hardware division instructions.
+        let mask = (diff >= p) as u64;
+        let value = diff - (mask * p);
         Self {
             prime: self.prime,
             value,

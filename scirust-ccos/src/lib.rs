@@ -1,9 +1,9 @@
 #![forbid(unsafe_code)]
 //! Cognitive Context Orchestration System (CCOS) interfacing and SoulLink Multi-Agent Mesh Network.
 
+use scirust_elliptic_discovery::{SearchPlan, execute_campaign};
 use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
-use scirust_elliptic_discovery::{SearchPlan, execute_campaign};
 
 /// Domain separator for CCOS campaign artifacts.
 pub const DOMAIN: &[u8] = b"SCIRUST-ELLIPTIC-DISCOVERY/CAMPAIGN/V1";
@@ -18,7 +18,8 @@ pub enum ValidationState {
 
 impl ValidationState {
     pub const fn tag(self) -> u8 {
-        match self {
+        match self
+        {
             Self::Pending => 0,
             Self::Certified => 1,
             Self::Refuted => 2,
@@ -110,8 +111,10 @@ impl CcosSemanticMemory {
     /// Verifies the cryptographic integrity of the entire memory chain.
     pub fn verify_integrity(&self) -> bool {
         let mut expected_prev = [0u8; 32];
-        for artifact in &self.artifacts {
-            if !artifact.verify(expected_prev) {
+        for artifact in &self.artifacts
+        {
+            if !artifact.verify(expected_prev)
+            {
                 return false;
             }
             expected_prev = artifact.chain_hash;
@@ -136,32 +139,43 @@ impl SoulLinkMesh {
 
     /// Registers a new sub-agent.
     pub fn register_agent(&mut self, agent_id: &str) {
-        if !self.agents.iter().any(|a| a == agent_id) {
+        if !self.agents.iter().any(|a| a == agent_id)
+        {
             self.agents.push(agent_id.to_string());
         }
     }
 
     /// Submits a dynamic SearchPlan from an agent, validating it via the canonical controls.
-    pub fn submit_plan(&mut self, agent_id: &str, plan: SearchPlan) -> Result<&CcosCampaignArtifact, String> {
+    pub fn submit_plan(
+        &mut self,
+        agent_id: &str,
+        plan: SearchPlan,
+    ) -> Result<&CcosCampaignArtifact, String> {
         self.register_agent(agent_id);
 
         let plan_fingerprint = plan.fingerprint();
 
         // 1. Log the Pending state to CCOS semantic memory
-        self.memory.append(plan_fingerprint, [0u8; 32], ValidationState::Pending);
+        self.memory
+            .append(plan_fingerprint, [0u8; 32], ValidationState::Pending);
 
         // 2. Execute the campaign deterministically (reproducing 6 strict canonical controls)
         let campaign_run = execute_campaign(plan);
         let campaign_fingerprint = campaign_run.fingerprint();
 
         // 3. Complete the orchestration with Certified or Refuted status
-        let final_state = if campaign_run.controls_valid() {
+        let final_state = if campaign_run.controls_valid()
+        {
             ValidationState::Certified
-        } else {
+        }
+        else
+        {
             ValidationState::Refuted
         };
 
-        let final_artifact = self.memory.append(plan_fingerprint, campaign_fingerprint, final_state);
+        let final_artifact =
+            self.memory
+                .append(plan_fingerprint, campaign_fingerprint, final_state);
         Ok(final_artifact)
     }
 
