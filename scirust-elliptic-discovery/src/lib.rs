@@ -1,10 +1,13 @@
 #![forbid(unsafe_code)]
+#![allow(clippy::needless_range_loop)]
+#![allow(clippy::manual_is_multiple_of)]
 //! Exact, deterministic experimentation on locally generated toy elliptic curves.
 //!
 //! This crate deliberately accepts only small prime fields and locally specified
 //! curve parameters. It has no key, address, SEC 1, network, or blockchain API.
 //! All arithmetic is exact and delegates modular primitives to scirust-modalg.
 
+pub mod adjacent;
 pub mod campaign;
 pub mod canonical;
 pub mod catalog;
@@ -25,12 +28,20 @@ pub mod review;
 pub mod scope;
 pub mod search;
 
+pub use adjacent::{
+    evaluate_line, evaluate_vertical, miller_loop, reduced_tate_pairing, weil_pairing,
+    ibe_hash_to_point, IbeParams, IbeCiphertext, ibe_encrypt, ibe_decrypt,
+    PairingCommitment, velu_isogeny_curve, apply_velu_isogeny, find_isogeny_path,
+    Oct8Fp, Sedenion16Fp, QuantumVulnerabilityReport, simulate_quantum_attack_resistance,
+    CcosAuditBlock, CcosAuditChain,
+};
 pub use campaign::{
     CampaignReplayReport, CampaignReport, CampaignRun, MANDATORY_CONTROLS, execute_campaign,
     replay_campaign,
 };
 pub use catalog::{CatalogEntry, CatalogFamily, RelationSignature, catalog_entry};
 pub use classify::{Classification, ClassificationStatus, classify};
+pub use campaign::MANDATORY_CONTROLS as CAMPAIGN_MANDATORY_CONTROLS; // avoid duplicate
 pub use controls::{ControlId, ControlResult, run_control};
 pub use curve::{CurveError, ToyCurve, ToyPoint};
 pub use execution::{
@@ -58,3 +69,11 @@ pub use search::{
     CandidateEvaluation, GateReport, GateState, ResearchCorpora, SearchError, SearchPlan,
     evaluate_candidate, run_search,
 };
+
+#[cfg(feature = "portable-simd")]
+pub mod hypercomplex_curve;
+#[cfg(feature = "portable-simd")]
+pub use hypercomplex_curve::{OctonionCurve, OctonionPoint, SedenionCurve, SedenionPoint};
+
+pub mod quantum_eval;
+pub use quantum_eval::{IsogenyAssessment, QuantumIsogenyEvaluator, ShorAssessment};
