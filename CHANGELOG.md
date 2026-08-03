@@ -5,6 +5,13 @@ versions sémantiques à partir de la prochaine release taguée.
 
 ## [Non publié]
 
+### Ajouté — Extension des domaines adjacents d'ECC dans SciRust
+- **Bilinear Pairings (Couplages Bilinéaires)** : implémentation de l'évaluation de ligne, de l'algorithme de Miller, et des couplages de Weil et Tate réduits sans allocation dynamique (hot-paths zero-allocation).
+- **Identity-Based Encryption & Commitments** : primitives IBE Boneh-Franklin et accumulateurs/engagements bilinéaires.
+- **Post-Quantum Isogenies (Isogénies)** : implémentation des formules de Vélu pour les courbes et points de sous-groupes d'ordre impair, et exploration de graphes d'isogénies par BFS.
+- **Cayley-Dickson Hypercomplex Curve Algebras** : types d'Octonions (`Oct8Fp`) et de Sédénions (`Sedenion16Fp`) sur $F_p$ avec multiplication non commutative/non associative et cryptage géométrique.
+- **Simulateur Hybride & Traçabilité CCOS** : modélisation de la résonance du filtre de Shor sur `DenseStateVector` et journalisation immuable dans `CcosAuditChain` par empreintes SHA-256.
+
 ### Clôturé — chantier paper Correctness '26 : archivage (non soumis en 2026)
 - **Décision utilisateur (2026-07-11)** : pas de soumission cette année. Le
   draft `paper/correctness26/` est archivé en l'état (bandeau de statut +
