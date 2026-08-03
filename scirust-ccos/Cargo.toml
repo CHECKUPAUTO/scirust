@@ -1,0 +1,12 @@
+[package]
+name = "scirust-ccos"
+version = "0.3.0"
+edition = "2021"
+publish = false
+rust-version = "1.89"
+description = "Cognitive Context Orchestration System (CCOS) deep interfacing and multi-agent mesh orchestration for SciRust"
+license-file = "../LICENSE.md"
+
+[dependencies]
+scirust-elliptic-discovery = { path = "../scirust-elliptic-discovery" }
+sha2 = "0.10"
