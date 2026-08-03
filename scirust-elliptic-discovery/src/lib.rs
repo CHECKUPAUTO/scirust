@@ -58,3 +58,11 @@ pub use search::{
     CandidateEvaluation, GateReport, GateState, ResearchCorpora, SearchError, SearchPlan,
     evaluate_candidate, run_search,
 };
+
+#[cfg(feature = "portable-simd")]
+pub mod hypercomplex_curve;
+#[cfg(feature = "portable-simd")]
+pub use hypercomplex_curve::{OctonionCurve, OctonionPoint, SedenionCurve, SedenionPoint};
+
+pub mod quantum_eval;
+pub use quantum_eval::{IsogenyAssessment, QuantumIsogenyEvaluator, ShorAssessment};

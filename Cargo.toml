@@ -183,6 +183,7 @@ members = [
     "scirust-causal",
     "scirust-modalg",
     "scirust-elliptic-discovery",
+    "scirust-ccos",
     "scirust-hypercrypto",
     "scirust-algogen",
     "scirust-automl",
