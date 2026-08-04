@@ -205,8 +205,60 @@ Selection constraints are intentionally stricter than the original local proof:
 aggregate, mean, and 90th-percentile trajectory stale-loss must remain below
 `0.01`, and mean local compute improvement must remain at least `0.8%`. Eligible
 guards are ranked by the fewest and least concentrated skipped decisions before
-compute improvement. The selected guard is exploratory and must be frozen before
-evaluation on new task prompts.
+compute improvement.
+
+Observed selection result:
+
+- candidates evaluated: `120`;
+- eligible candidates: `6`;
+- minimum skip margin: `0.000017300677036841128`;
+- minimum normalized refresh cost: `0.9642857142857143` (`27/28`);
+- maximum skips per attention layer: `4`;
+- cooldown decisions: `0`;
+- skipped decisions reduced from `312` to `226`;
+- mean skipped decisions per trajectory reduced from `5.2` to `3.7667`;
+- maximum skipped decisions per trajectory reduced from `8` to `4`;
+- aggregate stale-loss fraction: `0.0005645126`;
+- mean trajectory stale-loss fraction: `0.0011382795`;
+- 90th-percentile trajectory stale-loss fraction: `0.0016884127`;
+- worst trajectory stale-loss fraction: `0.0111111111`;
+- mean local compute improvement: `0.8951668%`;
+- local quality criterion: pass;
+- local compute criterion: pass.
+
+Because the normalized refresh-cost threshold is exactly `27/28`, this guard
+permits skips only in the first attention layer. The four-skip cap is maintained
+per layer and reset for every generation. The phase-3 trace is now development
+data for the guard and can no longer confirm it independently.
+
+## Phase 7: frozen guard on independent GSM8K prompts
+
+```bash
+bash experiments/elastic-cache-policy/jetson/run_guarded_independent_gsm8k.sh
+```
+
+The selected guard is implemented exactly in the patched Dream runtime and
+frozen before task evaluation. This phase:
+
+- uses seed `20260808`;
+- selects 60 GSM8K questions disjoint from all 60 phase-4/5 indices;
+- performs two runs per mode and question in counterbalanced `ABBA/BAAB` order;
+- uses the same generation seed for all four runs of a question;
+- fits or calibrates neither the five policies nor the guard;
+- preserves the phase-4 negative verdict;
+- bootstraps the 60 per-question median differences with 10,000 samples.
+
+Pre-registered success requires:
+
+- exact-match non-inferiority within five percentage points, including the lower
+  bootstrap bound;
+- mean latency improvement at least `0.5%` with lower 95% bound above zero;
+- mean total refresh-cost improvement at least `0.5%` with lower 95% bound above
+  zero;
+- exact deterministic reproducibility within each mode.
+
+The primary field is `independent_guard_validation_success`. Exit status `2`
+means a valid negative scientific result, not a runtime failure.
 
 ## Counterfactual metric
 
