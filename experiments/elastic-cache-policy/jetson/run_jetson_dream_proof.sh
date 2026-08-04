@@ -8,6 +8,7 @@ ELASTIC_ROOT="$WORK_ROOT/Elastic-Cache"
 VENV="$WORK_ROOT/venv"
 OUTPUT_ROOT="$WORK_ROOT/results/$(date -u +%Y%m%dT%H%M%SZ)"
 POLICY_BRANCH="research/elastic-cache-policy-discovery"
+TORCH_INDEX="https://download.pytorch.org/whl/cu130"
 
 fail() { printf 'ERREUR: %s\n' "$*" >&2; exit 1; }
 command -v git >/dev/null || fail "git introuvable"
@@ -40,12 +41,30 @@ else
     git -C "$ELASTIC_ROOT" checkout -B main origin/main
 fi
 
-if [ ! -d "$VENV" ]; then
-    python3 -m venv --system-site-packages "$VENV"
+# The host currently contains a CPU-only PyTorch used by other software. Never
+# inherit it: the proof needs an isolated CUDA 13 ARM64 wheel and must not modify
+# TensorRT-LLM's global Python environment.
+if [ -x "$VENV/bin/python" ]; then
+    if ! "$VENV/bin/python" - <<'PY' >/dev/null 2>&1
+import torch
+raise SystemExit(0 if torch.version.cuda and torch.cuda.is_available() else 1)
+PY
+    then
+        printf 'Recréation du venv expérimental CPU-only: %s\n' "$VENV"
+        rm -rf "$VENV"
+    fi
 fi
+
+if [ ! -x "$VENV/bin/python" ]; then
+    python3 -m venv "$VENV"
+    "$VENV/bin/python" -m pip install --upgrade 'pip<27' 'setuptools<80' wheel
+    "$VENV/bin/python" -m pip install \
+        --index-url "$TORCH_INDEX" \
+        'torch==2.10.0+cu130'
+fi
+
 # shellcheck disable=SC1091
 source "$VENV/bin/activate"
-python -m pip install --upgrade pip wheel setuptools
 python -m pip install \
     'transformers==4.49.0' \
     'accelerate==0.34.2' \
@@ -56,14 +75,22 @@ python -m pip install \
 python - <<'PY'
 import torch
 print("torch=", torch.__version__)
+print("torch_file=", torch.__file__)
 print("cuda_runtime=", torch.version.cuda)
 print("cuda_available=", torch.cuda.is_available())
-if not torch.cuda.is_available():
-    raise SystemExit("CUDA indisponible dans le venv; ne pas installer un wheel torch générique")
+if not torch.version.cuda or not torch.cuda.is_available():
+    raise SystemExit("PyTorch CUDA 13 indisponible dans le venv isolé")
 print("device=", torch.cuda.get_device_name(0))
+print("capability=", torch.cuda.get_device_capability(0))
 print("bf16_supported=", torch.cuda.is_bf16_supported())
 if not torch.cuda.is_bf16_supported():
     raise SystemExit("BF16 CUDA indisponible sur ce runtime Jetson")
+# Validate the GEMM path used by Dream, not merely CUDA device discovery.
+a = torch.randn((512, 512), device="cuda", dtype=torch.bfloat16)
+b = torch.randn((512, 512), device="cuda", dtype=torch.bfloat16)
+c = a @ b
+torch.cuda.synchronize()
+print("bf16_gemm_checksum=", float(c.float().abs().mean().item()))
 PY
 
 rustup toolchain install nightly-2026-07-02 --profile minimal
@@ -72,6 +99,9 @@ export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
 export HF_HUB_ENABLE_HF_TRANSFER=1
 export TOKENIZERS_PARALLELISM=false
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda-13}"
+export PATH="$CUDA_HOME/bin:$PATH"
+export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
 
 python "$SCIRUST_RUN/experiments/elastic-cache-policy/jetson/dream_jetson_proof.py" \
     --elastic-cache "$ELASTIC_ROOT" \
