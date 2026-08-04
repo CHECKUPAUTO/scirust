@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Fail-closed patcher adding the SciRust policy to Elastic-Cache Dream."""
+"""Fail-closed patcher adding SciRust cache policies to Elastic-Cache Dream.
+
+The runtime feature extraction mirrors the real counterfactual trace collector:
+cosine drift, similarity worsening, per-head standard deviation, normalized
+cache age, untracked attention mass, layer fraction, drift-age interaction, and
+normalized downstream refresh cost.
+"""
 from __future__ import annotations
 
 import argparse
@@ -20,6 +26,14 @@ _SCIRUST_DEFAULT_WEIGHTS = (
 _SCIRUST_DEFAULT_THRESHOLD = 1.0058506570900936
 
 
+def _scirust_linear_score(weights, features):
+    if len(weights) != len(features):
+        raise ValueError(
+            f"SciRust policy feature mismatch: {len(weights)} weights for {len(features)} features"
+        )
+    return sum(float(weight) * feature for weight, feature in zip(weights, features))
+
+
 def _scirust_cache_decision(
     module,
     similarity,
@@ -30,10 +44,16 @@ def _scirust_cache_decision(
 ):
     """Return a deterministic refresh decision and record runtime evidence."""
     similarity_value = float(similarity.detach().float().item())
-    head_std = float(per_head_similarity.detach().float().std(unbiased=False).item())
-    attention_mass = float(tracked_attention_mass.detach().float().clamp(0.0, 1.0).item())
+    head_std = float(
+        per_head_similarity.detach().float().std(unbiased=False).clamp_min(0.0).item()
+    )
+    attention_mass = float(
+        tracked_attention_mass.detach().float().clamp(0.0, 1.0).item()
+    )
     previous_similarity = getattr(module, "scirust_previous_similarity", None)
-    similarity_delta = 0.0 if previous_similarity is None else similarity_value - previous_similarity
+    similarity_delta = (
+        0.0 if previous_similarity is None else similarity_value - previous_similarity
+    )
     module.scirust_previous_similarity = similarity_value
 
     age_steps = int(getattr(module, "scirust_cache_age_steps", 0)) + 1
@@ -57,12 +77,36 @@ def _scirust_cache_decision(
     )
 
     mode = getattr(module, "scirust_policy_mode", "gamma")
-    weights = tuple(getattr(module, "scirust_policy_weights", _SCIRUST_DEFAULT_WEIGHTS))
-    threshold = float(getattr(module, "scirust_policy_threshold", _SCIRUST_DEFAULT_THRESHOLD))
-    risk = sum(weight * feature for weight, feature in zip(weights, features))
+    weights = tuple(
+        getattr(module, "scirust_policy_weights", _SCIRUST_DEFAULT_WEIGHTS)
+    )
+    threshold = float(
+        getattr(module, "scirust_policy_threshold", _SCIRUST_DEFAULT_THRESHOLD)
+    )
+    score = _scirust_linear_score(weights, features)
+    votes = None
 
     if mode == "linear":
-        refresh = risk >= threshold
+        refresh = score >= threshold
+    elif mode == "ensemble":
+        policies = tuple(getattr(module, "scirust_policy_ensemble", ()))
+        if not policies:
+            raise ValueError("SciRust ensemble mode requires at least one frozen policy")
+        vote_threshold = int(
+            getattr(module, "scirust_policy_vote_threshold", (len(policies) // 2) + 1)
+        )
+        if not 1 <= vote_threshold <= len(policies):
+            raise ValueError(
+                f"invalid SciRust ensemble vote threshold {vote_threshold} for {len(policies)} policies"
+            )
+        policy_scores = []
+        votes = 0
+        for policy_weights, policy_threshold in policies:
+            policy_score = _scirust_linear_score(tuple(policy_weights), features)
+            policy_scores.append(policy_score)
+            votes += int(policy_score >= float(policy_threshold))
+        score = sum(policy_scores) / len(policy_scores)
+        refresh = votes >= vote_threshold
     elif mode == "always":
         refresh = True
     elif mode == "never":
@@ -73,13 +117,15 @@ def _scirust_cache_decision(
         raise ValueError(f"unsupported SciRust cache policy mode: {mode}")
 
     module.scirust_decisions = int(getattr(module, "scirust_decisions", 0)) + 1
-    module.scirust_risk_sum = float(getattr(module, "scirust_risk_sum", 0.0)) + risk
+    module.scirust_risk_sum = float(getattr(module, "scirust_risk_sum", 0.0)) + score
     module.scirust_possible_refresh_cost = (
         float(getattr(module, "scirust_possible_refresh_cost", 0.0)) + refresh_cost
     )
     if refresh:
         module.scirust_refreshes = int(getattr(module, "scirust_refreshes", 0)) + 1
-        module.scirust_refresh_cost = float(getattr(module, "scirust_refresh_cost", 0.0)) + refresh_cost
+        module.scirust_refresh_cost = (
+            float(getattr(module, "scirust_refresh_cost", 0.0)) + refresh_cost
+        )
 
     if bool(getattr(module, "scirust_trace_enabled", False)):
         trace = getattr(module, "scirust_trace", None)
@@ -96,7 +142,8 @@ def _scirust_cache_decision(
                 "attention_mass": attention_mass,
                 "layer_fraction": layer_fraction,
                 "refresh_cost": refresh_cost,
-                "risk": risk,
+                "risk": score,
+                "votes": votes,
                 "refresh": bool(refresh),
             }
         )
@@ -110,11 +157,15 @@ OLD_DECISION = r'''            sim = F.cosine_similarity(past_att_weight, att_we
 '''
 
 NEW_DECISION = r'''            sim = F.cosine_similarity(past_att_weight, att_weight, dim=1).mean()
-            per_head_sim = F.cosine_similarity(
-                past_att_weight.float(), att_weight.float(), dim=-1
-            )
+            past_flat = past_att_weight.float().flatten(2)
+            tracked_flat = att_weight.float().flatten(2)
+            per_head_sim = F.cosine_similarity(past_flat, tracked_flat, dim=2)
             if track_position.numel() > 0:
-                tracked_attention_mass = att_weight.index_select(-1, track_position).sum(dim=-1).mean()
+                tracked_mass = masked_att_weight[..., track_position].sum()
+                total_mass = masked_att_weight.sum().clamp_min(
+                    torch.finfo(masked_att_weight.dtype).tiny
+                )
+                tracked_attention_mass = tracked_mass / total_mass
             else:
                 tracked_attention_mass = att_weight.new_tensor(0.0)
             if _scirust_cache_decision(
@@ -152,7 +203,10 @@ def main() -> None:
 
     target = args.elastic_cache_root / "dream" / "model" / "modeling_dream.py"
     text = target.read_text(encoding="utf-8")
-    marker = "    return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)\n"
+    marker = (
+        "    return hidden_states.reshape(batch, num_key_value_heads * n_rep, "
+        "slen, head_dim)\n"
+    )
     if text.count(marker) != 1:
         raise RuntimeError("repeat_kv insertion marker is not unique")
     if "_SCIRUST_DEFAULT_WEIGHTS" in text:
