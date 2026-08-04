@@ -3,7 +3,7 @@
 baseline (2.13.0). OFFLINE tool: not run in CI. Output fixtures are data only.
 
 Usage:
-    python3 generate_fixtures.py [--torch-bin PATH] [--families elementwise,reductions]
+    python3 generate_fixtures.py [--torch-bin PATH] [--families elementwise,reductions,normalization,shape,linear,loss]
 
 Provenance rules (LICENSING_AND_PROVENANCE.md):
   - executes the pinned baseline (`torch.__version__` must be 2.13.0),
@@ -169,6 +169,127 @@ def gen_normalization(gen, family_dir: Path) -> None:
         write(op, family_dir, cases, note="dim=-1 (dernière dimension)")
 
 
+def shape_forward(op, x, params):
+    """Retourne (y, gx) pour les ops de shape ; params selon l'op."""
+    if op == "reshape":
+        return torch.reshape(x, params["new_shape"])
+    if op == "transpose":
+        d0, d1 = params["dims"]
+        return torch.transpose(x, d0, d1)
+    if op == "permute":
+        return torch.permute(x, params["dims"])
+    if op == "broadcast_to":
+        return torch.broadcast_to(x, params["bcast_to"])
+    if op == "slice":
+        axis, start, end = params["axis"], params["start"], params["end"]
+        idx = [slice(None)] * x.dim()
+        idx[axis] = slice(start, end)
+        return x[tuple(idx)]
+    if op == "flatten":
+        return torch.flatten(x)
+    raise SystemExit(f"unknown shape op {op}")
+
+
+SHAPE_CASES = {
+    "reshape": [{"new_shape": [2, 6]}, {"new_shape": [10]}],
+    "transpose": [{"dims": (0, 1)}, {"dims": (0, 1)}],
+    "permute": [{"dims": (1, 0)}, {"dims": (1, 0)}],
+    "broadcast_to": [{"bcast_to": [3, 4]}, {"bcast_to": [2, 4]}],
+    "slice": [{"axis": 1, "start": 1, "end": 3}, {"axis": 0, "start": 1, "end": 4}],
+    "flatten": [{}, {}],
+}
+# broadcast_to exige des shapes broadcastables (sinon RuntimeError torch) :
+# on utilise des shapes d'entrée spécifiques (1,4)->(3,4) et (2,1)->(2,4).
+BROADCAST_IN_SHAPES = [(1, 4), (2, 1)]
+
+
+def gen_shape(gen, family_dir: Path) -> None:
+    for op, param_list in SHAPE_CASES.items():
+        cases = []
+        shapes = BROADCAST_IN_SHAPES if op == "broadcast_to" else SHAPES
+        for shape, params in zip(shapes, param_list):
+            x = seed_tensor(gen, shape, -3.0, 3.0).requires_grad_(True)
+            y = shape_forward(op, x, params)
+            gout = seed_tensor(gen, list(y.shape), -1.0, 1.0)
+            (gx,) = torch.autograd.grad(y, x, grad_outputs=gout)
+            case = {"kind": "shape", "shape": list(shape), "x": flat(x.detach()),
+                    "out_shape": list(y.shape), "y": flat(y.detach()),
+                    "gout": flat(gout), "gx": flat(gx)}
+            case.update({k: (list(v) if isinstance(v, (list, tuple)) else v)
+                         for k, v in params.items()})
+            cases.append(case)
+        write(op, family_dir, cases, note="exact reorder/copy ops; grads per torch autograd")
+
+
+def gen_linear(gen, family_dir: Path) -> None:
+    # matmul 2-D
+    for op, (s1, s2) in {"matmul": (([2, 3], [3, 4]), ([5, 2], [2, 3]))}.items():
+        cases = []
+        for (sa, sb) in (s1, s2):
+            a = seed_tensor(gen, sa, -2.0, 2.0).requires_grad_(True)
+            b = seed_tensor(gen, sb, -2.0, 2.0).requires_grad_(True)
+            y = torch.matmul(a, b)
+            gout = seed_tensor(gen, list(y.shape), -1.0, 1.0)
+            ga, gb = torch.autograd.grad(y, (a, b), grad_outputs=gout)
+            cases.append({"kind": "linear", "shape": list(sa), "a": flat(a.detach()),
+                          "b": flat(b.detach()), "out_shape": list(y.shape), "y": flat(y.detach()),
+                          "gout": flat(gout), "gx": flat(ga), "gb": flat(gb)})
+        write(op, family_dir, cases, note="2-D matmul, both operands autograd")
+    # bmm 3-D
+    cases = []
+    for (sa, sb) in (([2, 2, 3], [2, 3, 4]), ([3, 5, 2], [3, 2, 4])):
+        a = seed_tensor(gen, sa, -2.0, 2.0).requires_grad_(True)
+        b = seed_tensor(gen, sb, -2.0, 2.0).requires_grad_(True)
+        y = torch.bmm(a, b)
+        gout = seed_tensor(gen, list(y.shape), -1.0, 1.0)
+        ga, gb = torch.autograd.grad(y, (a, b), grad_outputs=gout)
+        cases.append({"kind": "linear", "shape": list(sa), "a": flat(a.detach()),
+                      "b": flat(b.detach()), "out_shape": list(y.shape), "y": flat(y.detach()),
+                      "gout": flat(gout), "gx": flat(ga), "gb": flat(gb)})
+    write("bmm", family_dir, cases, note="3-D batched matmul, both operands autograd")
+    # linear F.linear(x, w, b)
+    cases = []
+    for (sx, sw) in (([2, 4], [3, 4]), ([5, 3], [2, 3])):
+        x = seed_tensor(gen, sx, -2.0, 2.0).requires_grad_(True)
+        w = seed_tensor(gen, sw, -1.0, 1.0).requires_grad_(True)
+        b = seed_tensor(gen, [sw[0]], -1.0, 1.0).requires_grad_(True)
+        y = torch.nn.functional.linear(x, w, b)
+        gout = seed_tensor(gen, list(y.shape), -1.0, 1.0)
+        gx, gw, gb = torch.autograd.grad(y, (x, w, b), grad_outputs=gout)
+        cases.append({"kind": "linear", "shape": list(sx), "x": flat(x.detach()),
+                      "w": flat(w.detach()), "b": flat(b.detach()), "out_shape": list(y.shape),
+                      "y": flat(y.detach()), "gout": flat(gout), "gx": flat(gx),
+                      "gw": flat(gw), "gb": flat(gb)})
+    write("linear", family_dir, cases, note="F.linear(x, w, b) with bias, autograd on all")
+
+
+def gen_loss(gen, family_dir: Path) -> None:
+    # mse_loss mean
+    cases = []
+    for s in SHAPES:
+        p = seed_tensor(gen, s, -2.0, 2.0).requires_grad_(True)
+        t = seed_tensor(gen, s, -2.0, 2.0)
+        y = torch.nn.functional.mse_loss(p, t, reduction="mean")
+        gout = seed_tensor(gen, [], 1.0, 1.0)
+        (gp,) = torch.autograd.grad(y, p, grad_outputs=gout)
+        cases.append({"kind": "loss", "shape": list(s), "x": flat(p.detach()),
+                      "target": flat(t.detach()), "out_shape": [], "y": flat(y.detach()),
+                      "gout": flat(gout), "gx": flat(gp)})
+    write("mse_loss", family_dir, cases, note="reduction='mean', scalar out")
+    # cross_entropy mean, targets indices
+    cases = []
+    for (s, targets) in (([2, 4], [1, 3]), ([3, 5], [0, 2, 4])):
+        logits = seed_tensor(gen, s, -2.0, 2.0).requires_grad_(True)
+        tgt = torch.tensor(targets, dtype=torch.long)
+        y = torch.nn.functional.cross_entropy(logits, tgt, reduction="mean")
+        gout = seed_tensor(gen, [], 1.0, 1.0)
+        (gl,) = torch.autograd.grad(y, logits, grad_outputs=gout)
+        cases.append({"kind": "loss", "shape": list(s), "x": flat(logits.detach()),
+                      "indices": targets, "out_shape": [], "y": flat(y.detach()),
+                      "gout": flat(gout), "gx": flat(gl)})
+    write("cross_entropy", family_dir, cases, note="reduction='mean', scalar out, targets LongTensor")
+
+
 def write(op: str, family_dir: Path, cases: list[dict], note: str) -> None:
     path = family_dir / f"{op}.json"
     data = {
@@ -196,7 +317,8 @@ def manifest(files: dict[str, str]) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--torch-bin", default=None, help="path to the baseline interpreter (informational)")
-    ap.add_argument("--families", default="elementwise,reductions")
+    ap.add_argument("--families",
+                    default="elementwise,reductions,normalization,shape,linear,loss")
     args = ap.parse_args()
     import_torch(args.torch_bin)
 
@@ -213,6 +335,11 @@ def main() -> int:
     gen = torch.Generator().manual_seed(SEED)
     files: dict[str, str] = {}
     families = [f for f in args.families.split(",") if f]
+    if (OUT / "manifest.json").exists():
+        existing = json.loads((OUT / "manifest.json").read_text())
+        for key, h in existing.get("files", {}).items():
+            if key.split("/", 1)[0] not in families:
+                files[key] = h
     for fam in families:
         fam_dir = OUT / fam
         if fam == "elementwise":
@@ -221,6 +348,12 @@ def main() -> int:
             gen_reductions(gen, fam_dir)
         elif fam == "normalization":
             gen_normalization(gen, fam_dir)
+        elif fam == "shape":
+            gen_shape(gen, fam_dir)
+        elif fam == "linear":
+            gen_linear(gen, fam_dir)
+        elif fam == "loss":
+            gen_loss(gen, fam_dir)
         else:
             raise SystemExit(f"unknown family {fam}")
         for p in sorted(fam_dir.glob("*.json")):

@@ -39,10 +39,29 @@ struct Case {
     #[serde(default)]
     axis: Option<usize>,
     #[serde(default)]
+    start: Option<usize>,
+    #[serde(default)]
+    end: Option<usize>,
+    #[serde(default)]
+    dims: Option<Vec<usize>>,
+    #[serde(default)]
+    new_shape: Option<Vec<usize>>,
+    #[serde(default)]
+    bcast_to: Option<Vec<usize>>,
+    #[serde(default)]
     out_shape: Option<Vec<usize>>,
+    #[serde(default)]
     x: Vec<f32>,
     #[serde(default)]
+    a: Vec<f32>,
+    #[serde(default)]
     b: Vec<f32>,
+    #[serde(default)]
+    w: Vec<f32>,
+    #[serde(default)]
+    target: Vec<f32>,
+    #[serde(default)]
+    indices: Vec<usize>,
     y: Vec<f32>,
     #[serde(default)]
     gout: Vec<f32>,
@@ -50,6 +69,8 @@ struct Case {
     gx: Vec<f32>,
     #[serde(default)]
     gb: Vec<f32>,
+    #[serde(default)]
+    gw: Vec<f32>,
 }
 
 fn fixtures_dir() -> PathBuf {
@@ -449,6 +470,278 @@ fn parity_fixtures_manifest_is_valid() {
         assert_eq!(
             got, want,
             "fixture {rel}: sha256 drift — regenerate with docs/tensor-parity/provenance/generate_fixtures.py"
+        );
+    }
+}
+
+// ------------------------------------------------------------------ //
+//  Famille shape : reshape, transpose, permute, broadcast_to, slice,
+//  flatten (kinds "shape"; grads exacts selon torch autograd).
+// ------------------------------------------------------------------ //
+
+#[test]
+fn parity_shape_family() {
+    // (op, tolerance) — forward/grad exacts (reorders/copies), 1e-6 pour les
+    // grads accumulés (broadcast/slice).
+    let cases: Vec<(&str, f32)> = vec![
+        ("reshape", 0.0),
+        ("transpose", 0.0),
+        ("permute", 0.0),
+        ("broadcast_to", 1e-6),
+        ("slice", 1e-6),
+        ("flatten", 0.0),
+    ];
+    for (op, tol) in cases
+    {
+        let fx = load_fixture("shape", op);
+        assert_eq!(
+            fx.kind, "shape",
+            "{op}: unexpected fixture kind {}",
+            fx.kind
+        );
+        for (ci, c) in fx.cases.iter().enumerate()
+        {
+            let t = tensor(&c.x, &c.shape);
+            let out: TensorND = match op
+            {
+                "reshape" => parity::reshape(&t, c.new_shape.as_ref().unwrap()),
+                "transpose" => parity::transpose2(&t, 0, 1),
+                "permute" => parity::permute(&t, c.dims.as_ref().unwrap()),
+                "broadcast_to" => parity::broadcast_to(&t, c.bcast_to.as_ref().unwrap()),
+                "slice" =>
+                {
+                    parity::slice_axis(&t, c.axis.unwrap(), c.start.unwrap(), c.end.unwrap())
+                },
+                "flatten" => parity::flatten(&t),
+                _ => unreachable!(),
+            }
+            .unwrap_or_else(|e| panic!("{op} case {ci}: {e}"));
+            assert_eq!(
+                out.shape(),
+                c.out_shape.as_ref().unwrap(),
+                "{op} c{ci}: shape {:?} != {:?}",
+                out.shape(),
+                c.out_shape
+            );
+            assert_close(
+                &format!("{op} forward c{ci}"),
+                out.data.as_ref(),
+                &c.y,
+                tol,
+                tol,
+            );
+
+            let gout = tensor(&c.gout, c.out_shape.as_ref().unwrap());
+            let gx: TensorND = match op
+            {
+                "reshape" => parity::g_reshape(&gout, &c.shape),
+                "transpose" => parity::transpose2(&gout, 0, 1),
+                "permute" => parity::g_permute(&gout, c.dims.as_ref().unwrap()),
+                "broadcast_to" => parity::g_broadcast(&gout, &c.shape),
+                "slice" => parity::g_slice(
+                    &gout,
+                    &c.shape,
+                    c.axis.unwrap(),
+                    c.start.unwrap(),
+                    c.end.unwrap(),
+                ),
+                "flatten" => parity::g_reshape(&gout, &c.shape),
+                _ => unreachable!(),
+            }
+            .unwrap_or_else(|e| panic!("{op} grad c{ci}: {e}"));
+            assert_close(
+                &format!("{op} grad c{ci}"),
+                gx.data.as_ref(),
+                &c.gx,
+                tol,
+                tol,
+            );
+        }
+    }
+}
+
+// ------------------------------------------------------------------ //
+//  Famille linear : matmul 2-D, bmm 3-D, linear+bias
+// ------------------------------------------------------------------ //
+
+#[test]
+fn parity_linear_matmul() {
+    let fx = load_fixture("linear", "matmul");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let a = tensor(&c.a, &c.shape);
+        let b_shape = vec![c.shape[1], c.out_shape.as_ref().unwrap()[1]];
+        let b = tensor(&c.b, &b_shape);
+        let out = parity::matmul2(&a, &b).unwrap_or_else(|e| panic!("matmul c{ci}: {e}"));
+        assert_eq!(out.shape(), c.out_shape.as_ref().unwrap());
+        assert_close(
+            &format!("matmul forward c{ci}"),
+            out.data.as_ref(),
+            &c.y,
+            1e-4,
+            1e-4,
+        );
+        let gout = tensor(&c.gout, c.out_shape.as_ref().unwrap());
+        let (ga, gb) = parity::d_matmul2(&gout, &a, &b).unwrap();
+        assert_close(
+            &format!("matmul grad-a c{ci}"),
+            ga.data.as_ref(),
+            &c.gx,
+            1e-4,
+            1e-4,
+        );
+        assert_close(
+            &format!("matmul grad-b c{ci}"),
+            gb.data.as_ref(),
+            &c.gb,
+            1e-4,
+            1e-4,
+        );
+    }
+}
+
+#[test]
+fn parity_linear_bmm() {
+    let fx = load_fixture("linear", "bmm");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let a = tensor(&c.a, &c.shape);
+        let b_shape = c
+            .out_shape
+            .as_ref()
+            .unwrap()
+            .iter()
+            .enumerate()
+            .map(|(i, &d)| if i == 1 { c.shape[2] } else { d })
+            .collect::<Vec<_>>();
+        let b = tensor(&c.b, &b_shape);
+        let out = parity::bmm(&a, &b).unwrap_or_else(|e| panic!("bmm c{ci}: {e}"));
+        assert_eq!(out.shape(), c.out_shape.as_ref().unwrap());
+        assert_close(
+            &format!("bmm forward c{ci}"),
+            out.data.as_ref(),
+            &c.y,
+            1e-4,
+            1e-4,
+        );
+        let gout = tensor(&c.gout, c.out_shape.as_ref().unwrap());
+        let (ga, gb) = parity::d_bmm(&gout, &a, &b).unwrap();
+        assert_close(
+            &format!("bmm grad-a c{ci}"),
+            ga.data.as_ref(),
+            &c.gx,
+            1e-4,
+            1e-4,
+        );
+        assert_close(
+            &format!("bmm grad-b c{ci}"),
+            gb.data.as_ref(),
+            &c.gb,
+            1e-4,
+            1e-4,
+        );
+    }
+}
+
+#[test]
+fn parity_linear_linear() {
+    let fx = load_fixture("linear", "linear");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let x = tensor(&c.x, &c.shape);
+        let w_shape = vec![c.out_shape.as_ref().unwrap()[1], c.shape[1]];
+        let w = tensor(&c.w, &w_shape);
+        let bias = tensor(&c.b, &[w_shape[0]]);
+        let out =
+            parity::linear(&x, &w, Some(&bias)).unwrap_or_else(|e| panic!("linear c{ci}: {e}"));
+        assert_close(
+            &format!("linear forward c{ci}"),
+            out.data.as_ref(),
+            &c.y,
+            1e-4,
+            1e-4,
+        );
+        let gout = tensor(&c.gout, c.out_shape.as_ref().unwrap());
+        let (gx, gw, gb) = parity::d_linear(&gout, &x, &w, true).unwrap();
+        assert_close(
+            &format!("linear grad-x c{ci}"),
+            gx.data.as_ref(),
+            &c.gx,
+            1e-4,
+            1e-4,
+        );
+        assert_close(
+            &format!("linear grad-w c{ci}"),
+            gw.data.as_ref(),
+            &c.gw,
+            1e-4,
+            1e-4,
+        );
+        assert_close(
+            &format!("linear grad-b c{ci}"),
+            gb.data.as_ref(),
+            &c.gb,
+            1e-4,
+            1e-4,
+        );
+    }
+}
+
+// ------------------------------------------------------------------ //
+//  Famille loss : mse_loss (mean), cross_entropy (mean) — scalaires
+// ------------------------------------------------------------------ //
+
+#[test]
+fn parity_loss_mse() {
+    let fx = load_fixture("loss", "mse_loss");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let pred = tensor(&c.x, &c.shape);
+        let target = tensor(&c.target, &c.shape);
+        let out = parity::mse_loss_mean(&pred, &target).unwrap();
+        assert_eq!(out.shape(), &[] as &[usize], "mse c{ci}: must be scalar");
+        assert_close(
+            &format!("mse forward c{ci}"),
+            out.data.as_ref(),
+            &c.y,
+            1e-5,
+            1e-5,
+        );
+        let gout = c.gout.first().copied().unwrap_or(1.0);
+        let gx = parity::d_mse_loss_mean(&pred, &target, gout).unwrap();
+        assert_close(
+            &format!("mse grad c{ci}"),
+            gx.data.as_ref(),
+            &c.gx,
+            1e-5,
+            1e-5,
+        );
+    }
+}
+
+#[test]
+fn parity_loss_cross_entropy() {
+    let fx = load_fixture("loss", "cross_entropy");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let logits = tensor(&c.x, &c.shape);
+        let out = parity::cross_entropy_mean(&logits, &c.indices).unwrap();
+        assert_eq!(out.shape(), &[] as &[usize], "ce c{ci}: must be scalar");
+        assert_close(
+            &format!("ce forward c{ci}"),
+            out.data.as_ref(),
+            &c.y,
+            1e-5,
+            1e-5,
+        );
+        let gout = c.gout.first().copied().unwrap_or(1.0);
+        let gx = parity::d_cross_entropy_mean(&logits, &c.indices, gout).unwrap();
+        assert_close(
+            &format!("ce grad c{ci}"),
+            gx.data.as_ref(),
+            &c.gx,
+            1e-5,
+            1e-5,
         );
     }
 }
