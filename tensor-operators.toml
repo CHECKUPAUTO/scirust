@@ -20,7 +20,8 @@ impls = ["2d"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "reciprocal"
@@ -30,7 +31,8 @@ impls = ["2d"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "exp"
@@ -40,7 +42,8 @@ impls = ["2d", "nd", "simd"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "log"
@@ -50,7 +53,8 @@ impls = ["2d"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "log10"
@@ -60,7 +64,8 @@ impls = ["2d"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "sqrt"
@@ -70,7 +75,8 @@ impls = ["2d", "simd", "gpu"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "rsqrt"
@@ -90,7 +96,8 @@ impls = ["2d"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "sin"
@@ -100,7 +107,8 @@ impls = ["2d"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "cos"
@@ -110,7 +118,8 @@ impls = ["2d"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "tan"
@@ -120,7 +129,8 @@ impls = ["2d"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "asin"
@@ -130,7 +140,8 @@ impls = ["2d"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "acos"
@@ -140,7 +151,8 @@ impls = ["2d"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "atan"
@@ -150,7 +162,8 @@ impls = ["2d"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "atan2"
@@ -160,7 +173,8 @@ impls = ["2d"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "sinh"
@@ -170,7 +184,8 @@ impls = ["2d"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "cosh"
@@ -180,7 +195,8 @@ impls = ["2d"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "tanh"
@@ -190,7 +206,8 @@ impls = ["2d"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "sigmoid"
@@ -200,7 +217,8 @@ impls = ["2d", "nd", "simd", "gpu"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "silu"
@@ -210,7 +228,8 @@ impls = ["simd", "gpu", "cuda"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "relu"
@@ -220,7 +239,8 @@ impls = ["2d", "nd", "simd", "gpu", "cuda"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 0.0, rtol = 0.0 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "gelu"
@@ -230,7 +250,8 @@ impls = ["simd"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "add"
@@ -240,7 +261,8 @@ impls = ["2d", "nd", "simd", "gpu", "cuda"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "sub"
@@ -250,7 +272,8 @@ impls = ["2d", "nd"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "mul"
@@ -260,7 +283,8 @@ impls = ["2d", "nd", "gpu", "cuda"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "div"
@@ -270,7 +294,8 @@ impls = ["2d", "nd"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "matmul"
@@ -350,8 +375,9 @@ impls = ["2d", "nd", "gpu", "cuda"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-4, rtol = 1e-4 }
-status = "experimental"
+status = "parity"
 notes = "deterministic order (stricter-than-torch); CUDA deterministic_reduce_sum"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "mean"
@@ -361,8 +387,9 @@ impls = ["2d", "gpu", "cuda"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-4, rtol = 1e-4 }
-status = "experimental"
+status = "parity"
 notes = "CUDA deterministic_reduce_mean"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "max"
@@ -382,7 +409,8 @@ impls = ["2d"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-4, rtol = 1e-4 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "norm"
@@ -403,7 +431,8 @@ impls = ["2d", "nd", "simd", "gpu", "cuda"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "log_softmax"
@@ -413,7 +442,8 @@ impls = ["2d"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "layer_norm"
