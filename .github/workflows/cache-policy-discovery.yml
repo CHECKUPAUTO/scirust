@@ -36,9 +36,12 @@ jobs:
         run: |
           python3 -m py_compile \
             experiments/elastic-cache-policy/jetson/dream_jetson_proof.py \
+            experiments/elastic-cache-policy/jetson/dream_trace_only.py \
             experiments/elastic-cache-policy/jetson/finalize_dream_proof.py \
+            experiments/elastic-cache-policy/jetson/frozen_policy_confirmatory.py \
             experiments/elastic-cache-policy/jetson/robust_cross_validation.py
           bash -n \
+            experiments/elastic-cache-policy/jetson/run_confirmatory_dream_proof.sh \
             experiments/elastic-cache-policy/jetson/run_jetson_dream_proof.sh \
             experiments/elastic-cache-policy/jetson/run_robust_cross_validation.sh
       - name: Synthetic discovery comparison
