@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCIRUST_ROOT="${SCIRUST_ROOT:-$HOME/scirust}"
+SCIRUST_SOURCE="${SCIRUST_SOURCE:-$HOME/scirust}"
 WORK_ROOT="${WORK_ROOT:-$HOME/.local/share/scirust/dream-policy-proof}"
+SCIRUST_RUN="$WORK_ROOT/scirust-policy"
 ELASTIC_ROOT="$WORK_ROOT/Elastic-Cache"
 VENV="$WORK_ROOT/venv"
 OUTPUT_ROOT="$WORK_ROOT/results/$(date -u +%Y%m%dT%H%M%SZ)"
@@ -11,22 +12,25 @@ fail() { printf 'ERREUR: %s\n' "$*" >&2; exit 1; }
 command -v git >/dev/null || fail "git introuvable"
 command -v python3 >/dev/null || fail "python3 introuvable"
 command -v cargo >/dev/null || fail "cargo introuvable"
-[ -d "$SCIRUST_ROOT/.git" ] || fail "dépôt SciRust absent: $SCIRUST_ROOT"
+command -v rustup >/dev/null || fail "rustup introuvable"
+[ -d "$SCIRUST_SOURCE/.git" ] || fail "dépôt SciRust absent: $SCIRUST_SOURCE"
 [ "$(uname -m)" = "aarch64" ] || printf 'AVERTISSEMENT: architecture détectée: %s\n' "$(uname -m)"
 
 mkdir -p "$WORK_ROOT" "$OUTPUT_ROOT"
 
-cd "$SCIRUST_ROOT"
-git fetch origin --prune
-git switch research/elastic-cache-policy-discovery
-git pull --ff-only origin research/elastic-cache-policy-discovery
+git -C "$SCIRUST_SOURCE" fetch origin --prune
+if [ ! -d "$SCIRUST_RUN/.git" ]; then
+    git clone --shared "$SCIRUST_SOURCE" "$SCIRUST_RUN"
+fi
+git -C "$SCIRUST_RUN" fetch origin --prune
+git -C "$SCIRUST_RUN" checkout -B research/elastic-cache-policy-discovery \
+    origin/research/elastic-cache-policy-discovery
 
 if [ ! -d "$ELASTIC_ROOT/.git" ]; then
     git clone https://github.com/VILA-Lab/Elastic-Cache.git "$ELASTIC_ROOT"
 else
     git -C "$ELASTIC_ROOT" fetch origin --prune
-    git -C "$ELASTIC_ROOT" switch main
-    git -C "$ELASTIC_ROOT" pull --ff-only origin main
+    git -C "$ELASTIC_ROOT" checkout -B main origin/main
 fi
 
 if [ ! -d "$VENV" ]; then
@@ -51,6 +55,8 @@ if not torch.cuda.is_available():
     raise SystemExit("CUDA indisponible dans le venv; ne pas installer un wheel torch générique")
 print("device=", torch.cuda.get_device_name(0))
 print("bf16_supported=", torch.cuda.is_bf16_supported())
+if not torch.cuda.is_bf16_supported():
+    raise SystemExit("BF16 CUDA indisponible sur ce runtime Jetson")
 PY
 
 rustup toolchain install nightly-2026-07-02 --profile minimal
@@ -60,9 +66,9 @@ export HF_HUB_ENABLE_HF_TRANSFER=1
 export TOKENIZERS_PARALLELISM=false
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 
-python "$SCIRUST_ROOT/experiments/elastic-cache-policy/jetson/dream_jetson_proof.py" \
+python "$SCIRUST_RUN/experiments/elastic-cache-policy/jetson/dream_jetson_proof.py" \
     --elastic-cache "$ELASTIC_ROOT" \
-    --scirust "$SCIRUST_ROOT" \
+    --scirust "$SCIRUST_RUN" \
     --output-dir "$OUTPUT_ROOT" \
     --model Dream-org/Dream-v0-Instruct-7B \
     --trajectories 30 \
