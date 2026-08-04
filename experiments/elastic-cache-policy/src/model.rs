@@ -15,6 +15,8 @@ pub struct TraceRow {
     pub stale_loss: f64,
 }
 
+pub type TraceSplit = (Vec<TraceRow>, Vec<TraceRow>, Vec<TraceRow>);
+
 pub const FEATURE_NAMES: [&str; 8] = [
     "drift",
     "worsening",
@@ -329,7 +331,7 @@ pub fn split_by_trajectory_fold(
     rows: &[TraceRow],
     folds: u64,
     test_fold: u64,
-) -> Result<(Vec<TraceRow>, Vec<TraceRow>, Vec<TraceRow>), String> {
+) -> Result<TraceSplit, String> {
     if folds < 3
     {
         return Err("folds must be at least 3".into());
@@ -364,6 +366,6 @@ pub fn split_by_trajectory_fold(
     Ok((training, validation, test))
 }
 
-pub fn split_by_trajectory(rows: &[TraceRow]) -> (Vec<TraceRow>, Vec<TraceRow>, Vec<TraceRow>) {
+pub fn split_by_trajectory(rows: &[TraceRow]) -> TraceSplit {
     split_by_trajectory_fold(rows, 5, 4).expect("the default five-fold split is valid")
 }
