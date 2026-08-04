@@ -58,11 +58,10 @@ fn discovered_policy_beats_similarity_only_on_the_nonlinear_oracle() {
         },
     )
     .unwrap();
-    let comparison = compare_on_holdout(&result.policy, &test);
-    assert!(
-        comparison.learned.quality_loss_fraction <= 0.06,
-        "{comparison:?}"
-    );
+    let comparison = compare_on_holdout(&result.policy, &test, 0.05);
+    assert!(comparison.learned_meets_budget, "{comparison:?}");
+    assert!(comparison.constrained_better, "{comparison:?}");
+    assert!(comparison.pareto_dominates, "{comparison:?}");
     assert!(
         comparison.relative_compute_improvement > 0.10,
         "{comparison:?}"
