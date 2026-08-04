@@ -9,7 +9,8 @@ pub fn read_trace_csv(path: impl AsRef<Path>) -> Result<Vec<TraceRow>, String> {
         .map_err(|error| format!("cannot read {}: {error}", path.as_ref().display()))?;
     let mut lines = text.lines();
     let header = lines.next().ok_or_else(|| "trace is empty".to_string())?;
-    if header.trim() != TRACE_HEADER {
+    if header.trim() != TRACE_HEADER
+    {
         return Err(format!(
             "unexpected CSV header; expected `{TRACE_HEADER}`, got `{}`",
             header.trim()
@@ -17,13 +18,16 @@ pub fn read_trace_csv(path: impl AsRef<Path>) -> Result<Vec<TraceRow>, String> {
     }
 
     let mut rows = Vec::new();
-    for (offset, line) in lines.enumerate() {
+    for (offset, line) in lines.enumerate()
+    {
         let line_number = offset + 2;
-        if line.trim().is_empty() {
+        if line.trim().is_empty()
+        {
             continue;
         }
         let fields: Vec<&str> = line.split(',').map(str::trim).collect();
-        if fields.len() != 11 {
+        if fields.len() != 11
+        {
             return Err(format!(
                 "line {line_number}: expected 11 columns, got {}",
                 fields.len()
@@ -61,7 +65,8 @@ pub fn read_trace_csv(path: impl AsRef<Path>) -> Result<Vec<TraceRow>, String> {
             .map_err(|error| format!("line {line_number}: {error}"))?;
         rows.push(row);
     }
-    if rows.is_empty() {
+    if rows.is_empty()
+    {
         return Err("trace contains no data rows".into());
     }
     Ok(rows)
@@ -71,7 +76,8 @@ pub fn write_trace_csv(path: impl AsRef<Path>, rows: &[TraceRow]) -> Result<(), 
     let mut output = String::with_capacity(rows.len() * 128);
     output.push_str(TRACE_HEADER);
     output.push('\n');
-    for row in rows {
+    for row in rows
+    {
         output.push_str(&format!(
             "{},{},{},{:.17},{:.17},{:.17},{:.17},{:.17},{:.17},{:.17},{:.17}\n",
             row.trajectory_id,
