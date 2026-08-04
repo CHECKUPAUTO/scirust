@@ -12,56 +12,117 @@ layer input state:
 2. an exact full K/V refresh path.
 
 It records the competitor's cosine trigger plus seven additional signals and a
-bounded divergence between the two attention outputs. SciRust then fits the
-multi-signal policy on complete training trajectories, calibrates it on complete
-validation trajectories, and compares it with the best fixed `gamma` on held-out
-trajectories.
-
-The run is considered a reproduction of the synthetic result only when:
-
-- both policies satisfy the same `0.05` stale-loss budget;
-- the SciRust policy strictly Pareto-dominates the best fixed `gamma`;
-- the measured refresh-compute improvement lies within `63.110794% ± 8%`.
-
-This is a real Dream hidden-state and attention-output result. It is not yet a
-GSM8K, HumanEval, or end-to-end task-accuracy claim.
+bounded divergence between the two attention outputs. This is local
+attention-output counterfactual evidence, not yet a GSM8K, HumanEval, task
+accuracy, or wall-clock production claim.
 
 ## Jetson target
 
 - NVIDIA Jetson AGX Thor
 - Ubuntu 24.04
 - CUDA 13.0
+- compute capability 11.0
 - 128 GB unified memory
 - model: `Dream-org/Dream-v0-Instruct-7B`
-- model size: approximately 15.2 GB in BF16
+- NVIDIA container: `nvcr.io/nvidia/pytorch:25.08-py3`
+- validated image digest:
+  `sha256:ace9a848c0ae543317e3c4763b6b4248961c47902625abfe3c77a0fb931c50fb`
 
-The setup creates a virtual environment with `--system-site-packages` so the
-NVIDIA-provided Jetson PyTorch build is preserved. Do not install a generic
-PyPI `torch` wheel into this environment.
+The harness uses the NVIDIA NGC PyTorch container because the generic CUDA 13
+PyTorch wheel detects Thor but fails BF16 cuBLAS GEMM on this platform. The host
+Python, TensorRT-LLM installation, and system packages are not modified.
 
-## Run
+## Phase 1: first held-out Dream test
 
-From the SciRust repository:
+Run:
 
 ```bash
 bash experiments/elastic-cache-policy/jetson/run_jetson_dream_proof.sh
 ```
 
-The command checks CUDA, downloads the competitor and Dream checkpoint, collects
-30 deterministic trajectories, invokes the Rust discovery binary, and writes:
+Observed on the first real trace:
+
+- 30 deterministic trajectories;
+- 25,026 counterfactual observations;
+- learned quality loss: `0.06384892`;
+- quality budget: `0.05`;
+- learned normalized refresh compute: `0.81045261`;
+- raw compute reduction: `18.954739%`;
+- best admissible fixed gamma: `inf` / always refresh;
+- synthetic `63.11%` reproduction: false.
+
+The raw compute reduction is not admissible because the learned policy exceeds
+the registered quality budget.
+
+## Phase 2: trajectory-balanced exploratory cross-validation
+
+Run:
+
+```bash
+bash experiments/elastic-cache-policy/jetson/run_robust_cross_validation.sh
+```
+
+This phase reuses the first trace and applies:
+
+- equal objective weight per trajectory;
+- a calibration budget of `0.025` for a final budget of `0.05`;
+- constraints on aggregate loss, mean trajectory loss, and the nearest-rank
+  90th percentile of trajectory loss;
+- five rotating train/calibration/test folds;
+- a robust fixed-gamma comparison in every fold.
+
+Observed exploratory result:
+
+- folds meeting the quality budget: `5/5`;
+- folds beating the constrained fixed-gamma baseline: `5/5`;
+- mean relative compute improvement: `1.7591488%`;
+- minimum fold improvement: `0.151849%`;
+- maximum fold improvement: `3.636473%`;
+- mean learned quality loss: `0.005368442`;
+- maximum learned quality loss: `0.01064077`;
+- maximum 90th-percentile trajectory loss: `0.03361345`;
+- strict exploratory success: true.
+
+This is not confirmatory because the robust method was designed after inspecting
+the first split.
+
+## Phase 3: frozen independent confirmation
+
+Run:
+
+```bash
+bash experiments/elastic-cache-policy/jetson/run_confirmatory_dream_proof.sh
+```
+
+The confirmation protocol is frozen before collecting the new trace:
+
+- new seed: `20260805`;
+- 60 independent deterministic trajectories;
+- no policy fitting or threshold calibration on the new trace;
+- the five cross-validation policies are frozen as a bundle;
+- the primary policy refreshes when at least three of five policies vote to
+  refresh;
+- primary baseline: always refresh;
+- quality budget: `0.05` for aggregate, mean trajectory, and 90th-percentile
+  trajectory loss;
+- minimum mean compute improvement: `0.5%`;
+- deterministic 10,000-sample trajectory bootstrap;
+- the lower bound of the 95% compute-improvement interval must exceed zero.
+
+Outputs:
 
 ```text
-~/.local/share/scirust/dream-policy-proof/results/<UTC timestamp>/
+~/.local/share/scirust/dream-policy-proof/results/confirmatory-<UTC timestamp>/
 ├── dream_counterfactual_trace.csv
-├── scirust_discovery_output.txt
-└── dream_real_policy_report.json
+├── dream_trace_manifest.json
+└── dream_frozen_policy_confirmatory_report.json
 ```
 
 Exit status:
 
-- `0`: the 63.11% reproduction band is satisfied;
-- `2`: the real Dream result is valid but does not reproduce the band;
-- another nonzero status: environment, model, trace, or discovery failure.
+- `0`: every frozen confirmatory criterion is satisfied;
+- `2`: the independent experiment is valid but at least one criterion fails;
+- another nonzero status: environment, trace integrity, or evaluation failure.
 
 ## Metric boundary
 
@@ -74,6 +135,3 @@ The stale-loss target is:
 between cached and fully refreshed attention outputs for the same layer input.
 The refresh cost is the normalized number of downstream layers that must be
 recomputed after a trigger.
-
-A subsequent paper-grade phase must repeat the frozen comparison on task-level
-metrics and independent datasets.
