@@ -136,17 +136,15 @@ fn run() -> Result<(), String> {
         );
     }
 
-    let result = discover_linear_policy(
-        &training,
-        &validation,
-        DiscoveryConfig {
-            seed: args.seed,
-            steps: args.steps,
-            max_quality_loss: args.max_quality_loss,
-            ..DiscoveryConfig::default()
-        },
-    )?;
-    let comparison = compare_on_holdout(&result.policy, &test);
+    let config = DiscoveryConfig {
+        seed: args.seed,
+        steps: args.steps,
+        max_quality_loss: args.max_quality_loss,
+        ..DiscoveryConfig::default()
+    };
+    let calibration_budget = config.max_quality_loss * config.calibration_budget_fraction;
+    let result = discover_linear_policy(&training, &validation, config)?;
+    let comparison = compare_on_holdout(&result.policy, &test, args.max_quality_loss);
 
     println!("source={source}");
     println!(
@@ -157,6 +155,10 @@ fn run() -> Result<(), String> {
         test.len()
     );
     println!("seed={} steps={}", args.seed, args.steps);
+    println!(
+        "quality_budget={:.8} calibration_budget={:.8}",
+        args.max_quality_loss, calibration_budget
+    );
     println!("weights={:?}", result.policy.weights);
     println!("threshold={:.17}", result.policy.threshold);
     println!(
@@ -177,6 +179,12 @@ fn run() -> Result<(), String> {
         comparison.fixed_gamma.metrics.quality_loss_fraction,
         comparison.fixed_gamma.metrics.compute_fraction,
         comparison.fixed_gamma.metrics.refresh_rate
+    );
+    println!(
+        "learned_meets_budget={} fixed_gamma_meets_budget={} constrained_better={}",
+        comparison.learned_meets_budget,
+        comparison.fixed_gamma_meets_budget,
+        comparison.constrained_better
     );
     println!(
         "relative_compute_improvement={:.8} pareto_dominates={}",
