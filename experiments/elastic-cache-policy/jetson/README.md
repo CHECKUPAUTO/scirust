@@ -157,19 +157,56 @@ Each question is executed four times with the same generation seed:
 - even question positions: `always, ensemble, ensemble, always` (`ABBA`);
 - odd question positions: `ensemble, always, always, ensemble` (`BAAB`).
 
-Each mode is summarized by its median of two repeats for that question. The
-report bootstraps the 60 per-question median differences and separately records:
+Each mode is summarized by its median of two repeats for that question.
 
-- end-to-end latency;
-- total refresh cost;
-- conditional refresh saving;
-- refresh cost per decision;
-- latency per decision;
-- generation decision-count ratio;
-- within-mode deterministic reproducibility.
+Observed result:
 
-This phase is explicitly post-hoc and exploratory. It can isolate an execution
-signal but cannot replace the negative phase-4 verdict.
+- all 60 questions are exactly deterministic within each mode;
+- accuracy delta: `+1.6667` percentage points, 95% interval `[0, 5]` points;
+- exact response match rate: `70%`;
+- same prediction rate: `96.67%`;
+- mean end-to-end latency improvement: `0.1840%`;
+- latency 95% interval: `[-1.7366%, 2.0011%]`;
+- mean total refresh-cost improvement: `0.5329%`;
+- refresh-cost 95% interval: `[-1.4611%, 2.4059%]`;
+- mean conditional refresh-cost saving: `7.3859%`, 95% interval
+  `[6.7082%, 8.0998%]`;
+- mean refresh-cost-per-decision improvement: `7.6675%`, 95% interval
+  `[6.9708%, 8.4193%]`;
+- mean latency-per-decision improvement: `7.3303%`, 95% interval
+  `[6.6464%, 8.0719%]`;
+- mean ensemble/always decision ratio: `1.0779`, 95% interval
+  `[1.0574, 1.0989]`;
+- controlled latency signal: false;
+- controlled refresh-cost signal: false;
+- exploratory controlled signal: false.
+
+The crossover removes the execution-order ambiguity and confirms the mechanism:
+about `7.3%` to `7.7%` less work per decision is offset by about `7.8%` more
+decisions because the cache policy perturbs the generation trajectory. This
+phase remains post-hoc and does not replace the phase-4 verdict.
+
+## Phase 6: trajectory-stability guard development
+
+```bash
+bash experiments/elastic-cache-policy/jetson/run_trajectory_stability_guard_selection.sh
+```
+
+This offline phase does not use GSM8K outcomes and does not require a GPU. It
+repurposes the phase-3 local counterfactual trace as development data and sweeps
+runtime-implementable guards over:
+
+- minimum skip-risk margin;
+- minimum saved downstream refresh cost;
+- maximum skips per attention layer;
+- mandatory refreshed decisions after a skip.
+
+Selection constraints are intentionally stricter than the original local proof:
+aggregate, mean, and 90th-percentile trajectory stale-loss must remain below
+`0.01`, and mean local compute improvement must remain at least `0.8%`. Eligible
+guards are ranked by the fewest and least concentrated skipped decisions before
+compute improvement. The selected guard is exploratory and must be frozen before
+evaluation on new task prompts.
 
 ## Counterfactual metric
 
