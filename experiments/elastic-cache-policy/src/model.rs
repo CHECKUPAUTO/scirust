@@ -101,6 +101,8 @@ pub struct DiscoveryConfig {
     pub seed: u64,
     pub steps: usize,
     pub max_quality_loss: f64,
+    /// Fraction of the final quality budget used to calibrate the validation threshold.
+    pub calibration_budget_fraction: f64,
     pub initial_sigma: f64,
     pub minimum_sigma: f64,
 }
@@ -111,6 +113,7 @@ impl Default for DiscoveryConfig {
             seed: 20_260_804,
             steps: 600,
             max_quality_loss: 0.05,
+            calibration_budget_fraction: 0.8,
             initial_sigma: 0.8,
             minimum_sigma: 0.05,
         }
@@ -132,8 +135,12 @@ pub struct GammaBaseline {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HoldoutComparison {
+    pub quality_budget: f64,
     pub learned: PolicyMetrics,
     pub fixed_gamma: GammaBaseline,
+    pub learned_meets_budget: bool,
+    pub fixed_gamma_meets_budget: bool,
+    pub constrained_better: bool,
     pub relative_compute_improvement: f64,
     pub pareto_dominates: bool,
 }
