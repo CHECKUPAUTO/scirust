@@ -161,6 +161,12 @@ pub fn discover_linear_policy(
     {
         return Err("max_quality_loss must lie in [0,1]".into());
     }
+    if !config.calibration_budget_fraction.is_finite()
+        || !(0.0..=1.0).contains(&config.calibration_budget_fraction)
+        || config.calibration_budget_fraction == 0.0
+    {
+        return Err("calibration_budget_fraction must lie in (0,1]".into());
+    }
     if config.steps == 0
     {
         return Err("steps must be greater than zero".into());
@@ -199,8 +205,9 @@ pub fn discover_linear_policy(
 
     let mut weights = [0.0; 8];
     weights.copy_from_slice(&best_theta[..8]);
+    let calibration_budget = config.max_quality_loss * config.calibration_budget_fraction;
     let (threshold, validation_metrics) =
-        calibrate_threshold(validation, &weights, config.max_quality_loss)
+        calibrate_threshold(validation, &weights, calibration_budget)
             .ok_or_else(|| "cannot calibrate an empty validation trace".to_string())?;
 
     Ok(DiscoveryResult {
@@ -210,9 +217,19 @@ pub fn discover_linear_policy(
     })
 }
 
-pub fn compare_on_holdout(policy: &LinearPolicy, test: &[TraceRow]) -> HoldoutComparison {
+pub fn compare_on_holdout(
+    policy: &LinearPolicy,
+    test: &[TraceRow],
+    max_quality_loss: f64,
+) -> HoldoutComparison {
     let learned = evaluate_policy(test, |row| policy.refresh(row));
-    let fixed_gamma = best_fixed_gamma(test, learned.quality_loss_fraction);
+    let fixed_gamma = best_fixed_gamma(test, max_quality_loss);
+    let learned_meets_budget = learned.quality_loss_fraction <= max_quality_loss + 1e-12;
+    let fixed_gamma_meets_budget =
+        fixed_gamma.metrics.quality_loss_fraction <= max_quality_loss + 1e-12;
+    let constrained_better = learned_meets_budget
+        && fixed_gamma_meets_budget
+        && learned.compute_fraction < fixed_gamma.metrics.compute_fraction;
     let relative_compute_improvement = if fixed_gamma.metrics.compute_fraction > 0.0
     {
         (fixed_gamma.metrics.compute_fraction - learned.compute_fraction)
@@ -229,8 +246,12 @@ pub fn compare_on_holdout(policy: &LinearPolicy, test: &[TraceRow]) -> HoldoutCo
             || learned.compute_fraction < fixed_gamma.metrics.compute_fraction - 1e-12);
 
     HoldoutComparison {
+        quality_budget: max_quality_loss,
         learned,
         fixed_gamma,
+        learned_meets_budget,
+        fixed_gamma_meets_budget,
+        constrained_better,
         relative_compute_improvement,
         pareto_dominates,
     }
