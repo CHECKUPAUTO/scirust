@@ -8,8 +8,8 @@
   "generated": true,
   "summary": {
     "total": 74,
-    "parity": 30,
-    "experimental": 38,
+    "parity": 41,
+    "experimental": 27,
     "missing": 6
   },
   "families": {
@@ -45,14 +45,14 @@
     },
     "linear": {
       "total": 11,
-      "parity": 0,
-      "experimental": 7,
+      "parity": 3,
+      "experimental": 4,
       "missing": 4
     },
     "loss": {
       "total": 2,
-      "parity": 0,
-      "experimental": 2,
+      "parity": 2,
+      "experimental": 0,
       "missing": 0
     },
     "normalization": {
@@ -81,8 +81,8 @@
     },
     "shape": {
       "total": 9,
-      "parity": 0,
-      "experimental": 9,
+      "parity": 6,
+      "experimental": 3,
       "missing": 0
     },
     "sparse": {
@@ -269,7 +269,12 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "experimental"
+      "status": "parity",
+      "verified": {
+        "harness": "scirust-core/tests/parity_differential.rs",
+        "fixtures": "tests/parity/fixtures",
+        "on": "2026-08-04"
+      }
     },
     {
       "name": "broadcast_to",
@@ -287,7 +292,12 @@
         "atol": 0.0,
         "rtol": 0.0
       },
-      "status": "experimental"
+      "status": "parity",
+      "verified": {
+        "harness": "scirust-core/tests/parity_differential.rs",
+        "fixtures": "tests/parity/fixtures",
+        "on": "2026-08-04"
+      }
     },
     {
       "name": "cat",
@@ -437,7 +447,12 @@
         "atol": 0.00001,
         "rtol": 0.00001
       },
-      "status": "experimental"
+      "status": "parity",
+      "verified": {
+        "harness": "scirust-core/tests/parity_differential.rs",
+        "fixtures": "tests/parity/fixtures",
+        "on": "2026-08-04"
+      }
     },
     {
       "name": "digamma",
@@ -623,7 +638,12 @@
         "atol": 0.0,
         "rtol": 0.0
       },
-      "status": "experimental"
+      "status": "parity",
+      "verified": {
+        "harness": "scirust-core/tests/parity_differential.rs",
+        "fixtures": "tests/parity/fixtures",
+        "on": "2026-08-04"
+      }
     },
     {
       "name": "gather",
@@ -716,7 +736,12 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "experimental"
+      "status": "parity",
+      "verified": {
+        "harness": "scirust-core/tests/parity_differential.rs",
+        "fixtures": "tests/parity/fixtures",
+        "on": "2026-08-04"
+      }
     },
     {
       "name": "log",
@@ -836,7 +861,12 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "experimental"
+      "status": "parity",
+      "verified": {
+        "harness": "scirust-core/tests/parity_differential.rs",
+        "fixtures": "tests/parity/fixtures",
+        "on": "2026-08-04"
+      }
     },
     {
       "name": "max",
@@ -914,7 +944,12 @@
         "atol": 0.00001,
         "rtol": 0.00001
       },
-      "status": "experimental"
+      "status": "parity",
+      "verified": {
+        "harness": "scirust-core/tests/parity_differential.rs",
+        "fixtures": "tests/parity/fixtures",
+        "on": "2026-08-04"
+      }
     },
     {
       "name": "mul",
@@ -1014,7 +1049,12 @@
         "atol": 0.0,
         "rtol": 0.0
       },
-      "status": "experimental"
+      "status": "parity",
+      "verified": {
+        "harness": "scirust-core/tests/parity_differential.rs",
+        "fixtures": "tests/parity/fixtures",
+        "on": "2026-08-04"
+      }
     },
     {
       "name": "pow",
@@ -1119,7 +1159,12 @@
         "atol": 0.0,
         "rtol": 0.0
       },
-      "status": "experimental"
+      "status": "parity",
+      "verified": {
+        "harness": "scirust-core/tests/parity_differential.rs",
+        "fixtures": "tests/parity/fixtures",
+        "on": "2026-08-04"
+      }
     },
     {
       "name": "rms_norm",
@@ -1306,7 +1351,12 @@
         "atol": 0.0,
         "rtol": 0.0
       },
-      "status": "experimental"
+      "status": "parity",
+      "verified": {
+        "harness": "scirust-core/tests/parity_differential.rs",
+        "fixtures": "tests/parity/fixtures",
+        "on": "2026-08-04"
+      }
     },
     {
       "name": "softmax",
@@ -1536,7 +1586,12 @@
         "atol": 0.0,
         "rtol": 0.0
       },
-      "status": "experimental"
+      "status": "parity",
+      "verified": {
+        "harness": "scirust-core/tests/parity_differential.rs",
+        "fixtures": "tests/parity/fixtures",
+        "on": "2026-08-04"
+      }
     },
     {
       "name": "unfold",
