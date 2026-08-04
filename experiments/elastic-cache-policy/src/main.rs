@@ -103,9 +103,7 @@ fn parse_args() -> Result<Args, String> {
                     .next()
                     .ok_or("--calibration-budget-fraction requires a number")?
                     .parse()
-                    .map_err(|error| {
-                        format!("invalid --calibration-budget-fraction: {error}")
-                    })?;
+                    .map_err(|error| format!("invalid --calibration-budget-fraction: {error}"))?;
             },
             "--trajectory-balanced" => parsed.trajectory_balanced = true,
             "--tail-quality-quantile" =>
@@ -187,8 +185,7 @@ fn run() -> Result<(), String> {
         write_trace_csv(path, &rows)?;
     }
 
-    let (training, validation, test) =
-        split_by_trajectory_fold(&rows, args.folds, args.test_fold)?;
+    let (training, validation, test) = split_by_trajectory_fold(&rows, args.folds, args.test_fold)?;
     if training.is_empty() || validation.is_empty() || test.is_empty()
     {
         return Err(
@@ -309,7 +306,9 @@ fn run() -> Result<(), String> {
             .fixed_gamma_trajectory
             .worst_quality_loss_fraction,
         robust_comparison.fixed_gamma.metrics.compute_fraction,
-        robust_comparison.fixed_gamma_trajectory.mean_compute_fraction,
+        robust_comparison
+            .fixed_gamma_trajectory
+            .mean_compute_fraction,
         robust_comparison.fixed_gamma.metrics.refresh_rate
     );
     println!(
@@ -320,8 +319,7 @@ fn run() -> Result<(), String> {
     );
     println!(
         "robust relative_compute_improvement={:.8} pareto_dominates={}",
-        robust_comparison.relative_compute_improvement,
-        robust_comparison.pareto_dominates
+        robust_comparison.relative_compute_improvement, robust_comparison.pareto_dominates
     );
 
     if args.trace.is_none()
