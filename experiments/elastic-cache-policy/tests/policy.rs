@@ -38,9 +38,15 @@ fn robust_threshold_calibration_obeys_mean_and_tail_budgets() {
 fn trajectory_metrics_equalize_trajectory_weight() {
     let mut rows = synthetic_trace(2, 4, 17);
     rows.retain(|row| row.trajectory_id == 0 || row.step == 0);
+    for row in &mut rows
+    {
+        row.stale_loss = 1.0;
+        row.refresh_cost = 1.0;
+    }
     let metrics = evaluate_policy_by_trajectory(&rows, 1.0, |row| row.trajectory_id == 0);
     assert_eq!(metrics.trajectories, 2);
     assert!((metrics.mean_refresh_rate - 0.5).abs() < 1e-12);
+    assert!((metrics.mean_quality_loss_fraction - 0.5).abs() < 1e-12);
     assert!((metrics.tail_quality_loss_fraction - 1.0).abs() < 1e-12);
 }
 
