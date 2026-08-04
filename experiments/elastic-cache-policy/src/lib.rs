@@ -15,15 +15,15 @@ mod synthetic;
 mod trace_io;
 
 pub use discovery::{
-    best_fixed_gamma, best_fixed_gamma_robust, calibrate_threshold,
-    calibrate_threshold_robust, compare_on_holdout, compare_on_holdout_robust,
-    discover_linear_policy, discover_symbolic_surrogate,
+    best_fixed_gamma, best_fixed_gamma_robust, calibrate_threshold, calibrate_threshold_robust,
+    compare_on_holdout, compare_on_holdout_robust, discover_linear_policy,
+    discover_symbolic_surrogate,
 };
 pub use model::{
     DiscoveryConfig, DiscoveryResult, FEATURE_NAMES, GammaBaseline, HoldoutComparison,
-    LinearPolicy, PolicyMetrics, RobustHoldoutComparison, SymbolicCandidate,
-    TrajectoryPolicyMetrics, TraceRow, evaluate_policy, evaluate_policy_by_trajectory,
-    split_by_trajectory, split_by_trajectory_fold,
+    LinearPolicy, PolicyMetrics, RobustHoldoutComparison, SymbolicCandidate, TraceRow,
+    TrajectoryPolicyMetrics, evaluate_policy, evaluate_policy_by_trajectory, split_by_trajectory,
+    split_by_trajectory_fold,
 };
 pub use synthetic::synthetic_trace;
 pub use trace_io::{TRACE_HEADER, read_trace_csv, write_trace_csv};
