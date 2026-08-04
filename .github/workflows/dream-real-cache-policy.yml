@@ -6,11 +6,13 @@ on:
       - research/elastic-cache-policy-discovery
     paths:
       - "experiments/elastic-cache-policy/real/dream/**"
+      - "experiments/elastic-cache-policy/jetson/**"
       - ".github/workflows/dream-real-cache-policy.yml"
   pull_request:
     branches: [master, main, develop]
     paths:
       - "experiments/elastic-cache-policy/real/dream/**"
+      - "experiments/elastic-cache-policy/jetson/**"
       - ".github/workflows/dream-real-cache-policy.yml"
   workflow_dispatch:
 
