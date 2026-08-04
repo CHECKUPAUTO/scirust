@@ -21,7 +21,7 @@ pub use discovery::{
 };
 pub use model::{
     DiscoveryConfig, DiscoveryResult, FEATURE_NAMES, GammaBaseline, HoldoutComparison,
-    LinearPolicy, PolicyMetrics, RobustHoldoutComparison, SymbolicCandidate, TraceRow,
+    LinearPolicy, PolicyMetrics, RobustHoldoutComparison, SymbolicCandidate, TraceRow, TraceSplit,
     TrajectoryPolicyMetrics, evaluate_policy, evaluate_policy_by_trajectory, split_by_trajectory,
     split_by_trajectory_fold,
 };
