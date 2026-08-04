@@ -26,30 +26,18 @@ jobs:
         with:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
-      - name: Generate exact rustfmt patch
-        run: |
-          cargo +nightly-2026-07-02 fmt \
-            --manifest-path experiments/elastic-cache-policy/Cargo.toml
-          git diff --binary -- experiments/elastic-cache-policy > rustfmt.patch
-      - name: Upload rustfmt patch
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: cache-policy-rustfmt
-          if-no-files-found: error
-          retention-days: 2
-          path: rustfmt.patch
       - name: Format check
-        run: test ! -s rustfmt.patch
+        run: cargo +nightly-2026-07-02 fmt --manifest-path experiments/elastic-cache-policy/Cargo.toml -- --check
       - name: Clippy
         run: cargo +nightly-2026-07-02 clippy --manifest-path experiments/elastic-cache-policy/Cargo.toml --all-targets -- -D warnings
       - name: Unit tests
         run: cargo +nightly-2026-07-02 test --manifest-path experiments/elastic-cache-policy/Cargo.toml
       - name: Synthetic discovery comparison
         run: cargo +nightly-2026-07-02 test --release --manifest-path experiments/elastic-cache-policy/Cargo.toml -- --ignored
-      - name: CLI smoke test
+      - name: CLI discovery report
         run: |
           cargo +nightly-2026-07-02 run --release \
             --manifest-path experiments/elastic-cache-policy/Cargo.toml -- \
             --seed 20260804 \
-            --steps 200 \
+            --steps 600 \
             --max-quality-loss 0.05
