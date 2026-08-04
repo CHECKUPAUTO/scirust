@@ -44,6 +44,7 @@ jobs:
             experiments/elastic-cache-policy/jetson/select_trajectory_stability_guard.py \
             experiments/elastic-cache-policy/jetson/summarize_repeated_crossover.py \
             experiments/elastic-cache-policy/real/dream/benchmark_frozen_ensemble.py \
+            experiments/elastic-cache-policy/real/dream/benchmark_guarded_independent.py \
             experiments/elastic-cache-policy/real/dream/benchmark_repeated_crossover.py \
             experiments/elastic-cache-policy/real/dream/patch_elastic_cache.py
           bash -n \
@@ -51,6 +52,7 @@ jobs:
             experiments/elastic-cache-policy/jetson/finalize_repeated_crossover_summary.sh \
             experiments/elastic-cache-policy/jetson/run_confirmatory_dream_proof.sh \
             experiments/elastic-cache-policy/jetson/run_end_to_end_gsm8k.sh \
+            experiments/elastic-cache-policy/jetson/run_guarded_independent_gsm8k.sh \
             experiments/elastic-cache-policy/jetson/run_jetson_dream_proof.sh \
             experiments/elastic-cache-policy/jetson/run_repeated_crossover_gsm8k.sh \
             experiments/elastic-cache-policy/jetson/run_robust_cross_validation.sh \
