@@ -35,13 +35,14 @@ impl TraceRow {
             ("refresh_cost", self.refresh_cost),
             ("stale_loss", self.stale_loss),
         ];
-        for (name, value) in bounded {
-            if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+        for (name, value) in bounded
+        {
+            if !value.is_finite() || !(0.0..=1.0).contains(&value)
+            {
                 return Err(format!("{name} must be finite and in [0,1], got {value}"));
             }
         }
-        if !self.similarity_delta.is_finite()
-            || !(-1.0..=1.0).contains(&self.similarity_delta)
+        if !self.similarity_delta.is_finite() || !(-1.0..=1.0).contains(&self.similarity_delta)
         {
             return Err(format!(
                 "similarity_delta must be finite and in [-1,1], got {}",
@@ -153,7 +154,8 @@ pub fn evaluate_policy<F>(rows: &[TraceRow], refresh: F) -> PolicyMetrics
 where
     F: Fn(&TraceRow) -> bool,
 {
-    if rows.is_empty() {
+    if rows.is_empty()
+    {
         return PolicyMetrics {
             quality_loss_fraction: 0.0,
             compute_fraction: 0.0,
@@ -175,11 +177,15 @@ where
     let mut refresh_cost = 0.0;
     let mut refreshes = 0usize;
 
-    for row in rows {
-        if refresh(row) {
+    for row in rows
+    {
+        if refresh(row)
+        {
             refresh_cost += row.refresh_cost;
             refreshes += 1;
-        } else {
+        }
+        else
+        {
             incurred_loss += row.stale_loss;
         }
     }
@@ -191,14 +197,14 @@ where
     }
 }
 
-pub fn split_by_trajectory(
-    rows: &[TraceRow],
-) -> (Vec<TraceRow>, Vec<TraceRow>, Vec<TraceRow>) {
+pub fn split_by_trajectory(rows: &[TraceRow]) -> (Vec<TraceRow>, Vec<TraceRow>, Vec<TraceRow>) {
     let mut training = Vec::new();
     let mut validation = Vec::new();
     let mut test = Vec::new();
-    for row in rows {
-        match row.trajectory_id % 5 {
+    for row in rows
+    {
+        match row.trajectory_id % 5
+        {
             0..=2 => training.push(*row),
             3 => validation.push(*row),
             _ => test.push(*row),
