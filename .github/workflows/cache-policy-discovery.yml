@@ -18,23 +18,37 @@ jobs:
     name: deterministic policy discovery
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - name: Install formatting toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
+          toolchain: nightly-2026-07-02
           components: rustfmt, clippy
-      - name: Format
-        run: cargo fmt --manifest-path experiments/elastic-cache-policy/Cargo.toml -- --check
+      - name: Generate exact rustfmt patch
+        run: |
+          cargo +nightly-2026-07-02 fmt \
+            --manifest-path experiments/elastic-cache-policy/Cargo.toml
+          git diff --binary -- experiments/elastic-cache-policy > rustfmt.patch
+      - name: Upload rustfmt patch
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cache-policy-rustfmt
+          if-no-files-found: error
+          retention-days: 2
+          path: rustfmt.patch
+      - name: Format check
+        run: test ! -s rustfmt.patch
       - name: Clippy
-        run: cargo clippy --manifest-path experiments/elastic-cache-policy/Cargo.toml --all-targets -- -D warnings
+        run: cargo +nightly-2026-07-02 clippy --manifest-path experiments/elastic-cache-policy/Cargo.toml --all-targets -- -D warnings
       - name: Unit tests
-        run: cargo test --manifest-path experiments/elastic-cache-policy/Cargo.toml
+        run: cargo +nightly-2026-07-02 test --manifest-path experiments/elastic-cache-policy/Cargo.toml
       - name: Synthetic discovery comparison
-        run: cargo test --release --manifest-path experiments/elastic-cache-policy/Cargo.toml -- --ignored
+        run: cargo +nightly-2026-07-02 test --release --manifest-path experiments/elastic-cache-policy/Cargo.toml -- --ignored
       - name: CLI smoke test
         run: |
-          cargo run --release \
+          cargo +nightly-2026-07-02 run --release \
             --manifest-path experiments/elastic-cache-policy/Cargo.toml -- \
             --seed 20260804 \
             --steps 200 \
