@@ -29,6 +29,29 @@ git -C "$SCIRUST_RUN" fetch --prune origin \
 git -C "$SCIRUST_RUN" checkout -B "$POLICY_BRANCH" \
     "refs/remotes/origin/$POLICY_BRANCH"
 
+if [ "${FINALIZE_ONLY:-0}" = "1" ]; then
+    LATEST_OUTPUT=""
+    for candidate in $(ls -1dt "$WORK_ROOT"/results/* 2>/dev/null || true); do
+        if [ -f "$candidate/dream_counterfactual_trace.csv" ] && \
+           [ -f "$candidate/scirust_discovery_output.txt" ]; then
+            LATEST_OUTPUT="$candidate"
+            break
+        fi
+    done
+    [ -n "$LATEST_OUTPUT" ] || fail "aucun résultat Dream récupérable trouvé"
+    printf 'Finalisation sans recalcul: %s\n' "$LATEST_OUTPUT"
+    set +e
+    python3 "$SCIRUST_RUN/experiments/elastic-cache-policy/jetson/finalize_dream_proof.py" \
+        --output-dir "$LATEST_OUTPUT" \
+        --quality-budget 0.05 \
+        --seed 20260804
+    STATUS=$?
+    set -e
+    printf '\nRapport: %s\n' "$LATEST_OUTPUT/dream_real_policy_report.json"
+    cat "$LATEST_OUTPUT/dream_real_policy_report.json"
+    exit "$STATUS"
+fi
+
 if [ ! -d "$ELASTIC_ROOT/.git" ]; then
     git clone https://github.com/VILA-Lab/Elastic-Cache.git "$ELASTIC_ROOT"
 else
@@ -48,6 +71,7 @@ printf 'Image NVIDIA: %s\n' "${IMAGE_DIGEST:-$PYTORCH_IMAGE}"
 # NVIDIA's Thor guide validates the NGC PyTorch container path. The container
 # supplies the tested PyTorch/cuBLAS stack while all source, cache and result
 # directories remain explicit host mounts.
+set +e
 docker run --rm \
     --runtime=nvidia \
     --gpus all \
@@ -58,6 +82,7 @@ docker run --rm \
     -e HF_HUB_ENABLE_HF_TRANSFER=1 \
     -e TOKENIZERS_PARALLELISM=false \
     -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+    -e CUBLAS_WORKSPACE_CONFIG=:4096:8 \
     -e CARGO_HOME=/workspace/work/cargo \
     -e RUSTUP_HOME=/workspace/work/rustup \
     -v "$SCIRUST_RUN:/workspace/scirust" \
@@ -89,7 +114,7 @@ PY
 
 python3 -m venv --system-site-packages /workspace/work/container-venv
 source /workspace/work/container-venv/bin/activate
-PIP_CONSTRAINT=/dev/null python -m pip install --upgrade "pip<27" "setuptools<80" wheel
+PIP_CONSTRAINT=/dev/null python -m pip install --upgrade "pip<27" "setuptools<80" "wheel<0.47" "packaging<=25.0"
 PIP_CONSTRAINT=/dev/null python -m pip install \
     "transformers==4.49.0" \
     "accelerate==0.34.2" \
@@ -118,6 +143,7 @@ if ! command -v rustup >/dev/null 2>&1; then
 fi
 rustup toolchain install nightly-2026-07-02 --profile minimal
 
+set +e
 python /workspace/scirust/experiments/elastic-cache-policy/jetson/dream_jetson_proof.py \
     --elastic-cache /workspace/Elastic-Cache \
     --scirust /workspace/scirust \
@@ -129,7 +155,27 @@ python /workspace/scirust/experiments/elastic-cache-policy/jetson/dream_jetson_p
     --quality-budget 0.05 \
     --steps 1200 \
     --seed 20260804
+PROBE_STATUS=$?
+set -e
+
+if [ -f /workspace/output/dream_counterfactual_trace.csv ] && \
+   [ -f /workspace/output/scirust_discovery_output.txt ]; then
+    set +e
+    python /workspace/scirust/experiments/elastic-cache-policy/jetson/finalize_dream_proof.py \
+        --output-dir /workspace/output \
+        --quality-budget 0.05 \
+        --seed 20260804
+    FINAL_STATUS=$?
+    set -e
+    exit "$FINAL_STATUS"
+fi
+exit "$PROBE_STATUS"
 '
+STATUS=$?
+set -e
 
 printf '\nRésultats: %s\n' "$OUTPUT_ROOT"
-cat "$OUTPUT_ROOT/dream_real_policy_report.json"
+if [ -f "$OUTPUT_ROOT/dream_real_policy_report.json" ]; then
+    cat "$OUTPUT_ROOT/dream_real_policy_report.json"
+fi
+exit "$STATUS"
