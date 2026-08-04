@@ -7,8 +7,8 @@ cosine threshold with a deterministic eight-signal cache-refresh policy.
 
 For every reused attention layer, the trace probe executes both the cached K/V
 path and an exact full K/V refresh path from the same layer input. It records a
-bounded divergence between their attention outputs. The later GSM8K phase runs
-the frozen policy directly and measures exact-match accuracy and wall-clock
+bounded divergence between their attention outputs. The later GSM8K phases run
+the frozen policy directly and measure exact-match accuracy and wall-clock
 latency without the dual counterfactual path.
 
 ## Jetson target
@@ -95,39 +95,81 @@ Observed independent result on seed `20260805`:
 This confirms a small but statistically stable local refresh-compute gain. It
 does not revive the synthetic `63.11%` claim.
 
-## Phase 4: paired GSM8K quality and wall-clock benchmark
+## Phase 4: registered paired GSM8K end-to-end benchmark
 
 ```bash
 bash experiments/elastic-cache-policy/jetson/run_end_to_end_gsm8k.sh
 ```
 
-This phase patches Elastic-Cache with feature extraction matching the trace
-collector exactly and evaluates the frozen 3-of-5 ensemble against
-`always_refresh` on the same 60 GSM8K questions. The model is loaded once and
-execution order alternates for each pair.
+The frozen 3-of-5 ensemble is compared with `always_refresh` on the same 60
+GSM8K questions without fitting or calibration on GSM8K.
 
-Pre-registered criteria:
+Observed registered result:
 
-- no policy fitting or threshold calibration on GSM8K;
-- paired exact-match non-inferiority margin: `5` percentage points;
-- mean wall-clock improvement at least `0.5%`;
-- mean refresh-compute improvement at least `0.5%`;
-- lower bounds of both 95% paired bootstrap improvement intervals above zero;
-- 10,000 deterministic bootstrap samples.
+- accuracy delta: `+1.6667` percentage points, 95% interval `[0, 5]` points;
+- mean wall-clock improvement: `0.2909%`;
+- wall-clock 95% interval: `[-1.6496%, 2.1121%]`;
+- mean total refresh-cost improvement: `0.5329%`;
+- refresh-cost 95% interval: `[-1.4611%, 2.4059%]`;
+- quality criterion: pass;
+- latency criterion: fail;
+- refresh-compute criterion: fail;
+- `end_to_end_success`: false.
 
-Outputs:
+The registered negative verdict is final for this protocol and must not be
+retroactively changed.
 
-```text
-~/.local/share/scirust/dream-policy-proof/results/end-to-end-<UTC timestamp>/
-├── end_to_end_manifest.json
-└── dream_frozen_ensemble_gsm8k_report.json
+### Secondary diagnostic
+
+```bash
+bash experiments/elastic-cache-policy/jetson/finalize_end_to_end_diagnostic.sh
 ```
 
-Exit status:
+The diagnostic preserves the registered verdict and shows why the total metric
+is noisy:
 
-- `0`: all quality, refresh-compute, and wall-clock criteria pass;
-- `2`: the benchmark is valid but at least one end-to-end criterion fails;
-- another nonzero status: environment, model, dataset, or runtime failure.
+- exact response match rate: `70%`;
+- same prediction rate: `96.67%`;
+- same correctness rate: `98.33%`;
+- the ensemble executes more cache decisions on `55/60` questions;
+- mean ensemble/always decision ratio: `1.0779`;
+- mean conditional refresh-cost saving: `7.3859%`, 95% interval
+  `[6.7011%, 8.1040%]`;
+- mean refresh-cost-per-decision improvement: `7.6675%`, 95% interval
+  `[6.9636%, 8.4200%]`;
+- mean latency-per-decision improvement: `7.4346%`, 95% interval
+  `[6.7421%, 8.1682%]`.
+
+The execution order is strongly confounded with question identity: ensemble-first
+pairs show a positive mean while always-first pairs show a negative mean. Simple
+alternation therefore does not fully remove thermal, carry-over, and trajectory
+bias.
+
+## Phase 5: repeated counterbalanced crossover
+
+```bash
+bash experiments/elastic-cache-policy/jetson/run_repeated_crossover_gsm8k.sh
+```
+
+This exploratory follow-up reuses exactly the same 60 registered GSM8K indices.
+Each question is executed four times with the same generation seed:
+
+- even question positions: `always, ensemble, ensemble, always` (`ABBA`);
+- odd question positions: `ensemble, always, always, ensemble` (`BAAB`).
+
+Each mode is summarized by its median of two repeats for that question. The
+report bootstraps the 60 per-question median differences and separately records:
+
+- end-to-end latency;
+- total refresh cost;
+- conditional refresh saving;
+- refresh cost per decision;
+- latency per decision;
+- generation decision-count ratio;
+- within-mode deterministic reproducibility.
+
+This phase is explicitly post-hoc and exploratory. It can isolate an execution
+signal but cannot replace the negative phase-4 verdict.
 
 ## Counterfactual metric
 
