@@ -6,13 +6,14 @@ use scirust_evo::CmaEs;
 
 pub fn best_fixed_gamma(rows: &[TraceRow], max_quality_loss: f64) -> GammaBaseline {
     let mut best: Option<GammaBaseline> = None;
-    for i in 0..=2_000 {
+    for i in 0..=2_000
+    {
         let gamma = i as f64 / 2_000.0;
         let metrics = evaluate_policy(rows, |row| row.similarity < gamma);
         if metrics.quality_loss_fraction <= max_quality_loss + 1e-12
-            && best.as_ref().is_none_or(|current| {
-                metrics.compute_fraction < current.metrics.compute_fraction
-            })
+            && best
+                .as_ref()
+                .is_none_or(|current| metrics.compute_fraction < current.metrics.compute_fraction)
         {
             best = Some(GammaBaseline { gamma, metrics });
         }
@@ -24,9 +25,12 @@ pub fn best_fixed_gamma(rows: &[TraceRow], max_quality_loss: f64) -> GammaBaseli
 }
 
 fn sigmoid(value: f64) -> f64 {
-    if value >= 0.0 {
+    if value >= 0.0
+    {
         1.0 / (1.0 + (-value).exp())
-    } else {
+    }
+    else
+    {
         let exp = value.exp();
         exp / (1.0 + exp)
     }
@@ -46,7 +50,8 @@ fn smooth_objective(rows: &[TraceRow], theta: &[f64], max_quality_loss: f64) -> 
     let mut incurred_loss = 0.0;
     let mut refresh_cost = 0.0;
 
-    for row in rows {
+    for row in rows
+    {
         let features = row.features();
         let score = theta[8]
             + theta[..8]
@@ -72,7 +77,8 @@ pub fn calibrate_threshold(
     weights: &[f64; 8],
     max_quality_loss: f64,
 ) -> Option<(f64, PolicyMetrics)> {
-    if rows.is_empty() {
+    if rows.is_empty()
+    {
         return None;
     }
 
@@ -103,14 +109,17 @@ pub fn calibrate_threshold(
         compute_fraction: 0.0,
         refresh_rate: 0.0,
     };
-    if no_refresh.quality_loss_fraction <= max_quality_loss + 1e-12 {
+    if no_refresh.quality_loss_fraction <= max_quality_loss + 1e-12
+    {
         return Some((f64::INFINITY, no_refresh));
     }
 
-    while cursor < ranked.len() {
+    while cursor < ranked.len()
+    {
         let threshold = ranked[cursor].0;
         let mut end = cursor;
-        while end < ranked.len() && ranked[end].0.total_cmp(&threshold).is_eq() {
+        while end < ranked.len() && ranked[end].0.total_cmp(&threshold).is_eq()
+        {
             let row = rows[ranked[end].1];
             incurred_loss -= row.stale_loss;
             refresh_cost += row.refresh_cost;
@@ -122,7 +131,8 @@ pub fn calibrate_threshold(
             compute_fraction: refresh_cost / total_cost,
             refresh_rate: refreshes as f64 / rows.len() as f64,
         };
-        if metrics.quality_loss_fraction <= max_quality_loss + 1e-12 {
+        if metrics.quality_loss_fraction <= max_quality_loss + 1e-12
+        {
             return Some((threshold, metrics));
         }
         cursor = end;
@@ -143,13 +153,16 @@ pub fn discover_linear_policy(
     validation: &[TraceRow],
     config: DiscoveryConfig,
 ) -> Result<DiscoveryResult, String> {
-    if training.is_empty() || validation.is_empty() {
+    if training.is_empty() || validation.is_empty()
+    {
         return Err("training and validation traces must both be non-empty".into());
     }
-    if !(0.0..=1.0).contains(&config.max_quality_loss) {
+    if !(0.0..=1.0).contains(&config.max_quality_loss)
+    {
         return Err("max_quality_loss must lie in [0,1]".into());
     }
-    if config.steps == 0 {
+    if config.steps == 0
+    {
         return Err("steps must be greater than zero".into());
     }
     if !config.initial_sigma.is_finite()
@@ -168,12 +181,15 @@ pub fn discover_linear_policy(
     let mut best_theta = theta.clone();
     let mut best_fitness = f64::NEG_INFINITY;
 
-    for _ in 0..config.steps {
+    for _ in 0..config.steps
+    {
         let population = optimizer.step(&mut theta, |candidate| {
             -smooth_objective(training, candidate, config.max_quality_loss)
         });
-        for individual in population {
-            if individual.fitness.total_cmp(&best_fitness).is_gt() {
+        for individual in population
+        {
+            if individual.fitness.total_cmp(&best_fitness).is_gt()
+            {
                 best_fitness = individual.fitness;
                 best_theta.clone_from(&individual.genome);
             }
@@ -197,10 +213,13 @@ pub fn discover_linear_policy(
 pub fn compare_on_holdout(policy: &LinearPolicy, test: &[TraceRow]) -> HoldoutComparison {
     let learned = evaluate_policy(test, |row| policy.refresh(row));
     let fixed_gamma = best_fixed_gamma(test, learned.quality_loss_fraction);
-    let relative_compute_improvement = if fixed_gamma.metrics.compute_fraction > 0.0 {
+    let relative_compute_improvement = if fixed_gamma.metrics.compute_fraction > 0.0
+    {
         (fixed_gamma.metrics.compute_fraction - learned.compute_fraction)
             / fixed_gamma.metrics.compute_fraction
-    } else {
+    }
+    else
+    {
         0.0
     };
     let pareto_dominates = learned.quality_loss_fraction
