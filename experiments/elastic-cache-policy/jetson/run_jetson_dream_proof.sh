@@ -7,6 +7,7 @@ SCIRUST_RUN="$WORK_ROOT/scirust-policy"
 ELASTIC_ROOT="$WORK_ROOT/Elastic-Cache"
 VENV="$WORK_ROOT/venv"
 OUTPUT_ROOT="$WORK_ROOT/results/$(date -u +%Y%m%dT%H%M%SZ)"
+POLICY_BRANCH="research/elastic-cache-policy-discovery"
 
 fail() { printf 'ERREUR: %s\n' "$*" >&2; exit 1; }
 command -v git >/dev/null || fail "git introuvable"
@@ -18,13 +19,19 @@ command -v rustup >/dev/null || fail "rustup introuvable"
 
 mkdir -p "$WORK_ROOT" "$OUTPUT_ROOT"
 
+SCIRUST_REMOTE="$(git -C "$SCIRUST_SOURCE" remote get-url origin)"
 git -C "$SCIRUST_SOURCE" fetch origin --prune
 if [ ! -d "$SCIRUST_RUN/.git" ]; then
-    git clone --shared "$SCIRUST_SOURCE" "$SCIRUST_RUN"
+    git clone --shared --no-checkout "$SCIRUST_SOURCE" "$SCIRUST_RUN"
 fi
-git -C "$SCIRUST_RUN" fetch origin --prune
-git -C "$SCIRUST_RUN" checkout -B research/elastic-cache-policy-discovery \
-    origin/research/elastic-cache-policy-discovery
+# A shared local clone initially points origin at SCIRUST_SOURCE. Replace it with
+# the source repository's actual GitHub remote so remote-only research branches
+# are fetched correctly.
+git -C "$SCIRUST_RUN" remote set-url origin "$SCIRUST_REMOTE"
+git -C "$SCIRUST_RUN" fetch --prune origin \
+    "+refs/heads/$POLICY_BRANCH:refs/remotes/origin/$POLICY_BRANCH"
+git -C "$SCIRUST_RUN" checkout -B "$POLICY_BRANCH" \
+    "refs/remotes/origin/$POLICY_BRANCH"
 
 if [ ! -d "$ELASTIC_ROOT/.git" ]; then
     git clone https://github.com/VILA-Lab/Elastic-Cache.git "$ELASTIC_ROOT"
