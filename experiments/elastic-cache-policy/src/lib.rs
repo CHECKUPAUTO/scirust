@@ -20,8 +20,7 @@ pub use discovery::{
 };
 pub use model::{
     DiscoveryConfig, DiscoveryResult, FEATURE_NAMES, GammaBaseline, HoldoutComparison,
-    LinearPolicy, PolicyMetrics, SymbolicCandidate, TraceRow, evaluate_policy,
-    split_by_trajectory,
+    LinearPolicy, PolicyMetrics, SymbolicCandidate, TraceRow, evaluate_policy, split_by_trajectory,
 };
 pub use synthetic::synthetic_trace;
 pub use trace_io::{TRACE_HEADER, read_trace_csv, write_trace_csv};
