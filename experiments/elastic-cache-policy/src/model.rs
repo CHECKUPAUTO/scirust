@@ -305,9 +305,7 @@ where
     let mut refresh_rate_sum = 0.0;
     for accumulator in by_trajectory.values()
     {
-        qualities.push(
-            accumulator.incurred_loss / accumulator.total_loss.max(f64::EPSILON),
-        );
+        qualities.push(accumulator.incurred_loss / accumulator.total_loss.max(f64::EPSILON));
         compute_sum += accumulator.refresh_cost / accumulator.total_cost.max(f64::EPSILON);
         refresh_rate_sum += accumulator.refreshes as f64 / accumulator.rows.max(1) as f64;
     }
