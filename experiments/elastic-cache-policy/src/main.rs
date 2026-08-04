@@ -24,8 +24,8 @@ impl Default for Args {
             seed: 20_260_804,
             steps: 600,
             max_quality_loss: 0.05,
-            trajectories: 80,
-            rows_per_trajectory: 128,
+            trajectories: 400,
+            rows_per_trajectory: 64,
             symbolic: false,
         }
     }
@@ -33,7 +33,9 @@ impl Default for Args {
 
 fn usage() {
     eprintln!(
-        "usage: scirust-cache-policy [--trace FILE] [--write-synthetic FILE] \\\n         [--seed N] [--steps N] [--max-quality-loss X] \\\n         [--trajectories N] [--rows-per-trajectory N] [--symbolic]"
+        "usage: scirust-cache-policy [--trace FILE] [--write-synthetic FILE] \\
+         [--seed N] [--steps N] [--max-quality-loss X] \\
+         [--trajectories N] [--rows-per-trajectory N] [--symbolic]"
     );
 }
 
