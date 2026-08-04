@@ -1,7 +1,6 @@
 use scirust_cache_policy::{
-    DiscoveryConfig, compare_on_holdout, discover_linear_policy,
-    discover_symbolic_surrogate, read_trace_csv, split_by_trajectory, synthetic_trace,
-    write_trace_csv,
+    DiscoveryConfig, compare_on_holdout, discover_linear_policy, discover_symbolic_surrogate,
+    read_trace_csv, split_by_trajectory, synthetic_trace, write_trace_csv,
 };
 use std::path::PathBuf;
 
@@ -34,67 +33,73 @@ impl Default for Args {
 
 fn usage() {
     eprintln!(
-        "usage: scirust-cache-policy [--trace FILE] [--write-synthetic FILE] \
-         [--seed N] [--steps N] [--max-quality-loss X] \
-         [--trajectories N] [--rows-per-trajectory N] [--symbolic]"
+        "usage: scirust-cache-policy [--trace FILE] [--write-synthetic FILE] \\\n         [--seed N] [--steps N] [--max-quality-loss X] \\\n         [--trajectories N] [--rows-per-trajectory N] [--symbolic]"
     );
 }
 
 fn parse_args() -> Result<Args, String> {
     let mut parsed = Args::default();
     let mut args = std::env::args().skip(1);
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--trace" => {
-                parsed.trace = Some(PathBuf::from(
-                    args.next().ok_or("--trace requires a path")?,
-                ));
-            }
-            "--write-synthetic" => {
+    while let Some(arg) = args.next()
+    {
+        match arg.as_str()
+        {
+            "--trace" =>
+            {
+                parsed.trace = Some(PathBuf::from(args.next().ok_or("--trace requires a path")?));
+            },
+            "--write-synthetic" =>
+            {
                 parsed.write_synthetic = Some(PathBuf::from(
                     args.next().ok_or("--write-synthetic requires a path")?,
                 ));
-            }
-            "--seed" => {
+            },
+            "--seed" =>
+            {
                 parsed.seed = args
                     .next()
                     .ok_or("--seed requires an integer")?
                     .parse()
                     .map_err(|error| format!("invalid --seed: {error}"))?;
-            }
-            "--steps" => {
+            },
+            "--steps" =>
+            {
                 parsed.steps = args
                     .next()
                     .ok_or("--steps requires an integer")?
                     .parse()
                     .map_err(|error| format!("invalid --steps: {error}"))?;
-            }
-            "--max-quality-loss" => {
+            },
+            "--max-quality-loss" =>
+            {
                 parsed.max_quality_loss = args
                     .next()
                     .ok_or("--max-quality-loss requires a number")?
                     .parse()
                     .map_err(|error| format!("invalid --max-quality-loss: {error}"))?;
-            }
-            "--trajectories" => {
+            },
+            "--trajectories" =>
+            {
                 parsed.trajectories = args
                     .next()
                     .ok_or("--trajectories requires an integer")?
                     .parse()
                     .map_err(|error| format!("invalid --trajectories: {error}"))?;
-            }
-            "--rows-per-trajectory" => {
+            },
+            "--rows-per-trajectory" =>
+            {
                 parsed.rows_per_trajectory = args
                     .next()
                     .ok_or("--rows-per-trajectory requires an integer")?
                     .parse()
                     .map_err(|error| format!("invalid --rows-per-trajectory: {error}"))?;
-            }
+            },
             "--symbolic" => parsed.symbolic = true,
-            "-h" | "--help" => {
+            "-h" | "--help" =>
+            {
                 usage();
                 std::process::exit(0);
-            }
+            },
             other => return Err(format!("unknown argument `{other}`")),
         }
     }
@@ -103,22 +108,30 @@ fn parse_args() -> Result<Args, String> {
 
 fn run() -> Result<(), String> {
     let args = parse_args()?;
-    let (rows, source) = if let Some(path) = &args.trace {
+    let (rows, source) = if let Some(path) = &args.trace
+    {
         (read_trace_csv(path)?, format!("trace:{}", path.display()))
-    } else {
+    }
+    else
+    {
         (
             synthetic_trace(args.trajectories, args.rows_per_trajectory, args.seed),
             "synthetic-oracle".to_string(),
         )
     };
 
-    if let Some(path) = &args.write_synthetic {
+    if let Some(path) = &args.write_synthetic
+    {
         write_trace_csv(path, &rows)?;
     }
 
     let (training, validation, test) = split_by_trajectory(&rows);
-    if training.is_empty() || validation.is_empty() || test.is_empty() {
-        return Err("trajectory split produced an empty partition; provide at least five trajectory IDs".into());
+    if training.is_empty() || validation.is_empty() || test.is_empty()
+    {
+        return Err(
+            "trajectory split produced an empty partition; provide at least five trajectory IDs"
+                .into(),
+        );
     }
 
     let result = discover_linear_policy(
@@ -168,16 +181,23 @@ fn run() -> Result<(), String> {
         comparison.relative_compute_improvement, comparison.pareto_dominates
     );
 
-    if args.trace.is_none() {
+    if args.trace.is_none()
+    {
         println!("evidence_scope=synthetic-only; no claim about LLaDA or Dream");
     }
 
-    if args.symbolic {
+    if args.symbolic
+    {
         let capped = &training[..training.len().min(4_096)];
-        let seeds = [args.seed, args.seed.wrapping_add(1), args.seed.wrapping_add(2)];
+        let seeds = [
+            args.seed,
+            args.seed.wrapping_add(1),
+            args.seed.wrapping_add(2),
+        ];
         let front = discover_symbolic_surrogate(capped, &seeds, 120, 14, 25, 24);
         println!("symbolic_front_size={}", front.len());
-        for candidate in front.iter().take(12) {
+        for candidate in front.iter().take(12)
+        {
             println!(
                 "symbolic size={} mse={:.10} expr={}",
                 candidate.size, candidate.mse, candidate.expression
@@ -189,7 +209,8 @@ fn run() -> Result<(), String> {
 }
 
 fn main() {
-    if let Err(error) = run() {
+    if let Err(error) = run()
+    {
         usage();
         eprintln!("error: {error}");
         std::process::exit(2);
