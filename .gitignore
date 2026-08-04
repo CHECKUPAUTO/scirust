@@ -18,6 +18,7 @@ __pycache__/
 
 # Build artifacts
 /target/
+tools/tensor-parity/target/
 examples/benchmarks/target/
 # scirust-burn-bridge is excluded from the root workspace (it pulls in the real
 # Burn crate), so it builds into its own target dir.
