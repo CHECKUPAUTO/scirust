@@ -58,24 +58,18 @@ fn rotating_fold_split_never_leaks_a_trajectory() {
     let rows = synthetic_trace(25, 8, 11);
     for test_fold in 0..5
     {
-        let (training, validation, test) =
-            split_by_trajectory_fold(&rows, 5, test_fold).unwrap();
+        let (training, validation, test) = split_by_trajectory_fold(&rows, 5, test_fold).unwrap();
         let validation_fold = (test_fold + 4) % 5;
         assert!(
-            training
-                .iter()
-                .all(|row| row.trajectory_id % 5 != test_fold
-                    && row.trajectory_id % 5 != validation_fold)
+            training.iter().all(|row| row.trajectory_id % 5 != test_fold
+                && row.trajectory_id % 5 != validation_fold)
         );
         assert!(
             validation
                 .iter()
                 .all(|row| row.trajectory_id % 5 == validation_fold)
         );
-        assert!(
-            test.iter()
-                .all(|row| row.trajectory_id % 5 == test_fold)
-        );
+        assert!(test.iter().all(|row| row.trajectory_id % 5 == test_fold));
     }
 }
 
