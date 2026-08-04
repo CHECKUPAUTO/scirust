@@ -1,7 +1,7 @@
 use crate::model::{
     DiscoveryConfig, DiscoveryResult, FEATURE_NAMES, GammaBaseline, HoldoutComparison,
-    LinearPolicy, PolicyMetrics, RobustHoldoutComparison, SymbolicCandidate,
-    TrajectoryPolicyMetrics, TraceRow, dot, evaluate_policy, evaluate_policy_by_trajectory,
+    LinearPolicy, PolicyMetrics, RobustHoldoutComparison, SymbolicCandidate, TraceRow,
+    TrajectoryPolicyMetrics, dot, evaluate_policy, evaluate_policy_by_trajectory,
     nearest_rank_quantile,
 };
 use scirust_evo::CmaEs;
@@ -37,10 +37,9 @@ pub fn best_fixed_gamma_robust(
     {
         let gamma = i as f64 / 2_000.0;
         let metrics = evaluate_policy(rows, |row| row.similarity < gamma);
-        let trajectory =
-            evaluate_policy_by_trajectory(rows, tail_quality_quantile, |row| {
-                row.similarity < gamma
-            });
+        let trajectory = evaluate_policy_by_trajectory(rows, tail_quality_quantile, |row| {
+            row.similarity < gamma
+        });
         let meets_budget = metrics.quality_loss_fraction <= max_quality_loss + 1e-12
             && trajectory.mean_quality_loss_fraction <= max_quality_loss + 1e-12
             && trajectory.tail_quality_loss_fraction <= max_quality_loss + 1e-12;
@@ -314,13 +313,9 @@ pub fn calibrate_threshold_robust(
         let mut refresh_rate_sum = 0.0;
         for accumulator in accumulators
         {
-            qualities.push(
-                accumulator.incurred_loss / accumulator.total_loss.max(f64::EPSILON),
-            );
-            compute_sum +=
-                accumulator.refresh_cost / accumulator.total_cost.max(f64::EPSILON);
-            refresh_rate_sum +=
-                accumulator.refreshes as f64 / accumulator.rows.max(1) as f64;
+            qualities.push(accumulator.incurred_loss / accumulator.total_loss.max(f64::EPSILON));
+            compute_sum += accumulator.refresh_cost / accumulator.total_cost.max(f64::EPSILON);
+            refresh_rate_sum += accumulator.refreshes as f64 / accumulator.rows.max(1) as f64;
         }
         let trajectories = qualities.len();
         let mean_quality = qualities.iter().sum::<f64>() / trajectories.max(1) as f64;
@@ -336,13 +331,12 @@ pub fn calibrate_threshold_robust(
         }
     };
 
-    let aggregate_metrics = |incurred_loss: f64, refresh_cost: f64, refreshes: usize| {
-        PolicyMetrics {
+    let aggregate_metrics =
+        |incurred_loss: f64, refresh_cost: f64, refreshes: usize| PolicyMetrics {
             quality_loss_fraction: (incurred_loss / total_loss).max(0.0),
             compute_fraction: refresh_cost / total_cost,
             refresh_rate: refreshes as f64 / rows.len() as f64,
-        }
-    };
+        };
 
     let meets_budget = |aggregate: PolicyMetrics, trajectory: TrajectoryPolicyMetrics| {
         aggregate.quality_loss_fraction <= max_quality_loss + 1e-12
@@ -404,11 +398,7 @@ pub fn calibrate_threshold_robust(
         mean_compute_fraction: 1.0,
         mean_refresh_rate: 1.0,
     };
-    Some((
-        f64::NEG_INFINITY,
-        all_refresh,
-        all_refresh_trajectory,
-    ))
+    Some((f64::NEG_INFINITY, all_refresh, all_refresh_trajectory))
 }
 
 pub fn discover_linear_policy(
@@ -492,15 +482,13 @@ pub fn discover_linear_policy(
     }
     else
     {
-        let (threshold, metrics) =
-            calibrate_threshold(validation, &weights, calibration_budget)
-                .ok_or_else(|| "cannot calibrate an empty validation trace".to_string())?;
+        let (threshold, metrics) = calibrate_threshold(validation, &weights, calibration_budget)
+            .ok_or_else(|| "cannot calibrate an empty validation trace".to_string())?;
         let policy = LinearPolicy { weights, threshold };
-        let trajectory = evaluate_policy_by_trajectory(
-            validation,
-            config.tail_quality_quantile,
-            |row| policy.refresh(row),
-        );
+        let trajectory =
+            evaluate_policy_by_trajectory(validation, config.tail_quality_quantile, |row| {
+                policy.refresh(row)
+            });
         (threshold, metrics, trajectory)
     };
 
@@ -560,21 +548,17 @@ pub fn compare_on_holdout_robust(
 ) -> RobustHoldoutComparison {
     let learned = evaluate_policy(test, |row| policy.refresh(row));
     let learned_trajectory =
-        evaluate_policy_by_trajectory(test, tail_quality_quantile, |row| {
-            policy.refresh(row)
-        });
+        evaluate_policy_by_trajectory(test, tail_quality_quantile, |row| policy.refresh(row));
     let (fixed_gamma, fixed_gamma_trajectory) =
         best_fixed_gamma_robust(test, max_quality_loss, tail_quality_quantile);
 
     let learned_meets_budget = learned.quality_loss_fraction <= max_quality_loss + 1e-12
         && learned_trajectory.mean_quality_loss_fraction <= max_quality_loss + 1e-12
         && learned_trajectory.tail_quality_loss_fraction <= max_quality_loss + 1e-12;
-    let fixed_gamma_meets_budget =
-        fixed_gamma.metrics.quality_loss_fraction <= max_quality_loss + 1e-12
-            && fixed_gamma_trajectory.mean_quality_loss_fraction
-                <= max_quality_loss + 1e-12
-            && fixed_gamma_trajectory.tail_quality_loss_fraction
-                <= max_quality_loss + 1e-12;
+    let fixed_gamma_meets_budget = fixed_gamma.metrics.quality_loss_fraction
+        <= max_quality_loss + 1e-12
+        && fixed_gamma_trajectory.mean_quality_loss_fraction <= max_quality_loss + 1e-12
+        && fixed_gamma_trajectory.tail_quality_loss_fraction <= max_quality_loss + 1e-12;
     let constrained_better = learned_meets_budget
         && fixed_gamma_meets_budget
         && learned.compute_fraction < fixed_gamma.metrics.compute_fraction;
