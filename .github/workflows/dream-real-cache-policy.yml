@@ -1,6 +1,12 @@
 name: Dream Real Cache Policy
 
 on:
+  push:
+    branches:
+      - research/elastic-cache-policy-discovery
+    paths:
+      - "experiments/elastic-cache-policy/real/dream/**"
+      - ".github/workflows/dream-real-cache-policy.yml"
   pull_request:
     branches: [master, main, develop]
     paths:
