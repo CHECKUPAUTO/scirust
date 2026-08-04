@@ -59,5 +59,8 @@ fn discovered_policy_beats_similarity_only_on_the_nonlinear_oracle() {
     )
     .unwrap();
     let comparison = compare_on_holdout(&result.policy, &test);
-    assert!(comparison.relative_compute_improvement > 0.10, "{comparison:?}");
+    assert!(
+        comparison.relative_compute_improvement > 0.10,
+        "{comparison:?}"
+    );
 }
