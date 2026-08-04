@@ -17,9 +17,27 @@ untracked attention mass, layer depth, drift×age, refresh cost
 ```
 
 SciRust's seeded CMA-ES fits the risk weights. A deterministic validation sweep
-then calibrates the hard deployment threshold to an explicit stale-cache loss
-budget. On held-out trajectories, the tool compares the result with the best of
-2,001 fixed gamma values under the learned policy's measured quality loss.
+calibrates the hard deployment threshold with a safety reserve. On held-out
+trajectories, the tool compares the frozen result with the best of 2,001 fixed
+`gamma` values under the same pre-registered stale-cache loss budget.
+
+## Measured synthetic result
+
+The deterministic run `seed=20260804`, 600 CMA-ES steps, 400 independent
+trajectories and a final quality-loss budget of `0.05` produced:
+
+| Held-out test | Quality loss | Compute fraction | Refresh rate |
+|---|---:|---:|---:|
+| SciRust multi-signal policy | 0.04748920 | 0.18439180 | 0.19843750 |
+| Best fixed gamma (`0.865`) | 0.04966883 | 0.49985299 | 0.50039062 |
+
+Both policies satisfy the same quality constraint. The SciRust policy uses
+`63.110794%` less normalized refresh compute and strictly Pareto-dominates the
+best fixed threshold on this oracle. The exact coefficients and provenance are
+versioned in `results/synthetic_seed_20260804.json`.
+
+This result is **synthetic only**. It validates the discovery method; it does
+not prove a gain on LLaDA, Dream, or another real diffusion LLM.
 
 ## Run
 
@@ -32,9 +50,6 @@ cargo run --release \
   --steps 600 \
   --max-quality-loss 0.05
 ```
-
-The default run uses a deterministic nonlinear synthetic oracle. It validates
-only the discovery machinery; it is not evidence of a gain on LLaDA or Dream.
 
 Real trace:
 
