@@ -29,18 +29,19 @@ A fixed threshold is optimal only if similarity is a sufficient statistic and th
 The deployment policy is deliberately small:
 
 \[
-R(x)=b+w_1d+w_2\dot d_-+w_3v_h+w_4a+w_5(1-m)+w_6\ell+w_7da,
+R(x)=w_1d+w_2\dot d_-+w_3\sqrt{v_h}+w_4a+w_5(1-m)+w_6\ell+w_7da+w_8C_{\mathrm{refresh}},
 \]
 
 with:
 
 - \(d=1-\operatorname{cos}\): current attention drift;
 - \(\dot d_-=\max(-\Delta\operatorname{cos},0)\): worsening trend;
-- \(v_h\): normalized variance across heads;
+- \(\sqrt{v_h}\): normalized standard deviation across heads;
 - \(a\): normalized cache age;
 - \(m\): normalized tracked-token attention mass;
 - \(\ell\): normalized layer index;
-- \(da\): drift-age interaction.
+- \(da\): drift-age interaction;
+- \(C_{\mathrm{refresh}}\): measured or normalized recomputation cost.
 
 The cache is refreshed iff
 
@@ -77,20 +78,25 @@ or, preferably, the measured layer-time fraction on the target hardware.
 
 ## 4. Optimization
 
-For a policy with refresh probability \(p_i=\sigma(R(x_i))\), SciRust's seeded CMA-ES minimizes
+For a policy with refresh probability \(p_i=\sigma(R(x_i)/T)\), the current implementation uses seeded SciRust CMA-ES to minimize
 
 \[
-J_\lambda
-=\lambda\frac{\sum_i(1-p_i)L_i}{\sum_i L_i}
-+\frac{\sum_i p_iC_i}{\sum_i C_i}.
+J_\varepsilon
+=\frac{\sum_i p_iC_i}{\sum_i C_i}
++\rho\left[\max\left(0,
+\frac{\sum_i(1-p_i)L_i}{\sum_i L_i}-\varepsilon
+\right)\right]^2
++\eta\lVert w\rVert_2^2,
 \]
 
-Several \(\lambda\) values generate different quality/compute trade-offs. The tool then:
+where \(\varepsilon\) is the pre-registered stale-loss budget. The tool then:
 
-1. calibrates the bias to explicit quality-loss budgets;
-2. removes dominated candidates;
-3. compares the learned Pareto front with a complete sweep of fixed \(\gamma\in[0,1]\);
-4. optionally invokes `scirust-symreg` to discover a compact symbolic surrogate for stale-cache loss.
+1. fits smooth risk weights on complete training trajectories;
+2. calibrates the hard deployment threshold on validation trajectories;
+3. compares the frozen policy on held-out trajectories with a complete sweep of 2,001 fixed \(\gamma\) values under the same measured quality bound;
+4. optionally invokes `scirust-symreg` to discover a compact symbolic surrogate for stale-loss-per-refresh-cost.
+
+Repeating the experiment over several \(\varepsilon\) values yields a quality/compute Pareto front; the first implementation runs one explicit budget per invocation.
 
 This avoids the unfair comparison “learned policy versus gamma 0.9”. The baseline is the **best possible fixed gamma under the same measured quality budget**.
 
@@ -142,7 +148,7 @@ The no-trace mode is only a deterministic integration check. It deliberately use
 Split by complete prompts or generation trajectories, never by individual rows:
 
 - training: fit CMA-ES coefficients and symbolic surrogate;
-- validation: choose the quality budget and one Pareto candidate;
+- validation: choose the quality budget and one candidate;
 - test: freeze the policy and compare against the gamma sweep.
 
 Report:
@@ -181,7 +187,6 @@ The first experiment intentionally restricts the action space to `REUSE` versus 
 - deterministic synthetic trace generator;
 - total-order floating-point sorting;
 - deterministic tie-breaking by row index;
-- explicit Pareto dominance;
 - strict finite/range validation;
 - no hidden timestamps or random system entropy.
 
