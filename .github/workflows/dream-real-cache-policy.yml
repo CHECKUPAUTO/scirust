@@ -1,0 +1,144 @@
+name: Dream Real Cache Policy
+
+on:
+  pull_request:
+    branches: [master, main, develop]
+    paths:
+      - "experiments/elastic-cache-policy/real/dream/**"
+      - ".github/workflows/dream-real-cache-policy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dream-real-cache-policy-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dream-real-smoke:
+    name: Dream 7B real-checkpoint smoke (Jetson Thor)
+
+    # Never execute code from an untrusted fork on the self-hosted GPU runner.
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+
+    runs-on:
+      - self-hosted
+      - Linux
+      - ARM64
+      - scirust-arm64
+      - jetson-thor
+      - internal
+
+    timeout-minutes: 360
+
+    env:
+      PYTHONUNBUFFERED: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      HF_HUB_ENABLE_HF_TRANSFER: "1"
+      HF_HOME: ${{ runner.tool_cache }}/huggingface
+      PIP_CACHE_DIR: ${{ runner.tool_cache }}/pip
+      ELASTIC_CACHE_COMMIT: 1960d8fc6231205a1ae4ebba3898d475e339f7e1
+
+    steps:
+      - name: Check out SciRust
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+
+      - name: Report native GPU environment
+        run: |
+          uname -a
+          uname -m
+          free -h
+          df -h .
+          nvidia-smi || true
+          python3 - <<'PY'
+          import torch
+          print("torch", torch.__version__)
+          print("cuda_available", torch.cuda.is_available())
+          if torch.cuda.is_available():
+              print("cuda_device", torch.cuda.get_device_name())
+          PY
+
+      - name: Create isolated Python environment
+        run: |
+          rm -rf .venv-dream-real
+          python3 -m venv --system-site-packages .venv-dream-real
+          .venv-dream-real/bin/python -m pip install --upgrade pip
+          .venv-dream-real/bin/python -m pip install \
+            "transformers==4.49.0" \
+            "accelerate==0.34.2" \
+            "datasets==3.2.0" \
+            "einops>=0.8" \
+            sentencepiece \
+            "protobuf<6" \
+            hf_xet \
+            hf_transfer
+
+      - name: Fetch pinned Elastic-Cache snapshot
+        run: |
+          rm -rf .external/elastic-cache
+          mkdir -p .external
+          git clone --filter=blob:none https://github.com/VILA-Lab/Elastic-Cache.git .external/elastic-cache
+          git -C .external/elastic-cache checkout --detach "$ELASTIC_CACHE_COMMIT"
+          test "$(git -C .external/elastic-cache rev-parse HEAD)" = "$ELASTIC_CACHE_COMMIT"
+
+      - name: Apply fail-closed SciRust policy overlay
+        run: |
+          .venv-dream-real/bin/python \
+            experiments/elastic-cache-policy/real/dream/patch_elastic_cache.py \
+            .external/elastic-cache
+          .venv-dream-real/bin/python -m py_compile \
+            .external/elastic-cache/dream/model/modeling_dream.py \
+            experiments/elastic-cache-policy/real/dream/benchmark_real_dream.py
+
+      - name: Run real Dream held-out smoke benchmark
+        env:
+          PYTHONPATH: ${{ github.workspace }}/.external/elastic-cache/dream
+        run: |
+          mkdir -p artifacts/dream-real
+          .venv-dream-real/bin/python \
+            experiments/elastic-cache-policy/real/dream/benchmark_real_dream.py \
+            --model Dream-org/Dream-v0-Instruct-7B \
+            --output artifacts/dream-real/smoke-seed-20260804.json \
+            --seed 20260804 \
+            --validation-size 4 \
+            --test-size 8 \
+            --max-new-tokens 128 \
+            --window-length 32 \
+            --gamma-grid 0.85,0.90,0.95,0.98 \
+            --policy-quantiles 0.25,0.50,0.75,0.90 \
+            --probe-prompts 2 \
+            --dtype bfloat16
+
+      - name: Display benchmark verdict
+        if: always()
+        run: |
+          if test -f artifacts/dream-real/smoke-seed-20260804.json; then
+            python3 - <<'PY'
+          import json
+          from pathlib import Path
+          result = json.loads(Path("artifacts/dream-real/smoke-seed-20260804.json").read_text())
+          keys = [
+              "selected_gamma",
+              "selected_policy_threshold",
+              "quality_delta",
+              "relative_refresh_compute_gain",
+              "relative_latency_gain",
+              "reproduces_synthetic_63_11_percent",
+          ]
+          print(json.dumps({key: result[key] for key in keys}, indent=2, sort_keys=True))
+          PY
+          fi
+
+      - name: Upload real-checkpoint evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dream-real-cache-policy-${{ github.sha }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: artifacts/dream-real/
