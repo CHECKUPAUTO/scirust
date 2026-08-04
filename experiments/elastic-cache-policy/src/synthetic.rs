@@ -36,18 +36,18 @@ pub fn synthetic_trace(
 ) -> Vec<TraceRow> {
     let mut rng = SplitMix64::new(seed);
     let mut rows = Vec::with_capacity(trajectories * rows_per_trajectory);
-    for trajectory in 0..trajectories {
+    for trajectory in 0..trajectories
+    {
         let regime = rng.uniform();
-        for step in 0..rows_per_trajectory {
+        for step in 0..rows_per_trajectory
+        {
             let layer_id = (step % 32) as u32;
             let layer_fraction = layer_id as f64 / 31.0;
             let cache_age = ((step / 32) % 16) as f64 / 15.0;
             let similarity = (0.74 + 0.25 * rng.uniform()).clamp(0.0, 1.0);
-            let similarity_delta =
-                rng.uniform() * 0.08 - 0.04 - 0.035 * (regime - 0.5);
+            let similarity_delta = rng.uniform() * 0.08 - 0.04 - 0.035 * (regime - 0.5);
             let head_variance =
-                (0.01 + 0.22 * rng.uniform() + 0.12 * (regime - 0.5).abs())
-                    .clamp(0.0, 1.0);
+                (0.01 + 0.22 * rng.uniform() + 0.12 * (regime - 0.5).abs()).clamp(0.0, 1.0);
             let attention_mass = (0.35 + 0.60 * rng.uniform()).clamp(0.0, 1.0);
             let refresh_cost = (0.2 + 0.8 * (1.0 - layer_fraction)).clamp(0.0, 1.0);
             let drift = 1.0 - similarity;
