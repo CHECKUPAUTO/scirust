@@ -34,7 +34,9 @@ jobs:
         run: cargo +nightly-2026-07-02 test --manifest-path experiments/elastic-cache-policy/Cargo.toml
       - name: Jetson harness static checks
         run: |
-          python3 -m py_compile experiments/elastic-cache-policy/jetson/dream_jetson_proof.py
+          python3 -m py_compile \
+            experiments/elastic-cache-policy/jetson/dream_jetson_proof.py \
+            experiments/elastic-cache-policy/jetson/finalize_dream_proof.py
           bash -n experiments/elastic-cache-policy/jetson/run_jetson_dream_proof.sh
       - name: Synthetic discovery comparison
         run: cargo +nightly-2026-07-02 test --release --manifest-path experiments/elastic-cache-policy/Cargo.toml -- --ignored
