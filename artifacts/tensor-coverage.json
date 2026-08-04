@@ -1,0 +1,1431 @@
+{
+  "profile": "1.0",
+  "baseline": {
+    "version": "2.13.0",
+    "commit": "cf30153c4c131c8164ee7798e5022d810682e2cb",
+    "collected": "2026-08-04"
+  },
+  "generated": true,
+  "summary": {
+    "total": 74,
+    "parity": 0,
+    "experimental": 68,
+    "missing": 6
+  },
+  "families": {
+    "attention": {
+      "total": 1,
+      "parity": 0,
+      "experimental": 1,
+      "missing": 0
+    },
+    "conversion": {
+      "total": 1,
+      "parity": 0,
+      "experimental": 1,
+      "missing": 0
+    },
+    "convolution": {
+      "total": 4,
+      "parity": 0,
+      "experimental": 4,
+      "missing": 0
+    },
+    "elementwise": {
+      "total": 26,
+      "parity": 0,
+      "experimental": 26,
+      "missing": 0
+    },
+    "indexing": {
+      "total": 1,
+      "parity": 0,
+      "experimental": 1,
+      "missing": 0
+    },
+    "linear": {
+      "total": 11,
+      "parity": 0,
+      "experimental": 7,
+      "missing": 4
+    },
+    "loss": {
+      "total": 2,
+      "parity": 0,
+      "experimental": 2,
+      "missing": 0
+    },
+    "normalization": {
+      "total": 6,
+      "parity": 0,
+      "experimental": 6,
+      "missing": 0
+    },
+    "positional": {
+      "total": 1,
+      "parity": 0,
+      "experimental": 1,
+      "missing": 0
+    },
+    "quantization": {
+      "total": 1,
+      "parity": 0,
+      "experimental": 1,
+      "missing": 0
+    },
+    "reduction": {
+      "total": 5,
+      "parity": 0,
+      "experimental": 5,
+      "missing": 0
+    },
+    "shape": {
+      "total": 9,
+      "parity": 0,
+      "experimental": 9,
+      "missing": 0
+    },
+    "sparse": {
+      "total": 3,
+      "parity": 0,
+      "experimental": 2,
+      "missing": 1
+    },
+    "special": {
+      "total": 2,
+      "parity": 0,
+      "experimental": 2,
+      "missing": 0
+    },
+    "spectral": {
+      "total": 1,
+      "parity": 0,
+      "experimental": 0,
+      "missing": 1
+    }
+  },
+  "operators": [
+    {
+      "name": "acos",
+      "torch": "torch.acos",
+      "family": "elementwise",
+      "impls": [
+        "2d"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "add",
+      "torch": "torch.add",
+      "family": "elementwise",
+      "impls": [
+        "2d",
+        "nd",
+        "simd",
+        "gpu",
+        "cuda"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "asin",
+      "torch": "torch.asin",
+      "family": "elementwise",
+      "impls": [
+        "2d"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "atan",
+      "torch": "torch.atan",
+      "family": "elementwise",
+      "impls": [
+        "2d"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "atan2",
+      "torch": "torch.atan2",
+      "family": "elementwise",
+      "impls": [
+        "2d"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "avg_pool2d",
+      "torch": "torch.nn.functional.avg_pool2d",
+      "family": "convolution",
+      "impls": [
+        "simd"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "batch_norm",
+      "torch": "torch.nn.functional.batch_norm",
+      "family": "normalization",
+      "impls": [
+        "simd"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0001,
+        "rtol": 0.0001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "bmm",
+      "torch": "torch.bmm",
+      "family": "linear",
+      "impls": [
+        "2d",
+        "nd"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0001,
+        "rtol": 0.0001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "broadcast_to",
+      "torch": "torch.broadcast_to",
+      "family": "shape",
+      "impls": [
+        "2d",
+        "core"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0,
+        "rtol": 0.0
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "cat",
+      "torch": "torch.cat",
+      "family": "shape",
+      "impls": [
+        "nd"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0,
+        "rtol": 0.0
+      },
+      "status": "experimental",
+      "notes": "cat0 only (dim=0)"
+    },
+    {
+      "name": "cholesky",
+      "torch": "torch.linalg.cholesky",
+      "family": "linear",
+      "impls": [
+        "simd"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": false,
+      "tolerance": {
+        "atol": 0.0001,
+        "rtol": 0.0001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "conv1d",
+      "torch": "torch.nn.functional.conv1d",
+      "family": "convolution",
+      "impls": [
+        "simd"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0001,
+        "rtol": 0.0001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "conv2d",
+      "torch": "torch.nn.functional.conv2d",
+      "family": "convolution",
+      "impls": [
+        "simd"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0001,
+        "rtol": 0.0001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "cos",
+      "torch": "torch.cos",
+      "family": "elementwise",
+      "impls": [
+        "2d"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "cosh",
+      "torch": "torch.cosh",
+      "family": "elementwise",
+      "impls": [
+        "2d"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "cosine_similarity",
+      "torch": "torch.nn.functional.cosine_similarity",
+      "family": "linear",
+      "impls": [
+        "2d"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0001,
+        "rtol": 0.0001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "cross_entropy",
+      "torch": "torch.nn.functional.cross_entropy",
+      "family": "loss",
+      "impls": [
+        "nd",
+        "simd",
+        "gpu",
+        "cuda"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "digamma",
+      "torch": "torch.digamma",
+      "family": "special",
+      "impls": [
+        "simd"
+      ],
+      "dtypes": [
+        "f64"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 1e-10,
+        "rtol": 1e-10
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "div",
+      "torch": "torch.div",
+      "family": "elementwise",
+      "impls": [
+        "2d",
+        "nd"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "dropout",
+      "torch": "torch.nn.functional.dropout",
+      "family": "normalization",
+      "impls": [
+        "2d"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental",
+      "notes": "RNG stream not compared; compare keep-mask behavior on fixed seeds"
+    },
+    {
+      "name": "eig",
+      "torch": "torch.linalg.eig",
+      "family": "linear",
+      "impls": [],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": false,
+      "tolerance": {
+        "atol": 0.0001,
+        "rtol": 0.0001
+      },
+      "status": "missing",
+      "notes": "lanczos_eigen_symmetric (simd) is an approximation, not parity-grade"
+    },
+    {
+      "name": "einsum",
+      "torch": "torch.einsum",
+      "family": "linear",
+      "impls": [
+        "tnd"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": false,
+      "tolerance": {
+        "atol": 0.0001,
+        "rtol": 0.0001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "embedding",
+      "torch": "torch.nn.functional.embedding",
+      "family": "indexing",
+      "impls": [
+        "2d",
+        "simd",
+        "gpu",
+        "cuda"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0,
+        "rtol": 0.0
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "exp",
+      "torch": "torch.exp",
+      "family": "elementwise",
+      "impls": [
+        "2d",
+        "nd",
+        "simd"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "fake_quantize_per_tensor",
+      "torch": "torch.fake_quantize_per_tensor_affine",
+      "family": "quantization",
+      "impls": [
+        "2d"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental",
+      "notes": "fake_quantize_ste only"
+    },
+    {
+      "name": "fft",
+      "torch": "torch.fft",
+      "family": "spectral",
+      "impls": [],
+      "dtypes": [
+        "f32",
+        "f64"
+      ],
+      "autograd": false,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "missing"
+    },
+    {
+      "name": "flatten",
+      "torch": "torch.flatten",
+      "family": "shape",
+      "impls": [
+        "core"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": false,
+      "tolerance": {
+        "atol": 0.0,
+        "rtol": 0.0
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "gather",
+      "torch": "torch.gather",
+      "family": "shape",
+      "impls": [
+        "nd"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0,
+        "rtol": 0.0
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "gelu",
+      "torch": "torch.nn.functional.gelu",
+      "family": "elementwise",
+      "impls": [
+        "simd"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "layer_norm",
+      "torch": "torch.nn.functional.layer_norm",
+      "family": "normalization",
+      "impls": [
+        "2d",
+        "nd",
+        "simd"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0001,
+        "rtol": 0.0001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "lgamma",
+      "torch": "torch.lgamma",
+      "family": "special",
+      "impls": [
+        "simd"
+      ],
+      "dtypes": [
+        "f64"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 1e-10,
+        "rtol": 1e-10
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "linear",
+      "torch": "torch.nn.functional.linear",
+      "family": "linear",
+      "impls": [
+        "2d",
+        "simd"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0001,
+        "rtol": 0.0001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "log",
+      "torch": "torch.log",
+      "family": "elementwise",
+      "impls": [
+        "2d"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "log10",
+      "torch": "torch.log10",
+      "family": "elementwise",
+      "impls": [
+        "2d"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "log_softmax",
+      "torch": "torch.nn.functional.log_softmax",
+      "family": "normalization",
+      "impls": [
+        "2d"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "lstsq",
+      "torch": "torch.linalg.lstsq",
+      "family": "linear",
+      "impls": [],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": false,
+      "tolerance": {
+        "atol": 0.0001,
+        "rtol": 0.0001
+      },
+      "status": "missing"
+    },
+    {
+      "name": "lu_solve",
+      "torch": "torch.linalg.solve",
+      "family": "sparse",
+      "impls": [
+        "sparse"
+      ],
+      "dtypes": [
+        "f64"
+      ],
+      "autograd": false,
+      "tolerance": {
+        "atol": 1e-8,
+        "rtol": 1e-8
+      },
+      "status": "experimental",
+      "notes": "SparseLu::solve, f64 only"
+    },
+    {
+      "name": "matmul",
+      "torch": "torch.matmul",
+      "family": "linear",
+      "impls": [
+        "2d",
+        "nd",
+        "simd",
+        "gpu",
+        "cuda"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0001,
+        "rtol": 0.0001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "max",
+      "torch": "torch.max",
+      "family": "reduction",
+      "impls": [
+        "2d",
+        "gpu"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0,
+        "rtol": 0.0
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "max_pool2d",
+      "torch": "torch.nn.functional.max_pool2d",
+      "family": "convolution",
+      "impls": [
+        "2d",
+        "simd"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0,
+        "rtol": 0.0
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "mean",
+      "torch": "torch.mean",
+      "family": "reduction",
+      "impls": [
+        "2d",
+        "gpu",
+        "cuda"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0001,
+        "rtol": 0.0001
+      },
+      "status": "experimental",
+      "notes": "CUDA deterministic_reduce_mean"
+    },
+    {
+      "name": "mse_loss",
+      "torch": "torch.nn.functional.mse_loss",
+      "family": "loss",
+      "impls": [
+        "simd"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "mul",
+      "torch": "torch.mul",
+      "family": "elementwise",
+      "impls": [
+        "2d",
+        "nd",
+        "gpu",
+        "cuda"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "neg",
+      "torch": "torch.neg",
+      "family": "elementwise",
+      "impls": [
+        "2d"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "norm",
+      "torch": "torch.norm",
+      "family": "reduction",
+      "impls": [
+        "core"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": false,
+      "tolerance": {
+        "atol": 0.0001,
+        "rtol": 0.0001
+      },
+      "status": "experimental",
+      "notes": "frob_norm only"
+    },
+    {
+      "name": "normalize",
+      "torch": "torch.nn.functional.normalize",
+      "family": "linear",
+      "impls": [
+        "2d"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0001,
+        "rtol": 0.0001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "permute",
+      "torch": "torch.permute",
+      "family": "shape",
+      "impls": [
+        "nd",
+        "core"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0,
+        "rtol": 0.0
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "pow",
+      "torch": "torch.pow",
+      "family": "elementwise",
+      "impls": [
+        "2d"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "qr",
+      "torch": "torch.linalg.qr",
+      "family": "linear",
+      "impls": [],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": false,
+      "tolerance": {
+        "atol": 0.0001,
+        "rtol": 0.0001
+      },
+      "status": "missing"
+    },
+    {
+      "name": "reciprocal",
+      "torch": "torch.reciprocal",
+      "family": "elementwise",
+      "impls": [
+        "2d"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "relu",
+      "torch": "torch.relu",
+      "family": "elementwise",
+      "impls": [
+        "2d",
+        "nd",
+        "simd",
+        "gpu",
+        "cuda"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0,
+        "rtol": 0.0
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "reshape",
+      "torch": "torch.reshape",
+      "family": "shape",
+      "impls": [
+        "2d",
+        "nd",
+        "tnd",
+        "core"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0,
+        "rtol": 0.0
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "rms_norm",
+      "torch": "torch.nn.RMSNorm",
+      "family": "normalization",
+      "impls": [
+        "nd",
+        "simd",
+        "gpu",
+        "cuda"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0001,
+        "rtol": 0.0001
+      },
+      "status": "experimental",
+      "notes": "no torch native symbol in 2.13 (RMSNorm is a module); compare via F.rms_norm custom"
+    },
+    {
+      "name": "rope",
+      "torch": "custom (no native op in 2.13)",
+      "family": "positional",
+      "impls": [
+        "nd",
+        "simd",
+        "cuda"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0001,
+        "rtol": 0.0001
+      },
+      "status": "experimental",
+      "notes": "parity compares SciRust rope against a torch reference implementation committed as fixture"
+    },
+    {
+      "name": "rsqrt",
+      "torch": "torch.rsqrt",
+      "family": "elementwise",
+      "impls": [
+        "gpu"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": false,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "scaled_dot_product_attention",
+      "torch": "torch.nn.functional.scaled_dot_product_attention",
+      "family": "attention",
+      "impls": [
+        "simd",
+        "cuda"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0001,
+        "rtol": 0.0001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "sigmoid",
+      "torch": "torch.sigmoid",
+      "family": "elementwise",
+      "impls": [
+        "2d",
+        "nd",
+        "simd",
+        "gpu"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "silu",
+      "torch": "torch.nn.functional.silu",
+      "family": "elementwise",
+      "impls": [
+        "simd",
+        "gpu",
+        "cuda"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "sin",
+      "torch": "torch.sin",
+      "family": "elementwise",
+      "impls": [
+        "2d"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "sinh",
+      "torch": "torch.sinh",
+      "family": "elementwise",
+      "impls": [
+        "2d"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "slice",
+      "torch": "torch.Tensor.__getitem__ (slices)",
+      "family": "shape",
+      "impls": [
+        "2d",
+        "core"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0,
+        "rtol": 0.0
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "softmax",
+      "torch": "torch.nn.functional.softmax",
+      "family": "normalization",
+      "impls": [
+        "2d",
+        "nd",
+        "simd",
+        "gpu",
+        "cuda"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "sparse_autograd",
+      "torch": "torch.sparse (autograd)",
+      "family": "sparse",
+      "impls": [],
+      "dtypes": [
+        "f64"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 1e-8,
+        "rtol": 1e-8
+      },
+      "status": "missing",
+      "notes": "sparse autograd excluded in Profile 1.0 (EXCLUSIONS.md)"
+    },
+    {
+      "name": "spmv",
+      "torch": "torch.sparse.mm (spmv)",
+      "family": "sparse",
+      "impls": [
+        "sparse"
+      ],
+      "dtypes": [
+        "f64"
+      ],
+      "autograd": false,
+      "tolerance": {
+        "atol": 1e-10,
+        "rtol": 1e-10
+      },
+      "status": "experimental",
+      "notes": "csr spmv + spmm_dense; f64 only"
+    },
+    {
+      "name": "sqrt",
+      "torch": "torch.sqrt",
+      "family": "elementwise",
+      "impls": [
+        "2d",
+        "simd",
+        "gpu"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "sub",
+      "torch": "torch.sub",
+      "family": "elementwise",
+      "impls": [
+        "2d",
+        "nd"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "sum",
+      "torch": "torch.sum",
+      "family": "reduction",
+      "impls": [
+        "2d",
+        "nd",
+        "gpu",
+        "cuda"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0001,
+        "rtol": 0.0001
+      },
+      "status": "experimental",
+      "notes": "deterministic order (stricter-than-torch); CUDA deterministic_reduce_sum"
+    },
+    {
+      "name": "svd",
+      "torch": "torch.linalg.svd",
+      "family": "linear",
+      "impls": [],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": false,
+      "tolerance": {
+        "atol": 0.0001,
+        "rtol": 0.0001
+      },
+      "status": "missing"
+    },
+    {
+      "name": "tan",
+      "torch": "torch.tan",
+      "family": "elementwise",
+      "impls": [
+        "2d"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "tanh",
+      "torch": "torch.tanh",
+      "family": "elementwise",
+      "impls": [
+        "2d"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.00001,
+        "rtol": 0.00001
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "to_bf16",
+      "torch": "torch.Tensor.bfloat16",
+      "family": "conversion",
+      "impls": [
+        "simd",
+        "cuda"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": false,
+      "tolerance": {
+        "atol": 0.0,
+        "rtol": 0.0
+      },
+      "status": "experimental",
+      "notes": "storage conversion only in v1"
+    },
+    {
+      "name": "transpose",
+      "torch": "torch.transpose",
+      "family": "shape",
+      "impls": [
+        "2d",
+        "nd",
+        "core"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0,
+        "rtol": 0.0
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "unfold",
+      "torch": "torch.Tensor.unfold",
+      "family": "shape",
+      "impls": [
+        "core"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": false,
+      "tolerance": {
+        "atol": 0.0,
+        "rtol": 0.0
+      },
+      "status": "experimental"
+    },
+    {
+      "name": "var",
+      "torch": "torch.var",
+      "family": "reduction",
+      "impls": [
+        "2d"
+      ],
+      "dtypes": [
+        "f32"
+      ],
+      "autograd": true,
+      "tolerance": {
+        "atol": 0.0001,
+        "rtol": 0.0001
+      },
+      "status": "experimental"
+    }
+  ]
+}
