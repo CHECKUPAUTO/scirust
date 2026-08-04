@@ -47,18 +47,22 @@ fn discovery_is_deterministic_for_a_fixed_seed() {
 #[test]
 #[ignore = "research integration test; run with --release -- --ignored"]
 fn discovered_policy_beats_similarity_only_on_the_nonlinear_oracle() {
-    let rows = synthetic_trace(40, 64, 20_260_804);
+    let rows = synthetic_trace(200, 64, 20_260_804);
     let (training, validation, test) = split_by_trajectory(&rows);
     let result = discover_linear_policy(
         &training,
         &validation,
         DiscoveryConfig {
-            steps: 250,
+            steps: 300,
             ..DiscoveryConfig::default()
         },
     )
     .unwrap();
     let comparison = compare_on_holdout(&result.policy, &test);
+    assert!(
+        comparison.learned.quality_loss_fraction <= 0.06,
+        "{comparison:?}"
+    );
     assert!(
         comparison.relative_compute_improvement > 0.10,
         "{comparison:?}"
