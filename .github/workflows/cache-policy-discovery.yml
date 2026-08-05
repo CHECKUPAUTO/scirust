@@ -22,24 +22,23 @@ jobs:
         with:
           ref: research/elastic-cache-policy-discovery
           persist-credentials: true
+      - name: Remove tracked build artifacts
+        run: |
+          rm -rf experiments/elastic-cache-policy/target
+          printf '/target/\n' > experiments/elastic-cache-policy/.gitignore
+          if ! git diff --quiet -- experiments/elastic-cache-policy || \
+             [ -n "$(git ls-files --deleted experiments/elastic-cache-policy/target)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A experiments/elastic-cache-policy
+            git commit -m "chore(cache-policy): remove build artifacts"
+            git push origin HEAD:research/elastic-cache-policy-discovery
+          fi
       - name: Install formatting toolchain
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
-      - name: Apply safe Clippy fixes
-        run: |
-          cargo +nightly-2026-07-02 clippy --fix \
-            --manifest-path experiments/elastic-cache-policy/Cargo.toml \
-            --all-targets --allow-dirty --allow-staged
-          cargo +nightly-2026-07-02 fmt --manifest-path experiments/elastic-cache-policy/Cargo.toml
-          if ! git diff --quiet -- experiments/elastic-cache-policy; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add experiments/elastic-cache-policy
-            git commit -m "style(cache-policy): apply safe Clippy fixes"
-            git push origin HEAD:research/elastic-cache-policy-discovery
-          fi
       - name: Format check
         run: cargo +nightly-2026-07-02 fmt --manifest-path experiments/elastic-cache-policy/Cargo.toml -- --check
       - name: Clippy
