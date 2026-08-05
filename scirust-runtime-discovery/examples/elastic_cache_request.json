@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "experiment_id": "dream-elastic-cache-runtime-features-v1",
+  "base_features": [
+    "drift",
+    "worsening",
+    "head_std",
+    "cache_age",
+    "untracked_mass",
+    "layer_fraction",
+    "drift_age",
+    "refresh_cost",
+    "skip_margin",
+    "vote_fraction",
+    "candidate_ordinal",
+    "generation_progress",
+    "remaining_masked_fraction",
+    "query_masked_fraction",
+    "tracked_token_fraction",
+    "runtime_window_fraction",
+    "reset_layer_fraction",
+    "profile_gamma",
+    "profile_track_fraction",
+    "profile_max_new_tokens_fraction",
+    "profile_window_fraction",
+    "nfe_progress"
+  ],
+  "available_signals": [],
+  "observed_false_positive_ids": [
+    "historical-holdout-false-positive-1",
+    "historical-holdout-false-positive-2"
+  ],
+  "evidence_boundary": {
+    "development_split": "gsm8k_train_feature_development",
+    "validation_split": "gsm8k_train_feature_validation",
+    "holdout_split": "new_untouched_confirmation_prompts",
+    "holdout_must_remain_unread": true,
+    "task_outcomes_forbidden_at_runtime": true
+  },
+  "max_hypotheses": 256
+}
