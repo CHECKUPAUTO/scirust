@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "status": "synthetic_only",
+  "evidence_scope": "Deterministic nonlinear synthetic oracle. This does not establish a gain on LLaDA, Dream, or any real diffusion LLM.",
+  "competitor_archive": {
+    "name": "Elastic-Cache-main.zip",
+    "sha256": "1ba7593c48b9aea82df7369c5424ea5602b57168c8cc4e5f68d8ab9476dbc4e4"
+  },
+  "scirust": {
+    "repository": "Memorithm/scirust",
+    "branch": "research/elastic-cache-policy-discovery",
+    "head_commit": "52a7b237548e8b80de904140f43858a1680c9c96",
+    "draft_pull_request": 934,
+    "workflow_run_id": 30942697305,
+    "workflow_job_id": 92104832995,
+    "toolchain": "nightly-2026-07-02",
+    "optimizer": "scirust_evo::CmaEs::seeded"
+  },
+  "experiment": {
+    "seed": 20260804,
+    "optimizer_steps": 600,
+    "trajectories": 400,
+    "rows_per_trajectory": 64,
+    "rows_total": 25600,
+    "rows_train": 15360,
+    "rows_validation": 5120,
+    "rows_test": 5120,
+    "quality_budget": 0.05,
+    "calibration_budget": 0.04,
+    "fixed_gamma_candidates": 2001
+  },
+  "policy": {
+    "feature_order": [
+      "drift",
+      "worsening",
+      "head_std",
+      "cache_age",
+      "untracked_mass",
+      "layer_fraction",
+      "drift_age",
+      "refresh_cost"
+    ],
+    "weights": [
+      5.755952374691927,
+      0.7882582865936595,
+      4.897209095046155,
+      -1.2589910896098846,
+      3.570827209603688,
+      -2.65516332465057,
+      0.5164815206184813,
+      -3.853401529744073
+    ],
+    "threshold": 1.0058506570900936
+  },
+  "validation": {
+    "quality_loss_fraction": 0.03933871,
+    "compute_fraction": 0.18416709,
+    "refresh_rate": 0.19824219
+  },
+  "held_out_test": {
+    "learned_policy": {
+      "quality_loss_fraction": 0.04748920,
+      "compute_fraction": 0.18439180,
+      "refresh_rate": 0.19843750,
+      "meets_quality_budget": true
+    },
+    "best_fixed_gamma": {
+      "gamma": 0.865,
+      "quality_loss_fraction": 0.04966883,
+      "compute_fraction": 0.49985299,
+      "refresh_rate": 0.50039062,
+      "meets_quality_budget": true
+    },
+    "relative_compute_improvement": 0.63110794,
+    "constrained_better": true,
+    "pareto_dominates": true
+  },
+  "verification": {
+    "format": "passed",
+    "clippy_deny_warnings": "passed",
+    "unit_tests": "passed",
+    "release_research_test": "passed",
+    "cli_report": "passed"
+  }
+}
