@@ -11,6 +11,7 @@ mod evaluation;
 mod expression;
 mod proposal;
 mod schema;
+mod scientific_taste;
 
 pub use catalog::generate_catalog;
 pub use cogno::{
@@ -29,4 +30,9 @@ pub use proposal::{
 pub use schema::{
     ComputeClass, DiscoveryRequest, EvidenceBoundary, FeatureCatalog, FeatureFamily,
     FeatureHypothesis, RejectedHypothesis, RuntimeCost, TemporalAvailability,
+};
+pub use scientific_taste::{
+    SciAgentResearchBrief, SciAgentResearchTarget, ScientificTasteEvent,
+    ScientificTasteProfile, TasteFeedbackKind, build_sciagent_research_brief,
+    derive_scientific_taste,
 };
