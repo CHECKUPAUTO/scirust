@@ -12,6 +12,7 @@ const CRF_FEATURES: usize = 1 + RUNTIME_FEATURES + TAGS * TAGS;
 #[derive(Debug, Clone, Serialize)]
 pub struct SequentialRiskReport {
     pub model: String,
+    pub inference: String,
     pub tags: Vec<String>,
     pub feature_count: usize,
     pub epochs: usize,
@@ -103,6 +104,29 @@ fn dataset_nll(
         / sequences.len() as f64
 }
 
+fn potential_score(
+    weights: &[f64],
+    features: &[Box<FeatureFn>],
+    previous: Option<usize>,
+    current: usize,
+    observation: usize,
+) -> f64 {
+    weights
+        .iter()
+        .zip(features)
+        .map(|(weight, feature)| weight * feature(previous, current, observation))
+        .sum()
+}
+
+fn log_sum_exp_pair(left: f64, right: f64) -> f64 {
+    let maximum = left.max(right);
+    if !maximum.is_finite()
+    {
+        return maximum;
+    }
+    maximum + ((left - maximum).exp() + (right - maximum).exp()).ln()
+}
+
 pub fn fit_sequential_risk(
     rows: &[CandidateRecord],
     standardized_features: Vec<[f64; RUNTIME_FEATURES]>,
@@ -190,6 +214,7 @@ pub fn fit_sequential_risk(
     }
     let report = SequentialRiskReport {
         model: "scirust-sequential linear-chain CRF".to_string(),
+        inference: "causal prefix filtering; no future candidate is observed".to_string(),
         tags: vec!["safe".to_string(), "strict_unsafe".to_string()],
         feature_count: CRF_FEATURES,
         epochs,
@@ -206,7 +231,7 @@ pub fn fit_sequential_risk(
 }
 
 impl SequentialRiskModel {
-    pub fn unsafe_probabilities(
+    pub fn unsafe_prefix_probabilities(
         &self,
         sequences: &[Vec<usize>],
         row_count: usize,
@@ -219,17 +244,60 @@ impl SequentialRiskModel {
             {
                 continue;
             }
-            let (alpha, beta, log_partition) = self.crf.forward_backward(sequence, &features);
-            if !log_partition.is_finite()
+            let mut previous_log_probability: Option<[f64; TAGS]> = None;
+            for &row_index in sequence
             {
-                return Err("CRF produced a non-finite partition function".to_string());
-            }
-            for (step, row_index) in sequence.iter().enumerate()
-            {
-                let log_probability = alpha[step * TAGS + TAG_UNSAFE]
-                    + beta[step * TAGS + TAG_UNSAFE]
-                    - log_partition;
-                probabilities[*row_index] = log_probability.exp().clamp(0.0, 1.0);
+                let mut current = [0.0; TAGS];
+                match previous_log_probability
+                {
+                    None =>
+                    {
+                        for (tag, slot) in current.iter_mut().enumerate()
+                        {
+                            *slot = potential_score(
+                                &self.crf.weights,
+                                &features,
+                                None,
+                                tag,
+                                row_index,
+                            );
+                        }
+                    },
+                    Some(previous) =>
+                    {
+                        for (tag, slot) in current.iter_mut().enumerate()
+                        {
+                            let from_safe = previous[TAG_SAFE]
+                                + potential_score(
+                                    &self.crf.weights,
+                                    &features,
+                                    Some(TAG_SAFE),
+                                    tag,
+                                    row_index,
+                                );
+                            let from_unsafe = previous[TAG_UNSAFE]
+                                + potential_score(
+                                    &self.crf.weights,
+                                    &features,
+                                    Some(TAG_UNSAFE),
+                                    tag,
+                                    row_index,
+                                );
+                            *slot = log_sum_exp_pair(from_safe, from_unsafe);
+                        }
+                    },
+                }
+                let normalizer = log_sum_exp_pair(current[TAG_SAFE], current[TAG_UNSAFE]);
+                if !normalizer.is_finite()
+                {
+                    return Err("CRF prefix filter produced a non-finite normalizer".to_string());
+                }
+                for value in &mut current
+                {
+                    *value -= normalizer;
+                }
+                probabilities[row_index] = current[TAG_UNSAFE].exp().clamp(0.0, 1.0);
+                previous_log_probability = Some(current);
             }
         }
         Ok(probabilities)
