@@ -56,3 +56,25 @@ Phase 0 does not yet implement:
 - claims of model-level quality preservation.
 
 Those stages require the Phase 0 oracle as their differential reference.
+
+## Phase 1
+
+Phase 1 measures the fixed-rank runtime before any lossy mechanism is added:
+
+- exact dense and latent byte accounting;
+- basis and scratch accounting;
+- dense, explicit-latent and reconstruction-free operation estimates;
+- aggregate absolute, RMS and relative error metrics;
+- deterministic output fingerprints;
+- a deterministic 24-scenario baseline suite;
+- stable CSV export through `phase1_harness`;
+- no external dependency and no `unsafe` code.
+
+Run the baseline harness with:
+
+```bash
+cargo +1.89.0 run --release --bin phase1_harness > phase1.csv
+```
+
+Phase 1 still does not introduce adaptive ranks, quantization, residual
+channels, cache tiers or production integration.
