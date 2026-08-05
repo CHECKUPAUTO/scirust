@@ -6,7 +6,7 @@
 //! All calculations are pure Rust, zero-allocation on critical paths, forbid unsafe,
 //! and are fully deterministic.
 
-use crate::canonical::{sha256, CanonicalEncoder};
+use crate::canonical::{CanonicalEncoder, sha256};
 use crate::curve::{CurveError, ToyCurve, ToyPoint};
 use crate::field::{Fp, ToyPrime};
 
@@ -21,44 +21,68 @@ use crate::field::{Fp, ToyPrime};
 /// Zero-allocation, panic-free.
 pub fn evaluate_line(curve: ToyCurve, p1: ToyPoint, p2: ToyPoint, q: ToyPoint) -> Fp {
     let prime = curve.prime();
-    let q_coords = match q.affine_coordinates() {
+    let q_coords = match q.affine_coordinates()
+    {
         Some((qx, qy)) => (Fp::new(prime, qx), Fp::new(prime, qy)),
         None => return Fp::new(prime, 1),
     };
 
-    match (p1.affine_coordinates(), p2.affine_coordinates()) {
-        (Some((x1, y1)), Some((x2, y2))) => {
+    match (p1.affine_coordinates(), p2.affine_coordinates())
+    {
+        (Some((x1, y1)), Some((x2, y2))) =>
+        {
             let fx1 = Fp::new(prime, x1);
             let fy1 = Fp::new(prime, y1);
             let fx2 = Fp::new(prime, x2);
             let fy2 = Fp::new(prime, y2);
 
-            if x1 == x2 {
-                if y1 == fy2.neg().value() || y1 == 0 {
+            if x1 == x2
+            {
+                if y1 == fy2.neg().value() || y1 == 0
+                {
                     // Vertical line: addition yields O or point has y=0
                     q_coords.0.sub_same(fx1)
-                } else {
+                }
+                else
+                {
                     // Doubling: slope lambda = (3 * x1^2 + a) / (2 * y1)
-                    let num = fx1.square().mul_same(Fp::new(prime, 3)).add_same(Fp::new(prime, curve.a()));
+                    let num = fx1
+                        .square()
+                        .mul_same(Fp::new(prime, 3))
+                        .add_same(Fp::new(prime, curve.a()));
                     let den = fy1.add_same(fy1);
-                    if let Ok(lambda) = num.checked_div(den) {
+                    if let Ok(lambda) = num.checked_div(den)
+                    {
                         // y_Q - y1 - lambda * (x_Q - x1)
-                        q_coords.1.sub_same(fy1).sub_same(lambda.mul_same(q_coords.0.sub_same(fx1)))
-                    } else {
+                        q_coords
+                            .1
+                            .sub_same(fy1)
+                            .sub_same(lambda.mul_same(q_coords.0.sub_same(fx1)))
+                    }
+                    else
+                    {
                         q_coords.0.sub_same(fx1)
                     }
                 }
-            } else {
+            }
+            else
+            {
                 // Addition: slope lambda = (y2 - y1) / (x2 - x1)
                 let num = fy2.sub_same(fy1);
                 let den = fx2.sub_same(fx1);
-                if let Ok(lambda) = num.checked_div(den) {
-                    q_coords.1.sub_same(fy1).sub_same(lambda.mul_same(q_coords.0.sub_same(fx1)))
-                } else {
+                if let Ok(lambda) = num.checked_div(den)
+                {
+                    q_coords
+                        .1
+                        .sub_same(fy1)
+                        .sub_same(lambda.mul_same(q_coords.0.sub_same(fx1)))
+                }
+                else
+                {
                     q_coords.0.sub_same(fx1)
                 }
             }
-        }
+        },
         _ => Fp::new(prime, 1),
     }
 }
@@ -68,10 +92,9 @@ pub fn evaluate_line(curve: ToyCurve, p1: ToyPoint, p2: ToyPoint, q: ToyPoint) -
 /// This serves as the denominator component $v_C(Q)$ in Miller's algorithm.
 pub fn evaluate_vertical(curve: ToyCurve, c: ToyPoint, q: ToyPoint) -> Fp {
     let prime = curve.prime();
-    match (c.affine_coordinates(), q.affine_coordinates()) {
-        (Some((cx, _)), Some((qx, _))) => {
-            Fp::new(prime, qx).sub_same(Fp::new(prime, cx))
-        }
+    match (c.affine_coordinates(), q.affine_coordinates())
+    {
+        (Some((cx, _)), Some((qx, _))) => Fp::new(prime, qx).sub_same(Fp::new(prime, cx)),
         _ => Fp::new(prime, 1),
     }
 }
@@ -80,7 +103,8 @@ pub fn evaluate_vertical(curve: ToyCurve, c: ToyPoint, q: ToyPoint) -> Fp {
 ///
 /// Fully deterministic and runs with zero-allocation.
 pub fn miller_loop(curve: ToyCurve, p: ToyPoint, q: ToyPoint, m: u64) -> Option<Fp> {
-    if p.is_infinity() || q.is_infinity() {
+    if p.is_infinity() || q.is_infinity()
+    {
         return None;
     }
 
@@ -92,37 +116,47 @@ pub fn miller_loop(curve: ToyCurve, p: ToyPoint, q: ToyPoint, m: u64) -> Option<
     let mut bits = [0u8; 64];
     let mut num_bits = 0;
     let mut temp = m;
-    while temp > 0 {
+    while temp > 0
+    {
         bits[num_bits] = (temp & 1) as u8;
         num_bits += 1;
         temp >>= 1;
     }
 
-    if num_bits == 0 {
+    if num_bits == 0
+    {
         return Some(f);
     }
 
-    for i in (0..num_bits - 1).rev() {
+    for i in (0..num_bits - 1).rev()
+    {
         let l_tt = evaluate_line(curve, t, t, q);
         let next_t = curve.add(t, t).ok()?;
         let v_2t = evaluate_vertical(curve, next_t, q);
 
-        let double_factor = if v_2t.is_zero() {
+        let double_factor = if v_2t.is_zero()
+        {
             l_tt
-        } else {
+        }
+        else
+        {
             l_tt.checked_div(v_2t).unwrap_or(l_tt)
         };
         f = f.square().mul_same(double_factor);
         t = next_t;
 
-        if bits[i] == 1 {
+        if bits[i] == 1
+        {
             let l_tp = evaluate_line(curve, t, p, q);
             let next_tp = curve.add(t, p).ok()?;
             let v_tp = evaluate_vertical(curve, next_tp, q);
 
-            let add_factor = if v_tp.is_zero() {
+            let add_factor = if v_tp.is_zero()
+            {
                 l_tp
-            } else {
+            }
+            else
+            {
                 l_tp.checked_div(v_tp).unwrap_or(l_tp)
             };
             f = f.mul_same(add_factor);
@@ -138,11 +172,13 @@ pub fn miller_loop(curve: ToyCurve, p: ToyPoint, q: ToyPoint, m: u64) -> Option<
 /// Returns None if the parameters are mathematically inconsistent.
 pub fn reduced_tate_pairing(curve: ToyCurve, p: ToyPoint, q: ToyPoint, m: u64) -> Option<Fp> {
     let prime = curve.prime().value();
-    if (prime - 1) % m != 0 {
+    if (prime - 1) % m != 0
+    {
         return None;
     }
     let f = miller_loop(curve, p, q, m)?;
-    if f.is_zero() {
+    if f.is_zero()
+    {
         return None;
     }
     Some(f.pow((prime - 1) / m))
@@ -152,13 +188,17 @@ pub fn reduced_tate_pairing(curve: ToyCurve, p: ToyPoint, q: ToyPoint, m: u64) -
 pub fn weil_pairing(curve: ToyCurve, p: ToyPoint, q: ToyPoint, m: u64) -> Option<Fp> {
     let f_p_q = miller_loop(curve, p, q, m)?;
     let f_q_p = miller_loop(curve, q, p, m)?;
-    if f_q_p.is_zero() {
+    if f_q_p.is_zero()
+    {
         return None;
     }
     let ratio = f_p_q.checked_div(f_q_p).ok()?;
-    if m % 2 == 1 {
+    if m % 2 == 1
+    {
         Some(ratio.neg())
-    } else {
+    }
+    else
+    {
         Some(ratio)
     }
 }
@@ -170,11 +210,15 @@ pub fn ibe_hash_to_point(curve: ToyCurve, id: &[u8], m: u64) -> Option<ToyPoint>
     let prime = curve.prime();
     let modulus = prime.value();
 
-    if id.starts_with(b"POINT:") {
-        if let Ok(s) = std::str::from_utf8(&id[6..]) {
+    if id.starts_with(b"POINT:")
+    {
+        if let Ok(s) = std::str::from_utf8(&id[6..])
+        {
             let mut parts = s.split(',');
-            if let (Some(x_str), Some(y_str)) = (parts.next(), parts.next()) {
-                if let (Ok(x), Ok(y)) = (x_str.parse::<u64>(), y_str.parse::<u64>()) {
+            if let (Some(x_str), Some(y_str)) = (parts.next(), parts.next())
+            {
+                if let (Ok(x), Ok(y)) = (x_str.parse::<u64>(), y_str.parse::<u64>())
+                {
                     return curve.point_from_local_residues(x, y).ok();
                 }
             }
@@ -184,28 +228,36 @@ pub fn ibe_hash_to_point(curve: ToyCurve, id: &[u8], m: u64) -> Option<ToyPoint>
     let h = sha256(id);
     let seed = u64::from_be_bytes([h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]]);
 
-    for attempt in 0..modulus {
+    for attempt in 0..modulus
+    {
         let x_val = (seed + attempt) % modulus;
         let x_fp = Fp::new(prime, x_val);
-        let right = x_fp.square().mul_same(x_fp)
+        let right = x_fp
+            .square()
+            .mul_same(x_fp)
             .add_same(Fp::new(prime, curve.a()).mul_same(x_fp))
             .add_same(Fp::new(prime, curve.b()));
 
         // Search for a matching y coordinate without any heap allocation
         let mut found_y = None;
-        for y in 0..modulus {
+        for y in 0..modulus
+        {
             let y_fp = Fp::new(prime, y);
-            if y_fp.square().value() == right.value() {
+            if y_fp.square().value() == right.value()
+            {
                 found_y = Some(y);
                 break;
             }
         }
 
-        if let Some(y_val) = found_y {
+        if let Some(y_val) = found_y
+        {
             let p = curve.point_from_local_residues(x_val, y_val).ok()?;
             // Map to subgroup of order m using cofactor if possible, or verify order m
-            if let Ok(m_p) = curve.scalar_mul(p, m) {
-                if m_p.is_infinity() {
+            if let Ok(m_p) = curve.scalar_mul(p, m)
+            {
+                if m_p.is_infinity()
+                {
                     return Some(p);
                 }
             }
@@ -230,7 +282,12 @@ pub struct IbeCiphertext {
 }
 
 /// Encrypts a message (represented as a u64) under an Identity string using the pairing-based IBE.
-pub fn ibe_encrypt(params: &IbeParams, id: &[u8], msg: u64, ephemeral_r: u64) -> Option<IbeCiphertext> {
+pub fn ibe_encrypt(
+    params: &IbeParams,
+    id: &[u8],
+    msg: u64,
+    ephemeral_r: u64,
+) -> Option<IbeCiphertext> {
     let q_id = ibe_hash_to_point(params.curve, id, params.m)?;
     let u = params.curve.scalar_mul(params.p_gen, ephemeral_r).ok()?;
     let pairing_val = reduced_tate_pairing(params.curve, params.p_pub, q_id, params.m)?;
@@ -255,7 +312,14 @@ pub struct PairingCommitment {
 
 impl PairingCommitment {
     /// Commit to a secret $x$ with a blender $r$.
-    pub fn commit(curve: ToyCurve, p: ToyPoint, q: ToyPoint, x: u64, r: u64, m: u64) -> Option<Self> {
+    pub fn commit(
+        curve: ToyCurve,
+        p: ToyPoint,
+        q: ToyPoint,
+        x: u64,
+        r: u64,
+        m: u64,
+    ) -> Option<Self> {
         let p_x = curve.scalar_mul(p, x).ok()?;
         let p_r = curve.scalar_mul(p, r).ok()?;
         let left = reduced_tate_pairing(curve, p_x, q, m)?;
@@ -266,10 +330,21 @@ impl PairingCommitment {
     }
 
     /// Verify the commitment against $x$ and $r$.
-    pub fn verify(&self, curve: ToyCurve, p: ToyPoint, q: ToyPoint, x: u64, r: u64, m: u64) -> bool {
-        if let Some(recomputed) = Self::commit(curve, p, q, x, r, m) {
+    pub fn verify(
+        &self,
+        curve: ToyCurve,
+        p: ToyPoint,
+        q: ToyPoint,
+        x: u64,
+        r: u64,
+        m: u64,
+    ) -> bool {
+        if let Some(recomputed) = Self::commit(curve, p, q, x, r, m)
+        {
             self.commitment == recomputed.commitment
-        } else {
+        }
+        else
+        {
             false
         }
     }
@@ -289,18 +364,25 @@ pub fn velu_isogeny_curve(curve: ToyCurve, subgroup: &[ToyPoint]) -> Result<ToyC
     let mut t = Fp::new(prime, 0);
     let mut w = Fp::new(prime, 0);
 
-    for point in subgroup {
-        if point.is_infinity() {
+    for point in subgroup
+    {
+        if point.is_infinity()
+        {
             continue;
         }
-        if let Some((x, y)) = point.affine_coordinates() {
+        if let Some((x, y)) = point.affine_coordinates()
+        {
             // Standard odd order partition: only process representative from {Q, -Q}
-            if y <= modulus / 2 {
+            if y <= modulus / 2
+            {
                 let fx = Fp::new(prime, x);
                 let fy = Fp::new(prime, y);
 
                 // v_Q = 3x_Q^2 + a
-                let v_q = fx.square().mul_same(Fp::new(prime, 3)).add_same(Fp::new(prime, curve.a()));
+                let v_q = fx
+                    .square()
+                    .mul_same(Fp::new(prime, 3))
+                    .add_same(Fp::new(prime, curve.a()));
                 // u_Q = 2y_Q^2
                 let u_q = fy.square().mul_same(Fp::new(prime, 2));
 
@@ -326,13 +408,16 @@ pub fn apply_velu_isogeny(
     subgroup: &[ToyPoint],
     p: ToyPoint,
 ) -> Result<ToyPoint, CurveError> {
-    if p.is_infinity() {
+    if p.is_infinity()
+    {
         return Ok(codomain.identity());
     }
 
     // If P is in the kernel, it maps to the identity
-    for sg_p in subgroup {
-        if *sg_p == p {
+    for sg_p in subgroup
+    {
+        if *sg_p == p
+        {
             return Ok(codomain.identity());
         }
     }
@@ -346,16 +431,23 @@ pub fn apply_velu_isogeny(
     let mut sum_x = Fp::new(prime, 0);
     let mut sum_y = Fp::new(prime, 0);
 
-    for point in subgroup {
-        if point.is_infinity() {
+    for point in subgroup
+    {
+        if point.is_infinity()
+        {
             continue;
         }
-        if let Some((xq, yq)) = point.affine_coordinates() {
-            if yq <= modulus / 2 {
+        if let Some((xq, yq)) = point.affine_coordinates()
+        {
+            if yq <= modulus / 2
+            {
                 let fxq = Fp::new(prime, xq);
                 let fyq = Fp::new(prime, yq);
 
-                let v_q = fxq.square().mul_same(Fp::new(prime, 3)).add_same(Fp::new(prime, curve.a()));
+                let v_q = fxq
+                    .square()
+                    .mul_same(Fp::new(prime, 3))
+                    .add_same(Fp::new(prime, curve.a()));
                 let u_q = fyq.square().mul_same(Fp::new(prime, 2));
 
                 let dx = fpx.sub_same(fxq);
@@ -367,12 +459,21 @@ pub fn apply_velu_isogeny(
                 let inv_dx_cube = dx_cube.inverse().ok_or(CurveError::Singular)?;
 
                 // x' terms: u_q / (x - x_q) + 2 * v_q / (x - x_q)^2
-                let term_x = u_q.mul_same(inv_dx).add_same(v_q.mul_same(Fp::new(prime, 2)).mul_same(inv_dx_sq));
+                let term_x = u_q
+                    .mul_same(inv_dx)
+                    .add_same(v_q.mul_same(Fp::new(prime, 2)).mul_same(inv_dx_sq));
                 sum_x = sum_x.add_same(term_x);
 
                 // y' terms: 2 * u_q * y / (x - x_q)^2 + 4 * v_q * y / (x - x_q)^3
-                let term_y = u_q.mul_same(Fp::new(prime, 2)).mul_same(fpy).mul_same(inv_dx_sq)
-                    .add_same(v_q.mul_same(Fp::new(prime, 4)).mul_same(fpy).mul_same(inv_dx_cube));
+                let term_y = u_q
+                    .mul_same(Fp::new(prime, 2))
+                    .mul_same(fpy)
+                    .mul_same(inv_dx_sq)
+                    .add_same(
+                        v_q.mul_same(Fp::new(prime, 4))
+                            .mul_same(fpy)
+                            .mul_same(inv_dx_cube),
+                    );
                 sum_y = sum_y.add_same(term_y);
             }
         }
@@ -397,33 +498,44 @@ pub fn find_isogeny_path(
     visited.insert((start.a(), start.b()));
 
     let mut step = 0;
-    while !queue.is_empty() && step < max_depth {
+    while !queue.is_empty() && step < max_depth
+    {
         let mut next_queue = Vec::new();
-        for (current, path) in queue {
-            if current.a() == target.a() && current.b() == target.b() {
+        for (current, path) in queue
+        {
+            if current.a() == target.a() && current.b() == target.b()
+            {
                 return Some(path);
             }
 
             // Find all subgroups of order l
             let points = current.enumerate_points();
             let mut l_generators = Vec::new();
-            for p in &points {
-                if p.is_infinity() {
+            for p in &points
+            {
+                if p.is_infinity()
+                {
                     continue;
                 }
-                if let Ok(l_p) = current.scalar_mul(*p, l) {
-                    if l_p.is_infinity() {
+                if let Ok(l_p) = current.scalar_mul(*p, l)
+                {
+                    if l_p.is_infinity()
+                    {
                         // Check that it doesn't have smaller order
                         let mut has_smaller_order = false;
-                        for j in 1..l {
-                            if let Ok(j_p) = current.scalar_mul(*p, j) {
-                                if j_p.is_infinity() {
+                        for j in 1..l
+                        {
+                            if let Ok(j_p) = current.scalar_mul(*p, j)
+                            {
+                                if j_p.is_infinity()
+                                {
                                     has_smaller_order = true;
                                     break;
                                 }
                             }
                         }
-                        if !has_smaller_order {
+                        if !has_smaller_order
+                        {
                             l_generators.push(*p);
                         }
                     }
@@ -432,23 +544,30 @@ pub fn find_isogeny_path(
 
             // Construct unique subgroups
             let mut unique_subgroups: Vec<Vec<ToyPoint>> = Vec::new();
-            for gen in l_generators {
+            for gen in l_generators
+            {
                 let mut subgroup = Vec::new();
-                for i in 0..l {
-                    if let Ok(pt) = current.scalar_mul(gen, i) {
+                for i in 0..l
+                {
+                    if let Ok(pt) = current.scalar_mul(gen, i)
+                    {
                         subgroup.push(pt);
                     }
                 }
                 subgroup.sort_by_key(|pt| pt.affine_coordinates());
-                if !unique_subgroups.contains(&subgroup) {
+                if !unique_subgroups.contains(&subgroup)
+                {
                     unique_subgroups.push(subgroup);
                 }
             }
 
             // Generate neighbor curves
-            for subgroup in &unique_subgroups {
-                if let Ok(codomain) = velu_isogeny_curve(current, subgroup) {
-                    if visited.insert((codomain.a(), codomain.b())) {
+            for subgroup in &unique_subgroups
+            {
+                if let Ok(codomain) = velu_isogeny_curve(current, subgroup)
+                {
+                    if visited.insert((codomain.a(), codomain.b()))
+                    {
                         let mut new_path = path.clone();
                         new_path.push(codomain);
                         next_queue.push((codomain, new_path));
@@ -496,7 +615,8 @@ impl Oct8Fp {
     /// Exact addition.
     pub fn add(&self, other: &Self) -> Self {
         let mut c = [Fp::new(self.c[0].prime(), 0); 8];
-        for i in 0..8 {
+        for i in 0..8
+        {
             c[i] = self.c[i].add_same(other.c[i]);
         }
         Self { c }
@@ -505,7 +625,8 @@ impl Oct8Fp {
     /// Exact subtraction.
     pub fn sub(&self, other: &Self) -> Self {
         let mut c = [Fp::new(self.c[0].prime(), 0); 8];
-        for i in 0..8 {
+        for i in 0..8
+        {
             c[i] = self.c[i].sub_same(other.c[i]);
         }
         Self { c }
@@ -514,7 +635,8 @@ impl Oct8Fp {
     /// Exact negation.
     pub fn neg(&self) -> Self {
         let mut c = [Fp::new(self.c[0].prime(), 0); 8];
-        for i in 0..8 {
+        for i in 0..8
+        {
             c[i] = self.c[i].neg();
         }
         Self { c }
@@ -523,7 +645,8 @@ impl Oct8Fp {
     /// Conjugation.
     pub fn conj(&self) -> Self {
         let mut c = self.c;
-        for i in 1..8 {
+        for i in 1..8
+        {
             c[i] = c[i].neg();
         }
         Self { c }
@@ -556,13 +679,18 @@ impl Oct8Fp {
             [1, 1, 1, -1, 1, -1, -1, -1],
         ];
 
-        for i in 0..8 {
-            for j in 0..8 {
+        for i in 0..8
+        {
+            for j in 0..8
+            {
                 let p = self.c[i].mul_same(other.c[j]);
                 let k = IDX[i][j];
-                if SIGN[i][j] > 0 {
+                if SIGN[i][j] > 0
+                {
                     z[k] = z[k].add_same(p);
-                } else {
+                }
+                else
+                {
                     z[k] = z[k].sub_same(p);
                 }
             }
@@ -574,7 +702,8 @@ impl Oct8Fp {
     /// Norm.
     pub fn norm(&self) -> Fp {
         let mut acc = Fp::new(self.c[0].prime(), 0);
-        for i in 0..8 {
+        for i in 0..8
+        {
             acc = acc.add_same(self.c[i].square());
         }
         acc
@@ -583,7 +712,8 @@ impl Oct8Fp {
     /// Phase transformation scaling the imaginary components.
     pub fn phase_transform(&self, theta: Fp) -> Self {
         let mut c = self.c;
-        for i in 1..8 {
+        for i in 1..8
+        {
             c[i] = c[i].mul_same(theta);
         }
         Self { c }
@@ -600,7 +730,8 @@ impl Oct8Fp {
             let n = k1.norm();
             let n_inv = n.inverse()?;
             let mut conj = k1.conj();
-            for i in 0..8 {
+            for i in 0..8
+            {
                 conj.c[i] = conj.c[i].mul_same(n_inv);
             }
             conj
@@ -609,7 +740,8 @@ impl Oct8Fp {
             let n = k2.norm();
             let n_inv = n.inverse()?;
             let mut conj = k2.conj();
-            for i in 0..8 {
+            for i in 0..8
+            {
                 conj.c[i] = conj.c[i].mul_same(n_inv);
             }
             conj
@@ -717,7 +849,8 @@ pub fn simulate_quantum_attack_resistance(
     point: ToyPoint,
     order: u64,
 ) -> Option<QuantumVulnerabilityReport> {
-    if point.is_infinity() || order == 0 {
+    if point.is_infinity() || order == 0
+    {
         return None;
     }
 
@@ -739,8 +872,10 @@ pub fn simulate_quantum_attack_resistance(
     let samples = state.sample(2000, 42).ok()?;
     let mut primary_resonance_state = "000".to_string();
     let mut max_count = 0;
-    for (key, count) in &samples {
-        if *count > max_count {
+    for (key, count) in &samples
+    {
+        if *count > max_count
+        {
             max_count = *count;
             primary_resonance_state = key.clone();
         }
@@ -833,30 +968,37 @@ impl CcosAuditChain {
 
     /// Verifies the cryptographic integrity of the entire audit trail.
     pub fn verify(&self) -> bool {
-        if self.blocks.is_empty() {
+        if self.blocks.is_empty()
+        {
             return false;
         }
 
         // Verify genesis block
-        if self.blocks[0].index != 0 || self.blocks[0].previous_hash != [0u8; 32] {
+        if self.blocks[0].index != 0 || self.blocks[0].previous_hash != [0u8; 32]
+        {
             return false;
         }
-        if self.blocks[0].calculate_hash() != self.blocks[0].current_hash {
+        if self.blocks[0].calculate_hash() != self.blocks[0].current_hash
+        {
             return false;
         }
 
         // Verify subsequent blocks
-        for i in 1..self.blocks.len() {
+        for i in 1..self.blocks.len()
+        {
             let prev = &self.blocks[i - 1];
             let curr = &self.blocks[i];
 
-            if curr.index != prev.index + 1 {
+            if curr.index != prev.index + 1
+            {
                 return false;
             }
-            if curr.previous_hash != prev.current_hash {
+            if curr.previous_hash != prev.current_hash
+            {
                 return false;
             }
-            if curr.calculate_hash() != curr.current_hash {
+            if curr.calculate_hash() != curr.current_hash
+            {
                 return false;
             }
         }
@@ -883,45 +1025,64 @@ mod tests {
 
     fn get_test_setup() -> (ToyCurve, ToyPoint, ToyPoint, u64) {
         // Try primes systematically to find a curve and two points P, Q of order d >= 3 that have a non-trivial pairing
-        for p_val in [13, 17, 29, 37, 41] {
+        for p_val in [13, 17, 29, 37, 41]
+        {
             let prime = ToyPrime::new(p_val).unwrap();
-            for a in 1..10 {
-                for b in 1..10 {
-                    if let Ok(curve) = ToyCurve::new(prime, a, b) {
+            for a in 1..10
+            {
+                for b in 1..10
+                {
+                    if let Ok(curve) = ToyCurve::new(prime, a, b)
+                    {
                         let points = curve.enumerate_points();
-                        for d in 3..=6 {
-                            if (p_val - 1) % d == 0 {
+                        for d in 3..=6
+                        {
+                            if (p_val - 1) % d == 0
+                            {
                                 // Find points of order d
                                 let mut d_points = Vec::new();
-                                for pt in &points {
-                                    if pt.is_infinity() {
+                                for pt in &points
+                                {
+                                    if pt.is_infinity()
+                                    {
                                         continue;
                                     }
-                                    if let Ok(mul) = curve.scalar_mul(*pt, d) {
-                                        if mul.is_infinity() {
+                                    if let Ok(mul) = curve.scalar_mul(*pt, d)
+                                    {
+                                        if mul.is_infinity()
+                                        {
                                             let mut ok = true;
-                                            for j in 1..d {
-                                                if let Ok(j_mul) = curve.scalar_mul(*pt, j) {
-                                                    if j_mul.is_infinity() {
+                                            for j in 1..d
+                                            {
+                                                if let Ok(j_mul) = curve.scalar_mul(*pt, j)
+                                                {
+                                                    if j_mul.is_infinity()
+                                                    {
                                                         ok = false;
                                                         break;
                                                     }
                                                 }
                                             }
-                                            if ok {
+                                            if ok
+                                            {
                                                 d_points.push(*pt);
                                             }
                                         }
                                     }
                                 }
 
-                                for p in &d_points {
-                                    for q in &d_points {
-                                        if p == q {
+                                for p in &d_points
+                                {
+                                    for q in &d_points
+                                    {
+                                        if p == q
+                                        {
                                             continue;
                                         }
-                                        if let Some(val) = reduced_tate_pairing(curve, *p, *q, d) {
-                                            if !val.is_zero() && val.value() != 1 {
+                                        if let Some(val) = reduced_tate_pairing(curve, *p, *q, d)
+                                        {
+                                            if !val.is_zero() && val.value() != 1
+                                            {
                                                 return (curve, *p, *q, d);
                                             }
                                         }
@@ -992,22 +1153,30 @@ mod tests {
         let mut subgroup = Vec::new();
         subgroup.push(curve.identity());
         let mut current = p3_pt;
-        for _ in 1..d {
+        for _ in 1..d
+        {
             subgroup.push(current);
-            if let Ok(next) = curve.add(current, p3_pt) {
+            if let Ok(next) = curve.add(current, p3_pt)
+            {
                 current = next;
-            } else {
+            }
+            else
+            {
                 break;
             }
         }
 
         let codomain_res = velu_isogeny_curve(curve, &subgroup);
-        if let Ok(codomain) = codomain_res {
+        if let Ok(codomain) = codomain_res
+        {
             // Map another point
             let points = curve.enumerate_points();
-            for p in &points {
-                if !subgroup.contains(p) {
-                    if let Ok(mapped) = apply_velu_isogeny(curve, codomain, &subgroup, *p) {
+            for p in &points
+            {
+                if !subgroup.contains(p)
+                {
+                    if let Ok(mapped) = apply_velu_isogeny(curve, codomain, &subgroup, *p)
+                    {
                         assert!(codomain.is_on_curve(&mapped));
                         break;
                     }
@@ -1028,9 +1197,12 @@ mod tests {
         // e1 = (0, 1, 0, 0, 0, 0, 0, 0)
         // e2 = (0, 0, 1, 0, 0, 0, 0, 0)
         // e3 = (0, 0, 0, 1, 0, 0, 0, 0)
-        let mut c1 = [Fp::new(prime, 0); 8]; c1[1] = Fp::new(prime, 1);
-        let mut c2 = [Fp::new(prime, 0); 8]; c2[2] = Fp::new(prime, 1);
-        let mut c3 = [Fp::new(prime, 0); 8]; c3[3] = Fp::new(prime, 1);
+        let mut c1 = [Fp::new(prime, 0); 8];
+        c1[1] = Fp::new(prime, 1);
+        let mut c2 = [Fp::new(prime, 0); 8];
+        c2[2] = Fp::new(prime, 1);
+        let mut c3 = [Fp::new(prime, 0); 8];
+        c3[3] = Fp::new(prime, 1);
         let e1 = Oct8Fp::new(c1);
         let e2 = Oct8Fp::new(c2);
         let e3 = Oct8Fp::new(c3);
