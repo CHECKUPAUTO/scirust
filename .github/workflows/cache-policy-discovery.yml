@@ -48,7 +48,9 @@ jobs:
             experiments/elastic-cache-policy/real/dream/benchmark_frozen_ensemble.py \
             experiments/elastic-cache-policy/real/dream/benchmark_guarded_independent.py \
             experiments/elastic-cache-policy/real/dream/benchmark_repeated_crossover.py \
-            experiments/elastic-cache-policy/real/dream/patch_elastic_cache.py
+            experiments/elastic-cache-policy/real/dream/collect_trajectory_branch_dataset.py \
+            experiments/elastic-cache-policy/real/dream/patch_elastic_cache.py \
+            experiments/elastic-cache-policy/real/dream/patch_trajectory_probe.py
           bash -n \
             experiments/elastic-cache-policy/jetson/finalize_end_to_end_diagnostic.sh \
             experiments/elastic-cache-policy/jetson/finalize_guarded_independent_summary.sh \
@@ -60,6 +62,7 @@ jobs:
             experiments/elastic-cache-policy/jetson/run_jetson_dream_proof.sh \
             experiments/elastic-cache-policy/jetson/run_repeated_crossover_gsm8k.sh \
             experiments/elastic-cache-policy/jetson/run_robust_cross_validation.sh \
+            experiments/elastic-cache-policy/jetson/run_trajectory_branch_development.sh \
             experiments/elastic-cache-policy/jetson/run_trajectory_stability_guard_selection.sh
       - name: Synthetic discovery comparison
         run: cargo +nightly-2026-07-02 test --release --manifest-path experiments/elastic-cache-policy/Cargo.toml -- --ignored
