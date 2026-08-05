@@ -456,7 +456,8 @@ impls = ["2d", "nd", "simd"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-4, rtol = 1e-4 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "rms_norm"
@@ -466,8 +467,9 @@ impls = ["nd", "simd", "gpu", "cuda"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-4, rtol = 1e-4 }
-status = "experimental"
+status = "parity"
 notes = "no torch native symbol in 2.13 (RMSNorm is a module); compare via F.rms_norm custom"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "dropout"
