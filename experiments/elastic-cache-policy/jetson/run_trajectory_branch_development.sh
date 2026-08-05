@@ -14,11 +14,17 @@ TRAJECTORY_SEED="${TRAJECTORY_SEED:-20260809}"
 TRAJECTORY_SAMPLES="${TRAJECTORY_SAMPLES:-40}"
 TRAJECTORY_WARMUP_SAMPLES="${TRAJECTORY_WARMUP_SAMPLES:-2}"
 MAX_CANDIDATES="${MAX_CANDIDATES:-4}"
+TRAJECTORY_POLICY_SEED="${TRAJECTORY_POLICY_SEED:-20260810}"
+CRF_EPOCHS="${CRF_EPOCHS:-300}"
+NSGA_POPULATION="${NSGA_POPULATION:-120}"
+NSGA_GENERATIONS="${NSGA_GENERATIONS:-80}"
+MINIMUM_HOLDOUT_COVERAGE="${MINIMUM_HOLDOUT_COVERAGE:-0.02}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-$WORK_ROOT/results/trajectory-development-$(date -u +%Y%m%dT%H%M%SZ)}"
 
 fail() { printf 'ERREUR: %s\n' "$*" >&2; exit 1; }
 command -v git >/dev/null || fail "git introuvable"
 command -v docker >/dev/null || fail "docker introuvable"
+command -v cargo >/dev/null || fail "cargo introuvable"
 [ -d "$SCIRUST_SOURCE/.git" ] || fail "dépôt SciRust absent: $SCIRUST_SOURCE"
 docker info >/dev/null 2>&1 || fail "daemon Docker inaccessible"
 mkdir -p "$WORK_ROOT" "$OUTPUT_ROOT" "$WORK_ROOT/huggingface"
@@ -89,7 +95,16 @@ cat > "$OUTPUT_ROOT/trajectory_development_manifest.json" <<EOF
   "elastic_cache_commit": "$ELASTIC_COMMIT",
   "gsm8k_commit": "$GSM8K_COMMIT",
   "container_image": "$PYTORCH_IMAGE",
-  "container_digest": "${IMAGE_DIGEST:-unknown}"
+  "container_digest": "${IMAGE_DIGEST:-unknown}",
+  "offline_policy_seed": $TRAJECTORY_POLICY_SEED,
+  "offline_components": [
+    "scirust-causal invariant causal prediction",
+    "scirust-sequential linear-chain CRF",
+    "scirust-gp Matern-5/2 uncertainty",
+    "scirust-evo NSGA-II",
+    "scirust-symreg symbolic surrogate"
+  ],
+  "minimum_internal_holdout_coverage": $MINIMUM_HOLDOUT_COVERAGE
 }
 EOF
 
@@ -135,5 +150,26 @@ python /workspace/scirust/experiments/elastic-cache-policy/real/dream/collect_tr
     --dtype bfloat16
 "
 
+DATASET="$OUTPUT_ROOT/dream_single_skip_trajectory_candidates.jsonl"
+POLICY_OUTPUT="$OUTPUT_ROOT/dream_trajectory_policy_development_report.json"
+[ -s "$DATASET" ] || fail "le collecteur n'a produit aucun candidat de trajectoire"
+
+printf '\nDécouverte causale et séquentielle hors ligne\n'
+cargo +nightly-2026-07-02 run --release \
+    --manifest-path "$SCIRUST_RUN/experiments/elastic-cache-policy/Cargo.toml" \
+    --bin trajectory_policy_discovery -- \
+    --dataset "$DATASET" \
+    --output "$POLICY_OUTPUT" \
+    --seed "$TRAJECTORY_POLICY_SEED" \
+    --crf-epochs "$CRF_EPOCHS" \
+    --crf-learning-rate 0.03 \
+    --crf-l2 0.002 \
+    --nsga-population "$NSGA_POPULATION" \
+    --nsga-generations "$NSGA_GENERATIONS" \
+    --minimum-holdout-coverage "$MINIMUM_HOLDOUT_COVERAGE"
+
 printf '\nRésultats de développement trajectoire: %s\n' "$OUTPUT_ROOT"
+printf '\nRésumé des branches unitaires:\n'
 cat "$OUTPUT_ROOT/dream_single_skip_trajectory_report.json"
+printf '\nPolitique causale/séquentielle fail-closed:\n'
+cat "$POLICY_OUTPUT"
