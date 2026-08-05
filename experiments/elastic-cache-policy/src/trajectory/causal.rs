@@ -72,7 +72,7 @@ pub fn run_causal_diagnostic(
 
         intervention_data.extend_from_slice(&row.raw_features);
         intervention_data.push(1.0);
-        intervention_data.push(f64::from(row.strict_unsafe));
+        intervention_data.push(if row.strict_unsafe { 1.0 } else { 0.0 });
     }
 
     let baseline_environment = Environment::observational("always_refresh")
