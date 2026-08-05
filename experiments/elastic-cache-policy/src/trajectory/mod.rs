@@ -113,7 +113,7 @@ fn symbolic_report(
         .map(|index| {
             (
                 standardized[*index].to_vec(),
-                f64::from(rows[*index].strict_unsafe),
+                if rows[*index].strict_unsafe { 1.0 } else { 0.0 },
             )
         })
         .collect();
