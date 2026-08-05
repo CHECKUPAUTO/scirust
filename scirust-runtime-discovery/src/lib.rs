@@ -6,12 +6,17 @@
 //! untouched split before it can affect a runtime policy.
 
 mod catalog;
+mod cogno;
 mod evaluation;
 mod expression;
 mod proposal;
 mod schema;
 
 pub use catalog::generate_catalog;
+pub use cogno::{
+    CognoAdoptionRecord, CognoFeatureProposal, CognoProposalBatch, EvidenceReference,
+    ProposalOrigin, QuarantineState, TrustClass, build_cogno_adoption_records,
+};
 pub use evaluation::{
     AblationGroupSummary, DatasetEvaluationReport, FeatureEvaluation,
     evaluate_review_on_jsonl,
