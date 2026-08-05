@@ -6,10 +6,12 @@
 //! untouched split before it can affect a runtime policy.
 
 mod catalog;
+mod expression;
 mod proposal;
 mod schema;
 
 pub use catalog::generate_catalog;
+pub use expression::{SignalHistory, evaluate_expression};
 pub use proposal::{
     ProposalBatch, ProposalRejection, ProposalReview, RankedHypothesis, review_proposals,
     summarize_rejections,
