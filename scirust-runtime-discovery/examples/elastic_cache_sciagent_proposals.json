@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "experiment_id": "dream-elastic-cache-runtime-features-v1",
+  "proposer": "sciagent",
+  "maximum_scalar_ops": 64,
+  "maximum_persistent_state_scalars": 8,
+  "hypotheses": [
+    {
+      "id": "drift_curvature_proxy",
+      "name": "drift curvature proxy",
+      "family": "temporal_slope",
+      "expression": "drift[t] - 2 * drift[t-1] + drift[t-2]",
+      "required_signals": ["drift"],
+      "temporal_availability": "past_only",
+      "runtime_cost": {
+        "compute_class": "constant",
+        "estimated_scalar_ops": 5,
+        "persistent_state_scalars": 2,
+        "temporary_state_scalars": 1
+      },
+      "rationale": "Detects acceleration in cache divergence before a prediction changes.",
+      "expected_failure_mode": "A locally smooth drift level hides a rapidly worsening trajectory.",
+      "ablation_group": "sciagent_temporal_dynamics",
+      "deterministic": true
+    },
+    {
+      "id": "margin_age_interaction",
+      "name": "skip margin and cache age interaction",
+      "family": "cross_signal_interaction",
+      "expression": "skip_margin / (1 + cache_age)",
+      "required_signals": ["skip_margin", "cache_age"],
+      "temporal_availability": "current_decision",
+      "runtime_cost": {
+        "compute_class": "constant",
+        "estimated_scalar_ops": 3,
+        "persistent_state_scalars": 0,
+        "temporary_state_scalars": 1
+      },
+      "rationale": "Discounts apparent skip confidence as cached state ages.",
+      "expected_failure_mode": "A high raw skip margin is misleading for old cache entries.",
+      "ablation_group": "sciagent_interactions",
+      "deterministic": true
+    },
+    {
+      "id": "future_prediction_change",
+      "name": "future prediction change",
+      "family": "stability",
+      "expression": "prediction[t+1] != prediction[t]",
+      "required_signals": ["future_prediction"],
+      "temporal_availability": "future_dependent",
+      "runtime_cost": {
+        "compute_class": "constant",
+        "estimated_scalar_ops": 1,
+        "persistent_state_scalars": 0,
+        "temporary_state_scalars": 0
+      },
+      "rationale": "Deliberately invalid leakage fixture.",
+      "expected_failure_mode": "Uses information unavailable at decision time.",
+      "ablation_group": "invalid_leakage",
+      "deterministic": true
+    }
+  ]
+}
