@@ -1,5 +1,6 @@
 use super::data::{CandidateRecord, RUNTIME_FEATURES};
-use scirust_sequential::{FeatureFn, LinearChainCRF};
+use scirust_sequential::LinearChainCRF;
+use scirust_sequential::crf::FeatureFn;
 use serde::Serialize;
 use std::sync::Arc;
 

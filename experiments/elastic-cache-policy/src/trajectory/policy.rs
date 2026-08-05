@@ -98,7 +98,7 @@ impl PolicyParameters {
             maximum_crf_unsafe_probability: 0.0,
             maximum_gp_upper_risk: 0.0,
             gp_uncertainty_multiplier: 4.0,
-            minimum_skip_margin: f64::INFINITY,
+            minimum_skip_margin: 1.0e300,
             maximum_candidate_ordinal: 0,
             maximum_refresh_votes: 0,
         }
