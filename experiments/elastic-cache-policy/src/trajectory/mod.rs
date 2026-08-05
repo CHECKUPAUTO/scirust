@@ -172,7 +172,8 @@ pub fn discover_trajectory_policy(
         config.crf_learning_rate,
         config.crf_l2_penalty,
     )?;
-    let crf_probabilities = sequential_model.unsafe_probabilities(&all_sequences, rows.len())?;
+    let crf_probabilities =
+        sequential_model.unsafe_prefix_probabilities(&all_sequences, rows.len())?;
     if crf_probabilities
         .iter()
         .any(|probability| !probability.is_finite())
