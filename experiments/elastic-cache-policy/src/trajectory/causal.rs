@@ -1,7 +1,7 @@
 use super::data::{CandidateRecord, RUNTIME_FEATURE_NAMES, RUNTIME_FEATURES};
 use scirust_causal::{
-    CausalDataset, CausalVariable, Environment, InvarianceConfig, Intervention,
-    InterventionKind, SampleBlock, VariableKind, VariableRole, invariant_causal_prediction,
+    CausalDataset, CausalVariable, Environment, Intervention, InterventionKind, InvarianceConfig,
+    SampleBlock, VariableKind, VariableRole, invariant_causal_prediction,
 };
 use serde::Serialize;
 
@@ -27,11 +27,7 @@ pub struct CausalDiagnostic {
     pub error: Option<String>,
 }
 
-fn variable(
-    index: usize,
-    name: &str,
-    role: VariableRole,
-) -> Result<CausalVariable, String> {
+fn variable(index: usize, name: &str, role: VariableRole) -> Result<CausalVariable, String> {
     CausalVariable::new(index, name, role, VariableKind::Continuous)
         .map_err(|error| error.to_string())
 }
@@ -40,14 +36,16 @@ pub fn run_causal_diagnostic(
     rows: &[CandidateRecord],
     training_indices: &[usize],
 ) -> Result<CausalDiagnostic, String> {
-    if training_indices.len() < 8 {
+    if training_indices.len() < 8
+    {
         return Err("causal diagnostic requires at least eight training interventions".to_string());
     }
 
     let treatment_index = RUNTIME_FEATURES;
     let outcome_index = RUNTIME_FEATURES + 1;
     let mut variables = Vec::with_capacity(RUNTIME_FEATURES + 2);
-    for (index, name) in RUNTIME_FEATURE_NAMES.iter().enumerate() {
+    for (index, name) in RUNTIME_FEATURE_NAMES.iter().enumerate()
+    {
         variables.push(variable(index, name, VariableRole::Covariate)?);
     }
     variables.push(variable(
@@ -64,7 +62,8 @@ pub fn run_causal_diagnostic(
     let columns = variables.len();
     let mut baseline_data = Vec::with_capacity(training_indices.len() * columns);
     let mut intervention_data = Vec::with_capacity(training_indices.len() * columns);
-    for &row_index in training_indices {
+    for &row_index in training_indices
+    {
         let row = &rows[row_index];
         baseline_data.extend_from_slice(&row.raw_features);
         baseline_data.push(0.0);
@@ -75,15 +74,12 @@ pub fn run_causal_diagnostic(
         intervention_data.push(if row.strict_unsafe { 1.0 } else { 0.0 });
     }
 
-    let baseline_environment = Environment::observational("always_refresh")
+    let baseline_environment =
+        Environment::observational("always_refresh").map_err(|error| error.to_string())?;
+    let intervention = Intervention::new(treatment_index, InterventionKind::Atomic { value: 1.0 })
         .map_err(|error| error.to_string())?;
-    let intervention = Intervention::new(
-        treatment_index,
-        InterventionKind::Atomic { value: 1.0 },
-    )
-    .map_err(|error| error.to_string())?;
-    let single_skip_environment = Environment::new("single_skip", vec![intervention])
-        .map_err(|error| error.to_string())?;
+    let single_skip_environment =
+        Environment::new("single_skip", vec![intervention]).map_err(|error| error.to_string())?;
     let baseline_block = SampleBlock::new(
         baseline_environment,
         training_indices.len(),
@@ -110,8 +106,10 @@ pub fn run_causal_diagnostic(
         .map_err(|error| error.to_string())?
         .with_max_predictor_set_size(2);
     let result = invariant_causal_prediction(&dataset, outcome_index, &predictors, &config);
-    match result {
-        Ok(result) => {
+    match result
+    {
+        Ok(result) =>
+        {
             let names = |indices: &[usize]| {
                 indices
                     .iter()
@@ -144,7 +142,7 @@ pub fn run_causal_diagnostic(
                 ],
                 error: None,
             })
-        }
+        },
         Err(error) => Ok(CausalDiagnostic {
             method: "scirust-causal invariant causal prediction".to_string(),
             environments: vec!["always_refresh".to_string(), "single_skip".to_string()],

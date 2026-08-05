@@ -26,10 +26,12 @@ pub fn fit_gp_risk(
     standardized: &[[f64; RUNTIME_FEATURES]],
     training_indices: &[usize],
 ) -> Result<(GpRiskReport, Vec<f64>, Vec<f64>), String> {
-    if training_indices.is_empty() {
+    if training_indices.is_empty()
+    {
         return Err("cannot fit a Gaussian process on an empty split".to_string());
     }
-    if standardized.len() != rows.len() {
+    if standardized.len() != rows.len()
+    {
         return Err("GP feature table length does not match trajectory rows".to_string());
     }
     let x: Vec<Vec<f64>> = training_indices
@@ -38,21 +40,17 @@ pub fn fit_gp_risk(
         .collect();
     let y: Vec<f64> = training_indices
         .iter()
-        .map(|index| {
-            if rows[*index].strict_unsafe {
-                1.0
-            } else {
-                0.0
-            }
-        })
+        .map(|index| if rows[*index].strict_unsafe { 1.0 } else { 0.0 })
         .collect();
     let kernel = Matern52 {
         lengthscale: 1.5,
         variance: 1.0,
     };
     let mut fitted = None;
-    for noise in [0.01, 0.03, 0.05, 0.1, 0.2] {
-        if let Ok(gp) = GaussianProcess::fit(&x, &y, kernel, noise) {
+    for noise in [0.01, 0.03, 0.05, 0.1, 0.2]
+    {
+        if let Ok(gp) = GaussianProcess::fit(&x, &y, kernel, noise)
+        {
             fitted = Some((gp, noise));
             break;
         }
@@ -62,9 +60,11 @@ pub fn fit_gp_risk(
     })?;
     let mut means = Vec::with_capacity(rows.len());
     let mut standard_deviations = Vec::with_capacity(rows.len());
-    for features in standardized {
+    for features in standardized
+    {
         let (mean, variance) = gp.predict(features);
-        if !mean.is_finite() || !variance.is_finite() || variance < 0.0 {
+        if !mean.is_finite() || !variance.is_finite() || variance < 0.0
+        {
             return Err("scirust-gp produced a non-finite trajectory prediction".to_string());
         }
         means.push(mean.clamp(0.0, 1.0));
@@ -111,10 +111,12 @@ impl PolicyParameters {
         gp_mean: f64,
         gp_stddev: f64,
     ) -> bool {
-        if self.maximum_candidate_ordinal == 0 {
+        if self.maximum_candidate_ordinal == 0
+        {
             return false;
         }
-        if !crf_probability.is_finite() || !gp_mean.is_finite() || !gp_stddev.is_finite() {
+        if !crf_probability.is_finite() || !gp_mean.is_finite() || !gp_stddev.is_finite()
+        {
             return false;
         }
         let upper_risk = gp_mean + self.gp_uncertainty_multiplier * gp_stddev;
@@ -189,9 +191,11 @@ pub fn evaluate_policy(
         .count();
     let safe_candidates = indices.len() - strict_unsafe_candidates;
 
-    for &index in indices {
+    for &index in indices
+    {
         let row = &rows[index];
-        if !row.strict_unsafe {
+        if !row.strict_unsafe
+        {
             available_safe_positive_refresh_saving += row.saved_refresh_cost.max(0.0);
         }
         let permit = parameters.allows(
@@ -200,31 +204,41 @@ pub fn evaluate_policy(
             predictions.gp_mean[index],
             predictions.gp_stddev[index],
         );
-        if !permit {
+        if !permit
+        {
             continue;
         }
         allowed += 1;
-        if row.strict_unsafe {
+        if row.strict_unsafe
+        {
             strict_unsafe_allowed += 1;
-        } else {
+        }
+        else
+        {
             safe_allowed += 1;
         }
-        if row.semantic_unsafe {
+        if row.semantic_unsafe
+        {
             semantic_unsafe_allowed += 1;
         }
-        if row.trajectory_unsafe {
+        if row.trajectory_unsafe
+        {
             trajectory_unsafe_allowed += 1;
         }
-        if row.quality_regression {
+        if row.quality_regression
+        {
             quality_regressions_allowed += 1;
         }
-        if row.prediction_changed {
+        if row.prediction_changed
+        {
             prediction_changes_allowed += 1;
         }
-        if row.decision_count_changed {
+        if row.decision_count_changed
+        {
             decision_count_changes_allowed += 1;
         }
-        if row.response_changed {
+        if row.response_changed
+        {
             response_changes_allowed += 1;
         }
         selected_positive_refresh_saving += row.saved_refresh_cost.max(0.0);
@@ -234,9 +248,12 @@ pub fn evaluate_policy(
         decision_delta_sum += row.decision_delta as f64;
     }
 
-    let safe_refresh_saving_capture = if available_safe_positive_refresh_saving > 0.0 {
+    let safe_refresh_saving_capture = if available_safe_positive_refresh_saving > 0.0
+    {
         selected_positive_refresh_saving / available_safe_positive_refresh_saving
-    } else {
+    }
+    else
+    {
         0.0
     };
     PolicyMetrics {
@@ -261,16 +278,18 @@ pub fn evaluate_policy(
         safe_refresh_saving_capture,
         selected_net_refresh_saving,
         mean_selected_latency_improvement: latency_sum / allowed.max(1) as f64,
-        mean_selected_refresh_cost_improvement: refresh_improvement_sum
-            / allowed.max(1) as f64,
+        mean_selected_refresh_cost_improvement: refresh_improvement_sum / allowed.max(1) as f64,
         mean_selected_decision_delta: decision_delta_sum / allowed.max(1) as f64,
     }
 }
 
 fn sigmoid(value: f64) -> f64 {
-    if value >= 0.0 {
+    if value >= 0.0
+    {
         1.0 / (1.0 + (-value).exp())
-    } else {
+    }
+    else
+    {
         let exponent = value.exp();
         exponent / (1.0 + exponent)
     }
@@ -291,8 +310,8 @@ fn decode_genome(genome: &[f64], minimum_margin: f64, maximum_margin: f64) -> Po
 }
 
 fn objectives(metrics: &PolicyMetrics) -> Vec<f64> {
-    let false_safe_rate = metrics.strict_unsafe_allowed as f64
-        / metrics.strict_unsafe_candidates.max(1) as f64;
+    let false_safe_rate =
+        metrics.strict_unsafe_allowed as f64 / metrics.strict_unsafe_candidates.max(1) as f64;
     let missed_safe_saving = 1.0 - metrics.safe_refresh_saving_capture.clamp(0.0, 1.0);
     let missed_safe_coverage = 1.0 - metrics.safe_coverage.clamp(0.0, 1.0);
     vec![false_safe_rate, missed_safe_saving, missed_safe_coverage]
@@ -327,10 +346,12 @@ pub fn discover_fail_closed_policy(
     predictions: &RiskPredictions,
     config: NsgaConfig,
 ) -> Result<NsgaReport, String> {
-    if validation_indices.is_empty() || training_indices.is_empty() || holdout_indices.is_empty() {
+    if validation_indices.is_empty() || training_indices.is_empty() || holdout_indices.is_empty()
+    {
         return Err("NSGA-II requires non-empty train, validation, and holdout splits".to_string());
     }
-    if config.population < 8 || config.generations == 0 {
+    if config.population < 8 || config.generations == 0
+    {
         return Err("invalid NSGA-II population or generation count".to_string());
     }
     let minimum_margin = validation_indices
@@ -341,7 +362,8 @@ pub fn discover_fail_closed_policy(
         .iter()
         .map(|index| rows[*index].skip_margin)
         .fold(f64::NEG_INFINITY, f64::max);
-    if !minimum_margin.is_finite() || !maximum_margin.is_finite() {
+    if !minimum_margin.is_finite() || !maximum_margin.is_finite()
+    {
         return Err("validation skip-margin range is non-finite".to_string());
     }
 
@@ -351,22 +373,16 @@ pub fn discover_fail_closed_policy(
     optimizer.mutation_rate = 0.18;
     optimizer.crossover_rate = 0.9;
     let mut population = optimizer.init_pop(6);
-    for _ in 0..config.generations {
+    for _ in 0..config.generations
+    {
         optimizer.evolve(&mut population, |individuals| {
             individuals
                 .iter()
                 .map(|individual| {
-                    let parameters = decode_genome(
-                        &individual.genome,
-                        minimum_margin,
-                        maximum_margin,
-                    );
-                    let metrics = evaluate_policy(
-                        &parameters,
-                        rows,
-                        validation_indices,
-                        predictions,
-                    );
+                    let parameters =
+                        decode_genome(&individual.genome, minimum_margin, maximum_margin);
+                    let metrics =
+                        evaluate_policy(&parameters, rows, validation_indices, predictions);
                     objectives(&metrics)
                 })
                 .collect()
@@ -374,10 +390,12 @@ pub fn discover_fail_closed_policy(
     }
 
     let mut zero_false_safe = Vec::<(PolicyParameters, PolicyMetrics, bool)>::new();
-    for individual in &population {
+    for individual in &population
+    {
         let parameters = decode_genome(&individual.genome, minimum_margin, maximum_margin);
         let metrics = evaluate_policy(&parameters, rows, validation_indices, predictions);
-        if metrics.strict_unsafe_allowed == 0 && metrics.allowed > 0 {
+        if metrics.strict_unsafe_allowed == 0 && metrics.allowed > 0
+        {
             zero_false_safe.push((parameters, metrics, individual.rank == 1));
         }
     }
@@ -399,10 +417,8 @@ pub fn discover_fail_closed_policy(
             })
     });
     let zero_false_safe_candidates = zero_false_safe.len();
-    let (selected_parameters, validation, rank_one) = zero_false_safe
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| {
+    let (selected_parameters, validation, rank_one) =
+        zero_false_safe.into_iter().next().unwrap_or_else(|| {
             let parameters = PolicyParameters::deny_all();
             let metrics = evaluate_policy(&parameters, rows, validation_indices, predictions);
             (parameters, metrics, false)

@@ -1,6 +1,4 @@
-use scirust_cache_policy::trajectory::{
-    TrajectoryDiscoveryConfig, discover_trajectory_policy,
-};
+use scirust_cache_policy::trajectory::{TrajectoryDiscoveryConfig, discover_trajectory_policy};
 use serde_json::json;
 use std::io::Write;
 
@@ -11,28 +9,39 @@ fn write_synthetic_trajectory_dataset() -> std::path::PathBuf {
         20_260_810_u64
     ));
     let mut file = std::fs::File::create(&path).unwrap();
-    for prompt in 0..15usize {
-        for ordinal in 1..=3usize {
+    for prompt in 0..15usize
+    {
+        for ordinal in 1..=3usize
+        {
             let unsafe_branch = ordinal == 2;
             let prediction_changed = unsafe_branch && prompt % 3 == 0;
             let response_invariant = !unsafe_branch;
             let decision_invariant = !unsafe_branch;
             let baseline_prediction = format!("{}", 100 + prompt);
-            let branch_prediction = if prediction_changed {
+            let branch_prediction = if prediction_changed
+            {
                 format!("{}", 200 + prompt)
-            } else {
+            }
+            else
+            {
                 baseline_prediction.clone()
             };
             let baseline_decisions = 40 + prompt;
-            let branch_decisions = if decision_invariant {
+            let branch_decisions = if decision_invariant
+            {
                 baseline_decisions
-            } else {
+            }
+            else
+            {
                 baseline_decisions + 2
             };
             let baseline_refresh_cost = baseline_decisions as f64 * 0.96;
-            let branch_refresh_cost = if unsafe_branch {
+            let branch_refresh_cost = if unsafe_branch
+            {
                 baseline_refresh_cost + 0.3
-            } else {
+            }
+            else
+            {
                 baseline_refresh_cost - 0.96
             };
             let skip_margin = 0.01 * ordinal as f64 + prompt as f64 * 0.0001;
@@ -122,7 +131,12 @@ fn trajectory_discovery_builds_fail_closed_report() {
         report.split.train.rows + report.split.validation.rows + report.split.holdout.rows,
         45
     );
-    assert!(report.sequential.training_negative_log_likelihood.is_finite());
+    assert!(
+        report
+            .sequential
+            .training_negative_log_likelihood
+            .is_finite()
+    );
     assert!(report.gaussian_process.log_marginal_likelihood.is_finite());
     assert_eq!(report.nsga2.validation.quality_regressions_allowed, 0);
     assert_eq!(report.nsga2.validation.strict_unsafe_allowed, 0);

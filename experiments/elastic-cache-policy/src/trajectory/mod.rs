@@ -9,8 +9,7 @@ use data::{
     read_candidate_jsonl, sequences_for_indices, split_by_prompt, summarize_labels,
 };
 use policy::{
-    GpRiskReport, NsgaConfig, NsgaReport, RiskPredictions, discover_fail_closed_policy,
-    fit_gp_risk,
+    GpRiskReport, NsgaConfig, NsgaReport, RiskPredictions, discover_fail_closed_policy, fit_gp_risk,
 };
 use sequential::{SequentialRiskReport, fit_sequential_risk};
 use serde::Serialize;
@@ -100,7 +99,8 @@ fn symbolic_report(
     seed: u64,
     enabled: bool,
 ) -> SymbolicTrajectoryReport {
-    if !enabled {
+    if !enabled
+    {
         return SymbolicTrajectoryReport {
             enabled: false,
             engine: "scirust-symreg".to_string(),
@@ -122,17 +122,18 @@ fn symbolic_report(
     let front = scirust_symreg::discover(&data, &input_names, &seeds, 72, 10, 18, 18);
     SymbolicTrajectoryReport {
         enabled: true,
-        engine: "scirust-symreg genetic programming with symbolic differentiation"
-            .to_string(),
+        engine: "scirust-symreg genetic programming with symbolic differentiation".to_string(),
         target: "strict trajectory-unsafe indicator".to_string(),
         candidates: front
             .into_iter()
             .take(16)
-            .map(|(size, mean_squared_error, expression)| SymbolicTrajectoryCandidate {
-                size,
-                mean_squared_error,
-                expression: expression.to_string(),
-            })
+            .map(
+                |(size, mean_squared_error, expression)| SymbolicTrajectoryCandidate {
+                    size,
+                    mean_squared_error,
+                    expression: expression.to_string(),
+                },
+            )
             .collect(),
     }
 }
@@ -179,8 +180,7 @@ pub fn discover_trajectory_policy(
         return Err("CRF did not assign every trajectory candidate a risk".to_string());
     }
 
-    let (gp_report, gp_mean, gp_stddev) =
-        fit_gp_risk(&rows, &standardized, &split.train_rows)?;
+    let (gp_report, gp_mean, gp_stddev) = fit_gp_risk(&rows, &standardized, &split.train_rows)?;
     let predictions = RiskPredictions {
         crf_unsafe_probability: crf_probabilities,
         gp_mean,
