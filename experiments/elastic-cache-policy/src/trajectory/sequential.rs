@@ -254,13 +254,8 @@ impl SequentialRiskModel {
                     {
                         for (tag, slot) in current.iter_mut().enumerate()
                         {
-                            *slot = potential_score(
-                                &self.crf.weights,
-                                &features,
-                                None,
-                                tag,
-                                row_index,
-                            );
+                            *slot =
+                                potential_score(&self.crf.weights, &features, None, tag, row_index);
                         }
                     },
                     Some(previous) =>
