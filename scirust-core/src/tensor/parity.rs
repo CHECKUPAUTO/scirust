@@ -250,6 +250,239 @@ pub fn log_softmax_last(t: &TensorND) -> Result<TensorND> {
 }
 
 // ------------------------------------------------------------------ //
+//  Normalisation affine (layer_norm / rms_norm)                     //
+// ------------------------------------------------------------------ //
+
+/// Vérifie que `normalized_shape` correspond aux dims de queue de `x` et
+/// retourne (rows, group) où `group` est le nombre d'éléments par groupe.
+fn norm_groups(
+    x: &TensorND,
+    op: &'static str,
+    normalized_shape: &[usize],
+) -> Result<(usize, usize)> {
+    if normalized_shape.is_empty()
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "{op}: normalized_shape ne peut pas être vide"
+        )));
+    }
+    if normalized_shape.len() > x.ndim()
+    {
+        return Err(SciRustError::RankMismatch {
+            op,
+            expected: x.ndim(),
+            got: normalized_shape.len(),
+        });
+    }
+    let rank = x.ndim();
+    for (d, &want) in normalized_shape.iter().enumerate()
+    {
+        let got = x.shape[rank - normalized_shape.len() + d];
+        if got != want
+        {
+            return Err(SciRustError::ShapeMismatch {
+                op,
+                expected: (1, want),
+                got: (1, got),
+            });
+        }
+    }
+    let group = checked_prod(normalized_shape)?;
+    if group == 0
+    {
+        return Err(SciRustError::InvalidConfig(format!("{op}: group nul")));
+    }
+    Ok((x.numel() / group, group))
+}
+
+/// layer_norm affine : y = ((x - mean)/sqrt(var+eps)) * w + b,
+/// normalisé sur les dims de queue `normalized_shape` (var non biaisée).
+pub fn layer_norm(
+    x: &TensorND,
+    w: &TensorND,
+    b: &TensorND,
+    normalized_shape: &[usize],
+    eps: f32,
+) -> Result<TensorND> {
+    let (rows, group) = norm_groups(x, "parity::layer_norm", normalized_shape)?;
+    if w.numel() != group || b.numel() != group
+    {
+        return Err(SciRustError::ShapeMismatch {
+            op: "parity::layer_norm",
+            expected: (1, group),
+            got: (1, w.numel()),
+        });
+    }
+    let mut out = vec![0.0f32; x.numel()];
+    for i in 0..rows
+    {
+        let base = i * group;
+        let mean: f32 = (0..group).map(|j| x.data[base + j]).sum::<f32>() / group as f32;
+        let var: f32 = (0..group)
+            .map(|j| {
+                let d = x.data[base + j] - mean;
+                d * d
+            })
+            .sum::<f32>()
+            / group as f32;
+        let std = (var + eps).sqrt();
+        for j in 0..group
+        {
+            let xhat = (x.data[base + j] - mean) / std;
+            out[base + j] = xhat * w.data[j] + b.data[j];
+        }
+    }
+    Ok(TensorND::new(out, x.shape.clone()))
+}
+
+/// Gradient layer_norm (affine) : gx, gw, gb.
+/// Formules standard par groupe (ligne de `group` éléments) :
+///   std = sqrt(var + eps), xhat = (x - mean)/std, dxhat = gout * w
+///   gx  = (dxhat - mean(dxhat) - xhat * mean(dxhat * xhat)) / std
+///   gw  = Σ_rows gout * xhat          (par dim normalisée)
+///   gb  = Σ_rows gout                 (par dim normalisée)
+pub fn d_layer_norm(
+    gout: &TensorND,
+    x: &TensorND,
+    w: &TensorND,
+    normalized_shape: &[usize],
+    eps: f32,
+) -> Result<(TensorND, TensorND, TensorND)> {
+    let (rows, group) = norm_groups(x, "parity::d_layer_norm", normalized_shape)?;
+    if gout.numel() != x.numel() || w.numel() != group
+    {
+        return Err(SciRustError::ShapeMismatch {
+            op: "parity::d_layer_norm",
+            expected: (1, x.numel()),
+            got: (1, gout.numel()),
+        });
+    }
+    let mut gx = vec![0.0f32; x.numel()];
+    let mut gw = vec![0.0f32; group];
+    let mut gb = vec![0.0f32; group];
+    for i in 0..rows
+    {
+        let base = i * group;
+        let mean: f32 = (0..group).map(|j| x.data[base + j]).sum::<f32>() / group as f32;
+        let var: f32 = (0..group)
+            .map(|j| {
+                let d = x.data[base + j] - mean;
+                d * d
+            })
+            .sum::<f32>()
+            / group as f32;
+        let std = (var + eps).sqrt();
+        let mut xhat = vec![0.0f32; group];
+        let mut dxhat = vec![0.0f32; group];
+        for j in 0..group
+        {
+            xhat[j] = (x.data[base + j] - mean) / std;
+            dxhat[j] = gout.data[base + j] * w.data[j];
+        }
+        let mean_dxhat: f32 = dxhat.iter().sum::<f32>() / group as f32;
+        let mean_dxhat_xhat: f32 =
+            (0..group).map(|j| dxhat[j] * xhat[j]).sum::<f32>() / group as f32;
+        for j in 0..group
+        {
+            gx[base + j] = (dxhat[j] - mean_dxhat - xhat[j] * mean_dxhat_xhat) / std;
+            gw[j] += gout.data[base + j] * xhat[j];
+            gb[j] += gout.data[base + j];
+        }
+    }
+    Ok((
+        TensorND::new(gx, x.shape.clone()),
+        TensorND::new(gw, vec![group]),
+        TensorND::new(gb, vec![group]),
+    ))
+}
+
+/// rms_norm : y = (x / sqrt(mean(x²) + eps)) * w, normalisé sur les dims de
+/// queue `normalized_shape`.
+pub fn rms_norm(
+    x: &TensorND,
+    w: &TensorND,
+    normalized_shape: &[usize],
+    eps: f32,
+) -> Result<TensorND> {
+    let (rows, group) = norm_groups(x, "parity::rms_norm", normalized_shape)?;
+    if w.numel() != group
+    {
+        return Err(SciRustError::ShapeMismatch {
+            op: "parity::rms_norm",
+            expected: (1, group),
+            got: (1, w.numel()),
+        });
+    }
+    let mut out = vec![0.0f32; x.numel()];
+    for i in 0..rows
+    {
+        let base = i * group;
+        let ms: f32 = (0..group)
+            .map(|j| x.data[base + j] * x.data[base + j])
+            .sum::<f32>()
+            / group as f32;
+        let r = (ms + eps).sqrt();
+        for j in 0..group
+        {
+            out[base + j] = x.data[base + j] / r * w.data[j];
+        }
+    }
+    Ok(TensorND::new(out, x.shape.clone()))
+}
+
+/// Gradient rms_norm : gx, gw.
+/// Par groupe : r = sqrt(ms + eps), xhat = x/r, dxhat = gout * w
+///   gx = dxhat/r - xhat * Σ(dxhat * xhat) / r
+///   gw = Σ_rows gout * xhat
+pub fn d_rms_norm(
+    gout: &TensorND,
+    x: &TensorND,
+    w: &TensorND,
+    normalized_shape: &[usize],
+    eps: f32,
+) -> Result<(TensorND, TensorND)> {
+    let (rows, group) = norm_groups(x, "parity::d_rms_norm", normalized_shape)?;
+    if gout.numel() != x.numel() || w.numel() != group
+    {
+        return Err(SciRustError::ShapeMismatch {
+            op: "parity::d_rms_norm",
+            expected: (1, x.numel()),
+            got: (1, gout.numel()),
+        });
+    }
+    let mut gx = vec![0.0f32; x.numel()];
+    let mut gw = vec![0.0f32; group];
+    for i in 0..rows
+    {
+        let base = i * group;
+        let ms: f32 = (0..group)
+            .map(|j| x.data[base + j] * x.data[base + j])
+            .sum::<f32>()
+            / group as f32;
+        let r = (ms + eps).sqrt();
+        let dot: f32 = (0..group)
+            .map(|j| {
+                let dxhat = gout.data[base + j] * w.data[j];
+                dxhat * x.data[base + j]
+            })
+            .sum::<f32>();
+        let n = group as f32;
+        for j in 0..group
+        {
+            let xhat = x.data[base + j] / r;
+            let dxhat = gout.data[base + j] * w.data[j];
+            // gx = dxhat/r - x·Σ(dxhat·x)/(n·r³)
+            gx[base + j] = dxhat / r - x.data[base + j] * dot / (n * r * r * r);
+            gw[j] += gout.data[base + j] * xhat;
+        }
+    }
+    Ok((
+        TensorND::new(gx, x.shape.clone()),
+        TensorND::new(gw, vec![group]),
+    ))
+}
+
+// ------------------------------------------------------------------ //
 //  Réductions (déterministes, séquentielles)                       //
 // ------------------------------------------------------------------ //
 
