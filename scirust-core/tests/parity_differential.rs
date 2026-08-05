@@ -45,6 +45,8 @@ struct Case {
     #[serde(default)]
     dims: Option<Vec<usize>>,
     #[serde(default)]
+    eps: Option<f32>,
+    #[serde(default)]
     new_shape: Option<Vec<usize>>,
     #[serde(default)]
     bcast_to: Option<Vec<usize>>,
@@ -343,6 +345,91 @@ fn parity_normalization() {
             }
             assert_close(&format!("{op} grad c{ci}"), &g_expected, &c.gx, 1e-5, 1e-5);
         }
+    }
+}
+
+/// Gradcheck layer_norm / rms_norm (affine, normalized_shape = dernière dim) :
+/// compare y, gx, gw, gb contre les fixtures torch 2.13.0 (tol 1e-4).
+#[test]
+fn parity_normalization_affine() {
+    let fx = load_fixture("normalization", "layer_norm");
+    assert_eq!(fx.kind, "normalization");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let dims = c.dims.as_ref().expect("layer_norm case must have dims");
+        let eps = c.eps.expect("layer_norm case must have eps");
+        let x = tensor(&c.x, &c.shape);
+        let w = tensor(&c.w, dims);
+        let b = tensor(&c.b, dims);
+        let out = parity::layer_norm(&x, &w, &b, dims, eps)
+            .unwrap_or_else(|e| panic!("layer_norm case {ci}: {e}"));
+        assert_close(
+            &format!("layer_norm fwd c{ci}"),
+            out.data.as_ref(),
+            &c.y,
+            1e-4,
+            1e-4,
+        );
+        let gout = tensor(&c.gout, &c.shape);
+        let (gx, gw, gb) = parity::d_layer_norm(&gout, &x, &w, dims, eps)
+            .unwrap_or_else(|e| panic!("d_layer_norm case {ci}: {e}"));
+        assert_close(
+            &format!("layer_norm gx c{ci}"),
+            gx.data.as_ref(),
+            &c.gx,
+            1e-4,
+            1e-4,
+        );
+        assert_close(
+            &format!("layer_norm gw c{ci}"),
+            gw.data.as_ref(),
+            &c.gw,
+            1e-4,
+            1e-4,
+        );
+        assert_close(
+            &format!("layer_norm gb c{ci}"),
+            gb.data.as_ref(),
+            &c.gb,
+            1e-4,
+            1e-4,
+        );
+    }
+
+    let fx = load_fixture("normalization", "rms_norm");
+    assert_eq!(fx.kind, "normalization");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let dims = c.dims.as_ref().expect("rms_norm case must have dims");
+        let eps = c.eps.expect("rms_norm case must have eps");
+        let x = tensor(&c.x, &c.shape);
+        let w = tensor(&c.w, dims);
+        let out = parity::rms_norm(&x, &w, dims, eps)
+            .unwrap_or_else(|e| panic!("rms_norm case {ci}: {e}"));
+        assert_close(
+            &format!("rms_norm fwd c{ci}"),
+            out.data.as_ref(),
+            &c.y,
+            1e-4,
+            1e-4,
+        );
+        let gout = tensor(&c.gout, &c.shape);
+        let (gx, gw) = parity::d_rms_norm(&gout, &x, &w, dims, eps)
+            .unwrap_or_else(|e| panic!("d_rms_norm case {ci}: {e}"));
+        assert_close(
+            &format!("rms_norm gx c{ci}"),
+            gx.data.as_ref(),
+            &c.gx,
+            1e-4,
+            1e-4,
+        );
+        assert_close(
+            &format!("rms_norm gw c{ci}"),
+            gw.data.as_ref(),
+            &c.gw,
+            1e-4,
+            1e-4,
+        );
     }
 }
 

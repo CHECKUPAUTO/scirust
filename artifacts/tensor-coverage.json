@@ -8,8 +8,8 @@
   "generated": true,
   "summary": {
     "total": 74,
-    "parity": 41,
-    "experimental": 27,
+    "parity": 43,
+    "experimental": 25,
     "missing": 6
   },
   "families": {
@@ -57,8 +57,8 @@
     },
     "normalization": {
       "total": 6,
-      "parity": 2,
-      "experimental": 4,
+      "parity": 4,
+      "experimental": 2,
       "missing": 0
     },
     "positional": {
@@ -701,7 +701,12 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "experimental"
+      "status": "parity",
+      "verified": {
+        "harness": "scirust-core/tests/parity_differential.rs",
+        "fixtures": "tests/parity/fixtures",
+        "on": "2026-08-04"
+      }
     },
     {
       "name": "lgamma",
@@ -1184,8 +1189,13 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "experimental",
-      "notes": "no torch native symbol in 2.13 (RMSNorm is a module); compare via F.rms_norm custom"
+      "status": "parity",
+      "notes": "no torch native symbol in 2.13 (RMSNorm is a module); compare via F.rms_norm custom",
+      "verified": {
+        "harness": "scirust-core/tests/parity_differential.rs",
+        "fixtures": "tests/parity/fixtures",
+        "on": "2026-08-04"
+      }
     },
     {
       "name": "rope",
