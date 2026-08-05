@@ -113,9 +113,12 @@ pub fn run_causal_diagnostic(
     let mut variables = Vec::with_capacity(RUNTIME_FEATURES + 1);
     for (index, name) in RUNTIME_FEATURE_NAMES.iter().enumerate()
     {
-        let role = if index == ordinal_index {
+        let role = if index == ordinal_index
+        {
             VariableRole::Treatment
-        } else {
+        }
+        else
+        {
             VariableRole::Covariate
         };
         variables.push(variable(index, name, role)?);
