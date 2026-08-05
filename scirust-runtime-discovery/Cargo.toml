@@ -19,3 +19,7 @@ serde_json = "1"
 [[bin]]
 name = "runtime-feature-discovery"
 path = "src/bin/runtime_feature_discovery.rs"
+
+[[bin]]
+name = "review-feature-proposals"
+path = "src/bin/review_feature_proposals.rs"
