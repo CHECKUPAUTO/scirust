@@ -3,7 +3,7 @@
 baseline (2.13.0). OFFLINE tool: not run in CI. Output fixtures are data only.
 
 Usage:
-    python3 generate_fixtures.py [--torch-bin PATH] [--families elementwise,reductions,normalization,shape,linear,loss]
+    python3 generate_fixtures.py [--torch-bin PATH] [--families elementwise,reductions,normalization,shape,linear,loss,norm_affine]
 
 Provenance rules (LICENSING_AND_PROVENANCE.md):
   - executes the pinned baseline (`torch.__version__` must be 2.13.0),
@@ -169,6 +169,48 @@ def gen_normalization(gen, family_dir: Path) -> None:
         write(op, family_dir, cases, note="dim=-1 (dernière dimension)")
 
 
+def gen_norm_affine(gen, family_dir: Path) -> None:
+    """layer_norm/rms_norm (2-D, normalized_shape = dernière dim, affine).
+
+    IMPORTANT : cette étape doit rester la DERNIÈRE de la séquence de
+    génération. Le générateur est positionnel (une seule stream RNG seedée) ;
+    insérer de nouveaux tirages au milieu décalerait tous les hashs des
+    fixtures déjà commités.
+    """
+    norm_cases(gen, family_dir, "layer_norm")
+    norm_cases(gen, family_dir, "rms_norm")
+
+
+def norm_cases(gen, family_dir: Path, op: str) -> None:
+    """layer_norm/rms_norm (2-D, normalized_shape = dernière dim, affine)."""
+    eps = 1e-5
+    cases = []
+    for s in SHAPES:
+        w = seed_tensor(gen, (s[-1],), 0.5, 1.5).requires_grad_(True)
+        x = seed_tensor(gen, s, -3.0, 3.0).requires_grad_(True)
+        gout = seed_tensor(gen, s, -1.0, 1.0)
+        if op == "layer_norm":
+            b = seed_tensor(gen, (s[-1],), -1.0, 1.0).requires_grad_(True)
+            y = torch.nn.functional.layer_norm(x, (s[-1],), w, b, eps=eps)
+            gx, gw, gb = torch.autograd.grad(y, (x, w, b), grad_outputs=gout)
+            cases.append({"kind": "normalization", "shape": list(s),
+                          "dims": [s[-1]], "eps": eps,
+                          "x": flat(x.detach()), "w": flat(w.detach()),
+                          "b": flat(b.detach()), "y": flat(y.detach()),
+                          "gout": flat(gout), "gx": flat(gx),
+                          "gw": flat(gw), "gb": flat(gb)})
+        else:
+            y = torch.nn.functional.rms_norm(x, (s[-1],), w, eps=eps)
+            gx, gw = torch.autograd.grad(y, (x, w), grad_outputs=gout)
+            cases.append({"kind": "normalization", "shape": list(s),
+                          "dims": [s[-1]], "eps": eps,
+                          "x": flat(x.detach()), "w": flat(w.detach()),
+                          "y": flat(y.detach()), "gout": flat(gout),
+                          "gx": flat(gx), "gw": flat(gw)})
+    write(op, family_dir, cases,
+          note=f"{op}: affine, eps={eps}, normalized_shape = dernière dim")
+
+
 def shape_forward(op, x, params):
     """Retourne (y, gx) pour les ops de shape ; params selon l'op."""
     if op == "reshape":
@@ -318,7 +360,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--torch-bin", default=None, help="path to the baseline interpreter (informational)")
     ap.add_argument("--families",
-                    default="elementwise,reductions,normalization,shape,linear,loss")
+                    default="elementwise,reductions,normalization,shape,linear,loss,norm_affine")
     args = ap.parse_args()
     import_torch(args.torch_bin)
 
@@ -354,6 +396,8 @@ def main() -> int:
             gen_linear(gen, fam_dir)
         elif fam == "loss":
             gen_loss(gen, fam_dir)
+        elif fam == "norm_affine":
+            gen_norm_affine(gen, OUT / "normalization")
         else:
             raise SystemExit(f"unknown family {fam}")
         for p in sorted(fam_dir.glob("*.json")):
