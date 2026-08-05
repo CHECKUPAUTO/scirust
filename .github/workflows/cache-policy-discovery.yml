@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test:
@@ -20,20 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: research/elastic-cache-policy-discovery
-          persist-credentials: true
-      - name: Remove tracked build artifacts
-        run: |
-          rm -rf experiments/elastic-cache-policy/target
-          printf '/target/\n' > experiments/elastic-cache-policy/.gitignore
-          if ! git diff --quiet -- experiments/elastic-cache-policy || \
-             [ -n "$(git ls-files --deleted experiments/elastic-cache-policy/target)" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -A experiments/elastic-cache-policy
-            git commit -m "chore(cache-policy): remove build artifacts"
-            git push origin HEAD:research/elastic-cache-policy-discovery
-          fi
+          persist-credentials: false
       - name: Install formatting toolchain
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
@@ -69,6 +56,7 @@ jobs:
             experiments/elastic-cache-policy/jetson/finalize_guarded_independent_summary.sh \
             experiments/elastic-cache-policy/jetson/finalize_guarded_quality_diagnostic.sh \
             experiments/elastic-cache-policy/jetson/finalize_repeated_crossover_summary.sh \
+            experiments/elastic-cache-policy/jetson/finalize_trajectory_policy_discovery.sh \
             experiments/elastic-cache-policy/jetson/run_confirmatory_dream_proof.sh \
             experiments/elastic-cache-policy/jetson/run_end_to_end_gsm8k.sh \
             experiments/elastic-cache-policy/jetson/run_guarded_independent_gsm8k.sh \
@@ -82,7 +70,8 @@ jobs:
       - name: CLI discovery report
         run: |
           cargo +nightly-2026-07-02 run --release \
-            --manifest-path experiments/elastic-cache-policy/Cargo.toml -- \
+            --manifest-path experiments/elastic-cache-policy/Cargo.toml \
+            --bin scirust-cache-policy -- \
             --seed 20260804 \
             --steps 600 \
             --max-quality-loss 0.05
