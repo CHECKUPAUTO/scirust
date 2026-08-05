@@ -1,0 +1,22 @@
+[workspace]
+members = ["."]
+resolver = "2"
+
+[package]
+name = "scirust-cache-policy"
+version = "0.1.0"
+edition = "2021"
+publish = false
+rust-version = "1.89"
+description = "Deterministic SciRust discovery of elastic-cache refresh policies"
+license-file = "../../LICENSE.md"
+repository = "https://github.com/Memorithm/scirust"
+
+[dependencies]
+scirust-causal = { path = "../../scirust-causal" }
+scirust-evo = { path = "../../scirust-evo" }
+scirust-gp = { path = "../../scirust-gp" }
+scirust-sequential = { path = "../../scirust-sequential" }
+scirust-symreg = { path = "../../scirust-symreg" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
