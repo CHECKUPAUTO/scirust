@@ -26,11 +26,22 @@
     "elementwise/sub.json": "399ecc4336cdfa615b7c534ee6c9cbb8fc3f407d55bd274e130ef57ceab4e389",
     "elementwise/tan.json": "c243b55f3cc1b311f8a49dda8831aa2e3e670493736334d895c1be374a7cd357",
     "elementwise/tanh.json": "8ef7ca81c6d15c2e75320cafe68ac4cd8655498cacd4f22a55ff5204e2355bec",
+    "linear/bmm.json": "c6b4e70637b93f5268faa7ac0e3b707c8e4f18ce22b58f64b2f37a6102282060",
+    "linear/linear.json": "305a3df0c33bda29020065b1fb06548d01b03b9b7cfcb7b858d81390f8b432ef",
+    "linear/matmul.json": "61bf42c447265142e0bf73cf6ed65d8798220bdcea86145058d232dbae3c8e19",
+    "loss/cross_entropy.json": "7443a7dd5f732eeae0c11e46e671be4baa1c14429f0dc0ae3e5f984028fa0929",
+    "loss/mse_loss.json": "32f1700cfd4718ace27a1e6120a3ab12bffb981b221c86c6bdccfd31a12db256",
     "normalization/log_softmax.json": "8e46e3216f8e8bf7fce82d8bd69217107a487ee00e14a11c5e0809e372c4d393",
     "normalization/softmax.json": "7b2ea61a49a52c899b7beeb7fbd54dadc56ee7fa4686644ecb0d9a9ddb53b684",
     "reductions/mean.json": "7365d56aca7976963e4c0a754b1b20d03011ecea41bcfcca822ccdf6d1caf5d2",
     "reductions/sum.json": "6f9015dc5cedbf82c5a36a87ef63a46cd9ee9f2dc060ddb9ae490eef86d78391",
-    "reductions/var.json": "0f680cd4ee89e28d3a9d37f9e5c6d98c9668dc844bd34eb5bf359c3ef9c307da"
+    "reductions/var.json": "0f680cd4ee89e28d3a9d37f9e5c6d98c9668dc844bd34eb5bf359c3ef9c307da",
+    "shape/broadcast_to.json": "9ff663fbb3d5160ae296da03376a6672a8f66232557fd56e51c1327e3a8071f5",
+    "shape/flatten.json": "6998a533acb0f03c6a1141cf9cd288c9a74a0b4de4651034710d8a82df96fb11",
+    "shape/permute.json": "7bed83ffe04a19f31f4cb1e09eb6509e8d9889486271e65cab630664ba15daeb",
+    "shape/reshape.json": "c0ffbe908d11b75fe9ce17e4851423a76248777fbb68396103626a38e38c3701",
+    "shape/slice.json": "92eb217ec6baa2c6c7b52a29a41fcebb9b89cf75e35755b48381fe5ea878dcc5",
+    "shape/transpose.json": "679cff96e7f43fe4e45b986874df00c7a5e83779e892232d62968d02e9606cde"
   },
   "generator": "docs/tensor-parity/provenance/generate_fixtures.py",
   "pytorch": {
