@@ -13,6 +13,7 @@ mod discovery;
 mod model;
 mod synthetic;
 mod trace_io;
+pub mod trajectory;
 
 pub use discovery::{
     best_fixed_gamma, best_fixed_gamma_robust, calibrate_threshold, calibrate_threshold_robust,
