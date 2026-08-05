@@ -1,6 +1,4 @@
-use scirust_cache_policy::trajectory::{
-    TrajectoryDiscoveryConfig, discover_trajectory_policy,
-};
+use scirust_cache_policy::trajectory::{TrajectoryDiscoveryConfig, discover_trajectory_policy};
 use std::path::PathBuf;
 
 #[derive(Debug)]
@@ -37,45 +35,55 @@ fn parse_args() -> Result<Args, String> {
     let mut output = None;
     let mut config = TrajectoryDiscoveryConfig::default();
     let mut args = std::env::args().skip(1);
-    while let Some(argument) = args.next() {
-        match argument.as_str() {
-            "--dataset" => {
+    while let Some(argument) = args.next()
+    {
+        match argument.as_str()
+        {
+            "--dataset" =>
+            {
                 dataset = Some(PathBuf::from(
                     args.next().ok_or("--dataset requires a path")?,
                 ));
-            }
-            "--output" => {
+            },
+            "--output" =>
+            {
                 output = Some(PathBuf::from(
                     args.next().ok_or("--output requires a path")?,
                 ));
-            }
+            },
             "--seed" => config.seed = parse_value(&mut args, "--seed")?,
-            "--crf-epochs" => {
+            "--crf-epochs" =>
+            {
                 config.crf_epochs = parse_value(&mut args, "--crf-epochs")?;
-            }
-            "--crf-learning-rate" => {
-                config.crf_learning_rate =
-                    parse_value(&mut args, "--crf-learning-rate")?;
-            }
-            "--crf-l2" => {
+            },
+            "--crf-learning-rate" =>
+            {
+                config.crf_learning_rate = parse_value(&mut args, "--crf-learning-rate")?;
+            },
+            "--crf-l2" =>
+            {
                 config.crf_l2_penalty = parse_value(&mut args, "--crf-l2")?;
-            }
-            "--nsga-population" => {
+            },
+            "--nsga-population" =>
+            {
                 config.nsga_population = parse_value(&mut args, "--nsga-population")?;
-            }
-            "--nsga-generations" => {
+            },
+            "--nsga-generations" =>
+            {
                 config.nsga_generations = parse_value(&mut args, "--nsga-generations")?;
-            }
-            "--minimum-holdout-coverage" => {
+            },
+            "--minimum-holdout-coverage" =>
+            {
                 config.minimum_holdout_coverage =
                     parse_value(&mut args, "--minimum-holdout-coverage")?;
-            }
+            },
             "--no-symbolic" => config.symbolic = false,
             "--symbolic" => config.symbolic = true,
-            "-h" | "--help" => {
+            "-h" | "--help" =>
+            {
                 usage();
                 std::process::exit(0);
-            }
+            },
             other => return Err(format!("unknown argument `{other}`")),
         }
     }
@@ -89,15 +97,22 @@ fn parse_args() -> Result<Args, String> {
 fn run() -> Result<(), String> {
     let args = parse_args()?;
     let report = discover_trajectory_policy(&args.dataset, &args.config)?;
-    if let Some(parent) = args.output.parent() {
+    if let Some(parent) = args.output.parent()
+    {
         std::fs::create_dir_all(parent).map_err(|error| {
-            format!("cannot create output directory {}: {error}", parent.display())
+            format!(
+                "cannot create output directory {}: {error}",
+                parent.display()
+            )
         })?;
     }
     let encoded = serde_json::to_string_pretty(&report)
         .map_err(|error| format!("cannot serialize trajectory report: {error}"))?;
     std::fs::write(&args.output, format!("{encoded}\n")).map_err(|error| {
-        format!("cannot write trajectory report {}: {error}", args.output.display())
+        format!(
+            "cannot write trajectory report {}: {error}",
+            args.output.display()
+        )
     })?;
     println!("{encoded}");
     println!("\nRapport: {}", args.output.display());
@@ -105,7 +120,8 @@ fn run() -> Result<(), String> {
 }
 
 fn main() {
-    if let Err(error) = run() {
+    if let Err(error) = run()
+    {
         usage();
         eprintln!("error: {error}");
         std::process::exit(2);

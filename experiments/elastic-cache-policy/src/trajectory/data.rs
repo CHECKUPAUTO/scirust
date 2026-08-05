@@ -117,13 +117,15 @@ pub struct CandidateRecord {
 
 impl CandidateRecord {
     fn from_raw(raw: RawRow) -> Result<Self, String> {
-        if raw.schema_version != 1 {
+        if raw.schema_version != 1
+        {
             return Err(format!(
                 "unsupported trajectory row schema {}",
                 raw.schema_version
             ));
         }
-        if raw.split != "gsm8k_train" {
+        if raw.split != "gsm8k_train"
+        {
             return Err(format!(
                 "trajectory discovery accepts GSM8K train rows only, found `{}`",
                 raw.split
@@ -148,26 +150,30 @@ impl CandidateRecord {
             raw.effects.latency_improvement,
             raw.effects.refresh_cost_improvement,
         ];
-        if finite.iter().any(|value| !value.is_finite()) {
+        if finite.iter().any(|value| !value.is_finite())
+        {
             return Err(format!(
                 "non-finite trajectory value for prompt {} candidate {}",
                 raw.dataset_index, raw.candidate.ordinal
             ));
         }
-        if raw.candidate.ordinal == 0 {
+        if raw.candidate.ordinal == 0
+        {
             return Err("candidate ordinals must be one-based".to_string());
         }
-        if raw.baseline.decisions == 0 || raw.single_skip.decisions == 0 {
+        if raw.baseline.decisions == 0 || raw.single_skip.decisions == 0
+        {
             return Err("trajectory rows must contain at least one decision".to_string());
         }
-        if raw.baseline.refreshes != raw.baseline.decisions {
+        if raw.baseline.refreshes != raw.baseline.decisions
+        {
             return Err("baseline row is not an always-refresh trajectory".to_string());
         }
-        if raw.single_skip.refreshes > raw.single_skip.decisions {
+        if raw.single_skip.refreshes > raw.single_skip.decisions
+        {
             return Err("branch refresh count exceeds its decision count".to_string());
         }
-        if raw.candidate.refresh_cost.to_bits()
-            != raw.candidate.features.refresh_cost.to_bits()
+        if raw.candidate.refresh_cost.to_bits() != raw.candidate.features.refresh_cost.to_bits()
         {
             return Err("candidate refresh-cost fields disagree".to_string());
         }
@@ -236,7 +242,8 @@ pub fn read_candidate_jsonl(path: &Path) -> Result<Vec<CandidateRecord>, String>
     let reader = BufReader::new(file);
     let mut rows = Vec::new();
     let mut seen = BTreeSet::new();
-    for (line_index, line) in reader.lines().enumerate() {
+    for (line_index, line) in reader.lines().enumerate()
+    {
         let line = line.map_err(|error| {
             format!(
                 "cannot read trajectory dataset {} line {}: {error}",
@@ -244,7 +251,8 @@ pub fn read_candidate_jsonl(path: &Path) -> Result<Vec<CandidateRecord>, String>
                 line_index + 1
             )
         })?;
-        if line.trim().is_empty() {
+        if line.trim().is_empty()
+        {
             continue;
         }
         let raw: RawRow = serde_json::from_str(&line).map_err(|error| {
@@ -255,7 +263,8 @@ pub fn read_candidate_jsonl(path: &Path) -> Result<Vec<CandidateRecord>, String>
             )
         })?;
         let row = CandidateRecord::from_raw(raw)?;
-        if !seen.insert((row.prompt_id, row.ordinal)) {
+        if !seen.insert((row.prompt_id, row.ordinal))
+        {
             return Err(format!(
                 "duplicate prompt/candidate pair ({}, {})",
                 row.prompt_id, row.ordinal
@@ -263,7 +272,8 @@ pub fn read_candidate_jsonl(path: &Path) -> Result<Vec<CandidateRecord>, String>
         }
         rows.push(row);
     }
-    if rows.is_empty() {
+    if rows.is_empty()
+    {
         return Err("trajectory candidate dataset is empty".to_string());
     }
     rows.sort_by_key(|row| (row.prompt_id, row.ordinal));
@@ -278,29 +288,37 @@ pub struct Standardizer {
 
 impl Standardizer {
     pub fn fit(rows: &[CandidateRecord], indices: &[usize]) -> Result<Self, String> {
-        if indices.is_empty() {
+        if indices.is_empty()
+        {
             return Err("cannot fit a feature standardizer on an empty split".to_string());
         }
         let mut mean = [0.0; RUNTIME_FEATURES];
-        for &index in indices {
-            for (slot, value) in mean.iter_mut().zip(rows[index].raw_features) {
+        for &index in indices
+        {
+            for (slot, value) in mean.iter_mut().zip(rows[index].raw_features)
+            {
                 *slot += value;
             }
         }
-        for value in &mut mean {
+        for value in &mut mean
+        {
             *value /= indices.len() as f64;
         }
         let mut variance = [0.0; RUNTIME_FEATURES];
-        for &index in indices {
-            for feature in 0..RUNTIME_FEATURES {
+        for &index in indices
+        {
+            for feature in 0..RUNTIME_FEATURES
+            {
                 let delta = rows[index].raw_features[feature] - mean[feature];
                 variance[feature] += delta * delta;
             }
         }
         let mut scale = [1.0; RUNTIME_FEATURES];
-        for feature in 0..RUNTIME_FEATURES {
+        for feature in 0..RUNTIME_FEATURES
+        {
             scale[feature] = (variance[feature] / indices.len() as f64).sqrt();
-            if !scale[feature].is_finite() || scale[feature] < 1e-12 {
+            if !scale[feature].is_finite() || scale[feature] < 1e-12
+            {
                 scale[feature] = 1.0;
             }
         }
@@ -309,9 +327,10 @@ impl Standardizer {
 
     pub fn transform(&self, features: &[f64; RUNTIME_FEATURES]) -> [f64; RUNTIME_FEATURES] {
         let mut result = [0.0; RUNTIME_FEATURES];
-        for index in 0..RUNTIME_FEATURES {
-            result[index] = ((features[index] - self.mean[index]) / self.scale[index])
-                .clamp(-12.0, 12.0);
+        for index in 0..RUNTIME_FEATURES
+        {
+            result[index] =
+                ((features[index] - self.mean[index]) / self.scale[index]).clamp(-12.0, 12.0);
         }
         result
     }
@@ -344,13 +363,15 @@ pub fn split_by_prompt(rows: &[CandidateRecord], seed: u64) -> Result<PromptSpli
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
-    if prompts.len() < 10 {
+    if prompts.len() < 10
+    {
         return Err("trajectory discovery requires at least ten distinct prompts".to_string());
     }
     prompts.sort_by_key(|prompt| (mix64(*prompt as u64 ^ seed), *prompt));
     let train_end = (prompts.len() * 3) / 5;
     let validation_end = (prompts.len() * 4) / 5;
-    if train_end == 0 || validation_end <= train_end || validation_end >= prompts.len() {
+    if train_end == 0 || validation_end <= train_end || validation_end >= prompts.len()
+    {
         return Err("cannot form non-empty train/validation/holdout prompt splits".to_string());
     }
     let train_prompts = prompts[..train_end].to_vec();
@@ -362,14 +383,22 @@ pub fn split_by_prompt(rows: &[CandidateRecord], seed: u64) -> Result<PromptSpli
     let mut train_rows = Vec::new();
     let mut validation_rows = Vec::new();
     let mut holdout_rows = Vec::new();
-    for (index, row) in rows.iter().enumerate() {
-        if train_set.contains(&row.prompt_id) {
+    for (index, row) in rows.iter().enumerate()
+    {
+        if train_set.contains(&row.prompt_id)
+        {
             train_rows.push(index);
-        } else if validation_set.contains(&row.prompt_id) {
+        }
+        else if validation_set.contains(&row.prompt_id)
+        {
             validation_rows.push(index);
-        } else if holdout_set.contains(&row.prompt_id) {
+        }
+        else if holdout_set.contains(&row.prompt_id)
+        {
             holdout_rows.push(index);
-        } else {
+        }
+        else
+        {
             return Err("internal prompt-split assignment failure".to_string());
         }
     }
@@ -383,19 +412,19 @@ pub fn split_by_prompt(rows: &[CandidateRecord], seed: u64) -> Result<PromptSpli
     })
 }
 
-pub fn sequences_for_indices(
-    rows: &[CandidateRecord],
-    selected: &[usize],
-) -> Vec<Vec<usize>> {
+pub fn sequences_for_indices(rows: &[CandidateRecord], selected: &[usize]) -> Vec<Vec<usize>> {
     let selected: BTreeSet<usize> = selected.iter().copied().collect();
     let mut grouped: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
-    for (index, row) in rows.iter().enumerate() {
-        if selected.contains(&index) {
+    for (index, row) in rows.iter().enumerate()
+    {
+        if selected.contains(&index)
+        {
             grouped.entry(row.prompt_id).or_default().push(index);
         }
     }
     let mut sequences: Vec<Vec<usize>> = grouped.into_values().collect();
-    for sequence in &mut sequences {
+    for sequence in &mut sequences
+    {
         sequence.sort_by_key(|index| rows[*index].ordinal);
     }
     sequences
