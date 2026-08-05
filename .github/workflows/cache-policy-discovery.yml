@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test:
@@ -20,23 +20,12 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: research/elastic-cache-policy-discovery
-          persist-credentials: true
+          persist-credentials: false
       - name: Install formatting toolchain
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
-      - name: Apply deterministic formatting
-        run: |
-          cargo +nightly-2026-07-02 fmt --manifest-path experiments/elastic-cache-policy/Cargo.toml
-          if ! git diff --quiet -- experiments/elastic-cache-policy; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add experiments/elastic-cache-policy
-            git commit -m "style(cache-policy): apply rustfmt"
-            git push origin HEAD:research/elastic-cache-policy-discovery
-          fi
       - name: Format check
         run: cargo +nightly-2026-07-02 fmt --manifest-path experiments/elastic-cache-policy/Cargo.toml -- --check
       - name: Clippy
