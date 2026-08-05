@@ -1056,3 +1056,6 @@ mod tests {
         );
     }
 }
+
+/// Deterministic Phase 1 measurement harness.
+pub mod phase1;
