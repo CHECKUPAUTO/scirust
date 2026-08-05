@@ -29,19 +29,18 @@ pub mod scope;
 pub mod search;
 
 pub use adjacent::{
-    evaluate_line, evaluate_vertical, miller_loop, reduced_tate_pairing, weil_pairing,
-    ibe_hash_to_point, IbeParams, IbeCiphertext, ibe_encrypt, ibe_decrypt,
-    PairingCommitment, velu_isogeny_curve, apply_velu_isogeny, find_isogeny_path,
-    Oct8Fp, Sedenion16Fp, QuantumVulnerabilityReport, simulate_quantum_attack_resistance,
-    CcosAuditBlock, CcosAuditChain,
+    CcosAuditBlock, CcosAuditChain, IbeCiphertext, IbeParams, Oct8Fp, PairingCommitment,
+    QuantumVulnerabilityReport, Sedenion16Fp, apply_velu_isogeny, evaluate_line, evaluate_vertical,
+    find_isogeny_path, ibe_decrypt, ibe_encrypt, ibe_hash_to_point, miller_loop,
+    reduced_tate_pairing, simulate_quantum_attack_resistance, velu_isogeny_curve, weil_pairing,
 };
+pub use campaign::MANDATORY_CONTROLS as CAMPAIGN_MANDATORY_CONTROLS; // avoid duplicate
 pub use campaign::{
     CampaignReplayReport, CampaignReport, CampaignRun, MANDATORY_CONTROLS, execute_campaign,
     replay_campaign,
 };
 pub use catalog::{CatalogEntry, CatalogFamily, RelationSignature, catalog_entry};
 pub use classify::{Classification, ClassificationStatus, classify};
-pub use campaign::MANDATORY_CONTROLS as CAMPAIGN_MANDATORY_CONTROLS; // avoid duplicate
 pub use controls::{ControlId, ControlResult, run_control};
 pub use curve::{CurveError, ToyCurve, ToyPoint};
 pub use execution::{
