@@ -1,5 +1,5 @@
 use super::data::{CandidateRecord, RUNTIME_FEATURES};
-use scirust_evo::{MoIndividual, Nsga2};
+use scirust_evo::Nsga2;
 use scirust_gp::{GaussianProcess, Matern52};
 use serde::Serialize;
 
@@ -38,7 +38,13 @@ pub fn fit_gp_risk(
         .collect();
     let y: Vec<f64> = training_indices
         .iter()
-        .map(|index| f64::from(rows[*index].strict_unsafe))
+        .map(|index| {
+            if rows[*index].strict_unsafe {
+                1.0
+            } else {
+                0.0
+            }
+        })
         .collect();
     let kernel = Matern52 {
         lengthscale: 1.5,
@@ -203,12 +209,24 @@ pub fn evaluate_policy(
         } else {
             safe_allowed += 1;
         }
-        semantic_unsafe_allowed += usize::from(row.semantic_unsafe);
-        trajectory_unsafe_allowed += usize::from(row.trajectory_unsafe);
-        quality_regressions_allowed += usize::from(row.quality_regression);
-        prediction_changes_allowed += usize::from(row.prediction_changed);
-        decision_count_changes_allowed += usize::from(row.decision_count_changed);
-        response_changes_allowed += usize::from(row.response_changed);
+        if row.semantic_unsafe {
+            semantic_unsafe_allowed += 1;
+        }
+        if row.trajectory_unsafe {
+            trajectory_unsafe_allowed += 1;
+        }
+        if row.quality_regression {
+            quality_regressions_allowed += 1;
+        }
+        if row.prediction_changed {
+            prediction_changes_allowed += 1;
+        }
+        if row.decision_count_changed {
+            decision_count_changes_allowed += 1;
+        }
+        if row.response_changed {
+            response_changes_allowed += 1;
+        }
         selected_positive_refresh_saving += row.saved_refresh_cost.max(0.0);
         selected_net_refresh_saving += row.saved_refresh_cost;
         latency_sum += row.latency_improvement;
