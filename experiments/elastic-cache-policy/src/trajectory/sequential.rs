@@ -146,7 +146,7 @@ pub fn fit_sequential_risk(
 
     for epoch in 0..epochs
     {
-        let mut gradient = vec![0.0; CRF_FEATURES];
+        let mut gradient = [0.0; CRF_FEATURES];
         for sequence in training_sequences
         {
             if sequence.is_empty()
