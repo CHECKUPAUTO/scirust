@@ -1,0 +1,41 @@
+{
+  "dtype": "f32",
+  "files": {
+    "elementwise/acos.json": "ff0a1f9f3eb95658e413ddca844662082e7495de747e53b2632cda099a22ab6a",
+    "elementwise/add.json": "edd7f6bd3e4eefd585cdc7d8cb43c2ba2d6bf1f1fd1926e9093e028509a8ca91",
+    "elementwise/asin.json": "2c382043a0b5ffd09ac74b6210063c80ba8747ccb647eaed4dfee183a3185610",
+    "elementwise/atan.json": "e23d5391d94af4da1501a4968f66160a8975118aa54d66ee25b4d0211af9317b",
+    "elementwise/atan2.json": "0343c53f95b155a81d94947146ff11fe390ec35895fb303d99974eb3563b341d",
+    "elementwise/cos.json": "dbf4ce2cb265bc93f4ec14b331013e2913b5e593aafe90df039ae2b237107a21",
+    "elementwise/cosh.json": "5d2b0f41c6ebcc989b1b79b8417b0e971f9fa7157597b48d73b3a9857310dab9",
+    "elementwise/div.json": "b62f795f0b541800b9e4d4f83d67357283c42b173225c8cfbbb18fb716b85f15",
+    "elementwise/exp.json": "817afd013b2f8fc092648744b06773d69cfea6592f73450816096e8c18f19500",
+    "elementwise/gelu.json": "c68732373bdbe7c5f6e7573c374289575091f3bf81a5778e1b770e407c866f8a",
+    "elementwise/log.json": "9d3b11619d524850a63783acae2de81eafea1532f10345b212c1aaa9cfb5e0a3",
+    "elementwise/log10.json": "8f7d796b45f4e0f9b62794e372b7804117a0c1ba7f7d36557a14d294322a4a73",
+    "elementwise/mul.json": "98d69dbf1ea2cf7a9bf6e6e7a26db6cdc17d2255840c9f98640fea55e360f420",
+    "elementwise/neg.json": "f3f767e66e1186aa93a57c5421c7f96c043b1090195a20a655fbe10855f8c1c5",
+    "elementwise/pow.json": "d4b06d179271a71362a85a6573c07539585ae4f2b6458be3c5605c59fe9692e5",
+    "elementwise/reciprocal.json": "95138ad04c840a1394b8b2160fa0275377dcd3950ce4af9b4158db9f91d81168",
+    "elementwise/relu.json": "76ac5e130449c6f0d614177c1a70c4c42d68601b4154fd84f2a20b2000da779e",
+    "elementwise/sigmoid.json": "f2d762d201116a977113da83a9d4de40a7b32d66ebd495e5ab2331b728df8931",
+    "elementwise/silu.json": "4a6b16ad7e1edd49c8820cc638e4c9d1817c0bdff24fc27c5f4696ae8188570d",
+    "elementwise/sin.json": "d0f862e9486717f637d186bcb3bba923fbba87875447aac96a7c2d903194961c",
+    "elementwise/sinh.json": "86f591c3f639fea0a8cd6d38736566f3c90e91aac91524d49587924be4cbaeec",
+    "elementwise/sqrt.json": "8f43869ceab24a39754568faaefc23b798d622efafa80b262a1495cbdb896004",
+    "elementwise/sub.json": "399ecc4336cdfa615b7c534ee6c9cbb8fc3f407d55bd274e130ef57ceab4e389",
+    "elementwise/tan.json": "c243b55f3cc1b311f8a49dda8831aa2e3e670493736334d895c1be374a7cd357",
+    "elementwise/tanh.json": "8ef7ca81c6d15c2e75320cafe68ac4cd8655498cacd4f22a55ff5204e2355bec",
+    "normalization/log_softmax.json": "8e46e3216f8e8bf7fce82d8bd69217107a487ee00e14a11c5e0809e372c4d393",
+    "normalization/softmax.json": "7b2ea61a49a52c899b7beeb7fbd54dadc56ee7fa4686644ecb0d9a9ddb53b684",
+    "reductions/mean.json": "7365d56aca7976963e4c0a754b1b20d03011ecea41bcfcca822ccdf6d1caf5d2",
+    "reductions/sum.json": "6f9015dc5cedbf82c5a36a87ef63a46cd9ee9f2dc060ddb9ae490eef86d78391",
+    "reductions/var.json": "0f680cd4ee89e28d3a9d37f9e5c6d98c9668dc844bd34eb5bf359c3ef9c307da"
+  },
+  "generator": "docs/tensor-parity/provenance/generate_fixtures.py",
+  "pytorch": {
+    "source_commit": "cf30153c4c131c8164ee7798e5022d810682e2cb",
+    "version": "2.13.0+cu130"
+  },
+  "seed": 12648430
+}

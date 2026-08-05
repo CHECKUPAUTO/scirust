@@ -17,6 +17,13 @@ struct Tolerance {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+struct Verified {
+    harness: String,
+    fixtures: String,
+    on: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 struct Operator {
     name: String,
     torch: String,
@@ -31,6 +38,8 @@ struct Operator {
     status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    verified: Option<Verified>,
 }
 
 #[derive(Debug, Deserialize)]
