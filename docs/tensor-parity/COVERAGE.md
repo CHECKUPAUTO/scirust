@@ -31,13 +31,15 @@ Generated output summary (regenerate with `cargo run` in
 `tools/tensor-parity`):
 
 - total rows: 74
-- parity: 0
-- experimental: 68
+- parity: 30 (elementwise 25, reductions 3, normalization 2)
+- experimental: 38
 - missing: 6 (fft, svd, qr, lstsq, eig, sparse_autograd)
 
-Zero parity rows is the honest and intended state of Phase 0: the matrix is
-the *map*, not the territory. Rows move to `parity` only through the harness
-pipeline described in `TOOLS.md`.
+The 30 parity rows are verified by the Rust-only differential harness
+`scirust-core/tests/parity_differential.rs` against committed fixtures
+(`tests/parity/fixtures/`, generated offline from the frozen baseline —
+see `provenance/generate_fixtures.py`). Each parity row carries its
+`verified = { harness, fixtures, on }` annotation in `tensor-operators.toml`.
 
 ## Governance
 
