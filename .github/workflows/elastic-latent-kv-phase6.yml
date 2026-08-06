@@ -1,0 +1,71 @@
+name: Elastic Latent KV Phase 6
+
+on:
+  push:
+    branches:
+      - research/elastic-latent-kv-phase6
+    paths:
+      - experiments/elastic-latent-kv/**
+      - .github/workflows/elastic-latent-kv-phase6.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: elastic-latent-kv-phase6-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: experiments/elastic-latent-kv
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install toolchains
+        run: |
+          rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt
+          rustup toolchain install 1.89.0 --profile minimal --component clippy
+
+      - name: Format
+        run: cargo +nightly-2026-07-02 fmt --all -- --check
+
+      - name: Clippy
+        run: cargo +1.89.0 clippy --all-targets -- -D warnings
+
+      - name: Test debug
+        run: cargo +1.89.0 test --all-targets -- --test-threads=1
+
+      - name: Test release
+        run: cargo +1.89.0 test --all-targets --release -- --test-threads=1
+
+      - name: Doctests
+        run: cargo +1.89.0 test --doc
+
+      - name: Deterministic harness
+        run: |
+          cargo +1.89.0 run --quiet --release --bin phase6_harness > phase6-a.csv
+          cargo +1.89.0 run --quiet --release --bin phase6_harness > phase6-b.csv
+          cmp phase6-a.csv phase6-b.csv
+          python3 - <<'PY'
+          import csv
+          from pathlib import Path
+
+          path = Path("phase6-a.csv")
+          with path.open("r", encoding="utf-8", newline="") as handle:
+              reader = csv.DictReader(handle)
+              rows = list(reader)
+              fields = reader.fieldnames
+
+          assert fields is not None
+          assert len(fields) == 36, len(fields)
+          assert len(rows) == 12, len(rows)
+          assert len({row["output_fingerprint"] for row in rows}) == 12
+          assert all(row["selected_quality_guard_met"] == "1" for row in rows)
+          assert all(int(row["selected_total_bytes"]) <= int(row["budget_bytes"]) for row in rows)
+          print("Phase 6 CSV: CONFORME")
+          PY
