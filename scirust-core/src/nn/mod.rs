@@ -28,6 +28,7 @@ pub mod init;
 pub mod intervals;
 pub mod kan;
 pub mod kv_backend;
+pub mod latent_kv_cache;
 pub mod layer_norm;
 pub mod linear;
 pub mod lipschitz;
