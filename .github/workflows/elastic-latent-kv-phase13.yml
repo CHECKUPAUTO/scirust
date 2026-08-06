@@ -7,6 +7,7 @@ on:
     paths:
       - scirust-core/src/nn/elastic_latent_runtime.rs
       - scirust-core/src/nn/mod.rs
+      - scirust-core/examples/latent_kv_phase13.rs
       - experiments/elastic-latent-kv/PHASE13_SPEC.md
       - .github/workflows/elastic-latent-kv-phase13.yml
   pull_request:
@@ -15,6 +16,7 @@ on:
     paths:
       - scirust-core/src/nn/elastic_latent_runtime.rs
       - scirust-core/src/nn/mod.rs
+      - scirust-core/examples/latent_kv_phase13.rs
       - experiments/elastic-latent-kv/PHASE13_SPEC.md
       - .github/workflows/elastic-latent-kv-phase13.yml
 
@@ -37,3 +39,20 @@ jobs:
       - run: cargo +1.89.0 test -p scirust-core adaptive_latent_basis --locked -- --test-threads=1
       - run: cargo +1.89.0 test -p scirust-core latent_kv_lifecycle --locked -- --test-threads=1
       - run: cargo +1.89.0 test -p scirust-core latent_kv_kernels --locked -- --test-threads=1
+      - run: |
+          cargo +1.89.0 run --quiet --release --locked -p scirust-core --example latent_kv_phase13 > phase13-a.csv
+          cargo +1.89.0 run --quiet --release --locked -p scirust-core --example latent_kv_phase13 > phase13-b.csv
+          cmp phase13-a.csv phase13-b.csv
+          python3 - <<'PY'
+          import csv
+          with open('phase13-a.csv', newline='', encoding='utf-8') as handle:
+              rows = list(csv.DictReader(handle))
+          assert len(rows) == 1
+          row = rows[0]
+          assert int(row['steps']) == 32
+          assert int(row['planned_persistent_bytes']) <= 8192
+          assert int(row['allocated_bytes']) <= 65536
+          assert int(row['worst_quality_bps']) > 0
+          assert int(row['plan_fingerprint']) != 0
+          assert int(row['output_fingerprint']) != 0
+          PY
