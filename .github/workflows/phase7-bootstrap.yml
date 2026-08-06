@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - research/elastic-latent-kv-phase7-runtime
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: [master]
 
 permissions:
   contents: write
@@ -14,9 +17,10 @@ concurrency:
 
 jobs:
   bootstrap:
+    if: github.event_name == 'push' || github.event.pull_request.number == 945
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout branch
+      - name: Checkout writable branch
         uses: actions/checkout@v4
         with:
           ref: research/elastic-latent-kv-phase7-runtime
@@ -27,14 +31,33 @@ jobs:
           rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt
           rustup toolchain install 1.89.0 --profile minimal --component clippy
 
-      - name: Apply known static correction
+      - name: Apply compiler and Clippy corrections
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
-          path = Path("scirust-core/src/nn/latent_kv_cache.rs")
-          text = path.read_text(encoding="utf-8")
-          old = '''        assert_eq!(
+          cache_path = Path("scirust-core/src/nn/latent_kv_cache.rs")
+          cache = cache_path.read_text(encoding="utf-8")
+
+          cache_constructor = """    pub fn new(
+          capacity_tokens: usize,
+          dimension: usize,
+          key_rank: usize,
+          value_rank: usize,
+          key_format: LatentStorageFormat,
+          value_format: LatentStorageFormat,
+          key_basis: Vec<f32>,
+          value_basis: Vec<f32>,
+      ) -> Result<Self, LatentCacheError> {"""
+          if cache_constructor not in cache:
+              raise SystemExit("cache constructor not found")
+          cache = cache.replace(
+              cache_constructor,
+              "    #[allow(clippy::too_many_arguments)]\n" + cache_constructor,
+              1,
+          )
+
+          old_assertion = """        assert_eq!(
               QuantizedLatentKvCache::new(
                   2,
                   4,
@@ -46,12 +69,12 @@ jobs:
                   vec![0.0; 8],
               ),
               Err(LatentCacheError::RankTooLarge {
-                  name: "key",
+                  name: \"key\",
                   rank: 5,
                   dimension: 4,
               })
-          );'''
-          new = '''        assert!(matches!(
+          );"""
+          new_assertion = """        assert!(matches!(
               QuantizedLatentKvCache::new(
                   2,
                   4,
@@ -63,28 +86,56 @@ jobs:
                   vec![0.0; 8],
               ),
               Err(LatentCacheError::RankTooLarge {
-                  name: "key",
+                  name: \"key\",
                   rank: 5,
                   dimension: 4,
               })
-          ));'''
-          if old not in text:
-              raise SystemExit("known assertion block not found")
-          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          ));"""
+          if old_assertion not in cache:
+              raise SystemExit("rank assertion not found")
+          cache = cache.replace(old_assertion, new_assertion, 1)
+
+          old_chunks = "source.iter().zip(target.chunks_exact_mut(4))"
+          new_chunks = "source.iter().zip(target.as_chunks_mut::<4>().0)"
+          if old_chunks not in cache:
+              raise SystemExit("FP32 chunk encoder not found")
+          cache = cache.replace(old_chunks, new_chunks, 1)
+          cache_path.write_text(cache, encoding="utf-8")
+
+          backend_path = Path("scirust-core/src/nn/latent_kv_backend.rs")
+          backend = backend_path.read_text(encoding="utf-8")
+          backend_constructor = """    pub fn new(
+          capacity_tokens: usize,
+          dimension: usize,
+          key_rank: usize,
+          value_rank: usize,
+          key_format: LatentStorageFormat,
+          value_format: LatentStorageFormat,
+          key_basis: Vec<f32>,
+          value_basis: Vec<f32>,
+      ) -> Result<Self, LatentCacheError> {"""
+          if backend_constructor not in backend:
+              raise SystemExit("backend constructor not found")
+          backend = backend.replace(
+              backend_constructor,
+              "    #[allow(clippy::too_many_arguments)]\n" + backend_constructor,
+              1,
+          )
+          backend_path.write_text(backend, encoding="utf-8")
           PY
 
-      - name: Format
+      - name: Canonical formatting
         run: cargo +nightly-2026-07-02 fmt --all
 
       - name: Clippy
         run: cargo +1.89.0 clippy -p scirust-core --all-targets -- -D warnings
 
-      - name: Tests
+      - name: Focused and library tests
         run: |
           cargo +1.89.0 test -p scirust-core latent_kv -- --test-threads=1
           cargo +1.89.0 test -p scirust-core --lib -- --test-threads=1
 
-      - name: Harness
+      - name: Deterministic runtime harness
         run: |
           cargo +1.89.0 run --quiet --release -p scirust-core --example latent_kv_phase7 > phase7-a.csv
           cargo +1.89.0 run --quiet --release -p scirust-core --example latent_kv_phase7 > phase7-b.csv
@@ -101,18 +152,20 @@ jobs:
           assert len(rows) == 4
           assert all(row["quality_guard_met"] == "1" for row in rows)
           assert len({row["output_fingerprint"] for row in rows}) == 4
+          assert {row["format"] for row in rows} == {"f32", "int8", "int4"}
           PY
 
-      - name: Remove bootstrap workflow and commit canonical result
+      - name: Remove bootstrap and commit canonical result
         run: |
           rm .github/workflows/phase7-bootstrap.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add scirust-core/src/nn/latent_kv_cache.rs \
-                  scirust-core/src/nn/latent_kv_backend.rs \
-                  scirust-core/src/nn/mod.rs \
-                  scirust-core/examples/latent_kv_phase7.rs \
-                  .github/workflows/phase7-bootstrap.yml
+          git add --all -- \
+            .github/workflows/phase7-bootstrap.yml \
+            scirust-core/src/nn/latent_kv_cache.rs \
+            scirust-core/src/nn/latent_kv_backend.rs \
+            scirust-core/src/nn/mod.rs \
+            scirust-core/examples/latent_kv_phase7.rs
           git diff --cached --check
           git commit -m "fix(kv-cache): canonicalize Phase 7 runtime"
           git push origin HEAD:research/elastic-latent-kv-phase7-runtime
