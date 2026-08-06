@@ -1,9 +1,10 @@
 //! Integrated Phase 13 Elastic Latent KV inference runtime.
 //!
-//! The runtime combines Phase 9 plan selection, Phase 10 basis-version inputs,
+//! This session layer combines Phase 9 planning, Phase 10 basis versions,
 //! Phase 11 lifecycle metadata, Phase 12 projection kernels, and the validated
-//! Phase 8 residual latent attention backend behind one bounded numeric decode
-//! session.
+//! Phase 8 residual-latent attention backend.
+
+#![allow(clippy::needless_range_loop)]
 
 use crate::autodiff::reverse::Tensor;
 use crate::nn::adaptive_latent_kv::{
@@ -24,90 +25,46 @@ use core::fmt;
 /// Per-head calibration inputs frozen for one decode session.
 #[derive(Clone, Copy)]
 pub struct HeadCalibration<'a> {
-    /// Full row-major key basis shaped `[d_head, d_head]`.
     pub full_key_basis: &'a [f32],
-    /// Full row-major value basis shaped `[d_head, d_head]`.
     pub full_value_basis: &'a [f32],
-    /// Phase 9 quality telemetry.
     pub quality: AdaptiveQualityProfile<'a>,
-    /// Phase 10 basis version used for newly encoded tokens.
     pub basis_version: u32,
 }
 
 /// Integrated runtime configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ElasticLatentRuntimeConfig {
-    /// Maximum tokens accepted by each per-head backend in this session.
     pub capacity_tokens: usize,
-    /// Smallest adaptive rank.
     pub minimum_rank: usize,
-    /// Largest adaptive rank.
     pub maximum_rank: usize,
-    /// Largest residual slot count.
     pub maximum_residual_slots: usize,
-    /// Strict sum of Phase 9 persistent budgets across all heads.
     pub persistent_budget_bytes: usize,
-    /// Hard ceiling for actual backend allocations, including scratch.
     pub allocated_ceiling_bytes: usize,
-    /// Phase 11 lifecycle policy.
     pub lifecycle: LifecycleConfig,
-    /// Phase 12 projection kernel.
     pub kernel: LatentKernelKind,
 }
 
-/// Runtime telemetry after construction or decode.
+/// Aggregate runtime telemetry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ElasticLatentTelemetry {
-    /// Number of decoded tokens.
     pub steps: usize,
-    /// Sum of Phase 9 selected persistent bytes.
     pub planned_persistent_bytes: usize,
-    /// Actual fixed allocations reported by all head backends.
     pub allocated_bytes: usize,
-    /// Worst selected head quality in basis points.
     pub worst_quality_bps: u16,
-    /// Number of Phase 11 temperature changes on the most recent step.
     pub last_lifecycle_transitions: usize,
 }
 
 /// Phase 13 construction or decode errors.
 #[derive(Debug)]
 pub enum ElasticLatentRuntimeError {
-    /// Calibration count did not match the attention head count.
-    HeadCount {
-        /// Required heads.
-        expected: usize,
-        /// Supplied calibrations.
-        actual: usize,
-    },
-    /// Lifecycle capacity must equal runtime capacity.
+    ZeroHeads,
+    HeadCount { expected: usize, actual: usize },
     LifecycleCapacityMismatch,
-    /// Token width differed from `d_model`.
-    TokenLength {
-        /// Required width.
-        expected: usize,
-        /// Supplied width.
-        actual: usize,
-    },
-    /// A head reached the fixed session capacity.
-    CapacityExhausted {
-        /// Head index.
-        head: usize,
-        /// Configured token capacity.
-        capacity: usize,
-    },
-    /// Actual fixed allocations exceeded the configured ceiling.
-    AllocationCeiling {
-        /// Configured ceiling.
-        ceiling: usize,
-        /// Actual bytes.
-        actual: usize,
-    },
-    /// Phase 9 planning failed.
+    TokenLength { expected: usize, actual: usize },
+    CapacityExhausted { head: usize, capacity: usize },
+    AllocationCeiling { ceiling: usize, actual: usize },
     Policy(AdaptiveKvPolicyError),
-    /// Backend materialization failed.
     Backend(AdaptiveLatentBackendError),
-    /// Lifecycle construction failed.
     Lifecycle(LifecycleError),
 }
 
@@ -115,6 +72,7 @@ impl fmt::Display for ElasticLatentRuntimeError {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self
         {
+            Self::ZeroHeads => write!(output, "attention must contain at least one head"),
             Self::HeadCount { expected, actual } => {
                 write!(output, "head calibration mismatch: expected {expected}, got {actual}")
             }
@@ -157,7 +115,7 @@ impl From<LifecycleError> for ElasticLatentRuntimeError {
     }
 }
 
-/// Session-scoped integrated Elastic Latent KV decoder.
+/// Session-scoped bounded Elastic Latent KV decoder.
 pub struct ElasticLatentDecodeRuntime {
     config: ElasticLatentRuntimeConfig,
     backends: Vec<Box<dyn AttentionBackend>>,
@@ -180,6 +138,10 @@ impl ElasticLatentDecodeRuntime {
         config: ElasticLatentRuntimeConfig,
         calibrations: &[HeadCalibration<'_>],
     ) -> Result<Self, ElasticLatentRuntimeError> {
+        if attention.n_heads == 0
+        {
+            return Err(ElasticLatentRuntimeError::ZeroHeads);
+        }
         if calibrations.len() != attention.n_heads
         {
             return Err(ElasticLatentRuntimeError::HeadCount {
@@ -204,7 +166,7 @@ impl ElasticLatentDecodeRuntime {
 
         for (head, calibration) in calibrations.iter().copied().enumerate()
         {
-            let head_budget = base_budget + usize::from(head < remainder);
+            let head_budget = base_budget + if head < remainder { 1 } else { 0 };
             let plan = select_adaptive_plan(
                 AdaptiveKvPolicyConfig {
                     capacity_tokens: config.capacity_tokens,
@@ -264,13 +226,11 @@ impl ElasticLatentDecodeRuntime {
         })
     }
 
-    /// Returns the immutable per-head Phase 9 plans.
     #[must_use]
     pub fn plans(&self) -> &[AdaptiveKvPlan] {
         &self.plans
     }
 
-    /// Returns aggregate runtime telemetry.
     #[must_use]
     pub const fn telemetry(&self) -> ElasticLatentTelemetry {
         ElasticLatentTelemetry {
@@ -394,10 +354,12 @@ mod tests {
             maximum_residual_slots: 0,
             rank_divisor: 1,
         };
+        let hot_tokens = capacity.min(2);
+        let warm_tokens = capacity.saturating_sub(hot_tokens).min(2);
         LifecycleConfig {
             capacity_tokens: capacity,
-            hot_tokens: 2,
-            warm_tokens: 2,
+            hot_tokens,
+            warm_tokens,
             hot: tier,
             warm: tier,
             cold: tier,
