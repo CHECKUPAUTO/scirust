@@ -46,6 +46,8 @@ pub mod pinn;
 pub mod pool;
 pub mod positional_encoding;
 pub mod residual;
+pub mod residual_latent_kv_backend;
+pub mod residual_latent_kv_cache;
 pub mod rng;
 pub mod rope;
 pub mod sampling;
