@@ -1,6 +1,14 @@
 name: Elastic Latent KV Phase 10
 
 on:
+  push:
+    branches:
+      - research/elastic-latent-kv-phase10-online-bases
+    paths:
+      - scirust-core/src/nn/adaptive_latent_basis.rs
+      - scirust-core/src/nn/mod.rs
+      - experiments/elastic-latent-kv/PHASE10_SPEC.md
+      - .github/workflows/elastic-latent-kv-phase10.yml
   pull_request:
     branches:
       - research/elastic-latent-kv-phase9-adaptive-policy
