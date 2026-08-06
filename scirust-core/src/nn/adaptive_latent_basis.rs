@@ -1,4 +1,9 @@
 //! Deterministic online basis learning and versioning for Elastic Latent KV.
+//!
+//! Explicit index loops are intentional: they define the scalar update and
+//! Gram-Schmidt order used by the reproducibility contract.
+
+#![allow(clippy::needless_range_loop)]
 
 use core::fmt;
 
@@ -8,68 +13,39 @@ const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 /// Immutable learner configuration.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BasisLearningConfig {
-    /// Dense vector dimension.
     pub dimension: usize,
-    /// Learned basis rank.
     pub rank: usize,
-    /// Oja-style update rate.
     pub learning_rate: f32,
-    /// Number of samples between deterministic Gram-Schmidt passes.
     pub reorthogonalize_interval: usize,
-    /// Minimum samples between committed basis versions.
     pub minimum_samples_between_versions: usize,
-    /// Minimum quality improvement required to commit a version.
     pub minimum_quality_gain_bps: u16,
-    /// Maximum committed version records retained by the learner.
     pub maximum_versions: usize,
 }
 
 /// Immutable metadata for one committed basis epoch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BasisVersion {
-    /// Monotonic version number, starting at zero for the initial basis.
     pub version: u32,
-    /// Number of samples observed when the version was committed.
     pub samples_seen: usize,
-    /// Captured-energy estimate in basis points.
     pub quality_bps: u16,
-    /// Stable FNV-1a fingerprint of all basis coefficients.
     pub fingerprint: u64,
 }
 
 /// Result of one online observation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BasisObservation {
-    /// Quality after applying the sample and any scheduled re-orthogonalization.
     pub quality_bps: u16,
-    /// Newly committed version, if the commit conditions were met.
     pub committed: Option<BasisVersion>,
 }
 
 /// Errors returned by online basis construction or observation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum BasisLearningError {
-    /// A required integer field was zero.
     ZeroField(&'static str),
-    /// Rank exceeded the dense dimension.
     RankTooLarge,
-    /// Learning rate was outside `(0, 1]` or non-finite.
     InvalidLearningRate,
-    /// Initial basis length mismatch.
-    BasisLength {
-        /// Required element count.
-        expected: usize,
-        /// Supplied element count.
-        actual: usize,
-    },
-    /// Sample length mismatch.
-    SampleLength {
-        /// Required element count.
-        expected: usize,
-        /// Supplied element count.
-        actual: usize,
-    },
-    /// A basis or sample value was non-finite.
+    BasisLength { expected: usize, actual: usize },
+    SampleLength { expected: usize, actual: usize },
     NonFinite,
 }
 
@@ -108,7 +84,6 @@ pub struct DeterministicBasisLearner {
 }
 
 impl DeterministicBasisLearner {
-    /// Creates a learner from a row-major `[dimension, rank]` basis.
     pub fn new(
         config: BasisLearningConfig,
         initial_basis: Vec<f32>,
@@ -126,6 +101,7 @@ impl DeterministicBasisLearner {
         {
             return Err(BasisLearningError::NonFinite);
         }
+
         let mut learner = Self {
             config,
             basis: initial_basis,
@@ -138,56 +114,40 @@ impl DeterministicBasisLearner {
             current_version: 0,
         };
         learner.orthonormalize();
-        let initial = BasisVersion {
+        learner.versions.push(BasisVersion {
             version: 0,
             samples_seen: 0,
             quality_bps: 0,
             fingerprint: basis_fingerprint(&learner.basis),
-        };
-        learner.versions.push(initial);
+        });
         Ok(learner)
     }
 
-    /// Returns the current row-major basis.
     #[must_use]
     pub fn basis(&self) -> &[f32] {
         &self.basis
     }
 
-    /// Returns committed version metadata.
     #[must_use]
     pub fn versions(&self) -> &[BasisVersion] {
         &self.versions
     }
 
-    /// Returns the current basis version number.
     #[must_use]
     pub const fn current_version(&self) -> u32 {
         self.current_version
     }
 
-    /// Returns the number of observed samples.
     #[must_use]
     pub const fn samples_seen(&self) -> usize {
         self.samples_seen
     }
 
-    /// Applies one deterministic online update without growing scratch buffers.
     pub fn observe(&mut self, sample: &[f32]) -> Result<BasisObservation, BasisLearningError> {
-        if sample.len() != self.config.dimension
-        {
-            return Err(BasisLearningError::SampleLength {
-                expected: self.config.dimension,
-                actual: sample.len(),
-            });
-        }
-        if sample.iter().any(|value| !value.is_finite())
-        {
-            return Err(BasisLearningError::NonFinite);
-        }
-
+        validate_sample(sample, self.config.dimension)?;
         self.project(sample);
         self.reconstruct_residual(sample);
+
         for column in 0..self.config.rank
         {
             let coefficient = self.coefficients[column];
@@ -198,6 +158,7 @@ impl DeterministicBasisLearner {
                     self.config.learning_rate * coefficient * self.residual[row];
             }
         }
+
         self.samples_seen = self.samples_seen.saturating_add(1);
         if self
             .samples_seen
@@ -214,6 +175,7 @@ impl DeterministicBasisLearner {
         let enough_gain = quality_bps.saturating_sub(self.last_committed_quality_bps)
             >= self.config.minimum_quality_gain_bps;
         let has_capacity = self.versions.len() < self.config.maximum_versions;
+
         let committed = if enough_samples && enough_gain && has_capacity
         {
             self.current_version = self.current_version.saturating_add(1);
@@ -232,6 +194,7 @@ impl DeterministicBasisLearner {
         {
             None
         };
+
         Ok(BasisObservation {
             quality_bps,
             committed,
@@ -282,15 +245,18 @@ impl DeterministicBasisLearner {
                 let mut dot = 0.0_f32;
                 for row in 0..self.config.dimension
                 {
-                    dot += self.basis[row * self.config.rank + column]
-                        * self.basis[row * self.config.rank + previous];
+                    let current = self.basis[row * self.config.rank + column];
+                    let previous_value = self.basis[row * self.config.rank + previous];
+                    dot += current * previous_value;
                 }
                 for row in 0..self.config.dimension
                 {
-                    let index = row * self.config.rank + column;
-                    self.basis[index] -= dot * self.basis[row * self.config.rank + previous];
+                    let current_index = row * self.config.rank + column;
+                    let previous_value = self.basis[row * self.config.rank + previous];
+                    self.basis[current_index] -= dot * previous_value;
                 }
             }
+
             let mut norm_squared = 0.0_f32;
             for row in 0..self.config.dimension
             {
@@ -347,6 +313,21 @@ fn validate_config(config: BasisLearningConfig) -> Result<(), BasisLearningError
     if config.maximum_versions == 0
     {
         return Err(BasisLearningError::ZeroField("maximum_versions"));
+    }
+    Ok(())
+}
+
+fn validate_sample(sample: &[f32], dimension: usize) -> Result<(), BasisLearningError> {
+    if sample.len() != dimension
+    {
+        return Err(BasisLearningError::SampleLength {
+            expected: dimension,
+            actual: sample.len(),
+        });
+    }
+    if sample.iter().any(|value| !value.is_finite())
+    {
+        return Err(BasisLearningError::NonFinite);
     }
     Ok(())
 }
@@ -408,13 +389,13 @@ mod tests {
     }
 
     #[test]
-    fn reorthogonalized_columns_have_unit_norm() {
+    fn scheduled_reorthogonalization_normalizes_columns() {
         let mut learner = DeterministicBasisLearner::new(config(), identity_prefix(6, 3)).unwrap();
         learner.observe(&[0.4, 0.2, -0.7, 0.8, 0.5, -0.1]).unwrap();
         learner.observe(&[0.1, -0.5, 0.9, 0.3, 0.2, 0.6]).unwrap();
         for column in 0..3
         {
-            let norm: f32 = (0..6)
+            let norm = (0..6)
                 .map(|row| learner.basis()[row * 3 + column].powi(2))
                 .sum::<f32>()
                 .sqrt();
@@ -423,7 +404,7 @@ mod tests {
     }
 
     #[test]
-    fn version_capacity_never_grows() {
+    fn version_records_respect_fixed_capacity() {
         let mut learner = DeterministicBasisLearner::new(config(), identity_prefix(6, 3)).unwrap();
         for index in 0..40
         {
