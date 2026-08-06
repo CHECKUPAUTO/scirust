@@ -117,9 +117,13 @@ impl fmt::Display for AdaptiveKvPolicyError {
         {
             Self::ZeroField(field) => write!(output, "{field} must be non-zero"),
             Self::InvalidRankBounds => write!(output, "adaptive KV rank bounds are invalid"),
-            Self::ResidualSlotsTooLarge => {
-                write!(output, "adaptive KV residual slots exceed the dense dimension")
-            }
+            Self::ResidualSlotsTooLarge =>
+            {
+                write!(
+                    output,
+                    "adaptive KV residual slots exceed the dense dimension"
+                )
+            },
             Self::ProfileLength {
                 field,
                 expected,
@@ -347,7 +351,11 @@ fn validate_profile(
     config: AdaptiveKvPolicyConfig,
     profile: AdaptiveQualityProfile<'_>,
 ) -> Result<(), AdaptiveKvPolicyError> {
-    require_profile_length("key_rank_quality_bps", profile.key_rank_quality_bps, config.dimension)?;
+    require_profile_length(
+        "key_rank_quality_bps",
+        profile.key_rank_quality_bps,
+        config.dimension,
+    )?;
     require_profile_length(
         "value_rank_quality_bps",
         profile.value_rank_quality_bps,
@@ -457,7 +465,8 @@ fn better_plan(candidate: AdaptiveKvPlan, current: AdaptiveKvPlan) -> bool {
     {
         return candidate.worst_quality_bps > current.worst_quality_bps;
     }
-    let candidate_sum = u32::from(candidate.key.quality_bps) + u32::from(candidate.value.quality_bps);
+    let candidate_sum =
+        u32::from(candidate.key.quality_bps) + u32::from(candidate.value.quality_bps);
     let current_sum = u32::from(current.key.quality_bps) + u32::from(current.value.quality_bps);
     if candidate_sum != current_sum
     {
