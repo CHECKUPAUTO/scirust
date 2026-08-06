@@ -56,3 +56,98 @@ Phase 0 does not yet implement:
 - claims of model-level quality preservation.
 
 Those stages require the Phase 0 oracle as their differential reference.
+
+## Phase 1
+
+Phase 1 measures the fixed-rank runtime before any lossy mechanism is added:
+
+- exact dense and latent byte accounting;
+- basis and scratch accounting;
+- dense, explicit-latent and reconstruction-free operation estimates;
+- aggregate absolute, RMS and relative error metrics;
+- deterministic output fingerprints;
+- a deterministic 24-scenario baseline suite;
+- stable CSV export through `phase1_harness`;
+- no external dependency and no `unsafe` code.
+
+Run the baseline harness with:
+
+```bash
+cargo +1.89.0 run --release --bin phase1_harness > phase1.csv
+```
+
+Phase 1 still does not introduce adaptive ranks, quantization, residual
+channels, cache tiers or production integration.
+
+## Phase 2
+
+Phase 2 adds deterministic dense-to-latent conversion and fixed-rank selection:
+
+- residual-pivoted modified Gram-Schmidt basis construction;
+- deterministic tie-breaking and sign canonicalization;
+- caller-buffer projection and reconstruction;
+- key/value reconstruction metrics;
+- smallest nested rank satisfying a relative-RMS target;
+- dense-versus-projected reconstruction-free attention measurement;
+- a stable 12-scenario CSV harness;
+- no external dependency and no `unsafe` code.
+
+Phase 2 still uses one fixed key rank and one fixed value rank per scenario. It
+does not yet introduce per-token elasticity, quantization, residual channels or
+production integration.
+
+## Phase 3
+
+Phase 3 adds deterministic strict-budget planning over separate key/value rank
+pairs:
+
+- exact persistent coefficient and basis byte accounting;
+- exhaustive nested rank-pair evaluation;
+- independent key and value ranks;
+- reconstruction and attention quality guards;
+- explicit quality failure when no pair meets every target;
+- deterministic lexicographic selection;
+- non-dominated Pareto frontier construction;
+- a stable 12-scenario CSV harness;
+- no quantization, per-token rank or production integration.
+
+The persistent representation uses:
+
+\[
+B_{latent}=4(T+D)(R_K+R_V)
+\]
+
+while dense keys and values use:
+
+\[
+B_{dense}=8TD.
+\]
+
+Transient attention scratch is reported separately by Phase 1 and is not
+charged to the persistent-cache budget in Phase 3.
+
+## Phase 4
+
+Phase 4 adds a deterministic stateful controller above the strict-budget rank
+planner. Budget-forced downgrades and quality recovery are immediate; all other
+rank changes require consecutive identical proposals. The CSV harness traces
+52 budget and quality observations across four timelines and records proposals, active
+plans, transition reasons, suppressed oscillations and stable fingerprints.
+
+This remains a research-only reference implementation. It does not yet retrain
+bases from a live token stream, assign per-token ranks, quantize coefficients,
+evict tokens or integrate with production SciRust attention kernels.
+
+## Phase 5
+
+Phase 5 adds a deterministic fixed-slot sparse residual channel under the same strict persistent byte budget used by the rank planner.
+
+Key residuals correct attention scores directly through sparse query dot products. Value residuals are accumulated directly into the dense output after latent value accumulation. The attention path therefore remains reconstruction-free.
+
+The Phase 5 harness compares the selected residual-aware tuple `(key rank, value rank, key slots, value slots)` with the best zero-residual candidate under the identical budget. It reports exact storage accounting, reconstruction error, attention error, quality guards, Pareto-frontier size and a stable output fingerprint.
+
+```bash
+cargo +1.89.0 run --release --bin phase5_harness > target/phase5.csv
+```
+
+Phase 5 intentionally excludes coefficient quantization, residual-value quantization, GPU kernels and production model integration.

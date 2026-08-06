@@ -1056,3 +1056,18 @@ mod tests {
         );
     }
 }
+
+/// Deterministic Phase 1 measurement harness.
+pub mod phase1;
+
+/// Deterministic Phase 2 dense-to-latent projection.
+pub mod phase2;
+
+/// Deterministic Phase 3 strict-budget rank planning.
+pub mod phase3;
+
+/// Deterministic Phase 4 online rank adaptation.
+pub mod phase4;
+
+/// Deterministic Phase 5 sparse residual correction.
+pub mod phase5;
