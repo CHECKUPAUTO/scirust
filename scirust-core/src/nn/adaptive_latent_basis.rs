@@ -55,13 +55,24 @@ impl fmt::Display for BasisLearningError {
         {
             Self::ZeroField(field) => write!(output, "{field} must be non-zero"),
             Self::RankTooLarge => write!(output, "basis rank exceeds dense dimension"),
-            Self::InvalidLearningRate => write!(output, "learning rate must be finite and in (0, 1]"),
-            Self::BasisLength { expected, actual } => {
-                write!(output, "basis length mismatch: expected {expected}, got {actual}")
-            }
-            Self::SampleLength { expected, actual } => {
-                write!(output, "sample length mismatch: expected {expected}, got {actual}")
-            }
+            Self::InvalidLearningRate =>
+            {
+                write!(output, "learning rate must be finite and in (0, 1]")
+            },
+            Self::BasisLength { expected, actual } =>
+            {
+                write!(
+                    output,
+                    "basis length mismatch: expected {expected}, got {actual}"
+                )
+            },
+            Self::SampleLength { expected, actual } =>
+            {
+                write!(
+                    output,
+                    "sample length mismatch: expected {expected}, got {actual}"
+                )
+            },
             Self::NonFinite => write!(output, "basis learning input contains a non-finite value"),
         }
     }
@@ -154,8 +165,7 @@ impl DeterministicBasisLearner {
             for row in 0..self.config.dimension
             {
                 let index = row * self.config.rank + column;
-                self.basis[index] +=
-                    self.config.learning_rate * coefficient * self.residual[row];
+                self.basis[index] += self.config.learning_rate * coefficient * self.residual[row];
             }
         }
 
@@ -168,9 +178,7 @@ impl DeterministicBasisLearner {
         }
 
         let quality_bps = self.quality_bps(sample);
-        let enough_samples = self
-            .samples_seen
-            .saturating_sub(self.last_version_sample)
+        let enough_samples = self.samples_seen.saturating_sub(self.last_version_sample)
             >= self.config.minimum_samples_between_versions;
         let enough_gain = quality_bps.saturating_sub(self.last_committed_quality_bps)
             >= self.config.minimum_quality_gain_bps;
@@ -384,7 +392,10 @@ mod tests {
             first.observe(&sample).unwrap();
             second.observe(&sample).unwrap();
         }
-        assert_eq!(basis_fingerprint(first.basis()), basis_fingerprint(second.basis()));
+        assert_eq!(
+            basis_fingerprint(first.basis()),
+            basis_fingerprint(second.basis())
+        );
         assert_eq!(first.versions(), second.versions());
     }
 
