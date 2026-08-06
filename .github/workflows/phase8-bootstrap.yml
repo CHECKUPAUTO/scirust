@@ -20,11 +20,13 @@ jobs:
     if: github.event_name == 'push' || github.event.pull_request.number == 946
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout writable branch
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          ref: research/elastic-latent-kv-phase8-sparse-residuals
-          fetch-depth: 0
+      - name: Checkout writable branch without external actions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git clone --depth=1 \
+            --branch research/elastic-latent-kv-phase8-sparse-residuals \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" .
 
       - name: Install pinned toolchains
         run: |
