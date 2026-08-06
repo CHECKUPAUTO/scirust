@@ -1,82 +1,240 @@
-name: Elastic Latent KV Phase 7
+name: Elastic Latent KV Phase 7 Canonicalize
 
 on:
   push:
     branches:
       - research/elastic-latent-kv-phase7-runtime
-    paths:
-      - scirust-core/src/nn/latent_kv_cache.rs
-      - scirust-core/src/nn/latent_kv_backend.rs
-      - scirust-core/src/nn/mod.rs
-      - scirust-core/examples/latent_kv_phase7.rs
-      - experiments/elastic-latent-kv/PHASE7_SPEC.md
-      - experiments/elastic-latent-kv/README.md
-      - .github/workflows/elastic-latent-kv-phase7.yml
   pull_request:
-    paths:
-      - scirust-core/src/nn/latent_kv_cache.rs
-      - scirust-core/src/nn/latent_kv_backend.rs
-      - scirust-core/src/nn/mod.rs
-      - scirust-core/examples/latent_kv_phase7.rs
-      - experiments/elastic-latent-kv/PHASE7_SPEC.md
-      - experiments/elastic-latent-kv/README.md
-      - .github/workflows/elastic-latent-kv-phase7.yml
-  workflow_dispatch:
+    types: [opened, reopened, synchronize]
+    branches: [master]
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: elastic-latent-kv-phase7-${{ github.ref }}
+  group: elastic-latent-kv-phase7-canonicalize
   cancel-in-progress: true
 
 jobs:
-  validate:
+  canonicalize:
+    if: github.event_name == 'push' || github.event.pull_request.number == 945
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout writable branch
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: research/elastic-latent-kv-phase7-runtime
+          fetch-depth: 0
 
-      - name: Install toolchains
+      - name: Install pinned toolchains
         run: |
           rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt
           rustup toolchain install 1.89.0 --profile minimal --component clippy
 
-      - name: Format
-        run: cargo +nightly-2026-07-02 fmt --all -- --check
+      - name: Apply compiler and Clippy corrections
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          cache_path = Path("scirust-core/src/nn/latent_kv_cache.rs")
+          cache = cache_path.read_text(encoding="utf-8")
+
+          cache_marker = "    pub fn new(\n        capacity_tokens: usize,"
+          if cache_marker not in cache:
+              raise SystemExit("cache constructor not found")
+          cache = cache.replace(
+              cache_marker,
+              "    #[allow(clippy::too_many_arguments)]\n" + cache_marker,
+              1,
+          )
+
+          old_assertion = '''        assert_eq!(
+              QuantizedLatentKvCache::new(
+                  2,
+                  4,
+                  5,
+                  2,
+                  LatentStorageFormat::F32,
+                  LatentStorageFormat::F32,
+                  vec![0.0; 20],
+                  vec![0.0; 8],
+              ),
+              Err(LatentCacheError::RankTooLarge {
+                  name: "key",
+                  rank: 5,
+                  dimension: 4,
+              })
+          );'''
+          new_assertion = '''        assert!(matches!(
+              QuantizedLatentKvCache::new(
+                  2,
+                  4,
+                  5,
+                  2,
+                  LatentStorageFormat::F32,
+                  LatentStorageFormat::F32,
+                  vec![0.0; 20],
+                  vec![0.0; 8],
+              ),
+              Err(LatentCacheError::RankTooLarge {
+                  name: "key",
+                  rank: 5,
+                  dimension: 4,
+              })
+          ));'''
+          if old_assertion not in cache:
+              raise SystemExit("rank assertion not found")
+          cache = cache.replace(old_assertion, new_assertion, 1)
+
+          old_chunks = "source.iter().zip(target.chunks_exact_mut(4))"
+          new_chunks = "source.iter().zip(target.as_chunks_mut::<4>().0)"
+          if old_chunks not in cache:
+              raise SystemExit("FP32 chunk encoder not found")
+          cache = cache.replace(old_chunks, new_chunks, 1)
+          cache_path.write_text(cache, encoding="utf-8")
+
+          backend_path = Path("scirust-core/src/nn/latent_kv_backend.rs")
+          backend = backend_path.read_text(encoding="utf-8")
+          backend_marker = "    pub fn new(\n        capacity_tokens: usize,"
+          if backend_marker not in backend:
+              raise SystemExit("backend constructor not found")
+          backend = backend.replace(
+              backend_marker,
+              "    #[allow(clippy::too_many_arguments)]\n" + backend_marker,
+              1,
+          )
+          backend_path.write_text(backend, encoding="utf-8")
+          PY
+
+      - name: Canonical formatting
+        run: cargo +nightly-2026-07-02 fmt --all
 
       - name: Clippy
-        run: cargo +1.89.0 clippy -p scirust-core --all-targets -- -D warnings
+        run: cargo +1.89.0 clippy -p scirust-core --all-targets --locked -- -D warnings
 
-      - name: Phase 7 tests
-        run: cargo +1.89.0 test -p scirust-core latent_kv -- --test-threads=1
-
-      - name: scirust-core library tests
-        run: cargo +1.89.0 test -p scirust-core --lib -- --test-threads=1
+      - name: Focused and library tests
+        run: |
+          cargo +1.89.0 test -p scirust-core latent_kv --locked -- --test-threads=1
+          cargo +1.89.0 test -p scirust-core --lib --locked -- --test-threads=1
 
       - name: Deterministic runtime harness
         run: |
-          cargo +1.89.0 run --quiet --release -p scirust-core --example latent_kv_phase7 > phase7-a.csv
-          cargo +1.89.0 run --quiet --release -p scirust-core --example latent_kv_phase7 > phase7-b.csv
+          cargo +1.89.0 run --quiet --release --locked -p scirust-core --example latent_kv_phase7 > phase7-a.csv
+          cargo +1.89.0 run --quiet --release --locked -p scirust-core --example latent_kv_phase7 > phase7-b.csv
           cmp phase7-a.csv phase7-b.csv
           python3 - <<'PY'
           import csv
           from pathlib import Path
 
-          path = Path("phase7-a.csv")
-          with path.open("r", encoding="utf-8", newline="") as handle:
+          with Path("phase7-a.csv").open("r", encoding="utf-8", newline="") as handle:
               reader = csv.DictReader(handle)
               rows = list(reader)
               fields = reader.fieldnames
-
-          assert fields is not None
-          assert len(fields) == 12, len(fields)
-          assert len(rows) == 4, len(rows)
-          assert {row["format"] for row in rows} == {"f32", "int8", "int4"}
-          assert len({row["output_fingerprint"] for row in rows}) == 4
+          assert fields is not None and len(fields) == 12
+          assert len(rows) == 4
           assert all(row["quality_guard_met"] == "1" for row in rows)
-          assert all(float(row["compression_ratio"]) > 0.0 for row in rows)
-          compressed = [row for row in rows if row["format"] != "f32"]
-          assert all(int(row["allocated_bytes"]) < int(row["dense_bytes"]) for row in compressed)
-          print("Phase 7 runtime CSV: CONFORME")
+          assert len({row["output_fingerprint"] for row in rows}) == 4
+          assert {row["format"] for row in rows} == {"f32", "int8", "int4"}
           PY
+
+      - name: Restore final workflow and remove bootstrap
+        run: |
+          rm -f .github/workflows/phase7-bootstrap.yml
+          cat > .github/workflows/elastic-latent-kv-phase7.yml <<'YAML'
+          name: Elastic Latent KV Phase 7
+
+          on:
+            push:
+              branches:
+                - research/elastic-latent-kv-phase7-runtime
+              paths:
+                - scirust-core/src/nn/latent_kv_cache.rs
+                - scirust-core/src/nn/latent_kv_backend.rs
+                - scirust-core/src/nn/mod.rs
+                - scirust-core/examples/latent_kv_phase7.rs
+                - experiments/elastic-latent-kv/PHASE7_SPEC.md
+                - experiments/elastic-latent-kv/README.md
+                - .github/workflows/elastic-latent-kv-phase7.yml
+            pull_request:
+              branches: [master]
+              paths:
+                - scirust-core/src/nn/latent_kv_cache.rs
+                - scirust-core/src/nn/latent_kv_backend.rs
+                - scirust-core/src/nn/mod.rs
+                - scirust-core/examples/latent_kv_phase7.rs
+                - experiments/elastic-latent-kv/PHASE7_SPEC.md
+                - experiments/elastic-latent-kv/README.md
+                - .github/workflows/elastic-latent-kv-phase7.yml
+            workflow_dispatch:
+
+          permissions:
+            contents: read
+
+          concurrency:
+            group: elastic-latent-kv-phase7-${{ github.ref }}
+            cancel-in-progress: true
+
+          env:
+            RUSTFLAGS: -D warnings
+            CARGO_INCREMENTAL: 0
+
+          jobs:
+            validate:
+              runs-on: ubuntu-latest
+              steps:
+                - name: Checkout
+                  uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+                - name: Install toolchains
+                  run: |
+                    rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt
+                    rustup toolchain install 1.89.0 --profile minimal --component clippy
+
+                - name: Format
+                  run: cargo +nightly-2026-07-02 fmt --all -- --check
+
+                - name: Clippy
+                  run: cargo +1.89.0 clippy -p scirust-core --all-targets --locked -- -D warnings
+
+                - name: Phase 7 tests
+                  run: cargo +1.89.0 test -p scirust-core latent_kv --locked -- --test-threads=1
+
+                - name: scirust-core library tests
+                  run: cargo +1.89.0 test -p scirust-core --lib --locked -- --test-threads=1
+
+                - name: Deterministic runtime harness
+                  run: |
+                    cargo +1.89.0 run --quiet --release --locked -p scirust-core --example latent_kv_phase7 > phase7-a.csv
+                    cargo +1.89.0 run --quiet --release --locked -p scirust-core --example latent_kv_phase7 > phase7-b.csv
+                    cmp phase7-a.csv phase7-b.csv
+                    python3 - <<'PY'
+                    import csv
+                    from pathlib import Path
+
+                    with Path("phase7-a.csv").open("r", encoding="utf-8", newline="") as handle:
+                        reader = csv.DictReader(handle)
+                        rows = list(reader)
+                        fields = reader.fieldnames
+                    assert fields is not None and len(fields) == 12
+                    assert len(rows) == 4
+                    assert {row["format"] for row in rows} == {"f32", "int8", "int4"}
+                    assert len({row["output_fingerprint"] for row in rows}) == 4
+                    assert all(row["quality_guard_met"] == "1" for row in rows)
+                    assert all(float(row["compression_ratio"]) > 0.0 for row in rows)
+                    compressed = [row for row in rows if row["format"] != "f32"]
+                    assert all(
+                        int(row["allocated_bytes"]) < int(row["dense_bytes"])
+                        for row in compressed
+                    )
+                    print("Phase 7 runtime CSV: CONFORME")
+                    PY
+          YAML
+
+      - name: Commit canonical result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --all
+          git diff --cached --check
+          git commit -m "fix(kv-cache): canonicalize Phase 7 runtime"
+          git push origin HEAD:research/elastic-latent-kv-phase7-runtime
