@@ -1,13 +1,14 @@
 name: Phase 8 Bootstrap
 
-# Fresh run after the transient GitHub Actions service outage.
 on:
   push:
     branches:
       - research/elastic-latent-kv-phase8-sparse-residuals
   pull_request:
     types: [opened, reopened, synchronize]
-    branches: [master]
+    branches:
+      - master
+      - research/elastic-latent-kv-phase8-sparse-residuals
 
 permissions:
   contents: write
@@ -18,7 +19,10 @@ concurrency:
 
 jobs:
   bootstrap:
-    if: github.event_name == 'push' || github.event.pull_request.number == 946
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.number == 946 ||
+      github.event.pull_request.base.ref == 'research/elastic-latent-kv-phase8-sparse-residuals'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout writable branch without external actions
