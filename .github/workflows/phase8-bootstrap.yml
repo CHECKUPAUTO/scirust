@@ -1,5 +1,6 @@
 name: Phase 8 Bootstrap
 
+# Fresh run after the transient GitHub Actions service outage.
 on:
   push:
     branches:
