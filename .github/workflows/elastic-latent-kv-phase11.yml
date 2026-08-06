@@ -1,0 +1,27 @@
+name: Elastic Latent KV Phase 11
+
+on:
+  pull_request:
+    branches:
+      - research/elastic-latent-kv-phase10-online-bases
+    paths:
+      - scirust-core/src/nn/latent_kv_lifecycle.rs
+      - scirust-core/src/nn/mod.rs
+      - experiments/elastic-latent-kv/PHASE11_SPEC.md
+      - .github/workflows/elastic-latent-kv-phase11.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: |
+          rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt,clippy
+          rustup toolchain install 1.89.0 --profile minimal
+      - run: cargo +nightly-2026-07-02 fmt --all -- --check
+      - run: cargo +nightly-2026-07-02 clippy -p scirust-core --all-targets --locked -- -D warnings
+      - run: cargo +1.89.0 check -p scirust-core --all-targets --locked
+      - run: cargo +1.89.0 test -p scirust-core latent_kv_lifecycle --locked -- --test-threads=1
