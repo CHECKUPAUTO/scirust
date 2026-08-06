@@ -1062,3 +1062,6 @@ pub mod phase1;
 
 /// Deterministic Phase 2 dense-to-latent projection.
 pub mod phase2;
+
+/// Deterministic Phase 3 strict-budget rank planning.
+pub mod phase3;
