@@ -48,43 +48,31 @@ jobs:
               1,
           )
 
-          old_assertion = '''        assert_eq!(
-              QuantizedLatentKvCache::new(
-                  2,
-                  4,
-                  5,
-                  2,
-                  LatentStorageFormat::F32,
-                  LatentStorageFormat::F32,
-                  vec![0.0; 20],
-                  vec![0.0; 8],
-              ),
-              Err(LatentCacheError::RankTooLarge {
-                  name: "key",
-                  rank: 5,
-                  dimension: 4,
-              })
-          );'''
-          new_assertion = '''        assert!(matches!(
-              QuantizedLatentKvCache::new(
-                  2,
-                  4,
-                  5,
-                  2,
-                  LatentStorageFormat::F32,
-                  LatentStorageFormat::F32,
-                  vec![0.0; 20],
-                  vec![0.0; 8],
-              ),
-              Err(LatentCacheError::RankTooLarge {
-                  name: "key",
-                  rank: 5,
-                  dimension: 4,
-              })
-          ));'''
-          if old_assertion not in cache:
-              raise SystemExit("rank assertion not found")
-          cache = cache.replace(old_assertion, new_assertion, 1)
+          assertion_start = "        assert_eq!(\n            QuantizedLatentKvCache::new("
+          assertion_replacement = "        assert!(matches!(\n            QuantizedLatentKvCache::new("
+          if assertion_start not in cache:
+              raise SystemExit("rank assertion start not found")
+          cache = cache.replace(assertion_start, assertion_replacement, 1)
+
+          assertion_end = (
+              '            Err(LatentCacheError::RankTooLarge {\n'
+              '                name: "key",\n'
+              '                rank: 5,\n'
+              '                dimension: 4,\n'
+              '            })\n'
+              '        );'
+          )
+          assertion_end_replacement = (
+              '            Err(LatentCacheError::RankTooLarge {\n'
+              '                name: "key",\n'
+              '                rank: 5,\n'
+              '                dimension: 4,\n'
+              '            })\n'
+              '        ));'
+          )
+          if assertion_end not in cache:
+              raise SystemExit("rank assertion end not found")
+          cache = cache.replace(assertion_end, assertion_end_replacement, 1)
 
           old_chunks = "source.iter().zip(target.chunks_exact_mut(4))"
           new_chunks = "source.iter().zip(target.as_chunks_mut::<4>().0)"
