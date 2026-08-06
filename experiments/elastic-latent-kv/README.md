@@ -187,3 +187,25 @@ Phase 7 does not yet move sparse residual channels, online basis learning,
 adaptive ranks, eviction, or device-specific kernels into the production
 backend. Its scalar implementation is the differential contract for those
 follow-on phases.
+
+## Phase 8
+
+Phase 8 ports deterministic fixed-slot sparse residuals into a separate
+production-facing `scirust-core` backend while leaving Phase 7 unchanged:
+
+- independent key and value residual slot counts;
+- deterministic top-magnitude coordinate selection with lowest-index tie-breaks;
+- `u16` residual indices with an explicit empty sentinel;
+- FP32, row-wise INT8 and packed INT4 residual values;
+- key score correction through sparse query dot products;
+- value correction through a weighted sparse scatter after one latent
+  up-projection;
+- preallocated projection, reconstruction, selection and attention scratch;
+- typed validation for shapes, capacity, finite values, residual slots and
+  scratch sizes;
+- an `AttentionBackend` adapter for the live numeric `decode_step` path;
+- a deterministic CSV harness comparing zero residuals with FP32, INT8 and INT4
+  residual channels.
+
+Phase 8 still excludes online basis learning, per-token adaptive rank, adaptive
+slot counts, eviction, HOT/WARM/COLD transitions and device-specific kernels.
