@@ -95,3 +95,33 @@ Phase 2 adds deterministic dense-to-latent conversion and fixed-rank selection:
 Phase 2 still uses one fixed key rank and one fixed value rank per scenario. It
 does not yet introduce per-token elasticity, quantization, residual channels or
 production integration.
+
+## Phase 3
+
+Phase 3 adds deterministic strict-budget planning over separate key/value rank
+pairs:
+
+- exact persistent coefficient and basis byte accounting;
+- exhaustive nested rank-pair evaluation;
+- independent key and value ranks;
+- reconstruction and attention quality guards;
+- explicit quality failure when no pair meets every target;
+- deterministic lexicographic selection;
+- non-dominated Pareto frontier construction;
+- a stable 12-scenario CSV harness;
+- no quantization, per-token rank or production integration.
+
+The persistent representation uses:
+
+\[
+B_{latent}=4(T+D)(R_K+R_V)
+\]
+
+while dense keys and values use:
+
+\[
+B_{dense}=8TD.
+\]
+
+Transient attention scratch is reported separately by Phase 1 and is not
+charged to the persistent-cache budget in Phase 3.
