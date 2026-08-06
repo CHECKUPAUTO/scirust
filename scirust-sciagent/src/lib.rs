@@ -4,6 +4,7 @@ pub mod block;
 pub mod bpe;
 pub mod ccos;
 pub mod checkpointing;
+pub mod communication;
 pub mod config;
 pub mod corpus_paths;
 #[cfg(feature = "cuda")]
@@ -26,6 +27,7 @@ pub use attention::GQAAttention;
 pub use block::SciAgentBlock;
 pub use bpe::{BpeTokenizer, BpeTrainer};
 pub use ccos::CcosLog;
+pub use communication::SciAgentEndpoint;
 pub use config::SciAgentConfig;
 pub use generate::Generator;
 pub use inference::SciAgentInference;

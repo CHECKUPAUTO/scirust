@@ -2904,6 +2904,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-agent-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "scirust-agtech"
 version = "0.1.0"
 dependencies = [
@@ -3697,6 +3705,7 @@ dependencies = [
  "clap",
  "command-group",
  "rand 0.8.6",
+ "scirust-agent-protocol",
  "scirust-autodiff",
  "scirust-core",
  "scirust-cuda",
