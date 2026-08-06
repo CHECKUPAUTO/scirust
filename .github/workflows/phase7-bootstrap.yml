@@ -1,0 +1,118 @@
+name: Phase 7 Bootstrap
+
+on:
+  push:
+    branches:
+      - research/elastic-latent-kv-phase7-runtime
+
+permissions:
+  contents: write
+
+concurrency:
+  group: phase7-bootstrap
+  cancel-in-progress: true
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: research/elastic-latent-kv-phase7-runtime
+          fetch-depth: 0
+
+      - name: Install toolchains
+        run: |
+          rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt
+          rustup toolchain install 1.89.0 --profile minimal --component clippy
+
+      - name: Apply known static correction
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("scirust-core/src/nn/latent_kv_cache.rs")
+          text = path.read_text(encoding="utf-8")
+          old = '''        assert_eq!(
+              QuantizedLatentKvCache::new(
+                  2,
+                  4,
+                  5,
+                  2,
+                  LatentStorageFormat::F32,
+                  LatentStorageFormat::F32,
+                  vec![0.0; 20],
+                  vec![0.0; 8],
+              ),
+              Err(LatentCacheError::RankTooLarge {
+                  name: "key",
+                  rank: 5,
+                  dimension: 4,
+              })
+          );'''
+          new = '''        assert!(matches!(
+              QuantizedLatentKvCache::new(
+                  2,
+                  4,
+                  5,
+                  2,
+                  LatentStorageFormat::F32,
+                  LatentStorageFormat::F32,
+                  vec![0.0; 20],
+                  vec![0.0; 8],
+              ),
+              Err(LatentCacheError::RankTooLarge {
+                  name: "key",
+                  rank: 5,
+                  dimension: 4,
+              })
+          ));'''
+          if old not in text:
+              raise SystemExit("known assertion block not found")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+
+      - name: Format
+        run: cargo +nightly-2026-07-02 fmt --all
+
+      - name: Clippy
+        run: cargo +1.89.0 clippy -p scirust-core --all-targets -- -D warnings
+
+      - name: Tests
+        run: |
+          cargo +1.89.0 test -p scirust-core latent_kv -- --test-threads=1
+          cargo +1.89.0 test -p scirust-core --lib -- --test-threads=1
+
+      - name: Harness
+        run: |
+          cargo +1.89.0 run --quiet --release -p scirust-core --example latent_kv_phase7 > phase7-a.csv
+          cargo +1.89.0 run --quiet --release -p scirust-core --example latent_kv_phase7 > phase7-b.csv
+          cmp phase7-a.csv phase7-b.csv
+          python3 - <<'PY'
+          import csv
+          from pathlib import Path
+
+          with Path("phase7-a.csv").open("r", encoding="utf-8", newline="") as handle:
+              reader = csv.DictReader(handle)
+              rows = list(reader)
+              fields = reader.fieldnames
+          assert fields is not None and len(fields) == 12
+          assert len(rows) == 4
+          assert all(row["quality_guard_met"] == "1" for row in rows)
+          assert len({row["output_fingerprint"] for row in rows}) == 4
+          PY
+
+      - name: Remove bootstrap workflow and commit canonical result
+        run: |
+          rm .github/workflows/phase7-bootstrap.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scirust-core/src/nn/latent_kv_cache.rs \
+                  scirust-core/src/nn/latent_kv_backend.rs \
+                  scirust-core/src/nn/mod.rs \
+                  scirust-core/examples/latent_kv_phase7.rs \
+                  .github/workflows/phase7-bootstrap.yml
+          git diff --cached --check
+          git commit -m "fix(kv-cache): canonicalize Phase 7 runtime"
+          git push origin HEAD:research/elastic-latent-kv-phase7-runtime
