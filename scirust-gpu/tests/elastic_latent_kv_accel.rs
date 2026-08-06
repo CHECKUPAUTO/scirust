@@ -30,29 +30,20 @@ fn reconstruct<B: RawComputeBackend>(
 
 fn fixtures() -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     let dense = vec![
-        0.5, -0.2, 0.8, 0.1,
-        -0.4, 0.7, 0.3, -0.6,
-        0.9, 0.2, -0.5, 0.4,
+        0.5, -0.2, 0.8, 0.1, -0.4, 0.7, 0.3, -0.6, 0.9, 0.2, -0.5, 0.4,
     ];
     // First two columns of the 4x4 identity basis: shape [dimension=4, rank=2].
-    let basis = vec![
-        1.0, 0.0,
-        0.0, 1.0,
-        0.0, 0.0,
-        0.0, 0.0,
-    ];
+    let basis = vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0];
     // Transpose of the same basis: shape [rank=2, dimension=4].
-    let basis_transposed = vec![
-        1.0, 0.0, 0.0, 0.0,
-        0.0, 1.0, 0.0, 0.0,
-    ];
+    let basis_transposed = vec![1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
     (dense, basis, basis_transposed)
 }
 
 #[cfg(any(feature = "wgpu", feature = "cuda"))]
 fn assert_close(actual: &[f32], expected: &[f32], tolerance: f32) {
     assert_eq!(actual.len(), expected.len());
-    for (index, (actual, expected)) in actual.iter().zip(expected).enumerate() {
+    for (index, (actual, expected)) in actual.iter().zip(expected).enumerate()
+    {
         let error = (actual - expected).abs();
         assert!(
             error <= tolerance,
@@ -70,9 +61,7 @@ fn cpu_latent_projection_matches_hand_oracle() {
     assert_eq!(
         reconstructed,
         vec![
-            0.5, -0.2, 0.0, 0.0,
-            -0.4, 0.7, 0.0, 0.0,
-            0.9, 0.2, 0.0, 0.0,
+            0.5, -0.2, 0.0, 0.0, -0.4, 0.7, 0.0, 0.0, 0.9, 0.2, 0.0, 0.0,
         ]
     );
 }
@@ -97,8 +86,10 @@ fn wgpu_latent_projection_matches_cpu_oracle() {
 fn cuda_latent_projection_is_honest_and_bounded_when_available() {
     let (dense, basis, basis_transposed) = fixtures();
     let cpu_latent = project(&CpuBackend, &dense, &basis, 3, 4, 2).unwrap();
-    match project(&CudaBackend, &dense, &basis, 3, 4, 2) {
-        Ok(cuda_latent) => {
+    match project(&CudaBackend, &dense, &basis, 3, 4, 2)
+    {
+        Ok(cuda_latent) =>
+        {
             // CUDA path rounds inputs to bf16 before Tensor-core multiplication.
             assert_close(&cuda_latent, &cpu_latent, 5.0e-2);
             let cpu_dense =
@@ -106,8 +97,8 @@ fn cuda_latent_projection_is_honest_and_bounded_when_available() {
             let cuda_dense =
                 reconstruct(&CudaBackend, &cuda_latent, &basis_transposed, 3, 2, 4).unwrap();
             assert_close(&cuda_dense, &cpu_dense, 7.5e-2);
-        }
-        Err(BackendError::Unavailable("cuda")) => {}
+        },
+        Err(BackendError::Unavailable("cuda")) => {},
         Err(error) => panic!("unexpected CUDA latent-projection failure: {error:?}"),
     }
 }
