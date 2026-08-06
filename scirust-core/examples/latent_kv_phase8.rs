@@ -3,8 +3,7 @@
 use scirust_core::nn::latent_kv_cache::LatentStorageFormat;
 use scirust_core::nn::paged_attention::contiguous_attention;
 use scirust_core::nn::residual_latent_kv_cache::{
-    ResidualLatentAttentionScratch, ResidualQuantizedLatentKvCache,
-    SparseResidualConfig,
+    ResidualLatentAttentionScratch, ResidualQuantizedLatentKvCache, SparseResidualConfig,
 };
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
@@ -80,21 +79,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "scenario,tokens,dimension,rank,coefficient_format,residual_slots,residual_format,dense_bytes,used_bytes,allocated_bytes,compression_ratio,max_absolute_error,baseline_max_absolute_error,improvement_ratio,quality_guard_met,output_fingerprint"
     );
-    for scenario in scenarios {
+    for scenario in scenarios
+    {
         let outcome = evaluate(
-            scenario,
-            tokens,
-            dimension,
-            rank,
-            &keys,
-            &values,
-            &query,
-            &oracle,
+            scenario, tokens, dimension, rank, &keys, &values, &query, &oracle,
         )?;
         let dense_bytes = tokens * dimension * 2 * core::mem::size_of::<f32>();
         let compression_ratio = dense_bytes as f64 / outcome.allocated_bytes as f64;
-        let improvement_ratio = baseline.maximum_error as f64
-            / f64::from(outcome.maximum_error.max(f32::MIN_POSITIVE));
+        let improvement_ratio =
+            baseline.maximum_error as f64 / f64::from(outcome.maximum_error.max(f32::MIN_POSITIVE));
         let quality_guard_met = outcome.maximum_error <= scenario.maximum_error;
         let fingerprint = fingerprint(scenario, &outcome.output);
         println!(
@@ -124,10 +117,7 @@ fn evaluate(
     oracle: &[f32],
 ) -> Result<Outcome, Box<dyn std::error::Error>> {
     let basis = identity_prefix(dimension, rank);
-    let residual = SparseResidualConfig::new(
-        scenario.residual_slots,
-        scenario.residual_format,
-    );
+    let residual = SparseResidualConfig::new(scenario.residual_slots, scenario.residual_format);
     let mut cache = ResidualQuantizedLatentKvCache::new(
         tokens,
         dimension,
@@ -140,7 +130,8 @@ fn evaluate(
         residual,
         residual,
     )?;
-    for token in 0..tokens {
+    for token in 0..tokens
+    {
         let start = token * dimension;
         cache.append(
             &keys[start..start + dimension],
@@ -167,7 +158,8 @@ fn evaluate(
 
 fn identity_prefix(dimension: usize, rank: usize) -> Vec<f32> {
     let mut basis = vec![0.0; dimension * rank];
-    for diagonal in 0..rank {
+    for diagonal in 0..rank
+    {
         basis[diagonal * rank + diagonal] = 1.0;
     }
     basis
@@ -175,8 +167,10 @@ fn identity_prefix(dimension: usize, rank: usize) -> Vec<f32> {
 
 fn generated_matrix(rows: usize, columns: usize, seed: u64) -> Vec<f32> {
     let mut matrix = vec![0.0; rows * columns];
-    for row in 0..rows {
-        for column in 0..8 {
+    for row in 0..rows
+    {
+        for column in 0..8
+        {
             matrix[row * columns + column] =
                 sample(seed, row * columns + column) * coordinate_scale(column);
         }
@@ -188,7 +182,8 @@ fn generated_matrix(rows: usize, columns: usize, seed: u64) -> Vec<f32> {
 
 fn generated_query(columns: usize, seed: u64) -> Vec<f32> {
     let mut query = vec![0.0; columns];
-    for (column, scalar) in query.iter_mut().enumerate().take(8) {
+    for (column, scalar) in query.iter_mut().enumerate().take(8)
+    {
         *scalar = sample(seed, column) * coordinate_scale(column);
     }
     query[8] = 0.85;
@@ -212,19 +207,18 @@ fn sample(seed: u64, index: usize) -> f32 {
 fn fingerprint(scenario: Scenario, output: &[f32]) -> u64 {
     let mut state = FNV_OFFSET;
     hash_bytes(&mut state, scenario.name.as_bytes());
-    hash_bytes(
-        &mut state,
-        &(scenario.residual_slots as u64).to_le_bytes(),
-    );
+    hash_bytes(&mut state, &(scenario.residual_slots as u64).to_le_bytes());
     hash_bytes(&mut state, scenario.residual_format.label().as_bytes());
-    for value in output {
+    for value in output
+    {
         hash_bytes(&mut state, &value.to_bits().to_le_bytes());
     }
     state
 }
 
 fn hash_bytes(state: &mut u64, bytes: &[u8]) {
-    for byte in bytes {
+    for byte in bytes
+    {
         *state ^= u64::from(*byte);
         *state = state.wrapping_mul(FNV_PRIME);
     }
