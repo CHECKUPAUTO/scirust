@@ -1,6 +1,14 @@
 name: Elastic Latent KV Phase 11
 
 on:
+  push:
+    branches:
+      - research/elastic-latent-kv-phase11-lifecycle
+    paths:
+      - scirust-core/src/nn/latent_kv_lifecycle.rs
+      - scirust-core/src/nn/mod.rs
+      - experiments/elastic-latent-kv/PHASE11_SPEC.md
+      - .github/workflows/elastic-latent-kv-phase11.yml
   pull_request:
     branches:
       - research/elastic-latent-kv-phase10-online-bases
