@@ -1,6 +1,16 @@
 name: Elastic Latent KV Phase 9
 
 on:
+  push:
+    branches:
+      - research/elastic-latent-kv-phase9-adaptive-policy
+    paths:
+      - scirust-core/src/nn/adaptive_latent_kv.rs
+      - scirust-core/src/nn/adaptive_latent_kv_backend.rs
+      - scirust-core/src/nn/mod.rs
+      - scirust-core/examples/latent_kv_phase9.rs
+      - experiments/elastic-latent-kv/PHASE9_SPEC.md
+      - .github/workflows/elastic-latent-kv-phase9.yml
   pull_request:
     branches: [master]
     paths:
