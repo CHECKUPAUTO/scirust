@@ -1,49 +1,34 @@
-name: Elastic Latent KV Phase 11 Canonicalize
+name: Elastic Latent KV Phase 11
 
 on:
   push:
     branches:
       - research/elastic-latent-kv-phase11-lifecycle
+    paths:
+      - scirust-core/src/nn/latent_kv_lifecycle.rs
+      - scirust-core/src/nn/mod.rs
+      - experiments/elastic-latent-kv/PHASE11_SPEC.md
+      - .github/workflows/elastic-latent-kv-phase11.yml
   pull_request:
     branches:
       - research/elastic-latent-kv-phase10-online-bases
+    paths:
+      - scirust-core/src/nn/latent_kv_lifecycle.rs
+      - scirust-core/src/nn/mod.rs
+      - experiments/elastic-latent-kv/PHASE11_SPEC.md
+      - .github/workflows/elastic-latent-kv-phase11.yml
 
 permissions:
-  contents: write
-
-env:
-  RUSTFLAGS: -D warnings
-  CARGO_INCREMENTAL: 0
+  contents: read
 
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          ref: research/elastic-latent-kv-phase11-lifecycle
-          fetch-depth: 0
       - run: |
           rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt,clippy
           rustup toolchain install 1.89.0 --profile minimal
-      - name: Canonical rustfmt
-        run: cargo +nightly-2026-07-02 fmt --all
-      - name: Publish canonical stack formatting
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- \
-            scirust-core/src/nn/adaptive_latent_kv.rs \
-            scirust-core/src/nn/adaptive_latent_kv_backend.rs \
-            scirust-core/src/nn/adaptive_latent_basis.rs \
-            scirust-core/src/nn/latent_kv_lifecycle.rs \
-            scirust-core/src/nn/mod.rs \
-            scirust-core/examples/latent_kv_phase9.rs
-          git diff --cached --check
-          if ! git diff --cached --quiet; then
-            git commit -m "fix(kv-cache): canonicalize Phase 9-11 sources"
-            git push origin HEAD:research/elastic-latent-kv-phase11-lifecycle
-          fi
       - run: cargo +nightly-2026-07-02 fmt --all -- --check
       - run: cargo +nightly-2026-07-02 clippy -p scirust-core --all-targets --locked -- -D warnings
       - run: cargo +1.89.0 check -p scirust-core --all-targets --locked
