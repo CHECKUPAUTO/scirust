@@ -78,3 +78,20 @@ cargo +1.89.0 run --release --bin phase1_harness > phase1.csv
 
 Phase 1 still does not introduce adaptive ranks, quantization, residual
 channels, cache tiers or production integration.
+
+## Phase 2
+
+Phase 2 adds deterministic dense-to-latent conversion and fixed-rank selection:
+
+- residual-pivoted modified Gram-Schmidt basis construction;
+- deterministic tie-breaking and sign canonicalization;
+- caller-buffer projection and reconstruction;
+- key/value reconstruction metrics;
+- smallest nested rank satisfying a relative-RMS target;
+- dense-versus-projected reconstruction-free attention measurement;
+- a stable 12-scenario CSV harness;
+- no external dependency and no `unsafe` code.
+
+Phase 2 still uses one fixed key rank and one fixed value rank per scenario. It
+does not yet introduce per-token elasticity, quantization, residual channels or
+production integration.

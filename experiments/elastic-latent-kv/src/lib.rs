@@ -1059,3 +1059,6 @@ mod tests {
 
 /// Deterministic Phase 1 measurement harness.
 pub mod phase1;
+
+/// Deterministic Phase 2 dense-to-latent projection.
+pub mod phase2;
