@@ -1,7 +1,7 @@
 use scirust_agent_protocol::{
-    AgentIdentity, AgentKind, AgentMessage, MessageKind, ProtocolError, TrustClass, SCHEMA_VERSION,
+    AgentIdentity, AgentKind, AgentMessage, MessageKind, ProtocolError, SCHEMA_VERSION, TrustClass,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SciAgentEndpoint {
@@ -30,7 +30,9 @@ impl SciAgentEndpoint {
             .any(|recipient| recipient == &self.identity)
         {
             Ok(())
-        } else {
+        }
+        else
+        {
             Err(ProtocolError::InvalidRecipientCount(0))
         }
     }

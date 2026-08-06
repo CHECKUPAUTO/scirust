@@ -30,7 +30,8 @@ pub struct AgentIdentity {
 
 impl AgentIdentity {
     fn validate(&self) -> Result<(), ProtocolError> {
-        if self.id.trim().is_empty() {
+        if self.id.trim().is_empty()
+        {
             return Err(ProtocolError::EmptyAgentId);
         }
         Ok(())
@@ -70,16 +71,21 @@ pub struct EvidenceReference {
 
 impl EvidenceReference {
     fn validate(&self) -> Result<(), ProtocolError> {
-        if self.id.trim().is_empty() {
-            return Err(ProtocolError::InvalidEvidence("empty evidence id".to_string()));
+        if self.id.trim().is_empty()
+        {
+            return Err(ProtocolError::InvalidEvidence(
+                "empty evidence id".to_string(),
+            ));
         }
-        if self.sha256.len() != 64 || !self.sha256.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        if self.sha256.len() != 64 || !self.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
             return Err(ProtocolError::InvalidEvidence(format!(
                 "evidence `{}` has an invalid sha256",
                 self.id
             )));
         }
-        if self.split.trim().is_empty() {
+        if self.split.trim().is_empty()
+        {
             return Err(ProtocolError::InvalidEvidence(format!(
                 "evidence `{}` has an empty split",
                 self.id
@@ -97,10 +103,14 @@ pub struct CapabilityRequest {
 
 impl CapabilityRequest {
     fn validate(&self) -> Result<(), ProtocolError> {
-        if self.capability_id.trim().is_empty() {
-            return Err(ProtocolError::InvalidCapability("empty capability id".to_string()));
+        if self.capability_id.trim().is_empty()
+        {
+            return Err(ProtocolError::InvalidCapability(
+                "empty capability id".to_string(),
+            ));
         }
-        if self.rationale.trim().is_empty() {
+        if self.rationale.trim().is_empty()
+        {
             return Err(ProtocolError::InvalidCapability(format!(
                 "capability `{}` has an empty rationale",
                 self.capability_id
@@ -128,49 +138,64 @@ pub struct AgentMessage {
 
 impl AgentMessage {
     pub fn validate(&self) -> Result<(), ProtocolError> {
-        if self.schema_version != SCHEMA_VERSION {
+        if self.schema_version != SCHEMA_VERSION
+        {
             return Err(ProtocolError::UnsupportedSchema(self.schema_version));
         }
-        if self.message_id.trim().is_empty() {
+        if self.message_id.trim().is_empty()
+        {
             return Err(ProtocolError::EmptyMessageId);
         }
-        if self.conversation_id.trim().is_empty() {
+        if self.conversation_id.trim().is_empty()
+        {
             return Err(ProtocolError::EmptyConversationId);
         }
-        if self.confidence_bps > MAX_CONFIDENCE_BPS {
+        if self.confidence_bps > MAX_CONFIDENCE_BPS
+        {
             return Err(ProtocolError::ConfidenceOutOfRange(self.confidence_bps));
         }
         self.sender.validate()?;
-        if self.recipients.is_empty() || self.recipients.len() > MAX_RECIPIENTS {
+        if self.recipients.is_empty() || self.recipients.len() > MAX_RECIPIENTS
+        {
             return Err(ProtocolError::InvalidRecipientCount(self.recipients.len()));
         }
         let mut recipient_ids = BTreeSet::new();
-        for recipient in &self.recipients {
+        for recipient in &self.recipients
+        {
             recipient.validate()?;
             let key = (recipient.kind, recipient.id.as_str());
-            if !recipient_ids.insert(key) {
+            if !recipient_ids.insert(key)
+            {
                 return Err(ProtocolError::DuplicateRecipient(recipient.id.clone()));
             }
         }
-        if self.evidence.len() > MAX_EVIDENCE_REFERENCES {
-            return Err(ProtocolError::TooManyEvidenceReferences(self.evidence.len()));
+        if self.evidence.len() > MAX_EVIDENCE_REFERENCES
+        {
+            return Err(ProtocolError::TooManyEvidenceReferences(
+                self.evidence.len(),
+            ));
         }
         let mut evidence_ids = BTreeSet::new();
-        for evidence in &self.evidence {
+        for evidence in &self.evidence
+        {
             evidence.validate()?;
-            if !evidence_ids.insert(evidence.id.as_str()) {
+            if !evidence_ids.insert(evidence.id.as_str())
+            {
                 return Err(ProtocolError::DuplicateEvidence(evidence.id.clone()));
             }
         }
-        if self.requested_capabilities.len() > MAX_REQUESTED_CAPABILITIES {
+        if self.requested_capabilities.len() > MAX_REQUESTED_CAPABILITIES
+        {
             return Err(ProtocolError::TooManyCapabilities(
                 self.requested_capabilities.len(),
             ));
         }
         let mut capability_ids = BTreeSet::new();
-        for capability in &self.requested_capabilities {
+        for capability in &self.requested_capabilities
+        {
             capability.validate()?;
-            if !capability_ids.insert(capability.capability_id.as_str()) {
+            if !capability_ids.insert(capability.capability_id.as_str())
+            {
                 return Err(ProtocolError::DuplicateCapability(
                     capability.capability_id.clone(),
                 ));
@@ -180,34 +205,45 @@ impl AgentMessage {
     }
 
     fn validate_sender_policy(&self) -> Result<(), ProtocolError> {
-        match self.sender.kind {
-            AgentKind::CognoObserver => {
+        match self.sender.kind
+        {
+            AgentKind::CognoObserver =>
+            {
                 if !matches!(
                     self.message_kind,
                     MessageKind::PreferenceObservation | MessageKind::Contradiction
-                ) {
+                )
+                {
                     return Err(ProtocolError::CognoObserverMayNotSpeak);
                 }
-                if !self.requested_capabilities.is_empty() {
+                if !self.requested_capabilities.is_empty()
+                {
                     return Err(ProtocolError::CognoObserverMayNotRequestCapabilities);
                 }
-                if self.recipients.iter().any(|recipient| {
-                    !matches!(recipient.kind, AgentKind::DeterministicKernel)
-                }) {
+                if self
+                    .recipients
+                    .iter()
+                    .any(|recipient| !matches!(recipient.kind, AgentKind::DeterministicKernel))
+                {
                     return Err(ProtocolError::CognoObserverMustRemainInternal);
                 }
-            }
-            AgentKind::ExternalModel | AgentKind::SciAgent | AgentKind::CognoCommunicator => {
-                if self.trust_class != TrustClass::UntrustedModelOutput {
+            },
+            AgentKind::ExternalModel | AgentKind::SciAgent | AgentKind::CognoCommunicator =>
+            {
+                if self.trust_class != TrustClass::UntrustedModelOutput
+                {
                     return Err(ProtocolError::ModelOutputMustRemainUntrusted);
                 }
-            }
-            AgentKind::RuntimeDiscovery | AgentKind::DeterministicKernel => {
-                if self.trust_class != TrustClass::DeterministicKernelOutput {
+            },
+            AgentKind::RuntimeDiscovery | AgentKind::DeterministicKernel =>
+            {
+                if self.trust_class != TrustClass::DeterministicKernelOutput
+                {
                     return Err(ProtocolError::KernelOutputTrustMismatch);
                 }
-            }
-            AgentKind::Human => {}
+            },
+            AgentKind::Human =>
+            {},
         }
         Ok(())
     }
@@ -256,11 +292,19 @@ mod tests {
             sender: identity(sender, "sender"),
             recipients: vec![identity(AgentKind::DeterministicKernel, "kernel")],
             message_kind: kind,
-            trust_class: if matches!(sender, AgentKind::RuntimeDiscovery | AgentKind::DeterministicKernel) {
+            trust_class: if matches!(
+                sender,
+                AgentKind::RuntimeDiscovery | AgentKind::DeterministicKernel
+            )
+            {
                 TrustClass::DeterministicKernelOutput
-            } else if sender == AgentKind::Human {
+            }
+            else if sender == AgentKind::Human
+            {
                 TrustClass::HumanProvided
-            } else {
+            }
+            else
+            {
                 TrustClass::UntrustedModelOutput
             },
             confidence_bps: 5_000,
@@ -272,9 +316,11 @@ mod tests {
 
     #[test]
     fn sciagent_can_send_hypotheses() {
-        assert!(message(AgentKind::SciAgent, MessageKind::Hypothesis)
-            .validate()
-            .is_ok());
+        assert!(
+            message(AgentKind::SciAgent, MessageKind::Hypothesis)
+                .validate()
+                .is_ok()
+        );
     }
 
     #[test]
@@ -287,9 +333,11 @@ mod tests {
 
     #[test]
     fn cogno_observer_can_record_internal_contradictions() {
-        assert!(message(AgentKind::CognoObserver, MessageKind::Contradiction)
-            .validate()
-            .is_ok());
+        assert!(
+            message(AgentKind::CognoObserver, MessageKind::Contradiction)
+                .validate()
+                .is_ok()
+        );
     }
 
     #[test]

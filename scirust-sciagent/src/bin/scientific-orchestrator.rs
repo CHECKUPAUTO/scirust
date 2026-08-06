@@ -20,7 +20,8 @@ struct CognoObservationEnvelope {
 }
 
 fn sender_class(kind: AgentKind) -> &'static str {
-    match kind {
+    match kind
+    {
         AgentKind::Human => "human",
         AgentKind::ExternalModel => "external_model",
         AgentKind::SciAgent => "sciagent",
@@ -32,7 +33,8 @@ fn sender_class(kind: AgentKind) -> &'static str {
 }
 
 fn message_kind(kind: MessageKind) -> &'static str {
-    match kind {
+    match kind
+    {
         MessageKind::Question => "question",
         MessageKind::Hypothesis => "hypothesis",
         MessageKind::Critique => "critique",
@@ -71,7 +73,8 @@ fn observation_from_message(
 }
 
 fn process_line(line: &str, ordinal: u64) -> Result<CognoObservationEnvelope, String> {
-    if line.len() > MAX_JSONL_LINE_BYTES {
+    if line.len() > MAX_JSONL_LINE_BYTES
+    {
         return Err(format!(
             "line exceeds maximum of {MAX_JSONL_LINE_BYTES} bytes"
         ));
@@ -85,10 +88,13 @@ fn run() -> Result<(), String> {
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut output = stdout.lock();
-    for (index, line_result) in stdin.lock().lines().enumerate() {
+    for (index, line_result) in stdin.lock().lines().enumerate()
+    {
         let line_number = index + 1;
-        let line = line_result.map_err(|error| format!("cannot read line {line_number}: {error}"))?;
-        if line.trim().is_empty() {
+        let line =
+            line_result.map_err(|error| format!("cannot read line {line_number}: {error}"))?;
+        if line.trim().is_empty()
+        {
             continue;
         }
         let observation = process_line(&line, line_number as u64)
@@ -105,7 +111,8 @@ fn run() -> Result<(), String> {
 }
 
 fn main() {
-    if let Err(error) = run() {
+    if let Err(error) = run()
+    {
         eprintln!("scientific-orchestrator: {error}");
         std::process::exit(2);
     }
@@ -114,9 +121,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scirust_agent_protocol::{
-        AgentIdentity, SCHEMA_VERSION, TrustClass,
-    };
+    use scirust_agent_protocol::{AgentIdentity, SCHEMA_VERSION, TrustClass};
     use serde_json::json;
 
     fn message() -> AgentMessage {
