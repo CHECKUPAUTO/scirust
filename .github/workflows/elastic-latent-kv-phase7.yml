@@ -1,4 +1,4 @@
-name: Elastic Latent KV Phase 7 Canonicalize
+name: Elastic Latent KV Phase 7 Source Canonicalize
 
 on:
   push:
@@ -12,7 +12,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: elastic-latent-kv-phase7-canonicalize
+  group: elastic-latent-kv-phase7-source-canonicalize
   cancel-in-progress: true
 
 jobs:
@@ -40,19 +40,16 @@ jobs:
           cache = cache_path.read_text(encoding="utf-8")
 
           cache_marker = "    pub fn new(\n        capacity_tokens: usize,"
-          if cache_marker not in cache:
-              raise SystemExit("cache constructor not found")
-          cache = cache.replace(
-              cache_marker,
-              "    #[allow(clippy::too_many_arguments)]\n" + cache_marker,
-              1,
-          )
+          cache_attribute = "    #[allow(clippy::too_many_arguments)]\n"
+          if cache_attribute + cache_marker not in cache:
+              if cache_marker not in cache:
+                  raise SystemExit("cache constructor not found")
+              cache = cache.replace(cache_marker, cache_attribute + cache_marker, 1)
 
           assertion_start = "        assert_eq!(\n            QuantizedLatentKvCache::new("
           assertion_replacement = "        assert!(matches!(\n            QuantizedLatentKvCache::new("
-          if assertion_start not in cache:
-              raise SystemExit("rank assertion start not found")
-          cache = cache.replace(assertion_start, assertion_replacement, 1)
+          if assertion_start in cache:
+              cache = cache.replace(assertion_start, assertion_replacement, 1)
 
           assertion_end = (
               '            Err(LatentCacheError::RankTooLarge {\n'
@@ -62,35 +59,31 @@ jobs:
               '            })\n'
               '        );'
           )
-          assertion_end_replacement = (
-              '            Err(LatentCacheError::RankTooLarge {\n'
-              '                name: "key",\n'
-              '                rank: 5,\n'
-              '                dimension: 4,\n'
-              '            })\n'
-              '        ));'
-          )
-          if assertion_end not in cache:
-              raise SystemExit("rank assertion end not found")
-          cache = cache.replace(assertion_end, assertion_end_replacement, 1)
+          assertion_end_replacement = assertion_end[:-2] + '));'
+          if assertion_end in cache:
+              cache = cache.replace(assertion_end, assertion_end_replacement, 1)
 
           old_chunks = "source.iter().zip(target.chunks_exact_mut(4))"
-          new_chunks = "source.iter().zip(target.as_chunks_mut::<4>().0)"
-          if old_chunks not in cache:
-              raise SystemExit("FP32 chunk encoder not found")
-          cache = cache.replace(old_chunks, new_chunks, 1)
+          if old_chunks in cache:
+              cache = cache.replace(
+                  old_chunks,
+                  "source.iter().zip(target.as_chunks_mut::<4>().0)",
+                  1,
+              )
           cache_path.write_text(cache, encoding="utf-8")
 
           backend_path = Path("scirust-core/src/nn/latent_kv_backend.rs")
           backend = backend_path.read_text(encoding="utf-8")
           backend_marker = "    pub fn new(\n        capacity_tokens: usize,"
-          if backend_marker not in backend:
-              raise SystemExit("backend constructor not found")
-          backend = backend.replace(
-              backend_marker,
-              "    #[allow(clippy::too_many_arguments)]\n" + backend_marker,
-              1,
-          )
+          backend_attribute = "    #[allow(clippy::too_many_arguments)]\n"
+          if backend_attribute + backend_marker not in backend:
+              if backend_marker not in backend:
+                  raise SystemExit("backend constructor not found")
+              backend = backend.replace(
+                  backend_marker,
+                  backend_attribute + backend_marker,
+                  1,
+              )
           backend_path.write_text(backend, encoding="utf-8")
           PY
 
@@ -128,107 +121,21 @@ jobs:
           assert {row["format"] for row in rows} == {"f32", "int8", "int4"}
           PY
 
-      - name: Restore final workflow and remove bootstrap
+      - name: Commit only canonical source files
         run: |
-          rm -f .github/workflows/phase7-bootstrap.yml
-          cat > .github/workflows/elastic-latent-kv-phase7.yml <<'YAML'
-          name: Elastic Latent KV Phase 7
-
-          on:
-            push:
-              branches:
-                - research/elastic-latent-kv-phase7-runtime
-              paths:
-                - scirust-core/src/nn/latent_kv_cache.rs
-                - scirust-core/src/nn/latent_kv_backend.rs
-                - scirust-core/src/nn/mod.rs
-                - scirust-core/examples/latent_kv_phase7.rs
-                - experiments/elastic-latent-kv/PHASE7_SPEC.md
-                - experiments/elastic-latent-kv/README.md
-                - .github/workflows/elastic-latent-kv-phase7.yml
-            pull_request:
-              branches: [master]
-              paths:
-                - scirust-core/src/nn/latent_kv_cache.rs
-                - scirust-core/src/nn/latent_kv_backend.rs
-                - scirust-core/src/nn/mod.rs
-                - scirust-core/examples/latent_kv_phase7.rs
-                - experiments/elastic-latent-kv/PHASE7_SPEC.md
-                - experiments/elastic-latent-kv/README.md
-                - .github/workflows/elastic-latent-kv-phase7.yml
-            workflow_dispatch:
-
-          permissions:
-            contents: read
-
-          concurrency:
-            group: elastic-latent-kv-phase7-${{ github.ref }}
-            cancel-in-progress: true
-
-          env:
-            RUSTFLAGS: -D warnings
-            CARGO_INCREMENTAL: 0
-
-          jobs:
-            validate:
-              runs-on: ubuntu-latest
-              steps:
-                - name: Checkout
-                  uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-
-                - name: Install toolchains
-                  run: |
-                    rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt,clippy
-                    rustup toolchain install 1.89.0 --profile minimal
-
-                - name: Format
-                  run: cargo +nightly-2026-07-02 fmt --all -- --check
-
-                - name: Nightly Clippy
-                  run: cargo +nightly-2026-07-02 clippy -p scirust-core --all-targets --locked -- -D warnings
-
-                - name: MSRV check
-                  run: cargo +1.89.0 check -p scirust-core --all-targets --locked
-
-                - name: Phase 7 tests
-                  run: cargo +1.89.0 test -p scirust-core latent_kv --locked -- --test-threads=1
-
-                - name: scirust-core library tests
-                  run: cargo +1.89.0 test -p scirust-core --lib --locked -- --test-threads=1
-
-                - name: Deterministic runtime harness
-                  run: |
-                    cargo +1.89.0 run --quiet --release --locked -p scirust-core --example latent_kv_phase7 > phase7-a.csv
-                    cargo +1.89.0 run --quiet --release --locked -p scirust-core --example latent_kv_phase7 > phase7-b.csv
-                    cmp phase7-a.csv phase7-b.csv
-                    python3 - <<'PY'
-                    import csv
-                    from pathlib import Path
-
-                    with Path("phase7-a.csv").open("r", encoding="utf-8", newline="") as handle:
-                        reader = csv.DictReader(handle)
-                        rows = list(reader)
-                        fields = reader.fieldnames
-                    assert fields is not None and len(fields) == 12
-                    assert len(rows) == 4
-                    assert {row["format"] for row in rows} == {"f32", "int8", "int4"}
-                    assert len({row["output_fingerprint"] for row in rows}) == 4
-                    assert all(row["quality_guard_met"] == "1" for row in rows)
-                    assert all(float(row["compression_ratio"]) > 0.0 for row in rows)
-                    compressed = [row for row in rows if row["format"] != "f32"]
-                    assert all(
-                        int(row["allocated_bytes"]) < int(row["dense_bytes"])
-                        for row in compressed
-                    )
-                    print("Phase 7 runtime CSV: CONFORME")
-                    PY
-          YAML
-
-      - name: Commit canonical result
-        run: |
+          rm -f phase7-a.csv phase7-b.csv
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add --all
+          git add -- \
+            scirust-core/src/nn/latent_kv_cache.rs \
+            scirust-core/src/nn/latent_kv_backend.rs \
+            scirust-core/src/nn/mod.rs \
+            scirust-core/examples/latent_kv_phase7.rs
           git diff --cached --check
-          git commit -m "fix(kv-cache): canonicalize Phase 7 runtime"
-          git push origin HEAD:research/elastic-latent-kv-phase7-runtime
+          if git diff --cached --quiet
+          then
+            echo "Canonical sources already published"
+          else
+            git commit -m "fix(kv-cache): canonicalize Phase 7 runtime sources"
+            git push origin HEAD:research/elastic-latent-kv-phase7-runtime
+          fi
