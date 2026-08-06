@@ -31,12 +31,12 @@ Generated output summary (regenerate with `cargo run` in
 `tools/tensor-parity`):
 
 - total rows: 74
-- parity: 45 (elementwise 25, reductions 5, normalization 4, shape 6,
-  linear 3, loss 2)
-- experimental: 23
+- parity: 48 (elementwise 26, reductions 5, normalization 4, shape 6,
+  linear 3, loss 2, special 2)
+- experimental: 20
 - missing: 6 (fft, svd, qr, lstsq, eig, sparse_autograd)
 
-The 45 parity rows are verified by the Rust-only differential harness
+The 48 parity rows are verified by the Rust-only differential harness
 `scirust-core/tests/parity_differential.rs` against committed fixtures
 (`tests/parity/fixtures/`, generated offline from the frozen baseline —
 see `provenance/generate_fixtures.py`). Each parity row carries its

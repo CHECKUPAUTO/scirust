@@ -16,7 +16,7 @@ cos,elementwise,parity,2d,true,f32,0.00001,0.00001,cpu
 cosh,elementwise,parity,2d,true,f32,0.00001,0.00001,cpu
 cosine_similarity,linear,experimental,2d,true,f32,0.0001,0.0001,cpu
 cross_entropy,loss,parity,nd|simd|gpu|cuda,true,f32,0.00001,0.00001,cpu|gpu|cuda
-digamma,special,experimental,simd,true,f64,0.0000000001,0.0000000001,cpu
+digamma,special,parity,simd,true,f64,0.000000001,0.000000001,cpu
 div,elementwise,parity,2d|nd,true,f32,0.00001,0.00001,cpu
 dropout,normalization,experimental,2d,true,f32,0.00001,0.00001,cpu
 eig,linear,missing,,false,f32,0.0001,0.0001,
@@ -29,7 +29,7 @@ flatten,shape,parity,core,false,f32,0,0,cpu
 gather,shape,experimental,nd,true,f32,0,0,cpu
 gelu,elementwise,parity,simd,true,f32,0.00001,0.00001,cpu
 layer_norm,normalization,parity,2d|nd|simd,true,f32,0.0001,0.0001,cpu
-lgamma,special,experimental,simd,true,f64,0.0000000001,0.0000000001,cpu
+lgamma,special,parity,simd,true,f64,0.0000000001,0.0000000001,cpu
 linear,linear,parity,2d|simd,true,f32,0.0001,0.0001,cpu
 log,elementwise,parity,2d,true,f32,0.00001,0.00001,cpu
 log10,elementwise,parity,2d,true,f32,0.00001,0.00001,cpu
@@ -53,7 +53,7 @@ relu,elementwise,parity,2d|nd|simd|gpu|cuda,true,f32,0,0,cpu|gpu|cuda
 reshape,shape,parity,2d|nd|tnd|core,true,f32,0,0,cpu
 rms_norm,normalization,parity,nd|simd|gpu|cuda,true,f32,0.0001,0.0001,cpu|gpu|cuda
 rope,positional,experimental,nd|simd|cuda,true,f32,0.0001,0.0001,cpu|cuda
-rsqrt,elementwise,experimental,gpu,false,f32,0.00001,0.00001,gpu
+rsqrt,elementwise,parity,gpu,false,f32,0.00001,0.00001,gpu
 scaled_dot_product_attention,attention,experimental,simd|cuda,true,f32,0.0001,0.0001,cpu|cuda
 sigmoid,elementwise,parity,2d|nd|simd|gpu,true,f32,0.00001,0.00001,cpu|gpu
 silu,elementwise,parity,simd|gpu|cuda,true,f32,0.00001,0.00001,cpu|gpu|cuda

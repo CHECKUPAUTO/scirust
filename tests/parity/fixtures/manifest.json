@@ -18,6 +18,7 @@
     "elementwise/pow.json": "d4b06d179271a71362a85a6573c07539585ae4f2b6458be3c5605c59fe9692e5",
     "elementwise/reciprocal.json": "95138ad04c840a1394b8b2160fa0275377dcd3950ce4af9b4158db9f91d81168",
     "elementwise/relu.json": "76ac5e130449c6f0d614177c1a70c4c42d68601b4154fd84f2a20b2000da779e",
+    "elementwise/rsqrt.json": "8345484a055a1576b95cd764c3944f3dacbb142e7dedce3735c994145100e993",
     "elementwise/sigmoid.json": "f2d762d201116a977113da83a9d4de40a7b32d66ebd495e5ab2331b728df8931",
     "elementwise/silu.json": "4a6b16ad7e1edd49c8820cc638e4c9d1817c0bdff24fc27c5f4696ae8188570d",
     "elementwise/sin.json": "d0f862e9486717f637d186bcb3bba923fbba87875447aac96a7c2d903194961c",
@@ -45,7 +46,9 @@
     "shape/permute.json": "7bed83ffe04a19f31f4cb1e09eb6509e8d9889486271e65cab630664ba15daeb",
     "shape/reshape.json": "c0ffbe908d11b75fe9ce17e4851423a76248777fbb68396103626a38e38c3701",
     "shape/slice.json": "92eb217ec6baa2c6c7b52a29a41fcebb9b89cf75e35755b48381fe5ea878dcc5",
-    "shape/transpose.json": "679cff96e7f43fe4e45b986874df00c7a5e83779e892232d62968d02e9606cde"
+    "shape/transpose.json": "679cff96e7f43fe4e45b986874df00c7a5e83779e892232d62968d02e9606cde",
+    "special/digamma.json": "b085b259b815746b5dfbcce5b33e9599837227ce504ceae3cdb97a845ed9143c",
+    "special/lgamma.json": "a9d442f4325902c3d1f6d6981fdabeed9ec09793842a69103d07c100cb21b726"
   },
   "generator": "docs/tensor-parity/provenance/generate_fixtures.py",
   "pytorch": {
