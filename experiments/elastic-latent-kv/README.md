@@ -151,3 +151,20 @@ cargo +1.89.0 run --release --bin phase5_harness > target/phase5.csv
 ```
 
 Phase 5 intentionally excludes coefficient quantization, residual-value quantization, GPU kernels and production model integration.
+
+## Phase 6
+
+Phase 6 adds deterministic quantization planning for latent coefficients and
+sparse residual values:
+
+- row-wise symmetric INT8;
+- packed signed INT4 in the range `[-7, 7]`;
+- exact accounting for scales, packed payloads, FP32 bases and `u16` indices;
+- independent key/value coefficient and residual formats;
+- strict-budget candidate enumeration;
+- reconstruction and attention quality guards;
+- deterministic tie-breaking and output fingerprints;
+- 12 seeded scenarios covering exact, INT8 and mixed INT4/INT8 plans.
+
+The implementation remains an isolated research harness and does not modify
+production SciRust crates.
