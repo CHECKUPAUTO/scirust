@@ -37,13 +37,13 @@ log_softmax,normalization,parity,2d,true,f32,0.00001,0.00001,cpu
 lstsq,linear,missing,,false,f32,0.0001,0.0001,
 lu_solve,sparse,experimental,sparse,false,f64,0.00000001,0.00000001,cpu
 matmul,linear,parity,2d|nd|simd|gpu|cuda,true,f32,0.0001,0.0001,cpu|gpu|cuda
-max,reduction,experimental,2d|gpu,true,f32,0,0,cpu|gpu
+max,reduction,parity,2d|gpu,true,f32,0,0,cpu|gpu
 max_pool2d,convolution,experimental,2d|simd,true,f32,0,0,cpu
 mean,reduction,parity,2d|gpu|cuda,true,f32,0.0001,0.0001,cpu|gpu|cuda
 mse_loss,loss,parity,simd,true,f32,0.00001,0.00001,cpu
 mul,elementwise,parity,2d|nd|gpu|cuda,true,f32,0.00001,0.00001,cpu|gpu|cuda
 neg,elementwise,parity,2d,true,f32,0.00001,0.00001,cpu
-norm,reduction,experimental,core,false,f32,0.0001,0.0001,cpu
+norm,reduction,parity,core,false,f32,0.0001,0.0001,cpu
 normalize,linear,experimental,2d,true,f32,0.0001,0.0001,cpu
 permute,shape,parity,nd|core,true,f32,0,0,cpu
 pow,elementwise,parity,2d,true,f32,0.00001,0.00001,cpu

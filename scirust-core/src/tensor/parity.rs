@@ -567,6 +567,222 @@ pub fn var_axis(t: &TensorND, axis: usize) -> Result<TensorND> {
     })
 }
 
+/// max le long d'un axe (keepdim=false) : valeurs + indices du premier
+/// maximum (sémantique torch : premier index en cas d'égalité).
+pub fn max_axis(t: &TensorND, axis: usize) -> Result<(TensorND, Vec<usize>)> {
+    check_axis("parity::max_axis", axis, t.ndim())?;
+    let out_shape = reduce_axis_shape(t, axis)?;
+    let out_numel = checked_prod(&out_shape)?;
+    let axis_len = t.shape[axis];
+    let mut strides = vec![0usize; t.ndim()];
+    let mut acc = 1usize;
+    for d in (0..t.ndim()).rev()
+    {
+        strides[d] = acc;
+        acc = acc
+            .checked_mul(t.shape[d])
+            .ok_or_else(|| SciRustError::InvalidConfig("shape overflow".into()))?;
+    }
+    let mut out = vec![0.0f32; out_numel];
+    let mut indices = vec![0usize; out_numel];
+    let mut t_idx = vec![0usize; t.ndim()];
+    for i in 0..out_numel
+    {
+        let mut rem = i;
+        for k in (0..out_shape.len()).rev()
+        {
+            let pos = if k < axis { k } else { k + 1 };
+            let dim = out_shape[k];
+            t_idx[pos] = rem % dim;
+            rem /= dim;
+        }
+        debug_assert_eq!(rem, 0);
+        let mut best = f32::NEG_INFINITY;
+        let mut best_j = 0usize;
+        for j in 0..axis_len
+        {
+            t_idx[axis] = j;
+            let mut off = 0usize;
+            for (k, &idx) in t_idx.iter().enumerate()
+            {
+                off += idx * strides[k];
+            }
+            let v = t.data[off];
+            if v > best
+            {
+                best = v;
+                best_j = j;
+            }
+        }
+        out[i] = best;
+        indices[i] = best_j;
+    }
+    Ok((TensorND::new(out, out_shape), indices))
+}
+
+/// Gradient de max(dim) : le gout de chaque ligne est routé vers l'élément
+/// max (indices du premier maximum), 0 ailleurs.
+pub fn d_max_axis(
+    gout: &TensorND,
+    t: &TensorND,
+    axis: usize,
+    indices: &[usize],
+) -> Result<TensorND> {
+    check_axis("parity::d_max_axis", axis, t.ndim())?;
+    let out_shape = reduce_axis_shape(t, axis)?;
+    if gout.numel() != checked_prod(&out_shape)? || indices.len() != gout.numel()
+    {
+        return Err(SciRustError::ShapeMismatch {
+            op: "parity::d_max_axis",
+            expected: (1, checked_prod(&out_shape)?),
+            got: (1, gout.numel()),
+        });
+    }
+    let axis_len = t.shape[axis];
+    let mut strides = vec![0usize; t.ndim()];
+    let mut acc = 1usize;
+    for d in (0..t.ndim()).rev()
+    {
+        strides[d] = acc;
+        acc = acc
+            .checked_mul(t.shape[d])
+            .ok_or_else(|| SciRustError::InvalidConfig("shape overflow".into()))?;
+    }
+    let mut gx = vec![0.0f32; t.numel()];
+    let mut t_idx = vec![0usize; t.ndim()];
+    for (i, &j) in indices.iter().enumerate()
+    {
+        let mut rem = i;
+        for k in (0..out_shape.len()).rev()
+        {
+            let pos = if k < axis { k } else { k + 1 };
+            let dim = out_shape[k];
+            t_idx[pos] = rem % dim;
+            rem /= dim;
+        }
+        debug_assert_eq!(rem, 0);
+        debug_assert!(j < axis_len, "d_max_axis: index {j} >= axis_len {axis_len}");
+        t_idx[axis] = j;
+        let mut off = 0usize;
+        for (k, &idx) in t_idx.iter().enumerate()
+        {
+            off += idx * strides[k];
+        }
+        gx[off] = gout.data[i];
+    }
+    Ok(TensorND::new(gx, t.shape.clone()))
+}
+
+/// Norme de Frobenius (p=2) le long d'un axe : y = sqrt(Σ x²).
+pub fn norm_axis_p2(t: &TensorND, axis: usize) -> Result<TensorND> {
+    check_axis("parity::norm_axis_p2", axis, t.ndim())?;
+    let out_shape = reduce_axis_shape(t, axis)?;
+    let out_numel = checked_prod(&out_shape)?;
+    let axis_len = t.shape[axis];
+    let mut strides = vec![0usize; t.ndim()];
+    let mut acc = 1usize;
+    for d in (0..t.ndim()).rev()
+    {
+        strides[d] = acc;
+        acc = acc
+            .checked_mul(t.shape[d])
+            .ok_or_else(|| SciRustError::InvalidConfig("shape overflow".into()))?;
+    }
+    let mut out = vec![0.0f32; out_numel];
+    let mut t_idx = vec![0usize; t.ndim()];
+    for (i, slot) in out.iter_mut().enumerate()
+    {
+        let mut rem = i;
+        for k in (0..out_shape.len()).rev()
+        {
+            let pos = if k < axis { k } else { k + 1 };
+            let dim = out_shape[k];
+            t_idx[pos] = rem % dim;
+            rem /= dim;
+        }
+        debug_assert_eq!(rem, 0);
+        let mut sum = 0.0f32;
+        for j in 0..axis_len
+        {
+            t_idx[axis] = j;
+            let mut off = 0usize;
+            for (k, &idx) in t_idx.iter().enumerate()
+            {
+                off += idx * strides[k];
+            }
+            sum += t.data[off] * t.data[off];
+        }
+        *slot = sum.sqrt();
+    }
+    Ok(TensorND::new(out, out_shape))
+}
+
+/// Gradient norme p=2 le long d'un axe : gx = gout * x / ||x||₂ (0 si nul).
+pub fn d_norm_axis_p2(gout: &TensorND, t: &TensorND, axis: usize) -> Result<TensorND> {
+    check_axis("parity::d_norm_axis_p2", axis, t.ndim())?;
+    let out_shape = reduce_axis_shape(t, axis)?;
+    if gout.numel() != checked_prod(&out_shape)?
+    {
+        return Err(SciRustError::ShapeMismatch {
+            op: "parity::d_norm_axis_p2",
+            expected: (1, checked_prod(&out_shape)?),
+            got: (1, gout.numel()),
+        });
+    }
+    let axis_len = t.shape[axis];
+    let mut strides = vec![0usize; t.ndim()];
+    let mut acc = 1usize;
+    for d in (0..t.ndim()).rev()
+    {
+        strides[d] = acc;
+        acc = acc
+            .checked_mul(t.shape[d])
+            .ok_or_else(|| SciRustError::InvalidConfig("shape overflow".into()))?;
+    }
+    let mut gx = vec![0.0f32; t.numel()];
+    let mut t_idx = vec![0usize; t.ndim()];
+    for i in 0..gout.numel()
+    {
+        let mut rem = i;
+        for k in (0..out_shape.len()).rev()
+        {
+            let pos = if k < axis { k } else { k + 1 };
+            let dim = out_shape[k];
+            t_idx[pos] = rem % dim;
+            rem /= dim;
+        }
+        debug_assert_eq!(rem, 0);
+        let mut sum = 0.0f32;
+        for j in 0..axis_len
+        {
+            t_idx[axis] = j;
+            let mut off = 0usize;
+            for (k, &idx) in t_idx.iter().enumerate()
+            {
+                off += idx * strides[k];
+            }
+            sum += t.data[off] * t.data[off];
+        }
+        let norm = sum.sqrt();
+        if norm == 0.0
+        {
+            continue;
+        }
+        let g = gout.data[i] / norm;
+        for j in 0..axis_len
+        {
+            t_idx[axis] = j;
+            let mut off = 0usize;
+            for (k, &idx) in t_idx.iter().enumerate()
+            {
+                off += idx * strides[k];
+            }
+            gx[off] = g * t.data[off];
+        }
+    }
+    Ok(TensorND::new(gx, t.shape.clone()))
+}
+
 // ------------------------------------------------------------------ //
 //  Dérivées élémentaires (utilisées par le harness pour gradcheck) //
 // ------------------------------------------------------------------ //

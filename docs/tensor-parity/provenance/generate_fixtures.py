@@ -3,7 +3,7 @@
 baseline (2.13.0). OFFLINE tool: not run in CI. Output fixtures are data only.
 
 Usage:
-    python3 generate_fixtures.py [--torch-bin PATH] [--families elementwise,reductions,normalization,shape,linear,loss,norm_affine]
+    python3 generate_fixtures.py [--torch-bin PATH] [--families elementwise,reductions,normalization,shape,linear,loss,norm_affine,reduction_extra]
 
 Provenance rules (LICENSING_AND_PROVENANCE.md):
   - executes the pinned baseline (`torch.__version__` must be 2.13.0),
@@ -167,6 +167,41 @@ def gen_normalization(gen, family_dir: Path) -> None:
             else (lambda x: torch.nn.functional.log_softmax(x, dim=-1))
         cases = [build_case(gen, op, "unary", s, DEFAULT_DOMAIN, fn=fn) for s in SHAPES]
         write(op, family_dir, cases, note="dim=-1 (dernière dimension)")
+
+
+def gen_reduction_extra(gen, family_dir: Path) -> None:
+    """max (valeurs + indices) et norm p=2.
+
+    IMPORTANT : étape DERNIÈRE de la séquence de génération (positionnelle,
+    voir gen_norm_affine).
+    """
+    cases = []
+    for axis in REDUCTION_AXES:
+        for s in SHAPES:
+            x = seed_tensor(gen, s, -3.0, 3.0).requires_grad_(True)
+            vals, idx = torch.max(x, dim=axis)
+            out = list(vals.shape)
+            gout = seed_tensor(gen, out, -1.0, 1.0)
+            gx = grad_of(vals, x, gout)
+            cases.append({"kind": "reduction", "shape": list(s), "axis": axis,
+                          "out_shape": list(out), "x": flat(x.detach()),
+                          "y": flat(vals.detach()),
+                          "indices": [int(v) for v in idx.flatten().tolist()],
+                          "gout": flat(gout), "gx": flat(gx)})
+    write("max", family_dir, cases, note="torch.max(x, dim) values+indices, premier max")
+    cases = []
+    for axis in REDUCTION_AXES:
+        for s in SHAPES:
+            x = seed_tensor(gen, s, -3.0, 3.0).requires_grad_(True)
+            y = torch.norm(x, p=2, dim=axis)
+            out = list(y.shape)
+            gout = seed_tensor(gen, out, -1.0, 1.0)
+            gx = grad_of(y, x, gout)
+            cases.append({"kind": "reduction", "shape": list(s), "axis": axis,
+                          "out_shape": list(out), "x": flat(x.detach()),
+                          "y": flat(y.detach()), "gout": flat(gout),
+                          "gx": flat(gx)})
+    write("norm", family_dir, cases, note="torch.norm p=2 (frob), dim=axis")
 
 
 def gen_norm_affine(gen, family_dir: Path) -> None:
@@ -360,7 +395,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--torch-bin", default=None, help="path to the baseline interpreter (informational)")
     ap.add_argument("--families",
-                    default="elementwise,reductions,normalization,shape,linear,loss,norm_affine")
+                    default="elementwise,reductions,normalization,shape,linear,loss,norm_affine,reduction_extra")
     args = ap.parse_args()
     import_torch(args.torch_bin)
 
@@ -398,16 +433,20 @@ def main() -> int:
             gen_loss(gen, fam_dir)
         elif fam == "norm_affine":
             gen_norm_affine(gen, OUT / "normalization")
+        elif fam == "reduction_extra":
+            gen_reduction_extra(gen, OUT / "reductions")
         else:
             raise SystemExit(f"unknown family {fam}")
-        for p in sorted(fam_dir.glob("*.json")):
+        scan_dir = OUT / ("normalization" if fam == "norm_affine"
+                          else "reductions" if fam == "reduction_extra" else fam)
+        for p in sorted(scan_dir.glob("*.json")):
             if p.name in ("manifest.json",):
                 continue
             opname = p.stem
             if opname not in allowed:
                 print(f"WARN: {opname} not in registry; skipping hash entry")
                 continue
-            files[f"{fam}/{p.name}"] = hashlib.sha256(p.read_bytes()).hexdigest()
+            files[str(p.relative_to(OUT))] = hashlib.sha256(p.read_bytes()).hexdigest()
     manifest(files)
     return 0
 
