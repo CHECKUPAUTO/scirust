@@ -1,9 +1,9 @@
 //! Deterministic kernel layer for Elastic Latent KV.
 //!
-//! The scalar and block-4 stable kernels preserve the exact scalar accumulation
-//! order. The optional portable-SIMD backend is deterministic for a fixed target
-//! but is validated against the scalar oracle with a numerical tolerance because
-//! horizontal SIMD reduction changes floating-point association.
+//! Explicit index loops define the scalar floating-point association and are
+//! intentionally retained as the differential oracle for optimized backends.
+
+#![allow(clippy::needless_range_loop)]
 
 /// Compute backend used by the latent kernel dispatcher.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,13 +24,11 @@ pub struct LatentKernelDispatch {
 }
 
 impl LatentKernelDispatch {
-    /// Creates a dispatcher for the chosen kernel.
     #[must_use]
     pub const fn new(kind: LatentKernelKind) -> Self {
         Self { kind }
     }
 
-    /// Returns the selected kernel.
     #[must_use]
     pub const fn kind(self) -> LatentKernelKind {
         self.kind
@@ -49,7 +47,36 @@ impl LatentKernelDispatch {
         }
     }
 
-    /// Computes a dot product against one strided matrix column without scratch.
+    /// Computes a strided matrix-column dot product starting from `initial`.
+    #[must_use]
+    pub fn dot_strided_with_initial(
+        self,
+        matrix: &[f32],
+        rows: usize,
+        columns: usize,
+        column: usize,
+        vector: &[f32],
+        initial: f32,
+    ) -> f32 {
+        assert_eq!(matrix.len(), rows.saturating_mul(columns));
+        assert_eq!(vector.len(), rows);
+        assert!(column < columns);
+        match self.kind
+        {
+            LatentKernelKind::Scalar => {
+                scalar_dot_strided(matrix, rows, columns, column, vector, initial)
+            }
+            LatentKernelKind::Block4 => {
+                block4_dot_strided(matrix, rows, columns, column, vector, initial)
+            }
+            #[cfg(feature = "portable-simd")]
+            LatentKernelKind::PortableSimd => {
+                block4_dot_strided(matrix, rows, columns, column, vector, initial)
+            }
+        }
+    }
+
+    /// Computes a strided matrix-column dot product from zero.
     #[must_use]
     pub fn dot_strided(
         self,
@@ -59,21 +86,7 @@ impl LatentKernelDispatch {
         column: usize,
         vector: &[f32],
     ) -> f32 {
-        assert_eq!(matrix.len(), rows.saturating_mul(columns));
-        assert_eq!(vector.len(), rows);
-        assert!(column < columns);
-        match self.kind
-        {
-            LatentKernelKind::Scalar => scalar_dot_strided(matrix, rows, columns, column, vector),
-            LatentKernelKind::Block4 => block4_dot_strided(matrix, rows, columns, column, vector),
-            #[cfg(feature = "portable-simd")]
-            LatentKernelKind::PortableSimd => {
-                // Strided columns cannot be consumed directly by the existing
-                // contiguous SIMD primitive without allocating/gathering. Keep
-                // the allocation-free scalar-order path for this operation.
-                block4_dot_strided(matrix, rows, columns, column, vector)
-            }
-        }
+        self.dot_strided_with_initial(matrix, rows, columns, column, vector, 0.0)
     }
 
     /// Adds `weight * source` into `output` without allocation.
@@ -85,8 +98,6 @@ impl LatentKernelDispatch {
             LatentKernelKind::Block4 => block4_weighted_accumulate(output, source, weight),
             #[cfg(feature = "portable-simd")]
             LatentKernelKind::PortableSimd => {
-                // Preserve exact scalar association for accumulation into an
-                // existing output buffer. SIMD is used by contiguous dot paths.
                 block4_weighted_accumulate(output, source, weight);
             }
         }
@@ -130,8 +141,9 @@ fn scalar_dot_strided(
     columns: usize,
     column: usize,
     vector: &[f32],
+    initial: f32,
 ) -> f32 {
-    let mut sum = 0.0_f32;
+    let mut sum = initial;
     for row in 0..rows
     {
         sum += matrix[row * columns + column] * vector[row];
@@ -146,8 +158,9 @@ fn block4_dot_strided(
     columns: usize,
     column: usize,
     vector: &[f32],
+    initial: f32,
 ) -> f32 {
-    let mut sum = 0.0_f32;
+    let mut sum = initial;
     let mut row = 0;
     while row + 4 <= rows
     {
@@ -217,7 +230,7 @@ mod tests {
     }
 
     #[test]
-    fn block4_strided_dot_is_bit_identical_to_scalar() {
+    fn block4_strided_dot_preserves_initial_accumulator_order() {
         let rows = 17;
         let columns = 5;
         let matrix: Vec<f32> = (0..rows * columns)
@@ -227,9 +240,9 @@ mod tests {
         for column in 0..columns
         {
             let scalar = LatentKernelDispatch::new(LatentKernelKind::Scalar)
-                .dot_strided(&matrix, rows, columns, column, &vector);
+                .dot_strided_with_initial(&matrix, rows, columns, column, &vector, 0.17);
             let block = LatentKernelDispatch::new(LatentKernelKind::Block4)
-                .dot_strided(&matrix, rows, columns, column, &vector);
+                .dot_strided_with_initial(&matrix, rows, columns, column, &vector, 0.17);
             assert_eq!(scalar.to_bits(), block.to_bits());
         }
     }
