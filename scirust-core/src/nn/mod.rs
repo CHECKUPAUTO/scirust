@@ -1,6 +1,7 @@
 // scirust-core/src/nn/mod.rs
 
 pub mod activation;
+pub mod adaptive_latent_basis;
 pub mod adaptive_latent_kv;
 pub mod adaptive_latent_kv_backend;
 pub mod audio;
