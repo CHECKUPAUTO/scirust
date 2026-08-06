@@ -3,8 +3,8 @@
 use crate::nn::kv_backend::AttentionBackend;
 use crate::nn::latent_kv_cache::LatentStorageFormat;
 use crate::nn::residual_latent_kv_cache::{
-    ResidualLatentAttentionScratch, ResidualLatentCacheError,
-    ResidualQuantizedLatentKvCache, SparseResidualConfig,
+    ResidualLatentAttentionScratch, ResidualLatentCacheError, ResidualQuantizedLatentKvCache,
+    SparseResidualConfig,
 };
 use std::cell::RefCell;
 
@@ -60,8 +60,7 @@ impl ResidualLatentQuantizedBackend {
         residual_slots_per_token: usize,
         residual_format: LatentStorageFormat,
     ) -> Result<Self, ResidualLatentCacheError> {
-        let residual =
-            SparseResidualConfig::new(residual_slots_per_token, residual_format);
+        let residual = SparseResidualConfig::new(residual_slots_per_token, residual_format);
         Self::new(
             capacity_tokens,
             dimension,
@@ -122,7 +121,8 @@ mod tests {
 
     fn identity_prefix(dimension: usize, rank: usize) -> Vec<f32> {
         let mut basis = vec![0.0; dimension * rank];
-        for diagonal in 0..rank {
+        for diagonal in 0..rank
+        {
             basis[diagonal * rank + diagonal] = 1.0;
         }
         basis
@@ -135,7 +135,8 @@ mod tests {
 
     fn assert_close(left: &[f32], right: &[f32], tolerance: f32) {
         assert_eq!(left.len(), right.len());
-        for (index, (left_value, right_value)) in left.iter().zip(right).enumerate() {
+        for (index, (left_value, right_value)) in left.iter().zip(right).enumerate()
+        {
             let error = (left_value - right_value).abs();
             assert!(
                 error <= tolerance,
@@ -169,7 +170,8 @@ mod tests {
             })
             .collect();
 
-        for step in 0..8 {
+        for step in 0..8
+        {
             let token: Vec<f32> = (0..d_model)
                 .map(|index| ((step * d_model + index) as f32) * 0.013 - 0.4)
                 .collect();
