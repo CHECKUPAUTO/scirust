@@ -1,0 +1,62 @@
+name: PR 940 one-shot repair
+
+on:
+  push:
+    branches:
+      - feat/agent-communication-protocol
+    paths:
+      - .github/workflows/pr940-repair.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out the PR branch
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: feat/agent-communication-protocol
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Install pinned nightly
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+
+      - name: Synchronize, repair and validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch --no-tags origin master
+          git merge --no-edit origin/master
+
+          cargo +nightly-2026-07-02 fmt --all
+
+          # Running Cargo without --locked updates only the workspace lock entry
+          # required by the newly added path crate; its registry dependencies are
+          # already present in the repository lockfile.
+          cargo +nightly-2026-07-02 check -p scirust-agent-protocol
+          cargo +nightly-2026-07-02 test -p scirust-agent-protocol --all-targets
+          cargo +nightly-2026-07-02 test -p scirust-sciagent --all-targets
+          cargo +nightly-2026-07-02 clippy -p scirust-agent-protocol --all-targets -- -D warnings
+          cargo +nightly-2026-07-02 clippy -p scirust-sciagent --all-targets -- -D warnings
+
+          rm -f .github/workflows/pr940-repair.yml
+          git add -A
+          git diff --cached --check
+
+          if git diff --cached --quiet; then
+            echo "No repair changes were produced" >&2
+            exit 1
+          fi
+
+          git commit -m "fix(sciagent): synchronize protocol crate and lockfile"
+          git push origin HEAD:feat/agent-communication-protocol
