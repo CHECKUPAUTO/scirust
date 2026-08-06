@@ -47,7 +47,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "scenario,tokens,dimension,rank,format,dense_bytes,used_bytes,allocated_bytes,compression_ratio,max_absolute_error,quality_guard_met,output_fingerprint"
     );
-    for scenario in scenarios {
+    for scenario in scenarios
+    {
         run_scenario(scenario)?;
     }
     Ok(())
@@ -72,7 +73,8 @@ fn run_scenario(scenario: Scenario) -> Result<(), Box<dyn std::error::Error>> {
         basis.clone(),
         basis,
     )?;
-    for token in 0..tokens {
+    for token in 0..tokens
+    {
         let offset = token * dimension;
         cache.append(
             &keys[offset..offset + dimension],
@@ -108,7 +110,8 @@ fn run_scenario(scenario: Scenario) -> Result<(), Box<dyn std::error::Error>> {
 
 fn identity_prefix(dimension: usize, rank: usize) -> Vec<f32> {
     let mut basis = vec![0.0; dimension * rank];
-    for diagonal in 0..rank {
+    for diagonal in 0..rank
+    {
         basis[diagonal * rank + diagonal] = 1.0;
     }
     basis
@@ -116,8 +119,10 @@ fn identity_prefix(dimension: usize, rank: usize) -> Vec<f32> {
 
 fn generated_matrix(rows: usize, columns: usize, seed: u64) -> Vec<f32> {
     let mut matrix = Vec::with_capacity(rows * columns);
-    for row in 0..rows {
-        for column in 0..columns {
+    for row in 0..rows
+    {
+        for column in 0..columns
+        {
             matrix.push(sample(seed, row * columns + column) * coordinate_scale(column));
         }
     }
@@ -148,14 +153,16 @@ fn fingerprint(scenario: Scenario, output: &[f32]) -> u64 {
     hash_bytes(&mut state, scenario.name.as_bytes());
     hash_bytes(&mut state, &(scenario.rank as u64).to_le_bytes());
     hash_bytes(&mut state, scenario.format.label().as_bytes());
-    for value in output {
+    for value in output
+    {
         hash_bytes(&mut state, &value.to_bits().to_le_bytes());
     }
     state
 }
 
 fn hash_bytes(state: &mut u64, bytes: &[u8]) {
-    for byte in bytes {
+    for byte in bytes
+    {
         *state ^= u64::from(*byte);
         *state = state.wrapping_mul(FNV_PRIME);
     }
