@@ -76,7 +76,8 @@ pub enum ResidualLatentCacheError {
 
 impl fmt::Display for ResidualLatentCacheError {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::Latent(error) => write!(output, "{error}"),
             Self::ResidualSlotsTooLarge {
                 name,
@@ -198,22 +199,14 @@ impl ResidualQuantizedLatentKvCache {
         require_finite("key basis", &key_basis)?;
         require_finite("value basis", &value_basis)?;
 
-        let key_payload = vec![
-            0_u8;
-            checked_product(capacity_tokens, row_bytes(key_format, key_rank)?)?
-        ];
-        let value_payload = vec![
-            0_u8;
-            checked_product(capacity_tokens, row_bytes(value_format, value_rank)?)?
-        ];
-        let key_residual_indices = vec![
-            EMPTY_INDEX;
-            checked_product(capacity_tokens, key_residual.slots_per_token)?
-        ];
-        let value_residual_indices = vec![
-            EMPTY_INDEX;
-            checked_product(capacity_tokens, value_residual.slots_per_token)?
-        ];
+        let key_payload =
+            vec![0_u8; checked_product(capacity_tokens, row_bytes(key_format, key_rank)?)?];
+        let value_payload =
+            vec![0_u8; checked_product(capacity_tokens, row_bytes(value_format, value_rank)?)?];
+        let key_residual_indices =
+            vec![EMPTY_INDEX; checked_product(capacity_tokens, key_residual.slots_per_token)?];
+        let value_residual_indices =
+            vec![EMPTY_INDEX; checked_product(capacity_tokens, value_residual.slots_per_token)?];
         let key_residual_payload = vec![
             0_u8;
             checked_product(
@@ -369,10 +362,7 @@ impl ResidualQuantizedLatentKvCache {
         let residual_slots = self
             .len
             .saturating_mul(self.key_residual.slots_per_token)
-            .saturating_add(
-                self.len
-                    .saturating_mul(self.value_residual.slots_per_token),
-            );
+            .saturating_add(self.len.saturating_mul(self.value_residual.slots_per_token));
         let residual_indices = residual_slots.saturating_mul(core::mem::size_of::<u16>());
         let residual_payload = self
             .len
@@ -433,7 +423,8 @@ impl ResidualQuantizedLatentKvCache {
             .saturating_add(self.key_residual_values.capacity())
             .saturating_add(self.value_residual_values.capacity())
             .saturating_mul(core::mem::size_of::<f32>());
-        let selection_capacity = self.selected_coordinates.capacity() * core::mem::size_of::<bool>();
+        let selection_capacity =
+            self.selected_coordinates.capacity() * core::mem::size_of::<bool>();
 
         byte_capacity
             .saturating_add(index_capacity)
@@ -442,16 +433,13 @@ impl ResidualQuantizedLatentKvCache {
     }
 
     /// Projects and appends one dense key/value pair without growing storage.
-    pub fn append(
-        &mut self,
-        key: &[f32],
-        value: &[f32],
-    ) -> Result<(), ResidualLatentCacheError> {
+    pub fn append(&mut self, key: &[f32], value: &[f32]) -> Result<(), ResidualLatentCacheError> {
         require_length("key", key.len(), self.dimension)?;
         require_length("value", value.len(), self.dimension)?;
         require_finite("key", key)?;
         require_finite("value", value)?;
-        if self.len == self.capacity_tokens {
+        if self.len == self.capacity_tokens
+        {
             return Err(LatentCacheError::CapacityExceeded {
                 capacity: self.capacity_tokens,
             }
@@ -531,7 +519,8 @@ impl ResidualQuantizedLatentKvCache {
         output: &mut [f32],
         scratch: &mut ResidualLatentAttentionScratch,
     ) -> Result<(), ResidualLatentCacheError> {
-        if self.is_empty() {
+        if self.is_empty()
+        {
             return Err(LatentCacheError::EmptyCache.into());
         }
         require_length("query", query.len(), self.dimension)?;
@@ -550,7 +539,8 @@ impl ResidualQuantizedLatentKvCache {
         let attention_scale = 1.0 / (self.dimension as f32).sqrt();
         let query_latent = &scratch.query_latent[..self.key_rank];
         let scores = &mut scratch.scores[..self.len];
-        for (row, score) in scores.iter_mut().enumerate() {
+        for (row, score) in scores.iter_mut().enumerate()
+        {
             let latent_score = row_dot(
                 self.key_format,
                 self.key_rank,
@@ -574,7 +564,8 @@ impl ResidualQuantizedLatentKvCache {
         let latent_value = &mut scratch.value_latent[..self.value_rank];
         latent_value.fill(0.0);
         let denominator: f32 = scores.iter().copied().sum();
-        for (row, numerator) in scores.iter().copied().enumerate() {
+        for (row, numerator) in scores.iter().copied().enumerate()
+        {
             accumulate_row(
                 self.value_format,
                 self.value_rank,
@@ -592,7 +583,8 @@ impl ResidualQuantizedLatentKvCache {
             latent_value,
             output,
         );
-        for (row, numerator) in scores.iter().copied().enumerate() {
+        for (row, numerator) in scores.iter().copied().enumerate()
+        {
             add_sparse_row(
                 self.value_residual,
                 row,
@@ -613,7 +605,8 @@ fn residual_indices_for(
     resident_tokens: usize,
     token: usize,
 ) -> Option<&[u16]> {
-    if token >= resident_tokens {
+    if token >= resident_tokens
+    {
         return None;
     }
     let start = token * slots_per_token;
@@ -621,7 +614,8 @@ fn residual_indices_for(
 }
 
 fn non_zero(field: &'static str, value: usize) -> Result<(), ResidualLatentCacheError> {
-    if value == 0 {
+    if value == 0
+    {
         return Err(LatentCacheError::ZeroDimension { field }.into());
     }
     Ok(())
@@ -632,7 +626,8 @@ fn require_rank(
     rank: usize,
     dimension: usize,
 ) -> Result<(), ResidualLatentCacheError> {
-    if rank > dimension {
+    if rank > dimension
+    {
         return Err(LatentCacheError::RankTooLarge {
             name,
             rank,
@@ -644,7 +639,8 @@ fn require_rank(
 }
 
 fn require_dimension(dimension: usize) -> Result<(), ResidualLatentCacheError> {
-    if dimension > MAXIMUM_DIMENSION {
+    if dimension > MAXIMUM_DIMENSION
+    {
         return Err(ResidualLatentCacheError::DimensionTooLarge {
             dimension,
             maximum: MAXIMUM_DIMENSION,
@@ -658,7 +654,8 @@ fn require_slots(
     slots: usize,
     dimension: usize,
 ) -> Result<(), ResidualLatentCacheError> {
-    if slots > dimension {
+    if slots > dimension
+    {
         return Err(ResidualLatentCacheError::ResidualSlotsTooLarge {
             name,
             slots,
@@ -673,7 +670,8 @@ fn require_length(
     actual: usize,
     expected: usize,
 ) -> Result<(), ResidualLatentCacheError> {
-    if actual != expected {
+    if actual != expected
+    {
         return Err(LatentCacheError::Length {
             name,
             expected,
@@ -684,11 +682,9 @@ fn require_length(
     Ok(())
 }
 
-fn require_finite(
-    name: &'static str,
-    values: &[f32],
-) -> Result<(), ResidualLatentCacheError> {
-    if let Some(index) = values.iter().position(|value| !value.is_finite()) {
+fn require_finite(name: &'static str, values: &[f32]) -> Result<(), ResidualLatentCacheError> {
+    if let Some(index) = values.iter().position(|value| !value.is_finite())
+    {
         return Err(LatentCacheError::NonFinite { name, index }.into());
     }
     Ok(())
@@ -699,7 +695,8 @@ fn require_scratch(
     available: usize,
     required: usize,
 ) -> Result<(), ResidualLatentCacheError> {
-    if available < required {
+    if available < required
+    {
         return Err(LatentCacheError::ScratchTooSmall {
             name,
             required,
@@ -710,34 +707,29 @@ fn require_scratch(
     Ok(())
 }
 
-fn checked_product(
-    left: usize,
-    right: usize,
-) -> Result<usize, ResidualLatentCacheError> {
+fn checked_product(left: usize, right: usize) -> Result<usize, ResidualLatentCacheError> {
     left.checked_mul(right)
         .ok_or_else(|| LatentCacheError::Overflow.into())
 }
 
-fn scales_for(
-    format: LatentStorageFormat,
-    columns: usize,
-    capacity: usize,
-) -> Vec<f32> {
-    if columns == 0 || format == LatentStorageFormat::F32 {
+fn scales_for(format: LatentStorageFormat, columns: usize, capacity: usize) -> Vec<f32> {
+    if columns == 0 || format == LatentStorageFormat::F32
+    {
         Vec::new()
-    } else {
+    }
+    else
+    {
         vec![1.0; capacity]
     }
 }
 
-const fn scale_count(
-    format: LatentStorageFormat,
-    columns: usize,
-    rows: usize,
-) -> usize {
-    if columns == 0 || matches!(format, LatentStorageFormat::F32) {
+const fn scale_count(format: LatentStorageFormat, columns: usize, rows: usize) -> usize {
+    if columns == 0 || matches!(format, LatentStorageFormat::F32)
+    {
         0
-    } else {
+    }
+    else
+    {
         rows
     }
 }
@@ -746,7 +738,8 @@ fn row_bytes(
     format: LatentStorageFormat,
     columns: usize,
 ) -> Result<usize, ResidualLatentCacheError> {
-    match format {
+    match format
+    {
         LatentStorageFormat::F32 => checked_product(columns, core::mem::size_of::<f32>()),
         LatentStorageFormat::Int8 => Ok(columns),
         LatentStorageFormat::Int4 => Ok(columns.div_ceil(2)),
@@ -754,7 +747,8 @@ fn row_bytes(
 }
 
 const fn row_bytes_unchecked(format: LatentStorageFormat, columns: usize) -> usize {
-    match format {
+    match format
+    {
         LatentStorageFormat::F32 => columns * core::mem::size_of::<f32>(),
         LatentStorageFormat::Int8 => columns,
         LatentStorageFormat::Int4 => columns.div_ceil(2),
@@ -769,25 +763,23 @@ fn project_transpose(
     output: &mut [f32],
 ) {
     output.fill(0.0);
-    for (row, scalar) in vector.iter().copied().enumerate().take(rows) {
+    for (row, scalar) in vector.iter().copied().enumerate().take(rows)
+    {
         let offset = row * columns;
-        for column in 0..columns {
+        for column in 0..columns
+        {
             output[column] += basis[offset + column] * scalar;
         }
     }
 }
 
-fn up_project(
-    basis: &[f32],
-    rows: usize,
-    columns: usize,
-    latent: &[f32],
-    output: &mut [f32],
-) {
-    for (row, output_scalar) in output.iter_mut().enumerate().take(rows) {
+fn up_project(basis: &[f32], rows: usize, columns: usize, latent: &[f32], output: &mut [f32]) {
+    for (row, output_scalar) in output.iter_mut().enumerate().take(rows)
+    {
         let offset = row * columns;
         let mut sum = 0.0_f32;
-        for column in 0..columns {
+        for column in 0..columns
+        {
             sum += basis[offset + column] * latent[column];
         }
         *output_scalar = sum;
@@ -810,7 +802,8 @@ fn select_and_encode_residuals(
     payload: &mut [u8],
     scales: &mut [f32],
 ) {
-    if config.slots_per_token == 0 {
+    if config.slots_per_token == 0
+    {
         return;
     }
 
@@ -821,28 +814,34 @@ fn select_and_encode_residuals(
     let row_indices = &mut indices[start..start + config.slots_per_token];
     row_indices.fill(EMPTY_INDEX);
 
-    for slot in 0..config.slots_per_token {
+    for slot in 0..config.slots_per_token
+    {
         let mut best_coordinate = None;
         let mut best_magnitude = 0.0_f32;
         let mut best_value = 0.0_f32;
-        for coordinate in 0..dimension {
-            if selected[coordinate] {
+        for coordinate in 0..dimension
+        {
+            if selected[coordinate]
+            {
                 continue;
             }
             let value = dense[coordinate] - reconstruction[coordinate];
             let magnitude = value.abs();
-            if magnitude > best_magnitude {
+            if magnitude > best_magnitude
+            {
                 best_coordinate = Some(coordinate);
                 best_magnitude = magnitude;
                 best_value = value;
             }
         }
-        let Some(coordinate) = best_coordinate else {
+        let Some(coordinate) = best_coordinate
+        else
+        {
             break;
         };
         selected[coordinate] = true;
-        row_indices[slot] = u16::try_from(coordinate)
-            .expect("validated residual coordinate must fit inside u16");
+        row_indices[slot] =
+            u16::try_from(coordinate).expect("validated residual coordinate must fit inside u16");
         residual_values[slot] = best_value;
     }
 
@@ -864,55 +863,67 @@ fn encode_row(
     payload: &mut [u8],
     scales: &mut [f32],
 ) {
-    if columns == 0 {
+    if columns == 0
+    {
         return;
     }
     let bytes_per_row = row_bytes_unchecked(format, columns);
     let offset = row * bytes_per_row;
     let target = &mut payload[offset..offset + bytes_per_row];
-    match format {
-        LatentStorageFormat::F32 => {
-            for (value, bytes) in source.iter().zip(target.as_chunks_mut::<4>().0) {
+    match format
+    {
+        LatentStorageFormat::F32 =>
+        {
+            for (value, bytes) in source.iter().zip(target.as_chunks_mut::<4>().0)
+            {
                 bytes.copy_from_slice(&value.to_le_bytes());
             }
-        }
-        LatentStorageFormat::Int8 | LatentStorageFormat::Int4 => {
+        },
+        LatentStorageFormat::Int8 | LatentStorageFormat::Int4 =>
+        {
             target.fill(0);
             let limit = quantization_limit(format);
-            let maximum = source
-                .iter()
-                .copied()
-                .map(f32::abs)
-                .fold(0.0_f32, f32::max);
-            let scale = if maximum == 0.0 {
+            let maximum = source.iter().copied().map(f32::abs).fold(0.0_f32, f32::max);
+            let scale = if maximum == 0.0
+            {
                 1.0
-            } else {
+            }
+            else
+            {
                 maximum / f32::from(limit)
             };
             scales[row] = scale;
-            for (column, value) in source.iter().copied().enumerate() {
+            for (column, value) in source.iter().copied().enumerate()
+            {
                 let code = quantize(value, scale, limit);
-                match format {
-                    LatentStorageFormat::Int8 => {
+                match format
+                {
+                    LatentStorageFormat::Int8 =>
+                    {
                         target[column] = code.to_ne_bytes()[0];
-                    }
-                    LatentStorageFormat::Int4 => {
+                    },
+                    LatentStorageFormat::Int4 =>
+                    {
                         let nibble = code.to_ne_bytes()[0] & 0x0f;
-                        if column.is_multiple_of(2) {
+                        if column.is_multiple_of(2)
+                        {
                             target[column / 2] = nibble;
-                        } else {
+                        }
+                        else
+                        {
                             target[column / 2] |= nibble << 4;
                         }
-                    }
+                    },
                     LatentStorageFormat::F32 => unreachable!(),
                 }
             }
-        }
+        },
     }
 }
 
 const fn quantization_limit(format: LatentStorageFormat) -> i8 {
-    match format {
+    match format
+    {
         LatentStorageFormat::F32 => 0,
         LatentStorageFormat::Int8 => 127,
         LatentStorageFormat::Int4 => 7,
@@ -934,7 +945,8 @@ fn row_dot(
     vector: &[f32],
 ) -> f32 {
     let mut sum = 0.0_f32;
-    for (column, vector_scalar) in vector.iter().copied().enumerate().take(columns) {
+    for (column, vector_scalar) in vector.iter().copied().enumerate().take(columns)
+    {
         sum += vector_scalar * coefficient(format, columns, row, column, payload, scales);
     }
     sum
@@ -949,7 +961,8 @@ fn accumulate_row(
     weight: f32,
     output: &mut [f32],
 ) {
-    for (column, output_scalar) in output.iter_mut().enumerate().take(columns) {
+    for (column, output_scalar) in output.iter_mut().enumerate().take(columns)
+    {
         *output_scalar += weight * coefficient(format, columns, row, column, payload, scales);
     }
 }
@@ -964,8 +977,10 @@ fn coefficient(
 ) -> f32 {
     let bytes_per_row = row_bytes_unchecked(format, columns);
     let offset = row * bytes_per_row;
-    match format {
-        LatentStorageFormat::F32 => {
+    match format
+    {
+        LatentStorageFormat::F32 =>
+        {
             let start = offset + column * 4;
             f32::from_le_bytes([
                 payload[start],
@@ -973,24 +988,32 @@ fn coefficient(
                 payload[start + 2],
                 payload[start + 3],
             ])
-        }
-        LatentStorageFormat::Int8 => {
+        },
+        LatentStorageFormat::Int8 =>
+        {
             f32::from(i8::from_ne_bytes([payload[offset + column]])) * scales[row]
-        }
-        LatentStorageFormat::Int4 => {
+        },
+        LatentStorageFormat::Int4 =>
+        {
             let packed = payload[offset + column / 2];
-            let nibble = if column.is_multiple_of(2) {
+            let nibble = if column.is_multiple_of(2)
+            {
                 packed & 0x0f
-            } else {
+            }
+            else
+            {
                 packed >> 4
             };
-            let signed = if nibble < 8 {
+            let signed = if nibble < 8
+            {
                 nibble as i8
-            } else {
+            }
+            else
+            {
                 (i16::from(nibble) - 16) as i8
             };
             f32::from(signed) * scales[row]
-        }
+        },
     }
 }
 
@@ -1004,9 +1027,11 @@ fn sparse_row_dot(
 ) -> f32 {
     let start = row * config.slots_per_token;
     let mut sum = 0.0_f32;
-    for slot in 0..config.slots_per_token {
+    for slot in 0..config.slots_per_token
+    {
         let index = indices[start + slot];
-        if index != EMPTY_INDEX {
+        if index != EMPTY_INDEX
+        {
             sum += dense[usize::from(index)]
                 * coefficient(
                     config.format,
@@ -1031,9 +1056,11 @@ fn add_sparse_row(
     output: &mut [f32],
 ) {
     let start = row * config.slots_per_token;
-    for slot in 0..config.slots_per_token {
+    for slot in 0..config.slots_per_token
+    {
         let index = indices[start + slot];
-        if index != EMPTY_INDEX {
+        if index != EMPTY_INDEX
+        {
             output[usize::from(index)] += weight
                 * coefficient(
                     config.format,
@@ -1049,12 +1076,15 @@ fn add_sparse_row(
 
 fn softmax_numerators_in_place(scores: &mut [f32]) {
     let mut maximum = scores[0];
-    for score in &scores[1..] {
-        if *score > maximum {
+    for score in &scores[1..]
+    {
+        if *score > maximum
+        {
             maximum = *score;
         }
     }
-    for score in scores {
+    for score in scores
+    {
         *score = (*score - maximum).exp();
     }
 }
@@ -1062,15 +1092,16 @@ fn softmax_numerators_in_place(scores: &mut [f32]) {
 #[cfg(test)]
 mod tests {
     use super::{
-        ResidualLatentAttentionScratch, ResidualLatentCacheError,
-        ResidualQuantizedLatentKvCache, SparseResidualConfig,
+        ResidualLatentAttentionScratch, ResidualLatentCacheError, ResidualQuantizedLatentKvCache,
+        SparseResidualConfig,
     };
     use crate::nn::latent_kv_cache::LatentStorageFormat;
     use crate::nn::paged_attention::contiguous_attention;
 
     fn identity_prefix(dimension: usize, rank: usize) -> Vec<f32> {
         let mut basis = vec![0.0; dimension * rank];
-        for diagonal in 0..rank {
+        for diagonal in 0..rank
+        {
             basis[diagonal * rank + diagonal] = 1.0;
         }
         basis
@@ -1110,8 +1141,10 @@ mod tests {
     fn structured_data(tokens: usize, dimension: usize) -> (Vec<f32>, Vec<f32>) {
         let mut keys = vec![0.0; tokens * dimension];
         let mut values = vec![0.0; tokens * dimension];
-        for token in 0..tokens {
-            for coordinate in 0..4 {
+        for token in 0..tokens
+        {
+            for coordinate in 0..4
+            {
                 keys[token * dimension + coordinate] =
                     ((token + 1) * (coordinate + 2)) as f32 * 0.03 - 0.2;
                 values[token * dimension + coordinate] =
@@ -1125,17 +1158,16 @@ mod tests {
         (keys, values)
     }
 
-    fn evaluate(
-        cache: &ResidualQuantizedLatentKvCache,
-        query: &[f32],
-    ) -> Vec<f32> {
+    fn evaluate(cache: &ResidualQuantizedLatentKvCache, query: &[f32]) -> Vec<f32> {
         let mut output = vec![0.0; cache.dimension()];
         let mut scratch = ResidualLatentAttentionScratch::new(
             cache.capacity(),
             cache.key_rank(),
             cache.value_rank(),
         );
-        cache.attention_into(query, &mut output, &mut scratch).unwrap();
+        cache
+            .attention_into(query, &mut output, &mut scratch)
+            .unwrap();
         output
     }
 
@@ -1153,7 +1185,8 @@ mod tests {
             3,
             LatentStorageFormat::F32,
         );
-        for token in 0..tokens {
+        for token in 0..tokens
+        {
             let start = token * dimension;
             cache
                 .append(
@@ -1188,7 +1221,8 @@ mod tests {
             2,
             LatentStorageFormat::F32,
         );
-        for token in 0..tokens {
+        for token in 0..tokens
+        {
             let start = token * dimension;
             let key = &keys[start..start + dimension];
             let value = &values[start..start + dimension];
@@ -1231,7 +1265,8 @@ mod tests {
             2,
             LatentStorageFormat::Int4,
         );
-        for token in 0..tokens {
+        for token in 0..tokens
+        {
             let start = token * dimension;
             let key = &keys[start..start + dimension];
             let value = &values[start..start + dimension];
@@ -1255,9 +1290,7 @@ mod tests {
             1,
             LatentStorageFormat::F32,
         );
-        cache
-            .append(&[0.0, 1.0, -1.0, 0.5], &[0.0; 4])
-            .unwrap();
+        cache.append(&[0.0, 1.0, -1.0, 0.5], &[0.0; 4]).unwrap();
         assert_eq!(cache.key_residual_indices_for(0), Some(&[1_u16][..]));
     }
 
@@ -1272,7 +1305,8 @@ mod tests {
             LatentStorageFormat::Int4,
         );
         let allocated = cache.allocated_bytes();
-        for token in 0..8 {
+        for token in 0..8
+        {
             let key = vec![token as f32 * 0.1; 8];
             let value = vec![token as f32 * -0.07; 8];
             cache.append(&key, &value).unwrap();
@@ -1336,7 +1370,8 @@ mod tests {
             2,
             LatentStorageFormat::Int4,
         );
-        for token in 0..tokens {
+        for token in 0..tokens
+        {
             let start = token * dimension;
             cache
                 .append(
@@ -1348,8 +1383,14 @@ mod tests {
         let first = evaluate(&cache, &query);
         let second = evaluate(&cache, &query);
         assert_eq!(
-            first.iter().map(|value| value.to_bits()).collect::<Vec<_>>(),
-            second.iter().map(|value| value.to_bits()).collect::<Vec<_>>()
+            first
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            second
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
         );
     }
 }
