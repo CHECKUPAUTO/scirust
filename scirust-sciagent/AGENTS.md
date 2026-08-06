@@ -140,10 +140,11 @@ println!("{}", tok.decode(&ids));
 ## 7. Reproduce / extend training
 
 ```bash
-# 1. Stage a corpus of .rs files, then tokenize into shards.
-./target/release/collect-data --input <dir> \
+# 1. Stage a corpus of .rs files, then tokenize into shards. Generated data
+#    defaults outside the checkout; an in-repository --output is rejected.
+./target/release/collect-data --input <external-corpus-dir> \
   --tokenizer scirust-sciagent/tokenizer/bpe.json \
-  --output shards/ --recursive --seq-len 256
+  --recursive --seq-len 256
 
 # 2. Train (gradients flow correctly; accumulation is exact).
 ./target/release/sciagent-train --model small --data-dir shards/ \

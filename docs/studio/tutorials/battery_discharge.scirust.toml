@@ -1,0 +1,108 @@
+# SciRust Studio tutorial scenario: a lithium-ion cell under constant current.
+#
+# Run it with:
+#
+#   scirust run docs/studio/tutorials/battery_discharge.scirust.toml
+#
+# A 2.5 A*h cell discharged at 5 A — a 2C rate — from full, into a room at
+# 25 C. The Thevenin equivalent circuit: an open-circuit source whose voltage
+# falls with the state of charge, a series resistance, one RC polarisation
+# branch, and a lumped thermal mass that heats on the cell's own losses.
+#
+# What is verified, and why three states rather than one:
+#
+#   * coulomb_counting — the state of charge under constant current is a
+#     straight line, soc0 - I*t/(capacity*3600), and the model states it in
+#     closed form. So this one is checked against the EXACT answer, to 1e-9,
+#     not against an asymptote. Over these 1000 seconds the cell gives up
+#     0.5556 of its charge, ending at 44.4%.
+#   * relaxes_to_closed_form_levels — the polarisation overpotential
+#     approaches I*R1 = 0.05 V and the temperature approaches its
+#     self-heating equilibrium of 301.90 K. Both are first-order, so both
+#     thresholds are DERIVED from the run's own length in time constants.
+#
+# The three fail independently, which is the point of checking all of them: a
+# wrong capacity moves the SoC line and leaves the voltage and temperature
+# alone, a wrong R1 moves the overpotential, and a wrong thermal resistance
+# moves only the temperature. A run that merely ends somewhere plausible
+# fails at least one of the three.
+#
+# ---------------------------------------------------------------------------
+# Two time constants, an order of magnitude apart
+# ---------------------------------------------------------------------------
+#
+# R1*C1 is 20 s; R_th*C_th is 200 s. The cell's *voltage* has forgotten the
+# start within a couple of minutes while its *temperature* is barely under
+# way, so the settling check compares against the residual of the SLOWER of
+# the two. Holding the run to the fast one would fail a perfectly correct
+# integration, which is exactly the mistake the derived-threshold approach
+# exists to prevent.
+#
+# The run is 1000 s: five thermal time constants, by which point the initial
+# condition's influence has decayed by a factor of about 148.
+#
+# ---------------------------------------------------------------------------
+# Capacity is in coulombs
+# ---------------------------------------------------------------------------
+#
+# 2.5 A*h is 9000 C. The scenario unit table holds only symbols whose SI
+# conversion factor is exactly 1 — an entry carrying a hidden rescale is the
+# kind of thing that produces an answer wrong by a factor of 3600 and no
+# error message — so the amp-hour is spelled out here rather than smuggled
+# into a unit symbol. The adapter divides by 3600 in the open.
+#
+# Try it: drop `current` to 1.25 A (a 0.5C rate). The losses fall with the
+# SQUARE of the current, so the temperature rise falls sixteenfold, from
+# 3.75 K to 0.23 K — which is the whole argument for derating a pack.
+
+schema_version = 1
+
+[experiment]
+name = "Lithium-ion cell at 2C"
+description = "A Thevenin equivalent-circuit cell with one RC polarisation branch and lumped self-heating, discharged at constant current."
+
+[capability]
+id = "sim.energy.battery_thevenin"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+# 2.5 A*h. See the note above on why this is written in coulombs.
+capacity = { value = 9000.0, unit = "C" }
+# Ohmic resistance: the instantaneous step when the load is applied.
+r0 = { value = 0.02, unit = "Ohm" }
+# The polarisation branch: 0.01 Ohm across 2000 F, so tau = 20 s.
+r1 = { value = 0.01, unit = "Ohm" }
+c1 = { value = 2000.0, unit = "F" }
+# 5 A out of a 2.5 A*h cell is a 2C discharge.
+current = { value = 5.0, unit = "A" }
+# A linear open-circuit curve between empty and full.
+ocv_min = { value = 3.0, unit = "V" }
+ocv_max = { value = 4.2, unit = "V" }
+# 5 K/W to ambient across a 40 J/K cell: tau_th = 200 s.
+r_th = { value = 5.0, unit = "K/W" }
+c_th = { value = 40.0, unit = "J/K" }
+# 25 C.
+t_ambient = { value = 298.15, unit = "K" }
+
+[initial_state]
+# Full, and at ambient — so the entire thermal transient is inside the run
+# and the derived threshold accounts for exactly that much of it.
+soc = [{ value = 1.0, unit = "1" }]
+temperature = [{ value = 298.15, unit = "K" }]
+
+[solver]
+id = "rk4"
+start = { value = 0.0, unit = "s" }
+# Five thermal time constants.
+end = { value = 1000.0, unit = "s" }
+# tau_rc/200, so the fast polarisation transient is resolved rather than
+# jumped over. The thermal state is oversampled by a factor of ten, which
+# costs nothing at this size.
+step = { value = 0.1, unit = "s" }
+
+[outputs]
+record = ["soc", "overpotential", "temperature", "terminal_voltage", "exact_soc"]

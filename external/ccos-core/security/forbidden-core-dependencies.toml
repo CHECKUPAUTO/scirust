@@ -1,0 +1,16 @@
+# forbidden-core-dependencies.toml — versioned allowlist for
+# scripts/check-no-research-components.sh, step 3 (source scan).
+#
+# Each non-comment line is a literal substring that, when found in a grep
+# match line, suppresses that match. Every entry MUST be justified.
+# Keep this list minimal. Bump SECURITY_SCHEMA when editing.
+#
+# SECURITY_SCHEMA = 1
+
+# src/license.rs, src/setup.rs and docs may mention the words "claim" or
+# "release" — those are the Core license verifier and setup module, not the
+# excluded Enterprise claim client / release executor. (No entry needed:
+# the scan patterns do not match them.)
+
+# No allowlisted entries at this time. Any future entry requires a comment
+# citing the approving decision of ZEKRITI Tarek.

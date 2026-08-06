@@ -108,7 +108,7 @@ fn numerical_rank(design: &Matrix, relative_tolerance: f64) -> Result<usize, Cau
 /// rank (via SVD, see [`numerical_rank`]) is below its column count under
 /// `relative_tolerance`; [`CausalError::SolverFailure`] if the underlying QR
 /// solve fails for any other reason.
-fn residualize(
+pub(crate) fn residualize(
     target: &[f64],
     z_columns: &[&[f64]],
     relative_tolerance: f64,

@@ -20,46 +20,152 @@ Columns, exactly as specified for this matrix:
 - **Oracle tested** — the underlying model has an analytic-solution or
   conservation-law test *in its own crate* (independent of Studio).
 - **CLI exposed** — reachable through `scirust catalog`/`scirust run`.
-- **Desktop exposed** — reachable from a desktop application. **Always
-  "No" at this stage** — no desktop shell exists yet (Phase 5+).
+- **Desktop exposed** — reachable from the desktop application. Since Phase
+  3A this is no longer uniformly "No"; the desktop dimensions are broken out
+  per capability in [the desktop table below](#desktop-exposure-phase-3a),
+  because "the application can list it" and "the application can chart it"
+  are different claims and collapsing them would hide which is true.
+
+Since Phase 2B, every capability in the table below is also reachable
+out-of-process through `scirust-studio-worker` (see
+`docs/studio/IPC_PROTOCOL.md`), and any run can be recorded immutably with
+`scirust run --store` (see `docs/studio/STORAGE_LAYOUT.md`). Neither adds a
+capability, so neither gets a column; what *does* differ per capability is
+mid-run cancellation and progress reporting, tabulated in
+`docs/studio/RUNTIME_CONTRACT.md` — `sim.chemistry.robertson` supports
+neither in-process, because its adaptive stiff solver exposes no per-step
+callback.
 
 ## `scirust-sim` — the 16 modules audited in `docs/studio/REPOSITORY_AUDIT.md`
 
 | Module | Catalogued | Descriptor | Adapter | Scenario tested | Oracle tested | CLI exposed | Desktop exposed |
 |---|---|---|---|---|---|---|---|
-| `mechanics` (spring-mass-damper) | Yes | Yes | Yes | Yes | Yes (energy conservation) | Yes | No |
-| `mechanics` (pendulum, projectile, double pendulum) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
-| `orbital` (two-body) | Yes | Yes | Yes | Yes | Yes (energy + angular momentum) | Yes | No |
-| `epidemiology` (SIR) | Yes | Yes | Yes | Yes | Yes (population conservation, final-size relation) | Yes | No |
-| `epidemiology` (SEIR) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
-| `ecology` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
-| `chemistry` (consecutive/reversible reactions) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
-| `chemistry` (Robertson, stiff) | Yes | Yes | Yes | Yes | Yes (mass conservation, published reference values) | Yes | No |
-| `thermal` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
-| `electrical` (RC, series RLC) | Yes | Yes (RLC only) | Yes (RLC only) | Yes (RLC only) | Yes (passivity, closed-form match) | Yes (RLC only) | No |
-| `electrical` (Van der Pol) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
-| `stochastic` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
-| `pharmacokinetics` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
-| `rigid_body` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
-| `battery` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
-| `hvac` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
-| `grid` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
-| `laser` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
-| `photodiode` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
-| `apd` | Yes | No | No | No | Yes, per `scirust-sim`'s own tests (not independently re-verified this pass) | No | No |
-| `envs` (CartPole, GridWorld — `Environment`, not `System`) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No |
+| `mechanics` (spring-mass-damper) | Yes | Yes | Yes | Yes | Yes (energy conservation) | Yes | See desktop table |
+| `mechanics` (pendulum) | Yes | Yes | Yes | Yes | Yes (energy conservation, small-angle period) | Yes | See desktop table |
+| `mechanics` (double pendulum) | Yes | Yes | Yes | Yes | Yes (energy conservation) | Yes | See desktop table |
+| `mechanics` (projectile) | Yes | Yes | Yes | Yes | Yes (exact decoupled decay, terminal velocity) | Yes | See desktop table |
+| `orbital` (two-body) | Yes | Yes | Yes | Yes | Yes (energy + angular momentum) | Yes | See desktop table |
+| `epidemiology` (SIR) | Yes | Yes | Yes | Yes | Yes (population conservation, final-size relation) | Yes | See desktop table |
+| `epidemiology` (SEIR) | Yes | Yes | Yes | Yes | Yes (population conservation, exposure leads infection) | Yes | See desktop table |
+| `ecology` (Lotka-Volterra, logistic growth) | Yes | Yes | Yes | Yes | Yes (exact first integral; closed-form solution) | Yes | See desktop table |
+| `chemistry` (consecutive/reversible reactions) | Yes | Yes | Yes | Yes | Yes (Bateman closed form; closed form + equilibrium constant) | Yes | See desktop table |
+| `chemistry` (Robertson, stiff) | Yes | Yes | Yes | Yes | Yes (mass conservation, published reference values) | Yes | See desktop table |
+| `thermal` (1-D heat rod) | Yes | Yes | Yes | Yes | Yes (slowest-mode decay rate) | Yes | See desktop table |
+| `electrical` (RC, series RLC) | Yes | Yes | Yes | Yes | Yes (closed form + time constant; passivity, closed-form match) | Yes | See desktop table |
+| `electrical` (Van der Pol) | Yes | Yes | Yes | Yes | Yes (stated energy rate integrated; limit cycle from two starts) | Yes | See desktop table |
+| `stochastic` (Ornstein-Uhlenbeck) | Yes | Yes | Yes | Yes | Yes (exact stationary moments) | Yes | See desktop table |
+| `stochastic` (GBM, M/M/1 queue) | Yes | Yes | Yes | Yes | Yes (log-normal moments; L, rho and Little's law) | Yes | See desktop table |
+| `pharmacokinetics` (oral one-compartment) | Yes | Yes | Yes | Yes | Yes (Bateman closed form) | Yes | See desktop table |
+| `pharmacokinetics` (IV bolus, two-compartment) | Yes | Yes | Yes | Yes | Yes (biexponential closed form, AUC = dose/k10) | Yes | See desktop table |
+| `rigid_body` | Yes | Yes | Yes | Yes | Yes (energy + angular momentum, intermediate-axis instability) | Yes | See desktop table |
+| `battery` | Yes | Yes | Yes | Yes | Yes (exact coulomb counting, closed-form relaxations) | Yes | See desktop table |
+| `hvac` | Yes | Yes | Yes | Yes | Yes (closed-form 2R2C equilibrium) | Yes | See desktop table |
+| `grid` | Yes | Yes | Yes | Yes | Yes (conserved transient energy, small-signal frequency) | Yes | See desktop table |
+| `laser` | Yes | Yes | Yes | Yes | Yes (threshold clamp, light-current law, relaxation frequency) | Yes | See desktop table |
+| `photodiode` | Yes | Yes | Yes | Yes | Yes (closed-form level and RC time constant) | Yes | See desktop table |
+| `apd` | Yes | Yes | Yes | Yes | Yes (McIntyre limits, SNR optimum) | Yes | See desktop table |
+| `envs` (CartPole, GridWorld — `Environment`, not `System`) | Yes | No | No | No | Yes, per `scirust-sim`'s own tests | No | No, **and deliberately so** — see ADR 0012 |
 
 "Yes, per `scirust-sim`'s own tests (not independently re-verified this
-pass)" means: the audit read the module's own doc comments and knows tests
-exist (per `cargo test -p scirust-sim` passing in CI), but this Studio pass
-did not open the source and independently confirm the oracle's correctness
-the way it did for the five adapted models. That distinction matters — do
-not read "Oracle tested: Yes" here as "Studio verified this," only as "the
-owning crate verifies this."
+pass)" — which no longer appears in the table above — meant: the audit read
+the module's own doc comments and knew tests existed, but the Studio pass had
+not opened the source and independently confirmed the oracle. Every row that
+carried that caveat has since been adapted, and its oracle is now named
+explicitly. The remaining "No" rows are model families *within* adapted
+modules, and they carry no such caveat because nothing is claimed about them
+beyond "their own crate tests them."
 
-**5 of 16 modules have a real Studio adapter.** The other 11 (plus 3 model
-families within already-partially-adapted modules) are real, tested code
-that Studio does not yet expose. Building their adapters is Phase 3 work.
+**Every `scirust-sim` model family that implements `System` now has a Studio
+adapter** — 16 of 16 modules, 28 capabilities.
+
+The one remaining entry, `envs`, implements `Environment` rather than
+`System`, and is not adapted **by decision** rather than by omission: it
+needs an agent the scenario schema cannot express, and what would be
+verifiable about it is the harness rather than the physics. ADR 0012 sets out
+the attempt and the reasoning. It is closed, not pending.
+
+## Desktop exposure (Phase 3A)
+
+The desktop application (`apps/scirust-studio`, see
+`docs/studio/DESKTOP_ARCHITECTURE.md`) reads the same registry the CLI does,
+so its coverage is exactly the adapter coverage above — nothing is
+hard-coded in the interface, and nothing appears there that is not real.
+
+Columns:
+
+- **CLI executable** — `scirust run` executes it in-process.
+- **Worker executable** — `scirust-studio-worker` executes it
+  out-of-process, which is the path the desktop uses.
+- **Desktop catalogue visible** — appears in the desktop's Catalogue view
+  with its parameters, initial state, outputs, checks and solvers.
+- **Desktop runnable** — can be started, watched and settled from the
+  desktop's Experiment view.
+- **Desktop chartable** — its stored result is plotted against the
+  coordinates the integrator produced (result schema v2, ADR 0006).
+- **Desktop help available** — the desktop's Help view documents the
+  workflow that reaches it, and its shipped tutorial opens from Home or
+  Catalogue.
+
+| Capability | CLI executable | Worker executable | Desktop catalogue visible | Desktop runnable | Desktop chartable | Desktop help available |
+|---|---|---|---|---|---|---|
+| `sim.mechanics.spring_mass_damper` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.orbital.two_body` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.epidemiology.sir` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.electrical.rlc` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.chemistry.robertson` | Yes | Yes | Yes | Yes (indeterminate progress) | Yes | Yes |
+| `sim.ecology.lotka_volterra` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.ecology.logistic_growth` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.mechanics.pendulum` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.mechanics.double_pendulum` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.stochastic.ornstein_uhlenbeck` | Yes | Yes | Yes | Yes (per realisation) | Yes | Yes |
+| `sim.thermal.heat_rod_1d` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.optoelectronics.photodiode` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.thermal.hvac_zone` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.mechanics.rigid_body` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.pharmacology.oral_one_compartment` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.energy.battery_thevenin` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.optoelectronics.semiconductor_laser` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.power.swing_equation` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.optoelectronics.avalanche_photodiode` | Yes | Yes | Yes | Yes | Yes (against gain, not time) | Yes |
+| `sim.epidemiology.seir` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.chemistry.consecutive_reactions` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.chemistry.reversible_reaction` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.electrical.rc` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.mechanics.projectile` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.electrical.van_der_pol` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.pharmacology.two_compartment_iv` | Yes | Yes | Yes | Yes | Yes | Yes |
+| `sim.stochastic.mm1_queue` | Yes | Yes | Yes | Yes | Yes (histograms, against replicate) | Yes |
+| `sim.stochastic.geometric_brownian_motion` | Yes | Yes | Yes | Yes | Yes (curves and a histogram) | Yes |
+| Every other `scirust-sim` model family | No | No | No | No | No | No |
+| Every other workspace crate | No | No | No | No | No | No |
+
+Three notes, because a table like this is easy to over-read:
+
+1. **"Desktop runnable (indeterminate progress)"** for Robertson is not a
+   caveat about correctness. Its adaptive Rosenbrock-W solver exposes no
+   per-step callback, so there is no genuine fraction to report; the interface
+   shows indeterminate activity rather than an invented percentage, and
+   cancellation works by terminating the worker process. Both paths are
+   reported to the user as *cancelled*, because that is what was asked for.
+2. **"Desktop chartable"** is a claim about *coordinates*, not pixels. A run
+   recorded before result schema v2 is still openable and still charted, but
+   against sample ordinals and labelled as such — the application will not
+   invent an axis for a result that does not carry one. See
+   `docs/studio/adr/0006-result-axis-coordinates.md`.
+3. **"Desktop help available"** covers the shipped preview features only. The
+   Help view says so in its own first line rather than implying it documents a
+   complete product.
+
+**Desktop-exposed: 19 capabilities across all 16 `scirust-sim` module
+families**, identical to adapter coverage — as it has been at every phase,
+because the desktop reads the registry rather than a list of its own.
+
+Phase 3B-1 added four of these (Lotka-Volterra, logistic growth, pendulum,
+double pendulum) and **changed nothing in the desktop application** — no
+change to the shell, the interface, the bridge or the chart. That was the
+claim this table made at the end of Phase 3A, and it held: the catalogue, the
+run view, the verification panel and the chart are all driven from the
+registry, so adapting a model is the whole of the work.
 
 ## The rest of the workspace
 
@@ -81,4 +187,267 @@ public API, per the audit's own rule, not this matrix.
   `sim.orbital.two_body`, `sim.electrical.rlc`, `sim.chemistry.robertson`.
 - Catalogued, no tested Studio adapter: the other 11 `scirust-sim` model
   families, plus every other workspace crate.
-- Desktop-exposed: **0**, by design — no desktop shell exists yet.
+- Desktop-exposed: **0**, by design — no desktop shell existed at Phase 2A.
+
+## Summary counts (Phase 3A)
+
+- Operational, and now reachable from a native desktop application: the same
+  **5**. The desktop added a window, not a capability.
+- Desktop-exposed: **5** — catalogue-visible, runnable, chartable and
+  documented, per the desktop table above.
+- Still catalogue-only: the other 11 `scirust-sim` model families and every
+  other workspace crate.
+
+The number that did not change is the point. Phase 3A built a shell, an
+interface and a bridge; it deliberately did not begin the remaining eleven
+adapters, because doing both at once is how an application ends up with a
+capability nobody tested.
+
+## Summary counts (Phase 3B-1)
+
+- Operational (descriptor + adapter + scenario-tested + CLI-exposed +
+  desktop-exposed): **9** — the original five plus
+  `sim.ecology.lotka_volterra`, `sim.ecology.logistic_growth`,
+  `sim.mechanics.pendulum` and `sim.mechanics.double_pendulum`.
+- `scirust-sim` module families with at least one adapter: **6 of 16**
+  (mechanics, orbital, epidemiology, electrical, chemistry, ecology).
+- Still catalogue-only: `thermal`, `stochastic`, `pharmacokinetics`,
+  `rigid_body`, `battery`, `hvac`, `grid`, `laser`, `photodiode`, `apd`,
+  `envs`, plus SEIR, the two non-stiff chemistry models, the projectile and
+  Van der Pol within already-adapted families — and every other workspace
+  crate.
+
+### What the four new capabilities add beyond a bigger number
+
+Each was chosen to exercise something the first five did not:
+
+- **`sim.ecology.logistic_growth`** is the first capability with a
+  **one-component state**, and the first whose verification compares against a
+  **closed-form solution** at every recorded point rather than against a
+  conservation law. Measured error over the tutorial: `1.1e-13` relative to
+  the carrying capacity.
+- **`sim.ecology.lotka_volterra`** has an **exact first integral**, which is a
+  sharper oracle than "the curve looks periodic": a trajectory can look right
+  and still have drifted off its orbit. Measured drift: `8.1e-16`.
+- **`sim.mechanics.pendulum`** solves the equation **without the small-angle
+  approximation**, and reports the period measured from the trajectory next to
+  the textbook `2*pi*sqrt(L/g)`. At the tutorial's 90-degree release the two
+  differ by 18% (`2.368 s` against `2.006 s`) — the capability exists to make
+  that disagreement visible rather than to hide it.
+- **`sim.mechanics.double_pendulum`** is **deterministic but not
+  predictable**. It integrates a second trajectory from a start perturbed by
+  `1e-9 rad` and reports how far the two separate: over the tutorial they end
+  `3.0 rad` apart, having decorrelated at `t = 25.1 s`, and the result carries
+  a warning saying so. Divergence is reported as a measurement and never as a
+  failed check, because it is the physics behaving correctly.
+
+Two smaller things were needed to support them, both deliberately minimal: the
+unit table gained `rad` and `rad/s` (dimensionless and frequency respectively,
+both with a conversion factor of exactly 1), and the registry gained an
+`Ecology` category.
+
+## Summary counts (Phase 3B-2)
+
+- Operational: **11** — the nine above plus
+  `sim.stochastic.ornstein_uhlenbeck` and `sim.thermal.heat_rod_1d`.
+- `scirust-sim` module families with at least one adapter: **8 of 16**.
+- **Determinism classes in use: 2.** Nine capabilities are
+  `StrictSameBinarySameTarget`; the Ornstein-Uhlenbeck process is
+  `InherentlyStochasticRecordedSeed`, the first whose result is not a function
+  of its parameters alone.
+
+### What the stochastic capability changes
+
+It is the first capability for which `experiment.seed` — a scenario field that
+had existed since Phase 1 and was read by nothing — actually does something.
+It is required, recorded in the result's provenance, shown by the CLI and the
+desktop's provenance panel, and re-derived inside the run as a verification
+check. See `docs/studio/adr/0007-seeded-stochastic-capabilities.md`.
+
+It is also the only capability whose unit of progress is not the time step.
+A single realisation cannot be chunked, but an ensemble's atom is the
+realisation, so it reports one unit per realisation and can be cancelled
+between them. `sim.chemistry.robertson` remains the only capability that
+reports no progress at all, so the interface's indeterminate path is still
+exercised — by one model rather than two.
+
+### What ensembles change
+
+`experiment.replicates` asks a stochastic capability for many independent
+realisations, whose seeds are derived from the scenario's single seed. The
+result then carries the across-replicate mean, a spread band and a bounded
+number of individual paths, distinguished by `Series.role` so no consumer has
+to infer from an id which curve is a summary and which is one sample.
+
+The across-replicate check is materially stronger than the single-path one:
+samples along one path are autocorrelated and carry less information than
+their count suggests, while independent realisations carry exactly their
+count. Every capability — not only the stochastic ones — now answers for
+`replicates`, and one that draws no sample refuses rather than running the
+same computation `n` times. See `docs/studio/adr/0008-ensembles.md`.
+
+
+### What the field capability changes
+
+`sim.thermal.heat_rod_1d` is the first capability whose result is a **field**
+rather than a set of curves, and the first with two axes. `RunResult` gained
+`fields: Vec<Field>` — a row-major buffer naming a row axis and a column axis
+— because a `Series` is aligned one-to-one with a single axis and can only
+hold a slice of a field.
+
+The audit had said for four updates that schema v2 could already express this.
+It could not; ADR 0009 records the correction. The blocker was never only
+presentation.
+
+Both interfaces render it: the CLI as a coarse ASCII map, the desktop as a
+heat map. Both reduce by keeping the source sample **furthest from the mean**
+in each cell rather than the cell's average, which is the two-dimensional form
+of the chart's existing "reduction never hides a peak" rule — an average is
+exactly the operation that makes a spike disappear.
+
+Two of its series are plotted against *position* rather than time, also a
+first. See `docs/studio/adr/0009-fields.md`.
+
+## Summary counts (Phase 3B-3 through 3B-6)
+
+- Operational (descriptor + adapter + scenario-tested + CLI-exposed +
+  desktop-exposed): **19**.
+- **`scirust-sim` module families with at least one adapter: 16 of 16.**
+  There is no longer a model module that Studio cannot execute.
+- Determinism classes in use: still **2**. Every capability added since the
+  Ornstein-Uhlenbeck process is `StrictSameBinarySameTarget`.
+- Run domains in use: **2**. Eighteen capabilities are `RunDomain::Time`;
+  `sim.optoelectronics.avalanche_photodiode` is the first
+  `RunDomain::ParameterSweep`.
+
+The eight capabilities added across these updates were chosen so that each
+one made the *runtime* answer a question it had not been asked before, rather
+than only making the catalogue longer:
+
+- **`sim.optoelectronics.photodiode`** — the first capability whose tolerance
+  is **derived rather than chosen**. Its settling check compares against
+  `exp(-span/tau)`, the residual the run's own length in time constants
+  leaves behind, because a fixed `1e-3` failed a perfectly correct run that
+  measured `6.738e-3`. Every capability since has followed that rule.
+- **`sim.thermal.hvac_zone`** — a 2R2C network's slow time constant is an
+  exact root of a quadratic (46.2 h), not the naive `R*C` sum (57.8 h). The
+  check solves the quadratic. Its second check reverses every inequality
+  through a single sign factor, so a cooling scenario is verified by the same
+  code path as a heating one.
+- **`sim.mechanics.rigid_body`** — two exact invariants at once (the energy
+  ellipsoid and the momentum sphere), and the intermediate-axis instability
+  reported as a named property of the run rather than left for the reader to
+  notice in a chart.
+- **`sim.pharmacology.oral_one_compartment`** — verified against its
+  *complete* closed form at every sample, to `1.2e-12` across 5705 points. It
+  is the first capability with no `[initial_state]` at all: the state at
+  `t = 0` follows from the dose. It refuses `k_a == k_e` with a dedicated
+  error code rather than evaluating the Bateman form at its removable
+  singularity.
+- **`sim.energy.battery_thevenin`** — three states checked three different
+  ways, because they fail independently. Its settling threshold takes the
+  residual of the *slower* of two time constants (`R_th*C_th` = 200 s against
+  `R1*C1` = 20 s); a test pins that down, because holding the run to the fast
+  one would fail a correct integration.
+- **`sim.optoelectronics.semiconductor_laser`** — the first capability
+  verified against the **eigenvalues of its own Jacobian**. Numerical
+  integration and linear stability analysis are different routes to the same
+  rate equations, so a model with the right fixed point and the wrong
+  curvature there passes the operating-point check and fails the ringing one.
+  The damping correction is real: the damped period is 0.57 % longer than the
+  undamped `1/f_r`, against a 0.1 % tolerance.
+- **`sim.power.swing_equation`** — the first capability whose *integrator
+  choice* is part of the verification. Symplectic Euler conserves a modified
+  Hamiltonian exactly, so the energy check tests both the band's width
+  (measured `1.485e-3` against the derived `h*omega_n` = `1.475e-3`) and that
+  the band is not drifting (`2.3e-7` between halves). Its period tolerance is
+  the computed Lindstedt nonlinear correction, which the measurement matches
+  to 1 %.
+- **`sim.optoelectronics.avalanche_photodiode`** — the first capability with
+  **no time in it**, and the first whose checks have no tolerance at all. See
+  below.
+
+### What the parameter sweep changes
+
+An APD receiver analysis is algebraic: nothing is integrated. The capability
+sweeps avalanche gain instead, and its result carries a `gain` axis and no `t`
+axis.
+
+That is declared, not inferred. `CapabilityDescriptor` gained
+`domain: RunDomain`, and `RunSummary` gained `axis_id` naming which axis its
+bounds describe (defaulting to `"t"`, so every previously stored result
+decodes unchanged). The registry-driven test that demands a time axis now
+demands it of exactly the capabilities that promised one — and demands its
+*absence* from the ones that did not — instead of being weakened to "some
+axis" for everybody.
+
+Both of its checks are exact:
+
+- the SNR at the analytic optimum must be at least the SNR at **every** swept
+  gain. That is what a maximum is, so the only slack is round-off. The
+  optimum comes from the stationary condition `C*k*M^3 + C*(1-k)*M = 2T`,
+  whose left side is strictly increasing for every `k`, so bisection finds
+  its single root without a derivative or a guess.
+- the SNR curve must change direction **exactly once**, because that same
+  monotonicity guarantees a single root and therefore a single turn.
+
+A sweep that does not bracket the optimum reports both checks as not
+applicable and warns, rather than reporting its endpoint as the answer —
+which is what an argmax with no analytic companion would have done.
+
+## Summary counts (Phase 3B-7)
+
+- Operational (descriptor + adapter + scenario-tested + CLI-exposed +
+  desktop-exposed): **28**.
+- **Every `scirust-sim` model family implementing `System` is adapted.** The
+  one that is not — `envs` — implements `Environment`, and is a decided
+  non-goal rather than an outstanding item (ADR 0012).
+- Determinism classes in use: **2**. Run domains in use: **3** (Time,
+  ParameterSweep, Ensemble).
+- Result members in use: series, fields, and now **distributions** (ADR 0011).
+
+### What the nine capabilities added here needed
+
+- **`sim.epidemiology.seir`** — conservation is a strong check on the
+  arithmetic and a weak one on the *structure*, so its second check is
+  structural and tolerance-free: the exposed compartment must peak strictly
+  before the infectious one, for every parameter set.
+- **`sim.chemistry.consecutive_reactions`** and
+  **`sim.chemistry.reversible_reaction`** — complete closed forms at every
+  sample. The reversible reaction's equilibrium threshold had to grow two
+  terms it was missing: the ratio `b/a` amplifies error in the smaller
+  species by `total²/(a·b)`, and past thirty time constants the exponential
+  residual drops below what `f64` accumulates.
+- **`sim.electrical.rc`** — the cheapest possible statement that a level and
+  a rate fail independently.
+- **`sim.mechanics.projectile`** — the horizontal equation is *decoupled*, so
+  its solution is exact whatever gravity does, and a test doubles gravity to
+  assert the trajectory is bit-for-bit identical. Its threshold is RK4's own
+  amplification factor `R(z)` against `exp(z)`, in closed form.
+- **`sim.electrical.van_der_pol`** — a *differential identity*: the model
+  states its own energy rate, so integrating it must reproduce the change in
+  energy. Its second check runs a second trajectory from outside the cycle,
+  which an energy identity cannot replace.
+- **`sim.pharmacology.two_compartment_iv`** — total exposure is `dose/k10`
+  regardless of distribution, so a test doubles both distribution rates and
+  asserts the curve reshapes while the area does not move.
+- **`sim.stochastic.mm1_queue`** — the first result that is a **distribution**,
+  the first `RunDomain::Ensemble`, and the first *statistical* thresholds:
+  three standard errors computed from the run's own spread, so more
+  replicates sharpen the test rather than leaving it loose. Little's law
+  relates two measured quantities and mentions no closed form at all.
+- **`sim.stochastic.geometric_brownian_motion`** — two checks that catch
+  opposite errors, because the mean of `S_T` does not depend on volatility
+  and its log-return variance does not depend on drift.
+
+### Two things closed rather than carried
+
+`envs`, and a three-axis `Field`. Both were reopened with the intent of
+finishing them and both were closed on evidence — see ADR 0012, which also
+records that the second investigation found `scirust-itd::Field3` and so
+disproved the assumption the decision was first drafted on.
+
+Adapting `scirust-itd` itself remains genuine future work: it would be the
+first capability from outside `scirust-sim`, its simulation driver returns
+time series and 2-D fields the schema already expresses, and the audit's rule
+that another crate needs a real API review before adoption applies.

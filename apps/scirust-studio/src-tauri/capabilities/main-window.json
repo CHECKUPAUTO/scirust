@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-window",
+  "description": "The only capability granted to the main window. Every permission here is one a shipped feature uses; nothing is present speculatively.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:app:allow-version",
+    "core:window:allow-set-title",
+    "core:window:allow-minimize",
+    "core:window:allow-close",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

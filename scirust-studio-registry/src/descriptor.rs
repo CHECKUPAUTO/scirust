@@ -43,6 +43,51 @@ pub enum CapabilityCategory {
     Electrical,
     /// Chemical kinetics.
     Chemistry,
+    /// Population dynamics.
+    Ecology,
+    /// Stochastic processes.
+    Stochastic,
+    /// Heat transfer and thermal fields.
+    Thermal,
+    /// Light-emitting and light-detecting devices.
+    Optoelectronics,
+    /// Energy storage.
+    Energy,
+    /// Electrical power systems.
+    Power,
+    /// Drug absorption and distribution.
+    Pharmacology,
+}
+
+/// What a capability varies along its results' single independent axis.
+///
+/// Every capability up to now integrated forward in time, so "the x axis is
+/// time" was true and therefore never stated. It is not true of a receiver
+/// analysis that evaluates closed forms across a swept gain: that run has an
+/// axis, a summary and series like any other, but no time in it at all.
+///
+/// Declaring this in the catalogue rather than inferring it from the result
+/// means two things. A reader browsing capabilities can tell, before running
+/// anything, whether they will get a trajectory or a curve. And the
+/// registry-driven test that demands a `t` axis can demand it of exactly the
+/// capabilities that promised one, instead of being weakened to "some axis"
+/// for everybody because one capability is different.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RunDomain {
+    /// Integrated forward in time; results carry a `t` axis.
+    Time,
+    /// Closed forms evaluated across a swept parameter; results carry that
+    /// parameter's axis and no time axis.
+    ParameterSweep,
+    /// Independent realisations of a stochastic process, *indexed* rather
+    /// than swept; results carry a `replicate` axis with one point per
+    /// realisation and no time axis.
+    ///
+    /// Distinct from [`Self::ParameterSweep`] because nothing varies between
+    /// the points except the seed. A sweep's axis is a quantity the user
+    /// chose and can reason about; an ensemble's axis is a bookkeeping index,
+    /// and reading a trend along it would be reading noise.
+    Ensemble,
 }
 
 /// The scientific maturity of the *underlying model*, as documented by its
@@ -80,6 +125,30 @@ pub enum DeterminismClass {
     NonDeterministic,
 }
 
+impl DeterminismClass {
+    /// Whether a capability of this class produces a *sample* — so that
+    /// drawing several realisations answers a question one realisation
+    /// cannot.
+    ///
+    /// This is the single place that mapping is stated. A capability that is
+    /// bit-identical from its parameters would return the same path however
+    /// many times it was asked, so an ensemble of them is not a distribution;
+    /// it is one answer copied `n` times, at `n` times the cost, presented as
+    /// evidence about a spread that does not exist.
+    ///
+    /// [`Self::NonDeterministic`] is excluded for the opposite reason: its
+    /// realisations do differ, but with no seed to derive them from the
+    /// ensemble could not be obtained again, and a distribution nobody can
+    /// re-draw is not a result this project stores.
+    pub fn draws_a_sample(self) -> bool {
+        matches!(
+            self,
+            DeterminismClass::SeededButBackendDependent
+                | DeterminismClass::InherentlyStochasticRecordedSeed
+        )
+    }
+}
+
 /// Compute backend a capability can run on. Only `Cpu` exists today — there
 /// is no GPU-backed Studio worker yet (see `docs/studio/REPOSITORY_AUDIT.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,6 +163,18 @@ pub enum PrecisionKind {
     /// 64-bit IEEE-754 (the only precision any current adapter actually
     /// computes in — `scirust-sim`'s models are `f64` throughout).
     F64,
+    /// 32-bit IEEE-754.
+    ///
+    /// Declared by no capability in this build. The variant exists because
+    /// the scenario schema accepts `precision = "f32"`, and without somewhere
+    /// for a descriptor to say whether it supports that, the request could
+    /// only be silently ignored — which is what happened until
+    /// `validate_support::resolve_precision` started comparing the two.
+    ///
+    /// An empty vocabulary slot is not the same as a lie: this says "no
+    /// capability here computes in f32 yet", where declaring only `F64` and
+    /// accepting `"f32"` anyway said "you got what you asked for".
+    F32,
 }
 
 /// A solver a capability can be integrated with.
@@ -107,6 +188,22 @@ pub struct SolverDescriptor {
     pub fixed_step: bool,
     /// Whether this solver needs `solver.rtol`/`solver.atol` (adaptive).
     pub adaptive_tolerance: bool,
+    /// Whether a run driven by this solver reports genuine intermediate
+    /// progress.
+    ///
+    /// Declared rather than inferred from [`Self::fixed_step`], which is what
+    /// this used to be read off. That proxy was wrong in both directions and
+    /// had already produced one live defect: the Ornstein-Uhlenbeck process
+    /// declared a fixed step, so the interface drew a determinate bar for a
+    /// run that emitted no fractions at all. The discrete-event queue is the
+    /// mirror image — no step size anywhere, and a realisation is a perfectly
+    /// good unit of progress.
+    ///
+    /// "Progress" here means a fraction a reader can trust, not merely
+    /// evidence of life. A capability that cannot supply one says so, and the
+    /// interface shows indeterminate activity rather than an invented
+    /// percentage.
+    pub reports_progress: bool,
 }
 
 /// Scalar vs. fixed-length-vector shape of a parameter or state field.
@@ -209,6 +306,8 @@ pub struct CapabilityDescriptor {
     pub maturity: CapabilityMaturity,
     /// Reproducibility class of this capability's output.
     pub determinism: DeterminismClass,
+    /// What this capability's independent variable is.
+    pub domain: RunDomain,
     /// Backends this capability can run on.
     pub supported_backends: &'static [BackendKind],
     /// Precisions this capability can run at.

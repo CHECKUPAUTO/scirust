@@ -463,7 +463,7 @@
   0x5ba09810fa590787 (contrat cross-platform du backward).
 
 ## Session 2026-07-10 — volet 111 : audit de couverture RepDL + fermeture des écarts (clean-room)
-- **Audit complet** : `AUDIT_REPDL_2026-07-10.md` — matrice élément par élément des
+- **Audit complet** : `docs/audits/AUDIT_REPDL_2026-07-10.md` — matrice élément par élément des
   23 items de l'API publique de RepDL (ops/func/nn/optim/utils/from_torch_module)
   contre SciRust. 18 déjà couverts (dont conv2d + les 2 gradients, BatchNorm1d/2d,
   CrossEntropy, softmax, réductions 1D/2D, Adam), 2 couverts par composition
@@ -1432,7 +1432,7 @@
 - CLI : `scirust certify` (bornes IBP) + `scirust lm --opt adam|adamw|lion`.
   41 commandes. Tests + 8 gates verts.
 - docs multilingues : section « Recherche → Fonctions » ajoutée à README,
-  Documentation.md + 7 traductions (EN/ES/DE/ZH/JA/KO/AR), et au paper
+  docs/translations/Documentation.md + 7 traductions (EN/ES/DE/ZH/JA/KO/AR), et au paper
   (8 langues). Compteur tests README 683→810.
 - 2ᵉ recherche de papers → RESEARCH_ROADMAP Tier 7 (#21-#25) : conformal
   prediction (#21, fort fit certifiable), Schedule-Free (#22), AdEMAMix (#23),

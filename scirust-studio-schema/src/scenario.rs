@@ -53,6 +53,19 @@ pub struct ExperimentMeta {
     /// capabilities that have none.
     #[serde(default)]
     pub seed: Option<u64>,
+    /// How many independent realisations to draw.
+    ///
+    /// Absent, or `1`, means a single realisation — which is what every
+    /// deterministic capability produces and the only thing that was
+    /// available before ensembles existed. A larger value asks a stochastic
+    /// capability to answer a distributional question instead of showing one
+    /// sample; capabilities that consume no randomness reject it rather than
+    /// silently running the same computation `n` times.
+    ///
+    /// The replicates' seeds are *derived* from [`Self::seed`], so an
+    /// ensemble is reproducible from the same one number a single run is.
+    #[serde(default)]
+    pub replicates: Option<u32>,
 }
 
 /// Which capability a scenario runs.

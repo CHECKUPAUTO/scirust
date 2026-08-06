@@ -1,0 +1,116 @@
+# SciRust Studio tutorial scenario: two hundred queues, and what they agree on.
+#
+# Run it with:
+#
+#   scirust run docs/studio/tutorials/mm1_queue.scirust.toml
+#
+# A single-server queue: customers arrive at random (Poisson, 8 per hour), one
+# server handles them at random (exponential, 10 per hour), nobody balks and
+# nobody is turned away. Traffic intensity rho = 0.8, which is a busy but
+# stable counter.
+#
+# THIS RUN HAS NO TRAJECTORY AND NOTHING IS SWEPT. Each of the 200
+# realisations is an independent discrete-event simulation that reports four
+# aggregate numbers and no time series at all. The only thing that differs
+# between them is the seed. So the result's axis is the replicate INDEX —
+# `RunDomain::Ensemble`, the third domain in the catalogue — and reading a
+# trend along it would be reading noise.
+#
+# What the run actually produces is three HISTOGRAMS: of the time-average
+# occupancy, of the server utilization, and of the mean time in system. These
+# are the first distributions in the catalogue, and they are the reason this
+# capability was built. A histogram's n bins need n+1 edges, so it fits
+# neither a Series nor a Field — see ADR 0011.
+#
+# ---------------------------------------------------------------------------
+# What is verified
+# ---------------------------------------------------------------------------
+#
+#   * mean_queue_length_matches_the_closed_form — the across-replicate mean of
+#     the time-average occupancy against L = rho/(1-rho) = 4.0.
+#   * utilization_matches_traffic_intensity — the mean utilization against
+#     rho = 0.8. Independent: a simulation can get the mean occupancy right
+#     while mis-counting how much of the time the server was busy at all.
+#   * littles_law_holds — L = lambda*W.
+#
+# The thresholds are STANDARD ERRORS, not fixed numbers. Each is three sigma
+# on the mean, computed from the ensemble's own spread, which means asking for
+# more replicates makes the test sharper rather than leaving it equally loose.
+# That is the right shape of threshold for a stochastic capability: a fixed
+# tolerance either fails honest runs at small n or passes wrong ones at large.
+#
+# The third check is the one that is hardest to accidentally pass. Little's
+# law relates two quantities the run MEASURED to each other and mentions no
+# closed form at all. A simulation with a systematic error in both L and W
+# that happened to land on the textbook values would still have to satisfy it;
+# a simulation whose bookkeeping of arrivals against departures disagreed
+# would fail it while matching both formulas.
+#
+# Its threshold is taken on the per-replicate residual L_i - lambda*W_i rather
+# than by combining two separate standard errors. The two means come from the
+# same realisations and are strongly correlated — a busy realisation has both
+# a long queue and a long wait — so adding their variances would overstate the
+# band. Differencing first carries the correlation exactly instead of assuming
+# something about it.
+#
+# ---------------------------------------------------------------------------
+# The horizon is a bias, bounded rather than ignored
+# ---------------------------------------------------------------------------
+#
+# Every realisation starts with an empty queue, so its time-average is biased
+# LOW: the beginning of the run is spent filling up. The bias falls as
+# 1/horizon. At 5000 time units — some 40 000 customers — it sits well under
+# the three-sigma band, and a test asserts that an eight-times-longer horizon
+# moves the answer TOWARD the closed form, which is the evidence that the
+# residual is transient and not a wrong model.
+#
+# Try it: raise `arrival_rate` to 9.5, so rho = 0.95. L jumps from 4 to 19,
+# the histograms become dramatically more skewed, and the same 200 replicates
+# now give a much wider standard error — the check loosens by itself, because
+# a near-saturated queue genuinely is harder to pin down. Push it to 10.0 or
+# above and the scenario is REFUSED (SRST-VAL-0321): there is no steady state
+# for anything to be checked against.
+
+schema_version = 1
+
+[experiment]
+name = "M/M/1 queue at 80 % utilization"
+description = "Two hundred independent realisations of a single-server queue, checked against L = rho/(1-rho), rho, and Little's law."
+# Required: this capability draws a sample, so a result is only evidence if
+# someone else can obtain it again. The replicates' seeds are derived from
+# this one number.
+seed = 20260729
+# Two hundred realisations. The threshold on every check is three standard
+# errors of the mean, so this number directly sets how sharp the test is.
+replicates = 200
+
+[capability]
+id = "sim.stochastic.mm1_queue"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+# 8 arrivals per hour.
+arrival_rate = { value = 8.0, unit = "1/s" }
+# The server can manage 10 per hour, so rho = 0.8 and L = 4.
+service_rate = { value = 10.0, unit = "1/s" }
+
+# No [initial_state]: a queue starts empty. There is nothing to supply, and
+# a scenario that tried would be describing a different experiment.
+
+[solver]
+id = "discrete_event"
+start = { value = 0.0, unit = "s" }
+# 5000 time units per realisation, about 40 000 customers. Long enough that
+# the empty-queue bias is well under the statistical band.
+end = { value = 5000.0, unit = "s" }
+# No `step`: the state changes only at arrivals and departures, whose times
+# are drawn rather than stepped to. There is no truncation error here to
+# bound, which is why this solver declares itself neither fixed-step nor
+# adaptive.
+
+[outputs]
+record = ["queue_length", "utilization", "mean_sojourn", "served"]

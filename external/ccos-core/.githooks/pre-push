@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# pre-push hook — verify every outgoing commit satisfies the author policy (§43).
+set -euo pipefail
+zero='0000000000000000000000000000000000000000'
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue
+  if [ "$remote_sha" = "$zero" ]; then
+    range="$local_sha"
+  else
+    range="$remote_sha..$local_sha"
+  fi
+  scripts/check-author-policy.sh "$range" || {
+    echo "pre-push hook: author policy violation in $range — push refused" >&2
+    exit 1
+  }
+done

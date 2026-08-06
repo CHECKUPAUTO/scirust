@@ -11,11 +11,12 @@
 
 use scirust_sim::engine::FirstOrderForm;
 use scirust_sim::orbital::TwoBody;
-use scirust_sim::{simulate, simulate_second_order};
+
+use crate::execute_support::{TimeSpan, simulate_cancellable, simulate_second_order_cancellable};
 use scirust_studio_command::{ErrorCode, ErrorFamily};
 use scirust_studio_registry::{
     BackendKind, CapabilityCategory, CapabilityDescriptor, CapabilityId, CapabilityMaturity,
-    Cardinality, DeterminismClass, FieldDescriptor, OutputDescriptor, PrecisionKind,
+    Cardinality, DeterminismClass, FieldDescriptor, OutputDescriptor, PrecisionKind, RunDomain,
     SolverDescriptor, VerificationCheckDescriptor, VerificationDescriptor,
 };
 use scirust_studio_schema::Scenario;
@@ -23,12 +24,13 @@ use scirust_studio_schema::Scenario;
 use crate::adapter::{CapabilityAdapter, ExecutionError, ValidatedScenario, ValidationReport};
 use crate::control::ExecutionControl;
 use crate::result::{
-    AxisDescriptor, Metric, MetricValue, RESULT_SCHEMA_VERSION, RunProvenance, RunResult,
-    RunSummary, Series, VerificationResult, VerificationStatus,
+    Axis, AxisMonotonicity, Metric, MetricValue, RESULT_SCHEMA_VERSION, RunProvenance, RunResult,
+    RunSummary, Series, SeriesRole, TIME_AXIS_ID, VerificationResult, VerificationStatus,
 };
 use crate::sink::{EventSink, RunEvent};
 use crate::validate_support::{
-    check_unknown_model_fields, check_unknown_state_fields, resolve_model_scalar, resolve_solver,
+    check_unknown_model_fields, check_unknown_state_fields, resolve_backend_kind,
+    resolve_model_scalar, resolve_precision, resolve_replicates, resolve_solver,
     resolve_state_vector,
 };
 
@@ -87,6 +89,7 @@ const SYMPLECTIC_EULER: SolverDescriptor = SolverDescriptor {
     summary: "Fixed-step semi-implicit Euler; energy error stays bounded over long horizons.",
     fixed_step: true,
     adaptive_tolerance: false,
+    reports_progress: true,
 };
 
 const RK4: SolverDescriptor = SolverDescriptor {
@@ -94,6 +97,7 @@ const RK4: SolverDescriptor = SolverDescriptor {
     summary: "Fixed-step classical 4th-order Runge-Kutta; more accurate short-horizon, but energy drifts secularly over many orbits.",
     fixed_step: true,
     adaptive_tolerance: false,
+    reports_progress: true,
 };
 
 const ENERGY_CHECK: VerificationCheckDescriptor = VerificationCheckDescriptor {
@@ -120,6 +124,7 @@ pub static DESCRIPTOR: CapabilityDescriptor = CapabilityDescriptor {
     summary: "The planar two-body (Kepler) problem around a fixed primary, integrated with symplectic Euler or RK4.",
     maturity: CapabilityMaturity::Stable,
     determinism: DeterminismClass::StrictSameBinarySameTarget,
+    domain: RunDomain::Time,
     supported_backends: &[BackendKind::Cpu],
     supported_precisions: &[PrecisionKind::F64],
     supported_solvers: &[SYMPLECTIC_EULER, RK4],
@@ -193,6 +198,22 @@ impl CapabilityAdapter for TwoBodyAdapter {
         {
             errors.push(e);
         }
+        // Every adapter checks this, including the deterministic ones — see
+        // `resolve_replicates`.
+        if let Err(e) = resolve_replicates(scenario, DESCRIPTOR.determinism)
+        {
+            errors.push(e);
+        }
+        // The scenario's declared backend and precision must be ones this
+        // capability actually has — see `resolve_precision`.
+        if let Err(e) = resolve_backend_kind(scenario, &DESCRIPTOR)
+        {
+            errors.push(e);
+        }
+        if let Err(e) = resolve_precision(scenario, &DESCRIPTOR)
+        {
+            errors.push(e);
+        }
         if !errors.is_empty()
         {
             return Err(ValidationReport { errors });
@@ -249,13 +270,21 @@ impl CapabilityAdapter for TwoBodyAdapter {
         // Both solvers produce Trajectory rows shaped [x, y, vx, vy]:
         // simulate_second_order concatenates (q, v) directly, and
         // FirstOrderForm's dim = 2*dof with the same [q, v] split.
+        let span = TimeSpan {
+            t0,
+            t_end: t1,
+            h: step,
+        };
         let traj = match scn.solver.id.as_str()
         {
-            "symplectic_euler" => simulate_second_order(&model, &q0, &v0, t0, t1, step),
+            "symplectic_euler" =>
+            {
+                simulate_second_order_cancellable(&model, &q0, &v0, span, control, sink)?
+            },
             "rk4" =>
             {
                 let y0 = [q0[0], q0[1], v0[0], v0[1]];
-                simulate(&FirstOrderForm(&model), &y0, t0, t1, step)
+                simulate_cancellable(&FirstOrderForm(&model), &y0, span, control, sink)?
             },
             other =>
             {
@@ -263,11 +292,7 @@ impl CapabilityAdapter for TwoBodyAdapter {
                     "validated but unhandled solver id `{other}`"
                 )));
             },
-        }
-        .map_err(|e| {
-            sink.emit(RunEvent::Failed(e.to_string()));
-            ExecutionError::Numerical(e.to_string())
-        })?;
+        };
 
         let position_x = traj.column(0).expect("dim 0 exists");
         let position_y = traj.column(1).expect("dim 1 exists");
@@ -316,41 +341,57 @@ impl CapabilityAdapter for TwoBodyAdapter {
             summary: RunSummary {
                 capability_display_name: DESCRIPTOR.display_name.to_string(),
                 scenario_name: scn.experiment.name.clone(),
+                axis_id: TIME_AXIS_ID.to_string(),
                 steps: traj.len() - 1,
-                t_start: t0,
+                t_start: traj.t.first().copied().unwrap_or(t0),
                 t_end: traj.last_time().unwrap_or(t1),
             },
-            axes: vec![AxisDescriptor {
-                id: "t".to_string(),
+            // The integrator's own coordinates, carried through unchanged.
+            // Never regenerated from (start, end, count): that is right only
+            // for a fixed step and silently wrong for any adaptive solver.
+            axes: vec![Axis {
+                id: TIME_AXIS_ID.to_string(),
                 display_name: "time".to_string(),
                 unit: "s".to_string(),
+                monotonicity: AxisMonotonicity::StrictlyIncreasing,
+                values: traj.t.clone(),
             }],
             series: vec![
                 Series {
                     id: "position_x".to_string(),
                     display_name: "Position x".to_string(),
                     unit: "m".to_string(),
+                    axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::Trajectory,
                     values: position_x,
                 },
                 Series {
                     id: "position_y".to_string(),
                     display_name: "Position y".to_string(),
                     unit: "m".to_string(),
+                    axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::Trajectory,
                     values: position_y,
                 },
                 Series {
                     id: "velocity_x".to_string(),
                     display_name: "Velocity x".to_string(),
                     unit: "m/s".to_string(),
+                    axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::Trajectory,
                     values: velocity_x,
                 },
                 Series {
                     id: "velocity_y".to_string(),
                     display_name: "Velocity y".to_string(),
                     unit: "m/s".to_string(),
+                    axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::Trajectory,
                     values: velocity_y,
                 },
             ],
+            fields: vec![],
+            distributions: vec![],
             metrics: vec![
                 Metric {
                     id: "final_x".to_string(),
@@ -441,9 +482,13 @@ impl CapabilityAdapter for TwoBodyAdapter {
                 started_at_rfc3339: started_at.to_rfc3339(),
                 completed_at_rfc3339: chrono::Utc::now().to_rfc3339(),
                 elapsed_seconds: wall_start.elapsed().as_secs_f64(),
+                // This capability's result does not depend on a seed, so
+                // recording one would imply it did.
+                seed: None,
             },
         };
-        crate::result::assert_finite(&result).map_err(ExecutionError::Internal)?;
+        crate::result::validate_result(&result)
+            .map_err(|d| ExecutionError::Internal(crate::result::describe_defects(&d)))?;
         sink.emit(RunEvent::Completed);
         Ok(result)
     }

@@ -8,8 +8,13 @@
 //! supported — still lives entirely in each adapter module.
 
 use scirust_studio_command::{CatalogedError, ErrorCode, ErrorFamily};
-use scirust_studio_registry::{Cardinality, FieldDescriptor, SolverDescriptor};
+use scirust_studio_registry::{
+    BackendKind, CapabilityDescriptor, Cardinality, DeterminismClass, FieldDescriptor,
+    PrecisionKind, SolverDescriptor,
+};
 use scirust_studio_schema::Scenario;
+
+use crate::ensemble::MAX_REPLICATES;
 
 /// Generic (not field-specific) capability-validation error codes. Field
 /// -specific codes live on each adapter's own `FieldDescriptor`s.
@@ -18,6 +23,32 @@ pub const CODE_UNSUPPORTED_SOLVER: ErrorCode = ErrorCode::new(ErrorFamily::Valid
 pub const CODE_MISSING_STEP: ErrorCode = ErrorCode::new(ErrorFamily::Validation, 92);
 pub const CODE_MISSING_TOLERANCE: ErrorCode = ErrorCode::new(ErrorFamily::Validation, 93);
 pub const CODE_SUM_CONSTRAINT: ErrorCode = ErrorCode::new(ErrorFamily::Validation, 94);
+/// A stochastic capability was given no `experiment.seed`.
+pub const CODE_MISSING_SEED: ErrorCode = ErrorCode::new(ErrorFamily::Validation, 95);
+/// `experiment.replicates` was set above 1 on a capability that draws no
+/// sample, so the realisations would all be identical.
+pub const CODE_REPLICATES_UNSUPPORTED: ErrorCode = ErrorCode::new(ErrorFamily::Validation, 96);
+/// `experiment.replicates` was zero, or above [`MAX_REPLICATES`].
+pub const CODE_REPLICATES_OUT_OF_RANGE: ErrorCode = ErrorCode::new(ErrorFamily::Validation, 97);
+/// `backend.precision` names a precision this capability does not compute in.
+pub const CODE_UNSUPPORTED_PRECISION: ErrorCode = ErrorCode::new(ErrorFamily::Validation, 98);
+/// `backend.kind` names a backend this capability does not run on.
+pub const CODE_UNSUPPORTED_BACKEND: ErrorCode = ErrorCode::new(ErrorFamily::Validation, 99);
+
+/// The fixed-step RK4 descriptor most capabilities declare.
+///
+/// Eight adapters had been repeating the same four fields with the same
+/// summary. A capability whose RK4 needs saying something *particular* — the
+/// heat rod's stability bound, the two-body's symplectic alternative — still
+/// declares its own; this is only for the ones where the honest summary is
+/// the generic one.
+pub const RK4_SOLVER: SolverDescriptor = SolverDescriptor {
+    id: "rk4",
+    summary: "Classical fixed-step Runge-Kutta 4. Requires `solver.step`.",
+    fixed_step: true,
+    adaptive_tolerance: false,
+    reports_progress: true,
+};
 
 fn field_error(
     field: &FieldDescriptor,
@@ -298,6 +329,246 @@ pub fn resolve_solver<'a>(
     Ok(solver)
 }
 
+/// Resolve the seed a stochastic capability must run with.
+///
+/// A deterministic capability never calls this: its result does not depend on
+/// a seed, and demanding one would be theatre.
+///
+/// A stochastic capability calls it and is **refused without a seed**. That is
+/// a deliberate constraint rather than a convenience default. A result is only
+/// evidence if someone else can obtain it again, and for a single sample from
+/// a distribution the seed is the entire difference between "here is a
+/// trajectory" and "here is *the* trajectory these inputs produce". Picking
+/// one silently — from the clock, from the OS, from a hard-coded constant —
+/// would either make the run unreproducible or make every run identical while
+/// looking as though it had been sampled; both are worse than asking.
+pub fn resolve_seed(scenario: &Scenario) -> Result<u64, CatalogedError> {
+    scenario.experiment.seed.ok_or_else(|| CatalogedError {
+        code: CODE_MISSING_SEED,
+        title: "Missing seed".to_string(),
+        explanation: "this capability is stochastic: its result is one sample from a \
+                      distribution, and without `experiment.seed` that sample cannot be \
+                      reproduced"
+            .to_string(),
+        recoverable: true,
+        suggested_action: Some(
+            "add `seed = 42` (or any integer you choose) under [experiment]".to_string(),
+        ),
+    })
+}
+
+/// Resolve `experiment.replicates` for a capability of the given determinism
+/// class.
+///
+/// Absent means one realisation, which is what every capability produced
+/// before ensembles existed and what every deterministic one still produces.
+///
+/// **Every** adapter calls this, not only the stochastic ones, and that is the
+/// point: a scenario asking a spring-mass-damper for 500 replicates is asking
+/// for the same trajectory 500 times. Ignoring the field would waste the time
+/// silently; honouring it would present 500 identical curves as a
+/// distribution. It is refused instead, and the message says which of the two
+/// the user probably meant.
+///
+/// `docs/studio/adr/0008-ensembles.md` records why the class — rather than a
+/// per-adapter flag — decides this.
+pub fn resolve_replicates(
+    scenario: &Scenario,
+    determinism: DeterminismClass,
+) -> Result<usize, CatalogedError> {
+    let Some(requested) = scenario.experiment.replicates
+    else
+    {
+        return Ok(1);
+    };
+
+    if requested == 0
+    {
+        return Err(CatalogedError {
+            code: CODE_REPLICATES_OUT_OF_RANGE,
+            title: "Zero replicates".to_string(),
+            explanation: "`experiment.replicates = 0` asks for a run with no realisations in \
+                          it, which has no result to report"
+                .to_string(),
+            recoverable: true,
+            suggested_action: Some(
+                "use 1 for a single realisation, or remove the field — they mean the same thing"
+                    .to_string(),
+            ),
+        });
+    }
+
+    // One replicate is the single-realisation case and is always allowed,
+    // including for deterministic capabilities: it is what every scenario
+    // without the field already asks for, so rejecting it would make an
+    // explicit `replicates = 1` mean something different from omitting it.
+    if requested == 1
+    {
+        return Ok(1);
+    }
+
+    if !determinism.draws_a_sample()
+    {
+        return Err(CatalogedError {
+            code: CODE_REPLICATES_UNSUPPORTED,
+            title: "This capability has nothing to draw".to_string(),
+            explanation: format!(
+                "`experiment.replicates = {requested}` asks for {requested} independent \
+                 realisations, but this capability's determinism class is {determinism:?} — its \
+                 result is a function of its parameters, so every realisation would be the same \
+                 curve. An ensemble of identical curves is not a distribution"
+            ),
+            recoverable: true,
+            suggested_action: Some(
+                "remove `replicates` to run once; to vary the outcome, vary a parameter instead"
+                    .to_string(),
+            ),
+        });
+    }
+
+    if requested > MAX_REPLICATES
+    {
+        return Err(CatalogedError {
+            code: CODE_REPLICATES_OUT_OF_RANGE,
+            title: "Too many replicates".to_string(),
+            explanation: format!(
+                "`experiment.replicates = {requested}` exceeds the limit of {MAX_REPLICATES}. \
+                 The limit guards against a mistyped number; it is not a statement that \
+                 {MAX_REPLICATES} is affordable, because the cost of an ensemble is replicates \
+                 times steps and this bounds only the first"
+            ),
+            recoverable: true,
+            suggested_action: Some(format!(
+                "use at most {MAX_REPLICATES}; the standard error falls as 1/sqrt(n), so \
+                 quadrupling the replicates only halves it"
+            )),
+        });
+    }
+
+    Ok(requested as usize)
+}
+
+/// Check `backend.precision` against the precisions the capability declares.
+///
+/// The schema already restricts the field to `"f32"` and `"f64"`, which is
+/// what made this gap easy to miss: a scenario asking for `f32` passed
+/// validation, and then every adapter computed in `f64` regardless, because
+/// nothing compared the scenario's request against
+/// [`CapabilityDescriptor::supported_precisions`]. The result was correct
+/// arithmetic carrying a stated precision it did not have.
+///
+/// That is the same shape of defect as `experiment.seed` before Phase 3B-2 —
+/// a field the schema accepts and nothing reads — and it is worse here,
+/// because a silently-upgraded precision looks like the user got what they
+/// asked for. `f32` is not a smaller `f64`; someone selecting it is usually
+/// asking a question about conditioning or about matching another
+/// implementation's arithmetic, and answering in `f64` answers a different
+/// question.
+///
+/// Refusing costs the user one line. Every current capability declares `f64`
+/// only, so today this always refuses `f32` — and when a capability grows an
+/// `f32` path, this starts accepting it with no change here.
+pub fn resolve_precision(
+    scenario: &Scenario,
+    descriptor: &CapabilityDescriptor,
+) -> Result<PrecisionKind, CatalogedError> {
+    let requested = match scenario.backend.precision.as_str()
+    {
+        "f64" => PrecisionKind::F64,
+        "f32" => PrecisionKind::F32,
+        // Unreachable through `scirust_studio_schema::validate`, which rejects
+        // anything else first. Reported rather than asserted, because an
+        // adapter can be driven directly.
+        other =>
+        {
+            return Err(CatalogedError {
+                code: CODE_UNSUPPORTED_PRECISION,
+                title: "Unknown precision".to_string(),
+                explanation: format!("`backend.precision = \"{other}\"` is not a precision"),
+                recoverable: true,
+                suggested_action: Some("use \"f64\", or \"f32\" where supported".to_string()),
+            });
+        },
+    };
+
+    if descriptor.supported_precisions.contains(&requested)
+    {
+        return Ok(requested);
+    }
+
+    let available: Vec<&str> = descriptor
+        .supported_precisions
+        .iter()
+        .map(|p| match p
+        {
+            PrecisionKind::F64 => "f64",
+            PrecisionKind::F32 => "f32",
+        })
+        .collect();
+    Err(CatalogedError {
+        code: CODE_UNSUPPORTED_PRECISION,
+        title: "Unsupported precision".to_string(),
+        explanation: format!(
+            "`backend.precision = \"{}\"` was requested, but `{}` computes in {} only. \
+             Running it anyway would record a result whose stated precision is not the \
+             precision it was computed at",
+            scenario.backend.precision,
+            descriptor.id.0,
+            available.join(" or ")
+        ),
+        recoverable: true,
+        suggested_action: Some(format!(
+            "set `precision = \"{}\"` under [backend], or remove the field to take the default",
+            available.first().copied().unwrap_or("f64")
+        )),
+    })
+}
+
+/// Check `backend.kind` against the backends the capability declares.
+///
+/// The same gap as [`resolve_precision`], and closed at the same time for the
+/// same reason rather than waiting for it to matter. The schema restricts the
+/// field to `"cpu"` and every capability declares `Cpu`, so this refuses
+/// nothing today; it is what makes the first GPU-only — or CPU-only, once a
+/// GPU worker exists — capability fail loudly instead of running somewhere it
+/// never claimed to.
+pub fn resolve_backend_kind(
+    scenario: &Scenario,
+    descriptor: &CapabilityDescriptor,
+) -> Result<BackendKind, CatalogedError> {
+    let requested = match scenario.backend.kind.as_str()
+    {
+        "cpu" => BackendKind::Cpu,
+        other =>
+        {
+            return Err(CatalogedError {
+                code: CODE_UNSUPPORTED_BACKEND,
+                title: "Unknown backend".to_string(),
+                explanation: format!(
+                    "`backend.kind = \"{other}\"` is not a backend this build has"
+                ),
+                recoverable: true,
+                suggested_action: Some("use \"cpu\"".to_string()),
+            });
+        },
+    };
+
+    if descriptor.supported_backends.contains(&requested)
+    {
+        return Ok(requested);
+    }
+    Err(CatalogedError {
+        code: CODE_UNSUPPORTED_BACKEND,
+        title: "Unsupported backend".to_string(),
+        explanation: format!(
+            "`backend.kind = \"{}\"` was requested, but `{}` does not declare it",
+            scenario.backend.kind, descriptor.id.0
+        ),
+        recoverable: true,
+        suggested_action: Some("remove the field to take the default".to_string()),
+    })
+}
+
 /// Check that a set of SI-coherent values sums to `expected` within
 /// `tolerance` (e.g. Robertson's `a0 + b0 + c0 ≈ 1`).
 pub fn check_sum_constraint(
@@ -472,6 +743,7 @@ mod tests {
             summary: "s",
             fixed_step: true,
             adaptive_tolerance: false,
+            reports_progress: true,
         };
         let err = resolve_solver(&scenario, std::slice::from_ref(&rk4)).unwrap_err();
         assert_eq!(err.code, CODE_UNSUPPORTED_SOLVER);
@@ -489,6 +761,7 @@ mod tests {
             summary: "s",
             fixed_step: true,
             adaptive_tolerance: false,
+            reports_progress: true,
         };
         let err = resolve_solver(&scenario, std::slice::from_ref(&rk4)).unwrap_err();
         assert_eq!(err.code, CODE_MISSING_STEP);
@@ -506,6 +779,7 @@ mod tests {
             summary: "s",
             fixed_step: false,
             adaptive_tolerance: true,
+            reports_progress: false,
         };
         let err = resolve_solver(&scenario, std::slice::from_ref(&stiff)).unwrap_err();
         assert_eq!(err.code, CODE_MISSING_TOLERANCE);

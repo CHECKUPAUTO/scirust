@@ -1,0 +1,5 @@
+[net]
+# GitHub Actions' libgit2 transport can incorrectly request credentials for
+# public pinned repositories. Use the system git client, which preserves the
+# immutable revision while honoring the runner's public-network policy.
+git-fetch-with-cli = true

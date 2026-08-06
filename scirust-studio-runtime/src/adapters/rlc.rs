@@ -11,11 +11,12 @@
 //! metric exercises.
 
 use scirust_sim::electrical::SeriesRlc;
-use scirust_sim::simulate;
+
+use crate::execute_support::{TimeSpan, simulate_cancellable};
 use scirust_studio_command::{ErrorCode, ErrorFamily};
 use scirust_studio_registry::{
     BackendKind, CapabilityCategory, CapabilityDescriptor, CapabilityId, CapabilityMaturity,
-    Cardinality, DeterminismClass, FieldDescriptor, OutputDescriptor, PrecisionKind,
+    Cardinality, DeterminismClass, FieldDescriptor, OutputDescriptor, PrecisionKind, RunDomain,
     SolverDescriptor, VerificationCheckDescriptor, VerificationDescriptor,
 };
 use scirust_studio_schema::Scenario;
@@ -23,12 +24,13 @@ use scirust_studio_schema::Scenario;
 use crate::adapter::{CapabilityAdapter, ExecutionError, ValidatedScenario, ValidationReport};
 use crate::control::ExecutionControl;
 use crate::result::{
-    AxisDescriptor, Metric, MetricValue, RESULT_SCHEMA_VERSION, RunProvenance, RunResult,
-    RunSummary, Series, VerificationResult, VerificationStatus,
+    Axis, AxisMonotonicity, Metric, MetricValue, RESULT_SCHEMA_VERSION, RunProvenance, RunResult,
+    RunSummary, Series, SeriesRole, TIME_AXIS_ID, VerificationResult, VerificationStatus,
 };
 use crate::sink::{EventSink, RunEvent};
 use crate::validate_support::{
-    check_unknown_model_fields, check_unknown_state_fields, resolve_model_scalar, resolve_solver,
+    check_unknown_model_fields, check_unknown_state_fields, resolve_backend_kind,
+    resolve_model_scalar, resolve_precision, resolve_replicates, resolve_solver,
     resolve_state_vector,
 };
 
@@ -133,6 +135,7 @@ const RK4: SolverDescriptor = SolverDescriptor {
     summary: "Fixed-step classical 4th-order Runge-Kutta.",
     fixed_step: true,
     adaptive_tolerance: false,
+    reports_progress: true,
 };
 
 const FINITE_SOLUTION_CHECK: VerificationCheckDescriptor = VerificationCheckDescriptor {
@@ -159,6 +162,7 @@ pub static DESCRIPTOR: CapabilityDescriptor = CapabilityDescriptor {
     summary: "A series RLC circuit driven by a constant source, integrated with fixed-step RK4.",
     maturity: CapabilityMaturity::Stable,
     determinism: DeterminismClass::StrictSameBinarySameTarget,
+    domain: RunDomain::Time,
     supported_backends: &[BackendKind::Cpu],
     supported_precisions: &[PrecisionKind::F64],
     supported_solvers: &[RK4],
@@ -252,6 +256,22 @@ impl CapabilityAdapter for RlcAdapter {
         {
             errors.push(e);
         }
+        // Every adapter checks this, including the deterministic ones — see
+        // `resolve_replicates`.
+        if let Err(e) = resolve_replicates(scenario, DESCRIPTOR.determinism)
+        {
+            errors.push(e);
+        }
+        // The scenario's declared backend and precision must be ones this
+        // capability actually has — see `resolve_precision`.
+        if let Err(e) = resolve_backend_kind(scenario, &DESCRIPTOR)
+        {
+            errors.push(e);
+        }
+        if let Err(e) = resolve_precision(scenario, &DESCRIPTOR)
+        {
+            errors.push(e);
+        }
         if !errors.is_empty()
         {
             return Err(ValidationReport { errors });
@@ -306,10 +326,17 @@ impl CapabilityAdapter for RlcAdapter {
         let wall_start = std::time::Instant::now();
         let started_at = chrono::Utc::now();
 
-        let traj = simulate(&model, &[q0, i0], t0, t1, step).map_err(|e| {
-            sink.emit(RunEvent::Failed(e.to_string()));
-            ExecutionError::Numerical(e.to_string())
-        })?;
+        let traj = simulate_cancellable(
+            &model,
+            &[q0, i0],
+            TimeSpan {
+                t0,
+                t_end: t1,
+                h: step,
+            },
+            control,
+            sink,
+        )?;
 
         let charge_series = traj.column(0).expect("dim 0 exists");
         let current_series = traj.column(1).expect("dim 1 exists");
@@ -374,35 +401,49 @@ impl CapabilityAdapter for RlcAdapter {
             summary: RunSummary {
                 capability_display_name: DESCRIPTOR.display_name.to_string(),
                 scenario_name: scn.experiment.name.clone(),
+                axis_id: TIME_AXIS_ID.to_string(),
                 steps: traj.len() - 1,
-                t_start: t0,
+                t_start: traj.t.first().copied().unwrap_or(t0),
                 t_end: traj.last_time().unwrap_or(t1),
             },
-            axes: vec![AxisDescriptor {
-                id: "t".to_string(),
+            // The integrator's own coordinates, carried through unchanged.
+            // Never regenerated from (start, end, count): that is right only
+            // for a fixed step and silently wrong for any adaptive solver.
+            axes: vec![Axis {
+                id: TIME_AXIS_ID.to_string(),
                 display_name: "time".to_string(),
                 unit: "s".to_string(),
+                monotonicity: AxisMonotonicity::StrictlyIncreasing,
+                values: traj.t.clone(),
             }],
             series: vec![
                 Series {
                     id: "charge".to_string(),
                     display_name: "Charge".to_string(),
                     unit: "C".to_string(),
+                    axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::Trajectory,
                     values: charge_series,
                 },
                 Series {
                     id: "current".to_string(),
                     display_name: "Current".to_string(),
                     unit: "A".to_string(),
+                    axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::Trajectory,
                     values: current_series,
                 },
                 Series {
                     id: "capacitor_voltage".to_string(),
                     display_name: "Capacitor voltage".to_string(),
                     unit: "V".to_string(),
+                    axis_id: TIME_AXIS_ID.to_string(),
+                    role: SeriesRole::Trajectory,
                     values: capacitor_voltage_series,
                 },
             ],
+            fields: vec![],
+            distributions: vec![],
             metrics: vec![
                 Metric {
                     id: "final_current".to_string(),
@@ -469,9 +510,13 @@ impl CapabilityAdapter for RlcAdapter {
                 started_at_rfc3339: started_at.to_rfc3339(),
                 completed_at_rfc3339: chrono::Utc::now().to_rfc3339(),
                 elapsed_seconds: wall_start.elapsed().as_secs_f64(),
+                // This capability's result does not depend on a seed, so
+                // recording one would imply it did.
+                seed: None,
             },
         };
-        crate::result::assert_finite(&result).map_err(ExecutionError::Internal)?;
+        crate::result::validate_result(&result)
+            .map_err(|d| ExecutionError::Internal(crate::result::describe_defects(&d)))?;
         sink.emit(RunEvent::Completed);
         Ok(result)
     }

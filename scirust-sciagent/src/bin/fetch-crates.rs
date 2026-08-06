@@ -3,16 +3,17 @@
 //! extraction (no extra Rust dep for archives).
 //!
 //! Usage:
-//!   cargo run --bin fetch-crates -- --count 50 --output ./data/raw
-//!   cargo run --bin collect-data -- --input ./data/raw -o ./data/shards --tokenizer ./tokenizer/bpe.json --recursive
+//!   cargo run -p scirust-sciagent --features fetch --bin fetch-crates -- --count 50
+//!   cargo run -p scirust-sciagent --bin collect-data -- --input <external-corpus-dir> --tokenizer ./scirust-sciagent/tokenizer/bpe.json --recursive
 
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
 use clap::Parser;
+use scirust_sciagent::corpus_paths;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
@@ -107,8 +108,10 @@ struct Args {
     #[arg(short, long, default_value_t = 50)]
     count: usize,
 
-    #[arg(short, long, default_value = "./data/raw")]
-    output: PathBuf,
+    /// External directory for downloaded crates. Defaults to the platform data
+    /// directory; paths inside the SciRust checkout are rejected.
+    #[arg(short, long, value_name = "DIR")]
+    output: Option<PathBuf>,
 
     #[arg(long, default_value = "30")]
     delay_ms: u64,
@@ -133,8 +136,11 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-    fs::create_dir_all(&args.output).expect("Cannot create output dir");
-    let out = &args.output;
+    let out = corpus_paths::resolve_external_corpus_dir(args.output).unwrap_or_else(|error| {
+        eprintln!("Cannot use corpus output directory: {error}");
+        std::process::exit(2);
+    });
+    fs::create_dir_all(&out).expect("Cannot create output dir");
 
     let crates: Vec<CrateSummary> = if let Some(list_path) = &args.crate_list
     {
@@ -167,7 +173,7 @@ fn main() {
             continue;
         }
 
-        if let Err(e) = fetch_and_extract(c, out, args.skip_extract, args.max_retries)
+        if let Err(e) = fetch_and_extract(c, &out, args.skip_extract, args.max_retries)
         {
             eprintln!("  SKIP {}: {e}", c.id);
         }
@@ -188,7 +194,7 @@ fn main() {
         out.canonicalize().unwrap_or_else(|_| out.clone())
     );
     eprintln!(
-        "Next: cargo run --bin collect-data -- --input {:?} -o ./data/shards --tokenizer ./tokenizer/bpe.json --recursive",
+        "Next: cargo run -p scirust-sciagent --bin collect-data -- --input {:?} --tokenizer ./scirust-sciagent/tokenizer/bpe.json --recursive",
         out
     );
 }
@@ -426,31 +432,157 @@ fn collect_rs_files(
     Ok(())
 }
 
-fn collect_rs_recursive(
-    dir: &Path,
-    out: &Path,
-    prefix: &str,
-    count: &mut u32,
-) -> std::io::Result<()> {
-    for entry in fs::read_dir(dir)?
+fn collect_rs_recursive(dir: &Path, out: &Path, prefix: &str, count: &mut u32) -> io::Result<()> {
+    let mut entries = fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.file_name());
+
+    for entry in entries
     {
-        let entry = entry?;
         let path = entry.path();
         if path.is_dir()
         {
             collect_rs_recursive(&path, out, prefix, count)?;
         }
-        else if path.extension().is_some_and(|e| e == "rs")
+        else if path.extension().is_some_and(|extension| extension == "rs")
         {
             *count += 1;
             let name = format!("{prefix}_{count}.rs");
-            // Symlink to avoid duplicating disk space
-            let link = out.join(&name);
-            if !link.exists()
-            {
-                let _ = std::os::unix::fs::symlink(&path, &link);
-            }
+            let link = out.join(name);
+            let target = relative_symlink_target(&path, out)?;
+
+            ensure_symlink(&target, &link)?;
         }
     }
+
     Ok(())
+}
+
+fn relative_symlink_target(source: &Path, link_directory: &Path) -> io::Result<PathBuf> {
+    let corpus_root = link_directory.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "aggregate link directory must have a parent",
+        )
+    })?;
+
+    let source_relative = source.strip_prefix(corpus_root).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "source file must belong to the aggregate corpus root",
+        )
+    })?;
+
+    Ok(PathBuf::from("..").join(source_relative))
+}
+
+fn ensure_symlink(target: &Path, link: &Path) -> io::Result<()> {
+    match fs::symlink_metadata(link)
+    {
+        Ok(metadata) =>
+        {
+            if !metadata.file_type().is_symlink()
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    format!("refusing to replace non-symlink {}", link.display()),
+                ));
+            }
+
+            if fs::read_link(link)? == target
+            {
+                return Ok(());
+            }
+
+            fs::remove_file(link)?;
+        },
+        Err(error) if error.kind() == io::ErrorKind::NotFound =>
+        {},
+        Err(error) => return Err(error),
+    }
+
+    std::os::unix::fs::symlink(target, link)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temporary_directory(test_name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before Unix epoch")
+            .as_nanos();
+
+        let directory = std::env::temp_dir().join(format!(
+            "scirust-fetch-crates-{test_name}-{}-{nonce}",
+            std::process::id()
+        ));
+
+        fs::create_dir_all(&directory).expect("create temporary directory");
+        directory
+    }
+
+    #[test]
+    fn collection_is_deterministic_and_repairs_broken_links() {
+        let root = temporary_directory("relative-links");
+        let corpus = root.join("crates_raw");
+        let source = corpus.join("example/src");
+        let aggregate = corpus.join("all");
+
+        fs::create_dir_all(&source).expect("create source directory");
+        fs::create_dir_all(&aggregate).expect("create aggregate directory");
+
+        fs::write(source.join("z.rs"), "pub fn z() {}").expect("write z.rs");
+        fs::write(source.join("a.rs"), "pub fn a() {}").expect("write a.rs");
+
+        let first_link = aggregate.join("example_1.rs");
+        std::os::unix::fs::symlink("data/crates_raw/example/src/a.rs", &first_link)
+            .expect("create deliberately broken legacy link");
+
+        collect_rs_files(&source, &aggregate, "example").expect("collect Rust files");
+
+        assert_eq!(
+            fs::read_link(&first_link).expect("read first link"),
+            PathBuf::from("../example/src/a.rs")
+        );
+        assert_eq!(
+            fs::read_link(aggregate.join("example_2.rs")).expect("read second link"),
+            PathBuf::from("../example/src/z.rs")
+        );
+        assert_eq!(
+            fs::read_to_string(&first_link).expect("follow repaired link"),
+            "pub fn a() {}"
+        );
+
+        fs::remove_dir_all(root).expect("remove temporary directory");
+    }
+
+    #[test]
+    fn collection_refuses_to_replace_regular_files() {
+        let root = temporary_directory("regular-file");
+        let corpus = root.join("crates_raw");
+        let source = corpus.join("example");
+        let aggregate = corpus.join("all");
+
+        fs::create_dir_all(&source).expect("create source directory");
+        fs::create_dir_all(&aggregate).expect("create aggregate directory");
+        fs::write(source.join("lib.rs"), "pub fn example() {}").expect("write source");
+        fs::write(aggregate.join("example_1.rs"), "preserve me").expect("write collision");
+
+        let error = collect_rs_files(&source, &aggregate, "example")
+            .expect_err("regular-file collision must fail");
+
+        assert_eq!(
+            error.downcast_ref::<io::Error>().map(io::Error::kind),
+            Some(io::ErrorKind::AlreadyExists)
+        );
+        assert_eq!(
+            fs::read_to_string(aggregate.join("example_1.rs")).expect("read collision"),
+            "preserve me"
+        );
+
+        fs::remove_dir_all(root).expect("remove temporary directory");
+    }
 }

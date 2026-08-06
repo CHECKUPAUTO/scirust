@@ -1,0 +1,14 @@
+[package]
+name = "scirust-compute"
+version = "0.1.0"
+edition = "2021"
+publish = false
+rust-version = "1.89"
+description = "Backend-neutral compute contracts for SciRust"
+license-file = "../LICENSE.md"
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]

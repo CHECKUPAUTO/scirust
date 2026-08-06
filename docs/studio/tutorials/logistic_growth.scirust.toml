@@ -1,0 +1,55 @@
+# SciRust Studio tutorial scenario: logistic growth.
+#
+# Run it with:
+#
+#   scirust run docs/studio/tutorials/logistic_growth.scirust.toml
+#
+# A population growing from a small founding group toward the carrying
+# capacity its environment supports: fast while there is room, slowing as the
+# space fills, flattening as it approaches K.
+#
+# This is the catalogue's sharpest check. Logistic growth has a closed-form
+# solution,
+#
+#   x(t) = K / (1 + (K/x0 - 1)*exp(-r*t))
+#
+# so the run does not settle for "energy was roughly conserved" — it reports
+# the largest difference between the integrated curve and the exact answer, at
+# every recorded point, and plots both so they can be compared directly.
+#
+# It is also the only capability with a single-component state, which makes it
+# the narrowest case the result schema and the chart have to handle.
+
+schema_version = 1
+
+[experiment]
+name = "Logistic growth to carrying capacity"
+description = "A population of 10 growing at r = 0.8 toward a carrying capacity of 1000, plotted against its exact solution."
+seed = 42
+
+[capability]
+id = "sim.ecology.logistic_growth"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+rate = { value = 0.8, unit = "1/s" }
+capacity = { value = 1000.0, unit = "1" }
+
+[initial_state]
+population = [{ value = 10.0, unit = "1" }]
+
+[solver]
+id = "rk4"
+start = { value = 0.0, unit = "s" }
+# Long enough for the curve to flatten: at r = 0.8 the population is within a
+# fraction of a percent of K well before t = 20.
+end = { value = 20.0, unit = "s" }
+step = { value = 0.001, unit = "s" }
+
+[outputs]
+record = ["population", "exact"]
+sample_every = 1

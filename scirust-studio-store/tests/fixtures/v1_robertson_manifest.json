@@ -1,0 +1,18 @@
+{
+  "manifest_schema_version": 1,
+  "run_id": "20260728T230534Z-60cbca6499024d35",
+  "capability_id": "sim.chemistry.robertson",
+  "scenario_sha256": "60cbca6499024d35cb77f0c9349ba31d75883f1cf2458fde108de746c5c884d9",
+  "result_sha256": "d784dda9eebdbce1a4439c66e67107165dae80676bb20d36a28ec0982ce2d922",
+  "status": "completed",
+  "started_at_rfc3339": "2026-07-28T23:05:34.171974428+00:00",
+  "finished_at_rfc3339": "2026-07-28T23:05:34.172722982+00:00",
+  "environment": {
+    "os": "linux",
+    "arch": "x86_64",
+    "family": "unix",
+    "pointer_width": 64
+  },
+  "result_schema_version": 1,
+  "store_version": "0.1.0"
+}

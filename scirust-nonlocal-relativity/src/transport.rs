@@ -50,7 +50,7 @@ impl<const D: usize> HistoryEntry<D> {
     /// coordinates or a parameter value.
     ///
     /// Coordinates are set to the origin and the parameter to zero. These
-    /// placeholders are never read by [`crate::IdentityHistoryTransport`] or
+    /// default values are never read by [`crate::IdentityHistoryTransport`] or
     /// by the coordinate-memory pipeline; a geometric transport must not be
     /// combined with entries constructed this way, since it would silently
     /// transport from the wrong point.
@@ -110,6 +110,59 @@ where
     }
 
     Ok(())
+}
+
+/// Transport `vector`, initially expressed at `waypoints[0]`'s point, along
+/// the polyline described by `waypoints` (ordered oldest to newest), one
+/// discrete segment at a time via `transport`. Returns the vector expressed
+/// at `waypoints.last()`'s point.
+///
+/// This is the same per-segment mechanism [`HistoryBackend::push_entry`]
+/// applies internally, exposed directly over an explicit path for research
+/// and validation use: it lets a caller measure how a [`HistoryTransport`]'s
+/// accumulated numerical error behaves under path refinement, independent of
+/// the full simulation/backend machinery (see
+/// `examples/exact_transport_convergence.rs`, which compares
+/// [`DiscreteConnectionTransport`] against
+/// [`crate::exact_cylindrical_minkowski_transport`]).
+///
+/// `waypoints` must contain at least one entry. A single-waypoint polyline
+/// has no segments to transport across and returns `vector` unchanged.
+pub fn transport_vector_along_polyline<const D: usize, B, T>(
+    background: &B,
+    transport: &T,
+    vector: [f64; D],
+    waypoints: &[HistoryEntry<D>],
+) -> NonlocalResult<[f64; D]>
+where
+    B: Connection<D>,
+    T: HistoryTransport<D>,
+{
+    if waypoints.is_empty()
+    {
+        return Err(NonlocalRelativityError::EmptyTransportPolyline);
+    }
+
+    let mut current = vector;
+
+    for (segment_index, window) in waypoints.windows(2).enumerate()
+    {
+        let from_state = WorldlineState::new(window[0].coordinates, window[0].velocity);
+        let to_state = WorldlineState::new(window[1].coordinates, window[1].velocity);
+        let segment_step = window[1].parameter - window[0].parameter;
+
+        current = transport.transport_segment(
+            segment_index,
+            background,
+            current,
+            &from_state,
+            &to_state,
+            segment_step,
+        )?;
+        validate_transported_vector(&current, segment_index)?;
+    }
+
+    Ok(current)
 }
 
 /// Deterministic discrete parallel-transport approximation for retained

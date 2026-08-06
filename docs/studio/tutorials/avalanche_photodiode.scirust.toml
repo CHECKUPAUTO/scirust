@@ -1,0 +1,131 @@
+# SciRust Studio tutorial scenario: how much avalanche gain is too much.
+#
+# Run it with:
+#
+#   scirust run docs/studio/tutorials/avalanche_photodiode.scirust.toml
+#
+# THERE IS NO TIME IN THIS SCENARIO. Every other tutorial here integrates
+# something forward; this one sweeps a parameter. The `[solver]` section's
+# start, end and step are avalanche GAINS, not seconds, and the result carries
+# a `gain` axis and no `t` axis at all. The capability declares that in the
+# catalogue as `RunDomain::ParameterSweep`, so nothing downstream has to guess
+# from the shape of the output what it is looking at.
+#
+# The receiver: a silicon APD watching 20 nW at 1 GHz of bandwidth into a
+# 10 kOhm load at room temperature. A perfectly ordinary lidar front end, and
+# deeply thermal-noise-limited at unity gain — its SNR there is -8.1 dB, which
+# is to say the signal is under the noise.
+#
+# The trade-off the sweep exists to show:
+#
+#   * turning the gain up multiplies the signal, so signal POWER grows as M^2,
+#     which lifts it off the fixed thermal floor. This is what an APD is for.
+#   * but the avalanche is a random cascade, so it multiplies the shot noise
+#     by more than M^2 — by M^2*F(M), where the McIntyre factor F(M) = k*M +
+#     (1-k)*(2 - 1/M) itself grows with the gain.
+#
+# So the SNR climbs, peaks, and collapses. Here it peaks at M = 31.3 — a
+# textbook silicon APD operating point — at +12.4 dB, twenty decibels better
+# than the same detector with no multiplication at all.
+#
+# ---------------------------------------------------------------------------
+# Two checks, and neither of them has a tolerance
+# ---------------------------------------------------------------------------
+#
+# Writing SNR = A*M^2/(C*M^2*F(M) + T), maximising it means minimising
+# C*F(M) + T/M^2, whose stationary condition is
+#
+#     C*k*M^3 + C*(1-k)*M = 2T
+#
+# The left side is strictly increasing in M for every k in [0, 1] — at k = 0
+# it is a line, at k = 1 a cubic, in between a positive combination — so there
+# is exactly one positive root, and bisection finds it with no derivative and
+# no initial guess.
+#
+#   * optimum_is_where_the_closed_form_says — the SNR at that root must be at
+#     least the SNR at EVERY gain the sweep visited. That is not a number to
+#     agree with approximately; it is what "maximum" means, and the only slack
+#     allowed is a few ulps of round-off.
+#   * snr_is_unimodal_in_gain — one root means the curve rises then falls and
+#     does nothing else, so its difference sequence changes sign exactly once.
+#     A model with the right optimum but a spurious second bump passes the
+#     first check and fails this one.
+#
+# Both are theorems about the model that a sweep can falsify, which is a
+# stronger thing to be able to say than "agrees to within 1e-6".
+#
+# ---------------------------------------------------------------------------
+# Why the sweep starts at exactly 1.0
+# ---------------------------------------------------------------------------
+#
+# At unity gain an APD is a plain photodiode: F(1) = 1 for any k, and the shot
+# noise is the unmultiplied 2*q*I_p*B. Starting there means the run's first
+# point is a limit that can be checked against `sim.optoelectronics.photodiode`
+# by hand, and a test does exactly that. A gain below 1 would be attenuation
+# and is rejected at validation with SRST-VAL-0285.
+#
+# The step is 0.125 rather than 0.1 deliberately: it is a negative power of
+# two, so every one of the 953 sweep points is exact in binary and the last
+# one lands on 120.0 instead of 119.9.
+#
+# Try it: raise `ionization_ratio` from 0.02 to 0.5 — a germanium-like
+# detector instead of a good silicon one. The optimum falls from 31.3 to about
+# 10.9 and the peak SNR drops with it: a noisier avalanche is worth less gain,
+# which is the single most useful design rule this model states. A test
+# asserts that direction rather than leaving it to the prose.
+
+schema_version = 1
+
+[experiment]
+name = "APD gain optimum"
+description = "An avalanche photodiode receiver's SNR swept across gain, locating where excess noise overtakes the thermal floor."
+
+[capability]
+id = "sim.optoelectronics.avalanche_photodiode"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+# Silicon at 850 nm, before multiplication.
+responsivity = { value = 0.8, unit = "A/W" }
+# A good silicon APD: hole ionization is rare, so the cascade is quiet.
+ionization_ratio = { value = 0.02, unit = "1" }
+# Primary dark current, multiplied and shot-noise-generating exactly as the
+# signal is.
+dark_current = { value = 1.0e-10, unit = "A" }
+# The transimpedance load, and with it the thermal floor the gain exists to
+# escape.
+r_load = { value = 1.0e4, unit = "Ohm" }
+temperature = { value = 300.0, unit = "K" }
+# 1 GHz noise-equivalent bandwidth. It scales both noise variances equally, so
+# it moves the SNR up and down without moving the optimal gain at all.
+bandwidth = { value = 1.0e9, unit = "Hz" }
+# 20 nW. Weak enough to be thermal-limited at unity gain, strong enough that
+# the optimum lands at a positive SNR.
+optical_power = { value = 2.0e-8, unit = "W" }
+
+# There is deliberately no [initial_state]. Every point of this sweep is an
+# independent evaluation of closed forms — there is no state to start from,
+# and a scenario that offered one would be describing something else. The
+# adapter rejects it rather than ignoring it.
+
+[solver]
+id = "gain_sweep"
+# Gains, not seconds. Unity is the plain-photodiode limit; 120 is well past
+# the point where the excess noise has won.
+start = { value = 1.0, unit = "1" }
+end = { value = 120.0, unit = "1" }
+step = { value = 0.125, unit = "1" }
+
+[outputs]
+record = [
+    "snr",
+    "snr_db",
+    "signal_current",
+    "shot_noise_variance",
+    "thermal_noise_variance",
+    "excess_noise_factor",
+]

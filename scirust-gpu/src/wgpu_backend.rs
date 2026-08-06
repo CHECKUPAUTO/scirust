@@ -565,7 +565,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 /// calls (adapter/device acquisition and shader compilation are expensive).
 ///
 /// A cheap-to-[`Clone`] handle: the device, queue and pipelines live behind one
-/// [`Arc`] (none of `wgpu::Device`/`Queue`/`ComputePipeline` are themselves
+/// [`std::sync::Arc`] (none of `wgpu::Device`/`Queue`/`ComputePipeline` are themselves
 /// `Clone` in this wgpu version), so a clone shares the *same* underlying device.
 /// The shared test context (see [`WgpuContext::new`]) relies on this. [`Deref`]
 /// exposes the inner fields transparently, so call sites read `self.device`,

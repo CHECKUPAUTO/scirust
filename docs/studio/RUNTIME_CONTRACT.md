@@ -65,17 +65,66 @@ pub trait CapabilityAdapter: Send + Sync {
   `FieldDescriptor`/`SolverDescriptor` tables — not five independent
   re-implementations of the same logic.
 - **`execute`** receives a `ValidatedScenario` (constructible only by a
-  successful `validate()`), an `ExecutionControl` (checked for
-  cancellation before the integration call — see
-  `docs/studio/adr/0002-structured-run-results.md` for why finer-grained
-  cancellation is Phase 2B), and an `&mut dyn EventSink` that receives
-  `RunEvent::Started`/`Warning`/`Completed`/`Cancelled`/`Failed`. It
-  returns a fully-populated `RunResult` or an `ExecutionError`, never a
+  successful `validate()`), an `ExecutionControl`, and an `&mut dyn
+  EventSink` that receives
+  `RunEvent::Started`/`Progress`/`Warning`/`Completed`/`Cancelled`/`Failed`.
+  It returns a fully-populated `RunResult` or an `ExecutionError`, never a
   partially-built one.
 - Every adapter calls `scirust_studio_runtime::assert_finite(&result)`
   immediately before returning `Ok(result)`, converting any non-finite
   derived value into `ExecutionError::Internal` instead of a silently
   "successful" result containing JSON `null`.
+
+## Cancellation and progress
+
+Fixed-step capabilities check `ExecutionControl` after **every accepted
+step** and report genuine progress, via
+`scirust_sim::simulate_observed`/`simulate_second_order_observed` (see
+`docs/studio/adr/0003-worker-process-and-ipc.md`). `simulate` and
+`simulate_second_order` are wrappers around those same functions, so
+observing a run cannot change the numbers a completed run produces —
+`scirust-sim`'s `observed_rk4_run_is_bit_identical_to_the_unobserved_one`
+test asserts exactly that.
+
+`RunEvent::Progress` carries the fraction of the scenario's **time span**
+already integrated, taken from the `t` the solver reports. It is not a
+timer and not an estimate, and it is emitted at most 20 times per run.
+
+Not every capability can do this, and the table below says which:
+
+| Capability | Cancellation | Progress |
+|---|---|---|
+| `sim.mechanics.spring_mass_damper` | every step | yes |
+| `sim.epidemiology.sir` | every step | yes |
+| `sim.orbital.two_body` | every step (both solvers) | yes |
+| `sim.electrical.rlc` | every step | yes |
+| `sim.chemistry.robertson` | **before execution only** | **none** |
+| `sim.ecology.lotka_volterra` | every step | yes |
+| `sim.ecology.logistic_growth` | every step | yes |
+| `sim.mechanics.pendulum` | every step | yes |
+| `sim.mechanics.double_pendulum` | every step | yes (the main run only) |
+| `sim.stochastic.ornstein_uhlenbeck` | **between realisations** | **per realisation** |
+| `sim.thermal.heat_rod_1d` | every step | yes |
+
+Robertson integrates through `scirust_sim::stiff_bridge`'s adaptive
+Rosenbrock-W solver, which exposes no per-step callback. It is given no
+fabricated progress fraction. Mid-run cancellation for it is covered at the
+process level instead — the worker can be killed — which is one of the
+reasons the worker exists.
+
+The Ornstein-Uhlenbeck process is the one row whose unit of progress is not
+the time step. `ou_path` samples a whole realisation in a single call and
+cannot be chunked — each call re-seeds, so splitting the span would produce a
+different and differently-distributed sample. Its atom is therefore the
+*realisation*: an ensemble of `n` reports `n` units and can be cancelled
+between them, and a one-replicate run has a single indivisible unit and
+reports one step from nothing to done. That last case is not a fabricated
+fraction; it is an accurate description of a job with one part. See
+`docs/studio/adr/0008-ensembles.md`, which supersedes ADR 0007 on this point.
+
+Every adapter, including Robertson, honours an already-cancelled control
+before starting; `every_adapter_honours_a_pre_cancelled_control` asserts
+this for all of them.
 
 ## Implemented capabilities (Phase 2A)
 
@@ -86,11 +135,24 @@ pub trait CapabilityAdapter: Send + Sync {
 | `sim.orbital.two_body` | `scirust_sim::orbital::TwoBody` | `symplectic_euler`, `rk4` | `energy_drift`, `angular_momentum_drift`, `finite_trajectory` |
 | `sim.electrical.rlc` | `scirust_sim::electrical::SeriesRlc` | `rk4` | `finite_solution`, `damping_regime`, `energy_non_increasing` |
 | `sim.chemistry.robertson` | `scirust_sim::chemistry::Robertson` (via `scirust_sim::stiff_bridge::simulate_rosenbrock`, feature `stiff`) | `stiff_rosenbrock_w` | `mass_conservation`, `non_negative_concentrations`, `solver_completion` |
+| `sim.ecology.lotka_volterra` | `scirust_sim::ecology::LotkaVolterra` | `rk4` | `first_integral_drift`, `populations_stay_positive` |
+| `sim.ecology.logistic_growth` | `scirust_sim::ecology::LogisticGrowth` | `rk4` | `analytic_error`, `stays_below_capacity` |
+| `sim.mechanics.pendulum` | `scirust_sim::mechanics::Pendulum` | `rk4` | `energy_drift`, `amplitude_bounded` |
+| `sim.mechanics.double_pendulum` | `scirust_sim::mechanics::DoublePendulum` | `rk4` | `energy_drift`, `sensitive_dependence` |
+| `sim.thermal.heat_rod_1d` | `scirust_sim::thermal::HeatRod1d` | `rk4` | `approaches_steady_state`, `slowest_mode_decay_rate`, `maximum_principle` |
+| `sim.stochastic.ornstein_uhlenbeck` | `scirust_sim::stochastic::ou_path` | `exact_gaussian_transition` | `stationary_moments`, `reproducible_from_seed`, `ensemble_moments`*, `ensemble_derived_from_seed`* |
 
 Every row is a real, tested adapter with a shipped, executed tutorial
-scenario under `docs/studio/tutorials/`. See `docs/studio/CAPABILITY_MATRIX.md`
-for how these five relate to the rest of `scirust-sim` and the wider
-workspace.
+scenario under `docs/studio/tutorials/`. Checks marked `*` appear only when
+the scenario asks for more than one realisation. See
+`docs/studio/CAPABILITY_MATRIX.md` for how these relate to the rest of
+`scirust-sim` and the wider workspace.
+
+A capability may not emit a verification its catalogue entry does not
+declare; `no_adapter_emits_a_verification_its_catalogue_entry_does_not_declare`
+runs every adapter's own tutorial and checks it. The converse is deliberately
+not asserted, because a check that applies only to some scenarios would
+otherwise have to emit `NotApplicable` filler to satisfy it.
 
 ## Error codes
 
@@ -111,11 +173,137 @@ Validation codes currently in use:
 - `SRST-VAL-0120`..`0129`: `sim.orbital.two_body` field errors.
 - `SRST-VAL-0130`..`0139`: `sim.electrical.rlc` field errors.
 - `SRST-VAL-0140`..`0149`: `sim.chemistry.robertson` field errors.
+- `SRST-VAL-0150`..`0159`: `sim.ecology.lotka_volterra` field errors.
+- `SRST-VAL-0160`..`0169`: `sim.ecology.logistic_growth` field errors.
+- `SRST-VAL-0170`..`0179`: `sim.mechanics.pendulum` field errors.
+- `SRST-VAL-0180`..`0189`: `sim.mechanics.double_pendulum` field errors.
+- `SRST-VAL-0190`..`0199`: `sim.stochastic.ornstein_uhlenbeck` field errors.
+- `SRST-VAL-0095`: a stochastic capability was given no `experiment.seed`
+  (see `docs/studio/adr/0007-seeded-stochastic-capabilities.md`).
+- `SRST-VAL-0096`: `experiment.replicates` above 1 on a capability that draws
+  no sample, so every realisation would be the same curve.
+- `SRST-VAL-0097`: `experiment.replicates` is zero, or above the limit of
+  4 096 (see `docs/studio/adr/0008-ensembles.md`).
+- `SRST-VAL-0098`: `backend.precision` names a precision the capability does
+  not compute in.
+- `SRST-VAL-0099`: `backend.kind` names a backend the capability does not run
+  on.
+- `SRST-VAL-0200`..`0209`: `sim.thermal.heat_rod_1d` field errors, including
+  `0206` for a `solver.step` above the explicit diffusion stability limit —
+  refused rather than run, because above it RK4 on that stencil diverges
+  rather than losing accuracy.
+- `SRST-VAL-0210`..`0219`: `sim.optoelectronics.photodiode` field errors.
+- `SRST-VAL-0220`..`0229`: `sim.thermal.hvac_zone` field errors.
+- `SRST-VAL-0230`..`0239`: `sim.mechanics.rigid_body` field errors.
+- `SRST-VAL-0240`..`0249`: `sim.pharmacology.oral_one_compartment` field
+  errors, including `0245` for `k_a == k_e` — refused rather than evaluated,
+  because the Bateman closed form has a removable singularity there and the
+  capability's whole claim is that it matches that form.
+- `SRST-VAL-0250`..`0261`: `sim.energy.battery_thevenin` field errors.
+- `SRST-VAL-0262`..`0270`: `sim.optoelectronics.semiconductor_laser` field
+  errors.
+- `SRST-VAL-0271`..`0277`: `sim.power.swing_equation` field errors.
+- `SRST-VAL-0278`..`0285`: `sim.optoelectronics.avalanche_photodiode` field
+  errors, including `0285` for a sweep starting below unity gain — which
+  would be attenuation, not amplification.
+- `SRST-VAL-0286`..`0292`: `sim.epidemiology.seir` field errors.
+- `SRST-VAL-0293`..`0298`: `sim.chemistry.consecutive_reactions` field
+  errors, including `0298` for `k1 == k2` — refused because the Bateman form
+  divides by `k2 - k1` and the limit, though it exists, is not one the model
+  states.
+- `SRST-VAL-0299`..`0302`: `sim.chemistry.reversible_reaction` field errors.
+- `SRST-VAL-0303`..`0306`: `sim.electrical.rc` field errors.
+- `SRST-VAL-0307`..`0310`: `sim.mechanics.projectile` field errors.
+- `SRST-VAL-0311`..`0313`: `sim.electrical.van_der_pol` field errors.
+- `SRST-VAL-0314`..`0318`: `sim.pharmacology.two_compartment_iv` field
+  errors.
+- `SRST-VAL-0319`..`0321`: `sim.stochastic.mm1_queue` field errors,
+  including `0321` for an unstable queue — the simulation stays well defined
+  at `rho >= 1`, but every check compares against a steady state that does
+  not exist there.
+- `SRST-VAL-0322`..`0324`: `sim.stochastic.geometric_brownian_motion` field
+  errors.
 
 Each capability's exact field-to-code mapping is in that capability's
 adapter module (the `FieldDescriptor.error_code` on each `const`). A new
-capability should claim the next unused ten-number block and record it
-here.
+capability should claim the next unused block and record it here. The
+ten-number blocks stopped being ten-wide at `0250`: a capability with twelve
+fields needs twelve codes, and stretching one to fit a round number would
+mean two fields sharing a code, which is worse than an untidy table.
+
+## Progress
+
+`SolverDescriptor::reports_progress` says whether a run driven by that solver
+emits fractions a reader can trust.
+
+It is **declared**, not inferred. It used to be read off `fixed_step`, on the
+reasoning that a fixed-step solver is driven through `scirust-sim`'s per-step
+observer. That proxy was wrong in both directions, and both errors were real:
+
+- the Ornstein-Uhlenbeck process declares a fixed step and emits no per-step
+  fractions, so the desktop drew a determinate bar that never moved (found
+  and fixed in Phase 3B-3, by taking the *realisation* as the unit);
+- `sim.stochastic.mm1_queue` has no step size anywhere — it is a
+  discrete-event simulation — and reports one unit per realisation perfectly
+  well.
+
+`every_capability_emits_the_progress_it_declares` walks the registry, runs
+each capability's own tutorial, and asserts that a capability declaring
+progress emits some and one declining it emits none. It also asserts the
+fractions are inside `[0, 1]` and never go backwards — which caught
+`sim.electrical.van_der_pol` reaching one hundred percent and starting again,
+because it integrates two trajectories and each was reporting its own span.
+
+`sink::SubRangeSink` is the fix for that class: it maps a phase's
+`0.0..=1.0` onto a window of the whole run's, and swallows the phase's
+`Started` and `Completed` because those are the run's events and not a
+phase's. The earlier workaround — handing the second trajectory a
+`NullEventSink` — removed the reset and replaced it with a bar that reached
+the end at the halfway point, which is a fraction a reader still cannot
+trust.
+
+## Distributions
+
+`RunResult::distributions` carries histograms: `n` counts delimited by
+`n + 1` edges, with samples outside the range counted rather than clamped
+into the end bins.
+
+Neither a `Series` nor a `Field` could hold one — both are aligned
+one-to-one with an axis, and a histogram's edges outnumber its bins by one.
+`validate_result` enforces four structural rules (unique id, edge count,
+finite strictly-increasing edges, at least one bin) and no statistical ones.
+See `docs/studio/adr/0011-distributions.md`.
+
+## Run domains
+
+Every capability up to `sim.optoelectronics.avalanche_photodiode` integrated
+forward in time, so "the independent variable is time" was true of all of
+them and therefore never written down. An APD receiver analysis is algebraic:
+it evaluates closed forms across a swept avalanche gain and there is no time
+in it anywhere.
+
+`CapabilityDescriptor::domain` states which a capability is.
+
+- **`RunDomain::Time`** — the result carries a `t` axis
+  (`result::TIME_AXIS_ID`), strictly increasing, and `RunSummary::axis_id` is
+  `"t"`.
+- **`RunDomain::ParameterSweep`** — the result carries the swept parameter's
+  axis, strictly increasing, and **no** `t` axis. `RunSummary::axis_id` names
+  that axis instead. `solver.start`/`end`/`step` are in the parameter's units,
+  which the capability's solver descriptor says explicitly.
+
+`RunSummary::axis_id` is `#[serde(default)]`ed to `"t"`, so every result
+stored before the field existed decodes unchanged and means what it always
+meant.
+
+`validate_result` compares the summary's bounds against the axis it names,
+with exact equality, as it always has — the change is only that it now knows
+*which* axis that is rather than assuming. The registry-driven test
+`every_adapter_emits_exact_axis_coordinates` demands a `t` axis of exactly
+the capabilities that declared one, and demands its absence from the ones
+that did not. That matters: the alternative was to weaken the assertion to
+"some axis" for everybody, which would have let a time-integrating capability
+quietly stop emitting `t` without anything going red.
 
 ## CLI exit codes
 
@@ -131,11 +319,161 @@ table:
 | 6 | cancelled | `ExecutionError::Cancelled` |
 | 7 | internal failure | unregistered adapter for a validated capability id (a bug), `ExecutionError::Internal`, JSON serialization failure |
 
+## Out-of-process execution
+
+The same pipeline runs inside `scirust-studio-worker`, which speaks
+`scirust-studio-ipc` over stdin/stdout — see
+`docs/studio/IPC_PROTOCOL.md` and
+`docs/studio/adr/0003-worker-process-and-ipc.md`. The worker reaches
+capabilities through the identical `find_adapter`/`validate`/`execute` path
+this document describes; it is not a second execution route. The test
+`a_run_through_the_worker_matches_an_in_process_run` runs a scenario in a
+real spawned worker process and asserts the returned series, metrics, and
+verifications equal an in-process run of the same scenario exactly.
+
+`scirust-cli` still executes in-process: spawning a worker per CLI
+invocation would add latency a command-line user gains nothing from. The
+worker exists for the desktop shell, and is tested directly.
+
+## Result schema
+
+Results use **schema version 2**: every `Axis` carries its coordinates and
+every `Series` names the axis it belongs to, so nothing infers sample
+spacing. Runs stored under v1 remain readable and verifiable but are never
+given a reconstructed time axis — see
+`docs/studio/adr/0006-result-axis-coordinates.md` and
+`docs/studio/STORAGE_LAYOUT.md`.
+
+`validate_result` replaces `assert_finite` and checks the whole result for
+internal consistency, reporting every defect rather than the first.
+
+## Application orchestration
+
+`scirust-studio-app-service` supervises the worker, owns the job lifecycle
+and selects the run store, with no dependency on any GUI toolkit. See
+`docs/studio/APP_SERVICE.md`.
+
+## Run storage
+
+`scirust run --store <dir>` (or `SCIRUST_STUDIO_STORE`) records the run
+immutably — scenario, result, and a hashed provenance manifest — and
+`scirust runs list|show|verify|discard` inspects the store. See
+`docs/studio/STORAGE_LAYOUT.md` and
+`docs/studio/adr/0004-immutable-run-storage.md`. Storage is opt-in; there is
+no default location.
+
 ## Output formats
 
-Both `scirust catalog` and `scirust run` accept `--format text|json`
-(default `text`). `text` is meant for a human at a terminal; `json` is
+`scirust catalog`, `scirust run`, and `scirust runs list|show` accept
+`--format text|json` (default `text`). `text` is meant for a human at a terminal; `json` is
 meant for tests, scripts, and — eventually — a desktop client, and is a
 direct serialization of `CapabilityRegistry`'s entries or a `RunResult`
 with stable field names (see the two ADRs for why the field types are
 shaped the way they are).
+
+## Seeds and determinism
+
+Until Phase 3B-2 every capability was
+`DeterminismClass::StrictSameBinarySameTarget`: the result was a function of
+the parameters alone, and `experiment.seed` was read by nothing.
+
+`sim.stochastic.ornstein_uhlenbeck` is
+`InherentlyStochasticRecordedSeed`. For such a capability:
+
+- **`experiment.seed` is required.** Validation fails with `SRST-VAL-0095`
+  without one. A single sample from a distribution is not evidence unless
+  someone else can obtain the same sample.
+- **The seed is recorded** in `RunProvenance::seed`, which is `None` for every
+  capability that did not consume one — recording a scenario's seed against a
+  result that ignored it would imply it mattered.
+- **The verification is statistical.** No individual trajectory can be right
+  or wrong; the distribution can. See ADR 0007 for how the tolerance is
+  derived rather than chosen.
+- **The run re-derives itself** from the recorded seed and compares bit for
+  bit, so the reproducibility claim is demonstrated and not just asserted.
+
+Adding another stochastic capability means calling
+`validate_support::resolve_seed` in `validate`, passing the seed to the model,
+and setting `RunProvenance::seed`. Skipping any of the three produces a result
+nobody can reproduce, which is why the first two are enforced by the type
+system and the third by the bridge contract test.
+
+## Backend and precision
+
+`backend.kind` and `backend.precision` are checked **against the capability's
+own declaration**, not only against the schema's list of legal strings. Every
+adapter calls `validate_support::resolve_backend_kind` and
+`resolve_precision`, and two registry-driven tests walk `all_adapters()` to
+assert each one does.
+
+This closed a gap of the same shape as `experiment.seed` before Phase 3B-2.
+The schema accepted `precision = "f32"`; every descriptor declares
+`supported_precisions: &[PrecisionKind::F64]`; and nothing compared the two.
+A scenario asking for single precision passed validation and was computed in
+double, recording a stated precision it did not have — which is worse than a
+field nobody reads, because it looks like the user got what they asked for.
+`f32` is not a smaller `f64`: someone selecting it is usually asking about
+conditioning, or matching another implementation's arithmetic, and answering
+in `f64` answers a different question.
+
+`PrecisionKind::F32` exists as a vocabulary entry that no capability declares.
+That is not the same as a lie: it lets a descriptor say "not here yet", where
+declaring only `F64` and accepting `"f32"` anyway said "you got what you asked
+for". When a capability grows an `f32` path, the checks and their tests follow
+the descriptor with no edit.
+
+`backend.kind` refuses nothing today — the schema allows only `"cpu"` and
+every capability declares `Cpu`. It is there so the first capability that is
+not CPU-only fails loudly instead of running somewhere it never claimed to.
+
+## Fields
+
+A [`Field`] is a quantity spanning **two** axes, row-major, naming a row axis
+and a column axis and declaring its own column count. `RunResult::fields` is
+defaulted and empty for every capability whose outputs are curves.
+
+`validate_result` checks a field's shape twice — against the declared column
+count *and* against both axes — because a shape error is the one field defect
+that leaves every number finite and plausible. A row-major buffer read with
+the wrong stride is still a buffer of doubles and renders as a convincing
+picture of nothing.
+
+A `Series` could not carry a field: it is aligned one-to-one with a single
+axis, so the most it holds is a slice. See `docs/studio/adr/0009-fields.md`,
+which also corrects the claim in `REPOSITORY_AUDIT.md` that schema v2 already
+expressed one.
+
+## Ensembles
+
+`experiment.replicates` asks a stochastic capability for `n` independent
+realisations instead of one. Absent, or `1`, means what every scenario meant
+before the field existed.
+
+- **The replicates' seeds are derived** from `experiment.seed` by
+  `ensemble::replicate_seeds`, so an ensemble is reproducible from the same
+  one number a lone run is. Replicate 0 keeps the base seed, which is what
+  makes a one-replicate run bit-identical to the run the capability did before
+  ensembles, and a small ensemble a prefix of a large one.
+- **Every adapter calls `validate_support::resolve_replicates`**, not only the
+  stochastic ones. A capability whose `DeterminismClass::draws_a_sample` is
+  false refuses `replicates > 1` with `SRST-VAL-0096`: `n` copies of one
+  trajectory is not a distribution.
+  `every_capability_answers_for_replicates_according_to_its_class` walks the
+  registry, so a new adapter that forgets fails in CI.
+- **The summary is accumulated in one pass** by `ensemble::EnsembleAccumulator`,
+  using Welford's update. Memory is `O(samples)` regardless of the replicate
+  count, and a small spread on a large mean survives — which the
+  `E[x²] − E[x]²` shortcut does not.
+- **Retention is bounded and reported.** At most
+  `ensemble::MAX_RETAINED_MEMBERS` individual realisations are kept; both the
+  count drawn and the count kept are metrics, and both interfaces show them.
+- **`Series::role` says what each curve is** — `EnsembleMean`,
+  `EnsembleBandLower`/`Upper`, `EnsembleMember`, plus `Reference` for a line
+  the solver did not compute. `validate_result` enforces the structural rules
+  (one mean, a band that brackets it, one shared axis) but not statistical
+  ones, which belong to the capability's own checks.
+
+See `docs/studio/adr/0008-ensembles.md`, in particular for why the seed
+derivation is scrambled rather than counted — SplitMix64 places every seed on
+one shared cycle, so two replicates whose seeds differ by a multiple of its
+increment would draw overlapping noise.

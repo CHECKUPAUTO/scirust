@@ -25,10 +25,18 @@
 //!
 //! The numeric / statistical evaluation behind an `L2`/`L1` node's verdict is the
 //! backend's job (`sos-scirust`), supplied to the contract as a
-//! [`Reproduced::Certified`] outcome — this crate never fabricates it. A full
-//! store-driven `verify(object)` that walks an object's sub-DAG, re-executes it,
-//! and auto-diffs composes [`rerun`] with [`verify_reproduction`]; the piece it
-//! awaits is the object-graph re-execution driver. No stub crosses that line.
+//! [`Reproduced::Certified`] outcome — this crate never fabricates it, and now
+//! does not have to: `sos-scirust`'s `verdict` module supplies real ones
+//! (certificate-sum agreement for `L2`, a two-sample test for `L1`), and
+//! [`verify_rerun`] now joins them: it pairs an original run's ledger against a
+//! re-run's, reads each node's declared level from the store, decides `L3`/`L0`
+//! by id and routes `L2`/`L1` to that backend through a [`Certifier`]. What
+//! [`verify_object`] closes the loop from the store side: it finds the run
+//! that recorded an object, loads the [`Plan`](sos_workflow::Plan) that run's
+//! digest names — a `Plan` is a storable object now, precisely so a recorded
+//! run can be re-executed — re-runs it, and verifies. It refuses rather than
+//! guesses when nothing produced the object, when several runs did, or when
+//! the plan was never stored. No stub crosses that line.
 //!
 //! ## Example — a lock binds, or declares its drift
 //!
@@ -63,6 +71,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 pub mod contract;
+pub mod driver;
 pub mod error;
 pub mod lock;
 pub mod rerun;
@@ -71,6 +80,7 @@ pub use contract::{
     MatchRule, NodeClaim, NodeReport, NodeVerdict, Reproduced, VerifyReport, verify_node,
     verify_reproduction,
 };
+pub use driver::{Certifier, NoCertifier, verify_object, verify_rerun};
 pub use error::{ReproError, Result};
 pub use lock::{Drift, EnvLock};
 pub use rerun::rerun;

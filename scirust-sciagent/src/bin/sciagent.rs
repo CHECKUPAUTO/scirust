@@ -5,6 +5,9 @@ use scirust_core::autodiff::reverse::Tape;
 use scirust_sciagent::bpe::BpeTokenizer;
 use scirust_sciagent::config::SciAgentConfig;
 use scirust_sciagent::model::SciAgentModel;
+use scirust_sciagent::train::checkpoint::{load_checkpoint, read_meta};
+
+type CliResult<T> = Result<T, (i32, String)>;
 
 #[derive(Parser)]
 #[command(
@@ -60,58 +63,84 @@ enum Command {
     Info,
 }
 
-fn build_model(cli: &Cli) -> SciAgentModel {
-    if let Some(ref ckpt) = cli.checkpoint
+fn report_cli_error((code, message): (i32, String)) -> ! {
+    eprintln!("error: {message}");
+    std::process::exit(code);
+}
+
+/// Build a model only from a valid, explicitly supplied checkpoint.
+///
+/// A freshly initialized model contains random weights. All inference paths
+/// must fail closed when the checkpoint is missing or invalid.
+fn build_model(cli: &Cli) -> CliResult<SciAgentModel> {
+    let checkpoint = cli.checkpoint.as_ref().ok_or_else(|| {
+        (
+            2,
+            String::from(
+                "missing required `--checkpoint PATH`; refusing to run with random weights",
+            ),
+        )
+    })?;
+
+    eprintln!("Loading checkpoint from {:?} ...", checkpoint);
+
+    let meta = read_meta(checkpoint).map_err(|error| {
+        (
+            1,
+            format!(
+                "cannot read checkpoint metadata from `{}`: {error}",
+                checkpoint.display()
+            ),
+        )
+    })?;
+
+    let mut model = SciAgentModel::new(&meta.config);
+    load_checkpoint(&mut model, checkpoint).map_err(|error| {
+        (
+            1,
+            format!(
+                "cannot load checkpoint from `{}`: {error}",
+                checkpoint.display()
+            ),
+        )
+    })?;
+
+    Ok(model)
+}
+
+/// Resolve `info` configuration without allocating random model weights.
+fn info_config(cli: &Cli) -> CliResult<SciAgentConfig> {
+    if let Some(checkpoint) = cli.checkpoint.as_ref()
     {
-        println!("Loading checkpoint from {:?} ...", ckpt);
-        let meta_path = ckpt.join("meta.json");
-        let config = if let Ok(meta_str) = std::fs::read_to_string(&meta_path)
-        {
-            if let Ok(meta_json) = serde_json::from_str::<serde_json::Value>(&meta_str)
-            {
-                meta_json
-                    .get("config")
-                    .and_then(|cfg| {
-                        Some(SciAgentConfig {
-                            vocab_size: cfg["vocab_size"].as_u64()? as usize,
-                            d_model: cfg["d_model"].as_u64()? as usize,
-                            n_layers: cfg["n_layers"].as_u64()? as usize,
-                            n_heads: cfg["n_heads"].as_u64()? as usize,
-                            n_kv_heads: cfg["n_kv_heads"].as_u64()? as usize,
-                            d_ff: cfg["d_ff"].as_u64()? as usize,
-                            max_seq_len: cfg["max_seq_len"].as_u64()? as usize,
-                            rope_theta: cfg["rope_theta"].as_f64()? as f32,
-                            tie_embeddings: cfg["tie_embeddings"].as_bool()?,
-                            use_bias: cfg["use_bias"].as_bool().unwrap_or(false),
-                            eps: cfg["eps"].as_f64().unwrap_or(1e-5) as f32,
-                        })
-                    })
-                    .unwrap_or_else(|| get_config(&cli.model))
-            }
-            else
-            {
-                eprintln!("Warning: cannot parse meta.json, using CLI config");
-                get_config(&cli.model)
-            }
-        }
-        else
-        {
-            eprintln!("Warning: no meta.json found, using CLI config");
-            get_config(&cli.model)
-        };
-        let mut m = SciAgentModel::new(&config);
-        let _ = scirust_sciagent::train::checkpoint::load_checkpoint(&mut m, ckpt);
-        m
+        read_meta(checkpoint)
+            .map(|meta| meta.config)
+            .map_err(|error| {
+                (
+                    1,
+                    format!(
+                        "cannot read checkpoint metadata from `{}`: {error}",
+                        checkpoint.display()
+                    ),
+                )
+            })
     }
     else
     {
-        SciAgentModel::new(&get_config(&cli.model))
+        Ok(get_config(&cli.model))
     }
 }
 
 fn main() {
     let cli = Cli::parse();
-    let mut model = build_model(&cli);
+
+    if matches!(&cli.command, Command::Info)
+    {
+        let config = info_config(&cli).unwrap_or_else(|error| report_cli_error(error));
+        cmd_info(&config, &cli);
+        return;
+    }
+
+    let mut model = build_model(&cli).unwrap_or_else(|error| report_cli_error(error));
 
     match &cli.command
     {
@@ -119,7 +148,7 @@ fn main() {
         Command::Chat => cmd_chat(&mut model, &cli),
         Command::Explain { path, lines } => cmd_explain(&mut model, path, lines.as_deref(), &cli),
         Command::Generate { description } => cmd_generate(&mut model, description, &cli),
-        Command::Info => cmd_info(&model.config, &cli),
+        Command::Info => unreachable!("info returns before model construction"),
     }
 }
 
@@ -377,7 +406,24 @@ fn fmt_params(n: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_line_range;
+    use super::*;
+
+    fn test_cli(checkpoint: Option<PathBuf>) -> Cli {
+        Cli {
+            command: Command::Ask {
+                prompt: String::from("fn main() {}"),
+            },
+            model: String::from("debug"),
+            seed: 42,
+            max_tokens: 16,
+            temperature: 0.0,
+            top_k: 0,
+            top_p: 1.0,
+            repetition_penalty: 1.0,
+            json: false,
+            checkpoint,
+        }
+    }
 
     #[test]
     fn line_ranges_are_validated() {
@@ -387,5 +433,35 @@ mod tests {
         assert!(parse_line_range("9-4").is_err());
         assert!(parse_line_range("bad").is_err());
         assert!(parse_line_range("1-2-3").is_err());
+    }
+
+    #[test]
+    fn inference_requires_an_explicit_checkpoint() {
+        let error = match build_model(&test_cli(None))
+        {
+            Ok(_) => panic!("randomly initialized model must not be accepted"),
+            Err(error) => error,
+        };
+        assert_eq!(error.0, 2);
+        assert!(error.1.contains("--checkpoint PATH"));
+        assert!(error.1.contains("random weights"));
+    }
+
+    #[test]
+    fn invalid_checkpoint_fails_closed() {
+        let cli = test_cli(Some(PathBuf::from("/path/that/does/not/exist")));
+        let error = match build_model(&cli)
+        {
+            Ok(_) => panic!("invalid checkpoint must not produce a model"),
+            Err(error) => error,
+        };
+        assert_eq!(error.0, 1);
+        assert!(error.1.contains("cannot read checkpoint metadata"));
+    }
+
+    #[test]
+    fn info_config_does_not_allocate_model_weights() {
+        let config = info_config(&test_cli(None)).expect("info config should resolve");
+        assert_eq!(config.d_model, SciAgentConfig::debug().d_model);
     }
 }

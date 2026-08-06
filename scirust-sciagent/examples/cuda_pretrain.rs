@@ -16,6 +16,9 @@
 //!   a token id ≥ the config's `vocab_size` (shards tokenised for another vocab).
 //! - `SCIAGENT_CKPT` (default `checkpoints/cuda`), `SCIAGENT_STEPS` (300),
 //!   `SCIAGENT_SEQ` (128), `SCIAGENT_LR` — run knobs.
+//! - `SCIAGENT_MAX_TOKENS` — cap the corpus (default: **no cap**). Truncation keeps a
+//!   *prefix*, not a sample — the shard walk is alphabetical — so a cap on a crates.io
+//!   corpus trains only on the alphabetically-first crates. Always logged when it bites.
 //!
 //! ```text
 //! # self-contained smoke run (synthetic corpus, demo config):
@@ -292,7 +295,13 @@ fn main() {
     );
 
     let seq_len = env_usize("SCIAGENT_SEQ", 128).min(config.max_seq_len);
-    let max_tokens = env_usize("SCIAGENT_MAX_TOKENS", 16_000_000);
+    // No cap by default. This used to default to 16M, which silently trained on the
+    // first 16M tokens of the corpus and threw the rest away — and because the shard
+    // walk is alphabetical, that meant a crates.io corpus was really just the crates
+    // starting with "a". A 1.03B-token corpus looked like it was in use (the
+    // "streaming N tokens" line prints the full count) while the model overfit 1.6% of
+    // it. Truncation is now opt-in and always announced.
+    let max_tokens = env_usize("SCIAGENT_MAX_TOKENS", usize::MAX);
 
     // Token stream: BPE shards, byte-level text, or a synthetic corpus.
     let tokens: Vec<u32> = if let Ok(dir) = std::env::var("SCIAGENT_SHARDS")
@@ -320,7 +329,21 @@ fn main() {
             );
             std::process::exit(1);
         }
-        println!("streaming {} tokens from BPE shards in {dir}", raw.len());
+        if max_tokens < raw.len()
+        {
+            println!(
+                "streaming {} of {} tokens from BPE shards in {dir} \
+                 (TRUNCATED to {:.1}% by SCIAGENT_MAX_TOKENS={max_tokens} — the shard walk is\n\
+                 alphabetical, so a truncated corpus is a *prefix*, not a sample)",
+                max_tokens,
+                raw.len(),
+                100.0 * max_tokens as f64 / raw.len() as f64
+            );
+        }
+        else
+        {
+            println!("streaming {} tokens from BPE shards in {dir}", raw.len());
+        }
         raw.iter().take(max_tokens).copied().collect()
     }
     else if let Ok(text) = std::env::var("SCIAGENT_TEXT")

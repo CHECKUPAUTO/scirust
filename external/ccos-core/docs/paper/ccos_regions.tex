@@ -1,0 +1,811 @@
+\documentclass[11pt]{article}
+
+% --- arXiv-friendly preamble (standard packages only) ---
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\geometry{margin=1in}
+\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
+
+\newtheorem{definition}{Definition}
+\newtheorem{proposition}{Proposition}
+\newtheorem{theorem}{Theorem}
+
+\newcommand{\dcausal}{d_{\mathrm{c}}}
+\newcommand{\Nk}{\mathcal{N}_k}
+\newcommand{\code}[1]{\texttt{#1}}
+
+\title{\textbf{The Cognitive MMU:\\ Deterministic, Auditable Working Memory for LLM Coding Agents\\ \large (and an honest account of why causal retrieval does not beat RAG)}}
+\author{The CCOS Project\thanks{Causal Context Operating System (CCOS), an open
+research prototype. Source, reproduction scripts and this paper:
+\url{https://github.com/CHECKUPAUTO/CCOS}.}}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+An LLM coding agent's working memory is managed opaquely: a retrieval stack (RAG,
+GraphRAG, agent frameworks) pages a repository into a bounded window and mutates
+that window probabilistically as a session unfolds, so when an agent drifts after
+dozens of steps it is impossible to say \emph{why} or \emph{when} its
+representation of the project corrupted. CCOS treats agent memory the way an
+operating system treats RAM: source is parsed into an \emph{event-sourced} causal
+graph, nodes are scored and paged under a token budget, and every state transition
+is recorded in a hash-chained log that replays bit-for-bit. We give a precise,
+deterministic definition of a \emph{causal region} (a connected component of the
+cross-file causal-link graph) and of causal distance (a weighted shortest path),
+and prove that regions and the paged window are a pure function of the graph,
+reconstructing exactly on replay --- the property that makes an agent's memory
+\emph{auditable} and \emph{time-travel debuggable}. We then ask whether this causal structure makes CCOS a \emph{better retriever}
+than a baseline, and report --- honestly --- that it does not. Measured on $70$
+real bug-fix commits across three mature crates, causal selection \textbf{ties a
+plain lexical TF-IDF retriever} and loses to it at a tight budget; on real bugs a
+fix's files share vocabulary, so lexical similarity finds them too, and a
+proof-of-concept that seeds CCOS from a crash trace is likewise beaten by
+RAG-over-the-error-message (Rust error messages name the cause). An LLM-free
+simulation \emph{does} separate the two when a cause is constructed to be
+lexically dissimilar from its symptom, and a first on-device run with a $7$B model
+reproduces it --- but that regime does not occur on real code. The contribution is
+therefore \emph{not} better retrieval. It is the infrastructure a retrieval stack
+structurally lacks: a \emph{deterministic, replayable, auditable} agent memory in
+which one can rewind the exact context state at any step and replay it under
+different parameters (\emph{time-travel debugging}). To our knowledge CCOS is the
+first system to treat an agent's \emph{working memory itself} as a transactional
+subsystem --- deterministic, hash-chained, replayable bit-for-bit, and
+\emph{post-mortem debuggable}: a flight recorder for attention, with a breakpoint
+on the exact step at which the right information was evicted from the window. We release the engine, the
+honest validation harness, and this paper, labelling throughout what is
+\emph{proven} (formal structure, determinism, replay), \emph{measured} (retrieval
+coverage --- where CCOS does \emph{not} beat lexical RAG on real bugs), and the one
+axis where CCOS \emph{does} win: \textbf{efficiency}. Run end-to-end on real
+single-file fixes with a 30B model and a compiler-in-the-loop retry, CCOS and RAG
+resolve \emph{equally} ($2/10$), but CCOS does so on $776$ context tokens against
+the lexical retriever's $5366$ --- a $6.9\times$ reduction (and $4.1$--$9.1\times$
+across $51$ fixes from three crates, model-free), because the causal region stops
+at the working set rather than padding a top-$k$ to budget. CCOS is thus not a
+better retriever or solver, but a more \emph{frugal}, \emph{auditable} one --- it
+self-calibrates, with no $k$ to tune. (On its own source tree, region selection covers a task's $k$-hop
+neighbourhood with recall $0.97$ vs $0.35$ flat at $\approx\!48\%$ fewer tokens;
+regions are $95.5\%$ internally connected.)
+\end{abstract}
+
+\section{Introduction}
+
+An LLM coding agent operating over a repository must repeatedly decide \emph{what
+to put in the context window}. The dominant pattern is retrieval: embed code
+chunks, rank them against the task, and concatenate the top-$k$ until a token
+budget is exhausted~\cite{lewis2020rag}. This treats context as a one-dimensional
+ranked list. Two failure modes follow. First, \emph{dilution}: as tasks lengthen,
+the window accumulates globally salient but task-irrelevant code, and models
+attend poorly to the middle of long contexts~\cite{liu2023lost}. Second,
+\emph{incoherence}: the top-$k$ chunks need not form a connected unit of
+reasoning --- a function may be paged in without its callers, its error sites or
+the data it depends on.
+
+Operating systems faced the analogous problem decades ago and answered with the
+\emph{working set}: the set of recently referenced pages that must stay
+resident~\cite{denning1968working}. CCOS adopts the analogy for LLM
+context~\cite{packer2023memgpt}: source is parsed into a causal
+graph, nodes are scored, and a bounded ``context window'' is paged in and out
+like RAM~$\leftrightarrow$~VRAM. Unlike a retrieval stack, every transition is
+recorded in a hash-chained event log, so the memory is not a black box but an
+\emph{auditable, replayable} artefact. Our contributions are:
+
+\begin{enumerate}
+  \item A \textbf{formal, deterministic model of context regions}
+  (\S\ref{sec:regions}, \S\ref{sec:determinism}): causal distance as a weighted
+  shortest path, region membership as a connected component of the cross-file
+  causal-link graph, and a determinism theorem --- regions and the paged window
+  are a pure function of the graph, so a session reconstructs bit-for-bit from its
+  hash-chained event log (tamper-evident replay).
+  \item \textbf{Event-sourced agent sessions with time-travel debugging}
+  (\S\ref{sec:timetravel}): every cognitive operation (ingest, failure signal,
+  recall) is logged; the exact context state at any step is reconstructible; and a
+  recall can be \emph{replayed under different parameters} to ask whether the agent
+  would have decided better --- the capability a probabilistic retrieval stack
+  structurally lacks. To our knowledge this is the first treatment of context
+  assembly \emph{itself} as a replayable, post-mortem-debuggable subsystem --- a
+  \emph{flight recorder for an agent's attention} --- with an \emph{eviction
+  watchpoint} that names the exact step and operation at which the true cause was
+  squeezed out of the budgeted window.
+  \item An \textbf{honest validation harness and a negative result}
+  (\S\ref{sec:protocol}): on $70$ real bug-fix commits, causal selection
+  \emph{does not} beat a lexical TF-IDF retriever at placing a fix's files in the
+  window (it ties, and loses at a tight budget), and a crash-trace pivot is beaten
+  by RAG-over-the-error-message. We report this plainly --- it relocates CCOS's
+  value from \emph{retrieval} to \emph{auditability}.
+  \item An \textbf{LLM-free locality measurement} (\S\ref{sec:eval}) with real,
+  reproducible numbers, and a falsifiable \emph{sufficient}-condition protocol
+  (Phase~4) we specify but leave open.
+\end{enumerate}
+
+\section{Related Work}\label{sec:related}
+
+\paragraph{Retrieval-augmented generation.} RAG augments a parametric model with
+a non-parametric store and retrieves passages per
+query~\cite{lewis2020rag}. Self-RAG adds reflection tokens that gate
+retrieval and critique generations~\cite{asai2023selfrag}. These operate on
+\emph{independent} chunks; coherence between retrieved items is not modelled.
+
+\paragraph{Graph- and structure-aware retrieval.} GraphRAG builds an entity
+knowledge graph and answers global queries by summarising community
+structure~\cite{edge2024graphrag}. For code, property graphs unify AST, control
+flow and data flow~\cite{yamaguchi2014cpg}. CCOS regions are in this lineage but
+target \emph{paging}: which connected sub-structure to make resident for a task,
+under a token budget, with deterministic eviction.
+
+\paragraph{Agent memory.} MemGPT casts the LLM as an OS that pages between an
+in-context window and external storage~\cite{packer2023memgpt}; Generative Agents
+retrieve memories scored by recency, importance and
+relevance~\cite{park2023generative} --- the same factors CCOS aggregates into a
+region temperature. LangGraph~\cite{langgraph} structures agents as stateful
+graphs of steps; it orchestrates \emph{control} flow, whereas CCOS structures
+\emph{memory}. The two are complementary.
+
+\paragraph{Context-window management.} KV-cache eviction keeps ``heavy hitter''
+or sink tokens resident~\cite{liu2023lost}, and PagedAttention applies OS paging
+to the KV cache~\cite{kwon2023paged}. These act at the token level inside one
+forward pass; CCOS acts at the \emph{semantic} level across an agent session.
+
+\section{The Causal Context Substrate}\label{sec:substrate}
+
+CCOS parses source into a directed \emph{causal memory graph} $G=(V,E)$. A node
+$v\in V$ is a file, module, symbol or external dependency, with scalar fields
+$\mathrm{imp}(v)$ (base importance), $\mathrm{fail}(v)\in[0,1]$ (failure
+relevance) and $\mathrm{rec}(v)\in[0,1]$ (recency). An edge $e=(u\!\to\!w)\in E$
+carries a weight $w(e)\in(0,1]$ and a type (containment, dependency, reference,
+causation). The kernel assigns each node a causal score
+\begin{equation}
+\mathrm{score}(v) = \mathrm{clamp}\big(0.15\,\mathrm{imp}(v) + 0.50\,\mathrm{fail}(v)
+  + 0.30\,\mathrm{rec}(v) + 0.05\ln(1{+}\mathrm{acc}(v)),\,0,1\big),
+\label{eq:score}
+\end{equation}
+where $\mathrm{acc}(v)$ is the access count. Faults propagate along edges,
+$\mathrm{fail}$ decays with a logical clock, and every state transition is
+appended to a hash-chained event log enabling deterministic
+replay~\cite{haber1991timestamp}. Node identifiers are namespaced
+(\code{file:p}, \code{mod:p:n}, \code{use:p:path}, \code{sym:p:n},
+\code{dep:root}); the owning file of a node is recoverable from its identifier.
+CCOS v0.2 pages in the top-$\mathrm{score}$ nodes: a flat, 1-D policy. We now
+make selection spatial.
+
+\section{Context Regions}\label{sec:regions}
+
+\subsection{Causal distance}
+
+\begin{definition}[Causal distance]
+Let $\hat G$ be the undirected multigraph on $V$ induced by $E$, and assign each
+edge the cost $c(e) = -\ln w(e) \ge 0$, so that a stronger causal link is a
+shorter step. The \emph{causal distance} $\dcausal(u,v)$ is the minimum total
+cost over all $u$--$v$ paths in $\hat G$, and $+\infty$ if none exists. The
+unweighted hop distance $\mathrm{hops}(u,v)$ is defined analogously with unit
+costs.
+\end{definition}
+
+$c(e)\ge 0$ since $w(e)\le 1$, so $\dcausal$ is a genuine shortest-path metric on
+each connected component (non-negative, symmetric, triangle inequality). The
+\emph{$k$-hop causal neighbourhood} of a target $t$ is
+\begin{equation}
+\Nk(t) = \{\, v \in V : \mathrm{hops}(t,v) \le k \,\}.
+\end{equation}
+$\Nk(t)$ is the ground truth ``what is causally relevant to a task at $t$'' used
+in the evaluation (\S\ref{sec:eval}).
+
+\subsection{Region membership}
+
+External dependency hubs (e.g.\ \code{dep:std}) connect almost everything and
+must not collapse the graph into one component. We therefore separate them.
+
+\begin{definition}[Cross-file causal link]
+For a non-external node $v$ let $\phi(v)$ be its owning file. Two files $f,g$ are
+\emph{directly linked}, written $f \approx g$, iff there exists an edge
+$(u\!\to\!w)\in E$ with $\phi(u)=f$, $\phi(w)=g$, $f\neq g$, and neither $u$ nor
+$w$ is an external dependency node.
+\end{definition}
+
+\begin{definition}[Region]\label{def:region}
+Let $\approx^{*}$ be the reflexive-transitive closure of $\approx$ on the set of
+file keys. A \emph{region} is the set of all nodes whose files lie in one
+equivalence class of $\approx^{*}$; all external dependency nodes form one
+additional region. Two nodes belong to the same region iff their files are in the
+same connected component of the cross-file causal-link graph.
+\end{definition}
+
+\begin{proposition}[Regions partition the nodes]
+The regions of Definition~\ref{def:region} form a partition of $V$: every node
+lies in exactly one region.
+\end{proposition}
+\begin{proof}
+$\approx^{*}$ is an equivalence relation on file keys, so its classes partition
+the file keys; the external bucket is a distinct class by construction. Mapping
+each non-external node to its file's class and each external node to the external
+class is a total function into disjoint blocks, hence a partition. \qed
+\end{proof}
+
+By default (only containment and import edges) each source file is its own region.
+A genuine cross-file dependency or a propagated failure merges files into a single
+multi-file region --- the ``zone of knowledge'' an agent should wake together.
+
+\subsection{Region scalars}
+
+For a region $R$ with member set $M$:
+\begin{align}
+\mathrm{heat}(v)        &= 0.5\,\mathrm{score}(v) + 0.3\,\mathrm{fail}(v) + 0.2\,\mathrm{rec}(v), \\
+\mathrm{temp}(R)        &= \mathrm{clamp}\!\Big(\tfrac{1}{|M|}\textstyle\sum_{v\in M}\mathrm{heat}(v),\,0,1\Big), \label{eq:temp}\\
+\mathrm{dens}(R)        &= \frac{|\{\,e\in E : \text{both endpoints} \in M\,\}|}{|M|}. \label{eq:dens}
+\end{align}
+Temperature is how ``awake'' a region is; density is its internal causal cohesion
+(internal edges per member). Activation warms a region
+($\mathrm{temp}\mathrel{+}=0.25$, capped) and records a logical tick; a cooldown
+step multiplies temperatures by a decay factor and evicts regions below a floor.
+
+\subsection{Dynamic admission policy}\label{sec:policy}
+
+The static threshold $0.6$ becomes a function of token pressure $u\in[0,1]$ (the
+used fraction of the budget) and task complexity $\kappa\in[0,1]$:
+\begin{align}
+\theta(u,\kappa)       &= \mathrm{clamp}(0.6 + 0.3\,u - 0.2\,\kappa,\; 0.05,\; 0.95), \\
+a(R)                   &= 0.55\,\mathrm{temp}(R) + 0.30\,\frac{\mathrm{dens}(R)}{1+\mathrm{dens}(R)} + 0.15\,\kappa, \\
+\mathrm{admit}(R)      &\iff a(R) \ge \theta(u,\kappa).
+\end{align}
+A hot, cohesive region can be admitted even when the static $0.6$ would reject it;
+a nearly-full window raises $\theta$ so only the hottest regions enter.
+
+\section{Determinism and Replay}\label{sec:determinism}
+
+\begin{theorem}[Regional determinism]
+The region partition, every region scalar in
+\eqref{eq:temp}--\eqref{eq:dens}, and the activation history are pure,
+order-independent functions of the graph $G$ and the sequence of (logically
+timestamped) activation events. Consequently, given the event log of a session,
+the engine state reconstructs identically: if $G'$ is the graph rebuilt from the
+log and $L$ its region events, then $\mathrm{replay\_from}(G',L)$ equals the live
+engine that produced $L$.
+\end{theorem}
+\begin{proof}[Proof sketch]
+Clustering enumerates nodes and edges in sorted order and computes connected
+components by a sorted breadth-first search, so its output is independent of hash
+iteration order. Equations \eqref{eq:score}, \eqref{eq:temp} and \eqref{eq:dens}
+are deterministic arithmetic over node fields and a count of qualifying edges.
+Activation reads a logical clock (a counter), never wall-clock time, and the
+emitted \code{RegionActivated} event records the exact tick. Reconstruction
+re-clusters $G'$ (identical base state, since $G'\!=\!G$ structurally) and applies
+the recorded activations in log order; each step is the same pure function of the
+same inputs, so the resulting state is identical. The integration test
+\code{replay\_reconstructs\_identical\_engine} checks
+$\mathrm{engine}=\mathrm{replay\_from}(G',L)$ by structural equality. \qed
+\end{proof}
+
+This extends CCOS's existing guarantees: the primary event log is hash-chained and
+tamper-evident, so the region history is auditable, and a 10\,000-cycle test
+exhibits no drift in region count or temperatures.
+
+\paragraph{An auditable input boundary.} The same deterministic, replayable
+substrate hardens the text an agent ingests. Hidden-character injection vectors
+--- bidirectional overrides (the \emph{Trojan Source} attack, CVE-2021-42574),
+zero-width formatting, and the Unicode \emph{Tags} block used for invisible ASCII
+smuggling --- are de-obfuscated at ingest into explicit, visible literals
+(\code{[U+202E RLO]}) rather than silently stripped, and the findings are
+recorded against the same hash-chained log, so a replay reproduces the cleaned
+state. A downstream linear log-space classifier --- the closed form of
+multinomial Naive Bayes, $\mathrm{logit}=b+W\!\cdot\!X$ over a hashing-trick
+feature vector, its weights locked in a checksum-verified blob --- adds a
+\emph{deterministic, forensically decomposable} injection signal (a held-out
+red-team measures $F_1=0.90$; precision $0.87$, recall $0.93$). We are deliberate
+that this is a \emph{signal, not a solution}: a bag-of-features model is evaded by
+paraphrase, and no character-level pass addresses semantic injection --- the real
+mitigation is privilege separation in the host. The contribution is not a novel
+detector but that de-obfuscation and scoring inherit CCOS's defining property:
+every security decision is reproducible and auditable down to the exact feature
+that moved it.
+
+\section{Event-sourced sessions and time-travel debugging}\label{sec:timetravel}
+
+Determinism is not only a correctness property; it is the basis of the capability
+that, our evaluation will argue, distinguishes CCOS from a retrieval stack. An
+\code{AgentSession} records every cognitive operation an agent performs on its
+memory --- \code{Ingest}, \code{SignalFailure}, \code{Recall} --- as an ordered
+timeline. Because each operation is a deterministic function of the prior state,
+the memory after the first $n$ operations is reconstructed exactly by replaying
+the mutating ones (\code{replay\_to(n)}): one can \emph{rewind the agent's mind} to
+any step.
+
+The operation that matters for debugging is the counterfactual. \code{recall\_what\_if($n$,
+$q$, $b$)} replays the memory to step $n$ and re-runs a recall with a different
+query $q$ or token budget $b$, returning the window the agent \emph{would} have
+seen. When an agent emits a bad patch at step 15, an operator can replay its exact
+context at step 14, widen the budget or change the anchor, and observe whether the
+decision improves --- a closed-loop, reproducible debugger for an agent's working
+memory.
+
+\paragraph{A breakpoint on attention.} Replay also localises \emph{drift}. The
+\code{missing} watchpoint scans the timeline for the exact step at which a given
+node --- typically the true cause of a failure --- was squeezed out of the budgeted
+window by competing pressure, naming the triggering operation and the token gap;
+a complementary \code{energy} view surfaces the causal-heat migration through the
+graph that a file-level diff misses. It is, in effect, a \emph{breakpoint on an
+agent's attention}: the precise moment the right information left the window. An
+opaque retrieval stack can show only the final, corrupted context; CCOS can point
+to the step --- and the operation --- at which it went wrong. A RAG or framework
+stack mutates its store probabilistically across a
+session and keeps no canonical, replayable transition log, so the same question
+(\emph{why, and when, did the representation corrupt?}) has no answer there. We do
+not claim this improves task success; we claim it is a property the alternatives do
+not have, and that it is the honest locus of CCOS's contribution
+(\S\ref{sec:protocol}).
+
+\paragraph{The log as training data.} Because the timeline is deterministic and
+replayable, it is also a \emph{counterfactual evaluation set} for retrieval
+itself. We read a reward straight off it: for each recorded recall, was the node
+the agent engaged \emph{next} --- a failure signal or page-fault, taken as a
+post-hoc relevance signal --- present in the window that recall \emph{would} have
+produced under candidate scoring weights? Maximising this hit rate by deterministic
+coordinate ascent (each candidate scored by a full replay) yields scoring weights
+tuned to the session's own history; adopting them is recorded as an operation, so
+the learned policy is itself auditable and reproduced on replay. The reward is an
+honest proxy and the optimiser is greedy, so we claim only that this is retrieval
+that \emph{trains on a substrate the alternatives lack}: a probabilistic RAG store
+keeps no canonical, replayable log to learn from. This closes the loop the title
+implies --- the working memory is not only inspectable but \emph{self-improving}
+from its own auditable record.
+
+\section{Implementation}\label{sec:impl}
+
+The engine is $\approx\!600$ lines of dependency-light Rust layered above the
+graph, with no change to the parser, guard, incremental builder or event-sourcing
+core. The public surface is: \code{ContextRegionEngine} (\code{cluster\_nodes},
+\code{initialize\_regions}, \code{activate\_region}, \code{tick\_cooldown},
+\code{replay\_from}), the data types \code{ContextRegion} / \code{ContextPoint} /
+\code{ContextWindow}, the \code{ContextPolicy}, and five new event variants
+(\code{RegionCreated}, \code{RegionActivated}, \code{RegionMerged},
+\code{RegionEvicted}, \code{ContextWindowGenerated}). A \code{ccos regions} CLI
+exposes clustering, activation and the locality report. The whole crate builds
+warning-clean under \code{clippy -D warnings} and passes 431 tests.
+
+\paragraph{The cognitive MMU, made real.} Paging lives in the code, not only the
+prose: eviction is \emph{non-destructive}. When the resident node set exceeds its
+cap, the lowest-scored nodes are \emph{demoted}---with their incident edges---into
+a COLD tier rather than dropped, and any node faults back on demand
+(\code{page\_in}). A failure signal, or a recall \emph{around} a demoted node,
+resurrects it and its cold neighbours transparently; the page-in is a
+\emph{replayed} side effect, so \mbox{\code{replay}\,$=$\,\code{live}} still holds.
+The COLD tier's unbounded \emph{content} optionally spills to a content-addressed
+on-disk store (SHA-256 keys, deduplicated, and \emph{hash-verified} on read---a
+tampered or missing blob is a cold-miss, never a silent empty restore), bounding
+the resident-plus-cold \emph{content} footprint in RAM while the backing store on
+disk is unbounded. At the deepest tier, once the backing store \emph{itself} must
+stay frugal, an optional budget \emph{compacts} the coldest content---code
+skeletonised, prose summarised---to a causal summary, discarding the original. This
+is genuine, \emph{auditable forgetting}: it is lossy, but observable
+(\code{cold\_compacted}) and never a silent drop. This is the sense in which working
+memory is ``unbounded'': a \emph{direction}, frugality~$\times$~available RAM, rather
+than a literal claim---and at the floor frugality is the master, exactly as the
+demand-paging analogy demands. Honestly scoped: spill moves only \emph{content} to
+disk (per-cold-node metadata still grows in RAM---an on-disk index is future work),
+blobs are stored verbatim (dedup, no compression codec yet), and compaction bounds
+the cold \emph{content} footprint, not the entry \emph{count}. Both spill and
+compaction are opt-in; the default path keeps them off and serialization
+byte-identical, so the determinism guarantees of \S\ref{sec:determinism} are
+untouched.
+
+\paragraph{Hybrid entry fusion.} A free-text recall resolves its entry node by
+\emph{reciprocal-rank fusion}~\cite{cormack2009reciprocal} of three independent
+rankings---lexical token overlap, semantic INT4-TF-IDF cosine, and a causal
+\emph{active-failure} focus---before the usual region expansion. RRF compares
+ranks, not raw scores, so the three incomparable signals fuse without
+calibration. The causal vote is deliberately \emph{sparse}: it ranks only nodes
+under failure pressure, so it abstains on a quiet graph (no spurious id-ordered
+bias when scores are flat) and speaks for the active problem region once a failure
+is signalled---the CCOS-native attention signal rather than a generic importance
+prior. Deterministic, and an honest improvement to \emph{entry selection} only:
+the downstream region expansion and the evaluation of \S\ref{sec:eval} are
+unchanged. The semantic signal itself is, by default, deterministic INT4 TF-IDF;
+an opt-in build distils it into a learned \emph{latent-semantic} projection (LSA /
+truncated SVD of the corpus's document--term matrix, via a fixed Jacobi sweep),
+which captures synonymy raw TF-IDF cannot while remaining zero-dependency and
+deterministic --- the ``distil, don't couple'' rule that lets a learned component
+respect the replay invariant.
+
+\section{Evaluation: what we can measure today}\label{sec:eval}
+
+We separate \emph{measured} results (this section, fully reproducible and
+LLM-free) from \emph{hypothesised} agent-level gains (\S\ref{sec:protocol}).
+
+\paragraph{Setup.} We run on CCOS's own source tree
+($|V|=705$ nodes, $|E|=822$ edges, yielding $26$ regions). For a target node $t$
+we take $\Nk(t)$ with $k=2$ as ground truth and compare two selection strategies
+at the region's size budget: \textbf{flat} --- the top-$|R|$ nodes by
+$\mathrm{score}$ (CCOS v0.2 / classical ranked retrieval) --- and \textbf{region}
+--- the members of $t$'s region. We report causal precision $|S\cap\Nk|/|S|$,
+recall $|S\cap\Nk|/|\Nk|$, and the tokens each strategy needs to \emph{cover}
+$\Nk$. All numbers are emitted by \code{scripts/region\_benchmark.sh} and are
+deterministic.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lcc}
+\toprule
+Strategy & causal precision & causal recall \\
+\midrule
+flat (v0.2 / ranked) & 0.021 & 0.347 \\
+\textbf{region (v0.3)} & \textbf{0.057} & \textbf{0.972} \\
+\bottomrule
+\end{tabular}
+\caption{Locality on \code{src/} ($k=2$, 12 targets). Region selection covers
+$97\%$ of a task's causal neighbourhood versus $35\%$ for flat, at
+$\approx\!48\%$ fewer tokens for equal coverage.}
+\label{tab:locality}
+\end{table}
+
+\paragraph{Cohesion and cost.} Regions reach an \textbf{average causal density of
+$0.955$} (Eq.~\ref{eq:dens}, normalised) --- they are almost entirely internally
+connected, i.e.\ genuine causal clusters rather than arbitrary file groups.
+Building the region map for $705$ nodes takes $\approx\!20$\,ms
+($54.5$ builds/s); a single activation is $\approx\!20$\,ms.
+
+\paragraph{Honest reading.} Absolute precision is low ($0.06$) because the v0.2
+parser emits only containment and import edges, so $\Nk(t)$ is tiny (often $2$--$3$
+nodes) while a region spans a whole file. The robust, real wins are
+\emph{recall} ($0.97$ vs $0.35$) and \emph{token efficiency} ($\approx\!48\%$):
+a region reliably contains a task's causal neighbourhood and pays fewer tokens to
+do so. Richer semantic edges (call graph / data flow, roadmap item P1.3) would
+sharpen $\Nk$ and is the main lever to raise precision; we flag this rather than
+hide it.
+
+\section{Hypothesis simulation under a stated oracle (LLM-free)}\label{sec:sim}
+
+The core thesis --- \emph{does regional causal memory help an agent on long,
+multi-file tasks?} --- ultimately needs LLM rollouts (\S\ref{sec:protocol}). But
+its \emph{necessary condition} is testable now, without an LLM: \textbf{an agent
+cannot solve a task whose required causal context is absent from its window}. We
+measure, under an explicit oracle, whether each selection strategy \emph{places
+the required causal context in the window}.
+
+\paragraph{Setup.} We generate modular synthetic repositories: $S$ independent
+subsystems, each a set of files linked by one cross-file causal chain plus
+high-score \emph{decoy} symbols; there are no edges between subsystems, so each
+subsystem is one bounded causal region. The causal structure is \emph{decoupled}
+from the lexical structure --- a chain neighbour shares no identifier token with
+the target, only an edge --- modelling a dependency that is causally essential yet
+lexically dissimilar. A task of \emph{diameter} $d$ requires the $\pm d$ window
+along its chain (up to $2d{+}1$ files); the budget holds $\approx$ one subsystem,
+far less than the repository. The \textbf{oracle} is $R(t)\subseteq S$.
+
+Crucially, retrieval pipelines locate code from a text \emph{query}, whereas an
+OS-style memory \emph{anchors} on the workspace signal (the active file, a failing
+test). We model both: each task carries a query (a token bag) and an anchor (the
+active file node), and we run two scenarios --- \textbf{clean} (the query points
+at the target) and \textbf{noisy} (a trap decoy in an unrelated subsystem
+out-scores the target lexically). Six strategies share the budget:
+\code{rag-dense} (top-$k$ lexical), \code{rag-hybrid} (lexical $+$ causal score),
+\code{graphrag-1hop} (best hit $+$ one hop), \code{graphrag-bfs} (unbounded
+expansion from the best hit), \code{ccos-from-query} (CCOS region of the best
+\emph{lexical} hit --- an ablation), and \code{ccos-region} (CCOS region of the
+\emph{anchor}). Seeded and deterministic; reproduce with \code{ccos experiment}.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lcccccc}
+\toprule
+& \multicolumn{4}{c}{success at diameter $d$} & \multicolumn{2}{c}{overall} \\
+\cmidrule(lr){2-5}\cmidrule(lr){6-7}
+Strategy & $d{=}1$ & $d{=}2$ & $d{=}3$ & $d{=}4$ & succ. & cov. \\
+\midrule
+\multicolumn{7}{l}{\emph{Clean query (points at the target)}}\\
+\code{rag-dense}      & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 0.19 \\
+\code{rag-hybrid}     & 1.00 & 0.00 & 0.00 & 0.00 & 0.23 & 0.65 \\
+\code{graphrag-1hop}  & 1.00 & 0.00 & 0.00 & 0.00 & 0.23 & 0.58 \\
+\code{graphrag-bfs}   & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 \\
+\code{ccos-from-query}& 1.00 & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 \\
+\code{ccos-region}    & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 \\
+\midrule
+\multicolumn{7}{l}{\emph{Noisy query (a decoy out-scores the target lexically)}}\\
+\code{rag-dense}      & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 0.19 \\
+\code{rag-hybrid}     & 1.00 & 0.00 & 0.00 & 0.00 & 0.23 & 0.65 \\
+\code{graphrag-1hop}  & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 0.19 \\
+\code{graphrag-bfs}   & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 \\
+\code{ccos-from-query}& 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 \\
+\textbf{\code{ccos-region}} & \textbf{1.00} & \textbf{1.00} & \textbf{1.00} & \textbf{1.00} & \textbf{1.00} & \textbf{1.00} \\
+\bottomrule
+\end{tabular}
+\caption{Hypothesis simulation ($800$ tasks, seed $42$, budget $\approx$ one
+subsystem). Success $=$ the required causal set $R(t)$ is inside the window. Under
+a clean query every structure-aware method ties; under a misleading query only
+the workspace-anchored region survives.}
+\label{tab:sim}
+\end{table}
+
+\paragraph{Findings (and their honest limits).}
+\textbf{(1)} Lexical retrieval (\code{rag-dense}) \emph{fails} on cross-file
+causal tasks ($0\%$; coverage $0.19$): similarity cannot surface
+causally-essential but lexically-dissimilar context --- the hypothesis's premise.
+(\code{rag-hybrid}'s $d{=}1$ wins come from the \emph{causal score} it borrows,
+not lexical similarity, which is why they persist under noise.)
+\textbf{(2)} The value of structure-aware selection \emph{grows with diameter}:
+one-hop expansion solves only $d{=}1$, while full causal paging
+(\code{graphrag-bfs}, \code{ccos-region}) solves all $d$ --- the direction of H2.
+\textbf{(3) The clean tie.} Under a clean query, \code{graphrag-bfs},
+\code{ccos-from-query} and \code{ccos-region} all reach $1.00$: the lever is
+causal \emph{structure}, \textbf{not CCOS per se}.
+\textbf{(4) The noisy separation.} Under a \emph{misleading} query, every method
+that locates code lexically collapses to $0\%$ --- including the strong
+\code{graphrag-bfs} \emph{and} the \code{ccos-from-query} ablation (CCOS seeded on
+the query). Only \code{ccos-region}, which anchors on the workspace signal rather
+than the query, survives at $1.00$. The ablation isolates the differentiator: it
+is the \emph{anchor source} (a structural workspace signal vs.\ a lexical query),
+not the region machinery. This is the realistic regime --- a task description
+rarely names the exact distant cause, and an OS-style memory that tracks the
+active working set is robust where query-time retrieval is misled.
+\textbf{(5) Assumptions, stated.} This credits CCOS with a reliable anchor (the
+active file / failing test), which an OS-level memory has but a pure retrieval
+pipeline does not; and it assumes \emph{modular} repositories with separable
+regions (density $0.955$ on real code, \S\ref{sec:eval}) --- a monolithic giant
+region exceeding the budget collapses the advantage (observed, reported).
+\textbf{(6)} Throughout this is a \emph{simulation under a stated oracle}: it
+tests the \emph{necessary} (retrieval) condition, not the \emph{sufficient}
+(generation) one of \S\ref{sec:protocol}.
+
+\section{Real-LLM evaluation: a first on-device measurement}\label{sec:protocol}
+
+The simulation (\S\ref{sec:sim}) established the necessary condition. The
+sufficient condition --- that an LLM agent then \emph{solves} more tasks with
+regional memory than with chunk retrieval --- requires model rollouts. We
+\textbf{implement the harness} (\code{ccos eval}) and report a \textbf{first
+real-LLM run} against a local model.
+
+\paragraph{Implemented harness.} Each task is a tiny multi-file project encoding
+an \emph{arithmetic causal chain}: a base constant in one file is transformed
+through a chain of one-line functions across separate files, and the question
+``what integer does the last function return?'' is answerable \emph{only} by
+reading the whole chain (the distant cause included). Grading is therefore
+exact-match on an integer --- objective and automatable, with no code execution.
+The same six strategies of \S\ref{sec:sim} assemble the context window under a
+token budget (with the clean/noisy query split), the window is sent to a model
+(any OpenAI-, Anthropic-Messages-, or Ollama-compatible endpoint), and we record
+three metrics per diameter: \textbf{task success} (correct integer),
+\textbf{oracle coverage} (required chain $\subseteq$ window --- model-independent),
+and \textbf{symbol-hallucination} (the answer cites a function absent from the
+project).
+
+\paragraph{Setup.} We run \code{ccos eval} on-device on an NVIDIA Jetson AGX Thor
+against \code{qwen2.5:7b-instruct} served by Ollama (temperature $0$), with $20$
+tasks, seed $7$, a $600$-token budget, diameters $1$--$4$, in both the clean and
+noisy regimes. Table~\ref{tab:real} reports the run.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lcccccr}
+\toprule
+& \multicolumn{4}{c}{success at diameter $d$} & & \\
+\cmidrule(lr){2-5}
+Strategy & $d{=}1$ & $d{=}2$ & $d{=}3$ & $d{=}4$ & cov. & tok. \\
+\midrule
+\multicolumn{7}{l}{\emph{Clean query (names the target function)}}\\
+\code{rag-dense}      & 0.12 & 0.00 & 0.00 & 0.00 & 0.00 & 519 \\
+\code{rag-hybrid}     & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 521 \\
+\code{graphrag-1hop}  & 1.00 & 0.00 & 0.00 & 0.00 & 0.40 & 270 \\
+\code{graphrag-bfs}   & 1.00 & 0.00 & 0.17 & 0.00 & 1.00 & 402 \\
+\code{ccos-from-query}& 1.00 & 0.00 & 0.17 & 0.00 & 1.00 & 402 \\
+\code{ccos-region}    & 1.00 & 0.00 & 0.17 & 0.00 & 1.00 & 402 \\
+\midrule
+\multicolumn{7}{l}{\emph{Noisy query (a decoy out-scores the target lexically)}}\\
+\code{rag-dense}      & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 531 \\
+\code{rag-hybrid}     & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 521 \\
+\code{graphrag-1hop}  & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 165 \\
+\code{graphrag-bfs}   & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 165 \\
+\code{ccos-from-query}& 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 165 \\
+\textbf{\code{ccos-region}} & \textbf{1.00} & \textbf{0.00} & \textbf{0.17} & \textbf{0.00} & \textbf{1.00} & \textbf{402} \\
+\bottomrule
+\end{tabular}
+\caption{First real-LLM run: \code{qwen2.5:7b-instruct} via Ollama, on-device
+(NVIDIA Jetson AGX Thor), $20$ tasks, seed $7$, budget $600$ tokens. ``cov.'' is
+the model-independent oracle coverage; ``tok.'' the mean input tokens. Success is
+an exact-match integer answer.}
+\label{tab:real}
+\end{table}
+
+\paragraph{Findings.}
+\textbf{(1) Coverage transfers from simulation to real text.} The
+model-independent coverage column reproduces Table~\ref{tab:sim} on real file
+content: lexical RAG covers $0$, the structure-aware methods cover $1.00$ under a
+clean query, and under noise \emph{only} \code{ccos-region} holds $1.00$ --- the
+necessary condition, confirmed outside the simulator.
+\textbf{(2) Success is bounded by the model, not the context.} Where coverage is
+$1.00$, the $7$B model still solves only $d{=}1$ ($1.00$) and part of $d{=}3$
+($0.17$), missing $d{=}2,4$: with the whole chain in the window, the residual
+failure is \emph{arithmetic reasoning} --- a model-capability ceiling, not a
+selection failure. Crucially no method ever succeeds \emph{without} coverage
+(success $\subseteq$ coverage), which is the claim the harness is built to test.
+\textbf{(3) The noisy separation holds on a real LLM.} Under a misleading query
+every query-driven method collapses to $0\%$ success --- including
+\code{graphrag-bfs} and the \code{ccos-from-query} ablation --- while
+\code{ccos-region}, anchored on the workspace signal, is the \emph{only} strategy
+with non-zero success ($d{=}1$ at $1.00$). The query-driven methods even look
+\emph{cheaper} under noise ($165$ vs $402$ tokens) precisely because they
+confidently retrieve the wrong, smaller file; \code{ccos-region} spends its budget
+on the causally-correct chain.
+\textbf{(4) Honest limits.} $20$ tasks ($\approx 5$ per diameter) is a small
+sample, and a $7$B model floors the sufficient condition. A frontier model
+(\code{deepseek-v4-pro}, in progress) or a $70$B local model is expected to lift
+success wherever coverage is $1.00$, \emph{sharpening} --- not changing --- the
+separation, since coverage already fixes the ceiling.
+
+\paragraph{Toward external benchmarks.} The arithmetic-chain suite isolates the
+selection question; the decisive external tests are SWE-bench~\cite{jimenez2023swebench}
+issue resolution (a patch passes the hidden tests) and a controlled
+\emph{multi-file bug} suite where the fault site, its cause and its blast radius
+lie in distinct files. Baselines share the base LLM and token budget: classical
+RAG~\cite{lewis2020rag} (top-$k$ cosine over chunks), GraphRAG~\cite{edge2024graphrag}
+(community summaries over a code graph), MemGPT~\cite{packer2023memgpt} (OS-style
+paged memory), a LangGraph~\cite{langgraph} agent with a vector store, and CCOS
+regions. Metrics: resolved-rate, input tokens to success, and a citation-grounding
+hallucination rate checked against the ground-truth graph. We have begun this on
+real history: \code{scripts/causal\_validation} mines fix commits, checks out the
+pre-fix tree, injects the fault, and scores $R_{\mathrm{cov}} = |F_{\mathrm{target}}
+\cap \mathrm{WorkingSet}_K| / |F_{\mathrm{target}}|$ --- the fraction of the files
+a fix touched that the bounded working set recovers. On this repository's history
+the first run exposed a limitation and its fix, both measured: with
+downstream-only failure propagation $R_{\mathrm{cov}}$ was flat at $0.33$ (only the
+seed file recovered, as co-changed files are \emph{upstream} importers reached
+only through dependency hubs). Resolving intra-crate imports into file$\to$file
+edges and propagating failure \emph{bidirectionally} fixes this. Across three
+mature crates --- \code{fd}, \code{bat} and \code{hyperfine}, $70$ mined fix
+commits --- the effect is consistent: at a sufficient budget ($K{\ge}50$) the two
+changes lift $R_{\mathrm{cov}}$ to $0.85$--$1.0$ (from $0.50$--$0.84$
+downstream-only), while \emph{diluting} to $0.19$--$0.28$ at a tight $K{=}20$
+budget. \textbf{But against the obvious baseline, this is not a win.} Running a
+classical lexical RAG (TF-IDF cosine over file text, queried by the fault file) at
+the \emph{same file budget}, $R_{\mathrm{cov}}$ as CCOS\,/\,RAG is $0.92/0.94$,
+$1.00/0.98$, $0.87/0.92$ at $K{=}50$ and ties at $K{=}100$, while at $K{=}20$ RAG
+is clearly ahead ($0.20/0.56$ on \code{bat}, $0.20/0.73$ on \code{hyperfine}).
+Causal selection therefore has \emph{no net coverage advantage} over lexical
+similarity here, and is worse at a tight budget: on real bugs a fix's files are
+lexically similar to one another, so TF-IDF recovers them too --- the §\ref{sec:sim}
+premise of a cause lexically dissimilar from its symptom does not reproduce on
+these repositories. The honest reading is that the \emph{necessary} condition
+holds for the large majority but is \emph{not} CCOS-specific; a real advantage
+would have to come from the regimes this setup does not test --- a degraded/absent
+query (§\ref{sec:sim}), a symptom (failing test) lexically far from its cause
+(needing the real test-driven seed, not the highest-degree heuristic), or the
+\emph{sufficient} condition (Phase 4). Multi-crate workspaces, now linkable, also
+remain to be measured at scale.
+
+\paragraph{Sufficient condition (Phase 4): resolution ties, efficiency does not.}
+We run the generation half on real single-file fixes from \code{fd}: an agent is
+given an equal-budget context built two ways --- CCOS's causal region vs top-$k$
+lexical RAG --- asked to rewrite the buggy file, and graded by whether
+\code{cargo test} passes, with a \emph{compiler-in-the-loop} retry (on failure, a
+\emph{context page fault} parses the error with the trace layer, injects pressure on
+the faulting files, and re-prompts with a refreshed window). With a weak $7$B model
+and one shot, both resolve $0/15$; with \code{qwen3-coder-30B} and three attempts
+the loop lifts both to $2/10$ ($20\%$) --- the page-fault feedback, not the
+retriever, unlocks resolution, and CCOS shows \textbf{no resolution advantage} over
+RAG, consistent with the retrieval result. The \emph{efficiency} separates them: at
+equal resolution CCOS's auto-bounded region averages $776$ context tokens against
+the lexical retriever's budget-filling $5366$ --- a $\mathbf{6.9\times}$ reduction.
+The same holds at scale without a model: across $51$ single-file fix scenarios from
+\code{fd}, \code{bat} and \code{hyperfine}, CCOS assembles $700$--$1600$ context
+tokens against RAG's $\approx\!6000$, a $\mathbf{4.1}$--$\mathbf{9.1\times}$
+reduction. This is the one axis on which CCOS dominates: not \emph{what} it
+retrieves (a baseline matches that) but \emph{how little} it needs, because the
+causal region stops at the working set instead of padding a top-$k$ to budget. We
+state the caveats: the \emph{resolution} sample is tiny ($n{=}10$, two passes), and
+the baseline fills the budget by construction (a carefully tuned-$k$ RAG would also
+be sparser). The defensible claim is narrower but real: CCOS \emph{self-calibrates}
+--- it bounds itself at the causal region with no $k$ or budget to tune --- so it
+never wastes the window, which is precisely the point of demand paging.
+
+\paragraph{Hypotheses.}
+\textbf{H1} (efficiency): CCOS reaches equal task success at fewer input tokens
+than RAG/GraphRAG, because a region covers the causal neighbourhood with higher
+recall (Table~\ref{tab:locality}).
+\textbf{H2} (long-horizon success): on multi-file tasks CCOS's resolved-rate
+exceeds chunk RAG by a margin that grows with the causal diameter of the task.
+\textbf{H3} (grounding): CCOS lowers the symbol-hallucination rate, because the
+admitted window is a connected sub-graph of \emph{real} nodes.
+
+\paragraph{Threats to validity.} Region quality is bounded by edge quality
+(\S\ref{sec:eval}); results would conflate the region \emph{policy} with the
+underlying \emph{graph}. Ablations must therefore fix the graph and vary only the
+selection strategy, and report per-task causal diameter so that gains are
+attributed to coherence, not to retrieving more text. The \code{ccos-from-query}
+ablation in Table~\ref{tab:real} is exactly this control --- same graph and
+budget, only the anchor swapped --- and it collapses with the lexical baselines
+under noise. A positive result on H1--H3 would constitute the research
+contribution; a null result would still validate the deterministic, auditable
+infrastructure.
+
+\section{Limitations}
+
+We are deliberately explicit about what is \emph{not} shown.
+\textbf{(1) No coverage advantage over RAG on real bugs.} The headline real-data
+metric ($R_{\mathrm{cov}}$, \S\ref{sec:protocol}) ties a plain lexical TF-IDF
+retriever at a sufficient budget and loses to it at a tight one; on real fix
+commits the files a fix touches are lexically similar, so the simulation's premise
+of a lexically-dissimilar cause does not hold. The strong absolute numbers are a
+\emph{necessary} condition that a baseline also satisfies, not a CCOS win.
+(A complementary measurement on the engine's own source isolates a different,
+structurally-defined relation: a lexical TF-IDF retriever recovers only $49\%$
+(recall@$10$) of the AST-resolved \emph{import} dependencies---pairs that routinely
+share no vocabulary, dependency cosine $0.53$ vs $0.43$ random---so RAG's blind spot
+is real, but it lies off the fix-\emph{cohesion} axis the headline metric measures,
+where a fix's files do share vocabulary. The structural layer recovers those edges by
+construction; the now-default AST is what makes that recovery complete.)
+\textbf{(2) Necessary $\neq$ sufficient.} We never measure whether a region
+\emph{helps an agent fix} a bug (Phase 4: a patch passing the hidden tests) ---
+only whether the relevant files are retrievable.
+\textbf{(3) Seed heuristic.} The harness injects the fault at the
+highest-out-degree changed file, not at the genuinely failing test, so it does not
+exercise the regime where a symptom is lexically far from its cause --- the regime
+most favourable to causal selection.
+\textbf{(4) Scale and statistics.} Three single-crate repositories, $n\!\approx\!20$
+each; differences are reported with their standard deviation but not cross-validated.
+\textbf{(5) Engine.} The parser now \emph{defaults} to a real \texttt{syn} AST ---
+measured $36.5\%$ more accurate than the former line heuristic on the engine's own
+source (two-thirds vs.\ full import recall), the heuristic kept only as a fallback for
+non-Rust input --- and ingestion was hardened to reconstruct bit-identically across
+processes (sorted import resolution; order-invariant centrality). Regions remain
+file-granular and merge only on explicit cross-file edges; scoring weights are
+hand-tuned, though off-by-default eigenvector-centrality and node-lifecycle
+(\texttt{Stable}/\texttt{Working}/\texttt{Orphan}) refinements are now available. None of
+these affect the \emph{proven} properties (partition, determinism, replay) or the
+measured locality --- but the empirical case for a downstream agent benefit is, at this
+point, \emph{unproven}.
+
+\section{Conclusion}
+
+We set out to show that organising an agent's memory by \emph{causal regions}
+retrieves long-horizon context better than chunk retrieval, gave the construction
+a precise and deterministic definition, and proved it reconstructs bit-for-bit on
+replay. We then tested the retrieval claim against the obvious baseline on real
+data --- and it did not hold: across $70$ real bug-fix commits a plain lexical
+TF-IDF retriever ties causal selection and beats it at a tight budget, and a
+crash-trace pivot loses to RAG-over-the-error-message, because on real code a
+fix's files and its error messages share vocabulary. We report the negative result
+rather than bury it. What survives is not a better retriever but a different kind
+of object: a \emph{deterministic, replayable, auditable} working memory in which an
+agent's exact context state can be rewound and replayed under different
+parameters --- time-travel debugging that a probabilistic retrieval stack cannot
+offer. Whether that auditability, or a structured-context advantage at
+\emph{generation} time (Phase 4), yields a measurable downstream gain remains open.
+We release the engine, the honest validation harness and this paper so the
+distinction between what is proven, what is measured, and what is refuted can be
+checked rather than asserted.
+
+\begin{thebibliography}{99}
+\bibitem{lewis2020rag} P.~Lewis et al. Retrieval-Augmented Generation for
+Knowledge-Intensive NLP Tasks. \emph{NeurIPS}, 2020. arXiv:2005.11401.
+\bibitem{asai2023selfrag} A.~Asai et al. Self-RAG: Learning to Retrieve, Generate
+and Critique through Self-Reflection. \emph{ICLR}, 2024. arXiv:2310.11511.
+\bibitem{edge2024graphrag} D.~Edge et al. From Local to Global: A Graph RAG
+Approach to Query-Focused Summarization. 2024. arXiv:2404.16130.
+\bibitem{yamaguchi2014cpg} F.~Yamaguchi et al. Modeling and Discovering
+Vulnerabilities with Code Property Graphs. \emph{IEEE S\&P}, 2014.
+\bibitem{packer2023memgpt} C.~Packer et al. MemGPT: Towards LLMs as Operating
+Systems. 2023. arXiv:2310.08560.
+\bibitem{park2023generative} J.~S.~Park et al. Generative Agents: Interactive
+Simulacra of Human Behavior. \emph{UIST}, 2023. arXiv:2304.03442.
+\bibitem{langgraph} LangChain. LangGraph: Building Stateful, Multi-Actor
+Applications with LLMs. Software framework, 2023--2024.
+\url{https://github.com/langchain-ai/langgraph}.
+\bibitem{denning1968working} P.~J.~Denning. The Working Set Model for Program
+Behavior. \emph{Communications of the ACM}, 11(5), 1968.
+\bibitem{liu2023lost} N.~F.~Liu et al. Lost in the Middle: How Language Models Use
+Long Contexts. \emph{TACL}, 2024. arXiv:2307.03172.
+\bibitem{kwon2023paged} W.~Kwon et al. Efficient Memory Management for Large
+Language Model Serving with PagedAttention. \emph{SOSP}, 2023. arXiv:2309.06180.
+\bibitem{haber1991timestamp} S.~Haber and W.~S.~Stornetta. How to Time-Stamp a
+Digital Document. \emph{Journal of Cryptology}, 3(2), 1991.
+\bibitem{cormack2009reciprocal} G.~V.~Cormack, C.~L.~A.~Clarke, and S.~B\"uttcher.
+Reciprocal Rank Fusion Outperforms Condorcet and Individual Rank Learning Methods.
+\emph{SIGIR}, 2009.
+\bibitem{jimenez2023swebench} C.~E.~Jimenez et al. SWE-bench: Can Language Models
+Resolve Real-World GitHub Issues? \emph{ICLR}, 2024. arXiv:2310.06770.
+\end{thebibliography}
+
+\end{document}

@@ -38,14 +38,33 @@ extern crate alloc;
 #[cfg(not(feature = "std"))]
 use alloc::{format, string::String, vec, vec::Vec};
 
+pub use compute_adapter::{CpuBuffer, CpuComputeAdapter, CpuEvent, CpuKernel, CpuStream};
+pub use compute_dispatch::{
+    BackendSelectionAttempt, BackendSelectionOutcome, ComputeDispatcher, ComputePreference,
+    DispatchBuffer, DispatchEvent, DispatchKernel, DispatchStream,
+};
+
 /// Optional product-licensing gate for the GPU module (feature `license-gate`).
 #[cfg(feature = "license-gate")]
 pub mod license;
+
+mod compute_adapter;
+#[cfg(test)]
+mod compute_conformance;
+mod compute_dispatch;
+mod cpu_reference;
 
 #[cfg(feature = "wgpu")]
 mod chain;
 #[cfg(feature = "wgpu")]
 mod conv_gpu;
+#[cfg(feature = "cuda")]
+mod cuda_compute_adapter;
+// The canonical Reference path on CUDA. Separate from `cuda_compute_adapter`,
+// which implements the PTX contract: the two accept different kernel modules
+// and different placement conventions, and merging them would weaken both.
+#[cfg(feature = "cuda")]
+mod cuda_reference;
 #[cfg(feature = "wgpu")]
 pub mod deterministic;
 #[cfg(feature = "wgpu")]
@@ -62,6 +81,13 @@ pub mod ops;
 mod tensor;
 #[cfg(feature = "wgpu")]
 mod wgpu_backend;
+#[cfg(feature = "wgpu")]
+mod wgpu_compute_adapter;
+// The canonical Reference path on WGPU. Separate from `wgpu_compute_adapter`,
+// which implements the WGSL contract: the two accept different kernel modules
+// and different placement conventions, and merging them would weaken both.
+#[cfg(feature = "wgpu")]
+mod wgpu_reference;
 
 #[cfg(feature = "wgpu")]
 pub use chain::{
@@ -70,6 +96,15 @@ pub use chain::{
 };
 #[cfg(feature = "wgpu")]
 pub use conv_gpu::{COL2IM_WGSL, IM2COL_WGSL, cpu_col2im, cpu_im2col};
+#[cfg(feature = "cuda")]
+pub use cuda_compute_adapter::{
+    CudaComputeAdapter, CudaComputeBuffer, CudaComputeEvent, CudaComputeKernel, CudaComputeStream,
+};
+#[cfg(feature = "cuda")]
+pub use cuda_reference::{
+    CudaReferenceAdapter, CudaReferenceBuffer, CudaReferenceCounters, CudaReferenceEvent,
+    CudaReferenceKernel, CudaReferenceStream,
+};
 #[cfg(feature = "wgpu")]
 pub use deterministic_gpu::{DeterministicGpu, DeterministicValidator};
 #[cfg(feature = "wgpu")]
@@ -80,6 +115,16 @@ pub use fusion::{FusedLayer, FusionNode, plan_fusion};
 pub use tensor::GpuTensor;
 #[cfg(feature = "wgpu")]
 pub use wgpu_backend::{GpuMatrix, WgpuContext, wgpu_scale_causal_mask, wgpu_softmax};
+#[cfg(feature = "wgpu")]
+pub use wgpu_compute_adapter::{
+    WgpuComputeAdapter, WgpuComputeBuffer, WgpuComputeEvent, WgpuComputeKernel, WgpuComputeStream,
+};
+#[cfg(feature = "wgpu")]
+pub use wgpu_reference::{
+    WgpuDeviceClass, WgpuPowerPreference, WgpuReferenceAdapter, WgpuReferenceAdapterInfo,
+    WgpuReferenceBuffer, WgpuReferenceEvent, WgpuReferenceKernel, WgpuReferenceOptions,
+    WgpuReferenceStream,
+};
 
 /// Error returned when a compute backend cannot service a request.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -410,18 +455,27 @@ mod tests {
 
     #[test]
     fn device_backends_are_honest_not_fake() {
-        let a = [1.0, 2.0, 3.0, 4.0];
-        let b = [1.0, 0.0, 0.0, 1.0];
         #[cfg(not(feature = "cuda"))]
-        assert_eq!(
-            CudaBackend.gemm_f32(&a, &b, 2, 2, 2),
-            Err(BackendError::Unavailable("cuda"))
-        );
+        {
+            let a = [1.0, 2.0, 3.0, 4.0];
+            let b = [1.0, 0.0, 0.0, 1.0];
+
+            assert_eq!(
+                CudaBackend.gemm_f32(&a, &b, 2, 2, 2),
+                Err(BackendError::Unavailable("cuda"))
+            );
+        }
+
         #[cfg(not(feature = "wgpu"))]
-        assert_eq!(
-            WgpuBackend.gemm_f32(&a, &b, 2, 2, 2),
-            Err(BackendError::Unavailable("wgpu"))
-        );
+        {
+            let a = [1.0, 2.0, 3.0, 4.0];
+            let b = [1.0, 0.0, 0.0, 1.0];
+
+            assert_eq!(
+                WgpuBackend.gemm_f32(&a, &b, 2, 2, 2),
+                Err(BackendError::Unavailable("wgpu"))
+            );
+        }
     }
 
     #[cfg(feature = "cuda")]

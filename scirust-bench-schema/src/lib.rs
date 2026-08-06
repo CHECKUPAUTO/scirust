@@ -26,6 +26,25 @@
 //! this schema lacked. Harnesses that "don't have a seed handy" are being
 //! told something by the compiler.
 //!
+//! ## Confirmatory vs exploratory rows
+//!
+//! A reproducible number is not yet a *confirmatory* one. Re-running a harness
+//! until a metric looks good, then reporting that metric, produces rows that
+//! are perfectly seeded and perfectly reproducible — and still worth much less
+//! than rows whose metric and acceptance criterion were fixed before the run.
+//! Without a way to say which is which, an aggregator cannot tell them apart,
+//! and pooling them silently inflates whatever the pool is used to claim.
+//!
+//! [`Preregistration`] records that distinction, and records it *checkably*:
+//! the SHA-256 of the frozen protocol, the SHA-256 of the code that produced
+//! the value, whether execution was one-shot, and which named criterion the
+//! row answers. Both hashes are validated on construction, so the field cannot
+//! hold a string nobody can verify. [`BenchRecord::is_confirmatory`] is the
+//! partitioning predicate.
+//!
+//! This is optional and defaults to absent: existing rows, existing readers
+//! and existing harnesses are unaffected.
+//!
 //! ## Interchange format
 //!
 //! JSON Lines (one [`BenchRecord`] per line, stable field order — the struct
@@ -78,10 +97,105 @@ pub struct Certificate {
     pub determinism: Option<String>,
 }
 
-/// One benchmark measurement — the CANR §9 row
-/// `{kernel, dataset, method, seed, metric, value, ci, cert}`.
+/// Evidence that a measurement is **confirmatory**: the design and the code
+/// that produced it were frozen, and their hashes pinned, *before the number
+/// existed*.
 ///
-/// Field order here is the serialized field order; do not reorder.
+/// This is the distinction a benchmark row otherwise cannot express. A value
+/// obtained by running a harness, looking at the output, and then choosing
+/// which metric to report is not the same kind of evidence as a value obtained
+/// by declaring the metric and the acceptance criterion first and executing
+/// once — but both serialize identically without this field. Attaching a
+/// [`Preregistration`] makes the difference machine-checkable: both hashes can
+/// be recomputed by a third party against the committed artifacts.
+///
+/// The discipline it records is the one used by the upstream TDI project (see
+/// `scirust-tdi`): frozen preregistration, SHA-256-pinned scientific code,
+/// criteria named before execution, and a single human-gated run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Preregistration {
+    /// SHA-256 of the frozen preregistration document (64 lowercase hex).
+    pub preregistration_sha256: String,
+    /// SHA-256 of the evaluator / scientific code that produced `value`
+    /// (64 lowercase hex).
+    pub code_sha256: String,
+    /// Whether the measurement came from a single execution behind an explicit
+    /// human gate, as opposed to a re-runnable or repeated one. `false` is a
+    /// legitimate value and should be recorded honestly.
+    pub one_shot: bool,
+    /// The named preregistered criterion this row answers (e.g. `"TDI-5.9A"`),
+    /// when the protocol names one. Naming it is what prevents a row from
+    /// being retrofitted to whichever criterion it happens to satisfy.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub criterion: Option<String>,
+}
+
+impl Preregistration {
+    /// Build a preregistration record, **validating both hashes**.
+    ///
+    /// Returns `Err` unless each hash is exactly 64 lowercase hexadecimal
+    /// characters. This is deliberately strict: an unverifiable string in this
+    /// field would defeat the field's only purpose, which is to let a third
+    /// party recompute the hashes and check them against the committed
+    /// artifacts. A row that cannot be checked should carry no
+    /// [`Preregistration`] at all rather than an unusable one.
+    pub fn new(
+        preregistration_sha256: impl Into<String>,
+        code_sha256: impl Into<String>,
+        one_shot: bool,
+    ) -> Result<Self, String> {
+        let preregistration_sha256 = preregistration_sha256.into();
+        let code_sha256 = code_sha256.into();
+
+        check_sha256("preregistration_sha256", &preregistration_sha256)?;
+        check_sha256("code_sha256", &code_sha256)?;
+
+        Ok(Self {
+            preregistration_sha256,
+            code_sha256,
+            one_shot,
+            criterion: None,
+        })
+    }
+
+    /// Name the preregistered criterion this row answers.
+    #[must_use]
+    pub fn with_criterion(mut self, criterion: impl Into<String>) -> Self {
+        self.criterion = Some(criterion.into());
+        self
+    }
+}
+
+/// Rejects anything that is not exactly 64 lowercase hex characters.
+fn check_sha256(field: &str, value: &str) -> Result<(), String> {
+    if value.len() != 64
+    {
+        return Err(format!(
+            "{field} must be 64 hex characters, got {}",
+            value.len()
+        ));
+    }
+
+    if let Some(bad) = value
+        .chars()
+        .find(|c| !c.is_ascii_hexdigit() || c.is_ascii_uppercase())
+    {
+        return Err(format!(
+            "{field} must be lowercase hexadecimal, found {bad:?}"
+        ));
+    }
+
+    Ok(())
+}
+
+/// One benchmark measurement — the CANR §9 row
+/// `{kernel, dataset, method, seed, metric, value, ci, cert}`, optionally
+/// extended with a [`Preregistration`].
+///
+/// Field order here is the serialized field order; do not reorder. `prereg` is
+/// appended last so existing rows and existing readers are unaffected: it is
+/// omitted from the JSON when absent, and defaults to absent when parsing rows
+/// written before it existed.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BenchRecord {
     /// What computation was benchmarked (e.g. `"vst_denoise/wiener_global"`).
@@ -104,6 +218,10 @@ pub struct BenchRecord {
     /// Optional machine-checkable certificate backing the measurement.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub cert: Option<Certificate>,
+    /// Optional evidence that this row is confirmatory rather than
+    /// exploratory — see [`Preregistration`].
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub prereg: Option<Preregistration>,
 }
 
 impl BenchRecord {
@@ -127,6 +245,7 @@ impl BenchRecord {
             value,
             ci: None,
             cert: None,
+            prereg: None,
         }
     }
 
@@ -140,6 +259,24 @@ impl BenchRecord {
     pub fn with_cert(mut self, cert: Certificate) -> Self {
         self.cert = Some(cert);
         self
+    }
+
+    /// Attach preregistration evidence, marking this row confirmatory.
+    #[must_use]
+    pub fn with_prereg(mut self, prereg: Preregistration) -> Self {
+        self.prereg = Some(prereg);
+        self
+    }
+
+    /// Whether this row carries preregistration evidence *and* declares a
+    /// one-shot execution — the strongest claim the schema can express.
+    ///
+    /// Useful for partitioning a mixed result set: exploratory rows and
+    /// confirmatory rows should not be aggregated as though they were the
+    /// same kind of evidence.
+    #[must_use]
+    pub fn is_confirmatory(&self) -> bool {
+        self.prereg.as_ref().is_some_and(|p| p.one_shot)
     }
 
     /// One JSON object, no trailing newline.
@@ -283,6 +420,82 @@ mod tests {
         assert_eq!(text.lines().count(), 2);
         let back = parse_jsonl(&text).expect("round trip must parse");
         assert_eq!(back, records);
+    }
+
+    fn valid_prereg() -> Preregistration {
+        Preregistration::new(
+            "1fd2db07cfcad98c3c56b99270239a2cc5297fe3401846eb1a633b645177cab8",
+            "ffa55883c7a0f87e864f817e40518d3021281ae4886d7366c5f7318b1985be8e",
+            true,
+        )
+        .expect("fixture hashes are valid")
+    }
+
+    #[test]
+    fn preregistration_rejects_hashes_that_cannot_be_checked() {
+        let good = "1fd2db07cfcad98c3c56b99270239a2cc5297fe3401846eb1a633b645177cab8";
+
+        // Too short, too long, non-hex, and uppercase are all rejected: the
+        // field exists so a third party can recompute and compare, and any of
+        // these would make that impossible.
+        assert!(Preregistration::new("abc", good, true).is_err());
+        assert!(Preregistration::new(format!("{good}0"), good, true).is_err());
+        assert!(Preregistration::new(good, "z".repeat(64), true).is_err());
+        assert!(Preregistration::new(good, good.to_uppercase(), true).is_err());
+
+        // Both positions are checked, not just the first.
+        assert!(Preregistration::new(good, "abc", true).is_err());
+        assert!(Preregistration::new(good, good, true).is_ok());
+    }
+
+    #[test]
+    fn confirmatory_requires_both_prereg_and_one_shot() {
+        assert!(
+            !sample().is_confirmatory(),
+            "a bare row is not confirmatory"
+        );
+
+        assert!(sample().with_prereg(valid_prereg()).is_confirmatory());
+
+        let repeatable = Preregistration::new(
+            "1fd2db07cfcad98c3c56b99270239a2cc5297fe3401846eb1a633b645177cab8",
+            "ffa55883c7a0f87e864f817e40518d3021281ae4886d7366c5f7318b1985be8e",
+            false,
+        )
+        .unwrap();
+        assert!(
+            !sample().with_prereg(repeatable).is_confirmatory(),
+            "preregistered but not one-shot is not the strongest claim"
+        );
+    }
+
+    #[test]
+    fn prereg_round_trips_and_stays_absent_when_unused() {
+        let row = sample().to_json_row();
+        assert!(
+            !row.contains("\"prereg\""),
+            "absent prereg must not serialize: {row}"
+        );
+
+        let with = sample().with_prereg(valid_prereg().with_criterion("TDI-5.9A"));
+        let text = to_jsonl(std::slice::from_ref(&with));
+        assert!(text.contains("\"criterion\":\"TDI-5.9A\""));
+        assert_eq!(parse_jsonl(&text).unwrap(), vec![with]);
+    }
+
+    #[test]
+    fn rows_written_before_prereg_existed_still_parse() {
+        // Backward compatibility: `prereg` was added after this schema was
+        // already in use by six crates. A row serialized without it must still
+        // parse, landing as `None` — otherwise adding the field would
+        // invalidate every previously written .jsonl file.
+        let legacy =
+            r#"{"kernel":"k","dataset":"d","method":"m","seed":7,"metric":"snr_db","value":1.5}"#;
+        let parsed = parse_jsonl(legacy).expect("legacy rows must still parse");
+        assert_eq!(parsed.len(), 1);
+        assert!(parsed[0].prereg.is_none());
+        assert!(!parsed[0].is_confirmatory());
+        assert_eq!(parsed[0].seed, 7);
     }
 
     #[test]

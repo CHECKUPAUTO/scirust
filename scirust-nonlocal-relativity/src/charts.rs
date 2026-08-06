@@ -125,6 +125,38 @@ pub fn cylindrical_to_cartesian_velocity(
     Ok(converted)
 }
 
+/// Exact parallel transport of a contravariant vector between two points of
+/// flat Minkowski spacetime, expressed in the cylindrical chart, valid along
+/// *any* path connecting `from_coordinates` to `to_coordinates` that stays
+/// within a simply connected region of the chart (in particular, a path that
+/// does not wind around `r = 0`).
+///
+/// Parallel transport on a flat (curvature-free) manifold is path-independent:
+/// the difference between transporting along two distinct paths between the
+/// same two points equals transporting around the closed loop formed by one
+/// path followed by the reverse of the other, and a flat connection has
+/// trivial holonomy around every contractible loop. This function exploits
+/// that directly, with no discretization: it converts `vector_at_from` to the
+/// Cartesian chart at `from_coordinates` (where, because the Cartesian
+/// connection vanishes identically, transport along *any* path leaves the
+/// components unchanged), then converts that unchanged Cartesian vector back
+/// to the cylindrical chart at `to_coordinates`.
+///
+/// This is exact **only** for flat spacetime in this specific
+/// Cartesian/cylindrical chart pair. It is not a general bitensor propagator:
+/// it does not apply to `Schwarzschild` or any other curved background, where
+/// [`crate::DiscreteConnectionTransport`] remains a discrete approximation
+/// with no closed-form exact counterpart in this crate.
+pub fn exact_cylindrical_minkowski_transport(
+    from_coordinates: [f64; 4],
+    vector_at_from: [f64; 4],
+    to_coordinates: [f64; 4],
+) -> NonlocalResult<[f64; 4]> {
+    let cartesian_vector = cylindrical_to_cartesian_velocity(from_coordinates, vector_at_from)?;
+    let to_coordinates_cartesian = cylindrical_to_cartesian_coordinates(to_coordinates)?;
+    cartesian_to_cylindrical_velocity(to_coordinates_cartesian, cartesian_vector)
+}
+
 fn validate_cylindrical_radius(radius: f64) -> NonlocalResult<()> {
     if !radius.is_finite() || radius <= 0.0
     {

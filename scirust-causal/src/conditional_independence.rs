@@ -372,7 +372,7 @@ fn locate_global_row(dataset: &CausalDataset, global_row: usize) -> Option<(usiz
     None
 }
 
-fn select_rows(
+pub(crate) fn select_rows(
     dataset: &CausalDataset,
     regime: &RegimeSelection,
 ) -> Result<Vec<(usize, usize)>, CausalError> {
@@ -406,7 +406,11 @@ fn select_rows(
     }
 }
 
-fn extract_column(dataset: &CausalDataset, variable: usize, rows: &[(usize, usize)]) -> Vec<f64> {
+pub(crate) fn extract_column(
+    dataset: &CausalDataset,
+    variable: usize,
+    rows: &[(usize, usize)],
+) -> Vec<f64> {
     rows.iter()
         .map(|&(block_index, row)| {
             let block = &dataset.blocks[block_index];

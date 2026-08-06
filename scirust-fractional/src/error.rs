@@ -21,6 +21,23 @@ pub enum FractionalError {
 
     /// A sample at the indicated index is not finite.
     NonFiniteSample(usize),
+
+    /// The sample sequence and sample-time sequence have different lengths.
+    MismatchedLengths {
+        /// Number of supplied samples.
+        samples: usize,
+        /// Number of supplied sample times.
+        sample_times: usize,
+    },
+
+    /// A sample time at the indicated index is not finite.
+    NonFiniteSampleTime(usize),
+
+    /// Sample times are not strictly increasing at the indicated index.
+    NonMonotonicSampleTimes {
+        /// Index at which `sample_times[index] <= sample_times[index - 1]`.
+        index: usize,
+    },
 }
 
 impl fmt::Display for FractionalError {
@@ -50,6 +67,22 @@ impl fmt::Display for FractionalError {
             {
                 write!(formatter, "sample at index {index} is not finite")
             },
+            Self::MismatchedLengths {
+                samples,
+                sample_times,
+            } => write!(
+                formatter,
+                "sample sequence has length {samples} but sample-time sequence has length \
+                 {sample_times}"
+            ),
+            Self::NonFiniteSampleTime(index) =>
+            {
+                write!(formatter, "sample time at index {index} is not finite")
+            },
+            Self::NonMonotonicSampleTimes { index } => write!(
+                formatter,
+                "sample times must be strictly increasing; violated at index {index}"
+            ),
         }
     }
 }

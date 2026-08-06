@@ -202,6 +202,28 @@ fn validate_run(dim: usize, y0: &[f64], t0: f64, t_end: f64, h: f64) -> Result<u
     Ok(steps.max(1))
 }
 
+/// What a step observer tells an integrator to do after an accepted step.
+///
+/// See [`simulate_observed`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StepAction {
+    /// Keep integrating.
+    Continue,
+    /// Stop now, returning the trajectory recorded so far.
+    Stop,
+}
+
+/// The outcome of an integration driven by a step observer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObservedRun {
+    /// The trajectory recorded up to the point integration stopped. Always
+    /// contains at least the initial condition.
+    pub trajectory: Trajectory,
+    /// `true` if `t_end` was reached, `false` if the observer asked to stop
+    /// early with [`StepAction::Stop`].
+    pub completed: bool,
+}
+
 /// Integrate `system` from `y0` over `[t0, t_end]` with the classical
 /// fixed-step fourth-order Runge–Kutta method.
 ///
@@ -219,6 +241,33 @@ pub fn simulate<S: System>(
     t_end: f64,
     h: f64,
 ) -> Result<Trajectory, SimError> {
+    simulate_observed(system, y0, t0, t_end, h, |_, _| StepAction::Continue)
+        .map(|run| run.trajectory)
+}
+
+/// [`simulate`], with `observe` called after each accepted step with the new
+/// `(t, y)` — returning [`StepAction::Stop`] ends the integration early and
+/// reports `completed: false`.
+///
+/// This is the *same* loop [`simulate`] runs (that function is a wrapper
+/// around this one passing an observer that never stops), so an observed run
+/// that is allowed to finish produces bit-for-bit the trajectory an
+/// unobserved one would — the observer cannot perturb the arithmetic. That
+/// is what makes it usable for cooperative cancellation and for reporting
+/// genuine progress: a caller can abandon a long integration between steps
+/// without changing the numbers a completed run would have produced.
+pub fn simulate_observed<S, F>(
+    system: &S,
+    y0: &[f64],
+    t0: f64,
+    t_end: f64,
+    h: f64,
+    mut observe: F,
+) -> Result<ObservedRun, SimError>
+where
+    S: System,
+    F: FnMut(f64, &[f64]) -> StepAction,
+{
     let dim = system.dim();
     let steps = validate_run(dim, y0, t0, t_end, h)?;
 
@@ -237,6 +286,7 @@ pub fn simulate<S: System>(
     let mut stage = vec![0.0; dim];
 
     let mut t = t0;
+    let mut completed = true;
     while t < t_end
     {
         // Land exactly on t_end; the comparison above guarantees dt > 0.
@@ -270,8 +320,17 @@ pub fn simulate<S: System>(
         }
         traj.t.push(t);
         traj.y.push(y.clone());
+
+        if observe(t, &y) == StepAction::Stop
+        {
+            completed = false;
+            break;
+        }
     }
-    Ok(traj)
+    Ok(ObservedRun {
+        trajectory: traj,
+        completed,
+    })
 }
 
 // The Dormand–Prince 5(4) Butcher tableau (the method behind MATLAB's
@@ -626,6 +685,30 @@ pub fn simulate_second_order<S: SecondOrderSystem>(
     t_end: f64,
     h: f64,
 ) -> Result<Trajectory, SimError> {
+    simulate_second_order_observed(system, q0, v0, t0, t_end, h, |_, _| StepAction::Continue)
+        .map(|run| run.trajectory)
+}
+
+/// [`simulate_second_order`], with `observe` called after each accepted step
+/// with the new `(t, [q, v])` — returning [`StepAction::Stop`] ends the
+/// integration early and reports `completed: false`.
+///
+/// As with [`simulate_observed`], this is the same loop the unobserved
+/// function runs, so observing cannot change the numbers a completed run
+/// produces.
+pub fn simulate_second_order_observed<S, F>(
+    system: &S,
+    q0: &[f64],
+    v0: &[f64],
+    t0: f64,
+    t_end: f64,
+    h: f64,
+    mut observe: F,
+) -> Result<ObservedRun, SimError>
+where
+    S: SecondOrderSystem,
+    F: FnMut(f64, &[f64]) -> StepAction,
+{
     let n = system.dof();
     if v0.len() != n
     {
@@ -659,6 +742,7 @@ pub fn simulate_second_order<S: SecondOrderSystem>(
     let mut v = v0.to_vec();
     let mut acc = vec![0.0; n];
     let mut t = t0;
+    let mut completed = true;
     while t < t_end
     {
         let dt = h.min(t_end - t);
@@ -677,9 +761,20 @@ pub fn simulate_second_order<S: SecondOrderSystem>(
             return Err(SimError::NonFinite { t });
         }
         traj.t.push(t);
-        traj.y.push(row(&q, &v));
+        let recorded = row(&q, &v);
+        let action = observe(t, &recorded);
+        traj.y.push(recorded);
+
+        if action == StepAction::Stop
+        {
+            completed = false;
+            break;
+        }
     }
-    Ok(traj)
+    Ok(ObservedRun {
+        trajectory: traj,
+        completed,
+    })
 }
 
 #[cfg(test)]
@@ -990,5 +1085,108 @@ mod tests {
             result,
             Err(SimError::StepUnderflow { .. }) | Err(SimError::NonFinite { .. })
         ));
+    }
+
+    // ---- step observers -------------------------------------------------
+    //
+    // The point of these tests is that observing an integration is *free*:
+    // a run that is allowed to finish must produce exactly — bit for bit —
+    // what the unobserved function produces, so cooperative cancellation
+    // and progress reporting can never be blamed for a changed number.
+
+    #[test]
+    fn observed_rk4_run_is_bit_identical_to_the_unobserved_one() {
+        let plain = simulate(&Decay, &[1.0], 0.0, 5.0, 0.01).unwrap();
+        let observed =
+            simulate_observed(&Decay, &[1.0], 0.0, 5.0, 0.01, |_, _| StepAction::Continue).unwrap();
+        assert!(observed.completed);
+        assert_eq!(plain.t, observed.trajectory.t);
+        assert_eq!(plain.y, observed.trajectory.y);
+    }
+
+    #[test]
+    fn observed_symplectic_run_is_bit_identical_to_the_unobserved_one() {
+        let plain = simulate_second_order(&Harmonic, &[1.0], &[0.0], 0.0, 5.0, 0.01).unwrap();
+        let observed =
+            simulate_second_order_observed(&Harmonic, &[1.0], &[0.0], 0.0, 5.0, 0.01, |_, _| {
+                StepAction::Continue
+            })
+            .unwrap();
+        assert!(observed.completed);
+        assert_eq!(plain.t, observed.trajectory.t);
+        assert_eq!(plain.y, observed.trajectory.y);
+    }
+
+    #[test]
+    fn stopping_an_rk4_run_truncates_it_without_changing_the_kept_values() {
+        let plain = simulate(&Decay, &[1.0], 0.0, 5.0, 0.01).unwrap();
+        let mut seen = 0usize;
+        let stopped = simulate_observed(&Decay, &[1.0], 0.0, 5.0, 0.01, |_, _| {
+            seen += 1;
+            if seen == 100
+            {
+                StepAction::Stop
+            }
+            else
+            {
+                StepAction::Continue
+            }
+        })
+        .unwrap();
+
+        assert!(!stopped.completed, "observer asked to stop");
+        // 100 accepted steps plus the initial condition.
+        assert_eq!(stopped.trajectory.len(), 101);
+        assert!(stopped.trajectory.len() < plain.len());
+        // Every value that *was* produced is identical to the full run's —
+        // stopping truncates, it does not perturb.
+        assert_eq!(stopped.trajectory.t, plain.t[..101]);
+        assert_eq!(stopped.trajectory.y, plain.y[..101]);
+    }
+
+    #[test]
+    fn stopping_a_symplectic_run_truncates_it_without_changing_the_kept_values() {
+        let plain = simulate_second_order(&Harmonic, &[1.0], &[0.0], 0.0, 5.0, 0.01).unwrap();
+        let mut seen = 0usize;
+        let stopped =
+            simulate_second_order_observed(&Harmonic, &[1.0], &[0.0], 0.0, 5.0, 0.01, |_, _| {
+                seen += 1;
+                if seen == 50
+                {
+                    StepAction::Stop
+                }
+                else
+                {
+                    StepAction::Continue
+                }
+            })
+            .unwrap();
+
+        assert!(!stopped.completed);
+        assert_eq!(stopped.trajectory.len(), 51);
+        assert_eq!(stopped.trajectory.t, plain.t[..51]);
+        assert_eq!(stopped.trajectory.y, plain.y[..51]);
+    }
+
+    #[test]
+    fn an_observer_sees_the_state_that_was_recorded() {
+        let mut last_seen = Vec::new();
+        let run = simulate_observed(&Decay, &[1.0], 0.0, 0.5, 0.1, |t, y| {
+            last_seen = vec![t, y[0]];
+            StepAction::Continue
+        })
+        .unwrap();
+        let final_t = *run.trajectory.t.last().unwrap();
+        let final_y = run.trajectory.y.last().unwrap()[0];
+        assert_eq!(last_seen, vec![final_t, final_y]);
+    }
+
+    #[test]
+    fn stopping_on_the_very_first_step_still_keeps_the_initial_condition() {
+        let run =
+            simulate_observed(&Decay, &[1.0], 0.0, 5.0, 0.01, |_, _| StepAction::Stop).unwrap();
+        assert!(!run.completed);
+        assert_eq!(run.trajectory.len(), 2, "initial condition plus one step");
+        assert_eq!(run.trajectory.y[0], vec![1.0]);
     }
 }

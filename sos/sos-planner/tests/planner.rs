@@ -143,7 +143,9 @@ fn planning_is_deterministic_and_the_plan_seals() {
 
     let obj = seal_plan(p1, Author::engine("sos-planner"));
     assert!(obj.verify_id());
-    assert_eq!(obj.kind.name, "Plan");
+    // `ExperimentPlan`, not `Plan`: sos-workflow's stage DAG owns that kind,
+    // and two types sharing one would defeat the store's KindMismatch guard.
+    assert_eq!(obj.kind.name, "ExperimentPlan");
 }
 
 #[test]

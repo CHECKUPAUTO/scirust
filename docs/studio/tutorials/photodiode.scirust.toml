@@ -1,0 +1,66 @@
+# SciRust Studio tutorial scenario: a photodiode receiver.
+#
+# Run it with:
+#
+#   scirust run docs/studio/tutorials/photodiode.scirust.toml
+#
+# A silicon photodiode looking at a microwatt of light, feeding a 50 kOhm
+# transimpedance load. The photocurrent charges the junction capacitance
+# through that load: a first-order RC.
+#
+# What is verified, and why two checks rather than one:
+#
+#   * settles_at_the_closed_form_level — the settled voltage must equal
+#     I_ph*R_L, with I_ph = responsivity*P_opt + I_dark. Here that is
+#     (0.5 * 1e-6 + 1e-9) * 50e3 = 0.025050 V, exactly.
+#   * rc_time_constant — the approach to that level is a single exponential
+#     with tau = R_L*C_j = 100 ns. The run measures its own decay and
+#     compares.
+#
+# The pair matters because the two are INDEPENDENT. A wrong responsivity
+# moves the level and leaves the rate alone; a wrong capacitance does the
+# reverse. A curve that merely ends in the right place passes the first check
+# and fails the second, which is exactly what you want a verification to do.
+#
+# The run spans five time constants, by which point the deviation from the
+# settled level has decayed by a factor of about 148.
+#
+# Try it: raise `r_load` to 500e3. The signal grows tenfold and the bandwidth
+# falls tenfold — the transimpedance bargain, visible in the two metrics.
+
+schema_version = 1
+
+[experiment]
+name = "Photodiode receiver"
+description = "A silicon photodiode charging its junction capacitance through a transimpedance load."
+
+[capability]
+id = "sim.optoelectronics.photodiode"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+# Silicon at 850 nm.
+responsivity = { value = 0.5, unit = "A/W" }
+dark_current = { value = 1.0e-9, unit = "A" }
+r_load = { value = 50.0e3, unit = "Ohm" }
+c_junction = { value = 2.0e-12, unit = "F" }
+optical_power = { value = 1.0e-6, unit = "W" }
+
+[initial_state]
+# Starting from zero, so the whole exponential approach is in the run.
+voltage = [{ value = 0.0, unit = "V" }]
+
+[solver]
+id = "rk4"
+start = { value = 0.0, unit = "s" }
+# Five time constants.
+end = { value = 5.0e-7, unit = "s" }
+# tau/200, so the exponential is resolved rather than jumped over.
+step = { value = 5.0e-10, unit = "s" }
+
+[outputs]
+record = ["voltage", "steady_state"]

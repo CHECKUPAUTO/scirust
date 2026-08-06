@@ -62,7 +62,7 @@ fn is_benign_untestable(error: &CausalError) -> bool {
 /// All `k`-combinations of `items` (already sorted, deduplicated), in
 /// lexicographic order. `k == 0` yields exactly one combination: the empty
 /// set. `k > items.len()` yields none.
-fn combinations(items: &[usize], k: usize) -> Vec<Vec<usize>> {
+pub(crate) fn combinations(items: &[usize], k: usize) -> Vec<Vec<usize>> {
     if k > items.len()
     {
         return Vec::new();

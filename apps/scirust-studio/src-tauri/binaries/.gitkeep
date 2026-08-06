@@ -1,0 +1,5 @@
+Tauri looks here for the `scirust-studio-worker` sidecar, named with the
+target triple. The binary itself is generated, never committed:
+
+    cargo build -p scirust-studio-worker
+    cargo run --manifest-path apps/scirust-studio/tools/prepare-sidecar/Cargo.toml

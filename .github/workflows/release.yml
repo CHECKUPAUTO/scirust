@@ -52,6 +52,9 @@ jobs:
           git fetch --no-tags origin master
           git merge-base --is-ancestor "$GITHUB_SHA" origin/master
 
+      - name: Refuse public demo provenance and licensing roots
+        run: ./scripts/check-production-root.sh
+
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
