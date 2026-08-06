@@ -28,8 +28,8 @@ jobs:
 
       - name: Install pinned toolchains
         run: |
-          rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt
-          rustup toolchain install 1.89.0 --profile minimal --component clippy
+          rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt,clippy
+          rustup toolchain install 1.89.0 --profile minimal
 
       - name: Apply compiler and Clippy corrections
         run: |
@@ -97,8 +97,11 @@ jobs:
       - name: Canonical formatting
         run: cargo +nightly-2026-07-02 fmt --all
 
-      - name: Clippy
-        run: cargo +1.89.0 clippy -p scirust-core --all-targets --locked -- -D warnings
+      - name: Nightly Clippy
+        run: cargo +nightly-2026-07-02 clippy -p scirust-core --all-targets --locked -- -D warnings
+
+      - name: MSRV check
+        run: cargo +1.89.0 check -p scirust-core --all-targets --locked
 
       - name: Focused and library tests
         run: |
@@ -175,14 +178,17 @@ jobs:
 
                 - name: Install toolchains
                   run: |
-                    rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt
-                    rustup toolchain install 1.89.0 --profile minimal --component clippy
+                    rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt,clippy
+                    rustup toolchain install 1.89.0 --profile minimal
 
                 - name: Format
                   run: cargo +nightly-2026-07-02 fmt --all -- --check
 
-                - name: Clippy
-                  run: cargo +1.89.0 clippy -p scirust-core --all-targets --locked -- -D warnings
+                - name: Nightly Clippy
+                  run: cargo +nightly-2026-07-02 clippy -p scirust-core --all-targets --locked -- -D warnings
+
+                - name: MSRV check
+                  run: cargo +1.89.0 check -p scirust-core --all-targets --locked
 
                 - name: Phase 7 tests
                   run: cargo +1.89.0 test -p scirust-core latent_kv --locked -- --test-threads=1
