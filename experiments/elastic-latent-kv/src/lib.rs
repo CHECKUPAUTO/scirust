@@ -1068,3 +1068,6 @@ pub mod phase3;
 
 /// Deterministic Phase 4 online rank adaptation.
 pub mod phase4;
+
+/// Deterministic Phase 5 sparse residual correction.
+pub mod phase5;
