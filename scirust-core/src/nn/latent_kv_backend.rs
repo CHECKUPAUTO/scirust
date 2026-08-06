@@ -19,6 +19,7 @@ pub struct LatentQuantizedBackend {
 
 impl LatentQuantizedBackend {
     /// Creates a backend with independently selected key and value formats.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         capacity_tokens: usize,
         dimension: usize,
@@ -113,7 +114,8 @@ mod tests {
 
     fn identity(dimension: usize) -> Vec<f32> {
         let mut basis = vec![0.0; dimension * dimension];
-        for diagonal in 0..dimension {
+        for diagonal in 0..dimension
+        {
             basis[diagonal * dimension + diagonal] = 1.0;
         }
         basis
@@ -126,7 +128,8 @@ mod tests {
 
     fn assert_close(left: &[f32], right: &[f32], tolerance: f32) {
         assert_eq!(left.len(), right.len());
-        for (index, (left_value, right_value)) in left.iter().zip(right).enumerate() {
+        for (index, (left_value, right_value)) in left.iter().zip(right).enumerate()
+        {
             let error = (left_value - right_value).abs();
             assert!(
                 error <= tolerance,
@@ -158,7 +161,8 @@ mod tests {
             })
             .collect();
 
-        for step in 0..8 {
+        for step in 0..8
+        {
             let token: Vec<f32> = (0..d_model)
                 .map(|index| ((step * d_model + index) as f32) * 0.013 - 0.4)
                 .collect();
@@ -191,7 +195,8 @@ mod tests {
             })
             .collect();
 
-        for step in 0..capacity {
+        for step in 0..capacity
+        {
             let token: Vec<f32> = (0..d_model)
                 .map(|index| (((step + 3) * (index + 5)) as f32).sin() * 0.25)
                 .collect();
@@ -201,7 +206,8 @@ mod tests {
         }
 
         let dense_bytes = capacity * head_dimension * 2 * core::mem::size_of::<f32>();
-        for backend in &latent {
+        for backend in &latent
+        {
             assert!(backend.packed_bytes() < dense_bytes);
         }
     }
@@ -209,20 +215,16 @@ mod tests {
     #[test]
     fn adapter_reports_cache_state() {
         let dimension = 8;
-        let mut backend = LatentQuantizedBackend::new_symmetric(
-            4,
-            dimension,
-            4,
-            LatentStorageFormat::Int4,
-            {
+        let mut backend =
+            LatentQuantizedBackend::new_symmetric(4, dimension, 4, LatentStorageFormat::Int4, {
                 let mut basis = vec![0.0; dimension * 4];
-                for diagonal in 0..4 {
+                for diagonal in 0..4
+                {
                     basis[diagonal * 4 + diagonal] = 1.0;
                 }
                 basis
-            },
-        )
-        .unwrap();
+            })
+            .unwrap();
         assert!(backend.is_empty());
         backend.append(&[0.1; 8], &[0.2; 8]);
         assert_eq!(backend.len(), 1);

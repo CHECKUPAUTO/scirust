@@ -26,7 +26,8 @@ impl LatentStorageFormat {
     /// Stable human-readable label used by telemetry and tests.
     #[must_use]
     pub const fn label(self) -> &'static str {
-        match self {
+        match self
+        {
             Self::F32 => "f32",
             Self::Int8 => "int8",
             Self::Int4 => "int4",
@@ -34,7 +35,8 @@ impl LatentStorageFormat {
     }
 
     const fn quantization_limit(self) -> Option<i8> {
-        match self {
+        match self
+        {
             Self::F32 => None,
             Self::Int8 => Some(127),
             Self::Int4 => Some(7),
@@ -97,7 +99,8 @@ pub enum LatentCacheError {
 
 impl fmt::Display for LatentCacheError {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::ZeroDimension { field } => write!(output, "{field} must be non-zero"),
             Self::RankTooLarge {
                 name,
@@ -115,12 +118,17 @@ impl fmt::Display for LatentCacheError {
                 output,
                 "{name} length mismatch: expected {expected}, received {actual}"
             ),
-            Self::NonFinite { name, index } => {
-                write!(output, "{name} contains a non-finite scalar at index {index}")
-            }
-            Self::CapacityExceeded { capacity } => {
+            Self::NonFinite { name, index } =>
+            {
+                write!(
+                    output,
+                    "{name} contains a non-finite scalar at index {index}"
+                )
+            },
+            Self::CapacityExceeded { capacity } =>
+            {
                 write!(output, "latent cache token capacity exceeded: {capacity}")
-            }
+            },
             Self::EmptyCache => write!(output, "attention requires at least one cached token"),
             Self::ScratchTooSmall {
                 name,
@@ -156,7 +164,12 @@ impl LatentAttentionScratch {
         }
     }
 
-    fn validate(&self, tokens: usize, key_rank: usize, value_rank: usize) -> Result<(), LatentCacheError> {
+    fn validate(
+        &self,
+        tokens: usize,
+        key_rank: usize,
+        value_rank: usize,
+    ) -> Result<(), LatentCacheError> {
         require_scratch("score", self.scores.len(), tokens)?;
         require_scratch("query-latent", self.query_latent.len(), key_rank)?;
         require_scratch("value-latent", self.value_latent.len(), value_rank)
@@ -185,6 +198,7 @@ pub struct QuantizedLatentKvCache {
 
 impl QuantizedLatentKvCache {
     /// Creates an empty cache with row-major bases shaped `[dimension, rank]`.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         capacity_tokens: usize,
         dimension: usize,
@@ -288,7 +302,9 @@ impl QuantizedLatentKvCache {
     pub fn used_bytes(&self) -> usize {
         let basis_bytes = (self.key_basis.len() + self.value_basis.len())
             .saturating_mul(core::mem::size_of::<f32>());
-        let key_bytes = self.len.saturating_mul(row_bytes_unchecked(self.key_format, self.key_rank));
+        let key_bytes = self
+            .len
+            .saturating_mul(row_bytes_unchecked(self.key_format, self.key_rank));
         let value_bytes = self
             .len
             .saturating_mul(row_bytes_unchecked(self.value_format, self.value_rank));
@@ -324,7 +340,8 @@ impl QuantizedLatentKvCache {
         require_finite("key", key)?;
         require_finite("value", value)?;
 
-        if self.len == self.capacity_tokens {
+        if self.len == self.capacity_tokens
+        {
             return Err(LatentCacheError::CapacityExceeded {
                 capacity: self.capacity_tokens,
             });
@@ -376,7 +393,8 @@ impl QuantizedLatentKvCache {
         output: &mut [f32],
         scratch: &mut LatentAttentionScratch,
     ) -> Result<(), LatentCacheError> {
-        if self.is_empty() {
+        if self.is_empty()
+        {
             return Err(LatentCacheError::EmptyCache);
         }
         require_length("query", query.len(), self.dimension)?;
@@ -395,7 +413,8 @@ impl QuantizedLatentKvCache {
         let scale = 1.0 / (self.dimension as f32).sqrt();
         let query_latent = &scratch.query_latent[..self.key_rank];
         let scores = &mut scratch.scores[..self.len];
-        for (row, score) in scores.iter_mut().enumerate() {
+        for (row, score) in scores.iter_mut().enumerate()
+        {
             *score = row_dot(
                 self.key_format,
                 self.key_rank,
@@ -410,7 +429,8 @@ impl QuantizedLatentKvCache {
         let latent_value = &mut scratch.value_latent[..self.value_rank];
         latent_value.fill(0.0);
         let denominator: f32 = scores.iter().copied().sum();
-        for (row, numerator) in scores.iter().copied().enumerate() {
+        for (row, numerator) in scores.iter().copied().enumerate()
+        {
             accumulate_row(
                 self.value_format,
                 self.value_rank,
@@ -434,14 +454,16 @@ impl QuantizedLatentKvCache {
 }
 
 fn non_zero(field: &'static str, value: usize) -> Result<(), LatentCacheError> {
-    if value == 0 {
+    if value == 0
+    {
         return Err(LatentCacheError::ZeroDimension { field });
     }
     Ok(())
 }
 
 fn require_rank(name: &'static str, rank: usize, dimension: usize) -> Result<(), LatentCacheError> {
-    if rank > dimension {
+    if rank > dimension
+    {
         return Err(LatentCacheError::RankTooLarge {
             name,
             rank,
@@ -451,8 +473,13 @@ fn require_rank(name: &'static str, rank: usize, dimension: usize) -> Result<(),
     Ok(())
 }
 
-fn require_length(name: &'static str, actual: usize, expected: usize) -> Result<(), LatentCacheError> {
-    if actual != expected {
+fn require_length(
+    name: &'static str,
+    actual: usize,
+    expected: usize,
+) -> Result<(), LatentCacheError> {
+    if actual != expected
+    {
         return Err(LatentCacheError::Length {
             name,
             expected,
@@ -463,14 +490,20 @@ fn require_length(name: &'static str, actual: usize, expected: usize) -> Result<
 }
 
 fn require_finite(name: &'static str, values: &[f32]) -> Result<(), LatentCacheError> {
-    if let Some(index) = values.iter().position(|value| !value.is_finite()) {
+    if let Some(index) = values.iter().position(|value| !value.is_finite())
+    {
         return Err(LatentCacheError::NonFinite { name, index });
     }
     Ok(())
 }
 
-fn require_scratch(name: &'static str, available: usize, required: usize) -> Result<(), LatentCacheError> {
-    if available < required {
+fn require_scratch(
+    name: &'static str,
+    available: usize,
+    required: usize,
+) -> Result<(), LatentCacheError> {
+    if available < required
+    {
         return Err(LatentCacheError::ScratchTooSmall {
             name,
             required,
@@ -485,21 +518,24 @@ fn checked_product(left: usize, right: usize) -> Result<usize, LatentCacheError>
 }
 
 fn scales_for(format: LatentStorageFormat, capacity: usize) -> Vec<f32> {
-    match format {
+    match format
+    {
         LatentStorageFormat::F32 => Vec::new(),
         LatentStorageFormat::Int8 | LatentStorageFormat::Int4 => vec![1.0; capacity],
     }
 }
 
 const fn scale_count(format: LatentStorageFormat, rows: usize) -> usize {
-    match format {
+    match format
+    {
         LatentStorageFormat::F32 => 0,
         LatentStorageFormat::Int8 | LatentStorageFormat::Int4 => rows,
     }
 }
 
 fn row_bytes(format: LatentStorageFormat, columns: usize) -> Result<usize, LatentCacheError> {
-    match format {
+    match format
+    {
         LatentStorageFormat::F32 => checked_product(columns, core::mem::size_of::<f32>()),
         LatentStorageFormat::Int8 => Ok(columns),
         LatentStorageFormat::Int4 => Ok(columns.div_ceil(2)),
@@ -507,7 +543,8 @@ fn row_bytes(format: LatentStorageFormat, columns: usize) -> Result<usize, Laten
 }
 
 const fn row_bytes_unchecked(format: LatentStorageFormat, columns: usize) -> usize {
-    match format {
+    match format
+    {
         LatentStorageFormat::F32 => columns * core::mem::size_of::<f32>(),
         LatentStorageFormat::Int8 => columns,
         LatentStorageFormat::Int4 => columns.div_ceil(2),
@@ -522,25 +559,23 @@ fn project_transpose(
     output: &mut [f32],
 ) {
     output.fill(0.0);
-    for (row, scalar) in vector.iter().copied().enumerate().take(rows) {
+    for (row, scalar) in vector.iter().copied().enumerate().take(rows)
+    {
         let offset = row * columns;
-        for column in 0..columns {
+        for column in 0..columns
+        {
             output[column] += basis[offset + column] * scalar;
         }
     }
 }
 
-fn up_project(
-    basis: &[f32],
-    rows: usize,
-    columns: usize,
-    latent: &[f32],
-    output: &mut [f32],
-) {
-    for (row, output_scalar) in output.iter_mut().enumerate().take(rows) {
+fn up_project(basis: &[f32], rows: usize, columns: usize, latent: &[f32], output: &mut [f32]) {
+    for (row, output_scalar) in output.iter_mut().enumerate().take(rows)
+    {
         let offset = row * columns;
         let mut sum = 0.0_f32;
-        for column in 0..columns {
+        for column in 0..columns
+        {
             sum += basis[offset + column] * latent[column];
         }
         *output_scalar = sum;
@@ -558,46 +593,56 @@ fn encode_row(
     let bytes_per_row = row_bytes_unchecked(format, columns);
     let offset = row * bytes_per_row;
     let target = &mut payload[offset..offset + bytes_per_row];
-    match format {
-        LatentStorageFormat::F32 => {
-            for (value, bytes) in source.iter().zip(target.chunks_exact_mut(4)) {
+    match format
+    {
+        LatentStorageFormat::F32 =>
+        {
+            for (value, bytes) in source.iter().zip(target.as_chunks_mut::<4>().0)
+            {
                 bytes.copy_from_slice(&value.to_le_bytes());
             }
-        }
-        LatentStorageFormat::Int8 | LatentStorageFormat::Int4 => {
+        },
+        LatentStorageFormat::Int8 | LatentStorageFormat::Int4 =>
+        {
             target.fill(0);
             let limit = format
                 .quantization_limit()
                 .expect("integer formats have a quantization limit");
-            let maximum = source
-                .iter()
-                .copied()
-                .map(f32::abs)
-                .fold(0.0_f32, f32::max);
-            let scale = if maximum == 0.0 {
+            let maximum = source.iter().copied().map(f32::abs).fold(0.0_f32, f32::max);
+            let scale = if maximum == 0.0
+            {
                 1.0
-            } else {
+            }
+            else
+            {
                 maximum / f32::from(limit)
             };
             scales[row] = scale;
-            for (column, value) in source.iter().copied().enumerate() {
+            for (column, value) in source.iter().copied().enumerate()
+            {
                 let code = quantize(value, scale, limit);
-                match format {
-                    LatentStorageFormat::Int8 => {
+                match format
+                {
+                    LatentStorageFormat::Int8 =>
+                    {
                         target[column] = code.to_ne_bytes()[0];
-                    }
-                    LatentStorageFormat::Int4 => {
+                    },
+                    LatentStorageFormat::Int4 =>
+                    {
                         let nibble = code.to_ne_bytes()[0] & 0x0f;
-                        if column.is_multiple_of(2) {
+                        if column.is_multiple_of(2)
+                        {
                             target[column / 2] = nibble;
-                        } else {
+                        }
+                        else
+                        {
                             target[column / 2] |= nibble << 4;
                         }
-                    }
+                    },
                     LatentStorageFormat::F32 => unreachable!(),
                 }
             }
-        }
+        },
     }
 }
 
@@ -616,7 +661,8 @@ fn row_dot(
     vector: &[f32],
 ) -> f32 {
     let mut sum = 0.0_f32;
-    for (column, vector_scalar) in vector.iter().copied().enumerate().take(columns) {
+    for (column, vector_scalar) in vector.iter().copied().enumerate().take(columns)
+    {
         sum += vector_scalar * coefficient(format, columns, row, column, payload, scales);
     }
     sum
@@ -631,7 +677,8 @@ fn accumulate_row(
     weight: f32,
     output: &mut [f32],
 ) {
-    for (column, output_scalar) in output.iter_mut().enumerate().take(columns) {
+    for (column, output_scalar) in output.iter_mut().enumerate().take(columns)
+    {
         *output_scalar += weight * coefficient(format, columns, row, column, payload, scales);
     }
 }
@@ -646,8 +693,10 @@ fn coefficient(
 ) -> f32 {
     let bytes_per_row = row_bytes_unchecked(format, columns);
     let offset = row * bytes_per_row;
-    match format {
-        LatentStorageFormat::F32 => {
+    match format
+    {
+        LatentStorageFormat::F32 =>
+        {
             let start = offset + column * 4;
             f32::from_le_bytes([
                 payload[start],
@@ -655,35 +704,46 @@ fn coefficient(
                 payload[start + 2],
                 payload[start + 3],
             ])
-        }
-        LatentStorageFormat::Int8 => {
+        },
+        LatentStorageFormat::Int8 =>
+        {
             f32::from(i8::from_ne_bytes([payload[offset + column]])) * scales[row]
-        }
-        LatentStorageFormat::Int4 => {
+        },
+        LatentStorageFormat::Int4 =>
+        {
             let packed = payload[offset + column / 2];
-            let nibble = if column.is_multiple_of(2) {
+            let nibble = if column.is_multiple_of(2)
+            {
                 packed & 0x0f
-            } else {
+            }
+            else
+            {
                 packed >> 4
             };
-            let signed = if nibble < 8 {
+            let signed = if nibble < 8
+            {
                 nibble as i8
-            } else {
+            }
+            else
+            {
                 (i16::from(nibble) - 16) as i8
             };
             f32::from(signed) * scales[row]
-        }
+        },
     }
 }
 
 fn softmax_numerators_in_place(scores: &mut [f32]) {
     let mut maximum = scores[0];
-    for score in &scores[1..] {
-        if *score > maximum {
+    for score in &scores[1..]
+    {
+        if *score > maximum
+        {
             maximum = *score;
         }
     }
-    for score in scores {
+    for score in scores
+    {
         *score = (*score - maximum).exp();
     }
 }
@@ -691,21 +751,25 @@ fn softmax_numerators_in_place(scores: &mut [f32]) {
 #[cfg(test)]
 mod tests {
     use super::{
-        LatentAttentionScratch, LatentCacheError, LatentStorageFormat,
-        QuantizedLatentKvCache,
+        LatentAttentionScratch, LatentCacheError, LatentStorageFormat, QuantizedLatentKvCache,
     };
     use crate::nn::paged_attention::contiguous_attention;
     use crate::nn::rng::PcgEngine;
 
     fn identity(dimension: usize, rank: usize) -> Vec<f32> {
         let mut basis = vec![0.0; dimension * rank];
-        for diagonal in 0..rank {
+        for diagonal in 0..rank
+        {
             basis[diagonal * rank + diagonal] = 1.0;
         }
         basis
     }
 
-    fn seeded_vectors(tokens: usize, dimension: usize, seed: u64) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    fn seeded_vectors(
+        tokens: usize,
+        dimension: usize,
+        seed: u64,
+    ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
         let mut rng = PcgEngine::new(seed);
         let keys = (0..tokens * dimension)
             .map(|_| rng.float_signed())
@@ -736,7 +800,8 @@ mod tests {
             identity(dimension, dimension),
         )
         .unwrap();
-        for token in 0..tokens {
+        for token in 0..tokens
+        {
             let offset = token * dimension;
             cache
                 .append(
@@ -767,8 +832,14 @@ mod tests {
             &query,
         );
         assert_eq!(
-            expected.iter().map(|value| value.to_bits()).collect::<Vec<_>>(),
-            actual.iter().map(|value| value.to_bits()).collect::<Vec<_>>()
+            expected
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            actual
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
         );
     }
 
@@ -835,8 +906,14 @@ mod tests {
             &query,
         );
         assert_eq!(
-            first.iter().map(|value| value.to_bits()).collect::<Vec<_>>(),
-            second.iter().map(|value| value.to_bits()).collect::<Vec<_>>()
+            first
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            second
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
         );
     }
 
@@ -856,7 +933,8 @@ mod tests {
         )
         .unwrap();
         let allocation = cache.allocated_bytes();
-        for token in 0..tokens {
+        for token in 0..tokens
+        {
             let offset = token * dimension;
             cache
                 .append(
@@ -894,7 +972,7 @@ mod tests {
 
     #[test]
     fn invalid_shapes_and_non_finite_inputs_are_rejected() {
-        assert_eq!(
+        assert!(matches!(
             QuantizedLatentKvCache::new(
                 2,
                 4,
@@ -910,7 +988,7 @@ mod tests {
                 rank: 5,
                 dimension: 4,
             })
-        );
+        ));
 
         let mut cache = QuantizedLatentKvCache::new(
             2,
