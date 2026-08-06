@@ -130,10 +130,9 @@ fn prefix_basis(
         });
     }
     let mut output = Vec::with_capacity(dimension.saturating_mul(rank));
-    for row in 0..dimension
+    for row in full_basis.chunks_exact(dimension)
     {
-        let start = row * dimension;
-        output.extend_from_slice(&full_basis[start..start + rank]);
+        output.extend_from_slice(&row[..rank]);
     }
     Ok(output)
 }
@@ -149,9 +148,9 @@ mod tests {
 
     fn identity(dimension: usize) -> Vec<f32> {
         let mut basis = vec![0.0; dimension * dimension];
-        for index in 0..dimension
+        for (index, row) in basis.chunks_exact_mut(dimension).enumerate()
         {
-            basis[index * dimension + index] = 1.0;
+            row[index] = 1.0;
         }
         basis
     }
@@ -187,17 +186,19 @@ mod tests {
         let dimension = 8;
         let basis = identity(dimension);
         let selected = plan(capacity, dimension);
-        let backend = AdaptiveResidualLatentBackend::new(
-            capacity,
-            dimension,
-            &basis,
-            &basis,
-            selected,
-        )
-        .unwrap();
+        let backend =
+            AdaptiveResidualLatentBackend::new(capacity, dimension, &basis, &basis, selected)
+                .unwrap();
         assert_eq!(backend.plan(), selected);
         assert_eq!(backend.dim(), dimension);
         assert_eq!(backend.inner().cache().key_rank(), 4);
-        assert_eq!(backend.inner().cache().key_residual_config().slots_per_token(), 2);
+        assert_eq!(
+            backend
+                .inner()
+                .cache()
+                .key_residual_config()
+                .slots_per_token(),
+            2
+        );
     }
 }
