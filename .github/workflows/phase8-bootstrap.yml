@@ -21,7 +21,7 @@ jobs:
   bootstrap:
     if: >-
       github.event_name == 'push' ||
-      github.event.pull_request.number == 946 ||
+      github.event.pull_request.head.ref == 'research/elastic-latent-kv-phase8-sparse-residuals' ||
       github.event.pull_request.base.ref == 'research/elastic-latent-kv-phase8-sparse-residuals'
     runs-on: ubuntu-latest
     steps:
