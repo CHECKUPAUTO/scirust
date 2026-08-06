@@ -1,45 +1,54 @@
-name: Phase 8 Bootstrap
+name: Elastic Latent KV Phase 8
 
 on:
   push:
     branches:
-      - research/elastic-latent-kv-phase8-sparse-residuals
+      - ci/phase8-final-validation
+    paths:
+      - scirust-core/src/nn/residual_latent_kv_cache.rs
+      - scirust-core/src/nn/residual_latent_kv_backend.rs
+      - scirust-core/src/nn/mod.rs
+      - scirust-core/examples/latent_kv_phase8.rs
+      - experiments/elastic-latent-kv/PHASE8_SPEC.md
+      - experiments/elastic-latent-kv/README.md
+      - .github/workflows/elastic-latent-kv-phase8.yml
   pull_request:
-    types: [opened, reopened, synchronize]
-    branches:
-      - master
-      - research/elastic-latent-kv-phase8-sparse-residuals
+    branches: [master]
+    paths:
+      - scirust-core/src/nn/residual_latent_kv_cache.rs
+      - scirust-core/src/nn/residual_latent_kv_backend.rs
+      - scirust-core/src/nn/mod.rs
+      - scirust-core/examples/latent_kv_phase8.rs
+      - experiments/elastic-latent-kv/PHASE8_SPEC.md
+      - experiments/elastic-latent-kv/README.md
+      - .github/workflows/elastic-latent-kv-phase8.yml
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: phase8-bootstrap
+  group: elastic-latent-kv-phase8-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  RUSTFLAGS: -D warnings
+  CARGO_INCREMENTAL: 0
+
 jobs:
-  bootstrap:
-    if: >-
-      github.event_name == 'push' ||
-      github.event.pull_request.head.ref == 'research/elastic-latent-kv-phase8-sparse-residuals' ||
-      github.event.pull_request.base.ref == 'research/elastic-latent-kv-phase8-sparse-residuals'
+  validate:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout writable branch without external actions
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          git clone --depth=1 \
-            --branch research/elastic-latent-kv-phase8-sparse-residuals \
-            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" .
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
       - name: Install pinned toolchains
         run: |
           rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt,clippy
           rustup toolchain install 1.89.0 --profile minimal
 
-      - name: Canonical formatting
-        run: cargo +nightly-2026-07-02 fmt --all
+      - name: Format
+        run: cargo +nightly-2026-07-02 fmt --all -- --check
 
       - name: Nightly Clippy
         run: cargo +nightly-2026-07-02 clippy -p scirust-core --all-targets --locked -- -D warnings
@@ -47,10 +56,11 @@ jobs:
       - name: MSRV check
         run: cargo +1.89.0 check -p scirust-core --all-targets --locked
 
-      - name: Focused and library tests
-        run: |
-          cargo +1.89.0 test -p scirust-core residual_latent_kv --locked -- --test-threads=1
-          cargo +1.89.0 test -p scirust-core --lib --locked -- --test-threads=1
+      - name: Phase 8 tests
+        run: cargo +1.89.0 test -p scirust-core residual_latent_kv --locked -- --test-threads=1
+
+      - name: scirust-core library tests
+        run: cargo +1.89.0 test -p scirust-core --lib --locked -- --test-threads=1
 
       - name: Deterministic Phase 8 harness
         run: |
@@ -65,6 +75,7 @@ jobs:
               reader = csv.DictReader(handle)
               rows = list(reader)
               fields = reader.fieldnames
+
           assert fields is not None and len(fields) == 16
           assert len(rows) == 5
           assert all(row["quality_guard_met"] == "1" for row in rows)
@@ -74,30 +85,13 @@ jobs:
               int(row["allocated_bytes"]) < int(row["dense_bytes"])
               for row in rows
           )
+
           baseline = next(row for row in rows if row["scenario"] == "baseline-no-residual")
           baseline_error = float(baseline["max_absolute_error"])
           residual_rows = [row for row in rows if int(row["residual_slots"]) > 0]
           assert all(float(row["max_absolute_error"]) < baseline_error for row in residual_rows)
+
           exact = next(row for row in rows if row["scenario"] == "residual-f32")
           assert float(exact["max_absolute_error"]) <= 2.0e-6
           print("Phase 8 sparse residual CSV: CONFORME")
           PY
-
-      - name: Commit canonical source files
-        run: |
-          rm -f phase8-a.csv phase8-b.csv
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- \
-            scirust-core/src/nn/residual_latent_kv_cache.rs \
-            scirust-core/src/nn/residual_latent_kv_backend.rs \
-            scirust-core/src/nn/mod.rs \
-            scirust-core/examples/latent_kv_phase8.rs
-          git diff --cached --check
-          if git diff --cached --quiet
-          then
-            echo "Canonical Phase 8 sources already published"
-          else
-            git commit -m "fix(kv-cache): canonicalize Phase 8 runtime sources"
-            git push origin HEAD:research/elastic-latent-kv-phase8-sparse-residuals
-          fi
