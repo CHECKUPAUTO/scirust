@@ -518,6 +518,69 @@ fn parity_reductions() {
     run_reduction("var", 1e-4, 1e-4, parity::var_axis);
 }
 
+/// max(dim) : valeurs exactes + indices du premier max + grad routé ;
+/// norm p=2 (frob) : forward + grad, tol 1e-4.
+#[test]
+fn parity_reductions_max_norm() {
+    let fx = load_fixture("reductions", "max");
+    assert_eq!(fx.kind, "reduction");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let axis = c.axis.expect("max case must have axis");
+        let t = tensor(&c.x, &c.shape);
+        let (vals, idx) =
+            parity::max_axis(&t, axis).unwrap_or_else(|e| panic!("max case {ci}: {e}"));
+        let out_shape = c.out_shape.as_ref().unwrap();
+        assert_eq!(vals.shape(), out_shape, "max c{ci}: shape mismatch");
+        assert_close(
+            &format!("max fwd c{ci}"),
+            vals.data.as_ref(),
+            &c.y,
+            0.0,
+            0.0,
+        );
+        assert_eq!(idx, c.indices, "max c{ci}: argmax mismatch");
+        let gout = tensor(&c.gout, out_shape);
+        let gx = parity::d_max_axis(&gout, &t, axis, &idx)
+            .unwrap_or_else(|e| panic!("d_max case {ci}: {e}"));
+        assert_close(
+            &format!("max grad c{ci}"),
+            gx.data.as_ref(),
+            &c.gx,
+            0.0,
+            0.0,
+        );
+    }
+
+    let fx = load_fixture("reductions", "norm");
+    assert_eq!(fx.kind, "reduction");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let axis = c.axis.expect("norm case must have axis");
+        let t = tensor(&c.x, &c.shape);
+        let out = parity::norm_axis_p2(&t, axis).unwrap_or_else(|e| panic!("norm case {ci}: {e}"));
+        let out_shape = c.out_shape.as_ref().unwrap();
+        assert_eq!(out.shape(), out_shape, "norm c{ci}: shape mismatch");
+        assert_close(
+            &format!("norm fwd c{ci}"),
+            out.data.as_ref(),
+            &c.y,
+            1e-4,
+            1e-4,
+        );
+        let gout = tensor(&c.gout, out_shape);
+        let gx = parity::d_norm_axis_p2(&gout, &t, axis)
+            .unwrap_or_else(|e| panic!("d_norm case {ci}: {e}"));
+        assert_close(
+            &format!("norm grad c{ci}"),
+            gx.data.as_ref(),
+            &c.gx,
+            1e-4,
+            1e-4,
+        );
+    }
+}
+
 #[test]
 fn parity_error_paths_are_structured() {
     let t = tensor(&[1.0, 2.0, 3.0, 4.0], &[2, 2]);
