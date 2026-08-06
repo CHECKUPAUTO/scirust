@@ -125,3 +125,15 @@ B_{dense}=8TD.
 
 Transient attention scratch is reported separately by Phase 1 and is not
 charged to the persistent-cache budget in Phase 3.
+
+## Phase 4
+
+Phase 4 adds a deterministic stateful controller above the strict-budget rank
+planner. Budget-forced downgrades and quality recovery are immediate; all other
+rank changes require consecutive identical proposals. The CSV harness traces
+52 budget and quality observations across four timelines and records proposals, active
+plans, transition reasons, suppressed oscillations and stable fingerprints.
+
+This remains a research-only reference implementation. It does not yet retrain
+bases from a live token stream, assign per-token ranks, quantize coefficients,
+evict tokens or integrate with production SciRust attention kernels.

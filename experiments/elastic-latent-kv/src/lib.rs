@@ -1065,3 +1065,6 @@ pub mod phase2;
 
 /// Deterministic Phase 3 strict-budget rank planning.
 pub mod phase3;
+
+/// Deterministic Phase 4 online rank adaptation.
+pub mod phase4;
