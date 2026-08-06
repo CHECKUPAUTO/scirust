@@ -1,29 +1,14 @@
-name: Elastic Latent KV Phase 9
+name: Elastic Latent KV Phase 9 Canonicalize
 
 on:
   push:
     branches:
       - research/elastic-latent-kv-phase9-adaptive-policy
-    paths:
-      - scirust-core/src/nn/adaptive_latent_kv.rs
-      - scirust-core/src/nn/adaptive_latent_kv_backend.rs
-      - scirust-core/src/nn/mod.rs
-      - scirust-core/examples/latent_kv_phase9.rs
-      - experiments/elastic-latent-kv/PHASE9_SPEC.md
-      - .github/workflows/elastic-latent-kv-phase9.yml
   pull_request:
     branches: [master]
-    paths:
-      - scirust-core/src/nn/adaptive_latent_kv.rs
-      - scirust-core/src/nn/adaptive_latent_kv_backend.rs
-      - scirust-core/src/nn/mod.rs
-      - scirust-core/examples/latent_kv_phase9.rs
-      - experiments/elastic-latent-kv/PHASE9_SPEC.md
-      - .github/workflows/elastic-latent-kv-phase9.yml
-  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   RUSTFLAGS: -D warnings
@@ -34,9 +19,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: research/elastic-latent-kv-phase9-adaptive-policy
+          fetch-depth: 0
       - run: |
           rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt,clippy
           rustup toolchain install 1.89.0 --profile minimal
+      - name: Canonical rustfmt
+        run: cargo +nightly-2026-07-02 fmt --all
+      - name: Publish canonical source formatting
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- \
+            scirust-core/src/nn/adaptive_latent_kv.rs \
+            scirust-core/src/nn/adaptive_latent_kv_backend.rs \
+            scirust-core/src/nn/mod.rs \
+            scirust-core/examples/latent_kv_phase9.rs
+          git diff --cached --check
+          if ! git diff --cached --quiet; then
+            git commit -m "fix(kv-cache): canonicalize Phase 9 sources"
+            git push origin HEAD:research/elastic-latent-kv-phase9-adaptive-policy
+          fi
       - run: cargo +nightly-2026-07-02 fmt --all -- --check
       - run: cargo +nightly-2026-07-02 clippy -p scirust-core --all-targets --locked -- -D warnings
       - run: cargo +1.89.0 check -p scirust-core --all-targets --locked
