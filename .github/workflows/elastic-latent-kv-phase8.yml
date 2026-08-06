@@ -3,7 +3,7 @@ name: Elastic Latent KV Phase 8
 on:
   push:
     branches:
-      - ci/phase8-final-validation
+      - master
     paths:
       - scirust-core/src/nn/residual_latent_kv_cache.rs
       - scirust-core/src/nn/residual_latent_kv_backend.rs
