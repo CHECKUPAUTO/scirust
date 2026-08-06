@@ -86,7 +86,8 @@ impls = ["gpu"]
 dtypes = ["f32"]
 autograd = false
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "pow"
@@ -714,7 +715,8 @@ impls = ["simd"]
 dtypes = ["f64"]
 autograd = true
 tolerance = { atol = 1e-10, rtol = 1e-10 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "digamma"
@@ -723,8 +725,10 @@ family = "special"
 impls = ["simd"]
 dtypes = ["f64"]
 autograd = true
-tolerance = { atol = 1e-10, rtol = 1e-10 }
-status = "experimental"
+tolerance = { atol = 1e-9, rtol = 1e-9 }
+notes = "torch.polygamma(1) err ~3.6e-10 rel vs exact; harness tol 1e-9"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "spmv"
