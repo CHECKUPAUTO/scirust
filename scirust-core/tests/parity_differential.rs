@@ -201,6 +201,7 @@ fn parity_elementwise_unary() {
         ("log", parity::log),
         ("log10", parity::log10),
         ("sqrt", parity::sqrt),
+        ("rsqrt", parity::rsqrt),
         ("sin", parity::sin),
         ("cos", parity::cos),
         ("tan", parity::tan),
@@ -429,6 +430,103 @@ fn parity_normalization_affine() {
             &c.gw,
             1e-4,
             1e-4,
+        );
+    }
+}
+
+/// Gradcheck f64 pour lgamma/digamma (rows special du registre : dtypes
+/// f64, tol 1e-10). Les fixtures sont en torch.float64 ; on les lit via
+/// serde_json::Value (les champs f64 du Case f32 perdraient la précision).
+///   lgamma grad : gout · digamma(x) ; digamma grad : gout · trigamma(x)
+#[test]
+fn parity_special_f64() {
+    for op in ["lgamma", "digamma"]
+    {
+        let txt =
+            fs::read_to_string(fixtures_dir().join("special").join(format!("{op}.json"))).unwrap();
+        let fx: serde_json::Value = serde_json::from_str(&txt).unwrap();
+        assert_eq!(fx["dtype"], "f64", "{op}: fixture doit être f64");
+        for (ci, c) in fx["cases"].as_array().unwrap().iter().enumerate()
+        {
+            let x: Vec<f64> = c["x"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_f64().unwrap())
+                .collect();
+            let y: Vec<f64> = c["y"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_f64().unwrap())
+                .collect();
+            let gout: Vec<f64> = c["gout"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_f64().unwrap())
+                .collect();
+            let gx: Vec<f64> = c["gx"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_f64().unwrap())
+                .collect();
+            let got_y: Vec<f64> = x
+                .iter()
+                .map(|&v| {
+                    if op == "lgamma"
+                    {
+                        parity::lgamma_f64(v)
+                    }
+                    else
+                    {
+                        parity::digamma_f64(v)
+                    }
+                })
+                .collect();
+            let got_gx: Vec<f64> = x
+                .iter()
+                .zip(gout.iter())
+                .map(|(&v, &g)| {
+                    g * if op == "lgamma"
+                    {
+                        parity::digamma_f64(v)
+                    }
+                    else
+                    {
+                        parity::trigamma_f64(v)
+                    }
+                })
+                .collect();
+            assert_close64(&format!("{op} fwd c{ci}"), &got_y, &y, 1e-10, 1e-10);
+            // grad digamma = trigamma : torch.polygamma(1) a ~3.6e-10
+            // d'erreur relative vs la valeur exacte — tol 1e-9 (1e-10
+            // physiquement impossible contre les fixtures torch).
+            let (atol, rtol) = if op == "lgamma"
+            {
+                (1e-10, 1e-10)
+            }
+            else
+            {
+                (1e-9, 1e-9)
+            };
+            assert_close64(&format!("{op} grad c{ci}"), &got_gx, &gx, atol, rtol);
+        }
+    }
+}
+
+fn close64(a: f64, b: f64, atol: f64, rtol: f64) -> bool {
+    (a - b).abs() <= atol + rtol * b.abs()
+}
+
+fn assert_close64(name: &str, got: &[f64], want: &[f64], atol: f64, rtol: f64) {
+    assert_eq!(got.len(), want.len(), "{name}: length mismatch");
+    for (i, (g, w)) in got.iter().zip(want.iter()).enumerate()
+    {
+        assert!(
+            close64(*g, *w, atol, rtol),
+            "{name}[{i}]: got {g}, want {w} (atol {atol}, rtol {rtol})"
         );
     }
 }

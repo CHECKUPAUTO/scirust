@@ -3,7 +3,7 @@
 baseline (2.13.0). OFFLINE tool: not run in CI. Output fixtures are data only.
 
 Usage:
-    python3 generate_fixtures.py [--torch-bin PATH] [--families elementwise,reductions,normalization,shape,linear,loss,norm_affine,reduction_extra]
+    python3 generate_fixtures.py [--torch-bin PATH] [--families elementwise,reductions,normalization,shape,linear,loss,norm_affine,reduction_extra,unary_extra,special]
 
 Provenance rules (LICENSING_AND_PROVENANCE.md):
   - executes the pinned baseline (`torch.__version__` must be 2.13.0),
@@ -167,6 +167,35 @@ def gen_normalization(gen, family_dir: Path) -> None:
             else (lambda x: torch.nn.functional.log_softmax(x, dim=-1))
         cases = [build_case(gen, op, "unary", s, DEFAULT_DOMAIN, fn=fn) for s in SHAPES]
         write(op, family_dir, cases, note="dim=-1 (dernière dimension)")
+
+
+def gen_unary_extra(gen, family_dir: Path) -> None:
+    """rsqrt — APPEND fin de séquence (positionnel, voir gen_norm_affine)."""
+    cases = [build_case(gen, "rsqrt", "unary", s, (0.3, 5.0),
+                        fn=lambda x: torch.rsqrt(x)) for s in SHAPES]
+    write("rsqrt", family_dir, cases, note="1/sqrt(x), domaine > 0")
+
+
+def gen_special(gen, family_dir: Path) -> None:
+    """lgamma/digamma en f64 — APPEND fin de séquence (positionnel).
+
+    Les rows special du registre sont f64 avec tol 1e-10 : fixtures en
+    torch.float64 (domaine (0.1, 5.0), hors pôles). Le harness compare via
+    un chemin f64 dédié (hors TensorND, qui est f32).
+    """
+    for op in ("lgamma", "digamma"):
+        cases = []
+        for s in SHAPES:
+            x = torch.empty(s, dtype=torch.float64).uniform_(0.1, 5.0, generator=gen)
+            x = x.requires_grad_(True)
+            y = torch.lgamma(x) if op == "lgamma" else torch.digamma(x)
+            gout = torch.empty(s, dtype=torch.float64).uniform_(-1.0, 1.0, generator=gen)
+            (gx,) = torch.autograd.grad(y, x, grad_outputs=gout)
+            cases.append({"kind": "unary", "shape": list(s),
+                          "x": flat(x.detach()), "y": flat(y.detach()),
+                          "gout": flat(gout), "gx": flat(gx)})
+        write(op, family_dir, cases, dtype="f64",
+              note="f64, domaine (0.1, 5.0), grad via autograd")
 
 
 def gen_reduction_extra(gen, family_dir: Path) -> None:
@@ -367,12 +396,12 @@ def gen_loss(gen, family_dir: Path) -> None:
     write("cross_entropy", family_dir, cases, note="reduction='mean', scalar out, targets LongTensor")
 
 
-def write(op: str, family_dir: Path, cases: list[dict], note: str) -> None:
+def write(op: str, family_dir: Path, cases: list[dict], note: str, dtype: str = "f32") -> None:
     path = family_dir / f"{op}.json"
     data = {
         "op": op,
         "kind": cases[0]["kind"],
-        "dtype": "f32",
+        "dtype": dtype,
         "pytorch": {"version": torch.__version__, "commit": BASELINE_COMMIT,
                     "generated": "deterministic"},
         "note": note,
@@ -395,7 +424,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--torch-bin", default=None, help="path to the baseline interpreter (informational)")
     ap.add_argument("--families",
-                    default="elementwise,reductions,normalization,shape,linear,loss,norm_affine,reduction_extra")
+                    default="elementwise,reductions,normalization,shape,linear,loss,norm_affine,reduction_extra,unary_extra,special")
     args = ap.parse_args()
     import_torch(args.torch_bin)
 
@@ -435,10 +464,16 @@ def main() -> int:
             gen_norm_affine(gen, OUT / "normalization")
         elif fam == "reduction_extra":
             gen_reduction_extra(gen, OUT / "reductions")
+        elif fam == "unary_extra":
+            gen_unary_extra(gen, OUT / "elementwise")
+        elif fam == "special":
+            gen_special(gen, OUT / "special")
         else:
             raise SystemExit(f"unknown family {fam}")
         scan_dir = OUT / ("normalization" if fam == "norm_affine"
-                          else "reductions" if fam == "reduction_extra" else fam)
+                          else "reductions" if fam == "reduction_extra"
+                          else "elementwise" if fam == "unary_extra"
+                          else "special" if fam == "special" else fam)
         for p in sorted(scan_dir.glob("*.json")):
             if p.name in ("manifest.json",):
                 continue

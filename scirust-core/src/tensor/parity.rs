@@ -79,6 +79,10 @@ pub fn sqrt(t: &TensorND) -> Result<TensorND> {
     map(t, f32::sqrt)
 }
 
+pub fn rsqrt(t: &TensorND) -> Result<TensorND> {
+    map(t, |x| 1.0 / x.sqrt())
+}
+
 pub fn sin(t: &TensorND) -> Result<TensorND> {
     map(t, f32::sin)
 }
@@ -797,6 +801,7 @@ pub fn d_unary(op: &str, x: f32) -> Result<f32> {
         "log" => 1.0 / x,
         "log10" => 1.0 / (x * 10.0f32.ln()),
         "sqrt" => 0.5 / x.sqrt(),
+        "rsqrt" => -0.5 / (x * x.sqrt()),
         "sin" => x.cos(),
         "cos" => -x.sin(),
         "tan" => 1.0 + x.tan() * x.tan(),
@@ -1437,4 +1442,106 @@ pub fn d_cross_entropy_mean(logits: &TensorND, targets: &[usize], gout: f32) -> 
         }
     }
     Ok(TensorND::new(out, logits.shape.clone()))
+}
+
+// ------------------------------------------------------------------ //
+//  Fonctions spéciales f64 (lgamma / digamma / trigamma)            //
+//  Rows special du registre : dtypes f64, tol 1e-10. Ces noyaux sont
+//  indépendants de TensorND (f32) : le harness les appelle sur des
+//  tranches &[f64] extraites des fixtures.
+// ------------------------------------------------------------------ //
+
+/// ln Γ(x) par l'approximation de Lanczos (g=7, coefficients Godfrey).
+/// Précision ~1e-14 relative pour x > 0.
+pub fn lgamma_f64(x: f64) -> f64 {
+    const G: f64 = 7.0;
+    // Coefficients Godfrey (g=7) — précision délibérée, chaque chiffre compte.
+    #[allow(clippy::excessive_precision)]
+    const C: [f64; 9] = [
+        0.999999999999809_93,
+        676.5203681218851,
+        -1259.1392167224028,
+        771.32342877765313,
+        -176.61502916214059,
+        12.507343278686905,
+        -0.13857109526572012,
+        9.9843695780195716e-6,
+        1.5056327351493116e-7,
+    ];
+    if x < 0.5
+    {
+        // Réflexion : ln Γ(x) = ln π - ln Γ(1-x) - ln(sin πx)
+        let s = (std::f64::consts::PI * x).sin().abs();
+        let lg = std::f64::consts::PI.ln() - lgamma_f64(1.0 - x) - s.ln();
+        return if x > 0.0 { lg } else { f64::NAN };
+    }
+    let z = x - 1.0;
+    let mut series = C[0];
+    for (i, &c) in C.iter().enumerate().skip(1)
+    {
+        series += c / (z + i as f64);
+    }
+    let t = z + G + 0.5;
+    0.5 * (2.0 * std::f64::consts::PI).ln() + (z + 0.5) * t.ln() - t + series.ln()
+}
+
+/// ψ(x) — digamma par récurrence (remontée à x ≥ 6) + série asymptotique
+/// (Bernoulli jusqu'à B20). Précision ~1e-13 relative pour x > 0.
+pub fn digamma_f64(x: f64) -> f64 {
+    debug_assert!(x > 0.0, "digamma_f64: x doit être > 0, got {x}");
+    let mut v = x;
+    let mut acc = 0.0f64;
+    while v < 6.0
+    {
+        acc -= 1.0 / v;
+        v += 1.0;
+    }
+    let i = 1.0 / v;
+    let i2 = i * i;
+    let i4 = i2 * i2;
+    let i6 = i4 * i2;
+    let i8 = i4 * i4;
+    let i10 = i8 * i2;
+    let i12 = i8 * i4;
+    let i14 = i8 * i6;
+    let i16 = i8 * i8;
+    let i18 = i10 * i8;
+    let i20 = i10 * i10;
+    acc + v.ln() - 0.5 * i - i2 / 12.0 + i4 / 120.0 - i6 / 252.0 + i8 / 240.0 - i10 / 132.0
+        + 691.0 * i12 / 32760.0
+        - i14 / 12.0
+        + 3617.0 * i16 / 8160.0
+        - 43867.0 * i18 / 143640.0
+        + 174611.0 * i20 / 6600.0
+}
+
+/// ψ₁(x) — trigamma par récurrence + série asymptotique (B20).
+/// Précision ~1e-13 relative pour x > 0. Grad de digamma (autograd torch).
+pub fn trigamma_f64(x: f64) -> f64 {
+    debug_assert!(x > 0.0, "trigamma_f64: x doit être > 0, got {x}");
+    let mut v = x;
+    let mut acc = 0.0f64;
+    while v < 6.0
+    {
+        acc += 1.0 / (v * v);
+        v += 1.0;
+    }
+    let i = 1.0 / v;
+    let i2 = i * i;
+    let i3 = i2 * i;
+    let i5 = i3 * i2;
+    let i7 = i5 * i2;
+    let i9 = i7 * i2;
+    let i11 = i9 * i2;
+    let i13 = i11 * i2;
+    let i15 = i13 * i2;
+    let i17 = i15 * i2;
+    let i19 = i17 * i2;
+    let i21 = i19 * i2;
+    acc + i + 0.5 * i2 + i3 / 6.0 - i5 / 30.0 + i7 / 42.0 - i9 / 30.0 + 5.0 * i11 / 66.0
+        - 691.0 * i13 / 2730.0
+        + 7.0 * i15 / 6.0
+        - 3617.0 * i17 / 510.0
+        + 43867.0 * i19 / 798.0
+        - 174611.0 * i21 / 330.0
 }
