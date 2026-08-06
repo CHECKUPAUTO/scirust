@@ -1,4 +1,6 @@
-use scirust_agent_protocol::{AgentMessage, MessageKind, ProtocolError, SCHEMA_VERSION, TrustClass};
+use scirust_agent_protocol::{
+    AgentMessage, MessageKind, ProtocolError, SCHEMA_VERSION, TrustClass,
+};
 use scirust_sciagent::SciAgentEndpoint;
 use serde_json::json;
 use std::io::{self, BufRead, Write};
@@ -6,7 +8,8 @@ use std::io::{self, BufRead, Write};
 const MAX_JSONL_LINE_BYTES: usize = 1_048_576;
 
 fn response_kind(incoming: MessageKind) -> MessageKind {
-    match incoming {
+    match incoming
+    {
         MessageKind::Hypothesis
         | MessageKind::Critique
         | MessageKind::Counterexample
@@ -54,7 +57,8 @@ fn process_line(
     line: &str,
     line_number: usize,
 ) -> Result<AgentMessage, String> {
-    if line.len() > MAX_JSONL_LINE_BYTES {
+    if line.len() > MAX_JSONL_LINE_BYTES
+    {
         return Err(format!(
             "line {line_number} exceeds {MAX_JSONL_LINE_BYTES} bytes"
         ));
@@ -74,10 +78,13 @@ fn run() -> Result<(), String> {
     let stdout = io::stdout();
     let mut output = stdout.lock();
 
-    for (index, line_result) in stdin.lock().lines().enumerate() {
+    for (index, line_result) in stdin.lock().lines().enumerate()
+    {
         let line_number = index + 1;
-        let line = line_result.map_err(|error| format!("cannot read line {line_number}: {error}"))?;
-        if line.trim().is_empty() {
+        let line =
+            line_result.map_err(|error| format!("cannot read line {line_number}: {error}"))?;
+        if line.trim().is_empty()
+        {
             continue;
         }
         let response = process_line(&endpoint, &line, line_number)?;
@@ -94,7 +101,8 @@ fn run() -> Result<(), String> {
 }
 
 fn main() {
-    if let Err(error) = run() {
+    if let Err(error) = run()
+    {
         eprintln!("sciagent-dialogue: {error}");
         std::process::exit(2);
     }
