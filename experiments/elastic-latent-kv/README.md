@@ -137,3 +137,17 @@ plans, transition reasons, suppressed oscillations and stable fingerprints.
 This remains a research-only reference implementation. It does not yet retrain
 bases from a live token stream, assign per-token ranks, quantize coefficients,
 evict tokens or integrate with production SciRust attention kernels.
+
+## Phase 5
+
+Phase 5 adds a deterministic fixed-slot sparse residual channel under the same strict persistent byte budget used by the rank planner.
+
+Key residuals correct attention scores directly through sparse query dot products. Value residuals are accumulated directly into the dense output after latent value accumulation. The attention path therefore remains reconstruction-free.
+
+The Phase 5 harness compares the selected residual-aware tuple `(key rank, value rank, key slots, value slots)` with the best zero-residual candidate under the identical budget. It reports exact storage accounting, reconstruction error, attention error, quality guards, Pareto-frontier size and a stable output fingerprint.
+
+```bash
+cargo +1.89.0 run --release --bin phase5_harness > target/phase5.csv
+```
+
+Phase 5 intentionally excludes coefficient quantization, residual-value quantization, GPU kernels and production model integration.
