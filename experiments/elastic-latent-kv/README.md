@@ -168,3 +168,22 @@ sparse residual values:
 
 The implementation remains an isolated research harness and does not modify
 production SciRust crates.
+
+## Phase 7
+
+Phase 7 introduces the first production-facing bridge in `scirust-core`:
+
+- fixed-capacity latent coefficient storage for one attention head;
+- FP32, row-wise INT8 and packed row-wise INT4 coefficient formats;
+- dense-to-latent projection during append;
+- key scoring directly from quantized latent coefficients;
+- value accumulation in latent space;
+- one dense value up-projection per query;
+- fixed append and attention scratch allocations;
+- an `AttentionBackend` adapter usable by the live numeric `decode_step` path;
+- deterministic tests and a CSV runtime harness.
+
+Phase 7 does not yet move sparse residual channels, online basis learning,
+adaptive ranks, eviction, or device-specific kernels into the production
+backend. Its scalar implementation is the differential contract for those
+follow-on phases.
