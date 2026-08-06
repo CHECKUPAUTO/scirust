@@ -6,6 +6,13 @@ Phase 8 ports the deterministic sparse residual channel from the isolated
 research harness into a production-facing `scirust-core` attention backend.
 It is additive: the validated Phase 7 cache remains unchanged.
 
+The implementation was merged by PR #946. A dedicated read-only workflow now
+runs on `master` and on pull requests that touch the Phase 8 runtime,
+specification, harness, or workflow. This status section is intentionally kept
+inside the workflow path filter so post-merge validation can be evidenced by a
+normal pull-request run rather than by the historical red checks from the
+pre-formatting head of PR #946.
+
 ## Objective
 
 For a dense key or value vector `x`, a caller-supplied orthonormal basis `U`,
