@@ -1,0 +1,60 @@
+name: Security Audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 4 * * *"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  supply-chain:
+    name: dependency + license + SBOM
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo deny (advisories, licenses, bans, sources)
+        run: |
+          cargo install cargo-deny --locked
+          cargo deny check
+      - name: SBOM
+        run: |
+          cargo install cargo-sbom --locked
+          cargo sbom > sbom.cyclonedx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.cyclonedx.json
+          retention-days: 30
+
+  secrets:
+    name: secret detection
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # `gitleaks/gitleaks-action@v2` refuses to run on organisation-owned
+      # repositories without a paid GITLEAKS_LICENSE secret: it exits before
+      # scanning anything, so this job failed on every push and PR without ever
+      # looking for a secret. gitleaks itself stays MIT-licensed, so run the
+      # upstream release directly — same scanner, no licence server, pinned by
+      # SHA-256 so a retagged asset cannot change what executes here.
+      - name: gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          curl -sSfL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar xzf gitleaks.tar.gz gitleaks
+          ./gitleaks git . --redact --no-banner

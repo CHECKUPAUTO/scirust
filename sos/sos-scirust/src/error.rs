@@ -33,6 +33,19 @@ pub enum ScirustError {
         /// How many hypotheses the prior spans.
         hypotheses: usize,
     },
+    /// A Bayes factor was requested with no observations. No data is no
+    /// evidence — and the neutral `0` it would otherwise produce is a claim
+    /// about the evidence, not the absence of one.
+    #[error("a Bayes factor needs at least one observation")]
+    NoObservations,
+    /// The data is impossible under **both** hypotheses, so the ratio is
+    /// undefined rather than extreme. Both failed; comparing them is
+    /// meaningless.
+    #[error("the data is impossible under both hypotheses; the Bayes factor is undefined")]
+    UndefinedBayesFactor,
+    /// A distribution returned a `NaN` log-likelihood for an observation.
+    #[error("distribution returned a non-finite log-likelihood at k={0}")]
+    NonFiniteLikelihood(u64),
 }
 
 /// Convenience alias for `sos-scirust` results.

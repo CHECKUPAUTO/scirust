@@ -1,0 +1,42 @@
+[package]
+name = "ccos-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+ccos-core = { path = "..", default-features = false, features = ["license"] }
+serde_json = "1"
+base64 = "0.22"
+
+[[bin]]
+name = "license_token"
+path = "fuzz_targets/license_token.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "base64url"
+path = "fuzz_targets/base64url.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mcp_json"
+path = "fuzz_targets/mcp_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "persistence_blob"
+path = "fuzz_targets/persistence_blob.rs"
+test = false
+doc = false
+bench = false

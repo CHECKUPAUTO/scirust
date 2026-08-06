@@ -1,0 +1,116 @@
+# SciRust Studio tutorial scenario: growth that wanders, and why the average
+# is not the typical outcome.
+#
+# Run it with:
+#
+#   scirust run docs/studio/tutorials/geometric_brownian_motion.scirust.toml
+#
+# dS = mu*S*dt + sigma*S*dW. Proportional drift plus proportional noise, so
+# the logarithm is an ordinary Brownian motion and the process itself can
+# approach zero without ever reaching it. This is the model behind
+# Black-Scholes and behind every "grows at a rate but rattles around" story.
+#
+# 500 realisations of a value starting at 100, drifting at 8 % per unit time
+# with 30 % volatility, over 5 units.
+#
+# ---------------------------------------------------------------------------
+# The one number this run exists to separate
+# ---------------------------------------------------------------------------
+#
+# The MEAN grows at `drift`. The MEDIAN grows at `drift - volatility^2/2`,
+# which is smaller. Here that is 149.18 against 111.70 — a third apart — and
+# the difference is not a rounding artefact, it is the whole shape of the
+# distribution. Most realisations end BELOW the average, and a handful of
+# large ones pull it up.
+#
+# Confusing the two is the single most common error in an implementation of
+# this process, and the two checks are arranged so that error cannot hide:
+#
+#   * mean_grows_at_the_drift_rate — the across-replicate mean of the terminal
+#     value against S0*exp(drift*T). A run that used the median's growth rate
+#     in this expectation fails here and passes the other check.
+#   * log_returns_have_the_stated_variance — the sample variance of
+#     ln(S_T/S_0) against volatility^2*T. A run with the wrong volatility
+#     fails here and sails through the first, because the mean of S_T does not
+#     depend on volatility at all.
+#
+# A test asserts the first check rejects the median's growth rate when handed
+# a correct sample, so it is a real discriminator rather than a restatement.
+#
+# ---------------------------------------------------------------------------
+# Purely statistical thresholds
+# ---------------------------------------------------------------------------
+#
+# `scirust-sim` samples the EXACT log-normal transition rather than
+# discretising the stochastic differential equation, so there is no truncation
+# error to set aside — every threshold here is statistical and nothing else.
+#
+# Both are three standard errors of the statistic being tested, computed from
+# the run's own sample. For the variance that is sigma^2*sqrt(2/(n-1)), the
+# standard error of a normal sample's variance — and the log returns of this
+# process are exactly normal, so that is the right formula here rather than an
+# approximation borrowed from one.
+#
+# `solver.step` is a SAMPLING INTERVAL, not an approximation parameter.
+# Halving it gives a finer-grained picture of the same paths, not a more
+# accurate answer.
+#
+# ---------------------------------------------------------------------------
+# The histogram is the point of the picture
+# ---------------------------------------------------------------------------
+#
+# The run carries a distribution of the terminal value — deliberately of S_T
+# rather than of ln(S_T), because the visible right skew is exactly what a
+# mean and a symmetric band do not convey. It is why an error bar on a price
+# is misleading, drawn.
+#
+# Try it: set `volatility` to 0. The process becomes the deterministic
+# exponential, mean and median coincide exactly, and both checks compare
+# against zero spread without dividing by it — there is a test for that.
+
+schema_version = 1
+
+[experiment]
+name = "Geometric Brownian motion"
+description = "Five hundred realisations of a log-normal growth process, showing how far its mean sits above its median."
+seed = 20260730
+# Five hundred realisations. The thresholds are standard errors, so this
+# number sets how sharp both checks are.
+replicates = 500
+
+[capability]
+id = "sim.stochastic.geometric_brownian_motion"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+initial_value = { value = 100.0, unit = "1" }
+# 8 % per unit time — the rate the EXPECTATION grows at.
+drift = { value = 0.08, unit = "1/s" }
+# 30 % volatility. Large enough that the mean and median separate visibly,
+# which is what this run is about.
+volatility = { value = 0.3, unit = "1" }
+
+# No [initial_state]: the starting value is a model parameter, because
+# `gbm_path` takes it as one and splitting it across two sections of the
+# scenario would put half the process's definition somewhere else.
+
+[solver]
+id = "exact_transition"
+start = { value = 0.0, unit = "s" }
+end = { value = 5.0, unit = "s" }
+# A sampling interval, not an approximation parameter: the transition is
+# exact at any spacing.
+step = { value = 0.01, unit = "s" }
+
+[outputs]
+record = [
+    "ensemble_mean",
+    "ensemble_band_lower",
+    "ensemble_band_upper",
+    "expected_value",
+    "median_path",
+]

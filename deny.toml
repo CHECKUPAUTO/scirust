@@ -10,13 +10,31 @@ all-features = false
 
 [advisories]
 ignore = [
-    # Unmaintained notice, not a vulnerability: `paste` is pulled in via
-    # nalgebra -> simba and has no upstream replacement yet
+    # Unmaintained notice, not a vulnerability — no CVSS score is assigned
     # (https://rustsec.org/advisories/RUSTSEC-2024-0436).
-    { id = "RUSTSEC-2024-0436", reason = "paste unmaintained; transitively required by nalgebra/simba, no safe upgrade available" },
-    # Unmaintained notice, not a vulnerability: this is pulled in only by the
-    # optional Intel MKL source package and the advisory lists no safe upgrade.
-    { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 unmaintained; transitively required by intel-mkl-src, no safe upgrade available" },
+    #
+    # `paste` reaches this workspace through TWO paths, and only one of them can
+    # be removed:
+    #
+    #   nalgebra 0.33 -> simba 0.9  -> paste   (removable: simba 0.10 dropped
+    #                                           `paste`, and nalgebra 0.35
+    #                                           requires simba ^0.10)
+    #   wgpu-hal      -> metal      -> paste   (NOT removable: every published
+    #                                           `metal`, through 0.33.0, depends
+    #                                           on `paste`)
+    #
+    # So upgrading nalgebra does NOT clear this advisory, and a major bump
+    # undertaken for that reason would be wasted churn. The blocker is the
+    # Metal backend of the GPU stack, not the linear-algebra stack.
+    { id = "RUSTSEC-2024-0436", reason = "paste unmaintained; reaches the graph via wgpu-hal -> metal, which depends on it in every published version — upgrading nalgebra/simba does not remove it" },
+    # Unmaintained notice, not a vulnerability — no CVSS score is assigned.
+    # Pulled in only by the optional Intel MKL source package, four levels down:
+    #
+    #   intel-mkl-src -> ocipkg -> oci-spec -> getset -> proc-macro-error2
+    #
+    # `getset` is the crate that would have to move; the advisory lists no safe
+    # upgrade.
+    { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 unmaintained; reaches the graph only via intel-mkl-src -> ocipkg -> oci-spec -> getset, no safe upgrade available" },
 ]
 
 [licenses]

@@ -1,0 +1,130 @@
+# SciRust Studio tutorial scenario: a laser diode ringing on its way to
+# steady state.
+#
+# Run it with:
+#
+#   scirust run docs/studio/tutorials/semiconductor_laser.scirust.toml
+#
+# A single-mode semiconductor laser pumped at about 1.5 times threshold, given
+# a 10 % kick down in photon density and left to recover. What it does on the
+# way back is the whole point: it does not decay smoothly, it *rings*, because
+# carriers and photons trade energy back and forth faster than either relaxes
+# on its own.
+#
+# What is verified:
+#
+#   * settles_at_the_clamped_operating_point — above threshold the modal gain
+#     clamps the carrier density at n_th = n_t + 1/(Gamma*g0*tau_p) = 101, and
+#     the surplus pumping goes into light as s = Gamma*tau_p*(J - J_th) =
+#     0.01*(150 - 101) = 0.49. Pump it harder and the carrier density does not
+#     move at all; only the light does. That clamp is the single most
+#     characteristic thing a laser diode does, and it is checked directly.
+#   * rings_at_the_relaxation_frequency — the run's own ringing period,
+#     measured from the zero crossings of the photon density about 0.49, is
+#     compared with what the eigenvalues of the linearised rate equations
+#     predict.
+#
+# The second check is where the interesting part is. Both sides come from the
+# same rate equations, but by entirely different routes — one by integrating
+# them forward 8000 steps, the other by taking the Jacobian at the operating
+# point and reading off its eigenvalues. A model with the right fixed point
+# and the wrong curvature there passes the first check and fails this one.
+#
+# ---------------------------------------------------------------------------
+# The damped period, not the undamped one
+# ---------------------------------------------------------------------------
+#
+# The relaxation-oscillation frequency usually quoted, f_r = (1/2pi)*sqrt(g0*
+# s_ss/tau_p), is the UNDAMPED one: 1.1141 Hz here, a period of 0.897598 s.
+# The ringing is damped, at gamma = (1/tau_n + g0*s_ss)/2 = 0.745 1/s, so what
+# the run actually shows is 2*pi/sqrt(omega_n^2 - gamma^2) = 0.902737 s.
+#
+# That is 0.57 % longer. The check's tolerance is 0.1 %, so the difference is
+# not a rounding detail — a version of this check that compared against 1/f_r
+# would fail on a perfectly correct integration. Getting that right is what
+# "derived, not chosen" means in practice, and there is a test asserting the
+# two periods stay far enough apart for the check to be able to tell them
+# apart at all.
+#
+# ---------------------------------------------------------------------------
+# Why the densities are dimensionless
+# ---------------------------------------------------------------------------
+#
+# The rate equations are invariant under scaling n, n_t, s and J by any common
+# factor while scaling g0 by its inverse. There is no preferred density scale
+# in the model, so the scenario works in normalised units where that scale is
+# 1: the densities are dimensionless and g0 and the pump are rates. This is
+# the model's own convention (its test suite uses tau_n = 1), not a shortcut
+# around the unit table.
+#
+# ---------------------------------------------------------------------------
+# beta = 0, deliberately
+# ---------------------------------------------------------------------------
+#
+# Every closed form above is the beta -> 0 limit. With spontaneous emission
+# coupled into the mode there is no sharp threshold, the carrier density is
+# never quite clamped, and the model does not state the resulting operating
+# point. A scenario with beta > 0 still runs — try it — but both checks report
+# as not applicable and say why, rather than quietly comparing against numbers
+# that no longer describe the run.
+#
+# Try it: set `pump` to 199.0, twice the threshold excess. The output doubles
+# to 0.98 exactly (the light-current law is linear), the carrier density does
+# not move, and the ringing speeds up by sqrt(2) — three predictions from one
+# parameter change.
+
+schema_version = 1
+
+[experiment]
+name = "Laser diode relaxation oscillation"
+description = "A single-mode laser diode above threshold, kicked 10 % off its operating point and ringing back to it."
+
+[capability]
+id = "sim.optoelectronics.semiconductor_laser"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+# Normalised so the closed forms are round numbers: n_th = 101, J_th = 101.
+g0 = { value = 1.0, unit = "1/s" }
+n_t = { value = 1.0, unit = "1" }
+tau_n = { value = 1.0, unit = "s" }
+# The photon lifetime is a hundred times shorter than the carrier lifetime.
+# That ratio is what puts the relaxation oscillation between the two.
+tau_p = { value = 0.01, unit = "s" }
+gamma = { value = 1.0, unit = "1" }
+# See the note above: zero is what makes the closed forms exact.
+beta = { value = 0.0, unit = "1" }
+# 150 against a threshold of 101 — a pump excess of 49.
+pump = { value = 150.0, unit = "1/s" }
+
+[initial_state]
+# Start ON the operating point in carriers...
+carrier_density = [{ value = 101.0, unit = "1" }]
+# ...and 10 % below it in photons. Small enough that the linearisation the
+# frequency is derived from actually describes the ringing; large enough that
+# the oscillation is far above round-off for the whole run.
+photon_density = [{ value = 0.441, unit = "1" }]
+
+[solver]
+id = "rk4"
+start = { value = 0.0, unit = "s" }
+# About nine ringing periods, over which the amplitude decays by a factor of
+# 390. The period is measured from the second half only, where the ringing is
+# small enough for the linear prediction to be exact.
+end = { value = 8.0, unit = "s" }
+# The fastest rate in the problem is 1/tau_p = 100 1/s, so this is a hundred
+# steps per photon lifetime and about 900 per ringing period.
+step = { value = 0.001, unit = "s" }
+
+[outputs]
+record = [
+    "carrier_density",
+    "photon_density",
+    "net_gain",
+    "steady_carrier_density",
+    "steady_photon_density",
+]

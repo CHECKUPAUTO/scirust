@@ -57,10 +57,40 @@ pub fn lookup(symbol: &str) -> Option<UnitEntry> {
         "1/s" => Dimension::FREQUENCY,
         // Gravitational parameter mu = G*M (orbital two-body problem).
         "m^3/s^2" => Dimension::LENGTH.powi(3).div(Dimension::TIME.powi(2)),
+        // Thermal diffusivity alpha = k/(rho*c_p) (1-D heat equation).
+        "m^2/s" => Dimension::LENGTH.powi(2).div(Dimension::TIME),
         // Henry (inductance): H = J/A^2 (from E = 1/2 L I^2).
         "H" => Dimension::ENERGY.div(Dimension::CURRENT.powi(2)),
         // Farad (capacitance): F = C/V.
         "F" => Dimension::CHARGE.div(Dimension::VOLTAGE),
+        // The radian is the SI-coherent angular unit and is dimensionless by
+        // construction (arc length over radius). It is listed separately from
+        // "1" because an angle written `unit = "1"` reads as a mistake, and
+        // because a reader of a pendulum scenario should be able to see that
+        // the value is in radians and not degrees. The conversion factor is
+        // genuinely 1, so nothing here is a hidden rescale.
+        "rad" => Dimension::DIMENSIONLESS,
+        // Angular velocity. Dimensionally a frequency, exactly as "1/s" is.
+        "rad/s" => Dimension::FREQUENCY,
+        // Thermal resistance (HVAC zone model, battery self-heating).
+        "K/W" => Dimension::TEMPERATURE.div(Dimension::POWER),
+        // Heat capacity (the C of an RC thermal network).
+        "J/K" => Dimension::ENERGY.div(Dimension::TEMPERATURE),
+        // Spectral responsivity of a photodetector: photocurrent per watt.
+        "A/W" => Dimension::CURRENT.div(Dimension::POWER),
+        // Moment of inertia (rigid-body rotation).
+        "kg*m^2" => Dimension::MASS.mul(Dimension::LENGTH.powi(2)),
+        // Volume — of distribution, in the pharmacokinetic models.
+        "m^3" => Dimension::LENGTH.powi(3),
+        // Per-unit, the normalisation power engineers work in: every quantity
+        // is divided by a machine or system base, so it is genuinely
+        // dimensionless. Listed separately from "1" for the same reason "rad"
+        // is — a per-unit power written `unit = "1"` reads as a mistake, and a
+        // reader of a swing-equation scenario should be able to see at a
+        // glance that 1.0 means "rated", not "one watt". The factor is
+        // genuinely 1: what the base *is* belongs in the scenario's prose, not
+        // hidden in this table.
+        "pu" => Dimension::DIMENSIONLESS,
         _ => return None,
     };
     Some(UnitEntry {
@@ -72,6 +102,54 @@ pub fn lookup(symbol: &str) -> Option<UnitEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An angle is dimensionless and an angular velocity is a frequency, so
+    /// the pendulum capabilities can be dimension-checked like everything
+    /// else. Both factors must be exactly 1: a symbol that silently rescaled
+    /// a scenario's numbers would be far worse than one that is missing.
+    #[test]
+    fn angular_units_are_dimensionless_and_unscaled() {
+        let rad = lookup("rad").expect("rad");
+        assert_eq!(rad.dimension, Dimension::DIMENSIONLESS);
+        assert_eq!(rad.to_si_factor, 1.0);
+
+        let rate = lookup("rad/s").expect("rad/s");
+        assert_eq!(rate.dimension, Dimension::FREQUENCY);
+        assert_eq!(rate.to_si_factor, 1.0);
+
+        // Same dimension as the plain forms, so a scenario may write either.
+        assert_eq!(rad.dimension, lookup("1").unwrap().dimension);
+        assert_eq!(rate.dimension, lookup("1/s").unwrap().dimension);
+    }
+
+    /// Per-unit is dimensionless and unscaled, for the same reason the
+    /// radian is: it exists to make a scenario readable, not to convert
+    /// anything. If `pu` ever acquired a factor it would silently rescale
+    /// every power-system scenario in the repository.
+    #[test]
+    fn per_unit_is_dimensionless_and_unscaled() {
+        let pu = lookup("pu").expect("pu");
+        assert_eq!(pu.dimension, Dimension::DIMENSIONLESS);
+        assert_eq!(pu.to_si_factor, 1.0);
+        assert_eq!(pu.dimension, lookup("1").unwrap().dimension);
+    }
+
+    /// Every symbol in the table converts to SI by a factor of exactly one.
+    /// The table is a *dimension* table; the moment an entry needs a real
+    /// conversion (mg, litre, hour) that is a deliberate change with its own
+    /// tests, not something to slip in beside these.
+    #[test]
+    fn no_symbol_carries_a_hidden_conversion() {
+        for symbol in [
+            "1", "m", "kg", "s", "A", "K", "mol", "cd", "m/s", "m/s^2", "N", "J", "W", "Pa", "Hz",
+            "C", "V", "Ohm", "kg/s", "kg/s^2", "kg/m^3", "1/s", "m^3/s^2", "m^2/s", "H", "F",
+            "rad", "rad/s", "K/W", "J/K", "A/W", "kg*m^2", "m^3", "pu",
+        ]
+        {
+            let entry = lookup(symbol).unwrap_or_else(|| panic!("{symbol} must be in the table"));
+            assert_eq!(entry.to_si_factor, 1.0, "{symbol}");
+        }
+    }
 
     #[test]
     fn recognises_the_symbols_the_spring_mass_damper_example_uses() {

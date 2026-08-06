@@ -1,0 +1,57 @@
+# SciRust Studio tutorial scenario: a nonlinear pendulum.
+#
+# Run it with:
+#
+#   scirust run docs/studio/tutorials/pendulum.scirust.toml
+#
+# A 1 m pendulum released from rest at 90 degrees (pi/2 radians) under
+# Earth gravity, undamped.
+#
+# The release angle is chosen deliberately. Textbooks give the period as
+# 2*pi*sqrt(L/g) — about 2.006 s here — but that formula comes from replacing
+# sin(theta) with theta, which is only valid for small swings. This model does
+# not make that replacement, so the run measures the period from the
+# trajectory itself and reports it next to the small-angle value. At 90
+# degrees the true period is about 18% longer.
+#
+# That is the point of the capability: the two numbers disagree, visibly, and
+# the run shows you by how much instead of quietly using the approximation.
+#
+# With damping = 0 the energy per unit mass is conserved, and the pendulum can
+# never swing past its release angle. Both are checked.
+
+schema_version = 1
+
+[experiment]
+name = "Nonlinear pendulum released at 90 degrees"
+description = "A 1 m pendulum released from rest at pi/2 rad, where the small-angle period formula is measurably wrong."
+seed = 42
+
+[capability]
+id = "sim.mechanics.pendulum"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+length = { value = 1.0, unit = "m" }
+gravity = { value = 9.81, unit = "m/s^2" }
+damping = { value = 0.0, unit = "1/s" }
+
+[initial_state]
+# pi/2 radians = 90 degrees from the downward vertical.
+angle = [{ value = 1.5707963267948966, unit = "rad" }]
+angular_velocity = [{ value = 0.0, unit = "rad/s" }]
+
+[solver]
+id = "rk4"
+start = { value = 0.0, unit = "s" }
+# Roughly four full swings, so the measured period averages several crossings.
+end = { value = 10.0, unit = "s" }
+step = { value = 0.0005, unit = "s" }
+
+[outputs]
+record = ["angle", "angular_velocity", "energy"]
+sample_every = 1

@@ -2,7 +2,8 @@
 //! gap #3 of the `sos-scirust` scoping plan (`sos-simulation` backends).
 //!
 //! `sos-simulation` ships the backend-independent [`Simulate`] syscall,
-//! [`Observation`]'s honest determinism stamping, and the [`Vcr`] record/replay
+//! [`Observation`]'s honest determinism stamping, and the
+//! [`Vcr`](sos_simulation::Vcr) record/replay
 //! memo — but implements no solver itself, by the same Invariant VIII boundary
 //! gap #1 respected for `sos-planner`. Two real computations live here, both
 //! integrating `dy/dt = f(t, y)`, at the two determinism levels SDE §08 §2
@@ -59,6 +60,8 @@
 //! `L2`-plus-certificate family, alongside [`crate::quadrature`] — and
 //! `scirust-signal`/`scirust-sim`'s executor kinds are separate, deliberately
 //! deferred backends, not here.
+
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use scirust_solvers::ode::dopri5::dopri5;
 use scirust_solvers::ode::rk4::rk4_fixed;
@@ -228,6 +231,65 @@ pub struct CertifiedTrajectory {
     /// How many proposed steps were rejected (exceeded the tolerance) and
     /// retried at a smaller step size.
     pub rejected_steps: usize,
+}
+
+impl Canonical for CertifiedTrajectory {
+    fn encode(&self, enc: &mut CanonicalEncoder) {
+        enc.u64(self.trajectory.len() as u64);
+        for (t, y) in &self.trajectory
+        {
+            encode_f64(enc, *t);
+            enc.value(&ExactF64Seq(y));
+        }
+        encode_f64(enc, self.rtol);
+        encode_f64(enc, self.atol);
+        enc.u64(self.accepted_steps as u64);
+        enc.u64(self.rejected_steps as u64);
+    }
+}
+
+/// The exact-decimal file form.
+///
+/// Present for the same reason every other stored numeric type here has one: a
+/// certificate whose tolerances round-tripped through a lossy text form would
+/// certify something slightly different from what ran. `rtol` and `atol` are
+/// the *claim*; they of all numbers must survive a file exactly.
+#[derive(Serialize, Deserialize)]
+struct CertifiedTrajectoryRepr {
+    #[serde(with = "crate::stage::exact_trajectory")]
+    trajectory: Trajectory,
+    rtol: String,
+    atol: String,
+    accepted_steps: usize,
+    rejected_steps: usize,
+}
+
+impl Serialize for CertifiedTrajectory {
+    fn serialize<S: Serializer>(&self, s: S) -> core::result::Result<S::Ok, S::Error> {
+        CertifiedTrajectoryRepr {
+            trajectory: self.trajectory.clone(),
+            rtol: self.rtol.to_string(),
+            atol: self.atol.to_string(),
+            accepted_steps: self.accepted_steps,
+            rejected_steps: self.rejected_steps,
+        }
+        .serialize(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for CertifiedTrajectory {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> core::result::Result<Self, D::Error> {
+        use serde::de::Error as _;
+        let repr = CertifiedTrajectoryRepr::deserialize(d)?;
+        let parse = |s: &str| s.parse::<f64>().map_err(D::Error::custom);
+        Ok(Self {
+            trajectory: repr.trajectory,
+            rtol: parse(&repr.rtol)?,
+            atol: parse(&repr.atol)?,
+            accepted_steps: repr.accepted_steps,
+            rejected_steps: repr.rejected_steps,
+        })
+    }
 }
 
 /// A real [`Simulate`] backend: integrates `dy/dt = f(t, y)` via

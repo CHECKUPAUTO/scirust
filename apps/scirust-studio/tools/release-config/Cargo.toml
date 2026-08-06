@@ -1,0 +1,10 @@
+[package]
+name = "release-config"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "Decides from the environment how a release build should be signed, and refuses to build when that decision is half-configured."
+
+# Deliberately none. This tool runs inside the release pipeline, so every
+# crate it links is a crate that can affect a signed artifact.
+[dependencies]

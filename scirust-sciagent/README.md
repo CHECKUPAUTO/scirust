@@ -27,12 +27,18 @@ Deterministic small language model for Rust code generation, trained from scratc
 
 ### Data Pipeline
 
-1. **Download crates**: `fetch-crates --count 1000 --output data/`
-2. **Fetch HF datasets**: The Stack v2 Rust subset (9 parquet, 2.75GB)
-3. **Train tokenizer**: `train-tokenizer --input corpus.txt --vocab-size 8192`
-4. **Tokenize and shard**: `collect-data --input dir/ --tokenizer bpe.json --output shards/`
-5. **Train**: `sciagent-train --model small --data-dir shards/ --total-steps 2000`
-6. **Evaluate**: `sciagent-eval --checkpoint ckpt/final --data-dir heldout-shards/`
+Generated corpora and packed shards never belong in the source checkout. The
+collector defaults to an external platform data directory and refuses an
+in-repository `--output`; see
+[`docs/SCIAGENT_CORPUS_STORAGE.md`](../docs/SCIAGENT_CORPUS_STORAGE.md).
+
+1. **Locate storage**: `cargo run -p scirust-sciagent --bin sciagent-corpus -- location`
+2. **Download crates**: `cargo run -p scirust-sciagent --features fetch --bin fetch-crates -- --count 1000`
+3. **Fetch HF datasets**: The Stack v2 Rust subset (9 parquet, 2.75GB)
+4. **Train tokenizer**: `train-tokenizer --input corpus.txt --vocab-size 8192`
+5. **Tokenize and shard**: `collect-data --input <external-corpus-dir> --tokenizer bpe.json`
+6. **Train**: `sciagent-train --model small --data-dir <external-shards-dir> --total-steps 2000`
+7. **Evaluate**: `sciagent-eval --checkpoint ckpt/final --data-dir <external-heldout-shards-dir>`
 
 ### Reference run (small model)
 
@@ -48,19 +54,21 @@ pre‑fix checkpoints; they predate the gradient fixes.
 
 ### Usage
 
+Commands that use model weights (`ask`, `chat`, `explain`, and `generate`) require an explicit `--checkpoint PATH` and fail closed if it cannot be loaded. `info` may run without a checkpoint because it does not perform inference or allocate model weights.
+
 ```bash
 # Ask a prompt
 cargo run --release --bin sciagent -- --model small \\
-  --checkpoint /tmp/scirust_small_2k/final \\
+  --checkpoint scirust-sciagent/checkpoints/small-20M/final \\
   ask "fn main()" --max-tokens 100 --temperature 0.0
 
 # Interactive chat
 cargo run --release --bin sciagent -- --model small \\
-  --checkpoint /tmp/scirust_small_2k/final chat
+  --checkpoint scirust-sciagent/checkpoints/small-20M/final chat
 
 # Model info
 cargo run --release --bin sciagent -- --model small \\
-  --checkpoint /tmp/scirust_small_2k/final info
+  --checkpoint scirust-sciagent/checkpoints/small-20M/final info
 ```
 
 ## Tokenizer

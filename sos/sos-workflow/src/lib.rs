@@ -9,6 +9,17 @@
 //!
 //! * [`Plan`] — an immutable, validated [`Stage`] DAG with a **deterministic**
 //!   topological [schedule](Plan::schedule) (ties broken by [`StageId`]).
+//!   A stage's edges come in two kinds, deliberately kept apart:
+//!   [`deps`](Stage::deps) is *ordering* ("run after"), while
+//!   [`consumes`](Stage::consumes) is *dataflow* ("read the outputs of", which
+//!   implies ordering). Without the second there was no way to feed one stage
+//!   into the next at all — [`inputs`](Stage::inputs) takes literal
+//!   [`ObjectId`](sos_core::ObjectId)s and an upstream stage's ids do not
+//!   exist until it has run — so every output recorded zero provenance
+//!   parents and a plan produced a graph with no edges between its own nodes.
+//!   [`run_plan`] resolves consumed outputs into a stage's inputs **before**
+//!   computing its [`CacheKey`], so a downstream stage necessarily misses the
+//!   cache when its upstream produced something different.
 //! * [`CacheKey`] — the content address of a stage invocation:
 //!   `hash(descriptor ⊕ inputs ⊕ config ⊕ seed ⊕ env)`. The one mechanism that
 //!   gives **both** reproducibility and incremental compute.
@@ -19,6 +30,13 @@
 //!   a crashed run resumable).
 //! * [`RunLedger`] — the immutable, content-addressed record of *how* the plan
 //!   ran: control flow is data too.
+//! * [`Dispatch`] — the registry-mediated [`StageExecutor`] that **binds** a
+//!   stage to the code that runs it: resolving its plugin pinned to the content
+//!   hash the stage recorded (so a drifted implementation **fails** rather than
+//!   silently computing something else), authorizing it against the study's
+//!   capability `Grant` (refusing by default), then delegating. It is itself a
+//!   `StageExecutor`, so it composes into [`run_plan`] with the memoization and
+//!   ledger above it unchanged.
 //!
 //! ## What is deliberately *not* here yet
 //!
@@ -26,12 +44,16 @@
 //! [`ObjectId`](sos_core::ObjectId)s, not "curiosity" vs "reasoning." The stage
 //! *logic* (running a sweep, a derivation, a simulation) is supplied by the
 //! engine crates and backend adapters through the [`StageExecutor`] trait
-//! (Invariant VIII); this crate never runs a stage's logic. Also deferred, with
-//! **no stub**: manifest resolution (TOML study → `Plan`, a domain frontend), the
-//! effect boundary / executors that touch the world (`sos-scirust` + signed
-//! `Capability`s from `sos-registry`), and information-theoretic stopping rules
-//! (`sos-planner` / statistics). The pieces here are the deterministic heart —
-//! cache keys, scheduling, memoization, ledger — fully implemented and tested.
+//! (Invariant VIII); this crate binds and schedules that logic but never
+//! implements it. [`Manifest`] now supplies the other half of RFC-0002 §08
+//! §1's `resolve(&manifest, &graph)` — a TOML study resolves to a validated
+//! `Plan` — but only the manifest half: naming inputs symbolically through the
+//! knowledge graph needs a query language this crate will not invent alone, so
+//! a stage's inputs are content addresses. Still deferred, with **no stub**:
+//! that graph half, and information-theoretic stopping rules (`sos-planner` /
+//! statistics). The pieces here are the deterministic heart —
+//! cache keys, scheduling, memoization, binding, resolution, ledger — fully implemented and
+//! tested.
 //!
 //! ## Example — memoization makes an unchanged re-run free
 //!
@@ -81,14 +103,18 @@
 
 pub mod cache;
 pub mod descriptor;
+pub mod dispatch;
 pub mod engine;
 pub mod error;
 pub mod ledger;
+pub mod manifest;
 pub mod plan;
 
 pub use cache::CacheKey;
 pub use descriptor::StageDescriptor;
+pub use dispatch::Dispatch;
 pub use engine::{Memo, MemoTable, StageExecutor, run_plan};
 pub use error::{Result, WorkflowError};
 pub use ledger::{LedgerStep, RunLedger, StepOutcome};
+pub use manifest::{Manifest, ManifestError, StageSpec, Study, resolve_manifest};
 pub use plan::{Plan, Stage, StageId};

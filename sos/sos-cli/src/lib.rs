@@ -14,9 +14,14 @@
 //! sos ask [--store <path>] [--limit N]      run a curiosity sweep
 //! sos why [--store <path>] <object>        print the provenance behind an object
 //! sos verify [--store <path>] <object>     check an object's structural + content identity
+//!          [--rerun <runs.json>]            or re-execute its run and check reproduction
 //! sos diff [--store <path>] <a> <b>        compare two studies' ancestor sets
 //! sos plan <candidates.json> [--floor N]   recommend the next experiment
 //!          [--budget N]
+//! sos run <manifest.toml> <runs.json>      execute a study to completion
+//!          [--plugins <f>] [--allow <caps>]
+//!          [--env <label>] [--store <path>]
+//! sos address <runs.json>                  print the stage fields a study must pin
 //! sos publish <publication.json>           seal (and render) a publication
 //!          [--author <n>] [--format <f>]
 //!          [--store <path>]
@@ -28,15 +33,21 @@
 //!
 //! ## What is deliberately not here
 //!
-//! `sos run <manifest>` (executing a discovery workflow) and a true `sos
-//! merge` (reconciling two labs' divergent graphs) are not implemented: the
-//! former needs a real [`sos_workflow::StageExecutor`] backend — which is
-//! `sos-scirust`'s job and does not exist yet — and inventing one here would
-//! either be fake execution or a stub, both forbidden. The latter needs
-//! conflict-resolution semantics no crate in this workspace has designed yet.
-//! `sos clone`/`sos push` cover the local, no-network sharing case (mirroring
-//! how `git clone`/`git push` already work against a local path); a real
-//! network remote is `sos-mcp`'s domain, not this one.
+//! [`mod@run`] executes a study for real, but binds **two** of `sos-scirust`'s
+//! five backends — the model catalogue and the periodogram — and that limit is
+//! worth stating precisely because it is not arbitrary. The other three take a
+//! *function* (a right-hand side, an integrand, a residual), and no file can
+//! name a function, so no CLI plumbing could let a user supply one; they need
+//! a transport that ships code (RFC-0002 §10's WASM or MCP), not more work
+//! here. Only a backend whose configuration is *data* can be driven from a
+//! command line at all; see [`mod@run`]'s module docs.
+//!
+//! A true `sos merge` (reconciling two labs' divergent graphs) is still not
+//! implemented: it needs conflict-resolution semantics no crate in this
+//! workspace has designed yet. `sos clone`/`sos push` cover the local,
+//! no-network sharing case (mirroring how `git clone`/`git push` already work
+//! against a local path); a real network remote is `sos-mcp`'s domain, not
+//! this one.
 //!
 //! ## Example
 //!
@@ -82,9 +93,11 @@ pub mod header;
 pub mod init;
 pub mod know;
 pub mod log;
+pub mod memo;
 pub mod plan;
 pub mod plugins;
 pub mod publish;
+pub mod run;
 pub mod store;
 pub mod verify;
 pub mod why;
@@ -94,8 +107,8 @@ use error::CliError;
 
 /// Every dispatchable command name, for the "unknown command" message.
 const ALL_COMMANDS: &[&str] = &[
-    "init", "clone", "push", "log", "know", "ask", "why", "verify", "diff", "plan", "publish",
-    "plugins", "help", "version",
+    "init", "clone", "push", "log", "know", "ask", "why", "verify", "diff", "plan", "run",
+    "address", "publish", "plugins", "help", "version",
 ];
 
 /// Run the `sos` command line (`args` excludes the program name) and return
@@ -180,7 +193,14 @@ fn dispatch(args: &[String]) -> error::Result<String> {
         {
             let a = Args::parse(&rest)?;
             let id = parse_object_id(a.positional(0, "object")?)?;
-            verify::run(a.flag("store"), id)
+            if a.flag("rerun").is_some()
+            {
+                verify::rerun(a.flag("store"), id, &a)
+            }
+            else
+            {
+                verify::run(a.flag("store"), id)
+            }
         },
         Some("diff") =>
         {
@@ -193,6 +213,16 @@ fn dispatch(args: &[String]) -> error::Result<String> {
         {
             let a = Args::parse(&rest)?;
             plan::run(&a)
+        },
+        Some("run") =>
+        {
+            let a = Args::parse(&rest)?;
+            run::run(&a)
+        },
+        Some("address") =>
+        {
+            let a = Args::parse(&rest)?;
+            run::address(&a)
         },
         Some("publish") =>
         {
@@ -226,9 +256,15 @@ fn help_text() -> String {
         "  sos ask [--store <path>] [--limit N]     run a curiosity sweep\n",
         "  sos why [--store <path>] <object>        print the provenance behind an object\n",
         "  sos verify [--store <path>] <object>     check structural + content identity\n",
+        "           [--rerun <runs.json>] [--allow <caps>] [--plugins <f>]\n",
+        "                                          re-execute the run and check reproduction\n",
         "  sos diff [--store <path>] <a> <b>        compare two studies\n",
         "  sos plan <candidates.json> [--floor N]   recommend the next experiment\n",
         "           [--budget N]\n",
+        "  sos run <manifest.toml> <runs.json>      execute a study to completion\n",
+        "           [--plugins <descriptors.json>] [--allow <caps>] [--env <label>]\n",
+        "           [--store <path>]\n",
+        "  sos address <runs.json>                  print the stage fields a study must pin\n",
         "  sos publish <publication.json>           seal (and render) a publication\n",
         "           [--author <name>] [--format md|html|json] [--store <path>]\n",
         "  sos plugins <descriptors.json>           list/find plugins\n",

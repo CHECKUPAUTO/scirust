@@ -1,0 +1,89 @@
+# SciRust Studio tutorial scenario: a single-zone building thermal response.
+#
+# Run it with:
+#
+#   scirust run docs/studio/tutorials/hvac_zone.scirust.toml
+#
+# A room on a 5 °C day (278 K) with 3 kW of heating going into the air. Two
+# thermal masses — the air, which is light and responds in minutes, and the
+# wall, which is heavy and responds in days — coupled through R_aw, with the
+# wall tied to outside through the envelope R_wo.
+#
+# What is verified:
+#
+#   * steady_state — the model states its equilibrium in closed form, and it
+#     is not the obvious one. At equilibrium ALL the heat must leave through
+#     the series path, so the air sits Q*(R_aw + R_wo) = 30 K above outside
+#     while the wall sits only Q*R_wo = 24 K above it. Both nodes are checked
+#     separately: a sign error in one resistance moves one and not the other.
+#   * heat_flows_downhill — air warmer than wall warmer than outside, at every
+#     sample. That ordering follows from the physics rather than from these
+#     particular numbers, so it catches a coupling written backwards even in a
+#     run whose steady state comes out right.
+#
+# The tolerance on the first check is DERIVED, not chosen. A 2R2C network is a
+# 2x2 linear system, so its slow time constant is an exact root of a quadratic
+# — 46.2 hours here — and after a span the exact solution still holds
+# exp(-span/tau) of its initial deviation. That residual is the floor no
+# correct run can beat, so it is what the check compares against.
+#
+# ---------------------------------------------------------------------------
+# Why the run is nine days long
+# ---------------------------------------------------------------------------
+#
+# Because buildings are. The wall's 20 MJ/K of thermal mass is what makes a
+# masonry building coast through a cold night, and it is also what makes it
+# take days rather than minutes to reach a new equilibrium. Five slow time
+# constants is 231 hours of *simulated* time; the run itself is 2500 RK4 steps
+# and takes milliseconds.
+#
+# Try it: cut `c_wall` to 2.0e6 — a lightweight partition instead of masonry.
+# The zone settles roughly ten times faster and overshoots more, which is the
+# whole argument for thermal mass in one parameter.
+
+schema_version = 1
+
+[experiment]
+name = "Building zone thermal response"
+description = "A 2R2C zone with air and wall masses relaxing toward the closed-form equilibrium under constant heating."
+
+[capability]
+id = "sim.thermal.hvac_zone"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+# The air node: light, fast.
+c_air = { value = 8.0e5, unit = "J/K" }
+# The wall mass: heavy, slow. This is the parameter the run is really about.
+c_wall = { value = 2.0e7, unit = "J/K" }
+# Air-to-wall coupling: a good surface conductance.
+r_aw = { value = 2.0e-3, unit = "K/W" }
+# The envelope: 125 W/K, a well-insulated large zone.
+r_wo = { value = 8.0e-3, unit = "K/W" }
+# A cold day.
+t_outside = { value = 278.0, unit = "K" }
+# Heating. Negative would be cooling, and every inequality in the ordering
+# check reverses with it.
+q_hvac = { value = 3000.0, unit = "W" }
+
+[initial_state]
+# Everything starts at the outside temperature: the whole transient is in the
+# run, and the check's derived threshold accounts for exactly that.
+t_air = [{ value = 278.0, unit = "K" }]
+t_wall = [{ value = 278.0, unit = "K" }]
+
+[solver]
+id = "rk4"
+start = { value = 0.0, unit = "s" }
+# Five slow time constants, by which point the initial condition's influence
+# has decayed by a factor of about 148.
+end = { value = 832000.0, unit = "s" }
+# tau/500, comfortably resolving the fast air node as well.
+step = { value = 333.0, unit = "s" }
+
+[outputs]
+record = ["t_air", "t_wall", "air_steady_state", "wall_steady_state"]

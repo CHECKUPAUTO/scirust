@@ -1,0 +1,795 @@
+\documentclass[11pt]{article}
+
+% --- Preámbulo compatible con arXiv (solo paquetes estándar) ---
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish]{babel}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\geometry{margin=1in}
+\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
+
+\newtheorem{definition}{Definición}
+\newtheorem{proposition}{Proposición}
+\newtheorem{theorem}{Teorema}
+
+\newcommand{\dcausal}{d_{\mathrm{c}}}
+\newcommand{\Nk}{\mathcal{N}_k}
+\newcommand{\code}[1]{\texttt{#1}}
+
+\title{\textbf{La MMU cognitiva:\\ memoria de trabajo determinista y auditable para agentes de código basados en LLM\\ \large (y un relato honesto de por qué la recuperación causal no supera a RAG)}}
+\author{El proyecto CCOS\thanks{Causal Context Operating System (CCOS), un prototipo
+de investigación abierto. Código fuente, guiones de reproducción y este artículo:
+\url{https://github.com/CHECKUPAUTO/CCOS}.}}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+La memoria de trabajo de un agente de código basado en LLM se gestiona de forma
+opaca: una pila de recuperación (RAG, GraphRAG, marcos de agentes) pagina un
+repositorio en una ventana acotada y muta esa ventana de manera probabilística a lo
+largo de una sesión, de modo que cuando un agente se desvía tras decenas de pasos es
+imposible decir \emph{por qué} ni \emph{cuándo} se corrompió su representación del
+proyecto. CCOS trata la memoria del agente como un sistema operativo trata la RAM: el
+código fuente se analiza en un grafo causal \emph{event-sourced}, los nodos se
+puntúan y se paginan bajo un presupuesto de tokens, y cada transición de estado se
+registra en un registro encadenado por hash que se reproduce bit a bit. Damos una
+definición precisa y determinista de \emph{región causal} (una componente conexa del
+grafo de enlaces causales entre archivos) y de distancia causal (un camino más corto
+ponderado), y probamos que las regiones y la ventana paginada son una función pura
+del grafo, reconstruyéndose exactamente en la reproducción --- la propiedad que hace
+que la memoria de un agente sea \emph{auditable} y \emph{depurable por viaje en el
+tiempo}. Luego preguntamos si esta estructura causal hace de CCOS un \emph{mejor
+recuperador} que una referencia básica, e informamos --- honestamente --- de que no.
+Medida sobre $70$ commits reales de corrección de errores en tres bibliotecas
+(«crates») maduras, la selección causal \textbf{empata con un simple recuperador
+léxico TF-IDF} y pierde ante él con un presupuesto ajustado; en errores reales los
+archivos de una corrección comparten vocabulario, así que la similitud léxica también
+los encuentra, y una prueba de concepto que arranca CCOS desde una traza de fallo es
+asimismo superada por un RAG-sobre-el-mensaje-de-error (los mensajes de error de Rust
+nombran la causa). Una simulación sin LLM \emph{sí} separa a ambos cuando una causa se
+construye para ser léxicamente distinta de su síntoma, y una primera ejecución en
+dispositivo con un modelo de $7$ mil millones de parámetros lo reproduce --- pero ese
+régimen no ocurre en código real. La contribución no es, por tanto, una mejor
+recuperación. Es la infraestructura que a una pila de recuperación le falta
+estructuralmente: una memoria de agente \emph{determinista, reproducible, auditable}
+en la que se puede rebobinar el estado exacto del contexto en cualquier paso y
+reproducirlo bajo parámetros distintos (\emph{depuración por viaje en el tiempo}).
+Hasta donde sabemos, CCOS es el \emph{primer} sistema que trata la \emph{propia
+memoria de trabajo} de un agente como un subsistema transaccional --- determinista,
+encadenado por hash, reproducible bit a bit y \emph{depurable a posteriori}: una
+caja negra de la atención, con un punto de interrupción en el paso exacto en que la
+información correcta fue desalojada de la ventana. Publicamos el motor, el arnés de validación honesto y este artículo, etiquetando en
+todo momento lo que está \emph{probado} (estructura formal, determinismo,
+reproducción), \emph{medido} (cobertura de recuperación --- donde CCOS \emph{no}
+supera al RAG léxico en errores reales), y el único eje en el que CCOS \emph{sí}
+gana: la \textbf{eficiencia}. Ejecutado de extremo a extremo sobre correcciones
+reales de un solo archivo con un modelo de 30B y un reintento con el compilador en el
+bucle, CCOS y RAG resuelven \emph{por igual} ($2/10$), pero CCOS lo hace con $776$
+tokens de contexto frente a los $5366$ del recuperador léxico --- una reducción de
+$6{,}9\times$ (y de $4{,}1$ a $9{,}1\times$ en $51$ correcciones de tres crates, sin
+modelo), porque la región causal se detiene en el working set en lugar de rellenar un
+top-$k$ hasta el presupuesto. CCOS no es, pues, un mejor recuperador ni solucionador,
+sino uno más \emph{frugal} y \emph{auditable} --- se autocalibra, sin $k$ que ajustar.
+(Sobre su propio árbol de fuentes, la selección por región cubre el vecindario a $k$
+saltos de una tarea con una exhaustividad de $0{,}97$ frente a $0{,}35$ de la
+selección plana, con $\approx\!48\%$ menos tokens; las regiones están conectadas
+internamente al $95{,}5\%$.)
+\end{abstract}
+
+\section{Introducción}
+
+Un agente de código basado en LLM que opera sobre un repositorio debe decidir
+repetidamente \emph{qué poner en la ventana de contexto}. El patrón dominante es la
+recuperación: incrustar fragmentos de código, clasificarlos frente a la tarea, y
+concatenar el top-$k$ hasta agotar un presupuesto de tokens~\cite{lewis2020rag}. Esto
+trata el contexto como una lista clasificada unidimensional. De ahí se siguen dos
+modos de fallo. Primero, la \emph{dilución}: a medida que las tareas se alargan, la
+ventana acumula código globalmente saliente pero irrelevante para la tarea, y los
+modelos atienden mal al medio de los contextos largos~\cite{liu2023lost}. Segundo, la
+\emph{incoherencia}: los $k$ fragmentos mejor clasificados no tienen por qué formar
+una unidad conexa de razonamiento --- una función puede paginarse sin sus llamadores,
+sus sitios de error o los datos de los que depende.
+
+Los sistemas operativos afrontaron el problema análogo hace décadas y respondieron
+con el \emph{working set}: el conjunto de páginas referenciadas recientemente que
+deben permanecer residentes~\cite{denning1968working}. CCOS adopta la analogía para
+el contexto de LLM~\cite{packer2023memgpt}: el código fuente se analiza en un grafo
+causal, los nodos se puntúan, y una «ventana de contexto» acotada se pagina dentro y
+fuera como RAM~$\leftrightarrow$~VRAM. A diferencia de una pila de recuperación, cada
+transición se registra en un registro de eventos encadenado por hash, de modo que la
+memoria no es una caja negra sino un artefacto \emph{auditable y reproducible}.
+Nuestras contribuciones son:
+
+\begin{enumerate}
+  \item Un \textbf{modelo formal y determinista de regiones de contexto}
+  (\S\ref{sec:regions}, \S\ref{sec:determinism}): la distancia causal como camino más
+  corto ponderado, la pertenencia a una región como componente conexa del grafo de
+  enlaces causales entre archivos, y un teorema de determinismo --- las regiones y la
+  ventana paginada son una función pura del grafo, así que una sesión se reconstruye
+  bit a bit desde su registro de eventos encadenado por hash (reproducción a prueba de
+  manipulación).
+  \item \textbf{Sesiones de agente event-sourced con depuración por viaje en el
+  tiempo} (\S\ref{sec:timetravel}): cada operación cognitiva (ingesta, señal de fallo,
+  recuerdo) queda registrada; el estado exacto del contexto en cualquier paso es
+  reconstruible; y un recuerdo puede \emph{reproducirse bajo parámetros distintos}
+  para preguntar si el agente habría decidido mejor --- la capacidad que a una pila de
+  recuperación probabilística le falta estructuralmente. Hasta donde sabemos, es el
+  primer tratamiento del \emph{ensamblaje del contexto en sí} como un subsistema
+  reproducible y depurable a posteriori --- una \emph{caja negra de la atención de un
+  agente} --- con un \emph{punto de interrupción de desalojo} que nombra el paso y la
+  operación exactos en que la causa verdadera fue expulsada de la ventana acotada.
+  \item Un \textbf{arnés de validación honesto y un resultado negativo}
+  (\S\ref{sec:protocol}): sobre $70$ commits reales de corrección, la selección causal
+  \emph{no} supera a un recuperador léxico TF-IDF al colocar los archivos de una
+  corrección en la ventana (empata, y pierde con un presupuesto ajustado), y un pivote
+  por traza de fallo es superado por un RAG-sobre-el-mensaje-de-error. Lo informamos
+  con claridad --- reubica el valor de CCOS de la \emph{recuperación} a la
+  \emph{auditabilidad}.
+  \item Una \textbf{medición de localidad sin LLM} (\S\ref{sec:eval}) con cifras
+  reales y reproducibles, y un protocolo falsable de condición \emph{suficiente}
+  (Fase~4) que especificamos pero dejamos abierto.
+\end{enumerate}
+
+\section{Trabajo relacionado}\label{sec:related}
+
+\paragraph{Generación aumentada por recuperación.} RAG aumenta un modelo paramétrico
+con un almacén no paramétrico y recupera pasajes por consulta~\cite{lewis2020rag}.
+Self-RAG añade tokens de reflexión que regulan la recuperación y critican las
+generaciones~\cite{asai2023selfrag}. Estos operan sobre fragmentos
+\emph{independientes}; la coherencia entre elementos recuperados no se modela.
+
+\paragraph{Recuperación consciente de grafos y estructura.} GraphRAG construye un
+grafo de conocimiento de entidades y responde consultas globales resumiendo la
+estructura comunitaria~\cite{edge2024graphrag}. Para código, los grafos de propiedades
+unifican AST, flujo de control y flujo de datos~\cite{yamaguchi2014cpg}. Las regiones
+de CCOS están en este linaje pero apuntan a la \emph{paginación}: qué subestructura
+conexa hacer residente para una tarea, bajo un presupuesto de tokens, con desalojo
+determinista.
+
+\paragraph{Memoria de agente.} MemGPT presenta el LLM como un SO que pagina entre una
+ventana en contexto y almacenamiento externo~\cite{packer2023memgpt}; los Generative
+Agents recuperan recuerdos puntuados por recencia, importancia y
+relevancia~\cite{park2023generative} --- los mismos factores que CCOS agrega en una
+temperatura de región. LangGraph~\cite{langgraph} estructura los agentes como grafos
+de pasos con estado; orquesta el flujo de \emph{control}, mientras que CCOS estructura
+la \emph{memoria}. Ambos son complementarios.
+
+\paragraph{Gestión de la ventana de contexto.} El desalojo de la caché KV mantiene
+residentes los tokens «grandes impactadores» o sumidero~\cite{liu2023lost}, y
+PagedAttention aplica la paginación de SO a la caché KV~\cite{kwon2023paged}. Estas
+técnicas actúan a nivel de token dentro de un único paso hacia adelante; CCOS actúa al
+nivel \emph{semántico} a lo largo de una sesión de agente.
+
+\section{El sustrato de contexto causal}\label{sec:substrate}
+
+CCOS analiza el código fuente en un \emph{grafo de memoria causal} dirigido $G=(V,E)$.
+Un nodo $v\in V$ es un archivo, módulo, símbolo o dependencia externa, con campos
+escalares $\mathrm{imp}(v)$ (importancia base), $\mathrm{fail}(v)\in[0,1]$ (relevancia
+de fallo) y $\mathrm{rec}(v)\in[0,1]$ (recencia). Una arista $e=(u\!\to\!w)\in E$ lleva
+un peso $w(e)\in(0,1]$ y un tipo (contención, dependencia, referencia, causación). El
+núcleo asigna a cada nodo una puntuación causal
+\begin{equation}
+\mathrm{score}(v) = \mathrm{clamp}\big(0.15\,\mathrm{imp}(v) + 0.50\,\mathrm{fail}(v)
+  + 0.30\,\mathrm{rec}(v) + 0.05\ln(1{+}\mathrm{acc}(v)),\,0,1\big),
+\label{eq:score}
+\end{equation}
+donde $\mathrm{acc}(v)$ es el conteo de accesos. Los fallos se propagan a lo largo de
+las aristas, $\mathrm{fail}$ decae con un reloj lógico, y cada transición de estado se
+añade a un registro de eventos encadenado por hash que permite una reproducción
+determinista~\cite{haber1991timestamp}. Los identificadores de nodo tienen espacio de
+nombres (\code{file:p}, \code{mod:p:n}, \code{use:p:path}, \code{sym:p:n},
+\code{dep:root}); el archivo propietario de un nodo es recuperable desde su
+identificador. CCOS v0.2 pagina los nodos de mayor $\mathrm{score}$: una política
+plana y 1-D. Ahora hacemos espacial la selección.
+
+\section{Regiones de contexto}\label{sec:regions}
+
+\subsection{Distancia causal}
+
+\begin{definition}[Distancia causal]
+Sea $\hat G$ el multigrafo no dirigido sobre $V$ inducido por $E$, y asignemos a cada
+arista el coste $c(e) = -\ln w(e) \ge 0$, de modo que un enlace causal más fuerte sea
+un paso más corto. La \emph{distancia causal} $\dcausal(u,v)$ es el coste total mínimo
+sobre todos los caminos $u$--$v$ en $\hat G$, y $+\infty$ si no existe ninguno. La
+distancia en saltos no ponderada $\mathrm{hops}(u,v)$ se define análogamente con
+costes unitarios.
+\end{definition}
+
+$c(e)\ge 0$ puesto que $w(e)\le 1$, así que $\dcausal$ es una verdadera métrica de
+camino más corto en cada componente conexa (no negativa, simétrica, desigualdad
+triangular). El \emph{vecindario causal a $k$ saltos} de un objetivo $t$ es
+\begin{equation}
+\Nk(t) = \{\, v \in V : \mathrm{hops}(t,v) \le k \,\}.
+\end{equation}
+$\Nk(t)$ es la verdad-base «lo que es causalmente relevante para una tarea en $t$»
+usada en la evaluación (\S\ref{sec:eval}).
+
+\subsection{Pertenencia a una región}
+
+Los concentradores de dependencias externas (p.\ ej.\ \code{dep:std}) conectan casi
+todo y no deben colapsar el grafo en una sola componente. Por eso los separamos.
+
+\begin{definition}[Enlace causal entre archivos]
+Para un nodo no externo $v$ sea $\phi(v)$ su archivo propietario. Dos archivos $f,g$
+están \emph{directamente enlazados}, escrito $f \approx g$, si y solo si existe una
+arista $(u\!\to\!w)\in E$ con $\phi(u)=f$, $\phi(w)=g$, $f\neq g$, y ni $u$ ni $w$ es
+un nodo de dependencia externa.
+\end{definition}
+
+\begin{definition}[Región]\label{def:region}
+Sea $\approx^{*}$ la clausura reflexiva-transitiva de $\approx$ sobre el conjunto de
+claves de archivo. Una \emph{región} es el conjunto de todos los nodos cuyos archivos
+están en una misma clase de equivalencia de $\approx^{*}$; todos los nodos de
+dependencia externa forman una región adicional. Dos nodos pertenecen a la misma
+región si y solo si sus archivos están en la misma componente conexa del grafo de
+enlaces causales entre archivos.
+\end{definition}
+
+\begin{proposition}[Las regiones particionan los nodos]
+Las regiones de la Definición~\ref{def:region} forman una partición de $V$: cada nodo
+está en exactamente una región.
+\end{proposition}
+\begin{proof}
+$\approx^{*}$ es una relación de equivalencia sobre las claves de archivo, así que sus
+clases particionan las claves; el cubo externo es una clase distinta por construcción.
+Aplicar cada nodo no externo a la clase de su archivo y cada nodo externo a la clase
+externa es una función total hacia bloques disjuntos, y por tanto una partición. \qed
+\end{proof}
+
+Por defecto (solo aristas de contención e importación) cada archivo fuente es su
+propia región. Una verdadera dependencia entre archivos o un fallo propagado fusiona
+archivos en una única región multiarchivo --- la «zona de conocimiento» que un agente
+debería despertar junta.
+
+\subsection{Escalares de región}
+
+Para una región $R$ con conjunto de miembros $M$:
+\begin{align}
+\mathrm{heat}(v)        &= 0.5\,\mathrm{score}(v) + 0.3\,\mathrm{fail}(v) + 0.2\,\mathrm{rec}(v), \\
+\mathrm{temp}(R)        &= \mathrm{clamp}\!\Big(\tfrac{1}{|M|}\textstyle\sum_{v\in M}\mathrm{heat}(v),\,0,1\Big), \label{eq:temp}\\
+\mathrm{dens}(R)        &= \frac{|\{\,e\in E : \text{ambos extremos} \in M\,\}|}{|M|}. \label{eq:dens}
+\end{align}
+La temperatura es cuán «despierta» está una región; la densidad es su cohesión causal
+interna (aristas internas por miembro). La activación calienta una región
+($\mathrm{temp}\mathrel{+}=0.25$, con tope) y registra un tic lógico; un paso de
+enfriamiento multiplica las temperaturas por un factor de decaimiento y desaloja las
+regiones por debajo de un umbral.
+
+\subsection{Política de admisión dinámica}\label{sec:policy}
+
+El umbral estático $0.6$ se convierte en una función de la presión de tokens
+$u\in[0,1]$ (la fracción usada del presupuesto) y la complejidad de la tarea
+$\kappa\in[0,1]$:
+\begin{align}
+\theta(u,\kappa)       &= \mathrm{clamp}(0.6 + 0.3\,u - 0.2\,\kappa,\; 0.05,\; 0.95), \\
+a(R)                   &= 0.55\,\mathrm{temp}(R) + 0.30\,\frac{\mathrm{dens}(R)}{1+\mathrm{dens}(R)} + 0.15\,\kappa, \\
+\mathrm{admit}(R)      &\iff a(R) \ge \theta(u,\kappa).
+\end{align}
+Una región caliente y cohesiva puede admitirse aun cuando el $0.6$ estático la
+rechazaría; una ventana casi llena eleva $\theta$ para que solo entren las regiones
+más calientes.
+
+\section{Determinismo y reproducción}\label{sec:determinism}
+
+\begin{theorem}[Determinismo regional]
+La partición en regiones, cada escalar de región de las
+ecuaciones~\eqref{eq:temp}--\eqref{eq:dens}, y el historial de activación son
+funciones puras, independientes del orden, del grafo $G$ y de la secuencia de eventos
+de activación (lógicamente marcados con tiempo). En consecuencia, dado el registro de
+eventos de una sesión, el estado del motor se reconstruye idénticamente: si $G'$ es el
+grafo reconstruido desde el registro y $L$ sus eventos de región, entonces
+$\mathrm{replay\_from}(G',L)$ es igual al motor en vivo que produjo $L$.
+\end{theorem}
+\begin{proof}[Esbozo de prueba]
+El agrupamiento enumera nodos y aristas en orden ordenado y calcula las componentes
+conexas mediante una búsqueda en anchura ordenada, de modo que su salida es
+independiente del orden de iteración del hash. Las ecuaciones \eqref{eq:score},
+\eqref{eq:temp} y \eqref{eq:dens} son aritmética determinista sobre los campos de los
+nodos y un conteo de aristas que cualifican. La activación lee un reloj lógico (un
+contador), nunca el tiempo de pared, y el evento \code{RegionActivated} emitido
+registra el tic exacto. La reconstrucción reagrupa $G'$ (estado base idéntico, ya que
+$G'\!=\!G$ estructuralmente) y aplica las activaciones registradas en el orden del
+registro; cada paso es la misma función pura de las mismas entradas, así que el estado
+resultante es idéntico. La prueba de integración
+\code{replay\_reconstructs\_identical\_engine} verifica
+$\mathrm{engine}=\mathrm{replay\_from}(G',L)$ por igualdad estructural. \qed
+\end{proof}
+
+Esto extiende las garantías existentes de CCOS: el registro de eventos principal está
+encadenado por hash y es a prueba de manipulación, de modo que el historial de
+regiones es auditable, y una prueba de 10\,000 ciclos no exhibe deriva alguna en el
+número de regiones ni en las temperaturas.
+
+\paragraph{Una frontera de entrada auditable.} El mismo sustrato determinista y
+reproducible endurece el texto que un agente ingiere. Los vectores de inyección
+por caracteres ocultos --- anulaciones bidireccionales (el ataque \emph{Trojan
+Source}, CVE-2021-42574), formato de ancho cero y el bloque Unicode \emph{Tags}
+usado para el contrabando de ASCII invisible --- se des-ofuscan en la ingesta a
+literales explícitos y visibles (\code{[U+202E RLO]}) en lugar de eliminarse en
+silencio, y los hallazgos se registran en el mismo registro encadenado por hash,
+de modo que una reproducción reconstruye el estado limpio. Un clasificador lineal
+en espacio logarítmico posterior --- la forma cerrada del Naïve Bayes multinomial,
+$\mathrm{logit}=b+W\!\cdot\!X$ sobre un vector de características por \emph{hashing
+trick}, con sus pesos fijados en un blob verificado por suma de comprobación ---
+añade una señal de inyección \emph{determinista y descomponible forensemente} (un
+red-team sobre datos reservados mide $F_1=0{,}90$; precisión $0{,}87$,
+exhaustividad $0{,}93$). Lo afirmamos de forma deliberada: es una \emph{señal, no
+una solución} --- un modelo de bolsa de características se evade con paráfrasis, y
+ninguna pasada a nivel de carácter aborda la inyección semántica; la mitigación
+real es la separación de privilegios en el host. La contribución no es un detector
+novedoso, sino que la des-ofuscación y la puntuación heredan la propiedad
+distintiva de CCOS: toda decisión de seguridad es reproducible y auditable hasta
+la característica exacta que la inclinó.
+
+\section{Sesiones event-sourced y depuración por viaje en el tiempo}\label{sec:timetravel}
+
+El determinismo no es solo una propiedad de corrección; es la base de la capacidad
+que, como argumentará nuestra evaluación, distingue a CCOS de una pila de
+recuperación. Una \code{AgentSession} registra cada operación cognitiva que un agente
+realiza sobre su memoria --- \code{Ingest}, \code{SignalFailure}, \code{Recall} ---
+como una línea de tiempo ordenada. Dado que cada operación es una función determinista
+del estado previo, la memoria tras las primeras $n$ operaciones se reconstruye
+exactamente reproduciendo las que mutan (\code{replay\_to(n)}): se puede
+\emph{rebobinar la mente del agente} a cualquier paso.
+
+La operación que importa para la depuración es la contrafactual.
+\code{recall\_what\_if($n$, $q$, $b$)} reproduce la memoria hasta el paso $n$ y vuelve
+a ejecutar un recuerdo con una consulta $q$ o un presupuesto de tokens $b$ distintos,
+devolviendo la ventana que el agente \emph{habría} visto. Cuando un agente emite un
+mal parche en el paso 15, un operador puede reproducir su contexto exacto en el paso
+14, ampliar el presupuesto o cambiar el ancla, y observar si la decisión mejora --- un
+depurador de bucle cerrado y reproducible para la memoria de trabajo de un agente.
+
+\paragraph{Un punto de interrupción sobre la atención.} La reproducción también
+localiza la \emph{deriva}. El punto de observación \code{missing} recorre la línea de
+tiempo en busca del paso exacto en que un nodo dado --- típicamente la causa
+verdadera de un fallo --- fue expulsado de la ventana acotada por la presión
+competidora, nombrando la operación desencadenante y la diferencia de tokens; una
+vista \code{energy} complementaria revela la migración de calor causal por el grafo
+que un diff a nivel de archivo pasa por alto. Es, en efecto, un \emph{punto de
+interrupción sobre la atención de un agente}: el instante preciso en que la
+información correcta abandonó la ventana. Una pila de recuperación opaca solo puede
+mostrar el contexto final, corrupto; CCOS puede señalar el paso --- y la operación ---
+en que se torció.
+
+Una pila RAG o de marco muta su almacén de forma probabilística a lo largo de una sesión y
+no conserva ningún registro de transiciones canónico y reproducible, así que la misma
+pregunta (\emph{¿por qué, y cuándo, se corrompió la representación?}) no tiene
+respuesta allí. No afirmamos que esto mejore el éxito en las tareas; afirmamos que es
+una propiedad que las alternativas no tienen, y que es el lugar honesto de la
+contribución de CCOS (\S\ref{sec:protocol}).
+
+\section{Implementación}\label{sec:impl}
+
+El motor son $\approx\!600$ líneas de Rust ligero en dependencias, en capa sobre el
+grafo, sin cambios en el analizador, el guardián, el constructor incremental o el
+núcleo event-sourcing. La superficie pública es: \code{ContextRegionEngine}
+(\code{cluster\_nodes}, \code{initialize\_regions}, \code{activate\_region},
+\code{tick\_cooldown}, \code{replay\_from}), los tipos de datos \code{ContextRegion} /
+\code{ContextPoint} / \code{ContextWindow}, la \code{ContextPolicy}, y cinco nuevas
+variantes de evento (\code{RegionCreated}, \code{RegionActivated}, \code{RegionMerged},
+\code{RegionEvicted}, \code{ContextWindowGenerated}). Una CLI \code{ccos regions}
+expone el agrupamiento, la activación y el informe de localidad. Toda la crate compila
+sin advertencias bajo \code{clippy -D warnings} y pasa 364 pruebas.
+
+\section{Evaluación: lo que podemos medir hoy}\label{sec:eval}
+
+Separamos los resultados \emph{medidos} (esta sección, totalmente reproducible y sin
+LLM) de las ganancias \emph{hipotéticas} a nivel de agente (\S\ref{sec:protocol}).
+
+\paragraph{Montaje.} Operamos sobre el propio árbol de fuentes de CCOS ($|V|=705$
+nodos, $|E|=822$ aristas, dando $26$ regiones). Para un nodo objetivo $t$ tomamos
+$\Nk(t)$ con $k=2$ como verdad-base y comparamos dos estrategias de selección al
+presupuesto de tamaño de la región: \textbf{plana} --- los $|R|$ mejores nodos por
+$\mathrm{score}$ (CCOS v0.2 / recuperación clasificada clásica) --- y \textbf{región}
+--- los miembros de la región de $t$. Reportamos precisión causal $|S\cap\Nk|/|S|$,
+exhaustividad $|S\cap\Nk|/|\Nk|$, y los tokens que cada estrategia necesita para
+\emph{cubrir} $\Nk$. Todas las cifras las emite \code{scripts/region\_benchmark.sh} y
+son deterministas.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lcc}
+\toprule
+Estrategia & precisión causal & exhaustividad causal \\
+\midrule
+plana (v0.2 / clasificada) & 0.021 & 0.347 \\
+\textbf{región (v0.3)} & \textbf{0.057} & \textbf{0.972} \\
+\bottomrule
+\end{tabular}
+\caption{Localidad sobre \code{src/} ($k=2$, 12 objetivos). La selección por región
+cubre el $97\%$ del vecindario causal de una tarea frente al $35\%$ de la selección
+plana, con $\approx\!48\%$ menos tokens para igual cobertura.}
+\label{tab:locality}
+\end{table}
+
+\paragraph{Cohesión y coste.} Las regiones alcanzan una \textbf{densidad causal media
+de $0{,}955$} (Ec.~\ref{eq:dens}, normalizada) --- están casi por completo conectadas
+internamente, es decir, agrupaciones causales genuinas y no grupos de archivos
+arbitrarios. Construir el mapa de regiones para $705$ nodos lleva $\approx\!20$\,ms
+($54{,}5$ construcciones/s); una sola activación son $\approx\!20$\,ms.
+
+\paragraph{Lectura honesta.} La precisión absoluta es baja ($0{,}06$) porque el
+analizador v0.2 solo emite aristas de contención e importación, así que $\Nk(t)$ es
+diminuto (a menudo $2$--$3$ nodos) mientras que una región abarca un archivo entero.
+Las ganancias robustas y reales son la \emph{exhaustividad} ($0{,}97$ frente a
+$0{,}35$) y la \emph{eficiencia en tokens} ($\approx\!48\%$): una región contiene de
+forma fiable el vecindario causal de una tarea y paga menos tokens por hacerlo.
+Aristas semánticas más ricas (grafo de llamadas / flujo de datos, ítem P1.3 de la hoja
+de ruta) afinarían $\Nk$ y son la palanca principal para elevar la precisión; lo
+señalamos en vez de ocultarlo.
+
+\section{Simulación de hipótesis bajo un oráculo declarado (sin LLM)}\label{sec:sim}
+
+La tesis central --- \emph{¿ayuda la memoria causal por regiones a un agente en
+tareas largas multiarchivo?} --- en última instancia necesita despliegues de LLM
+(\S\ref{sec:protocol}). Pero su \emph{condición necesaria} es comprobable ya, sin LLM:
+\textbf{un agente no puede resolver una tarea cuyo contexto causal requerido está
+ausente de su ventana}. Medimos, bajo un oráculo explícito, si cada estrategia de
+selección \emph{coloca el contexto causal requerido en la ventana}.
+
+\paragraph{Montaje.} Generamos repositorios sintéticos modulares: $S$ subsistemas
+independientes, cada uno un conjunto de archivos enlazados por una cadena causal entre
+archivos más símbolos \emph{señuelo} de alta puntuación; no hay aristas entre
+subsistemas, así que cada subsistema es una región causal acotada. La estructura causal
+está \emph{desacoplada} de la estructura léxica --- un vecino de la cadena no comparte
+ningún token de identificador con el objetivo, solo una arista --- modelando una
+dependencia causalmente esencial pero léxicamente distinta. Una tarea de \emph{diámetro}
+$d$ requiere la ventana $\pm d$ a lo largo de su cadena (hasta $2d{+}1$ archivos); el
+presupuesto contiene $\approx$ un subsistema, mucho menos que el repositorio. El
+\textbf{oráculo} es $R(t)\subseteq S$.
+
+Crucialmente, los \emph{pipelines} de recuperación localizan código a partir de una
+\emph{consulta} textual, mientras que una memoria de tipo SO se \emph{ancla} en la
+señal del espacio de trabajo (el archivo activo, una prueba que falla). Modelamos
+ambos: cada tarea lleva una consulta (una bolsa de tokens) y un ancla (el nodo del
+archivo activo), y ejecutamos dos escenarios --- \textbf{limpio} (la consulta apunta
+al objetivo) y \textbf{ruidoso} (un señuelo trampa en un subsistema no relacionado
+supera léxicamente al objetivo). Seis estrategias comparten el presupuesto:
+\code{rag-dense} (top-$k$ léxico), \code{rag-hybrid} (léxico $+$ puntuación causal),
+\code{graphrag-1hop} (mejor acierto $+$ un salto), \code{graphrag-bfs} (expansión no
+acotada desde el mejor acierto), \code{ccos-from-query} (región CCOS del mejor acierto
+\emph{léxico} --- una ablación), y \code{ccos-region} (región CCOS del \emph{ancla}).
+Con semilla y deterministas; reproducir con \code{ccos experiment}.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lcccccc}
+\toprule
+& \multicolumn{4}{c}{éxito al diámetro $d$} & \multicolumn{2}{c}{global} \\
+\cmidrule(lr){2-5}\cmidrule(lr){6-7}
+Estrategia & $d{=}1$ & $d{=}2$ & $d{=}3$ & $d{=}4$ & éxito & cob. \\
+\midrule
+\multicolumn{7}{l}{\emph{Consulta limpia (apunta al objetivo)}}\\
+\code{rag-dense}      & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 0.19 \\
+\code{rag-hybrid}     & 1.00 & 0.00 & 0.00 & 0.00 & 0.23 & 0.65 \\
+\code{graphrag-1hop}  & 1.00 & 0.00 & 0.00 & 0.00 & 0.23 & 0.58 \\
+\code{graphrag-bfs}   & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 \\
+\code{ccos-from-query}& 1.00 & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 \\
+\code{ccos-region}    & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 \\
+\midrule
+\multicolumn{7}{l}{\emph{Consulta ruidosa (un señuelo supera léxicamente al objetivo)}}\\
+\code{rag-dense}      & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 0.19 \\
+\code{rag-hybrid}     & 1.00 & 0.00 & 0.00 & 0.00 & 0.23 & 0.65 \\
+\code{graphrag-1hop}  & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 0.19 \\
+\code{graphrag-bfs}   & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 \\
+\code{ccos-from-query}& 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 \\
+\textbf{\code{ccos-region}} & \textbf{1.00} & \textbf{1.00} & \textbf{1.00} & \textbf{1.00} & \textbf{1.00} & \textbf{1.00} \\
+\bottomrule
+\end{tabular}
+\caption{Simulación de hipótesis ($800$ tareas, semilla $42$, presupuesto $\approx$ un
+subsistema). Éxito $=$ el conjunto causal requerido $R(t)$ está dentro de la ventana.
+Bajo una consulta limpia, todo método consciente de la estructura empata; bajo una
+consulta engañosa, solo sobrevive la región anclada al espacio de trabajo.}
+\label{tab:sim}
+\end{table}
+
+\paragraph{Hallazgos (y sus límites honestos).}
+\textbf{(1)} La recuperación léxica (\code{rag-dense}) \emph{falla} en tareas causales
+entre archivos ($0\%$; cobertura $0{,}19$): la similitud no puede hacer aflorar
+contexto causalmente esencial pero léxicamente distinto --- la premisa de la
+hipótesis. (Las victorias en $d{=}1$ de \code{rag-hybrid} vienen de la \emph{puntuación
+causal} que toma prestada, no de la similitud léxica, razón por la cual persisten bajo
+ruido.)
+\textbf{(2)} El valor de la selección consciente de la estructura \emph{crece con el
+diámetro}: la expansión a un salto solo resuelve $d{=}1$, mientras que la paginación
+causal completa (\code{graphrag-bfs}, \code{ccos-region}) resuelve todos los $d$ --- la
+dirección de H2.
+\textbf{(3) El empate limpio.} Bajo una consulta limpia, \code{graphrag-bfs},
+\code{ccos-from-query} y \code{ccos-region} alcanzan todas $1{,}00$: la palanca es la
+\emph{estructura} causal, \textbf{no CCOS en sí}.
+\textbf{(4) La separación ruidosa.} Bajo una consulta \emph{engañosa}, todo método que
+localiza código léxicamente colapsa a $0\%$ --- incluido el fuerte \code{graphrag-bfs}
+\emph{y} la ablación \code{ccos-from-query} (CCOS sembrado en la consulta). Solo
+\code{ccos-region}, que se ancla en la señal del espacio de trabajo en vez de la
+consulta, sobrevive a $1{,}00$. La ablación aísla el diferenciador: es la \emph{fuente
+del ancla} (una señal estructural del espacio de trabajo frente a una consulta léxica),
+no la maquinaria de regiones. Este es el régimen realista --- una descripción de tarea
+rara vez nombra la causa distante exacta, y una memoria de tipo SO que rastrea el
+working set activo es robusta donde la recuperación en tiempo de consulta es engañada.
+\textbf{(5) Supuestos, declarados.} Esto acredita a CCOS con un ancla fiable (el
+archivo activo / la prueba que falla), que una memoria a nivel de SO tiene pero un
+\emph{pipeline} de pura recuperación no; y supone repositorios \emph{modulares} con
+regiones separables (densidad $0{,}955$ en código real, \S\ref{sec:eval}) --- una
+región gigante monolítica que exceda el presupuesto colapsa la ventaja (observado,
+reportado).
+\textbf{(6)} En todo momento esto es una \emph{simulación bajo un oráculo declarado}:
+prueba la condición \emph{necesaria} (recuperación), no la \emph{suficiente}
+(generación) de la \S\ref{sec:protocol}.
+
+\section{Evaluación con LLM real: una primera medición en dispositivo}\label{sec:protocol}
+
+La simulación (\S\ref{sec:sim}) estableció la condición necesaria. La condición
+suficiente --- que un agente LLM \emph{resuelva} luego más tareas con memoria por
+regiones que con recuperación por fragmentos --- requiere despliegues de modelo.
+\textbf{Implementamos el arnés} (\code{ccos eval}) y reportamos una \textbf{primera
+ejecución con LLM real} contra un modelo local.
+
+\paragraph{Arnés implementado.} Cada tarea es un diminuto proyecto multiarchivo que
+codifica una \emph{cadena causal aritmética}: una constante base en un archivo se
+transforma a través de una cadena de funciones de una línea en archivos separados, y la
+pregunta «¿qué entero devuelve la última función?» solo es respondible \emph{leyendo}
+toda la cadena (la causa distante incluida). La calificación es por tanto coincidencia
+exacta sobre un entero --- objetiva y automatizable, sin ejecución de código. Las mismas
+seis estrategias de la \S\ref{sec:sim} ensamblan la ventana de contexto bajo un
+presupuesto de tokens (con la división de consulta limpia/ruidosa), la ventana se envía
+a un modelo (cualquier endpoint compatible con OpenAI, Anthropic-Messages u Ollama), y
+registramos tres métricas por diámetro: \textbf{éxito de tarea} (entero correcto),
+\textbf{cobertura del oráculo} (cadena requerida $\subseteq$ ventana --- independiente
+del modelo), y \textbf{alucinación de símbolo} (la respuesta cita una función ausente
+del proyecto).
+
+\paragraph{Montaje.} Ejecutamos \code{ccos eval} en dispositivo sobre una NVIDIA Jetson
+AGX Thor contra \code{qwen2.5:7b-instruct} servido por Ollama (temperatura $0$), con
+$20$ tareas, semilla $7$, un presupuesto de $600$ tokens, diámetros de $1$ a $4$, en
+ambos regímenes limpio y ruidoso. La Tabla~\ref{tab:real} reporta la ejecución.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lcccccr}
+\toprule
+& \multicolumn{4}{c}{éxito al diámetro $d$} & & \\
+\cmidrule(lr){2-5}
+Estrategia & $d{=}1$ & $d{=}2$ & $d{=}3$ & $d{=}4$ & cob. & tok. \\
+\midrule
+\multicolumn{7}{l}{\emph{Consulta limpia (nombra la función objetivo)}}\\
+\code{rag-dense}      & 0.12 & 0.00 & 0.00 & 0.00 & 0.00 & 519 \\
+\code{rag-hybrid}     & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 521 \\
+\code{graphrag-1hop}  & 1.00 & 0.00 & 0.00 & 0.00 & 0.40 & 270 \\
+\code{graphrag-bfs}   & 1.00 & 0.00 & 0.17 & 0.00 & 1.00 & 402 \\
+\code{ccos-from-query}& 1.00 & 0.00 & 0.17 & 0.00 & 1.00 & 402 \\
+\code{ccos-region}    & 1.00 & 0.00 & 0.17 & 0.00 & 1.00 & 402 \\
+\midrule
+\multicolumn{7}{l}{\emph{Consulta ruidosa (un señuelo supera léxicamente al objetivo)}}\\
+\code{rag-dense}      & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 531 \\
+\code{rag-hybrid}     & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 521 \\
+\code{graphrag-1hop}  & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 165 \\
+\code{graphrag-bfs}   & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 165 \\
+\code{ccos-from-query}& 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 165 \\
+\textbf{\code{ccos-region}} & \textbf{1.00} & \textbf{0.00} & \textbf{0.17} & \textbf{0.00} & \textbf{1.00} & \textbf{402} \\
+\bottomrule
+\end{tabular}
+\caption{Primera ejecución con LLM real: \code{qwen2.5:7b-instruct} vía Ollama, en
+dispositivo (NVIDIA Jetson AGX Thor), $20$ tareas, semilla $7$, presupuesto $600$
+tokens. «cob.» es la cobertura del oráculo independiente del modelo; «tok.» la media de
+tokens de entrada. El éxito es una respuesta entera por coincidencia exacta.}
+\label{tab:real}
+\end{table}
+
+\paragraph{Hallazgos.}
+\textbf{(1) La cobertura se transfiere de la simulación al texto real.} La columna de
+cobertura independiente del modelo reproduce la Tabla~\ref{tab:sim} sobre contenido de
+archivo real: el RAG léxico cubre $0$, los métodos conscientes de la estructura cubren
+$1{,}00$ bajo una consulta limpia, y bajo ruido \emph{solo} \code{ccos-region} mantiene
+$1{,}00$ --- la condición necesaria, confirmada fuera del simulador.
+\textbf{(2) El éxito está acotado por el modelo, no por el contexto.} Donde la cobertura
+es $1{,}00$, el modelo de $7$B aún resuelve solo $d{=}1$ ($1{,}00$) y parte de $d{=}3$
+($0{,}17$), fallando $d{=}2,4$: con toda la cadena en la ventana, el fallo residual es
+el \emph{razonamiento aritmético} --- un techo de capacidad del modelo, no un fallo de
+selección. Crucialmente, ningún método tiene éxito jamás \emph{sin} cobertura (éxito
+$\subseteq$ cobertura), que es la afirmación que el arnés está construido para probar.
+\textbf{(3) La separación ruidosa se mantiene en un LLM real.} Bajo una consulta
+engañosa, todo método impulsado por la consulta colapsa a $0\%$ de éxito --- incluidos
+\code{graphrag-bfs} y la ablación \code{ccos-from-query} --- mientras que
+\code{ccos-region}, anclada en la señal del espacio de trabajo, es la \emph{única}
+estrategia con éxito no nulo ($d{=}1$ a $1{,}00$). Los métodos impulsados por la
+consulta incluso parecen \emph{más baratos} bajo ruido ($165$ frente a $402$ tokens)
+precisamente porque recuperan con confianza el archivo equivocado, más pequeño;
+\code{ccos-region} gasta su presupuesto en la cadena causalmente correcta.
+\textbf{(4) Límites honestos.} $20$ tareas ($\approx 5$ por diámetro) es una muestra
+pequeña, y un modelo de $7$B pone en el suelo la condición suficiente. Un modelo de
+frontera (\code{deepseek-v4-pro}, en curso) o un modelo local de $70$B se espera que
+eleve el éxito allí donde la cobertura es $1{,}00$, \emph{agudizando} --- no cambiando
+--- la separación, ya que la cobertura fija el techo.
+
+\paragraph{Hacia benchmarks externos.} La suite de cadena aritmética aísla la pregunta
+de la selección; las pruebas externas decisivas son la resolución de incidencias de
+SWE-bench~\cite{jimenez2023swebench} (un parche pasa las pruebas ocultas) y una suite
+controlada de \emph{errores multiarchivo} donde el sitio de la falla, su causa y su
+radio de impacto residen en archivos distintos. Las referencias comparten el LLM base y
+el presupuesto de tokens: RAG clásico~\cite{lewis2020rag} (top-$k$ coseno sobre
+fragmentos), GraphRAG~\cite{edge2024graphrag} (resúmenes de comunidades sobre un grafo
+de código), MemGPT~\cite{packer2023memgpt} (memoria paginada de tipo SO), un agente
+LangGraph~\cite{langgraph} con un almacén vectorial, y las regiones de CCOS. Métricas:
+tasa de resolución, tokens de entrada hasta el éxito, y una tasa de alucinación de
+fundamentación de citas verificada contra el grafo verdad-base. Hemos comenzado esto
+sobre historia real: \code{scripts/causal\_validation} extrae commits de corrección,
+recupera el árbol previo a la corrección, inyecta la falla, y puntúa
+$R_{\mathrm{cov}} = |F_{\mathrm{target}} \cap \mathrm{WorkingSet}_K| / |F_{\mathrm{target}}|$
+--- la fracción de los archivos que una corrección tocó que el working set acotado
+recupera. Sobre la historia de este repositorio, la primera ejecución expuso una
+limitación y su corrección, ambas medidas: con propagación de fallo solo aguas abajo,
+$R_{\mathrm{cov}}$ era plano en $0{,}33$ (solo el archivo semilla recuperado, ya que los
+archivos co-modificados son importadores \emph{aguas arriba} alcanzados solo por
+concentradores de dependencias). Resolver las importaciones intra-crate en aristas
+archivo$\to$archivo y propagar el fallo \emph{bidireccionalmente} corrige esto. En tres
+crates maduras --- \code{fd}, \code{bat} e \code{hyperfine}, $70$ commits de corrección
+extraídos --- el efecto es consistente: a presupuesto suficiente ($K{\ge}50$) los dos
+cambios elevan $R_{\mathrm{cov}}$ a $0{,}85$--$1{,}0$ (desde $0{,}50$--$0{,}84$ solo
+aguas abajo), mientras se \emph{diluye} a $0{,}19$--$0{,}28$ a un presupuesto ajustado
+$K{=}20$. \textbf{Pero frente a la referencia obvia, esto no es una victoria.}
+Ejecutando un RAG léxico clásico (coseno TF-IDF sobre el texto de los archivos,
+consultado por el archivo de la falla) al \emph{mismo presupuesto de archivos},
+$R_{\mathrm{cov}}$ para CCOS\,/\,RAG es $0{,}92/0{,}94$, $1{,}00/0{,}98$, $0{,}87/0{,}92$
+a $K{=}50$ y empata a $K{=}100$, mientras que a $K{=}20$ el RAG va claramente por
+delante ($0{,}20/0{,}56$ en \code{bat}, $0{,}20/0{,}73$ en \code{hyperfine}). La
+selección causal no tiene por tanto \emph{ninguna ventaja neta de cobertura} sobre la
+similitud léxica aquí, y es peor a presupuesto ajustado: en errores reales los archivos
+de una corrección se parecen léxicamente entre sí, así que el TF-IDF también los
+recupera --- la premisa de la \S\ref{sec:sim} de una causa léxicamente distinta de su
+síntoma no se reproduce en estos repositorios. La lectura honesta es que la condición
+\emph{necesaria} se cumple para la gran mayoría pero \emph{no} es específica de CCOS;
+una ventaja real tendría que venir de los regímenes que este montaje no prueba --- una
+consulta degradada/ausente (\S\ref{sec:sim}), un síntoma (prueba que falla) léxicamente
+lejos de su causa (que necesita la siembra real guiada por la prueba, no la heurística
+de mayor grado), o la condición \emph{suficiente} (Fase 4). Los espacios de trabajo
+multi-crate, ahora enlazables, también quedan por medir a escala.
+
+\paragraph{Condición suficiente (Fase 4): la resolución empata, la eficiencia no.}
+Ejecutamos la mitad de generación sobre correcciones reales de un solo archivo de
+\code{fd}: a un agente se le da un contexto de igual presupuesto construido de dos
+formas --- la región causal de CCOS frente a un RAG léxico top-$k$ --- se le pide
+reescribir el archivo con el error, y se califica según si \code{cargo test} pasa, con
+un reintento \emph{compilador en el bucle} (al fallar, una \emph{falla de página de
+contexto} analiza el error con la capa de traza, inyecta presión en los archivos que
+fallan, y vuelve a indicar con una ventana refrescada). Con un modelo débil de $7$B y un
+solo intento, ambos resuelven $0/15$; con \code{qwen3-coder-30B} y tres intentos el
+bucle eleva ambos a $2/10$ ($20\%$) --- es la retroalimentación por falla de página, no
+el recuperador, lo que desbloquea la resolución, y CCOS no muestra \textbf{ninguna
+ventaja de resolución} sobre el RAG, consistente con el resultado de recuperación. La
+\emph{eficiencia} los separa: a igual resolución, la región auto-acotada de CCOS
+promedia $776$ tokens de contexto frente a los $5366$ que llenan el presupuesto del
+recuperador léxico --- una reducción de $\mathbf{6{,}9\times}$. Lo mismo se cumple a
+escala sin modelo: en $51$ escenarios de corrección de un solo archivo de \code{fd},
+\code{bat} e \code{hyperfine}, CCOS ensambla $700$--$1600$ tokens de contexto frente a
+los $\approx\!6000$ del RAG, una reducción de $\mathbf{4{,}1}$--$\mathbf{9{,}1\times}$.
+Este es el único eje en el que CCOS domina: no \emph{lo que} recupera (una referencia lo
+iguala) sino \emph{cuán poco} necesita, porque la región causal se detiene en el working
+set en lugar de rellenar un top-$k$ hasta el presupuesto. Enunciamos las salvedades: la
+muestra de \emph{resolución} es diminuta ($n{=}10$, dos pasadas), y la referencia llena
+el presupuesto por construcción (un RAG con $k$ cuidadosamente ajustado también sería
+más disperso). La afirmación defendible es más estrecha pero real: CCOS
+\emph{se autocalibra} --- se acota en la región causal sin $k$ ni presupuesto que
+ajustar --- así que nunca desperdicia la ventana, que es precisamente el propósito de la
+paginación bajo demanda.
+
+\paragraph{Hipótesis.}
+\textbf{H1} (eficiencia): CCOS alcanza un éxito de tarea igual con menos tokens de
+entrada que RAG/GraphRAG, porque una región cubre el vecindario causal con mayor
+exhaustividad (Tabla~\ref{tab:locality}).
+\textbf{H2} (éxito a largo horizonte): en tareas multiarchivo, la tasa de resolución de
+CCOS supera al RAG por fragmentos por un margen que crece con el diámetro causal de la
+tarea.
+\textbf{H3} (fundamentación): CCOS reduce la tasa de alucinación de símbolos, porque la
+ventana admitida es un subgrafo conexo de nodos \emph{reales}.
+
+\paragraph{Amenazas a la validez.} La calidad de una región está acotada por la calidad
+de las aristas (\S\ref{sec:eval}); los resultados confundirían la \emph{política} de
+región con el \emph{grafo} subyacente. Las ablaciones deben, por tanto, fijar el grafo y
+variar solo la estrategia de selección, y reportar el diámetro causal por tarea para que
+las ganancias se atribuyan a la coherencia, no a recuperar más texto. La ablación
+\code{ccos-from-query} de la Tabla~\ref{tab:real} es exactamente este control --- mismo
+grafo y presupuesto, solo el ancla intercambiada --- y colapsa con las referencias
+léxicas bajo ruido. Un resultado positivo en H1--H3 constituiría la contribución de
+investigación; un resultado nulo aún validaría la infraestructura determinista y
+auditable.
+
+\section{Limitaciones}
+
+Somos deliberadamente explícitos sobre lo que \emph{no} se muestra.
+\textbf{(1) Ninguna ventaja de cobertura sobre RAG en errores reales.} La métrica
+principal sobre datos reales ($R_{\mathrm{cov}}$, \S\ref{sec:protocol}) empata con un
+simple recuperador léxico TF-IDF a presupuesto suficiente y pierde ante él a uno
+ajustado; en commits de corrección reales los archivos que una corrección toca se
+parecen léxicamente, así que la premisa de la simulación de una causa léxicamente
+distinta no se sostiene. Los fuertes números absolutos son una condición
+\emph{necesaria} que una referencia también satisface, no una victoria de CCOS.
+(Una medición complementaria sobre la propia fuente del motor aísla una relación
+distinta, definida estructuralmente: un recuperador léxico TF-IDF recupera solo el
+$49\%$ (exhaustividad@10) de las dependencias de importación resueltas por AST ---
+pares que rutinariamente no comparten vocabulario, coseno de dependencia $0{,}53$
+frente a $0{,}43$ aleatorio --- así que el punto ciego del RAG es real, pero queda
+fuera del eje de cohesión de la corrección que mide la métrica principal, donde los
+archivos de una corrección sí comparten vocabulario. La capa estructural recupera
+esas aristas por construcción; el AST, ahora por defecto, es lo que hace completa esa
+recuperación.)
+\textbf{(2) Necesario $\neq$ suficiente.} Nunca medimos si una región \emph{ayuda a un
+agente a corregir} un error (Fase 4: un parche que pasa las pruebas ocultas) --- solo si
+los archivos relevantes son recuperables.
+\textbf{(3) Heurística de siembra.} El arnés inyecta la falla en el archivo modificado
+de mayor grado de salida, no en la prueba realmente fallida, así que no ejercita el
+régimen donde un síntoma está léxicamente lejos de su causa --- el régimen más favorable
+a la selección causal.
+\textbf{(4) Escala y estadística.} Tres repositorios de una sola crate,
+$n\!\approx\!20$ cada uno; las diferencias se reportan con su desviación estándar pero no
+se validan de forma cruzada.
+\textbf{(5) Motor.} El analizador ahora usa por defecto un AST \code{syn} real ---
+medido un $36{,}5\%$ más preciso que la antigua heurística de línea sobre la propia
+fuente del motor (dos tercios frente a exhaustividad de importación completa), con la
+heurística conservada solo como reserva para entradas que no son Rust --- y la
+ingesta se endureció para reconstruir de forma bit-idéntica entre procesos
+(resolución de importaciones ordenada; centralidad invariante al orden). Las regiones
+siguen siendo de granularidad de archivo y solo se fusionan en aristas entre archivos
+explícitas; los pesos de puntuación están ajustados a mano, aunque ya están
+disponibles refinamientos, desactivados por defecto, de centralidad de autovalor y de
+ciclo de vida de nodo (Stable/Working/Orphan). Nada de esto afecta a las propiedades
+\emph{probadas} (partición, determinismo, reproducción) ni a la localidad medida ---
+pero el caso empírico de un beneficio para el agente aguas abajo está, en este punto,
+\emph{sin probar}.
+
+\section{Conclusión}
+
+Nos propusimos mostrar que organizar la memoria de un agente por \emph{regiones
+causales} recupera el contexto a largo horizonte mejor que la recuperación por
+fragmentos, dimos a la construcción una definición precisa y determinista, y probamos
+que se reconstruye bit a bit en la reproducción. Luego probamos la afirmación de
+recuperación contra la referencia obvia sobre datos reales --- y no se sostuvo: en $70$
+commits reales de corrección de errores, un simple recuperador léxico TF-IDF empata con
+la selección causal y la supera a presupuesto ajustado, y un pivote por traza de fallo
+pierde ante un RAG-sobre-el-mensaje-de-error, porque en código real los archivos de una
+corrección y sus mensajes de error comparten vocabulario. Reportamos el resultado
+negativo en vez de enterrarlo. Lo que sobrevive no es un mejor recuperador sino un tipo
+de objeto distinto: una memoria de trabajo \emph{determinista, reproducible, auditable}
+en la que el estado exacto del contexto de un agente puede rebobinarse y reproducirse
+bajo parámetros distintos --- depuración por viaje en el tiempo que una pila de
+recuperación probabilística no puede ofrecer. Si esa auditabilidad, o una ventaja de
+contexto estructurado en tiempo de \emph{generación} (Fase 4), produce una ganancia
+medible aguas abajo, queda abierto. Publicamos el motor, el arnés de validación honesto
+y este artículo para que la distinción entre lo que está probado, lo que está medido y
+lo que está refutado pueda comprobarse en vez de afirmarse.
+
+\begin{thebibliography}{99}
+\bibitem{lewis2020rag} P.~Lewis et al. Retrieval-Augmented Generation for
+Knowledge-Intensive NLP Tasks. \emph{NeurIPS}, 2020. arXiv:2005.11401.
+\bibitem{asai2023selfrag} A.~Asai et al. Self-RAG: Learning to Retrieve, Generate
+and Critique through Self-Reflection. \emph{ICLR}, 2024. arXiv:2310.11511.
+\bibitem{edge2024graphrag} D.~Edge et al. From Local to Global: A Graph RAG
+Approach to Query-Focused Summarization. 2024. arXiv:2404.16130.
+\bibitem{yamaguchi2014cpg} F.~Yamaguchi et al. Modeling and Discovering
+Vulnerabilities with Code Property Graphs. \emph{IEEE S\&P}, 2014.
+\bibitem{packer2023memgpt} C.~Packer et al. MemGPT: Towards LLMs as Operating
+Systems. 2023. arXiv:2310.08560.
+\bibitem{park2023generative} J.~S.~Park et al. Generative Agents: Interactive
+Simulacra of Human Behavior. \emph{UIST}, 2023. arXiv:2304.03442.
+\bibitem{langgraph} LangChain. LangGraph: Building Stateful, Multi-Actor
+Applications with LLMs. Marco de software, 2023--2024.
+\url{https://github.com/langchain-ai/langgraph}.
+\bibitem{denning1968working} P.~J.~Denning. The Working Set Model for Program
+Behavior. \emph{Communications of the ACM}, 11(5), 1968.
+\bibitem{liu2023lost} N.~F.~Liu et al. Lost in the Middle: How Language Models Use
+Long Contexts. \emph{TACL}, 2024. arXiv:2307.03172.
+\bibitem{kwon2023paged} W.~Kwon et al. Efficient Memory Management for Large
+Language Model Serving with PagedAttention. \emph{SOSP}, 2023. arXiv:2309.06180.
+\bibitem{haber1991timestamp} S.~Haber and W.~S.~Stornetta. How to Time-Stamp a
+Digital Document. \emph{Journal of Cryptology}, 3(2), 1991.
+\bibitem{jimenez2023swebench} C.~E.~Jimenez et al. SWE-bench: Can Language Models
+Resolve Real-World GitHub Issues? \emph{ICLR}, 2024. arXiv:2310.06770.
+\end{thebibliography}
+
+\end{document}

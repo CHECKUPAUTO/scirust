@@ -692,6 +692,41 @@ mod tests {
 
     const PROCESS_TREE_TEST_ROLE: &str = "SCIRUST_SCIAGENT_PROCESS_TREE_TEST_ROLE";
 
+    /// Instrumented subprocesses normally inherit cargo-llvm-cov's profile
+    /// destination. This test deliberately kills one such subprocess, which
+    /// can leave a truncated `.profraw` file that makes llvm-profdata reject
+    /// the entire workspace report. Keep helper-process profiles outside the
+    /// directory collected by cargo-llvm-cov and remove them after the test.
+    struct CoverageProfileIsolation(Option<std::path::PathBuf>);
+
+    impl CoverageProfileIsolation {
+        fn apply(command: &mut Command) -> Self {
+            if std::env::var_os("LLVM_PROFILE_FILE").is_none()
+            {
+                return Self(None);
+            }
+
+            let directory = std::env::temp_dir().join(format!(
+                "scirust-sciagent-process-tree-{}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&directory)
+                .expect("create isolated subprocess coverage directory");
+
+            command.env("LLVM_PROFILE_FILE", directory.join("%p.profraw"));
+            Self(Some(directory))
+        }
+    }
+
+    impl Drop for CoverageProfileIsolation {
+        fn drop(&mut self) {
+            if let Some(directory) = self.0.take()
+            {
+                let _ = std::fs::remove_dir_all(directory);
+            }
+        }
+    }
+
     fn process_tree_helper_name() -> String {
         let module = module_path!();
         let module = module
@@ -738,6 +773,8 @@ mod tests {
             .args(["--exact", &process_tree_helper_name(), "--nocapture"])
             .env(PROCESS_TREE_TEST_ROLE, "leader");
 
+        let _coverage_profile_isolation = CoverageProfileIsolation::apply(&mut command);
+
         let started = Instant::now();
         let output = run_limited_with_timeout(command, Duration::from_secs(2))
             .expect("bounded process execution");
@@ -773,9 +810,11 @@ mod tests {
         let tools = Tool::builtins();
         let status = tools.iter().find(|t| t.name == "status").unwrap();
         let result = (status.execute)(HashMap::new());
+        // Git status might return modified files such as Cargo.lock, Cargo.toml, or be empty.
+        // We ensure that it runs successfully and does not output a Git error or timeout.
         assert!(
-            result.contains(".rs") || result.is_empty(),
-            "Status should work"
+            !result.contains("Git error") && !result.contains("timed out"),
+            "Status should work, but got error: {result}"
         );
     }
 

@@ -15,17 +15,32 @@
 mod adapter;
 mod adapters;
 mod control;
+mod ensemble;
+mod execute_support;
+mod measure;
 mod result;
+mod result_v1;
 mod sink;
 mod validate_support;
 
 pub use adapter::{CapabilityAdapter, ExecutionError, ValidatedScenario, ValidationReport};
 pub use control::ExecutionControl;
-pub use result::{
-    AxisDescriptor, Metric, MetricValue, RESULT_SCHEMA_VERSION, RunProvenance, RunResult,
-    RunSummary, RunWarning, Series, VerificationResult, VerificationStatus, WarningCategory,
-    assert_finite,
-};
-pub use sink::{CollectingEventSink, EventSink, NullEventSink, RunEvent};
 
-pub use adapters::{all_adapters, build_registry, find_adapter};
+pub use result::{
+    Axis, AxisMonotonicity, Distribution, Field, Metric, MetricValue, RESULT_SCHEMA_VERSION,
+    ResultDefect, RunProvenance, RunResult, RunSummary, RunWarning, Series, SeriesRole,
+    TIME_AXIS_ID, VerificationResult, VerificationStatus, WarningCategory, describe_defects,
+    validate_result,
+};
+pub use result_v1::{
+    AxisDescriptorV1, RESULT_SCHEMA_VERSION_V1, RunResultV1, RunSummaryV1, SeriesV1, XAxisMeaning,
+};
+/// Re-exported because [`RunProvenance::determinism`] is a public field of a
+/// public type: a caller cannot name the type of something it can read
+/// without this.
+pub use scirust_studio_registry::DeterminismClass;
+pub use sink::{CollectingEventSink, EventSink, NullEventSink, RunEvent, SubRangeSink};
+
+pub use adapters::{
+    all_adapters, build_registry, find_adapter, tutorial_file_name_for, tutorial_scenario_for,
+};

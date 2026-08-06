@@ -30,7 +30,16 @@
 #[cfg(feature = "cuda")]
 mod chain;
 #[cfg(feature = "cuda")]
+mod raw_runtime;
+
+#[cfg(feature = "cuda")]
 pub use chain::{CudaChain, CudaF32, CudaMatrix};
+#[cfg(feature = "cuda")]
+pub use raw_runtime::{
+    CudaDeviceInfo, CudaRawAccess, CudaRawBinding, CudaRawBuffer, CudaRawCompileOptions,
+    CudaRawEvent, CudaRawKernel, CudaRawLaunchConfig, CudaRawRuntime, device_count,
+    driver_available,
+};
 
 /// Whether this build includes the CUDA backend (the `cuda` feature). `false`
 /// builds carry no CUDA dependency and expose no device API.

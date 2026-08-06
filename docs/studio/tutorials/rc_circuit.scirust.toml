@@ -1,0 +1,73 @@
+# SciRust Studio tutorial scenario: the first-order system.
+#
+# Run it with:
+#
+#   scirust run docs/studio/tutorials/rc_circuit.scirust.toml
+#
+# A 1 uF capacitor charging through 10 kOhm from a 5 V source. One state, one
+# time constant of 10 ms, one exponential. There is nothing surprising in the
+# physics — which is exactly why it is a good place to state the thing this
+# whole catalogue is built around.
+#
+# What is verified:
+#
+#   * settles_at_the_source_voltage — the capacitor ends at 5 V, whatever it
+#     started from.
+#   * matches_the_closed_form — the approach is
+#     v_source + (v0 - v_source)*exp(-t/RC), checked at EVERY recorded sample.
+#
+# These two fail independently, and that is the point. A wrong source voltage
+# moves the destination and leaves the rate alone. A wrong R or C moves the
+# rate and leaves the destination alone. A capability that only compared the
+# endpoint would pass the first check forever and never notice the second.
+#
+# Both thresholds are derived. The closed-form check's is RK4's truncation
+# error against an analytic reference evaluated at the integrator's own
+# timestamps — there is no discretisation on the reference side to hide
+# behind. The settling check's is exp(-span/RC), the residual the run's own
+# length in time constants necessarily leaves.
+#
+# The run starts at -2 V, below the source rather than at zero, so the
+# capacitor has to cross zero on its way up. That is not decoration: a sign
+# error in the source term produces a curve that still settles somewhere
+# plausible if you start at zero, and does not if you start below.
+#
+# Try it: halve the capacitance. The time constant halves, the settled voltage
+# does not move at all, and the two metrics report exactly that — which is the
+# independence the two checks exist to police, made visible in one edit.
+
+schema_version = 1
+
+[experiment]
+name = "RC charging circuit"
+description = "A 1 uF capacitor charging through 10 kOhm toward 5 V from a negative start."
+
+[capability]
+id = "sim.electrical.rc"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+resistance = { value = 1.0e4, unit = "Ohm" }
+capacitance = { value = 1.0e-6, unit = "F" }
+# The destination. It sets where, not how fast.
+v_source = { value = 5.0, unit = "V" }
+
+[initial_state]
+# Below the source and below zero, so the run crosses zero on the way up.
+voltage = [{ value = -2.0, unit = "V" }]
+
+[solver]
+id = "rk4"
+start = { value = 0.0, unit = "s" }
+# Eight time constants (tau = 10 ms), so the residual the settling check
+# compares against is exp(-8) = 3.4e-4.
+end = { value = 0.08, unit = "s" }
+# tau/500.
+step = { value = 2.0e-5, unit = "s" }
+
+[outputs]
+record = ["voltage", "exact_voltage", "source_voltage", "current"]

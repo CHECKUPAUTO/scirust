@@ -61,26 +61,102 @@
 //!   [`quadrature::CertifiedIntegral`] needs no accepted/rejected bookkeeping
 //!   the way [`ode::CertifiedTrajectory`] does: a *successful* strict call is
 //!   by construction guaranteed to have met the declared tolerance.
+//! * [`root`] — [`root::BroydenRootSimulator`] solves `F(x) = 0` with
+//!   `scirust_solvers`' quasi-Newton Broyden iteration. Also `L2`, and the
+//!   certificate it carries is unusually load-bearing: a root solve is
+//!   *basin-dependent*, so [`root::CertifiedRoot`] records
+//!   [`started_from`](root::CertifiedRoot::started_from) alongside the residual
+//!   — a root reported without its starting point cannot be reproduced or even
+//!   correctly interpreted.
+//! * [`spectrum`] — two backends over `scirust-signal`, both answering
+//!   *"what is in this signal?"* rather than *"what does this system do?"*,
+//!   and both `L3`:
+//!     * [`spectrum::PeriodogramSimulator`] — a windowed periodogram over the
+//!       FFT. Its module docs are explicit that `L3` asserts
+//!       bit-reproducibility and **not** accuracy: a single periodogram is a
+//!       biased, high-variance PSD estimator whose variance does not shrink
+//!       with record length. Like [`root::CertifiedRoot`], its output carries
+//!       the choice that shaped it ([`spectrum::Spectrum::window`]).
+//!     * [`spectrum::WelchSimulator`] — the averaged periodogram, whose
+//!       variance *does* fall, as `1/segments`. Also `L3`, and that equality
+//!       is the point: the two differ in **estimator quality**, which a
+//!       determinism tag does not express. So
+//!       [`spectrum::AveragedSpectrum`] carries `segments` and
+//!       `dropped_samples` — a *statistical quality descriptor on an exactly
+//!       reproducible result*, a third kind of metadata beside `L2`'s
+//!       tolerance certificate and `L1`'s standard error.
 //!
-//! [`ode`] and [`quadrature`] share their `f64`-quantization and
-//! `scirust-solvers`-error-mapping helpers via [`solver`] rather than
-//! duplicating them.
+//!   Both outputs carry a centroid, spread and flatness, and **they are not
+//!   the same statistics**: [`spectrum::Spectrum`]'s are magnitude-weighted
+//!   (what `scirust-signal`'s complex-spectrum functions compute) and
+//!   [`spectrum::AveragedSpectrum`]'s are power-weighted (what its PSD-domain
+//!   functions compute, since a Welch estimate is a real PSD and the
+//!   complex-spectrum ones cannot read it at all). Both types say so on every
+//!   affected field.
+//!
+//! * [`model`] — [`model::CatalogSimulator`] runs `scirust-sim`'s
+//!   oracle-tested domain models (SIR/SEIR, Lotka-Volterra, RC circuits, Van
+//!   der Pol, damped oscillators, ...) on its fixed-step RK4. `L3`, and the
+//!   reason it exists is not the integrator — [`ode::Rk4OdeSimulator`] already
+//!   integrates — but **identity**. That backend's model is an anonymous
+//!   closure, so an [`ode::OdeConfig`]'s content address fixes the span, the
+//!   step and the initial state while leaving the physics to whichever closure
+//!   the handler was built with; the same digest can denote two different
+//!   experiments. A [`model::ModelSpec`] is a name plus a parameter vector, so
+//!   a [`model::ModelRun`]'s address *determines what will be computed* — the
+//!   property a study manifest needs, since it identifies a stage's
+//!   configuration by digest and cannot inline a right-hand side.
+//!   [`model::ModeledTrajectoryBody`] makes such a run a first-class stored
+//!   object that can answer which model produced it.
+//!
+//! [`ode`], [`quadrature`], [`root`], [`spectrum`] and [`model`] share their
+//! `f64`-quantization helpers — and the solver backends their
+//! `scirust-solvers`-error mapping — via [`solver`] rather than duplicating
+//! them.
+//!
+//! **Gaps #2, #4–8** — the `sos-workflow` `StageExecutor` now dispatches real
+//! work through [`stage::OdeStageHandler`], [`stage::CatalogStageHandler`] and
+//! [`stage::SpectrumStageHandler`], and [`verdict`] supplies the agreement
+//! predicates `sos-repro` re-execution checks against. Those handlers are the
+//! same mechanism with different guarantees, which is the clearest statement
+//! of what a data-only configuration buys: the catalogue and spectral ones can
+//! be asked [`model_at`](stage::CatalogStageHandler::model_at) /
+//! [`measurement_at`](stage::SpectrumStageHandler::measurement_at) — *what will
+//! this stage actually do?* — from a [`Plan`](sos_workflow::Plan) alone, before
+//! anything runs, and the closure-based one has no such answer to give.
 //!
 //! ## What is deliberately not here yet
 //!
-//! Gap #2 (the `sos-workflow` `StageExecutor`) needs a dispatch/registry
-//! mechanism first — a materially different, larger increment — and gaps
-//! #4–8 are untouched; each is its own increment, not stubbed here.
+//! * [`pipeline`] — [`pipeline::TrajectorySpectrumSimulator`], the first
+//!   backend whose input is **another stage's output** rather than data
+//!   written into its own configuration. A
+//!   [`pipeline::TrajectorySpectrumConfig`] names a *component* of whatever
+//!   trajectory the stage consumed and nothing else; in particular it does not
+//!   take a sample rate, because a [`ode::Trajectory`] carries its own time
+//!   grid. Deriving the rate is not convenience — it is the only way to catch
+//!   the error that matters, since an FFT assumes uniform sampling and
+//!   [`ode::Dopri5OdeSimulator`] is adaptive. A hand-declared rate would let a
+//!   spectrum of an unevenly sampled trajectory look entirely plausible and
+//!   mean nothing; [`pipeline::uniform_sample_rate`] refuses it instead. `L3`.
+//!
 //! Registry-mediated resolution (binding a `sos-registry` `PluginDescriptor`
-//! to any capability above) is also deferred: `sos-scirust` is documented as
+//! to any capability above) is deferred: `sos-scirust` is documented as
 //! the in-process "Static Rust... the default" transport (RFC-0002 §10 §1),
 //! so direct construction is the expected shape until a caller actually needs
-//! to swap implementations. Within gap #3 itself, `scirust-solvers`' nonlinear
-//! (Newton/Broyden) is a separate follow-on backend — root-finding does not
-//! obviously fit `Simulate`'s "observe an experiment" framing the way
-//! integration does, so it needs its own look rather than a mechanical
-//! repeat of this pattern — and `scirust-signal`/`scirust-sim`'s executor
-//! kinds (SDE §08 §2) are untouched.
+//! to swap implementations. Within the signal family, spectrograms are
+//! follow-on work.
+//!
+//! Seven of the nine [`Simulate`](sos_simulation::Simulate) backends have
+//! stage handlers ([`ode::Rk4OdeSimulator`], [`model::CatalogSimulator`],
+//! [`model::AdaptiveCatalogSimulator`], [`spectrum::PeriodogramSimulator`],
+//! [`spectrum::WelchSimulator`], [`pipeline::TrajectorySpectrumSimulator`] and
+//! [`pipeline::TrajectorySpectrogramSimulator`]);
+//! [`ode::Dopri5OdeSimulator`], [`quadrature`] and [`root`] do not, and no
+//! other engine's stages have handlers at all. Six of those seven are
+//! reachable from `sos run` — the six whose configuration is data. The
+//! others take a *function*, and no file can name a function, so a CLI
+//! binding for them needs a transport that ships code (RFC-0002 §10's WASM or
+//! MCP), not more plumbing here.
 //!
 //! ## Example
 //!
@@ -113,17 +189,36 @@
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
+pub mod bayes;
 pub mod bo;
 pub mod eig;
 pub mod error;
+pub mod model;
 pub mod nmc;
 pub mod ode;
+pub mod pipeline;
 pub mod quadrature;
+pub mod root;
 mod solver;
+pub mod spectrum;
+pub mod stage;
+pub mod verdict;
 
+pub use bayes::{BayesFactor, log10_bayes_factor};
 pub use bo::BoResult;
 pub use eig::GpEigEstimator;
 pub use error::{Result, ScirustError};
+pub use model::{
+    CatalogSimulator, ModelKind, ModelRun, ModelSpec, ModeledTrajectory, ModeledTrajectoryBody,
+    UnknownModel,
+};
 pub use nmc::NestedMcEigEstimator;
 pub use ode::{Dopri5OdeSimulator, Rk4OdeSimulator};
 pub use quadrature::QuadratureSimulator;
+pub use root::{BroydenRootSimulator, CertifiedRoot, RootConfig};
+pub use spectrum::{
+    AveragedSpectrum, AveragedSpectrumBody, PeriodogramSimulator, Spectrum, SpectrumBody,
+    SpectrumConfig, WelchConfig, WelchSimulator, WindowKind,
+};
+pub use stage::{OdeStageHandler, TrajectoryBody, config_address};
+pub use verdict::{Agreement, VerdictError, certify_root};

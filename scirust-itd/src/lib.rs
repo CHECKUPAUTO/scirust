@@ -55,6 +55,13 @@
 //!      the reference's full `simulate_material_deformation` orchestration
 //!      (eulerian baseline + per-interval diagnostic + indices + consistency
 //!      certification).
+//! 6. **3-D region and topology analysis** ([`field3`], [`region3`]) — ported
+//!    from the reference's Mission 8 structural machinery: deterministic
+//!    6-connected component labelling of a 3-D mask (bounded box or periodic
+//!    torus), size-filtered region records (volume, cell-index centroid),
+//!    mask-overlap metrics (IoU, Dice, symmetrised max-nearest-cell distance)
+//!    and persistence-gated topology events (core merger / split) on a
+//!    component-count series.
 //!
 //! ## Provenance
 //!
@@ -74,10 +81,12 @@
 pub mod covariance;
 mod error;
 mod field;
+pub mod field3;
 pub mod geometry;
 pub mod material;
 pub mod multiscale;
 pub mod operators;
+pub mod region3;
 pub mod scenarios;
 pub mod signature;
 pub mod simulate;
@@ -90,6 +99,7 @@ pub use covariance::{
 };
 pub use error::{ItdError, Result};
 pub use field::Field2;
+pub use field3::Field3;
 pub use geometry::{BoundaryMode, Geometry};
 pub use material::{
     AdvectionSource, MaterialDeformation, MaterialInterval, interpolate_interval_series_to_nodes,
@@ -97,6 +107,11 @@ pub use material::{
     simulate_material_deformation_with_advection,
 };
 pub use multiscale::{MultiscaleProfile, MultiscaleReference, derive_multiscale_profile};
+pub use region3::{
+    Comparison, Labeling, Mask3, RegionRecord, TopologyEvent, TopologyEventKind, centroid_distance,
+    core_count_series, detect_regions, detect_topology_events, dice, iou, label_components,
+    max_nearest_distance, threshold_mask,
+};
 pub use scenarios::{Config, Scenario};
 pub use signature::{StructuralMetrics, StructuralWeights, structural_metrics};
 pub use simulate::{

@@ -1,0 +1,25 @@
+[package]
+name = "scirust-variational"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Variational mechanics, physics-informed ML, and optimal control for SciRust: Euler-Lagrange (symbolic + autodiff), Lagrangian/Hamiltonian neural networks, PINNs, and direct transcription methods"
+license-file = "../LICENSE.md"
+repository = "https://github.com/Memorithm/scirust"
+
+[dependencies]
+scirust-core = { path = "../scirust-core" }
+scirust-symbolic = { path = "../scirust-symbolic" }
+scirust-solvers = { path = "../scirust-solvers" }
+scirust-autodiff = { path = "../scirust-autodiff" }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+
+[dev-dependencies]
+approx = "0.5"
+
+[features]
+default = ["std", "learning"]
+std = []
+learning = []
+serde = ["dep:serde", "dep:serde_json"]

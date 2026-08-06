@@ -13,6 +13,7 @@ categories = ["science", "data-structures"]
 sos-core = { workspace = true }
 sos-knowledge = { workspace = true }
 sos-reasoning = { workspace = true }
+sos-planner = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 

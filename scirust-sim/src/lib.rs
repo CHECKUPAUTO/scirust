@@ -137,8 +137,8 @@ pub mod stochastic;
 pub mod thermal;
 
 pub use engine::{
-    SecondOrderSystem, SimError, System, Trajectory, simulate, simulate_adaptive,
-    simulate_second_order,
+    ObservedRun, SecondOrderSystem, SimError, StepAction, System, Trajectory, simulate,
+    simulate_adaptive, simulate_observed, simulate_second_order, simulate_second_order_observed,
 };
 pub use env::{Environment, FiniteActionSpace, Step, run_episode};
 pub use rng::SplitMix64;

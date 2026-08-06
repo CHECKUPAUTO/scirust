@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# commit-msg hook — reject AI attribution and contribution trailers (§43).
+# Technical references to model providers are allowed; attribution is not.
+set -euo pipefail
+MSG="$1"
+TRAILER_RE='^(co-?authored-by|co-developed-by|contributed-by|generated-by|assisted-by|suggested-by|[a-z-]*-session)\s*:'
+ATTRIBUTION_RE='generated (by|with) (claude|chatgpt|codex|copilot|gemini|kimi|opencode|ai)|ai[- ]generated|ai[- ]assisted|written by (claude|chatgpt|codex|kimi|ai)'
+
+if grep -Eiq "$TRAILER_RE" "$MSG"; then
+  echo "commit-msg hook: contribution trailers are forbidden (single human contributor policy)" >&2
+  exit 1
+fi
+if grep -Eiq "$ATTRIBUTION_RE" "$MSG"; then
+  echo "commit-msg hook: AI attribution is forbidden in commit messages" >&2
+  exit 1
+fi

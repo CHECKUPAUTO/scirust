@@ -27,12 +27,33 @@
 //! ## Provenance & scope
 //!
 //! This is a faithful re-homing of the TDI `tdi-core` crate, kept exact and
-//! test-for-test identical. As the reference project states, its results
-//! challenge entropy-only sufficiency within the tested synthetic families but
-//! do **not** establish a universal law, invariance across system sizes, or
-//! superiority over every dynamical baseline (TDI-1's signal was fully subsumed
-//! by the orbital baseline). What transfers to SciRust is the deterministic,
-//! exact machinery and its honest evaluation discipline.
+//! test-for-test identical: the twelve modules differ from the frozen upstream
+//! only by SciRust's `rustfmt.toml` and this documentation, so the upstream
+//! confirmatory results describe this crate's behaviour directly.
+//!
+//! Within small synthetic finite-state families, and under preregistered
+//! one-shot evaluation, the overlaps carry predictive information beyond exact
+//! contraction descriptors (TDI-5.5), beyond exact spectral moments (TDI-5.6),
+//! across four generator families (TDI-5.7 exactly, TDI-6.5 non-exactly), across
+//! three system widths (TDI-5.8), beyond the **literal** spectral gap and mixing
+//! time (TDI-6.1), beyond a fourth spectral moment — which also shows the exact
+//! descriptor ladder saturating while the signal does not (TDI-5.9) — and under
+//! a degree-2 nonlinear model, where the advantage **grows** rather than shrinks
+//! (TDI-6.2).
+//!
+//! It does **not** establish a universal law, transportable calibration, a
+//! transportable effect size, or superiority over an arbitrarily expressive
+//! learner. TDI-1's signal was fully subsumed by the orbital baseline
+//! (incremental gain `0`). Cross-domain transfer of the deficit *level* is a
+//! **measured failure**, and two label-free repairs were preregistered and
+//! refuted with their mechanisms identified: feature re-standardization
+//! (TDI-6.6) and an additive observable offset (TDI-6.7) are each *Harmful* in
+//! every confirmatory cell. What survives transfer is rank ordering, which
+//! TDI-6.8 was built to test and which — as of this crate's documentation — has
+//! **not yet been run**.
+//!
+//! The full preregistrations, results reports and hash manifests are copied
+//! verbatim under `docs/tdi-upstream/`.
 
 mod action;
 mod baseline;

@@ -1,0 +1,87 @@
+# SciRust Studio tutorial scenario: an epidemic with an incubation period.
+#
+# Run it with:
+#
+#   scirust run docs/studio/tutorials/seir_epidemic.scirust.toml
+#
+# The same outbreak as `sir_epidemic.scirust.toml` — R0 = 3, one case per
+# thousand to start — with one thing added: people who catch it are not
+# infectious straight away. They spend an average of 1/sigma days incubating.
+#
+# That single extra compartment is why SEIR exists. Compare the two runs and
+# the difference is not subtle: the epidemic arrives later and its peak is
+# lower, because at any moment a chunk of the infected population is sitting
+# in a compartment that does not transmit.
+#
+# What is verified:
+#
+#   * population_is_conserved — the four derivatives sum to zero identically,
+#     so s + e + i + r never moves. The threshold is the run's own
+#     accumulated round-off, `steps * f64::EPSILON`, not a chosen number:
+#     the invariant is exact and only floating-point addition can disturb it.
+#   * exposure_leads_infection — the exposed compartment must peak strictly
+#     BEFORE the infectious one.
+#
+# The second check is the one that earns its place. Conservation is a strong
+# test of the arithmetic and a weak test of the structure: a model that moved
+# people between the wrong two compartments would conserve them just as
+# faithfully. The ordering is structural — nobody becomes infectious without
+# first being exposed, and the transfer is one-directional — so it holds for
+# every parameter set, and a coupling written backwards fails it.
+#
+# It has no tolerance, either. Any positive lead passes and any non-positive
+# lead fails, because this is an ordering rather than a magnitude.
+#
+# ---------------------------------------------------------------------------
+# Reading the numbers
+# ---------------------------------------------------------------------------
+#
+# Rates are per day. beta = 0.6 and gamma = 0.2 give R0 = 3 — each case
+# infects three others in a fully susceptible population, roughly measles-like
+# in a naive population. sigma = 0.3 is a mean latent period of 3.3 days.
+#
+# Try it: raise `sigma` to 3.0, a latent period of eight hours instead of
+# three days. The exposed compartment nearly empties, the epidemic accelerates
+# to look almost exactly like the SIR run, and the lead the ordering check
+# measures shrinks toward zero without ever reaching it.
+
+schema_version = 1
+
+[experiment]
+name = "SEIR epidemic with a latent stage"
+description = "An R0 = 3 outbreak in which the newly infected incubate for three days before becoming infectious."
+
+[capability]
+id = "sim.epidemiology.seir"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+# Effective contact rate, per day.
+beta = { value = 0.6, unit = "1/s" }
+# 1/sigma = 3.3 days of incubation.
+sigma = { value = 0.3, unit = "1/s" }
+# 1/gamma = 5 days infectious. R0 = beta/gamma = 3.
+gamma = { value = 0.2, unit = "1/s" }
+
+[initial_state]
+# One case per thousand, already infectious; nobody incubating yet, so the
+# whole exposed compartment is built by the epidemic itself.
+susceptible = [{ value = 0.999, unit = "1" }]
+exposed = [{ value = 0.0, unit = "1" }]
+infectious = [{ value = 0.001, unit = "1" }]
+recovered = [{ value = 0.0, unit = "1" }]
+
+[solver]
+id = "rk4"
+start = { value = 0.0, unit = "s" }
+# 120 days: long enough for the outbreak to run its course and the recovered
+# fraction to settle.
+end = { value = 120.0, unit = "s" }
+step = { value = 0.05, unit = "s" }
+
+[outputs]
+record = ["susceptible", "exposed", "infectious", "recovered", "population"]

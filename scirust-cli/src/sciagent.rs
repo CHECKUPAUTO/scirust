@@ -8,6 +8,9 @@ use scirust_sciagent::bpe::BpeTokenizer;
 use scirust_sciagent::config::SciAgentConfig;
 use scirust_sciagent::model::SciAgentModel;
 use scirust_sciagent::quantize::QuantizedSciAgent;
+use scirust_sciagent::train::checkpoint::{load_checkpoint, read_meta};
+
+type CliResult<T> = Result<T, (u8, String)>;
 
 fn flag_str(args: &[String], name: &str) -> Option<String> {
     args.iter()
@@ -26,6 +29,48 @@ fn flag_u64(args: &[String], name: &str, default: u64) -> u64 {
 
 fn model_name(args: &[String]) -> String {
     flag_str(args, "--model").unwrap_or_else(|| String::from("debug"))
+}
+
+fn report_cli_error((code, message): (u8, String)) -> u8 {
+    eprintln!("error: {message}");
+    code
+}
+
+/// Load configuration and weights from an explicit checkpoint.
+///
+/// A newly constructed model contains random weights. Inference must therefore
+/// fail closed when the checkpoint is missing, unreadable, or invalid.
+fn load_required_model(args: &[String]) -> CliResult<SciAgentModel> {
+    let path = flag_str(args, "--checkpoint")
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            (
+                2,
+                String::from(
+                    "missing required `--checkpoint PATH`; refusing to run with random weights",
+                ),
+            )
+        })?;
+
+    let meta = read_meta(&path).map_err(|error| {
+        (
+            1,
+            format!(
+                "cannot read checkpoint metadata from `{}`: {error}",
+                path.display()
+            ),
+        )
+    })?;
+
+    let mut model = SciAgentModel::new(&meta.config);
+    load_checkpoint(&mut model, &path).map_err(|error| {
+        (
+            1,
+            format!("cannot load checkpoint from `{}`: {error}", path.display()),
+        )
+    })?;
+
+    Ok(model)
 }
 
 fn get_config(name: &str) -> SciAgentConfig {
@@ -95,19 +140,25 @@ fn run_ask(args: &[String]) -> u8 {
         .unwrap_or_default();
     if prompt.is_empty()
     {
-        eprintln!("usage: scirust sciagent ask <prompt> [--model debug|350m|7b]");
+        eprintln!("usage: scirust sciagent ask <prompt> --checkpoint PATH");
         return 2;
     }
-    let cfg = get_config(&model_name(args));
-    let mut model = SciAgentModel::new(&cfg);
+    let mut model = match load_required_model(args)
+    {
+        Ok(model) => model,
+        Err(error) => return report_cli_error(error),
+    };
     cmd_ask(&mut model, &prompt, 512);
     0
 }
 
-fn run_chat(_args: &[String]) -> u8 {
-    let cfg = get_config("debug");
-    let mut model = SciAgentModel::new(&cfg);
-    let gen = scirust_sciagent::generate::Generator::new(&cfg);
+fn run_chat(args: &[String]) -> u8 {
+    let mut model = match load_required_model(args)
+    {
+        Ok(model) => model,
+        Err(error) => return report_cli_error(error),
+    };
+    let gen = scirust_sciagent::generate::Generator::new(&model.config);
 
     println!("SCIAGENT chat (Ctrl+D to exit)");
     let mut history: Vec<usize> = Vec::new();
@@ -189,8 +240,11 @@ fn run_explain(args: &[String]) -> u8 {
         None => content.chars().take(2000).collect::<String>(),
     };
     let prompt = format!("Explain this code:\n```rust\n{excerpt}\n```");
-    let cfg = get_config("debug");
-    let mut model = SciAgentModel::new(&cfg);
+    let mut model = match load_required_model(args)
+    {
+        Ok(model) => model,
+        Err(error) => return report_cli_error(error),
+    };
     cmd_ask(&mut model, &prompt, 512);
     0
 }
@@ -204,14 +258,35 @@ fn run_generate(args: &[String]) -> u8 {
         eprintln!("usage: scirust sciagent generate <description>");
         return 2;
     }
-    let cfg = get_config(&model_name(args));
-    let mut model = SciAgentModel::new(&cfg);
+    let mut model = match load_required_model(args)
+    {
+        Ok(model) => model,
+        Err(error) => return report_cli_error(error),
+    };
     cmd_ask(&mut model, &format!("Write Rust code for: {desc}"), 512);
     0
 }
 
 fn run_info(args: &[String]) -> u8 {
-    let cfg = get_config(&model_name(args));
+    let cfg = match flag_str(args, "--checkpoint").map(PathBuf::from)
+    {
+        Some(path) => match read_meta(&path)
+        {
+            Ok(meta) => meta.config,
+            Err(error) =>
+            {
+                return report_cli_error((
+                    1,
+                    format!(
+                        "cannot read checkpoint metadata from `{}`: {error}",
+                        path.display()
+                    ),
+                ));
+            },
+        },
+        None => get_config(&model_name(args)),
+    };
+
     println!("=== SCIAGENT Model Info ===");
     println!("Name: scirust-sciagent");
     println!("Architecture: GQA + SwiGLU + RoPE + RMSNorm");
@@ -226,9 +301,13 @@ fn run_info(args: &[String]) -> u8 {
     0
 }
 
-fn run_attest(_args: &[String]) -> u8 {
-    let cfg = get_config("debug");
-    let model = SciAgentModel::new(&cfg);
+fn run_attest(args: &[String]) -> u8 {
+    let model = match load_required_model(args)
+    {
+        Ok(model) => model,
+        Err(error) => return report_cli_error(error),
+    };
+    let cfg = model.config.clone();
     let mut inf = scirust_sciagent::inference::SciAgentInference::new(model, &cfg);
     let prompt = vec![4usize, 5, 6];
     let _out = inf.generate(&prompt, 10);
@@ -244,8 +323,12 @@ fn run_attest(_args: &[String]) -> u8 {
 }
 
 fn run_quantize(args: &[String]) -> u8 {
-    let cfg = get_config(&model_name(args));
-    let model = SciAgentModel::new(&cfg);
+    let model = match load_required_model(args)
+    {
+        Ok(model) => model,
+        Err(error) => return report_cli_error(error),
+    };
+    let cfg = model.config.clone();
     let group_size = flag_u64(args, "--group", 32) as usize;
     let quantized = QuantizedSciAgent::from_model(&model, group_size);
 
@@ -299,5 +382,42 @@ pub fn run(args: &[String]) -> u8 {
             );
             2
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inference_requires_an_explicit_checkpoint() {
+        let error = match load_required_model(&[])
+        {
+            Ok(_) => panic!("randomly initialized model must not be accepted"),
+            Err(error) => error,
+        };
+        assert_eq!(error.0, 2);
+        assert!(error.1.contains("--checkpoint PATH"));
+        assert!(error.1.contains("random weights"));
+    }
+
+    #[test]
+    fn invalid_checkpoint_fails_closed() {
+        let args = vec![
+            String::from("--checkpoint"),
+            String::from("/path/that/does/not/exist"),
+        ];
+        let error = match load_required_model(&args)
+        {
+            Ok(_) => panic!("invalid checkpoint must not produce a model"),
+            Err(error) => error,
+        };
+        assert_eq!(error.0, 1);
+        assert!(error.1.contains("cannot read checkpoint metadata"));
+    }
+
+    #[test]
+    fn info_does_not_require_model_weights() {
+        assert_eq!(run_info(&[]), 0);
     }
 }

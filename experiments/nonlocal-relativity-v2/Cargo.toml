@@ -1,0 +1,14 @@
+[package]
+name = "nonlocal-relativity-experiments"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Deterministic, reproducible numerical experiments for the experimental scirust-nonlocal-relativity fractional-memory worldline research layer. Not a physical validation."
+
+[dependencies]
+scirust-fractional = { path = "../../scirust-fractional" }
+scirust-relativity = { path = "../../scirust-relativity" }
+scirust-nonlocal-relativity = { path = "../../scirust-nonlocal-relativity" }
+
+[lints.rust]
+unsafe_code = "forbid"

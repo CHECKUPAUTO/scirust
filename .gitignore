@@ -1,6 +1,14 @@
 # Ephemeral agent workflow worktrees (transient, auto-managed)
 .claude/worktrees/
 
+# CCOS causal-memory runtime (workspace snapshot + oplog, fed by the
+# .claude PostToolUse hook — see docs/CCOS_MEMORY.md). Per-session state.
+.ccos/
+external/ccos-core/target/
+# Verdict written by `ccos setup` — a machine-local install report (host probe,
+# absolute paths), regenerated on every run.
+setup_report.json
+
 # obd2_api runtime feedback archive (generated locally, not a static asset)
 examples/obd2_diagnostic/data/feedback.jsonl
 
@@ -41,11 +49,21 @@ scirust-rustc-driver/target/
 .DS_Store
 Thumbs.db
 
-# Data
-/data/
+# Generated-data policy
+#
+# SCIAGENT corpora and packed shards are machine-local artifacts.  They live
+# outside the checkout (see docs/SCIAGENT_CORPUS_STORAGE.md), so a broad
+# `/data/` ignore rule would only hide an accidental in-tree corpus from Git.
+# Keep repository-root data visible instead; the location guard rejects legacy
+# SCIAGENT corpus paths in CI and the producer refuses to write below the root.
 *.bin
 *.tar.gz
 *.zip
+!/data/
+!/data/**/
+!/data/**/*.bin
+!/data/**/*.tar.gz
+!/data/**/*.zip
 
 # TurboQuant
 .turboquant-backup/
@@ -63,6 +81,11 @@ systemd/turboquant-*.service
 *.tmp
 *.bak
 *.lock
+# …but a workspace's Cargo.lock is part of the build it reproduces, and CI
+# builds the desktop application with `--locked`. Without this negation the
+# blanket `*.lock` above would drop it and every desktop CI job would fail
+# on a lock file it was told not to update.
+!apps/scirust-studio/Cargo.lock
 
 # CycloneDX SBOMs are generated from Cargo.lock in CI/release and uploaded.
 *.cdx.json

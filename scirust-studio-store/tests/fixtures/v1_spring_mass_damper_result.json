@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "capability_id": "sim.mechanics.spring_mass_damper",
+  "summary": {
+    "capability_display_name": "Spring-mass-damper",
+    "scenario_name": "Spring-mass-damper (undamped)",
+    "steps": 5,
+    "t_start": 0.0,
+    "t_end": 0.05
+  },
+  "axes": [
+    {
+      "id": "t",
+      "display_name": "time",
+      "unit": "s"
+    }
+  ],
+  "series": [
+    {
+      "id": "position",
+      "display_name": "Position",
+      "unit": "m",
+      "values": [
+        1.0,
+        0.9998000066666667,
+        0.9992001066622223,
+        0.9982005399386698,
+        0.9968017063093704,
+        0.9950041652891239
+      ]
+    },
+    {
+      "id": "velocity",
+      "display_name": "Velocity",
+      "unit": "m/s",
+      "values": [
+        0.0,
+        -0.03999733333333334,
+        -0.07997866826663114,
+        -0.11992801279904006,
+        -0.15982938772544064,
+        -0.19966683302791613
+      ]
+    },
+    {
+      "id": "energy",
+      "display_name": "Energy",
+      "unit": "J",
+      "values": [
+        2.0,
+        1.9999999999982223,
+        1.9999999999964446,
+        1.9999999999946672,
+        1.9999999999928892,
+        1.9999999999911113
+      ]
+    }
+  ],
+  "metrics": [
+    {
+      "id": "final_position",
+      "display_name": "Final position",
+      "value": {
+        "scalar": 0.9950041652891239
+      },
+      "unit": "m"
+    },
+    {
+      "id": "final_velocity",
+      "display_name": "Final velocity",
+      "value": {
+        "scalar": -0.19966683302791613
+      },
+      "unit": "m/s"
+    }
+  ],
+  "warnings": [],
+  "verifications": [
+    {
+      "id": "energy_drift",
+      "status": "passed",
+      "measured": 4.444333789876964e-12,
+      "threshold": 1e-6,
+      "explanation": "undamped spring-mass-damper: relative energy drift 4.444e-12 (RK4 approximately conserves energy)"
+    }
+  ],
+  "provenance": {
+    "capability_id": "sim.mechanics.spring_mass_damper",
+    "determinism": "StrictSameBinarySameTarget",
+    "adapter_crate": "scirust-studio-runtime",
+    "adapter_version": "0.1.0",
+    "started_at_rfc3339": "2026-07-28T23:05:34.168545598+00:00",
+    "completed_at_rfc3339": "2026-07-28T23:05:34.168569994+00:00",
+    "elapsed_seconds": 0.000025274
+  }
+}

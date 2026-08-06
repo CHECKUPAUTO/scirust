@@ -10,24 +10,43 @@
 //! structurally rather than as a habit to maintain by hand.
 
 use scirust_studio_runtime::{
-    ExecutionControl, ExecutionError, MetricValue, NullEventSink, RunResult, VerificationStatus,
-    build_registry, find_adapter,
+    Axis, ExecutionControl, ExecutionError, Field, MetricValue, NullEventSink, RunResult,
+    SeriesRole, VerificationStatus, build_registry, find_adapter,
 };
 use scirust_studio_schema::{parse_toml, validate};
+use scirust_studio_store::{RunStore, StoreError};
 
 use crate::ux;
 
-/// Pull a `--format text|json` flag out of `args`, defaulting to `"text"`.
-/// Returns the format and the remaining (positional) arguments.
-fn take_format(args: &[String]) -> (String, Vec<String>) {
-    let mut format = "text".to_string();
+/// Report where a run was recorded, or why it could not be.
+///
+/// A storage failure after a successful computation is reported but does not
+/// change the exit code: the run really did succeed, and claiming otherwise
+/// would be as wrong as silently swallowing the problem.
+fn report_store_outcome(recorded: Result<String, StoreError>) {
+    match recorded
+    {
+        // stderr, not stdout: this is a status notice, and stdout carries
+        // the result — which under `--format json` must stay parseable.
+        // Printing it to stdout made `scirust run --format json --store …`
+        // emit a leading non-JSON line.
+        Ok(run_id) => eprintln!("{}", ux::dim(&format!("recorded as run {run_id}"))),
+        Err(e) => eprintln!("{} could not record this run: {e}", ux::error_prefix()),
+    }
+}
+
+/// Pull `--<name> <value>` out of `args`, returning the value (if present)
+/// and the remaining arguments.
+pub(crate) fn take_option(args: &[String], name: &str) -> (Option<String>, Vec<String>) {
+    let flag = format!("--{name}");
+    let mut value = None;
     let mut rest = Vec::new();
     let mut i = 0;
     while i < args.len()
     {
-        if args[i] == "--format" && i + 1 < args.len()
+        if args[i] == flag && i + 1 < args.len()
         {
-            format = args[i + 1].clone();
+            value = Some(args[i + 1].clone());
             i += 2;
         }
         else
@@ -36,7 +55,32 @@ fn take_format(args: &[String]) -> (String, Vec<String>) {
             i += 1;
         }
     }
-    (format, rest)
+    (value, rest)
+}
+
+/// Pull a `--format text|json` flag out of `args`, defaulting to `"text"`.
+/// Returns the format and the remaining (positional) arguments.
+fn take_format(args: &[String]) -> (String, Vec<String>) {
+    let (value, rest) = take_option(args, "format");
+    (value.unwrap_or_else(|| "text".to_string()), rest)
+}
+
+/// The environment variable naming a default run store.
+pub(crate) const STORE_ENV: &str = "SCIRUST_STUDIO_STORE";
+
+/// Resolve where runs should be recorded: `--store <dir>` wins, then
+/// `SCIRUST_STUDIO_STORE`, and otherwise nothing is recorded.
+///
+/// There is deliberately no built-in default path. Writing run history into
+/// a guessed location under the user's home directory without being asked is
+/// a decision that belongs to the application, not to a library call, and
+/// this build has no user-facing setting to turn it back off.
+pub(crate) fn resolve_store(explicit: Option<String>) -> Option<String> {
+    explicit.or_else(|| match std::env::var(STORE_ENV)
+    {
+        Ok(path) if !path.trim().is_empty() => Some(path),
+        _ => None,
+    })
 }
 
 /// `scirust catalog [--format text|json]` — list the capabilities this
@@ -94,11 +138,14 @@ pub fn run_catalog(args: &[String]) -> u8 {
 /// brief: 2 usage, 3 validation, 5 numerical failure, 6 cancelled, 7
 /// internal failure.
 pub fn run_scenario(args: &[String]) -> u8 {
-    let (format, rest) = take_format(args);
+    let (store_arg, args) = take_option(args, "store");
+    let (format, rest) = take_format(&args);
     let Some(path) = rest.first()
     else
     {
-        eprintln!("usage: scirust run <scenario.scirust.toml> [--format text|json]");
+        eprintln!(
+            "usage: scirust run <scenario.scirust.toml> [--format text|json] [--store <dir>]"
+        );
         return 2;
     };
     let text = match std::fs::read_to_string(path)
@@ -162,12 +209,47 @@ pub fn run_scenario(args: &[String]) -> u8 {
         },
     };
 
+    // Open the store *before* executing, so a run killed part-way through
+    // leaves a detectable interrupted record rather than no trace at all —
+    // that is the whole point of recording the attempt separately from the
+    // outcome. See `docs/studio/adr/0004-immutable-run-storage.md`.
+    let mut pending = None;
+    if let Some(root) = resolve_store(store_arg)
+    {
+        match RunStore::open(&root)
+        {
+            Ok(store) => match store.begin(&scenario.capability.id, &text)
+            {
+                Ok(p) => pending = Some(p),
+                Err(e) =>
+                {
+                    eprintln!("{} cannot record this run: {e}", ux::error_prefix());
+                    return 7;
+                },
+            },
+            Err(e) =>
+            {
+                eprintln!("{} cannot open run store `{root}`: {e}", ux::error_prefix());
+                return 7;
+            },
+        }
+    }
+
     let mut sink = NullEventSink;
     let result = match adapter.execute(&validated, &ExecutionControl::new(), &mut sink)
     {
         Ok(r) => r,
         Err(e) =>
         {
+            if let Some(pending) = pending
+            {
+                let recorded = match e
+                {
+                    ExecutionError::Cancelled => pending.cancel(),
+                    _ => pending.fail(&e.to_string()),
+                };
+                report_store_outcome(recorded);
+            }
             eprintln!("{} {e}", ux::error_prefix());
             return match e
             {
@@ -178,6 +260,11 @@ pub fn run_scenario(args: &[String]) -> u8 {
             };
         },
     };
+
+    if let Some(pending) = pending
+    {
+        report_store_outcome(pending.complete(&result));
+    }
 
     match format.as_str()
     {
@@ -210,19 +297,304 @@ pub fn run_scenario(args: &[String]) -> u8 {
     }
 }
 
+/// Render a scalar so its magnitude survives.
+///
+/// Fixed notation inside the range where it reads naturally, scientific
+/// outside it. Zero is written plainly rather than as `0.000000e0`.
+fn format_scalar(v: f64) -> String {
+    let magnitude = v.abs();
+    if v == 0.0
+    {
+        "0".to_string()
+    }
+    else if (1e-3..1e7).contains(&magnitude)
+    {
+        format!("{v:.6}")
+    }
+    else
+    {
+        format!("{v:.6e}")
+    }
+}
+
+/// An integer metric's value, if the result carries one under that id.
+fn integer_metric(result: &RunResult, id: &str) -> Option<i64> {
+    result
+        .metrics
+        .iter()
+        .find(|m| m.id == id)
+        .and_then(|m| match m.value
+        {
+            MetricValue::Integer(v) => Some(v),
+            _ => None,
+        })
+}
+
+/// The character ramp, coolest to hottest.
+///
+/// ASCII only. A terminal that cannot render a block character would show
+/// replacement glyphs, and a field printed as a column of question marks is
+/// worse than one printed coarsely.
+const RAMP: &[u8] = b" .:-=+*#%@";
+
+/// Draw a field as a coarse ASCII map, and say what was dropped.
+///
+/// A field is `rows x columns` of numbers; a terminal has neither. The
+/// reduction keeps, for each cell, the sample **furthest from the field's
+/// mean** rather than the cell's average — the same principle the chart's
+/// min/max bucketing follows, for the same reason: an average is exactly the
+/// operation that makes a spike disappear. The header states both shapes so
+/// nobody reads the picture as the data.
+fn print_field(result: &RunResult, field: &Field) {
+    const MAX_ROWS: usize = 16;
+    const MAX_COLUMNS: usize = 64;
+
+    let rows = field.rows();
+    let columns = field.columns;
+    if rows == 0 || columns == 0
+    {
+        println!("  {} is empty", field.id);
+        return;
+    }
+
+    let axis_of = |id: &str| result.axes.iter().find(|a| a.id == id);
+    let row_axis = axis_of(&field.row_axis_id);
+    let column_axis = axis_of(&field.column_axis_id);
+    let label = |axis: Option<&Axis>| {
+        axis.map(|a| format!("{} ({})", a.display_name, a.unit))
+            .unwrap_or_else(|| "?".to_string())
+    };
+
+    let (min, max) = field
+        .values
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &v| {
+            (lo.min(v), hi.max(v))
+        });
+    let mean = field.values.iter().sum::<f64>() / field.values.len() as f64;
+
+    let drawn_rows = rows.min(MAX_ROWS);
+    let drawn_columns = columns.min(MAX_COLUMNS);
+    println!(
+        "  {:<18} {} {} x {} {}, drawn {} x {}",
+        field.id,
+        rows,
+        label(row_axis),
+        columns,
+        label(column_axis),
+        drawn_rows,
+        drawn_columns
+    );
+    println!(
+        "  {}",
+        ux::dim(&format!(
+            "{} .. {} {} mapped onto `{}`; each cell is the sample furthest from the mean, \
+             so an extreme is never averaged away",
+            format_args!("{min:.4}"),
+            format_args!("{max:.4}"),
+            field.unit,
+            String::from_utf8_lossy(RAMP).trim_end(),
+        ))
+    );
+
+    let extent = if (max - min).abs() > f64::EPSILON
+    {
+        max - min
+    }
+    else
+    {
+        1.0
+    };
+
+    for r in 0..drawn_rows
+    {
+        // Half-open blocks, so every source row lands in exactly one cell.
+        let row_lo = r * rows / drawn_rows;
+        let row_hi = ((r + 1) * rows / drawn_rows).max(row_lo + 1);
+        let mut line = String::with_capacity(drawn_columns);
+        for c in 0..drawn_columns
+        {
+            let col_lo = c * columns / drawn_columns;
+            let col_hi = ((c + 1) * columns / drawn_columns).max(col_lo + 1);
+            let mut chosen = mean;
+            let mut furthest = -1.0_f64;
+            for rr in row_lo..row_hi.min(rows)
+            {
+                for cc in col_lo..col_hi.min(columns)
+                {
+                    if let Some(v) = field.at(rr, cc)
+                    {
+                        let distance = (v - mean).abs();
+                        if distance > furthest
+                        {
+                            furthest = distance;
+                            chosen = v;
+                        }
+                    }
+                }
+            }
+            let level = (((chosen - min) / extent) * (RAMP.len() - 1) as f64).round();
+            let index = (level as usize).min(RAMP.len() - 1);
+            line.push(RAMP[index] as char);
+        }
+        // The row coordinate, so the vertical direction is readable.
+        let coordinate = row_axis
+            .and_then(|a| a.values.get(row_lo))
+            .map(|v| format!("{v:>10.4}"))
+            .unwrap_or_else(|| " ".repeat(10));
+        println!("  {coordinate} |{line}|");
+    }
+}
+
+/// Draw a histogram as horizontal bars, one row per bin.
+///
+/// Bars rather than the field renderer's density map, because a distribution
+/// is one-dimensional and a row of shaded cells would make the reader
+/// estimate a count from a shade when a length is available and exact.
+///
+/// The bin's **interval** is printed rather than its centre. A histogram's
+/// whole content is "this much fell between these two values", and a centre
+/// makes a reader guess the width — which is the same off-by-one that made
+/// `Distribution` its own type instead of a one-row `Field`.
+fn print_distribution(distribution: &scirust_studio_runtime::Distribution) {
+    const BAR_WIDTH: usize = 40;
+
+    println!(
+        "  {} ({} samples, unit {})",
+        distribution.display_name,
+        distribution.total(),
+        distribution.unit
+    );
+
+    let peak = distribution.counts.iter().copied().max().unwrap_or(0);
+    if peak == 0
+    {
+        println!("  (every sample fell outside the binned range)");
+    }
+    for (index, count) in distribution.counts.iter().enumerate()
+    {
+        let (lo, hi) = (distribution.edges[index], distribution.edges[index + 1]);
+        // `peak` is non-zero here whenever any bar is drawn, so this scales
+        // the largest bin to the full width.
+        let filled = if peak == 0
+        {
+            0
+        }
+        else
+        {
+            (*count as usize * BAR_WIDTH).div_ceil(peak as usize)
+        };
+        let bar: String = "#".repeat(filled);
+        println!("  [{:>10.4}, {:>10.4}) {bar:<BAR_WIDTH$} {count}", lo, hi);
+    }
+
+    // Never silently: a sample outside the range is a statement about the
+    // range being wrong, and hiding it would turn a badly chosen histogram
+    // into a plausible-looking one.
+    if distribution.underflow > 0 || distribution.overflow > 0
+    {
+        println!(
+            "  outside the binned range: {} below, {} above",
+            distribution.underflow, distribution.overflow
+        );
+    }
+    if let Some(mean) = distribution.estimated_mean()
+    {
+        println!(
+            "  mean (estimated from bin centres) {}",
+            format_scalar(mean)
+        );
+    }
+}
+
 fn print_result_text(result: &RunResult) {
     println!("{}", ux::heading(&result.summary.capability_display_name));
     println!("  scenario      {}", result.summary.scenario_name);
     println!("  capability    {}", result.capability_id);
     println!("  steps         {}", result.summary.steps);
-    let axis_unit = result.axes.first().map(|a| a.unit.as_str()).unwrap_or("");
-    println!("  t final       {} {axis_unit}", result.summary.t_end);
+    // Not every capability integrates in time: a parameter sweep's summary
+    // describes the parameter it swept, so the label comes from the axis
+    // rather than being hardcoded to "t".
+    let axis = result.summary_axis().or_else(|| result.axes.first());
+    // The axis *id* rather than its display name: "t final" and "gain final"
+    // both read correctly and both fit the column, where "time final" would
+    // only have changed every existing line for no gain.
+    let (label, unit) = match axis
+    {
+        Some(a) => (a.id.as_str(), a.unit.as_str()),
+        None => ("axis", ""),
+    };
+    println!(
+        "  {:<13} {} {unit}",
+        format!("{label} final"),
+        result.summary.t_end
+    );
+
+    // Printed only when the computation actually consumed one, and printed
+    // next to the determinism class it qualifies: for a stochastic result the
+    // seed is not decoration, it is the difference between a trajectory and
+    // *the* trajectory these inputs produce.
+    if let Some(seed) = result.provenance.seed
+    {
+        println!("  determinism   {:?}", result.provenance.determinism);
+        println!("  seed          {seed}  (re-run with this seed to obtain the same sample)");
+    }
+
+    // An ensemble is announced before its series are listed, because
+    // "member_0 … member_7" beside a mean reads as eight results unless the
+    // reader is told that eight is a sample of the realisations and the mean
+    // is over all of them.
+    if let Some(drawn) = integer_metric(result, "replicates")
+    {
+        let kept = integer_metric(result, "retained_members").unwrap_or(0);
+        println!(
+            "  ensemble      {drawn} independent realisations, {kept} kept in the result{}",
+            if kept < drawn
+            {
+                format!(" ({} not stored)", drawn - kept)
+            }
+            else
+            {
+                String::new()
+            }
+        );
+    }
 
     println!();
     println!("{}", ux::heading("SERIES"));
     for s in &result.series
     {
-        println!("  {:<18} {} points, unit {}", s.id, s.values.len(), s.unit);
+        // The role, not the id, is what tells a reader whether a curve is
+        // evidence about many realisations or one of them.
+        let role = match s.role
+        {
+            SeriesRole::Trajectory => String::new(),
+            SeriesRole::Reference => ux::dim("reference"),
+            SeriesRole::EnsembleMean => ux::dim("mean over the ensemble"),
+            SeriesRole::EnsembleBandLower => ux::dim("band, lower edge"),
+            SeriesRole::EnsembleBandUpper => ux::dim("band, upper edge"),
+            SeriesRole::EnsembleMember => ux::dim("one realisation"),
+        };
+        println!(
+            "  {:<30} {} points, unit {:<4} {role}",
+            s.id,
+            s.values.len(),
+            s.unit
+        );
+    }
+
+    for field in &result.fields
+    {
+        println!();
+        println!("{}", ux::heading("FIELD"));
+        print_field(result, field);
+    }
+
+    for distribution in &result.distributions
+    {
+        println!();
+        println!("{}", ux::heading("DISTRIBUTION"));
+        print_distribution(distribution);
     }
 
     println!();
@@ -231,12 +603,22 @@ fn print_result_text(result: &RunResult) {
     {
         let value = match &m.value
         {
-            MetricValue::Scalar(v) => format!("{v:.6}"),
+            // `{:.6}` alone renders 1e-7 as "0.000000" and 1.6e6 as a wall
+            // of digits. A metric a capability thought worth reporting must
+            // not be rounded to nothing by its formatter: the photodiode's
+            // 100 ns time constant is the whole point of that run.
+            MetricValue::Scalar(v) => format_scalar(*v),
             MetricValue::Integer(v) => v.to_string(),
             MetricValue::Text(v) => v.clone(),
         };
-        let unit = m.unit.as_deref().unwrap_or("");
-        println!("  {:<18} {value} {unit}", m.id);
+        // Same column width as SERIES above, and wide enough for the longest
+        // id an ensemble produces — `ensemble_final_standard_error` ran off
+        // the end of the old 18.
+        match m.unit.as_deref()
+        {
+            Some(unit) if !unit.is_empty() => println!("  {:<30} {value} {unit}", m.id),
+            _ => println!("  {:<30} {value}", m.id),
+        }
     }
 
     println!();

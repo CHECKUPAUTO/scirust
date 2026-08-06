@@ -25,15 +25,23 @@
 //! Under a perfect oracle and the standard assumptions this can provably not
 //! occur, so seeing the warning is itself diagnostic information.
 //!
-//! # Rule 4 is out of scope
+//! # Rule 4, and when it is needed
 //!
 //! Meek (1995) proves rules R1-R3 necessary *and sufficient* to complete a
 //! PDAG into a CPDAG whenever every initial directed edge comes from
-//! v-structure detection alone — exactly this module's setting, since this
-//! phase accepts no background knowledge. Meek's rule 4 is needed only when
-//! additional orientations *beyond* what v-structures give are injected
-//! (background knowledge); since none are here, rule 4 would never find a
-//! pattern to act on, and is not implemented.
+//! v-structure detection alone — exactly the discovery pipeline's setting.
+//! Meek's rule 4 is needed only when additional orientations *beyond* what
+//! v-structures give are injected.
+//!
+//! Phase 5C.3 recorded that as a reason not to implement R4, since nothing at
+//! the time injected such orientations. `crate::experiment_design` now does:
+//! planning an intervention means orienting the edges at its target for a
+//! reason that is not a v-structure. So R4 is implemented here, and reached
+//! through a **separate entry point** — [`apply_meek_rules_with_background`].
+//! The discovery pipeline keeps calling [`apply_meek_rules`], whose behaviour
+//! is therefore unchanged by this addition; a test asserts the two agree on
+//! v-structure-only input, which is Meek's theorem stated as an executable
+//! prediction rather than a citation.
 
 use crate::cpdag::Cpdag;
 use std::collections::BTreeMap;
@@ -101,13 +109,43 @@ pub(crate) fn orient_v_structures(
 
 /// Applies Meek's rules R1-R3 to a fixpoint (repeats until a full pass makes
 /// no change).
+///
+/// This is the variant for the discovery pipeline, where every directed edge
+/// entering the propagation came from v-structure detection. R4 is *provably*
+/// unable to fire in that setting (see the module docs), so omitting it costs
+/// nothing and keeps the pipeline's behaviour exactly as documented.
 pub(crate) fn apply_meek_rules(cpdag: &mut Cpdag) {
+    meek_fixpoint(cpdag, false);
+}
+
+/// Applies Meek's rules R1-**R4** to a fixpoint.
+///
+/// This is the variant for callers that injected orientations from something
+/// other than v-structure detection — background knowledge, or (the reason
+/// this exists) the outcome of a planned intervention in
+/// `crate::experiment_design`. That is exactly the setting in which Meek's R4
+/// becomes necessary for completeness: with only v-structure orientations R4
+/// can never find a pattern to act on, but once an edge is oriented for an
+/// external reason it can.
+///
+/// Using this variant where R1-R3 suffice is harmless but wasteful; using
+/// [`apply_meek_rules`] where R4 is needed would silently under-orient, which
+/// is why the two are separate functions rather than one flag with a default.
+pub(crate) fn apply_meek_rules_with_background(cpdag: &mut Cpdag) {
+    meek_fixpoint(cpdag, true);
+}
+
+fn meek_fixpoint(cpdag: &mut Cpdag, include_rule_4: bool) {
     loop
     {
         let mut changed = false;
         changed |= apply_rule_1(cpdag);
         changed |= apply_rule_2(cpdag);
         changed |= apply_rule_3(cpdag);
+        if include_rule_4
+        {
+            changed |= apply_rule_4(cpdag);
+        }
         if !changed
         {
             break;
@@ -178,6 +216,60 @@ fn apply_rule_3(cpdag: &mut Cpdag) -> bool {
                     if !cpdag.is_adjacent(c, d)
                         && cpdag.is_directed(c, b)
                         && cpdag.is_directed(d, b)
+                    {
+                        witnessed = true;
+                        break 'search;
+                    }
+                }
+            }
+            if witnessed && cpdag.orient(a, b)
+            {
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
+/// R4 — the background-knowledge rule: `a - b`, `a - c` (both undirected),
+/// `c -> d`, `d -> b`, and `c`, `b` **not** adjacent `⟹` `a -> b`.
+///
+/// Only reachable when some edge was oriented for a reason other than
+/// v-structure detection; see [`apply_meek_rules_with_background`].
+///
+/// Why the premises force it: suppose the edge went `b -> a` instead. The
+/// undirected `a - c` must resolve one way or the other. `a -> c` closes the
+/// directed cycle `a -> c -> d -> b -> a`. And `c -> a` puts `c -> a <- b` in
+/// the graph, an *unshielded* collider (`c` and `b` are non-adjacent) that is
+/// not among the evidenced ones — had it been, `a - b` and `a - c` would
+/// already be directed rather than undirected. Both options are excluded, so
+/// `a -> b`.
+///
+/// Note that this derivation never uses the adjacency of `a` and `d`, so no
+/// such premise is imposed here; formulations that state one are imposing a
+/// condition their own argument does not need.
+fn apply_rule_4(cpdag: &mut Cpdag) -> bool {
+    let mut changed = false;
+    for &(p, q) in &cpdag.undirected_edges()
+    {
+        for &(a, b) in &[(p, q), (q, p)]
+        {
+            if !cpdag.is_undirected(a, b)
+            {
+                continue; // oriented by an earlier iteration this same pass
+            }
+            let mut witnessed = false;
+            'search: for c in cpdag.neighbors(a)
+            {
+                if c == b || !cpdag.is_undirected(a, c) || cpdag.is_adjacent(c, b)
+                {
+                    continue;
+                }
+                // `d == a` and `d == b` need no guard: both would require a
+                // directed edge on a pair the premises hold undirected.
+                for d in cpdag.neighbors(c)
+                {
+                    if cpdag.is_directed(c, d) && cpdag.is_directed(d, b)
                     {
                         witnessed = true;
                         break 'search;
@@ -406,5 +498,110 @@ mod tests {
         g.orient(0, 1);
         apply_meek_rules(&mut g);
         assert!(!has_cycle(&g));
+    }
+    // ─── Rule 4 ─────────────────────────────────────────────────────────
+
+    /// The premises of R4, built so R1-R3 provably cannot reach the edge.
+    ///
+    /// `0 - 1`, `0 - 2`, `0 - 3` undirected; `2 -> 3`, `3 -> 1` directed;
+    /// `2` and `1` non-adjacent. R1 is blocked because `3` and `0` *are*
+    /// adjacent, R2 needs a directed chain into `1` from `0` and there is
+    /// none, R3 needs two directed edges into a common head and there is one.
+    fn rule_4_shape() -> Cpdag {
+        Cpdag::from_edges(4, &[(2, 3), (3, 1)], &[(0, 1), (0, 2), (0, 3)]).unwrap()
+    }
+
+    #[test]
+    fn rules_1_to_3_leave_the_rule_4_edge_undirected() {
+        let mut g = rule_4_shape();
+        apply_meek_rules(&mut g);
+        assert!(
+            g.is_undirected(0, 1),
+            "R1-R3 must not reach this edge, or the R4 test proves nothing"
+        );
+    }
+
+    #[test]
+    fn rule_4_orients_what_rules_1_to_3_cannot() {
+        let mut g = rule_4_shape();
+        apply_meek_rules_with_background(&mut g);
+        assert!(g.is_directed(0, 1), "R4 should force 0 -> 1");
+    }
+
+    #[test]
+    fn rule_4_needs_the_outer_pair_non_adjacent() {
+        // Same shape, but now 1 and 2 are adjacent, so orienting 1 -> 0 would
+        // create a *shielded* collider, which is allowed. R4 must not fire.
+        let mut g =
+            Cpdag::from_edges(4, &[(2, 3), (3, 1)], &[(0, 1), (0, 2), (0, 3), (1, 2)]).unwrap();
+        apply_meek_rules_with_background(&mut g);
+        assert!(g.is_undirected(0, 1));
+    }
+
+    #[test]
+    fn rule_4_is_unreachable_from_v_structure_orientations_alone() {
+        // Meek's theorem says R1-R3 are complete when every directed edge came
+        // from v-structure detection. That makes the two entry points
+        // *predicted* to agree on such input — an executable prediction rather
+        // than a citation. Any disagreement here would mean either the theorem
+        // does not apply as stated or R4 is implemented too eagerly.
+        /// `(n_nodes, absent edges, separating sets)`.
+        type VStructureCase = (
+            usize,
+            Vec<(usize, usize)>,
+            Vec<((usize, usize), Vec<usize>)>,
+        );
+        let cases: Vec<VStructureCase> = vec![
+            // Collider at 2.
+            (3, vec![(0, 1)], vec![((0, 1), vec![])]),
+            // Chain 0 - 1 - 2.
+            (3, vec![(0, 2)], vec![((0, 2), vec![1])]),
+            // Collider feeding a chain: 0 -> 2 <- 1, 2 - 3.
+            (
+                4,
+                vec![(0, 1), (0, 3), (1, 3)],
+                vec![((0, 1), vec![]), ((0, 3), vec![2]), ((1, 3), vec![2])],
+            ),
+            // Two colliders sharing a head.
+            (
+                5,
+                vec![(0, 1), (0, 3), (1, 3), (2, 4), (3, 4)],
+                vec![
+                    ((0, 1), vec![]),
+                    ((0, 3), vec![2]),
+                    ((1, 3), vec![2]),
+                    ((2, 4), vec![3]),
+                    ((3, 4), vec![]),
+                ],
+            ),
+            // Diamond: no collider anywhere, everything stays reversible.
+            (
+                4,
+                vec![(0, 3), (1, 2)],
+                vec![((0, 3), vec![1, 2]), ((1, 2), vec![0])],
+            ),
+        ];
+
+        for (n_nodes, absent, seps) in cases
+        {
+            let mut base = Cpdag::complete(n_nodes);
+            for &(a, b) in &absent
+            {
+                base.remove_edge(a, b);
+            }
+            let sepsets: BTreeMap<(usize, usize), Vec<usize>> = seps.into_iter().collect();
+            let mut warnings = Vec::new();
+            orient_v_structures(&mut base, &sepsets, &mut warnings);
+
+            let mut without_rule_4 = base.clone();
+            apply_meek_rules(&mut without_rule_4);
+            let mut with_rule_4 = base.clone();
+            apply_meek_rules_with_background(&mut with_rule_4);
+
+            assert_eq!(
+                without_rule_4, with_rule_4,
+                "R4 fired on v-structure-only input for a {n_nodes}-node case"
+            );
+        }
     }
 }

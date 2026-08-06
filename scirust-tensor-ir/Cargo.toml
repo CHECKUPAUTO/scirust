@@ -1,0 +1,15 @@
+[package]
+name = "scirust-tensor-ir"
+version = "0.1.0"
+edition = "2021"
+publish = false
+rust-version = "1.89"
+description = "Canonical backend-neutral tensor graph IR for SciRust"
+license-file = "../LICENSE.md"
+
+[features]
+default = ["std"]
+std = ["scirust-compute/std"]
+
+[dependencies]
+scirust-compute = { path = "../scirust-compute", default-features = false }

@@ -1,0 +1,17 @@
+[package]
+name = "scirust-studio-ipc"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SciRust Studio: the versioned, size-bounded, line-delimited JSON protocol spoken between a Studio client (the CLI today, a desktop shell later) and the out-of-process capability worker."
+
+[dependencies]
+scirust-studio-runtime = { path = "../scirust-studio-runtime" }
+serde = { version = "1", features = ["derive"] }
+# `float_roundtrip` is required, not optional. Without it serde_json's fast
+# float parser can return a value one ULP away from the one that was
+# serialized, so a RunResult that crossed the worker boundary would no longer
+# equal the one the adapter computed — silently, in the last bit. The
+# worker's `a_run_through_the_worker_matches_an_in_process_run` test fails
+# without this feature.
+serde_json = { version = "1", features = ["float_roundtrip"] }

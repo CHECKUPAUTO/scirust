@@ -1,0 +1,94 @@
+# SciRust Studio tutorial scenario: why one exponential is not enough.
+#
+# Run it with:
+#
+#   scirust run docs/studio/tutorials/two_compartment_iv.scirust.toml
+#
+# A 100 mg intravenous bolus. The dose lands in the bloodstream all at once
+# and then does two things simultaneously: it is eliminated, and it
+# distributes into and back out of the tissues.
+#
+# The plasma curve that results is BIEXPONENTIAL — a fast distribution phase
+# and a slow elimination phase. This is why fitting real IV data with a single
+# exponential looks wrong early and right late, and it is why the two-
+# compartment model exists.
+#
+# What is verified:
+#
+#   * matches_the_biexponential_closed_form — the central amount against the
+#     model's stated solution at every recorded sample. The reference is
+#     exact, so the measurement is RK4's truncation error alone. This check is
+#     dominated by the EARLY curve, where the fast phase makes the derivative
+#     largest.
+#   * total_exposure_is_dose_over_elimination — the area under the curve is
+#     dose/k10 exactly, over the whole real line. The run covers a finite
+#     window, so the trapezoid area is completed with the ANALYTIC TAIL from
+#     the same biexponential form.
+#
+# The second is a statement about the late curve, and about something the
+# first cannot see. AUC depends only on how the drug LEAVES, not on how it
+# distributes: k12 and k21 do not appear in dose/k10 at all. A model with the
+# right curve shape and the wrong elimination rate tracks the trajectory
+# locally and misses the area.
+#
+# A test states that directly — it doubles both distribution rates, which
+# visibly reshapes the curve (the fast phase moves by more than 10 %), and
+# asserts the total exposure does not move at all.
+#
+# Both thresholds are derived. The AUC's is the composite trapezoid rule's
+# leading Euler-Maclaurin error, (h^2/12)*(f'(end) - f'(start)), computed from
+# the closed form at both ends rather than chosen.
+#
+# ---------------------------------------------------------------------------
+# No [initial_state]
+# ---------------------------------------------------------------------------
+#
+# A bolus lands entirely in the central compartment, so the state at t = 0
+# follows from the dose. There is nothing for a scenario to supply, and one
+# that tried would be describing a different experiment — an infusion, or a
+# second dose on top of a residue. The capability rejects it rather than
+# ignoring it, the same as `sim.pharmacology.oral_one_compartment`.
+#
+# Rates are per hour and the dose is in milligrams; the volume is in cubic
+# metres because that is the unit table's only volume, and 0.02 m^3 is 20 L —
+# a plausible central volume for an adult.
+
+schema_version = 1
+
+[experiment]
+name = "Two-compartment IV bolus"
+description = "A 100 mg bolus distributing into tissue while being eliminated, giving a biexponential plasma curve."
+
+[capability]
+id = "sim.pharmacology.two_compartment_iv"
+
+[backend]
+kind = "cpu"
+precision = "f64"
+deterministic = true
+
+[model]
+# Elimination, per hour. This alone sets the total exposure.
+k10 = { value = 0.15, unit = "1/s" }
+# Distribution out to tissue, and back. Fast compared with elimination, which
+# is what separates the two phases.
+k12 = { value = 1.2, unit = "1/s" }
+k21 = { value = 0.8, unit = "1/s" }
+# 20 litres of central volume.
+volume = { value = 0.02, unit = "m^3" }
+# 100 mg.
+dose = { value = 100.0, unit = "1" }
+
+# No [initial_state]: the bolus determines it. See the note above.
+
+[solver]
+id = "rk4"
+start = { value = 0.0, unit = "s" }
+# 48 hours. Far past the distribution phase (which is over in about two) and
+# well into elimination, so the analytic tail the AUC check adds is a small
+# correction rather than most of the answer.
+end = { value = 48.0, unit = "s" }
+step = { value = 0.0005, unit = "s" }
+
+[outputs]
+record = ["central_amount", "peripheral_amount", "concentration", "exact_central"]
