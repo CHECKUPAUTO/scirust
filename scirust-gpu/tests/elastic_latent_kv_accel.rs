@@ -1,6 +1,10 @@
 //! Differential accelerator checks for Elastic Latent KV Phase 12.
 
-use scirust_gpu::{BackendError, BackendResult, CpuBackend, CudaBackend, RawComputeBackend, WgpuBackend};
+use scirust_gpu::{BackendResult, CpuBackend, RawComputeBackend};
+#[cfg(feature = "cuda")]
+use scirust_gpu::{BackendError, CudaBackend};
+#[cfg(feature = "wgpu")]
+use scirust_gpu::WgpuBackend;
 
 fn project<B: RawComputeBackend>(
     backend: &B,
@@ -45,6 +49,7 @@ fn fixtures() -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     (dense, basis, basis_transposed)
 }
 
+#[cfg(any(feature = "wgpu", feature = "cuda"))]
 fn assert_close(actual: &[f32], expected: &[f32], tolerance: f32) {
     assert_eq!(actual.len(), expected.len());
     for (index, (actual, expected)) in actual.iter().zip(expected).enumerate() {
