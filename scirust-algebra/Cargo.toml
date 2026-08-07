@@ -1,0 +1,14 @@
+[package]
+name = "scirust-algebra"
+version = "0.1.0"
+edition = "2021"
+publish = false
+rust-version = "1.89"
+description = "Deterministic zero-allocation algebra and group theory primitives for SciRust"
+license-file = "../LICENSE.md"
+repository = "https://github.com/Memorithm/scirust"
+readme = "README.md"
+
+[dependencies]
+
+[dev-dependencies]
