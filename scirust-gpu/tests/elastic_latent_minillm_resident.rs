@@ -2,8 +2,7 @@
 
 use scirust_core::nn::transformer::mini_llm::{CharTokenizer, MiniLLM, MiniLLMConfig};
 use scirust_gpu::{
-    WgpuLatentHeadBasis, WgpuLatentLayerBasis, WgpuResidentMiniLlm,
-    WgpuResidentMiniLlmError,
+    WgpuLatentHeadBasis, WgpuLatentLayerBasis, WgpuResidentMiniLlm, WgpuResidentMiniLlmError,
 };
 
 fn identity_basis(dimension: usize) -> Vec<f32> {
@@ -132,9 +131,7 @@ fn resident_minillm_rejects_invalid_input_and_reset_reuses_storage() {
     ));
     assert_eq!(resident.telemetry().steps, 0);
 
-    let invalid_token = resident
-        .step_argmax_at(config.vocab_size, 0)
-        .unwrap_err();
+    let invalid_token = resident.step_argmax_at(config.vocab_size, 0).unwrap_err();
     assert!(matches!(
         invalid_token,
         WgpuResidentMiniLlmError::TokenOutOfRange { .. }
