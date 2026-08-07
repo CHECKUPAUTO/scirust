@@ -359,7 +359,8 @@ impls = ["2d"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-4, rtol = 1e-4 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "normalize"
@@ -369,7 +370,8 @@ impls = ["2d"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-4, rtol = 1e-4 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "sum"
@@ -482,8 +484,9 @@ impls = ["2d"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
 notes = "RNG stream not compared; compare keep-mask behavior on fixed seeds"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "batch_norm"
@@ -493,7 +496,8 @@ impls = ["simd"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-4, rtol = 1e-4 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "reshape"
@@ -558,7 +562,8 @@ impls = ["nd"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 0.0, rtol = 0.0 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "cat"
@@ -568,8 +573,9 @@ impls = ["nd"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 0.0, rtol = 0.0 }
-status = "experimental"
-notes = "cat0 only (dim=0)"
+status = "parity"
+notes = "cat dims 0 et 1, 2-D uniquement"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "flatten"
@@ -590,7 +596,8 @@ impls = ["core"]
 dtypes = ["f32"]
 autograd = false
 tolerance = { atol = 0.0, rtol = 0.0 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "embedding"
@@ -600,7 +607,8 @@ impls = ["2d", "simd", "gpu", "cuda"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 0.0, rtol = 0.0 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "rope"
@@ -610,8 +618,9 @@ impls = ["nd", "simd", "cuda"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-4, rtol = 1e-4 }
-status = "experimental"
+status = "parity"
 notes = "parity compares SciRust rope against a torch reference implementation committed as fixture"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "scaled_dot_product_attention"
@@ -621,7 +630,8 @@ impls = ["simd", "cuda"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-4, rtol = 1e-4 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "conv1d"
@@ -692,9 +702,10 @@ family = "quantization"
 impls = ["2d"]
 dtypes = ["f32"]
 autograd = true
-tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+tolerance = { atol = 0.0, rtol = 0.0 }
+status = "parity"
 notes = "fake_quantize_ste only"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "to_bf16"
@@ -704,8 +715,9 @@ impls = ["simd", "cuda"]
 dtypes = ["f32"]
 autograd = false
 tolerance = { atol = 0.0, rtol = 0.0 }
-status = "experimental"
+status = "parity"
 notes = "storage conversion only in v1"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "lgamma"

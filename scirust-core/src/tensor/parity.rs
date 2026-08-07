@@ -1545,3 +1545,887 @@ pub fn trigamma_f64(x: f64) -> f64 {
         + 43867.0 * i19 / 798.0
         - 174611.0 * i21 / 330.0
 }
+
+// ------------------------------------------------------------------ //
+//  Shape — cat / gather / unfold                                   //
+// ------------------------------------------------------------------ //
+
+fn row_strides(shape: &[usize]) -> Vec<usize> {
+    let mut strides = vec![0usize; shape.len()];
+    let mut acc = 1usize;
+    for d in (0..shape.len()).rev()
+    {
+        strides[d] = acc;
+        acc *= shape[d];
+    }
+    strides
+}
+
+fn linear_off(shape: &[usize], coords: &[usize], strides: &[usize]) -> usize {
+    let _ = shape;
+    coords.iter().zip(strides).map(|(&c, &s)| c * s).sum()
+}
+
+/// cat de deux tenseurs 2-D le long de `dim` (0 ou 1), même rang.
+pub fn cat2(a: &TensorND, b: &TensorND, dim: usize) -> Result<TensorND> {
+    if a.ndim() != 2 || b.ndim() != 2
+    {
+        return Err(SciRustError::RankMismatch {
+            op: "parity::cat2",
+            expected: 2,
+            got: a.ndim(),
+        });
+    }
+    if dim >= 2
+    {
+        return Err(SciRustError::AxisOutOfBounds {
+            op: "parity::cat2",
+            axis: dim,
+            rank: 2,
+        });
+    }
+    for d in 0..2
+    {
+        if d != dim && a.shape[d] != b.shape[d]
+        {
+            return Err(SciRustError::ShapeMismatch {
+                op: "parity::cat2",
+                expected: (a.shape[0], a.shape[1]),
+                got: (b.shape[0], b.shape[1]),
+            });
+        }
+    }
+    let mut out_shape = a.shape.clone();
+    out_shape[dim] = a.shape[dim] + b.shape[dim];
+    let mut out = vec![0.0f32; checked_prod(&out_shape)?];
+    for (src, start) in [(&a.data, 0usize), (&b.data, a.shape[dim])]
+    {
+        let mut coords = vec![0usize; 2];
+        for i in 0..src.len()
+        {
+            let mut rem = i;
+            for d in (0..2).rev()
+            {
+                coords[d] = rem % a.shape[d];
+                rem /= a.shape[d];
+            }
+            coords[dim] += start;
+            out[linear_off(&out_shape, &coords, &row_strides(&out_shape))] = src[i];
+        }
+    }
+    Ok(TensorND::new(out, out_shape))
+}
+
+/// Gradients de cat : tranches de gout.
+pub fn d_cat2(
+    gout: &TensorND,
+    a_shape: &[usize],
+    b_shape: &[usize],
+    dim: usize,
+) -> Result<(TensorND, TensorND)> {
+    let ga_shape = a_shape.to_vec();
+    let gb_shape = b_shape.to_vec();
+    let mut ga = vec![0.0f32; checked_prod(&ga_shape)?];
+    let mut gb = vec![0.0f32; checked_prod(&gb_shape)?];
+    let mut coords = vec![0usize; 2];
+    for i in 0..gout.numel()
+    {
+        let mut rem = i;
+        for d in (0..2).rev()
+        {
+            coords[d] = rem % gout.shape[d];
+            rem /= gout.shape[d];
+        }
+        let v = gout.data[i];
+        if coords[dim] < a_shape[dim]
+        {
+            ga[linear_off(&ga_shape, &coords, &row_strides(&ga_shape))] = v;
+        }
+        else
+        {
+            coords[dim] -= a_shape[dim];
+            gb[linear_off(&gb_shape, &coords, &row_strides(&gb_shape))] = v;
+        }
+    }
+    let _ = b_shape;
+    Ok((TensorND::new(ga, ga_shape), TensorND::new(gb, gb_shape)))
+}
+
+/// gather le long d'un axe (indices même shape que x) — 2-D.
+pub fn gather2(x: &TensorND, axis: usize, indices: &[usize]) -> Result<TensorND> {
+    if x.ndim() != 2
+    {
+        return Err(SciRustError::RankMismatch {
+            op: "parity::gather2",
+            expected: 2,
+            got: x.ndim(),
+        });
+    }
+    if axis >= 2
+    {
+        return Err(SciRustError::AxisOutOfBounds {
+            op: "parity::gather2",
+            axis,
+            rank: 2,
+        });
+    }
+    if indices.len() != x.numel()
+    {
+        return Err(SciRustError::ShapeMismatch {
+            op: "parity::gather2",
+            expected: (1, x.numel()),
+            got: (1, indices.len()),
+        });
+    }
+    let mut out = vec![0.0f32; x.numel()];
+    let mut coords = vec![0usize; 2];
+    for i in 0..x.numel()
+    {
+        let mut rem = i;
+        for d in (0..2).rev()
+        {
+            coords[d] = rem % x.shape[d];
+            rem /= x.shape[d];
+        }
+        let idx = indices[i];
+        if idx >= x.shape[axis]
+        {
+            return Err(SciRustError::IndexOutOfBounds {
+                what: "gather index",
+                index: idx,
+                bound: x.shape[axis],
+            });
+        }
+        coords[axis] = idx;
+        out[i] = x.data[linear_off(x.shape(), &coords, &row_strides(x.shape()))];
+    }
+    Ok(TensorND::new(out, x.shape.clone()))
+}
+
+/// Gradient gather : scatter-add de gout vers les indices.
+pub fn d_gather2(
+    gout: &TensorND,
+    x_shape: &[usize],
+    axis: usize,
+    indices: &[usize],
+) -> Result<TensorND> {
+    if axis >= 2
+    {
+        return Err(SciRustError::AxisOutOfBounds {
+            op: "parity::d_gather2",
+            axis,
+            rank: 2,
+        });
+    }
+    if indices.len() != gout.numel()
+    {
+        return Err(SciRustError::ShapeMismatch {
+            op: "parity::d_gather2",
+            expected: (1, gout.numel()),
+            got: (1, indices.len()),
+        });
+    }
+    let mut gx = vec![0.0f32; checked_prod(x_shape)?];
+    let mut coords = [0usize; 2];
+    for (i, (&idx, &g)) in indices.iter().zip(gout.data.iter()).enumerate()
+    {
+        let mut rem = i;
+        for d in (0..2).rev()
+        {
+            coords[d] = rem % gout.shape[d];
+            rem /= gout.shape[d];
+        }
+        coords[axis] = idx;
+        gx[linear_off(x_shape, &coords, &row_strides(x_shape))] += g;
+    }
+    Ok(TensorND::new(gx, x_shape.to_vec()))
+}
+
+/// unfold (sliding windows) le long d'un axe — 2-D, sortie rang+1.
+pub fn unfold2(x: &TensorND, axis: usize, size: usize, step: usize) -> Result<TensorND> {
+    if x.ndim() != 2
+    {
+        return Err(SciRustError::RankMismatch {
+            op: "parity::unfold2",
+            expected: 2,
+            got: x.ndim(),
+        });
+    }
+    if axis >= 2 || size == 0 || step == 0
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::unfold2: axis {axis}, size {size}, step {step}"
+        )));
+    }
+    let dim = x.shape[axis];
+    if size > dim
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::unfold2: size {size} > dim {dim}"
+        )));
+    }
+    let l = (dim - size) / step + 1;
+    let mut out_shape = x.shape.clone();
+    out_shape[axis] = l;
+    out_shape.push(size);
+    let strides = row_strides(x.shape());
+    let mut out = vec![0.0f32; checked_prod(&out_shape)?];
+    // décodage : coordonnées de sortie sur 3 dims (2 remplacées par l + size)
+    let mut in_coords = [0usize; 2];
+    for (i, o) in out.iter_mut().enumerate()
+    {
+        let mut rem = i;
+        let mut o_coords = [0usize; 3];
+        for d in (0..3).rev()
+        {
+            o_coords[d] = rem % out_shape[d];
+            rem /= out_shape[d];
+        }
+        in_coords.copy_from_slice(&o_coords[..2]);
+        in_coords[axis] = o_coords[axis] * step + o_coords[2];
+        *o = x.data[linear_off(x.shape(), &in_coords, &strides)];
+    }
+    Ok(TensorND::new(out, out_shape))
+}
+
+/// Gradient unfold : somme des contributions de chaque fenêtre.
+pub fn d_unfold2(
+    gout: &TensorND,
+    x_shape: &[usize],
+    axis: usize,
+    size: usize,
+    step: usize,
+) -> Result<TensorND> {
+    if axis >= 2 || size == 0 || step == 0
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::d_unfold2: axis {axis}, size {size}, step {step}"
+        )));
+    }
+    let strides = row_strides(x_shape);
+    let mut gx = vec![0.0f32; checked_prod(x_shape)?];
+    let mut in_coords = [0usize; 2];
+    let mut o_coords = [0usize; 3];
+    for (i, &g) in gout.data.iter().enumerate()
+    {
+        let mut rem = i;
+        for d in (0..3).rev()
+        {
+            o_coords[d] = rem % gout.shape[d];
+            rem /= gout.shape[d];
+        }
+        in_coords.copy_from_slice(&o_coords[..2]);
+        in_coords[axis] = o_coords[axis] * step + o_coords[2];
+        gx[linear_off(x_shape, &in_coords, &strides)] += g;
+    }
+    Ok(TensorND::new(gx, x_shape.to_vec()))
+}
+
+// ------------------------------------------------------------------ //
+//  Indexing — embedding                                            //
+// ------------------------------------------------------------------ //
+
+/// embedding(indices, weight) : out[i, j, :] = w[indices[i, j], :].
+pub fn embed(idx_shape: &[usize], indices: &[usize], w: &TensorND) -> Result<TensorND> {
+    let (v, d) = (w.shape[0], w.shape[1]);
+    let idx_numel = checked_prod(idx_shape)?;
+    if indices.len() != idx_numel
+    {
+        return Err(SciRustError::ShapeMismatch {
+            op: "parity::embed",
+            expected: (1, idx_numel),
+            got: (1, indices.len()),
+        });
+    }
+    let mut out_shape = idx_shape.to_vec();
+    out_shape.push(d);
+    let mut out = vec![0.0f32; idx_numel * d];
+    for (i, &idx) in indices.iter().enumerate()
+    {
+        if idx >= v
+        {
+            return Err(SciRustError::IndexOutOfBounds {
+                what: "embedding index",
+                index: idx,
+                bound: v,
+            });
+        }
+        for j in 0..d
+        {
+            out[i * d + j] = w.data[idx * d + j];
+        }
+    }
+    Ok(TensorND::new(out, out_shape))
+}
+
+/// Gradient embedding : scatter-add vers w.
+pub fn d_embed(gout: &TensorND, indices: &[usize], v: usize, d: usize) -> Result<TensorND> {
+    let mut gw = vec![0.0f32; v * d];
+    for (i, &idx) in indices.iter().enumerate()
+    {
+        if idx >= v
+        {
+            return Err(SciRustError::IndexOutOfBounds {
+                what: "embedding index",
+                index: idx,
+                bound: v,
+            });
+        }
+        for j in 0..d
+        {
+            gw[idx * d + j] += gout.data[i * d + j];
+        }
+    }
+    Ok(TensorND::new(gw, vec![v, d]))
+}
+
+// ------------------------------------------------------------------ //
+//  Linear — cosine_similarity / normalize                          //
+// ------------------------------------------------------------------ //
+
+/// cosine_similarity(a, b, dim=-1) — lignes de la dernière dim.
+pub fn cosine_sim(a: &TensorND, b: &TensorND) -> Result<TensorND> {
+    if a.shape() != b.shape() || a.ndim() != 2
+    {
+        return Err(SciRustError::ShapeMismatch {
+            op: "parity::cosine_sim",
+            expected: (a.shape[0], a.shape[1]),
+            got: (b.shape[0], b.shape[1]),
+        });
+    }
+    let (rows, cols) = (a.shape[0], a.shape[1]);
+    let mut out = vec![0.0f32; rows];
+    for (r, o) in out.iter_mut().enumerate()
+    {
+        let base = r * cols;
+        let na: f32 = (0..cols)
+            .map(|j| a.data[base + j] * a.data[base + j])
+            .sum::<f32>()
+            .sqrt();
+        let nb: f32 = (0..cols)
+            .map(|j| b.data[base + j] * b.data[base + j])
+            .sum::<f32>()
+            .sqrt();
+        let dot: f32 = (0..cols).map(|j| a.data[base + j] * b.data[base + j]).sum();
+        *o = if na == 0.0 || nb == 0.0
+        {
+            0.0
+        }
+        else
+        {
+            dot / (na * nb)
+        };
+    }
+    Ok(TensorND::new(out, vec![rows]))
+}
+
+/// Gradients cosine_similarity (lignes) :
+///   ga_i = gout·(b_i/(na·nb) - a_i·dot/(na³·nb))
+///   gb_i = gout·(a_i/(na·nb) - b_i·dot/(na·nb³))
+pub fn d_cosine_sim(gout: &TensorND, a: &TensorND, b: &TensorND) -> Result<(TensorND, TensorND)> {
+    let (rows, cols) = (a.shape[0], a.shape[1]);
+    let mut ga = vec![0.0f32; a.numel()];
+    let mut gb = vec![0.0f32; b.numel()];
+    for r in 0..rows
+    {
+        let base = r * cols;
+        let na: f32 = (0..cols)
+            .map(|j| a.data[base + j] * a.data[base + j])
+            .sum::<f32>()
+            .sqrt();
+        let nb: f32 = (0..cols)
+            .map(|j| b.data[base + j] * b.data[base + j])
+            .sum::<f32>()
+            .sqrt();
+        let dot: f32 = (0..cols).map(|j| a.data[base + j] * b.data[base + j]).sum();
+        let g = gout.data[r];
+        if na == 0.0 || nb == 0.0
+        {
+            continue;
+        }
+        let den_ab = na * nb;
+        let den_a3b = den_ab * na * na;
+        let den_ab3 = den_ab * nb * nb;
+        for j in 0..cols
+        {
+            let ai = a.data[base + j];
+            let bi = b.data[base + j];
+            ga[base + j] = g * (bi / den_ab - ai * dot / den_a3b);
+            gb[base + j] = g * (ai / den_ab - bi * dot / den_ab3);
+        }
+    }
+    Ok((
+        TensorND::new(ga, a.shape.clone()),
+        TensorND::new(gb, b.shape.clone()),
+    ))
+}
+
+/// F.normalize(x, p=2, dim=1) — normalisation L2 par ligne.
+pub fn normalize2(x: &TensorND) -> Result<TensorND> {
+    if x.ndim() != 2
+    {
+        return Err(SciRustError::RankMismatch {
+            op: "parity::normalize2",
+            expected: 2,
+            got: x.ndim(),
+        });
+    }
+    let (rows, cols) = (x.shape[0], x.shape[1]);
+    let mut out = vec![0.0f32; x.numel()];
+    for r in 0..rows
+    {
+        let base = r * cols;
+        let n: f32 = (0..cols)
+            .map(|j| x.data[base + j] * x.data[base + j])
+            .sum::<f32>()
+            .sqrt();
+        for j in 0..cols
+        {
+            out[base + j] = if n == 0.0 { 0.0 } else { x.data[base + j] / n };
+        }
+    }
+    Ok(TensorND::new(out, x.shape.clone()))
+}
+
+/// Gradient normalize L2 : gx_j = (gout_j - x_j·Σ(gout·x)/n²)/n.
+pub fn d_normalize2(gout: &TensorND, x: &TensorND) -> Result<TensorND> {
+    let (rows, cols) = (x.shape[0], x.shape[1]);
+    let mut gx = vec![0.0f32; x.numel()];
+    for r in 0..rows
+    {
+        let base = r * cols;
+        let n: f32 = (0..cols)
+            .map(|j| x.data[base + j] * x.data[base + j])
+            .sum::<f32>()
+            .sqrt();
+        if n == 0.0
+        {
+            continue;
+        }
+        let dot: f32 = (0..cols)
+            .map(|j| gout.data[base + j] * x.data[base + j])
+            .sum();
+        for j in 0..cols
+        {
+            gx[base + j] = (gout.data[base + j] - x.data[base + j] * dot / (n * n)) / n;
+        }
+    }
+    Ok(TensorND::new(gx, x.shape.clone()))
+}
+
+// ------------------------------------------------------------------ //
+//  Normalisation — dropout (masque commité) / batch_norm eval       //
+// ------------------------------------------------------------------ //
+
+/// dropout : y = x·mask/(1-p), mask ∈ {0,1} commité dans la fixture.
+pub fn dropout_apply(x: &TensorND, p: f32, mask: &[f32]) -> Result<TensorND> {
+    if mask.len() != x.numel()
+    {
+        return Err(SciRustError::ShapeMismatch {
+            op: "parity::dropout_apply",
+            expected: (1, x.numel()),
+            got: (1, mask.len()),
+        });
+    }
+    if !(0.0..1.0).contains(&p)
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::dropout_apply: p={p}"
+        )));
+    }
+    let scale = 1.0 / (1.0 - p);
+    let out: Vec<f32> = x
+        .data
+        .iter()
+        .zip(mask)
+        .map(|(&xv, &m)| xv * m * scale)
+        .collect();
+    Ok(TensorND::new(out, x.shape.clone()))
+}
+
+pub fn d_dropout(gout: &TensorND, p: f32, mask: &[f32]) -> Result<TensorND> {
+    let scale = 1.0 / (1.0 - p);
+    let gx: Vec<f32> = gout
+        .data
+        .iter()
+        .zip(mask)
+        .map(|(&g, &m)| g * m * scale)
+        .collect();
+    Ok(TensorND::new(gx, gout.shape.clone()))
+}
+
+/// batch_norm en mode eval (stats running, affine) : 2-D, canaux = dim 1.
+/// y = (x - rm)/sqrt(rv + eps) * w + b
+pub fn batch_norm_eval(
+    x: &TensorND,
+    w: &TensorND,
+    b: &TensorND,
+    rm: &TensorND,
+    rv: &TensorND,
+    eps: f32,
+) -> Result<TensorND> {
+    if x.ndim() != 2
+    {
+        return Err(SciRustError::RankMismatch {
+            op: "parity::batch_norm_eval",
+            expected: 2,
+            got: x.ndim(),
+        });
+    }
+    let (rows, c) = (x.shape[0], x.shape[1]);
+    if w.numel() != c || b.numel() != c || rm.numel() != c || rv.numel() != c
+    {
+        return Err(SciRustError::ShapeMismatch {
+            op: "parity::batch_norm_eval",
+            expected: (1, c),
+            got: (1, w.numel()),
+        });
+    }
+    let std: Vec<f32> = rv.data.iter().map(|&v| (v + eps).sqrt()).collect();
+    let mut out = vec![0.0f32; x.numel()];
+    for i in 0..rows
+    {
+        let base = i * c;
+        for j in 0..c
+        {
+            let xhat = (x.data[base + j] - rm.data[j]) / std[j];
+            out[base + j] = xhat * w.data[j] + b.data[j];
+        }
+    }
+    Ok(TensorND::new(out, x.shape.clone()))
+}
+
+/// Gradient batch_norm eval : gx, gw, gb.
+pub fn d_batch_norm_eval(
+    gout: &TensorND,
+    x: &TensorND,
+    w: &TensorND,
+    rm: &TensorND,
+    rv: &TensorND,
+    eps: f32,
+) -> Result<(TensorND, TensorND, TensorND)> {
+    let (rows, c) = (x.shape[0], x.shape[1]);
+    let std: Vec<f32> = rv.data.iter().map(|&v| (v + eps).sqrt()).collect();
+    let mut gx = vec![0.0f32; x.numel()];
+    let mut gw = vec![0.0f32; c];
+    let mut gb = vec![0.0f32; c];
+    for i in 0..rows
+    {
+        let base = i * c;
+        for j in 0..c
+        {
+            let xhat = (x.data[base + j] - rm.data[j]) / std[j];
+            gx[base + j] = gout.data[base + j] * w.data[j] / std[j];
+            gw[j] += gout.data[base + j] * xhat;
+            gb[j] += gout.data[base + j];
+        }
+    }
+    Ok((
+        TensorND::new(gx, x.shape.clone()),
+        TensorND::new(gw, vec![c]),
+        TensorND::new(gb, vec![c]),
+    ))
+}
+
+// ------------------------------------------------------------------ //
+//  Positional — rope (paires, base fixe)                            //
+// ------------------------------------------------------------------ //
+
+/// rope : dernières dims (L, H, D) avec D pair ; θ_p,i = p / base^(2i/D).
+///   y0 = x0·cosθ - x1·sinθ ; y1 = x0·sinθ + x1·cosθ  (paires adjacentes)
+pub fn rope(x: &TensorND, base: f32) -> Result<TensorND> {
+    let rank = x.ndim();
+    if rank < 2
+    {
+        return Err(SciRustError::RankMismatch {
+            op: "parity::rope",
+            expected: 2,
+            got: rank,
+        });
+    }
+    let d = x.shape[rank - 1];
+    if !d.is_multiple_of(2)
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::rope: dernière dim impaire {d}"
+        )));
+    }
+    let l = x.shape[0];
+    let mut out = vec![0.0f32; x.numel()];
+    let outer = x.numel() / (l * d);
+    let pairs = d / 2;
+    for o in 0..outer
+    {
+        for p in 0..l
+        {
+            let base_off = (p * outer + o) * d;
+            for k in 0..pairs
+            {
+                let theta = p as f32 / base.powf(2.0 * k as f32 / d as f32);
+                let (c, s) = (theta.cos(), theta.sin());
+                let (x0, x1) = (x.data[base_off + 2 * k], x.data[base_off + 2 * k + 1]);
+                out[base_off + 2 * k] = x0 * c - x1 * s;
+                out[base_off + 2 * k + 1] = x0 * s + x1 * c;
+            }
+        }
+    }
+    Ok(TensorND::new(out, x.shape.clone()))
+}
+
+/// Gradient rope :
+///   gx0 = gout0·cos + gout1·sin ; gx1 = -gout0·sin + gout1·cos
+pub fn d_rope(gout: &TensorND, x: &TensorND, base: f32) -> Result<TensorND> {
+    let rank = x.ndim();
+    let d = x.shape[rank - 1];
+    let l = x.shape[0];
+    let mut gx = vec![0.0f32; x.numel()];
+    let outer = x.numel() / (l * d);
+    let pairs = d / 2;
+    for o in 0..outer
+    {
+        for p in 0..l
+        {
+            let base_off = (p * outer + o) * d;
+            for k in 0..pairs
+            {
+                let theta = p as f32 / base.powf(2.0 * k as f32 / d as f32);
+                let (c, s) = (theta.cos(), theta.sin());
+                let (g0, g1) = (gout.data[base_off + 2 * k], gout.data[base_off + 2 * k + 1]);
+                gx[base_off + 2 * k] = g0 * c + g1 * s;
+                gx[base_off + 2 * k + 1] = -g0 * s + g1 * c;
+            }
+        }
+    }
+    Ok(TensorND::new(gx, x.shape.clone()))
+}
+
+// ------------------------------------------------------------------ //
+//  Attention — scaled_dot_product_attention (1 batch)               //
+// ------------------------------------------------------------------ //
+
+/// sdpa sans masque ni dropout : out = softmax(q·kᵀ/√d)·v, shapes (B,L,E).
+pub fn sdpa(q: &TensorND, k: &TensorND, v: &TensorND) -> Result<TensorND> {
+    if q.ndim() != 3 || k.ndim() != 3 || v.ndim() != 3
+    {
+        return Err(SciRustError::RankMismatch {
+            op: "parity::sdpa",
+            expected: 3,
+            got: q.ndim(),
+        });
+    }
+    if q.shape() != k.shape() || q.shape() != v.shape()
+    {
+        return Err(SciRustError::ShapeMismatch {
+            op: "parity::sdpa",
+            expected: (q.shape[0], q.shape[1]),
+            got: (k.shape[0], k.shape[1]),
+        });
+    }
+    let (b, l, e) = (q.shape[0], q.shape[1], q.shape[2]);
+    let inv = (e as f32).sqrt().recip();
+    let mut out = vec![0.0f32; b * l * e];
+    for batch in 0..b
+    {
+        let (qb, kb, vb) = (batch * l * e, batch * l * e, batch * l * e);
+        let mut scores = vec![0.0f32; l * l];
+        for i in 0..l
+        {
+            for j in 0..l
+            {
+                let mut acc = 0.0f32;
+                for d in 0..e
+                {
+                    acc += q.data[qb + i * e + d] * k.data[kb + j * e + d];
+                }
+                scores[i * l + j] = acc * inv;
+            }
+        }
+        for i in 0..l
+        {
+            let max = scores[i * l..(i + 1) * l]
+                .iter()
+                .cloned()
+                .fold(f32::NEG_INFINITY, f32::max);
+            let mut sum = 0.0f32;
+            for j in 0..l
+            {
+                sum += (scores[i * l + j] - max).exp();
+            }
+            for j in 0..l
+            {
+                let p = (scores[i * l + j] - max).exp() / sum;
+                for d in 0..e
+                {
+                    out[batch * l * e + i * e + d] += p * v.data[vb + j * e + d];
+                }
+            }
+        }
+    }
+    Ok(TensorND::new(out, q.shape.clone()))
+}
+
+/// Gradients sdpa : (gq, gk, gv).
+pub fn d_sdpa(
+    gout: &TensorND,
+    q: &TensorND,
+    k: &TensorND,
+    v: &TensorND,
+) -> Result<(TensorND, TensorND, TensorND)> {
+    let (b, l, e) = (q.shape[0], q.shape[1], q.shape[2]);
+    let inv = (e as f32).sqrt().recip();
+    let mut gq = vec![0.0f32; q.numel()];
+    let mut gk = vec![0.0f32; k.numel()];
+    let mut gv = vec![0.0f32; v.numel()];
+    for batch in 0..b
+    {
+        let (qb, kb, vb, ob) = (batch * l * e, batch * l * e, batch * l * e, batch * l * e);
+        let mut scores = vec![0.0f32; l * l];
+        let mut probs = vec![0.0f32; l * l];
+        for i in 0..l
+        {
+            for j in 0..l
+            {
+                let mut acc = 0.0f32;
+                for d in 0..e
+                {
+                    acc += q.data[qb + i * e + d] * k.data[kb + j * e + d];
+                }
+                scores[i * l + j] = acc * inv;
+            }
+        }
+        for i in 0..l
+        {
+            let max = scores[i * l..(i + 1) * l]
+                .iter()
+                .cloned()
+                .fold(f32::NEG_INFINITY, f32::max);
+            let mut sum = 0.0f32;
+            for j in 0..l
+            {
+                sum += (scores[i * l + j] - max).exp();
+            }
+            for j in 0..l
+            {
+                probs[i * l + j] = (scores[i * l + j] - max).exp() / sum;
+            }
+        }
+        // gv = Pᵀ·gout
+        for i in 0..l
+        {
+            for j in 0..l
+            {
+                let p = probs[i * l + j];
+                for d in 0..e
+                {
+                    gv[vb + j * e + d] += p * gout.data[ob + i * e + d];
+                }
+            }
+        }
+        // gP = gout·vᵀ ; gS = P ⊙ (gP - Σ_j gP·P) ; puis gq/gk
+        for i in 0..l
+        {
+            let mut gp_row = vec![0.0f32; l];
+            let mut dot = 0.0f32;
+            for j in 0..l
+            {
+                let mut acc = 0.0f32;
+                for d in 0..e
+                {
+                    acc += gout.data[ob + i * e + d] * v.data[vb + j * e + d];
+                }
+                gp_row[j] = acc;
+                dot += acc * probs[i * l + j];
+            }
+            for j in 0..l
+            {
+                let gs = probs[i * l + j] * (gp_row[j] - dot);
+                for d in 0..e
+                {
+                    gq[qb + i * e + d] += gs * k.data[kb + j * e + d] * inv;
+                    gk[kb + j * e + d] += gs * q.data[qb + i * e + d] * inv;
+                }
+            }
+        }
+    }
+    Ok((
+        TensorND::new(gq, q.shape.clone()),
+        TensorND::new(gk, k.shape.clone()),
+        TensorND::new(gv, v.shape.clone()),
+    ))
+}
+
+// ------------------------------------------------------------------ //
+//  Quantization / conversion                                        //
+// ------------------------------------------------------------------ //
+
+/// fake_quantize_per_tensor_affine (STE) : arrondi à l'éventuel pair,
+/// clamp [qmin, qmax] ; y = (q - zp)·scale. Grad = gout (STE).
+pub fn fake_quant(x: f32, scale: f32, zp: i64, qmin: i64, qmax: i64) -> f32 {
+    let v = x / scale;
+    let q = round_half_even(v) as i64 + zp;
+    let q = q.clamp(qmin, qmax);
+    (q - zp) as f32 * scale
+}
+
+fn round_half_even(v: f32) -> f32 {
+    let floor = v.floor();
+    let frac = v - floor;
+    if frac == 0.5
+    {
+        if (floor as i64) % 2 == 0
+        {
+            floor
+        }
+        else
+        {
+            floor + 1.0
+        }
+    }
+    else
+    {
+        v.round()
+    }
+}
+
+pub fn fake_quant_map(t: &TensorND, scale: f32, zp: i64, qmin: i64, qmax: i64) -> Result<TensorND> {
+    Ok(TensorND::new(
+        t.data
+            .iter()
+            .map(|&v| fake_quant(v, scale, zp, qmin, qmax))
+            .collect(),
+        t.shape.clone(),
+    ))
+}
+
+/// Gradient fake_quantize (STE) : gout partout où la valeur quantisée
+/// PRÉ-CLAMP est dans [qmin, qmax], zéro sinon (masquage torch).
+pub fn d_fake_quant_map(
+    gout: &TensorND,
+    x: &TensorND,
+    scale: f32,
+    zp: i64,
+    qmin: i64,
+    qmax: i64,
+) -> Result<TensorND> {
+    let mut gx = vec![0.0f32; x.numel()];
+    for (i, (&v, &g)) in x.data.iter().zip(gout.data.iter()).enumerate()
+    {
+        let q = round_half_even(v / scale) as i64 + zp;
+        gx[i] = if qmin <= q && q <= qmax { g } else { 0.0 };
+    }
+    Ok(TensorND::new(gx, x.shape.clone()))
+}
+
+/// to_bf16 : arrondi round-to-nearest-even de la mantisse f32 à 8 bits.
+pub fn to_bf16(x: f32) -> f32 {
+    let bits = x.to_bits();
+    let round_bias = 0x7FFF + ((bits >> 16) & 1);
+    f32::from_bits((bits + round_bias) & 0xFFFF_0000)
+}
+
+pub fn to_bf16_map(t: &TensorND) -> Result<TensorND> {
+    Ok(TensorND::new(
+        t.data.iter().map(|&x| to_bf16(x)).collect(),
+        t.shape.clone(),
+    ))
+}

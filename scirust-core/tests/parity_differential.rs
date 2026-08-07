@@ -33,6 +33,7 @@ struct Fixture {
 #[derive(Debug, Deserialize)]
 struct Case {
     kind: String,
+    #[serde(default)]
     shape: Vec<usize>,
     #[serde(default)]
     scalar: Option<f32>,
@@ -52,6 +53,36 @@ struct Case {
     bcast_to: Option<Vec<usize>>,
     #[serde(default)]
     out_shape: Option<Vec<usize>>,
+    #[serde(default)]
+    size: Option<usize>,
+    #[serde(default)]
+    step: Option<usize>,
+    #[serde(default)]
+    p: Option<f32>,
+    #[serde(default)]
+    mask: Option<Vec<f32>>,
+    #[serde(default)]
+    scale: Option<f32>,
+    #[serde(default)]
+    zp: Option<i64>,
+    #[serde(default)]
+    qmin: Option<i64>,
+    #[serde(default)]
+    qmax: Option<i64>,
+    #[serde(default)]
+    idx_shape: Option<Vec<usize>>,
+    #[serde(default)]
+    base: Option<f32>,
+    #[serde(default)]
+    c: Vec<f32>,
+    #[serde(default)]
+    rm: Vec<f32>,
+    #[serde(default)]
+    rv: Vec<f32>,
+    #[serde(default)]
+    gk: Vec<f32>,
+    #[serde(default)]
+    gv: Vec<f32>,
     #[serde(default)]
     x: Vec<f32>,
     #[serde(default)]
@@ -990,6 +1021,378 @@ fn parity_loss_cross_entropy() {
             &c.gx,
             1e-5,
             1e-5,
+        );
+    }
+}
+
+// ------------------------------------------------------------------ //
+//  Shape extra — cat / gather / unfold                              //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn parity_shape_extra_cat_gather_unfold() {
+    // cat : dim 0 puis dim 1
+    let fx = load_fixture("shape", "cat");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let a = tensor(&c.a, &c.shape);
+        let b = tensor(&c.b, &c.shape);
+        let dim = c.dims.as_ref().unwrap()[0];
+        let out = parity::cat2(&a, &b, dim).unwrap();
+        assert_eq!(
+            out.shape(),
+            c.out_shape.as_ref().unwrap(),
+            "cat c{ci}: shape"
+        );
+        assert_close(&format!("cat fwd c{ci}"), out.data.as_ref(), &c.y, 0.0, 0.0);
+        let gout = tensor(&c.gout, c.out_shape.as_ref().unwrap());
+        let (gx, gb) = parity::d_cat2(&gout, &c.shape, &c.shape, dim).unwrap();
+        assert_close(&format!("cat gx c{ci}"), gx.data.as_ref(), &c.gx, 0.0, 0.0);
+        assert_close(&format!("cat gb c{ci}"), gb.data.as_ref(), &c.gb, 0.0, 0.0);
+    }
+    // gather : axe 0 puis axe 1
+    let fx = load_fixture("shape", "gather");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let x = tensor(&c.x, &c.shape);
+        let axis = c.axis.unwrap();
+        let out = parity::gather2(&x, axis, &c.indices).unwrap();
+        assert_eq!(out.shape(), &c.shape, "gather c{ci}: shape");
+        assert_close(
+            &format!("gather fwd c{ci}"),
+            out.data.as_ref(),
+            &c.y,
+            0.0,
+            0.0,
+        );
+        let gout = tensor(&c.gout, &c.shape);
+        let gx = parity::d_gather2(&gout, &c.shape, axis, &c.indices).unwrap();
+        assert_close(
+            &format!("gather gx c{ci}"),
+            gx.data.as_ref(),
+            &c.gx,
+            0.0,
+            0.0,
+        );
+    }
+    // unfold : (axe=1, size=2, step=1) puis (axe=0, size=2, step=2)
+    let fx = load_fixture("shape", "unfold");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let x = tensor(&c.x, &c.shape);
+        let out = parity::unfold2(&x, c.axis.unwrap(), c.size.unwrap(), c.step.unwrap()).unwrap();
+        assert_eq!(
+            out.shape(),
+            c.out_shape.as_ref().unwrap(),
+            "unfold c{ci}: shape"
+        );
+        assert_close(
+            &format!("unfold fwd c{ci}"),
+            out.data.as_ref(),
+            &c.y,
+            0.0,
+            0.0,
+        );
+        let gout = tensor(&c.gout, c.out_shape.as_ref().unwrap());
+        let gx = parity::d_unfold2(
+            &gout,
+            &c.shape,
+            c.axis.unwrap(),
+            c.size.unwrap(),
+            c.step.unwrap(),
+        )
+        .unwrap();
+        assert_close(
+            &format!("unfold gx c{ci}"),
+            gx.data.as_ref(),
+            &c.gx,
+            0.0,
+            0.0,
+        );
+    }
+}
+
+// ------------------------------------------------------------------ //
+//  Indexing — embedding                                              //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn parity_indexing_embedding() {
+    let fx = load_fixture("indexing", "embedding");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let idx_shape = c.idx_shape.as_ref().unwrap();
+        let out_shape = c.out_shape.as_ref().unwrap();
+        let d = out_shape[out_shape.len() - 1];
+        let v = c.w.len() / d;
+        let w = tensor(&c.w, &[v, d]);
+        let out = parity::embed(idx_shape, &c.indices, &w).unwrap();
+        assert_eq!(out.shape(), out_shape, "embed c{ci}: shape");
+        assert_close(
+            &format!("embed fwd c{ci}"),
+            out.data.as_ref(),
+            &c.y,
+            0.0,
+            0.0,
+        );
+        let gout = tensor(&c.gout, out_shape);
+        let gw = parity::d_embed(&gout, &c.indices, v, d).unwrap();
+        assert_close(
+            &format!("embed gw c{ci}"),
+            gw.data.as_ref(),
+            &c.gw,
+            0.0,
+            0.0,
+        );
+    }
+}
+
+// ------------------------------------------------------------------ //
+//  Linear extra — cosine_similarity / normalize                     //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn parity_linear_extra_cosine_normalize() {
+    let fx = load_fixture("linear", "cosine_similarity");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let a = tensor(&c.a, &c.shape);
+        let b = tensor(&c.b, &c.shape);
+        let out = parity::cosine_sim(&a, &b).unwrap();
+        assert_eq!(
+            out.shape(),
+            c.out_shape.as_ref().unwrap(),
+            "cos c{ci}: shape"
+        );
+        assert_close(
+            &format!("cos fwd c{ci}"),
+            out.data.as_ref(),
+            &c.y,
+            1e-4,
+            1e-4,
+        );
+        let gout = tensor(&c.gout, c.out_shape.as_ref().unwrap());
+        let (gx, gb) = parity::d_cosine_sim(&gout, &a, &b).unwrap();
+        assert_close(
+            &format!("cos gx c{ci}"),
+            gx.data.as_ref(),
+            &c.gx,
+            1e-4,
+            1e-4,
+        );
+        assert_close(
+            &format!("cos gb c{ci}"),
+            gb.data.as_ref(),
+            &c.gb,
+            1e-4,
+            1e-4,
+        );
+    }
+    let fx = load_fixture("linear", "normalize");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let x = tensor(&c.x, &c.shape);
+        let out = parity::normalize2(&x).unwrap();
+        assert_eq!(out.shape(), &c.shape, "norm c{ci}: shape");
+        assert_close(
+            &format!("norm fwd c{ci}"),
+            out.data.as_ref(),
+            &c.y,
+            1e-4,
+            1e-4,
+        );
+        let gout = tensor(&c.gout, &c.shape);
+        let gx = parity::d_normalize2(&gout, &x).unwrap();
+        assert_close(
+            &format!("norm gx c{ci}"),
+            gx.data.as_ref(),
+            &c.gx,
+            1e-4,
+            1e-4,
+        );
+    }
+}
+
+// ------------------------------------------------------------------ //
+//  Normalization stochastique — dropout / batch_norm (eval)         //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn parity_norm_stoch_dropout_batchnorm() {
+    let fx = load_fixture("normalization", "dropout");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let x = tensor(&c.x, &c.shape);
+        let mask = c.mask.as_ref().unwrap();
+        let p = c.p.unwrap();
+        let out = parity::dropout_apply(&x, p, mask).unwrap();
+        assert_close(
+            &format!("dropout fwd c{ci}"),
+            out.data.as_ref(),
+            &c.y,
+            1e-5,
+            1e-5,
+        );
+        let gout = tensor(&c.gout, &c.shape);
+        let gx = parity::d_dropout(&gout, p, mask).unwrap();
+        assert_close(
+            &format!("dropout gx c{ci}"),
+            gx.data.as_ref(),
+            &c.gx,
+            1e-5,
+            1e-5,
+        );
+    }
+    let fx = load_fixture("normalization", "batch_norm");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let x = tensor(&c.x, &c.shape);
+        let w = tensor(&c.w, &[c.shape[1]]);
+        let b = tensor(&c.b, &[c.shape[1]]);
+        let rm = tensor(&c.rm, &[c.shape[1]]);
+        let rv = tensor(&c.rv, &[c.shape[1]]);
+        let eps = c.eps.unwrap_or(1e-5);
+        let out = parity::batch_norm_eval(&x, &w, &b, &rm, &rv, eps).unwrap();
+        assert_close(
+            &format!("bn fwd c{ci}"),
+            out.data.as_ref(),
+            &c.y,
+            1e-4,
+            1e-4,
+        );
+        let gout = tensor(&c.gout, &c.shape);
+        let (gx, gw, gb) = parity::d_batch_norm_eval(&gout, &x, &w, &rm, &rv, eps).unwrap();
+        assert_close(&format!("bn gx c{ci}"), gx.data.as_ref(), &c.gx, 1e-4, 1e-4);
+        assert_close(&format!("bn gw c{ci}"), gw.data.as_ref(), &c.gw, 1e-4, 1e-4);
+        assert_close(&format!("bn gb c{ci}"), gb.data.as_ref(), &c.gb, 1e-4, 1e-4);
+    }
+}
+
+// ------------------------------------------------------------------ //
+//  Positional — rope ; Attention — scaled_dot_product_attention     //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn parity_positional_rope_attention_sdpa() {
+    let fx = load_fixture("positional", "rope");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let x = tensor(&c.x, &c.shape);
+        let base = c.base.unwrap_or(10000.0);
+        let out = parity::rope(&x, base).unwrap();
+        assert_eq!(out.shape(), &c.shape, "rope c{ci}: shape");
+        assert_close(
+            &format!("rope fwd c{ci}"),
+            out.data.as_ref(),
+            &c.y,
+            1e-4,
+            1e-4,
+        );
+        let gout = tensor(&c.gout, &c.shape);
+        let gx = parity::d_rope(&gout, &x, base).unwrap();
+        assert_close(
+            &format!("rope gx c{ci}"),
+            gx.data.as_ref(),
+            &c.gx,
+            1e-4,
+            1e-4,
+        );
+    }
+    let fx = load_fixture("attention", "scaled_dot_product_attention");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let q = tensor(&c.a, &c.shape);
+        let k = tensor(&c.b, &c.shape);
+        let v = tensor(&c.c, &c.shape);
+        let out = parity::sdpa(&q, &k, &v).unwrap();
+        assert_eq!(out.shape(), &c.shape, "sdpa c{ci}: shape");
+        assert_close(
+            &format!("sdpa fwd c{ci}"),
+            out.data.as_ref(),
+            &c.y,
+            1e-4,
+            1e-4,
+        );
+        let gout = tensor(&c.gout, &c.shape);
+        let (gq, gk, gv) = parity::d_sdpa(&gout, &q, &k, &v).unwrap();
+        assert_close(
+            &format!("sdpa gq c{ci}"),
+            gq.data.as_ref(),
+            &c.gx,
+            1e-4,
+            1e-4,
+        );
+        assert_close(
+            &format!("sdpa gk c{ci}"),
+            gk.data.as_ref(),
+            &c.gk,
+            1e-4,
+            1e-4,
+        );
+        assert_close(
+            &format!("sdpa gv c{ci}"),
+            gv.data.as_ref(),
+            &c.gv,
+            1e-4,
+            1e-4,
+        );
+    }
+}
+
+// ------------------------------------------------------------------ //
+//  Quantization / conversion — fake_quantize (STE) / to_bf16        //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn parity_quantization_fake_quant_to_bf16() {
+    let fx = load_fixture("quantization", "fake_quantize_per_tensor");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let x = tensor(&c.x, &c.shape);
+        let out = parity::fake_quant_map(
+            &x,
+            c.scale.unwrap(),
+            c.zp.unwrap(),
+            c.qmin.unwrap(),
+            c.qmax.unwrap(),
+        )
+        .unwrap();
+        assert_close(
+            &format!("fakequant fwd c{ci}"),
+            out.data.as_ref(),
+            &c.y,
+            0.0,
+            0.0,
+        );
+        let gout = tensor(&c.gout, &c.shape);
+        let gx = parity::d_fake_quant_map(
+            &gout,
+            &x,
+            c.scale.unwrap(),
+            c.zp.unwrap(),
+            c.qmin.unwrap(),
+            c.qmax.unwrap(),
+        )
+        .unwrap();
+        assert_close(
+            &format!("fakequant gx c{ci}"),
+            gx.data.as_ref(),
+            &c.gx,
+            0.0,
+            0.0,
+        );
+    }
+    let fx = load_fixture("conversion", "to_bf16");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let x = tensor(&c.x, &c.shape);
+        let out = parity::to_bf16_map(&x).unwrap();
+        assert_close(
+            &format!("to_bf16 fwd c{ci}"),
+            out.data.as_ref(),
+            &c.y,
+            0.0,
+            0.0,
         );
     }
 }

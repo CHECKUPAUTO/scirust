@@ -3,7 +3,7 @@
 baseline (2.13.0). OFFLINE tool: not run in CI. Output fixtures are data only.
 
 Usage:
-    python3 generate_fixtures.py [--torch-bin PATH] [--families elementwise,reductions,normalization,shape,linear,loss,norm_affine,reduction_extra,unary_extra,special]
+    python3 generate_fixtures.py [--torch-bin PATH] [--families elementwise,reductions,normalization,shape,linear,loss,norm_affine,reduction_extra,unary_extra,special,shape_extra,indexing,linear_extra,norm_stoch,positional,attention,quantization,conversion]
 
 Provenance rules (LICENSING_AND_PROVENANCE.md):
   - executes the pinned baseline (`torch.__version__` must be 2.13.0),
@@ -196,6 +196,206 @@ def gen_special(gen, family_dir: Path) -> None:
                           "gout": flat(gout), "gx": flat(gx)})
         write(op, family_dir, cases, dtype="f64",
               note="f64, domaine (0.1, 5.0), grad via autograd")
+
+
+def gen_shape_extra(gen, family_dir: Path) -> None:
+    """cat / gather / unfold — APPEND fin de séquence (positionnel)."""
+    cases = []
+    for dim in (0, 1):
+        s = (3, 4)
+        a = seed_tensor(gen, s, -3.0, 3.0).requires_grad_(True)
+        b = seed_tensor(gen, s, -3.0, 3.0).requires_grad_(True)
+        y = torch.cat([a, b], dim=dim)
+        gout = seed_tensor(gen, list(y.shape), -1.0, 1.0)
+        gx, gb = torch.autograd.grad(y, (a, b), grad_outputs=gout)
+        cases.append({"kind": "cat", "shape": list(s), "dims": [dim],
+                      "a": flat(a.detach()), "b": flat(b.detach()),
+                      "out_shape": list(y.shape),
+                      "y": flat(y.detach()), "gout": flat(gout),
+                      "gx": flat(gx), "gb": flat(gb)})
+    write("cat", family_dir, cases, note="cat 2 tenseurs même shape, dim 0/1")
+    cases = []
+    for axis in (0, 1):
+        s = (3, 4)
+        x = seed_tensor(gen, s, -3.0, 3.0).requires_grad_(True)
+        idx = torch.randint(0, s[axis], s, generator=gen)
+        y = torch.gather(x, axis, idx)
+        gout = seed_tensor(gen, s, -1.0, 1.0)
+        (gx,) = torch.autograd.grad(y, x, grad_outputs=gout)
+        cases.append({"kind": "gather", "shape": list(s), "axis": axis,
+                      "x": flat(x.detach()),
+                      "indices": [int(v) for v in idx.flatten().tolist()],
+                      "y": flat(y.detach()), "gout": flat(gout),
+                      "gx": flat(gx)})
+    write("gather", family_dir, cases, note="gather index même shape que x, axe 0/1")
+    cases = []
+    for (axis, size, step) in ((1, 2, 1), (0, 2, 2)):
+        s = (3, 4)
+        x = seed_tensor(gen, s, -3.0, 3.0).requires_grad_(True)
+        y = x.unfold(axis, size, step)
+        gout = seed_tensor(gen, list(y.shape), -1.0, 1.0)
+        (gx,) = torch.autograd.grad(y, x, grad_outputs=gout)
+        cases.append({"kind": "unfold", "shape": list(s), "axis": axis,
+                      "x": flat(x.detach()),
+                      "size": size, "step": step, "out_shape": list(y.shape),
+                      "y": flat(y.detach()), "gout": flat(gout),
+                      "gx": flat(gx)})
+    write("unfold", family_dir, cases, note="unfold axe 0/1, taille/pas")
+
+
+def gen_indexing(gen, family_dir: Path) -> None:
+    """embedding — APPEND fin de séquence (positionnel)."""
+    cases = []
+    for idx_shape, V, D in (((2, 3), 8, 4), ((3, 2), 6, 3)):
+        w = seed_tensor(gen, (V, D), -1.0, 1.0).requires_grad_(True)
+        idx = torch.randint(0, V, idx_shape, generator=gen)
+        y = torch.nn.functional.embedding(idx, w)
+        gout = seed_tensor(gen, list(y.shape), -1.0, 1.0)
+        (gw,) = torch.autograd.grad(y, w, grad_outputs=gout)
+        cases.append({"kind": "embedding", "idx_shape": list(idx_shape),
+                      "indices": [int(v) for v in idx.flatten().tolist()],
+                      "w": flat(w.detach()), "out_shape": list(y.shape),
+                      "y": flat(y.detach()), "gout": flat(gout),
+                      "gw": flat(gw)})
+    write("embedding", family_dir, cases, note="embedding(index, weight) grad vers weight")
+
+
+def gen_linear_extra(gen, family_dir: Path) -> None:
+    """cosine_similarity / normalize — APPEND fin de séquence (positionnel)."""
+    cases = []
+    for s in SHAPES:
+        a = seed_tensor(gen, s, -3.0, 3.0).requires_grad_(True)
+        b = seed_tensor(gen, s, -3.0, 3.0).requires_grad_(True)
+        y = torch.nn.functional.cosine_similarity(a, b, dim=-1)
+        out = list(y.shape)
+        gout = seed_tensor(gen, out, -1.0, 1.0)
+        gx, gb = torch.autograd.grad(y, (a, b), grad_outputs=gout)
+        cases.append({"kind": "cosine", "shape": list(s),
+                      "a": flat(a.detach()), "b": flat(b.detach()),
+                      "out_shape": out, "y": flat(y.detach()),
+                      "gout": flat(gout), "gx": flat(gx), "gb": flat(gb)})
+    write("cosine_similarity", family_dir, cases, note="cosine_similarity dim=-1")
+    cases = []
+    for s in SHAPES:
+        x = seed_tensor(gen, s, -3.0, 3.0).requires_grad_(True)
+        y = torch.nn.functional.normalize(x, p=2, dim=1)
+        gout = seed_tensor(gen, s, -1.0, 1.0)
+        (gx,) = torch.autograd.grad(y, x, grad_outputs=gout)
+        cases.append({"kind": "normalize", "shape": list(s),
+                      "x": flat(x.detach()),
+                      "y": flat(y.detach()), "gout": flat(gout),
+                      "gx": flat(gx)})
+    write("normalize", family_dir, cases, note="normalize p=2 dim=1")
+
+
+def gen_norm_stoch(gen, family_dir: Path) -> None:
+    """dropout (masque fixé par seed) / batch_norm eval — APPEND fin de séquence."""
+    cases = []
+    for p in (0.5, 0.2):
+        s = (3, 4)
+        x = seed_tensor(gen, s, -3.0, 3.0).requires_grad_(True)
+        keep = torch.bernoulli(torch.full(s, 1.0 - p), generator=gen)
+        y = x * keep / (1.0 - p)
+        gout = seed_tensor(gen, s, -1.0, 1.0)
+        (gx,) = torch.autograd.grad(y, x, grad_outputs=gout)
+        cases.append({"kind": "dropout", "shape": list(s), "p": p,
+                      "x": flat(x.detach()),
+                      "mask": [float(v) for v in keep.flatten().tolist()],
+                      "y": flat(y.detach()), "gout": flat(gout),
+                      "gx": flat(gx)})
+    write("dropout", family_dir, cases,
+          note="masque bernoulli seedé commité ; y = x*mask/(1-p)")
+    cases = []
+    for s in SHAPES:
+        C = s[1]
+        x = seed_tensor(gen, s, -3.0, 3.0).requires_grad_(True)
+        rm = seed_tensor(gen, (C,), -0.5, 0.5)
+        rv = torch.empty((C,), dtype=torch.float32).uniform_(0.5, 2.0, generator=gen)
+        w = seed_tensor(gen, (C,), 0.5, 1.5).requires_grad_(True)
+        b = seed_tensor(gen, (C,), -1.0, 1.0).requires_grad_(True)
+        y = torch.nn.functional.batch_norm(x, rm, rv, w, b, training=False,
+                                           momentum=0.1, eps=1e-5)
+        gout = seed_tensor(gen, s, -1.0, 1.0)
+        gx, gw, gb = torch.autograd.grad(y, (x, w, b), grad_outputs=gout)
+        cases.append({"kind": "batchnorm", "shape": list(s), "dims": [C],
+                      "x": flat(x.detach()),
+                      "eps": 1e-5, "w": flat(w.detach()), "b": flat(b.detach()),
+                      "rm": flat(rm), "rv": flat(rv), "y": flat(y.detach()),
+                      "gout": flat(gout), "gx": flat(gx), "gw": flat(gw),
+                      "gb": flat(gb)})
+    write("batch_norm", family_dir, cases, note="eval mode, running stats, eps=1e-5")
+
+
+def gen_positional(gen, family_dir: Path) -> None:
+    """rope (référence torch en ops natives, paires, base=10000) — APPEND fin de séquence."""
+    cases = []
+    for s in ((2, 3, 4), (2, 2, 6)):
+        L, H, D = s
+        x = seed_tensor(gen, s, -3.0, 3.0).requires_grad_(True)
+        pos = torch.arange(L, dtype=torch.float32).unsqueeze(1)
+        i = torch.arange(0, D, 2, dtype=torch.float32)
+        theta = pos / (10000.0 ** (i / D))
+        c = torch.cos(theta).unsqueeze(1)
+        sn = torch.sin(theta).unsqueeze(1)
+        xh = x.view(L, H, D // 2, 2)
+        rot0 = xh[..., 0] * c - xh[..., 1] * sn
+        rot1 = xh[..., 0] * sn + xh[..., 1] * c
+        y = torch.stack([rot0, rot1], dim=-1).view(L, H, D)
+        gout = seed_tensor(gen, s, -1.0, 1.0)
+        (gx,) = torch.autograd.grad(y, x, grad_outputs=gout)
+        cases.append({"kind": "rope", "shape": list(s), "base": 10000.0,
+                      "x": flat(x.detach()),
+                      "y": flat(y.detach()), "gout": flat(gout),
+                      "gx": flat(gx)})
+    write("rope", family_dir, cases, note="rope paires, base=10000, dernières dims paires")
+
+
+def gen_attention(gen, family_dir: Path) -> None:
+    """scaled_dot_product_attention (sans masque, dropout=0) — APPEND fin de séquence."""
+    cases = []
+    for (B, L, E) in ((1, 3, 4), (1, 4, 2)):
+        q = seed_tensor(gen, (B, L, E), -1.0, 1.0).requires_grad_(True)
+        k = seed_tensor(gen, (B, L, E), -1.0, 1.0).requires_grad_(True)
+        v = seed_tensor(gen, (B, L, E), -1.0, 1.0).requires_grad_(True)
+        y = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+        gout = seed_tensor(gen, list(y.shape), -1.0, 1.0)
+        gq, gk, gv = torch.autograd.grad(y, (q, k, v), grad_outputs=gout)
+        cases.append({"kind": "attention", "shape": [B, L, E],
+                      "a": flat(q.detach()), "b": flat(k.detach()),
+                      "c": flat(v.detach()), "out_shape": list(y.shape),
+                      "y": flat(y.detach()), "gout": flat(gout),
+                      "gx": flat(gq), "gk": flat(gk), "gv": flat(gv)})
+    write("scaled_dot_product_attention", family_dir, cases,
+          note="sdpa sans masque ni dropout, 1 batch")
+
+
+def gen_quantization(gen, family_dir: Path) -> None:
+    """fake_quantize_per_tensor_affine (STE) — APPEND fin de séquence."""
+    cases = []
+    for s in SHAPES:
+        x = seed_tensor(gen, s, -1.0, 1.0).requires_grad_(True)
+        scale, zp, qmin, qmax = 0.1, 0, 0, 255
+        y = torch.fake_quantize_per_tensor_affine(x, scale, zp, qmin, qmax)
+        gout = seed_tensor(gen, s, -1.0, 1.0)
+        (gx,) = torch.autograd.grad(y, x, grad_outputs=gout)
+        cases.append({"kind": "fakequant", "shape": list(s), "scale": scale,
+                      "zp": zp, "qmin": qmin, "qmax": qmax,
+                      "x": flat(x.detach()),
+                      "y": flat(y.detach()), "gout": flat(gout),
+                      "gx": flat(gx)})
+    write("fake_quantize_per_tensor", family_dir, cases,
+          note="scale=0.1 zp=0 qmin=0 qmax=255, grad STE")
+
+
+def gen_conversion(gen, family_dir: Path) -> None:
+    """to_bf16 (round f32 -> bf16 -> f32, sans autograd) — APPEND fin de séquence."""
+    cases = []
+    for s in SHAPES:
+        x = seed_tensor(gen, s, -1.0, 1.0)
+        y = x.to(torch.bfloat16).float()
+        cases.append({"kind": "unary", "shape": list(s),
+                      "x": flat(x), "y": flat(y)})
+    write("to_bf16", family_dir, cases, note="conversion aller-retour bf16, exacte")
 
 
 def gen_reduction_extra(gen, family_dir: Path) -> None:
@@ -424,7 +624,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--torch-bin", default=None, help="path to the baseline interpreter (informational)")
     ap.add_argument("--families",
-                    default="elementwise,reductions,normalization,shape,linear,loss,norm_affine,reduction_extra,unary_extra,special")
+                    default="elementwise,reductions,normalization,shape,linear,loss,norm_affine,reduction_extra,unary_extra,special,shape_extra,indexing,linear_extra,norm_stoch,positional,attention,quantization,conversion")
     args = ap.parse_args()
     import_torch(args.torch_bin)
 
@@ -439,13 +639,7 @@ def main() -> int:
     allowed = {op["name"] for op in registry["operator"]}
 
     gen = torch.Generator().manual_seed(SEED)
-    files: dict[str, str] = {}
     families = [f for f in args.families.split(",") if f]
-    if (OUT / "manifest.json").exists():
-        existing = json.loads((OUT / "manifest.json").read_text())
-        for key, h in existing.get("files", {}).items():
-            if key.split("/", 1)[0] not in families:
-                files[key] = h
     for fam in families:
         fam_dir = OUT / fam
         if fam == "elementwise":
@@ -468,20 +662,36 @@ def main() -> int:
             gen_unary_extra(gen, OUT / "elementwise")
         elif fam == "special":
             gen_special(gen, OUT / "special")
+        elif fam == "shape_extra":
+            gen_shape_extra(gen, OUT / "shape")
+        elif fam == "indexing":
+            gen_indexing(gen, OUT / "indexing")
+        elif fam == "linear_extra":
+            gen_linear_extra(gen, OUT / "linear")
+        elif fam == "norm_stoch":
+            gen_norm_stoch(gen, OUT / "normalization")
+        elif fam == "positional":
+            gen_positional(gen, OUT / "positional")
+        elif fam == "attention":
+            gen_attention(gen, OUT / "attention")
+        elif fam == "quantization":
+            gen_quantization(gen, OUT / "quantization")
+        elif fam == "conversion":
+            gen_conversion(gen, OUT / "conversion")
         else:
             raise SystemExit(f"unknown family {fam}")
-        scan_dir = OUT / ("normalization" if fam == "norm_affine"
-                          else "reductions" if fam == "reduction_extra"
-                          else "elementwise" if fam == "unary_extra"
-                          else "special" if fam == "special" else fam)
-        for p in sorted(scan_dir.glob("*.json")):
-            if p.name in ("manifest.json",):
-                continue
-            opname = p.stem
-            if opname not in allowed:
-                print(f"WARN: {opname} not in registry; skipping hash entry")
-                continue
-            files[str(p.relative_to(OUT))] = hashlib.sha256(p.read_bytes()).hexdigest()
+    # Scan global : le manifest reflète toujours exactement le disque
+    # (déterministe ; les runs partiels dérivent les VALEURS — toujours
+    # régénérer la liste complète — mais le manifest ne ment jamais).
+    files: dict[str, str] = {}
+    for p in sorted(OUT.glob("*/*.json")):
+        if p.name in ("manifest.json",):
+            continue
+        opname = p.stem
+        if opname not in allowed:
+            print(f"WARN: {opname} not in registry; skipping hash entry")
+            continue
+        files[str(p.relative_to(OUT))] = hashlib.sha256(p.read_bytes()).hexdigest()
     manifest(files)
     return 0
 
