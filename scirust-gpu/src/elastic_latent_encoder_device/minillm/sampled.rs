@@ -9,8 +9,8 @@ use core::fmt;
 
 use super::{U32_BYTES, WgpuResidentMiniLlm, WgpuResidentMiniLlmError};
 use crate::{
-    WgpuComputeEvent, WgpuComputeKernel, WgpuDeterministicSampler,
-    WgpuDeterministicSamplerError, WgpuLatentLayerBasis,
+    WgpuComputeEvent, WgpuComputeKernel, WgpuDeterministicSampler, WgpuDeterministicSamplerError,
+    WgpuLatentLayerBasis,
 };
 use scirust_compute::{
     BufferAccess, BufferBinding, ComputeBackend, ComputeError, KernelFormat, KernelModule,
@@ -160,11 +160,8 @@ impl WgpuResidentSampledMiniLlm {
         let inner = WgpuResidentMiniLlm::new(snapshot, capacity, rank, layers)?;
         let context = inner.encoder.adapter.context().clone();
         let sampler = WgpuDeterministicSampler::from_context(context, vocab_size, sampling, seed)?;
-        let module = KernelModule::new(
-            KernelFormat::Wgsl,
-            "main",
-            LOGITS_WGSL.as_bytes().to_vec(),
-        )?;
+        let module =
+            KernelModule::new(KernelFormat::Wgsl, "main", LOGITS_WGSL.as_bytes().to_vec())?;
         let logits_kernel = inner.encoder.adapter.compile(&module)?;
         let resident_bytes = inner
             .resident_bytes
@@ -214,11 +211,10 @@ impl WgpuResidentSampledMiniLlm {
         let token = [u32::try_from(token_id).map_err(|_| {
             WgpuResidentMiniLlmError::InvalidConfig("MiniLLM token id exceeds WGPU u32 range")
         })?];
-        self.inner.encoder.adapter.write(
-            &self.inner.state,
-            0,
-            bytemuck::cast_slice(&token),
-        )?;
+        self.inner
+            .encoder
+            .adapter
+            .write(&self.inner.state, 0, bytemuck::cast_slice(&token))?;
 
         let preprocess = self.inner.launch_preprocess()?;
         self.inner.encoder.adapter.wait(&preprocess)?;
@@ -323,11 +319,7 @@ impl WgpuResidentSampledMiniLlm {
             binding(0, &self.inner.state, BufferAccess::ReadWrite),
             binding(1, &self.inner.weights, BufferAccess::ReadOnly),
             binding(2, &self.inner.encoder.io, BufferAccess::ReadWrite),
-            binding(
-                3,
-                self.sampler.logits_buffer(),
-                BufferAccess::ReadWrite,
-            ),
+            binding(3, self.sampler.logits_buffer(), BufferAccess::ReadWrite),
         ];
         let config = LaunchConfig::new([1, 1, 1], [1, 1, 1], 0)?;
         Ok(self.inner.encoder.adapter.launch(

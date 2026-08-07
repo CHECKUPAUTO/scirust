@@ -86,12 +86,8 @@ fn parity_case(config: SamplingConfig, seed: u64, max_tokens: usize) {
     )
     .expect("Phase 20 validation requires an available WGPU adapter");
 
-    let actual = sampled_with_resident_runtime(
-        &mut resident,
-        &prompt,
-        max_tokens,
-        model_config.max_seq_len,
-    );
+    let actual =
+        sampled_with_resident_runtime(&mut resident, &prompt, max_tokens, model_config.max_seq_len);
     assert_eq!(actual, expected, "resident sampled generation diverged");
 
     let telemetry = resident.telemetry();
