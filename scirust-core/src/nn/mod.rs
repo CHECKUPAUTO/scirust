@@ -60,6 +60,7 @@ pub mod rope;
 pub mod sampling;
 pub mod sequential;
 pub mod smoothing;
+pub mod tiered_latent_kv_backend;
 pub mod transformer;
 pub mod tt_linear;
 pub mod vision;
@@ -99,6 +100,9 @@ pub use positional_encoding::PositionalEncoding;
 pub use residual::ResidualBlock;
 pub use rng::PcgEngine;
 pub use sequential::Sequential;
+pub use tiered_latent_kv_backend::{
+    TieredLatentBackendError, TieredLatentTelemetry, TieredResidualLatentBackend,
+};
 pub use transformer::{MultiHeadAttention, TransformerBlock, TransformerEncoder};
 pub use tt_linear::{TTLinear, tt_decompose, tt_decompose_auto};
 pub use vision::ResNet;
