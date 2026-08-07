@@ -9,7 +9,11 @@
 use core::fmt;
 
 mod minillm;
-pub use minillm::{WgpuResidentMiniLlm, WgpuResidentMiniLlmError, WgpuResidentMiniLlmTelemetry};
+pub use minillm::{
+    WgpuResidentMiniLlm, WgpuResidentMiniLlmError, WgpuResidentMiniLlmTelemetry,
+    WgpuResidentSampledMiniLlm, WgpuResidentSampledMiniLlmError,
+    WgpuResidentSampledMiniLlmTelemetry,
+};
 
 use crate::{
     WgpuComputeAdapter, WgpuComputeBuffer, WgpuComputeEvent, WgpuComputeKernel, WgpuComputeStream,
