@@ -1,10 +1,10 @@
 //! Differential accelerator checks for Elastic Latent KV Phase 12.
 
-use scirust_gpu::{BackendResult, CpuBackend, RawComputeBackend};
-#[cfg(feature = "cuda")]
-use scirust_gpu::{BackendError, CudaBackend};
 #[cfg(feature = "wgpu")]
 use scirust_gpu::WgpuBackend;
+#[cfg(feature = "cuda")]
+use scirust_gpu::{BackendError, CudaBackend};
+use scirust_gpu::{BackendResult, CpuBackend, RawComputeBackend};
 
 fn project<B: RawComputeBackend>(
     backend: &B,
@@ -32,7 +32,9 @@ fn fixtures() -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     let dense = vec![
         0.5, -0.2, 0.8, 0.1, -0.4, 0.7, 0.3, -0.6, 0.9, 0.2, -0.5, 0.4,
     ];
+    // First two columns of the 4x4 identity basis: shape [dimension=4, rank=2].
     let basis = vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0];
+    // Transpose of the same basis: shape [rank=2, dimension=4].
     let basis_transposed = vec![1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
     (dense, basis, basis_transposed)
 }
@@ -58,9 +60,7 @@ fn cpu_latent_projection_matches_hand_oracle() {
     let reconstructed = reconstruct(&CpuBackend, &latent, &basis_transposed, 3, 2, 4).unwrap();
     assert_eq!(
         reconstructed,
-        vec![
-            0.5, -0.2, 0.0, 0.0, -0.4, 0.7, 0.0, 0.0, 0.9, 0.2, 0.0, 0.0,
-        ]
+        vec![0.5, -0.2, 0.0, 0.0, -0.4, 0.7, 0.0, 0.0, 0.9, 0.2, 0.0, 0.0,]
     );
 }
 
@@ -88,6 +88,7 @@ fn cuda_latent_projection_is_honest_and_bounded_when_available() {
     {
         Ok(cuda_latent) =>
         {
+            // CUDA path rounds inputs to bf16 before Tensor-core multiplication.
             assert_close(&cuda_latent, &cpu_latent, 5.0e-2);
             let cpu_dense =
                 reconstruct(&CpuBackend, &cpu_latent, &basis_transposed, 3, 2, 4).unwrap();
@@ -95,7 +96,8 @@ fn cuda_latent_projection_is_honest_and_bounded_when_available() {
                 reconstruct(&CudaBackend, &cuda_latent, &basis_transposed, 3, 2, 4).unwrap();
             assert_close(&cuda_dense, &cpu_dense, 7.5e-2);
         },
-        Err(BackendError::Unavailable("cuda")) => {},
+        Err(BackendError::Unavailable("cuda")) =>
+        {},
         Err(error) => panic!("unexpected CUDA latent-projection failure: {error:?}"),
     }
 }
