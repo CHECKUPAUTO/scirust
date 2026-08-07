@@ -838,6 +838,13 @@ impl BlockMasters {
     }
 }
 
+/// Resident diagnostics for one optimizer step. Keeping these tiny buffers alive
+/// lets pretraining enqueue several complete steps before any host synchronization.
+struct CudaStepDiagnostics {
+    loss_rows: CudaF32,
+    grad_sumsq: CudaF32,
+}
+
 /// A trainable [`CudaModel`]: the bf16 model plus **fp32 master weights and AdamW
 /// moments** (the mixed-precision contract). Each [`Self::train_step`] runs the
 /// whole forward → cross-entropy grad → backward → AdamW update on Tensor cores,
@@ -980,6 +987,34 @@ impl CudaTrainer {
         adam_eps: f32,
         weight_decay: f32,
     ) -> f32 {
+        let diag = self.train_step_batch_deferred(
+            tokens,
+            targets,
+            batch_size,
+            seq_len,
+            lr,
+            betas,
+            adam_eps,
+            weight_decay,
+        );
+        self.finish_step_diagnostics(diag)
+    }
+
+    /// Enqueue a complete optimizer step without reading diagnostics back to the host.
+    /// Public one-step APIs stay synchronous; the production pretrainer batches these
+    /// diagnostics so loss/gnorm telemetry no longer inserts a barrier every step.
+    #[allow(clippy::too_many_arguments)]
+    fn train_step_batch_deferred(
+        &mut self,
+        tokens: &[u32],
+        targets: &[u32],
+        batch_size: usize,
+        seq_len: usize,
+        lr: f32,
+        betas: (f32, f32),
+        adam_eps: f32,
+        weight_decay: f32,
+    ) -> CudaStepDiagnostics {
         assert!(
             batch_size > 0 && seq_len > 0,
             "train_step_batch: empty batch"
@@ -1095,8 +1130,15 @@ impl CudaTrainer {
             one(&mut mb.wu, &mut mm.wu, &mut mv.wu, &bg.dwu, &mut b.wu);
             one(&mut mb.wd, &mut mm.wd, &mut mv.wd, &bg.dwd, &mut b.wd);
         }
-        let loss = ch.mean_f32(&loss_rows);
-        self.last_grad_norm = ch.grad_norm_from_sumsq(&grad_sumsq);
+        CudaStepDiagnostics {
+            loss_rows,
+            grad_sumsq,
+        }
+    }
+
+    fn finish_step_diagnostics(&mut self, diag: CudaStepDiagnostics) -> f32 {
+        let loss = self.model.chain.mean_f32(&diag.loss_rows);
+        self.last_grad_norm = self.model.chain.grad_norm_from_sumsq(&diag.grad_sumsq);
         loss
     }
 
@@ -1200,6 +1242,7 @@ impl CudaTrainer {
     ) -> Vec<f32> {
         let s = cfg.seq_len;
         let batch = cfg.batch_size.max(1);
+        let telemetry = cfg.telemetry_interval.max(1);
         let mut losses = Vec::new();
         if tokens.len() <= s
         {
@@ -1254,6 +1297,8 @@ impl CudaTrainer {
         let t0 = std::time::Instant::now();
         let mut packed_inputs = Vec::with_capacity(batch * s);
         let mut packed_targets = Vec::with_capacity(batch * s);
+        let mut pending: Vec<CudaStepDiagnostics> = Vec::with_capacity(telemetry);
+        let mut last_loss = f32::NAN;
 
         while step < cfg.total_steps && n_windows > 0
         {
@@ -1276,7 +1321,7 @@ impl CudaTrainer {
                 packed_targets.extend_from_slice(&train_tokens[start + 1..start + s + 1]);
             }
             let lr = schedule.lr_at(step);
-            let loss = self.train_step_batch(
+            pending.push(self.train_step_batch_deferred(
                 &packed_inputs,
                 &packed_targets,
                 batch,
@@ -1285,34 +1330,51 @@ impl CudaTrainer {
                 cfg.betas,
                 cfg.adam_eps,
                 cfg.weight_decay,
-            );
-            losses.push(loss);
+            ));
             step += 1;
 
-            if cfg.log_interval > 0 && step.is_multiple_of(cfg.log_interval)
+            let need_log = cfg.log_interval > 0 && step.is_multiple_of(cfg.log_interval);
+            let need_eval = cfg.eval_interval > 0
+                && !val_tokens.is_empty()
+                && step.is_multiple_of(cfg.eval_interval);
+            let need_save = cfg.save_interval > 0 && step.is_multiple_of(cfg.save_interval);
+            let need_flush = pending.len() >= telemetry
+                || need_log
+                || need_eval
+                || need_save
+                || step == cfg.total_steps;
+
+            if need_flush
+            {
+                for diag in pending.drain(..)
+                {
+                    last_loss = self.finish_step_diagnostics(diag);
+                    losses.push(last_loss);
+                }
+            }
+
+            if need_log
             {
                 let done = (step - cfg.start_step) * s * batch;
                 let secs = t0.elapsed().as_secs_f64().max(1e-9);
                 let tps = done as f64 / secs;
                 let gnorm = self.last_grad_norm();
                 println!(
-                    "[cuda step {step:>6}] B{batch}×T{s} loss {loss:>9.4} | lr {lr:.3e} | gnorm {gnorm:>7.2} | {tps:>8.0} tok/s"
+                    "[cuda step {step:>6}] B{batch}×T{s} loss {last_loss:>9.4} | lr {lr:.3e} | gnorm {gnorm:>7.2} | {tps:>8.0} tok/s"
                 );
             }
-            if cfg.eval_interval > 0
-                && !val_tokens.is_empty()
-                && step.is_multiple_of(cfg.eval_interval)
+            if need_eval
             {
                 let val = self.eval_loss(val_tokens, s, cfg.eval_windows);
                 println!("            └─ held-out val loss {val:>9.4}");
             }
-            if cfg.save_interval > 0 && step.is_multiple_of(cfg.save_interval)
+            if need_save
             {
                 self.sync_to_model(model);
                 let dir = std::path::Path::new(&cfg.checkpoint_dir).join(format!("step_{step}"));
                 let meta = CheckpointMeta {
                     step,
-                    loss,
+                    loss: last_loss,
                     lr,
                     config: config.clone(),
                 };
@@ -1336,6 +1398,13 @@ impl CudaTrainer {
                     Err(e) => eprintln!("  checkpoint at step {step} failed: {e}"),
                 }
             }
+        }
+
+        // Defensive flush for any non-standard early exit. Normal total-step exit
+        // already flushes above, so the returned vector remains exactly per-step.
+        for diag in pending.drain(..)
+        {
+            losses.push(self.finish_step_diagnostics(diag));
         }
         losses
     }
@@ -1427,6 +1496,10 @@ pub struct CudaPretrainConfig {
     pub seq_len: usize,
     /// Number of independent sequences packed into each optimizer step.
     pub batch_size: usize,
+    /// Maximum number of optimizer steps queued before exact loss/gnorm telemetry
+    /// is copied to the host. Lower values improve observability; higher values reduce
+    /// synchronization frequency. Logging/eval/checkpoint boundaries always flush.
+    pub telemetry_interval: usize,
     /// Print a loss/lr line every this many steps (0 = never).
     pub log_interval: usize,
     /// Write a checkpoint every this many steps (0 = never).
@@ -1468,6 +1541,7 @@ impl Default for CudaPretrainConfig {
             weight_decay: 0.1,
             seq_len: 128,
             batch_size: 1,
+            telemetry_interval: 25,
             log_interval: 100,
             save_interval: 500,
             checkpoint_dir: "checkpoints".to_string(),
