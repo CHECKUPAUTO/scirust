@@ -12,8 +12,8 @@
 use core::fmt;
 
 use crate::{
-    WgpuComputeAdapter, WgpuComputeBuffer, WgpuComputeEvent, WgpuComputeKernel,
-    WgpuComputeStream, WgpuContext,
+    WgpuComputeAdapter, WgpuComputeBuffer, WgpuComputeEvent, WgpuComputeKernel, WgpuComputeStream,
+    WgpuContext,
 };
 use scirust_compute::{
     BufferAccess, BufferBinding, ComputeBackend, ComputeError, KernelFormat, KernelModule,
@@ -156,7 +156,8 @@ pub enum WgpuResidentLatentKvError {
 
 impl fmt::Display for WgpuResidentLatentKvError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::InvalidConfig(message) => write!(formatter, "{message}"),
             Self::BasisLength {
                 expected,
@@ -231,9 +232,8 @@ impl WgpuResidentLatentKvCache {
         key_basis: &[f32],
         value_basis: &[f32],
     ) -> Result<Self, WgpuResidentLatentKvError> {
-        let context = WgpuContext::new().map_err(|_| {
-            WgpuResidentLatentKvError::InvalidConfig("WGPU backend is unavailable")
-        })?;
+        let context = WgpuContext::new()
+            .map_err(|_| WgpuResidentLatentKvError::InvalidConfig("WGPU backend is unavailable"))?;
         Self::from_context(context, capacity, dimension, rank, key_basis, value_basis)
     }
 
@@ -247,28 +247,33 @@ impl WgpuResidentLatentKvCache {
         key_basis: &[f32],
         value_basis: &[f32],
     ) -> Result<Self, WgpuResidentLatentKvError> {
-        if capacity == 0 {
+        if capacity == 0
+        {
             return Err(WgpuResidentLatentKvError::InvalidConfig(
                 "latent cache capacity must be non-zero",
             ));
         }
-        if dimension == 0 {
+        if dimension == 0
+        {
             return Err(WgpuResidentLatentKvError::InvalidConfig(
                 "latent cache dimension must be non-zero",
             ));
         }
-        if rank == 0 || rank > dimension {
+        if rank == 0 || rank > dimension
+        {
             return Err(WgpuResidentLatentKvError::InvalidConfig(
                 "latent cache rank must be in 1..=dimension",
             ));
         }
 
-        let basis_elements = dimension
-            .checked_mul(rank)
-            .ok_or(WgpuResidentLatentKvError::InvalidConfig(
-                "latent basis shape overflows usize",
-            ))?;
-        if key_basis.len() != basis_elements || value_basis.len() != basis_elements {
+        let basis_elements =
+            dimension
+                .checked_mul(rank)
+                .ok_or(WgpuResidentLatentKvError::InvalidConfig(
+                    "latent basis shape overflows usize",
+                ))?;
+        if key_basis.len() != basis_elements || value_basis.len() != basis_elements
+        {
             return Err(WgpuResidentLatentKvError::BasisLength {
                 expected: basis_elements,
                 key: key_basis.len(),
@@ -288,21 +293,21 @@ impl WgpuResidentLatentKvCache {
             .ok_or(WgpuResidentLatentKvError::InvalidConfig(
                 "latent cache scratch storage overflows usize",
             ))?;
-        let cache_elements = cache_coefficients
-            .checked_add(scratch_elements)
-            .ok_or(WgpuResidentLatentKvError::InvalidConfig(
-                "latent cache storage overflows usize",
-            ))?;
-        let io_elements = dimension
-            .checked_mul(2)
-            .ok_or(WgpuResidentLatentKvError::InvalidConfig(
-                "latent IO storage overflows usize",
-            ))?;
-        let packed_basis_elements = basis_elements
-            .checked_mul(2)
-            .ok_or(WgpuResidentLatentKvError::InvalidConfig(
-                "packed latent basis storage overflows usize",
-            ))?;
+        let cache_elements = cache_coefficients.checked_add(scratch_elements).ok_or(
+            WgpuResidentLatentKvError::InvalidConfig("latent cache storage overflows usize"),
+        )?;
+        let io_elements =
+            dimension
+                .checked_mul(2)
+                .ok_or(WgpuResidentLatentKvError::InvalidConfig(
+                    "latent IO storage overflows usize",
+                ))?;
+        let packed_basis_elements =
+            basis_elements
+                .checked_mul(2)
+                .ok_or(WgpuResidentLatentKvError::InvalidConfig(
+                    "packed latent basis storage overflows usize",
+                ))?;
 
         let basis_bytes = bytes_for_f32(packed_basis_elements)?;
         let cache_bytes = bytes_for_f32(cache_elements)?;
@@ -320,16 +325,10 @@ impl WgpuResidentLatentKvCache {
         packed_basis.extend_from_slice(value_basis);
         adapter.write(&basis, 0, bytemuck::cast_slice(&packed_basis))?;
 
-        let append_module = KernelModule::new(
-            KernelFormat::Wgsl,
-            "main",
-            APPEND_WGSL.as_bytes().to_vec(),
-        )?;
-        let attend_module = KernelModule::new(
-            KernelFormat::Wgsl,
-            "main",
-            ATTEND_WGSL.as_bytes().to_vec(),
-        )?;
+        let append_module =
+            KernelModule::new(KernelFormat::Wgsl, "main", APPEND_WGSL.as_bytes().to_vec())?;
+        let attend_module =
+            KernelModule::new(KernelFormat::Wgsl, "main", ATTEND_WGSL.as_bytes().to_vec())?;
         let append_kernel = adapter.compile(&append_module)?;
         let attend_kernel = adapter.compile(&attend_module)?;
         let stream = adapter.create_stream()?;
@@ -365,11 +364,7 @@ impl WgpuResidentLatentKvCache {
     }
 
     /// Projects and appends one dense key/value pair into the resident ring.
-    pub fn append(
-        &mut self,
-        key: &[f32],
-        value: &[f32],
-    ) -> Result<(), WgpuResidentLatentKvError> {
+    pub fn append(&mut self, key: &[f32], value: &[f32]) -> Result<(), WgpuResidentLatentKvError> {
         self.require_vector("key", key)?;
         self.require_vector("value", value)?;
 
@@ -409,22 +404,27 @@ impl WgpuResidentLatentKvCache {
         output: &mut [f32],
     ) -> Result<(), WgpuResidentLatentKvError> {
         self.require_vector("query", query)?;
-        if output.len() != self.dimension {
+        if output.len() != self.dimension
+        {
             return Err(WgpuResidentLatentKvError::VectorLength {
                 name: "output",
                 expected: self.dimension,
                 actual: output.len(),
             });
         }
-        if self.len == 0 {
+        if self.len == 0
+        {
             return Err(WgpuResidentLatentKvError::EmptyCache);
         }
 
         self.adapter
             .write(&self.io, 0, bytemuck::cast_slice(query))?;
-        let oldest = if self.len < self.capacity {
+        let oldest = if self.len < self.capacity
+        {
             0
-        } else {
+        }
+        else
+        {
             self.next_slot
         };
         let params = [
@@ -451,10 +451,7 @@ impl WgpuResidentLatentKvCache {
     }
 
     /// Convenience wrapper that allocates only the returned dense context.
-    pub fn attention(
-        &mut self,
-        query: &[f32],
-    ) -> Result<Vec<f32>, WgpuResidentLatentKvError> {
+    pub fn attention(&mut self, query: &[f32]) -> Result<Vec<f32>, WgpuResidentLatentKvError> {
         let mut output = vec![0.0; self.dimension];
         self.attention_into(query, &mut output)?;
         Ok(output)
@@ -477,7 +474,8 @@ impl WgpuResidentLatentKvCache {
         name: &'static str,
         vector: &[f32],
     ) -> Result<(), WgpuResidentLatentKvError> {
-        if vector.len() != self.dimension {
+        if vector.len() != self.dimension
+        {
             return Err(WgpuResidentLatentKvError::VectorLength {
                 name,
                 expected: self.dimension,
@@ -536,9 +534,6 @@ fn bytes_for_f32(elements: usize) -> Result<usize, WgpuResidentLatentKvError> {
         ))
 }
 
-fn usize_to_u32(
-    value: usize,
-    message: &'static str,
-) -> Result<u32, WgpuResidentLatentKvError> {
+fn usize_to_u32(value: usize, message: &'static str) -> Result<u32, WgpuResidentLatentKvError> {
     u32::try_from(value).map_err(|_| WgpuResidentLatentKvError::InvalidConfig(message))
 }
