@@ -11,8 +11,7 @@ on:
       - experiments/elastic-latent-kv/PHASE13_SPEC.md
       - .github/workflows/elastic-latent-kv-phase13.yml
   pull_request:
-    branches:
-      - research/elastic-latent-kv-phase12-kernels
+    branches: [master]
     paths:
       - scirust-core/src/nn/elastic_latent_runtime.rs
       - scirust-core/src/nn/mod.rs
