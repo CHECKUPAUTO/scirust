@@ -641,7 +641,8 @@ impls = ["simd"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-4, rtol = 1e-4 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "conv2d"
@@ -651,7 +652,8 @@ impls = ["simd"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-4, rtol = 1e-4 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "max_pool2d"
@@ -661,7 +663,8 @@ impls = ["2d", "simd"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 0.0, rtol = 0.0 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "avg_pool2d"
@@ -671,7 +674,8 @@ impls = ["simd"]
 dtypes = ["f32"]
 autograd = true
 tolerance = { atol = 1e-5, rtol = 1e-5 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "cross_entropy"
