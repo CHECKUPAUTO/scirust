@@ -25,37 +25,28 @@ jobs:
 
           sampler = Path('scirust-gpu/src/deterministic_sampling_device.rs')
           text = sampler.read_text()
-          old_fields = '''    vocab_size: usize,
-              draws: usize,
-              resident_bytes: usize,
-          }'''
-          new_fields = '''    vocab_size: usize,
-              draws: usize,
-              resident_bytes: usize,
-              initial_state: u64,
-              increment: u64,
-              consumes_rng: bool,
-          }'''
           if 'initial_state: u64' not in text:
-              if old_fields not in text:
-                  raise SystemExit('sampler field insertion point not found')
-              text = text.replace(old_fields, new_fields, 1)
+              needle = '    resident_bytes: usize,\n}\n\nimpl WgpuDeterministicSampler {'
+              replacement = '''    resident_bytes: usize,
+          initial_state: u64,
+          increment: u64,
+          consumes_rng: bool,
+          }
 
-          old_init = '''            vocab_size,
-                  draws: 0,
-                  resident_bytes: logits_bytes + scratch_bytes + state_bytes,
-              })'''
-          new_init = '''            vocab_size,
-                  draws: 0,
-                  resident_bytes: logits_bytes + scratch_bytes + state_bytes,
-                  initial_state: state_word,
-                  increment,
-                  consumes_rng: config.temperature > 0.0 && config.top_k != 1,
-              })'''
+          impl WgpuDeterministicSampler {'''
+              if needle not in text:
+                  raise SystemExit('sampler field insertion point not found')
+              text = text.replace(needle, replacement, 1)
           if 'initial_state: state_word' not in text:
-              if old_init not in text:
+              needle = '            resident_bytes: logits_bytes + scratch_bytes + state_bytes,\n        })'
+              replacement = '''            resident_bytes: logits_bytes + scratch_bytes + state_bytes,
+              initial_state: state_word,
+              increment,
+              consumes_rng: config.temperature > 0.0 && config.top_k != 1,
+          })'''
+              if needle not in text:
                   raise SystemExit('sampler initializer insertion point not found')
-              text = text.replace(old_init, new_init, 1)
+              text = text.replace(needle, replacement, 1)
 
           start = text.index('    pub fn sample(&mut self, logits: &[f32])')
           end = text.index('    fn launch(&self)', start)
@@ -144,10 +135,8 @@ jobs:
           lib = Path('scirust-gpu/src/lib.rs')
           text = lib.read_text()
           if 'WgpuResidentSampledMiniLlm,' not in text:
-              needle = '''    WgpuLatentLayerBasis, WgpuResidentMiniLlm, WgpuResidentMiniLlmError,
-              WgpuResidentMiniLlmTelemetry, WgpuResidentTransformerEncoder,'''
-              replacement = '''    WgpuLatentLayerBasis, WgpuResidentMiniLlm, WgpuResidentMiniLlmError,
-              WgpuResidentMiniLlmTelemetry, WgpuResidentSampledMiniLlm,
+              needle = '    WgpuResidentMiniLlmTelemetry, WgpuResidentTransformerEncoder,'
+              replacement = '''    WgpuResidentMiniLlmTelemetry, WgpuResidentSampledMiniLlm,
               WgpuResidentSampledMiniLlmError, WgpuResidentSampledMiniLlmTelemetry,
               WgpuResidentTransformerEncoder,'''
               if needle not in text:
@@ -163,6 +152,8 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add scirust-gpu/src/deterministic_sampling_device.rs scirust-gpu/src/elastic_latent_encoder_device/minillm.rs scirust-gpu/src/elastic_latent_encoder_device/minillm/sampled.rs scirust-gpu/src/lib.rs
+          git add scirust-gpu/src/deterministic_sampling_device.rs scirust-gpu/src/elastic_latent_encoder_device/minillm.rs scirust-gpu/src/elastic_latent_encoder_device/minillm/sampled.rs scirust-gpu/src/lib.rs scirust-gpu/tests/elastic_latent_minillm_sampled_resident.rs
           git commit -m "feat(kv-cache): wire resident sampled MiniLLM"
           git push origin HEAD:research/phase20-wgpu-resident-sampled-minillm
+
+# Retrigger marker: 2026-08-07T22:40Z
