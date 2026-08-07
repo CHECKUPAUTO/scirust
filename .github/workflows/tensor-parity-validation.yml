@@ -75,6 +75,6 @@ jobs:
       - name: Run differential parity harness
         run: cargo +1.89.0 test -p scirust-core --test parity_differential --locked
       - name: Regenerate coverage artifacts
-        run: cargo +1.89.0 run --quiet --manifest-path tools/tensor-parity/Cargo.toml --locked
+        run: cargo +1.89.0 run --quiet --manifest-path tools/tensor-parity/Cargo.toml --offline
       - name: Assert generated coverage is current
         run: git diff --exit-code -- artifacts/tensor-coverage.csv artifacts/tensor-coverage.json
