@@ -24,6 +24,9 @@ pub mod lie;
 /// Presented groups and fixed-capacity coset enumeration.
 #[rustfmt::skip]
 pub mod presented;
+/// Deterministic orbit/transversal and stabilizer-chain algorithms.
+#[rustfmt::skip]
+pub mod schreier;
 /// Finite-group representation helpers and harmonic-analysis primitives.
 #[rustfmt::skip]
 pub mod representation;
