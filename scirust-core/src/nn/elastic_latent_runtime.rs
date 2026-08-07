@@ -19,9 +19,7 @@ use crate::nn::latent_kv_lifecycle::{
     CacheTemperature, CompressionTier, LatentKvLifecycle, LifecycleAction, LifecycleConfig,
     LifecycleError,
 };
-use crate::nn::tiered_latent_kv_backend::{
-    TieredLatentBackendError, TieredResidualLatentBackend,
-};
+use crate::nn::tiered_latent_kv_backend::{TieredLatentBackendError, TieredResidualLatentBackend};
 use crate::nn::transformer::attention::MultiHeadAttention;
 use core::fmt;
 
@@ -206,8 +204,8 @@ impl ElasticLatentDecodeRuntime {
                 calibration,
                 head_budget,
             )?;
-            planned_persistent_bytes = planned_persistent_bytes
-                .saturating_add(backend.planned_persistent_bytes());
+            planned_persistent_bytes =
+                planned_persistent_bytes.saturating_add(backend.planned_persistent_bytes());
             allocated_bytes = allocated_bytes.saturating_add(backend.packed_bytes());
             worst_quality_bps = worst_quality_bps.min(lifecycle_worst_quality(
                 calibration.quality,
@@ -337,7 +335,10 @@ fn select_budgeted_tiered_backend(
     config: ElasticLatentRuntimeConfig,
     calibration: HeadCalibration<'_>,
     head_budget: usize,
-) -> Result<(AdaptiveKvPlan, TieredResidualLatentBackend), ElasticLatentRuntimeError> {
+) -> Result<
+    (AdaptiveKvPlan, TieredResidualLatentBackend),
+    ElasticLatentRuntimeError,
+> {
     let mut planner_budget = head_budget;
     loop
     {
@@ -380,9 +381,11 @@ fn lifecycle_worst_quality(
     lifecycle: LifecycleConfig,
     dimension: usize,
 ) -> u16 {
-    let cold_tokens = lifecycle
-        .capacity_tokens
-        .saturating_sub(lifecycle.hot_tokens.saturating_add(lifecycle.warm_tokens));
+    let cold_tokens = lifecycle.capacity_tokens.saturating_sub(
+        lifecycle
+            .hot_tokens
+            .saturating_add(lifecycle.warm_tokens),
+    );
     let mut worst = 10_000_u16;
     for (capacity, tier) in [
         (lifecycle.hot_tokens, lifecycle.hot),
