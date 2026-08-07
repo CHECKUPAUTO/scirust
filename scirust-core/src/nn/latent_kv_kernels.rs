@@ -48,6 +48,10 @@ impl LatentKernelDispatch {
     }
 
     /// Computes a strided matrix-column dot product starting from `initial`.
+    ///
+    /// The scalar and block-4 paths deliberately accumulate from `initial`
+    /// before the first product, matching the existing Transformer projection
+    /// order `bias + Σ(x_i * w_i)` exactly.
     #[must_use]
     pub fn dot_strided_with_initial(
         self,
@@ -63,16 +67,22 @@ impl LatentKernelDispatch {
         assert!(column < columns);
         match self.kind
         {
-            LatentKernelKind::Scalar => {
+            LatentKernelKind::Scalar =>
+            {
                 scalar_dot_strided(matrix, rows, columns, column, vector, initial)
-            }
-            LatentKernelKind::Block4 => {
+            },
+            LatentKernelKind::Block4 =>
+            {
                 block4_dot_strided(matrix, rows, columns, column, vector, initial)
-            }
+            },
             #[cfg(feature = "portable-simd")]
-            LatentKernelKind::PortableSimd => {
+            LatentKernelKind::PortableSimd =>
+            {
+                // The existing portable-SIMD primitive is contiguous. Gathering
+                // a strided column would require scratch, so projections retain
+                // the allocation-free block-4 scalar association.
                 block4_dot_strided(matrix, rows, columns, column, vector, initial)
-            }
+            },
         }
     }
 
@@ -97,9 +107,10 @@ impl LatentKernelDispatch {
             LatentKernelKind::Scalar => scalar_weighted_accumulate(output, source, weight),
             LatentKernelKind::Block4 => block4_weighted_accumulate(output, source, weight),
             #[cfg(feature = "portable-simd")]
-            LatentKernelKind::PortableSimd => {
+            LatentKernelKind::PortableSimd =>
+            {
                 block4_weighted_accumulate(output, source, weight);
-            }
+            },
         }
     }
 }
@@ -252,13 +263,22 @@ mod tests {
         let (_, source) = data(37);
         let mut scalar = vec![0.1; source.len()];
         let mut block = scalar.clone();
-        LatentKernelDispatch::new(LatentKernelKind::Scalar)
-            .weighted_accumulate(&mut scalar, &source, -0.37);
+        LatentKernelDispatch::new(LatentKernelKind::Scalar).weighted_accumulate(
+            &mut scalar,
+            &source,
+            -0.37,
+        );
         LatentKernelDispatch::new(LatentKernelKind::Block4)
             .weighted_accumulate(&mut block, &source, -0.37);
         assert_eq!(
-            scalar.iter().map(|value| value.to_bits()).collect::<Vec<_>>(),
-            block.iter().map(|value| value.to_bits()).collect::<Vec<_>>()
+            scalar
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            block
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
         );
     }
 
