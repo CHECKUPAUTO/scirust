@@ -1,10 +1,10 @@
 //! Differential accelerator checks for Elastic Latent KV Phase 12.
 
-use scirust_gpu::{BackendResult, CpuBackend, RawComputeBackend};
-#[cfg(feature = "cuda")]
-use scirust_gpu::{BackendError, CudaBackend};
 #[cfg(feature = "wgpu")]
 use scirust_gpu::WgpuBackend;
+#[cfg(feature = "cuda")]
+use scirust_gpu::{BackendError, CudaBackend};
+use scirust_gpu::{BackendResult, CpuBackend, RawComputeBackend};
 
 fn project<B: RawComputeBackend>(
     backend: &B,
@@ -60,9 +60,7 @@ fn cpu_latent_projection_matches_hand_oracle() {
     let reconstructed = reconstruct(&CpuBackend, &latent, &basis_transposed, 3, 2, 4).unwrap();
     assert_eq!(
         reconstructed,
-        vec![
-            0.5, -0.2, 0.0, 0.0, -0.4, 0.7, 0.0, 0.0, 0.9, 0.2, 0.0, 0.0,
-        ]
+        vec![0.5, -0.2, 0.0, 0.0, -0.4, 0.7, 0.0, 0.0, 0.9, 0.2, 0.0, 0.0,]
     );
 }
 
@@ -98,7 +96,8 @@ fn cuda_latent_projection_is_honest_and_bounded_when_available() {
                 reconstruct(&CudaBackend, &cuda_latent, &basis_transposed, 3, 2, 4).unwrap();
             assert_close(&cuda_dense, &cpu_dense, 7.5e-2);
         },
-        Err(BackendError::Unavailable("cuda")) => {},
+        Err(BackendError::Unavailable("cuda")) =>
+        {},
         Err(error) => panic!("unexpected CUDA latent-projection failure: {error:?}"),
     }
 }
