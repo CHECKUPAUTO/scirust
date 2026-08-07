@@ -33,6 +33,7 @@ pub mod kan;
 pub mod kv_backend;
 pub mod latent_kv_backend;
 pub mod latent_kv_cache;
+pub mod latent_kv_lifecycle;
 pub mod layer_norm;
 pub mod linear;
 pub mod lipschitz;
