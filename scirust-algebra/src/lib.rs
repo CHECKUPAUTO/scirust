@@ -25,4 +25,4 @@ pub mod lie;
 #[rustfmt::skip]
 pub mod representation;
 
-pub use core::{AbelianGroup, Field, Group, Magma, Monoid, Ring, Semigroup};
+pub use crate::core::{AbelianGroup, Field, Group, Magma, Monoid, Ring, Semigroup};
