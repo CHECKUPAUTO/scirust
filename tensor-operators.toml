@@ -339,7 +339,8 @@ impls = ["tnd"]
 dtypes = ["f32"]
 autograd = false
 tolerance = { atol = 1e-4, rtol = 1e-4 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "cholesky"
@@ -349,7 +350,8 @@ impls = ["simd"]
 dtypes = ["f32"]
 autograd = false
 tolerance = { atol = 1e-4, rtol = 1e-4 }
-status = "experimental"
+status = "parity"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "cosine_similarity"
@@ -754,8 +756,9 @@ impls = ["sparse"]
 dtypes = ["f64"]
 autograd = false
 tolerance = { atol = 1e-10, rtol = 1e-10 }
-status = "experimental"
+status = "parity"
 notes = "csr spmv + spmm_dense; f64 only"
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "lu_solve"
@@ -765,10 +768,11 @@ impls = ["sparse"]
 dtypes = ["f64"]
 autograd = false
 tolerance = { atol = 1e-8, rtol = 1e-8 }
-status = "experimental"
+status = "parity"
 notes = "SparseLu::solve, f64 only"
 
 # --- Explicit gaps (no implementation) --------------------------------------
+verified = { harness = "scirust-core/tests/parity_differential.rs", fixtures = "tests/parity/fixtures", on = "2026-08-04" }
 
 [[operator]]
 name = "fft"
