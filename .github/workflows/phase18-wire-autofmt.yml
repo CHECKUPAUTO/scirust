@@ -1,0 +1,70 @@
+name: Phase 18 Wire Autofmt
+
+on:
+  push:
+    branches:
+      - research/phase18-wgpu-resident-minillm
+    paths:
+      - .github/workflows/phase18-wire-autofmt.yml
+
+permissions:
+  contents: write
+
+jobs:
+  wire-and-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: research/phase18-wgpu-resident-minillm
+      - run: rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt
+      - name: Wire resident MiniLLM module
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          child = Path('scirust-gpu/src/elastic_latent_encoder_device/minillm.rs')
+          text = child.read_text().replace('        let mut encoder =\n', '        let encoder =\n')
+          child.write_text(text)
+
+          parent = Path('scirust-gpu/src/elastic_latent_encoder_device.rs')
+          text = parent.read_text()
+          if 'mod minillm;' not in text:
+              marker = 'use core::fmt;\n'
+              if marker not in text:
+                  raise SystemExit('parent module insertion point not found')
+              text = text.replace(
+                  marker,
+                  marker + '\nmod minillm;\npub use minillm::{\n    WgpuResidentMiniLlm, WgpuResidentMiniLlmError, WgpuResidentMiniLlmTelemetry,\n};\n',
+                  1,
+              )
+              parent.write_text(text)
+
+          lib = Path('scirust-gpu/src/lib.rs')
+          text = lib.read_text()
+          if 'WgpuResidentMiniLlm,' not in text:
+              needle = '''pub use elastic_latent_encoder_device::{
+              WgpuLatentLayerBasis, WgpuResidentTransformerEncoder, WgpuResidentTransformerEncoderError,
+              WgpuResidentTransformerEncoderTelemetry,
+          };'''
+              replacement = '''pub use elastic_latent_encoder_device::{
+              WgpuLatentLayerBasis, WgpuResidentMiniLlm, WgpuResidentMiniLlmError,
+              WgpuResidentMiniLlmTelemetry, WgpuResidentTransformerEncoder,
+              WgpuResidentTransformerEncoderError, WgpuResidentTransformerEncoderTelemetry,
+          };'''
+              if needle not in text:
+                  raise SystemExit('lib export insertion point not found')
+              text = text.replace(needle, replacement, 1)
+              lib.write_text(text)
+          PY
+      - run: cargo +nightly-2026-07-02 fmt --all
+      - name: Commit deterministic wiring and formatting
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scirust-gpu/src/elastic_latent_encoder_device.rs scirust-gpu/src/elastic_latent_encoder_device/minillm.rs scirust-gpu/src/lib.rs scirust-core/src/nn/transformer/mini_llm.rs
+          git commit -m "style(gpu): wire and rustfmt Phase 18"
+          git push origin HEAD:research/phase18-wgpu-resident-minillm
