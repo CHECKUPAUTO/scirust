@@ -19,6 +19,7 @@ pub mod dora;
 pub mod dropout;
 pub mod elastic_kv_cache;
 pub mod elastic_latent_basis_handoff;
+pub mod elastic_latent_encoder_handoff;
 pub mod elastic_latent_runtime;
 pub mod elastic_latent_transformer;
 pub mod embedding;
@@ -82,6 +83,9 @@ pub use dropout::Dropout;
 pub use elastic_latent_basis_handoff::{
     BasisHandoffError, CommittedBasisLearner, LearnedHeadBasis,
     resolve_committed_head_calibration, runtime_from_committed_bases,
+};
+pub use elastic_latent_encoder_handoff::{
+    EncoderBasisHandoffError, LearnedLayerBasis, encoder_session_from_committed_bases,
 };
 pub use elastic_latent_transformer::{
     ElasticLatentEncoderSession, ElasticLatentInferStep, ElasticLatentLayerConfig,
