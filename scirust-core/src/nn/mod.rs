@@ -54,12 +54,14 @@ pub mod pool;
 pub mod positional_encoding;
 pub mod residual;
 pub mod residual_latent_kv_backend;
+#[allow(clippy::too_many_arguments)]
 pub mod residual_latent_kv_cache;
 pub mod rng;
 pub mod rope;
 pub mod sampling;
 pub mod sequential;
 pub mod smoothing;
+#[allow(dead_code)]
 pub mod tiered_latent_kv_backend;
 pub mod transformer;
 pub mod tt_linear;

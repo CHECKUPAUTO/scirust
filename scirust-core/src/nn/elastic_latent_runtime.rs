@@ -19,9 +19,7 @@ use crate::nn::latent_kv_lifecycle::{
     CacheTemperature, CompressionTier, LatentKvLifecycle, LifecycleAction, LifecycleConfig,
     LifecycleError,
 };
-use crate::nn::tiered_latent_kv_backend::{
-    TieredLatentBackendError, TieredResidualLatentBackend,
-};
+use crate::nn::tiered_latent_kv_backend::{TieredLatentBackendError, TieredResidualLatentBackend};
 use crate::nn::transformer::attention::MultiHeadAttention;
 use core::fmt;
 
@@ -65,12 +63,24 @@ pub struct ElasticLatentTelemetry {
 #[derive(Debug)]
 pub enum ElasticLatentRuntimeError {
     ZeroHeads,
-    HeadCount { expected: usize, actual: usize },
+    HeadCount {
+        expected: usize,
+        actual: usize,
+    },
     LifecycleCapacityMismatch,
-    TokenLength { expected: usize, actual: usize },
+    TokenLength {
+        expected: usize,
+        actual: usize,
+    },
     /// Retained for source compatibility with pre-sliding-window callers.
-    CapacityExhausted { head: usize, capacity: usize },
-    AllocationCeiling { ceiling: usize, actual: usize },
+    CapacityExhausted {
+        head: usize,
+        capacity: usize,
+    },
+    AllocationCeiling {
+        ceiling: usize,
+        actual: usize,
+    },
     Policy(AdaptiveKvPolicyError),
     /// Retained for source compatibility with the original Phase 13 backend.
     Backend(AdaptiveLatentBackendError),
@@ -148,7 +158,6 @@ impl From<LifecycleError> for ElasticLatentRuntimeError {
 
 /// Session-scoped bounded Elastic Latent KV decoder.
 pub struct ElasticLatentDecodeRuntime {
-    config: ElasticLatentRuntimeConfig,
     backends: Vec<Box<dyn AttentionBackend>>,
     plans: Vec<AdaptiveKvPlan>,
     basis_versions: Vec<u32>,
@@ -200,14 +209,10 @@ impl ElasticLatentDecodeRuntime {
         for (head, calibration) in calibrations.iter().copied().enumerate()
         {
             let head_budget = base_budget + if head < remainder { 1 } else { 0 };
-            let (plan, backend) = select_budgeted_tiered_backend(
-                attention.d_head,
-                config,
-                calibration,
-                head_budget,
-            )?;
-            planned_persistent_bytes = planned_persistent_bytes
-                .saturating_add(backend.planned_persistent_bytes());
+            let (plan, backend) =
+                select_budgeted_tiered_backend(attention.d_head, config, calibration, head_budget)?;
+            planned_persistent_bytes =
+                planned_persistent_bytes.saturating_add(backend.planned_persistent_bytes());
             allocated_bytes = allocated_bytes.saturating_add(backend.packed_bytes());
             worst_quality_bps = worst_quality_bps.min(lifecycle_worst_quality(
                 calibration.quality,
@@ -237,7 +242,6 @@ impl ElasticLatentDecodeRuntime {
             target: config.lifecycle.hot,
         };
         Ok(Self {
-            config,
             backends,
             plans,
             basis_versions,
