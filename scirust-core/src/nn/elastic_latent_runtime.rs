@@ -73,21 +73,35 @@ impl fmt::Display for ElasticLatentRuntimeError {
         match self
         {
             Self::ZeroHeads => write!(output, "attention must contain at least one head"),
-            Self::HeadCount { expected, actual } => {
-                write!(output, "head calibration mismatch: expected {expected}, got {actual}")
-            }
-            Self::LifecycleCapacityMismatch => {
+            Self::HeadCount { expected, actual } =>
+            {
+                write!(
+                    output,
+                    "head calibration mismatch: expected {expected}, got {actual}"
+                )
+            },
+            Self::LifecycleCapacityMismatch =>
+            {
                 write!(output, "lifecycle capacity must equal runtime capacity")
-            }
-            Self::TokenLength { expected, actual } => {
-                write!(output, "token length mismatch: expected {expected}, got {actual}")
-            }
-            Self::CapacityExhausted { head, capacity } => {
+            },
+            Self::TokenLength { expected, actual } =>
+            {
+                write!(
+                    output,
+                    "token length mismatch: expected {expected}, got {actual}"
+                )
+            },
+            Self::CapacityExhausted { head, capacity } =>
+            {
                 write!(output, "head {head} reached session capacity {capacity}")
-            }
-            Self::AllocationCeiling { ceiling, actual } => {
-                write!(output, "latent runtime allocation {actual} exceeds ceiling {ceiling}")
-            }
+            },
+            Self::AllocationCeiling { ceiling, actual } =>
+            {
+                write!(
+                    output,
+                    "latent runtime allocation {actual} exceeds ceiling {ceiling}"
+                )
+            },
             Self::Policy(error) => write!(output, "{error}"),
             Self::Backend(error) => write!(output, "{error}"),
             Self::Lifecycle(error) => write!(output, "{error}"),
@@ -266,9 +280,24 @@ impl ElasticLatentDecodeRuntime {
             }
         }
 
-        let q = linear_apply_kernel(&attention.w_q.weight, &attention.w_q.bias, token, self.kernel);
-        let k = linear_apply_kernel(&attention.w_k.weight, &attention.w_k.bias, token, self.kernel);
-        let v = linear_apply_kernel(&attention.w_v.weight, &attention.w_v.bias, token, self.kernel);
+        let q = linear_apply_kernel(
+            &attention.w_q.weight,
+            &attention.w_q.bias,
+            token,
+            self.kernel,
+        );
+        let k = linear_apply_kernel(
+            &attention.w_k.weight,
+            &attention.w_k.bias,
+            token,
+            self.kernel,
+        );
+        let v = linear_apply_kernel(
+            &attention.w_v.weight,
+            &attention.w_v.bias,
+            token,
+            self.kernel,
+        );
         let mut context = vec![0.0_f32; attention.d_model];
         let mut transitions = 0_usize;
         for head in 0..attention.n_heads
@@ -280,9 +309,8 @@ impl ElasticLatentDecodeRuntime {
             context[start..end].copy_from_slice(&output);
             let admission = self.lifecycles[head].admit(self.basis_versions[head]);
             debug_assert!(admission.evicted.is_none());
-            transitions = transitions.saturating_add(
-                self.lifecycles[head].rebalance_into(&mut self.lifecycle_scratch),
-            );
+            transitions = transitions
+                .saturating_add(self.lifecycles[head].rebalance_into(&mut self.lifecycle_scratch));
         }
         self.steps = self.steps.saturating_add(1);
         self.last_lifecycle_transitions = transitions;
@@ -307,13 +335,7 @@ fn linear_apply_kernel(
     for column in 0..weight.cols
     {
         output[column] = bias.data[column]
-            + kernel.dot_strided(
-                &weight.data,
-                weight.rows,
-                weight.cols,
-                column,
-                input,
-            );
+            + kernel.dot_strided(&weight.data, weight.rows, weight.cols, column, input);
     }
     output
 }
