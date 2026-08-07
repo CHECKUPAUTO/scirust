@@ -8,8 +8,8 @@
   "generated": true,
   "summary": {
     "total": 74,
-    "parity": 60,
-    "experimental": 8,
+    "parity": 64,
+    "experimental": 4,
     "missing": 6
   },
   "families": {
@@ -27,8 +27,8 @@
     },
     "convolution": {
       "total": 4,
-      "parity": 0,
-      "experimental": 4,
+      "parity": 4,
+      "experimental": 0,
       "missing": 0
     },
     "elementwise": {
@@ -234,7 +234,12 @@
         "atol": 0.00001,
         "rtol": 0.00001
       },
-      "status": "experimental"
+      "status": "parity",
+      "verified": {
+        "harness": "scirust-core/tests/parity_differential.rs",
+        "fixtures": "tests/parity/fixtures",
+        "on": "2026-08-04"
+      }
     },
     {
       "name": "batch_norm",
@@ -359,7 +364,12 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "experimental"
+      "status": "parity",
+      "verified": {
+        "harness": "scirust-core/tests/parity_differential.rs",
+        "fixtures": "tests/parity/fixtures",
+        "on": "2026-08-04"
+      }
     },
     {
       "name": "conv2d",
@@ -376,7 +386,12 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "experimental"
+      "status": "parity",
+      "verified": {
+        "harness": "scirust-core/tests/parity_differential.rs",
+        "fixtures": "tests/parity/fixtures",
+        "on": "2026-08-04"
+      }
     },
     {
       "name": "cos",
@@ -958,7 +973,12 @@
         "atol": 0.0,
         "rtol": 0.0
       },
-      "status": "experimental"
+      "status": "parity",
+      "verified": {
+        "harness": "scirust-core/tests/parity_differential.rs",
+        "fixtures": "tests/parity/fixtures",
+        "on": "2026-08-04"
+      }
     },
     {
       "name": "mean",

@@ -2429,3 +2429,363 @@ pub fn to_bf16_map(t: &TensorND) -> Result<TensorND> {
         t.shape.clone(),
     ))
 }
+
+// ------------------------------------------------------------------ //
+//  Convolution — conv1d / conv2d (valid, stride 1, bias)            //
+// ------------------------------------------------------------------ //
+
+/// conv1d : x (B, Cin, L), w (Cout, Cin, K), b (Cout,) → (B, Cout, L-K+1).
+/// Valid, stride 1, padding 0.
+pub fn conv1d(x: &TensorND, w: &TensorND, b: &TensorND) -> Result<TensorND> {
+    if x.ndim() != 3 || w.ndim() != 3
+    {
+        return Err(SciRustError::RankMismatch {
+            op: "parity::conv1d",
+            expected: 3,
+            got: x.ndim(),
+        });
+    }
+    let (b_, cin, l) = (x.shape[0], x.shape[1], x.shape[2]);
+    let (cout, _, k) = (w.shape[0], w.shape[1], w.shape[2]);
+    if w.shape[1] != cin || b.numel() != cout
+    {
+        return Err(SciRustError::ShapeMismatch {
+            op: "parity::conv1d",
+            expected: (1, cin),
+            got: (1, w.shape[1]),
+        });
+    }
+    let ol = l - k + 1;
+    let mut out = vec![0.0f32; b_ * cout * ol];
+    for b_i in 0..b_
+    {
+        for co in 0..cout
+        {
+            for i in 0..ol
+            {
+                let mut acc = b.data[co];
+                for ci in 0..cin
+                {
+                    for kk in 0..k
+                    {
+                        acc += x.data[(b_i * cin + ci) * l + i + kk]
+                            * w.data[(co * cin + ci) * k + kk];
+                    }
+                }
+                out[(b_i * cout + co) * ol + i] = acc;
+            }
+        }
+    }
+    Ok(TensorND::new(out, vec![b_, cout, ol]))
+}
+
+/// Gradient conv1d : (gx, gw, gb).
+pub fn d_conv1d(
+    gout: &TensorND,
+    x: &TensorND,
+    w: &TensorND,
+) -> Result<(TensorND, TensorND, TensorND)> {
+    let (b_, cin, l) = (x.shape[0], x.shape[1], x.shape[2]);
+    let (cout, _, k) = (w.shape[0], w.shape[1], w.shape[2]);
+    let ol = l - k + 1;
+    let mut gx = vec![0.0f32; x.numel()];
+    let mut gw = vec![0.0f32; w.numel()];
+    let mut gb = vec![0.0f32; cout];
+    for b_i in 0..b_
+    {
+        for co in 0..cout
+        {
+            for i in 0..ol
+            {
+                let g = gout.data[(b_i * cout + co) * ol + i];
+                gb[co] += g;
+                for ci in 0..cin
+                {
+                    for kk in 0..k
+                    {
+                        let wv = w.data[(co * cin + ci) * k + kk];
+                        gx[(b_i * cin + ci) * l + i + kk] += g * wv;
+                        gw[(co * cin + ci) * k + kk] += g * x.data[(b_i * cin + ci) * l + i + kk];
+                    }
+                }
+            }
+        }
+    }
+    Ok((
+        TensorND::new(gx, x.shape.clone()),
+        TensorND::new(gw, w.shape.clone()),
+        TensorND::new(gb, vec![cout]),
+    ))
+}
+
+/// conv2d : x (B, Cin, H, W), w (Cout, Cin, KH, KW), b (Cout,) →
+/// (B, Cout, H-KH+1, W-KW+1). Valid, stride 1, padding 0.
+pub fn conv2d(x: &TensorND, w: &TensorND, b: &TensorND) -> Result<TensorND> {
+    if x.ndim() != 4 || w.ndim() != 4
+    {
+        return Err(SciRustError::RankMismatch {
+            op: "parity::conv2d",
+            expected: 4,
+            got: x.ndim(),
+        });
+    }
+    let (b_, cin, h, wd) = (x.shape[0], x.shape[1], x.shape[2], x.shape[3]);
+    let (cout, _, kh, kw) = (w.shape[0], w.shape[1], w.shape[2], w.shape[3]);
+    if w.shape[1] != cin || b.numel() != cout
+    {
+        return Err(SciRustError::ShapeMismatch {
+            op: "parity::conv2d",
+            expected: (1, cin),
+            got: (1, w.shape[1]),
+        });
+    }
+    let (oh, ow) = (h - kh + 1, wd - kw + 1);
+    let mut out = vec![0.0f32; b_ * cout * oh * ow];
+    for b_i in 0..b_
+    {
+        for co in 0..cout
+        {
+            for i in 0..oh
+            {
+                for j in 0..ow
+                {
+                    let mut acc = b.data[co];
+                    for ci in 0..cin
+                    {
+                        for kk in 0..kh
+                        {
+                            for kw_ in 0..kw
+                            {
+                                acc += x.data[((b_i * cin + ci) * h + i + kk) * wd + j + kw_]
+                                    * w.data[((co * cin + ci) * kh + kk) * kw + kw_];
+                            }
+                        }
+                    }
+                    out[((b_i * cout + co) * oh + i) * ow + j] = acc;
+                }
+            }
+        }
+    }
+    Ok(TensorND::new(out, vec![b_, cout, oh, ow]))
+}
+
+/// Gradient conv2d : (gx, gw, gb).
+pub fn d_conv2d(
+    gout: &TensorND,
+    x: &TensorND,
+    w: &TensorND,
+) -> Result<(TensorND, TensorND, TensorND)> {
+    let (b_, cin, h, wd) = (x.shape[0], x.shape[1], x.shape[2], x.shape[3]);
+    let (cout, _, kh, kw) = (w.shape[0], w.shape[1], w.shape[2], w.shape[3]);
+    let (oh, ow) = (h - kh + 1, wd - kw + 1);
+    let mut gx = vec![0.0f32; x.numel()];
+    let mut gw = vec![0.0f32; w.numel()];
+    let mut gb = vec![0.0f32; cout];
+    for b_i in 0..b_
+    {
+        for co in 0..cout
+        {
+            for i in 0..oh
+            {
+                for j in 0..ow
+                {
+                    let g = gout.data[((b_i * cout + co) * oh + i) * ow + j];
+                    gb[co] += g;
+                    for ci in 0..cin
+                    {
+                        for kk in 0..kh
+                        {
+                            for kw_ in 0..kw
+                            {
+                                let wv = w.data[((co * cin + ci) * kh + kk) * kw + kw_];
+                                let xv = x.data[((b_i * cin + ci) * h + i + kk) * wd + j + kw_];
+                                gx[((b_i * cin + ci) * h + i + kk) * wd + j + kw_] += g * wv;
+                                gw[((co * cin + ci) * kh + kk) * kw + kw_] += g * xv;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok((
+        TensorND::new(gx, x.shape.clone()),
+        TensorND::new(gw, w.shape.clone()),
+        TensorND::new(gb, vec![cout]),
+    ))
+}
+
+// ------------------------------------------------------------------ //
+//  Convolution — max_pool2d / avg_pool2d (k×k, stride s, pad 0)     //
+// ------------------------------------------------------------------ //
+
+/// max_pool2d : x (B, C, H, W) → (B, C, OH, OW), fenêtres k×k pas s.
+/// Retourne aussi les indices (index spatial aplati par canal, premier max).
+pub fn max_pool2d_with_idx(
+    x: &TensorND,
+    k: usize,
+    stride: usize,
+) -> Result<(TensorND, Vec<usize>)> {
+    if x.ndim() != 4
+    {
+        return Err(SciRustError::RankMismatch {
+            op: "parity::max_pool2d",
+            expected: 4,
+            got: x.ndim(),
+        });
+    }
+    let (b_, c, h, wd) = (x.shape[0], x.shape[1], x.shape[2], x.shape[3]);
+    if k > h || k > wd || stride == 0
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::max_pool2d: k {k}, stride {stride}, H {h}, W {wd}"
+        )));
+    }
+    let (oh, ow) = ((h - k) / stride + 1, (wd - k) / stride + 1);
+    let mut out = vec![0.0f32; b_ * c * oh * ow];
+    let mut idx = vec![0usize; b_ * c * oh * ow];
+    for b_i in 0..b_
+    {
+        for c_i in 0..c
+        {
+            for oi in 0..oh
+            {
+                for oj in 0..ow
+                {
+                    let mut best = f32::NEG_INFINITY;
+                    let mut best_off = 0usize;
+                    for di in 0..k
+                    {
+                        for dj in 0..k
+                        {
+                            let (i, j) = (oi * stride + di, oj * stride + dj);
+                            let v = x.data[((b_i * c + c_i) * h + i) * wd + j];
+                            if v > best
+                            {
+                                best = v;
+                                best_off = i * wd + j;
+                            }
+                        }
+                    }
+                    let n = ((b_i * c + c_i) * oh + oi) * ow + oj;
+                    out[n] = best;
+                    idx[n] = best_off;
+                }
+            }
+        }
+    }
+    Ok((TensorND::new(out, vec![b_, c, oh, ow]), idx))
+}
+
+/// Gradient max_pool2d : gout redistribué au premier max de chaque fenêtre.
+pub fn d_max_pool2d(gout: &TensorND, x: &TensorND, k: usize, stride: usize) -> Result<TensorND> {
+    let (b_, c, h, wd) = (x.shape[0], x.shape[1], x.shape[2], x.shape[3]);
+    let (oh, ow) = ((h - k) / stride + 1, (wd - k) / stride + 1);
+    let mut gx = vec![0.0f32; x.numel()];
+    for b_i in 0..b_
+    {
+        for c_i in 0..c
+        {
+            for oi in 0..oh
+            {
+                for oj in 0..ow
+                {
+                    let mut best = f32::NEG_INFINITY;
+                    let mut best_off = 0usize;
+                    for di in 0..k
+                    {
+                        for dj in 0..k
+                        {
+                            let (i, j) = (oi * stride + di, oj * stride + dj);
+                            let v = x.data[((b_i * c + c_i) * h + i) * wd + j];
+                            if v > best
+                            {
+                                best = v;
+                                best_off = i * wd + j;
+                            }
+                        }
+                    }
+                    let g = gout.data[((b_i * c + c_i) * oh + oi) * ow + oj];
+                    gx[((b_i * c + c_i) * h) * wd + best_off] += g;
+                }
+            }
+        }
+    }
+    Ok(TensorND::new(gx, x.shape.clone()))
+}
+
+/// avg_pool2d : moyenne des fenêtres k×k pas s (count_include_pad sans pad).
+pub fn avg_pool2d(x: &TensorND, k: usize, stride: usize) -> Result<TensorND> {
+    if x.ndim() != 4
+    {
+        return Err(SciRustError::RankMismatch {
+            op: "parity::avg_pool2d",
+            expected: 4,
+            got: x.ndim(),
+        });
+    }
+    let (b_, c, h, wd) = (x.shape[0], x.shape[1], x.shape[2], x.shape[3]);
+    if k > h || k > wd || stride == 0
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::avg_pool2d: k {k}, stride {stride}, H {h}, W {wd}"
+        )));
+    }
+    let (oh, ow) = ((h - k) / stride + 1, (wd - k) / stride + 1);
+    let inv = 1.0 / (k * k) as f32;
+    let mut out = vec![0.0f32; b_ * c * oh * ow];
+    for b_i in 0..b_
+    {
+        for c_i in 0..c
+        {
+            for oi in 0..oh
+            {
+                for oj in 0..ow
+                {
+                    let mut acc = 0.0f32;
+                    for di in 0..k
+                    {
+                        for dj in 0..k
+                        {
+                            let (i, j) = (oi * stride + di, oj * stride + dj);
+                            acc += x.data[((b_i * c + c_i) * h + i) * wd + j];
+                        }
+                    }
+                    out[((b_i * c + c_i) * oh + oi) * ow + oj] = acc * inv;
+                }
+            }
+        }
+    }
+    Ok(TensorND::new(out, vec![b_, c, oh, ow]))
+}
+
+/// Gradient avg_pool2d : gout/k² redistribué à chaque position de fenêtre.
+pub fn d_avg_pool2d(gout: &TensorND, k: usize, stride: usize) -> Result<TensorND> {
+    let (b_, c, oh, ow) = (gout.shape[0], gout.shape[1], gout.shape[2], gout.shape[3]);
+    let h = (oh - 1) * stride + k;
+    let wd = (ow - 1) * stride + k;
+    let mut gx = vec![0.0f32; b_ * c * h * wd];
+    let inv = 1.0 / (k * k) as f32;
+    for b_i in 0..b_
+    {
+        for c_i in 0..c
+        {
+            for oi in 0..oh
+            {
+                for oj in 0..ow
+                {
+                    let g = gout.data[((b_i * c + c_i) * oh + oi) * ow + oj] * inv;
+                    for di in 0..k
+                    {
+                        for dj in 0..k
+                        {
+                            let (i, j) = (oi * stride + di, oj * stride + dj);
+                            gx[((b_i * c + c_i) * h + i) * wd + j] += g;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(TensorND::new(gx, vec![b_, c, h, wd]))
+}
