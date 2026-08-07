@@ -30,6 +30,13 @@ jobs:
           PY
       - name: Apply B33 source patch
         run: python3 scripts/sciagent_b33_patch.py
+      - name: Normalize generated text EOF
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("scirust-sciagent/ROUTE_B.md")
+          p.write_text(p.read_text().rstrip() + "\n")
+          PY
       - name: Format
         run: cargo fmt --all
       - name: Test SciAgent CPU attention/model
