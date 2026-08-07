@@ -158,7 +158,6 @@ impl From<LifecycleError> for ElasticLatentRuntimeError {
 
 /// Session-scoped bounded Elastic Latent KV decoder.
 pub struct ElasticLatentDecodeRuntime {
-    config: ElasticLatentRuntimeConfig,
     backends: Vec<Box<dyn AttentionBackend>>,
     plans: Vec<AdaptiveKvPlan>,
     basis_versions: Vec<u32>,
@@ -243,7 +242,6 @@ impl ElasticLatentDecodeRuntime {
             target: config.lifecycle.hot,
         };
         Ok(Self {
-            config,
             backends,
             plans,
             basis_versions,
