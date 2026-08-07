@@ -1,4 +1,4 @@
-//! Deterministic WGPU token sampling compatible with SciRust's seeded CPU sampler.
+//! Deterministic WGPU token sampling compatible with SciRust's seeded CPU sampling_state.
 //!
 //! WGSL has no portable native `u64`, while [`PcgEngine`] uses a 64-bit PCG
 //! state. This module emulates the state transition with two `u32` limbs and a
@@ -47,7 +47,7 @@ struct WideU32 {
 
 @group(0) @binding(0) var<storage, read> logits: array<f32>;
 @group(0) @binding(1) var<storage, read_write> scratch: array<f32>;
-@group(0) @binding(2) var<storage, read_write> sampler: SamplerState;
+@group(0) @binding(2) var<storage, read_write> sampling_state: SamplerState;
 
 fn mul_u32_wide(a: u32, b: u32) -> WideU32 {
     let a0 = a & 0xffffu;
@@ -67,8 +67,8 @@ fn mul_u32_wide(a: u32, b: u32) -> WideU32 {
 }
 
 fn pcg_next_u32() -> u32 {
-    let old_lo = sampler.state_lo;
-    let old_hi = sampler.state_hi;
+    let old_lo = sampling_state.state_lo;
+    let old_hi = sampling_state.state_hi;
 
     // 0x5851f42d4c957f2d, reduced modulo 2^64. For a two-limb
     // multiplication only the low words of the two cross products contribute
@@ -77,15 +77,15 @@ fn pcg_next_u32() -> u32 {
     let cross_lo_hi = old_lo * 0x5851f42du;
     let cross_hi_lo = old_hi * 0x4c957f2du;
 
-    let added_lo = product_lo.lo + sampler.inc_lo;
+    let added_lo = product_lo.lo + sampling_state.inc_lo;
     let carry = select(0u, 1u, added_lo < product_lo.lo);
     let added_hi = product_lo.hi
         + cross_lo_hi
         + cross_hi_lo
-        + sampler.inc_hi
+        + sampling_state.inc_hi
         + carry;
-    sampler.state_lo = added_lo;
-    sampler.state_hi = added_hi;
+    sampling_state.state_lo = added_lo;
+    sampling_state.state_hi = added_hi;
 
     // xorshifted = (((oldstate >> 18) ^ oldstate) >> 27) as u32
     let shifted18_lo = (old_lo >> 18u) | (old_hi << 14u);
@@ -114,13 +114,13 @@ fn greedy_argmax(vocab_size: u32) -> u32 {
 
 @compute @workgroup_size(1)
 fn main() {
-    let vocab_size = sampler.vocab_size;
-    let temperature = bitcast<f32>(sampler.temperature_bits);
-    let top_p = bitcast<f32>(sampler.top_p_bits);
+    let vocab_size = sampling_state.vocab_size;
+    let temperature = bitcast<f32>(sampling_state.temperature_bits);
+    let top_p = bitcast<f32>(sampling_state.top_p_bits);
     let order_offset = vocab_size;
 
-    if (temperature <= 0.0 || sampler.top_k == 1u) {
-        sampler.output_id = greedy_argmax(vocab_size);
+    if (temperature <= 0.0 || sampling_state.top_k == 1u) {
+        sampling_state.output_id = greedy_argmax(vocab_size);
         return;
     }
 
@@ -157,8 +157,8 @@ fn main() {
         }
     }
 
-    if (sampler.top_k > 0u && sampler.top_k < vocab_size) {
-        for (var rank: u32 = sampler.top_k; rank < vocab_size; rank = rank + 1u) {
+    if (sampling_state.top_k > 0u && sampling_state.top_k < vocab_size) {
+        for (var rank: u32 = sampling_state.top_k; rank < vocab_size; rank = rank + 1u) {
             let token = u32(scratch[order_offset + rank]);
             scratch[token] = 0.0;
         }
@@ -192,24 +192,24 @@ fn main() {
         sum = sum + scratch[token];
     }
     if (sum <= 0.0) {
-        sampler.output_id = greedy_argmax(vocab_size);
+        sampling_state.output_id = greedy_argmax(vocab_size);
         return;
     }
 
     let random_word = pcg_next_u32();
-    sampler.draws = sampler.draws + 1u;
+    sampling_state.draws = sampling_state.draws + 1u;
     let random_unit = f32(random_word) / 4294967296.0;
     let threshold = random_unit * sum;
     var cumulative = 0.0;
     for (var token: u32 = 0u; token < vocab_size; token = token + 1u) {
         cumulative = cumulative + scratch[token];
         if (threshold < cumulative) {
-            sampler.output_id = token;
+            sampling_state.output_id = token;
             return;
         }
     }
 
-    sampler.output_id = u32(scratch[order_offset]);
+    sampling_state.output_id = u32(scratch[order_offset]);
 }
 "#;
 
