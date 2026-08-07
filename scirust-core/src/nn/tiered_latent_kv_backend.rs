@@ -65,7 +65,10 @@ impl fmt::Display for TieredLatentBackendError {
             ),
             Self::ZeroRankDivisor(temperature) =>
             {
-                write!(output, "{temperature:?} lifecycle rank divisor must be non-zero")
+                write!(
+                    output,
+                    "{temperature:?} lifecycle rank divisor must be non-zero"
+                )
             },
             Self::Residual(error) => write!(output, "{error}"),
         }
@@ -180,24 +183,20 @@ impl TieredResidualLatentBackend {
             plan,
             lifecycle.cold,
         )?;
-        let planned_persistent_bytes = planned_tier_bytes(
-            lifecycle.hot_tokens,
-            dimension,
-            plan,
-            lifecycle.hot,
-        )
-        .saturating_add(planned_tier_bytes(
-            lifecycle.warm_tokens,
-            dimension,
-            plan,
-            lifecycle.warm,
-        ))
-        .saturating_add(planned_tier_bytes(
-            cold_tokens,
-            dimension,
-            plan,
-            lifecycle.cold,
-        ));
+        let planned_persistent_bytes =
+            planned_tier_bytes(lifecycle.hot_tokens, dimension, plan, lifecycle.hot)
+                .saturating_add(planned_tier_bytes(
+                    lifecycle.warm_tokens,
+                    dimension,
+                    plan,
+                    lifecycle.warm,
+                ))
+                .saturating_add(planned_tier_bytes(
+                    cold_tokens,
+                    dimension,
+                    plan,
+                    lifecycle.cold,
+                ));
 
         Ok(Self {
             dimension,
@@ -453,13 +452,12 @@ impl AttentionBackend for TieredResidualLatentBackend {
     fn attention(&self, query: &[f32]) -> Vec<f32> {
         assert_eq!(query.len(), self.dimension);
         let resident = self.len();
-        assert!(resident > 0, "attention requires a resident lifecycle token");
+        assert!(
+            resident > 0,
+            "attention requires a resident lifecycle token"
+        );
         let mut scratch = self.attention_scratch.borrow_mut();
-        let TieredAttentionScratch {
-            scores,
-            key,
-            value,
-        } = &mut *scratch;
+        let TieredAttentionScratch { scores, key, value } = &mut *scratch;
         let active_scores = &mut scores[..resident];
         let scale = 1.0 / (self.dimension as f32).sqrt();
         let mut cursor = 0;
@@ -665,7 +663,9 @@ fn prefix_basis(full_basis: &[f32], dimension: usize, rank: usize) -> Vec<f32> {
 }
 
 fn tier_len(cache: &Option<ResidualQuantizedLatentKvCache>) -> usize {
-    cache.as_ref().map_or(0, ResidualQuantizedLatentKvCache::len)
+    cache
+        .as_ref()
+        .map_or(0, ResidualQuantizedLatentKvCache::len)
 }
 
 fn tier_allocated(cache: &Option<ResidualQuantizedLatentKvCache>) -> usize {
