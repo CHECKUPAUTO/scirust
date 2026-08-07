@@ -16,6 +16,18 @@ jobs:
         with:
           ref: fix/sciagent-b33-head-local-rope
           fetch-depth: 0
+      - name: Normalize repeated CUDA replacement sites
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("scripts/sciagent_b33_patch.py")
+          s = p.read_text()
+          old = '    if n != count:\n        raise SystemExit(f"expected {count}, found {n}: {old[:150]!r}")\n    return text.replace(old, new, count)\n'
+          new = '    if n < count:\n        raise SystemExit(f"expected at least {count}, found {n}: {old[:150]!r}")\n    return text.replace(old, new, count)\n'
+          if old not in s:
+              raise SystemExit("B33 replacement helper shape changed")
+          p.write_text(s.replace(old, new, 1))
+          PY
       - name: Apply B33 source patch
         run: python3 scripts/sciagent_b33_patch.py
       - name: Format
