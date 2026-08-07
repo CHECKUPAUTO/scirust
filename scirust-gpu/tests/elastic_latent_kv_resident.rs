@@ -4,7 +4,8 @@ use scirust_gpu::WgpuResidentLatentKvCache;
 
 fn basis(dimension: usize, rank: usize) -> Vec<f32> {
     let mut basis = vec![0.0; dimension * rank];
-    for index in 0..rank {
+    for index in 0..rank
+    {
         basis[index * rank + index] = 1.0;
     }
     basis
@@ -12,8 +13,10 @@ fn basis(dimension: usize, rank: usize) -> Vec<f32> {
 
 fn project(vector: &[f32], basis: &[f32], dimension: usize, rank: usize) -> Vec<f32> {
     let mut output = vec![0.0; rank];
-    for j in 0..rank {
-        for i in 0..dimension {
+    for j in 0..rank
+    {
+        for i in 0..dimension
+        {
             output[j] += vector[i] * basis[i * rank + j];
         }
     }
@@ -32,10 +35,12 @@ fn cpu_attention(
     let query_latent = project(query, key_basis, dimension, rank);
     let scale = 1.0 / (dimension as f32).sqrt();
     let mut scores = Vec::with_capacity(keys.len());
-    for key in keys {
+    for key in keys
+    {
         let key_latent = project(key, key_basis, dimension, rank);
         let mut score = 0.0;
-        for j in 0..rank {
+        for j in 0..rank
+        {
             score += query_latent[j] * key_latent[j];
         }
         scores.push(score * scale);
@@ -43,25 +48,31 @@ fn cpu_attention(
 
     let maximum = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let mut denominator = 0.0;
-    for score in &mut scores {
+    for score in &mut scores
+    {
         *score = (*score - maximum).exp();
         denominator += *score;
     }
-    for score in &mut scores {
+    for score in &mut scores
+    {
         *score /= denominator;
     }
 
     let mut latent_context = vec![0.0; rank];
-    for (weight, value) in scores.iter().zip(values) {
+    for (weight, value) in scores.iter().zip(values)
+    {
         let value_latent = project(value, value_basis, dimension, rank);
-        for j in 0..rank {
+        for j in 0..rank
+        {
             latent_context[j] += *weight * value_latent[j];
         }
     }
 
     let mut output = vec![0.0; dimension];
-    for i in 0..dimension {
-        for j in 0..rank {
+    for i in 0..dimension
+    {
+        for j in 0..rank
+        {
             output[i] += latent_context[j] * value_basis[i * rank + j];
         }
     }
@@ -70,7 +81,8 @@ fn cpu_attention(
 
 fn assert_close(actual: &[f32], expected: &[f32], tolerance: f32) {
     assert_eq!(actual.len(), expected.len());
-    for (index, (actual, expected)) in actual.iter().zip(expected).enumerate() {
+    for (index, (actual, expected)) in actual.iter().zip(expected).enumerate()
+    {
         let error = (actual - expected).abs();
         assert!(
             error <= tolerance,
@@ -85,14 +97,8 @@ fn resident_lower_rank_attention_matches_cpu_oracle() {
     let rank = 2;
     let key_basis = basis(dimension, rank);
     let value_basis = basis(dimension, rank);
-    let mut cache = WgpuResidentLatentKvCache::new(
-        4,
-        dimension,
-        rank,
-        &key_basis,
-        &value_basis,
-    )
-    .expect("Phase 14 validation requires an available WGPU adapter");
+    let mut cache = WgpuResidentLatentKvCache::new(4, dimension, rank, &key_basis, &value_basis)
+        .expect("Phase 14 validation requires an available WGPU adapter");
 
     let keys = vec![
         vec![0.5, -0.2, 0.9, 0.1],
@@ -104,7 +110,8 @@ fn resident_lower_rank_attention_matches_cpu_oracle() {
         vec![0.5, -0.3, 0.7, 0.9],
         vec![-0.6, 0.4, 0.2, 0.3],
     ];
-    for (key, value) in keys.iter().zip(&values) {
+    for (key, value) in keys.iter().zip(&values)
+    {
         cache.append(key, value).unwrap();
     }
 
@@ -135,14 +142,8 @@ fn resident_ring_wraps_without_growing_persistent_storage() {
     let rank = 2;
     let key_basis = basis(dimension, rank);
     let value_basis = basis(dimension, rank);
-    let mut cache = WgpuResidentLatentKvCache::new(
-        2,
-        dimension,
-        rank,
-        &key_basis,
-        &value_basis,
-    )
-    .expect("Phase 14 validation requires an available WGPU adapter");
+    let mut cache = WgpuResidentLatentKvCache::new(2, dimension, rank, &key_basis, &value_basis)
+        .expect("Phase 14 validation requires an available WGPU adapter");
     let resident_bytes = cache.telemetry().resident_bytes;
 
     let all_keys = [
@@ -155,7 +156,8 @@ fn resident_ring_wraps_without_growing_persistent_storage() {
         vec![-0.4, 0.6, 0.3, 0.8],
         vec![0.2, -0.5, 0.9, 0.4],
     ];
-    for (key, value) in all_keys.iter().zip(&all_values) {
+    for (key, value) in all_keys.iter().zip(&all_values)
+    {
         cache.append(key, value).unwrap();
         assert_eq!(cache.telemetry().resident_bytes, resident_bytes);
     }
