@@ -1,0 +1,82 @@
+name: Elastic Latent KV Final Benchmark
+
+on:
+  push:
+    branches:
+      - research/elastic-latent-kv-final-benchmark
+    paths:
+      - scirust-core/examples/elastic_latent_kv_benchmark.rs
+      - experiments/elastic-latent-kv/FINAL_BENCHMARK.md
+      - .github/workflows/elastic-latent-kv-final-benchmark.yml
+  pull_request:
+    branches: [master]
+    paths:
+      - scirust-core/examples/elastic_latent_kv_benchmark.rs
+      - experiments/elastic-latent-kv/FINAL_BENCHMARK.md
+      - .github/workflows/elastic-latent-kv-final-benchmark.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: |
+          rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt,clippy
+          rustup toolchain install 1.89.0 --profile minimal
+      - run: cargo +nightly-2026-07-02 fmt --all -- --check
+      - run: cargo +nightly-2026-07-02 clippy -p scirust-core --all-targets --locked -- -D warnings
+      - run: cargo +1.89.0 check -p scirust-core --all-targets --locked
+      - run: |
+          SCIRUST_ELASTIC_KV_BENCH_CONTEXTS=32,128 \
+          SCIRUST_ELASTIC_KV_BENCH_REPEATS=2 \
+          SCIRUST_ELASTIC_KV_BENCH_BUDGET_BPS=3000 \
+          cargo +1.89.0 run --quiet --release --locked -p scirust-core \
+            --example elastic_latent_kv_benchmark > final-benchmark.csv
+          python3 - <<'PY'
+          import csv
+          import math
+
+          with open('final-benchmark.csv', newline='', encoding='utf-8') as handle:
+              rows = list(csv.DictReader(handle))
+
+          assert len(rows) == 8, len(rows)
+          expected_variants = {
+              'dense-kv',
+              'phase7-latent-int4',
+              'phase8-residual-int4',
+              'adaptive-policy',
+          }
+          by_context = {}
+          for row in rows:
+              context = int(row['context_tokens'])
+              by_context.setdefault(context, []).append(row)
+              assert int(row['resident_tokens']) == context + 1
+              assert int(row['allocated_bytes']) > 0
+              assert int(row['cache_prefill_ns']) > 0
+              assert int(row['attention_ttft_proxy_ns']) > 0
+              assert int(row['decode_latency_ns']) > 0
+              assert float(row['attention_tokens_per_second']) > 0.0
+              assert int(row['deterministic']) == 1
+              assert int(row['output_fingerprint'], 16) != 0
+              assert math.isfinite(float(row['max_output_absolute_error']))
+
+          assert set(by_context) == {32, 128}
+          for context, context_rows in by_context.items():
+              assert {row['variant'] for row in context_rows} == expected_variants
+              dense = next(row for row in context_rows if row['variant'] == 'dense-kv')
+              dense_bytes = int(dense['allocated_bytes'])
+              assert int(dense['dense_allocated_bytes']) == dense_bytes
+              assert abs(float(dense['compression_ratio']) - 1.0) < 1.0e-12
+              assert float(dense['max_output_absolute_error']) == 0.0
+              for row in context_rows:
+                  assert int(row['dense_allocated_bytes']) == dense_bytes
+                  if row['variant'] != 'dense-kv':
+                      assert int(row['allocated_bytes']) < dense_bytes, (context, row)
+              adaptive = next(row for row in context_rows if row['variant'] == 'adaptive-policy')
+              assert 0 < int(adaptive['planned_persistent_bytes']) <= int(adaptive['allocated_bytes'])
+              assert int(adaptive['quality_bps']) > 0
+              assert int(adaptive['plan_fingerprint'], 16) != 0
+          PY
