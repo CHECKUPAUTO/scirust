@@ -130,6 +130,52 @@ pub struct LearnedHeadBasis<'a> {
     pub quality: AdaptiveQualityProfile<'a>,
 }
 
+/// Owned construction-time calibration resolved from immutable Phase 10 commits.
+///
+/// Phase 13 currently accepts a square basis carrier. A lower-rank learned basis
+/// is therefore copied into the leading columns of a square matrix and the
+/// unused columns are zero-filled. `maximum_rank` is validated not to exceed the
+/// learned prefix, so the zero-filled carrier columns can never be selected.
+pub struct ResolvedHeadCalibration<'a> {
+    full_key_basis: Vec<f32>,
+    full_value_basis: Vec<f32>,
+    quality: AdaptiveQualityProfile<'a>,
+    basis_version: u32,
+    key_rank: usize,
+    value_rank: usize,
+}
+
+impl ResolvedHeadCalibration<'_> {
+    /// Common K/V committed version represented by this calibration.
+    #[must_use]
+    pub const fn basis_version(&self) -> u32 {
+        self.basis_version
+    }
+
+    /// Learned key basis rank before square-carrier materialization.
+    #[must_use]
+    pub const fn key_rank(&self) -> usize {
+        self.key_rank
+    }
+
+    /// Learned value basis rank before square-carrier materialization.
+    #[must_use]
+    pub const fn value_rank(&self) -> usize {
+        self.value_rank
+    }
+
+    /// Borrows the resolved data in the form consumed by Phase 13.
+    #[must_use]
+    pub fn as_head_calibration(&self) -> HeadCalibration<'_> {
+        HeadCalibration {
+            full_key_basis: &self.full_key_basis,
+            full_value_basis: &self.full_value_basis,
+            quality: self.quality,
+            basis_version: self.basis_version,
+        }
+    }
+}
+
 /// Errors surfaced while archiving or handing learned bases to Phase 13.
 #[derive(Debug)]
 pub enum BasisHandoffError {
@@ -144,11 +190,23 @@ pub enum BasisHandoffError {
         channel: &'static str,
         version: u32,
     },
-    BasisShape {
+    InvalidBasisShape {
         head: usize,
         channel: &'static str,
-        expected: usize,
-        actual: usize,
+        dimension: usize,
+        elements: usize,
+    },
+    LearnedRankTooLarge {
+        head: usize,
+        channel: &'static str,
+        dimension: usize,
+        rank: usize,
+    },
+    MaximumRankExceedsLearned {
+        head: usize,
+        maximum_rank: usize,
+        key_rank: usize,
+        value_rank: usize,
     },
     Runtime(ElasticLatentRuntimeError),
 }
@@ -174,14 +232,32 @@ impl fmt::Display for BasisHandoffError {
                 output,
                 "head {head} {channel} learner has no committed basis for version {version}"
             ),
-            Self::BasisShape {
+            Self::InvalidBasisShape {
                 head,
                 channel,
-                expected,
-                actual,
+                dimension,
+                elements,
             } => write!(
                 output,
-                "head {head} {channel} committed basis length mismatch: expected {expected}, got {actual}"
+                "head {head} {channel} committed basis with {elements} elements is not row-major [dimension={dimension}, rank]"
+            ),
+            Self::LearnedRankTooLarge {
+                head,
+                channel,
+                dimension,
+                rank,
+            } => write!(
+                output,
+                "head {head} {channel} learned rank {rank} exceeds dimension {dimension}"
+            ),
+            Self::MaximumRankExceedsLearned {
+                head,
+                maximum_rank,
+                key_rank,
+                value_rank,
+            } => write!(
+                output,
+                "head {head} runtime maximum rank {maximum_rank} exceeds learned key/value ranks {key_rank}/{value_rank}"
             ),
             Self::Runtime(error) => write!(output, "{error}"),
         }
@@ -213,39 +289,53 @@ impl From<ElasticLatentRuntimeError> for BasisHandoffError {
 
 /// Resolves one head to the newest key/value basis version committed by both learners.
 ///
-/// Phase 13 currently consumes a full row-major `[dimension, dimension]` basis
-/// because its policy may select any prefix rank up to the dense head dimension.
+/// Lower-rank learned bases remain lower-rank semantically. They are copied into
+/// square construction-time carriers only because the current Phase 13 backend
+/// API accepts a full row-major matrix; the planner is forbidden from selecting
+/// any of the zero-filled columns beyond the learned ranks.
 pub fn resolve_committed_head_calibration<'a>(
     head: usize,
     dimension: usize,
+    maximum_rank: usize,
     learned: LearnedHeadBasis<'a>,
-) -> Result<HeadCalibration<'a>, BasisHandoffError> {
+) -> Result<ResolvedHeadCalibration<'a>, BasisHandoffError> {
     let basis_version = learned
         .key
         .current_version()
         .min(learned.value.current_version());
-    let full_key_basis = learned.key.committed_basis(basis_version).ok_or(
+    let key_basis = learned.key.committed_basis(basis_version).ok_or(
         BasisHandoffError::MissingCommittedVersion {
             head,
             channel: "key",
             version: basis_version,
         },
     )?;
-    let full_value_basis = learned.value.committed_basis(basis_version).ok_or(
+    let value_basis = learned.value.committed_basis(basis_version).ok_or(
         BasisHandoffError::MissingCommittedVersion {
             head,
             channel: "value",
             version: basis_version,
         },
     )?;
-    let expected = dimension.saturating_mul(dimension);
-    validate_basis_shape(head, "key", full_key_basis, expected)?;
-    validate_basis_shape(head, "value", full_value_basis, expected)?;
-    Ok(HeadCalibration {
+    let (full_key_basis, key_rank) = materialize_square_basis(head, "key", dimension, key_basis)?;
+    let (full_value_basis, value_rank) =
+        materialize_square_basis(head, "value", dimension, value_basis)?;
+    if maximum_rank > key_rank || maximum_rank > value_rank
+    {
+        return Err(BasisHandoffError::MaximumRankExceedsLearned {
+            head,
+            maximum_rank,
+            key_rank,
+            value_rank,
+        });
+    }
+    Ok(ResolvedHeadCalibration {
         full_key_basis,
         full_value_basis,
         quality: learned.quality,
         basis_version,
+        key_rank,
+        value_rank,
     })
 }
 
@@ -266,15 +356,20 @@ pub fn runtime_from_committed_bases(
             actual: learned_heads.len(),
         });
     }
-    let mut calibrations = Vec::with_capacity(learned_heads.len());
+    let mut resolved = Vec::with_capacity(learned_heads.len());
     for (head, learned) in learned_heads.iter().copied().enumerate()
     {
-        calibrations.push(resolve_committed_head_calibration(
+        resolved.push(resolve_committed_head_calibration(
             head,
             attention.d_head,
+            config.maximum_rank,
             learned,
         )?);
     }
+    let calibrations: Vec<_> = resolved
+        .iter()
+        .map(ResolvedHeadCalibration::as_head_calibration)
+        .collect();
     Ok(ElasticLatentDecodeRuntime::new(
         attention,
         config,
@@ -282,22 +377,39 @@ pub fn runtime_from_committed_bases(
     )?)
 }
 
-fn validate_basis_shape(
+fn materialize_square_basis(
     head: usize,
     channel: &'static str,
+    dimension: usize,
     basis: &[f32],
-    expected: usize,
-) -> Result<(), BasisHandoffError> {
-    if basis.len() != expected
+) -> Result<(Vec<f32>, usize), BasisHandoffError> {
+    if dimension == 0 || basis.is_empty() || basis.len() % dimension != 0
     {
-        return Err(BasisHandoffError::BasisShape {
+        return Err(BasisHandoffError::InvalidBasisShape {
             head,
             channel,
-            expected,
-            actual: basis.len(),
+            dimension,
+            elements: basis.len(),
         });
     }
-    Ok(())
+    let rank = basis.len() / dimension;
+    if rank > dimension
+    {
+        return Err(BasisHandoffError::LearnedRankTooLarge {
+            head,
+            channel,
+            dimension,
+            rank,
+        });
+    }
+    let mut full = vec![0.0; dimension.saturating_mul(dimension)];
+    for row in 0..dimension
+    {
+        let source = row * rank;
+        let destination = row * dimension;
+        full[destination..destination + rank].copy_from_slice(&basis[source..source + rank]);
+    }
+    Ok((full, rank))
 }
 
 #[cfg(test)]
@@ -361,16 +473,16 @@ mod tests {
     }
 
     #[test]
-    fn resolver_uses_highest_common_key_value_version() {
-        const RANK_QUALITY: [u16; 2] = [5_000, 10_000];
+    fn resolver_uses_highest_common_lower_rank_version() {
+        const RANK_QUALITY: [u16; 3] = [4_000, 8_000, 10_000];
         const RESIDUAL_GAIN: [u16; 1] = [0];
         let mut key =
-            CommittedBasisLearner::new(learner_config(2, 2), identity_prefix(2, 2)).unwrap();
+            CommittedBasisLearner::new(learner_config(3, 2), identity_prefix(3, 2)).unwrap();
         let mut value =
-            CommittedBasisLearner::new(learner_config(2, 2), identity_prefix(2, 2)).unwrap();
-        key.observe(&[1.0, 0.0]).unwrap();
-        key.observe(&[0.0, 1.0]).unwrap();
-        value.observe(&[1.0, 0.0]).unwrap();
+            CommittedBasisLearner::new(learner_config(3, 2), identity_prefix(3, 2)).unwrap();
+        key.observe(&[1.0, 0.0, 1.0]).unwrap();
+        key.observe(&[0.0, 1.0, 1.0]).unwrap();
+        value.observe(&[1.0, 0.0, 1.0]).unwrap();
         assert_eq!(key.current_version(), 2);
         assert_eq!(value.current_version(), 1);
 
@@ -380,8 +492,9 @@ mod tests {
             key_residual_gain_bps: &RESIDUAL_GAIN,
             value_residual_gain_bps: &RESIDUAL_GAIN,
         };
-        let calibration = resolve_committed_head_calibration(
+        let resolved = resolve_committed_head_calibration(
             0,
+            3,
             2,
             LearnedHeadBasis {
                 key: &key,
@@ -390,29 +503,39 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(calibration.basis_version, 1);
-        assert_eq!(
-            basis_fingerprint(calibration.full_key_basis),
-            key.versions()[1].fingerprint
-        );
-        assert_eq!(
-            basis_fingerprint(calibration.full_value_basis),
-            value.versions()[1].fingerprint
-        );
+        assert_eq!(resolved.basis_version(), 1);
+        assert_eq!(resolved.key_rank(), 2);
+        assert_eq!(resolved.value_rank(), 2);
+        let calibration = resolved.as_head_calibration();
+        let archived_key = key.committed_basis(1).unwrap();
+        let archived_value = value.committed_basis(1).unwrap();
+        for row in 0..3
+        {
+            assert_eq!(
+                &calibration.full_key_basis[row * 3..row * 3 + 2],
+                &archived_key[row * 2..row * 2 + 2]
+            );
+            assert_eq!(
+                &calibration.full_value_basis[row * 3..row * 3 + 2],
+                &archived_value[row * 2..row * 2 + 2]
+            );
+            assert_eq!(calibration.full_key_basis[row * 3 + 2], 0.0);
+            assert_eq!(calibration.full_value_basis[row * 3 + 2], 0.0);
+        }
     }
 
     #[test]
-    fn fresh_runtime_consumes_committed_full_rank_epoch() {
-        const RANK_QUALITY: [u16; 2] = [5_000, 10_000];
+    fn fresh_runtime_consumes_committed_lower_rank_epoch() {
+        const RANK_QUALITY: [u16; 3] = [4_000, 8_000, 10_000];
         const RESIDUAL_GAIN: [u16; 1] = [0];
         let mut rng = PcgEngine::new(101);
-        let attention = MultiHeadAttention::new(2, 1, false, &KaimingNormal, &Zeros, &mut rng);
+        let attention = MultiHeadAttention::new(3, 1, false, &KaimingNormal, &Zeros, &mut rng);
         let mut key =
-            CommittedBasisLearner::new(learner_config(2, 2), identity_prefix(2, 2)).unwrap();
+            CommittedBasisLearner::new(learner_config(3, 2), identity_prefix(3, 2)).unwrap();
         let mut value =
-            CommittedBasisLearner::new(learner_config(2, 2), identity_prefix(2, 2)).unwrap();
-        key.observe(&[1.0, 0.0]).unwrap();
-        value.observe(&[1.0, 0.0]).unwrap();
+            CommittedBasisLearner::new(learner_config(3, 2), identity_prefix(3, 2)).unwrap();
+        key.observe(&[1.0, 0.0, 1.0]).unwrap();
+        value.observe(&[1.0, 0.0, 1.0]).unwrap();
         let quality = AdaptiveQualityProfile {
             key_rank_quality_bps: &RANK_QUALITY,
             value_rank_quality_bps: &RANK_QUALITY,
@@ -447,8 +570,10 @@ mod tests {
             }],
         )
         .unwrap();
-        let output = runtime.decode_step(&attention, &[0.25, -0.5]).unwrap();
-        assert_eq!(output.len(), 2);
+        let output = runtime
+            .decode_step(&attention, &[0.25, -0.5, 0.75])
+            .unwrap();
+        assert_eq!(output.len(), 3);
         assert_eq!(runtime.telemetry().steps, 1);
     }
 }
