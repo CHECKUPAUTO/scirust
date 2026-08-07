@@ -240,11 +240,16 @@ pub enum WgpuResidentLatentMhaError {
 
 impl fmt::Display for WgpuResidentLatentMhaError {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::InvalidConfig(message) => write!(output, "{message}"),
-            Self::HeadCount { expected, actual } => {
-                write!(output, "latent MHA head mismatch: expected {expected}, got {actual}")
-            }
+            Self::HeadCount { expected, actual } =>
+            {
+                write!(
+                    output,
+                    "latent MHA head mismatch: expected {expected}, got {actual}"
+                )
+            },
             Self::BasisLength {
                 head,
                 expected,
@@ -258,7 +263,10 @@ impl fmt::Display for WgpuResidentLatentMhaError {
                 name,
                 expected,
                 actual,
-            } => write!(output, "{name} length mismatch: expected {expected}, got {actual}"),
+            } => write!(
+                output,
+                "{name} length mismatch: expected {expected}, got {actual}"
+            ),
             Self::PositionMismatch { expected, actual } => write!(
                 output,
                 "latent MHA position mismatch: expected {expected}, got {actual}"
@@ -450,14 +458,16 @@ impl WgpuResidentLatentMha {
         pos: usize,
         output: &mut [f32],
     ) -> Result<(), WgpuResidentLatentMhaError> {
-        if pos != self.steps {
+        if pos != self.steps
+        {
             return Err(WgpuResidentLatentMhaError::PositionMismatch {
                 expected: self.steps,
                 actual: pos,
             });
         }
         self.require_vector("input", input)?;
-        if output.len() != self.d_model {
+        if output.len() != self.d_model
+        {
             return Err(WgpuResidentLatentMhaError::VectorLength {
                 name: "output",
                 expected: self.d_model,
@@ -495,10 +505,7 @@ impl WgpuResidentLatentMha {
     }
 
     /// Executes at the runtime's next expected position.
-    pub fn infer_step(
-        &mut self,
-        input: &[f32],
-    ) -> Result<Vec<f32>, WgpuResidentLatentMhaError> {
+    pub fn infer_step(&mut self, input: &[f32]) -> Result<Vec<f32>, WgpuResidentLatentMhaError> {
         self.infer_step_at(input, self.steps)
     }
 
@@ -508,9 +515,7 @@ impl WgpuResidentLatentMha {
         &mut self,
         mha: &MultiHeadAttention,
     ) -> Result<(), WgpuResidentLatentMhaError> {
-        if mha.d_model != self.d_model
-            || mha.n_heads != self.n_heads
-            || mha.d_head != self.d_head
+        if mha.d_model != self.d_model || mha.n_heads != self.n_heads || mha.d_head != self.d_head
         {
             return Err(WgpuResidentLatentMhaError::InvalidConfig(
                 "cannot reload weights from a different MHA topology",
@@ -541,7 +546,8 @@ impl WgpuResidentLatentMha {
         name: &'static str,
         vector: &[f32],
     ) -> Result<(), WgpuResidentLatentMhaError> {
-        if vector.len() != self.d_model {
+        if vector.len() != self.d_model
+        {
             return Err(WgpuResidentLatentMhaError::VectorLength {
                 name,
                 expected: self.d_model,
@@ -571,37 +577,47 @@ fn validate_topology(
     rank: usize,
     heads: &[WgpuLatentHeadBasis<'_>],
 ) -> Result<(), WgpuResidentLatentMhaError> {
-    if capacity == 0 {
+    if capacity == 0
+    {
         return Err(WgpuResidentLatentMhaError::InvalidConfig(
             "resident MHA capacity must be non-zero",
         ));
     }
-    if mha.d_model == 0 || mha.n_heads == 0 || mha.d_head == 0 {
+    if mha.d_model == 0 || mha.n_heads == 0 || mha.d_head == 0
+    {
         return Err(WgpuResidentLatentMhaError::InvalidConfig(
             "resident MHA topology must be non-zero",
         ));
     }
-    if mha.d_head.checked_mul(mha.n_heads) != Some(mha.d_model) {
+    if mha.d_head.checked_mul(mha.n_heads) != Some(mha.d_model)
+    {
         return Err(WgpuResidentLatentMhaError::InvalidConfig(
             "resident MHA requires d_model == n_heads * d_head",
         ));
     }
-    if rank == 0 || rank > mha.d_head {
+    if rank == 0 || rank > mha.d_head
+    {
         return Err(WgpuResidentLatentMhaError::InvalidConfig(
             "resident MHA rank must be in 1..=d_head",
         ));
     }
-    if heads.len() != mha.n_heads {
+    if heads.len() != mha.n_heads
+    {
         return Err(WgpuResidentLatentMhaError::HeadCount {
             expected: mha.n_heads,
             actual: heads.len(),
         });
     }
-    let expected = mha.d_head.checked_mul(rank).ok_or(
-        WgpuResidentLatentMhaError::InvalidConfig("resident MHA basis shape overflows usize"),
-    )?;
-    for (head, basis) in heads.iter().enumerate() {
-        if basis.key.len() != expected || basis.value.len() != expected {
+    let expected =
+        mha.d_head
+            .checked_mul(rank)
+            .ok_or(WgpuResidentLatentMhaError::InvalidConfig(
+                "resident MHA basis shape overflows usize",
+            ))?;
+    for (head, basis) in heads.iter().enumerate()
+    {
+        if basis.key.len() != expected || basis.value.len() != expected
+        {
             return Err(WgpuResidentLatentMhaError::BasisLength {
                 head,
                 expected,
@@ -614,11 +630,15 @@ fn validate_topology(
 }
 
 fn validate_weight_shapes(mha: &MultiHeadAttention) -> Result<(), WgpuResidentLatentMhaError> {
-    let matrix = mha.d_model.checked_mul(mha.d_model).ok_or(
-        WgpuResidentLatentMhaError::InvalidConfig("resident MHA matrix shape overflows usize"),
-    )?;
+    let matrix =
+        mha.d_model
+            .checked_mul(mha.d_model)
+            .ok_or(WgpuResidentLatentMhaError::InvalidConfig(
+                "resident MHA matrix shape overflows usize",
+            ))?;
     let linears = [&mha.w_q, &mha.w_k, &mha.w_v, &mha.w_o];
-    for linear in linears {
+    for linear in linears
+    {
         if linear.in_features != mha.d_model
             || linear.out_features != mha.d_model
             || linear.weight.data.len() != matrix
@@ -632,9 +652,7 @@ fn validate_weight_shapes(mha: &MultiHeadAttention) -> Result<(), WgpuResidentLa
     Ok(())
 }
 
-fn pack_weights(
-    mha: &MultiHeadAttention,
-) -> Result<Vec<f32>, WgpuResidentLatentMhaError> {
+fn pack_weights(mha: &MultiHeadAttention) -> Result<Vec<f32>, WgpuResidentLatentMhaError> {
     validate_weight_shapes(mha)?;
     let matrix = mha.d_model * mha.d_model;
     let total = matrix
@@ -660,9 +678,11 @@ fn pack_bases(
     d_head: usize,
     rank: usize,
 ) -> Result<Vec<f32>, WgpuResidentLatentMhaError> {
-    let per_head = d_head.checked_mul(rank).ok_or(
-        WgpuResidentLatentMhaError::InvalidConfig("resident MHA basis shape overflows usize"),
-    )?;
+    let per_head = d_head
+        .checked_mul(rank)
+        .ok_or(WgpuResidentLatentMhaError::InvalidConfig(
+            "resident MHA basis shape overflows usize",
+        ))?;
     let total = heads
         .len()
         .checked_mul(per_head)
@@ -671,10 +691,12 @@ fn pack_bases(
             "resident MHA packed bases overflow usize",
         ))?;
     let mut packed = Vec::with_capacity(total);
-    for head in heads {
+    for head in heads
+    {
         packed.extend_from_slice(head.key);
     }
-    for head in heads {
+    for head in heads
+    {
         packed.extend_from_slice(head.value);
     }
     Ok(packed)
@@ -702,9 +724,6 @@ fn bytes_for_f32(elements: usize) -> Result<usize, WgpuResidentLatentMhaError> {
         ))
 }
 
-fn usize_to_u32(
-    value: usize,
-    message: &'static str,
-) -> Result<u32, WgpuResidentLatentMhaError> {
+fn usize_to_u32(value: usize, message: &'static str) -> Result<u32, WgpuResidentLatentMhaError> {
     u32::try_from(value).map_err(|_| WgpuResidentLatentMhaError::InvalidConfig(message))
 }
