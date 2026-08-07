@@ -1,0 +1,79 @@
+name: Tensor Parity Validation
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - scirust-core/src/tensor/**
+      - scirust-core/tests/parity_differential.rs
+      - tensor-operators.toml
+      - tests/parity/fixtures/**
+      - artifacts/tensor-coverage.csv
+      - artifacts/tensor-coverage.json
+      - docs/tensor-parity/**
+      - tools/tensor-parity/**
+      - .github/workflows/tensor-parity-validation.yml
+  pull_request:
+    branches: [master]
+    paths:
+      - scirust-core/src/tensor/**
+      - scirust-core/tests/parity_differential.rs
+      - tensor-operators.toml
+      - tests/parity/fixtures/**
+      - artifacts/tensor-coverage.csv
+      - artifacts/tensor-coverage.json
+      - docs/tensor-parity/**
+      - tools/tensor-parity/**
+      - .github/workflows/tensor-parity-validation.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Install pinned Rust toolchains
+        run: |
+          rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt,clippy
+          rustup toolchain install 1.89.0 --profile minimal
+      - name: Check formatting
+        run: cargo +nightly-2026-07-02 fmt --all -- --check
+      - name: Run strict Clippy
+        run: cargo +nightly-2026-07-02 clippy -p scirust-core --all-targets --locked -- -D warnings
+      - name: Check MSRV
+        run: cargo +1.89.0 check -p scirust-core --all-targets --locked
+      - name: Verify fixture manifest checksums
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          fixture_root = Path('tests/parity/fixtures')
+          manifest = json.loads((fixture_root / 'manifest.json').read_text())
+          missing = []
+          mismatched = []
+          for relative, expected in sorted(manifest['files'].items()):
+              path = fixture_root / relative
+              if not path.is_file():
+                  missing.append(relative)
+                  continue
+              actual = hashlib.sha256(path.read_bytes()).hexdigest()
+              if actual != expected:
+                  mismatched.append((relative, expected, actual))
+          if missing or mismatched:
+              for relative in missing:
+                  print(f'missing fixture: {relative}')
+              for relative, expected, actual in mismatched:
+                  print(f'checksum mismatch: {relative}: expected={expected} actual={actual}')
+              raise SystemExit(1)
+          print(f"verified {len(manifest['files'])} parity fixtures")
+          PY
+      - name: Run differential parity harness
+        run: cargo +1.89.0 test -p scirust-core --test parity_differential --locked
+      - name: Regenerate coverage artifacts with pinned tooling
+        run: cargo +1.89.0 run --quiet --manifest-path tools/tensor-parity/Cargo.toml --locked
+      - name: Assert generated coverage is current
+        run: git diff --exit-code -- artifacts/tensor-coverage.csv artifacts/tensor-coverage.json
