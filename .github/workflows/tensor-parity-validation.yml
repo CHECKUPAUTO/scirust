@@ -73,16 +73,7 @@ jobs:
           PY
       - name: Run differential parity harness
         run: cargo +1.89.0 test -p scirust-core --test parity_differential --locked
-      - name: Bootstrap standalone tooling lockfile
-        run: cargo +1.89.0 generate-lockfile --manifest-path tools/tensor-parity/Cargo.toml
-      - name: Upload standalone tooling lockfile
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: tensor-parity-cargo-lock
-          if-no-files-found: error
-          retention-days: 1
-          path: tools/tensor-parity/Cargo.lock
-      - name: Regenerate coverage artifacts
+      - name: Regenerate coverage artifacts with pinned tooling
         run: cargo +1.89.0 run --quiet --manifest-path tools/tensor-parity/Cargo.toml --locked
       - name: Assert generated coverage is current
         run: git diff --exit-code -- artifacts/tensor-coverage.csv artifacts/tensor-coverage.json
