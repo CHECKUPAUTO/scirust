@@ -72,6 +72,13 @@ pub enum ResidualLatentCacheError {
         /// Largest accepted dense dimension.
         maximum: usize,
     },
+    /// A requested resident row index was outside the active prefix.
+    TokenOutOfRange {
+        /// Requested zero-based resident row.
+        token: usize,
+        /// Number of currently resident rows.
+        resident_tokens: usize,
+    },
 }
 
 impl fmt::Display for ResidualLatentCacheError {
@@ -90,6 +97,13 @@ impl fmt::Display for ResidualLatentCacheError {
             Self::DimensionTooLarge { dimension, maximum } => write!(
                 output,
                 "head dimension {dimension} exceeds residual-index maximum {maximum}"
+            ),
+            Self::TokenOutOfRange {
+                token,
+                resident_tokens,
+            } => write!(
+                output,
+                "resident token index {token} is outside cache length {resident_tokens}"
             ),
         }
     }
@@ -596,6 +610,187 @@ impl ResidualQuantizedLatentKvCache {
             );
         }
         Ok(())
+    }
+
+    /// Reconstructs one resident key/value row into caller-owned dense buffers.
+    ///
+    /// This is intended for deterministic lifecycle migration between preallocated
+    /// compression tiers. It performs no allocation and does not mutate the cache.
+    pub fn reconstruct_token_into(
+        &self,
+        token: usize,
+        key: &mut [f32],
+        value: &mut [f32],
+    ) -> Result<(), ResidualLatentCacheError> {
+        if token >= self.len
+        {
+            return Err(ResidualLatentCacheError::TokenOutOfRange {
+                token,
+                resident_tokens: self.len,
+            });
+        }
+        require_length("reconstructed key", key.len(), self.dimension)?;
+        require_length("reconstructed value", value.len(), self.dimension)?;
+        reconstruct_row_into(
+            &self.key_basis,
+            self.dimension,
+            self.key_rank,
+            self.key_format,
+            token,
+            &self.key_payload,
+            &self.key_scales,
+            self.key_residual,
+            &self.key_residual_indices,
+            &self.key_residual_payload,
+            &self.key_residual_scales,
+            key,
+        );
+        reconstruct_row_into(
+            &self.value_basis,
+            self.dimension,
+            self.value_rank,
+            self.value_format,
+            token,
+            &self.value_payload,
+            &self.value_scales,
+            self.value_residual,
+            &self.value_residual_indices,
+            &self.value_residual_payload,
+            &self.value_residual_scales,
+            value,
+        );
+        Ok(())
+    }
+
+    /// Removes the oldest resident row while retaining all fixed allocations.
+    ///
+    /// The remaining resident prefix is shifted left in-place. This operation is
+    /// O(resident rows) but performs no allocation and enables sliding-window reuse.
+    pub fn remove_oldest(&mut self) -> Result<(), ResidualLatentCacheError> {
+        if self.is_empty()
+        {
+            return Err(LatentCacheError::EmptyCache.into());
+        }
+        remove_oldest_row(
+            self.key_format,
+            self.key_rank,
+            self.len,
+            &mut self.key_payload,
+            &mut self.key_scales,
+        );
+        remove_oldest_row(
+            self.value_format,
+            self.value_rank,
+            self.len,
+            &mut self.value_payload,
+            &mut self.value_scales,
+        );
+        remove_oldest_residual_row(
+            self.key_residual,
+            self.len,
+            &mut self.key_residual_indices,
+            &mut self.key_residual_payload,
+            &mut self.key_residual_scales,
+        );
+        remove_oldest_residual_row(
+            self.value_residual,
+            self.len,
+            &mut self.value_residual_indices,
+            &mut self.value_residual_payload,
+            &mut self.value_residual_scales,
+        );
+        self.len -= 1;
+        Ok(())
+    }
+}
+
+fn reconstruct_row_into(
+    basis: &[f32],
+    dimension: usize,
+    rank: usize,
+    format: LatentStorageFormat,
+    row: usize,
+    payload: &[u8],
+    scales: &[f32],
+    residual: SparseResidualConfig,
+    residual_indices: &[u16],
+    residual_payload: &[u8],
+    residual_scales: &[f32],
+    output: &mut [f32],
+) {
+    for (coordinate, output_scalar) in output.iter_mut().enumerate().take(dimension)
+    {
+        let basis_offset = coordinate * rank;
+        let mut sum = 0.0_f32;
+        for latent in 0..rank
+        {
+            sum += basis[basis_offset + latent]
+                * coefficient(format, rank, row, latent, payload, scales);
+        }
+        *output_scalar = sum;
+    }
+    let residual_offset = row * residual.slots_per_token;
+    for slot in 0..residual.slots_per_token
+    {
+        let index = residual_indices[residual_offset + slot];
+        if index != EMPTY_INDEX
+        {
+            output[usize::from(index)] += coefficient(
+                residual.format,
+                residual.slots_per_token,
+                row,
+                slot,
+                residual_payload,
+                residual_scales,
+            );
+        }
+    }
+}
+
+fn remove_oldest_residual_row(
+    config: SparseResidualConfig,
+    resident_rows: usize,
+    indices: &mut [u16],
+    payload: &mut [u8],
+    scales: &mut [f32],
+) {
+    if config.slots_per_token == 0
+    {
+        return;
+    }
+    let active_indices = resident_rows * config.slots_per_token;
+    indices.copy_within(config.slots_per_token..active_indices, 0);
+    let tail = (resident_rows - 1) * config.slots_per_token;
+    indices[tail..tail + config.slots_per_token].fill(EMPTY_INDEX);
+    remove_oldest_row(
+        config.format,
+        config.slots_per_token,
+        resident_rows,
+        payload,
+        scales,
+    );
+}
+
+fn remove_oldest_row(
+    format: LatentStorageFormat,
+    columns: usize,
+    resident_rows: usize,
+    payload: &mut [u8],
+    scales: &mut [f32],
+) {
+    if columns == 0
+    {
+        return;
+    }
+    let bytes_per_row = row_bytes_unchecked(format, columns);
+    let active_bytes = resident_rows * bytes_per_row;
+    payload.copy_within(bytes_per_row..active_bytes, 0);
+    let tail = (resident_rows - 1) * bytes_per_row;
+    payload[tail..tail + bytes_per_row].fill(0);
+    if !matches!(format, LatentStorageFormat::F32)
+    {
+        scales.copy_within(1..resident_rows, 0);
+        scales[resident_rows - 1] = 1.0;
     }
 }
 
@@ -1392,5 +1587,43 @@ mod tests {
                 .map(|value| value.to_bits())
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn reconstruction_and_oldest_removal_preserve_fixed_allocation() {
+        let dimension = 4;
+        let mut cache = build_cache(
+            3,
+            dimension,
+            dimension,
+            LatentStorageFormat::F32,
+            0,
+            LatentStorageFormat::F32,
+        );
+        let rows = [
+            ([1.0, 2.0, 3.0, 4.0], [-1.0, -2.0, -3.0, -4.0]),
+            ([5.0, 6.0, 7.0, 8.0], [-5.0, -6.0, -7.0, -8.0]),
+            ([9.0, 10.0, 11.0, 12.0], [-9.0, -10.0, -11.0, -12.0]),
+        ];
+        let allocated = cache.allocated_bytes();
+        for (key, value) in rows
+        {
+            cache.append(&key, &value).unwrap();
+        }
+        let mut key = [0.0; 4];
+        let mut value = [0.0; 4];
+        cache.reconstruct_token_into(0, &mut key, &mut value).unwrap();
+        assert_eq!(key, rows[0].0);
+        assert_eq!(value, rows[0].1);
+        cache.remove_oldest().unwrap();
+        assert_eq!(cache.len(), 2);
+        assert_eq!(cache.allocated_bytes(), allocated);
+        cache.reconstruct_token_into(0, &mut key, &mut value).unwrap();
+        assert_eq!(key, rows[1].0);
+        assert_eq!(value, rows[1].1);
+        cache.append(&[13.0, 14.0, 15.0, 16.0], &[-13.0, -14.0, -15.0, -16.0])
+            .unwrap();
+        assert_eq!(cache.len(), 3);
+        assert_eq!(cache.allocated_bytes(), allocated);
     }
 }
