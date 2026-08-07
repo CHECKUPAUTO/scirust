@@ -21,6 +21,9 @@ pub mod equivariant;
 /// Lie groups, Lie algebras and Clifford/geometric algebra.
 #[rustfmt::skip]
 pub mod lie;
+/// Presented groups and fixed-capacity coset enumeration.
+#[rustfmt::skip]
+pub mod presented;
 /// Finite-group representation helpers and harmonic-analysis primitives.
 #[rustfmt::skip]
 pub mod representation;
