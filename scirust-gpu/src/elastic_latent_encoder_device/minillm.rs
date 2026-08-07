@@ -127,14 +127,8 @@ fn main() {
 #[derive(Debug)]
 pub enum WgpuResidentMiniLlmError {
     InvalidConfig(&'static str),
-    TokenOutOfRange {
-        token_id: usize,
-        vocab_size: usize,
-    },
-    PositionMismatch {
-        expected: usize,
-        actual: usize,
-    },
+    TokenOutOfRange { token_id: usize, vocab_size: usize },
+    PositionMismatch { expected: usize, actual: usize },
     Encoder(WgpuResidentTransformerEncoderError),
     Compute(ComputeError),
 }
@@ -214,7 +208,7 @@ impl WgpuResidentMiniLlm {
         let max_seq_len = snapshot.config.max_seq_len;
         let d_model = snapshot.config.d_model;
 
-        let mut encoder =
+        let encoder =
             WgpuResidentTransformerEncoder::new(snapshot.encoder, capacity, rank, layers)?;
         if encoder.d_model != d_model
         {
@@ -230,7 +224,9 @@ impl WgpuResidentMiniLlm {
         let weights = encoder
             .adapter
             .allocate(weights_bytes, 4, MemorySpace::Device)?;
-        let state = encoder.adapter.allocate(state_bytes, 4, MemorySpace::Device)?;
+        let state = encoder
+            .adapter
+            .allocate(state_bytes, 4, MemorySpace::Device)?;
         encoder
             .adapter
             .write(&weights, 0, bytemuck::cast_slice(&weights_data))?;
@@ -452,9 +448,11 @@ fn validate_snapshot(
     }
     if snapshot.encoder.d_model != config.d_model
         || snapshot.encoder.blocks.len() != config.n_layers
-        || snapshot.encoder.blocks.iter().any(|block| {
-            block.n_heads != config.n_heads || block.d_ff != config.d_ff
-        })
+        || snapshot
+            .encoder
+            .blocks
+            .iter()
+            .any(|block| block.n_heads != config.n_heads || block.d_ff != config.d_ff)
     {
         return Err(WgpuResidentMiniLlmError::InvalidConfig(
             "MiniLLM encoder topology mismatch",
@@ -478,7 +476,10 @@ fn validate_snapshot(
         ));
     }
     ensure_u32(config.d_model, "MiniLLM d_model exceeds WGPU u32 range")?;
-    ensure_u32(config.vocab_size, "MiniLLM vocab size exceeds WGPU u32 range")?;
+    ensure_u32(
+        config.vocab_size,
+        "MiniLLM vocab size exceeds WGPU u32 range",
+    )?;
     ensure_u32(
         config.max_seq_len,
         "MiniLLM max_seq_len exceeds WGPU u32 range",
@@ -495,9 +496,7 @@ fn pack_weights(
         .vocab_size
         .checked_mul(config.d_model)
         .and_then(|value| value.checked_add(config.d_model.checked_mul(2)?))
-        .and_then(|value| {
-            value.checked_add(config.d_model.checked_mul(config.vocab_size)?)
-        })
+        .and_then(|value| value.checked_add(config.d_model.checked_mul(config.vocab_size)?))
         .and_then(|value| value.checked_add(config.vocab_size))
         .ok_or(WgpuResidentMiniLlmError::InvalidConfig(
             "MiniLLM packed inference weights overflow usize",
@@ -514,11 +513,9 @@ fn pack_weights(
 }
 
 fn bytes_for_f32(elements: usize) -> Result<usize, WgpuResidentMiniLlmError> {
-    elements
-        .checked_mul(core::mem::size_of::<f32>())
-        .ok_or(WgpuResidentMiniLlmError::InvalidConfig(
-            "MiniLLM f32 buffer size overflows usize",
-        ))
+    elements.checked_mul(core::mem::size_of::<f32>()).ok_or(
+        WgpuResidentMiniLlmError::InvalidConfig("MiniLLM f32 buffer size overflows usize"),
+    )
 }
 
 fn ensure_u32(value: usize, message: &'static str) -> Result<(), WgpuResidentMiniLlmError> {
