@@ -4,6 +4,12 @@
 It is designed around fixed-size values, caller-owned workspaces and static dispatch so
 hot paths do not require heap allocation or dynamic dispatch.
 
+## Compatibility
+
+The crate follows the root SciRust workspace baseline: Rust 1.89, edition 2021,
+`#![forbid(unsafe_code)]`, and no external dependencies. The reference kernels are kept
+portable across the stable x86_64, ARM64 and MSRV validation lanes used by the workspace.
+
 ## Architecture
 
 - `core`: algebraic law traits (`Magma`, `Semigroup`, `Monoid`, `Group`,
