@@ -72,6 +72,8 @@ mod deterministic_gpu;
 #[cfg(feature = "wgpu")]
 mod elastic_latent_device;
 #[cfg(feature = "wgpu")]
+mod elastic_latent_mha_device;
+#[cfg(feature = "wgpu")]
 mod engine;
 #[cfg(feature = "wgpu")]
 mod fusion;
@@ -112,6 +114,11 @@ pub use deterministic_gpu::{DeterministicGpu, DeterministicValidator};
 #[cfg(feature = "wgpu")]
 pub use elastic_latent_device::{
     WgpuResidentLatentKvCache, WgpuResidentLatentKvError, WgpuResidentLatentKvTelemetry,
+};
+#[cfg(feature = "wgpu")]
+pub use elastic_latent_mha_device::{
+    WgpuLatentHeadBasis, WgpuResidentLatentMha, WgpuResidentLatentMhaError,
+    WgpuResidentLatentMhaTelemetry,
 };
 #[cfg(feature = "wgpu")]
 pub use engine::WgpuEngine;
