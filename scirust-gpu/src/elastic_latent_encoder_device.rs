@@ -8,6 +8,9 @@
 
 use core::fmt;
 
+mod minillm;
+pub use minillm::{WgpuResidentMiniLlm, WgpuResidentMiniLlmError, WgpuResidentMiniLlmTelemetry};
+
 use crate::{
     WgpuComputeAdapter, WgpuComputeBuffer, WgpuComputeEvent, WgpuComputeKernel, WgpuComputeStream,
     WgpuContext, WgpuLatentHeadBasis,

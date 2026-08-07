@@ -126,8 +126,9 @@ pub use elastic_latent_device::{
 };
 #[cfg(feature = "wgpu")]
 pub use elastic_latent_encoder_device::{
-    WgpuLatentLayerBasis, WgpuResidentTransformerEncoder, WgpuResidentTransformerEncoderError,
-    WgpuResidentTransformerEncoderTelemetry,
+    WgpuLatentLayerBasis, WgpuResidentMiniLlm, WgpuResidentMiniLlmError,
+    WgpuResidentMiniLlmTelemetry, WgpuResidentTransformerEncoder,
+    WgpuResidentTransformerEncoderError, WgpuResidentTransformerEncoderTelemetry,
 };
 #[cfg(feature = "wgpu")]
 pub use elastic_latent_mha_device::{
