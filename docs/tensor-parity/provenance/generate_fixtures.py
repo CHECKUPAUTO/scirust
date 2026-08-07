@@ -3,7 +3,7 @@
 baseline (2.13.0). OFFLINE tool: not run in CI. Output fixtures are data only.
 
 Usage:
-    python3 generate_fixtures.py [--torch-bin PATH] [--families elementwise,reductions,normalization,shape,linear,loss,norm_affine,reduction_extra,unary_extra,special,shape_extra,indexing,linear_extra,norm_stoch,positional,attention,quantization,conversion]
+    python3 generate_fixtures.py [--torch-bin PATH] [--families elementwise,reductions,normalization,shape,linear,loss,norm_affine,reduction_extra,unary_extra,special,shape_extra,indexing,linear_extra,norm_stoch,positional,attention,quantization,conversion,convolution]
 
 Provenance rules (LICENSING_AND_PROVENANCE.md):
   - executes the pinned baseline (`torch.__version__` must be 2.13.0),
@@ -398,6 +398,68 @@ def gen_conversion(gen, family_dir: Path) -> None:
     write("to_bf16", family_dir, cases, note="conversion aller-retour bf16, exacte")
 
 
+def gen_convolution(gen, family_dir: Path) -> None:
+    """conv1d/conv2d (valid, stride 1, bias) + max_pool2d/avg_pool2d (k=s=2, pad=0)
+    — APPEND fin de séquence (positionnel)."""
+    cases = []
+    for (B, Cin, L), (Cout, K) in (((1, 2, 8), (3, 3)), ((1, 3, 10), (2, 2))):
+        x = seed_tensor(gen, (B, Cin, L), -3.0, 3.0).requires_grad_(True)
+        w = seed_tensor(gen, (Cout, Cin, K), -1.0, 1.0).requires_grad_(True)
+        b = seed_tensor(gen, (Cout,), -1.0, 1.0).requires_grad_(True)
+        y = torch.nn.functional.conv1d(x, w, b)
+        gout = seed_tensor(gen, list(y.shape), -1.0, 1.0)
+        gx, gw, gb = torch.autograd.grad(y, (x, w, b), grad_outputs=gout)
+        cases.append({"kind": "conv1d", "shape": list(x.shape), "x": flat(x.detach()),
+                      "w": flat(w.detach()),
+                      "b": flat(b.detach()), "kernel": K, "out_shape": list(y.shape),
+                      "y": flat(y.detach()), "gout": flat(gout),
+                      "gx": flat(gx), "gw": flat(gw), "gb": flat(gb)})
+    write("conv1d", family_dir, cases,
+          note="conv1d valid stride=1, bias, autograd x/w/b")
+    cases = []
+    for (B, Cin, H, W), (Cout, KH, KW) in (((1, 2, 5, 5), (3, 3, 3)),
+                                           ((1, 1, 4, 4), (2, 2, 2))):
+        x = seed_tensor(gen, (B, Cin, H, W), -3.0, 3.0).requires_grad_(True)
+        w = seed_tensor(gen, (Cout, Cin, KH, KW), -1.0, 1.0).requires_grad_(True)
+        b = seed_tensor(gen, (Cout,), -1.0, 1.0).requires_grad_(True)
+        y = torch.nn.functional.conv2d(x, w, b)
+        gout = seed_tensor(gen, list(y.shape), -1.0, 1.0)
+        gx, gw, gb = torch.autograd.grad(y, (x, w, b), grad_outputs=gout)
+        cases.append({"kind": "conv2d", "shape": list(x.shape), "x": flat(x.detach()),
+                      "w": flat(w.detach()),
+                      "b": flat(b.detach()), "kh": KH, "kw": KW,
+                      "out_shape": list(y.shape), "y": flat(y.detach()),
+                      "gout": flat(gout), "gx": flat(gx), "gw": flat(gw),
+                      "gb": flat(gb)})
+    write("conv2d", family_dir, cases,
+          note="conv2d valid stride=1, bias, autograd x/w/b")
+    cases = []
+    for s, k in (((1, 2, 4, 4), 2), ((1, 3, 6, 6), 2)):
+        x = seed_tensor(gen, s, -3.0, 3.0).requires_grad_(True)
+        y, idx = torch.nn.functional.max_pool2d(x, k, return_indices=True)
+        gout = seed_tensor(gen, list(y.shape), -1.0, 1.0)
+        (gx,) = torch.autograd.grad(y, x, grad_outputs=gout)
+        cases.append({"kind": "maxpool", "shape": list(s), "x": flat(x.detach()),
+                      "kernel": k,
+                      "indices": [int(v) for v in idx.flatten().tolist()],
+                      "out_shape": list(y.shape), "y": flat(y.detach()),
+                      "gout": flat(gout), "gx": flat(gx)})
+    write("max_pool2d", family_dir, cases,
+          note="k=s=2 pad=0, indices torch (premier max par fenêtre)")
+    cases = []
+    for s, k in (((1, 2, 4, 4), 2), ((1, 3, 6, 6), 2)):
+        x = seed_tensor(gen, s, -3.0, 3.0).requires_grad_(True)
+        y = torch.nn.functional.avg_pool2d(x, k)
+        gout = seed_tensor(gen, list(y.shape), -1.0, 1.0)
+        (gx,) = torch.autograd.grad(y, x, grad_outputs=gout)
+        cases.append({"kind": "avgpool", "shape": list(s), "x": flat(x.detach()),
+                      "kernel": k,
+                      "out_shape": list(y.shape), "y": flat(y.detach()),
+                      "gout": flat(gout), "gx": flat(gx)})
+    write("avg_pool2d", family_dir, cases,
+          note="k=s=2 pad=0, count_include_pad default")
+
+
 def gen_reduction_extra(gen, family_dir: Path) -> None:
     """max (valeurs + indices) et norm p=2.
 
@@ -624,7 +686,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--torch-bin", default=None, help="path to the baseline interpreter (informational)")
     ap.add_argument("--families",
-                    default="elementwise,reductions,normalization,shape,linear,loss,norm_affine,reduction_extra,unary_extra,special,shape_extra,indexing,linear_extra,norm_stoch,positional,attention,quantization,conversion")
+                    default="elementwise,reductions,normalization,shape,linear,loss,norm_affine,reduction_extra,unary_extra,special,shape_extra,indexing,linear_extra,norm_stoch,positional,attention,quantization,conversion,convolution")
     args = ap.parse_args()
     import_torch(args.torch_bin)
 
@@ -678,6 +740,8 @@ def main() -> int:
             gen_quantization(gen, OUT / "quantization")
         elif fam == "conversion":
             gen_conversion(gen, OUT / "conversion")
+        elif fam == "convolution":
+            gen_convolution(gen, OUT / "convolution")
         else:
             raise SystemExit(f"unknown family {fam}")
     # Scan global : le manifest reflète toujours exactement le disque

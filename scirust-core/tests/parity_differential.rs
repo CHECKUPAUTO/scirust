@@ -58,6 +58,12 @@ struct Case {
     #[serde(default)]
     step: Option<usize>,
     #[serde(default)]
+    kernel: Option<usize>,
+    #[serde(default)]
+    kh: Option<usize>,
+    #[serde(default)]
+    kw: Option<usize>,
+    #[serde(default)]
     p: Option<f32>,
     #[serde(default)]
     mask: Option<Vec<f32>>,
@@ -1393,6 +1399,164 @@ fn parity_quantization_fake_quant_to_bf16() {
             &c.y,
             0.0,
             0.0,
+        );
+    }
+}
+
+// ------------------------------------------------------------------ //
+//  Convolution — conv1d / conv2d / max_pool2d / avg_pool2d          //
+// ------------------------------------------------------------------ //
+
+#[test]
+fn parity_convolution() {
+    let fx = load_fixture("convolution", "conv1d");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let x = tensor(&c.x, &c.shape);
+        let k = c.kernel.unwrap();
+        let cout = c.w.len() / (c.shape[1] * k);
+        let w = tensor(&c.w, &[cout, c.shape[1], k]);
+        let b = tensor(&c.b, &[cout]);
+        let out = parity::conv1d(&x, &w, &b).unwrap();
+        assert_eq!(
+            out.shape(),
+            c.out_shape.as_ref().unwrap(),
+            "conv1d c{ci}: shape"
+        );
+        assert_close(
+            &format!("conv1d fwd c{ci}"),
+            out.data.as_ref(),
+            &c.y,
+            1e-4,
+            1e-4,
+        );
+        let gout = tensor(&c.gout, c.out_shape.as_ref().unwrap());
+        let (gx, gw, gb) = parity::d_conv1d(&gout, &x, &w).unwrap();
+        assert_close(
+            &format!("conv1d gx c{ci}"),
+            gx.data.as_ref(),
+            &c.gx,
+            1e-4,
+            1e-4,
+        );
+        assert_close(
+            &format!("conv1d gw c{ci}"),
+            gw.data.as_ref(),
+            &c.gw,
+            1e-4,
+            1e-4,
+        );
+        assert_close(
+            &format!("conv1d gb c{ci}"),
+            gb.data.as_ref(),
+            &c.gb,
+            1e-4,
+            1e-4,
+        );
+    }
+    let fx = load_fixture("convolution", "conv2d");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let x = tensor(&c.x, &c.shape);
+        let (kh, kw) = (c.kh.unwrap(), c.kw.unwrap());
+        let cout = c.w.len() / (c.shape[1] * kh * kw);
+        let w = tensor(&c.w, &[cout, c.shape[1], kh, kw]);
+        let b = tensor(&c.b, &[cout]);
+        let out = parity::conv2d(&x, &w, &b).unwrap();
+        assert_eq!(
+            out.shape(),
+            c.out_shape.as_ref().unwrap(),
+            "conv2d c{ci}: shape"
+        );
+        assert_close(
+            &format!("conv2d fwd c{ci}"),
+            out.data.as_ref(),
+            &c.y,
+            1e-4,
+            1e-4,
+        );
+        let gout = tensor(&c.gout, c.out_shape.as_ref().unwrap());
+        let (gx, gw, gb) = parity::d_conv2d(&gout, &x, &w).unwrap();
+        assert_close(
+            &format!("conv2d gx c{ci}"),
+            gx.data.as_ref(),
+            &c.gx,
+            1e-4,
+            1e-4,
+        );
+        assert_close(
+            &format!("conv2d gw c{ci}"),
+            gw.data.as_ref(),
+            &c.gw,
+            1e-4,
+            1e-4,
+        );
+        assert_close(
+            &format!("conv2d gb c{ci}"),
+            gb.data.as_ref(),
+            &c.gb,
+            1e-4,
+            1e-4,
+        );
+    }
+    let fx = load_fixture("convolution", "max_pool2d");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let x = tensor(&c.x, &c.shape);
+        let k = c.kernel.unwrap();
+        let (out, idx) = parity::max_pool2d_with_idx(&x, k, k).unwrap();
+        assert_eq!(
+            out.shape(),
+            c.out_shape.as_ref().unwrap(),
+            "maxpool c{ci}: shape"
+        );
+        assert_close(
+            &format!("maxpool fwd c{ci}"),
+            out.data.as_ref(),
+            &c.y,
+            0.0,
+            0.0,
+        );
+        assert_eq!(
+            idx, c.indices,
+            "maxpool c{ci}: argmax tie-break must match torch (first max)"
+        );
+        let gout = tensor(&c.gout, c.out_shape.as_ref().unwrap());
+        let gx = parity::d_max_pool2d(&gout, &x, k, k).unwrap();
+        assert_close(
+            &format!("maxpool gx c{ci}"),
+            gx.data.as_ref(),
+            &c.gx,
+            0.0,
+            0.0,
+        );
+    }
+    let fx = load_fixture("convolution", "avg_pool2d");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let x = tensor(&c.x, &c.shape);
+        let k = c.kernel.unwrap();
+        let out = parity::avg_pool2d(&x, k, k).unwrap();
+        assert_eq!(
+            out.shape(),
+            c.out_shape.as_ref().unwrap(),
+            "avgpool c{ci}: shape"
+        );
+        assert_close(
+            &format!("avgpool fwd c{ci}"),
+            out.data.as_ref(),
+            &c.y,
+            1e-5,
+            1e-5,
+        );
+        let gout = tensor(&c.gout, c.out_shape.as_ref().unwrap());
+        let gx = parity::d_avg_pool2d(&gout, k, k).unwrap();
+        assert_close(
+            &format!("avgpool gx c{ci}"),
+            gx.data.as_ref(),
+            &c.gx,
+            1e-5,
+            1e-5,
         );
     }
 }

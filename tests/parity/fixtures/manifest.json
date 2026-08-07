@@ -3,6 +3,10 @@
   "files": {
     "attention/scaled_dot_product_attention.json": "ec885efe023112dbd06986dfa7d636e83109f79cf6ddea1320f424683b2533e5",
     "conversion/to_bf16.json": "6738ac397798db362b513e5d6e504c537ca74206b6b4c927fc0a10e00749dc20",
+    "convolution/avg_pool2d.json": "e28f72a52c93e2c2d5826a9f394b211a1915cabf1ee9687f155df9a48be135c1",
+    "convolution/conv1d.json": "7e10ba8d5f6d97e637e576f57c0839a29b33fdb26f35bbcd4ceaf0be28928871",
+    "convolution/conv2d.json": "191bc2b3a37fcba02b1b1f67e96d2f41d7eb78b5c1fe76844661dc148624e7f5",
+    "convolution/max_pool2d.json": "ab08d8c086fa2a170093a12f14217e4c0adee3804975d0b680295b0bf573b197",
     "elementwise/acos.json": "ff0a1f9f3eb95658e413ddca844662082e7495de747e53b2632cda099a22ab6a",
     "elementwise/add.json": "edd7f6bd3e4eefd585cdc7d8cb43c2ba2d6bf1f1fd1926e9093e028509a8ca91",
     "elementwise/asin.json": "2c382043a0b5ffd09ac74b6210063c80ba8747ccb647eaed4dfee183a3185610",
