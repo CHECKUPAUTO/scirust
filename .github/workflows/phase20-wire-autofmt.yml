@@ -1,0 +1,168 @@
+name: Phase 20 Wire Autofmt
+
+on:
+  push:
+    branches:
+      - research/phase20-wgpu-resident-sampled-minillm
+    paths:
+      - .github/workflows/phase20-wire-autofmt.yml
+
+permissions:
+  contents: write
+
+jobs:
+  wire-and-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: research/phase20-wgpu-resident-sampled-minillm
+      - run: rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt
+      - name: Wire sampled MiniLLM and resident sampler hooks
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          sampler = Path('scirust-gpu/src/deterministic_sampling_device.rs')
+          text = sampler.read_text()
+          old_fields = '''    vocab_size: usize,
+              draws: usize,
+              resident_bytes: usize,
+          }'''
+          new_fields = '''    vocab_size: usize,
+              draws: usize,
+              resident_bytes: usize,
+              initial_state: u64,
+              increment: u64,
+              consumes_rng: bool,
+          }'''
+          if 'initial_state: u64' not in text:
+              if old_fields not in text:
+                  raise SystemExit('sampler field insertion point not found')
+              text = text.replace(old_fields, new_fields, 1)
+
+          old_init = '''            vocab_size,
+                  draws: 0,
+                  resident_bytes: logits_bytes + scratch_bytes + state_bytes,
+              })'''
+          new_init = '''            vocab_size,
+                  draws: 0,
+                  resident_bytes: logits_bytes + scratch_bytes + state_bytes,
+                  initial_state: state_word,
+                  increment,
+                  consumes_rng: config.temperature > 0.0 && config.top_k != 1,
+              })'''
+          if 'initial_state: state_word' not in text:
+              if old_init not in text:
+                  raise SystemExit('sampler initializer insertion point not found')
+              text = text.replace(old_init, new_init, 1)
+
+          start = text.index('    pub fn sample(&mut self, logits: &[f32])')
+          end = text.index('    fn launch(&self)', start)
+          replacement = '''    pub fn sample(&mut self, logits: &[f32]) -> Result<usize, WgpuDeterministicSamplerError> {
+              if logits.len() != self.vocab_size
+              {
+                  return Err(WgpuDeterministicSamplerError::LogitLength {
+                      expected: self.vocab_size,
+                      actual: logits.len(),
+                  });
+              }
+              if let Some((index, _)) = logits
+                  .iter()
+                  .enumerate()
+                  .find(|(_, value)| !value.is_finite())
+              {
+                  return Err(WgpuDeterministicSamplerError::NonFiniteLogit { index });
+              }
+
+              self.adapter
+                  .write(&self.logits, 0, bytemuck::cast_slice(logits))?;
+              self.sample_resident()
+          }
+
+          /// Restore the exact seeded PCG state without reallocating WGPU buffers.
+          pub fn reset(&mut self) -> Result<(), WgpuDeterministicSamplerError> {
+              let words = [
+                  self.initial_state as u32,
+                  (self.initial_state >> 32) as u32,
+                  self.increment as u32,
+                  (self.increment >> 32) as u32,
+                  0,
+                  0,
+              ];
+              self.adapter.write(
+                  &self.state,
+                  4 * U32_BYTES,
+                  bytemuck::cast_slice(&words),
+              )?;
+              self.draws = 0;
+              Ok(())
+          }
+
+          pub(crate) fn logits_buffer(&self) -> &WgpuComputeBuffer {
+              &self.logits
+          }
+
+          pub(crate) fn sample_resident(&mut self) -> Result<usize, WgpuDeterministicSamplerError> {
+              let event = self.launch()?;
+              self.adapter.wait(&event)?;
+
+              let mut output_id = [0u32; 1];
+              self.adapter.read(
+                  &self.state,
+                  8 * U32_BYTES,
+                  bytemuck::cast_slice_mut(&mut output_id),
+              )?;
+              if self.consumes_rng
+              {
+                  self.draws = self.draws.saturating_add(1);
+              }
+              Ok(output_id[0] as usize)
+          }
+
+          '''
+          text = text[:start] + replacement + text[end:]
+          sampler.write_text(text)
+
+          parent = Path('scirust-gpu/src/elastic_latent_encoder_device/minillm.rs')
+          text = parent.read_text()
+          if 'mod sampled;' not in text:
+              marker = 'use core::fmt;\n'
+              insertion = '''use core::fmt;
+
+          mod sampled;
+          pub use sampled::{
+              WgpuResidentSampledMiniLlm, WgpuResidentSampledMiniLlmError,
+              WgpuResidentSampledMiniLlmTelemetry,
+          };
+          '''
+              if marker not in text:
+                  raise SystemExit('MiniLLM sampled module insertion point not found')
+              text = text.replace(marker, insertion, 1)
+              parent.write_text(text)
+
+          lib = Path('scirust-gpu/src/lib.rs')
+          text = lib.read_text()
+          if 'WgpuResidentSampledMiniLlm,' not in text:
+              needle = '''    WgpuLatentLayerBasis, WgpuResidentMiniLlm, WgpuResidentMiniLlmError,
+              WgpuResidentMiniLlmTelemetry, WgpuResidentTransformerEncoder,'''
+              replacement = '''    WgpuLatentLayerBasis, WgpuResidentMiniLlm, WgpuResidentMiniLlmError,
+              WgpuResidentMiniLlmTelemetry, WgpuResidentSampledMiniLlm,
+              WgpuResidentSampledMiniLlmError, WgpuResidentSampledMiniLlmTelemetry,
+              WgpuResidentTransformerEncoder,'''
+              if needle not in text:
+                  raise SystemExit('lib sampled export insertion point not found')
+              text = text.replace(needle, replacement, 1)
+              lib.write_text(text)
+          PY
+      - run: cargo +nightly-2026-07-02 fmt --all
+      - name: Commit Phase 20 wiring and formatting
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scirust-gpu/src/deterministic_sampling_device.rs scirust-gpu/src/elastic_latent_encoder_device/minillm.rs scirust-gpu/src/elastic_latent_encoder_device/minillm/sampled.rs scirust-gpu/src/lib.rs
+          git commit -m "feat(kv-cache): wire resident sampled MiniLLM"
+          git push origin HEAD:research/phase20-wgpu-resident-sampled-minillm
