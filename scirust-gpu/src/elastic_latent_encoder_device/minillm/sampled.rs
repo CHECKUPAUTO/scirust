@@ -111,6 +111,12 @@ impl From<WgpuResidentMiniLlmError> for WgpuResidentSampledMiniLlmError {
     }
 }
 
+impl From<super::super::WgpuResidentTransformerEncoderError> for WgpuResidentSampledMiniLlmError {
+    fn from(error: super::super::WgpuResidentTransformerEncoderError) -> Self {
+        Self::MiniLlm(error.into())
+    }
+}
+
 impl From<WgpuDeterministicSamplerError> for WgpuResidentSampledMiniLlmError {
     fn from(error: WgpuDeterministicSamplerError) -> Self {
         Self::Sampling(error)
