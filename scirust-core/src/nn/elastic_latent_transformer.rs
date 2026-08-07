@@ -424,7 +424,11 @@ mod tests {
         let mut rng = PcgEngine::new(29);
         let encoder =
             TransformerEncoder::new(1, 8, 2, 16, true, &KaimingNormal, &Zeros, &mut rng);
-        let error = ElasticLatentEncoderSession::new(&encoder, &[]).unwrap_err();
+        let error = match ElasticLatentEncoderSession::new(&encoder, &[])
+        {
+            Ok(_) => panic!("mismatched topology must fail"),
+            Err(error) => error,
+        };
         assert!(matches!(
             error,
             ElasticLatentTransformerError::LayerCount {
