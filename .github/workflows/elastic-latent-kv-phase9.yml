@@ -1,0 +1,57 @@
+name: Elastic Latent KV Phase 9
+
+on:
+  push:
+    branches:
+      - research/elastic-latent-kv-phase9-adaptive-policy
+    paths:
+      - scirust-core/src/nn/adaptive_latent_kv.rs
+      - scirust-core/src/nn/adaptive_latent_kv_backend.rs
+      - scirust-core/src/nn/mod.rs
+      - scirust-core/examples/latent_kv_phase9.rs
+      - experiments/elastic-latent-kv/PHASE9_SPEC.md
+      - .github/workflows/elastic-latent-kv-phase9.yml
+  pull_request:
+    branches: [master]
+    paths:
+      - scirust-core/src/nn/adaptive_latent_kv.rs
+      - scirust-core/src/nn/adaptive_latent_kv_backend.rs
+      - scirust-core/src/nn/mod.rs
+      - scirust-core/examples/latent_kv_phase9.rs
+      - experiments/elastic-latent-kv/PHASE9_SPEC.md
+      - .github/workflows/elastic-latent-kv-phase9.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  RUSTFLAGS: -D warnings
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: |
+          rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt,clippy
+          rustup toolchain install 1.89.0 --profile minimal
+      - run: cargo +nightly-2026-07-02 fmt --all -- --check
+      - run: cargo +nightly-2026-07-02 clippy -p scirust-core --all-targets --locked -- -D warnings
+      - run: cargo +1.89.0 check -p scirust-core --all-targets --locked
+      - run: cargo +1.89.0 test -p scirust-core adaptive_latent_kv --locked -- --test-threads=1
+      - run: |
+          cargo +1.89.0 run --quiet --release --locked -p scirust-core --example latent_kv_phase9 > phase9-a.csv
+          cargo +1.89.0 run --quiet --release --locked -p scirust-core --example latent_kv_phase9 > phase9-b.csv
+          cmp phase9-a.csv phase9-b.csv
+          python3 - <<'PY'
+          import csv
+          with open('phase9-a.csv', newline='', encoding='utf-8') as handle:
+              rows = list(csv.DictReader(handle))
+          assert len(rows) == 6
+          assert all(int(row['total_bytes']) <= int(row['budget_bytes']) for row in rows)
+          assert len({row['fingerprint'] for row in rows}) == len(rows)
+          qualities = [int(row['worst_quality_bps']) for row in rows]
+          assert qualities == sorted(qualities)
+          PY
