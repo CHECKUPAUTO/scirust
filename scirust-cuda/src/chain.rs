@@ -609,6 +609,41 @@ extern "C" __global__ void adamw_kernel(
     }
 }
 
+
+// AdamW variant for uninterrupted training: consume the resident global gradient
+// sum-of-squares directly. This removes the mid-step GPU->CPU synchronization that
+// previously existed only to compute the clipping factor on the host.
+extern "C" __global__ void adamw_norm_kernel(
+    float* param, float* m, float* v, const unsigned short* grad, unsigned short* param_bf,
+    const size_t n, const float lr, const float b1, const float b2,
+    const float eps, const float wd, const float bc1, const float bc2,
+    const float* grad_sumsq, const float max_grad_norm)
+{
+    size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) {
+        const float sq = grad_sumsq[0];
+        const float norm = sqrtf(sq);
+        float scale = 1.0f;
+        // NaN fails `sq >= 0`; +inf exceeds the finite guard. Match the host path:
+        // a non-finite norm skips the update instead of corrupting the parameters.
+        if (!(sq >= 0.0f) || sq > 3.0e38f) scale = 0.0f;
+        else if (max_grad_norm > 0.0f && norm > max_grad_norm)
+            scale = max_grad_norm / norm;
+
+        float g = b2f(grad[i]) * scale;
+        float mi = b1 * m[i] + (1.0f - b1) * g;
+        float vi = b2 * v[i] + (1.0f - b2) * g * g;
+        m[i] = mi;
+        v[i] = vi;
+        float mhat = mi / bc1;
+        float vhat = vi / bc2;
+        float p = param[i];
+        p -= lr * (mhat / (sqrtf(vhat) + eps) + wd * p);
+        param[i] = p;
+        param_bf[i] = f2b(p);
+    }
+}
+
 // Sum of squares of a bf16 buffer, accumulated (fp32) into accum[0] — the building
 // block for the global gradient L2 norm (grad clipping). Block-local reduction in
 // shared memory, then one atomicAdd per block. Launch with block_dim = 256 (the
@@ -697,6 +732,7 @@ struct Kernels {
     ce_loss: CudaFunction,
     ce_loss_grad: CudaFunction,
     adamw: CudaFunction,
+    adamw_norm: CudaFunction,
     sumsq: CudaFunction,
 }
 
@@ -775,6 +811,7 @@ impl CudaChain {
             ce_loss: f("ce_loss_kernel"),
             ce_loss_grad: f("ce_loss_grad_kernel"),
             adamw: f("adamw_kernel"),
+            adamw_norm: f("adamw_norm_kernel"),
             sumsq: f("sumsq_kernel"),
         })
     }
@@ -1659,17 +1696,24 @@ impl CudaChain {
 
     /// Mean cross-entropy plus its resident bf16 logit gradient in one pass.
     /// The only D2H transfer is `rows` fp32 scalars used for deterministic logging.
-    pub fn cross_entropy_loss_grad(
+    /// Cross-entropy loss rows plus resident bf16 logit gradient in one CUDA pass.
+    /// No host synchronization occurs: callers may enqueue backward and AdamW first,
+    /// then read the tiny loss vector after the optimizer has completed on the stream.
+    pub fn cross_entropy_loss_grad_resident(
         &self,
         logits: &CudaMatrix,
         targets: &[u32],
-    ) -> (f32, CudaMatrix) {
+    ) -> (CudaF32, CudaMatrix) {
         let (rows, cols) = (logits.rows, logits.cols);
         assert!(
             rows > 0 && cols > 0,
-            "cross_entropy_loss_grad: empty logits"
+            "cross_entropy_loss_grad_resident: empty logits"
         );
-        assert_eq!(targets.len(), rows, "cross_entropy_loss_grad: target count");
+        assert_eq!(
+            targets.len(),
+            rows,
+            "cross_entropy_loss_grad_resident: target count"
+        );
         let tgt = self.stream.clone_htod(targets).expect("cuda htod targets");
         let mut loss_rows = self
             .stream
@@ -1692,19 +1736,40 @@ impl CudaChain {
             block_dim: (256, 1, 1),
             shared_mem_bytes: 0,
         };
-        // SAFETY: one block owns each row and writes disjoint gradient elements.
+        // SAFETY: one block owns each row and writes disjoint loss/gradient data.
         unsafe { builder.launch(cfg).expect("launch ce_loss_grad_kernel") };
-        let host = self
-            .stream
-            .clone_dtoh(&loss_rows)
-            .expect("cuda dtoh CE loss");
-        let loss = (host.iter().map(|&v| v as f64).sum::<f64>() / rows as f64) as f32;
-        (loss, CudaMatrix { buf: d, rows, cols })
+        (
+            CudaF32 {
+                buf: loss_rows,
+                len: rows,
+            },
+            CudaMatrix { buf: d, rows, cols },
+        )
+    }
+
+    /// Deterministic host mean of a small resident fp32 vector. This is intentionally
+    /// a synchronization point and should be called only after all step kernels are
+    /// enqueued when used for training diagnostics.
+    pub fn mean_f32(&self, x: &CudaF32) -> f32 {
+        if x.len == 0
+        {
+            return f32::NAN;
+        }
+        let host = self.stream.clone_dtoh(&x.buf).expect("cuda dtoh f32 mean");
+        (host.iter().map(|&v| v as f64).sum::<f64>() / host.len() as f64) as f32
+    }
+
+    pub fn cross_entropy_loss_grad(
+        &self,
+        logits: &CudaMatrix,
+        targets: &[u32],
+    ) -> (f32, CudaMatrix) {
+        let (loss_rows, grad) = self.cross_entropy_loss_grad_resident(logits, targets);
+        (self.mean_f32(&loss_rows), grad)
     }
 
     /// Cross-entropy gradient w.r.t. the logits: `(softmax(logits) − onehot(target))
-    /// / rows`, one row per target. The loss itself is computed host-side from the
-    /// downloaded logits (as Route A does), so only the grad is resident here.
+    /// / rows`, one row per target. Delegates to the fused device CE path.
     pub fn cross_entropy_grad(&self, logits: &CudaMatrix, targets: &[u32]) -> CudaMatrix {
         self.cross_entropy_loss_grad(logits, targets).1
     }
@@ -1774,13 +1839,70 @@ impl CudaChain {
         }
     }
 
-    /// The global L2 norm `sqrt(Σᵢ ‖gᵢ‖²)` over a set of gradient matrices — for
-    /// gradient clipping. Each grad's sum-of-squares is reduced on-device (fp32) and
-    /// accumulated into one scalar, downloaded once. The atomic accumulation order
-    /// varies run-to-run, but only below the bf16 noise floor (the grads are already
-    /// bf16), so this doesn't add meaningful non-determinism. Returns `+inf`/`NaN`
-    /// faithfully if any grad is non-finite (so the caller can skip the step).
-    pub fn global_grad_norm(&self, grads: &[&CudaMatrix]) -> f32 {
+    /// AdamW update using a resident global gradient sum-of-squares. The clipping
+    /// factor is computed inside the kernel, so training does not synchronize with
+    /// the host between backward and optimizer update.
+    #[allow(clippy::too_many_arguments)]
+    pub fn adamw_step_with_norm(
+        &self,
+        param: &mut CudaF32,
+        m: &mut CudaF32,
+        v: &mut CudaF32,
+        grad: &CudaMatrix,
+        param_bf16: &mut CudaMatrix,
+        lr: f32,
+        betas: (f32, f32),
+        eps: f32,
+        weight_decay: f32,
+        step: u32,
+        grad_sumsq: &CudaF32,
+        max_grad_norm: f32,
+    ) {
+        let n = param.len;
+        assert_eq!(m.len, n, "adamw_step_with_norm: m len");
+        assert_eq!(v.len, n, "adamw_step_with_norm: v len");
+        assert_eq!(grad.rows * grad.cols, n, "adamw_step_with_norm: grad len");
+        assert_eq!(
+            param_bf16.rows * param_bf16.cols,
+            n,
+            "adamw_step_with_norm: view len"
+        );
+        assert_eq!(
+            grad_sumsq.len, 1,
+            "adamw_step_with_norm: sumsq must be scalar"
+        );
+        let (b1, b2) = betas;
+        let bc1 = 1.0 - b1.powi(step as i32);
+        let bc2 = 1.0 - b2.powi(step as i32);
+        let (n_a, lr_a, b1_a, b2_a, eps_a, wd_a, bc1_a, bc2_a, max_a) =
+            (n, lr, b1, b2, eps, weight_decay, bc1, bc2, max_grad_norm);
+        let mut builder = self.stream.launch_builder(&self.kernels().adamw_norm);
+        builder.arg(&mut param.buf);
+        builder.arg(&mut m.buf);
+        builder.arg(&mut v.buf);
+        builder.arg(&grad.buf);
+        builder.arg(&mut param_bf16.buf);
+        builder.arg(&n_a);
+        builder.arg(&lr_a);
+        builder.arg(&b1_a);
+        builder.arg(&b2_a);
+        builder.arg(&eps_a);
+        builder.arg(&wd_a);
+        builder.arg(&bc1_a);
+        builder.arg(&bc2_a);
+        builder.arg(&grad_sumsq.buf);
+        builder.arg(&max_a);
+        // SAFETY: argument layout matches adamw_norm_kernel and grid covers n.
+        unsafe {
+            builder
+                .launch(LaunchConfig::for_num_elems(n as u32))
+                .expect("launch adamw_norm_kernel");
+        }
+    }
+
+    /// Accumulate the global gradient sum-of-squares into a resident fp32 scalar.
+    /// This is the asynchronous half of global gradient clipping.
+    pub fn global_grad_sumsq(&self, grads: &[&CudaMatrix]) -> CudaF32 {
         let mut accum = self.stream.alloc_zeros::<f32>(1).expect("cuda alloc accum");
         for g in grads
         {
@@ -1801,13 +1923,31 @@ impl CudaChain {
                 block_dim: (block, 1, 1),
                 shared_mem_bytes: 0,
             };
-            // SAFETY: arg order/types match `sumsq_kernel`; block_dim 256 = sdata size.
-            unsafe {
-                builder.launch(cfg).expect("launch sumsq_kernel");
-            }
+            // SAFETY: argument layout matches sumsq_kernel; block size is 256.
+            unsafe { builder.launch(cfg).expect("launch sumsq_kernel") };
         }
-        let host = self.stream.clone_dtoh(&accum).expect("cuda dtoh accum");
+        CudaF32 { buf: accum, len: 1 }
+    }
+
+    /// Read a resident gradient sum-of-squares after the optimizer stream is done.
+    pub fn grad_norm_from_sumsq(&self, sumsq: &CudaF32) -> f32 {
+        assert_eq!(sumsq.len, 1, "grad_norm_from_sumsq: scalar required");
+        let host = self
+            .stream
+            .clone_dtoh(&sumsq.buf)
+            .expect("cuda dtoh grad sumsq");
         host[0].sqrt()
+    }
+
+    /// The global L2 norm `sqrt(Σᵢ ‖gᵢ‖²)` over a set of gradient matrices — for
+    /// gradient clipping. Each grad's sum-of-squares is reduced on-device (fp32) and
+    /// accumulated into one scalar, downloaded once. The atomic accumulation order
+    /// varies run-to-run, but only below the bf16 noise floor (the grads are already
+    /// bf16), so this doesn't add meaningful non-determinism. Returns `+inf`/`NaN`
+    /// faithfully if any grad is non-finite (so the caller can skip the step).
+    pub fn global_grad_norm(&self, grads: &[&CudaMatrix]) -> f32 {
+        let sumsq = self.global_grad_sumsq(grads);
+        self.grad_norm_from_sumsq(&sumsq)
     }
 }
 
