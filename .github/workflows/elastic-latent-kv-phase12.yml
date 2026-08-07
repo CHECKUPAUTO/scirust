@@ -1,0 +1,64 @@
+name: Elastic Latent KV Phase 12
+
+on:
+  push:
+    branches:
+      - research/elastic-latent-kv-phase12-kernels
+    paths:
+      - scirust-core/src/nn/latent_kv_kernels.rs
+      - scirust-core/src/nn/mod.rs
+      - scirust-gpu/tests/elastic_latent_kv_accel.rs
+      - experiments/elastic-latent-kv/PHASE12_SPEC.md
+      - .github/workflows/elastic-latent-kv-phase12.yml
+  pull_request:
+    branches: [master]
+    paths:
+      - scirust-core/src/nn/latent_kv_kernels.rs
+      - scirust-core/src/nn/mod.rs
+      - scirust-gpu/tests/elastic_latent_kv_accel.rs
+      - experiments/elastic-latent-kv/PHASE12_SPEC.md
+      - .github/workflows/elastic-latent-kv-phase12.yml
+
+permissions:
+  contents: read
+
+jobs:
+  stable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: |
+          rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt,clippy
+          rustup toolchain install 1.89.0 --profile minimal
+      - run: cargo +nightly-2026-07-02 fmt --all -- --check
+      - run: cargo +nightly-2026-07-02 clippy -p scirust-core --all-targets --locked -- -D warnings
+      - run: cargo +1.89.0 check -p scirust-core --all-targets --locked
+      - run: cargo +1.89.0 test -p scirust-core latent_kv_kernels --locked -- --test-threads=1
+      - run: cargo +1.89.0 test -p scirust-gpu --test elastic_latent_kv_accel --locked -- --test-threads=1
+
+  portable-simd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: rustup toolchain install nightly-2026-07-02 --profile minimal
+      - run: cargo +nightly-2026-07-02 test -p scirust-core latent_kv_kernels --features portable-simd --locked -- --test-threads=1
+
+  wgpu-lavapipe:
+    runs-on: ubuntu-latest
+    env:
+      WGPU_BACKEND: vulkan
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers libvulkan1
+          rustup toolchain install 1.89.0 --profile minimal
+      - run: cargo +1.89.0 test -p scirust-gpu --features wgpu --test elastic_latent_kv_accel --locked -- --test-threads=1
+
+  cuda-compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: rustup toolchain install 1.89.0 --profile minimal
+      - run: cargo +1.89.0 check -p scirust-gpu --features cuda --test elastic_latent_kv_accel --locked
