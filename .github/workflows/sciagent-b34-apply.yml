@@ -1,0 +1,38 @@
+name: SciAgent B34 exact data resume
+
+on:
+  pull_request:
+    branches:
+      - fix/sciagent-b33-head-local-rope
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/sciagent-b34-data-resume
+          fetch-depth: 0
+      - name: Apply B34 source patch
+        run: python3 scripts/sciagent_b34_patch.py
+      - name: Format
+        run: cargo fmt --all
+      - name: Test SciAgent CPU surface
+        run: cargo test -p scirust-sciagent --lib
+      - name: Check CUDA pretrain
+        run: cargo check -p scirust-sciagent --features cuda --example cuda_pretrain
+      - name: Compile CUDA parity
+        run: cargo test -p scirust-sciagent --features cuda --test cuda_parity --no-run
+      - name: Remove one-shot helpers
+        run: rm -f scripts/sciagent_b34_patch.py .github/workflows/sciagent-b34-apply.yml
+      - name: Commit and push validated B34
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix(sciagent): make data resume exact and corpus loading bounded"
+          git push origin HEAD:fix/sciagent-b34-data-resume
