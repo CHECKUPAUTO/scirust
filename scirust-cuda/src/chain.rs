@@ -91,6 +91,32 @@ extern "C" __global__ void slice_cols_kernel(
     }
 }
 
+
+// Row slicing/placement for true B×T training. Projection/MLP/head GEMMs operate
+// on packed B*T rows, while attention slices each sequence back to T rows so the
+// causal mask can never leak information across samples.
+extern "C" __global__ void slice_rows_kernel(
+    unsigned short* out, const unsigned short* x,
+    const size_t cols, const size_t row_start, const size_t nrows)
+{
+    const size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < nrows * cols) {
+        const size_t r = idx / cols, c = idx % cols;
+        out[idx] = x[(row_start + r) * cols + c];
+    }
+}
+
+extern "C" __global__ void place_rows_kernel(
+    unsigned short* out, const unsigned short* x,
+    const size_t cols, const size_t row_start, const size_t nrows)
+{
+    const size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < nrows * cols) {
+        const size_t r = idx / cols, c = idx % cols;
+        out[(row_start + r) * cols + c] = x[idx];
+    }
+}
+
 // Scatter a narrow block into a zero-padded wide matrix at col_start.
 extern "C" __global__ void place_cols_kernel(
     unsigned short* out, const unsigned short* x,
@@ -717,6 +743,8 @@ struct Kernels {
     rmsnorm: CudaFunction,
     slice_cols: CudaFunction,
     place_cols: CudaFunction,
+    slice_rows: CudaFunction,
+    place_rows: CudaFunction,
     softmax: CudaFunction,
     scale_mask: CudaFunction,
     rope: CudaFunction,
@@ -796,6 +824,8 @@ impl CudaChain {
             rmsnorm: f("rmsnorm_fast_kernel"),
             slice_cols: f("slice_cols_kernel"),
             place_cols: f("place_cols_kernel"),
+            slice_rows: f("slice_rows_kernel"),
+            place_rows: f("place_rows_kernel"),
             softmax: f("softmax_fast_kernel"),
             scale_mask: f("scale_mask_kernel"),
             rope: f("rope_kernel"),
@@ -1166,6 +1196,77 @@ impl CudaChain {
             buf: out,
             rows,
             cols: ncols,
+        }
+    }
+
+    /// Copy a contiguous row range into a new resident matrix.
+    pub fn slice_rows(&self, x: &CudaMatrix, row_start: usize, nrows: usize) -> CudaMatrix {
+        assert!(
+            row_start + nrows <= x.rows,
+            "slice_rows: range out of bounds"
+        );
+        let cols = x.cols;
+        let total = nrows * cols;
+        let mut out = self
+            .stream
+            .alloc_zeros::<bf16>(total)
+            .expect("cuda alloc rows");
+        let (cols_a, start_a, nrows_a) = (cols, row_start, nrows);
+        let mut builder = self.stream.launch_builder(&self.kernels().slice_rows);
+        builder.arg(&mut out);
+        builder.arg(&x.buf);
+        builder.arg(&cols_a);
+        builder.arg(&start_a);
+        builder.arg(&nrows_a);
+        // SAFETY: host range assertion guarantees all source rows are valid.
+        unsafe {
+            builder
+                .launch(LaunchConfig::for_num_elems(total as u32))
+                .expect("launch slice_rows_kernel");
+        }
+        CudaMatrix {
+            buf: out,
+            rows: nrows,
+            cols,
+        }
+    }
+
+    /// Concatenate equal-width matrices along rows without a host round-trip.
+    pub fn concat_rows(&self, parts: &[&CudaMatrix]) -> CudaMatrix {
+        assert!(!parts.is_empty(), "concat_rows: empty parts");
+        let cols = parts[0].cols;
+        assert!(
+            parts.iter().all(|p| p.cols == cols),
+            "concat_rows: column mismatch"
+        );
+        let rows: usize = parts.iter().map(|p| p.rows).sum();
+        let mut out = self
+            .stream
+            .alloc_zeros::<bf16>(rows * cols)
+            .expect("cuda alloc concat rows");
+        let cols_a = cols;
+        let mut row_start = 0usize;
+        for p in parts
+        {
+            let (start_a, nrows_a) = (row_start, p.rows);
+            let mut builder = self.stream.launch_builder(&self.kernels().place_rows);
+            builder.arg(&mut out);
+            builder.arg(&p.buf);
+            builder.arg(&cols_a);
+            builder.arg(&start_a);
+            builder.arg(&nrows_a);
+            // SAFETY: destination was allocated for the sum of all part rows.
+            unsafe {
+                builder
+                    .launch(LaunchConfig::for_num_elems((p.rows * cols) as u32))
+                    .expect("launch place_rows_kernel");
+            }
+            row_start += p.rows;
+        }
+        CudaMatrix {
+            buf: out,
+            rows,
+            cols,
         }
     }
 
