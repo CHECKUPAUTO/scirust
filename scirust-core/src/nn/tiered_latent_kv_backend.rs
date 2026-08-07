@@ -183,24 +183,20 @@ impl TieredResidualLatentBackend {
             plan,
             lifecycle.cold,
         )?;
-        let planned_persistent_bytes = planned_tier_bytes(
-            lifecycle.hot_tokens,
-            dimension,
-            plan,
-            lifecycle.hot,
-        )
-        .saturating_add(planned_tier_bytes(
-            lifecycle.warm_tokens,
-            dimension,
-            plan,
-            lifecycle.warm,
-        ))
-        .saturating_add(planned_tier_bytes(
-            cold_tokens,
-            dimension,
-            plan,
-            lifecycle.cold,
-        ));
+        let planned_persistent_bytes =
+            planned_tier_bytes(lifecycle.hot_tokens, dimension, plan, lifecycle.hot)
+                .saturating_add(planned_tier_bytes(
+                    lifecycle.warm_tokens,
+                    dimension,
+                    plan,
+                    lifecycle.warm,
+                ))
+                .saturating_add(planned_tier_bytes(
+                    cold_tokens,
+                    dimension,
+                    plan,
+                    lifecycle.cold,
+                ));
 
         Ok(Self {
             dimension,
@@ -461,11 +457,7 @@ impl AttentionBackend for TieredResidualLatentBackend {
             "attention requires a resident lifecycle token"
         );
         let mut scratch = self.attention_scratch.borrow_mut();
-        let TieredAttentionScratch {
-            scores,
-            key,
-            value,
-        } = &mut *scratch;
+        let TieredAttentionScratch { scores, key, value } = &mut *scratch;
         let active_scores = &mut scores[..resident];
         let scale = 1.0 / (self.dimension as f32).sqrt();
         let mut cursor = 0;
@@ -572,9 +564,7 @@ fn validate_tier(
 ) -> Result<(), TieredLatentBackendError> {
     if tier.rank_divisor == 0
     {
-        return Err(TieredLatentBackendError::ZeroRankDivisor(
-            temperature,
-        ));
+        return Err(TieredLatentBackendError::ZeroRankDivisor(temperature));
     }
     Ok(())
 }
@@ -673,7 +663,9 @@ fn prefix_basis(full_basis: &[f32], dimension: usize, rank: usize) -> Vec<f32> {
 }
 
 fn tier_len(cache: &Option<ResidualQuantizedLatentKvCache>) -> usize {
-    cache.as_ref().map_or(0, ResidualQuantizedLatentKvCache::len)
+    cache
+        .as_ref()
+        .map_or(0, ResidualQuantizedLatentKvCache::len)
 }
 
 fn tier_allocated(cache: &Option<ResidualQuantizedLatentKvCache>) -> usize {
@@ -799,10 +791,7 @@ mod tests {
             let actual = backend.attention(&query);
             for (left, right) in expected.iter().zip(&actual)
             {
-                assert!(
-                    (left - right).abs() <= 3.0e-6,
-                    "left={left}, right={right}"
-                );
+                assert!((left - right).abs() <= 3.0e-6, "left={left}, right={right}");
             }
             assert_eq!(backend.len(), (step + 1).min(capacity));
         }
