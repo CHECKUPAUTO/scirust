@@ -74,6 +74,8 @@ mod elastic_latent_block_device;
 #[cfg(feature = "wgpu")]
 mod elastic_latent_device;
 #[cfg(feature = "wgpu")]
+mod elastic_latent_encoder_device;
+#[cfg(feature = "wgpu")]
 mod elastic_latent_mha_device;
 #[cfg(feature = "wgpu")]
 mod engine;
@@ -121,6 +123,11 @@ pub use elastic_latent_block_device::{
 #[cfg(feature = "wgpu")]
 pub use elastic_latent_device::{
     WgpuResidentLatentKvCache, WgpuResidentLatentKvError, WgpuResidentLatentKvTelemetry,
+};
+#[cfg(feature = "wgpu")]
+pub use elastic_latent_encoder_device::{
+    WgpuLatentLayerBasis, WgpuResidentTransformerEncoder, WgpuResidentTransformerEncoderError,
+    WgpuResidentTransformerEncoderTelemetry,
 };
 #[cfg(feature = "wgpu")]
 pub use elastic_latent_mha_device::{
