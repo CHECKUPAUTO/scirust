@@ -262,9 +262,7 @@ mod tests {
     };
     use crate::autodiff::reverse::{Tape, Tensor};
     use crate::nn::adaptive_latent_kv::AdaptiveQualityProfile;
-    use crate::nn::elastic_latent_runtime::{
-        ElasticLatentRuntimeConfig, HeadCalibration,
-    };
+    use crate::nn::elastic_latent_runtime::{ElasticLatentRuntimeConfig, HeadCalibration};
     use crate::nn::init::{KaimingNormal, Zeros};
     use crate::nn::latent_kv_cache::LatentStorageFormat;
     use crate::nn::latent_kv_kernels::LatentKernelKind;
@@ -313,8 +311,7 @@ mod tests {
     #[test]
     fn elastic_encoder_matches_dense_legacy_at_full_rank() {
         let mut rng = PcgEngine::new(17);
-        let encoder =
-            TransformerEncoder::new(2, 8, 2, 16, true, &KaimingNormal, &Zeros, &mut rng);
+        let encoder = TransformerEncoder::new(2, 8, 2, 16, true, &KaimingNormal, &Zeros, &mut rng);
         let mut dense = encoder.clone();
         let mut elastic = encoder;
         let basis = identity(4);
@@ -422,8 +419,7 @@ mod tests {
     #[test]
     fn elastic_encoder_rejects_layer_topology_mismatch() {
         let mut rng = PcgEngine::new(29);
-        let encoder =
-            TransformerEncoder::new(1, 8, 2, 16, true, &KaimingNormal, &Zeros, &mut rng);
+        let encoder = TransformerEncoder::new(1, 8, 2, 16, true, &KaimingNormal, &Zeros, &mut rng);
         let error = match ElasticLatentEncoderSession::new(&encoder, &[])
         {
             Ok(_) => panic!("mismatched topology must fail"),
