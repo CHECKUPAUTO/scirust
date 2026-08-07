@@ -65,7 +65,10 @@ impl fmt::Display for TieredLatentBackendError {
             ),
             Self::ZeroRankDivisor(temperature) =>
             {
-                write!(output, "{temperature:?} lifecycle rank divisor must be non-zero")
+                write!(
+                    output,
+                    "{temperature:?} lifecycle rank divisor must be non-zero"
+                )
             },
             Self::Residual(error) => write!(output, "{error}"),
         }
@@ -453,7 +456,10 @@ impl AttentionBackend for TieredResidualLatentBackend {
     fn attention(&self, query: &[f32]) -> Vec<f32> {
         assert_eq!(query.len(), self.dimension);
         let resident = self.len();
-        assert!(resident > 0, "attention requires a resident lifecycle token");
+        assert!(
+            resident > 0,
+            "attention requires a resident lifecycle token"
+        );
         let mut scratch = self.attention_scratch.borrow_mut();
         let TieredAttentionScratch {
             scores,
@@ -566,7 +572,9 @@ fn validate_tier(
 ) -> Result<(), TieredLatentBackendError> {
     if tier.rank_divisor == 0
     {
-        return Err(TieredLatentBackendError::ZeroRankDivisor(temperature));
+        return Err(TieredLatentBackendError::ZeroRankDivisor(
+            temperature,
+        ));
     }
     Ok(())
 }
@@ -791,7 +799,10 @@ mod tests {
             let actual = backend.attention(&query);
             for (left, right) in expected.iter().zip(&actual)
             {
-                assert!((left - right).abs() <= 3.0e-6, "left={left}, right={right}");
+                assert!(
+                    (left - right).abs() <= 3.0e-6,
+                    "left={left}, right={right}"
+                );
             }
             assert_eq!(backend.len(), (step + 1).min(capacity));
         }
