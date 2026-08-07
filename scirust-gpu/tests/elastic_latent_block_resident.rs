@@ -10,7 +10,8 @@ use scirust_gpu::{
 
 fn identity_basis(dimension: usize) -> Vec<f32> {
     let mut basis = vec![0.0; dimension * dimension];
-    for index in 0..dimension {
+    for index in 0..dimension
+    {
         basis[index * dimension + index] = 1.0;
     }
     basis
@@ -18,7 +19,8 @@ fn identity_basis(dimension: usize) -> Vec<f32> {
 
 fn prefix_basis(dimension: usize, rank: usize) -> Vec<f32> {
     let mut basis = vec![0.0; dimension * rank];
-    for index in 0..rank {
+    for index in 0..rank
+    {
         basis[index * rank + index] = 1.0;
     }
     basis
@@ -32,8 +34,10 @@ fn linear(
     out_width: usize,
 ) -> Vec<f32> {
     let mut output = bias.to_vec();
-    for column in 0..out_width {
-        for row in 0..in_width {
+    for column in 0..out_width
+    {
+        for row in 0..in_width
+        {
             output[column] += input[row] * weight[row * out_width + column];
         }
     }
@@ -44,7 +48,8 @@ fn layer_norm(input: &[f32], gamma: &[f32], beta: &[f32], eps: f32) -> Vec<f32> 
     let width = input.len();
     let mean = input.iter().sum::<f32>() / width as f32;
     let mut variance = 0.0;
-    for value in input {
+    for value in input
+    {
         let delta = *value - mean;
         variance += delta * delta;
     }
@@ -60,8 +65,10 @@ fn layer_norm(input: &[f32], gamma: &[f32], beta: &[f32], eps: f32) -> Vec<f32> 
 
 fn project(vector: &[f32], basis: &[f32], dimension: usize, rank: usize) -> Vec<f32> {
     let mut output = vec![0.0; rank];
-    for latent in 0..rank {
-        for index in 0..dimension {
+    for latent in 0..rank
+    {
+        for index in 0..dimension
+        {
             output[latent] += vector[index] * basis[index * rank + latent];
         }
     }
@@ -79,35 +86,43 @@ fn latent_attention(
     let query_latent = project(query, basis, dimension, rank);
     let scale = 1.0 / (dimension as f32).sqrt();
     let mut scores = Vec::with_capacity(keys.len());
-    for key in keys {
+    for key in keys
+    {
         let key_latent = project(key, basis, dimension, rank);
         let mut score = 0.0;
-        for latent in 0..rank {
+        for latent in 0..rank
+        {
             score += query_latent[latent] * key_latent[latent];
         }
         scores.push(score * scale);
     }
     let maximum = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let mut denominator = 0.0;
-    for score in &mut scores {
+    for score in &mut scores
+    {
         *score = (*score - maximum).exp();
         denominator += *score;
     }
-    for score in &mut scores {
+    for score in &mut scores
+    {
         *score /= denominator;
     }
 
     let mut latent_context = vec![0.0; rank];
-    for (weight, value) in scores.iter().zip(values) {
+    for (weight, value) in scores.iter().zip(values)
+    {
         let value_latent = project(value, basis, dimension, rank);
-        for latent in 0..rank {
+        for latent in 0..rank
+        {
             latent_context[latent] += *weight * value_latent[latent];
         }
     }
 
     let mut output = vec![0.0; dimension];
-    for index in 0..dimension {
-        for latent in 0..rank {
+    for index in 0..dimension
+    {
+        for latent in 0..rank
+        {
             output[index] += latent_context[latent] * basis[index * rank + latent];
         }
     }
@@ -153,13 +168,15 @@ fn cpu_sliding_latent_block(
     );
     key_history.push(k);
     value_history.push(v);
-    if key_history.len() > capacity {
+    if key_history.len() > capacity
+    {
         key_history.remove(0);
         value_history.remove(0);
     }
 
     let mut combined = vec![0.0; d_model];
-    for head in 0..block.n_heads {
+    for head in 0..block.n_heads
+    {
         let start = head * block.mha.d_head;
         let query = &q[start..start + block.mha.d_head];
         let keys: Vec<Vec<f32>> = key_history
@@ -198,7 +215,8 @@ fn cpu_sliding_latent_block(
         d_model,
         block.d_ff,
     );
-    for value in &mut hidden {
+    for value in &mut hidden
+    {
         *value = value.max(0.0);
     }
     let ffn = linear(
@@ -216,7 +234,8 @@ fn cpu_sliding_latent_block(
 
 fn assert_close(actual: &[f32], expected: &[f32], tolerance: f32) {
     assert_eq!(actual.len(), expected.len());
-    for (index, (actual, expected)) in actual.iter().zip(expected).enumerate() {
+    for (index, (actual, expected)) in actual.iter().zip(expected).enumerate()
+    {
         let error = (actual - expected).abs();
         assert!(
             error <= tolerance,
@@ -242,7 +261,8 @@ fn full_rank_resident_block_matches_legacy_incremental_oracle() {
         .expect("Phase 16 validation requires an available WGPU adapter");
     let tape = Tape::new();
 
-    for pos in 0..5 {
+    for pos in 0..5
+    {
         let input: Vec<f32> = (0..8)
             .map(|index| ((pos * 13 + index) as f32 * 0.17).sin() * 0.3)
             .collect();
@@ -281,19 +301,13 @@ fn lower_rank_resident_block_matches_cpu_oracle_after_ring_wrap() {
     let mut keys = Vec::new();
     let mut values = Vec::new();
 
-    for pos in 0..5 {
+    for pos in 0..5
+    {
         let input: Vec<f32> = (0..8)
             .map(|index| ((pos * 7 + index) as f32 * 0.11).cos() * 0.25)
             .collect();
-        let expected = cpu_sliding_latent_block(
-            &block,
-            &input,
-            &mut keys,
-            &mut values,
-            capacity,
-            &basis,
-            2,
-        );
+        let expected =
+            cpu_sliding_latent_block(&block, &input, &mut keys, &mut values, capacity, &basis, 2);
         let actual = resident.infer_step_at(&input, pos).unwrap();
         assert_close(&actual, &expected, 1.2e-3);
         assert_eq!(resident.telemetry().resident_bytes, resident_bytes);

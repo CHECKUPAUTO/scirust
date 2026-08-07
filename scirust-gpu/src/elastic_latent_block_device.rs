@@ -282,7 +282,10 @@ fn main() {
 #[derive(Debug)]
 pub enum WgpuResidentTransformerBlockError {
     InvalidConfig(&'static str),
-    HeadCount { expected: usize, actual: usize },
+    HeadCount {
+        expected: usize,
+        actual: usize,
+    },
     BasisLength {
         head: usize,
         expected: usize,
@@ -294,13 +297,17 @@ pub enum WgpuResidentTransformerBlockError {
         expected: usize,
         actual: usize,
     },
-    PositionMismatch { expected: usize, actual: usize },
+    PositionMismatch {
+        expected: usize,
+        actual: usize,
+    },
     Compute(ComputeError),
 }
 
 impl fmt::Display for WgpuResidentTransformerBlockError {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::InvalidConfig(message) => write!(output, "{message}"),
             Self::HeadCount { expected, actual } => write!(
                 output,
@@ -514,14 +521,16 @@ impl WgpuResidentTransformerBlock {
         pos: usize,
         output: &mut [f32],
     ) -> Result<(), WgpuResidentTransformerBlockError> {
-        if pos != self.steps {
+        if pos != self.steps
+        {
             return Err(WgpuResidentTransformerBlockError::PositionMismatch {
                 expected: self.steps,
                 actual: pos,
             });
         }
         self.require_vector("input", input)?;
-        if output.len() != self.d_model {
+        if output.len() != self.d_model
+        {
             return Err(WgpuResidentTransformerBlockError::VectorLength {
                 name: "output",
                 expected: self.d_model,
@@ -600,7 +609,8 @@ impl WgpuResidentTransformerBlock {
         name: &'static str,
         vector: &[f32],
     ) -> Result<(), WgpuResidentTransformerBlockError> {
-        if vector.len() != self.d_model {
+        if vector.len() != self.d_model
+        {
             return Err(WgpuResidentTransformerBlockError::VectorLength {
                 name,
                 expected: self.d_model,
@@ -630,12 +640,14 @@ fn validate_topology(
     rank: usize,
     heads: &[WgpuLatentHeadBasis<'_>],
 ) -> Result<(), WgpuResidentTransformerBlockError> {
-    if capacity == 0 {
+    if capacity == 0
+    {
         return Err(WgpuResidentTransformerBlockError::InvalidConfig(
             "resident transformer block capacity must be non-zero",
         ));
     }
-    if block.d_model == 0 || block.n_heads == 0 || block.d_ff == 0 || block.mha.d_head == 0 {
+    if block.d_model == 0 || block.n_heads == 0 || block.d_ff == 0 || block.mha.d_head == 0
+    {
         return Err(WgpuResidentTransformerBlockError::InvalidConfig(
             "resident transformer block topology must be non-zero",
         ));
@@ -648,26 +660,28 @@ fn validate_topology(
             "resident transformer block attention topology is inconsistent",
         ));
     }
-    if rank == 0 || rank > block.mha.d_head {
+    if rank == 0 || rank > block.mha.d_head
+    {
         return Err(WgpuResidentTransformerBlockError::InvalidConfig(
             "resident transformer block rank must be in 1..=d_head",
         ));
     }
-    if heads.len() != block.n_heads {
+    if heads.len() != block.n_heads
+    {
         return Err(WgpuResidentTransformerBlockError::HeadCount {
             expected: block.n_heads,
             actual: heads.len(),
         });
     }
-    let expected = block
-        .mha
-        .d_head
-        .checked_mul(rank)
-        .ok_or(WgpuResidentTransformerBlockError::InvalidConfig(
+    let expected = block.mha.d_head.checked_mul(rank).ok_or(
+        WgpuResidentTransformerBlockError::InvalidConfig(
             "resident transformer block basis shape overflows usize",
-        ))?;
-    for (head, basis) in heads.iter().enumerate() {
-        if basis.key.len() != expected || basis.value.len() != expected {
+        ),
+    )?;
+    for (head, basis) in heads.iter().enumerate()
+    {
+        if basis.key.len() != expected || basis.value.len() != expected
+        {
             return Err(WgpuResidentTransformerBlockError::BasisLength {
                 head,
                 expected,
@@ -684,12 +698,19 @@ fn validate_weight_shapes(
 ) -> Result<(), WgpuResidentTransformerBlockError> {
     let d_model = block.d_model;
     let d_ff = block.d_ff;
-    let model_matrix = d_model
-        .checked_mul(d_model)
-        .ok_or(WgpuResidentTransformerBlockError::InvalidConfig(
-            "resident transformer block model matrix overflows usize",
-        ))?;
-    for linear in [&block.mha.w_q, &block.mha.w_k, &block.mha.w_v, &block.mha.w_o] {
+    let model_matrix =
+        d_model
+            .checked_mul(d_model)
+            .ok_or(WgpuResidentTransformerBlockError::InvalidConfig(
+                "resident transformer block model matrix overflows usize",
+            ))?;
+    for linear in [
+        &block.mha.w_q,
+        &block.mha.w_k,
+        &block.mha.w_v,
+        &block.mha.w_o,
+    ]
+    {
         if linear.in_features != d_model
             || linear.out_features != d_model
             || linear.weight.data.len() != model_matrix
@@ -709,8 +730,7 @@ fn validate_weight_shapes(
             "resident transformer block LayerNorm parameter shape mismatch",
         ));
     }
-    if (block.ln1.eps - 1e-5).abs() > f32::EPSILON
-        || (block.ln2.eps - 1e-5).abs() > f32::EPSILON
+    if (block.ln1.eps - 1e-5).abs() > f32::EPSILON || (block.ln2.eps - 1e-5).abs() > f32::EPSILON
     {
         return Err(WgpuResidentTransformerBlockError::InvalidConfig(
             "resident transformer block currently requires LayerNorm eps=1e-5",
@@ -732,9 +752,7 @@ fn validate_weight_shapes(
     Ok(())
 }
 
-fn pack_weights(
-    block: &TransformerBlock,
-) -> Result<Vec<f32>, WgpuResidentTransformerBlockError> {
+fn pack_weights(block: &TransformerBlock) -> Result<Vec<f32>, WgpuResidentTransformerBlockError> {
     validate_weight_shapes(block)?;
     let d_model = block.d_model;
     let d_ff = block.d_ff;
@@ -773,11 +791,12 @@ fn pack_bases(
     d_head: usize,
     rank: usize,
 ) -> Result<Vec<f32>, WgpuResidentTransformerBlockError> {
-    let per_head = d_head
-        .checked_mul(rank)
-        .ok_or(WgpuResidentTransformerBlockError::InvalidConfig(
-            "resident transformer block basis shape overflows usize",
-        ))?;
+    let per_head =
+        d_head
+            .checked_mul(rank)
+            .ok_or(WgpuResidentTransformerBlockError::InvalidConfig(
+                "resident transformer block basis shape overflows usize",
+            ))?;
     let total = heads
         .len()
         .checked_mul(per_head)
@@ -786,10 +805,12 @@ fn pack_bases(
             "resident transformer block packed bases overflow usize",
         ))?;
     let mut packed = Vec::with_capacity(total);
-    for head in heads {
+    for head in heads
+    {
         packed.extend_from_slice(head.key);
     }
-    for head in heads {
+    for head in heads
+    {
         packed.extend_from_slice(head.value);
     }
     Ok(packed)
