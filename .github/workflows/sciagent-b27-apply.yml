@@ -7,12 +7,16 @@ on:
     paths:
       - scripts/sciagent_b27_patch.py
       - .github/workflows/sciagent-b27-apply.yml
+  pull_request:
+    branches:
+      - perf/sciagent-b23-b26-kernel-path
 
 permissions:
   contents: write
 
 jobs:
   apply-and-validate:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
