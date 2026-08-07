@@ -7,6 +7,9 @@ on:
     paths:
       - scripts/sciagent_b23_b26_patch.py
       - .github/workflows/sciagent-b23-b26-apply.yml
+  pull_request:
+    branches:
+      - master
 
 permissions:
   contents: write
