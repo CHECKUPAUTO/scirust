@@ -1104,6 +1104,9 @@ pub struct CudaOptimizerResume {
     pub corpus_tokens: Option<usize>,
     pub corpus_hash: Option<u64>,
     pub split_version: Option<u32>,
+    pub max_grad_norm: Option<f32>,
+    pub val_frac: Option<f32>,
+    pub shuffle: Option<bool>,
 }
 
 fn optimizer_tensor(chain: &CudaChain, x: &CudaF32, rows: usize, cols: usize) -> Tensor {
@@ -1499,7 +1502,7 @@ impl CudaTrainer {
         .map_err(|e| format!("cannot save optimizer.safetensors: {e}"))?;
 
         let meta = serde_json::json!({
-            "version": 3,
+            "version": 4,
             "step": self.step,
             "base_lr": cfg.base_lr,
             "min_lr": cfg.min_lr,
@@ -1513,6 +1516,9 @@ impl CudaTrainer {
             "corpus_tokens": cfg.corpus_tokens,
             "corpus_hash": cfg.corpus_hash,
             "split_version": WINDOW_SPLIT_VERSION,
+            "max_grad_norm": cfg.max_grad_norm,
+            "val_frac": cfg.val_frac,
+            "shuffle": cfg.shuffle,
         });
         let encoded = serde_json::to_string_pretty(&meta)
             .map_err(|e| format!("cannot serialize optimizer metadata: {e}"))?;
@@ -1550,7 +1556,7 @@ impl CudaTrainer {
         let meta: serde_json::Value = serde_json::from_str(&raw)
             .map_err(|e| format!("cannot parse {}: {e}", meta_path.display()))?;
         let version = meta["version"].as_u64().unwrap_or(0);
-        if !(1..=3).contains(&version)
+        if !(1..=4).contains(&version)
         {
             return Err(format!(
                 "unsupported optimizer checkpoint version {version} in {}",
@@ -1631,6 +1637,8 @@ impl CudaTrainer {
         self.step = step as u32;
         let optional_usize = |key: &str| meta[key].as_u64().map(|x| x as usize);
         let optional_u64 = |key: &str| meta[key].as_u64();
+        let optional_f32 = |key: &str| meta[key].as_f64().map(|x| x as f32);
+        let optional_bool = |key: &str| meta[key].as_bool();
         Ok(Some(CudaOptimizerResume {
             step,
             base_lr: number("base_lr")?,
@@ -1675,6 +1683,30 @@ impl CudaTrainer {
             split_version: if version >= 3
             {
                 optional_u64("split_version").map(|v| v as u32)
+            }
+            else
+            {
+                None
+            },
+            max_grad_norm: if version >= 4
+            {
+                optional_f32("max_grad_norm")
+            }
+            else
+            {
+                None
+            },
+            val_frac: if version >= 4
+            {
+                optional_f32("val_frac")
+            }
+            else
+            {
+                None
+            },
+            shuffle: if version >= 4
+            {
+                optional_bool("shuffle")
             }
             else
             {
