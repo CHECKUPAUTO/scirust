@@ -63,12 +63,24 @@ pub struct ElasticLatentTelemetry {
 #[derive(Debug)]
 pub enum ElasticLatentRuntimeError {
     ZeroHeads,
-    HeadCount { expected: usize, actual: usize },
+    HeadCount {
+        expected: usize,
+        actual: usize,
+    },
     LifecycleCapacityMismatch,
-    TokenLength { expected: usize, actual: usize },
+    TokenLength {
+        expected: usize,
+        actual: usize,
+    },
     /// Retained for source compatibility with pre-sliding-window callers.
-    CapacityExhausted { head: usize, capacity: usize },
-    AllocationCeiling { ceiling: usize, actual: usize },
+    CapacityExhausted {
+        head: usize,
+        capacity: usize,
+    },
+    AllocationCeiling {
+        ceiling: usize,
+        actual: usize,
+    },
     Policy(AdaptiveKvPolicyError),
     /// Retained for source compatibility with the original Phase 13 backend.
     Backend(AdaptiveLatentBackendError),
@@ -198,12 +210,8 @@ impl ElasticLatentDecodeRuntime {
         for (head, calibration) in calibrations.iter().copied().enumerate()
         {
             let head_budget = base_budget + if head < remainder { 1 } else { 0 };
-            let (plan, backend) = select_budgeted_tiered_backend(
-                attention.d_head,
-                config,
-                calibration,
-                head_budget,
-            )?;
+            let (plan, backend) =
+                select_budgeted_tiered_backend(attention.d_head, config, calibration, head_budget)?;
             planned_persistent_bytes =
                 planned_persistent_bytes.saturating_add(backend.planned_persistent_bytes());
             allocated_bytes = allocated_bytes.saturating_add(backend.packed_bytes());
@@ -335,10 +343,7 @@ fn select_budgeted_tiered_backend(
     config: ElasticLatentRuntimeConfig,
     calibration: HeadCalibration<'_>,
     head_budget: usize,
-) -> Result<
-    (AdaptiveKvPlan, TieredResidualLatentBackend),
-    ElasticLatentRuntimeError,
-> {
+) -> Result<(AdaptiveKvPlan, TieredResidualLatentBackend), ElasticLatentRuntimeError> {
     let mut planner_budget = head_budget;
     loop
     {
@@ -381,11 +386,9 @@ fn lifecycle_worst_quality(
     lifecycle: LifecycleConfig,
     dimension: usize,
 ) -> u16 {
-    let cold_tokens = lifecycle.capacity_tokens.saturating_sub(
-        lifecycle
-            .hot_tokens
-            .saturating_add(lifecycle.warm_tokens),
-    );
+    let cold_tokens = lifecycle
+        .capacity_tokens
+        .saturating_sub(lifecycle.hot_tokens.saturating_add(lifecycle.warm_tokens));
     let mut worst = 10_000_u16;
     for (capacity, tier) in [
         (lifecycle.hot_tokens, lifecycle.hot),
