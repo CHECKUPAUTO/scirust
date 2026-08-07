@@ -57,7 +57,8 @@ pub struct CudaModelGrads {
     pub d_final_norm: CudaMatrix,
 }
 
-/// Training cache for one sequence's attention.
+/// Training cache for one sequence's attention; narrow heads are assembled with
+/// allocation-light head assembly rather than full-width padding and addition.
 struct CudaAttentionSequenceCache {
     qr: CudaMatrix,
     kr: CudaMatrix,
@@ -75,8 +76,6 @@ struct CudaAttentionTrainCache {
 /// Training-only activations for one Transformer block.
 struct CudaBlockTrainCache {
     xn: CudaMatrix,
-    q: CudaMatrix,
-    k: CudaMatrix,
     v: CudaMatrix,
     attention: CudaAttentionTrainCache,
     ctx: CudaMatrix,
@@ -168,25 +167,20 @@ impl CudaModel {
         let kr = self.chain.rope(k, seq, 0, self.theta);
         let repeat = self.n_heads / self.n_kv_heads;
         let scale = 1.0 / (dh as f32).sqrt();
-        let mut out: Option<CudaMatrix> = None;
+        let mut heads = Vec::with_capacity(self.n_heads);
         for head in 0..self.n_heads
         {
             let kv = head / repeat;
             let qs = self.chain.slice_cols(&qr, head * dh, dh);
             let ks = self.chain.slice_cols(&kr, kv * dh, dh);
             let vs = self.chain.slice_cols(v, kv * dh, dh);
-            let scores = self.chain.matmul_bt(&qs, &ks); // qs·ksᵀ  (t×t)
+            let scores = self.chain.matmul_bt(&qs, &ks);
             let scaled = self.chain.scale_causal_mask(&scores, scale, self.causal);
             let weights = self.chain.softmax(&scaled);
-            let ctx = self.chain.matmul(&weights, &vs); // (t×dh)
-            let padded = self.chain.place_cols(&ctx, head * dh, self.d_model);
-            out = Some(match out
-            {
-                None => padded,
-                Some(acc) => self.chain.add(&acc, &padded),
-            });
+            heads.push(self.chain.matmul(&weights, &vs));
         }
-        out.expect("n_heads ≥ 1")
+        let refs: Vec<&CudaMatrix> = heads.iter().collect();
+        self.chain.concat_cols(&refs)
     }
 
     /// One GQA transformer block (pre-norm + residual, attention then SwiGLU MLP).
@@ -308,58 +302,49 @@ impl CudaModel {
         let ch = &self.chain;
         let dh = self.d_model / self.n_heads;
         let seq = q.rows();
-        let kv_dim = self.n_kv_heads * dh;
         let qr = ch.rope(q, seq, 0, self.theta);
         let kr = ch.rope(k, seq, 0, self.theta);
         let repeat = self.n_heads / self.n_kv_heads;
         let scale = 1.0 / (dh as f32).sqrt();
-
-        let mut dqr: Option<CudaMatrix> = None;
-        let mut dkr: Option<CudaMatrix> = None;
-        let mut dvv: Option<CudaMatrix> = None;
+        let mut dq_heads = Vec::with_capacity(self.n_heads);
+        let mut dk_kv: Vec<Option<CudaMatrix>> = (0..self.n_kv_heads).map(|_| None).collect();
+        let mut dv_kv: Vec<Option<CudaMatrix>> = (0..self.n_kv_heads).map(|_| None).collect();
         for head in 0..self.n_heads
         {
             let kv = head / repeat;
             let qs = ch.slice_cols(&qr, head * dh, dh);
             let ks = ch.slice_cols(&kr, kv * dh, dh);
             let vs = ch.slice_cols(v, kv * dh, dh);
-            // Recompute this head's forward softmax weights.
             let scores = ch.matmul_bt(&qs, &ks);
             let scaled = ch.scale_causal_mask(&scores, scale, self.causal);
             let weights = ch.softmax(&scaled);
-            // Grad of this head's context = adjoint of place_cols = slice of dout.
             let d_ctx = ch.slice_cols(dout, head * dh, dh);
-            // Single-head attention adjoint.
-            let dweights = ch.matmul_bt(&d_ctx, &vs); // d_ctx·vsᵀ
-            let dvs = ch.matmul_at(&weights, &d_ctx); // weightsᵀ·d_ctx
+            let dweights = ch.matmul_bt(&d_ctx, &vs);
+            let dvs = ch.matmul_at(&weights, &d_ctx);
             let dscaled = ch.softmax_backward(&weights, &dweights);
             let dscores = ch.scale_causal_mask_backward(&dscaled, scale, self.causal);
-            let dqs = ch.matmul(&dscores, &ks); // dscores·ks
-            let dks = ch.matmul_at(&dscores, &qs); // dscoresᵀ·qs
-            // Scatter each head's grads back to full width and accumulate.
-            let dqs_full = ch.place_cols(&dqs, head * dh, self.d_model);
-            let dks_full = ch.place_cols(&dks, kv * dh, kv_dim);
-            let dvs_full = ch.place_cols(&dvs, kv * dh, kv_dim);
-            dqr = Some(match dqr
+            let dqs = ch.matmul(&dscores, &ks);
+            let dks = ch.matmul_at(&dscores, &qs);
+            dq_heads.push(dqs);
+            dk_kv[kv] = Some(match dk_kv[kv].take()
             {
-                None => dqs_full,
-                Some(acc) => ch.add(&acc, &dqs_full),
+                None => dks,
+                Some(acc) => ch.add(&acc, &dks),
             });
-            dkr = Some(match dkr
+            dv_kv[kv] = Some(match dv_kv[kv].take()
             {
-                None => dks_full,
-                Some(acc) => ch.add(&acc, &dks_full),
-            });
-            dvv = Some(match dvv
-            {
-                None => dvs_full,
-                Some(acc) => ch.add(&acc, &dvs_full),
+                None => dvs,
+                Some(acc) => ch.add(&acc, &dvs),
             });
         }
-        let dqr = dqr.expect("n_heads ≥ 1");
-        let dkr = dkr.expect("n_heads ≥ 1");
-        let dv = dvv.expect("n_heads ≥ 1");
-        // RoPE adjoint: qr = rope(q), kr = rope(k); v was not rotated.
+        let dq_refs: Vec<&CudaMatrix> = dq_heads.iter().collect();
+        let dk_refs: Vec<&CudaMatrix> =
+            dk_kv.iter().map(|x| x.as_ref().expect("kv grad")).collect();
+        let dv_refs: Vec<&CudaMatrix> =
+            dv_kv.iter().map(|x| x.as_ref().expect("kv grad")).collect();
+        let dqr = ch.concat_cols(&dq_refs);
+        let dkr = ch.concat_cols(&dk_refs);
+        let dv = ch.concat_cols(&dv_refs);
         let dq = ch.rope_backward(&dqr, seq, 0, self.theta);
         let dk = ch.rope_backward(&dkr, seq, 0, self.theta);
         (dq, dk, dv)
@@ -484,7 +469,7 @@ impl CudaModel {
         let kr = ch.rope(k, seq, 0, self.theta);
         let repeat = self.n_heads / self.n_kv_heads;
         let scale = 1.0 / (dh as f32).sqrt();
-        let mut out: Option<CudaMatrix> = None;
+        let mut heads = Vec::with_capacity(self.n_heads);
         let mut weights_all = Vec::with_capacity(self.n_heads);
         for head in 0..self.n_heads
         {
@@ -495,17 +480,12 @@ impl CudaModel {
             let scores = ch.matmul_bt(&qs, &ks);
             let scaled = ch.scale_causal_mask(&scores, scale, self.causal);
             let weights = ch.softmax(&scaled);
-            let ctx = ch.matmul(&weights, &vs);
-            let padded = ch.place_cols(&ctx, head * dh, self.d_model);
-            out = Some(match out
-            {
-                None => padded,
-                Some(acc) => ch.add(&acc, &padded),
-            });
+            heads.push(ch.matmul(&weights, &vs));
             weights_all.push(weights);
         }
+        let refs: Vec<&CudaMatrix> = heads.iter().collect();
         (
-            out.expect("n_heads >= 1"),
+            ch.concat_cols(&refs),
             CudaAttentionSequenceCache {
                 qr,
                 kr,
@@ -579,8 +559,6 @@ impl CudaModel {
             out,
             CudaBlockTrainCache {
                 xn,
-                q,
-                k,
                 v,
                 attention,
                 ctx,
@@ -639,12 +617,11 @@ impl CudaModel {
         let ch = &self.chain;
         let dh = self.d_model / self.n_heads;
         let seq = cache.qr.rows();
-        let kv_dim = self.n_kv_heads * dh;
         let repeat = self.n_heads / self.n_kv_heads;
         let scale = 1.0 / (dh as f32).sqrt();
-        let mut dqr: Option<CudaMatrix> = None;
-        let mut dkr: Option<CudaMatrix> = None;
-        let mut dvv: Option<CudaMatrix> = None;
+        let mut dq_heads = Vec::with_capacity(self.n_heads);
+        let mut dk_kv: Vec<Option<CudaMatrix>> = (0..self.n_kv_heads).map(|_| None).collect();
+        let mut dv_kv: Vec<Option<CudaMatrix>> = (0..self.n_kv_heads).map(|_| None).collect();
         for head in 0..self.n_heads
         {
             let kv = head / repeat;
@@ -659,28 +636,29 @@ impl CudaModel {
             let dscores = ch.scale_causal_mask_backward(&dscaled, scale, self.causal);
             let dqs = ch.matmul(&dscores, &ks);
             let dks = ch.matmul_at(&dscores, &qs);
-            let dqs_full = ch.place_cols(&dqs, head * dh, self.d_model);
-            let dks_full = ch.place_cols(&dks, kv * dh, kv_dim);
-            let dvs_full = ch.place_cols(&dvs, kv * dh, kv_dim);
-            dqr = Some(match dqr
+            dq_heads.push(dqs);
+            dk_kv[kv] = Some(match dk_kv[kv].take()
             {
-                None => dqs_full,
-                Some(acc) => ch.add(&acc, &dqs_full),
+                None => dks,
+                Some(acc) => ch.add(&acc, &dks),
             });
-            dkr = Some(match dkr
+            dv_kv[kv] = Some(match dv_kv[kv].take()
             {
-                None => dks_full,
-                Some(acc) => ch.add(&acc, &dks_full),
-            });
-            dvv = Some(match dvv
-            {
-                None => dvs_full,
-                Some(acc) => ch.add(&acc, &dvs_full),
+                None => dvs,
+                Some(acc) => ch.add(&acc, &dvs),
             });
         }
-        let dq = ch.rope_backward(&dqr.expect("heads"), seq, 0, self.theta);
-        let dk = ch.rope_backward(&dkr.expect("heads"), seq, 0, self.theta);
-        (dq, dk, dvv.expect("heads"))
+        let dq_refs: Vec<&CudaMatrix> = dq_heads.iter().collect();
+        let dk_refs: Vec<&CudaMatrix> =
+            dk_kv.iter().map(|x| x.as_ref().expect("kv grad")).collect();
+        let dv_refs: Vec<&CudaMatrix> =
+            dv_kv.iter().map(|x| x.as_ref().expect("kv grad")).collect();
+        let dqr = ch.concat_cols(&dq_refs);
+        let dkr = ch.concat_cols(&dk_refs);
+        let dv = ch.concat_cols(&dv_refs);
+        let dq = ch.rope_backward(&dqr, seq, 0, self.theta);
+        let dk = ch.rope_backward(&dkr, seq, 0, self.theta);
+        (dq, dk, dv)
     }
 
     fn attention_backward_cached(
