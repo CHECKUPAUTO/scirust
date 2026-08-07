@@ -189,14 +189,7 @@ fn cpu_sliding_latent_block(
             .iter()
             .map(|row| row[start..start + block.mha.d_head].to_vec())
             .collect();
-        let context = latent_attention(
-            query,
-            &keys,
-            &values,
-            basis,
-            block.mha.d_head,
-            rank,
-        );
+        let context = latent_attention(query, &keys, &values, basis, block.mha.d_head, rank);
         combined[start..start + block.mha.d_head].copy_from_slice(&context);
     }
 

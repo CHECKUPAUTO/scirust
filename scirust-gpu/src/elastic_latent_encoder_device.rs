@@ -494,8 +494,14 @@ impl WgpuResidentTransformerEncoder {
             ),
         )?;
 
-        ensure_wgpu_indexable(weights_data.len(), "packed encoder weights exceed WGPU u32 range")?;
-        ensure_wgpu_indexable(bases_data.len(), "packed encoder bases exceed WGPU u32 range")?;
+        ensure_wgpu_indexable(
+            weights_data.len(),
+            "packed encoder weights exceed WGPU u32 range",
+        )?;
+        ensure_wgpu_indexable(
+            bases_data.len(),
+            "packed encoder bases exceed WGPU u32 range",
+        )?;
         ensure_wgpu_indexable(
             state_data_elements,
             "resident transformer encoder state exceeds WGPU u32 range",
@@ -824,11 +830,12 @@ fn validate_block_shapes(
             "resident transformer encoder requires uniform block topology",
         ));
     }
-    let model_matrix = d_model.checked_mul(d_model).ok_or(
-        WgpuResidentTransformerEncoderError::InvalidConfig(
-            "resident transformer encoder model matrix overflows usize",
-        ),
-    )?;
+    let model_matrix =
+        d_model
+            .checked_mul(d_model)
+            .ok_or(WgpuResidentTransformerEncoderError::InvalidConfig(
+                "resident transformer encoder model matrix overflows usize",
+            ))?;
     for linear in [
         &block.mha.w_q,
         &block.mha.w_k,
@@ -940,11 +947,12 @@ fn pack_bases(
     d_head: usize,
     rank: usize,
 ) -> Result<Vec<f32>, WgpuResidentTransformerEncoderError> {
-    let per_head = d_head.checked_mul(rank).ok_or(
-        WgpuResidentTransformerEncoderError::InvalidConfig(
-            "resident transformer encoder basis shape overflows usize",
-        ),
-    )?;
+    let per_head =
+        d_head
+            .checked_mul(rank)
+            .ok_or(WgpuResidentTransformerEncoderError::InvalidConfig(
+                "resident transformer encoder basis shape overflows usize",
+            ))?;
     let head_count = layers
         .iter()
         .try_fold(0usize, |count, layer| count.checked_add(layer.heads.len()))
@@ -986,9 +994,7 @@ fn binding<'a>(
     }
 }
 
-fn bytes_for_f32(
-    elements: usize,
-) -> Result<usize, WgpuResidentTransformerEncoderError> {
+fn bytes_for_f32(elements: usize) -> Result<usize, WgpuResidentTransformerEncoderError> {
     elements
         .checked_mul(F32_BYTES)
         .ok_or(WgpuResidentTransformerEncoderError::InvalidConfig(
