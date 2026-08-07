@@ -19,6 +19,7 @@ pub mod dora;
 pub mod dropout;
 pub mod elastic_kv_cache;
 pub mod elastic_latent_runtime;
+pub mod elastic_latent_transformer;
 pub mod embedding;
 pub mod ensemble;
 pub mod fno;
@@ -74,6 +75,10 @@ pub use certified::{CertifiedModule, Contract, ValueBoundedContract};
 pub use conv_utils::{ConvConfig, Padding};
 pub use conv2d::Conv2d;
 pub use dropout::Dropout;
+pub use elastic_latent_transformer::{
+    ElasticLatentEncoderSession, ElasticLatentInferStep, ElasticLatentLayerConfig,
+    ElasticLatentTransformerError,
+};
 pub use embedding::Embedding;
 pub use fused_ops::{
     FusedKernelOp, matmul_gelu, matmul_layernorm, matmul_relu, matmul_scale, matmul_silu,
