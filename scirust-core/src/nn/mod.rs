@@ -1,6 +1,9 @@
 // scirust-core/src/nn/mod.rs
 
 pub mod activation;
+pub mod adaptive_latent_basis;
+pub mod adaptive_latent_kv;
+pub mod adaptive_latent_kv_backend;
 pub mod audio;
 pub mod batch_norm;
 pub mod batch_norm_2d;
@@ -15,6 +18,8 @@ pub mod deeponet;
 pub mod dora;
 pub mod dropout;
 pub mod elastic_kv_cache;
+pub mod elastic_latent_runtime;
+pub mod elastic_latent_transformer;
 pub mod embedding;
 pub mod ensemble;
 pub mod fno;
@@ -28,6 +33,10 @@ pub mod init;
 pub mod intervals;
 pub mod kan;
 pub mod kv_backend;
+pub mod latent_kv_backend;
+pub mod latent_kv_cache;
+pub mod latent_kv_kernels;
+pub mod latent_kv_lifecycle;
 pub mod layer_norm;
 pub mod linear;
 pub mod lipschitz;
@@ -44,11 +53,16 @@ pub mod pinn;
 pub mod pool;
 pub mod positional_encoding;
 pub mod residual;
+pub mod residual_latent_kv_backend;
+#[allow(clippy::too_many_arguments)]
+pub mod residual_latent_kv_cache;
 pub mod rng;
 pub mod rope;
 pub mod sampling;
 pub mod sequential;
 pub mod smoothing;
+#[allow(dead_code)]
+pub mod tiered_latent_kv_backend;
 pub mod transformer;
 pub mod tt_linear;
 pub mod vision;
@@ -64,6 +78,10 @@ pub use certified::{CertifiedModule, Contract, ValueBoundedContract};
 pub use conv_utils::{ConvConfig, Padding};
 pub use conv2d::Conv2d;
 pub use dropout::Dropout;
+pub use elastic_latent_transformer::{
+    ElasticLatentEncoderSession, ElasticLatentInferStep, ElasticLatentLayerConfig,
+    ElasticLatentTransformerError,
+};
 pub use embedding::Embedding;
 pub use fused_ops::{
     FusedKernelOp, matmul_gelu, matmul_layernorm, matmul_relu, matmul_scale, matmul_silu,
@@ -84,6 +102,9 @@ pub use positional_encoding::PositionalEncoding;
 pub use residual::ResidualBlock;
 pub use rng::PcgEngine;
 pub use sequential::Sequential;
+pub use tiered_latent_kv_backend::{
+    TieredLatentBackendError, TieredLatentTelemetry, TieredResidualLatentBackend,
+};
 pub use transformer::{MultiHeadAttention, TransformerBlock, TransformerEncoder};
 pub use tt_linear::{TTLinear, tt_decompose, tt_decompose_auto};
 pub use vision::ResNet;
