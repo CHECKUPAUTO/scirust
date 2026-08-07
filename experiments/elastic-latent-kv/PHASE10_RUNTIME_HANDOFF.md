@@ -36,9 +36,9 @@ common_version = min(key.current_version(), value.current_version())
 ```
 
 and loads the immutable key and value snapshots for that same version. This is
-the newest version known to be committed by both channels. A faster-moving
-channel therefore cannot silently pair a newer basis with an older one under a
-single token version.
+the newest ordinal version known to be committed by both channels. A
+faster-moving channel therefore cannot silently pair its newest basis with an
+older channel under a single token version.
 
 ## Runtime factories
 
@@ -48,8 +48,10 @@ The public handoff API exposes:
   immutable committed snapshots;
 - `LearnedHeadBasis` — key/value learners and quality profile for one attention
   head;
+- `ResolvedHeadCalibration` — construction-time owned carrier for one resolved
+  committed K/V version;
 - `resolve_committed_head_calibration` — resolves one head to the newest common
-  committed version;
+  committed version and validates the learned rank against the runtime policy;
 - `runtime_from_committed_bases` — creates a fresh
   `ElasticLatentDecodeRuntime` directly from learned heads;
 - `LearnedLayerBasis` — runtime policy plus learned heads for one Transformer
@@ -61,16 +63,28 @@ Existing `HeadCalibration`, `ElasticLatentDecodeRuntime::new`,
 `ElasticLatentEncoderSession::new`, and the historical dense Transformer APIs
 remain unchanged.
 
-## Basis shape contract
+## Lower-rank learned bases
 
-The current Phase 13 tiered backend accepts a full row-major
-`[d_head, d_head]` basis because the Phase 9 planner may select any prefix rank
-up to the dense head dimension. Consequently, a learner used by this handoff
-must currently be configured with `dimension == rank == d_head`.
+Online learning is useful when `rank < d_head`; forcing a square learned basis
+would make a full orthonormal basis span the whole head space and leave no
+reconstruction residual for the Oja update to learn from.
 
-Lower-rank online learners remain valid Phase 10 learners, but they cannot be
-fed directly into this Phase 13 factory until the backend supports an explicit
-maximum learned rank or a deterministic orthogonal completion policy.
+Phase 13 currently accepts a square row-major `[d_head, d_head]` basis carrier.
+The handoff therefore materializes a construction-time square carrier without
+changing the learned subspace:
+
+1. the exact committed `[d_head, learned_rank]` columns are copied into the
+   leading columns of the square carrier;
+2. columns `learned_rank..d_head` are zero-filled;
+3. the handoff rejects the runtime if `maximum_rank` exceeds either the learned
+   key rank or learned value rank.
+
+The zero-filled columns are therefore structural padding only and can never be
+selected by the Phase 9 planner. Tiered Phase 11 storage receives exactly the
+same learned prefix columns that were archived at the Phase 10 commit.
+
+This keeps the existing Phase 13 backend API stable while allowing actual
+lower-rank online bases to drive future cache epochs.
 
 ## Epoch semantics
 
@@ -78,10 +92,13 @@ maximum learned rank or a deterministic orthogonal completion policy.
 2. Phase 10 quality gates decide independently whether each channel commits.
 3. Open a new Phase 13 runtime/session.
 4. The factory resolves the highest common committed K/V version for each head.
-5. Phase 13 copies those bases into its preallocated tiered caches.
-6. Later observations may advance the online learners, but the running runtime
+5. It validates that the runtime's `maximum_rank` is supported by both learned
+   bases and materializes square construction-time carriers.
+6. Phase 13 copies the selected learned prefix columns into its preallocated
+   tiered caches.
+7. Later observations may advance the online learners, but the running runtime
    remains bound to its construction epoch.
-7. Open another runtime/session to consume later common commits.
+8. Open another runtime/session to consume later common commits.
 
 This preserves the Phase 10 rule that committed versions apply only to future
 cache epochs and the Phase 11 rule that resident tokens retain the basis version
@@ -94,9 +111,11 @@ metadata capacity and the basis snapshot storage are reserved during
 construction. Snapshot lookup is deterministic and scans the bounded version
 metadata in commit order.
 
-Runtime/session construction may allocate because Phase 13 already allocates
-its bounded cache structures at construction. No new allocation claim is made
-for construction itself or for the surrounding legacy tape-based Transformer.
+Square carrier materialization occurs only while opening a fresh runtime/session
+and follows fixed row-major copy order. Runtime/session construction may allocate
+because Phase 13 already allocates its bounded cache structures at construction.
+No new allocation claim is made for construction itself or for the surrounding
+legacy tape-based Transformer.
 
 ## Validation
 
@@ -111,5 +130,6 @@ cargo +1.89.0 test -p scirust-core elastic_latent_encoder_handoff --locked -- --
 ```
 
 The tests cover immutable snapshot preservation across later training, highest
-common K/V version resolution, direct Phase 13 runtime construction, and direct
-Transformer session construction.
+common K/V version resolution, lower-rank square-carrier preservation, direct
+Phase 13 runtime construction from learned lower-rank bases, and direct
+Transformer session construction from learned lower-rank bases.
