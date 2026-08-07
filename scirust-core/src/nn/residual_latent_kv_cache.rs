@@ -1612,16 +1612,21 @@ mod tests {
         }
         let mut key = [0.0; 4];
         let mut value = [0.0; 4];
-        cache.reconstruct_token_into(0, &mut key, &mut value).unwrap();
+        cache
+            .reconstruct_token_into(0, &mut key, &mut value)
+            .unwrap();
         assert_eq!(key, rows[0].0);
         assert_eq!(value, rows[0].1);
         cache.remove_oldest().unwrap();
         assert_eq!(cache.len(), 2);
         assert_eq!(cache.allocated_bytes(), allocated);
-        cache.reconstruct_token_into(0, &mut key, &mut value).unwrap();
+        cache
+            .reconstruct_token_into(0, &mut key, &mut value)
+            .unwrap();
         assert_eq!(key, rows[1].0);
         assert_eq!(value, rows[1].1);
-        cache.append(&[13.0, 14.0, 15.0, 16.0], &[-13.0, -14.0, -15.0, -16.0])
+        cache
+            .append(&[13.0, 14.0, 15.0, 16.0], &[-13.0, -14.0, -15.0, -16.0])
             .unwrap();
         assert_eq!(cache.len(), 3);
         assert_eq!(cache.allocated_bytes(), allocated);
