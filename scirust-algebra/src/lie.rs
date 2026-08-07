@@ -1,6 +1,6 @@
 //! Lie groups, Lie algebras and geometric algebra.
 
-use crate::core::{Field, LieAlgebra};
+use crate::core::{Field, LieAlgebra, Ring};
 
 /// Three-vector used by `so(3)` and `SE(3)`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
