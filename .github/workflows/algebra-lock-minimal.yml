@@ -21,12 +21,12 @@ jobs:
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: nightly-2026-07-02
-      - name: Restore pre-refresh lock and let Cargo minimally amend it
+      - name: Restore pre-refresh lock and minimally resolve workspace
         shell: bash
         run: |
           set -euo pipefail
           git checkout 2ff57250b55ec2bbc0d8af5fb4cd0d7d41a135d1 -- Cargo.lock
-          cargo check -p scirust-algebra
+          cargo metadata --format-version 1 --no-deps >/dev/null
       - name: Commit minimal lock update and remove one-shot workflow
         shell: bash
         run: |
