@@ -159,15 +159,57 @@ impl CudaModel {
         self.vocab
     }
 
+    /// Apply the existing narrow-matrix RoPE kernel independently to each logical
+    /// head, then concatenate the disjoint head blocks. This is the GQA-correct
+    /// rotary basis: frequency index zero restarts for every d_head slice.
+    fn rope_heads(
+        &self,
+        x: &CudaMatrix,
+        n_heads: usize,
+        seq_len: usize,
+        offset: usize,
+    ) -> CudaMatrix {
+        assert!(n_heads > 0 && x.cols().is_multiple_of(n_heads));
+        let dh = x.cols() / n_heads;
+        assert!(dh.is_multiple_of(2));
+        let mut heads = Vec::with_capacity(n_heads);
+        for head in 0..n_heads
+        {
+            let raw = self.chain.slice_cols(x, head * dh, dh);
+            heads.push(self.chain.rope(&raw, seq_len, offset, self.theta));
+        }
+        let refs: Vec<&CudaMatrix> = heads.iter().collect();
+        self.chain.concat_cols(&refs)
+    }
+
+    fn rope_heads_backward(
+        &self,
+        dy: &CudaMatrix,
+        n_heads: usize,
+        seq_len: usize,
+        offset: usize,
+    ) -> CudaMatrix {
+        assert!(n_heads > 0 && dy.cols().is_multiple_of(n_heads));
+        let dh = dy.cols() / n_heads;
+        let mut heads = Vec::with_capacity(n_heads);
+        for head in 0..n_heads
+        {
+            let raw = self.chain.slice_cols(dy, head * dh, dh);
+            heads.push(self.chain.rope_backward(&raw, seq_len, offset, self.theta));
+        }
+        let refs: Vec<&CudaMatrix> = heads.iter().collect();
+        self.chain.concat_cols(&refs)
+    }
+
     /// Multi-head grouped-query attention over `q` (`t×d_model`) and `k`/`v`
-    /// (`t×kv_dim`), matching `GpuChain::gqa_attention`: RoPE the full-width q/k,
+    /// (`t×kv_dim`), matching `GpuChain::gqa_attention`: apply RoPE independently inside every logical head,
     /// then per head `softmax((qs·ksᵀ)/√dh [+causal])·vs`, placed into the head's
     /// `d_model` slot and summed.
     fn attention(&self, q: &CudaMatrix, k: &CudaMatrix, v: &CudaMatrix) -> CudaMatrix {
         let dh = self.d_model / self.n_heads;
         let seq = q.rows();
-        let qr = self.chain.rope(q, seq, 0, self.theta);
-        let kr = self.chain.rope(k, seq, 0, self.theta);
+        let qr = self.rope_heads(q, self.n_heads, seq, 0);
+        let kr = self.rope_heads(k, self.n_kv_heads, seq, 0);
         let repeat = self.n_heads / self.n_kv_heads;
         let scale = 1.0 / (dh as f32).sqrt();
         let mut heads = Vec::with_capacity(self.n_heads);
@@ -344,7 +386,7 @@ impl CudaModel {
             let ctx = self.attention(&q, &k, &v);
             // `attention` computes the same K RoPE internally; retain an identical
             // resident copy here so future queries can attend without re-prefill.
-            kcache[layer] = Some(ch.rope(&k, p, 0, self.theta));
+            kcache[layer] = Some(self.rope_heads(&k, self.n_kv_heads, p, 0));
             vcache[layer] = Some(v);
             let attn_out = ch.matmul(&ctx, &b.wo);
             let h = ch.add(&x, &attn_out);
@@ -381,8 +423,8 @@ impl CudaModel {
             let q = ch.matmul(&xn, &b.wq);
             let k = ch.matmul(&xn, &b.wk);
             let v = ch.matmul(&xn, &b.wv);
-            let qr = ch.rope(&q, 1, pos, self.theta);
-            let kr = ch.rope(&k, 1, pos, self.theta);
+            let qr = self.rope_heads(&q, self.n_heads, 1, pos);
+            let kr = self.rope_heads(&k, self.n_kv_heads, 1, pos);
 
             kcache[layer] = Some(match kcache[layer].take()
             {
@@ -471,8 +513,8 @@ impl CudaModel {
         let ch = &self.chain;
         let dh = self.d_model / self.n_heads;
         let seq = q.rows();
-        let qr = ch.rope(q, seq, 0, self.theta);
-        let kr = ch.rope(k, seq, 0, self.theta);
+        let qr = self.rope_heads(q, self.n_heads, seq, 0);
+        let kr = self.rope_heads(k, self.n_kv_heads, seq, 0);
         let repeat = self.n_heads / self.n_kv_heads;
         let scale = 1.0 / (dh as f32).sqrt();
         let mut dq_heads = Vec::with_capacity(self.n_heads);
@@ -514,8 +556,8 @@ impl CudaModel {
         let dqr = ch.concat_cols(&dq_refs);
         let dkr = ch.concat_cols(&dk_refs);
         let dv = ch.concat_cols(&dv_refs);
-        let dq = ch.rope_backward(&dqr, seq, 0, self.theta);
-        let dk = ch.rope_backward(&dkr, seq, 0, self.theta);
+        let dq = self.rope_heads_backward(&dqr, self.n_heads, seq, 0);
+        let dk = self.rope_heads_backward(&dkr, self.n_kv_heads, seq, 0);
         (dq, dk, dv)
     }
 
@@ -634,8 +676,8 @@ impl CudaModel {
         let ch = &self.chain;
         let dh = self.d_model / self.n_heads;
         let seq = q.rows();
-        let qr = ch.rope(q, seq, 0, self.theta);
-        let kr = ch.rope(k, seq, 0, self.theta);
+        let qr = self.rope_heads(q, self.n_heads, seq, 0);
+        let kr = self.rope_heads(k, self.n_kv_heads, seq, 0);
         let repeat = self.n_heads / self.n_kv_heads;
         let scale = 1.0 / (dh as f32).sqrt();
         let mut heads = Vec::with_capacity(self.n_heads);
@@ -825,8 +867,8 @@ impl CudaModel {
         let dqr = ch.concat_cols(&dq_refs);
         let dkr = ch.concat_cols(&dk_refs);
         let dv = ch.concat_cols(&dv_refs);
-        let dq = ch.rope_backward(&dqr, seq, 0, self.theta);
-        let dk = ch.rope_backward(&dkr, seq, 0, self.theta);
+        let dq = self.rope_heads_backward(&dqr, self.n_heads, seq, 0);
+        let dk = self.rope_heads_backward(&dkr, self.n_kv_heads, seq, 0);
         (dq, dk, dv)
     }
 
