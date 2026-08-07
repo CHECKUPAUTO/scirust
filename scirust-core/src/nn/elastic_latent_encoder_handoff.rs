@@ -44,8 +44,12 @@ impl fmt::Display for EncoderBasisHandoffError {
                 output,
                 "learned layer count mismatch: expected {expected}, got {actual}"
             ),
-            Self::Head { layer, source } => {
-                write!(output, "elastic basis handoff failed for layer {layer}: {source}")
+            Self::Head { layer, source } =>
+            {
+                write!(
+                    output,
+                    "elastic basis handoff failed for layer {layer}: {source}"
+                )
             },
             Self::Session(error) => write!(output, "{error}"),
         }
@@ -180,8 +184,7 @@ mod tests {
         const RANK_QUALITY: [u16; 2] = [5_000, 10_000];
         const RESIDUAL_GAIN: [u16; 1] = [0];
         let mut rng = PcgEngine::new(211);
-        let encoder =
-            TransformerEncoder::new(1, 2, 1, 4, true, &KaimingNormal, &Zeros, &mut rng);
+        let encoder = TransformerEncoder::new(1, 2, 1, 4, true, &KaimingNormal, &Zeros, &mut rng);
         let mut key = CommittedBasisLearner::new(learner_config(2), identity(2)).unwrap();
         let mut value = CommittedBasisLearner::new(learner_config(2), identity(2)).unwrap();
         key.observe(&[1.0, 0.0]).unwrap();
