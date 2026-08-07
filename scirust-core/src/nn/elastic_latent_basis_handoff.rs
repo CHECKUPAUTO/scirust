@@ -158,7 +158,10 @@ impl fmt::Display for BasisHandoffError {
         match self
         {
             Self::Learning(error) => write!(output, "{error}"),
-            Self::ArchiveCapacityOverflow => write!(output, "committed basis archive size overflow"),
+            Self::ArchiveCapacityOverflow =>
+            {
+                write!(output, "committed basis archive size overflow")
+            },
             Self::HeadCount { expected, actual } => write!(
                 output,
                 "learned head count mismatch: expected {expected}, got {actual}"
@@ -345,11 +348,8 @@ mod tests {
 
     #[test]
     fn committed_snapshot_survives_future_training() {
-        let mut learner = CommittedBasisLearner::new(
-            learner_config(3, 2),
-            identity_prefix(3, 2),
-        )
-        .unwrap();
+        let mut learner =
+            CommittedBasisLearner::new(learner_config(3, 2), identity_prefix(3, 2)).unwrap();
         let first = learner.observe(&[1.0, 0.0, 1.0]).unwrap();
         let version = first.committed.expect("first sample commits");
         let fingerprint = basis_fingerprint(learner.committed_basis(version.version).unwrap());
