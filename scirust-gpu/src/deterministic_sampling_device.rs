@@ -216,13 +216,8 @@ fn main() {
 #[derive(Debug)]
 pub enum WgpuDeterministicSamplerError {
     InvalidConfig(&'static str),
-    LogitLength {
-        expected: usize,
-        actual: usize,
-    },
-    NonFiniteLogit {
-        index: usize,
-    },
+    LogitLength { expected: usize, actual: usize },
+    NonFiniteLogit { index: usize },
     Compute(ComputeError),
 }
 
@@ -235,7 +230,8 @@ impl fmt::Display for WgpuDeterministicSamplerError {
                 output,
                 "sampler logits length mismatch: expected {expected}, got {actual}"
             ),
-            Self::NonFiniteLogit { index } => {
+            Self::NonFiniteLogit { index } =>
+            {
                 write!(output, "sampler logit at index {index} is not finite")
             },
             Self::Compute(error) => write!(output, "{error}"),
@@ -307,9 +303,12 @@ impl WgpuDeterministicSampler {
         ];
 
         let logits_bytes = bytes_for_f32(vocab_size)?;
-        let scratch_elements = vocab_size.checked_mul(2).ok_or(
-            WgpuDeterministicSamplerError::InvalidConfig("sampler scratch size overflows usize"),
-        )?;
+        let scratch_elements =
+            vocab_size
+                .checked_mul(2)
+                .ok_or(WgpuDeterministicSamplerError::InvalidConfig(
+                    "sampler scratch size overflows usize",
+                ))?;
         let scratch_bytes = bytes_for_f32(scratch_elements)?;
         let state_bytes = STATE_WORDS.checked_mul(U32_BYTES).ok_or(
             WgpuDeterministicSamplerError::InvalidConfig("sampler state size overflows usize"),
@@ -353,10 +352,7 @@ impl WgpuDeterministicSampler {
         }
     }
 
-    pub fn sample(
-        &mut self,
-        logits: &[f32],
-    ) -> Result<usize, WgpuDeterministicSamplerError> {
+    pub fn sample(&mut self, logits: &[f32]) -> Result<usize, WgpuDeterministicSamplerError> {
         if logits.len() != self.vocab_size
         {
             return Err(WgpuDeterministicSamplerError::LogitLength {
@@ -364,7 +360,10 @@ impl WgpuDeterministicSampler {
                 actual: logits.len(),
             });
         }
-        if let Some((index, _)) = logits.iter().enumerate().find(|(_, value)| !value.is_finite())
+        if let Some((index, _)) = logits
+            .iter()
+            .enumerate()
+            .find(|(_, value)| !value.is_finite())
         {
             return Err(WgpuDeterministicSamplerError::NonFiniteLogit { index });
         }
@@ -389,11 +388,8 @@ impl WgpuDeterministicSampler {
 
     fn config_consumes_rng(&self) -> Result<bool, WgpuDeterministicSamplerError> {
         let mut words = [0u32; 3];
-        self.adapter.read(
-            &self.state,
-            U32_BYTES,
-            bytemuck::cast_slice_mut(&mut words),
-        )?;
+        self.adapter
+            .read(&self.state, U32_BYTES, bytemuck::cast_slice_mut(&mut words))?;
         let temperature = f32::from_bits(words[0]);
         let top_k = words[1];
         Ok(temperature > 0.0 && top_k != 1)
@@ -476,9 +472,6 @@ fn bytes_for_f32(elements: usize) -> Result<usize, WgpuDeterministicSamplerError
         ))
 }
 
-fn usize_to_u32(
-    value: usize,
-    message: &'static str,
-) -> Result<u32, WgpuDeterministicSamplerError> {
+fn usize_to_u32(value: usize, message: &'static str) -> Result<u32, WgpuDeterministicSamplerError> {
     u32::try_from(value).map_err(|_| WgpuDeterministicSamplerError::InvalidConfig(message))
 }

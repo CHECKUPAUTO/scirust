@@ -70,6 +70,8 @@ pub mod deterministic;
 #[cfg(feature = "wgpu")]
 mod deterministic_gpu;
 #[cfg(feature = "wgpu")]
+mod deterministic_sampling_device;
+#[cfg(feature = "wgpu")]
 mod elastic_latent_block_device;
 #[cfg(feature = "wgpu")]
 mod elastic_latent_device;
@@ -115,6 +117,10 @@ pub use cuda_reference::{
 };
 #[cfg(feature = "wgpu")]
 pub use deterministic_gpu::{DeterministicGpu, DeterministicValidator};
+#[cfg(feature = "wgpu")]
+pub use deterministic_sampling_device::{
+    WgpuDeterministicSampler, WgpuDeterministicSamplerError, WgpuDeterministicSamplerTelemetry,
+};
 #[cfg(feature = "wgpu")]
 pub use elastic_latent_block_device::{
     WgpuResidentTransformerBlock, WgpuResidentTransformerBlockError,
