@@ -1,6 +1,12 @@
 name: SciAgent B36 distributed validation
 
 on:
+  push:
+    branches:
+      - fix/sciagent-b36-distributed-validation
+    paths:
+      - scripts/sciagent_b36_patch.py
+      - .github/workflows/sciagent-b36-apply.yml
   pull_request:
     branches:
       - fix/sciagent-b35-deterministic-gradnorm
@@ -10,6 +16,7 @@ permissions:
 
 jobs:
   apply-and-validate:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,7 +32,7 @@ jobs:
       - name: Check CUDA pretrain
         run: cargo check -p scirust-sciagent --features cuda --example cuda_pretrain
       - name: Check CUDA eval
-        run: cargo check -p scirust-sciagent --features cuda --example cuda_eval
+        run: cargo check -p scirust-sciagent --features cuda,eval --example cuda_eval
       - name: Compile CUDA parity
         run: cargo test -p scirust-sciagent --features cuda --test cuda_parity --no-run
       - name: Remove one-shot helpers
