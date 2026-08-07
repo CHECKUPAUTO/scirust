@@ -8,8 +8,8 @@
   "generated": true,
   "summary": {
     "total": 74,
-    "parity": 64,
-    "experimental": 4,
+    "parity": 68,
+    "experimental": 0,
     "missing": 6
   },
   "families": {
@@ -45,8 +45,8 @@
     },
     "linear": {
       "total": 11,
-      "parity": 5,
-      "experimental": 2,
+      "parity": 7,
+      "experimental": 0,
       "missing": 4
     },
     "loss": {
@@ -87,8 +87,8 @@
     },
     "sparse": {
       "total": 3,
-      "parity": 0,
-      "experimental": 2,
+      "parity": 2,
+      "experimental": 0,
       "missing": 1
     },
     "special": {
@@ -347,7 +347,12 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "experimental"
+      "status": "parity",
+      "verified": {
+        "harness": "scirust-core/tests/parity_differential.rs",
+        "fixtures": "tests/parity/fixtures",
+        "on": "2026-08-04"
+      }
     },
     {
       "name": "conv1d",
@@ -584,7 +589,12 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "experimental"
+      "status": "parity",
+      "verified": {
+        "harness": "scirust-core/tests/parity_differential.rs",
+        "fixtures": "tests/parity/fixtures",
+        "on": "2026-08-04"
+      }
     },
     {
       "name": "embedding",
@@ -905,8 +915,13 @@
         "atol": 1e-8,
         "rtol": 1e-8
       },
-      "status": "experimental",
-      "notes": "SparseLu::solve, f64 only"
+      "status": "parity",
+      "notes": "SparseLu::solve, f64 only",
+      "verified": {
+        "harness": "scirust-core/tests/parity_differential.rs",
+        "fixtures": "tests/parity/fixtures",
+        "on": "2026-08-04"
+      }
     },
     {
       "name": "matmul",
@@ -1521,8 +1536,13 @@
         "atol": 1e-10,
         "rtol": 1e-10
       },
-      "status": "experimental",
-      "notes": "csr spmv + spmm_dense; f64 only"
+      "status": "parity",
+      "notes": "csr spmv + spmm_dense; f64 only",
+      "verified": {
+        "harness": "scirust-core/tests/parity_differential.rs",
+        "fixtures": "tests/parity/fixtures",
+        "on": "2026-08-04"
+      }
     },
     {
       "name": "sqrt",

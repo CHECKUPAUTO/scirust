@@ -110,6 +110,10 @@ struct Case {
     gb: Vec<f32>,
     #[serde(default)]
     gw: Vec<f32>,
+    #[serde(default)]
+    spec: Option<String>,
+    #[serde(default)]
+    shapes: Option<Vec<Vec<usize>>>,
 }
 
 fn fixtures_dir() -> PathBuf {
@@ -1557,6 +1561,179 @@ fn parity_convolution() {
             &c.gx,
             1e-5,
             1e-5,
+        );
+    }
+}
+
+/// cholesky (row linalg) : forward only (autograd false), SPD A=M·Mᵀ+0.5I,
+/// L inférieur retourné par torch.linalg.cholesky.
+#[test]
+fn parity_linalg_cholesky() {
+    let fx = load_fixture("linalg", "cholesky");
+    assert_eq!(fx.dtype, "f32");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        assert_eq!(c.kind, "cholesky", "case {ci}");
+        assert_eq!(c.shape.len(), 2, "cholesky case {ci}: doit être 2-D");
+        let n = c.shape[0];
+        assert_eq!(c.shape[1], n, "cholesky case {ci}: carrée");
+        let a = tensor(&c.a, &[n, n]);
+        let l = parity::cholesky(&a).unwrap_or_else(|e| panic!("cholesky case {ci}: {e}"));
+        assert_eq!(l.shape, vec![n, n]);
+        assert_close(
+            &format!("cholesky fwd c{ci}"),
+            l.data.as_ref(),
+            &c.y,
+            1e-4,
+            1e-4,
+        );
+    }
+}
+
+/// spmv/spmm CSR (rows sparse) : f64, forward only, tol registre 1e-10.
+/// Fixtures lues via serde_json::Value (cf. parity_special_f64).
+#[test]
+fn parity_sparse_spmv() {
+    let txt = fs::read_to_string(fixtures_dir().join("sparse").join("spmv.json")).unwrap();
+    let fx: serde_json::Value = serde_json::from_str(&txt).unwrap();
+    assert_eq!(fx["dtype"], "f64");
+    for (ci, c) in fx["cases"].as_array().unwrap().iter().enumerate()
+    {
+        let _n = c["n"].as_u64().unwrap() as usize;
+        let rowptr: Vec<usize> = c["rowptr"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_u64().unwrap() as usize)
+            .collect();
+        let colidx: Vec<usize> = c["colidx"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_u64().unwrap() as usize)
+            .collect();
+        let values: Vec<f64> = c["values"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect();
+        let x: Vec<f64> = c["x"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect();
+        let b: Vec<f64> = c["b"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect();
+        let yv: Vec<f64> = c["yv"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect();
+        let ym: Vec<f64> = c["ym"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect();
+        let got_v = parity::spmv_csr(&rowptr, &colidx, &values, &x)
+            .unwrap_or_else(|e| panic!("spmv case {ci}: {e}"));
+        assert_close64(&format!("spmv fwd c{ci}"), &got_v, &yv, 1e-10, 1e-10);
+        let got_m = parity::spmm_csr(&rowptr, &colidx, &values, &b, 2)
+            .unwrap_or_else(|e| panic!("spmm case {ci}: {e}"));
+        assert_close64(&format!("spmm fwd c{ci}"), &got_m, &ym, 1e-10, 1e-10);
+    }
+}
+
+/// lu_solve (row sparse) : solve A·x=b en f64, tol registre 1e-8.
+#[test]
+fn parity_sparse_lu_solve() {
+    let txt = fs::read_to_string(fixtures_dir().join("sparse").join("lu_solve.json")).unwrap();
+    let fx: serde_json::Value = serde_json::from_str(&txt).unwrap();
+    assert_eq!(fx["dtype"], "f64");
+    for (ci, c) in fx["cases"].as_array().unwrap().iter().enumerate()
+    {
+        let n = c["n"].as_u64().unwrap() as usize;
+        let a: Vec<f64> = c["a"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect();
+        let b1: Vec<f64> = c["b1"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect();
+        let b2: Vec<f64> = c["b2"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect();
+        let y1: Vec<f64> = c["y1"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect();
+        let y2: Vec<f64> = c["y2"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect();
+        let got1 = parity::lu_solve_f64(&a, &b1, n, 1)
+            .unwrap_or_else(|e| panic!("lu_solve case {ci}: {e}"));
+        assert_close64(&format!("lu_solve 1col c{ci}"), &got1, &y1, 1e-8, 1e-8);
+        let got2 = parity::lu_solve_f64(&a, &b2, n, 2)
+            .unwrap_or_else(|e| panic!("lu_solve 2col case {ci}: {e}"));
+        assert_close64(&format!("lu_solve 2col c{ci}"), &got2, &y2, 1e-8, 1e-8);
+    }
+}
+
+/// einsum (row linear) : forward only, subset 5 specs (2 opérandes,
+/// transposée, 3 opérandes, diagonale, scalaire).
+#[test]
+fn parity_linear_einsum() {
+    let fx = load_fixture("einsum", "einsum");
+    assert_eq!(fx.dtype, "f32");
+    for (ci, c) in fx.cases.iter().enumerate()
+    {
+        let shapes = c
+            .shapes
+            .as_ref()
+            .unwrap_or_else(|| panic!("einsum case {ci}: shapes requis"));
+        let operands: Vec<Vec<f32>> = [&c.x, &c.a, &c.b]
+            .iter()
+            .take(shapes.len())
+            .map(|d| (*d).clone())
+            .collect();
+        let tensors: Vec<TensorND> = operands
+            .iter()
+            .zip(shapes.iter())
+            .map(|(d, s)| tensor(d, s))
+            .collect();
+        let refs: Vec<&TensorND> = tensors.iter().collect();
+        let spec = c
+            .spec
+            .as_ref()
+            .unwrap_or_else(|| panic!("einsum case {ci}: spec requis"));
+        let out = parity::einsum(spec, &refs)
+            .unwrap_or_else(|e| panic!("einsum case {ci} ({spec}): {e}"));
+        assert_close(
+            &format!("einsum fwd c{ci} ({spec})"),
+            out.data.as_ref(),
+            &c.y,
+            1e-4,
+            1e-4,
         );
     }
 }

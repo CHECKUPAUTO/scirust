@@ -3,7 +3,7 @@
 baseline (2.13.0). OFFLINE tool: not run in CI. Output fixtures are data only.
 
 Usage:
-    python3 generate_fixtures.py [--torch-bin PATH] [--families elementwise,reductions,normalization,shape,linear,loss,norm_affine,reduction_extra,unary_extra,special,shape_extra,indexing,linear_extra,norm_stoch,positional,attention,quantization,conversion,convolution]
+    python3 generate_fixtures.py [--torch-bin PATH] [--families elementwise,reductions,normalization,shape,linear,loss,norm_affine,reduction_extra,unary_extra,special,shape_extra,indexing,linear_extra,norm_stoch,positional,attention,quantization,conversion,convolution,linalg,sparse,einsum]
 
 Provenance rules (LICENSING_AND_PROVENANCE.md):
   - executes the pinned baseline (`torch.__version__` must be 2.13.0),
@@ -460,6 +460,77 @@ def gen_convolution(gen, family_dir: Path) -> None:
           note="k=s=2 pad=0, count_include_pad default")
 
 
+def gen_linalg(gen, family_dir: Path) -> None:
+    """cholesky (SPD construit A = M·Mᵀ + λI) — APPEND fin de séquence."""
+    cases = []
+    for n in (4, 3):
+        m = seed_tensor(gen, (n, n), -1.0, 1.0)
+        a = m @ m.T + torch.eye(n) * 0.5
+        l = torch.linalg.cholesky(a)
+        cases.append({"kind": "cholesky", "shape": [n, n],
+                      "a": flat(a.detach()), "y": flat(l.detach())})
+    write("cholesky", family_dir, cases,
+          note="SPD A=M·Mᵀ+0.5I, L inférieur, f32, forward only")
+
+
+def gen_sparse(gen, family_dir: Path) -> None:
+    """spmv/spmm CSR (f64) + lu_solve (f64) — APPEND fin de séquence."""
+    cases = []
+    for (n, m) in ((5, 4), (3, 6)):
+        dens = torch.empty((n, m), dtype=torch.float64).uniform_(-1.0, 1.0, generator=gen)
+        mask = torch.bernoulli(torch.full((n, m), 0.4), generator=gen)
+        a_sp = (dens * mask).to_sparse_csr()
+        x = torch.empty((m,), dtype=torch.float64).uniform_(-1.0, 1.0, generator=gen)
+        b = torch.empty((m, 2), dtype=torch.float64).uniform_(-1.0, 1.0, generator=gen)
+        yv = torch.sparse.mm(a_sp, x.unsqueeze(1)).squeeze(1)
+        ym = torch.sparse.mm(a_sp, b)
+        cases.append({"kind": "spmv", "n": n, "m": m,
+                      "rowptr": [int(v) for v in a_sp.crow_indices().tolist()],
+                      "colidx": [int(v) for v in a_sp.col_indices().tolist()],
+                      "values": a_sp.values().tolist(),
+                      "x": flat(x.detach()), "yv": flat(yv.detach()),
+                      "b": flat(b.detach()), "ym": flat(ym.detach())})
+    write("spmv", family_dir, cases, dtype="f64",
+          note="CSR ~40% nnz, spmv + spmm_dense, f64, forward only")
+    cases = []
+    for n in (4, 3):
+        a = (torch.empty((n, n), dtype=torch.float64).uniform_(-2.0, 2.0, generator=gen)
+             + torch.eye(n) * n)
+        b1 = torch.empty((n,), dtype=torch.float64).uniform_(-1.0, 1.0, generator=gen)
+        b2 = torch.empty((n, 2), dtype=torch.float64).uniform_(-1.0, 1.0, generator=gen)
+        y1 = torch.linalg.solve(a, b1)
+        y2 = torch.linalg.solve(a, b2)
+        cases.append({"kind": "lu_solve", "n": n, "a": flat(a.detach()),
+                      "b1": flat(b1.detach()), "y1": flat(y1.detach()),
+                      "b2": flat(b2.detach()), "y2": flat(y2.detach())})
+    write("lu_solve", family_dir, cases, dtype="f64",
+          note="solve A·x=b, A diagonale dominante, b 1-col et 2-col, f64")
+
+
+def gen_einsum(gen, family_dir: Path) -> None:
+    """einsum subset testé : ij,jk->ik / ij->ji / ij,jk,kl->il / ii->i / ij->
+    — APPEND fin de séquence."""
+    cases = []
+    specs = [
+        ("ij,jk->ik", [(3, 4), (4, 5)]),
+        ("ij->ji", [(3, 4)]),
+        ("ij,jk,kl->il", [(2, 3), (3, 4), (4, 2)]),
+        ("ii->i", [(4, 4)]),
+        ("ij->", [(2, 3)]),
+    ]
+    for spec, shapes in specs:
+        tensors = [seed_tensor(gen, s, -2.0, 2.0) for s in shapes]
+        y = torch.einsum(spec, tensors)
+        case = {"kind": "einsum", "spec": spec,
+                "shapes": [list(s) for s in shapes],
+                "y": flat(y.detach())}
+        for name, t in zip(("x", "a", "b"), tensors):
+            case[name] = flat(t.detach())
+        cases.append(case)
+    write("einsum", family_dir, cases, dtype="f32",
+          note="subset 5 specs (2 operands, transpose, 3 operands, diag, scalaire)")
+
+
 def gen_reduction_extra(gen, family_dir: Path) -> None:
     """max (valeurs + indices) et norm p=2.
 
@@ -742,6 +813,12 @@ def main() -> int:
             gen_conversion(gen, OUT / "conversion")
         elif fam == "convolution":
             gen_convolution(gen, OUT / "convolution")
+        elif fam == "linalg":
+            gen_linalg(gen, OUT / "linalg")
+        elif fam == "sparse":
+            gen_sparse(gen, OUT / "sparse")
+        elif fam == "einsum":
+            gen_einsum(gen, OUT / "einsum")
         else:
             raise SystemExit(f"unknown family {fam}")
     # Scan global : le manifest reflète toujours exactement le disque
