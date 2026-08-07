@@ -3,6 +3,7 @@
 //! This module provides the core orbit/transversal and sifting machinery used by a
 //! Schreier-Sims implementation. All storage is fixed at compile time.
 
+use crate::core::Group;
 use crate::discrete::Permutation;
 
 /// Error returned when a fixed-capacity stabilizer-chain workspace is insufficient.
