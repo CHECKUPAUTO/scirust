@@ -383,7 +383,7 @@ fn materialize_square_basis(
     dimension: usize,
     basis: &[f32],
 ) -> Result<(Vec<f32>, usize), BasisHandoffError> {
-    if dimension == 0 || basis.is_empty() || basis.len() % dimension != 0
+    if dimension == 0 || basis.is_empty() || !basis.len().is_multiple_of(dimension)
     {
         return Err(BasisHandoffError::InvalidBasisShape {
             head,
