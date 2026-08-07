@@ -9,6 +9,8 @@ hot paths do not require heap allocation or dynamic dispatch.
 The crate follows the root SciRust workspace baseline: Rust 1.89, edition 2021,
 `#![forbid(unsafe_code)]`, and no external dependencies. The reference kernels are kept
 portable across the stable x86_64, ARM64 and MSRV validation lanes used by the workspace.
+The root lockfile includes the crate as a dependency-free workspace package so standard
+`--locked` CI validation can build it without re-resolving the dependency graph.
 
 ## Architecture
 
