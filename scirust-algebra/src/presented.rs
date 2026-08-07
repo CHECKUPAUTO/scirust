@@ -150,10 +150,9 @@ impl<const C: usize, const A: usize> CosetTable<C, A> {
     fn coincide(&mut self, left: u16, right: u16) {
         let mut pending_left = [UNDEFINED; C];
         let mut pending_right = [UNDEFINED; C];
-        let mut pending_len = 0usize;
         pending_left[0] = left;
         pending_right[0] = right;
-        pending_len = 1;
+        let mut pending_len = 1usize;
 
         while pending_len != 0 {
             pending_len -= 1;
