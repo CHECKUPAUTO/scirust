@@ -22,7 +22,7 @@ jobs:
         with:
           toolchain: nightly-2026-07-02
       - name: Regenerate lockfile with Cargo
-        run: cargo generate-lockfile --offline
+        run: cargo generate-lockfile
       - name: Commit generated lockfile and remove one-shot workflow
         shell: bash
         run: |
