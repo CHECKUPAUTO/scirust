@@ -48,7 +48,7 @@ use scirust_sciagent::cuda_model::{CudaPretrainConfig, CudaTrainer};
 use scirust_sciagent::model::SciAgentModel;
 use scirust_sciagent::train::checkpoint::{latest_checkpoint, load_checkpoint, read_meta};
 use scirust_sciagent::train::dataset::{
-    ShardLoader, content_hash, source_quality, token_stream_hash,
+    ShardLoader, WINDOW_SPLIT_VERSION, content_hash, source_quality, token_stream_hash,
 };
 
 /// A tied, vocab-256 byte-level config — small enough to iterate fast, real enough
@@ -479,6 +479,19 @@ fn main() {
                     "corpus_hash saved={v:016x} current={corpus_hash:016x}"
                 ));
             }
+        }
+        match saved.split_version
+        {
+            Some(v) if v == WINDOW_SPLIT_VERSION =>
+            {},
+            Some(v) => mismatches.push(format!(
+                "split_version saved={v} current={WINDOW_SPLIT_VERSION}"
+            )),
+            None if saved.step > 0 => mismatches.push(format!(
+                "split_version saved=legacy-tail current={WINDOW_SPLIT_VERSION}"
+            )),
+            None =>
+            {},
         }
         if !mismatches.is_empty()
         {
