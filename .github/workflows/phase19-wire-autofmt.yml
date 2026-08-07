@@ -1,0 +1,56 @@
+name: Phase 19 Wire Autofmt
+
+on:
+  push:
+    branches:
+      - research/phase19-wgpu-deterministic-sampling
+    paths:
+      - .github/workflows/phase19-wire-autofmt.yml
+
+permissions:
+  contents: write
+
+jobs:
+  wire-and-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: research/phase19-wgpu-deterministic-sampling
+      - run: rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt
+      - name: Wire deterministic sampler exports
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scirust-gpu/src/lib.rs')
+          text = path.read_text()
+          if 'mod deterministic_sampling_device;' not in text:
+              needle = '#[cfg(feature = "wgpu")]\nmod deterministic_gpu;'
+              replacement = needle + '\n#[cfg(feature = "wgpu")]\nmod deterministic_sampling_device;'
+              if needle not in text:
+                  raise SystemExit('module insertion point not found')
+              text = text.replace(needle, replacement, 1)
+          if 'pub use deterministic_sampling_device::' not in text:
+              needle = '#[cfg(feature = "wgpu")]\npub use deterministic_gpu::{DeterministicGpu, DeterministicValidator};'
+              replacement = needle + '''
+          #[cfg(feature = "wgpu")]
+          pub use deterministic_sampling_device::{
+              WgpuDeterministicSampler, WgpuDeterministicSamplerError,
+              WgpuDeterministicSamplerTelemetry,
+          };'''
+              if needle not in text:
+                  raise SystemExit('export insertion point not found')
+              text = text.replace(needle, replacement, 1)
+          path.write_text(text)
+          PY
+      - run: cargo +nightly-2026-07-02 fmt --all
+      - name: Commit deterministic wiring and formatting
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scirust-gpu/src/lib.rs scirust-gpu/src/deterministic_sampling_device.rs scirust-gpu/tests/deterministic_sampling_resident.rs
+          git commit -m "style(sampling): wire and rustfmt Phase 19"
+          git push origin HEAD:research/phase19-wgpu-deterministic-sampling
