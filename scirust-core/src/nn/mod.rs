@@ -81,8 +81,8 @@ pub use conv_utils::{ConvConfig, Padding};
 pub use conv2d::Conv2d;
 pub use dropout::Dropout;
 pub use elastic_latent_basis_handoff::{
-    BasisHandoffError, CommittedBasisLearner, LearnedHeadBasis,
-    resolve_committed_head_calibration, runtime_from_committed_bases,
+    BasisHandoffError, CommittedBasisLearner, LearnedHeadBasis, resolve_committed_head_calibration,
+    runtime_from_committed_bases,
 };
 pub use elastic_latent_encoder_handoff::{
     EncoderBasisHandoffError, LearnedLayerBasis, encoder_session_from_committed_bases,
