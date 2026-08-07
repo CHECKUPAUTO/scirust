@@ -182,10 +182,35 @@ impl<const N:usize,const B:usize> Clifford<N,B> {
         Some(Self { coeffs:out,metric:self.metric })
     }
     /// Reverse anti-automorphism.
-    pub fn reverse(&self)->Self { let mut o=*self; let mut mask=0; while mask<B { let grade=mask.count_ones(); if (grade*(grade-1)/2)&1==1{o.coeffs[mask]=-o.coeffs[mask];} mask+=1;} o }
+    pub fn reverse(&self)->Self {
+        let mut out=*self;
+        let mut mask=0;
+        while mask<B {
+            let grade=mask.count_ones();
+            if (grade*(grade-1)/2)&1==1 {
+                out.coeffs[mask] = -out.coeffs[mask];
+            }
+            mask+=1;
+        }
+        out
+    }
 }
 fn blade_product<const N:usize>(a:usize,b:usize,metric:&[i8;N])->(usize,f64) {
-    let mut sign=1.0; let mut i=0; while i<N { if (a>>i)&1==1 { let lower=b & ((1usize<<i)-1); if lower.count_ones()&1==1{sign=-sign;} if (b>>i)&1==1{sign*=metric[i] as f64;} } i+=1;} (a^b,sign)
+    let mut sign=1.0;
+    let mut i=0;
+    while i<N {
+        if (a>>i)&1==1 {
+            let lower=b & ((1usize<<i)-1);
+            if lower.count_ones()&1==1 {
+                sign = -sign;
+            }
+            if (b>>i)&1==1 {
+                sign*=metric[i] as f64;
+            }
+        }
+        i+=1;
+    }
+    (a^b,sign)
 }
 
 /// Unit quaternion representation of `SU(2)`, the double cover of `SO(3)`.
