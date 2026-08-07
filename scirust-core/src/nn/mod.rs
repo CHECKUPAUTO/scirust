@@ -18,6 +18,7 @@ pub mod deeponet;
 pub mod dora;
 pub mod dropout;
 pub mod elastic_kv_cache;
+pub mod elastic_latent_runtime;
 pub mod embedding;
 pub mod ensemble;
 pub mod fno;
