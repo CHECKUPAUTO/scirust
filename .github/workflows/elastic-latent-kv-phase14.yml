@@ -1,0 +1,48 @@
+name: Elastic Latent KV Phase 14
+
+on:
+  push:
+    branches:
+      - research/phase14-wgpu-resident-latent-kv
+    paths:
+      - scirust-gpu/src/elastic_latent_device.rs
+      - scirust-gpu/src/lib.rs
+      - scirust-gpu/tests/elastic_latent_kv_resident.rs
+      - experiments/elastic-latent-kv/PHASE14_SPEC.md
+      - .github/workflows/elastic-latent-kv-phase14.yml
+  pull_request:
+    branches: [master]
+    paths:
+      - scirust-gpu/src/elastic_latent_device.rs
+      - scirust-gpu/src/lib.rs
+      - scirust-gpu/tests/elastic_latent_kv_resident.rs
+      - experiments/elastic-latent-kv/PHASE14_SPEC.md
+      - .github/workflows/elastic-latent-kv-phase14.yml
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: |
+          rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt,clippy
+          rustup toolchain install 1.89.0 --profile minimal
+      - run: cargo +nightly-2026-07-02 fmt --all -- --check
+      - run: cargo +nightly-2026-07-02 clippy -p scirust-gpu --all-targets --features wgpu --locked -- -D warnings
+      - run: cargo +1.89.0 check -p scirust-gpu --all-targets --features wgpu --locked
+
+  wgpu-lavapipe:
+    runs-on: ubuntu-latest
+    env:
+      WGPU_BACKEND: vulkan
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers libvulkan1
+          rustup toolchain install 1.89.0 --profile minimal
+      - run: cargo +1.89.0 test -p scirust-gpu --features wgpu --test elastic_latent_kv_resident --locked -- --test-threads=1
