@@ -1,0 +1,38 @@
+name: SciAgent B29 attention assembly
+
+on:
+  pull_request:
+    branches:
+      - perf/sciagent-b28-true-batch
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/sciagent-b29-attention-assembly
+          fetch-depth: 0
+      - name: Apply B29 source patch
+        run: python3 scripts/sciagent_b29_patch.py
+      - name: Format
+        run: cargo fmt --all
+      - name: Check CUDA backend
+        run: cargo check -p scirust-cuda --features cuda
+      - name: Check SciAgent CUDA pretrain
+        run: cargo check -p scirust-sciagent --features cuda --example cuda_pretrain
+      - name: Check SciAgent CUDA library
+        run: cargo check -p scirust-sciagent --features cuda
+      - name: Remove one-shot helpers
+        run: rm -f scripts/sciagent_b29_patch.py .github/workflows/sciagent-b29-apply.yml
+      - name: Commit and push validated B29
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "perf(sciagent): reduce per-head CUDA assembly overhead"
+          git push origin HEAD:perf/sciagent-b29-attention-assembly
