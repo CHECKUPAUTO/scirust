@@ -2789,3 +2789,281 @@ pub fn d_avg_pool2d(gout: &TensorND, k: usize, stride: usize) -> Result<TensorND
     }
     Ok(TensorND::new(gx, vec![b_, c, h, wd]))
 }
+
+/// Cholesky inférieur (2-D carrée f32) : A = L·Lᵀ, méthode de Cholesky classique.
+pub fn cholesky(a: &TensorND) -> Result<TensorND> {
+    let n = a.shape[0];
+    if a.shape.len() != 2 || a.shape[1] != n
+    {
+        return Err("cholesky: attend une matrice carrée 2-D".into());
+    }
+    let mut l = vec![0.0f32; n * n];
+    for j in 0..n
+    {
+        let mut s = a.data[j * n + j];
+        for k in 0..j
+        {
+            s -= l[j * n + k] * l[j * n + k];
+        }
+        if s <= 0.0
+        {
+            return Err("cholesky: matrice non définie positive".into());
+        }
+        l[j * n + j] = s.sqrt();
+        for i in (j + 1)..n
+        {
+            let mut t = a.data[i * n + j];
+            for k in 0..j
+            {
+                t -= l[i * n + k] * l[j * n + k];
+            }
+            l[i * n + j] = t / l[j * n + j];
+        }
+    }
+    Ok(TensorND::new(l, vec![n, n]))
+}
+
+/// spmv CSR f64 : y = A·x (A csr 2-D, x vecteur).
+pub fn spmv_csr(rowptr: &[usize], colidx: &[usize], values: &[f64], x: &[f64]) -> Result<Vec<f64>> {
+    let n = rowptr.len() - 1;
+    let mut y = vec![0.0f64; n];
+    for i in 0..n
+    {
+        let mut acc = 0.0;
+        for p in rowptr[i]..rowptr[i + 1]
+        {
+            acc += values[p] * x[colidx[p]];
+        }
+        y[i] = acc;
+    }
+    Ok(y)
+}
+
+/// spmm_dense CSR f64 : Y = A·B (B dense (m, k)).
+pub fn spmm_csr(
+    rowptr: &[usize],
+    colidx: &[usize],
+    values: &[f64],
+    b: &[f64],
+    k: usize,
+) -> Result<Vec<f64>> {
+    let n = rowptr.len() - 1;
+    let mut y = vec![0.0f64; n * k];
+    for i in 0..n
+    {
+        for p in rowptr[i]..rowptr[i + 1]
+        {
+            let v = values[p];
+            let j = colidx[p];
+            for cc in 0..k
+            {
+                y[i * k + cc] += v * b[j * k + cc];
+            }
+        }
+    }
+    Ok(y)
+}
+
+/// solve LU f64 avec pivot partiel : A·x = b (2-D), b colonne ou (n,k).
+pub fn lu_solve_f64(a: &[f64], b: &[f64], n: usize, k: usize) -> Result<Vec<f64>> {
+    if a.len() != n * n
+    {
+        return Err("lu_solve: A doit être (n,n)".into());
+    }
+    let mut lu = a.to_vec();
+    let mut piv: Vec<usize> = (0..n).collect();
+    for col in 0..n
+    {
+        let mut best = col;
+        let mut bv = lu[col * n + col].abs();
+        for r in (col + 1)..n
+        {
+            if lu[r * n + col].abs() > bv
+            {
+                bv = lu[r * n + col].abs();
+                best = r;
+            }
+        }
+        if bv == 0.0
+        {
+            return Err("lu_solve: matrice singulière".into());
+        }
+        if best != col
+        {
+            piv.swap(col, best);
+            for cc in 0..n
+            {
+                lu.swap(col * n + cc, best * n + cc);
+            }
+        }
+        for r in (col + 1)..n
+        {
+            let f = lu[r * n + col] / lu[col * n + col];
+            lu[r * n + col] = f;
+            for cc in (col + 1)..n
+            {
+                lu[r * n + cc] -= f * lu[col * n + cc];
+            }
+        }
+    }
+    let mut x = vec![0.0f64; n * k];
+    for cc in 0..k
+    {
+        let mut y = vec![0.0f64; n];
+        for i in 0..n
+        {
+            let mut s = b[piv[i] * k + cc];
+            for j in 0..i
+            {
+                s -= lu[i * n + j] * y[j];
+            }
+            y[i] = s;
+        }
+        for i in (0..n).rev()
+        {
+            let mut s = y[i];
+            for j in (i + 1)..n
+            {
+                s -= lu[i * n + j] * x[j * k + cc];
+            }
+            x[i * k + cc] = s / lu[i * n + i];
+        }
+    }
+    Ok(x)
+}
+
+/// einsum générique (f32, rank ≤ 3, ≤ 3 opérandes, lettres a-z) :
+/// `"ij,jk->ik"`, `"ij->ji"`, `"ij,jk,kl->il"`, `"ii->i"`, `"ij->"`.
+pub fn einsum(spec: &str, ops: &[&TensorND]) -> Result<TensorND> {
+    let (lhs, rhs) = spec
+        .split_once("->")
+        .ok_or_else(|| format!("einsum: spec sans '->' : {spec}"))?;
+    let specs: Vec<Vec<char>> = lhs.split(',').map(|s| s.chars().collect()).collect();
+    if specs.len() != ops.len()
+    {
+        return Err(format!(
+            "einsum: {} opérandes attendus, {} donnés",
+            specs.len(),
+            ops.len()
+        )
+        .into());
+    }
+    let out_spec: Vec<char> = rhs.chars().collect();
+    let mut dims: std::collections::HashMap<char, usize> = std::collections::HashMap::new();
+    for (si, sp) in specs.iter().enumerate()
+    {
+        if sp.len() != ops[si].shape.len()
+        {
+            return Err(format!(
+                "einsum: rank opérande {} ({} lettres) ≠ rank tenseur ({})",
+                si,
+                sp.len(),
+                ops[si].shape.len()
+            )
+            .into());
+        }
+        for (&letter, &d) in sp.iter().zip(ops[si].shape.iter())
+        {
+            if let Some(&d0) = dims.get(&letter)
+            {
+                if d0 != d
+                {
+                    return Err(format!(
+                        "einsum: dimension incohérente pour '{letter}' ({} vs {})",
+                        d0, d
+                    )
+                    .into());
+                }
+            }
+            else
+            {
+                dims.insert(letter, d);
+            }
+        }
+    }
+    for &letter in &out_spec
+    {
+        if !dims.contains_key(&letter)
+        {
+            return Err(format!("einsum: '{letter}' inconnue dans la sortie").into());
+        }
+    }
+    let mut contract: Vec<char> = Vec::new();
+    for sp in &specs
+    {
+        for &letter in sp
+        {
+            if !out_spec.contains(&letter) && !contract.contains(&letter)
+            {
+                contract.push(letter);
+            }
+        }
+    }
+    let mut out_shape: Vec<usize> = out_spec.iter().map(|l| dims[l]).collect();
+    if out_shape.is_empty()
+    {
+        out_shape.push(1);
+    }
+    let strides: Vec<Vec<usize>> = ops
+        .iter()
+        .map(|t| {
+            let mut st = vec![0usize; t.shape.len()];
+            let mut acc = 1;
+            for i in (0..t.shape.len()).rev()
+            {
+                st[i] = acc;
+                acc *= t.shape[i];
+            }
+            st
+        })
+        .collect();
+    let mut out = vec![0.0f32; out_shape.iter().product::<usize>()];
+    let mut loop_dims: Vec<char> = out_spec.clone();
+    loop_dims.extend(contract.iter().copied());
+    let n_out = out_spec.len();
+    let mut out_stride = vec![1usize; n_out];
+    for i in (1..n_out).rev()
+    {
+        out_stride[i - 1] = out_stride[i] * out_shape[i];
+    }
+    let mut idx = vec![0usize; loop_dims.len()];
+    loop
+    {
+        let mut oidx = 0usize;
+        for (p, _letter) in loop_dims.iter().enumerate()
+        {
+            if p < n_out
+            {
+                oidx += idx[p] * out_stride[p];
+            }
+        }
+        let mut prod = 1.0f32;
+        for (si, t) in ops.iter().enumerate()
+        {
+            let mut off = 0usize;
+            for (pi, &letter) in specs[si].iter().enumerate()
+            {
+                let li = loop_dims.iter().position(|&l| l == letter).unwrap();
+                off += idx[li] * strides[si][pi];
+            }
+            prod *= t.data[off];
+        }
+        out[oidx] += prod;
+        let mut carry = true;
+        for p in (0..loop_dims.len()).rev()
+        {
+            idx[p] += 1;
+            if idx[p] < dims[&loop_dims[p]]
+            {
+                carry = false;
+                break;
+            }
+            idx[p] = 0;
+        }
+        if carry
+        {
+            break;
+        }
+    }
+    Ok(TensorND::new(out, out_shape))
+}

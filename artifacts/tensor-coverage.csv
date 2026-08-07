@@ -9,7 +9,7 @@ batch_norm,normalization,parity,simd,true,f32,0.0001,0.0001,cpu
 bmm,linear,parity,2d|nd,true,f32,0.0001,0.0001,cpu
 broadcast_to,shape,parity,2d|core,true,f32,0,0,cpu
 cat,shape,parity,nd,true,f32,0,0,cpu
-cholesky,linear,experimental,simd,false,f32,0.0001,0.0001,cpu
+cholesky,linear,parity,simd,false,f32,0.0001,0.0001,cpu
 conv1d,convolution,parity,simd,true,f32,0.0001,0.0001,cpu
 conv2d,convolution,parity,simd,true,f32,0.0001,0.0001,cpu
 cos,elementwise,parity,2d,true,f32,0.00001,0.00001,cpu
@@ -20,7 +20,7 @@ digamma,special,parity,simd,true,f64,0.000000001,0.000000001,cpu
 div,elementwise,parity,2d|nd,true,f32,0.00001,0.00001,cpu
 dropout,normalization,parity,2d,true,f32,0.00001,0.00001,cpu
 eig,linear,missing,,false,f32,0.0001,0.0001,
-einsum,linear,experimental,tnd,false,f32,0.0001,0.0001,cpu
+einsum,linear,parity,tnd,false,f32,0.0001,0.0001,cpu
 embedding,indexing,parity,2d|simd|gpu|cuda,true,f32,0,0,cpu|gpu|cuda
 exp,elementwise,parity,2d|nd|simd,true,f32,0.00001,0.00001,cpu
 fake_quantize_per_tensor,quantization,parity,2d,true,f32,0,0,cpu
@@ -35,7 +35,7 @@ log,elementwise,parity,2d,true,f32,0.00001,0.00001,cpu
 log10,elementwise,parity,2d,true,f32,0.00001,0.00001,cpu
 log_softmax,normalization,parity,2d,true,f32,0.00001,0.00001,cpu
 lstsq,linear,missing,,false,f32,0.0001,0.0001,
-lu_solve,sparse,experimental,sparse,false,f64,0.00000001,0.00000001,cpu
+lu_solve,sparse,parity,sparse,false,f64,0.00000001,0.00000001,cpu
 matmul,linear,parity,2d|nd|simd|gpu|cuda,true,f32,0.0001,0.0001,cpu|gpu|cuda
 max,reduction,parity,2d|gpu,true,f32,0,0,cpu|gpu
 max_pool2d,convolution,parity,2d|simd,true,f32,0,0,cpu
@@ -62,7 +62,7 @@ sinh,elementwise,parity,2d,true,f32,0.00001,0.00001,cpu
 slice,shape,parity,2d|core,true,f32,0,0,cpu
 softmax,normalization,parity,2d|nd|simd|gpu|cuda,true,f32,0.00001,0.00001,cpu|gpu|cuda
 sparse_autograd,sparse,missing,,true,f64,0.00000001,0.00000001,
-spmv,sparse,experimental,sparse,false,f64,0.0000000001,0.0000000001,cpu
+spmv,sparse,parity,sparse,false,f64,0.0000000001,0.0000000001,cpu
 sqrt,elementwise,parity,2d|simd|gpu,true,f32,0.00001,0.00001,cpu|gpu
 sub,elementwise,parity,2d|nd,true,f32,0.00001,0.00001,cpu
 sum,reduction,parity,2d|nd|gpu|cuda,true,f32,0.0001,0.0001,cpu|gpu|cuda
