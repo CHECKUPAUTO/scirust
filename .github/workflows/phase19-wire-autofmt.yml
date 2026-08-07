@@ -54,3 +54,5 @@ jobs:
           git add scirust-gpu/src/lib.rs scirust-gpu/src/deterministic_sampling_device.rs scirust-gpu/tests/deterministic_sampling_resident.rs
           git commit -m "style(sampling): wire and rustfmt Phase 19"
           git push origin HEAD:research/phase19-wgpu-deterministic-sampling
+
+# Retrigger marker: 2026-08-07
