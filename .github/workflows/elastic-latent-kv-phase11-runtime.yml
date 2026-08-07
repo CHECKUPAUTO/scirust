@@ -1,0 +1,41 @@
+name: Elastic Latent KV Phase 11 Runtime
+
+on:
+  push:
+    branches:
+      - research/elastic-latent-kv-phase11-runtime-completion
+    paths:
+      - scirust-core/src/nn/residual_latent_kv_cache.rs
+      - scirust-core/src/nn/tiered_latent_kv_backend.rs
+      - scirust-core/src/nn/elastic_latent_runtime.rs
+      - scirust-core/src/nn/mod.rs
+      - experiments/elastic-latent-kv/PHASE11_RUNTIME_COMPLETION.md
+      - .github/workflows/elastic-latent-kv-phase11-runtime.yml
+  pull_request:
+    branches: [master]
+    paths:
+      - scirust-core/src/nn/residual_latent_kv_cache.rs
+      - scirust-core/src/nn/tiered_latent_kv_backend.rs
+      - scirust-core/src/nn/elastic_latent_runtime.rs
+      - scirust-core/src/nn/mod.rs
+      - experiments/elastic-latent-kv/PHASE11_RUNTIME_COMPLETION.md
+      - .github/workflows/elastic-latent-kv-phase11-runtime.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: |
+          rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt,clippy
+          rustup toolchain install 1.89.0 --profile minimal
+      - run: cargo +nightly-2026-07-02 fmt --all -- --check
+      - run: cargo +nightly-2026-07-02 clippy -p scirust-core --all-targets --locked -- -D warnings
+      - run: cargo +1.89.0 check -p scirust-core --all-targets --locked
+      - run: cargo +1.89.0 test -p scirust-core reconstruction_and_oldest_removal_preserve_fixed_allocation --locked
+      - run: cargo +1.89.0 test -p scirust-core tiered_latent_kv_backend::tests --locked
+      - run: cargo +1.89.0 test -p scirust-core elastic_latent_runtime::tests --locked
+      - run: cargo +1.89.0 run --quiet --locked -p scirust-core --example latent_kv_phase13
