@@ -1,6 +1,12 @@
 name: SciAgent B33 head-local RoPE
 
 on:
+  push:
+    branches:
+      - fix/sciagent-b33-head-local-rope
+    paths:
+      - scripts/sciagent_b33_patch.py
+      - .github/workflows/sciagent-b33-apply.yml
   pull_request:
     branches:
       - fix/sciagent-b32-exact-resume
@@ -10,6 +16,7 @@ permissions:
 
 jobs:
   apply-and-validate:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
