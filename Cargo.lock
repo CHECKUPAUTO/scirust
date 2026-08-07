@@ -2920,6 +2920,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-algebra"
+version = "0.1.0"
+
+[[package]]
 name = "scirust-algogen"
 version = "0.1.0"
 dependencies = [
