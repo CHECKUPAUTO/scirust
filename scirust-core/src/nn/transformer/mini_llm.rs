@@ -92,7 +92,33 @@ pub struct MiniLLM {
     lm_head: Linear,
 }
 
+/// Borrowed, read-only view of the parameters required for incremental inference.
+///
+/// This keeps `MiniLLM` internals encapsulated while allowing accelerator crates
+/// to snapshot inference weights without depending on training/tape state.
+pub struct MiniLlmInferenceSnapshot<'a> {
+    pub config: &'a MiniLLMConfig,
+    pub embedding: &'a crate::nn::embedding::Embedding,
+    pub positional_encoding: &'a PositionalEncoding,
+    pub encoder: &'a TransformerEncoder,
+    pub final_norm: &'a LayerNorm,
+    pub lm_head: &'a Linear,
+}
+
 impl MiniLLM {
+    /// Borrow the immutable parameters and topology needed by an inference backend.
+    #[must_use]
+    pub fn inference_snapshot(&self) -> MiniLlmInferenceSnapshot<'_> {
+        MiniLlmInferenceSnapshot {
+            config: &self.config,
+            embedding: &self.embed,
+            positional_encoding: &self.pos_enc,
+            encoder: &self.encoder,
+            final_norm: &self.ln_f,
+            lm_head: &self.lm_head,
+        }
+    }
+
     pub fn new(config: MiniLLMConfig, tokenizer: CharTokenizer) -> Self {
         let mut rng = PcgEngine::new(42);
         let w_init = KaimingNormal;
