@@ -129,7 +129,10 @@ impl fmt::Display for LifecycleError {
             Self::ZeroCapacity => write!(output, "lifecycle capacity must be non-zero"),
             Self::InvalidWindows => write!(output, "HOT and WARM windows exceed capacity"),
             Self::ZeroRankDivisor => write!(output, "compression rank divisor must be non-zero"),
-            Self::NotResident(position) => write!(output, "token position {position} is not resident"),
+            Self::NotResident(position) =>
+            {
+                write!(output, "token position {position} is not resident")
+            },
         }
     }
 }
@@ -210,7 +213,9 @@ impl LatentKvLifecycle {
     /// Marks a resident token as accessed. Access does not reorder logical age.
     pub fn touch(&mut self, position: u64) -> Result<(), LifecycleError> {
         self.tick = self.tick.wrapping_add(1);
-        let index = self.index_of(position).ok_or(LifecycleError::NotResident(position))?;
+        let index = self
+            .index_of(position)
+            .ok_or(LifecycleError::NotResident(position))?;
         self.slots[index].last_access_tick = self.tick;
         Ok(())
     }
@@ -299,7 +304,9 @@ fn validate_config(config: LifecycleConfig) -> Result<(), LifecycleError> {
     {
         return Err(LifecycleError::InvalidWindows);
     }
-    if config.hot.rank_divisor == 0 || config.warm.rank_divisor == 0 || config.cold.rank_divisor == 0
+    if config.hot.rank_divisor == 0
+        || config.warm.rank_divisor == 0
+        || config.cold.rank_divisor == 0
     {
         return Err(LifecycleError::ZeroRankDivisor);
     }
@@ -364,8 +371,14 @@ mod tests {
         let mut actions = [placeholder; 6];
         let count = lifecycle.rebalance_into(&mut actions);
         assert_eq!(count, 4);
-        assert_eq!(lifecycle.get(0).unwrap().temperature, CacheTemperature::Cold);
-        assert_eq!(lifecycle.get(2).unwrap().temperature, CacheTemperature::Warm);
+        assert_eq!(
+            lifecycle.get(0).unwrap().temperature,
+            CacheTemperature::Cold
+        );
+        assert_eq!(
+            lifecycle.get(2).unwrap().temperature,
+            CacheTemperature::Warm
+        );
         assert_eq!(lifecycle.get(5).unwrap().temperature, CacheTemperature::Hot);
     }
 
