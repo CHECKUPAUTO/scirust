@@ -15,7 +15,7 @@
 //! - `SCIAGENT_SHARDS` — a dir of little-endian `u32` `.bin` token shards; aborts if
 //!   a token id ≥ the config's `vocab_size` (shards tokenised for another vocab).
 //! - `SCIAGENT_CKPT` (default `checkpoints/cuda`), `SCIAGENT_STEPS` (300),
-//!   `SCIAGENT_SEQ` (128), `SCIAGENT_LR` — run knobs.
+//!   `SCIAGENT_SEQ` (128), `SCIAGENT_BATCH` (1), `SCIAGENT_LR` — run knobs.
 //! - `SCIAGENT_MAX_TOKENS` — cap the corpus (default: **no cap**). Truncation keeps a
 //!   *prefix*, not a sample — the shard walk is alphabetical — so a cap on a crates.io
 //!   corpus trains only on the alphabetically-first crates. Always logged when it bites.
@@ -295,6 +295,7 @@ fn main() {
     );
 
     let seq_len = env_usize("SCIAGENT_SEQ", 128).min(config.max_seq_len);
+    let batch_size = env_usize("SCIAGENT_BATCH", 1).max(1);
     // No cap by default. This used to default to 16M, which silently trained on the
     // first 16M tokens of the corpus and threw the rest away — and because the shard
     // walk is alphabetical, that meant a crates.io corpus was really just the crates
@@ -437,6 +438,7 @@ fn main() {
         total_steps,
         start_step,
         seq_len,
+        batch_size,
         weight_decay: 0.0,
         adam_eps,
         log_interval: 25,
@@ -450,7 +452,7 @@ fn main() {
         ..Default::default()
     };
     println!(
-        "seq_len {seq_len} | steps {start_step}..{total_steps} | base_lr {base_lr:.1e} | \
+        "batch {batch_size} × seq_len {seq_len} | steps {start_step}..{total_steps} | base_lr {base_lr:.1e} | \
          eps {adam_eps:.0e} | clip {max_grad_norm} | save/{save_interval} keep {keep_last} | \
          shuffle {shuffle} | ckpt → {ckpt_dir}\n"
     );
