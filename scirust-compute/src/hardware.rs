@@ -11,23 +11,19 @@ use crate::{DType, DeviceCapabilities, DeviceId, DeviceKind, MemorySpace};
 /// backend adapters must not turn a missing observation into a negative claim.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[non_exhaustive]
-pub enum SupportLevel
-{
+pub enum SupportLevel {
     #[default]
     Unknown,
     Unsupported,
     Supported,
 }
 
-impl SupportLevel
-{
-    pub const fn is_supported(self) -> bool
-    {
+impl SupportLevel {
+    pub const fn is_supported(self) -> bool {
         matches!(self, Self::Supported)
     }
 
-    pub const fn from_known(value: bool) -> Self
-    {
+    pub const fn from_known(value: bool) -> Self {
         if value
         {
             Self::Supported
@@ -42,12 +38,12 @@ impl SupportLevel
 /// Architecture family of the processor executing a compute backend.
 ///
 /// This enum deliberately describes families rather than individual CPUs or
-/// accelerator SKUs. `Other` plus [`Architecture::name`] keeps the contract
-/// extensible without requiring SciRust to know every future architecture.
+/// accelerator SKUs. `Other` plus an optional architecture name keeps the
+/// contract extensible without requiring SciRust to know every future
+/// architecture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[non_exhaustive]
-pub enum ArchitectureFamily
-{
+pub enum ArchitectureFamily {
     X86_64,
     Aarch64,
     RiscV64,
@@ -64,8 +60,7 @@ pub enum ArchitectureFamily
 
 /// Architecture identity advertised by a backend.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct Architecture
-{
+pub struct Architecture {
     pub family: ArchitectureFamily,
     /// Optional backend- or vendor-provided architecture name.
     ///
@@ -74,10 +69,8 @@ pub struct Architecture
     pub name: Option<String>,
 }
 
-impl Architecture
-{
-    pub const fn unknown() -> Self
-    {
+impl Architecture {
+    pub const fn unknown() -> Self {
         Self {
             family: ArchitectureFamily::Unknown,
             name: None,
@@ -88,16 +81,14 @@ impl Architecture
     ///
     /// This is an identity observation only. It does not claim any optional ISA
     /// feature such as AVX-512, SVE or RVV; those require explicit probing.
-    pub fn current_host() -> Self
-    {
+    pub fn current_host() -> Self {
         Self {
             family: CURRENT_HOST_ARCHITECTURE,
             name: None,
         }
     }
 
-    pub fn named(family: ArchitectureFamily, name: impl Into<String>) -> Self
-    {
+    pub fn named(family: ArchitectureFamily, name: impl Into<String>) -> Self {
         Self {
             family,
             name: Some(name.into()),
@@ -130,8 +121,7 @@ const CURRENT_HOST_ARCHITECTURE: ArchitectureFamily = ArchitectureFamily::Unknow
 /// hatch for future ISAs and vendor extensions without changing this contract.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum IsaFeature
-{
+pub enum IsaFeature {
     // x86-64
     Sse2,
     Avx2,
@@ -163,8 +153,7 @@ pub enum IsaFeature
 /// Shape of the vector execution model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[non_exhaustive]
-pub enum VectorModel
-{
+pub enum VectorModel {
     Scalar,
     FixedWidth,
     Scalable,
@@ -173,8 +162,7 @@ pub enum VectorModel
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct IsaCapabilities
-{
+pub struct IsaCapabilities {
     pub features: Vec<IsaFeature>,
     pub vector_model: VectorModel,
     /// Minimum vector width in bits when the backend can state one.
@@ -183,10 +171,8 @@ pub struct IsaCapabilities
     pub max_vector_bits: Option<u32>,
 }
 
-impl IsaCapabilities
-{
-    pub fn supports(&self, feature: &IsaFeature) -> bool
-    {
+impl IsaCapabilities {
+    pub fn supports(&self, feature: &IsaFeature) -> bool {
         self.features.contains(feature)
     }
 }
@@ -197,8 +183,7 @@ impl IsaCapabilities
 /// arithmetic and accumulation are separate because accelerators frequently
 /// store one format while accumulating in another.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct NumericCapabilities
-{
+pub struct NumericCapabilities {
     pub storage_dtypes: Vec<DType>,
     pub arithmetic_dtypes: Vec<DType>,
     pub accumulation_dtypes: Vec<DType>,
@@ -206,8 +191,7 @@ pub struct NumericCapabilities
 
 /// Matrix/tensor acceleration properties.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct MatrixCapabilities
-{
+pub struct MatrixCapabilities {
     pub accelerated: SupportLevel,
     pub input_dtypes: Vec<DType>,
     pub accumulation_dtypes: Vec<DType>,
@@ -215,8 +199,7 @@ pub struct MatrixCapabilities
 
 /// Memory properties relevant to portable scheduling and transfer planning.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct MemoryCapabilities
-{
+pub struct MemoryCapabilities {
     /// Memory spaces explicitly accepted by this backend when known.
     pub spaces: Vec<MemorySpace>,
     pub coherent_host_device: SupportLevel,
@@ -226,8 +209,7 @@ pub struct MemoryCapabilities
 
 /// Execution properties independent of a particular kernel language.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ExecutionCapabilities
-{
+pub struct ExecutionCapabilities {
     pub async_execution: SupportLevel,
     pub ordered_streams: SupportLevel,
     pub subgroup_operations: SupportLevel,
@@ -240,8 +222,7 @@ pub struct ExecutionCapabilities
 /// several modes depending on the selected kernel implementation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum ReproducibilityLevel
-{
+pub enum ReproducibilityLevel {
     /// Same output bits for the same inputs under the declared contract.
     BitExact,
     /// Stable result on the same backend/implementation, without cross-backend
@@ -254,15 +235,12 @@ pub enum ReproducibilityLevel
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ReproducibilityCapabilities
-{
+pub struct ReproducibilityCapabilities {
     pub modes: Vec<ReproducibilityLevel>,
 }
 
-impl ReproducibilityCapabilities
-{
-    pub fn supports(&self, level: ReproducibilityLevel) -> bool
-    {
+impl ReproducibilityCapabilities {
+    pub fn supports(&self, level: ReproducibilityLevel) -> bool {
         self.modes.contains(&level)
     }
 }
@@ -273,8 +251,7 @@ impl ReproducibilityCapabilities
 /// backends can continue exposing the legacy resource limits while gradually
 /// overriding the richer hardware profile as reliable probes become available.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HardwareCapabilities
-{
+pub struct HardwareCapabilities {
     pub device: DeviceId,
     pub architecture: Architecture,
     pub isa: IsaCapabilities,
@@ -285,15 +262,13 @@ pub struct HardwareCapabilities
     pub reproducibility: ReproducibilityCapabilities,
 }
 
-impl HardwareCapabilities
-{
+impl HardwareCapabilities {
     /// Conservative bridge from the existing capability contract.
     ///
     /// Only facts already represented by [`DeviceCapabilities`] are promoted.
     /// Everything else remains unknown until a backend or hardware probe states
     /// it explicitly.
-    pub fn from_device_capabilities(capabilities: &DeviceCapabilities) -> Self
-    {
+    pub fn from_device_capabilities(capabilities: &DeviceCapabilities) -> Self {
         let architecture = match capabilities.device.kind()
         {
             DeviceKind::Reference | DeviceKind::Cpu => Architecture::current_host(),
@@ -312,9 +287,7 @@ impl HardwareCapabilities
             matrix: MatrixCapabilities::default(),
             memory: MemoryCapabilities::default(),
             execution: ExecutionCapabilities {
-                async_execution: SupportLevel::from_known(
-                    capabilities.supports_async_execution,
-                ),
+                async_execution: SupportLevel::from_known(capabilities.supports_async_execution),
                 ..ExecutionCapabilities::default()
             },
             reproducibility: ReproducibilityCapabilities::default(),
@@ -323,29 +296,22 @@ impl HardwareCapabilities
 }
 
 #[cfg(test)]
-mod tests
-{
+mod tests {
     use alloc::vec;
 
     use super::*;
 
     #[test]
-    fn support_level_preserves_unknown_state()
-    {
+    fn support_level_preserves_unknown_state() {
         assert!(!SupportLevel::Unknown.is_supported());
         assert_eq!(SupportLevel::from_known(true), SupportLevel::Supported);
-        assert_eq!(
-            SupportLevel::from_known(false),
-            SupportLevel::Unsupported
-        );
+        assert_eq!(SupportLevel::from_known(false), SupportLevel::Unsupported);
     }
 
     #[test]
-    fn current_host_architecture_never_claims_optional_isa_features()
-    {
-        let capabilities = HardwareCapabilities::from_device_capabilities(
-            &DeviceCapabilities::reference_cpu(),
-        );
+    fn current_host_architecture_never_claims_optional_isa_features() {
+        let capabilities =
+            HardwareCapabilities::from_device_capabilities(&DeviceCapabilities::reference_cpu());
 
         assert_eq!(capabilities.device, DeviceId::reference());
         assert!(capabilities.isa.features.is_empty());
@@ -353,8 +319,7 @@ mod tests
     }
 
     #[test]
-    fn legacy_bridge_promotes_only_known_facts()
-    {
+    fn legacy_bridge_promotes_only_known_facts() {
         let legacy = DeviceCapabilities {
             device: DeviceId::new(DeviceKind::Cuda, 2),
             name: "test-cuda".into(),
@@ -368,19 +333,18 @@ mod tests
 
         assert_eq!(hardware.device, legacy.device);
         assert_eq!(hardware.architecture, Architecture::unknown());
-        assert_eq!(hardware.numeric.storage_dtypes, vec![DType::F16, DType::F32]);
-        assert!(hardware.numeric.arithmetic_dtypes.is_empty());
         assert_eq!(
-            hardware.execution.async_execution,
-            SupportLevel::Supported
+            hardware.numeric.storage_dtypes,
+            vec![DType::F16, DType::F32]
         );
+        assert!(hardware.numeric.arithmetic_dtypes.is_empty());
+        assert_eq!(hardware.execution.async_execution, SupportLevel::Supported);
         assert_eq!(hardware.matrix.accelerated, SupportLevel::Unknown);
         assert!(hardware.memory.spaces.is_empty());
     }
 
     #[test]
-    fn feature_and_reproducibility_membership_are_explicit()
-    {
+    fn feature_and_reproducibility_membership_are_explicit() {
         let isa = IsaCapabilities {
             features: vec![IsaFeature::Avx2, IsaFeature::Fma],
             ..IsaCapabilities::default()
