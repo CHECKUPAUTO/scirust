@@ -86,17 +86,21 @@ jobs:
       CARGO_INCREMENTAL: 0
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-      - name: Prepare executable temporary directory
+      - name: Prepare isolated executable build directory
         run: |
           tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.ci-tmp.XXXXXX")"
           chmod 700 "$tmpdir"
           echo "TMPDIR=$tmpdir" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=$tmpdir/target" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: 1.89.0
+      - name: Pin Cargo bin directory for self-hosted steps
+        run: echo "$(dirname "$(rustup which cargo --toolchain 1.89.0)")" >> "$GITHUB_PATH"
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
         with:
           shared-key: phase25-wgpu-thor
+          cache-targets: false
       - name: Report WGPU/Vulkan environment
         continue-on-error: true
         run: |
