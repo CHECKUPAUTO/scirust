@@ -25,8 +25,8 @@ pub use device::{DeviceId, DeviceKind};
 pub use dtype::DType;
 pub use error::{ComputeError, ComputeResult};
 pub use hardware::{
-    Architecture, ArchitectureFamily, ExecutionCapabilities, HardwareCapabilities, IsaCapabilities,
-    IsaFeature, MatrixCapabilities, MemoryCapabilities, NumericCapabilities,
+    Architecture, ArchitectureFamily, CapabilitySet, ExecutionCapabilities, HardwareCapabilities,
+    IsaCapabilities, IsaFeature, MatrixCapabilities, MemoryCapabilities, NumericCapabilities,
     ReproducibilityCapabilities, ReproducibilityLevel, SupportLevel, VectorModel,
 };
 pub use ids::{BufferId, EventId, KernelId, StreamId};
