@@ -50,7 +50,12 @@ jobs:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
       - name: Report Thor CUDA
-        run: nvidia-smi --query-gpu=name,driver_version,compute_cap,memory.total --format=csv,noheader
+        run: |
+          if command -v nvidia-smi >/dev/null 2>&1; then
+            nvidia-smi --query-gpu=name,driver_version,compute_cap,memory.total --format=csv,noheader
+          else
+            echo "nvidia-smi is unavailable on this Jetson runner; CUDA availability is validated by the required SCIAGENT CUDA parity step."
+          fi
       - name: Format
         run: rustup run nightly-2026-07-02 cargo fmt --all -- --check
       - name: SCIAGENT CUDA parity
