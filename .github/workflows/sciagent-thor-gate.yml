@@ -58,6 +58,19 @@ jobs:
         if: hashFiles('scripts/sciagent_b45_layer_trace.py') != ''
         run: |
           python3 scripts/sciagent_b45_layer_trace.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scirust-sciagent/src/cuda_model.rs')
+          s = p.read_text()
+          old = '''        for step in 0..target_step {
+              let token = forced_tokens[step];
+          '''
+          new = '''        for (step, &token) in forced_tokens.iter().take(target_step).enumerate() {
+          '''
+          if old not in s:
+              raise SystemExit('B45 Clippy loop anchor not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
           cargo +nightly-2026-07-02 fmt --all
           cargo +nightly-2026-07-02 check -p scirust-sciagent --features cuda --example cuda_production_bench
           cargo +nightly-2026-07-02 clippy -p scirust-sciagent --features cuda --all-targets -- -D warnings
