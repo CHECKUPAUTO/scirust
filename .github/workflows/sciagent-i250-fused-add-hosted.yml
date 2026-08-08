@@ -2,7 +2,7 @@ name: SciAgent I250 fused-add hosted
 
 on:
   pull_request:
-    branches: [ci/i250-fused-add-base]
+    branches: [ci/i250-fused-down-base]
     paths:
       - "scirust-cuda/**"
       - "scirust-sciagent/**"
