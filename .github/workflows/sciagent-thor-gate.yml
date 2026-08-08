@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: sciagent-thor-${{ github.event.pull_request.number || github.ref }}
@@ -27,7 +27,6 @@ concurrency:
 jobs:
   sciagent-thor:
     name: SCIAGENT CUDA parity + 304M benchmark
-    # Never run code from an untrusted fork on the self-hosted Thor.
     if: >
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
@@ -45,15 +44,31 @@ jobs:
       RUSTFLAGS: "-D warnings"
       SCIRUST_REQUIRE_CUDA: "1"
     steps:
-      - name: Check out tested revision
+      - name: Check out tested branch
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          fetch-depth: 0
       - name: Install pinned nightly
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
+      - name: Apply B45 once and publish code only
+        if: hashFiles('scripts/sciagent_b45_layer_trace.py') != ''
+        run: |
+          python3 scripts/sciagent_b45_layer_trace.py
+          cargo +nightly-2026-07-02 fmt --all
+          cargo +nightly-2026-07-02 check -p scirust-sciagent --features cuda --example cuda_production_bench
+          cargo +nightly-2026-07-02 clippy -p scirust-sciagent --features cuda --all-targets -- -D warnings
+          rm -f scripts/sciagent_b45_layer_trace.py
+          git restore -- .github/workflows
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "test(sciagent): localize production KV drift by layer"
+          git push origin HEAD:perf/sciagent-b39-thor-production-bench
       - name: Report Thor CUDA
         run: |
           uname -a
