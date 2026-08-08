@@ -51,6 +51,12 @@ No global reproducibility mode is advertised by the generic WGPU adapter.
 
 Specific SciRust WGPU kernels can provide stronger deterministic contracts separately when their algorithm and validation justify it. The generic ability to compile arbitrary WGSL is not itself proof of `BitExact` or `Deterministic` execution across devices and drivers.
 
+## Validation
+
+Pure profile tests verify tri-state semantics without requiring graphics hardware. A separate integration test acquires `WgpuComputeAdapter` and calls `ComputeBackend::hardware_capabilities()` through the public trait path, so the WGPU/lavapipe CI job validates the actual wiring rather than only the helper function.
+
+The profile does not depend on a particular adapter name or vendor, so the lavapipe result is meaningful for the portable contract while native ARM64 continues to protect cross-architecture compilation.
+
 ## Planner consequence
 
 A portable WGPU candidate should express semantic requirements such as `F32`, device memory, and asynchronous execution. Hardware-specific candidates requiring a known accelerator family, matrix acceleration, subgroup operations, FP16/BF16, or a reproducibility mode remain ineligible until those properties are explicitly proven.
