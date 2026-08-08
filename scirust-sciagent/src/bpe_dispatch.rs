@@ -34,13 +34,15 @@ impl VersionedBpeTokenizer {
         let semantics = declared_semantics(&input)?;
         match semantics
         {
-            BpeMergeSemantics::LegacyParallelV1 => {
+            BpeMergeSemantics::LegacyParallelV1 =>
+            {
                 let path = path.to_str().ok_or(BpeDispatchError::NonUtf8Path)?;
                 BpeTokenizer::load_json(path)
                     .map(Self::Legacy)
                     .map_err(BpeDispatchError::Io)
             },
-            BpeMergeSemantics::CanonicalRankV1 => {
+            BpeMergeSemantics::CanonicalRankV1 =>
+            {
                 let profile = reference_profile()?;
                 ElasticTextTokenizer::from_json_str(&input, profile)
                     .map(Self::Canonical)
@@ -81,10 +83,9 @@ impl VersionedBpeTokenizer {
     ) -> Vec<TokenId> {
         match self
         {
-            Self::Legacy(tokenizer) => {
-                tokenizer.encode_with_special(text, prepend_bos, append_eos)
-            },
-            Self::Canonical(tokenizer) => {
+            Self::Legacy(tokenizer) => tokenizer.encode_with_special(text, prepend_bos, append_eos),
+            Self::Canonical(tokenizer) =>
+            {
                 tokenizer.encode_with_special(text, prepend_bos, append_eos)
             },
         }
@@ -144,11 +145,22 @@ impl VersionedBpeTokenizer {
 
 fn declared_semantics(input: &str) -> Result<BpeMergeSemantics, BpeDispatchError> {
     let value: serde_json::Value = serde_json::from_str(input).map_err(BpeDispatchError::Json)?;
-    match value.get("merge_semantics").and_then(serde_json::Value::as_str)
+    match value.get("merge_semantics")
     {
-        None | Some(LEGACY_BPE_SEMANTICS_V1) => Ok(BpeMergeSemantics::LegacyParallelV1),
-        Some(CANONICAL_BPE_SEMANTICS_V1) => Ok(BpeMergeSemantics::CanonicalRankV1),
-        Some(other) => Err(BpeDispatchError::UnknownMergeSemantics(other.to_string())),
+        None => Ok(BpeMergeSemantics::LegacyParallelV1),
+        Some(serde_json::Value::String(value)) if value == LEGACY_BPE_SEMANTICS_V1 =>
+        {
+            Ok(BpeMergeSemantics::LegacyParallelV1)
+        },
+        Some(serde_json::Value::String(value)) if value == CANONICAL_BPE_SEMANTICS_V1 =>
+        {
+            Ok(BpeMergeSemantics::CanonicalRankV1)
+        },
+        Some(serde_json::Value::String(value)) =>
+        {
+            Err(BpeDispatchError::UnknownMergeSemantics(value.clone()))
+        },
+        Some(_) => Err(BpeDispatchError::InvalidMergeSemanticsType),
     }
 }
 
@@ -162,6 +174,7 @@ pub enum BpeDispatchError {
     Io(std::io::Error),
     Json(serde_json::Error),
     NonUtf8Path,
+    InvalidMergeSemanticsType,
     UnknownMergeSemantics(String),
     Canonical(ElasticTextTokenizerError),
     InvalidReferenceProfile(ThresholdError),
@@ -176,15 +189,22 @@ impl fmt::Display for BpeDispatchError {
             Self::Io(error) => write!(f, "BPE tokenizer I/O failed: {error}"),
             Self::Json(error) => write!(f, "BPE tokenizer JSON failed: {error}"),
             Self::NonUtf8Path => f.write_str("BPE tokenizer path is not valid UTF-8"),
-            Self::UnknownMergeSemantics(value) => {
+            Self::InvalidMergeSemanticsType =>
+            {
+                f.write_str("BPE merge_semantics must be a string when present")
+            },
+            Self::UnknownMergeSemantics(value) =>
+            {
                 write!(f, "unknown BPE merge semantics `{value}`")
             },
             Self::Canonical(error) => write!(f, "canonical BPE tokenizer failed: {error}"),
-            Self::InvalidReferenceProfile(error) => {
+            Self::InvalidReferenceProfile(error) =>
+            {
                 write!(f, "invalid canonical reference profile: {error}")
             },
             Self::ProfileStore(error) => write!(f, "elastic profile rejected: {error}"),
-            Self::LegacyProfileUnsupported => {
+            Self::LegacyProfileUnsupported =>
+            {
                 f.write_str("elastic execution profiles require canonical BPE semantics")
             },
         }
@@ -233,5 +253,20 @@ mod tests {
             declared_semantics(r#"{"merge_semantics":"future-v99"}"#),
             Err(BpeDispatchError::UnknownMergeSemantics(_))
         ));
+    }
+
+    #[test]
+    fn non_string_semantics_fails_closed() {
+        for input in [
+            r#"{"merge_semantics":null}"#,
+            r#"{"merge_semantics":42}"#,
+            r#"{"merge_semantics":true}"#,
+        ]
+        {
+            assert!(matches!(
+                declared_semantics(input),
+                Err(BpeDispatchError::InvalidMergeSemanticsType)
+            ));
+        }
     }
 }
