@@ -107,12 +107,15 @@ fn collect_numa_nodes(node_root: &Path) -> Vec<NumaRecord> {
 fn collect_caches(cpu_root: &Path, cpus: &[CpuRecord]) -> Vec<CacheRecord> {
     let mut caches = BTreeMap::<CacheKey, CacheRecord>::new();
 
-    for cpu in cpus {
+    for cpu in cpus
+    {
         let cache_root = cpu_root.join(format!("cpu{}/cache", cpu.id));
-        for (index, path) in numeric_entries(&cache_root, "index") {
-            let Some(level) = read_trimmed(&path.join("level"))
-                .and_then(|value| value.parse::<u8>().ok())
-            else {
+        for (index, path) in numeric_entries(&cache_root, "index")
+        {
+            let Some(level) =
+                read_trimmed(&path.join("level")).and_then(|value| value.parse::<u8>().ok())
+            else
+            {
                 continue;
             };
 
@@ -121,7 +124,8 @@ fn collect_caches(cpu_root: &Path, cpus: &[CpuRecord]) -> Vec<CacheRecord> {
                 .unwrap_or(CacheKind::Other);
             let shared = read_trimmed(&path.join("shared_cpu_list"))
                 .and_then(|value| parse_cpu_list(&value));
-            let (shared_cpus, fallback_cpu, fallback_index) = match shared {
+            let (shared_cpus, fallback_cpu, fallback_index) = match shared
+            {
                 Some(cpus) if !cpus.is_empty() => (cpus, None, None),
                 _ => (vec![cpu.id], Some(cpu.id), Some(index)),
             };
@@ -162,14 +166,17 @@ fn build_topology(
     topology.nodes.push(machine_node);
 
     let mut package_ids = BTreeSet::new();
-    for cpu in cpus {
-        if let Some(package_id) = cpu.package_id {
+    for cpu in cpus
+    {
+        if let Some(package_id) = cpu.package_id
+        {
             package_ids.insert(package_id);
         }
     }
 
     let mut package_nodes = BTreeMap::new();
-    for package_id in package_ids {
+    for package_id in package_ids
+    {
         let node_id = allocate_id(&mut next_id);
         let mut node = TopologyNode::new(node_id, TopologyNodeKind::CpuPackage);
         node.name = Some(format!("cpu-package-{package_id}"));
@@ -179,7 +186,8 @@ fn build_topology(
     }
 
     let mut numa_node_ids = BTreeMap::new();
-    for numa in numa_nodes {
+    for numa in numa_nodes
+    {
         let node_id = allocate_id(&mut next_id);
         let mut node = TopologyNode::new(node_id, TopologyNodeKind::NumaNode);
         node.name = Some(format!("numa-{}", numa.id));
@@ -207,7 +215,8 @@ fn build_topology(
     }
 
     let mut cpu_nodes = BTreeMap::new();
-    for cpu in cpus {
+    for cpu in cpus
+    {
         let node_id = allocate_id(&mut next_id);
         let mut node = TopologyNode::new(node_id, TopologyNodeKind::ProcessingUnit);
         node.name = Some(format!("cpu-{}", cpu.id));
@@ -221,12 +230,17 @@ fn build_topology(
         cpu_nodes.insert(cpu.id, node_id);
     }
 
-    for numa in numa_nodes {
-        let Some(numa_id) = numa_node_ids.get(&numa.id).copied() else {
+    for numa in numa_nodes
+    {
+        let Some(numa_id) = numa_node_ids.get(&numa.id).copied()
+        else
+        {
             continue;
         };
-        for cpu in &numa.cpus {
-            if let Some(cpu_id) = cpu_nodes.get(cpu).copied() {
+        for cpu in &numa.cpus
+        {
+            if let Some(cpu_id) = cpu_nodes.get(cpu).copied()
+            {
                 topology.links.push(TopologyLink {
                     from: numa_id,
                     to: cpu_id,
@@ -239,7 +253,8 @@ fn build_topology(
         }
     }
 
-    for cache in caches {
+    for cache in caches
+    {
         let cache_id = allocate_id(&mut next_id);
         let mut node = TopologyNode::new(cache_id, TopologyNodeKind::Cache);
         node.name = Some(cache_name(cache));
@@ -254,8 +269,10 @@ fn build_topology(
         let parent = common_package(cache, cpus, &package_nodes).unwrap_or(machine);
         topology.links.push(contains(parent, cache_id));
 
-        for cpu in &cache.key.shared_cpus {
-            if let Some(cpu_id) = cpu_nodes.get(cpu).copied() {
+        for cpu in &cache.key.shared_cpus
+        {
+            if let Some(cpu_id) = cpu_nodes.get(cpu).copied()
+            {
                 topology.links.push(TopologyLink {
                     from: cache_id,
                     to: cpu_id,
@@ -277,14 +294,17 @@ fn common_package(
     package_nodes: &BTreeMap<u32, TopologyNodeId>,
 ) -> Option<TopologyNodeId> {
     let mut package = None;
-    for cpu_id in &cache.key.shared_cpus {
+    for cpu_id in &cache.key.shared_cpus
+    {
         let current = cpus
             .iter()
             .find(|cpu| cpu.id == *cpu_id)
             .and_then(|cpu| cpu.package_id)?;
-        match package {
+        match package
+        {
             None => package = Some(current),
-            Some(existing) if existing == current => {}
+            Some(existing) if existing == current =>
+            {},
             Some(_) => return None,
         }
     }
@@ -309,20 +329,29 @@ fn allocate_id(next_id: &mut u32) -> TopologyNodeId {
 }
 
 fn numeric_entries(root: &Path, prefix: &str) -> Vec<(u32, PathBuf)> {
-    let Ok(entries) = fs::read_dir(root) else {
+    let Ok(entries) = fs::read_dir(root)
+    else
+    {
         return Vec::new();
     };
 
     let mut found = Vec::new();
-    for entry in entries.flatten() {
+    for entry in entries.flatten()
+    {
         let name = entry.file_name();
-        let Some(name) = name.to_str() else {
+        let Some(name) = name.to_str()
+        else
+        {
             continue;
         };
-        let Some(suffix) = name.strip_prefix(prefix) else {
+        let Some(suffix) = name.strip_prefix(prefix)
+        else
+        {
             continue;
         };
-        let Ok(id) = suffix.parse::<u32>() else {
+        let Ok(id) = suffix.parse::<u32>()
+        else
+        {
             continue;
         };
         found.push((id, entry.path()));
@@ -339,30 +368,39 @@ fn read_trimmed(path: &Path) -> Option<String> {
 
 fn parse_cpu_list(input: &str) -> Option<Vec<u32>> {
     let input = input.trim();
-    if input.is_empty() {
+    if input.is_empty()
+    {
         return Some(Vec::new());
     }
 
     let mut cpus = BTreeSet::new();
-    for part in input.split(',') {
+    for part in input.split(',')
+    {
         let part = part.trim();
-        if part.is_empty() {
+        if part.is_empty()
+        {
             return None;
         }
 
-        if let Some((start, end)) = part.split_once('-') {
-            if start.contains('-') || end.contains('-') {
+        if let Some((start, end)) = part.split_once('-')
+        {
+            if start.contains('-') || end.contains('-')
+            {
                 return None;
             }
             let start = start.parse::<u32>().ok()?;
             let end = end.parse::<u32>().ok()?;
-            if start > end || end.saturating_sub(start) > 1_000_000 {
+            if start > end || end.saturating_sub(start) > 1_000_000
+            {
                 return None;
             }
-            for cpu in start..=end {
+            for cpu in start..=end
+            {
                 cpus.insert(cpu);
             }
-        } else {
+        }
+        else
+        {
             cpus.insert(part.parse::<u32>().ok()?);
         }
     }
@@ -371,7 +409,8 @@ fn parse_cpu_list(input: &str) -> Option<Vec<u32>> {
 }
 
 fn parse_cache_kind(input: &str) -> CacheKind {
-    match input.trim() {
+    match input.trim()
+    {
         "Data" => CacheKind::Data,
         "Instruction" => CacheKind::Instruction,
         "Unified" => CacheKind::Unified,
@@ -380,7 +419,8 @@ fn parse_cache_kind(input: &str) -> CacheKind {
 }
 
 fn cache_kind_rank(kind: CacheKind) -> u8 {
-    match kind {
+    match kind
+    {
         CacheKind::Data => 0,
         CacheKind::Instruction => 1,
         CacheKind::Unified => 2,
@@ -390,7 +430,8 @@ fn cache_kind_rank(kind: CacheKind) -> u8 {
 
 fn parse_size_bytes(input: &str) -> Option<u64> {
     let value = input.trim();
-    if value.is_empty() {
+    if value.is_empty()
+    {
         return None;
     }
 
@@ -399,7 +440,8 @@ fn parse_size_bytes(input: &str) -> Option<u64> {
         .unwrap_or(value.len());
     let number = value[..split].parse::<u64>().ok()?;
     let suffix = value[split..].trim();
-    let multiplier = match suffix {
+    let multiplier = match suffix
+    {
         "" | "B" => 1,
         "K" | "KB" | "kB" => 1024,
         "M" | "MB" => 1024_u64.pow(2),
@@ -410,14 +452,18 @@ fn parse_size_bytes(input: &str) -> Option<u64> {
 }
 
 fn parse_numa_mem_total(input: &str) -> Option<u64> {
-    for line in input.lines() {
+    for line in input.lines()
+    {
         let tokens = line.split_whitespace().collect::<Vec<_>>();
-        let Some(index) = tokens.iter().position(|token| *token == "MemTotal:") else {
+        let Some(index) = tokens.iter().position(|token| *token == "MemTotal:")
+        else
+        {
             continue;
         };
         let value = tokens.get(index + 1)?.parse::<u64>().ok()?;
         let unit = tokens.get(index + 2).copied().unwrap_or("B");
-        let multiplier = match unit {
+        let multiplier = match unit
+        {
             "B" => 1,
             "kB" | "KB" | "K" => 1024,
             "MB" | "M" => 1024_u64.pow(2),
@@ -430,7 +476,8 @@ fn parse_numa_mem_total(input: &str) -> Option<u64> {
 }
 
 fn cache_name(cache: &CacheRecord) -> String {
-    let kind = match cache.kind {
+    let kind = match cache.kind
+    {
         CacheKind::Data => "data",
         CacheKind::Instruction => "instruction",
         CacheKind::Unified => "unified",
@@ -502,22 +549,15 @@ mod tests {
         write(&root, "cpu/cpu0/topology/physical_package_id", "0\n");
         write(&root, "cpu/cpu1/topology/physical_package_id", "0\n");
         write(&root, "node/node0/cpulist", "0-1\n");
-        write(
-            &root,
-            "node/node0/meminfo",
-            "Node 0 MemTotal: 65536 kB\n",
-        );
+        write(&root, "node/node0/meminfo", "Node 0 MemTotal: 65536 kB\n");
 
-        for cpu in 0..=1 {
+        for cpu in 0..=1
+        {
             let prefix = format!("cpu/cpu{cpu}/cache/index0");
             write(&root, &format!("{prefix}/level"), "1\n");
             write(&root, &format!("{prefix}/type"), "Data\n");
             write(&root, &format!("{prefix}/size"), "32K\n");
-            write(
-                &root,
-                &format!("{prefix}/coherency_line_size"),
-                "64\n",
-            );
+            write(&root, &format!("{prefix}/coherency_line_size"), "64\n");
             write(&root, &format!("{prefix}/shared_cpu_list"), "0-1\n");
         }
 
