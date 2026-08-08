@@ -105,6 +105,10 @@ pub struct ExecutionProfile {
     pub architecture: ExecutionArchitecture,
     pub capability_profile_sha256: Sha256Digest,
     pub topology_profile_sha256: Sha256Digest,
+    /// Caller-provided memory ceiling that constrained implementation selection.
+    /// `None` means no explicit caller budget was applied; `Some(0)` is a real
+    /// zero-byte constraint and is intentionally distinct in the fingerprint.
+    pub memory_budget_bytes: Option<u64>,
     pub numeric_mode: String,
     pub reproducibility: ExecutionReproducibility,
     pub kernel_semantic_version: String,
@@ -164,6 +168,7 @@ impl ExecutionProfile {
         put_optional_text(&mut out, self.architecture.name.as_deref());
         put_text(&mut out, self.capability_profile_sha256.as_str());
         put_text(&mut out, self.topology_profile_sha256.as_str());
+        put_optional_u64(&mut out, self.memory_budget_bytes);
         put_text(&mut out, &self.numeric_mode);
         out.push(reproducibility_tag(self.reproducibility));
         put_text(&mut out, &self.kernel_semantic_version);
@@ -267,6 +272,10 @@ fn put_u32(out: &mut Vec<u8>, value: u32) {
     out.extend_from_slice(&value.to_le_bytes());
 }
 
+fn put_u64(out: &mut Vec<u8>, value: u64) {
+    out.extend_from_slice(&value.to_le_bytes());
+}
+
 fn put_text(out: &mut Vec<u8>, value: &str) {
     let len = u32::try_from(value.len()).expect("validated execution-profile text length fits u32");
     put_u32(out, len);
@@ -280,6 +289,18 @@ fn put_optional_text(out: &mut Vec<u8>, value: Option<&str>) {
         {
             out.push(1);
             put_text(out, value);
+        },
+        None => out.push(0),
+    }
+}
+
+fn put_optional_u64(out: &mut Vec<u8>, value: Option<u64>) {
+    match value
+    {
+        Some(value) =>
+        {
+            out.push(1);
+            put_u64(out, value);
         },
         None => out.push(0),
     }
@@ -433,6 +454,7 @@ mod tests {
             },
             capability_profile_sha256: hash(0x11),
             topology_profile_sha256: hash(0x22),
+            memory_budget_bytes: Some(8 * 1024 * 1024 * 1024),
             numeric_mode: "bf16_tensor_core".to_string(),
             reproducibility: ExecutionReproducibility::Deterministic,
             kernel_semantic_version: "sciagent.decode.v1".to_string(),
@@ -466,6 +488,24 @@ mod tests {
         assert_eq!(
             profile.canonical_bytes().unwrap(),
             decoded.canonical_bytes().unwrap()
+        );
+    }
+
+    #[test]
+    fn memory_budget_is_part_of_the_execution_identity() {
+        let profile = profile();
+        let baseline = profile.fingerprint().unwrap();
+
+        let mut unconstrained = profile.clone();
+        unconstrained.memory_budget_bytes = None;
+        assert_ne!(unconstrained.fingerprint().unwrap(), baseline);
+
+        let mut zero_budget = profile;
+        zero_budget.memory_budget_bytes = Some(0);
+        assert_ne!(zero_budget.fingerprint().unwrap(), baseline);
+        assert_ne!(
+            zero_budget.fingerprint().unwrap(),
+            unconstrained.fingerprint().unwrap()
         );
     }
 
