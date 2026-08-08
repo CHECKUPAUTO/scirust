@@ -43,19 +43,12 @@ jobs:
       - run: |
           sudo apt-get update
           sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
-      - name: Probe 4096-vocabulary bounded and oracle bursts on lavapipe
+      - name: Probe 4096-vocabulary production bursts on lavapipe
         run: |
           set -euo pipefail
           for limit in 8 32; do
             echo "=== Phase 28 lavapipe bounded top-k=50 limit: $limit ==="
             SCIRUST_RESIDENT_PROBE_TOP_K=50 \
-            SCIRUST_RESIDENT_PROBE_LIMIT="$limit" \
-              cargo +1.89.0 run --quiet --release --locked -p scirust-gpu \
-                --features wgpu --example resident_generation_first_token_probe
-          done
-          for limit in 5 6 7 8; do
-            echo "=== Phase 28 lavapipe oracle top-k=0 limit: $limit ==="
-            SCIRUST_RESIDENT_PROBE_TOP_K=0 \
             SCIRUST_RESIDENT_PROBE_LIMIT="$limit" \
               cargo +1.89.0 run --quiet --release --locked -p scirust-gpu \
                 --features wgpu --example resident_generation_first_token_probe
@@ -119,7 +112,7 @@ jobs:
       SCIRUST_RESIDENT_BENCH_VOCAB: "4096"
       SCIRUST_RESIDENT_BENCH_PROMPT_TOKENS: "16"
       SCIRUST_RESIDENT_BENCH_DECODE_TOKENS: "8,32"
-      SCIRUST_RESIDENT_BENCH_TOP_KS: "0,50"
+      SCIRUST_RESIDENT_BENCH_TOP_KS: "50"
       SCIRUST_RESIDENT_BENCH_REPEATS: "7"
       SCIRUST_RESIDENT_BENCH_WARMUP: "3"
       CARGO_INCREMENTAL: "0"
@@ -158,22 +151,26 @@ jobs:
           uname -a
           nvidia-smi
           vulkaninfo --summary
+      - name: Require an idle Thor for performance measurements
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! compute_apps="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null)"; then
+            echo "::error::Phase 28 cannot verify that the Thor is idle; refusing to publish a performance baseline."
+            exit 1
+          fi
+          if [[ -n "${compute_apps//[[:space:]]/}" ]]; then
+            echo "::error::Phase 28 performance baseline requires an idle Thor; unrelated compute processes are active:"
+            printf '%s\n' "$compute_apps"
+            exit 1
+          fi
+          echo "Thor compute queue is idle before the Phase 28 baseline."
       - name: Probe bounded sampler at production burst sizes
         run: |
           set -euo pipefail
           for limit in 8 32; do
             echo "=== Phase 28 Thor bounded top-k=50 limit: $limit ==="
             SCIRUST_RESIDENT_PROBE_TOP_K=50 \
-            SCIRUST_RESIDENT_PROBE_LIMIT="$limit" \
-              rustup run 1.89.0 cargo run --quiet --release --locked -p scirust-gpu \
-                --features wgpu --example resident_generation_first_token_probe
-          done
-      - name: Locate oracle sampler Thor threshold
-        run: |
-          set -euo pipefail
-          for limit in 5 6 7 8; do
-            echo "=== Phase 28 Thor oracle top-k=0 limit: $limit ==="
-            SCIRUST_RESIDENT_PROBE_TOP_K=0 \
             SCIRUST_RESIDENT_PROBE_LIMIT="$limit" \
               rustup run 1.89.0 cargo run --quiet --release --locked -p scirust-gpu \
                 --features wgpu --example resident_generation_first_token_probe
@@ -192,8 +189,8 @@ jobs:
           with open('phase28-thor.csv', newline='', encoding='utf-8') as handle:
               rows = list(csv.DictReader(handle))
 
-          assert len(rows) == 4, rows
-          assert {int(row['top_k']) for row in rows} == {0, 50}
+          assert len(rows) == 2, rows
+          assert {int(row['top_k']) for row in rows} == {50}
           assert {int(row['requested_decode_tokens']) for row in rows} == {8, 32}
           for row in rows:
               requested = int(row['requested_decode_tokens'])
