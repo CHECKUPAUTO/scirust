@@ -46,7 +46,7 @@ jobs:
         with:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
-      - name: Apply B49 once and publish code only
+      - name: Apply B49 deterministic context and publish code only
         if: hashFiles('scripts/sciagent_b49_deterministic_context.py') != ''
         run: |
           python3 scripts/sciagent_b49_deterministic_context.py
@@ -64,8 +64,7 @@ jobs:
           git commit -m "fix(sciagent): use deterministic attention context reduction"
           git push origin HEAD:perf/sciagent-b39-thor-production-bench
       - name: Report Thor CUDA
-        run: |
-          nvidia-smi --query-gpu=name,driver_version,compute_cap,memory.total --format=csv,noheader
+        run: nvidia-smi --query-gpu=name,driver_version,compute_cap,memory.total --format=csv,noheader
       - name: Format
         run: cargo +nightly-2026-07-02 fmt --all -- --check
       - name: SCIAGENT CUDA parity
