@@ -152,7 +152,15 @@ fn emit_case(
         let full = resident.generate_ids_resident(prompt, requested_decode)?;
         if full != expected
         {
-            return Err("warmup CPU/WGPU sequence mismatch".into());
+            return Err(sequence_mismatch(
+                "warmup",
+                top_k,
+                requested_decode,
+                prompt.len(),
+                &expected,
+                &full,
+            )
+            .into());
         }
         std::hint::black_box(full);
     }
@@ -173,6 +181,18 @@ fn emit_case(
         let start = Instant::now();
         let full = resident.generate_ids_resident(prompt, requested_decode)?;
         full_elapsed.push(start.elapsed().as_nanos());
+        if full != expected
+        {
+            return Err(sequence_mismatch(
+                "measured",
+                top_k,
+                requested_decode,
+                prompt.len(),
+                &expected,
+                &full,
+            )
+            .into());
+        }
         replay &= full == expected;
         std::hint::black_box(full);
     }
@@ -246,6 +266,35 @@ fn emit_case(
     );
 
     Ok(())
+}
+
+fn sequence_mismatch(
+    stage: &str,
+    top_k: usize,
+    requested_decode: usize,
+    prompt_len: usize,
+    expected: &[usize],
+    actual: &[usize],
+) -> String {
+    let first_index = expected
+        .iter()
+        .zip(actual)
+        .position(|(expected_token, actual_token)| expected_token != actual_token)
+        .unwrap_or(expected.len().min(actual.len()));
+    let expected_token = expected
+        .get(first_index)
+        .map_or_else(|| "end".to_owned(), usize::to_string);
+    let actual_token = actual
+        .get(first_index)
+        .map_or_else(|| "end".to_owned(), usize::to_string);
+    format!(
+        "Phase 28 {stage} CPU/WGPU sequence mismatch: top_k={top_k}, requested_decode={requested_decode}, first_index={first_index}, generated_offset={}, expected_token={expected_token}, actual_token={actual_token}, expected_len={}, actual_len={}, expected_fingerprint={:016x}, actual_fingerprint={:016x}",
+        first_index.saturating_sub(prompt_len),
+        expected.len(),
+        actual.len(),
+        fingerprint(expected),
+        fingerprint(actual),
+    )
 }
 
 fn synthetic_tokenizer(vocab_size: usize) -> Result<CharTokenizer, Box<dyn std::error::Error>> {
