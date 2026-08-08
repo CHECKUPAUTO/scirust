@@ -39,10 +39,17 @@ jobs:
       SCIRUST_REQUIRE_CUDA: "1"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Prepare executable temporary directory
+        run: |
+          tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.ci-tmp.XXXXXX")"
+          chmod 700 "$tmpdir"
+          echo "TMPDIR=$tmpdir" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
+      - name: Pin Cargo bin directory for self-hosted steps
+        run: echo "$(dirname "$(rustup which cargo --toolchain nightly-2026-07-02)")" >> "$GITHUB_PATH"
       - name: Report Thor CUDA
         run: nvidia-smi --query-gpu=name,driver_version,compute_cap,memory.total --format=csv,noheader
       - name: Format
