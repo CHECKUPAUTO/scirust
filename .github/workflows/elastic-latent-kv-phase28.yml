@@ -43,10 +43,15 @@ jobs:
       - run: |
           sudo apt-get update
           sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
-      - name: Probe 4096-vocabulary first token on lavapipe
+      - name: Probe 4096-vocabulary burst limits on lavapipe
         run: |
-          cargo +1.89.0 run --quiet --release --locked -p scirust-gpu \
-            --features wgpu --example resident_generation_first_token_probe
+          set -euo pipefail
+          for limit in 1 2 3 4 8; do
+            echo "=== Phase 28 lavapipe burst limit: $limit ==="
+            SCIRUST_RESIDENT_PROBE_LIMIT="$limit" \
+              cargo +1.89.0 run --quiet --release --locked -p scirust-gpu \
+                --features wgpu --example resident_generation_first_token_probe
+          done
       - name: Run resident-generation smoke baseline
         run: |
           cargo +1.89.0 run --quiet --release --locked -p scirust-gpu \
@@ -145,10 +150,15 @@ jobs:
           uname -a
           nvidia-smi
           vulkaninfo --summary
-      - name: Probe first token before device feedback
+      - name: Probe burst limits in fresh Thor WGPU processes
         run: |
-          rustup run 1.89.0 cargo run --quiet --release --locked -p scirust-gpu \
-            --features wgpu --example resident_generation_first_token_probe
+          set -euo pipefail
+          for limit in 1 2 3 4 8; do
+            echo "=== Phase 28 Thor burst limit: $limit ==="
+            SCIRUST_RESIDENT_PROBE_LIMIT="$limit" \
+              rustup run 1.89.0 cargo run --quiet --release --locked -p scirust-gpu \
+                --features wgpu --example resident_generation_first_token_probe
+          done
       - name: Run real-device resident baseline
         run: |
           rustup run 1.89.0 cargo run --quiet --release --locked -p scirust-gpu \
