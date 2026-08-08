@@ -1,0 +1,52 @@
+name: SciAgent B40 exact epoch + fused RoPE
+
+on:
+  push:
+    branches:
+      - perf/sciagent-b39-thor-production-bench
+    paths:
+      - scripts/sciagent_b40_patch.py
+      - .github/workflows/sciagent-b40-apply.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: perf/sciagent-b39-thor-production-bench
+          fetch-depth: 0
+      - name: Apply B40
+        run: python3 scripts/sciagent_b40_patch.py
+      - name: Format
+        run: cargo fmt --all
+      - name: Test SciAgent CPU surface
+        run: cargo test -p scirust-sciagent --lib
+      - name: Check CUDA backend
+        run: cargo check -p scirust-cuda --features cuda
+      - name: Check CUDA pretrain and production bench
+        run: |
+          cargo check -p scirust-sciagent --features cuda --example cuda_pretrain
+          cargo check -p scirust-sciagent --features cuda --example cuda_production_bench
+      - name: Compile CUDA parity
+        run: cargo test -p scirust-sciagent --features cuda --test cuda_parity --no-run
+      - name: Remove one-shot helpers and stale diagnostics
+        run: |
+          rm -f scripts/sciagent_b40_patch.py .github/workflows/sciagent-b40-apply.yml
+          rm -f .github/workflows/sciagent-final-diagnostics.yml
+          rm -f .github/workflows/sciagent-wgpu-diagnostic.yml
+          rm -f .github/workflows/sciagent-ci-report.yml
+          rm -f SCIAGENT_CI_REPORT.tmp.md
+          rm -rf ci-diagnostics
+      - name: Commit validated B40
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "perf(sciagent): make resumed epochs exact and fuse head-local RoPE"
+          git push origin HEAD:perf/sciagent-b39-thor-production-bench
