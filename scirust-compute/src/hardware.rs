@@ -76,6 +76,11 @@ impl<T: PartialEq> CapabilitySet<T> {
         self.support_level(value).is_supported()
     }
 
+    /// Whether no capability value has been classified yet.
+    pub fn is_empty(&self) -> bool {
+        self.supported.is_empty() && self.unsupported.is_empty()
+    }
+
     pub fn supported_values(&self) -> &[T] {
         &self.supported
     }
@@ -368,9 +373,11 @@ mod tests {
     fn capability_set_preserves_all_three_states_and_disjointness() {
         let mut set = CapabilitySet::default();
         assert_eq!(set.support_level(&DType::F32), SupportLevel::Unknown);
+        assert!(set.is_empty());
         set.set_support(DType::F32, SupportLevel::Supported);
         assert_eq!(set.support_level(&DType::F32), SupportLevel::Supported);
         assert_eq!(set.supported_values(), &[DType::F32]);
+        assert!(!set.is_empty());
         assert!(set.unsupported_values().is_empty());
         set.set_support(DType::F32, SupportLevel::Unsupported);
         assert_eq!(set.support_level(&DType::F32), SupportLevel::Unsupported);
@@ -378,6 +385,7 @@ mod tests {
         assert_eq!(set.unsupported_values(), &[DType::F32]);
         set.set_support(DType::F32, SupportLevel::Unknown);
         assert_eq!(set.support_level(&DType::F32), SupportLevel::Unknown);
+        assert!(set.is_empty());
     }
 
     #[test]
