@@ -242,20 +242,20 @@ impl CanonicalBpeOracle {
 
             for (position, pair) in ids.windows(2).enumerate()
             {
-                let Some(rule) = self.merges.get(&(pair[0], pair[1])) else
+                let Some(rule) = self.merges.get(&(pair[0], pair[1]))
+                else
                 {
                     continue;
                 };
                 let candidate = (rule.rank, position, rule.output);
-                if best.is_none_or(|current| {
-                    (candidate.0, candidate.1) < (current.0, current.1)
-                })
+                if best.is_none_or(|current| (candidate.0, candidate.1) < (current.0, current.1))
                 {
                     best = Some(candidate);
                 }
             }
 
-            let Some((_, position, output)) = best else
+            let Some((_, position, output)) = best
+            else
             {
                 break;
             };
@@ -282,8 +282,7 @@ mod tests {
         const BC: TokenId = 20;
         const AB: TokenId = 21;
 
-        let oracle =
-            CanonicalBpeOracle::from_ordered_merges(&[(B, C, BC), (A, B, AB)]).unwrap();
+        let oracle = CanonicalBpeOracle::from_ordered_merges(&[(B, C, BC), (A, B, AB)]).unwrap();
         assert_eq!(oracle.encode_ids(&[A, B, C]), vec![A, BC]);
     }
 
