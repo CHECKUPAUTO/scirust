@@ -15,7 +15,9 @@ use crate::elastic_tokenizer::{
 use crate::sha256::sha256_hex;
 
 pub const ELASTIC_PROFILE_SCHEMA_V1: u32 = 1;
+pub const ELASTIC_PROFILE_SCHEMA_V2: u32 = 2;
 pub const CANONICAL_BPE_SEMANTICS_V1: &str = "canonical-rank-v1";
+const ELASTIC_PROFILE_PAYLOAD_DOMAIN_V2: &str = "scirust-elastic-profile-payload-v2";
 
 /// Stable identity of the host characteristics used for calibration.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -73,6 +75,9 @@ pub struct StoredElasticProfile {
     pub tokenizer_fingerprint: String,
     pub hardware: ElasticHardwareIdentity,
     pub profile: ElasticProfile,
+    /// SHA-256 integrity binding for schema-v2 profile payloads. Legacy schema
+    /// v1 profiles remain readable and carry no payload fingerprint.
+    pub payload_fingerprint: Option<String>,
 }
 
 impl StoredElasticProfile {
@@ -81,12 +86,20 @@ impl StoredElasticProfile {
         hardware: ElasticHardwareIdentity,
         profile: ElasticProfile,
     ) -> Self {
+        let tokenizer_fingerprint = ordered_merges_fingerprint(merges);
+        let payload_fingerprint = profile_payload_fingerprint(
+            CANONICAL_BPE_SEMANTICS_V1,
+            &tokenizer_fingerprint,
+            &hardware,
+            profile,
+        );
         Self {
-            schema_version: ELASTIC_PROFILE_SCHEMA_V1,
+            schema_version: ELASTIC_PROFILE_SCHEMA_V2,
             bpe_semantics: CANONICAL_BPE_SEMANTICS_V1.to_string(),
-            tokenizer_fingerprint: ordered_merges_fingerprint(merges),
+            tokenizer_fingerprint,
             hardware,
             profile,
+            payload_fingerprint: Some(payload_fingerprint),
         }
     }
 
@@ -97,7 +110,10 @@ impl StoredElasticProfile {
         merges: &[(TokenId, TokenId, TokenId)],
         hardware: &ElasticHardwareIdentity,
     ) -> Result<(), ProfileStoreError> {
-        if self.schema_version != ELASTIC_PROFILE_SCHEMA_V1
+        if !matches!(
+            self.schema_version,
+            ELASTIC_PROFILE_SCHEMA_V1 | ELASTIC_PROFILE_SCHEMA_V2
+        )
         {
             return Err(ProfileStoreError::UnsupportedSchema(self.schema_version));
         }
@@ -113,10 +129,46 @@ impl StoredElasticProfile {
         {
             return Err(ProfileStoreError::HardwareMismatch);
         }
+        self.verify_payload_integrity()?;
         Ok(())
     }
 
+    /// Verifies the self-contained payload integrity binding when present.
+    pub fn verify_payload_integrity(&self) -> Result<(), ProfileStoreError> {
+        match self.schema_version
+        {
+            ELASTIC_PROFILE_SCHEMA_V1 =>
+            {
+                if self.payload_fingerprint.is_some()
+                {
+                    return Err(ProfileStoreError::UnexpectedPayloadFingerprint);
+                }
+                Ok(())
+            },
+            ELASTIC_PROFILE_SCHEMA_V2 =>
+            {
+                let stored = self
+                    .payload_fingerprint
+                    .as_deref()
+                    .ok_or(ProfileStoreError::MissingField("payload_fingerprint"))?;
+                let expected = profile_payload_fingerprint(
+                    &self.bpe_semantics,
+                    &self.tokenizer_fingerprint,
+                    &self.hardware,
+                    self.profile,
+                );
+                if stored != expected
+                {
+                    return Err(ProfileStoreError::PayloadFingerprintCorrupt);
+                }
+                Ok(())
+            },
+            version => Err(ProfileStoreError::UnsupportedSchema(version)),
+        }
+    }
+
     pub fn to_json_string(&self) -> Result<String, ProfileStoreError> {
+        self.verify_payload_integrity()?;
         let thresholds = self.profile.thresholds();
         let kernels = self
             .profile
@@ -124,7 +176,7 @@ impl StoredElasticProfile {
             .into_iter()
             .map(kernel_name)
             .collect::<Vec<_>>();
-        let value = serde_json::json!({
+        let mut value = serde_json::json!({
             "schema_version": self.schema_version,
             "bpe_semantics": self.bpe_semantics,
             "tokenizer_fingerprint": self.tokenizer_fingerprint,
@@ -143,6 +195,10 @@ impl StoredElasticProfile {
             },
             "kernels": kernels,
         });
+        if let Some(fingerprint) = &self.payload_fingerprint
+        {
+            value["payload_fingerprint"] = serde_json::Value::String(fingerprint.clone());
+        }
         serde_json::to_string_pretty(&value).map_err(ProfileStoreError::Json)
     }
 
@@ -152,7 +208,10 @@ impl StoredElasticProfile {
         let schema_version = required_u64(&value, "schema_version")?;
         let schema_version = u32::try_from(schema_version)
             .map_err(|_| ProfileStoreError::InvalidField("schema_version"))?;
-        if schema_version != ELASTIC_PROFILE_SCHEMA_V1
+        if !matches!(
+            schema_version,
+            ELASTIC_PROFILE_SCHEMA_V1 | ELASTIC_PROFILE_SCHEMA_V2
+        )
         {
             return Err(ProfileStoreError::UnsupportedSchema(schema_version));
         }
@@ -201,13 +260,32 @@ impl StoredElasticProfile {
             *slot = parse_kernel(name)?;
         }
 
-        Ok(Self {
+        let payload_fingerprint = match schema_version
+        {
+            ELASTIC_PROFILE_SCHEMA_V1 =>
+            {
+                if value.get("payload_fingerprint").is_some()
+                {
+                    return Err(ProfileStoreError::UnexpectedPayloadFingerprint);
+                }
+                None
+            },
+            ELASTIC_PROFILE_SCHEMA_V2 => Some(
+                required_str(&value, "payload_fingerprint")?.to_string(),
+            ),
+            _ => unreachable!("schema guard above accepted only v1/v2"),
+        };
+
+        let stored = Self {
             schema_version,
             bpe_semantics,
             tokenizer_fingerprint,
             hardware,
             profile: ElasticProfile::new(thresholds, kernels),
-        })
+            payload_fingerprint,
+        };
+        stored.verify_payload_integrity()?;
+        Ok(stored)
     }
 
     pub fn save(&self, path: impl AsRef<Path>) -> Result<(), ProfileStoreError> {
@@ -218,6 +296,38 @@ impl StoredElasticProfile {
         let input = fs::read_to_string(path).map_err(ProfileStoreError::Io)?;
         Self::from_json_str(&input)
     }
+}
+
+fn profile_payload_fingerprint(
+    bpe_semantics: &str,
+    tokenizer_fingerprint: &str,
+    hardware: &ElasticHardwareIdentity,
+    profile: ElasticProfile,
+) -> String {
+    let thresholds = profile.thresholds();
+    let kernels = profile.kernels();
+    let mut bytes = Vec::with_capacity(256);
+    append_len_prefixed(&mut bytes, ELASTIC_PROFILE_PAYLOAD_DOMAIN_V2.as_bytes());
+    append_len_prefixed(&mut bytes, bpe_semantics.as_bytes());
+    append_len_prefixed(&mut bytes, tokenizer_fingerprint.as_bytes());
+    append_len_prefixed(&mut bytes, hardware.arch.as_bytes());
+    append_len_prefixed(&mut bytes, hardware.os.as_bytes());
+    append_len_prefixed(&mut bytes, hardware.device.as_bytes());
+    for threshold in [
+        thresholds.s_max,
+        thresholds.m_max,
+        thresholds.l_max,
+        thresholds.xl_max,
+        thresholds.xxl_max,
+    ]
+    {
+        bytes.extend_from_slice(&(threshold as u64).to_le_bytes());
+    }
+    for kernel in kernels
+    {
+        append_len_prefixed(&mut bytes, kernel_name(kernel).as_bytes());
+    }
+    sha256_hex(&bytes)
 }
 
 fn append_len_prefixed(output: &mut Vec<u8>, bytes: &[u8]) {
@@ -285,6 +395,8 @@ pub enum ProfileStoreError {
     TokenizerFingerprintMismatch,
     HardwareMismatch,
     HardwareFingerprintCorrupt,
+    PayloadFingerprintCorrupt,
+    UnexpectedPayloadFingerprint,
     InvalidThresholds(ThresholdError),
 }
 
@@ -317,6 +429,14 @@ impl fmt::Display for ProfileStoreError {
             Self::HardwareFingerprintCorrupt =>
             {
                 f.write_str("elastic profile hardware fingerprint is corrupt")
+            },
+            Self::PayloadFingerprintCorrupt =>
+            {
+                f.write_str("elastic profile payload fingerprint is corrupt")
+            },
+            Self::UnexpectedPayloadFingerprint =>
+            {
+                f.write_str("legacy elastic profile unexpectedly contains a payload fingerprint")
             },
             Self::InvalidThresholds(error) =>
             {
@@ -367,6 +487,8 @@ mod tests {
         let merges = [(1, 2, 3), (3, 4, 5)];
         let hardware = ElasticHardwareIdentity::new("aarch64", "linux", "thor-class");
         let stored = StoredElasticProfile::new(&merges, hardware.clone(), sample_profile());
+        assert_eq!(stored.schema_version, ELASTIC_PROFILE_SCHEMA_V2);
+        assert!(stored.payload_fingerprint.is_some());
         let json = stored.to_json_string().unwrap();
         let loaded = StoredElasticProfile::from_json_str(&json).unwrap();
         assert_eq!(stored, loaded);
@@ -414,5 +536,76 @@ mod tests {
             StoredElasticProfile::from_json_str(&json),
             Err(ProfileStoreError::HardwareFingerprintCorrupt)
         ));
+    }
+
+    #[test]
+    fn corrupted_threshold_payload_is_rejected_on_load() {
+        let stored = StoredElasticProfile::new(
+            &[(1, 2, 3)],
+            ElasticHardwareIdentity::new("x86_64", "linux", "cpu-a"),
+            sample_profile(),
+        );
+        let mut value: serde_json::Value =
+            serde_json::from_str(&stored.to_json_string().unwrap()).unwrap();
+        value["thresholds"]["m_max"] = serde_json::json!(65);
+        let json = serde_json::to_string(&value).unwrap();
+        assert!(matches!(
+            StoredElasticProfile::from_json_str(&json),
+            Err(ProfileStoreError::PayloadFingerprintCorrupt)
+        ));
+    }
+
+    #[test]
+    fn corrupted_kernel_payload_is_rejected_on_load() {
+        let stored = StoredElasticProfile::new(
+            &[(1, 2, 3)],
+            ElasticHardwareIdentity::new("x86_64", "linux", "cpu-a"),
+            sample_profile(),
+        );
+        let mut value: serde_json::Value =
+            serde_json::from_str(&stored.to_json_string().unwrap()).unwrap();
+        value["kernels"][0] = serde_json::json!("reference");
+        let json = serde_json::to_string(&value).unwrap();
+        assert!(matches!(
+            StoredElasticProfile::from_json_str(&json),
+            Err(ProfileStoreError::PayloadFingerprintCorrupt)
+        ));
+    }
+
+    #[test]
+    fn legacy_v1_profile_remains_readable() {
+        let hardware = ElasticHardwareIdentity::new("x86_64", "linux", "cpu-a");
+        let profile = sample_profile();
+        let thresholds = profile.thresholds();
+        let kernels = profile
+            .kernels()
+            .into_iter()
+            .map(kernel_name)
+            .collect::<Vec<_>>();
+        let value = serde_json::json!({
+            "schema_version": ELASTIC_PROFILE_SCHEMA_V1,
+            "bpe_semantics": CANONICAL_BPE_SEMANTICS_V1,
+            "tokenizer_fingerprint": ordered_merges_fingerprint(&[(1, 2, 3)]),
+            "hardware": {
+                "arch": hardware.arch,
+                "os": hardware.os,
+                "device": hardware.device,
+                "fingerprint": hardware.fingerprint(),
+            },
+            "thresholds": {
+                "s_max": thresholds.s_max,
+                "m_max": thresholds.m_max,
+                "l_max": thresholds.l_max,
+                "xl_max": thresholds.xl_max,
+                "xxl_max": thresholds.xxl_max,
+            },
+            "kernels": kernels,
+        });
+        let loaded = StoredElasticProfile::from_json_str(&value.to_string()).unwrap();
+        assert_eq!(loaded.schema_version, ELASTIC_PROFILE_SCHEMA_V1);
+        assert_eq!(loaded.payload_fingerprint, None);
+        loaded
+            .verify_for(&[(1, 2, 3)], &hardware)
+            .expect("legacy v1 profile remains compatible");
     }
 }
