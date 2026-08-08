@@ -70,6 +70,10 @@ jobs:
 
     timeout-minutes: 120
 
+    concurrency:
+      group: scirust-thor-gpu-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: false
+
     env:
       RUST_BACKTRACE: 1
       CARGO_INCREMENTAL: 0
