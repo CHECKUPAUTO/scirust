@@ -29,106 +29,75 @@ jobs:
 
           commands = Path("tools/cargo-scirust/src/commands.rs")
           text = commands.read_text()
-          old = '''fn fingerprint(bytes: &[u8]) -> String {
-              let mut hash = 0xcbf29ce484222325u64;
-              for &byte in bytes {
-                  hash ^= u64::from(byte);
-                  hash = hash.wrapping_mul(0x100000001b3);
-              }
-              format!("fnv1a64:{hash:016x}")
-          }
-'''
-          new = '''fn fingerprint(bytes: &[u8]) -> String {
-              let normalized = normalize_newlines(bytes);
-              let mut hash = 0xcbf29ce484222325u64;
-              for byte in normalized {
-                  hash ^= u64::from(byte);
-                  hash = hash.wrapping_mul(0x100000001b3);
-              }
-              format!("fnv1a64:{hash:016x}")
-          }
-'''
-          if old not in text:
-              raise SystemExit("fingerprint block not found")
-          text = text.replace(old, new, 1)
-          old_test = '''    fn fingerprint_is_stable() {
-              assert_eq!(fingerprint(b"hello"), "fnv1a64:a430d84680aabd0b");
-          }
-'''
-          new_test = '''    fn fingerprint_is_stable() {
-              assert_eq!(fingerprint(b"hello"), "fnv1a64:a430d84680aabd0b");
-              assert_eq!(fingerprint(b"a\\r\\nb\\r\\n"), fingerprint(b"a\\nb\\n"));
-          }
-'''
-          if old_test not in text:
-              raise SystemExit("fingerprint test block not found")
-          commands.write_text(text.replace(old_test, new_test, 1))
+          if "for &byte in bytes {" in text:
+              text = text.replace(
+                  "    let mut hash = 0xcbf29ce484222325u64;\n    for &byte in bytes {\n",
+                  "    let normalized = normalize_newlines(bytes);\n    let mut hash = 0xcbf29ce484222325u64;\n    for byte in normalized {\n",
+                  1,
+              )
+          elif "for byte in normalized {" not in text:
+              raise SystemExit("fingerprint loop not found")
+          stable = '        assert_eq!(fingerprint(b"hello"), "fnv1a64:a430d84680aabd0b");\n'
+          crlf = '        assert_eq!(fingerprint(b"a\\r\\nb\\r\\n"), fingerprint(b"a\\nb\\n"));\n'
+          if crlf not in text:
+              if stable not in text:
+                  raise SystemExit("fingerprint stability assertion not found")
+              text = text.replace(stable, stable + crlf, 1)
+          commands.write_text(text)
 
           workspace = Path("tools/cargo-scirust/src/workspace.rs")
           text = workspace.read_text()
-          old = '''    fn infer_base(&self) -> AppResult<String> {
-              if let Ok(base_ref) = env::var("GITHUB_BASE_REF") {
-                  if !base_ref.trim().is_empty() {
-                      let remote = format!("origin/{base_ref}");
-                      if self.git_ref_exists(&remote) {
-                          return Ok(remote);
-                      }
-                      if self.git_ref_exists(&base_ref) {
-                          return Ok(base_ref);
-                      }
-                  }
-              }
-
-              if self.git_ref_exists("HEAD^") {
-                  Ok("HEAD^".to_string())
-              } else {
-                  Ok("HEAD".to_string())
-              }
-          }
-'''
-          new = '''    fn infer_base(&self) -> AppResult<String> {
-              if let Ok(base_ref) = env::var("GITHUB_BASE_REF") {
-                  if !base_ref.trim().is_empty() {
-                      for candidate in [format!("origin/{base_ref}"), base_ref] {
-                          if let Some(base) = self.git_merge_base(&candidate) {
-                              return Ok(base);
-                          }
-                      }
-                  }
-              }
-
-              for candidate in ["origin/master", "master", "origin/main", "main"] {
-                  if let Some(base) = self.git_merge_base(candidate) {
-                      return Ok(base);
-                  }
-              }
-
-              if self.git_ref_exists("HEAD^") {
-                  Ok("HEAD^".to_string())
-              } else {
-                  Ok("HEAD".to_string())
-              }
-          }
-
-          fn git_merge_base(&self, reference: &str) -> Option<String> {
-              if !self.git_ref_exists(reference) {
-                  return None;
-              }
-              let output = Command::new("git")
-                  .current_dir(&self.root)
-                  .args(["merge-base", "HEAD", reference])
-                  .output()
-                  .ok()?;
-              if !output.status.success() {
-                  return None;
-              }
-              let base = String::from_utf8_lossy(&output.stdout).trim().to_string();
-              (!base.is_empty()).then_some(base)
-          }
-'''
-          if old not in text:
-              raise SystemExit("infer_base block not found")
-          workspace.write_text(text.replace(old, new, 1))
+          start = text.find("    fn infer_base(&self) -> AppResult<String> {")
+          end = text.find("    fn git_ref_exists(&self, reference: &str) -> bool {", start)
+          if start < 0 or end < 0:
+              raise SystemExit("infer_base boundaries not found")
+          current = text[start:end]
+          if "fn git_merge_base" not in current:
+              block = "\n".join([
+                  "    fn infer_base(&self) -> AppResult<String> {",
+                  "        if let Ok(base_ref) = env::var(\"GITHUB_BASE_REF\") {",
+                  "            if !base_ref.trim().is_empty() {",
+                  "                for candidate in [format!(\"origin/{base_ref}\"), base_ref] {",
+                  "                    if let Some(base) = self.git_merge_base(&candidate) {",
+                  "                        return Ok(base);",
+                  "                    }",
+                  "                }",
+                  "            }",
+                  "        }",
+                  "",
+                  "        for candidate in [\"origin/master\", \"master\", \"origin/main\", \"main\"] {",
+                  "            if let Some(base) = self.git_merge_base(candidate) {",
+                  "                return Ok(base);",
+                  "            }",
+                  "        }",
+                  "",
+                  "        if self.git_ref_exists(\"HEAD^\") {",
+                  "            Ok(\"HEAD^\".to_string())",
+                  "        } else {",
+                  "            Ok(\"HEAD\".to_string())",
+                  "        }",
+                  "    }",
+                  "",
+                  "    fn git_merge_base(&self, reference: &str) -> Option<String> {",
+                  "        if !self.git_ref_exists(reference) {",
+                  "            return None;",
+                  "        }",
+                  "        let output = Command::new(\"git\")",
+                  "            .current_dir(&self.root)",
+                  "            .args([\"merge-base\", \"HEAD\", reference])",
+                  "            .output()",
+                  "            .ok()?;",
+                  "        if !output.status.success() {",
+                  "            return None;",
+                  "        }",
+                  "        let base = String::from_utf8_lossy(&output.stdout).trim().to_string();",
+                  "        (!base.is_empty()).then_some(base)",
+                  "    }",
+                  "",
+                  "",
+              ])
+              text = text[:start] + block + text[end:]
+          workspace.write_text(text)
           PY
           cargo +1.89.0 fmt --manifest-path tools/cargo-scirust/Cargo.toml
           git config user.name "github-actions[bot]"
