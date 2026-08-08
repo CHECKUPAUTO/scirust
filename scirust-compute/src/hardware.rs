@@ -161,9 +161,15 @@ pub enum VectorModel {
     Unknown,
 }
 
+/// Instruction-set capabilities known for one processor.
+///
+/// `features` contains capabilities positively detected as supported;
+/// `unsupported_features` contains capabilities for which a reliable probe ran
+/// and returned false. A feature in neither list remains [`SupportLevel::Unknown`].
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct IsaCapabilities {
     pub features: Vec<IsaFeature>,
+    pub unsupported_features: Vec<IsaFeature>,
     pub vector_model: VectorModel,
     /// Minimum vector width in bits when the backend can state one.
     pub min_vector_bits: Option<u32>,
@@ -172,8 +178,23 @@ pub struct IsaCapabilities {
 }
 
 impl IsaCapabilities {
+    pub fn support_level(&self, feature: &IsaFeature) -> SupportLevel {
+        if self.features.contains(feature)
+        {
+            SupportLevel::Supported
+        }
+        else if self.unsupported_features.contains(feature)
+        {
+            SupportLevel::Unsupported
+        }
+        else
+        {
+            SupportLevel::Unknown
+        }
+    }
+
     pub fn supports(&self, feature: &IsaFeature) -> bool {
-        self.features.contains(feature)
+        self.support_level(feature).is_supported()
     }
 }
 
@@ -315,6 +336,7 @@ mod tests {
 
         assert_eq!(capabilities.device, DeviceId::reference());
         assert!(capabilities.isa.features.is_empty());
+        assert!(capabilities.isa.unsupported_features.is_empty());
         assert_eq!(capabilities.isa.vector_model, VectorModel::Unknown);
     }
 
@@ -344,17 +366,29 @@ mod tests {
     }
 
     #[test]
-    fn feature_and_reproducibility_membership_are_explicit() {
+    fn feature_support_preserves_supported_unsupported_and_unknown() {
         let isa = IsaCapabilities {
             features: vec![IsaFeature::Avx2, IsaFeature::Fma],
+            unsupported_features: vec![IsaFeature::Avx512F],
             ..IsaCapabilities::default()
         };
+
+        assert_eq!(isa.support_level(&IsaFeature::Avx2), SupportLevel::Supported);
+        assert_eq!(
+            isa.support_level(&IsaFeature::Avx512F),
+            SupportLevel::Unsupported
+        );
+        assert_eq!(isa.support_level(&IsaFeature::Sse2), SupportLevel::Unknown);
+        assert!(isa.supports(&IsaFeature::Avx2));
+        assert!(!isa.supports(&IsaFeature::Avx512F));
+    }
+
+    #[test]
+    fn reproducibility_membership_is_explicit() {
         let reproducibility = ReproducibilityCapabilities {
             modes: vec![ReproducibilityLevel::Deterministic],
         };
 
-        assert!(isa.supports(&IsaFeature::Avx2));
-        assert!(!isa.supports(&IsaFeature::Avx512F));
         assert!(reproducibility.supports(ReproducibilityLevel::Deterministic));
         assert!(!reproducibility.supports(ReproducibilityLevel::BitExact));
     }
