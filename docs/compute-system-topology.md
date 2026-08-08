@@ -48,6 +48,27 @@ The same graph can describe, for example:
 
 Known interconnect classes are hints for classification, not dispatch identities. `Other` remains available for future interconnects.
 
+## Host probing
+
+With the `std` feature enabled, `probe_host_topology()` populates the model from host interfaces that SciRust can state conservatively.
+
+On Linux the current probe reads sysfs for:
+
+- online logical CPUs;
+- `physical_package_id` package membership;
+- NUMA node CPU lists;
+- NUMA `MemTotal` capacity;
+- cache level, role, size and coherency-line size;
+- cache `shared_cpu_list` membership.
+
+Directory enumeration, CPU lists, packages, NUMA nodes and cache identities are normalized into deterministic numeric order before topology node IDs are allocated. Shared caches are deduplicated from their reported shared CPU set rather than duplicated once per logical CPU.
+
+The probe deliberately does **not** infer an interconnect class from CPU architecture, package identity or NUMA membership. A missing sysfs file, malformed value or unavailable concept is omitted instead of being converted into `Unsupported` or guessed from the machine class.
+
+On non-Linux systems `probe_host_topology()` currently returns an empty valid snapshot rather than inventing a topology from incomplete portable APIs. The topology model itself remains available under `no_std`; only host probing requires `std`.
+
+The Linux implementation is isolated behind target-specific compilation so Windows and macOS builds do not compile unused sysfs helpers under `-D warnings`.
+
 ## Metrics and determinism
 
 `TransferMetrics` is optional and records provenance as `Reported`, `Measured` or `Declared`.
@@ -63,6 +84,8 @@ Bandwidth and latency are metadata only. The deterministic capability planner mu
 
 The graph deliberately does not reject cycles, multiple relations between the same nodes or missing performance data.
 
+The Linux host-probe tests use synthetic sysfs fixtures rather than depending on the CI machine's real topology. They verify deterministic snapshots, shared-cache deduplication, NUMA memory parsing and conservative behavior when sysfs facts are absent.
+
 ## Next implementation step
 
-A host topology probe should populate this contract from reliable OS/backend interfaces. Linux NUMA/cache discovery should remain separate from accelerator-specific augmentation. Missing information must stay absent/unknown rather than being inferred from machine class or architecture name.
+Accelerator backends should augment the host snapshot with device nodes and only those locality, memory-domain, peer-access or interconnect facts that their runtime APIs can establish explicitly. CPU, WGPU and CUDA backend-specific `HardwareCapabilities` should remain separate from this topology augmentation.
