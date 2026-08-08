@@ -366,7 +366,12 @@ fn main() {
     );
     println!(
         "resident VRAM estimate: fp32 master ~{weight_mb:.0} MB + bf16 view ~{bf16_mb:.0} MB + \
-         AdamW state ~{opt_mb:.0} MB (activations extra)\n"
+         AdamW state ~{opt_mb:.0} MB (activations extra)"
+    );
+    println!(
+        "exact checkpoint estimate: model + AdamW m/v ~{:.1} GB; best/ is model-only ~{:.1} GB\n",
+        (weight_mb + opt_mb) / 1000.0,
+        weight_mb / 1000.0
     );
 
     // Large production runs default to 512: the historical 128-token default
@@ -615,7 +620,7 @@ fn main() {
         .unwrap_or(0.02f32);
     // Checkpoint/telemetry cadence does not alter model math.
     let save_interval = env_usize("SCIAGENT_SAVE", 500);
-    let keep_last = env_usize("SCIAGENT_KEEP", 3);
+    let keep_last = env_usize("SCIAGENT_KEEP", 2);
     let explicit_shuffle = std::env::var("SCIAGENT_SHUFFLE")
         .ok()
         .map(|v| !matches!(v.as_str(), "0" | "false"));
@@ -726,7 +731,8 @@ fn main() {
         (1.0 - last / first) * 100.0
     );
 
-    // Final sync + checkpoint so the last weights are always persisted.
+    // `pretrain` now guarantees a final exact `step_N/` recovery checkpoint when
+    // checkpointing is enabled, even if the target falls between periodic saves.
     trainer.sync_to_model(&mut model);
-    println!("trained fp32 masters synced back into the SciAgentModel; resume from {ckpt_dir}.");
+    println!("trained fp32 masters synced; exact resume checkpoints are under {ckpt_dir}/step_N.");
 }

@@ -1920,8 +1920,14 @@ impl CudaTrainer {
         {
             reshuffle(&mut order, epoch);
         }
-        let mut best_val = f32::INFINITY;
-        let mut best_step: Option<usize> = None;
+        let (mut best_step, mut best_val) = load_best_validation(&cfg.checkpoint_dir)
+            .map(|(step, val)| (Some(step), val))
+            .unwrap_or((None, f32::INFINITY));
+        if let Some(saved_best) = best_step
+        {
+            println!("restored best validation: {best_val:.4} @ step {saved_best}");
+        }
+        let mut last_eval: Option<(usize, f32)> = None;
         let t0 = std::time::Instant::now();
         let mut packed_inputs = Vec::with_capacity(batch * s);
         let mut packed_targets = Vec::with_capacity(batch * s);
@@ -1994,6 +2000,7 @@ impl CudaTrainer {
             if need_eval
             {
                 let val = self.eval_loss_windows(tokens, s, &val_windows, cfg.eval_windows);
+                last_eval = Some((step, val));
                 println!("            └─ held-out val loss {val:>9.4}");
             }
             if need_save
@@ -2010,19 +2017,44 @@ impl CudaTrainer {
                 {
                     Ok(()) =>
                     {
-                        println!("  checkpoint → {}", dir.display());
+                        println!("  exact checkpoint → {}", dir.display());
                         if !val_windows.is_empty()
                         {
-                            let v =
-                                self.eval_loss_windows(tokens, s, &val_windows, cfg.eval_windows);
+                            let v = match last_eval
+                            {
+                                Some((eval_step, v)) if eval_step == step => v,
+                                _ =>
+                                {
+                                    let v = self.eval_loss_windows(
+                                        tokens,
+                                        s,
+                                        &val_windows,
+                                        cfg.eval_windows,
+                                    );
+                                    last_eval = Some((step, v));
+                                    v
+                                },
+                            };
                             if v < best_val
                             {
                                 best_val = v;
                                 best_step = Some(step);
-                                println!("    (best val {v:.4} @ step {step} → protected)");
+                                match save_best_validation_model(
+                                    model,
+                                    &meta,
+                                    v,
+                                    &cfg.checkpoint_dir,
+                                )
+                                {
+                                    Ok(()) => println!(
+                                        "    best model-only → {}/best (val {v:.4} @ step {step})",
+                                        cfg.checkpoint_dir
+                                    ),
+                                    Err(e) => eprintln!("    best-model save failed: {e}"),
+                                }
                             }
                         }
-                        prune_checkpoints(&cfg.checkpoint_dir, cfg.keep_last, best_step);
+                        prune_checkpoints(&cfg.checkpoint_dir, cfg.keep_last);
                     },
                     Err(e) => eprintln!("  checkpoint at step {step} failed: {e}"),
                 }
@@ -2033,10 +2065,123 @@ impl CudaTrainer {
         // already flushes above, so the returned vector remains exactly per-step.
         for diag in pending.drain(..)
         {
-            losses.push(self.finish_step_diagnostics(diag));
+            last_loss = self.finish_step_diagnostics(diag);
+            losses.push(last_loss);
         }
+
+        // A run target is an exact recovery boundary even when it falls between the
+        // periodic save cadence. Historically the example only synced host weights
+        // here and falsely claimed a final checkpoint existed.
+        if cfg.save_interval > 0 && step > cfg.start_step && !step.is_multiple_of(cfg.save_interval)
+        {
+            self.sync_to_model(model);
+            let lr = schedule.lr_at(step.saturating_sub(1));
+            let dir = Path::new(&cfg.checkpoint_dir).join(format!("step_{step}"));
+            let meta = CheckpointMeta {
+                step,
+                loss: last_loss,
+                lr,
+                config: config.clone(),
+            };
+            match self.save_training_checkpoint(model, &meta, cfg, &dir)
+            {
+                Ok(()) =>
+                {
+                    println!("  final exact checkpoint → {}", dir.display());
+                    if !val_windows.is_empty()
+                    {
+                        let v = match last_eval
+                        {
+                            Some((eval_step, v)) if eval_step == step => v,
+                            _ => self.eval_loss_windows(tokens, s, &val_windows, cfg.eval_windows),
+                        };
+                        if v < best_val
+                        {
+                            best_val = v;
+                            best_step = Some(step);
+                            if let Err(e) =
+                                save_best_validation_model(model, &meta, v, &cfg.checkpoint_dir)
+                            {
+                                eprintln!("    final best-model save failed: {e}");
+                            }
+                        }
+                    }
+                    prune_checkpoints(&cfg.checkpoint_dir, cfg.keep_last);
+                },
+                Err(e) => eprintln!("  final checkpoint at step {step} failed: {e}"),
+            }
+        }
+        let _ = best_step; // retained for diagnostics/documentation; best/ is model-only.
+        let _ = best_val;
         losses
     }
+}
+
+fn load_best_validation(dir: &str) -> Option<(usize, f32)> {
+    let path = Path::new(dir).join("best").join("selection.json");
+    let raw = std::fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let step = value["step"].as_u64()? as usize;
+    let val = value["val_loss"].as_f64()? as f32;
+    val.is_finite().then_some((step, val))
+}
+
+/// Publish a model-only best-validation snapshot. Exact resume checkpoints keep
+/// AdamW state in `step_N/`; the historical best does not need another ~2.4 GB of
+/// moments. `best/` is deliberately ignored by `latest_checkpoint`.
+fn save_best_validation_model(
+    model: &SciAgentModel,
+    meta: &CheckpointMeta,
+    val_loss: f32,
+    root: &str,
+) -> std::result::Result<(), String> {
+    let root = Path::new(root);
+    std::fs::create_dir_all(root)
+        .map_err(|e| format!("cannot create checkpoint root {}: {e}", root.display()))?;
+    let partial = root.join(".best.partial");
+    let old = root.join(".best.old");
+    let best = root.join("best");
+    if partial.exists()
+    {
+        std::fs::remove_dir_all(&partial)
+            .map_err(|e| format!("cannot remove stale {}: {e}", partial.display()))?;
+    }
+    if old.exists()
+    {
+        std::fs::remove_dir_all(&old)
+            .map_err(|e| format!("cannot remove stale {}: {e}", old.display()))?;
+    }
+    save_checkpoint(model, meta, &partial).map_err(|e| format!("cannot save best model: {e}"))?;
+    let selection = serde_json::json!({
+        "version": 1,
+        "step": meta.step,
+        "val_loss": val_loss,
+    });
+    std::fs::write(
+        partial.join("selection.json"),
+        serde_json::to_string_pretty(&selection)
+            .map_err(|e| format!("cannot encode best selection: {e}"))?,
+    )
+    .map_err(|e| format!("cannot write best selection: {e}"))?;
+
+    if best.exists()
+    {
+        std::fs::rename(&best, &old)
+            .map_err(|e| format!("cannot rotate previous best {}: {e}", best.display()))?;
+    }
+    if let Err(e) = std::fs::rename(&partial, &best)
+    {
+        if old.exists()
+        {
+            let _ = std::fs::rename(&old, &best);
+        }
+        return Err(format!("cannot publish best {}: {e}", best.display()));
+    }
+    if old.exists()
+    {
+        let _ = std::fs::remove_dir_all(old);
+    }
+    Ok(())
 }
 
 /// Deterministic in-place Fisher–Yates shuffle of `order` (an SplitMix/LCG PRNG,
@@ -2056,11 +2201,10 @@ fn shuffle_windows(order: &mut [usize], seed: u64) {
     }
 }
 
-/// Delete old `step_N/` checkpoints under `dir`, keeping only the most recent
-/// `keep_last` (by numeric step) plus `protect` (the best-val step, if any).
-/// `keep_last == 0` disables pruning (keep everything). Best-effort — I/O errors on
-/// individual removals are ignored so a failed delete never aborts training.
-fn prune_checkpoints(dir: &str, keep_last: usize, protect: Option<usize>) {
+/// Delete old exact-resume `step_N/` checkpoints, keeping only the most recent
+/// `keep_last`. Historical best validation lives separately in model-only `best/`,
+/// so it no longer pins another multi-GB AdamW sidecar.
+fn prune_checkpoints(dir: &str, keep_last: usize) {
     if keep_last == 0
     {
         return;
@@ -2092,10 +2236,7 @@ fn prune_checkpoints(dir: &str, keep_last: usize, protect: Option<usize>) {
         {
             continue; // among the last `keep_last`
         }
-        if protect == Some(*n as usize)
-        {
-            continue; // the best-val checkpoint
-        }
+        let _ = n;
         let _ = std::fs::remove_dir_all(p);
     }
 }
@@ -2138,16 +2279,15 @@ pub struct CudaPretrainConfig {
     /// Global gradient-norm clip threshold (`<= 0` disables). Default `1.0` —
     /// standard for pretraining, and what keeps a bad batch from diverging the run.
     pub max_grad_norm: f32,
-    /// Fraction of the token stream held out (from the tail) for validation
+    /// Fraction of deterministic distributed windows held out for validation
     /// (`0.0` disables held-out eval). Default `0.02`.
     pub val_frac: f32,
     /// Report held-out validation loss every this many steps (0 = never).
     pub eval_interval: usize,
     /// Max validation windows averaged per eval (bounds eval cost). Default `32`.
     pub eval_windows: usize,
-    /// Checkpoint retention: keep only the most recent `keep_last` `step_N/` dirs
-    /// (plus the best-val one, which is never pruned). `0` keeps everything — the old
-    /// behavior, which fills the disk on a long run. Default `3`.
+    /// Exact-resume checkpoint retention. Historical best validation is stored
+    /// separately as model-only `best/`; `0` keeps every exact checkpoint. Default `2`.
     pub keep_last: usize,
     /// Exact-resume corpus identity (B34). Zero is reserved for legacy/tests that
     /// do not provide a production corpus fingerprint.
@@ -2182,7 +2322,7 @@ impl Default for CudaPretrainConfig {
             val_frac: 0.02,
             eval_interval: 250,
             eval_windows: 32,
-            keep_last: 3,
+            keep_last: 2,
             corpus_tokens: 0,
             corpus_hash: 0,
             shuffle: true,
