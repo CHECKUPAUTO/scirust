@@ -18,7 +18,8 @@ pub(crate) fn hardware_capabilities(
 ) -> HardwareCapabilities {
     let mut hardware = capabilities.hardware_baseline();
 
-    hardware.architecture = if info.compute_capability.0 >= 0 && info.compute_capability.1 >= 0 {
+    hardware.architecture = if info.compute_capability.0 >= 0 && info.compute_capability.1 >= 0
+    {
         Architecture::named(
             ArchitectureFamily::NvidiaGpu,
             format!(
@@ -160,7 +161,10 @@ mod tests {
             );
         }
         assert_eq!(
-            hardware.numeric.arithmetic_dtypes.support_level(&DType::F16),
+            hardware
+                .numeric
+                .arithmetic_dtypes
+                .support_level(&DType::F16),
             SupportLevel::Unknown
         );
         assert_eq!(
@@ -202,7 +206,10 @@ mod tests {
 
         assert_eq!(hardware.execution.async_execution, SupportLevel::Supported);
         assert_eq!(hardware.execution.ordered_streams, SupportLevel::Supported);
-        assert_eq!(hardware.execution.subgroup_operations, SupportLevel::Unknown);
+        assert_eq!(
+            hardware.execution.subgroup_operations,
+            SupportLevel::Unknown
+        );
         assert_eq!(hardware.execution.atomic_i64, SupportLevel::Unknown);
         assert_eq!(hardware.matrix.accelerated, SupportLevel::Unknown);
         assert_eq!(
