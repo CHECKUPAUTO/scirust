@@ -1,7 +1,7 @@
 //! Integer-angular-momentum coupling coefficients for SO(3).
 //!
-//! These deterministic scalar reference routines implement the Racah factorial sum
-//! for Wigner 3j symbols and derive Clebsch-Gordan coefficients from it. They are
+//! These deterministic scalar reference routines implement Racah factorial sums for
+//! Wigner 3j/6j symbols and derive Clebsch-Gordan coefficients from them. They are
 //! allocation-free and intended to generate/validate equivariant coupling tables.
 
 /// Compute the Wigner 3j symbol
@@ -75,13 +75,79 @@ pub fn wigner_3j(
         {
             return None;
         }
-        let sign = parity_sign(z);
-        sum += sign / denominator;
+        sum += parity_sign(z) / denominator;
         z += 1;
     }
 
     let phase = parity_sign(j1i - j2i - m3);
     let result = phase * prefactor * sum;
+    result.is_finite().then_some(result)
+}
+
+/// Compute the Wigner 6j symbol
+/// `{j1 j2 j3; j4 j5 j6}` for non-negative integer angular momenta.
+///
+/// The implementation uses the Racah single-sum formula. If any of the four triangle
+/// conditions is violated, `Some(0.0)` is returned. Overflow of an intermediate
+/// factorial is reported as `None` rather than silently producing an infinite value.
+pub fn wigner_6j(
+    j1: usize,
+    j2: usize,
+    j3: usize,
+    j4: usize,
+    j5: usize,
+    j6: usize,
+) -> Option<f64>
+{
+    if !triangle_allowed(j1, j2, j3)
+        || !triangle_allowed(j1, j5, j6)
+        || !triangle_allowed(j4, j2, j6)
+        || !triangle_allowed(j4, j5, j3)
+    {
+        return Some(0.0);
+    }
+
+    let prefactor = triangle_delta(j1, j2, j3)?
+        * triangle_delta(j1, j5, j6)?
+        * triangle_delta(j4, j2, j6)?
+        * triangle_delta(j4, j5, j3)?;
+
+    let a1 = j1.checked_add(j2)?.checked_add(j3)?;
+    let a2 = j1.checked_add(j5)?.checked_add(j6)?;
+    let a3 = j4.checked_add(j2)?.checked_add(j6)?;
+    let a4 = j4.checked_add(j5)?.checked_add(j3)?;
+    let b1 = j1.checked_add(j2)?.checked_add(j4)?.checked_add(j5)?;
+    let b2 = j2.checked_add(j3)?.checked_add(j5)?.checked_add(j6)?;
+    let b3 = j1.checked_add(j3)?.checked_add(j4)?.checked_add(j6)?;
+
+    let z_min = a1.max(a2).max(a3).max(a4);
+    let z_max = b1.min(b2).min(b3);
+    if z_min > z_max
+    {
+        return Some(0.0);
+    }
+
+    let mut sum = 0.0;
+    let mut z = z_min;
+    while z <= z_max
+    {
+        let numerator = factorial(z.checked_add(1)?)?;
+        let denominator = factorial(z - a1)?
+            * factorial(z - a2)?
+            * factorial(z - a3)?
+            * factorial(z - a4)?
+            * factorial(b1 - z)?
+            * factorial(b2 - z)?
+            * factorial(b3 - z)?;
+        if !numerator.is_finite() || !denominator.is_finite() || denominator == 0.0
+        {
+            return None;
+        }
+        sum += parity_sign(isize::try_from(z).ok()?) * numerator / denominator;
+        z += 1;
+    }
+
+    let result = prefactor * sum;
     result.is_finite().then_some(result)
 }
 
@@ -160,6 +226,20 @@ fn triangle_allowed(j1: usize, j2: usize, j3: usize) -> bool
     j1.abs_diff(j2) <= j3 && j3 <= j1.saturating_add(j2)
 }
 
+fn triangle_delta(j1: usize, j2: usize, j3: usize) -> Option<f64>
+{
+    if !triangle_allowed(j1, j2, j3)
+    {
+        return Some(0.0);
+    }
+    let numerator = factorial(j1 + j2 - j3)?
+        * factorial(j1 + j3 - j2)?
+        * factorial(j2 + j3 - j1)?;
+    let denominator = factorial(j1.checked_add(j2)?.checked_add(j3)?.checked_add(1)?)?;
+    let value = (numerator / denominator).sqrt();
+    value.is_finite().then_some(value)
+}
+
 #[inline]
 fn parity_sign(exponent: isize) -> f64
 {
@@ -212,10 +292,23 @@ mod tests
     }
 
     #[test]
+    fn six_j_all_vector_channels_matches_racah_value()
+    {
+        assert!((wigner_6j(1, 1, 1, 1, 1, 1).unwrap() - 1.0 / 6.0).abs() < 1e-14);
+    }
+
+    #[test]
+    fn six_j_with_scalar_channels_matches_known_value()
+    {
+        assert!((wigner_6j(1, 1, 0, 1, 1, 0).unwrap() - 1.0 / 3.0).abs() < 1e-14);
+    }
+
+    #[test]
     fn selection_rules_return_zero()
     {
         assert_eq!(wigner_3j(1, 1, 3, 0, 0, 0), Some(0.0));
         assert_eq!(wigner_3j(1, 1, 1, 1, 1, -1), Some(0.0));
+        assert_eq!(wigner_6j(1, 1, 3, 1, 1, 1), Some(0.0));
         assert_eq!(clebsch_gordan(1, 1, 1, 1, 1, 1), Some(0.0));
     }
 }
