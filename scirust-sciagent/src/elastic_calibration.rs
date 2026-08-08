@@ -47,10 +47,8 @@ impl CalibrationReport {
         }
 
         let lengths: BTreeSet<usize> = measurements.iter().map(|m| m.piece_len).collect();
-        let rejected_semantic_measurements = measurements
-            .iter()
-            .filter(|m| !m.semantic_match)
-            .count();
+        let rejected_semantic_measurements =
+            measurements.iter().filter(|m| !m.semantic_match).count();
         let disqualified: BTreeSet<(usize, u8)> = measurements
             .iter()
             .filter(|m| !m.semantic_match)
@@ -86,7 +84,8 @@ impl CalibrationReport {
         let mut winners = Vec::with_capacity(lengths.len());
         for piece_len in lengths
         {
-            let Some(per_kernel) = candidates.get(&piece_len) else
+            let Some(per_kernel) = candidates.get(&piece_len)
+            else
             {
                 return Err(CalibrationError::NoSemanticallyValidKernel { piece_len });
             };
