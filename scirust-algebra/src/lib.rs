@@ -9,6 +9,9 @@
 #[rustfmt::skip]
 mod scalar;
 
+/// Certification and inter-reduction helpers for bounded rewriting systems.
+#[rustfmt::skip]
+pub mod completion;
 /// Algebraic laws, products, quotients and actions.
 #[rustfmt::skip]
 pub mod core;
