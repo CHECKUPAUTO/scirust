@@ -11,6 +11,11 @@
 //! geometry; [`SlhaScoreProfile::new`] permits model-specific geometries while
 //! preserving the same grouped signed-INT4 + optional sign-residual equation.
 //!
+//! Residual widths need not be multiples of 64. Storage still uses `u64` words, but
+//! unused high bits in the final word are masked out of the Hamming distance and out
+//! of the declared `d_s` term. This lets a model store exactly the useful number of
+//! binary residual directions instead of padding its mathematical score to a word.
+//!
 //! Scoring is allocation-free and fixed-order. Device implementations can use this
 //! scalar path as their differential oracle.
 
@@ -22,9 +27,6 @@ pub enum SlhaScoreError {
     ZeroDimension {
         field: &'static str,
     },
-    ResidualNotWordAligned {
-        bits: usize,
-    },
     Length {
         name: &'static str,
         expected: usize,
@@ -34,7 +36,6 @@ pub enum SlhaScoreError {
         name: &'static str,
         index: usize,
     },
-    Overflow,
 }
 
 impl fmt::Display for SlhaScoreError {
@@ -42,10 +43,6 @@ impl fmt::Display for SlhaScoreError {
         match self
         {
             Self::ZeroDimension { field } => write!(formatter, "{field} must be non-zero"),
-            Self::ResidualNotWordAligned { bits } => write!(
-                formatter,
-                "SLHA residual width {bits} must be a multiple of 64 bits"
-            ),
             Self::Length {
                 name,
                 expected,
@@ -58,7 +55,6 @@ impl fmt::Display for SlhaScoreError {
             {
                 write!(formatter, "{name} contains a non-finite scalar at {index}")
             },
-            Self::Overflow => write!(formatter, "SLHA score geometry size overflow"),
         }
     }
 }
@@ -96,12 +92,6 @@ impl SlhaScoreProfile {
         if group_dim == 0
         {
             return Err(SlhaScoreError::ZeroDimension { field: "group_dim" });
-        }
-        if !residual_bits.is_multiple_of(64)
-        {
-            return Err(SlhaScoreError::ResidualNotWordAligned {
-                bits: residual_bits,
-            });
         }
         Ok(Self {
             coarse_dims,
@@ -141,9 +131,10 @@ impl SlhaScoreProfile {
         self.coarse_dims.div_ceil(2)
     }
 
+    /// Number of storage words required for the declared residual bits.
     #[must_use]
     pub const fn residual_words(self) -> usize {
-        self.residual_bits / 64
+        self.residual_bits.div_ceil(64)
     }
 
     #[must_use]
@@ -224,11 +215,7 @@ impl SlhaScoreProfile {
         }
 
         let coarse = self.coarse_dot_int4(query_coarse, packed_latent, scale, group_scales);
-        let hamming: u32 = query_sign
-            .iter()
-            .zip(residual_bitmap)
-            .map(|(query, key)| (query ^ key).count_ones())
-            .sum();
+        let hamming = self.hamming_valid_bits(query_sign, residual_bitmap);
         Ok(coarse
             + dynamic_lambda * (self.residual_bits as f32 - 2.0 * hamming as f32))
     }
@@ -280,6 +267,22 @@ impl SlhaScoreProfile {
         }
         sum
     }
+
+    fn hamming_valid_bits(self, left: &[u64], right: &[u64]) -> u32 {
+        let words = self.residual_words();
+        let tail_bits = self.residual_bits % 64;
+        let mut hamming = 0u32;
+        for word in 0..words
+        {
+            let mut different = left[word] ^ right[word];
+            if word + 1 == words && tail_bits != 0
+            {
+                different &= (1u64 << tail_bits) - 1;
+            }
+            hamming = hamming.saturating_add(different.count_ones());
+        }
+        hamming
+    }
 }
 
 fn require_length(
@@ -327,17 +330,18 @@ mod tests {
 
     #[test]
     fn model_specific_profile_does_not_inherit_slhav2_padding() {
-        let profile = SlhaScoreProfile::new(32, 64, 16).unwrap();
-        assert_eq!(profile.latent_bytes(), 16);
+        let profile = SlhaScoreProfile::new(24, 24, 8).unwrap();
+        assert_eq!(profile.latent_bytes(), 12);
+        assert_eq!(profile.residual_words(), 1);
         assert_eq!(profile.residual_bytes(), 8);
-        assert_eq!(profile.group_count(), 2);
-        assert_eq!(profile.hot_payload_bytes(), 24);
+        assert_eq!(profile.group_count(), 3);
+        assert_eq!(profile.hot_payload_bytes(), 20);
         assert_eq!(profile.slhav2_serialized_tile_bytes(), None);
     }
 
     #[test]
     fn warm_int4_uses_signed_zero_point_and_group_scale() {
-        let profile = SlhaScoreProfile::new(4, 64, 2).unwrap();
+        let profile = SlhaScoreProfile::new(4, 4, 2).unwrap();
         // nibbles: 8 -> 0, 9 -> +1, 7 -> -1, 10 -> +2.
         let packed = [0x98u8, 0xa7u8];
         let query = [1.0f32, 2.0, 3.0, 4.0];
@@ -373,8 +377,25 @@ mod tests {
     }
 
     #[test]
+    fn unused_tail_bits_do_not_change_compact_residual_score() {
+        let profile = SlhaScoreProfile::new(2, 5, 2).unwrap();
+        let packed = [0x88u8];
+        let query = [0.0f32; 2];
+        let left = [0b1_0101u64];
+        let right_a = [0b0_0011u64];
+        let right_b = [right_a[0] | (!0u64 << 5)];
+        let a = profile
+            .score_hot_int4(&query, &packed, 1.0, &[255], &left, &right_a, 0.5)
+            .unwrap();
+        let b = profile
+            .score_hot_int4(&query, &packed, 1.0, &[255], &left, &right_b, 0.5)
+            .unwrap();
+        assert_eq!(a.to_bits(), b.to_bits());
+    }
+
+    #[test]
     fn malformed_buffers_fail_closed() {
-        let profile = SlhaScoreProfile::new(8, 64, 4).unwrap();
+        let profile = SlhaScoreProfile::new(8, 17, 4).unwrap();
         assert!(matches!(
             profile.score_warm_int4(&[0.0; 7], &[0; 4], 1.0, &[255; 2]),
             Err(SlhaScoreError::Length {
@@ -382,5 +403,6 @@ mod tests {
                 ..
             })
         ));
+        assert_eq!(profile.residual_words(), 1);
     }
 }
