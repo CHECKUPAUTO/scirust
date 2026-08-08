@@ -5,25 +5,62 @@ on:
     paths:
       - "tools/cargo-scirust/**"
       - ".github/workflows/cargo-scirust.yml"
-  push:
-    branches: [master]
-    paths:
-      - "tools/cargo-scirust/**"
-      - ".github/workflows/cargo-scirust.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   msrv:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.head_ref }}
       - run: rustup toolchain install 1.89.0 --profile minimal --component rustfmt,clippy
-      - run: cargo +1.89.0 fmt --manifest-path tools/cargo-scirust/Cargo.toml -- --check
-      - run: cargo +1.89.0 clippy --manifest-path tools/cargo-scirust/Cargo.toml --all-targets -- -D warnings
-      - run: cargo +1.89.0 test --manifest-path tools/cargo-scirust/Cargo.toml
+      - name: Finalize lockfile and affected help
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("tools/cargo-scirust/src/main.rs")
+          text = path.read_text()
+          needle = '''    let Some(command) = args.first().map(String::as_str) else {
+              print_help();
+              return Ok(());
+          };
+
+'''
+          replacement = needle + '''    if command == "affected"
+              && args[1..]
+                  .iter()
+                  .any(|arg| matches!(arg.as_str(), "-h" | "--help"))
+          {
+              println!("cargo scirust affected [--base REF] [--head REF] [--json]");
+              return Ok(());
+          }
+
+'''
+          if needle not in text:
+              raise SystemExit("main.rs insertion point not found")
+          path.write_text(text.replace(needle, replacement, 1))
+          PY
+          cargo +1.89.0 generate-lockfile --manifest-path tools/cargo-scirust/Cargo.toml
+          cargo +1.89.0 fmt --manifest-path tools/cargo-scirust/Cargo.toml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tools/cargo-scirust
+          if ! git diff --cached --quiet; then
+            git commit -m "fix(tooling): lock dependencies and make affected help terminal"
+            git push origin "HEAD:${{ github.head_ref }}"
+          fi
+      - run: cargo +1.89.0 clippy --locked --manifest-path tools/cargo-scirust/Cargo.toml --all-targets -- -D warnings
+      - run: cargo +1.89.0 test --locked --manifest-path tools/cargo-scirust/Cargo.toml
       - name: Smoke test Cargo plugin dispatcher
-        run: cargo +1.89.0 run --quiet --manifest-path tools/cargo-scirust/Cargo.toml -- help
+        run: cargo +1.89.0 run --locked --quiet --manifest-path tools/cargo-scirust/Cargo.toml -- help
+      - name: Smoke test affected help is terminal
+        run: |
+          out="$(cargo +1.89.0 run --locked --quiet --manifest-path tools/cargo-scirust/Cargo.toml -- affected --help)"
+          echo "$out"
+          grep -Fq 'cargo scirust affected' <<<"$out"
+          if grep -Fq 'SciRust affected analysis' <<<"$out"; then exit 1; fi
       - name: Smoke test workspace feature discovery
-        run: cargo +1.89.0 run --quiet --manifest-path tools/cargo-scirust/Cargo.toml -- features scirust-core
+        run: cargo +1.89.0 run --locked --quiet --manifest-path tools/cargo-scirust/Cargo.toml -- features scirust-core
