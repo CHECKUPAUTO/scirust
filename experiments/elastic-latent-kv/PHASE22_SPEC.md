@@ -73,6 +73,8 @@ The permanent Phase 22 gate requires:
 - Mesa lavapipe execution of the deterministic sampler integration suite;
 - Mesa lavapipe execution of the Phase 21 device-feedback suite as a non-regression proof.
 
+After any synchronization with a newer `master`, all material gates are rerun on the new exact branch head; green results from an older head are not reused for merge qualification.
+
 The sampler suite must prove:
 
 1. exact CPU/WGPU seeded temperature parity on the full-ranking fallback;
