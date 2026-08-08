@@ -186,12 +186,11 @@ extern "C" __global__ void decode_gqa_kernel(
     }
     sum = red[0];
 
-    // Once every score has been consumed by the reduction, reuse the score storage
-    // for bf16 probabilities.  This makes the context accumulation see the same
-    // bf16 boundary as the legacy softmax -> attention_context pipeline.
-    unsigned short* probs = (unsigned short*)scores;
+    // Every probability is rounded through bf16, but remains stored as a float in
+    // its original score slot.  That preserves the legacy softmax boundary without
+    // aliasing the 4-byte score array through a 2-byte pointer.
     for (size_t j = tid; j < seq; j += blockDim.x)
-        probs[j] = f2b(__expf(scores[j] - mx) / sum);
+        scores[j] = b2f(f2b(__expf(scores[j] - mx) / sum));
     __syncthreads();
 
     // B49 parity rule: every output channel owns a strict left-to-right fp32
@@ -202,7 +201,7 @@ extern "C" __global__ void decode_gqa_kernel(
             const float vv = j == pos
                 ? b2f(qkv[d_model + kv_dim + kv * dh + c])
                 : b2f(vcache[j * kv_dim + kv * dh + c]);
-            acc += b2f(probs[j]) * vv;
+            acc += scores[j] * vv;
         }
         out[head * dh + c] = f2b(acc);
     }
