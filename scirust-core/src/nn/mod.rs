@@ -66,6 +66,7 @@ pub mod smoothing;
 #[allow(dead_code)]
 pub mod tiered_latent_kv_backend;
 pub mod transformer;
+pub mod tt_decode;
 pub mod tt_linear;
 pub mod vision;
 pub mod vit;
@@ -115,6 +116,7 @@ pub use tiered_latent_kv_backend::{
     TieredLatentBackendError, TieredLatentTelemetry, TieredResidualLatentBackend,
 };
 pub use transformer::{MultiHeadAttention, TransformerBlock, TransformerEncoder};
+pub use tt_decode::{TtDecodeError, TwoCoreTtDecodePlan};
 pub use tt_linear::{TTLinear, tt_decompose, tt_decompose_auto};
 pub use vision::ResNet;
 pub use vit::ViT;
