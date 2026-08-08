@@ -1,6 +1,6 @@
 extern crate alloc;
 
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 use crate::{
     ArchitectureFamily, CacheDescriptor, CacheKind, CapabilitySet, DType, DeviceId, DeviceKind,
@@ -41,11 +41,7 @@ pub fn canonical_hardware_profile_bytes(
     put_optional_u32(&mut out, hardware.isa.max_vector_bits);
 
     put_capability_set(&mut out, &hardware.numeric.storage_dtypes, encode_dtype)?;
-    put_capability_set(
-        &mut out,
-        &hardware.numeric.arithmetic_dtypes,
-        encode_dtype,
-    )?;
+    put_capability_set(&mut out, &hardware.numeric.arithmetic_dtypes, encode_dtype)?;
     put_capability_set(
         &mut out,
         &hardware.numeric.accumulation_dtypes,
@@ -54,11 +50,7 @@ pub fn canonical_hardware_profile_bytes(
 
     out.push(support_tag(hardware.matrix.accelerated));
     put_capability_set(&mut out, &hardware.matrix.input_dtypes, encode_dtype)?;
-    put_capability_set(
-        &mut out,
-        &hardware.matrix.accumulation_dtypes,
-        encode_dtype,
-    )?;
+    put_capability_set(&mut out, &hardware.matrix.accumulation_dtypes, encode_dtype)?;
 
     put_capability_set(&mut out, &hardware.memory.spaces, encode_memory_space)?;
     out.push(support_tag(hardware.memory.coherent_host_device));
@@ -189,9 +181,7 @@ fn encode_memory_space(space: &MemorySpace) -> Result<Vec<u8>, ProfileEncodingEr
     Ok(vec![memory_space_tag(*space)])
 }
 
-fn encode_reproducibility(
-    level: &ReproducibilityLevel,
-) -> Result<Vec<u8>, ProfileEncodingError> {
+fn encode_reproducibility(level: &ReproducibilityLevel) -> Result<Vec<u8>, ProfileEncodingError> {
     Ok(vec![reproducibility_tag(*level)])
 }
 
@@ -516,9 +506,8 @@ mod tests {
 
     #[test]
     fn hardware_encoding_ignores_capability_insertion_order() {
-        let mut left = HardwareCapabilities::from_device_capabilities(
-            &DeviceCapabilities::reference_cpu(),
-        );
+        let mut left =
+            HardwareCapabilities::from_device_capabilities(&DeviceCapabilities::reference_cpu());
         left.architecture = Architecture::named(ArchitectureFamily::X86_64, "test-x86");
         left.isa
             .features
@@ -527,9 +516,8 @@ mod tests {
             .features
             .set_support(IsaFeature::Fma, SupportLevel::Supported);
 
-        let mut right = HardwareCapabilities::from_device_capabilities(
-            &DeviceCapabilities::reference_cpu(),
-        );
+        let mut right =
+            HardwareCapabilities::from_device_capabilities(&DeviceCapabilities::reference_cpu());
         right.architecture = Architecture::named(ArchitectureFamily::X86_64, "test-x86");
         right
             .isa
@@ -548,9 +536,8 @@ mod tests {
 
     #[test]
     fn hardware_encoding_preserves_unknown_vs_unsupported() {
-        let unknown = HardwareCapabilities::from_device_capabilities(
-            &DeviceCapabilities::reference_cpu(),
-        );
+        let unknown =
+            HardwareCapabilities::from_device_capabilities(&DeviceCapabilities::reference_cpu());
         let mut unsupported = unknown.clone();
         unsupported
             .numeric
