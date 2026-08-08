@@ -1,0 +1,66 @@
+name: SciAgent actionable CI report
+
+on:
+  push:
+    branches:
+      - perf/sciagent-b39-thor-production-bench
+    paths:
+      - .github/workflows/sciagent-ci-report.yml
+
+permissions:
+  contents: write
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: perf/sciagent-b39-thor-production-bench
+          fetch-depth: 0
+      - name: Install toolchains and Vulkan
+        run: |
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup toolchain install nightly-2026-07-02 --profile minimal --component clippy
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mesa-vulkan-drivers libvulkan1 vulkan-tools
+      - name: Run diagnostics
+        shell: bash
+        run: |
+          set +e
+          rm -f /tmp/msrv.log /tmp/clippy.log /tmp/wgpu.log
+          cargo +1.89.0 check --workspace --all-targets --locked > /tmp/msrv.log 2>&1
+          msrv=$?
+          cargo +nightly-2026-07-02 clippy --workspace --all-targets --locked -- -D warnings > /tmp/clippy.log 2>&1
+          clippy=$?
+          cargo +nightly-2026-07-02 test -p scirust-sciagent --features gpu --test gpu_parity -- --nocapture > /tmp/wgpu.log 2>&1
+          wgpu=$?
+          {
+            echo '# TEMP SCIAGENT CI REPORT'
+            echo
+            echo "MSRV_EXIT=$msrv"
+            echo "CLIPPY_EXIT=$clippy"
+            echo "WGPU_EXIT=$wgpu"
+            echo
+            echo '## MSRV tail'
+            echo '```text'
+            tail -n 100 /tmp/msrv.log
+            echo '```'
+            echo
+            echo '## Clippy tail'
+            echo '```text'
+            tail -n 120 /tmp/clippy.log
+            echo '```'
+            echo
+            echo '## WGPU tail'
+            echo '```text'
+            tail -n 140 /tmp/wgpu.log
+            echo '```'
+          } > SCIAGENT_CI_REPORT.tmp.md
+      - name: Commit report
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f SCIAGENT_CI_REPORT.tmp.md
+          git commit -m "ci(sciagent): publish actionable CI report"
+          git push origin HEAD:perf/sciagent-b39-thor-production-bench
