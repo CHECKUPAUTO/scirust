@@ -588,9 +588,11 @@ impl ResidentModel {
                 )
                 .expect("gqa attention");
             // Seed the caches with the prompt's roped keys / raw values. `kr` here
-            // is the same full-width RoPE (positions 0..P) `decode_step` produces
+            // is the same head-local RoPE (positions 0..P) `decode_step` produces
             // one row at a time, so later appends line up exactly.
-            let kr = chain.rope(&k, p, 0, self.theta).expect("rope k");
+            let kr = chain
+                .rope_heads(&k, self.n_kv_heads, p, 0, self.theta)
+                .expect("head-local rope k");
             kcache[l] = Some(kr);
             vcache[l] = Some(v);
             let attn_out = chain.matmul(&ctx, &b.wo).expect("wo");
@@ -639,10 +641,14 @@ impl ResidentModel {
             let k = chain.matmul(&xn, &b.wk).expect("wk"); // [1 × kv_dim]
             let v = chain.matmul(&xn, &b.wv).expect("wv"); // [1 × kv_dim]
             // RoPE the single new row at its absolute position (seq_len 1, offset
-            // pos ⇒ position = pos). Each width feeds its own frequency schedule,
-            // exactly as `gqa_attention` ropes the full-width q/k.
-            let qr = chain.rope(&q, 1, pos, self.theta).expect("rope q");
-            let kr = chain.rope(&k, 1, pos, self.theta).expect("rope k");
+            // pos ⇒ position = pos). Frequency indices restart in every head,
+            // exactly as the corrected `gqa_attention` path.
+            let qr = chain
+                .rope_heads(&q, self.n_heads, 1, pos, self.theta)
+                .expect("head-local rope q");
+            let kr = chain
+                .rope_heads(&k, self.n_kv_heads, 1, pos, self.theta)
+                .expect("head-local rope k");
             // Append this step's roped key / raw value to the resident layer caches
             // (GPU-side row stack — no download/re-upload round-trip).
             kcache[l] = Some(match kcache[l].take()
@@ -710,8 +716,12 @@ impl ResidentModel {
             let k = chain.matmul(&xn, &b.wk).expect("wk"); // [m × kv_dim]
             let v = chain.matmul(&xn, &b.wv).expect("wv"); // [m × kv_dim]
             // Row r sits at absolute position start_pos + r.
-            let qr = chain.rope(&q, m, start_pos, self.theta).expect("rope q");
-            let kr = chain.rope(&k, m, start_pos, self.theta).expect("rope k");
+            let qr = chain
+                .rope_heads(&q, self.n_heads, m, start_pos, self.theta)
+                .expect("head-local rope q");
+            let kr = chain
+                .rope_heads(&k, self.n_kv_heads, m, start_pos, self.theta)
+                .expect("head-local rope k");
             // Append all m roped keys / values to the resident caches.
             kcache[l] = Some(match kcache[l].take()
             {
