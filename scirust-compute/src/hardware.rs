@@ -83,7 +83,8 @@ impl<T: PartialEq> CapabilitySet<T> {
         {
             SupportLevel::Supported => self.supported.push(value),
             SupportLevel::Unsupported => self.unsupported.push(value),
-            SupportLevel::Unknown => {}
+            SupportLevel::Unknown =>
+            {},
         }
     }
 }
@@ -131,9 +132,6 @@ impl Architecture {
     }
 
     /// Compile-time architecture of the host running this binary.
-    ///
-    /// This is an identity observation only. It does not claim any optional ISA
-    /// feature such as AVX-512, SVE or RVV; those require explicit probing.
     pub fn current_host() -> Self {
         Self {
             family: CURRENT_HOST_ARCHITECTURE,
@@ -169,9 +167,6 @@ const CURRENT_HOST_ARCHITECTURE: ArchitectureFamily = ArchitectureFamily::Wasm32
 const CURRENT_HOST_ARCHITECTURE: ArchitectureFamily = ArchitectureFamily::Unknown;
 
 /// Optional ISA feature exposed by a compute processor.
-///
-/// Known variants cover the first portability targets. `Other` is an escape
-/// hatch for future ISAs and vendor extensions without changing this contract.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum IsaFeature {
@@ -199,7 +194,6 @@ pub enum IsaFeature {
     Other(String),
 }
 
-/// Shape of the vector execution model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[non_exhaustive]
 pub enum VectorModel {
@@ -228,7 +222,6 @@ impl IsaCapabilities {
     }
 }
 
-/// Numeric formats explicitly advertised by a backend.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct NumericCapabilities {
     pub storage_dtypes: CapabilitySet<DType>,
@@ -236,7 +229,6 @@ pub struct NumericCapabilities {
     pub accumulation_dtypes: CapabilitySet<DType>,
 }
 
-/// Matrix/tensor acceleration properties.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct MatrixCapabilities {
     pub accelerated: SupportLevel,
@@ -244,7 +236,6 @@ pub struct MatrixCapabilities {
     pub accumulation_dtypes: CapabilitySet<DType>,
 }
 
-/// Memory properties relevant to portable scheduling and transfer planning.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct MemoryCapabilities {
     pub spaces: CapabilitySet<MemorySpace>,
@@ -253,7 +244,6 @@ pub struct MemoryCapabilities {
     pub async_transfers: SupportLevel,
 }
 
-/// Execution properties independent of a particular kernel language.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ExecutionCapabilities {
     pub async_execution: SupportLevel,
@@ -262,7 +252,6 @@ pub struct ExecutionCapabilities {
     pub atomic_i64: SupportLevel,
 }
 
-/// Reproducibility mode a backend/kernel combination can promise.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ReproducibilityLevel {
@@ -287,7 +276,6 @@ impl ReproducibilityCapabilities {
     }
 }
 
-/// Architecture-neutral capability profile for one logical compute device.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HardwareCapabilities {
     pub device: DeviceId,
@@ -302,10 +290,6 @@ pub struct HardwareCapabilities {
 
 impl HardwareCapabilities {
     /// Conservative bridge from the existing capability contract.
-    ///
-    /// The legacy dtype list is an exhaustive support declaration, so this
-    /// bridge preserves supported and unsupported storage dtypes. Other
-    /// properties remain unknown until a backend or hardware probe states them.
     pub fn from_device_capabilities(capabilities: &DeviceCapabilities) -> Self {
         let architecture = match capabilities.device.kind()
         {
@@ -374,18 +358,15 @@ mod tests {
     #[test]
     fn capability_set_preserves_all_three_states_and_disjointness() {
         let mut set = CapabilitySet::default();
-
         assert_eq!(set.support_level(&DType::F32), SupportLevel::Unknown);
         set.set_support(DType::F32, SupportLevel::Supported);
         assert_eq!(set.support_level(&DType::F32), SupportLevel::Supported);
         assert_eq!(set.supported_values(), &[DType::F32]);
         assert!(set.unsupported_values().is_empty());
-
         set.set_support(DType::F32, SupportLevel::Unsupported);
         assert_eq!(set.support_level(&DType::F32), SupportLevel::Unsupported);
         assert!(set.supported_values().is_empty());
         assert_eq!(set.unsupported_values(), &[DType::F32]);
-
         set.set_support(DType::F32, SupportLevel::Unknown);
         assert_eq!(set.support_level(&DType::F32), SupportLevel::Unknown);
     }
@@ -394,7 +375,6 @@ mod tests {
     fn current_host_architecture_never_claims_optional_isa_features() {
         let capabilities =
             HardwareCapabilities::from_device_capabilities(&DeviceCapabilities::reference_cpu());
-
         assert_eq!(capabilities.device, DeviceId::reference());
         assert!(capabilities.isa.features.supported_values().is_empty());
         assert!(capabilities.isa.features.unsupported_values().is_empty());
@@ -411,9 +391,7 @@ mod tests {
             max_workgroup_size: [256, 1, 1],
             supports_async_execution: true,
         };
-
         let hardware = HardwareCapabilities::from_device_capabilities(&legacy);
-
         assert_eq!(hardware.device, legacy.device);
         assert_eq!(hardware.architecture, Architecture::unknown());
         assert_eq!(
@@ -425,7 +403,10 @@ mod tests {
             SupportLevel::Unsupported
         );
         assert_eq!(
-            hardware.numeric.arithmetic_dtypes.support_level(&DType::F32),
+            hardware
+                .numeric
+                .arithmetic_dtypes
+                .support_level(&DType::F32),
             SupportLevel::Unknown
         );
         assert_eq!(hardware.execution.async_execution, SupportLevel::Supported);
@@ -441,8 +422,10 @@ mod tests {
             .set_support(IsaFeature::Fma, SupportLevel::Supported);
         isa.features
             .set_support(IsaFeature::Avx512F, SupportLevel::Unsupported);
-
-        assert_eq!(isa.support_level(&IsaFeature::Avx2), SupportLevel::Supported);
+        assert_eq!(
+            isa.support_level(&IsaFeature::Avx2),
+            SupportLevel::Supported
+        );
         assert_eq!(
             isa.support_level(&IsaFeature::Avx512F),
             SupportLevel::Unsupported
@@ -453,11 +436,9 @@ mod tests {
     #[test]
     fn reproducibility_membership_is_explicit() {
         let mut reproducibility = ReproducibilityCapabilities::default();
-        reproducibility.modes.set_support(
-            ReproducibilityLevel::Deterministic,
-            SupportLevel::Supported,
-        );
-
+        reproducibility
+            .modes
+            .set_support(ReproducibilityLevel::Deterministic, SupportLevel::Supported);
         assert!(reproducibility.supports(ReproducibilityLevel::Deterministic));
         assert_eq!(
             reproducibility.support_level(ReproducibilityLevel::BitExact),
