@@ -7,6 +7,7 @@ on:
       - "scirust-sciagent/src/artifact_provenance.rs"
       - "scirust-sciagent/src/execution_attestation.rs"
       - "scirust-sciagent/src/lib.rs"
+      - "scirust-sciagent/src/route_b_execution_attestation.rs"
       - "scirust-sciagent/src/sha256.rs"
       - "scirust-sciagent/src/train/checkpoint.rs"
       - "scirust-sciagent/tokenizer/bpe.json"
@@ -36,6 +37,8 @@ jobs:
         run: cargo +1.89.0 check -p scirust-sciagent --lib --locked
       - name: Test runtime attestation builder
         run: cargo +1.89.0 test -p scirust-sciagent --lib execution_attestation --locked
+      - name: Test Route-B attestation semantics
+        run: cargo +1.89.0 test -p scirust-sciagent --lib route_b_execution_attestation --locked
       - name: Test artifact provenance identities
         run: cargo +1.89.0 test -p scirust-sciagent --lib artifact_provenance --locked
       - name: Test checkpoint provenance
