@@ -1,0 +1,220 @@
+name: SciAgent I250 mainline hosted
+
+on:
+  pull_request:
+    branches: [ci/i250-mainline-base]
+    paths:
+      - "scirust-cuda/**"
+      - "scirust-sciagent/**"
+      - ".github/workflows/sciagent-i250-mainline-hosted.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sciagent-i250-mainline-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  hosted:
+    name: I250 single-model A/B compile + Clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+      - name: Wire fused LM-head and per-burst decode modes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          runtime = Path("scirust-cuda/src/decode.rs")
+          text = runtime.read_text()
+          import_marker = "use crate::bf16_gemv::CudaBf16Gemv;\n"
+          import_insert = (
+              "use crate::bf16_gemv::CudaBf16Gemv;\n"
+              "use crate::bf16_lm_head_argmax::{CudaBf16LmHeadArgmax, CudaBf16LmHeadArgmaxWorkspace};\n"
+          )
+          if "CudaBf16LmHeadArgmaxWorkspace" not in text:
+              if import_marker not in text:
+                  raise SystemExit("runtime LM-head import marker not found")
+              text = text.replace(import_marker, import_insert, 1)
+
+          field_marker = "    gemv: CudaBf16Gemv,\n    kernels: DecodeKernels,\n"
+          field_insert = "    gemv: CudaBf16Gemv,\n    lm_head_argmax: CudaBf16LmHeadArgmax,\n    kernels: DecodeKernels,\n"
+          if "    lm_head_argmax: CudaBf16LmHeadArgmax," not in text:
+              if field_marker not in text:
+                  raise SystemExit("runtime LM-head field marker not found")
+              text = text.replace(field_marker, field_insert, 1)
+
+          ctor_marker = "        let gemv = CudaBf16Gemv::from_context(ctx.clone(), stream.clone())?;\n"
+          ctor_insert = (
+              "        let gemv = CudaBf16Gemv::from_context(ctx.clone(), stream.clone())?;\n"
+              "        let lm_head_argmax = CudaBf16LmHeadArgmax::from_context(\n"
+              "            ctx.clone(),\n"
+              "            stream.clone(),\n"
+              "        )?;\n"
+          )
+          if "let lm_head_argmax = CudaBf16LmHeadArgmax::from_context" not in text:
+              if ctor_marker not in text:
+                  raise SystemExit("runtime LM-head constructor marker not found")
+              text = text.replace(ctor_marker, ctor_insert, 1)
+
+          init_marker = "            gemv,\n            kernels,\n"
+          init_insert = "            gemv,\n            lm_head_argmax,\n            kernels,\n"
+          if "            lm_head_argmax,\n            kernels," not in text:
+              if init_marker not in text:
+                  raise SystemExit("runtime LM-head init marker not found")
+              text = text.replace(init_marker, init_insert, 1)
+
+          method_marker = "    #[must_use]\n    pub fn download(&self, matrix: &CudaDecodeMatrix) -> Vec<f32> {\n"
+          methods = '''    #[must_use]\n    pub fn lm_head_argmax_workspace(&self, vocab: usize) -> CudaBf16LmHeadArgmaxWorkspace {\n        self.lm_head_argmax.workspace(vocab)\n    }\n\n    pub fn greedy_lm_head_argmax_into(\n        &self,\n        hidden: &CudaDecodeMatrix,\n        embedding: &CudaDecodeMatrix,\n        workspace: &mut CudaBf16LmHeadArgmaxWorkspace,\n        feedback: &mut CudaDecodeGreedyFeedback,\n        generated_index: usize,\n    ) {\n        assert_eq!(hidden.rows, 1, "LM-head greedy hidden row count");\n        assert_eq!(embedding.cols, hidden.cols, "LM-head greedy hidden width");\n        assert!(generated_index < feedback.capacity, "LM-head greedy feedback index");\n        self.lm_head_argmax.argmax_into(\n            &hidden.buf,\n            &embedding.buf,\n            workspace,\n            &mut feedback.current_token,\n            &mut feedback.generated,\n            generated_index,\n            hidden.cols,\n            embedding.rows,\n        );\n    }\n\n'''
+          if "pub fn greedy_lm_head_argmax_into(" not in text:
+              if method_marker not in text:
+                  raise SystemExit("runtime LM-head method marker not found")
+              text = text.replace(method_marker, methods + method_marker, 1)
+          runtime.write_text(text)
+
+          model = Path("scirust-sciagent/src/cuda_decode.rs")
+          text = model.read_text()
+          text = text.replace(
+              "    CudaDecodeGreedyFeedback, CudaDecodeKvCache, CudaDecodeMatrix, CudaDecodeRuntime,\n",
+              "    CudaBf16LmHeadArgmaxWorkspace, CudaDecodeGreedyFeedback, CudaDecodeKvCache,\n    CudaDecodeMatrix, CudaDecodeRuntime,\n",
+              1,
+          )
+
+          enum_marker = "/// Batch-one SCIAGENT decoder with fused projection weights and fixed-capacity KV.\n"
+          modes = '''/// Greedy LM-head implementation used by the I250 device-feedback burst.\n#[derive(Debug, Clone, Copy, PartialEq, Eq)]\npub enum CudaDecodeLmHeadMode {\n    /// Materialize all BF16 logits, then run the separate greedy argmax kernel.\n    FullLogits,\n    /// Compute tied-LM-head logits and greedy winner without a full logits row.\n    FusedArgmax,\n}\n\n/// Runtime-selectable exact/deterministic decode implementation choices.\n#[derive(Debug, Clone, Copy, PartialEq, Eq)]\npub struct CudaDecodeModes {\n    pub ffn: CudaDecodeFfnMode,\n    pub lm_head: CudaDecodeLmHeadMode,\n}\n\nimpl Default for CudaDecodeModes {\n    fn default() -> Self {\n        Self {\n            ffn: CudaDecodeFfnMode::FusedGemv,\n            lm_head: CudaDecodeLmHeadMode::FusedArgmax,\n        }\n    }\n}\n\n'''
+          if "pub enum CudaDecodeLmHeadMode" not in text:
+              if enum_marker not in text:
+                  raise SystemExit("model LM-head enum marker not found")
+              text = text.replace(enum_marker, modes + enum_marker, 1)
+
+          text = text.replace("    ffn_mode: CudaDecodeFfnMode,\n", "", 1)
+
+          ctor_old = '''    /// Mirror one immutable CPU model snapshot into the default fastest I250 runtime.\n    #[must_use]\n    pub fn from_model(model: &SciAgentModel) -> Option<Self> {\n        Self::from_model_with_ffn_mode(model, CudaDecodeFfnMode::FusedGemv)\n    }\n\n    /// Mirror one immutable CPU model snapshot with an explicit FFN backend.\n    #[must_use]\n    pub fn from_model_with_ffn_mode(\n        model: &SciAgentModel,\n        ffn_mode: CudaDecodeFfnMode,\n    ) -> Option<Self> {\n        assert!(\n'''
+          ctor_new = '''    /// Mirror one immutable CPU model snapshot into the I250 runtime.\n    #[must_use]\n    pub fn from_model(model: &SciAgentModel) -> Option<Self> {\n        assert!(\n'''
+          if "pub fn from_model_with_ffn_mode" in text:
+              if ctor_old not in text:
+                  raise SystemExit("model constructor refactor marker not found")
+              text = text.replace(ctor_old, ctor_new, 1)
+          text = text.replace("            ffn_mode,\n", "", 1)
+
+          getter = '''    #[must_use]\n    pub const fn ffn_mode(&self) -> CudaDecodeFfnMode {\n        self.ffn_mode\n    }\n\n'''
+          text = text.replace(getter, "", 1)
+
+          text = text.replace(
+              "    fn forward_embedded_resident(\n",
+              "    fn forward_embedded_hidden_resident(\n",
+              1,
+          )
+          signature_marker = '''        pos: usize,\n        caches: &mut [DecodeLayerCache],\n        workspace: &mut DecodeWorkspace,\n    ) {\n'''
+          signature_insert = '''        pos: usize,\n        caches: &mut [DecodeLayerCache],\n        workspace: &mut DecodeWorkspace,\n        ffn_mode: CudaDecodeFfnMode,\n    ) {\n'''
+          method_start = text.index("    fn forward_embedded_hidden_resident(")
+          sig_pos = text.index(signature_marker, method_start)
+          text = text[:sig_pos] + text[sig_pos:].replace(signature_marker, signature_insert, 1)
+          text = text.replace("            match self.ffn_mode\n", "            match ffn_mode\n", 1)
+
+          lm_tail = '''        runtime.rms_norm_into(\n            &workspace.x,\n            &self.final_norm,\n            self.eps,\n            &mut workspace.norm,\n        );\n        runtime.matmul_bt_into(&workspace.norm, &self.embedding, &mut workspace.logits);\n    }\n\n'''
+          hidden_tail = '''        runtime.rms_norm_into(\n            &workspace.x,\n            &self.final_norm,\n            self.eps,\n            &mut workspace.norm,\n        );\n    }\n\n    fn project_logits_resident(&self, workspace: &mut DecodeWorkspace) {\n        self.runtime\n            .matmul_bt_into(&workspace.norm, &self.embedding, &mut workspace.logits);\n    }\n\n'''
+          if lm_tail not in text:
+              raise SystemExit("model LM-head projection tail marker not found")
+          text = text.replace(lm_tail, hidden_tail, 1)
+
+          text = text.replace(
+              "    fn forward_host_token_resident(\n",
+              "    fn forward_host_token_hidden_resident(\n",
+              1,
+          )
+          host_start = text.index("    fn forward_host_token_hidden_resident(")
+          host_sig = text.index(signature_marker, host_start)
+          text = text[:host_sig] + text[host_sig:].replace(signature_marker, signature_insert, 1)
+          text = text.replace(
+              "        self.forward_embedded_resident(pos, caches, workspace);\n",
+              "        self.forward_embedded_hidden_resident(pos, caches, workspace, ffn_mode);\n",
+              1,
+          )
+
+          text = text.replace(
+              "    fn forward_feedback_token_resident(\n",
+              "    fn forward_feedback_token_hidden_resident(\n",
+              1,
+          )
+          feedback_start = text.index("    fn forward_feedback_token_hidden_resident(")
+          feedback_sig = text.index(signature_marker, feedback_start)
+          text = text[:feedback_sig] + text[feedback_sig:].replace(signature_marker, signature_insert, 1)
+          text = text.replace(
+              "        self.forward_embedded_resident(pos, caches, workspace);\n",
+              "        self.forward_embedded_hidden_resident(pos, caches, workspace, ffn_mode);\n",
+              1,
+          )
+
+          text = text.replace(
+              "            self.forward_host_token_resident(token, pos, &mut caches, &mut workspace);\n",
+              "            self.forward_host_token_hidden_resident(\n                token,\n                pos,\n                &mut caches,\n                &mut workspace,\n                CudaDecodeFfnMode::FusedGemv,\n            );\n",
+          )
+          prompt_loop_end = '''        }\n        let mut logits = self.runtime.download(&workspace.logits);\n'''
+          prompt_loop_new = '''        }\n        self.project_logits_resident(&mut workspace);\n        let mut logits = self.runtime.download(&workspace.logits);\n'''
+          if prompt_loop_end not in text:
+              raise SystemExit("host generation prompt-logits marker not found")
+          text = text.replace(prompt_loop_end, prompt_loop_new, 1)
+          text = text.replace(
+              "            self.forward_host_token_resident(next, pos, &mut caches, &mut workspace);\n            logits = self.runtime.download(&workspace.logits);\n",
+              "            self.forward_host_token_hidden_resident(\n                next,\n                pos,\n                &mut caches,\n                &mut workspace,\n                CudaDecodeFfnMode::FusedGemv,\n            );\n            self.project_logits_resident(&mut workspace);\n            logits = self.runtime.download(&workspace.logits);\n",
+              1,
+          )
+
+          device_start = text.index("    pub fn generate_greedy_device_feedback(")
+          device_end = text.index("\n    fn assert_capacity", device_start)
+          device_methods = '''    pub fn generate_greedy_device_feedback(&self, prompt: &[u32], max_new: usize) -> Vec<u32> {\n        self.generate_greedy_device_feedback_with_modes(\n            prompt,\n            max_new,\n            CudaDecodeModes::default(),\n        )\n    }\n\n    /// Greedy device-feedback generation with explicit per-burst implementation modes.\n    pub fn generate_greedy_device_feedback_with_modes(\n        &self,\n        prompt: &[u32],\n        max_new: usize,\n        modes: CudaDecodeModes,\n    ) -> Vec<u32> {\n        let mut tokens = normalized_prompt(prompt);\n        if max_new == 0\n        {\n            return tokens;\n        }\n        self.assert_capacity(tokens.len(), max_new);\n        let capacity = tokens.len() + max_new;\n        let mut caches = self.caches(capacity);\n        let mut workspace = self.workspace();\n        let mut lm_workspace = match modes.lm_head\n        {\n            CudaDecodeLmHeadMode::FullLogits => None,\n            CudaDecodeLmHeadMode::FusedArgmax =>\n            {\n                Some(self.runtime.lm_head_argmax_workspace(self.vocab))\n            },\n        };\n\n        for (pos, &token) in tokens.iter().enumerate()\n        {\n            self.forward_host_token_hidden_resident(\n                token,\n                pos,\n                &mut caches,\n                &mut workspace,\n                modes.ffn,\n            );\n        }\n\n        let mut feedback = self.runtime.greedy_feedback(max_new);\n        self.select_greedy_resident(\n            &mut workspace,\n            lm_workspace.as_mut(),\n            &mut feedback,\n            0,\n            modes.lm_head,\n        );\n\n        for generated_index in 1..max_new\n        {\n            let pos = tokens.len() + generated_index - 1;\n            self.forward_feedback_token_hidden_resident(\n                &feedback,\n                pos,\n                &mut caches,\n                &mut workspace,\n                modes.ffn,\n            );\n            self.select_greedy_resident(\n                &mut workspace,\n                lm_workspace.as_mut(),\n                &mut feedback,\n                generated_index,\n                modes.lm_head,\n            );\n        }\n\n        for token in self.runtime.download_feedback(&feedback)\n        {\n            tokens.push(token);\n            if token == 0\n            {\n                break;\n            }\n        }\n        tokens\n    }\n\n    fn select_greedy_resident(\n        &self,\n        workspace: &mut DecodeWorkspace,\n        lm_workspace: Option<&mut CudaBf16LmHeadArgmaxWorkspace>,\n        feedback: &mut CudaDecodeGreedyFeedback,\n        generated_index: usize,\n        lm_head_mode: CudaDecodeLmHeadMode,\n    ) {\n        match lm_head_mode\n        {\n            CudaDecodeLmHeadMode::FullLogits =>\n            {\n                self.project_logits_resident(workspace);\n                self.runtime\n                    .greedy_argmax_into(&workspace.logits, feedback, generated_index);\n            },\n            CudaDecodeLmHeadMode::FusedArgmax =>\n            {\n                self.runtime.greedy_lm_head_argmax_into(\n                    &workspace.norm,\n                    &self.embedding,\n                    lm_workspace.expect("fused LM-head workspace must exist"),\n                    feedback,\n                    generated_index,\n                );\n            },\n        }\n    }\n'''
+          text = text[:device_start] + device_methods + text[device_end:]
+          model.write_text(text)
+
+          bench = Path("scirust-sciagent/examples/cuda_decode_bench.rs")
+          bench.write_text(r'''//! I250 batch-one CUDA decode benchmark.\n//!\n//! One resident `CudaDecodeModel` is exercised under multiple implementation modes\n//! so A/B numbers are not polluted by different CUDA contexts or weight uploads.\n\nuse std::time::Instant;\n\nuse scirust_sciagent::config::SciAgentConfig;\nuse scirust_sciagent::cuda_decode::{\n    CudaDecodeFfnMode, CudaDecodeLmHeadMode, CudaDecodeModel, CudaDecodeModes,\n};\nuse scirust_sciagent::cuda_model::CudaModel;\nuse scirust_sciagent::generate::SamplingParams;\nuse scirust_sciagent::model::SciAgentModel;\n\nconst BF16_BYTES_PER_PARAMETER: f64 = 2.0;\n\nfn env_usize(key: &str, default: usize) -> usize {\n    std::env::var(key)\n        .ok()\n        .and_then(|value| value.parse().ok())\n        .unwrap_or(default)\n}\n\nfn env_f64(key: &str, default: f64) -> f64 {\n    std::env::var(key)\n        .ok()\n        .and_then(|value| value.parse().ok())\n        .unwrap_or(default)\n}\n\nfn env_optional_f64(key: &str) -> Option<f64> {\n    std::env::var(key)\n        .ok()\n        .and_then(|value| value.parse::<f64>().ok())\n        .filter(|value| value.is_finite() && *value > 0.0)\n}\n\nfn env_bool(key: &str) -> bool {\n    std::env::var(key)\n        .ok()\n        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))\n}\n\nfn synthetic_tokens(len: usize, vocab: usize) -> Vec<u32> {\n    (0..len)\n        .map(|index| {\n            let mixed = (index as u64)\n                .wrapping_mul(6_364_136_223_846_793_005)\n                .wrapping_add(1_442_695_040_888_963_407);\n            (mixed % vocab as u64) as u32\n        })\n        .collect()\n}\n\nfn print_roofline(params: usize, memory_gbps: f64, target_tps: f64, stretch_tps: f64) {\n    let weight_bytes = params as f64 * BF16_BYTES_PER_PARAMETER;\n    let bytes_per_gb = 1_000_000_000.0;\n    let roof_tps = memory_gbps * bytes_per_gb / weight_bytes;\n    let target_gbps = target_tps * weight_bytes / bytes_per_gb;\n    let stretch_gbps = stretch_tps * weight_bytes / bytes_per_gb;\n    println!(\n        "SCIAGENT_I250_ROOFLINE provenance=explicit_env params={params} precision=bf16 weight_bytes={:.0} memory_gbps={memory_gbps:.3} bf16_weight_stream_roof_tok_s={roof_tps:.3} target_tok_s={target_tps:.3} target_min_weight_gbps={target_gbps:.3} target_bandwidth_fraction={:.4} stretch_tok_s={stretch_tps:.3} stretch_min_weight_gbps={stretch_gbps:.3} stretch_bandwidth_fraction={:.4}",\n        weight_bytes,\n        target_gbps / memory_gbps,\n        stretch_gbps / memory_gbps,\n    );\n}\n\nfn throughput(new_tokens: usize, seconds: f64) -> f64 {\n    new_tokens as f64 / seconds.max(1e-9)\n}\n\nfn timed_generate(\n    model: &CudaDecodeModel,\n    prompt: &[u32],\n    max_new: usize,\n    modes: CudaDecodeModes,\n) -> (Vec<u32>, f64, f64) {\n    let started = Instant::now();\n    let tokens = model.generate_greedy_device_feedback_with_modes(prompt, max_new, modes);\n    let seconds = started.elapsed().as_secs_f64();\n    let new_tokens = tokens.len().saturating_sub(prompt.len());\n    (tokens, seconds, throughput(new_tokens, seconds))\n}\n\nfn main() {\n    let config = SciAgentConfig::sciagent_350m();\n    let prompt_len = env_usize("SCIAGENT_DECODE_PROMPT", 128).max(1);\n    let max_new = env_usize("SCIAGENT_DECODE_NEW", 64).max(1);\n    let target_tps = env_f64("SCIAGENT_DECODE_TARGET_TPS", 250.0);\n    let stretch_tps = env_f64("SCIAGENT_DECODE_STRETCH_TPS", 750.0);\n    let memory_gbps = env_optional_f64("SCIAGENT_DECODE_MEMORY_GBPS");\n    let require_target = env_bool("SCIAGENT_DECODE_REQUIRE_TARGET");\n    assert!(prompt_len + max_new <= config.max_seq_len);\n\n    if let Some(memory_gbps) = memory_gbps {\n        print_roofline(\n            config.total_parameters(),\n            memory_gbps,\n            target_tps,\n            stretch_tps,\n        );\n    } else {\n        println!(\n            "SCIAGENT_I250_ROOFLINE provenance=unknown status=omitted hint=SCIAGENT_DECODE_MEMORY_GBPS"\n        );\n    }\n\n    let model = SciAgentModel::new(&config);\n    let Some(oracle) = CudaModel::from_model(&model) else {\n        eprintln!("no CUDA Route-B runtime available");\n        std::process::exit(2);\n    };\n    let Some(fast) = CudaDecodeModel::from_model(&model) else {\n        eprintln!("no I250 CUDA decode runtime available");\n        std::process::exit(2);\n    };\n\n    let prompt = synthetic_tokens(prompt_len, config.vocab_size);\n    let greedy = SamplingParams {\n        temperature: 0.0,\n        top_p: 1.0,\n        top_k: 1,\n        repetition_penalty: 1.0,\n        repetition_window: 64,\n    };\n    let seed = 0x4932_3530_5448_4F52u64;\n\n    let fastest = CudaDecodeModes::default();\n    let ffn_baseline = CudaDecodeModes {\n        ffn: CudaDecodeFfnMode::CublasLt,\n        lm_head: CudaDecodeLmHeadMode::FusedArgmax,\n    };\n    let lm_baseline = CudaDecodeModes {\n        ffn: CudaDecodeFfnMode::FusedGemv,\n        lm_head: CudaDecodeLmHeadMode::FullLogits,\n    };\n    let dense_i250 = CudaDecodeModes {\n        ffn: CudaDecodeFfnMode::CublasLt,\n        lm_head: CudaDecodeLmHeadMode::FullLogits,\n    };\n\n    // Warm all implementation modes outside measurement windows.\n    let _ = fast.generate_greedy_device_feedback_with_modes(&prompt, 1, fastest);\n    let _ = fast.generate_greedy_device_feedback_with_modes(&prompt, 1, ffn_baseline);\n    let _ = fast.generate_greedy_device_feedback_with_modes(&prompt, 1, lm_baseline);\n    let _ = fast.generate_greedy_device_feedback_with_modes(&prompt, 1, dense_i250);\n    let _ = oracle.generate_cached(&prompt, 1, &greedy, seed);\n\n    let (fast_tokens, fast_seconds, fast_tps) =\n        timed_generate(&fast, &prompt, max_new, fastest);\n    let (ffn_tokens, ffn_seconds, ffn_tps) =\n        timed_generate(&fast, &prompt, max_new, ffn_baseline);\n    let (lm_tokens, lm_seconds, lm_tps) =\n        timed_generate(&fast, &prompt, max_new, lm_baseline);\n    let (dense_tokens, dense_seconds, dense_tps) =\n        timed_generate(&fast, &prompt, max_new, dense_i250);\n\n    let oracle_started = Instant::now();\n    let oracle_tokens = oracle.generate_cached(&prompt, max_new, &greedy, seed);\n    let oracle_seconds = oracle_started.elapsed().as_secs_f64();\n    let oracle_new = oracle_tokens.len().saturating_sub(prompt.len());\n    let oracle_tps = throughput(oracle_new, oracle_seconds);\n\n    let parity = fast_tokens == oracle_tokens;\n    let ffn_parity = ffn_tokens == oracle_tokens;\n    let lm_parity = lm_tokens == oracle_tokens;\n    let dense_parity = dense_tokens == oracle_tokens;\n    let ffn_gain = fast_tps / ffn_tps.max(1e-9);\n    let lm_gain = fast_tps / lm_tps.max(1e-9);\n    let stack_gain = fast_tps / dense_tps.max(1e-9);\n    let speedup = fast_tps / oracle_tps.max(1e-9);\n    let target_met = fast_tps >= target_tps;\n    let stretch_met = fast_tps >= stretch_tps;\n\n    println!(\n        "SCIAGENT_I250_DECODE params={} prompt={} requested_new={} fast_mode=ffn_fused_gemv+lm_fused_argmax fast_seconds={:.6} fast_tok_s={:.3} ffn_baseline=cublaslt+lm_fused_argmax ffn_seconds={:.6} ffn_tok_s={:.3} ffn_gain={:.3} lm_baseline=ffn_fused_gemv+full_logits lm_seconds={:.6} lm_tok_s={:.3} lm_gain={:.3} dense_i250=cublaslt+full_logits dense_seconds={:.6} dense_tok_s={:.3} stack_gain={:.3} b49_seconds={:.6} b49_tok_s={:.3} speedup={:.3} generated_h2d_bytes_per_token=0 generated_d2h_bytes_per_token=0 final_readback_bytes={} target_tok_s={:.3} target_met={} stretch_tok_s={:.3} stretch_met={} parity={} ffn_parity={} lm_parity={} dense_parity={}",\n        config.total_parameters(),\n        prompt_len,\n        max_new,\n        fast_seconds,\n        fast_tps,\n        ffn_seconds,\n        ffn_tps,\n        ffn_gain,\n        lm_seconds,\n        lm_tps,\n        lm_gain,\n        dense_seconds,\n        dense_tps,\n        stack_gain,\n        oracle_seconds,\n        oracle_tps,\n        speedup,\n        max_new * core::mem::size_of::<u32>(),\n        target_tps,\n        target_met,\n        stretch_tps,\n        stretch_met,\n        parity,\n        ffn_parity,\n        lm_parity,\n        dense_parity,\n    );\n\n    if !parity || !ffn_parity || !lm_parity || !dense_parity {\n        eprintln!("ERROR: an I250 A/B mode diverged from the B49 cached oracle");\n        std::process::exit(3);\n    }\n    if require_target && !target_met {\n        eprintln!(\n            "ERROR: fastest I250 CUDA decode {:.3} tok/s is below required {:.3} tok/s",\n            fast_tps, target_tps\n        );\n        std::process::exit(4);\n    }\n}\n'''.replace('\\n', '\n'))
+          PY
+
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("scirust-sciagent/tests/cuda_decode_parity.rs")
+          text = path.read_text()
+          text = text.replace(
+              "use scirust_sciagent::cuda_decode::CudaDecodeModel;",
+              "use scirust_sciagent::cuda_decode::{\n    CudaDecodeFfnMode, CudaDecodeLmHeadMode, CudaDecodeModel, CudaDecodeModes,\n};",
+              1,
+          )
+          marker = '''        let device = fast.generate_greedy_device_feedback(&prompt, max_new);\n        assert_eq!(host, expected, "host-sampler I250 diverged for {prompt:?}");\n        assert_eq!(\n            device, expected,\n            "device-feedback I250 diverged for {prompt:?}"\n        );\n'''
+          replacement = '''        let device = fast.generate_greedy_device_feedback(&prompt, max_new);\n        let ffn_baseline = fast.generate_greedy_device_feedback_with_modes(\n            &prompt,\n            max_new,\n            CudaDecodeModes {\n                ffn: CudaDecodeFfnMode::CublasLt,\n                lm_head: CudaDecodeLmHeadMode::FusedArgmax,\n            },\n        );\n        let lm_baseline = fast.generate_greedy_device_feedback_with_modes(\n            &prompt,\n            max_new,\n            CudaDecodeModes {\n                ffn: CudaDecodeFfnMode::FusedGemv,\n                lm_head: CudaDecodeLmHeadMode::FullLogits,\n            },\n        );\n        assert_eq!(host, expected, "host-sampler I250 diverged for {prompt:?}");\n        assert_eq!(device, expected, "device-feedback I250 diverged for {prompt:?}");\n        assert_eq!(ffn_baseline, expected, "cuBLASLt FFN baseline diverged for {prompt:?}");\n        assert_eq!(lm_baseline, expected, "full-logits LM baseline diverged for {prompt:?}");\n'''
+          if marker not in text:
+              raise SystemExit("parity insertion marker not found")
+          text = text.replace(marker, replacement, 1)
+          path.write_text(text)
+          PY
+
+          cargo +nightly-2026-07-02 fmt --all
+      - name: CUDA SCIAGENT compile
+        run: cargo +nightly-2026-07-02 check -p scirust-sciagent --features cuda --all-targets --locked
+      - name: Strict Clippy
+        run: cargo +nightly-2026-07-02 clippy -p scirust-sciagent --features cuda --all-targets --locked -- -D warnings
+      - name: Commit validated single-model A/B sources only
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            scirust-cuda/src/decode.rs \
+            scirust-sciagent/src/cuda_decode.rs \
+            scirust-sciagent/examples/cuda_decode_bench.rs \
+            scirust-sciagent/tests/cuda_decode_parity.rs
+          if ! git diff --cached --quiet; then
+            git commit -m "perf(sciagent): fuse greedy LM head and add single-model A/B modes"
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          fi
