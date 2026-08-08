@@ -8,9 +8,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    CacheDescriptor, CacheKind, InterconnectClass, MemoryDomainDescriptor, MemorySpace,
-    SupportLevel, SystemTopology, TopologyLink, TopologyNode, TopologyNodeId, TopologyNodeKind,
-    TopologyRelation,
+    CacheDescriptor, CacheKind, MemoryDomainDescriptor, MemorySpace, SupportLevel, SystemTopology,
+    TopologyLink, TopologyNode, TopologyNodeId, TopologyNodeKind, TopologyRelation,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -180,7 +179,6 @@ fn build_topology(
     }
 
     let mut numa_node_ids = BTreeMap::new();
-    let mut memory_node_ids = BTreeMap::new();
     for numa in numa_nodes {
         let node_id = allocate_id(&mut next_id);
         let mut node = TopologyNode::new(node_id, TopologyNodeKind::NumaNode);
@@ -203,10 +201,9 @@ fn build_topology(
             to: memory_id,
             relation: TopologyRelation::AffineTo,
             bidirectional: true,
-            interconnect: Some(InterconnectClass::HostMemoryBus),
+            interconnect: None,
             metrics: None,
         });
-        memory_node_ids.insert(numa.id, memory_id);
     }
 
     let mut cpu_nodes = BTreeMap::new();
@@ -235,7 +232,7 @@ fn build_topology(
                     to: cpu_id,
                     relation: TopologyRelation::AffineTo,
                     bidirectional: true,
-                    interconnect: Some(InterconnectClass::OnChip),
+                    interconnect: None,
                     metrics: None,
                 });
             }
@@ -264,14 +261,13 @@ fn build_topology(
                     to: cpu_id,
                     relation: TopologyRelation::AffineTo,
                     bidirectional: true,
-                    interconnect: Some(InterconnectClass::OnChip),
+                    interconnect: None,
                     metrics: None,
                 });
             }
         }
     }
 
-    let _ = memory_node_ids;
     topology
 }
 
@@ -389,7 +385,6 @@ fn cache_kind_rank(kind: CacheKind) -> u8 {
         CacheKind::Instruction => 1,
         CacheKind::Unified => 2,
         CacheKind::Other => 3,
-        _ => 4,
     }
 }
 
@@ -440,7 +435,6 @@ fn cache_name(cache: &CacheRecord) -> String {
         CacheKind::Instruction => "instruction",
         CacheKind::Unified => "unified",
         CacheKind::Other => "other",
-        _ => "future",
     };
     let cpus = cache
         .key
@@ -480,7 +474,10 @@ mod tests {
     #[test]
     fn cpu_list_parser_is_sorted_deduplicated_and_rejects_invalid_ranges() {
         assert_eq!(parse_cpu_list("0"), Some(vec![0]));
-        assert_eq!(parse_cpu_list("0-3,8,10-11"), Some(vec![0, 1, 2, 3, 8, 10, 11]));
+        assert_eq!(
+            parse_cpu_list("0-3,8,10-11"),
+            Some(vec![0, 1, 2, 3, 8, 10, 11])
+        );
         assert_eq!(parse_cpu_list("2,0-2"), Some(vec![0, 1, 2]));
         assert_eq!(parse_cpu_list("3-1"), None);
         assert_eq!(parse_cpu_list("0-1-2"), None);
@@ -505,14 +502,22 @@ mod tests {
         write(&root, "cpu/cpu0/topology/physical_package_id", "0\n");
         write(&root, "cpu/cpu1/topology/physical_package_id", "0\n");
         write(&root, "node/node0/cpulist", "0-1\n");
-        write(&root, "node/node0/meminfo", "Node 0 MemTotal: 65536 kB\n");
+        write(
+            &root,
+            "node/node0/meminfo",
+            "Node 0 MemTotal: 65536 kB\n",
+        );
 
         for cpu in 0..=1 {
             let prefix = format!("cpu/cpu{cpu}/cache/index0");
             write(&root, &format!("{prefix}/level"), "1\n");
             write(&root, &format!("{prefix}/type"), "Data\n");
             write(&root, &format!("{prefix}/size"), "32K\n");
-            write(&root, &format!("{prefix}/coherency_line_size"), "64\n");
+            write(
+                &root,
+                &format!("{prefix}/coherency_line_size"),
+                "64\n",
+            );
             write(&root, &format!("{prefix}/shared_cpu_list"), "0-1\n");
         }
 
@@ -521,27 +526,51 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(first.validate(), Ok(()));
         assert_eq!(
-            first.nodes.iter().filter(|node| node.kind == TopologyNodeKind::Machine).count(),
+            first
+                .nodes
+                .iter()
+                .filter(|node| node.kind == TopologyNodeKind::Machine)
+                .count(),
             1
         );
         assert_eq!(
-            first.nodes.iter().filter(|node| node.kind == TopologyNodeKind::CpuPackage).count(),
+            first
+                .nodes
+                .iter()
+                .filter(|node| node.kind == TopologyNodeKind::CpuPackage)
+                .count(),
             1
         );
         assert_eq!(
-            first.nodes.iter().filter(|node| node.kind == TopologyNodeKind::NumaNode).count(),
+            first
+                .nodes
+                .iter()
+                .filter(|node| node.kind == TopologyNodeKind::NumaNode)
+                .count(),
             1
         );
         assert_eq!(
-            first.nodes.iter().filter(|node| node.kind == TopologyNodeKind::ProcessingUnit).count(),
+            first
+                .nodes
+                .iter()
+                .filter(|node| node.kind == TopologyNodeKind::ProcessingUnit)
+                .count(),
             2
         );
         assert_eq!(
-            first.nodes.iter().filter(|node| node.kind == TopologyNodeKind::Cache).count(),
+            first
+                .nodes
+                .iter()
+                .filter(|node| node.kind == TopologyNodeKind::Cache)
+                .count(),
             1
         );
         assert_eq!(
-            first.nodes.iter().filter(|node| node.kind == TopologyNodeKind::MemoryDomain).count(),
+            first
+                .nodes
+                .iter()
+                .filter(|node| node.kind == TopologyNodeKind::MemoryDomain)
+                .count(),
             1
         );
 
@@ -565,15 +594,27 @@ mod tests {
         let topology = probe_linux_topology(&root);
         assert_eq!(topology.validate(), Ok(()));
         assert_eq!(
-            topology.nodes.iter().filter(|node| node.kind == TopologyNodeKind::CpuPackage).count(),
+            topology
+                .nodes
+                .iter()
+                .filter(|node| node.kind == TopologyNodeKind::CpuPackage)
+                .count(),
             0
         );
         assert_eq!(
-            topology.nodes.iter().filter(|node| node.kind == TopologyNodeKind::ProcessingUnit).count(),
+            topology
+                .nodes
+                .iter()
+                .filter(|node| node.kind == TopologyNodeKind::ProcessingUnit)
+                .count(),
             1
         );
         assert_eq!(
-            topology.nodes.iter().filter(|node| node.kind == TopologyNodeKind::MemoryDomain).count(),
+            topology
+                .nodes
+                .iter()
+                .filter(|node| node.kind == TopologyNodeKind::MemoryDomain)
+                .count(),
             0
         );
 
