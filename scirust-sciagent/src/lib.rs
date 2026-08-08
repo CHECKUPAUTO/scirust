@@ -39,9 +39,7 @@ pub use attention::GQAAttention;
 pub use block::SciAgentBlock;
 pub use bpe::{BpeTokenizer, BpeTrainer};
 pub use bpe_dispatch::{BpeDispatchError, VersionedBpeTokenizer};
-pub use canonical_bpe_train::{
-    CanonicalBpeArtifact, CanonicalBpeTrainError, CanonicalBpeTrainer,
-};
+pub use canonical_bpe_train::{CanonicalBpeArtifact, CanonicalBpeTrainError, CanonicalBpeTrainer};
 pub use ccos::CcosLog;
 pub use communication::SciAgentEndpoint;
 pub use config::SciAgentConfig;
