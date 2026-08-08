@@ -52,7 +52,9 @@ jobs:
       - name: Report Thor CUDA
         run: |
           if command -v nvidia-smi >/dev/null 2>&1; then
-            nvidia-smi --query-gpu=name,driver_version,compute_cap,memory.total --format=csv,noheader
+            if ! nvidia-smi --query-gpu=name,driver_version,compute_cap,memory.total --format=csv,noheader; then
+              echo "nvidia-smi reporting failed on this Jetson runner; the functional CUDA preflight below determines availability."
+            fi
           else
             echo "nvidia-smi is unavailable on this Jetson runner; the functional CUDA preflight below determines availability."
           fi
