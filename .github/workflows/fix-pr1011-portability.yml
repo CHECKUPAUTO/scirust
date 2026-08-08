@@ -1,0 +1,38 @@
+name: Fix PR1011 portability
+on:
+  push:
+    branches: [compute/linux-host-topology-probe]
+permissions:
+  contents: write
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: compute/linux-host-topology-probe
+      - name: Gate Linux-only implementation warnings on non-Linux
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scirust-compute/src/topology_probe.rs')
+          s = p.read_text()
+          marker = '//! available in `no_std` builds.\n'
+          insert = marker + '\n#![cfg_attr(not(target_os = "linux"), allow(dead_code))]\n'
+          if insert not in s:
+              s = s.replace(marker, insert, 1)
+          p.write_text(s)
+          PY
+          cargo fmt --all
+          git diff --check
+      - name: Commit fix and remove helper
+        shell: bash
+        run: |
+          rm .github/workflows/fix-pr1011-portability.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scirust-compute/src/topology_probe.rs .github/workflows/fix-pr1011-portability.yml
+          git commit -m 'fix(compute): gate Linux topology implementation warnings'
+          git push origin HEAD:compute/linux-host-topology-probe
