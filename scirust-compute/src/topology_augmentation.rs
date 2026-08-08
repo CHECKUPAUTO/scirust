@@ -141,10 +141,7 @@ fn append_accelerator_unchecked(
 
     let memory_id = if descriptor.memory.is_some()
     {
-        Some(
-            first_free_node_id(&used_ids)
-                .ok_or(TopologyAugmentationError::NodeIdExhausted)?,
-        )
+        Some(first_free_node_id(&used_ids).ok_or(TopologyAugmentationError::NodeIdExhausted)?)
     }
     else
     {
@@ -279,8 +276,7 @@ mod tests {
     #[test]
     fn accelerator_without_memory_adds_no_synthetic_memory_or_link() {
         let mut topology = SystemTopology::default();
-        let descriptor =
-            AcceleratorTopologyDescriptor::new(DeviceId::new(DeviceKind::Wgpu, 0));
+        let descriptor = AcceleratorTopologyDescriptor::new(DeviceId::new(DeviceKind::Wgpu, 0));
 
         let added = augment_accelerator_topology(&mut topology, descriptor).unwrap();
 
@@ -302,10 +298,7 @@ mod tests {
         let before = topology.clone();
 
         assert_eq!(
-            augment_accelerator_topology(
-                &mut topology,
-                AcceleratorTopologyDescriptor::new(device)
-            ),
+            augment_accelerator_topology(&mut topology, AcceleratorTopologyDescriptor::new(device)),
             Err(TopologyAugmentationError::DuplicateDevice(device))
         );
         assert_eq!(topology, before);
@@ -366,6 +359,9 @@ mod tests {
             Some(TopologyNodeId::new(2))
         );
         assert_eq!(first_free_node_id(&[1, 2]), Some(TopologyNodeId::new(0)));
-        assert_eq!(first_free_node_id(&[u32::MAX]), Some(TopologyNodeId::new(0)));
+        assert_eq!(
+            first_free_node_id(&[u32::MAX]),
+            Some(TopologyNodeId::new(0))
+        );
     }
 }
