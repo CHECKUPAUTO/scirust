@@ -1,0 +1,140 @@
+name: PR1056 one-shot rustfmt
+
+on:
+  push:
+    branches:
+      - feat/elastic-tokenizer-versioned-bpe
+
+permissions:
+  contents: write
+
+jobs:
+  format-once:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: feat/elastic-tokenizer-versioned-bpe
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt
+      - name: Apply merge-id safety fix, pinned rustfmt, and remove helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('scirust-sciagent/src/elastic_text_tokenizer.rs')
+          text = path.read_text()
+
+          old = '''        validate_special_tokens(&vocab)?;
+                  validate_byte_vocab(&vocab, reversible)?;
+                  let engine = ElasticBpeEngine::from_ordered_merges(&merges, profile)?;'''.replace('                  ', '        ')
+          new = '''        validate_special_tokens(&vocab)?;
+          validate_byte_vocab(&vocab, reversible)?;
+          validate_merge_ids(&merges, rev.len())?;
+          let engine = ElasticBpeEngine::from_ordered_merges(&merges, profile)?;'''.replace('          ', '        ')
+          if old not in text:
+              raise SystemExit('expected constructor validation block not found')
+          text = text.replace(old, new, 1)
+
+          marker = '''fn byte_to_unit(byte: u8) -> char {'''
+          helper = '''fn validate_merge_ids(
+              merges: &[(TokenId, TokenId, TokenId)],
+              vocab_size: usize,
+          ) -> Result<(), ElasticTextTokenizerError> {
+              for (rule_index, &(left, right, output)) in merges.iter().enumerate()
+              {
+                  for token_id in [left, right, output]
+                  {
+                      if token_id >= vocab_size
+                      {
+                          return Err(ElasticTextTokenizerError::MergeTokenOutOfVocab {
+                              rule_index,
+                              token_id,
+                              vocab_size,
+                          });
+                      }
+                  }
+              }
+              Ok(())
+          }
+
+          ''' + marker
+          if marker not in text:
+              raise SystemExit('byte_to_unit marker not found')
+          text = text.replace(marker, helper, 1)
+
+          old = '''    InvalidMergeRule(usize),
+              EmptyVocab,'''
+          new = '''    InvalidMergeRule(usize),
+              MergeTokenOutOfVocab {
+                  rule_index: usize,
+                  token_id: TokenId,
+                  vocab_size: usize,
+              },
+              EmptyVocab,'''
+          old = old.replace('              ', '    ')
+          new = new.replace('              ', '    ')
+          if old not in text:
+              raise SystemExit('error enum marker not found')
+          text = text.replace(old, new, 1)
+
+          old = '''            Self::InvalidMergeRule(index) => {
+                  write!(f, "invalid elastic tokenizer merge rule at index {index}")
+              },
+              Self::EmptyVocab => f.write_str("elastic tokenizer vocabulary is empty"),'''.replace('              ', '            ')
+          new = '''            Self::InvalidMergeRule(index) => {
+                  write!(f, "invalid elastic tokenizer merge rule at index {index}")
+              },
+              Self::MergeTokenOutOfVocab {
+                  rule_index,
+                  token_id,
+                  vocab_size,
+              } => write!(
+                  f,
+                  "elastic tokenizer merge rule {rule_index} references token id {token_id} outside vocabulary size {vocab_size}"
+              ),
+              Self::EmptyVocab => f.write_str("elastic tokenizer vocabulary is empty"),'''.replace('              ', '            ')
+          if old not in text:
+              raise SystemExit('display marker not found')
+          text = text.replace(old, new, 1)
+
+          end = '''    #[test]
+              fn execution_kernel_changes_without_changing_text_token_ids() {'''.replace('              ', '    ')
+          if end not in text:
+              raise SystemExit('test insertion marker not found')
+          test = '''    #[test]
+          fn merge_ids_must_exist_in_vocab() {
+              let mut value: serde_json::Value = serde_json::from_str(&canonical_test_json()).unwrap();
+              value["merges"] = serde_json::json!(["102 103 999999"]);
+              let input = serde_json::to_string(&value).unwrap();
+              assert!(matches!(
+                  ElasticTextTokenizer::from_json_str(&input, profile(BpeKernel::Reference)),
+                  Err(ElasticTextTokenizerError::MergeTokenOutOfVocab {
+                      rule_index: 0,
+                      token_id: 999999,
+                      ..
+                  })
+              ));
+          }
+
+          '''.replace('          ', '    ') + end
+          text = text.replace(end, test, 1)
+
+          path.write_text(text)
+          PY
+          cargo +nightly-2026-07-02 fmt --all
+          rm .github/workflows/pr1056-format-once.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "fix(sciagent): validate canonical merge ids and format"
+          git push origin HEAD:feat/elastic-tokenizer-versioned-bpe
