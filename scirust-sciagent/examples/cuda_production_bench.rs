@@ -151,6 +151,7 @@ fn bench_decode(config: &SciAgentConfig, prompt_len: usize, max_new: usize) {
         top_p: 1.0,
         top_k: 1,
         repetition_penalty: 1.0,
+        repetition_window: 64,
     };
 
     // Small untimed calls ensure kernels/BLAS paths are hot before either timing.
