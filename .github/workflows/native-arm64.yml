@@ -86,7 +86,7 @@ jobs:
           fetch-depth: 0
 
       # BEGIN SCIAGENT B43 ONE-SHOT AUTOFIX
-      - name: Apply validated SCIAGENT B40-B43 corrections once
+      - name: Apply validated SCIAGENT B40-B43 corrections once (retry 2)
         if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'perf/sciagent-b39-thor-production-bench'
         run: |
           python3 scripts/sciagent_b43_autofix.py
