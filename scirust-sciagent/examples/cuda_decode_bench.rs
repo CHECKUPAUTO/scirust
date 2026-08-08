@@ -1,9 +1,15 @@
 //! I250 batch-one CUDA decode benchmark.
 //!
 //! This intentionally excludes the training sweep from `cuda_production_bench` so a
-//! future Thor validation window can measure inference alone.  The benchmark keeps
+//! future Thor validation window can measure inference alone. The benchmark keeps
 //! B49's cached decoder as the token-parity oracle and reports the fused path against
 //! the user-facing 250 tok/s target.
+//!
+//! The benchmark also prints a simple weight-stream roofline. Batch-one autoregressive
+//! decode is normally dominated by reading the model weights for every generated token;
+//! the roofline therefore reports how much of the configured DRAM bandwidth a target
+//! would consume if every weight byte were read exactly once and all other traffic were
+//! free. It is an optimistic bound, not a throughput prediction.
 
 use std::time::Instant;
 
@@ -12,6 +18,9 @@ use scirust_sciagent::cuda_decode::CudaDecodeModel;
 use scirust_sciagent::cuda_model::CudaModel;
 use scirust_sciagent::generate::SamplingParams;
 use scirust_sciagent::model::SciAgentModel;
+
+const THOR_T5000_PEAK_MEMORY_GBPS: f64 = 273.0;
+const BF16_BYTES_PER_PARAMETER: f64 = 2.0;
 
 fn env_usize(key: &str, default: usize) -> usize {
     std::env::var(key)
@@ -44,15 +53,43 @@ fn synthetic_tokens(len: usize, vocab: usize) -> Vec<u32> {
         .collect()
 }
 
+fn print_roofline(params: usize, memory_gbps: f64, target_tps: f64, stretch_tps: f64) {
+    let weight_bytes = params as f64 * BF16_BYTES_PER_PARAMETER;
+    let bytes_per_gb = 1_000_000_000.0;
+    let bf16_roof_tps = memory_gbps * bytes_per_gb / weight_bytes;
+    let target_gbps = target_tps * weight_bytes / bytes_per_gb;
+    let stretch_gbps = stretch_tps * weight_bytes / bytes_per_gb;
+
+    println!(
+        "SCIAGENT_I250_ROOFLINE params={params} precision=bf16 weight_bytes={:.0} memory_peak_gbps={memory_gbps:.3} bf16_weight_stream_roof_tok_s={bf16_roof_tps:.3} target_tok_s={target_tps:.3} target_min_weight_gbps={target_gbps:.3} target_peak_fraction={:.4} stretch_tok_s={stretch_tps:.3} stretch_min_weight_gbps={stretch_gbps:.3} stretch_peak_fraction={:.4}",
+        weight_bytes,
+        target_gbps / memory_gbps,
+        stretch_gbps / memory_gbps,
+    );
+}
+
 fn main() {
     let config = SciAgentConfig::sciagent_350m();
     let prompt_len = env_usize("SCIAGENT_DECODE_PROMPT", 128).max(1);
     let max_new = env_usize("SCIAGENT_DECODE_NEW", 64).max(1);
     let target_tps = env_f64("SCIAGENT_DECODE_TARGET_TPS", 250.0);
+    let stretch_tps = env_f64("SCIAGENT_DECODE_STRETCH_TPS", 750.0);
+    let memory_gbps = env_f64(
+        "SCIAGENT_DECODE_MEMORY_GBPS",
+        THOR_T5000_PEAK_MEMORY_GBPS,
+    );
     let require_target = env_bool("SCIAGENT_DECODE_REQUIRE_TARGET");
+    assert!(memory_gbps > 0.0, "decode memory bandwidth must be positive");
     assert!(
         prompt_len + max_new <= config.max_seq_len,
         "benchmark request exceeds max_seq_len"
+    );
+
+    print_roofline(
+        config.total_parameters(),
+        memory_gbps,
+        target_tps,
+        stretch_tps,
     );
 
     let model = SciAgentModel::new(&config);
@@ -98,9 +135,10 @@ fn main() {
         f64::NAN
     };
     let target_met = fast_tps >= target_tps;
+    let stretch_met = fast_tps >= stretch_tps;
 
     println!(
-        "SCIAGENT_I250_DECODE params={} prompt={} requested_new={} fast_new={} fast_seconds={:.6} fast_tok_s={:.3} b49_new={} b49_seconds={:.6} b49_tok_s={:.3} speedup={:.3} target_tok_s={:.3} target_met={} parity={}",
+        "SCIAGENT_I250_DECODE params={} prompt={} requested_new={} fast_new={} fast_seconds={:.6} fast_tok_s={:.3} b49_new={} b49_seconds={:.6} b49_tok_s={:.3} speedup={:.3} target_tok_s={:.3} target_met={} stretch_tok_s={:.3} stretch_met={} parity={}",
         config.total_parameters(),
         prompt_len,
         max_new,
@@ -113,6 +151,8 @@ fn main() {
         speedup,
         target_tps,
         target_met,
+        stretch_tps,
+        stretch_met,
         parity
     );
 
