@@ -40,44 +40,45 @@ fn write_model_semantics_marker(path: &Path) -> std::result::Result<(), String> 
 
 def patch_model(text: str) -> str:
     if "SCIAGENT_MODEL_SEMANTICS_VERSION" in text:
-        raise SystemExit("cuda_model already B42 patched")
+        print("cuda_model already B42 patched")
+        return text
     marker = "/// One GQA block's weights mirrored into VRAM (bf16).\n"
     pos = text.find(marker)
     if pos < 0:
         raise SystemExit("missing semantics helper insertion point")
     text = text[:pos] + SEMANTICS_HELPERS + "\n" + text[pos:]
 
-    # Both exact recovery and model-only best snapshots must carry the marker. The
-    # exact call has indentation inside an impl; the best helper is a free function.
     exact = '''        save_checkpoint(model, meta, &partial)\n            .map_err(|e| format!("cannot save model checkpoint: {e}"))?;\n        self.save_optimizer_state(cfg, &partial)?;\n'''
     exact_new = '''        save_checkpoint(model, meta, &partial)\n            .map_err(|e| format!("cannot save model checkpoint: {e}"))?;\n        write_model_semantics_marker(&partial)?;\n        self.save_optimizer_state(cfg, &partial)?;\n'''
-    text = must_replace(text, exact, exact_new, 1)
+    text = must_replace(text, exact, exact_new)
 
-    best = '''    save_checkpoint(model, meta, &partial)\n        .map_err(|e| format!("cannot save best model: {e}"))?;\n    let selection = serde_json::json!({\n'''
-    best_new = '''    save_checkpoint(model, meta, &partial)\n        .map_err(|e| format!("cannot save best model: {e}"))?;\n    write_model_semantics_marker(&partial)?;\n    let selection = serde_json::json!({\n'''
-    text = must_replace(text, best, best_new, 1)
+    best = '''    save_checkpoint(model, meta, &partial).map_err(|e| format!("cannot save best model: {e}"))?;\n    let selection = serde_json::json!({\n'''
+    best_new = '''    save_checkpoint(model, meta, &partial).map_err(|e| format!("cannot save best model: {e}"))?;\n    write_model_semantics_marker(&partial)?;\n    let selection = serde_json::json!({\n'''
+    text = must_replace(text, best, best_new)
     return text
 
 
 def patch_example(text: str) -> str:
     if "checkpoint model semantics" in text:
-        raise SystemExit("cuda_pretrain already B42 patched")
+        print("cuda_pretrain already B42 patched")
+        return text
     old_import = "use scirust_sciagent::cuda_model::{CudaPretrainConfig, CudaTrainer};\n"
     new_import = "use scirust_sciagent::cuda_model::{\n    CudaPretrainConfig, CudaTrainer, SCIAGENT_MODEL_SEMANTICS_VERSION,\n    read_model_semantics_version,\n};\n"
-    text = must_replace(text, old_import, new_import, 1)
+    text = must_replace(text, old_import, new_import)
 
     old = '''    if let Some((path, meta)) = &resume\n    {\n        match load_checkpoint(&mut model, path)\n'''
     new = '''    if let Some((path, meta)) = &resume\n    {\n        let checkpoint_semantics = read_model_semantics_version(path).unwrap_or(1);\n        if checkpoint_semantics != SCIAGENT_MODEL_SEMANTICS_VERSION\n        {\n            let message = format!(\n                "checkpoint model semantics v{checkpoint_semantics} != current v{} (B33 head-local RoPE)",\n                SCIAGENT_MODEL_SEMANTICS_VERSION\n            );\n            if !allow_nonexact_resume()\n            {\n                eprintln!(\n                    "{message}; refusing to train historical weights under different model math. \\\n                     Use a fresh SCIAGENT_CKPT directory for the production run. \\\n                     SCIAGENT_ALLOW_NONEXACT_RESUME=1 is research-only."\n                );\n                std::process::exit(1);\n            }\n            eprintln!("WARNING: {message}; non-exact model-semantics override enabled");\n        }\n        match load_checkpoint(&mut model, path)\n'''
-    text = must_replace(text, old, new, 1)
+    text = must_replace(text, old, new)
     return text
 
 
 def patch_eval(text: str) -> str:
     if "historical checkpoint semantics" in text:
-        raise SystemExit("cuda_eval already B42 patched")
+        print("cuda_eval already B42 patched")
+        return text
     old_import = "use scirust_sciagent::cuda_model::CudaModel;\n"
     new_import = "use scirust_sciagent::cuda_model::{\n    CudaModel, SCIAGENT_MODEL_SEMANTICS_VERSION, read_model_semantics_version,\n};\n"
-    text = must_replace(text, old_import, new_import, 1)
+    text = must_replace(text, old_import, new_import)
 
     idx = text.find("read_meta(&ckpt")
     if idx < 0:
