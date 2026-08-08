@@ -29,7 +29,10 @@ fn runtime_wgpu_adapter_augments_topology_without_physical_fabric_claims() {
 
     let descriptor = AcceleratorTopologyProvider::accelerator_topology_descriptor(&adapter);
     assert_eq!(descriptor.device.kind(), DeviceKind::Wgpu);
-    let memory = descriptor.memory.as_ref().expect("logical WGPU memory domain");
+    let memory = descriptor
+        .memory
+        .as_ref()
+        .expect("logical WGPU memory domain");
     assert_eq!(memory.space, MemorySpace::Device);
     assert_eq!(memory.capacity_bytes, None);
     assert_eq!(memory.host_addressable, SupportLevel::Unknown);
@@ -66,7 +69,10 @@ fn runtime_cuda_adapter_augments_topology_from_driver_facts_only() {
     let expected_capacity = u64::try_from(adapter.runtime().device_info().total_memory_bytes).ok();
     let descriptor = AcceleratorTopologyProvider::accelerator_topology_descriptor(&adapter);
     assert_eq!(descriptor.device.kind(), DeviceKind::Cuda);
-    let memory = descriptor.memory.as_ref().expect("logical CUDA memory domain");
+    let memory = descriptor
+        .memory
+        .as_ref()
+        .expect("logical CUDA memory domain");
     assert_eq!(memory.space, MemorySpace::Device);
     assert_eq!(memory.capacity_bytes, expected_capacity);
     assert_eq!(memory.host_addressable, SupportLevel::Unknown);
