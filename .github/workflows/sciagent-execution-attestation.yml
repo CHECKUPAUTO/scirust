@@ -1,0 +1,35 @@
+name: SciAgent execution attestation
+
+on:
+  pull_request:
+    branches: [master, main, develop]
+    paths:
+      - "scirust-sciagent/src/execution_attestation.rs"
+      - "scirust-sciagent/src/lib.rs"
+      - "scirust-sciagent/src/sha256.rs"
+      - "scirust-agent-protocol/**"
+      - "docs/sciagent-runtime-execution-attestation.md"
+      - ".github/workflows/sciagent-execution-attestation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: runtime builder + MSRV
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+      - run: rustup toolchain install 1.89.0 --profile minimal
+      - name: Format
+        run: cargo +nightly-2026-07-02 fmt --all -- --check
+      - name: Clippy builder
+        run: cargo +nightly-2026-07-02 clippy -p scirust-sciagent --lib --locked -- -D warnings
+      - name: Check MSRV
+        run: cargo +1.89.0 check -p scirust-sciagent --lib --locked
+      - name: Test runtime attestation builder
+        run: cargo +1.89.0 test -p scirust-sciagent --lib execution_attestation --locked
