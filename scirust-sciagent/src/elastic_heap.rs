@@ -278,13 +278,7 @@ mod tests {
 
     #[test]
     fn heap_matches_reference_on_pathological_repetitive_piece() {
-        let merges = [
-            (1, 1, 2),
-            (2, 2, 3),
-            (3, 3, 4),
-            (4, 4, 5),
-            (5, 5, 6),
-        ];
+        let merges = [(1, 1, 2), (2, 2, 3), (3, 3, 4), (4, 4, 5), (5, 5, 6)];
         let input = vec![1; 8192];
         assert_parity(&merges, &input);
     }
