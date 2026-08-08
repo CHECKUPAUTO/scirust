@@ -7,7 +7,7 @@ on:
       - "scirust-core/**"
       - ".github/workflows/sciagent-i250-tt-hosted-check.yml"
   pull_request:
-    branches: [ci/i250-hosted-base]
+    branches: [ci/i250-tt-hosted-base]
     paths:
       - "scirust-core/**"
       - ".github/workflows/sciagent-i250-tt-hosted-check.yml"
