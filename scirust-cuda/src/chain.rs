@@ -92,6 +92,21 @@ extern "C" __global__ void slice_cols_kernel(
 }
 
 
+
+// Copy a narrow contiguous matrix into a disjoint column range of a preallocated
+// output. Unlike place_cols, this does not materialize a full zero-padded d_model
+// matrix per head. It is the primitive behind allocation-light head assembly.
+extern "C" __global__ void place_cols_into_kernel(
+    unsigned short* out, const unsigned short* x,
+    const size_t rows, const size_t ncols, const size_t col_start, const size_t dst_cols)
+{
+    const size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < rows * ncols) {
+        const size_t r = idx / ncols, c = idx % ncols;
+        out[r * dst_cols + col_start + c] = x[idx];
+    }
+}
+
 // Row slicing/placement for true B×T training. Projection/MLP/head GEMMs operate
 // on packed B*T rows, while attention slices each sequence back to T rows so the
 // causal mask can never leak information across samples.
@@ -743,6 +758,7 @@ struct Kernels {
     rmsnorm: CudaFunction,
     slice_cols: CudaFunction,
     place_cols: CudaFunction,
+    place_cols_into: CudaFunction,
     slice_rows: CudaFunction,
     place_rows: CudaFunction,
     softmax: CudaFunction,
@@ -824,6 +840,7 @@ impl CudaChain {
             rmsnorm: f("rmsnorm_fast_kernel"),
             slice_cols: f("slice_cols_kernel"),
             place_cols: f("place_cols_kernel"),
+            place_cols_into: f("place_cols_into_kernel"),
             slice_rows: f("slice_rows_kernel"),
             place_rows: f("place_rows_kernel"),
             softmax: f("softmax_fast_kernel"),
@@ -1196,6 +1213,47 @@ impl CudaChain {
             buf: out,
             rows,
             cols: ncols,
+        }
+    }
+
+    /// Concatenate equal-height matrices along columns into one resident matrix.
+    /// Each part writes a disjoint range, avoiding the old place_cols+add chain.
+    pub fn concat_cols(&self, parts: &[&CudaMatrix]) -> CudaMatrix {
+        assert!(!parts.is_empty(), "concat_cols: empty parts");
+        let rows = parts[0].rows;
+        assert!(
+            parts.iter().all(|p| p.rows == rows),
+            "concat_cols: row mismatch"
+        );
+        let cols: usize = parts.iter().map(|p| p.cols).sum();
+        let mut out = self
+            .stream
+            .alloc_zeros::<bf16>(rows * cols)
+            .expect("cuda alloc concat cols");
+        let (rows_a, dst_cols_a) = (rows, cols);
+        let mut col_start = 0usize;
+        for p in parts
+        {
+            let (ncols_a, start_a) = (p.cols, col_start);
+            let mut builder = self.stream.launch_builder(&self.kernels().place_cols_into);
+            builder.arg(&mut out);
+            builder.arg(&p.buf);
+            builder.arg(&rows_a);
+            builder.arg(&ncols_a);
+            builder.arg(&start_a);
+            builder.arg(&dst_cols_a);
+            // SAFETY: all parts have the same row count and disjoint destination cols.
+            unsafe {
+                builder
+                    .launch(LaunchConfig::for_num_elems((rows * p.cols) as u32))
+                    .expect("launch place_cols_into_kernel");
+            }
+            col_start += p.cols;
+        }
+        CudaMatrix {
+            buf: out,
+            rows,
+            cols,
         }
     }
 
