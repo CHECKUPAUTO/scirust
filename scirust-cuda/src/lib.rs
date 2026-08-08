@@ -30,6 +30,8 @@
 #[cfg(feature = "cuda")]
 mod bf16_gemv;
 #[cfg(feature = "cuda")]
+mod bf16_tiled_gemv;
+#[cfg(feature = "cuda")]
 mod chain;
 #[cfg(feature = "cuda")]
 mod decode;
@@ -38,6 +40,8 @@ mod raw_runtime;
 
 #[cfg(feature = "cuda")]
 pub use bf16_gemv::CudaBf16Gemv;
+#[cfg(feature = "cuda")]
+pub use bf16_tiled_gemv::{CudaBf16TiledGemv, CudaBf16TiledGemvWorkspace};
 #[cfg(feature = "cuda")]
 pub use chain::{CudaChain, CudaF32, CudaMatrix};
 #[cfg(feature = "cuda")]
