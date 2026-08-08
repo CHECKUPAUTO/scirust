@@ -66,7 +66,7 @@ struct EncoderState {
 
 struct FeedbackState {
     generated_count: u32,
-    active: u32,
+    running: u32,
     sampler_draws: u32,
     max_tokens: u32,
     tokens: array<u32>,
@@ -79,13 +79,13 @@ struct FeedbackState {
 
 @compute @workgroup_size(1)
 fn main() {
-    if (feedback.active == 0u) {
+    if (feedback.running == 0u) {
         return;
     }
 
     let index = feedback.generated_count;
     if (index >= feedback.max_tokens) {
-        feedback.active = 0u;
+        feedback.running = 0u;
         return;
     }
 
@@ -96,7 +96,7 @@ fn main() {
     mini.token_id = token;
 
     if (token == 0u) {
-        feedback.active = 0u;
+        feedback.running = 0u;
         sampling_state.enabled = 0u;
         encoder.enabled = 0u;
         mini.phase_mode = 2u;
@@ -114,7 +114,8 @@ pub enum WgpuResidentDeviceFeedbackMiniLlmError {
 
 impl fmt::Display for WgpuResidentDeviceFeedbackMiniLlmError {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::Sampled(error) => write!(output, "{error}"),
             Self::InvalidConfig(message) => write!(output, "{message}"),
             Self::CorruptDeviceCount { count, limit } => write!(
@@ -202,21 +203,25 @@ impl WgpuResidentDeviceFeedbackMiniLlm {
         let feedback_bytes = words
             .checked_mul(U32_BYTES)
             .ok_or(Self::invalid("device-feedback byte size overflows usize"))?;
-        let feedback = inner
-            .inner
-            .encoder
-            .adapter
-            .allocate(feedback_bytes, 4, MemorySpace::Device)?;
+        let feedback =
+            inner
+                .inner
+                .encoder
+                .adapter
+                .allocate(feedback_bytes, 4, MemorySpace::Device)?;
         let module = KernelModule::new(
             KernelFormat::Wgsl,
             "main",
             DEVICE_FEEDBACK_WGSL.as_bytes().to_vec(),
         )?;
         let feedback_kernel = inner.inner.encoder.adapter.compile(&module)?;
-        let resident_bytes = inner
-            .resident_bytes
-            .checked_add(feedback_bytes)
-            .ok_or(Self::invalid("device-feedback resident bytes overflow usize"))?;
+        let resident_bytes =
+            inner
+                .resident_bytes
+                .checked_add(feedback_bytes)
+                .ok_or(Self::invalid(
+                    "device-feedback resident bytes overflow usize",
+                ))?;
 
         Ok(Self {
             inner,
@@ -258,14 +263,18 @@ impl WgpuResidentDeviceFeedbackMiniLlm {
         self.inner.reset()?;
         self.last_burst_readback_bytes = 0;
 
-        if prompt_ids.is_empty() {
+        if prompt_ids.is_empty()
+        {
             return Ok(Vec::new());
         }
-        if prompt_ids.len() > self.inner.inner.max_seq_len {
+        if prompt_ids.len() > self.inner.inner.max_seq_len
+        {
             return Err(Self::invalid("device-feedback prompt exceeds max_seq_len"));
         }
-        for &token_id in prompt_ids {
-            if token_id >= self.inner.inner.vocab_size {
+        for &token_id in prompt_ids
+        {
+            if token_id >= self.inner.inner.vocab_size
+            {
                 return Err(WgpuResidentMiniLlmError::TokenOutOfRange {
                     token_id,
                     vocab_size: self.inner.inner.vocab_size,
@@ -274,7 +283,8 @@ impl WgpuResidentDeviceFeedbackMiniLlm {
             }
         }
 
-        for (pos, &token_id) in prompt_ids.iter().enumerate() {
+        for (pos, &token_id) in prompt_ids.iter().enumerate()
+        {
             self.inner.ingest_at(token_id, pos)?;
         }
 
@@ -284,11 +294,15 @@ impl WgpuResidentDeviceFeedbackMiniLlm {
                 .max_seq_len
                 .saturating_sub(prompt_ids.len()),
         );
-        if limit == 0 {
+        if limit == 0
+        {
             return Ok(prompt_ids.to_vec());
         }
-        if limit > self.feedback_capacity {
-            return Err(Self::invalid("device-feedback burst exceeds resident capacity"));
+        if limit > self.feedback_capacity
+        {
+            return Err(Self::invalid(
+                "device-feedback burst exceeds resident capacity",
+            ));
         }
 
         self.set_phase_mode(1)?;
@@ -297,15 +311,16 @@ impl WgpuResidentDeviceFeedbackMiniLlm {
         let limit_u32 = u32::try_from(limit)
             .map_err(|_| Self::invalid("device-feedback limit exceeds WGPU u32 range"))?;
         let header = [0u32, 1u32, 0u32, limit_u32];
-        self.inner.inner.encoder.adapter.write(
-            &self.feedback,
-            0,
-            bytemuck::cast_slice(&header),
-        )?;
+        self.inner
+            .inner
+            .encoder
+            .adapter
+            .write(&self.feedback, 0, bytemuck::cast_slice(&header))?;
 
         let burst_result = self.run_burst(limit);
         let restore_result = self.restore_enabled_state();
-        if let Err(error) = burst_result {
+        if let Err(error) = burst_result
+        {
             restore_result?;
             return Err(error);
         }
@@ -313,7 +328,9 @@ impl WgpuResidentDeviceFeedbackMiniLlm {
 
         let words_to_read = FEEDBACK_HEADER_WORDS
             .checked_add(limit)
-            .ok_or(Self::invalid("device-feedback readback size overflows usize"))?;
+            .ok_or(Self::invalid(
+                "device-feedback readback size overflows usize",
+            ))?;
         let mut words = vec![0u32; words_to_read];
         self.inner.inner.encoder.adapter.read(
             &self.feedback,
@@ -323,7 +340,8 @@ impl WgpuResidentDeviceFeedbackMiniLlm {
         self.last_burst_readback_bytes = words_to_read * U32_BYTES;
 
         let generated_count = words[0] as usize;
-        if generated_count > limit {
+        if generated_count > limit
+        {
             return Err(WgpuResidentDeviceFeedbackMiniLlmError::CorruptDeviceCount {
                 count: generated_count,
                 limit,
@@ -359,15 +377,14 @@ impl WgpuResidentDeviceFeedbackMiniLlm {
         Ok(())
     }
 
-    fn run_burst(
-        &mut self,
-        limit: usize,
-    ) -> Result<(), WgpuResidentDeviceFeedbackMiniLlmError> {
-        for generated_index in 0..limit {
+    fn run_burst(&mut self, limit: usize) -> Result<(), WgpuResidentDeviceFeedbackMiniLlmError> {
+        for generated_index in 0..limit
+        {
             self.inner.sampler.launch_resident_without_readback()?;
             let _feedback = self.launch_feedback()?;
 
-            if generated_index + 1 < limit {
+            if generated_index + 1 < limit
+            {
                 let _preprocess = self.inner.inner.launch_preprocess()?;
                 let _encoder = self.inner.inner.encoder.launch()?;
                 let _logits = self.inner.launch_logits()?;
@@ -376,18 +393,16 @@ impl WgpuResidentDeviceFeedbackMiniLlm {
         Ok(())
     }
 
-    fn launch_feedback(
-        &self,
-    ) -> Result<WgpuComputeEvent, WgpuResidentDeviceFeedbackMiniLlmError> {
+    fn launch_feedback(&self) -> Result<WgpuComputeEvent, WgpuResidentDeviceFeedbackMiniLlmError> {
         let bindings = [
             binding(0, &self.inner.inner.state, BufferAccess::ReadWrite),
-            binding(1, self.inner.sampler.state_buffer(), BufferAccess::ReadWrite),
-            binding(2, &self.feedback, BufferAccess::ReadWrite),
             binding(
-                3,
-                &self.inner.inner.encoder.state,
+                1,
+                self.inner.sampler.state_buffer(),
                 BufferAccess::ReadWrite,
             ),
+            binding(2, &self.feedback, BufferAccess::ReadWrite),
+            binding(3, &self.inner.inner.encoder.state, BufferAccess::ReadWrite),
         ];
         let config = LaunchConfig::new([1, 1, 1], [1, 1, 1], 0)?;
         Ok(self.inner.inner.encoder.adapter.launch(
@@ -398,10 +413,7 @@ impl WgpuResidentDeviceFeedbackMiniLlm {
         )?)
     }
 
-    fn set_phase_mode(
-        &self,
-        mode: u32,
-    ) -> Result<(), WgpuResidentDeviceFeedbackMiniLlmError> {
+    fn set_phase_mode(&self, mode: u32) -> Result<(), WgpuResidentDeviceFeedbackMiniLlmError> {
         let word = [mode];
         self.inner.inner.encoder.adapter.write(
             &self.inner.inner.state,
