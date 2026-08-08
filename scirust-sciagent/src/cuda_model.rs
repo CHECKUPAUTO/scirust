@@ -57,6 +57,37 @@ pub struct CudaModelGrads {
     pub d_final_norm: CudaMatrix,
 }
 
+/// Training-only cache for one attention invocation. Keeping RoPE outputs and
+/// per-head softmax weights avoids rebuilding the whole attention forward in the
+/// backward pass. Inference and parity APIs keep their existing recompute path.
+struct CudaAttentionTrainCache {
+    qr: CudaMatrix,
+    kr: CudaMatrix,
+    weights: Vec<CudaMatrix>,
+}
+
+/// Training-only activations for one Transformer block.
+struct CudaBlockTrainCache {
+    xn: CudaMatrix,
+    q: CudaMatrix,
+    k: CudaMatrix,
+    v: CudaMatrix,
+    attention: CudaAttentionTrainCache,
+    ctx: CudaMatrix,
+    h: CudaMatrix,
+    hn: CudaMatrix,
+    gate: CudaMatrix,
+    up: CudaMatrix,
+    act: CudaMatrix,
+}
+
+/// Full training forward cache. `xs[i]` is block i's input and `xs[n]` the trunk.
+struct CudaTrainCache {
+    xs: Vec<CudaMatrix>,
+    blocks: Vec<CudaBlockTrainCache>,
+    normed: CudaMatrix,
+}
+
 /// A [`SciAgentModel`] mirrored into VRAM as bf16 matrices, running the whole
 /// decoder forward on the Tensor-core [`CudaChain`]. Tied-embedding models only.
 pub struct CudaModel {
@@ -432,6 +463,239 @@ impl CudaModel {
         }
     }
 
+    /// Training attention forward retaining only the activations required by its VJP.
+    fn attention_train(
+        &self,
+        q: &CudaMatrix,
+        k: &CudaMatrix,
+        v: &CudaMatrix,
+    ) -> (CudaMatrix, CudaAttentionTrainCache) {
+        let ch = &self.chain;
+        let dh = self.d_model / self.n_heads;
+        let seq = q.rows();
+        let qr = ch.rope(q, seq, 0, self.theta);
+        let kr = ch.rope(k, seq, 0, self.theta);
+        let repeat = self.n_heads / self.n_kv_heads;
+        let scale = 1.0 / (dh as f32).sqrt();
+        let mut out: Option<CudaMatrix> = None;
+        let mut weights_all = Vec::with_capacity(self.n_heads);
+        for head in 0..self.n_heads
+        {
+            let kv = head / repeat;
+            let qs = ch.slice_cols(&qr, head * dh, dh);
+            let ks = ch.slice_cols(&kr, kv * dh, dh);
+            let vs = ch.slice_cols(v, kv * dh, dh);
+            let scores = ch.matmul_bt(&qs, &ks);
+            let scaled = ch.scale_causal_mask(&scores, scale, self.causal);
+            let weights = ch.softmax(&scaled);
+            let ctx = ch.matmul(&weights, &vs);
+            let padded = ch.place_cols(&ctx, head * dh, self.d_model);
+            out = Some(match out
+            {
+                None => padded,
+                Some(acc) => ch.add(&acc, &padded),
+            });
+            weights_all.push(weights);
+        }
+        (
+            out.expect("n_heads >= 1"),
+            CudaAttentionTrainCache {
+                qr,
+                kr,
+                weights: weights_all,
+            },
+        )
+    }
+
+    /// Training block forward retaining activations instead of recomputing them later.
+    fn block_train(&self, x: &CudaMatrix, b: &CudaBlock) -> (CudaMatrix, CudaBlockTrainCache) {
+        let ch = &self.chain;
+        let xn = ch.rms_norm(x, &b.norm1, self.eps);
+        let q = ch.matmul(&xn, &b.wq);
+        let k = ch.matmul(&xn, &b.wk);
+        let v = ch.matmul(&xn, &b.wv);
+        let (ctx, attention) = self.attention_train(&q, &k, &v);
+        let attn_out = ch.matmul(&ctx, &b.wo);
+        let h = ch.add(x, &attn_out);
+        let hn = ch.rms_norm(&h, &b.norm2, self.eps);
+        let gate = ch.matmul(&hn, &b.wg);
+        let up = ch.matmul(&hn, &b.wu);
+        let act = ch.swiglu(&gate, &up);
+        let mlp = ch.matmul(&act, &b.wd);
+        let out = ch.add(&h, &mlp);
+        (
+            out,
+            CudaBlockTrainCache {
+                xn,
+                q,
+                k,
+                v,
+                attention,
+                ctx,
+                h,
+                hn,
+                gate,
+                up,
+                act,
+            },
+        )
+    }
+
+    /// Full training forward with an explicit activation cache.
+    fn forward_train(&self, tokens: &[u32]) -> (CudaMatrix, CudaTrainCache) {
+        let ch = &self.chain;
+        let mut xs = Vec::with_capacity(self.blocks.len() + 1);
+        let mut caches = Vec::with_capacity(self.blocks.len());
+        xs.push(ch.embed(tokens, &self.embedding));
+        for b in &self.blocks
+        {
+            let (out, cache) = self.block_train(xs.last().expect("block input"), b);
+            xs.push(out);
+            caches.push(cache);
+        }
+        let normed = ch.rms_norm(xs.last().expect("trunk"), &self.final_norm, self.eps);
+        let logits = ch.matmul_bt(&normed, &self.embedding);
+        (
+            logits,
+            CudaTrainCache {
+                xs,
+                blocks: caches,
+                normed,
+            },
+        )
+    }
+
+    fn attention_backward_cached(
+        &self,
+        v: &CudaMatrix,
+        dout: &CudaMatrix,
+        cache: &CudaAttentionTrainCache,
+    ) -> (CudaMatrix, CudaMatrix, CudaMatrix) {
+        let ch = &self.chain;
+        let dh = self.d_model / self.n_heads;
+        let seq = cache.qr.rows();
+        let kv_dim = self.n_kv_heads * dh;
+        let repeat = self.n_heads / self.n_kv_heads;
+        let scale = 1.0 / (dh as f32).sqrt();
+        let mut dqr: Option<CudaMatrix> = None;
+        let mut dkr: Option<CudaMatrix> = None;
+        let mut dvv: Option<CudaMatrix> = None;
+        for head in 0..self.n_heads
+        {
+            let kv = head / repeat;
+            let qs = ch.slice_cols(&cache.qr, head * dh, dh);
+            let ks = ch.slice_cols(&cache.kr, kv * dh, dh);
+            let vs = ch.slice_cols(v, kv * dh, dh);
+            let weights = &cache.weights[head];
+            let d_ctx = ch.slice_cols(dout, head * dh, dh);
+            let dweights = ch.matmul_bt(&d_ctx, &vs);
+            let dvs = ch.matmul_at(weights, &d_ctx);
+            let dscaled = ch.softmax_backward(weights, &dweights);
+            let dscores = ch.scale_causal_mask_backward(&dscaled, scale, self.causal);
+            let dqs = ch.matmul(&dscores, &ks);
+            let dks = ch.matmul_at(&dscores, &qs);
+            let dqs_full = ch.place_cols(&dqs, head * dh, self.d_model);
+            let dks_full = ch.place_cols(&dks, kv * dh, kv_dim);
+            let dvs_full = ch.place_cols(&dvs, kv * dh, kv_dim);
+            dqr = Some(match dqr
+            {
+                None => dqs_full,
+                Some(acc) => ch.add(&acc, &dqs_full),
+            });
+            dkr = Some(match dkr
+            {
+                None => dks_full,
+                Some(acc) => ch.add(&acc, &dks_full),
+            });
+            dvv = Some(match dvv
+            {
+                None => dvs_full,
+                Some(acc) => ch.add(&acc, &dvs_full),
+            });
+        }
+        let dq = ch.rope_backward(&dqr.expect("heads"), seq, 0, self.theta);
+        let dk = ch.rope_backward(&dkr.expect("heads"), seq, 0, self.theta);
+        (dq, dk, dvv.expect("heads"))
+    }
+
+    fn block_backward_cached(
+        &self,
+        x: &CudaMatrix,
+        b: &CudaBlock,
+        cache: &CudaBlockTrainCache,
+        dout: &CudaMatrix,
+    ) -> (CudaMatrix, CudaBlockGrads) {
+        let ch = &self.chain;
+        let dact = ch.matmul_bt(dout, &b.wd);
+        let dwd = ch.matmul_at(&cache.act, dout);
+        let (dgate, dup) = ch.swiglu_backward(&cache.gate, &cache.up, &dact);
+        let dwg = ch.matmul_at(&cache.hn, &dgate);
+        let dwu = ch.matmul_at(&cache.hn, &dup);
+        let dhn = ch.add(&ch.matmul_bt(&dgate, &b.wg), &ch.matmul_bt(&dup, &b.wu));
+        let dnorm2 = ch.rms_norm_gain_backward(&cache.h, &dhn, self.eps);
+        let dh = ch.add(
+            dout,
+            &ch.rms_norm_backward(&cache.h, &b.norm2, &dhn, self.eps),
+        );
+
+        let dwo = ch.matmul_at(&cache.ctx, &dh);
+        let d_ctx = ch.matmul_bt(&dh, &b.wo);
+        let (dq, dk, dv) = self.attention_backward_cached(&cache.v, &d_ctx, &cache.attention);
+        let dwq = ch.matmul_at(&cache.xn, &dq);
+        let dwk = ch.matmul_at(&cache.xn, &dk);
+        let dwv = ch.matmul_at(&cache.xn, &dv);
+        let dxn = ch.add(
+            &ch.add(&ch.matmul_bt(&dq, &b.wq), &ch.matmul_bt(&dk, &b.wk)),
+            &ch.matmul_bt(&dv, &b.wv),
+        );
+        let dnorm1 = ch.rms_norm_gain_backward(x, &dxn, self.eps);
+        let dx = ch.add(&dh, &ch.rms_norm_backward(x, &b.norm1, &dxn, self.eps));
+        (
+            dx,
+            CudaBlockGrads {
+                dwq,
+                dwk,
+                dwv,
+                dwo,
+                dwg,
+                dwu,
+                dwd,
+                dnorm1,
+                dnorm2,
+            },
+        )
+    }
+
+    fn backward_cached(
+        &self,
+        tokens: &[u32],
+        dlogits: &CudaMatrix,
+        cache: &CudaTrainCache,
+    ) -> CudaModelGrads {
+        let ch = &self.chain;
+        let trunk = cache.xs.last().expect("trunk");
+        let d_normed = ch.matmul(dlogits, &self.embedding);
+        let de_head = ch.matmul_at(dlogits, &cache.normed);
+        let d_final_norm = ch.rms_norm_gain_backward(trunk, &d_normed, self.eps);
+        let mut d_cur = ch.rms_norm_backward(trunk, &self.final_norm, &d_normed, self.eps);
+        let mut block_grads = Vec::with_capacity(self.blocks.len());
+        for i in (0..self.blocks.len()).rev()
+        {
+            let (dx, grads) =
+                self.block_backward_cached(&cache.xs[i], &self.blocks[i], &cache.blocks[i], &d_cur);
+            d_cur = dx;
+            block_grads.push(grads);
+        }
+        block_grads.reverse();
+        let de_embed = ch.embed_backward(tokens, &d_cur, self.vocab);
+        let d_embedding = ch.add(&de_head, &de_embed);
+        CudaModelGrads {
+            d_embedding,
+            blocks: block_grads,
+            d_final_norm,
+        }
+    }
+
     /// The tied-embedding gradient for `(tokens, targets)`, downloaded — the single
     /// number that validates the whole backward: it sums the LM-head grad and the
     /// grad backpropagated through every block into the input gather. Forward →
@@ -493,10 +757,6 @@ impl BlockMasters {
         }
     }
 }
-
-/// Host mean cross-entropy `−(1/rows)·Σ log P[i, tgtᵢ]` over row-major logits —
-/// the pre-update loss (matches `train::cross_entropy_loss`). Kept here so the CUDA
-/// path needs no `scirust-gpu` dependency.
 
 /// A trainable [`CudaModel`]: the bf16 model plus **fp32 master weights and AdamW
 /// moments** (the mixed-precision contract). Each [`Self::train_step`] runs the
@@ -600,7 +860,7 @@ impl CudaTrainer {
     }
 
     /// One mixed-precision AdamW training step on `(tokens, targets)`: forward →
-    /// host cross-entropy grad → backward → AdamW update of every trainable weight
+    /// resident cross-entropy grad → cached backward → AdamW update of every trainable weight
     /// (tied embedding, final RMSNorm gain, and each block's nine weights), fp32
     /// masters updated and bf16 views refreshed in place. Returns the **pre-update**
     /// mean cross-entropy loss.
@@ -615,52 +875,37 @@ impl CudaTrainer {
         weight_decay: f32,
     ) -> f32 {
         self.step += 1;
-        // Forward and CE stay resident. Only one fp32 loss scalar per token row
-        // crosses to the host; the full rows×vocab logit matrix never does.
-        let logits = self.model.forward_resident(tokens);
-        let (loss, dlogits) = self.model.chain.cross_entropy_loss_grad(&logits, targets);
-        let grads = self.model.backward(tokens, &dlogits);
 
-        // Global gradient-norm clipping: compute ‖g‖ over every weight's grad, then
-        // scale so the update's norm is ≤ max_grad_norm. A non-finite norm (NaN/inf
-        // from a pathological batch) → scale 0, i.e. skip the update so a spike can't
-        // corrupt the weights. This is what keeps the 270M bf16 pretrain from
-        // diverging at a bad batch.
-        let max_norm = self.max_grad_norm;
-        let gnorm = {
-            let mut grad_refs: Vec<&CudaMatrix> = vec![&grads.d_embedding, &grads.d_final_norm];
-            for bg in &grads.blocks
-            {
-                grad_refs.push(&bg.dnorm1);
-                grad_refs.push(&bg.dwq);
-                grad_refs.push(&bg.dwk);
-                grad_refs.push(&bg.dwv);
-                grad_refs.push(&bg.dwo);
-                grad_refs.push(&bg.dnorm2);
-                grad_refs.push(&bg.dwg);
-                grad_refs.push(&bg.dwu);
-                grad_refs.push(&bg.dwd);
-            }
-            self.model.chain.global_grad_norm(&grad_refs)
-        };
-        self.last_grad_norm = gnorm;
-        let scale = if !gnorm.is_finite()
-        {
-            0.0
-        }
-        else if max_norm > 0.0 && gnorm > max_norm
-        {
-            max_norm / gnorm
-        }
-        else
-        {
-            1.0
-        };
+        // One uninterrupted CUDA stream: cached forward -> fused resident CE ->
+        // cached backward -> resident grad norm -> AdamW. Host diagnostics are read
+        // only after every optimizer kernel has been queued.
+        let (logits, cache) = self.model.forward_train(tokens);
+        let (loss_rows, dlogits) = self
+            .model
+            .chain
+            .cross_entropy_loss_grad_resident(&logits, targets);
+        let grads = self.model.backward_cached(tokens, &dlogits, &cache);
 
-        // AdamW updates — fp32 masters mutated in place, bf16 views refreshed.
-        let step = self.step;
+        let mut grad_refs: Vec<&CudaMatrix> = vec![&grads.d_embedding, &grads.d_final_norm];
+        for bg in &grads.blocks
+        {
+            grad_refs.push(&bg.dnorm1);
+            grad_refs.push(&bg.dwq);
+            grad_refs.push(&bg.dwk);
+            grad_refs.push(&bg.dwv);
+            grad_refs.push(&bg.dwo);
+            grad_refs.push(&bg.dnorm2);
+            grad_refs.push(&bg.dwg);
+            grad_refs.push(&bg.dwu);
+            grad_refs.push(&bg.dwd);
+        }
         let ch = &self.model.chain;
-        ch.adamw_step(
+        let grad_sumsq = ch.global_grad_sumsq(&grad_refs);
+        drop(grad_refs);
+
+        let step = self.step;
+        let max_norm = self.max_grad_norm;
+        ch.adamw_step_with_norm(
             &mut self.master_embedding,
             &mut self.m_embedding,
             &mut self.v_embedding,
@@ -671,9 +916,10 @@ impl CudaTrainer {
             adam_eps,
             weight_decay,
             step,
-            scale,
+            &grad_sumsq,
+            max_norm,
         );
-        ch.adamw_step(
+        ch.adamw_step_with_norm(
             &mut self.master_final_norm,
             &mut self.m_final_norm,
             &mut self.v_final_norm,
@@ -684,7 +930,8 @@ impl CudaTrainer {
             adam_eps,
             weight_decay,
             step,
-            scale,
+            &grad_sumsq,
+            max_norm,
         );
         for i in 0..self.model.blocks.len()
         {
@@ -700,7 +947,7 @@ impl CudaTrainer {
                        vo: &mut CudaF32,
                        grad: &CudaMatrix,
                        view: &mut CudaMatrix| {
-                ch.adamw_step(
+                ch.adamw_step_with_norm(
                     master,
                     mo,
                     vo,
@@ -711,7 +958,8 @@ impl CudaTrainer {
                     adam_eps,
                     weight_decay,
                     step,
-                    scale,
+                    &grad_sumsq,
+                    max_norm,
                 );
             };
             one(
@@ -736,6 +984,11 @@ impl CudaTrainer {
             one(&mut mb.wu, &mut mm.wu, &mut mv.wu, &bg.dwu, &mut b.wu);
             one(&mut mb.wd, &mut mm.wd, &mut mv.wd, &bg.dwd, &mut b.wd);
         }
+
+        // First host reads of the step. Because all work shares one CUDA stream,
+        // these synchronize only after the optimizer has completed.
+        let loss = ch.mean_f32(&loss_rows);
+        self.last_grad_norm = ch.grad_norm_from_sumsq(&grad_sumsq);
         loss
     }
 
