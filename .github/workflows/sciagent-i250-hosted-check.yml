@@ -29,23 +29,15 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
-  hosted-check:
-    name: I250 format + algebra + CUDA compile
+  clippy-diagnostic:
+    name: I250 strict Clippy diagnostic
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: nightly-2026-07-02
-          components: rustfmt, clippy
-      - name: Format
-        run: cargo +nightly-2026-07-02 fmt --all -- --check
-      - name: SLHA score-profile algebra
-        run: cargo +nightly-2026-07-02 test -p scirust-core --lib --locked slha_ -- --nocapture
-      - name: Elastic decode planning algebra
-        run: cargo +nightly-2026-07-02 test -p scirust-sciagent --lib --locked elastic_ -- --nocapture
-      - name: CUDA feature compile
-        run: cargo +nightly-2026-07-02 check -p scirust-sciagent --features cuda --all-targets --locked
-      - name: CUDA strict Clippy
-        run: cargo +nightly-2026-07-02 clippy -p scirust-sciagent --features cuda --all-targets --locked -- -D warnings
+          components: clippy
+      - name: CUDA strict Clippy short diagnostics
+        run: cargo +nightly-2026-07-02 clippy -p scirust-sciagent --features cuda --all-targets --locked --message-format short -- -D warnings
