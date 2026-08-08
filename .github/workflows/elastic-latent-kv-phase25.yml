@@ -1,0 +1,132 @@
+name: Elastic Latent KV Phase 25
+
+on:
+  pull_request:
+    paths:
+      - "scirust-gpu/Cargo.toml"
+      - "scirust-gpu/examples/deterministic_sampler_compare.rs"
+      - "experiments/elastic-latent-kv/PHASE25_SPEC.md"
+      - ".github/workflows/elastic-latent-kv-phase25.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt,clippy
+      - run: rustup toolchain install 1.89.0 --profile minimal
+      - run: cargo +nightly-2026-07-02 fmt --all -- --check
+      - run: cargo +nightly-2026-07-02 clippy -p scirust-gpu --all-targets --features wgpu --locked -- -D warnings
+      - run: cargo +1.89.0 check -p scirust-gpu --all-targets --features wgpu --locked
+
+  compare-smoke-lavapipe:
+    runs-on: ubuntu-24.04
+    env:
+      WGPU_BACKEND: vulkan
+      SCIRUST_REQUIRE_WGPU: "1"
+      SCIRUST_SAMPLER_COMPARE_VOCABS: 64
+      SCIRUST_SAMPLER_COMPARE_TOP_KS: 5,16
+      SCIRUST_SAMPLER_COMPARE_REPEATS: 2
+      SCIRUST_SAMPLER_COMPARE_WARMUP: 1
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: rustup toolchain install 1.89.0 --profile minimal
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
+      - run: |
+          cargo +1.89.0 run --quiet --release --locked -p scirust-gpu \
+            --features wgpu --example deterministic_sampler_compare > phase25-lavapipe.csv
+          cat phase25-lavapipe.csv
+      - run: |
+          python3 - <<'PY'
+          import csv
+          import math
+          with open('phase25-lavapipe.csv', newline='', encoding='utf-8') as handle:
+              rows = list(csv.DictReader(handle))
+          assert len(rows) == 2, rows
+          assert {int(row['top_k']) for row in rows} == {5, 16}
+          for row in rows:
+              assert int(row['vocab_size']) == 64
+              assert int(row['repeats']) == 2
+              assert int(row['sequential_median_ns']) > 0
+              assert int(row['parallel_median_ns']) > 0
+              speedup = float(row['speedup_parallel_vs_sequential'])
+              assert math.isfinite(speedup) and speedup > 0.0
+              assert int(row['exact_stream_match']) == 1, row
+              assert row['sequential_fingerprint'] == row['parallel_fingerprint'], row
+              assert int(row['sequential_ranking_passes']) == int(row['top_k'])
+              assert int(row['parallel_ranking_passes']) == int(row['top_k'])
+              assert int(row['parallel_lanes']) == 64
+          PY
+
+  compare-jetson-thor:
+    name: Phase 25 benchmark (Jetson Thor WGPU)
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on:
+      - self-hosted
+      - Linux
+      - ARM64
+      - scirust-arm64
+      - jetson-thor
+      - internal
+    timeout-minutes: 45
+    env:
+      WGPU_BACKEND: vulkan
+      SCIRUST_REQUIRE_WGPU: "1"
+      SCIRUST_SAMPLER_COMPARE_VOCABS: 4096
+      SCIRUST_SAMPLER_COMPARE_TOP_KS: 5,50,200
+      SCIRUST_SAMPLER_COMPARE_REPEATS: 7
+      SCIRUST_SAMPLER_COMPARE_WARMUP: 3
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Prepare executable temporary directory
+        run: |
+          tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.ci-tmp.XXXXXX")"
+          chmod 700 "$tmpdir"
+          echo "TMPDIR=$tmpdir" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: 1.89.0
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+        with:
+          shared-key: phase25-wgpu-thor
+      - name: Report WGPU/Vulkan environment
+        continue-on-error: true
+        run: |
+          uname -a
+          nvidia-smi
+          vulkaninfo --summary
+      - name: Run real-device sampler comparison
+        run: |
+          cargo +1.89.0 run --quiet --release --locked -p scirust-gpu \
+            --features wgpu --example deterministic_sampler_compare > phase25-thor.csv
+          cat phase25-thor.csv
+      - name: Validate exact real-device rows
+        run: |
+          python3 - <<'PY'
+          import csv
+          import math
+          with open('phase25-thor.csv', newline='', encoding='utf-8') as handle:
+              rows = list(csv.DictReader(handle))
+          assert len(rows) == 3, rows
+          assert {int(row['top_k']) for row in rows} == {5, 50, 200}
+          for row in rows:
+              assert int(row['vocab_size']) == 4096
+              assert int(row['repeats']) == 7
+              assert int(row['sequential_median_ns']) > 0
+              assert int(row['parallel_median_ns']) > 0
+              speedup = float(row['speedup_parallel_vs_sequential'])
+              assert math.isfinite(speedup) and speedup > 0.0
+              assert int(row['exact_stream_match']) == 1, row
+              assert row['sequential_fingerprint'] == row['parallel_fingerprint'], row
+              assert int(row['sequential_ranking_passes']) == int(row['top_k'])
+              assert int(row['parallel_ranking_passes']) == int(row['top_k'])
+              assert int(row['parallel_lanes']) == 64
+          PY
