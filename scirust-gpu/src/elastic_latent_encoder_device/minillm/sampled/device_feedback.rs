@@ -7,9 +7,11 @@
 
 use core::fmt;
 
+use super::super::WgpuResidentMiniLlmError;
 use super::{WgpuResidentSampledMiniLlm, WgpuResidentSampledMiniLlmError};
 use crate::{
-    WgpuComputeBuffer, WgpuComputeEvent, WgpuComputeKernel, WgpuLatentLayerBasis,
+    WgpuComputeBuffer, WgpuComputeEvent, WgpuComputeKernel, WgpuDeterministicSamplerError,
+    WgpuLatentLayerBasis, WgpuResidentTransformerEncoderError,
 };
 use scirust_compute::{
     BufferAccess, BufferBinding, ComputeBackend, ComputeError, KernelFormat, KernelModule,
@@ -132,6 +134,24 @@ impl From<WgpuResidentSampledMiniLlmError> for WgpuResidentDeviceFeedbackMiniLlm
     }
 }
 
+impl From<WgpuResidentMiniLlmError> for WgpuResidentDeviceFeedbackMiniLlmError {
+    fn from(error: WgpuResidentMiniLlmError) -> Self {
+        Self::Sampled(WgpuResidentSampledMiniLlmError::MiniLlm(error))
+    }
+}
+
+impl From<WgpuDeterministicSamplerError> for WgpuResidentDeviceFeedbackMiniLlmError {
+    fn from(error: WgpuDeterministicSamplerError) -> Self {
+        Self::Sampled(WgpuResidentSampledMiniLlmError::Sampling(error))
+    }
+}
+
+impl From<WgpuResidentTransformerEncoderError> for WgpuResidentDeviceFeedbackMiniLlmError {
+    fn from(error: WgpuResidentTransformerEncoderError) -> Self {
+        Self::Sampled(WgpuResidentSampledMiniLlmError::from(error))
+    }
+}
+
 impl From<ComputeError> for WgpuResidentDeviceFeedbackMiniLlmError {
     fn from(error: ComputeError) -> Self {
         Self::Compute(error)
@@ -174,9 +194,8 @@ impl WgpuResidentDeviceFeedbackMiniLlm {
         seed: u64,
     ) -> Result<Self, WgpuResidentDeviceFeedbackMiniLlmError> {
         let feedback_capacity = snapshot.config.max_seq_len;
-        let inner = WgpuResidentSampledMiniLlm::new(
-            snapshot, capacity, rank, layers, sampling, seed,
-        )?;
+        let inner =
+            WgpuResidentSampledMiniLlm::new(snapshot, capacity, rank, layers, sampling, seed)?;
         let words = FEEDBACK_HEADER_WORDS
             .checked_add(feedback_capacity)
             .ok_or(Self::invalid("device-feedback buffer size overflows usize"))?;
@@ -247,12 +266,10 @@ impl WgpuResidentDeviceFeedbackMiniLlm {
         }
         for &token_id in prompt_ids {
             if token_id >= self.inner.inner.vocab_size {
-                return Err(WgpuResidentSampledMiniLlmError::MiniLlm(
-                    super::super::WgpuResidentMiniLlmError::TokenOutOfRange {
-                        token_id,
-                        vocab_size: self.inner.inner.vocab_size,
-                    },
-                )
+                return Err(WgpuResidentMiniLlmError::TokenOutOfRange {
+                    token_id,
+                    vocab_size: self.inner.inner.vocab_size,
+                }
                 .into());
             }
         }
@@ -321,7 +338,8 @@ impl WgpuResidentDeviceFeedbackMiniLlm {
         let generated_ingests = generated_count.saturating_sub(1);
         let total_ingested = prompt_ids.len().saturating_add(generated_ingests);
         self.inner.inner.encoder.steps = total_ingested;
-        self.inner.inner.encoder.resident_tokens = total_ingested.min(self.inner.inner.encoder.capacity);
+        self.inner.inner.encoder.resident_tokens =
+            total_ingested.min(self.inner.inner.encoder.capacity);
         self.inner.inner.encoder.next_slot = total_ingested % self.inner.inner.encoder.capacity;
         self.inner.sample_ready = false;
 
@@ -347,18 +365,12 @@ impl WgpuResidentDeviceFeedbackMiniLlm {
     ) -> Result<(), WgpuResidentDeviceFeedbackMiniLlmError> {
         for generated_index in 0..limit {
             self.inner.sampler.launch_resident_without_readback()?;
-            let feedback = self.launch_feedback()?;
-            self.inner.inner.encoder.adapter.wait(&feedback)?;
+            let _feedback = self.launch_feedback()?;
 
             if generated_index + 1 < limit {
-                let preprocess = self.inner.inner.launch_preprocess()?;
-                self.inner.inner.encoder.adapter.wait(&preprocess)?;
-
-                let encoder = self.inner.inner.encoder.launch()?;
-                self.inner.inner.encoder.adapter.wait(&encoder)?;
-
-                let logits = self.inner.launch_logits()?;
-                self.inner.inner.encoder.adapter.wait(&logits)?;
+                let _preprocess = self.inner.inner.launch_preprocess()?;
+                let _encoder = self.inner.inner.encoder.launch()?;
+                let _logits = self.inner.launch_logits()?;
             }
         }
         Ok(())
