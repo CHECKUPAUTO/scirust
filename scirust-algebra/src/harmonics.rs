@@ -53,7 +53,7 @@ pub fn real_spherical_harmonic_sine(
 {
     if m == 0
     {
-        return (l == 0 || l > 0).then_some(0.0);
+        return Some(0.0);
     }
     let legendre = associated_legendre(l, m, theta.cos())?;
     let normalization = spherical_harmonic_normalization(l, m)?;
