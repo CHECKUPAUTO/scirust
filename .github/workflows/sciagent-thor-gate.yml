@@ -48,16 +48,14 @@ jobs:
         with:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
-      - name: Pin Cargo bin directory for self-hosted steps
-        run: echo "$(dirname "$(rustup which cargo --toolchain nightly-2026-07-02)")" >> "$GITHUB_PATH"
       - name: Report Thor CUDA
         run: nvidia-smi --query-gpu=name,driver_version,compute_cap,memory.total --format=csv,noheader
       - name: Format
-        run: cargo +nightly-2026-07-02 fmt --all -- --check
+        run: rustup run nightly-2026-07-02 cargo fmt --all -- --check
       - name: SCIAGENT CUDA parity
-        run: cargo +nightly-2026-07-02 test -p scirust-sciagent --features cuda --test cuda_parity -- --nocapture
+        run: rustup run nightly-2026-07-02 cargo test -p scirust-sciagent --features cuda --test cuda_parity -- --nocapture
       - name: SCIAGENT CUDA clippy
-        run: cargo +nightly-2026-07-02 clippy -p scirust-sciagent --features cuda --all-targets -- -D warnings
+        run: rustup run nightly-2026-07-02 cargo clippy -p scirust-sciagent --features cuda --all-targets -- -D warnings
       - name: SCIAGENT production sweep
         env:
           SCIAGENT_BENCH_BATCHES: "8"
@@ -65,4 +63,4 @@ jobs:
           SCIAGENT_BENCH_STEPS: "1"
           SCIAGENT_BENCH_PROMPT: "128"
           SCIAGENT_BENCH_DECODE_NEW: "8"
-        run: cargo +nightly-2026-07-02 run -p scirust-sciagent --features cuda --release --example cuda_production_bench
+        run: rustup run nightly-2026-07-02 cargo run -p scirust-sciagent --features cuda --release --example cuda_production_bench
