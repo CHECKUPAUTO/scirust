@@ -14,6 +14,7 @@ on:
       - "scirust-compute/**"
       - "scirust-cuda/**"
       - "scirust-gpu/**"
+      - "scirust-sciagent/**"
       - "scirust-tensor-compile/**"
       - "scirust-tensor-core/**"
       - "scirust-tensor-ir/**"
@@ -35,6 +36,7 @@ on:
       - "scirust-compute/**"
       - "scirust-cuda/**"
       - "scirust-gpu/**"
+      - "scirust-sciagent/**"
       - "scirust-tensor-compile/**"
       - "scirust-tensor-core/**"
       - "scirust-tensor-ir/**"
@@ -123,9 +125,6 @@ jobs:
       # CUDA path can be proved rather than merely compiled.
       # -------------------------------------------------------------------
 
-      # Diagnostic only. This step never gates anything and no Rust code reads
-      # it: it exists so a failure below can be read against what the machine
-      # actually carried. The proof is the test steps, not this output.
       - name: Report the CUDA device and libraries
         continue-on-error: true
         run: |
@@ -135,17 +134,6 @@ jobs:
           ldconfig -p | grep -E 'libcuda|libnvrtc' || \
             echo "no libcuda/libnvrtc entry in the loader cache"
 
-      # `SCIRUST_REQUIRE_CUDA=1` turns "no device, so skip" into a hard
-      # failure. Without it a machine with no driver would report a green
-      # run having executed nothing at all — which is exactly the kind of
-      # silent pass this job exists to prevent. The job therefore fails if
-      # the driver or a device is missing, if no test actually ran, if a
-      # kernel does not launch, if the readback is wrong, or if a result
-      # disagrees with the CPU reference.
-      #
-      # A missing NVRTC is not part of that variable's job and needs no
-      # special handling: the tests compile kernels for real, so an unusable
-      # runtime compiler fails them on its own.
       - name: Test the canonical Reference kernels on CUDA
         env:
           SCIRUST_REQUIRE_CUDA: "1"
@@ -165,6 +153,30 @@ jobs:
           SCIRUST_REQUIRE_CUDA: "1"
         run: cargo test -p scirust-cuda --features cuda -- --nocapture
 
+      # SCIAGENT Route-B must execute on the real Thor, not merely compile on hosted
+      # CI. These tests cover forward/backward parity, training, cached decode parity,
+      # and exact optimizer resume against the CPU/naive reference paths.
+      - name: Test SCIAGENT Route-B CUDA parity on Thor
+        env:
+          SCIRUST_REQUIRE_CUDA: "1"
+        run: |
+          cargo test -p scirust-sciagent --features cuda --test cuda_parity \
+            -- --nocapture
+
+      # Short production-shape sweep. The example performs an untimed warm step before
+      # each measurement. Four measured steps are enough to expose batch scaling while
+      # keeping PR CI bounded; the standalone documented command can run longer.
+      - name: Benchmark SCIAGENT 304M production path on Thor
+        env:
+          SCIAGENT_BENCH_BATCHES: "1,2,4,8"
+          SCIAGENT_BENCH_SEQ: "512"
+          SCIAGENT_BENCH_STEPS: "4"
+          SCIAGENT_BENCH_PROMPT: "128"
+          SCIAGENT_BENCH_DECODE_NEW: "8"
+        run: |
+          cargo run -p scirust-sciagent --features cuda --release \
+            --example cuda_production_bench
+
       - name: Run Clippy
         run: |
           cargo clippy \
@@ -176,4 +188,5 @@ jobs:
             -D warnings
           cargo clippy -p scirust-cuda --features cuda --all-targets -- -D warnings
           cargo clippy -p scirust-gpu --features cuda --all-targets -- -D warnings
+          cargo clippy -p scirust-sciagent --features cuda --all-targets -- -D warnings
           cargo clippy -p scirust --features tensor-canonical-cuda --all-targets -- -D warnings
