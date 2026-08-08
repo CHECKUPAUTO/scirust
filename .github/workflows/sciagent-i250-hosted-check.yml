@@ -17,7 +17,7 @@ on:
       - ".github/workflows/sciagent-i250-hosted-check.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: sciagent-i250-hosted-${{ github.event.pull_request.number || github.ref }}
@@ -35,89 +35,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          ref: ${{ github.event_name == 'push' && github.ref_name || github.event.pull_request.head.sha }}
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
-      - name: Apply fixed-order loop rewrites on scratch push
-        if: github.event_name == 'push'
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path("scirust-core/src/nn/slha_residual_sketch.rs")
-          text = path.read_text()
-          replacements = [
-              (
-                  """        for row in 0..self.dimension
-        {
-            let input_value = input[row];
-            let offset = row * self.residual_bits;
-            for bit in 0..self.residual_bits
-            {
-                output[bit] += input_value * self.projection[offset + bit];
-            }
-        }
-""",
-                  """        for (row, &input_value) in input.iter().enumerate()
-        {
-            let offset = row * self.residual_bits;
-            for (bit, output_value) in output.iter_mut().enumerate()
-            {
-                *output_value += input_value * self.projection[offset + bit];
-            }
-        }
-""",
-              ),
-              (
-                  """            for row in 0..self.dimension
-            {
-                projection += input[row] * self.projection[row * self.residual_bits + bit];
-            }
-""",
-                  """            for (row, &input_value) in input.iter().enumerate()
-            {
-                projection += input_value * self.projection[row * self.residual_bits + bit];
-            }
-""",
-              ),
-              (
-                  """        for row in 0..dimension
-        {
-            dot += vector[row] * coarse_basis[row * rank + column];
-        }
-        for row in 0..dimension
-        {
-            vector[row] -= dot * coarse_basis[row * rank + column];
-        }
-""",
-                  """        for (row, &value) in vector.iter().enumerate().take(dimension)
-        {
-            dot += value * coarse_basis[row * rank + column];
-        }
-        for (row, value) in vector.iter_mut().enumerate().take(dimension)
-        {
-            *value -= dot * coarse_basis[row * rank + column];
-        }
-""",
-              ),
-          ]
-          for old, new in replacements:
-              if old in text:
-                  text = text.replace(old, new, 1)
-              elif new not in text:
-                  raise SystemExit("expected Clippy rewrite marker not found")
-          path.write_text(text)
-          PY
-          cargo +nightly-2026-07-02 fmt --all
-          if ! git diff --quiet -- scirust-core; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add scirust-core
-            git commit -m "style(i250): keep SLHA loops Clippy-clean"
-            git push origin HEAD:perf/sciagent-i250-resident-kv
-          fi
       - name: Format
         run: cargo +nightly-2026-07-02 fmt --all -- --check
       - name: SLHA score-profile algebra
