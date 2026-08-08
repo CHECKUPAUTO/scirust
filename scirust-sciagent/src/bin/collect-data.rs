@@ -1,11 +1,10 @@
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use std::collections::{BTreeMap, HashSet};
-
 use clap::Parser;
-use scirust_sciagent::bpe::BpeTokenizer;
+use scirust_sciagent::VersionedBpeTokenizer;
 use scirust_sciagent::corpus_paths;
 use scirust_sciagent::train::dataset::{
     content_hash, matches_extension, parse_extensions, skip_source_dir, source_quality,
@@ -144,8 +143,12 @@ fn main() {
     });
     fs::create_dir_all(&output).expect("Cannot create output dir");
 
-    let tok = BpeTokenizer::load_json(&args.tokenizer).expect("Failed to load tokenizer");
-    eprintln!("Tokenizer loaded: vocab_size={}", tok.vocab_size());
+    let tok = VersionedBpeTokenizer::load_json(&args.tokenizer).expect("Failed to load tokenizer");
+    eprintln!(
+        "Tokenizer loaded: vocab_size={} merge_semantics={}",
+        tok.vocab_size(),
+        tok.merge_semantics().as_str()
+    );
 
     let exts = parse_extensions(&args.extension);
     eprintln!("Ingesting extensions: {exts:?}");
@@ -196,7 +199,7 @@ fn ingest_file(
     path: &Path,
     content: &str,
     filter: bool,
-    tok: &BpeTokenizer,
+    tok: &VersionedBpeTokenizer,
     writer: &mut ShardWriter,
     stats: &mut CollectStats,
 ) {
@@ -226,7 +229,7 @@ fn collect_dir(
     dir: &Path,
     exts: &[String],
     filter: bool,
-    tok: &BpeTokenizer,
+    tok: &VersionedBpeTokenizer,
     writer: &mut ShardWriter,
     stats: &mut CollectStats,
 ) {
