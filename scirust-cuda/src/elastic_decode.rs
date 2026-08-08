@@ -274,7 +274,11 @@ impl CudaElasticDecodeRuntime {
             .load_module(ptx)
             .map_err(|error| eprintln!("scirust-cuda elastic decode: module load failed: {error}"))
             .ok()?;
-        let function = |name: &str| module.load_function(name).expect("load elastic decode kernel");
+        let function = |name: &str| {
+            module
+                .load_function(name)
+                .expect("load elastic decode kernel")
+        };
         let kernels = ElasticDecodeKernels {
             add: function("elastic_add_kernel"),
             embed_token: function("elastic_embed_token_kernel"),
@@ -292,7 +296,10 @@ impl CudaElasticDecodeRuntime {
 
     #[must_use]
     pub fn matrix(&self, rows: usize, cols: usize) -> CudaElasticMatrix {
-        assert!(rows > 0 && cols > 0, "elastic decode matrix must be non-empty");
+        assert!(
+            rows > 0 && cols > 0,
+            "elastic decode matrix must be non-empty"
+        );
         let buf = self
             .stream
             .alloc_zeros::<bf16>(rows * cols)
@@ -302,7 +309,11 @@ impl CudaElasticDecodeRuntime {
 
     #[must_use]
     pub fn upload(&self, data: &[f32], rows: usize, cols: usize) -> CudaElasticMatrix {
-        assert_eq!(data.len(), rows * cols, "elastic decode upload shape mismatch");
+        assert_eq!(
+            data.len(),
+            rows * cols,
+            "elastic decode upload shape mismatch"
+        );
         let bf: Vec<bf16> = data.iter().map(|&value| bf16::from_f32(value)).collect();
         let buf = self
             .stream
@@ -313,7 +324,10 @@ impl CudaElasticDecodeRuntime {
 
     #[must_use]
     pub fn kv_cache(&self, capacity: usize, cols: usize) -> CudaElasticKvCache {
-        assert!(capacity > 0 && cols > 0, "elastic KV cache must be non-empty");
+        assert!(
+            capacity > 0 && cols > 0,
+            "elastic KV cache must be non-empty"
+        );
         let buf = self
             .stream
             .alloc_zeros::<bf16>(capacity * cols)
@@ -340,7 +354,10 @@ impl CudaElasticDecodeRuntime {
         table: &CudaElasticMatrix,
         out: &mut CudaElasticMatrix,
     ) {
-        assert!(table.rows > 0 && table.cols > 0, "elastic embedding table empty");
+        assert!(
+            table.rows > 0 && table.cols > 0,
+            "elastic embedding table empty"
+        );
         assert_eq!((out.rows, out.cols), (1, table.cols));
         let (token_arg, vocab_arg, d_arg) = (token as usize, table.rows, table.cols);
         let mut builder = self.stream.launch_builder(&self.kernels.embed_token);
@@ -400,14 +417,14 @@ impl CudaElasticDecodeRuntime {
             block_dim: (256, 1, 1),
             shared_mem_bytes: 0,
         };
-        unsafe { builder.launch(config).expect("elastic decode RMSNorm launch") };
+        unsafe {
+            builder
+                .launch(config)
+                .expect("elastic decode RMSNorm launch")
+        };
     }
 
-    pub fn swiglu_split_into(
-        &self,
-        gate_up: &CudaElasticMatrix,
-        out: &mut CudaElasticMatrix,
-    ) {
+    pub fn swiglu_split_into(&self, gate_up: &CudaElasticMatrix, out: &mut CudaElasticMatrix) {
         assert_eq!(gate_up.rows, 1);
         assert_eq!(gate_up.cols % 2, 0);
         let d_ff = gate_up.cols / 2;
@@ -519,7 +536,10 @@ impl CudaElasticDecodeRuntime {
         assert_eq!(vcache.cols, v_width);
         assert_eq!(kcache.capacity, vcache.capacity);
         assert!(pos < kcache.capacity);
-        assert_eq!((out_latent.rows, out_latent.cols), (1, n_heads * value_rank));
+        assert_eq!(
+            (out_latent.rows, out_latent.cols),
+            (1, n_heads * value_rank)
+        );
 
         let capacity = kcache.capacity;
         let (

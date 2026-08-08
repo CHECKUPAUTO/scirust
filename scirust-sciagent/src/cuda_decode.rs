@@ -86,7 +86,8 @@ impl CudaDecodeModel {
         );
 
         let mut blocks = Vec::with_capacity(model.layers.len());
-        for layer in &model.layers {
+        for layer in &model.layers
+        {
             let qkv_host = fuse_columns(&[
                 &layer.attn.w_q.weight,
                 &layer.attn.w_k.weight,
@@ -178,11 +179,16 @@ impl CudaDecodeModel {
         caches: &mut [DecodeLayerCache],
         ws: &mut DecodeWorkspace,
     ) {
-        assert_eq!(caches.len(), self.blocks.len(), "decode cache/layer mismatch");
+        assert_eq!(
+            caches.len(),
+            self.blocks.len(),
+            "decode cache/layer mismatch"
+        );
         let rt = &self.runtime;
         rt.embed_token_into(token, &self.embedding, &mut ws.x);
 
-        for (block, cache) in self.blocks.iter().zip(caches.iter_mut()) {
+        for (block, cache) in self.blocks.iter().zip(caches.iter_mut())
+        {
             rt.rms_norm_into(&ws.x, &block.norm1, self.eps, &mut ws.norm);
             rt.matmul_into(&ws.norm, &block.qkv, &mut ws.qkv);
             rt.gqa_decode_into(
@@ -223,12 +229,16 @@ impl CudaDecodeModel {
         params: &SamplingParams,
         seed: u64,
     ) -> Vec<u32> {
-        let mut tokens = if prompt.is_empty() {
+        let mut tokens = if prompt.is_empty()
+        {
             vec![0]
-        } else {
+        }
+        else
+        {
             prompt.to_vec()
         };
-        if max_new == 0 {
+        if max_new == 0
+        {
             return tokens;
         }
 
@@ -246,18 +256,21 @@ impl CudaDecodeModel {
 
         // Sequential prefill stays resident. The only readback is after the final
         // prompt token, when its logits are actually needed to choose token #1.
-        for (pos, &token) in tokens.iter().enumerate() {
+        for (pos, &token) in tokens.iter().enumerate()
+        {
             self.forward_token_resident(token, pos, &mut caches, &mut ws);
         }
         let mut logits = self.runtime.download(&ws.logits);
 
         let mut rng = seed_to_state(seed);
-        for i in 0..max_new {
+        for i in 0..max_new
+        {
             let recent: Vec<usize> = tokens.iter().map(|&t| t as usize).collect();
             let next = sample_row(&logits, params, &recent, &mut rng) as u32;
             let pos = tokens.len();
             tokens.push(next);
-            if next == 0 || i + 1 == max_new {
+            if next == 0 || i + 1 == max_new
+            {
                 break;
             }
             self.forward_token_resident(next, pos, &mut caches, &mut ws);
@@ -268,14 +281,22 @@ impl CudaDecodeModel {
 }
 
 fn fuse_columns(parts: &[&Tensor]) -> Vec<f32> {
-    assert!(!parts.is_empty(), "fuse_columns requires at least one matrix");
+    assert!(
+        !parts.is_empty(),
+        "fuse_columns requires at least one matrix"
+    );
     let rows = parts[0].rows;
-    assert!(parts.iter().all(|p| p.rows == rows), "fuse_columns row mismatch");
+    assert!(
+        parts.iter().all(|p| p.rows == rows),
+        "fuse_columns row mismatch"
+    );
     let cols: usize = parts.iter().map(|p| p.cols).sum();
     let mut out = vec![0.0f32; rows * cols];
-    for r in 0..rows {
+    for r in 0..rows
+    {
         let mut dst_col = 0usize;
-        for part in parts {
+        for part in parts
+        {
             let src = &part.data[r * part.cols..(r + 1) * part.cols];
             let dst = &mut out[r * cols + dst_col..r * cols + dst_col + part.cols];
             dst.copy_from_slice(src);
@@ -293,9 +314,6 @@ mod tests {
     fn fused_columns_preserve_row_major_order() {
         let a = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
         let b = Tensor::from_vec(vec![5.0, 6.0], 2, 1);
-        assert_eq!(
-            fuse_columns(&[&a, &b]),
-            vec![1.0, 2.0, 5.0, 3.0, 4.0, 6.0]
-        );
+        assert_eq!(fuse_columns(&[&a, &b]), vec![1.0, 2.0, 5.0, 3.0, 4.0, 6.0]);
     }
 }

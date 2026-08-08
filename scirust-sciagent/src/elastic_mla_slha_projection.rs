@@ -22,10 +22,7 @@ pub enum ElasticMlaSlhaProjectionError {
     BasePlan(ElasticMlaPlanError),
     Sketch(SlhaResidualSketchError),
     ScoreProfile(SlhaScoreError),
-    LayerBasisCount {
-        layers: usize,
-        bases: usize,
-    },
+    LayerBasisCount { layers: usize, bases: usize },
     Overflow,
 }
 
@@ -303,14 +300,9 @@ mod tests {
         .unwrap();
         let residual_bits = 2;
         let seed = 0x534c_4841_454c_4153;
-        let plan = ElasticMlaSlhaLayerWeights::from_attention(
-            attention,
-            &bases,
-            residual_bits,
-            2,
-            seed,
-        )
-        .unwrap();
+        let plan =
+            ElasticMlaSlhaLayerWeights::from_attention(attention, &bases, residual_bits, 2, seed)
+                .unwrap();
         assert!(plan.qk_does_not_widen_dense_head());
 
         let input: Vec<f32> = (0..attention.d_model)
@@ -361,13 +353,8 @@ mod tests {
         let model = SciAgentModel::new(&SciAgentConfig::small());
         let attention = &model.layers[0].attn;
         let selection = RopePairSelection::high_frequency_prefix(attention.d_head, 4).unwrap();
-        let bases = ElasticMlaBases::coordinate_prefix(
-            attention.n_kv_heads,
-            selection,
-            2,
-            4,
-        )
-        .unwrap();
+        let bases =
+            ElasticMlaBases::coordinate_prefix(attention.n_kv_heads, selection, 2, 4).unwrap();
         let first =
             ElasticMlaSlhaLayerWeights::from_attention(attention, &bases, 3, 2, 99).unwrap();
         let second =

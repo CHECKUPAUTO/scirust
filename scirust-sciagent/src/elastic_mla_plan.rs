@@ -69,10 +69,10 @@ impl fmt::Display for ElasticMlaPlanError {
                 formatter,
                 "RoPE dimensions {rope_dimensions} must be even and <= d_head {d_head}"
             ),
-            Self::RopePairOutOfRange { pair, pair_count } => write!(
-                formatter,
-                "RoPE pair {pair} is outside 0..{pair_count}"
-            ),
+            Self::RopePairOutOfRange { pair, pair_count } =>
+            {
+                write!(formatter, "RoPE pair {pair} is outside 0..{pair_count}")
+            },
             Self::RopePairsNotStrictlyIncreasing => write!(
                 formatter,
                 "RoPE pair indices must be strictly increasing and duplicate-free"
@@ -81,10 +81,7 @@ impl fmt::Display for ElasticMlaPlanError {
                 name,
                 rank,
                 dimension,
-            } => write!(
-                formatter,
-                "{name} rank {rank} is outside 1..={dimension}"
-            ),
+            } => write!(formatter, "{name} rank {rank} is outside 1..={dimension}"),
             Self::BasisLength {
                 name,
                 expected,
@@ -295,14 +292,7 @@ impl ElasticMlaBases {
     ) -> Result<Self, ElasticMlaPlanError> {
         let key_nope = prefix_basis(n_kv_heads, selection.nope_dimensions(), key_rank)?;
         let value = prefix_basis(n_kv_heads, selection.d_head(), value_rank)?;
-        Self::new(
-            n_kv_heads,
-            selection,
-            key_rank,
-            value_rank,
-            key_nope,
-            value,
-        )
+        Self::new(n_kv_heads, selection, key_rank, value_rank, key_nope, value)
     }
 
     #[must_use]
@@ -670,8 +660,7 @@ fn validate_attention(
             "ElasticMLA d_model must equal n_heads * d_head",
         ));
     }
-    if bases.n_kv_heads != attention.n_kv_heads
-        || bases.selection.d_head() != attention.d_head
+    if bases.n_kv_heads != attention.n_kv_heads || bases.selection.d_head() != attention.d_head
     {
         return Err(ElasticMlaPlanError::InvalidTopology(
             "ElasticMLA basis topology does not match attention",
@@ -739,11 +728,7 @@ fn checked_product(left: usize, right: usize) -> Result<usize, ElasticMlaPlanErr
     left.checked_mul(right).ok_or(ElasticMlaPlanError::Overflow)
 }
 
-fn checked_product3(
-    a: usize,
-    b: usize,
-    c: usize,
-) -> Result<usize, ElasticMlaPlanError> {
+fn checked_product3(a: usize, b: usize, c: usize) -> Result<usize, ElasticMlaPlanError> {
     a.checked_mul(b)
         .and_then(|value| value.checked_mul(c))
         .ok_or(ElasticMlaPlanError::Overflow)
@@ -915,13 +900,8 @@ mod tests {
         let model = SciAgentModel::new(&SciAgentConfig::small());
         let attention = &model.layers[0].attn;
         let selection = RopePairSelection::high_frequency_prefix(attention.d_head, 4).unwrap();
-        let bases = ElasticMlaBases::coordinate_prefix(
-            attention.n_kv_heads,
-            selection,
-            4,
-            4,
-        )
-        .unwrap();
+        let bases =
+            ElasticMlaBases::coordinate_prefix(attention.n_kv_heads, selection, 4, 4).unwrap();
         let converted = ElasticMlaLayerWeights::from_attention(attention, &bases).unwrap();
         assert!(
             converted.cache_scalars_per_kv_head() < converted.dense_cache_scalars_per_kv_head()

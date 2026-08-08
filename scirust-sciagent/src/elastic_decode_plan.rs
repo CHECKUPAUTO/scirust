@@ -97,7 +97,10 @@ impl fmt::Display for ElasticDecodePlanError {
             ),
             Self::NonFiniteBasis { name, index } =>
             {
-                write!(formatter, "{name} basis contains non-finite value at {index}")
+                write!(
+                    formatter,
+                    "{name} basis contains non-finite value at {index}"
+                )
             },
             Self::WeightShape {
                 name,
@@ -157,10 +160,10 @@ impl LatentGqaBases {
         require_basis("key", &key, expected_key)?;
         require_basis("value", &value, expected_value)?;
 
-        let key_identity = key_rank == d_head
-            && all_heads_are_identity(&key, n_kv_heads, d_head, key_rank);
-        let value_identity = value_rank == d_head
-            && all_heads_are_identity(&value, n_kv_heads, d_head, value_rank);
+        let key_identity =
+            key_rank == d_head && all_heads_are_identity(&key, n_kv_heads, d_head, key_rank);
+        let value_identity =
+            value_rank == d_head && all_heads_are_identity(&value, n_kv_heads, d_head, value_rank);
         let exact_identity = key_identity && value_identity;
         let rotary_rule = if key_identity
         {
@@ -240,14 +243,7 @@ impl LatentGqaBases {
         }
         let key = prefix_basis(n_kv_heads, d_head, key_rank)?;
         let value = prefix_basis(n_kv_heads, d_head, value_rank)?;
-        Self::new(
-            n_kv_heads,
-            d_head,
-            key_rank,
-            value_rank,
-            key,
-            value,
-        )
+        Self::new(n_kv_heads, d_head, key_rank, value_rank, key, value)
     }
 
     #[must_use]
@@ -534,11 +530,7 @@ impl AbsorbedGqaWeights {
         self.d_model
             .saturating_mul(self.d_model)
             .saturating_mul(2)
-            .saturating_add(
-                self.d_model
-                    .saturating_mul(kv_dim)
-                    .saturating_mul(2),
-            )
+            .saturating_add(self.d_model.saturating_mul(kv_dim).saturating_mul(2))
     }
 }
 
@@ -688,11 +680,7 @@ fn checked_product(left: usize, right: usize) -> Result<usize, ElasticDecodePlan
         .ok_or(ElasticDecodePlanError::Overflow)
 }
 
-fn checked_product3(
-    a: usize,
-    b: usize,
-    c: usize,
-) -> Result<usize, ElasticDecodePlanError> {
+fn checked_product3(a: usize, b: usize, c: usize) -> Result<usize, ElasticDecodePlanError> {
     a.checked_mul(b)
         .and_then(|value| value.checked_mul(c))
         .ok_or(ElasticDecodePlanError::Overflow)
@@ -717,12 +705,7 @@ fn prefix_basis(
     Ok(basis)
 }
 
-fn all_heads_are_identity(
-    basis: &[f32],
-    n_kv_heads: usize,
-    d_head: usize,
-    rank: usize,
-) -> bool {
+fn all_heads_are_identity(basis: &[f32], n_kv_heads: usize, d_head: usize, rank: usize) -> bool {
     if rank != d_head
     {
         return false;
@@ -944,8 +927,7 @@ mod tests {
                 let mut sum = 0.0f32;
                 for latent_col in 0..rank
                 {
-                    sum += latent[q_head * rank + latent_col]
-                        * basis[channel * rank + latent_col];
+                    sum += latent[q_head * rank + latent_col] * basis[channel * rank + latent_col];
                 }
                 dense_context[q_head * attention.d_head + channel] = sum;
             }

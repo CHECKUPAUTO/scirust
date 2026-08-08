@@ -213,8 +213,7 @@ impl ElasticMlaSlhaLayout {
 }
 
 fn checked_mul(left: usize, right: usize) -> Result<usize, ElasticMlaSlhaError> {
-    left.checked_mul(right)
-        .ok_or(ElasticMlaSlhaError::Overflow)
+    left.checked_mul(right).ok_or(ElasticMlaSlhaError::Overflow)
 }
 
 fn checked_mul3(a: usize, b: usize, c: usize) -> Result<usize, ElasticMlaSlhaError> {
@@ -234,13 +233,8 @@ mod tests {
         let model = SciAgentModel::new(&SciAgentConfig::small());
         let attention = &model.layers[0].attn;
         let selection = RopePairSelection::high_frequency_prefix(attention.d_head, 4).unwrap();
-        let bases = ElasticMlaBases::coordinate_prefix(
-            attention.n_kv_heads,
-            selection,
-            4,
-            4,
-        )
-        .unwrap();
+        let bases =
+            ElasticMlaBases::coordinate_prefix(attention.n_kv_heads, selection, 4, 4).unwrap();
         ElasticMlaLayerWeights::from_attention(attention, &bases).unwrap()
     }
 

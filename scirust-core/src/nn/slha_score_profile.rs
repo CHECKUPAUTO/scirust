@@ -216,8 +216,7 @@ impl SlhaScoreProfile {
 
         let coarse = self.coarse_dot_int4(query_coarse, packed_latent, scale, group_scales);
         let hamming = self.hamming_valid_bits(query_sign, residual_bitmap);
-        Ok(coarse
-            + dynamic_lambda * (self.residual_bits as f32 - 2.0 * hamming as f32))
+        Ok(coarse + dynamic_lambda * (self.residual_bits as f32 - 2.0 * hamming as f32))
     }
 
     fn validate_coarse_inputs(
@@ -362,15 +361,7 @@ mod tests {
         let residual = [0xffff_ffff_0000_0000u64];
         let hamming = (query_sign[0] ^ residual[0]).count_ones();
         let actual = profile
-            .score_hot_int4(
-                &query,
-                &packed,
-                1.0,
-                &[255],
-                &query_sign,
-                &residual,
-                0.25,
-            )
+            .score_hot_int4(&query, &packed, 1.0, &[255], &query_sign, &residual, 0.25)
             .unwrap();
         let expected = 0.25 * (64.0 - 2.0 * hamming as f32);
         assert_eq!(actual.to_bits(), expected.to_bits());

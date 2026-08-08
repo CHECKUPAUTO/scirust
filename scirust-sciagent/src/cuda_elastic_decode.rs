@@ -38,7 +38,10 @@ impl fmt::Display for CudaElasticDecodeError {
         match self
         {
             Self::Plan(error) => write!(formatter, "{error}"),
-            Self::RuntimeUnavailable => write!(formatter, "Elastic CUDA decode runtime unavailable"),
+            Self::RuntimeUnavailable =>
+            {
+                write!(formatter, "Elastic CUDA decode runtime unavailable")
+            },
             Self::UnsupportedRotaryRule { layer, rule } => write!(
                 formatter,
                 "Elastic CUDA layer {layer} does not yet support rotary rule {rule:?}"
@@ -327,7 +330,11 @@ impl CudaElasticDecodeModel {
         for (block, cache) in self.blocks.iter().zip(caches.iter_mut())
         {
             runtime.rms_norm_into(&workspace.x, &block.norm1, self.eps, &mut workspace.norm);
-            runtime.matmul_into(&workspace.norm, &block.qkv_latent, &mut workspace.qkv_latent);
+            runtime.matmul_into(
+                &workspace.norm,
+                &block.qkv_latent,
+                &mut workspace.qkv_latent,
+            );
             runtime.latent_gqa_into(
                 &workspace.qkv_latent,
                 &mut cache.k,
@@ -355,7 +362,12 @@ impl CudaElasticDecodeModel {
             runtime.add_into(&workspace.h, &workspace.tmp_d, &mut workspace.x);
         }
 
-        runtime.rms_norm_into(&workspace.x, &self.final_norm, self.eps, &mut workspace.norm);
+        runtime.rms_norm_into(
+            &workspace.x,
+            &self.final_norm,
+            self.eps,
+            &mut workspace.norm,
+        );
         runtime.matmul_bt_into(&workspace.norm, &self.embedding, &mut workspace.logits);
     }
 
@@ -424,8 +436,8 @@ fn fuse_columns(parts: &[&Tensor]) -> Vec<f32> {
         for part in parts
         {
             let source = &part.data[row * part.cols..(row + 1) * part.cols];
-            let destination = &mut output
-                [row * cols + destination_col..row * cols + destination_col + part.cols];
+            let destination =
+                &mut output[row * cols + destination_col..row * cols + destination_col + part.cols];
             destination.copy_from_slice(source);
             destination_col += part.cols;
         }
@@ -444,8 +456,8 @@ fn fuse_flat_columns(rows: usize, parts: &[(&[f32], usize)]) -> Vec<f32> {
         for &(data, cols) in parts
         {
             let source = &data[row * cols..(row + 1) * cols];
-            let destination = &mut output[row * total_cols + destination_col
-                ..row * total_cols + destination_col + cols];
+            let destination = &mut output
+                [row * total_cols + destination_col..row * total_cols + destination_col + cols];
             destination.copy_from_slice(source);
             destination_col += cols;
         }

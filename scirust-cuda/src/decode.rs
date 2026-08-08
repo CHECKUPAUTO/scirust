@@ -266,7 +266,8 @@ pub struct CudaDecodeRuntime {
 
 impl CudaDecodeRuntime {
     pub fn new() -> Option<Self> {
-        if !cuda_libraries_available() || !nvrtc_available() {
+        if !cuda_libraries_available() || !nvrtc_available()
+        {
             return None;
         }
         let ctx = CudaContext::new(0).ok()?;
@@ -313,7 +314,10 @@ impl CudaDecodeRuntime {
     }
 
     pub fn kv_cache(&self, capacity: usize, cols: usize) -> CudaDecodeKvCache {
-        assert!(capacity > 0 && cols > 0, "decode KV cache must be non-empty");
+        assert!(
+            capacity > 0 && cols > 0,
+            "decode KV cache must be non-empty"
+        );
         let buf = self
             .stream
             .alloc_zeros::<bf16>(capacity * cols)
@@ -339,8 +343,15 @@ impl CudaDecodeRuntime {
         table: &CudaDecodeMatrix,
         out: &mut CudaDecodeMatrix,
     ) {
-        assert!(table.rows > 0 && table.cols > 0, "decode embedding table empty");
-        assert_eq!((out.rows, out.cols), (1, table.cols), "decode embed output shape");
+        assert!(
+            table.rows > 0 && table.cols > 0,
+            "decode embedding table empty"
+        );
+        assert_eq!(
+            (out.rows, out.cols),
+            (1, table.cols),
+            "decode embed output shape"
+        );
         let d = table.cols;
         let (token_a, vocab_a, d_a) = (token as usize, table.rows, d);
         let mut builder = self.stream.launch_builder(&self.kernels.embed_token);
@@ -362,14 +373,13 @@ impl CudaDecodeRuntime {
         out
     }
 
-    pub fn add_into(
-        &self,
-        a: &CudaDecodeMatrix,
-        b: &CudaDecodeMatrix,
-        out: &mut CudaDecodeMatrix,
-    ) {
+    pub fn add_into(&self, a: &CudaDecodeMatrix, b: &CudaDecodeMatrix, out: &mut CudaDecodeMatrix) {
         assert_eq!((a.rows, a.cols), (b.rows, b.cols), "decode add input shape");
-        assert_eq!((out.rows, out.cols), (a.rows, a.cols), "decode add output shape");
+        assert_eq!(
+            (out.rows, out.cols),
+            (a.rows, a.cols),
+            "decode add output shape"
+        );
         let n = a.rows * a.cols;
         let n_a = n;
         let mut builder = self.stream.launch_builder(&self.kernels.add);
@@ -398,8 +408,16 @@ impl CudaDecodeRuntime {
         out: &mut CudaDecodeMatrix,
     ) {
         assert_eq!(x.rows, 1, "decode RMSNorm is batch-one only");
-        assert_eq!(weight.rows * weight.cols, x.cols, "decode RMSNorm weight shape");
-        assert_eq!((out.rows, out.cols), (1, x.cols), "decode RMSNorm output shape");
+        assert_eq!(
+            weight.rows * weight.cols,
+            x.cols,
+            "decode RMSNorm weight shape"
+        );
+        assert_eq!(
+            (out.rows, out.cols),
+            (1, x.cols),
+            "decode RMSNorm output shape"
+        );
         let cols = x.cols;
         let (cols_a, eps_a) = (cols, eps);
         let mut builder = self.stream.launch_builder(&self.kernels.rmsnorm);
@@ -427,15 +445,15 @@ impl CudaDecodeRuntime {
         out
     }
 
-    pub fn swiglu_split_into(
-        &self,
-        gate_up: &CudaDecodeMatrix,
-        out: &mut CudaDecodeMatrix,
-    ) {
+    pub fn swiglu_split_into(&self, gate_up: &CudaDecodeMatrix, out: &mut CudaDecodeMatrix) {
         assert_eq!(gate_up.rows, 1, "decode SwiGLU is batch-one only");
         assert_eq!(gate_up.cols % 2, 0, "decode gate/up width must be even");
         let d_ff = gate_up.cols / 2;
-        assert_eq!((out.rows, out.cols), (1, d_ff), "decode SwiGLU output shape");
+        assert_eq!(
+            (out.rows, out.cols),
+            (1, d_ff),
+            "decode SwiGLU output shape"
+        );
         let d_ff_a = d_ff;
         let mut builder = self.stream.launch_builder(&self.kernels.swiglu_split);
         builder.arg(&mut out.buf);
@@ -502,7 +520,11 @@ impl CudaDecodeRuntime {
     ) {
         let (m, k, n) = (a.rows, a.cols, b.rows);
         assert_eq!(b.cols, k, "decode matmul_bt inner dimensions");
-        assert_eq!((out.rows, out.cols), (m, n), "decode matmul_bt output shape");
+        assert_eq!(
+            (out.rows, out.cols),
+            (m, n),
+            "decode matmul_bt output shape"
+        );
         let cfg = MatmulConfig {
             transa: true,
             transb: false,
@@ -555,20 +577,20 @@ impl CudaDecodeRuntime {
         assert_eq!(qkv.cols, d_model + 2 * kv_dim, "decode fused QKV width");
         assert_eq!(kcache.cols, kv_dim, "decode K-cache width");
         assert_eq!(vcache.cols, kv_dim, "decode V-cache width");
-        assert_eq!(kcache.capacity, vcache.capacity, "decode KV capacity mismatch");
+        assert_eq!(
+            kcache.capacity, vcache.capacity,
+            "decode KV capacity mismatch"
+        );
         assert!(pos < kcache.capacity, "decode position exceeds KV capacity");
-        assert_eq!((out.rows, out.cols), (1, d_model), "decode GQA output shape");
+        assert_eq!(
+            (out.rows, out.cols),
+            (1, d_model),
+            "decode GQA output shape"
+        );
 
         let capacity = kcache.capacity;
-        let (pos_a, cap_a, d_a, kv_a, nh_a, nkv_a, theta_a) = (
-            pos,
-            capacity,
-            d_model,
-            kv_dim,
-            n_heads,
-            n_kv_heads,
-            theta,
-        );
+        let (pos_a, cap_a, d_a, kv_a, nh_a, nkv_a, theta_a) =
+            (pos, capacity, d_model, kv_dim, n_heads, n_kv_heads, theta);
         let scale_a = 1.0f32 / (dh as f32).sqrt();
         let mut builder = self.stream.launch_builder(&self.kernels.gqa);
         builder.arg(&mut out.buf);
@@ -629,7 +651,8 @@ mod tests {
 
     #[test]
     fn decode_kernel_source_compiles_when_nvrtc_is_available() {
-        if !nvrtc_available() {
+        if !nvrtc_available()
+        {
             eprintln!("cuda decode: NVRTC unavailable, skipping compile test");
             return;
         }
