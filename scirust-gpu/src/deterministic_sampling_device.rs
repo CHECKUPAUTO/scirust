@@ -20,7 +20,7 @@ use scirust_compute::{
 };
 use scirust_core::nn::sampling::SamplingConfig;
 
-const STATE_WORDS: usize = 10;
+const STATE_WORDS: usize = 11;
 const F32_BYTES: usize = core::mem::size_of::<f32>();
 const U32_BYTES: usize = core::mem::size_of::<u32>();
 const MAX_EXACT_F32_INDEX: usize = 1 << 24;
@@ -38,6 +38,7 @@ struct SamplerState {
     inc_hi: u32,
     output_id: u32,
     draws: u32,
+    enabled: u32,
 };
 
 struct WideU32 {
@@ -118,6 +119,10 @@ fn main() {
     let temperature = bitcast<f32>(sampling_state.temperature_bits);
     let top_p = bitcast<f32>(sampling_state.top_p_bits);
     let order_offset = vocab_size;
+
+    if (sampling_state.enabled == 0u) {
+        return;
+    }
 
     if (temperature <= 0.0 || sampling_state.top_k == 1u) {
         sampling_state.output_id = greedy_argmax(vocab_size);
@@ -303,6 +308,7 @@ impl WgpuDeterministicSampler {
             (increment >> 32) as u32,
             0,
             0,
+            1,
         ];
 
         let logits_bytes = bytes_for_f32(vocab_size)?;
@@ -388,6 +394,7 @@ impl WgpuDeterministicSampler {
             (self.increment >> 32) as u32,
             0,
             0,
+            1,
         ];
         self.adapter
             .write(&self.state, 4 * U32_BYTES, bytemuck::cast_slice(&words))?;
@@ -397,6 +404,28 @@ impl WgpuDeterministicSampler {
 
     pub(crate) fn logits_buffer(&self) -> &WgpuComputeBuffer {
         &self.logits
+    }
+
+    pub(crate) fn state_buffer(&self) -> &WgpuComputeBuffer {
+        &self.state
+    }
+
+    pub(crate) fn launch_resident_without_readback(
+        &self,
+    ) -> Result<(), WgpuDeterministicSamplerError> {
+        self.launch()?;
+        Ok(())
+    }
+
+    pub(crate) fn set_enabled(&self, enabled: bool) -> Result<(), WgpuDeterministicSamplerError> {
+        let word = [u32::from(enabled)];
+        self.adapter
+            .write(&self.state, 10 * U32_BYTES, bytemuck::cast_slice(&word))?;
+        Ok(())
+    }
+
+    pub(crate) fn sync_host_draws(&mut self, draws: usize) {
+        self.draws = draws;
     }
 
     pub(crate) fn sample_resident(&mut self) -> Result<usize, WgpuDeterministicSamplerError> {
