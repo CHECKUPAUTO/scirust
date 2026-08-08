@@ -62,6 +62,7 @@ pub mod rng;
 pub mod rope;
 pub mod sampling;
 pub mod sequential;
+pub mod slha_score_profile;
 pub mod smoothing;
 #[allow(dead_code)]
 pub mod tiered_latent_kv_backend;
@@ -111,6 +112,7 @@ pub use positional_encoding::PositionalEncoding;
 pub use residual::ResidualBlock;
 pub use rng::PcgEngine;
 pub use sequential::Sequential;
+pub use slha_score_profile::{SlhaScoreError, SlhaScoreProfile};
 pub use tiered_latent_kv_backend::{
     TieredLatentBackendError, TieredLatentTelemetry, TieredResidualLatentBackend,
 };
