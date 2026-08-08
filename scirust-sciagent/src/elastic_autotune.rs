@@ -13,8 +13,11 @@ use std::time::Instant;
 use crate::elastic_calibration::{CalibrationError, CalibrationMeasurement, CalibrationReport};
 use crate::elastic_heap::HeapBpe;
 use crate::elastic_indexed::IndexedBpe;
+use crate::elastic_profile_fit::{ElasticProfileFitter, ProfileFitError};
 use crate::elastic_tiny::TinyScanBpe;
-use crate::elastic_tokenizer::{BpeKernel, CanonicalBpeOracle, DuplicateMergeRule, TokenId};
+use crate::elastic_tokenizer::{
+    BpeKernel, CanonicalBpeOracle, DuplicateMergeRule, ElasticProfile, TokenId,
+};
 
 const CALIBRATION_KERNELS: [BpeKernel; 4] = [
     BpeKernel::Reference,
@@ -84,6 +87,12 @@ impl AutotuneResult {
 
     pub const fn report(&self) -> &CalibrationReport {
         &self.report
+    }
+
+    /// Fits the six execution classes directly from the semantics-gated timing
+    /// samples gathered by this calibration session.
+    pub fn fit_profile(&self) -> Result<ElasticProfile, ProfileFitError> {
+        ElasticProfileFitter::fit(&self.measurements)
     }
 }
 
