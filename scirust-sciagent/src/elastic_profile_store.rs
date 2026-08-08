@@ -9,7 +9,9 @@ use std::fmt;
 use std::fs;
 use std::path::Path;
 
-use crate::elastic_tokenizer::{BpeKernel, ElasticProfile, ElasticThresholds, ThresholdError, TokenId};
+use crate::elastic_tokenizer::{
+    BpeKernel, ElasticProfile, ElasticThresholds, ThresholdError, TokenId,
+};
 use crate::sha256::sha256_hex;
 
 pub const ELASTIC_PROFILE_SCHEMA_V1: u32 = 1;
@@ -145,7 +147,8 @@ impl StoredElasticProfile {
     }
 
     pub fn from_json_str(input: &str) -> Result<Self, ProfileStoreError> {
-        let value: serde_json::Value = serde_json::from_str(input).map_err(ProfileStoreError::Json)?;
+        let value: serde_json::Value =
+            serde_json::from_str(input).map_err(ProfileStoreError::Json)?;
         let schema_version = required_u64(&value, "schema_version")?;
         let schema_version = u32::try_from(schema_version)
             .map_err(|_| ProfileStoreError::InvalidField("schema_version"))?;
@@ -254,10 +257,7 @@ fn required_str<'a>(
         .ok_or(ProfileStoreError::InvalidField(field))
 }
 
-fn required_u64(
-    value: &serde_json::Value,
-    field: &'static str,
-) -> Result<u64, ProfileStoreError> {
+fn required_u64(value: &serde_json::Value, field: &'static str) -> Result<u64, ProfileStoreError> {
     value
         .get(field)
         .ok_or(ProfileStoreError::MissingField(field))?
@@ -269,8 +269,7 @@ fn required_usize(
     value: &serde_json::Value,
     field: &'static str,
 ) -> Result<usize, ProfileStoreError> {
-    usize::try_from(required_u64(value, field)?)
-        .map_err(|_| ProfileStoreError::InvalidField(field))
+    usize::try_from(required_u64(value, field)?).map_err(|_| ProfileStoreError::InvalidField(field))
 }
 
 #[derive(Debug)]
@@ -297,24 +296,32 @@ impl fmt::Display for ProfileStoreError {
             Self::Json(error) => write!(f, "elastic profile JSON failed: {error}"),
             Self::MissingField(field) => write!(f, "elastic profile missing field `{field}`"),
             Self::InvalidField(field) => write!(f, "elastic profile invalid field `{field}`"),
-            Self::InvalidKernelCount(count) => {
+            Self::InvalidKernelCount(count) =>
+            {
                 write!(f, "elastic profile must contain six kernels, found {count}")
             },
             Self::UnknownKernel(name) => write!(f, "elastic profile unknown kernel `{name}`"),
-            Self::UnsupportedSchema(version) => {
+            Self::UnsupportedSchema(version) =>
+            {
                 write!(f, "unsupported elastic profile schema version {version}")
             },
-            Self::SemanticVersionMismatch => {
+            Self::SemanticVersionMismatch =>
+            {
                 f.write_str("elastic profile BPE semantic version mismatch")
             },
-            Self::TokenizerFingerprintMismatch => {
+            Self::TokenizerFingerprintMismatch =>
+            {
                 f.write_str("elastic profile tokenizer fingerprint mismatch")
             },
             Self::HardwareMismatch => f.write_str("elastic profile hardware identity mismatch"),
-            Self::HardwareFingerprintCorrupt => {
+            Self::HardwareFingerprintCorrupt =>
+            {
                 f.write_str("elastic profile hardware fingerprint is corrupt")
             },
-            Self::InvalidThresholds(error) => write!(f, "elastic profile thresholds invalid: {error}"),
+            Self::InvalidThresholds(error) =>
+            {
+                write!(f, "elastic profile thresholds invalid: {error}")
+            },
         }
     }
 }
