@@ -53,7 +53,7 @@ struct CacheRecord {
 pub fn probe_host_topology() -> SystemTopology {
     #[cfg(target_os = "linux")]
     {
-        return probe_linux_topology(Path::new("/sys/devices/system"));
+        probe_linux_topology(Path::new("/sys/devices/system"))
     }
 
     #[cfg(not(target_os = "linux"))]
