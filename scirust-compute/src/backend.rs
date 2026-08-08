@@ -17,12 +17,23 @@ pub trait ComputeBackend {
 
     /// Rich architecture-neutral hardware profile for this backend.
     ///
-    /// The default implementation is deliberately conservative and promotes
-    /// only facts already present in [`DeviceCapabilities`]. Backends should
-    /// override this method when they have reliable ISA, numeric, memory,
-    /// matrix or reproducibility information.
+    /// The default starts from the conservative legacy bridge. With `std`
+    /// enabled, a CPU backend additionally receives the runtime host
+    /// architecture/ISA facts from [`crate::probe_host_cpu`]. Numeric, memory,
+    /// matrix and reproducibility guarantees are still left to concrete
+    /// backends to override when they can state them honestly.
     fn hardware_capabilities(&self) -> HardwareCapabilities {
-        self.capabilities().hardware_baseline()
+        let mut hardware = self.capabilities().hardware_baseline();
+
+        #[cfg(feature = "std")]
+        if self.capabilities().device.kind() == crate::DeviceKind::Cpu
+        {
+            let probed = crate::probe_host_cpu();
+            hardware.architecture = probed.architecture;
+            hardware.isa = probed.isa;
+        }
+
+        hardware
     }
 
     fn allocate(
