@@ -137,6 +137,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          command -v flock >/dev/null
+          exec 9>"$SCIRUST_THOR_GPU_LOCK"
+          flock -x 9
+
           if ! compute_apps="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null)"; then
             echo "::error::Phase 28 cannot verify Thor occupancy."
             exit 1
@@ -153,21 +157,22 @@ jobs:
             pid="$(printf '%s' "$raw_pid" | tr -d '[:space:]')"
             [[ "$pid" =~ ^[0-9]+$ ]] || { managed_training=false; continue; }
             cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
-            cwd="$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)"
-            stderr_target="$(readlink -f "/proc/$pid/fd/2" 2>/dev/null || true)"
-            echo "pid=$pid cmdline=$cmdline"
-            echo "pid=$pid cwd=$cwd"
-            echo "pid=$pid stderr=$stderr_target"
-            if [[ "$cmdline" != *"/root/scirust/target/release/examples/cuda_pretrain"* ]] \
-              || [[ "$cwd" != /root/scirust-sciagent-prod-* ]] \
-              || [[ "$stderr_target" != /root/sciagent-production/*/train-*.log ]]; then
+            proc_user="$(ps -p "$pid" -o user= 2>/dev/null | xargs || true)"
+            ppid="$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d '[:space:]')"
+            cgroup="$(cat "/proc/$pid/cgroup" 2>/dev/null || true)"
+            echo "pid=$pid user=$proc_user ppid=$ppid cmdline=$cmdline cgroup=$cgroup"
+            if [[ "${process_name# }" != "/root/scirust/target/release/examples/cuda_pretrain" ]] \
+              || [[ "$cmdline" != *"/root/scirust/target/release/examples/cuda_pretrain"* ]] \
+              || [[ "$proc_user" != "root" ]] \
+              || [[ "$ppid" != "1" ]] \
+              || [[ "$cgroup" != 0::/user.slice/user-0.slice/session-*.scope ]]; then
               managed_training=false
             fi
           done <<< "$compute_apps"
 
           if [[ "$managed_training" == true ]]; then
             echo "run_baseline=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Phase 28 Thor baseline deferred: a recognized SciAgent production cuda_pretrain run owns the GPU. The process is left untouched."
+            echo "::notice::Phase 28 Thor baseline deferred: a detached root SciAgent cuda_pretrain session owns the GPU. No WGPU workload is launched and the training process is left untouched."
             exit 0
           fi
 
@@ -178,6 +183,13 @@ jobs:
         run: |
           echo "Phase 28 software/static gates remain authoritative for this run."
           echo "The real-Thor performance baseline is deferred until the managed SciAgent production training releases the GPU."
+          {
+            echo "## Phase 28 Thor performance baseline: DEFERRED"
+            echo
+            echo "The Thor is owned by the detached SciAgent production cuda_pretrain session."
+            echo "No Phase 28 WGPU probe or performance benchmark was launched."
+            echo "This is not hardware-baseline evidence; PR #1024 remains draft until an idle-Thor run records the two CSV rows."
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Prepare isolated executable build directory
         if: steps.occupancy.outputs.run_baseline == 'true'
         run: |
