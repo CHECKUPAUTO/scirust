@@ -1,5 +1,6 @@
 use scirust_compute::{
-    Architecture, ArchitectureFamily, DType, DeviceCapabilities, HardwareCapabilities, MemorySpace,
+    AcceleratorTopologyDescriptor, AcceleratorTopologyProvider, Architecture, ArchitectureFamily,
+    DType, DeviceCapabilities, HardwareCapabilities, MemoryDomainDescriptor, MemorySpace,
     SupportLevel,
 };
 use scirust_cuda::CudaDeviceInfo;
@@ -79,6 +80,26 @@ pub(crate) fn hardware_capabilities(
     // path publishes and tests those semantic guarantees.
 
     hardware
+}
+
+pub(crate) fn topology_descriptor(
+    capabilities: &DeviceCapabilities,
+    info: &CudaDeviceInfo,
+) -> AcceleratorTopologyDescriptor {
+    let mut descriptor = AcceleratorTopologyDescriptor::new(capabilities.device);
+    descriptor.name = Some(capabilities.name.clone());
+    descriptor.memory = Some(MemoryDomainDescriptor {
+        space: MemorySpace::Device,
+        capacity_bytes: u64::try_from(info.total_memory_bytes).ok(),
+        host_addressable: SupportLevel::Unknown,
+    });
+    descriptor
+}
+
+impl AcceleratorTopologyProvider for super::CudaComputeAdapter {
+    fn accelerator_topology_descriptor(&self) -> AcceleratorTopologyDescriptor {
+        topology_descriptor(self.capabilities(), self.runtime().device_info())
+    }
 }
 
 #[cfg(test)]
@@ -188,5 +209,22 @@ mod tests {
         assert_eq!(hardware.execution.atomic_i64, SupportLevel::Unknown);
         assert_eq!(hardware.matrix.accelerated, SupportLevel::Unknown);
         assert!(hardware.reproducibility.modes.is_empty());
+    }
+
+    #[test]
+    fn topology_profile_uses_driver_memory_capacity_without_claiming_host_access() {
+        let capabilities = legacy_capabilities();
+        let info = device_info();
+        let descriptor = topology_descriptor(&capabilities, &info);
+        let memory = descriptor.memory.expect("logical CUDA device memory");
+
+        assert_eq!(descriptor.device, capabilities.device);
+        assert_eq!(descriptor.name.as_deref(), Some(capabilities.name.as_str()));
+        assert_eq!(memory.space, MemorySpace::Device);
+        assert_eq!(
+            memory.capacity_bytes,
+            u64::try_from(info.total_memory_bytes).ok()
+        );
+        assert_eq!(memory.host_addressable, SupportLevel::Unknown);
     }
 }
