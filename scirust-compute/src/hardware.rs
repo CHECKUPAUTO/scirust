@@ -373,7 +373,10 @@ mod tests {
             ..IsaCapabilities::default()
         };
 
-        assert_eq!(isa.support_level(&IsaFeature::Avx2), SupportLevel::Supported);
+        assert_eq!(
+            isa.support_level(&IsaFeature::Avx2),
+            SupportLevel::Supported
+        );
         assert_eq!(
             isa.support_level(&IsaFeature::Avx512F),
             SupportLevel::Unsupported
