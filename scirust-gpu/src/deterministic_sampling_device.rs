@@ -413,8 +413,7 @@ impl WgpuDeterministicSampler {
     pub(crate) fn launch_resident_without_readback(
         &self,
     ) -> Result<(), WgpuDeterministicSamplerError> {
-        let event = self.launch()?;
-        self.adapter.wait(&event)?;
+        self.launch()?;
         Ok(())
     }
 
