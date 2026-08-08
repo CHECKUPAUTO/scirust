@@ -148,7 +148,7 @@ const fn kernel_order(kernel: BpeKernel) -> u8 {
 fn integer_median(sorted: &[u64]) -> u64 {
     debug_assert!(!sorted.is_empty());
     let middle = sorted.len() / 2;
-    if sorted.len() % 2 == 1
+    if !sorted.len().is_multiple_of(2)
     {
         sorted[middle]
     }
