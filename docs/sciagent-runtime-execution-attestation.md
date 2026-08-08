@@ -39,9 +39,11 @@ This separation prevents an attestation helper from silently changing execution 
 
 ## Model and tokenizer provenance
 
-Model and tokenizer hashes are required `Sha256Digest` inputs. They must be computed once at the relevant load/provenance boundary and then carried with the loaded runtime state. The builder does not substitute a placeholder hash and does not re-read large files during generation.
+Model and tokenizer hashes are required `Sha256Digest` inputs. They are computed once at the relevant load/provenance boundary and then carried with the loaded runtime state. The builder does not substitute a placeholder hash and does not re-read large files during generation.
 
-A follow-up integration phase will add provenance-bearing checkpoint/tokenizer loaders for the resident production paths and pass those hashes into this builder.
+`load_checkpoint_with_provenance` reads `model.safetensors` once and hashes the exact byte buffer that is passed to the safetensors deserializer, eliminating a hash/load TOCTOU gap. The legacy `load_checkpoint` API remains available and delegates to that provenance-bearing path.
+
+SciAgent also exposes deterministic identities for the built-in raw-byte tokenizer and the embedded `tokenizer/bpe.json`. The raw-byte path hashes a versioned semantic identifier because it has no artifact file; the embedded BPE path hashes the exact `include_bytes!` payload. External tokenizer files remain a follow-up so the active ElasticTokeniser work can settle without introducing a competing parser path.
 
 ## Integrity and trust
 
