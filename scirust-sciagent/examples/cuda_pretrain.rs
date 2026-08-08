@@ -249,6 +249,7 @@ fn main() {
 
     let mut model = SciAgentModel::new(&config);
     let mut start_step = 0usize;
+    let mut loaded_resume_path: Option<std::path::PathBuf> = None;
     if let Some((path, meta)) = &resume
     {
         match load_checkpoint(&mut model, path)
@@ -256,8 +257,9 @@ fn main() {
             Ok(_) =>
             {
                 start_step = meta.step;
+                loaded_resume_path = Some(path.clone());
                 println!(
-                    "resuming from {} (step {}, loss {:.4})",
+                    "resuming model from {} (step {}, loss {:.4})",
                     path.display(),
                     meta.step,
                     meta.loss
@@ -273,7 +275,47 @@ fn main() {
         eprintln!("no CUDA device available. Run on the Jetson Thor (needs the CUDA toolkit).");
         std::process::exit(2);
     };
-    trainer.reset_step(); // fresh AdamW moments; the LR schedule continues via start_step
+    let optimizer_resume = if let Some(path) = loaded_resume_path.as_deref()
+    {
+        match trainer.load_optimizer_state(path)
+        {
+            Ok(Some(state)) =>
+            {
+                if state.step != start_step
+                {
+                    eprintln!(
+                        "optimizer checkpoint step {} != model step {}; refusing mismatched resume",
+                        state.step, start_step
+                    );
+                    std::process::exit(1);
+                }
+                println!(
+                    "optimizer state restored exactly at step {} (AdamW m/v + bias correction)",
+                    state.step
+                );
+                Some(state)
+            },
+            Ok(None) =>
+            {
+                eprintln!(
+                    "legacy checkpoint has no optimizer state; AdamW moments restart once. \
+                     The next B32 checkpoint will be exactly resumable."
+                );
+                trainer.reset_step();
+                None
+            },
+            Err(e) =>
+            {
+                eprintln!("optimizer checkpoint is present but invalid: {e}");
+                std::process::exit(1);
+            },
+        }
+    }
+    else
+    {
+        trainer.reset_step();
+        None
+    };
 
     let params = config.total_parameters();
     let weight_mb = params as f64 * 4.0 / 1e6; // fp32 master
@@ -382,31 +424,57 @@ fn main() {
         toks
     };
 
-    // Total-step target. `SCIAGENT_TOTAL_STEPS` sets it ABSOLUTELY — so resuming an
-    // interrupted run to its original target is just `SCIAGENT_TOTAL_STEPS=40000`
-    // (no arithmetic, no overshoot from the additive default). Otherwise it stays
-    // additive (`start_step + STEPS`), the historical behavior. Warmup is 10% of the
-    // ACTUAL remaining run either way, so a short resume re-warms briefly (cushioning
-    // the AdamW-moment reset) rather than re-ramping a full fresh-run warmup.
+    // Exact B32 resumes inherit the saved optimizer/LR trajectory by default. An
+    // explicit environment override still wins. Legacy checkpoints (no AdamW sidecar)
+    // keep the historical one-time re-warm that cushions their zero-moment restart.
     let steps_env = env_usize("SCIAGENT_STEPS", 300);
     let total_steps = std::env::var("SCIAGENT_TOTAL_STEPS")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
         .filter(|&t| t > start_step)
+        .or_else(|| {
+            optimizer_resume
+                .as_ref()
+                .map(|s| s.total_steps)
+                .filter(|&t| t > start_step)
+        })
         .unwrap_or(start_step + steps_env);
     let run_len = total_steps.saturating_sub(start_step).max(1);
-    let warmup_extra = std::env::var("SCIAGENT_WARMUP")
+    let explicit_warmup = std::env::var("SCIAGENT_WARMUP")
         .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or((run_len / 10).max(1));
-    // LR must key off model *size*, not vocab: a 270M byte-level model (vocab 256)
-    // diverges at the 3e-3 that suits a tiny demo. Small trunks (d_model ≤ 256) can
-    // take the hot 3e-3; anything larger gets the standard 3e-4 (with warmup+cosine).
-    let default_lr = if config.d_model <= 256 { 3e-3 } else { 3e-4 };
-    let base_lr = std::env::var("SCIAGENT_LR")
+        .and_then(|v| v.parse::<usize>().ok());
+    let warmup_steps = if let Some(extra) = explicit_warmup
+    {
+        start_step + extra
+    }
+    else if let Some(saved) = optimizer_resume.as_ref()
+    {
+        saved.warmup_steps
+    }
+    else
+    {
+        start_step + (run_len / 10).max(1)
+    };
+    // LR must key off model size for fresh/legacy runs. Exact resumes inherit the
+    // saved schedule unless SCIAGENT_LR explicitly requests a new peak LR.
+    let size_default_lr = if config.d_model <= 256 { 3e-3 } else { 3e-4 };
+    let explicit_lr = std::env::var("SCIAGENT_LR")
         .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(default_lr);
+        .and_then(|v| v.parse::<f32>().ok());
+    let base_lr = explicit_lr
+        .or_else(|| optimizer_resume.as_ref().map(|s| s.base_lr))
+        .unwrap_or(size_default_lr);
+    let min_lr = if explicit_lr.is_some()
+    {
+        base_lr * 0.1
+    }
+    else
+    {
+        optimizer_resume
+            .as_ref()
+            .map(|s| s.min_lr)
+            .unwrap_or(base_lr * 0.1)
+    };
     // Global grad-norm clip (default 1.0; SCIAGENT_CLIP overrides, <= 0 disables).
     let max_grad_norm = std::env::var("SCIAGENT_CLIP")
         .ok()
@@ -416,6 +484,7 @@ fn main() {
     let adam_eps = std::env::var("SCIAGENT_EPS")
         .ok()
         .and_then(|v| v.parse().ok())
+        .or_else(|| optimizer_resume.as_ref().map(|s| s.adam_eps))
         .unwrap_or(1e-5f32);
     // Held-out validation fraction (tail; default 2%; SCIAGENT_VAL_FRAC overrides, 0 disables).
     let val_frac = std::env::var("SCIAGENT_VAL_FRAC")
@@ -433,16 +502,19 @@ fn main() {
         std::env::var("SCIAGENT_SHUFFLE").as_deref(),
         Ok("0" | "false")
     );
+    let resume_betas = optimizer_resume.as_ref().map(|s| s.betas);
+    let resume_weight_decay = optimizer_resume.as_ref().map(|s| s.weight_decay);
     let cfg = CudaPretrainConfig {
         base_lr,
-        min_lr: base_lr * 0.1,
-        warmup_steps: start_step + warmup_extra,
+        min_lr,
+        warmup_steps,
         total_steps,
         start_step,
         seq_len,
         batch_size,
         telemetry_interval,
-        weight_decay: 0.0,
+        betas: resume_betas.unwrap_or(CudaPretrainConfig::default().betas),
+        weight_decay: resume_weight_decay.unwrap_or(0.0),
         adam_eps,
         log_interval: 25,
         save_interval,
