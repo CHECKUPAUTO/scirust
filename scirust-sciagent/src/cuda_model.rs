@@ -21,6 +21,7 @@ use crate::config::SciAgentConfig;
 use crate::generate::{SamplingParams, sample_row, seed_to_state};
 use crate::model::SciAgentModel;
 use crate::train::checkpoint::{CheckpointMeta, save_checkpoint};
+use crate::train::dataset::{WINDOW_SPLIT_VERSION, distributed_window_split};
 use crate::train::scheduler::WarmupCosineSchedule;
 
 /// One GQA block's weights mirrored into VRAM (bf16).
@@ -284,6 +285,40 @@ impl CudaModel {
             total += self.chain.cross_entropy_loss(&logits, targets) as f64;
             count += 1;
             cursor += s;
+        }
+        if count == 0
+        {
+            f32::NAN
+        }
+        else
+        {
+            (total / count as f64) as f32
+        }
+    }
+
+    /// Mean CE over explicit non-overlapping window starts. Used by the distributed
+    /// held-out protocol so evaluation samples the full corpus deterministically.
+    pub fn eval_loss_windows(
+        &self,
+        tokens: &[u32],
+        seq_len: usize,
+        starts: &[usize],
+        max_windows: usize,
+    ) -> f32 {
+        let s = seq_len;
+        let mut total = 0.0f64;
+        let mut count = 0usize;
+        for &start in starts.iter().take(max_windows.max(1))
+        {
+            if start + s >= tokens.len()
+            {
+                continue;
+            }
+            let inputs = &tokens[start..start + s];
+            let targets = &tokens[start + 1..start + s + 1];
+            let logits = self.forward_resident(inputs);
+            total += self.chain.cross_entropy_loss(&logits, targets) as f64;
+            count += 1;
         }
         if count == 0
         {
@@ -1068,6 +1103,7 @@ pub struct CudaOptimizerResume {
     pub batch_size: Option<usize>,
     pub corpus_tokens: Option<usize>,
     pub corpus_hash: Option<u64>,
+    pub split_version: Option<u32>,
 }
 
 fn optimizer_tensor(chain: &CudaChain, x: &CudaF32, rows: usize, cols: usize) -> Tensor {
@@ -1463,7 +1499,7 @@ impl CudaTrainer {
         .map_err(|e| format!("cannot save optimizer.safetensors: {e}"))?;
 
         let meta = serde_json::json!({
-            "version": 2,
+            "version": 3,
             "step": self.step,
             "base_lr": cfg.base_lr,
             "min_lr": cfg.min_lr,
@@ -1476,6 +1512,7 @@ impl CudaTrainer {
             "batch_size": cfg.batch_size,
             "corpus_tokens": cfg.corpus_tokens,
             "corpus_hash": cfg.corpus_hash,
+            "split_version": WINDOW_SPLIT_VERSION,
         });
         let encoded = serde_json::to_string_pretty(&meta)
             .map_err(|e| format!("cannot serialize optimizer metadata: {e}"))?;
@@ -1513,7 +1550,7 @@ impl CudaTrainer {
         let meta: serde_json::Value = serde_json::from_str(&raw)
             .map_err(|e| format!("cannot parse {}: {e}", meta_path.display()))?;
         let version = meta["version"].as_u64().unwrap_or(0);
-        if version != 1 && version != 2
+        if !(1..=3).contains(&version)
         {
             return Err(format!(
                 "unsupported optimizer checkpoint version {version} in {}",
@@ -1635,6 +1672,14 @@ impl CudaTrainer {
             {
                 None
             },
+            split_version: if version >= 3
+            {
+                optional_u64("split_version").map(|v| v as u32)
+            }
+            else
+            {
+                None
+            },
         }))
     }
 
@@ -1712,6 +1757,17 @@ impl CudaTrainer {
         {
             (total / count as f64) as f32
         }
+    }
+
+    fn eval_loss_windows(
+        &self,
+        tokens: &[u32],
+        seq_len: usize,
+        starts: &[usize],
+        max_windows: usize,
+    ) -> f32 {
+        self.model
+            .eval_loss_windows(tokens, seq_len, starts, max_windows)
     }
 
     /// Forward `tokens → logits` on the (possibly trained) bf16 model — a thin
@@ -1799,35 +1855,25 @@ impl CudaTrainer {
         }
         self.max_grad_norm = cfg.max_grad_norm;
 
-        let val_len = ((tokens.len() as f32 * cfg.val_frac.max(0.0)) as usize)
-            .min(tokens.len().saturating_sub(s + 1));
-        let (train_tokens, val_tokens): (&[u32], &[u32]) = if val_len > s + 1
+        let (mut order, val_windows) = distributed_window_split(tokens.len(), s, cfg.val_frac);
+        let n_windows = order.len();
+        if n_windows == 0
         {
-            let cut = tokens.len() - val_len;
-            (&tokens[..cut], &tokens[cut..])
+            return losses;
         }
-        else
-        {
-            (tokens, &[])
-        };
-        if !val_tokens.is_empty()
+        if !val_windows.is_empty()
         {
             println!(
-                "held-out validation: {} tokens ({:.0}% tail)\n",
-                val_tokens.len(),
-                cfg.val_frac * 100.0
+                "held-out validation: {} distributed windows ({:.1}% target, split-v{})\n",
+                val_windows.len(),
+                cfg.val_frac * 100.0,
+                WINDOW_SPLIT_VERSION
             );
         }
 
         let schedule =
             WarmupCosineSchedule::new(cfg.base_lr, cfg.min_lr, cfg.warmup_steps, cfg.total_steps);
         let mut step = cfg.start_step;
-        let n_windows = train_tokens.len().saturating_sub(1) / s;
-        if n_windows == 0
-        {
-            return losses;
-        }
-        let mut order: Vec<usize> = (0..n_windows).collect();
         // The permutation is a pure function of the absolute epoch, never of the
         // process invocation. Resume reconstructs both epoch and cursor from the
         // number of sequences already consumed, so interrupted and uninterrupted
@@ -1865,10 +1911,10 @@ impl CudaTrainer {
                     }
                     wi = 0;
                 }
-                let start = order[wi] * s;
+                let start = order[wi];
                 wi += 1;
-                packed_inputs.extend_from_slice(&train_tokens[start..start + s]);
-                packed_targets.extend_from_slice(&train_tokens[start + 1..start + s + 1]);
+                packed_inputs.extend_from_slice(&tokens[start..start + s]);
+                packed_targets.extend_from_slice(&tokens[start + 1..start + s + 1]);
             }
             let lr = schedule.lr_at(step);
             pending.push(self.train_step_batch_deferred(
@@ -1885,7 +1931,7 @@ impl CudaTrainer {
 
             let need_log = cfg.log_interval > 0 && step.is_multiple_of(cfg.log_interval);
             let need_eval = cfg.eval_interval > 0
-                && !val_tokens.is_empty()
+                && !val_windows.is_empty()
                 && step.is_multiple_of(cfg.eval_interval);
             let need_save = cfg.save_interval > 0 && step.is_multiple_of(cfg.save_interval);
             let need_flush = pending.len() >= telemetry
@@ -1915,7 +1961,7 @@ impl CudaTrainer {
             }
             if need_eval
             {
-                let val = self.eval_loss(val_tokens, s, cfg.eval_windows);
+                let val = self.eval_loss_windows(tokens, s, &val_windows, cfg.eval_windows);
                 println!("            └─ held-out val loss {val:>9.4}");
             }
             if need_save
@@ -1933,9 +1979,10 @@ impl CudaTrainer {
                     Ok(()) =>
                     {
                         println!("  checkpoint → {}", dir.display());
-                        if !val_tokens.is_empty()
+                        if !val_windows.is_empty()
                         {
-                            let v = self.eval_loss(val_tokens, s, cfg.eval_windows);
+                            let v =
+                                self.eval_loss_windows(tokens, s, &val_windows, cfg.eval_windows);
                             if v < best_val
                             {
                                 best_val = v;
