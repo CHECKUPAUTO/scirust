@@ -39,6 +39,12 @@ jobs:
       SCIRUST_REQUIRE_CUDA: "1"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Prepare isolated executable build directory
+        run: |
+          tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.ci-tmp.XXXXXX")"
+          chmod 700 "$tmpdir"
+          echo "TMPDIR=$tmpdir" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=$tmpdir/target" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: nightly-2026-07-02
@@ -46,11 +52,11 @@ jobs:
       - name: Report Thor CUDA
         run: nvidia-smi --query-gpu=name,driver_version,compute_cap,memory.total --format=csv,noheader
       - name: Format
-        run: cargo +nightly-2026-07-02 fmt --all -- --check
+        run: rustup run nightly-2026-07-02 cargo fmt --all -- --check
       - name: SCIAGENT CUDA parity
-        run: cargo +nightly-2026-07-02 test -p scirust-sciagent --features cuda --test cuda_parity -- --nocapture
+        run: rustup run nightly-2026-07-02 cargo test -p scirust-sciagent --features cuda --test cuda_parity -- --nocapture
       - name: SCIAGENT CUDA clippy
-        run: cargo +nightly-2026-07-02 clippy -p scirust-sciagent --features cuda --all-targets -- -D warnings
+        run: rustup run nightly-2026-07-02 cargo clippy -p scirust-sciagent --features cuda --all-targets -- -D warnings
       - name: SCIAGENT production sweep
         env:
           SCIAGENT_BENCH_BATCHES: "8"
@@ -58,4 +64,4 @@ jobs:
           SCIAGENT_BENCH_STEPS: "1"
           SCIAGENT_BENCH_PROMPT: "128"
           SCIAGENT_BENCH_DECODE_NEW: "8"
-        run: cargo +nightly-2026-07-02 run -p scirust-sciagent --features cuda --release --example cuda_production_bench
+        run: rustup run nightly-2026-07-02 cargo run -p scirust-sciagent --features cuda --release --example cuda_production_bench
