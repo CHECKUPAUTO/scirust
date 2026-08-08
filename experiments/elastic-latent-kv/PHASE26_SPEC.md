@@ -6,7 +6,7 @@ Implementation phase following the Phase 25 Jetson Thor benchmark. The integrati
 
 ## Evidence carried forward
 
-Phase 25 compared the sequential bounded-top-k sampler with the Phase 24 64-lane sampler through the same public sampling boundary. On the internal NVIDIA Thor runner at vocabulary size 4096, top-k 5/50/200 produced exact stream matches and identical fingerprints. Measured median speedups were approximately 5.62x, 18.22x and 30.68x respectively.
+Phase 25 compared the sequential bounded-top-k sampler with the Phase 24 64-lane sampler through the same public sampling boundary. On the internal NVIDIA Thor runner at vocabulary size 4096, top-k 5/50/200 produced exact stream matches and identical fingerprints. The validated seven-repeat medians were 4,975,130 ns vs 952,365 ns (5.223974x) for top-k 5, 30,648,032 ns vs 1,427,052 ns (21.476465x) for top-k 50, and 113,555,136 ns vs 3,206,578 ns (35.413184x) for top-k 200.
 
 Phase 26 therefore promotes the parallel implementation only inside the configuration region already covered by the exact algorithm:
 
