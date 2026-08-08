@@ -20,7 +20,6 @@ def patch_model(text: str) -> str:
     idx = text.find(struct_anchor)
     if idx < 0:
         raise SystemExit("missing CudaCacheParityStep")
-    # Insert the layer record before the existing step record.
     layer_struct = '''#[derive(Clone, Debug)]\npub struct CudaCacheLayerParity {\n    pub layer: usize,\n    pub rel_l2: f32,\n    pub max_abs: f32,\n}\n\n'''
     text = text[:idx] + layer_struct + text[idx:]
 
@@ -46,8 +45,7 @@ def patch_model(text: str) -> str:
         let _ = self.prefill_cached(&prefix, &mut kcache, &mut vcache);
 
         let mut cached_trace: Vec<Vec<f32>> = Vec::new();
-        for step in 0..target_step {
-            let token = forced_tokens[step];
+        for (step, &token) in forced_tokens.iter().take(target_step).enumerate() {
             let pos = prefix.len();
             prefix.push(token);
             if step + 1 < target_step {
