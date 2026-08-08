@@ -8,6 +8,7 @@ on:
       - "scirust-gpu/src/deterministic_sampling*.rs"
       - "scirust-gpu/src/elastic_latent_encoder_device/**"
       - "scirust-gpu/examples/resident_generation_benchmark.rs"
+      - "scirust-gpu/examples/resident_generation_first_token_probe.rs"
       - "experiments/elastic-latent-kv/PHASE28_SPEC.md"
       - ".github/workflows/elastic-latent-kv-phase28.yml"
 
@@ -42,6 +43,10 @@ jobs:
       - run: |
           sudo apt-get update
           sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
+      - name: Probe 4096-vocabulary first token on lavapipe
+        run: |
+          cargo +1.89.0 run --quiet --release --locked -p scirust-gpu \
+            --features wgpu --example resident_generation_first_token_probe
       - name: Run resident-generation smoke baseline
         run: |
           cargo +1.89.0 run --quiet --release --locked -p scirust-gpu \
@@ -140,6 +145,10 @@ jobs:
           uname -a
           nvidia-smi
           vulkaninfo --summary
+      - name: Probe first token before device feedback
+        run: |
+          rustup run 1.89.0 cargo run --quiet --release --locked -p scirust-gpu \
+            --features wgpu --example resident_generation_first_token_probe
       - name: Run real-device resident baseline
         run: |
           rustup run 1.89.0 cargo run --quiet --release --locked -p scirust-gpu \
