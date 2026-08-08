@@ -109,8 +109,8 @@ mod tests {
                 BpeKernel::Reference,
             ],
         );
-        let engine = ElasticBpeEngine::from_ordered_merges(&[(2, 3, 10), (1, 2, 11)], profile)
-            .unwrap();
+        let engine =
+            ElasticBpeEngine::from_ordered_merges(&[(2, 3, 10), (1, 2, 11)], profile).unwrap();
 
         let encoded = engine.encode_ids(&[1, 2, 3], 3);
         assert_eq!(encoded.ids, vec![1, 10]);
