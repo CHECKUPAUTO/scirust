@@ -7,6 +7,12 @@
 
 use core::fmt;
 
+mod sampled;
+pub use sampled::{
+    WgpuResidentSampledMiniLlm, WgpuResidentSampledMiniLlmError,
+    WgpuResidentSampledMiniLlmTelemetry,
+};
+
 use super::{
     WgpuLatentLayerBasis, WgpuResidentTransformerEncoder, WgpuResidentTransformerEncoderError,
     binding,
