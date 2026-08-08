@@ -206,7 +206,7 @@ impl<const I: usize, const C: usize> CharacterTable<I, C> {
         }
         let mut a = 0usize;
         while a < C {
-            if self.class_sizes[a] == 0 || self.group_order % self.class_sizes[a] != 0 {
+            if self.class_sizes[a] == 0 || !self.group_order.is_multiple_of(self.class_sizes[a]) {
                 return false;
             }
             let mut b = 0usize;
