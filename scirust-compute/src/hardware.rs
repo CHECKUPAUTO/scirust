@@ -41,10 +41,19 @@ impl SupportLevel {
 /// [`CapabilitySet::set_support`] keeps the supported and unsupported partitions
 /// disjoint, so a profile never needs a sentinel value to represent missing
 /// knowledge.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapabilitySet<T> {
     supported: Vec<T>,
     unsupported: Vec<T>,
+}
+
+impl<T> Default for CapabilitySet<T> {
+    fn default() -> Self {
+        Self {
+            supported: Vec::new(),
+            unsupported: Vec::new(),
+        }
+    }
 }
 
 impl<T: PartialEq> CapabilitySet<T> {
