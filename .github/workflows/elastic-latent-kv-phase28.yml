@@ -106,6 +106,9 @@ jobs:
       - jetson-thor
       - internal
     timeout-minutes: 60
+    concurrency:
+      group: scirust-thor-gpu-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: false
     env:
       WGPU_BACKEND: vulkan
       SCIRUST_REQUIRE_WGPU: "1"
