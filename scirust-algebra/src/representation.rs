@@ -73,11 +73,17 @@ pub enum CharacterClassError {
     /// The representation and class-label slices describe different element counts.
     LengthMismatch,
     /// A class label does not fit in the caller-provided output storage.
-    ClassOutOfRange { class: usize },
+    ClassOutOfRange {
+        /// Conjugacy-class index that exceeds the output storage.
+        class: usize,
+    },
     /// Two elements assigned to one conjugacy class have different traces.
     NonConstantTrace {
+        /// Conjugacy-class index whose traces are inconsistent.
         class: usize,
+        /// First trace value observed for the class.
         expected: f64,
+        /// Conflicting trace value observed for the class.
         actual: f64,
     },
 }
