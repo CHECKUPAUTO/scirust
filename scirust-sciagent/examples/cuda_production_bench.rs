@@ -222,6 +222,14 @@ fn bench_decode(config: &SciAgentConfig, prompt_len: usize, max_new: usize) {
             );
             if first.step > 0
             {
+                for component in
+                    cuda.cache_projection_parity_teacher_forced(&prompt, forced, first.step)
+                {
+                    println!(
+                        "SCIAGENT_THOR_KV_PROJECTION step={} component={} rel_l2={:.8e} max_abs={:.8e}",
+                        first.step, component.component, component.rel_l2, component.max_abs
+                    );
+                }
                 for layer in cuda.cache_layer_parity_teacher_forced(&prompt, forced, first.step)
                 {
                     println!(
