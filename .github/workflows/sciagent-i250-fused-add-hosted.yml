@@ -5,6 +5,7 @@ on:
     branches: [ci/i250-fused-add-base]
     paths:
       - "scirust-cuda/**"
+      - "scirust-sciagent/**"
       - ".github/workflows/sciagent-i250-fused-add-hosted.yml"
 
 permissions:
@@ -20,9 +21,9 @@ env:
 
 jobs:
   hosted:
-    name: Fused add format + CUDA compile + Clippy
+    name: Fused tiled-down compile + Clippy
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
@@ -31,30 +32,42 @@ jobs:
         with:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
-      - name: Add local API-shape Clippy allowance
+      - name: Fuse tiled down projection with residual add
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          path = Path("scirust-cuda/src/bf16_tiled_gemv.rs")
-          text = path.read_text()
-          marker = "    /// `[1,K] × [K,N]`, BF16 projection boundary, then BF16 residual add.\n    pub fn gemv_kn_add_into(\n"
-          replacement = "    /// `[1,K] × [K,N]`, BF16 projection boundary, then BF16 residual add.\n    #[allow(clippy::too_many_arguments)] // Mirrors the explicit GEMV + residual contract.\n    pub fn gemv_kn_add_into(\n"
-          if replacement not in text:
+
+          runtime = Path("scirust-cuda/src/decode.rs")
+          text = runtime.read_text()
+          marker = '''    #[must_use]\n    pub fn lm_head_argmax_workspace(&self, vocab: usize) -> CudaBf16LmHeadArgmaxWorkspace {\n'''
+          method = '''    pub fn tiled_gemv_add_into(\n        &self,\n        input: &CudaDecodeMatrix,\n        weight: &CudaDecodeMatrix,\n        workspace: &mut CudaBf16TiledGemvWorkspace,\n        residual: &CudaDecodeMatrix,\n        output: &mut CudaDecodeMatrix,\n    ) {\n        assert_eq!(input.rows, 1, "tiled decode GEMV-add is batch-one only");\n        assert_eq!(weight.rows, input.cols, "tiled decode GEMV-add input width");\n        assert_eq!((residual.rows, residual.cols), (1, weight.cols));\n        assert_eq!((output.rows, output.cols), (1, weight.cols));\n        self.tiled_gemv.gemv_kn_add_into(\n            &input.buf,\n            &weight.buf,\n            workspace,\n            &residual.buf,\n            &mut output.buf,\n            input.cols,\n            output.cols,\n        );\n    }\n\n'''
+          if "pub fn tiled_gemv_add_into(" not in text:
               if marker not in text:
-                  raise SystemExit("fused-add method marker not found")
-              path.write_text(text.replace(marker, replacement, 1))
+                  raise SystemExit("runtime fused-add insertion marker not found")
+              text = text.replace(marker, method + marker, 1)
+          runtime.write_text(text)
+
+          model = Path("scirust-sciagent/src/cuda_decode.rs")
+          text = model.read_text()
+          old = '''            match down_mode\n            {\n                CudaDecodeDownMode::CublasLt =>\n                {\n                    runtime.matmul_into(&workspace.act, &block.down, &mut workspace.tmp_d);\n                },\n                CudaDecodeDownMode::TiledGemv =>\n                {\n                    runtime.tiled_gemv_into(\n                        &workspace.act,\n                        &block.down,\n                        &mut workspace.down_tiled,\n                        &mut workspace.tmp_d,\n                    );\n                },\n            }\n            runtime.add_into(&workspace.h, &workspace.tmp_d, &mut workspace.x);\n'''
+          new = '''            match down_mode\n            {\n                CudaDecodeDownMode::CublasLt =>\n                {\n                    runtime.matmul_into(&workspace.act, &block.down, &mut workspace.tmp_d);\n                    runtime.add_into(&workspace.h, &workspace.tmp_d, &mut workspace.x);\n                },\n                CudaDecodeDownMode::TiledGemv =>\n                {\n                    runtime.tiled_gemv_add_into(\n                        &workspace.act,\n                        &block.down,\n                        &mut workspace.down_tiled,\n                        &workspace.h,\n                        &mut workspace.x,\n                    );\n                },\n            }\n'''
+          if new not in text:
+              if old not in text:
+                  raise SystemExit("model tiled-down dispatch marker not found")
+              text = text.replace(old, new, 1)
+          model.write_text(text)
           PY
           cargo +nightly-2026-07-02 fmt --all
-      - name: CUDA compile
-        run: cargo +nightly-2026-07-02 check -p scirust-cuda --features cuda --all-targets --locked
+      - name: CUDA SCIAGENT compile
+        run: cargo +nightly-2026-07-02 check -p scirust-sciagent --features cuda --all-targets --locked
       - name: Strict Clippy
-        run: cargo +nightly-2026-07-02 clippy -p scirust-cuda --features cuda --all-targets --locked -- -D warnings
-      - name: Commit validated fused-add source only
+        run: cargo +nightly-2026-07-02 clippy -p scirust-sciagent --features cuda --all-targets --locked -- -D warnings
+      - name: Commit validated fused-down sources only
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add scirust-cuda/src/bf16_tiled_gemv.rs
+          git add scirust-cuda/src/decode.rs scirust-sciagent/src/cuda_decode.rs
           if ! git diff --cached --quiet; then
-            git commit -m "perf(cuda): keep fused tiled residual add Clippy-clean"
+            git commit -m "perf(sciagent): fuse tiled down projection with residual add"
             git push origin HEAD:${{ github.event.pull_request.head.ref }}
           fi
