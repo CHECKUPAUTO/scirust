@@ -5,6 +5,12 @@
 //! directly into the sampler's resident logits buffer. Prompt tokens can be
 //! ingested without consuming RNG state, matching `generate_ids_cached_sampled`.
 
+mod device_feedback;
+pub use device_feedback::{
+    WgpuResidentDeviceFeedbackMiniLlm, WgpuResidentDeviceFeedbackMiniLlmError,
+    WgpuResidentDeviceFeedbackMiniLlmTelemetry,
+};
+
 use core::fmt;
 
 use super::{U32_BYTES, WgpuResidentMiniLlm, WgpuResidentMiniLlmError};
@@ -38,6 +44,10 @@ struct MiniState {
 
 @compute @workgroup_size(1)
 fn main() {
+    if (mini._pad0 == 2u) {
+        return;
+    }
+
     let d_model = mini.d_model;
     let vocab_size = mini.vocab_size;
     let embedding_elements = vocab_size * d_model;
