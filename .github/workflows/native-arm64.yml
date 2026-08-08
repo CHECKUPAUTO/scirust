@@ -93,11 +93,15 @@ jobs:
           toolchain: nightly-2026-07-02
           components: rustfmt
 
-      - name: Apply validated SCIAGENT B40-B43 corrections once (retry 4)
+      - name: Apply validated SCIAGENT B40-B43 corrections once (retry 5)
         if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'perf/sciagent-b39-thor-production-bench'
         run: |
           python3 scripts/sciagent_b43_autofix.py
           cargo +nightly-2026-07-02 fmt --all
+          # The runner token has contents:write but GitHub intentionally forbids it
+          # from changing workflow files. Keep workflow cleanup for the authenticated
+          # repository connector and push only production code/docs from this step.
+          git restore -- .github/workflows
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
@@ -144,12 +148,6 @@ jobs:
 
       - name: Test experimental nonlocal relativity
         run: cargo test -p scirust-nonlocal-relativity
-
-      # -------------------------------------------------------------------
-      # Real CUDA execution. This runner is the only place in the project
-      # where a CUDA device exists, so it is the only place the canonical
-      # CUDA path can be proved rather than merely compiled.
-      # -------------------------------------------------------------------
 
       - name: Report the CUDA device and libraries
         continue-on-error: true
