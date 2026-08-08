@@ -72,6 +72,8 @@ mod deterministic_gpu;
 #[cfg(feature = "wgpu")]
 mod deterministic_sampling_device;
 #[cfg(feature = "wgpu")]
+mod deterministic_sampling_parallel;
+#[cfg(feature = "wgpu")]
 mod elastic_latent_block_device;
 #[cfg(feature = "wgpu")]
 mod elastic_latent_device;
@@ -120,6 +122,10 @@ pub use deterministic_gpu::{DeterministicGpu, DeterministicValidator};
 #[cfg(feature = "wgpu")]
 pub use deterministic_sampling_device::{
     WgpuDeterministicSampler, WgpuDeterministicSamplerError, WgpuDeterministicSamplerTelemetry,
+};
+#[cfg(feature = "wgpu")]
+pub use deterministic_sampling_parallel::{
+    PARALLEL_TOP_K_LANES, PARALLEL_TOP_K_MAX, WgpuParallelTopKSampler,
 };
 #[cfg(feature = "wgpu")]
 pub use elastic_latent_block_device::{
