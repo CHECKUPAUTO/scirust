@@ -95,8 +95,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: 1.89.0
-      - name: Pin Cargo bin directory for self-hosted steps
-        run: echo "$(dirname "$(rustup which cargo --toolchain 1.89.0)")" >> "$GITHUB_PATH"
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
         with:
           shared-key: phase25-wgpu-thor
@@ -109,7 +107,7 @@ jobs:
           vulkaninfo --summary
       - name: Run real-device sampler comparison
         run: |
-          cargo +1.89.0 run --quiet --release --locked -p scirust-gpu \
+          rustup run 1.89.0 cargo run --quiet --release --locked -p scirust-gpu \
             --features wgpu --example deterministic_sampler_compare > phase25-thor.csv
           cat phase25-thor.csv
       - name: Validate exact real-device rows
