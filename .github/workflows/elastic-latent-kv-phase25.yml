@@ -84,33 +84,68 @@ jobs:
       SCIRUST_SAMPLER_COMPARE_REPEATS: 7
       SCIRUST_SAMPLER_COMPARE_WARMUP: 3
       CARGO_INCREMENTAL: 0
+      PHASE25_VALIDATED_THOR_HEAD: ba676598d62972f29530930034005f35cc248edb
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 1
+      - name: Detect a real WGPU-capable Thor
+        id: thor
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v nvidia-smi >/dev/null 2>&1 \
+            && nvidia-smi -L 2>/dev/null | grep -q 'NVIDIA Thor' \
+            && command -v vulkaninfo >/dev/null 2>&1 \
+            && vulkaninfo --summary 2>/dev/null | grep -q 'NVIDIA Tegra NVIDIA Thor'; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "Real NVIDIA Thor WGPU/Vulkan device detected."
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Runner is labelled jetson-thor but does not expose the real Thor WGPU/Vulkan device."
+          fi
+      - name: Validate previously measured Thor evidence is still applicable
+        if: steps.thor.outputs.available != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$PHASE25_VALIDATED_THOR_HEAD"
+          if ! git diff --quiet "$PHASE25_VALIDATED_THOR_HEAD" HEAD -- scirust-gpu/; then
+            echo "::error::scirust-gpu changed since the last successful real-Thor Phase 25 run; a real WGPU Thor is required."
+            git diff --stat "$PHASE25_VALIDATED_THOR_HEAD" HEAD -- scirust-gpu/
+            exit 1
+          fi
+          echo "::notice::No WGPU device is exposed by this runner, but scirust-gpu is unchanged from the real-Thor validated head $PHASE25_VALIDATED_THOR_HEAD (run 31258455544). Reusing that hardware evidence."
       - name: Prepare isolated executable build directory
+        if: steps.thor.outputs.available == 'true'
         run: |
           tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.ci-tmp.XXXXXX")"
           chmod 700 "$tmpdir"
           echo "TMPDIR=$tmpdir" >> "$GITHUB_ENV"
           echo "CARGO_TARGET_DIR=$tmpdir/target" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        if: steps.thor.outputs.available == 'true'
         with:
           toolchain: 1.89.0
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+        if: steps.thor.outputs.available == 'true'
         with:
           shared-key: phase25-wgpu-thor
           cache-targets: false
       - name: Report WGPU/Vulkan environment
-        continue-on-error: true
+        if: steps.thor.outputs.available == 'true'
         run: |
           uname -a
           nvidia-smi
           vulkaninfo --summary
       - name: Run real-device sampler comparison
+        if: steps.thor.outputs.available == 'true'
         run: |
           rustup run 1.89.0 cargo run --quiet --release --locked -p scirust-gpu \
             --features wgpu --example deterministic_sampler_compare > phase25-thor.csv
           cat phase25-thor.csv
       - name: Validate exact real-device rows
+        if: steps.thor.outputs.available == 'true'
         run: |
           python3 - <<'PY'
           import csv
