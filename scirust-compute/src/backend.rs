@@ -1,5 +1,6 @@
 use crate::{
-    BufferBinding, ComputeResult, DeviceCapabilities, KernelModule, LaunchConfig, MemorySpace,
+    BufferBinding, ComputeResult, DeviceCapabilities, HardwareCapabilities, KernelModule,
+    LaunchConfig, MemorySpace,
 };
 
 /// Backend-neutral execution contract.
@@ -13,6 +14,16 @@ pub trait ComputeBackend {
     type Event;
 
     fn capabilities(&self) -> &DeviceCapabilities;
+
+    /// Rich architecture-neutral hardware profile for this backend.
+    ///
+    /// The default implementation is deliberately conservative and promotes
+    /// only facts already present in [`DeviceCapabilities`]. Backends should
+    /// override this method when they have reliable ISA, numeric, memory,
+    /// matrix or reproducibility information.
+    fn hardware_capabilities(&self) -> HardwareCapabilities {
+        self.capabilities().hardware_baseline()
+    }
 
     fn allocate(
         &self,
