@@ -23,9 +23,9 @@ mod strides;
 mod tensor;
 mod topology;
 mod topology_augmentation;
-mod topology_provider;
 #[cfg(feature = "std")]
 mod topology_probe;
+mod topology_provider;
 
 pub use backend::ComputeBackend;
 pub use binding::{BufferAccess, BufferBinding};
