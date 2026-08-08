@@ -1,0 +1,85 @@
+name: Elastic Latent KV Phase 23
+
+on:
+  pull_request:
+    paths:
+      - "scirust-gpu/Cargo.toml"
+      - "scirust-gpu/examples/deterministic_sampler_bench.rs"
+      - "experiments/elastic-latent-kv/PHASE23_SPEC.md"
+      - ".github/workflows/elastic-latent-kv-phase23.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt,clippy
+      - run: rustup toolchain install 1.89.0 --profile minimal
+      - run: cargo +nightly-2026-07-02 fmt --all -- --check
+      - run: cargo +nightly-2026-07-02 clippy -p scirust-gpu --all-targets --features wgpu --locked -- -D warnings
+      - run: cargo +1.89.0 check -p scirust-gpu --all-targets --features wgpu --locked
+
+  benchmark-smoke-lavapipe:
+    runs-on: ubuntu-24.04
+    env:
+      WGPU_BACKEND: vulkan
+      SCIRUST_REQUIRE_WGPU: 1
+      SCIRUST_SAMPLER_BENCH_VOCABS: 32,64
+      SCIRUST_SAMPLER_BENCH_TOP_KS: 0,1,5,16
+      SCIRUST_SAMPLER_BENCH_REPEATS: 2
+      SCIRUST_SAMPLER_BENCH_WARMUP: 1
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: rustup toolchain install 1.89.0 --profile minimal
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
+      - run: |
+          cargo +1.89.0 run --quiet --release --locked -p scirust-gpu \
+            --features wgpu --example deterministic_sampler_bench > phase23-sampler-benchmark.csv
+      - run: |
+          python3 - <<'PY'
+          import csv
+          import math
+
+          with open('phase23-sampler-benchmark.csv', newline='', encoding='utf-8') as handle:
+              rows = list(csv.DictReader(handle))
+
+          assert len(rows) == 8, len(rows)
+          assert {(int(r['vocab_size']), int(r['top_k'])) for r in rows} == {
+              (v, k) for v in (32, 64) for k in (0, 1, 5, 16)
+          }
+
+          for row in rows:
+              vocab = int(row['vocab_size'])
+              top_k = int(row['top_k'])
+              passes = int(row['ranking_passes'])
+              if top_k == 1:
+                  expected_passes = 0
+              elif 0 < top_k < vocab:
+                  expected_passes = top_k
+              else:
+                  expected_passes = vocab
+              assert passes == expected_passes, row
+
+              expected_comparisons = passes * (2 * vocab - passes - 1) // 2
+              full_comparisons = vocab * (vocab - 1) // 2
+              assert int(row['selection_comparisons']) == expected_comparisons, row
+              expected_fraction = 0.0 if full_comparisons == 0 else expected_comparisons / full_comparisons
+              assert abs(float(row['comparison_fraction_of_full']) - expected_fraction) < 1e-8, row
+
+              expected_fast = int(1 < top_k < vocab)
+              assert int(row['fast_path']) == expected_fast, row
+              assert int(row['repeats']) == 2, row
+              assert int(row['median_sample_ns']) > 0, row
+              throughput = float(row['samples_per_second'])
+              assert math.isfinite(throughput) and throughput > 0.0, row
+              assert int(row['deterministic']) == 1, row
+              assert int(row['output_fingerprint'], 16) != 0, row
+              assert int(row['resident_bytes']) > 0, row
+              assert int(row['upload_bytes_per_sample']) == vocab * 4, row
+              assert int(row['download_bytes_per_sample']) == 4, row
+          PY
