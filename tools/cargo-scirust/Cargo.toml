@@ -1,0 +1,23 @@
+[package]
+name = "cargo-scirust"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+publish = false
+description = "Fast repository-aware Cargo commands for SciRust"
+license-file = "../../LICENSE.md"
+repository = "https://github.com/Memorithm/scirust"
+
+[[bin]]
+name = "cargo-scirust"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Keep this tooling crate intentionally outside the 100+ crate SciRust workspace.
+# It must stay cheap to compile/install and must not make root workspace checks pull
+# tooling-only dependencies. The binary still inspects the parent workspace via
+# `cargo metadata` at runtime.
+[workspace]

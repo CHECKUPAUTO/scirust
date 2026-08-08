@@ -1,0 +1,44 @@
+name: cargo-scirust
+
+on:
+  pull_request:
+    paths:
+      - "tools/cargo-scirust/**"
+      - ".gitignore"
+      - ".github/workflows/cargo-scirust.yml"
+  push:
+    branches: [master]
+    paths:
+      - "tools/cargo-scirust/**"
+      - ".gitignore"
+      - ".github/workflows/cargo-scirust.yml"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TARGET_DIR: /tmp/cargo-scirust-target
+
+jobs:
+  msrv:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+      - run: rustup toolchain install 1.89.0 --profile minimal --component rustfmt,clippy
+      - run: cargo +1.89.0 fmt --manifest-path tools/cargo-scirust/Cargo.toml -- --check
+      - run: cargo +1.89.0 clippy --locked --manifest-path tools/cargo-scirust/Cargo.toml --all-targets -- -D warnings
+      - run: cargo +1.89.0 test --locked --manifest-path tools/cargo-scirust/Cargo.toml
+      - name: Smoke test default affected merge-base analysis
+        run: cargo +1.89.0 run --locked --quiet --manifest-path tools/cargo-scirust/Cargo.toml -- affected --json
+      - name: Smoke test Cargo plugin dispatcher
+        run: cargo +1.89.0 run --locked --quiet --manifest-path tools/cargo-scirust/Cargo.toml -- help
+      - name: Smoke test affected help is terminal
+        run: |
+          out="$(cargo +1.89.0 run --locked --quiet --manifest-path tools/cargo-scirust/Cargo.toml -- affected --help)"
+          echo "$out"
+          grep -Fq 'cargo scirust affected' <<<"$out"
+          if grep -Fq 'SciRust affected analysis' <<<"$out"; then exit 1; fi
+      - name: Smoke test workspace feature discovery
+        run: cargo +1.89.0 run --locked --quiet --manifest-path tools/cargo-scirust/Cargo.toml -- features scirust-core
