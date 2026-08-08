@@ -14,6 +14,7 @@ use cudarc::nvrtc::compile_ptx;
 use half::bf16;
 
 use crate::bf16_gemv::CudaBf16Gemv;
+use crate::bf16_lm_head_argmax::{CudaBf16LmHeadArgmax, CudaBf16LmHeadArgmaxWorkspace};
 
 const DECODE_KERNELS_SRC: &str = r#"
 __device__ __forceinline__ float b2f(unsigned short h) {
@@ -321,6 +322,7 @@ pub struct CudaDecodeRuntime {
     stream: Arc<CudaStream>,
     blas: CudaBlasLT,
     gemv: CudaBf16Gemv,
+    lm_head_argmax: CudaBf16LmHeadArgmax,
     kernels: DecodeKernels,
 }
 
@@ -335,6 +337,7 @@ impl CudaDecodeRuntime {
         let stream = ctx.default_stream();
         let blas = CudaBlasLT::new(stream.clone()).ok()?;
         let gemv = CudaBf16Gemv::from_context(ctx.clone(), stream.clone())?;
+        let lm_head_argmax = CudaBf16LmHeadArgmax::from_context(ctx.clone(), stream.clone())?;
         let ptx = compile_ptx(DECODE_KERNELS_SRC)
             .map_err(|error| eprintln!("scirust-cuda decode: NVRTC compile failed: {error}"))
             .ok()?;
@@ -357,6 +360,7 @@ impl CudaDecodeRuntime {
             stream,
             blas,
             gemv,
+            lm_head_argmax,
             kernels,
         })
     }
@@ -412,6 +416,37 @@ impl CudaDecodeRuntime {
             generated,
             capacity,
         }
+    }
+
+    #[must_use]
+    pub fn lm_head_argmax_workspace(&self, vocab: usize) -> CudaBf16LmHeadArgmaxWorkspace {
+        self.lm_head_argmax.workspace(vocab)
+    }
+
+    pub fn greedy_lm_head_argmax_into(
+        &self,
+        hidden: &CudaDecodeMatrix,
+        embedding: &CudaDecodeMatrix,
+        workspace: &mut CudaBf16LmHeadArgmaxWorkspace,
+        feedback: &mut CudaDecodeGreedyFeedback,
+        generated_index: usize,
+    ) {
+        assert_eq!(hidden.rows, 1, "LM-head greedy hidden row count");
+        assert_eq!(embedding.cols, hidden.cols, "LM-head greedy hidden width");
+        assert!(
+            generated_index < feedback.capacity,
+            "LM-head greedy feedback index"
+        );
+        self.lm_head_argmax.argmax_into(
+            &hidden.buf,
+            &embedding.buf,
+            workspace,
+            &mut feedback.current_token,
+            &mut feedback.generated,
+            generated_index,
+            hidden.cols,
+            embedding.rows,
+        );
     }
 
     #[must_use]

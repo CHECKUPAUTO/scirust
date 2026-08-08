@@ -7,7 +7,8 @@
 
 use scirust_core::autodiff::reverse::Tensor;
 use scirust_cuda::{
-    CudaDecodeGreedyFeedback, CudaDecodeKvCache, CudaDecodeMatrix, CudaDecodeRuntime,
+    CudaBf16LmHeadArgmaxWorkspace, CudaDecodeGreedyFeedback, CudaDecodeKvCache, CudaDecodeMatrix,
+    CudaDecodeRuntime,
 };
 
 use crate::generate::{SamplingParams, sample_row, seed_to_state};
@@ -48,13 +49,37 @@ pub enum CudaDecodeFfnMode {
     FusedGemv,
 }
 
+/// Greedy LM-head implementation used by the I250 device-feedback burst.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CudaDecodeLmHeadMode {
+    /// Materialize all BF16 logits, then run the separate greedy argmax kernel.
+    FullLogits,
+    /// Compute tied-LM-head logits and greedy winner without a full logits row.
+    FusedArgmax,
+}
+
+/// Runtime-selectable exact/deterministic decode implementation choices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CudaDecodeModes {
+    pub ffn: CudaDecodeFfnMode,
+    pub lm_head: CudaDecodeLmHeadMode,
+}
+
+impl Default for CudaDecodeModes {
+    fn default() -> Self {
+        Self {
+            ffn: CudaDecodeFfnMode::FusedGemv,
+            lm_head: CudaDecodeLmHeadMode::FusedArgmax,
+        }
+    }
+}
+
 /// Batch-one SCIAGENT decoder with fused projection weights and fixed-capacity KV.
 pub struct CudaDecodeModel {
     runtime: CudaDecodeRuntime,
     embedding: CudaDecodeMatrix,
     final_norm: CudaDecodeMatrix,
     blocks: Vec<DecodeBlock>,
-    ffn_mode: CudaDecodeFfnMode,
     d_model: usize,
     d_ff: usize,
     n_heads: usize,
@@ -67,18 +92,9 @@ pub struct CudaDecodeModel {
 }
 
 impl CudaDecodeModel {
-    /// Mirror one immutable CPU model snapshot into the default fastest I250 runtime.
+    /// Mirror one immutable CPU model snapshot into the I250 runtime.
     #[must_use]
     pub fn from_model(model: &SciAgentModel) -> Option<Self> {
-        Self::from_model_with_ffn_mode(model, CudaDecodeFfnMode::FusedGemv)
-    }
-
-    /// Mirror one immutable CPU model snapshot with an explicit FFN backend.
-    #[must_use]
-    pub fn from_model_with_ffn_mode(
-        model: &SciAgentModel,
-        ffn_mode: CudaDecodeFfnMode,
-    ) -> Option<Self> {
         assert!(
             model.config.tie_embeddings,
             "CudaDecodeModel currently requires tied embeddings"
@@ -142,7 +158,6 @@ impl CudaDecodeModel {
             embedding,
             final_norm,
             blocks,
-            ffn_mode,
             d_model: config.d_model,
             d_ff: config.d_ff,
             n_heads: config.n_heads,
@@ -153,11 +168,6 @@ impl CudaDecodeModel {
             vocab: config.vocab_size,
             max_seq_len: config.max_seq_len,
         })
-    }
-
-    #[must_use]
-    pub const fn ffn_mode(&self) -> CudaDecodeFfnMode {
-        self.ffn_mode
     }
 
     #[must_use]
@@ -196,11 +206,12 @@ impl CudaDecodeModel {
 
     /// Continue the token step after `workspace.x` has been populated by either a
     /// host-token embedding or the device-feedback embedding kernel.
-    fn forward_embedded_resident(
+    fn forward_embedded_hidden_resident(
         &self,
         pos: usize,
         caches: &mut [DecodeLayerCache],
         workspace: &mut DecodeWorkspace,
+        ffn_mode: CudaDecodeFfnMode,
     ) {
         assert_eq!(
             caches.len(),
@@ -227,7 +238,7 @@ impl CudaDecodeModel {
             runtime.add_into(&workspace.x, &workspace.tmp_d, &mut workspace.h);
 
             runtime.rms_norm_into(&workspace.h, &block.norm2, self.eps, &mut workspace.norm);
-            match self.ffn_mode
+            match ffn_mode
             {
                 CudaDecodeFfnMode::FusedGemv =>
                 {
@@ -249,31 +260,37 @@ impl CudaDecodeModel {
             self.eps,
             &mut workspace.norm,
         );
-        runtime.matmul_bt_into(&workspace.norm, &self.embedding, &mut workspace.logits);
     }
 
-    fn forward_host_token_resident(
+    fn project_logits_resident(&self, workspace: &mut DecodeWorkspace) {
+        self.runtime
+            .matmul_bt_into(&workspace.norm, &self.embedding, &mut workspace.logits);
+    }
+
+    fn forward_host_token_hidden_resident(
         &self,
         token: u32,
         pos: usize,
         caches: &mut [DecodeLayerCache],
         workspace: &mut DecodeWorkspace,
+        ffn_mode: CudaDecodeFfnMode,
     ) {
         self.runtime
             .embed_token_into(token, &self.embedding, &mut workspace.x);
-        self.forward_embedded_resident(pos, caches, workspace);
+        self.forward_embedded_hidden_resident(pos, caches, workspace, ffn_mode);
     }
 
-    fn forward_feedback_token_resident(
+    fn forward_feedback_token_hidden_resident(
         &self,
         feedback: &CudaDecodeGreedyFeedback,
         pos: usize,
         caches: &mut [DecodeLayerCache],
         workspace: &mut DecodeWorkspace,
+        ffn_mode: CudaDecodeFfnMode,
     ) {
         self.runtime
             .embed_feedback_into(feedback, &self.embedding, &mut workspace.x);
-        self.forward_embedded_resident(pos, caches, workspace);
+        self.forward_embedded_hidden_resident(pos, caches, workspace, ffn_mode);
     }
 
     /// General deterministic host-sampler path retained as an oracle for sampling
@@ -297,8 +314,15 @@ impl CudaDecodeModel {
 
         for (pos, &token) in tokens.iter().enumerate()
         {
-            self.forward_host_token_resident(token, pos, &mut caches, &mut workspace);
+            self.forward_host_token_hidden_resident(
+                token,
+                pos,
+                &mut caches,
+                &mut workspace,
+                CudaDecodeFfnMode::FusedGemv,
+            );
         }
+        self.project_logits_resident(&mut workspace);
         let mut logits = self.runtime.download(&workspace.logits);
         let mut rng = seed_to_state(seed);
 
@@ -312,7 +336,14 @@ impl CudaDecodeModel {
             {
                 break;
             }
-            self.forward_host_token_resident(next, pos, &mut caches, &mut workspace);
+            self.forward_host_token_hidden_resident(
+                next,
+                pos,
+                &mut caches,
+                &mut workspace,
+                CudaDecodeFfnMode::FusedGemv,
+            );
+            self.project_logits_resident(&mut workspace);
             logits = self.runtime.download(&workspace.logits);
         }
         tokens
@@ -329,6 +360,16 @@ impl CudaDecodeModel {
     /// returned sequence is truncated at the first EOS, so emitted-token semantics
     /// are exact; post-EOS work is only wasted compute and is the next optimization.
     pub fn generate_greedy_device_feedback(&self, prompt: &[u32], max_new: usize) -> Vec<u32> {
+        self.generate_greedy_device_feedback_with_modes(prompt, max_new, CudaDecodeModes::default())
+    }
+
+    /// Greedy device-feedback generation with explicit per-burst implementation modes.
+    pub fn generate_greedy_device_feedback_with_modes(
+        &self,
+        prompt: &[u32],
+        max_new: usize,
+        modes: CudaDecodeModes,
+    ) -> Vec<u32> {
         let mut tokens = normalized_prompt(prompt);
         if max_new == 0
         {
@@ -338,22 +379,52 @@ impl CudaDecodeModel {
         let capacity = tokens.len() + max_new;
         let mut caches = self.caches(capacity);
         let mut workspace = self.workspace();
+        let mut lm_workspace = match modes.lm_head
+        {
+            CudaDecodeLmHeadMode::FullLogits => None,
+            CudaDecodeLmHeadMode::FusedArgmax =>
+            {
+                Some(self.runtime.lm_head_argmax_workspace(self.vocab))
+            },
+        };
 
         for (pos, &token) in tokens.iter().enumerate()
         {
-            self.forward_host_token_resident(token, pos, &mut caches, &mut workspace);
+            self.forward_host_token_hidden_resident(
+                token,
+                pos,
+                &mut caches,
+                &mut workspace,
+                modes.ffn,
+            );
         }
 
         let mut feedback = self.runtime.greedy_feedback(max_new);
-        self.runtime
-            .greedy_argmax_into(&workspace.logits, &mut feedback, 0);
+        self.select_greedy_resident(
+            &mut workspace,
+            lm_workspace.as_mut(),
+            &mut feedback,
+            0,
+            modes.lm_head,
+        );
 
         for generated_index in 1..max_new
         {
             let pos = tokens.len() + generated_index - 1;
-            self.forward_feedback_token_resident(&feedback, pos, &mut caches, &mut workspace);
-            self.runtime
-                .greedy_argmax_into(&workspace.logits, &mut feedback, generated_index);
+            self.forward_feedback_token_hidden_resident(
+                &feedback,
+                pos,
+                &mut caches,
+                &mut workspace,
+                modes.ffn,
+            );
+            self.select_greedy_resident(
+                &mut workspace,
+                lm_workspace.as_mut(),
+                &mut feedback,
+                generated_index,
+                modes.lm_head,
+            );
         }
 
         for token in self.runtime.download_feedback(&feedback)
@@ -365,6 +436,35 @@ impl CudaDecodeModel {
             }
         }
         tokens
+    }
+
+    fn select_greedy_resident(
+        &self,
+        workspace: &mut DecodeWorkspace,
+        lm_workspace: Option<&mut CudaBf16LmHeadArgmaxWorkspace>,
+        feedback: &mut CudaDecodeGreedyFeedback,
+        generated_index: usize,
+        lm_head_mode: CudaDecodeLmHeadMode,
+    ) {
+        match lm_head_mode
+        {
+            CudaDecodeLmHeadMode::FullLogits =>
+            {
+                self.project_logits_resident(workspace);
+                self.runtime
+                    .greedy_argmax_into(&workspace.logits, feedback, generated_index);
+            },
+            CudaDecodeLmHeadMode::FusedArgmax =>
+            {
+                self.runtime.greedy_lm_head_argmax_into(
+                    &workspace.norm,
+                    &self.embedding,
+                    lm_workspace.expect("fused LM-head workspace must exist"),
+                    feedback,
+                    generated_index,
+                );
+            },
+        }
     }
 
     fn assert_capacity(&self, prompt_len: usize, max_new: usize) {

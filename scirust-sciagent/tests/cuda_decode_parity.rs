@@ -2,7 +2,9 @@
 #![cfg(feature = "cuda")]
 
 use scirust_sciagent::config::SciAgentConfig;
-use scirust_sciagent::cuda_decode::CudaDecodeModel;
+use scirust_sciagent::cuda_decode::{
+    CudaDecodeFfnMode, CudaDecodeLmHeadMode, CudaDecodeModel, CudaDecodeModes,
+};
 use scirust_sciagent::cuda_model::CudaModel;
 use scirust_sciagent::generate::SamplingParams;
 use scirust_sciagent::model::SciAgentModel;
@@ -60,10 +62,34 @@ fn fused_cuda_decode_and_device_feedback_match_b49_greedy() {
         let expected = oracle.generate_cached(&prompt, max_new, &params, seed);
         let host = fast.generate(&prompt, max_new, &params, seed);
         let device = fast.generate_greedy_device_feedback(&prompt, max_new);
+        let ffn_baseline = fast.generate_greedy_device_feedback_with_modes(
+            &prompt,
+            max_new,
+            CudaDecodeModes {
+                ffn: CudaDecodeFfnMode::CublasLt,
+                lm_head: CudaDecodeLmHeadMode::FusedArgmax,
+            },
+        );
+        let lm_baseline = fast.generate_greedy_device_feedback_with_modes(
+            &prompt,
+            max_new,
+            CudaDecodeModes {
+                ffn: CudaDecodeFfnMode::FusedGemv,
+                lm_head: CudaDecodeLmHeadMode::FullLogits,
+            },
+        );
         assert_eq!(host, expected, "host-sampler I250 diverged for {prompt:?}");
         assert_eq!(
             device, expected,
             "device-feedback I250 diverged for {prompt:?}"
+        );
+        assert_eq!(
+            ffn_baseline, expected,
+            "cuBLASLt FFN baseline diverged for {prompt:?}"
+        );
+        assert_eq!(
+            lm_baseline, expected,
+            "full-logits LM baseline diverged for {prompt:?}"
         );
     }
 }

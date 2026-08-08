@@ -1,14 +1,14 @@
 //! I250 batch-one CUDA decode benchmark.
 //!
-//! The primary metric is now greedy device-feedback generation: argmax, token
-//! feedback and generated-token accumulation stay on CUDA and the host performs one
-//! compact `u32[max_new]` readback after the burst. The historical I250 host-sampler
-//! path and B49 cached path are measured as diagnostics/oracles.
+//! One resident `CudaDecodeModel` is exercised under multiple implementation modes
+//! so A/B numbers are not polluted by different CUDA contexts or weight uploads.
 
 use std::time::Instant;
 
 use scirust_sciagent::config::SciAgentConfig;
-use scirust_sciagent::cuda_decode::{CudaDecodeFfnMode, CudaDecodeModel};
+use scirust_sciagent::cuda_decode::{
+    CudaDecodeFfnMode, CudaDecodeLmHeadMode, CudaDecodeModel, CudaDecodeModes,
+};
 use scirust_sciagent::cuda_model::CudaModel;
 use scirust_sciagent::generate::SamplingParams;
 use scirust_sciagent::model::SciAgentModel;
@@ -71,6 +71,19 @@ fn throughput(new_tokens: usize, seconds: f64) -> f64 {
     new_tokens as f64 / seconds.max(1e-9)
 }
 
+fn timed_generate(
+    model: &CudaDecodeModel,
+    prompt: &[u32],
+    max_new: usize,
+    modes: CudaDecodeModes,
+) -> (Vec<u32>, f64, f64) {
+    let started = Instant::now();
+    let tokens = model.generate_greedy_device_feedback_with_modes(prompt, max_new, modes);
+    let seconds = started.elapsed().as_secs_f64();
+    let new_tokens = tokens.len().saturating_sub(prompt.len());
+    (tokens, seconds, throughput(new_tokens, seconds))
+}
+
 fn main() {
     let config = SciAgentConfig::sciagent_350m();
     let prompt_len = env_usize("SCIAGENT_DECODE_PROMPT", 128).max(1);
@@ -104,18 +117,10 @@ fn main() {
         eprintln!("no CUDA Route-B runtime available");
         std::process::exit(2);
     };
-    let Some(fast) =
-        CudaDecodeModel::from_model_with_ffn_mode(&model, CudaDecodeFfnMode::FusedGemv)
+    let Some(fast) = CudaDecodeModel::from_model(&model)
     else
     {
-        eprintln!("no fused-GEMV CUDA decode runtime available");
-        std::process::exit(2);
-    };
-    let Some(cublas) =
-        CudaDecodeModel::from_model_with_ffn_mode(&model, CudaDecodeFfnMode::CublasLt)
-    else
-    {
-        eprintln!("no cuBLASLt I250 decode baseline available");
+        eprintln!("no I250 CUDA decode runtime available");
         std::process::exit(2);
     };
 
@@ -129,22 +134,32 @@ fn main() {
     };
     let seed = 0x4932_3530_5448_4F52u64;
 
-    // Warm NVRTC/cuBLASLt and all measured paths outside the timing windows.
-    let _ = fast.generate_greedy_device_feedback(&prompt, 1);
-    let _ = cublas.generate_greedy_device_feedback(&prompt, 1);
+    let fastest = CudaDecodeModes::default();
+    let ffn_baseline = CudaDecodeModes {
+        ffn: CudaDecodeFfnMode::CublasLt,
+        lm_head: CudaDecodeLmHeadMode::FusedArgmax,
+    };
+    let lm_baseline = CudaDecodeModes {
+        ffn: CudaDecodeFfnMode::FusedGemv,
+        lm_head: CudaDecodeLmHeadMode::FullLogits,
+    };
+    let dense_i250 = CudaDecodeModes {
+        ffn: CudaDecodeFfnMode::CublasLt,
+        lm_head: CudaDecodeLmHeadMode::FullLogits,
+    };
+
+    // Warm all implementation modes outside measurement windows.
+    let _ = fast.generate_greedy_device_feedback_with_modes(&prompt, 1, fastest);
+    let _ = fast.generate_greedy_device_feedback_with_modes(&prompt, 1, ffn_baseline);
+    let _ = fast.generate_greedy_device_feedback_with_modes(&prompt, 1, lm_baseline);
+    let _ = fast.generate_greedy_device_feedback_with_modes(&prompt, 1, dense_i250);
     let _ = oracle.generate_cached(&prompt, 1, &greedy, seed);
 
-    let device_started = Instant::now();
-    let device_tokens = fast.generate_greedy_device_feedback(&prompt, max_new);
-    let device_seconds = device_started.elapsed().as_secs_f64();
-    let device_new = device_tokens.len().saturating_sub(prompt.len());
-    let device_tps = throughput(device_new, device_seconds);
-
-    let cublas_started = Instant::now();
-    let cublas_tokens = cublas.generate_greedy_device_feedback(&prompt, max_new);
-    let cublas_seconds = cublas_started.elapsed().as_secs_f64();
-    let cublas_new = cublas_tokens.len().saturating_sub(prompt.len());
-    let cublas_tps = throughput(cublas_new, cublas_seconds);
+    let (fast_tokens, fast_seconds, fast_tps) = timed_generate(&fast, &prompt, max_new, fastest);
+    let (ffn_tokens, ffn_seconds, ffn_tps) = timed_generate(&fast, &prompt, max_new, ffn_baseline);
+    let (lm_tokens, lm_seconds, lm_tps) = timed_generate(&fast, &prompt, max_new, lm_baseline);
+    let (dense_tokens, dense_seconds, dense_tps) =
+        timed_generate(&fast, &prompt, max_new, dense_i250);
 
     let oracle_started = Instant::now();
     let oracle_tokens = oracle.generate_cached(&prompt, max_new, &greedy, seed);
@@ -152,40 +167,33 @@ fn main() {
     let oracle_new = oracle_tokens.len().saturating_sub(prompt.len());
     let oracle_tps = throughput(oracle_new, oracle_seconds);
 
-    let device_parity = device_tokens == oracle_tokens;
-    let cublas_parity = cublas_tokens == oracle_tokens;
-    let speedup = if oracle_tps > 0.0
-    {
-        device_tps / oracle_tps
-    }
-    else
-    {
-        f64::NAN
-    };
-    let ffn_gain = if cublas_tps > 0.0
-    {
-        device_tps / cublas_tps
-    }
-    else
-    {
-        f64::NAN
-    };
-    let target_met = device_tps >= target_tps;
-    let stretch_met = device_tps >= stretch_tps;
+    let parity = fast_tokens == oracle_tokens;
+    let ffn_parity = ffn_tokens == oracle_tokens;
+    let lm_parity = lm_tokens == oracle_tokens;
+    let dense_parity = dense_tokens == oracle_tokens;
+    let ffn_gain = fast_tps / ffn_tps.max(1e-9);
+    let lm_gain = fast_tps / lm_tps.max(1e-9);
+    let stack_gain = fast_tps / dense_tps.max(1e-9);
+    let speedup = fast_tps / oracle_tps.max(1e-9);
+    let target_met = fast_tps >= target_tps;
+    let stretch_met = fast_tps >= stretch_tps;
 
     println!(
-        "SCIAGENT_I250_DECODE params={} prompt={} requested_new={} fast_mode=device_feedback_greedy ffn_fast=fused_gemv fast_new={} fast_seconds={:.6} fast_tok_s={:.3} ffn_baseline=cublaslt cublas_new={} cublas_seconds={:.6} cublas_tok_s={:.3} ffn_gain={:.3} b49_new={} b49_seconds={:.6} b49_tok_s={:.3} speedup={:.3} generated_h2d_bytes_per_token=0 generated_d2h_bytes_per_token=0 final_readback_bytes={} target_tok_s={:.3} target_met={} stretch_tok_s={:.3} stretch_met={} parity={} cublas_parity={}",
+        "SCIAGENT_I250_DECODE params={} prompt={} requested_new={} fast_mode=ffn_fused_gemv+lm_fused_argmax fast_seconds={:.6} fast_tok_s={:.3} ffn_baseline=cublaslt+lm_fused_argmax ffn_seconds={:.6} ffn_tok_s={:.3} ffn_gain={:.3} lm_baseline=ffn_fused_gemv+full_logits lm_seconds={:.6} lm_tok_s={:.3} lm_gain={:.3} dense_i250=cublaslt+full_logits dense_seconds={:.6} dense_tok_s={:.3} stack_gain={:.3} b49_seconds={:.6} b49_tok_s={:.3} speedup={:.3} generated_h2d_bytes_per_token=0 generated_d2h_bytes_per_token=0 final_readback_bytes={} target_tok_s={:.3} target_met={} stretch_tok_s={:.3} stretch_met={} parity={} ffn_parity={} lm_parity={} dense_parity={}",
         config.total_parameters(),
         prompt_len,
         max_new,
-        device_new,
-        device_seconds,
-        device_tps,
-        cublas_new,
-        cublas_seconds,
-        cublas_tps,
+        fast_seconds,
+        fast_tps,
+        ffn_seconds,
+        ffn_tps,
         ffn_gain,
-        oracle_new,
+        lm_seconds,
+        lm_tps,
+        lm_gain,
+        dense_seconds,
+        dense_tps,
+        stack_gain,
         oracle_seconds,
         oracle_tps,
         speedup,
@@ -194,20 +202,22 @@ fn main() {
         target_met,
         stretch_tps,
         stretch_met,
-        device_parity,
-        cublas_parity,
+        parity,
+        ffn_parity,
+        lm_parity,
+        dense_parity,
     );
 
-    if !device_parity || !cublas_parity
+    if !parity || !ffn_parity || !lm_parity || !dense_parity
     {
-        eprintln!("ERROR: I250 CUDA decode diverged from the B49 cached oracle");
+        eprintln!("ERROR: an I250 A/B mode diverged from the B49 cached oracle");
         std::process::exit(3);
     }
     if require_target && !target_met
     {
         eprintln!(
-            "ERROR: device-feedback CUDA decode {:.3} tok/s is below required {:.3} tok/s",
-            device_tps, target_tps
+            "ERROR: fastest I250 CUDA decode {:.3} tok/s is below required {:.3} tok/s",
+            fast_tps, target_tps
         );
         std::process::exit(4);
     }
