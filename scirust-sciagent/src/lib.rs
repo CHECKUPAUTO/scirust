@@ -37,10 +37,10 @@ pub use elastic_calibration::{
     CalibrationError, CalibrationMeasurement, CalibrationReport, CalibrationWinner,
 };
 pub use elastic_engine::{ElasticBpeEngine, ElasticEncoding};
-pub use elastic_tiny::{TinyScanBpe, TINY_SCAN_CAPACITY};
+pub use elastic_tiny::{TINY_SCAN_CAPACITY, TinyScanBpe};
 pub use elastic_tokenizer::{
-    BpeKernel, CanonicalBpeOracle, DuplicateMergeRule, ElasticProfile, ElasticThresholds, PieceClass,
-    ThresholdError, TokenId,
+    BpeKernel, CanonicalBpeOracle, DuplicateMergeRule, ElasticProfile, ElasticThresholds,
+    PieceClass, ThresholdError, TokenId,
 };
 pub use generate::Generator;
 pub use inference::SciAgentInference;
