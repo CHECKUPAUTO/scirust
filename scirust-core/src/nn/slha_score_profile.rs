@@ -189,6 +189,7 @@ impl SlhaScoreProfile {
     }
 
     /// HOT score = coarse score + sign-Hamming residual correction.
+    #[allow(clippy::too_many_arguments)] // Mirrors the SLHA HOT score contract.
     pub fn score_hot_int4(
         self,
         query_coarse: &[f32],
