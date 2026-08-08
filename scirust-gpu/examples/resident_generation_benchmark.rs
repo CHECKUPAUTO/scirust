@@ -48,10 +48,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err("SCIRUST_RESIDENT_BENCH_VOCAB must be at least 4".into());
     }
-    if D_MODEL % N_HEADS != 0
-    {
-        return Err("Phase 28 model width must be divisible by the head count".into());
-    }
     for &top_k in &top_ks
     {
         if top_k >= vocab && top_k != 0
@@ -105,7 +101,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[allow(clippy::too_many_arguments)]
 fn emit_case(
     tokenizer: &CharTokenizer,
-    config: &MiniLLMConfig,
+    config: &MiniLlmConfig,
     prompt: &[usize],
     requested_decode: usize,
     top_k: usize,
