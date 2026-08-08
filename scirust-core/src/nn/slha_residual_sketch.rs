@@ -1,20 +1,14 @@
 //! Deterministic sign-LSH residual sketch orthogonal to a learned coarse basis.
 //!
-//! SLHA-style scoring augments a continuous coarse projection with sign bits from the
-//! key residual outside that coarse subspace. Reconstructing the dense residual at
+//! SLHA-style scoring augments a continuous coarse projection with sign bits from
+//! the key residual outside that coarse subspace. Reconstructing that residual at
 //! decode time would defeat ElasticMLA's reconstruction-free design. Instead, this
-//! module constructs deterministic random hyperplanes that are themselves orthogonal
-//! to the coarse basis.
+//! module builds deterministic hyperplanes that are themselves orthogonal to the
+//! coarse basis.
 //!
-//! If `U` is the orthonormal coarse basis and `r` is one generated hyperplane with
-//! `U^T r = 0`, then for any vector `x`:
-//!
-//! ```text
-//! r^T x = r^T (x - U U^T x)
-//! ```
-//!
-//! The residual sign can therefore be produced directly by a projection absorbed
-//! into Q/K weights. No dense reconstruction or subtraction is required per token.
+//! For an orthonormal coarse basis `U` and an orthogonal hyperplane `r`,
+//! `r^T x = r^T (x - U U^T x)`. The residual sign can therefore be produced by a
+//! projection absorbed directly into Q/K weights.
 
 use core::fmt;
 
@@ -178,18 +172,17 @@ impl SlhaResidualSketch {
             for attempt in 0..MAX_CANDIDATE_ATTEMPTS
             {
                 fill_rademacher(&mut candidate, seed, bit, attempt);
-                remove_coarse_component(&mut candidate, dimension, coarse_rank, coarse_basis);
-                // A second fixed-order pass limits loss of orthogonality in f32.
-                remove_coarse_component(&mut candidate, dimension, coarse_rank, coarse_basis);
+                remove_coarse_component(&mut candidate, coarse_rank, coarse_basis);
+                remove_coarse_component(&mut candidate, coarse_rank, coarse_basis);
                 let norm_squared = candidate.iter().map(|value| value * value).sum::<f32>();
                 if norm_squared <= MIN_NORM_SQUARED || !norm_squared.is_finite()
                 {
                     continue;
                 }
                 let inverse_norm = norm_squared.sqrt().recip();
-                for row in 0..dimension
+                for (row, &value) in candidate.iter().enumerate()
                 {
-                    projection[row * residual_bits + bit] = candidate[row] * inverse_norm;
+                    projection[row * residual_bits + bit] = value * inverse_norm;
                 }
                 accepted = true;
                 break;
@@ -236,8 +229,6 @@ impl SlhaResidualSketch {
         self.fingerprint
     }
 
-    /// Row-major `[dimension, residual_bits]` projection matrix. This matrix can be
-    /// multiplied into a model's existing Q/K projection weights offline.
     #[must_use]
     pub fn projection(&self) -> &[f32] {
         &self.projection
@@ -258,20 +249,19 @@ impl SlhaResidualSketch {
             });
         }
         output.fill(0.0);
-        for row in 0..self.dimension
+        for (row, &input_value) in input.iter().enumerate()
         {
-            let input_value = input[row];
             let offset = row * self.residual_bits;
-            for bit in 0..self.residual_bits
+            for (bit, output_value) in output.iter_mut().enumerate()
             {
-                output[bit] += input_value * self.projection[offset + bit];
+                *output_value += input_value * self.projection[offset + bit];
             }
         }
         Ok(())
     }
 
-    /// Pack the signs of the residual projections. Bit `1` means a negative
-    /// projection, matching the sign convention used by SLHAv2.
+    /// Pack the projection signs. Bit `1` means a negative projection, matching
+    /// SLHAv2's sign convention.
     pub fn sign_bits_into(
         &self,
         input: &[f32],
@@ -289,12 +279,12 @@ impl SlhaResidualSketch {
         output_words.fill(0);
         for bit in 0..self.residual_bits
         {
-            let mut projection = 0.0f32;
-            for row in 0..self.dimension
+            let mut value = 0.0f32;
+            for (row, &input_value) in input.iter().enumerate()
             {
-                projection += input[row] * self.projection[row * self.residual_bits + bit];
+                value += input_value * self.projection[row * self.residual_bits + bit];
             }
-            if projection < 0.0
+            if value < 0.0
             {
                 output_words[bit / 64] |= 1u64 << (bit % 64);
             }
@@ -346,22 +336,17 @@ fn validate_orthonormal(
     Ok(())
 }
 
-fn remove_coarse_component(
-    vector: &mut [f32],
-    dimension: usize,
-    rank: usize,
-    coarse_basis: &[f32],
-) {
+fn remove_coarse_component(vector: &mut [f32], rank: usize, coarse_basis: &[f32]) {
     for column in 0..rank
     {
         let mut dot = 0.0f32;
-        for row in 0..dimension
+        for (row, &value) in vector.iter().enumerate()
         {
-            dot += vector[row] * coarse_basis[row * rank + column];
+            dot += value * coarse_basis[row * rank + column];
         }
-        for row in 0..dimension
+        for (row, value) in vector.iter_mut().enumerate()
         {
-            vector[row] -= dot * coarse_basis[row * rank + column];
+            *value -= dot * coarse_basis[row * rank + column];
         }
     }
 }
@@ -408,20 +393,18 @@ mod tests {
     }
 
     #[test]
-    fn sketch_is_exactly_replayable_from_seed_and_basis() {
+    fn sketch_is_replayable_from_seed_and_basis() {
         let basis = identity_prefix(8, 3);
         let first = SlhaResidualSketch::from_orthonormal_coarse_basis(8, 3, 7, 42, &basis).unwrap();
-        let second =
-            SlhaResidualSketch::from_orthonormal_coarse_basis(8, 3, 7, 42, &basis).unwrap();
+        let second = SlhaResidualSketch::from_orthonormal_coarse_basis(8, 3, 7, 42, &basis).unwrap();
         assert_eq!(first.projection(), second.projection());
         assert_eq!(first.fingerprint(), second.fingerprint());
     }
 
     #[test]
-    fn every_hyperplane_is_orthogonal_to_coarse_basis() {
+    fn hyperplanes_are_orthogonal_to_coarse_basis() {
         let basis = identity_prefix(12, 4);
-        let sketch =
-            SlhaResidualSketch::from_orthonormal_coarse_basis(12, 4, 13, 7, &basis).unwrap();
+        let sketch = SlhaResidualSketch::from_orthonormal_coarse_basis(12, 4, 13, 7, &basis).unwrap();
         for bit in 0..sketch.residual_bits()
         {
             for coarse in 0..4
@@ -438,13 +421,11 @@ mod tests {
     }
 
     #[test]
-    fn sketch_of_vector_equals_sketch_of_its_coarse_residual() {
-        let dimension = 8;
-        let rank = 3;
-        let basis = identity_prefix(dimension, rank);
+    fn vector_and_its_coarse_residual_have_same_sign_sketch() {
+        let basis = identity_prefix(8, 3);
         let sketch = SlhaResidualSketch::from_orthonormal_coarse_basis(
-            dimension,
-            rank,
+            8,
+            3,
             11,
             0x534c_4841,
             &basis,
@@ -452,10 +433,7 @@ mod tests {
         .unwrap();
         let input = [1.0f32, -2.0, 3.0, 0.5, -0.25, 4.0, -5.0, 2.5];
         let mut residual = input;
-        for index in 0..rank
-        {
-            residual[index] = 0.0;
-        }
+        residual[..3].fill(0.0);
         let mut input_bits = [0u64; 1];
         let mut residual_bits = [0u64; 1];
         sketch.sign_bits_into(&input, &mut input_bits).unwrap();
@@ -477,8 +455,7 @@ mod tests {
     #[test]
     fn sign_output_uses_exact_declared_bit_count() {
         let basis = identity_prefix(6, 2);
-        let sketch =
-            SlhaResidualSketch::from_orthonormal_coarse_basis(6, 2, 65, 9, &basis).unwrap();
+        let sketch = SlhaResidualSketch::from_orthonormal_coarse_basis(6, 2, 65, 9, &basis).unwrap();
         let input = [1.0f32, 2.0, -1.0, 0.5, -0.25, 3.0];
         let mut words = [0u64; 2];
         sketch.sign_bits_into(&input, &mut words).unwrap();
