@@ -1,23 +1,36 @@
 name: SciAgent Thor gate
 
 on:
-  push:
-    branches:
-      - perf/sciagent-b39-thor-production-bench
+  pull_request:
+    branches: [master, main, develop]
     paths:
-      - .github/workflows/sciagent-thor-gate.yml
+      - "scirust-sciagent/**"
+      - "scirust-cuda/**"
+      - "scirust-gpu/**"
+      - ".github/workflows/sciagent-thor-gate.yml"
+  push:
+    branches: [master, main, develop]
+    paths:
+      - "scirust-sciagent/**"
+      - "scirust-cuda/**"
+      - "scirust-gpu/**"
+      - ".github/workflows/sciagent-thor-gate.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: sciagent-thor-gate
+  group: sciagent-thor-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   sciagent-thor:
     name: SCIAGENT CUDA parity + 304M benchmark
+    # Never run code from an untrusted fork on the self-hosted Thor.
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on:
       - self-hosted
       - Linux
@@ -32,10 +45,10 @@ jobs:
       RUSTFLAGS: "-D warnings"
       SCIRUST_REQUIRE_CUDA: "1"
     steps:
-      - name: Check out branch
+      - name: Check out tested revision
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
-          ref: perf/sciagent-b39-thor-production-bench
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Install pinned nightly
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
@@ -48,11 +61,11 @@ jobs:
           nvidia-smi
           nvidia-smi --query-gpu=name,driver_version,compute_cap,memory.total --format=csv,noheader
       - name: Format
-        run: cargo fmt --all -- --check
+        run: cargo +nightly-2026-07-02 fmt --all -- --check
       - name: SCIAGENT CUDA parity
-        run: cargo test -p scirust-sciagent --features cuda --test cuda_parity -- --nocapture
+        run: cargo +nightly-2026-07-02 test -p scirust-sciagent --features cuda --test cuda_parity -- --nocapture
       - name: SCIAGENT CUDA clippy
-        run: cargo clippy -p scirust-sciagent --features cuda --all-targets -- -D warnings
+        run: cargo +nightly-2026-07-02 clippy -p scirust-sciagent --features cuda --all-targets -- -D warnings
       - name: SCIAGENT 304M production sweep
         env:
           SCIAGENT_BENCH_BATCHES: "1,2,4,8"
@@ -61,4 +74,4 @@ jobs:
           SCIAGENT_BENCH_PROMPT: "128"
           SCIAGENT_BENCH_DECODE_NEW: "8"
         run: |
-          cargo run -p scirust-sciagent --features cuda --release --example cuda_production_bench
+          cargo +nightly-2026-07-02 run -p scirust-sciagent --features cuda --release --example cuda_production_bench
