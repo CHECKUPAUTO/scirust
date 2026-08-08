@@ -7,7 +7,7 @@
 From the SciRust repository:
 
 ```bash
-cargo install --path tools/cargo-scirust --force
+cargo install --locked --path tools/cargo-scirust --force
 ```
 
 Cargo then discovers the binary automatically:
@@ -30,7 +30,7 @@ cargo scirust affected --base origin/master --head HEAD
 cargo scirust affected --base origin/master --head HEAD --json
 ```
 
-Without `--base`, the tool uses `GITHUB_BASE_REF` when available, otherwise `HEAD^` (or `HEAD` for a one-commit repository). Without `--head`, tracked working-tree changes plus untracked files are included.
+Without `--base`, the tool first uses the Git merge-base with `GITHUB_BASE_REF` when available, then tries `origin/master`, `master`, `origin/main`, and `main`; only if none can provide a merge-base does it fall back to `HEAD^` (or `HEAD` for a one-commit repository). Without `--head`, tracked working-tree changes plus untracked files are included.
 
 Changes to root `Cargo.toml`, `Cargo.lock`, `rust-toolchain*`, or `.cargo/config*` conservatively affect the entire workspace.
 
