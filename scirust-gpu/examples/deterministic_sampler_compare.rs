@@ -29,9 +29,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "vocab_size,top_k,repeats,sequential_median_ns,parallel_median_ns,speedup_parallel_vs_sequential,exact_stream_match,sequential_fingerprint,parallel_fingerprint,sequential_ranking_passes,parallel_ranking_passes,parallel_lanes"
     );
 
-    for vocab in vocabs {
+    for vocab in vocabs
+    {
         let values = deterministic_logits(vocab);
-        for &top_k in &top_ks {
+        for &top_k in &top_ks
+        {
             emit_case(vocab, top_k, repeats, warmup, &values)?;
         }
     }
@@ -54,7 +56,8 @@ fn emit_case(
     let mut sequential = WgpuDeterministicSampler::new(vocab, config, seed)?;
     let mut parallel = WgpuParallelTopKSampler::new(vocab, config, seed)?;
 
-    for _ in 0..warmup {
+    for _ in 0..warmup
+    {
         std::hint::black_box(sequential.sample(values)?);
         std::hint::black_box(parallel.sample(values)?);
     }
@@ -87,7 +90,8 @@ where
 {
     let mut elapsed = Vec::with_capacity(repeats);
     let mut tokens = Vec::with_capacity(repeats);
-    for _ in 0..repeats {
+    for _ in 0..repeats
+    {
         let start = Instant::now();
         tokens.push(sample()?);
         elapsed.push(start.elapsed().as_nanos());
@@ -107,8 +111,10 @@ fn deterministic_logits(vocab: usize) -> Vec<f32> {
 
 fn fingerprint(tokens: &[usize]) -> u64 {
     let mut hash = FNV_OFFSET;
-    for &token in tokens {
-        for byte in (token as u64).to_le_bytes() {
+    for &token in tokens
+    {
+        for byte in (token as u64).to_le_bytes()
+        {
             hash ^= u64::from(byte);
             hash = hash.wrapping_mul(FNV_PRIME);
         }
@@ -124,7 +130,8 @@ fn parse_list(name: &str, default: &str) -> Result<Vec<usize>, Box<dyn std::erro
         .filter(|value| !value.is_empty())
         .map(str::parse::<usize>)
         .collect::<Result<Vec<_>, _>>()?;
-    if values.is_empty() || (name.ends_with("VOCABS") && values.contains(&0)) {
+    if values.is_empty() || (name.ends_with("VOCABS") && values.contains(&0))
+    {
         return Err(format!("{name} must contain positive comma-separated integers").into());
     }
     Ok(values)
@@ -136,7 +143,8 @@ fn parse_positive(name: &str, default: usize) -> Result<usize, Box<dyn std::erro
         .map(|raw| raw.parse::<usize>())
         .transpose()?
         .unwrap_or(default);
-    if value == 0 {
+    if value == 0
+    {
         return Err(format!("{name} must be positive").into());
     }
     Ok(value)
