@@ -1,5 +1,6 @@
 use scirust_compute::{
-    Architecture, DType, DeviceCapabilities, HardwareCapabilities, MemorySpace, SupportLevel,
+    AcceleratorTopologyDescriptor, AcceleratorTopologyProvider, Architecture, DType,
+    DeviceCapabilities, HardwareCapabilities, MemoryDomainDescriptor, MemorySpace, SupportLevel,
 };
 
 const KNOWN_DTYPES: [DType; 13] = [
@@ -84,6 +85,25 @@ pub(crate) fn hardware_capabilities(capabilities: &DeviceCapabilities) -> Hardwa
     hardware
 }
 
+pub(crate) fn topology_descriptor(
+    capabilities: &DeviceCapabilities,
+) -> AcceleratorTopologyDescriptor {
+    let mut descriptor = AcceleratorTopologyDescriptor::new(capabilities.device);
+    descriptor.name = Some(capabilities.name.clone());
+    descriptor.memory = Some(MemoryDomainDescriptor {
+        space: MemorySpace::Device,
+        capacity_bytes: None,
+        host_addressable: SupportLevel::Unknown,
+    });
+    descriptor
+}
+
+impl AcceleratorTopologyProvider for super::WgpuComputeAdapter {
+    fn accelerator_topology_descriptor(&self) -> AcceleratorTopologyDescriptor {
+        topology_descriptor(self.capabilities())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,5 +181,18 @@ mod tests {
         assert_eq!(hardware.execution.atomic_i64, SupportLevel::Unsupported);
         assert_eq!(hardware.matrix.accelerated, SupportLevel::Unknown);
         assert!(hardware.reproducibility.modes.is_empty());
+    }
+
+    #[test]
+    fn topology_profile_reports_logical_device_memory_without_physical_inference() {
+        let capabilities = legacy_capabilities();
+        let descriptor = topology_descriptor(&capabilities);
+        let memory = descriptor.memory.expect("logical WGPU device memory");
+
+        assert_eq!(descriptor.device, capabilities.device);
+        assert_eq!(descriptor.name.as_deref(), Some(capabilities.name.as_str()));
+        assert_eq!(memory.space, MemorySpace::Device);
+        assert_eq!(memory.capacity_bytes, None);
+        assert_eq!(memory.host_addressable, SupportLevel::Unknown);
     }
 }
