@@ -70,14 +70,11 @@ jobs:
 
     timeout-minutes: 120
 
-    concurrency:
-      group: scirust-thor-gpu-${{ github.event.pull_request.number || github.ref }}
-      cancel-in-progress: false
-
     env:
       RUST_BACKTRACE: 1
       CARGO_INCREMENTAL: 0
       RUSTFLAGS: "-D warnings"
+      SCIRUST_THOR_GPU_LOCK: /tmp/scirust-thor-gpu.lock
 
     steps:
       - name: Check out repository
@@ -147,7 +144,12 @@ jobs:
         if: steps.cuda-device.outputs.available == 'true'
         env:
           SCIRUST_REQUIRE_CUDA: "1"
+        shell: bash
         run: |
+          set -euo pipefail
+          command -v flock >/dev/null
+          exec 9>"$SCIRUST_THOR_GPU_LOCK"
+          flock -x 9
           cargo test -p scirust-gpu --features cuda --test cuda_reference \
             -- --nocapture
 
@@ -155,7 +157,11 @@ jobs:
         if: steps.cuda-device.outputs.available == 'true'
         env:
           SCIRUST_REQUIRE_CUDA: "1"
+        shell: bash
         run: |
+          set -euo pipefail
+          exec 9>"$SCIRUST_THOR_GPU_LOCK"
+          flock -x 9
           cargo test -p scirust --features tensor-canonical-cuda \
             --test canonical_tensor_cuda -- --nocapture
 
@@ -163,7 +169,12 @@ jobs:
         if: steps.cuda-device.outputs.available == 'true'
         env:
           SCIRUST_REQUIRE_CUDA: "1"
-        run: cargo test -p scirust-cuda --features cuda -- --nocapture
+        shell: bash
+        run: |
+          set -euo pipefail
+          exec 9>"$SCIRUST_THOR_GPU_LOCK"
+          flock -x 9
+          cargo test -p scirust-cuda --features cuda -- --nocapture
 
       - name: Run Clippy
         run: |
