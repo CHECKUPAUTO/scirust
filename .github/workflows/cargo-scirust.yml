@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "tools/cargo-scirust/**"
+      - ".gitignore"
       - ".github/workflows/cargo-scirust.yml"
 
 permissions:
