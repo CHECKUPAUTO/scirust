@@ -6,29 +6,23 @@ on:
       - "tools/cargo-scirust/**"
       - ".gitignore"
       - ".github/workflows/cargo-scirust.yml"
+  push:
+    branches: [master]
+    paths:
+      - "tools/cargo-scirust/**"
+      - ".gitignore"
+      - ".github/workflows/cargo-scirust.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   msrv:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          ref: ${{ github.head_ref }}
       - run: rustup toolchain install 1.89.0 --profile minimal --component rustfmt,clippy
-      - name: Generate and commit standalone lockfile
-        run: |
-          cargo +1.89.0 generate-lockfile --manifest-path tools/cargo-scirust/Cargo.toml
-          cargo +1.89.0 fmt --manifest-path tools/cargo-scirust/Cargo.toml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tools/cargo-scirust
-          if ! git diff --cached --quiet; then
-            git commit -m "chore(tooling): lock cargo-scirust dependencies"
-            git push origin "HEAD:${{ github.head_ref }}"
-          fi
+      - run: cargo +1.89.0 fmt --manifest-path tools/cargo-scirust/Cargo.toml -- --check
       - run: cargo +1.89.0 clippy --locked --manifest-path tools/cargo-scirust/Cargo.toml --all-targets -- -D warnings
       - run: cargo +1.89.0 test --locked --manifest-path tools/cargo-scirust/Cargo.toml
       - name: Smoke test Cargo plugin dispatcher
