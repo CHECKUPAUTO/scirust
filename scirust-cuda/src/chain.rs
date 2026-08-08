@@ -935,6 +935,17 @@ impl CudaChain {
         Ok(bf.iter().map(|x| x.to_f32()).collect())
     }
 
+    /// Allocate an all-zero resident bf16 matrix. Used by the exact cached-attention
+    /// parity path to preserve the full-forward cuBLASLt output shape without a
+    /// host allocation or transfer.
+    pub fn zeros_bf16(&self, rows: usize, cols: usize) -> CudaMatrix {
+        let buf = self
+            .stream
+            .alloc_zeros::<bf16>(rows.saturating_mul(cols))
+            .expect("cuda alloc bf16 zeros");
+        CudaMatrix { buf, rows, cols }
+    }
+
     /// Upload an fp32 vector to VRAM **without** rounding (master-weight / moment
     /// storage — see [`CudaF32`]).
     pub fn upload_f32(&self, data: &[f32]) -> CudaF32 {

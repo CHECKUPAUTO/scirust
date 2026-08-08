@@ -434,7 +434,23 @@ impl CudaModel {
             let scores = ch.matmul_bt(&qs, &ks);
             let scaled = ch.scale_causal_mask(&scores, scale, false);
             let weights = ch.softmax(&scaled);
-            heads.push(ch.matmul(&weights, &vs));
+            // cuBLASLt may choose a different reduction algorithm for the cached
+            // `1×T · T×dh` GEMM than for the full-forward `T×T · T×dh` GEMM. B47
+            // proved every value through softmax is bit-identical and the first
+            // numerical drift appears here. Preserve the full-forward matrix shape
+            // and keep only its last row; zero earlier rows cannot affect that row.
+            // This is the shape-stable context GEMM correctness path.
+            if weights.rows() == 1 && vs.rows() > 1
+            {
+                let pad = ch.zeros_bf16(vs.rows() - 1, weights.cols());
+                let padded_weights = ch.concat_rows(&[&pad, &weights]);
+                let full_shape_ctx = ch.matmul(&padded_weights, &vs);
+                heads.push(ch.slice_rows(&full_shape_ctx, vs.rows() - 1, 1));
+            }
+            else
+            {
+                heads.push(ch.matmul(&weights, &vs));
+            }
         }
         let refs: Vec<&CudaMatrix> = heads.iter().collect();
         ch.concat_cols(&refs)
