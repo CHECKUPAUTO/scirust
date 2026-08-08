@@ -1,5 +1,6 @@
 use scirust_compute::{
-    DType, DeviceCapabilities, HardwareCapabilities, MemorySpace, ReproducibilityLevel, SupportLevel,
+    DType, DeviceCapabilities, HardwareCapabilities, MemorySpace, ReproducibilityLevel,
+    SupportLevel,
 };
 
 const KNOWN_DTYPES: [DType; 13] = [
@@ -39,7 +40,10 @@ pub(crate) fn hardware_capabilities(capabilities: &DeviceCapabilities) -> Hardwa
             SupportLevel::Unsupported
         };
         hardware.numeric.arithmetic_dtypes.set_support(dtype, level);
-        hardware.numeric.accumulation_dtypes.set_support(dtype, level);
+        hardware
+            .numeric
+            .accumulation_dtypes
+            .set_support(dtype, level);
     }
 
     hardware.matrix.accelerated = SupportLevel::Unsupported;
