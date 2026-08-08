@@ -84,7 +84,8 @@ impl CudaDecodeModel {
         );
 
         let mut blocks = Vec::with_capacity(model.layers.len());
-        for layer in &model.layers {
+        for layer in &model.layers
+        {
             let qkv_host = fuse_columns(&[
                 &layer.attn.w_q.weight,
                 &layer.attn.w_k.weight,
@@ -176,9 +177,14 @@ impl CudaDecodeModel {
         caches: &mut [DecodeLayerCache],
         workspace: &mut DecodeWorkspace,
     ) {
-        assert_eq!(caches.len(), self.blocks.len(), "decode cache/layer mismatch");
+        assert_eq!(
+            caches.len(),
+            self.blocks.len(),
+            "decode cache/layer mismatch"
+        );
         let runtime = &self.runtime;
-        for (block, cache) in self.blocks.iter().zip(caches.iter_mut()) {
+        for (block, cache) in self.blocks.iter().zip(caches.iter_mut())
+        {
             runtime.rms_norm_into(&workspace.x, &block.norm1, self.eps, &mut workspace.norm);
             runtime.matmul_into(&workspace.norm, &block.qkv, &mut workspace.qkv);
             runtime.gqa_decode_into(
@@ -202,7 +208,12 @@ impl CudaDecodeModel {
             runtime.add_into(&workspace.h, &workspace.tmp_d, &mut workspace.x);
         }
 
-        runtime.rms_norm_into(&workspace.x, &self.final_norm, self.eps, &mut workspace.norm);
+        runtime.rms_norm_into(
+            &workspace.x,
+            &self.final_norm,
+            self.eps,
+            &mut workspace.norm,
+        );
         runtime.matmul_bt_into(&workspace.norm, &self.embedding, &mut workspace.logits);
     }
 
@@ -240,7 +251,8 @@ impl CudaDecodeModel {
         seed: u64,
     ) -> Vec<u32> {
         let mut tokens = normalized_prompt(prompt);
-        if max_new == 0 {
+        if max_new == 0
+        {
             return tokens;
         }
         self.assert_capacity(tokens.len(), max_new);
@@ -248,18 +260,21 @@ impl CudaDecodeModel {
         let mut caches = self.caches(capacity);
         let mut workspace = self.workspace();
 
-        for (pos, &token) in tokens.iter().enumerate() {
+        for (pos, &token) in tokens.iter().enumerate()
+        {
             self.forward_host_token_resident(token, pos, &mut caches, &mut workspace);
         }
         let mut logits = self.runtime.download(&workspace.logits);
         let mut rng = seed_to_state(seed);
 
-        for generated_index in 0..max_new {
+        for generated_index in 0..max_new
+        {
             let recent: Vec<usize> = tokens.iter().map(|&token| token as usize).collect();
             let next = sample_row(&logits, params, &recent, &mut rng) as u32;
             let pos = tokens.len();
             tokens.push(next);
-            if next == 0 || generated_index + 1 == max_new {
+            if next == 0 || generated_index + 1 == max_new
+            {
                 break;
             }
             self.forward_host_token_resident(next, pos, &mut caches, &mut workspace);
@@ -280,7 +295,8 @@ impl CudaDecodeModel {
     /// are exact; post-EOS work is only wasted compute and is the next optimization.
     pub fn generate_greedy_device_feedback(&self, prompt: &[u32], max_new: usize) -> Vec<u32> {
         let mut tokens = normalized_prompt(prompt);
-        if max_new == 0 {
+        if max_new == 0
+        {
             return tokens;
         }
         self.assert_capacity(tokens.len(), max_new);
@@ -288,7 +304,8 @@ impl CudaDecodeModel {
         let mut caches = self.caches(capacity);
         let mut workspace = self.workspace();
 
-        for (pos, &token) in tokens.iter().enumerate() {
+        for (pos, &token) in tokens.iter().enumerate()
+        {
             self.forward_host_token_resident(token, pos, &mut caches, &mut workspace);
         }
 
@@ -296,21 +313,19 @@ impl CudaDecodeModel {
         self.runtime
             .greedy_argmax_into(&workspace.logits, &mut feedback, 0);
 
-        for generated_index in 1..max_new {
+        for generated_index in 1..max_new
+        {
             let pos = tokens.len() + generated_index - 1;
-            self.forward_feedback_token_resident(
-                &feedback,
-                pos,
-                &mut caches,
-                &mut workspace,
-            );
+            self.forward_feedback_token_resident(&feedback, pos, &mut caches, &mut workspace);
             self.runtime
                 .greedy_argmax_into(&workspace.logits, &mut feedback, generated_index);
         }
 
-        for token in self.runtime.download_feedback(&feedback) {
+        for token in self.runtime.download_feedback(&feedback)
+        {
             tokens.push(token);
-            if token == 0 {
+            if token == 0
+            {
                 break;
             }
         }
@@ -330,25 +345,36 @@ impl CudaDecodeModel {
 }
 
 fn normalized_prompt(prompt: &[u32]) -> Vec<u32> {
-    if prompt.is_empty() {
+    if prompt.is_empty()
+    {
         vec![0]
-    } else {
+    }
+    else
+    {
         prompt.to_vec()
     }
 }
 
 fn fuse_columns(parts: &[&Tensor]) -> Vec<f32> {
-    assert!(!parts.is_empty(), "fuse_columns requires at least one matrix");
+    assert!(
+        !parts.is_empty(),
+        "fuse_columns requires at least one matrix"
+    );
     let rows = parts[0].rows;
-    assert!(parts.iter().all(|part| part.rows == rows), "fuse_columns row mismatch");
+    assert!(
+        parts.iter().all(|part| part.rows == rows),
+        "fuse_columns row mismatch"
+    );
     let cols: usize = parts.iter().map(|part| part.cols).sum();
     let mut output = vec![0.0f32; rows * cols];
-    for row in 0..rows {
+    for row in 0..rows
+    {
         let mut destination_col = 0usize;
-        for part in parts {
+        for part in parts
+        {
             let source = &part.data[row * part.cols..(row + 1) * part.cols];
-            let destination = &mut output
-                [row * cols + destination_col..row * cols + destination_col + part.cols];
+            let destination =
+                &mut output[row * cols + destination_col..row * cols + destination_col + part.cols];
             destination.copy_from_slice(source);
             destination_col += part.cols;
         }
@@ -364,9 +390,6 @@ mod tests {
     fn fused_columns_preserve_row_major_order() {
         let a = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
         let b = Tensor::from_vec(vec![5.0, 6.0], 2, 1);
-        assert_eq!(
-            fuse_columns(&[&a, &b]),
-            vec![1.0, 2.0, 5.0, 3.0, 4.0, 6.0]
-        );
+        assert_eq!(fuse_columns(&[&a, &b]), vec![1.0, 2.0, 5.0, 3.0, 4.0, 6.0]);
     }
 }

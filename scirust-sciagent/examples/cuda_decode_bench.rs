@@ -81,25 +81,32 @@ fn main() {
     let require_target = env_bool("SCIAGENT_DECODE_REQUIRE_TARGET");
     assert!(prompt_len + max_new <= config.max_seq_len);
 
-    if let Some(memory_gbps) = memory_gbps {
+    if let Some(memory_gbps) = memory_gbps
+    {
         print_roofline(
             config.total_parameters(),
             memory_gbps,
             target_tps,
             stretch_tps,
         );
-    } else {
+    }
+    else
+    {
         println!(
             "SCIAGENT_I250_ROOFLINE provenance=unknown status=omitted hint=SCIAGENT_DECODE_MEMORY_GBPS"
         );
     }
 
     let model = SciAgentModel::new(&config);
-    let Some(oracle) = CudaModel::from_model(&model) else {
+    let Some(oracle) = CudaModel::from_model(&model)
+    else
+    {
         eprintln!("no CUDA Route-B runtime available");
         std::process::exit(2);
     };
-    let Some(fast) = CudaDecodeModel::from_model(&model) else {
+    let Some(fast) = CudaDecodeModel::from_model(&model)
+    else
+    {
         eprintln!("no fused CUDA decode runtime available");
         std::process::exit(2);
     };
@@ -139,14 +146,20 @@ fn main() {
 
     let device_parity = device_tokens == oracle_tokens;
     let host_parity = host_tokens == oracle_tokens;
-    let speedup = if oracle_tps > 0.0 {
+    let speedup = if oracle_tps > 0.0
+    {
         device_tps / oracle_tps
-    } else {
+    }
+    else
+    {
         f64::NAN
     };
-    let feedback_gain = if host_tps > 0.0 {
+    let feedback_gain = if host_tps > 0.0
+    {
         device_tps / host_tps
-    } else {
+    }
+    else
+    {
         f64::NAN
     };
     let target_met = device_tps >= target_tps;
@@ -177,11 +190,13 @@ fn main() {
         host_parity,
     );
 
-    if !device_parity || !host_parity {
+    if !device_parity || !host_parity
+    {
         eprintln!("ERROR: I250 CUDA decode diverged from the B49 cached oracle");
         std::process::exit(3);
     }
-    if require_target && !target_met {
+    if require_target && !target_met
+    {
         eprintln!(
             "ERROR: device-feedback CUDA decode {:.3} tok/s is below required {:.3} tok/s",
             device_tps, target_tps

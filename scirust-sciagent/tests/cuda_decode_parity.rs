@@ -37,11 +37,15 @@ fn greedy() -> SamplingParams {
 fn fused_cuda_decode_and_device_feedback_match_b49_greedy() {
     let config = tiny_tied();
     let model = SciAgentModel::new(&config);
-    let Some(oracle) = CudaModel::from_model(&model) else {
+    let Some(oracle) = CudaModel::from_model(&model)
+    else
+    {
         eprintln!("cuda: no device, skipping I250 decode parity");
         return;
     };
-    let Some(fast) = CudaDecodeModel::from_model(&model) else {
+    let Some(fast) = CudaDecodeModel::from_model(&model)
+    else
+    {
         eprintln!("cuda: fast decode runtime unavailable, skipping I250 decode parity");
         return;
     };
@@ -51,7 +55,8 @@ fn fused_cuda_decode_and_device_feedback_match_b49_greedy() {
         (vec![3u32, 5, 7, 11], 6usize, 0x1250u64),
         (vec![1u32], 8usize, 0x2250u64),
         (vec![9u32, 2, 17, 4, 6, 8], 5usize, 0x3250u64),
-    ] {
+    ]
+    {
         let expected = oracle.generate_cached(&prompt, max_new, &params, seed);
         let host = fast.generate(&prompt, max_new, &params, seed);
         let device = fast.generate_greedy_device_feedback(&prompt, max_new);
@@ -67,11 +72,15 @@ fn fused_cuda_decode_and_device_feedback_match_b49_greedy() {
 fn device_feedback_preserves_empty_prompt_semantics() {
     let config = tiny_tied();
     let model = SciAgentModel::new(&config);
-    let Some(oracle) = CudaModel::from_model(&model) else {
+    let Some(oracle) = CudaModel::from_model(&model)
+    else
+    {
         eprintln!("cuda: no device, skipping I250 empty-prompt parity");
         return;
     };
-    let Some(fast) = CudaDecodeModel::from_model(&model) else {
+    let Some(fast) = CudaDecodeModel::from_model(&model)
+    else
+    {
         eprintln!("cuda: fast decode runtime unavailable, skipping I250 empty-prompt parity");
         return;
     };
@@ -85,7 +94,9 @@ fn device_feedback_preserves_empty_prompt_semantics() {
 fn device_feedback_zero_generation_matches_prompt_normalization() {
     let config = tiny_tied();
     let model = SciAgentModel::new(&config);
-    let Some(fast) = CudaDecodeModel::from_model(&model) else {
+    let Some(fast) = CudaDecodeModel::from_model(&model)
+    else
+    {
         eprintln!("cuda: fast decode runtime unavailable, skipping zero-generation gate");
         return;
     };
