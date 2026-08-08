@@ -89,6 +89,7 @@ impl ElasticTextTokenizer {
             json.get("version").and_then(serde_json::Value::as_str) == Some("byte_level_v2");
         validate_special_tokens(&vocab)?;
         validate_byte_vocab(&vocab, reversible)?;
+        validate_merge_ids(&merges, rev.len())?;
         let engine = ElasticBpeEngine::from_ordered_merges(&merges, profile)?;
 
         Ok(Self {
@@ -309,6 +310,27 @@ fn validate_byte_vocab(
     Ok(())
 }
 
+fn validate_merge_ids(
+    merges: &[(TokenId, TokenId, TokenId)],
+    vocab_size: usize,
+) -> Result<(), ElasticTextTokenizerError> {
+    for (rule_index, &(left, right, output)) in merges.iter().enumerate()
+    {
+        for token_id in [left, right, output]
+        {
+            if token_id >= vocab_size
+            {
+                return Err(ElasticTextTokenizerError::MergeTokenOutOfVocab {
+                    rule_index,
+                    token_id,
+                    vocab_size,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
 fn byte_to_unit(byte: u8) -> char {
     let codepoint = if byte < 128
     {
@@ -364,6 +386,11 @@ pub enum ElasticTextTokenizerError {
     UnknownMergeSemantics(String),
     LegacyMergeSemantics,
     InvalidMergeRule(usize),
+    MergeTokenOutOfVocab {
+        rule_index: usize,
+        token_id: TokenId,
+        vocab_size: usize,
+    },
     EmptyVocab,
     InvalidVocabId(TokenId),
     DuplicateVocabId(TokenId),
@@ -393,6 +420,14 @@ impl fmt::Display for ElasticTextTokenizerError {
             Self::InvalidMergeRule(index) => {
                 write!(f, "invalid elastic tokenizer merge rule at index {index}")
             },
+            Self::MergeTokenOutOfVocab {
+                rule_index,
+                token_id,
+                vocab_size,
+            } => write!(
+                f,
+                "elastic tokenizer merge rule {rule_index} references token id {token_id} outside vocabulary size {vocab_size}"
+            ),
             Self::EmptyVocab => f.write_str("elastic tokenizer vocabulary is empty"),
             Self::InvalidVocabId(id) => write!(f, "elastic tokenizer invalid vocab id {id}"),
             Self::DuplicateVocabId(id) => write!(f, "elastic tokenizer duplicate vocab id {id}"),
@@ -473,6 +508,21 @@ mod tests {
         assert!(matches!(
             ElasticTextTokenizer::from_json_str(&input, profile(BpeKernel::Reference)),
             Err(ElasticTextTokenizerError::LegacyMergeSemantics)
+        ));
+    }
+
+    #[test]
+    fn merge_ids_must_exist_in_vocab() {
+        let mut value: serde_json::Value = serde_json::from_str(&canonical_test_json()).unwrap();
+        value["merges"] = serde_json::json!(["102 103 999999"]);
+        let input = serde_json::to_string(&value).unwrap();
+        assert!(matches!(
+            ElasticTextTokenizer::from_json_str(&input, profile(BpeKernel::Reference)),
+            Err(ElasticTextTokenizerError::MergeTokenOutOfVocab {
+                rule_index: 0,
+                token_id: 999999,
+                ..
+            })
         ));
     }
 
