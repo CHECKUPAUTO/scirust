@@ -56,7 +56,6 @@ jobs:
   native-arm64:
     name: Native ARM64 (Jetson Thor)
 
-    # Never execute untrusted code from a fork on the self-hosted runner.
     if: >
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
@@ -100,6 +99,9 @@ jobs:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
 
+      - name: Pin Cargo bin directory for self-hosted steps
+        run: echo "$(dirname "$(rustup which cargo --toolchain nightly-2026-07-02)")" >> "$GITHUB_PATH"
+
       - name: Restore Cargo cache
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
         with:
@@ -117,15 +119,6 @@ jobs:
       - name: Test experimental nonlocal relativity
         run: cargo test -p scirust-nonlocal-relativity
 
-      # -------------------------------------------------------------------
-      # Real CUDA execution. This runner is the only place in the project
-      # where a CUDA device exists, so it is the only place the canonical
-      # CUDA path can be proved rather than merely compiled.
-      # -------------------------------------------------------------------
-
-      # Diagnostic only. This step never gates anything and no Rust code reads
-      # it: it exists so a failure below can be read against what the machine
-      # actually carried. The proof is the test steps, not this output.
       - name: Report the CUDA device and libraries
         continue-on-error: true
         run: |
@@ -135,17 +128,6 @@ jobs:
           ldconfig -p | grep -E 'libcuda|libnvrtc' || \
             echo "no libcuda/libnvrtc entry in the loader cache"
 
-      # `SCIRUST_REQUIRE_CUDA=1` turns "no device, so skip" into a hard
-      # failure. Without it a machine with no driver would report a green
-      # run having executed nothing at all — which is exactly the kind of
-      # silent pass this job exists to prevent. The job therefore fails if
-      # the driver or a device is missing, if no test actually ran, if a
-      # kernel does not launch, if the readback is wrong, or if a result
-      # disagrees with the CPU reference.
-      #
-      # A missing NVRTC is not part of that variable's job and needs no
-      # special handling: the tests compile kernels for real, so an unusable
-      # runtime compiler fails them on its own.
       - name: Test the canonical Reference kernels on CUDA
         env:
           SCIRUST_REQUIRE_CUDA: "1"
