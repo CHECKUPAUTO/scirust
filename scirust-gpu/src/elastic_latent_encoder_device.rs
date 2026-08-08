@@ -10,8 +10,9 @@ use core::fmt;
 
 mod minillm;
 pub use minillm::{
-    WgpuResidentMiniLlm, WgpuResidentMiniLlmError, WgpuResidentMiniLlmTelemetry,
-    WgpuResidentSampledMiniLlm, WgpuResidentSampledMiniLlmError,
+    WgpuResidentDeviceFeedbackMiniLlm, WgpuResidentDeviceFeedbackMiniLlmError,
+    WgpuResidentDeviceFeedbackMiniLlmTelemetry, WgpuResidentMiniLlm, WgpuResidentMiniLlmError,
+    WgpuResidentMiniLlmTelemetry, WgpuResidentSampledMiniLlm, WgpuResidentSampledMiniLlmError,
     WgpuResidentSampledMiniLlmTelemetry,
 };
 
@@ -26,7 +27,7 @@ use scirust_compute::{
 use scirust_core::nn::transformer::{block::TransformerBlock, encoder::TransformerEncoder};
 
 const F32_BYTES: usize = core::mem::size_of::<f32>();
-const HEADER_WORDS: usize = 9;
+const HEADER_WORDS: usize = 10;
 
 const FUSED_ENCODER_WGSL: &str = r#"
 struct ResidentState {
@@ -39,6 +40,7 @@ struct ResidentState {
     d_ff: u32,
     len: u32,
     next_slot: u32,
+    enabled: u32,
     data: array<f32>,
 };
 
@@ -70,6 +72,10 @@ fn dense_from_state(
 
 @compute @workgroup_size(1)
 fn main() {
+    if (state.enabled == 0u) {
+        return;
+    }
+
     let d_model = state.d_model;
     let n_layers = state.n_layers;
     let n_heads = state.n_heads;
@@ -542,6 +548,7 @@ impl WgpuResidentTransformerEncoder {
             usize_to_u32(d_ff, "d_ff exceeds WGPU u32 range")?,
             0,
             0,
+            1,
         ];
         adapter.write(&state, 0, bytemuck::cast_slice(&header))?;
 
@@ -667,7 +674,7 @@ impl WgpuResidentTransformerEncoder {
     }
 
     pub fn reset(&mut self) -> Result<(), WgpuResidentTransformerEncoderError> {
-        let cleared = [0u32, 0u32];
+        let cleared = [0u32, 0u32, 1u32];
         self.adapter.write(
             &self.state,
             7 * core::mem::size_of::<u32>(),
@@ -676,6 +683,19 @@ impl WgpuResidentTransformerEncoder {
         self.resident_tokens = 0;
         self.steps = 0;
         self.next_slot = 0;
+        Ok(())
+    }
+
+    pub(crate) fn set_enabled(
+        &self,
+        enabled: bool,
+    ) -> Result<(), WgpuResidentTransformerEncoderError> {
+        let word = [u32::from(enabled)];
+        self.adapter.write(
+            &self.state,
+            9 * core::mem::size_of::<u32>(),
+            bytemuck::cast_slice(&word),
+        )?;
         Ok(())
     }
 
