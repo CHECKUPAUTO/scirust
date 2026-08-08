@@ -1,12 +1,14 @@
-//! Deterministic WGPU token sampling compatible with SciRust's seeded CPU sampling_state.
+//! Deterministic WGPU token sampling compatible with SciRust's seeded CPU sampler.
 //!
-//! WGSL has no portable native `u64`, while [`PcgEngine`] uses a 64-bit PCG
-//! state. This module emulates the state transition with two `u32` limbs and a
-//! fixed-order 32x32->64 multiply, then applies the same temperature, top-k,
-//! top-p and categorical-draw semantics as `scirust_core::nn::sampling`.
+//! WGSL has no portable native `u64`, while SciRust's PCG engine uses a 64-bit
+//! state. This module emulates that transition with two `u32` limbs and preserves
+//! the CPU temperature, top-k, top-p and categorical-draw semantics.
 //!
-//! The first kernel deliberately uses one invocation and selection-sort style
-//! ranking. It is a reproducibility baseline, not a throughput claim.
+//! The kernel deliberately uses one invocation as a deterministic correctness
+//! baseline. When `0 < top_k < vocab_size`, only the first `top_k` selection
+//! passes are required: the remaining order entries still contain every rejected
+//! token exactly once, so filtering stays exact while ranking falls from O(V²)
+//! to O(V·K). Unbounded sampling retains the full oracle-grade ranking path.
 
 use core::fmt;
 
@@ -72,8 +74,8 @@ fn pcg_next_u32() -> u32 {
     let old_hi = sampling_state.state_hi;
 
     // 0x5851f42d4c957f2d, reduced modulo 2^64. For a two-limb
-    // multiplication only the low words of the two cross products contribute
-    // to the high output limb.
+    // multiplication only the low words of the cross products contribute to
+    // the high output limb.
     let product_lo = mul_u32_wide(old_lo, 0x4c957f2du);
     let cross_lo_hi = old_lo * 0x5851f42du;
     let cross_hi_lo = old_hi * 0x4c957f2du;
@@ -140,10 +142,13 @@ fn main() {
         scratch[order_offset + token] = f32(token);
     }
 
-    // CPU sorts probability descending and breaks ties by the lower token id.
-    // Selection sort is intentionally O(V^2): fixed order and no workgroup
-    // races make this a useful oracle-grade baseline.
-    for (var rank: u32 = 0u; rank < vocab_size; rank = rank + 1u) {
+    // CPU sorts probability descending and breaks ties by lower token id. A
+    // bounded top-k request needs only the first K ranks. Selection-sort swaps
+    // preserve a permutation in the unsorted tail, so the later top-k zeroing
+    // still visits every rejected token exactly once.
+    let bounded_top_k = sampling_state.top_k > 0u && sampling_state.top_k < vocab_size;
+    let ranking_limit = select(vocab_size, sampling_state.top_k, bounded_top_k);
+    for (var rank: u32 = 0u; rank < ranking_limit; rank = rank + 1u) {
         var best_pos = rank;
         for (var pos: u32 = rank + 1u; pos < vocab_size; pos = pos + 1u) {
             let best_id = u32(scratch[order_offset + best_pos]);
@@ -162,7 +167,7 @@ fn main() {
         }
     }
 
-    if (sampling_state.top_k > 0u && sampling_state.top_k < vocab_size) {
+    if (bounded_top_k) {
         for (var rank: u32 = sampling_state.top_k; rank < vocab_size; rank = rank + 1u) {
             let token = u32(scratch[order_offset + rank]);
             scratch[token] = 0.0;
@@ -177,7 +182,9 @@ fn main() {
         if (total > 0.0) {
             var cumulative = 0.0;
             var cutoff = vocab_size;
-            for (var rank: u32 = 0u; rank < vocab_size; rank = rank + 1u) {
+            // With bounded top-k, ranks after K already have zero probability
+            // and their relative order cannot affect the nucleus prefix.
+            for (var rank: u32 = 0u; rank < ranking_limit; rank = rank + 1u) {
                 let token = u32(scratch[order_offset + rank]);
                 cumulative = cumulative + scratch[token] / total;
                 if (cumulative >= top_p) {
@@ -275,6 +282,7 @@ pub struct WgpuDeterministicSampler {
     initial_state: u64,
     increment: u64,
     consumes_rng: bool,
+    ranking_passes: usize,
 }
 
 impl WgpuDeterministicSampler {
@@ -336,6 +344,18 @@ impl WgpuDeterministicSampler {
         )?;
         let kernel = adapter.compile(&module)?;
         let stream = adapter.create_stream()?;
+        let ranking_passes = if config.temperature <= 0.0 || config.top_k == 1
+        {
+            0
+        }
+        else if config.top_k > 0 && config.top_k < vocab_size
+        {
+            config.top_k
+        }
+        else
+        {
+            vocab_size
+        };
 
         Ok(Self {
             adapter,
@@ -350,6 +370,7 @@ impl WgpuDeterministicSampler {
             initial_state: state_word,
             increment,
             consumes_rng: config.temperature > 0.0 && config.top_k != 1,
+            ranking_passes,
         })
     }
 
@@ -362,6 +383,20 @@ impl WgpuDeterministicSampler {
             upload_bytes_per_sample: self.vocab_size * F32_BYTES,
             download_bytes_per_sample: U32_BYTES,
         }
+    }
+
+    /// Number of deterministic selection passes executed by one non-disabled
+    /// sample. This is `top_k` for the bounded fast path, `vocab_size` for the
+    /// full-ranking fallback, and zero for greedy shortcuts.
+    #[must_use]
+    pub const fn ranking_passes_per_sample(&self) -> usize {
+        self.ranking_passes
+    }
+
+    /// Whether this sampler uses the exact bounded top-k O(V·K) ranking path.
+    #[must_use]
+    pub const fn uses_bounded_top_k_fast_path(&self) -> bool {
+        self.ranking_passes > 0 && self.ranking_passes < self.vocab_size
     }
 
     pub fn sample(&mut self, logits: &[f32]) -> Result<usize, WgpuDeterministicSamplerError> {
