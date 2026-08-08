@@ -1,9 +1,9 @@
 //! Seeded sampled MiniLLM inference without host-visible logits.
 //!
 //! This wrapper reuses the resident MiniLLM and deterministic WGPU samplers on
-//! the same context. Phase 26 promotes the exact 64-lane bounded-top-k sampler
-//! for eligible configurations while retaining the historical sequential
-//! sampler as the deterministic fallback.
+//! the same context. Phase 26 promotes the exact 64-lane bounded-top-k sampler;
+//! Phase 27 routes that promotion through architecture-neutral implementation
+//! requirements rather than a machine- or vendor-specific policy branch.
 
 mod device_feedback;
 pub use device_feedback::{
@@ -20,11 +20,16 @@ use crate::{
     WgpuDeterministicSamplerTelemetry, WgpuLatentLayerBasis, WgpuParallelTopKSampler,
 };
 use scirust_compute::{
-    BufferAccess, BufferBinding, ComputeBackend, ComputeError, KernelFormat, KernelModule,
-    LaunchConfig,
+    BufferAccess, BufferBinding, ComputeBackend, ComputeError, ExecutionLimits,
+    HardwareCapabilities, ImplementationCandidate, ImplementationRequirements, KernelFormat,
+    KernelModule, KernelRequirements, LaunchConfig, PlannerPolicy, WorkgroupRequirement,
+    select_implementation,
 };
 use scirust_core::nn::sampling::SamplingConfig;
 use scirust_core::nn::transformer::mini_llm::MiniLlmInferenceSnapshot;
+
+const PARALLEL_SAMPLER_IMPLEMENTATION: &str = "parallel-top-k-64";
+const SEQUENTIAL_SAMPLER_IMPLEMENTATION: &str = "sequential-oracle";
 
 const LOGITS_WGSL: &str = r#"
 struct MiniState {
@@ -155,6 +160,59 @@ pub struct WgpuResidentSampledMiniLlmTelemetry {
     pub sample_ready: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResidentSamplerBackend {
+    Sequential,
+    Parallel,
+}
+
+fn select_resident_sampler_backend(
+    vocab_size: usize,
+    sampling: SamplingConfig,
+    hardware: &HardwareCapabilities,
+    limits: &ExecutionLimits,
+) -> Result<ResidentSamplerBackend, WgpuDeterministicSamplerError> {
+    let parallel_algorithm_eligible = sampling.temperature > 0.0
+        && sampling.top_k >= 2
+        && sampling.top_k < vocab_size
+        && sampling.top_k <= PARALLEL_TOP_K_MAX;
+
+    if !parallel_algorithm_eligible
+    {
+        return Ok(ResidentSamplerBackend::Sequential);
+    }
+
+    let parallel_kernel = KernelRequirements::default();
+    let sequential_kernel = KernelRequirements::default();
+    let candidates = [
+        ImplementationCandidate {
+            name: PARALLEL_SAMPLER_IMPLEMENTATION,
+            priority: 0,
+            requirements: ImplementationRequirements::new(&parallel_kernel).with_workgroup(
+                WorkgroupRequirement::x(PARALLEL_TOP_K_LANES as u32),
+            ),
+        },
+        ImplementationCandidate {
+            name: SEQUENTIAL_SAMPLER_IMPLEMENTATION,
+            priority: 1,
+            requirements: ImplementationRequirements::new(&sequential_kernel),
+        },
+    ];
+    let selected = select_implementation(hardware, limits, &candidates, PlannerPolicy::default())
+        .ok_or(WgpuDeterministicSamplerError::InvalidConfig(
+            "no compatible resident sampler implementation",
+        ))?;
+
+    match selected.name
+    {
+        PARALLEL_SAMPLER_IMPLEMENTATION => Ok(ResidentSamplerBackend::Parallel),
+        SEQUENTIAL_SAMPLER_IMPLEMENTATION => Ok(ResidentSamplerBackend::Sequential),
+        _ => Err(WgpuDeterministicSamplerError::InvalidConfig(
+            "capability planner selected an unknown resident sampler implementation",
+        )),
+    }
+}
+
 enum ResidentSampler {
     Sequential(WgpuDeterministicSampler),
     Parallel(WgpuParallelTopKSampler),
@@ -166,25 +224,17 @@ impl ResidentSampler {
         vocab_size: usize,
         sampling: SamplingConfig,
         seed: u64,
-        max_workgroup_size_x: u32,
+        hardware: &HardwareCapabilities,
+        limits: &ExecutionLimits,
     ) -> Result<Self, WgpuDeterministicSamplerError> {
-        let parallel_eligible = sampling.temperature > 0.0
-            && sampling.top_k >= 2
-            && sampling.top_k < vocab_size
-            && sampling.top_k <= PARALLEL_TOP_K_MAX
-            && max_workgroup_size_x >= PARALLEL_TOP_K_LANES as u32;
-
-        if parallel_eligible
+        match select_resident_sampler_backend(vocab_size, sampling, hardware, limits)?
         {
-            Ok(Self::Parallel(WgpuParallelTopKSampler::from_context(
-                context, vocab_size, sampling, seed,
-            )?))
-        }
-        else
-        {
-            Ok(Self::Sequential(WgpuDeterministicSampler::from_context(
-                context, vocab_size, sampling, seed,
-            )?))
+            ResidentSamplerBackend::Parallel => Ok(Self::Parallel(
+                WgpuParallelTopKSampler::from_context(context, vocab_size, sampling, seed)?,
+            )),
+            ResidentSamplerBackend::Sequential => Ok(Self::Sequential(
+                WgpuDeterministicSampler::from_context(context, vocab_size, sampling, seed)?,
+            )),
         }
     }
 
@@ -277,10 +327,17 @@ impl WgpuResidentSampledMiniLlm {
     ) -> Result<Self, WgpuResidentSampledMiniLlmError> {
         let vocab_size = snapshot.config.vocab_size;
         let inner = WgpuResidentMiniLlm::new(snapshot, capacity, rank, layers)?;
-        let max_workgroup_size_x = inner.encoder.adapter.capabilities().max_workgroup_size[0];
+        let hardware = inner.encoder.adapter.hardware_capabilities();
+        let limits = ExecutionLimits::from_device_capabilities(inner.encoder.adapter.capabilities());
         let context = inner.encoder.adapter.context().clone();
-        let sampler =
-            ResidentSampler::select(context, vocab_size, sampling, seed, max_workgroup_size_x)?;
+        let sampler = ResidentSampler::select(
+            context,
+            vocab_size,
+            sampling,
+            seed,
+            &hardware,
+            &limits,
+        )?;
         let module =
             KernelModule::new(KernelFormat::Wgsl, "main", LOGITS_WGSL.as_bytes().to_vec())?;
         let logits_kernel = inner.encoder.adapter.compile(&module)?;
@@ -319,7 +376,7 @@ impl WgpuResidentSampledMiniLlm {
         }
     }
 
-    /// Whether Phase 26 selected the exact 64-lane bounded-top-k sampler.
+    /// Whether the capability planner selected the exact 64-lane bounded-top-k sampler.
     #[must_use]
     pub fn uses_parallel_sampler(&self) -> bool {
         self.sampler.is_parallel()
@@ -462,5 +519,81 @@ fn binding<'a>(
         offset_bytes: 0,
         length_bytes: buffer.len(),
         access,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use scirust_compute::DeviceCapabilities;
+
+    fn hardware() -> HardwareCapabilities {
+        HardwareCapabilities::from_device_capabilities(&DeviceCapabilities::reference_cpu())
+    }
+
+    fn bounded_sampling() -> SamplingConfig {
+        SamplingConfig {
+            temperature: 1.0,
+            top_k: 5,
+            top_p: 0.9,
+        }
+    }
+
+    #[test]
+    fn sampler_policy_promotes_only_with_known_sufficient_workgroup_width() {
+        let profile = hardware();
+        let wide = ExecutionLimits {
+            max_workgroup_size: [Some(PARALLEL_TOP_K_LANES as u32), Some(1), Some(1)],
+        };
+        assert_eq!(
+            select_resident_sampler_backend(128, bounded_sampling(), &profile, &wide).unwrap(),
+            ResidentSamplerBackend::Parallel
+        );
+
+        let narrow = ExecutionLimits {
+            max_workgroup_size: [Some((PARALLEL_TOP_K_LANES - 1) as u32), Some(1), Some(1)],
+        };
+        assert_eq!(
+            select_resident_sampler_backend(128, bounded_sampling(), &profile, &narrow).unwrap(),
+            ResidentSamplerBackend::Sequential
+        );
+
+        assert_eq!(
+            select_resident_sampler_backend(
+                128,
+                bounded_sampling(),
+                &profile,
+                &ExecutionLimits::default(),
+            )
+            .unwrap(),
+            ResidentSamplerBackend::Sequential
+        );
+    }
+
+    #[test]
+    fn sampler_algorithm_ineligibility_remains_separate_from_hardware_policy() {
+        let profile = hardware();
+        let wide = ExecutionLimits {
+            max_workgroup_size: [Some(1024), Some(1024), Some(64)],
+        };
+        for sampling in [
+            SamplingConfig::greedy(),
+            SamplingConfig {
+                temperature: 1.0,
+                top_k: 0,
+                top_p: 0.9,
+            },
+            SamplingConfig {
+                temperature: 1.0,
+                top_k: PARALLEL_TOP_K_MAX + 1,
+                top_p: 0.9,
+            },
+        ]
+        {
+            assert_eq!(
+                select_resident_sampler_backend(512, sampling, &profile, &wide).unwrap(),
+                ResidentSamplerBackend::Sequential
+            );
+        }
     }
 }
