@@ -1,0 +1,38 @@
+name: SciAgent I250 mainline hosted
+
+on:
+  pull_request:
+    branches: [ci/i250-mainline-base]
+    paths:
+      - "scirust-cuda/**"
+      - "scirust-sciagent/**"
+      - ".github/workflows/sciagent-i250-mainline-hosted.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sciagent-i250-mainline-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  hosted:
+    name: I250 format + CUDA compile + Clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+      - name: Format
+        run: cargo +nightly-2026-07-02 fmt --all -- --check
+      - name: CUDA feature compile
+        run: cargo +nightly-2026-07-02 check -p scirust-sciagent --features cuda --all-targets --locked
+      - name: Strict Clippy
+        run: cargo +nightly-2026-07-02 clippy -p scirust-sciagent --features cuda --all-targets --locked -- -D warnings
