@@ -16,7 +16,7 @@ use scirust_gpu::{WgpuLatentHeadBasis, WgpuLatentLayerBasis, WgpuResidentDeviceF
 const DEFAULT_VOCAB: usize = 4096;
 const DEFAULT_PROMPT_TOKENS: usize = 16;
 const DEFAULT_DECODE_TOKENS: &str = "8,32";
-const DEFAULT_TOP_KS: &str = "0,50";
+const DEFAULT_TOP_KS: &str = "50";
 const DEFAULT_REPEATS: usize = 7;
 const DEFAULT_WARMUP: usize = 3;
 const DEFAULT_SEED: u64 = 0x28_00_00_01;
