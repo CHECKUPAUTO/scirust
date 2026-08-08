@@ -47,7 +47,9 @@ use scirust_sciagent::config::SciAgentConfig;
 use scirust_sciagent::cuda_model::{CudaPretrainConfig, CudaTrainer};
 use scirust_sciagent::model::SciAgentModel;
 use scirust_sciagent::train::checkpoint::{latest_checkpoint, load_checkpoint, read_meta};
-use scirust_sciagent::train::dataset::{ShardLoader, content_hash, source_quality};
+use scirust_sciagent::train::dataset::{
+    ShardLoader, content_hash, source_quality, token_stream_hash,
+};
 
 /// A tied, vocab-256 byte-level config — small enough to iterate fast, real enough
 /// to train on an actual code tree with no tokenizer.
@@ -337,8 +339,24 @@ fn main() {
          AdamW state ~{opt_mb:.0} MB (activations extra)\n"
     );
 
-    let seq_len = env_usize("SCIAGENT_SEQ", 128).min(config.max_seq_len);
-    let batch_size = env_usize("SCIAGENT_BATCH", 1).max(1);
+    // Large production runs default to 512: the historical 128-token default
+    // rarely held a complete Rust function and contributed to the syntax wall. Exact
+    // B34 resumes inherit their saved B/T unless the operator explicitly overrides.
+    let default_seq = if config.d_model > 256 { 512 } else { 128 };
+    let explicit_seq = std::env::var("SCIAGENT_SEQ")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok());
+    let seq_len = explicit_seq
+        .or_else(|| optimizer_resume.as_ref().and_then(|s| s.seq_len))
+        .unwrap_or(default_seq)
+        .min(config.max_seq_len);
+    let explicit_batch = std::env::var("SCIAGENT_BATCH")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok());
+    let batch_size = explicit_batch
+        .or_else(|| optimizer_resume.as_ref().and_then(|s| s.batch_size))
+        .unwrap_or(1)
+        .max(1);
     let telemetry_interval = env_usize("SCIAGENT_TELEMETRY", 25).max(1);
     // No cap by default. This used to default to 16M, which silently trained on the
     // first 16M tokens of the corpus and threw the rest away — and because the shard
@@ -362,7 +380,8 @@ fn main() {
             );
             std::process::exit(1);
         }
-        let raw = loader.tokens();
+        let mut raw = loader.into_tokens();
+        let original_len = raw.len();
         let maxid = raw.iter().copied().max().unwrap_or(0) as usize;
         if maxid >= config.vocab_size
         {
@@ -374,22 +393,23 @@ fn main() {
             );
             std::process::exit(1);
         }
-        if max_tokens < raw.len()
+        if max_tokens < original_len
         {
             println!(
                 "streaming {} of {} tokens from BPE shards in {dir} \
                  (TRUNCATED to {:.1}% by SCIAGENT_MAX_TOKENS={max_tokens} — the shard walk is\n\
                  alphabetical, so a truncated corpus is a *prefix*, not a sample)",
                 max_tokens,
-                raw.len(),
-                100.0 * max_tokens as f64 / raw.len() as f64
+                original_len,
+                100.0 * max_tokens as f64 / original_len as f64
             );
+            raw.truncate(max_tokens);
         }
         else
         {
-            println!("streaming {} tokens from BPE shards in {dir}", raw.len());
+            println!("streaming {} tokens from BPE shards in {dir}", original_len);
         }
-        raw.iter().take(max_tokens).copied().collect()
+        raw
     }
     else if let Ok(text) = std::env::var("SCIAGENT_TEXT")
     {
@@ -423,6 +443,63 @@ fn main() {
         );
         toks
     };
+
+    let corpus_tokens = tokens.len();
+    let corpus_hash = token_stream_hash(&tokens);
+    println!("corpus identity: {corpus_tokens} tokens | fnv64 {corpus_hash:016x}");
+    if let Some(saved) = optimizer_resume.as_ref()
+    {
+        let mut mismatches = Vec::new();
+        if let Some(v) = saved.seq_len
+        {
+            if v != seq_len
+            {
+                mismatches.push(format!("seq_len saved={v} current={seq_len}"));
+            }
+        }
+        if let Some(v) = saved.batch_size
+        {
+            if v != batch_size
+            {
+                mismatches.push(format!("batch saved={v} current={batch_size}"));
+            }
+        }
+        if let Some(v) = saved.corpus_tokens
+        {
+            if v != corpus_tokens
+            {
+                mismatches.push(format!("corpus_tokens saved={v} current={corpus_tokens}"));
+            }
+        }
+        if let Some(v) = saved.corpus_hash
+        {
+            if v != corpus_hash
+            {
+                mismatches.push(format!(
+                    "corpus_hash saved={v:016x} current={corpus_hash:016x}"
+                ));
+            }
+        }
+        if !mismatches.is_empty()
+        {
+            let allow = matches!(
+                std::env::var("SCIAGENT_ALLOW_NONEXACT_RESUME").as_deref(),
+                Ok("1" | "true")
+            );
+            if !allow
+            {
+                eprintln!(
+                    "exact resume refused: {}. Set SCIAGENT_ALLOW_NONEXACT_RESUME=1 only for an intentional branch experiment.",
+                    mismatches.join(", ")
+                );
+                std::process::exit(1);
+            }
+            eprintln!(
+                "WARNING: non-exact resume explicitly allowed: {}",
+                mismatches.join(", ")
+            );
+        }
+    }
 
     // Exact B32 resumes inherit the saved optimizer/LR trajectory by default. An
     // explicit environment override still wins. Legacy checkpoints (no AdamW sidecar)
@@ -523,6 +600,8 @@ fn main() {
         val_frac,
         eval_interval: 100,
         keep_last,
+        corpus_tokens,
+        corpus_hash,
         shuffle,
         ..Default::default()
     };

@@ -1063,6 +1063,11 @@ pub struct CudaOptimizerResume {
     pub betas: (f32, f32),
     pub adam_eps: f32,
     pub weight_decay: f32,
+    /// Exact-data resume fields are absent on legacy B32/v1 sidecars.
+    pub seq_len: Option<usize>,
+    pub batch_size: Option<usize>,
+    pub corpus_tokens: Option<usize>,
+    pub corpus_hash: Option<u64>,
 }
 
 fn optimizer_tensor(chain: &CudaChain, x: &CudaF32, rows: usize, cols: usize) -> Tensor {
@@ -1458,7 +1463,7 @@ impl CudaTrainer {
         .map_err(|e| format!("cannot save optimizer.safetensors: {e}"))?;
 
         let meta = serde_json::json!({
-            "version": 1,
+            "version": 2,
             "step": self.step,
             "base_lr": cfg.base_lr,
             "min_lr": cfg.min_lr,
@@ -1467,6 +1472,10 @@ impl CudaTrainer {
             "betas": [cfg.betas.0, cfg.betas.1],
             "adam_eps": cfg.adam_eps,
             "weight_decay": cfg.weight_decay,
+            "seq_len": cfg.seq_len,
+            "batch_size": cfg.batch_size,
+            "corpus_tokens": cfg.corpus_tokens,
+            "corpus_hash": cfg.corpus_hash,
         });
         let encoded = serde_json::to_string_pretty(&meta)
             .map_err(|e| format!("cannot serialize optimizer metadata: {e}"))?;
@@ -1503,10 +1512,11 @@ impl CudaTrainer {
             .map_err(|e| format!("cannot read {}: {e}", meta_path.display()))?;
         let meta: serde_json::Value = serde_json::from_str(&raw)
             .map_err(|e| format!("cannot parse {}: {e}", meta_path.display()))?;
-        if meta["version"].as_u64() != Some(1)
+        let version = meta["version"].as_u64().unwrap_or(0);
+        if version != 1 && version != 2
         {
             return Err(format!(
-                "unsupported optimizer checkpoint version in {}",
+                "unsupported optimizer checkpoint version {version} in {}",
                 meta_path.display()
             ));
         }
@@ -1582,6 +1592,8 @@ impl CudaTrainer {
             load_pair!(wd);
         }
         self.step = step as u32;
+        let optional_usize = |key: &str| meta[key].as_u64().map(|x| x as usize);
+        let optional_u64 = |key: &str| meta[key].as_u64();
         Ok(Some(CudaOptimizerResume {
             step,
             base_lr: number("base_lr")?,
@@ -1591,6 +1603,38 @@ impl CudaTrainer {
             betas: (beta0, beta1),
             adam_eps: number("adam_eps")?,
             weight_decay: number("weight_decay")?,
+            seq_len: if version >= 2
+            {
+                optional_usize("seq_len")
+            }
+            else
+            {
+                None
+            },
+            batch_size: if version >= 2
+            {
+                optional_usize("batch_size")
+            }
+            else
+            {
+                None
+            },
+            corpus_tokens: if version >= 2
+            {
+                optional_usize("corpus_tokens")
+            }
+            else
+            {
+                None
+            },
+            corpus_hash: if version >= 2
+            {
+                optional_u64("corpus_hash")
+            }
+            else
+            {
+                None
+            },
         }))
     }
 
@@ -1779,19 +1823,25 @@ impl CudaTrainer {
             WarmupCosineSchedule::new(cfg.base_lr, cfg.min_lr, cfg.warmup_steps, cfg.total_steps);
         let mut step = cfg.start_step;
         let n_windows = train_tokens.len().saturating_sub(1) / s;
+        if n_windows == 0
+        {
+            return losses;
+        }
         let mut order: Vec<usize> = (0..n_windows).collect();
-        let mut epoch: u64 = 0;
+        // The permutation is a pure function of the absolute epoch, never of the
+        // process invocation. Resume reconstructs both epoch and cursor from the
+        // number of sequences already consumed, so interrupted and uninterrupted
+        // runs see the exact same next windows.
+        let consumed_windows = cfg.start_step.saturating_mul(batch);
+        let mut epoch: u64 = (consumed_windows / n_windows) as u64;
+        let mut wi = consumed_windows % n_windows;
         let reshuffle = |order: &mut [usize], epoch: u64| {
-            shuffle_windows(
-                order,
-                (cfg.start_step as u64).wrapping_add(epoch.wrapping_mul(0x9E37_79B9_7F4A_7C15)),
-            );
+            shuffle_windows(order, 0x5343_4941_4745_4E54u64 ^ epoch);
         };
         if cfg.shuffle
         {
             reshuffle(&mut order, epoch);
         }
-        let mut wi = 0usize;
         let mut best_val = f32::INFINITY;
         let mut best_step: Option<usize> = None;
         let t0 = std::time::Instant::now();
@@ -2020,6 +2070,10 @@ pub struct CudaPretrainConfig {
     /// (plus the best-val one, which is never pruned). `0` keeps everything — the old
     /// behavior, which fills the disk on a long run. Default `3`.
     pub keep_last: usize,
+    /// Exact-resume corpus identity (B34). Zero is reserved for legacy/tests that
+    /// do not provide a production corpus fingerprint.
+    pub corpus_tokens: usize,
+    pub corpus_hash: u64,
     /// Shuffle the training window order (re-shuffled deterministically each epoch).
     /// Default `true` — sequential streaming spikes per-step loss variance and
     /// encourages memorizing adjacent near-duplicate windows. `false` = sequential.
@@ -2050,6 +2104,8 @@ impl Default for CudaPretrainConfig {
             eval_interval: 250,
             eval_windows: 32,
             keep_last: 3,
+            corpus_tokens: 0,
+            corpus_hash: 0,
             shuffle: true,
         }
     }
