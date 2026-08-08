@@ -172,7 +172,8 @@ fn select_resident_sampler_backend(
     hardware: &HardwareCapabilities,
     limits: &ExecutionLimits,
 ) -> Result<ResidentSamplerBackend, WgpuDeterministicSamplerError> {
-    let parallel_algorithm_eligible = sampling.temperature > 0.0
+    let parallel_algorithm_eligible = sampling.temperature.is_finite()
+        && sampling.temperature > 0.0
         && sampling.top_k >= 2
         && sampling.top_k < vocab_size
         && sampling.top_k <= PARALLEL_TOP_K_MAX;
@@ -188,9 +189,8 @@ fn select_resident_sampler_backend(
         ImplementationCandidate {
             name: PARALLEL_SAMPLER_IMPLEMENTATION,
             priority: 0,
-            requirements: ImplementationRequirements::new(&parallel_kernel).with_workgroup(
-                WorkgroupRequirement::x(PARALLEL_TOP_K_LANES as u32),
-            ),
+            requirements: ImplementationRequirements::new(&parallel_kernel)
+                .with_workgroup(WorkgroupRequirement::x(PARALLEL_TOP_K_LANES as u32)),
         },
         ImplementationCandidate {
             name: SEQUENTIAL_SAMPLER_IMPLEMENTATION,
@@ -200,8 +200,8 @@ fn select_resident_sampler_backend(
     ];
     let selected = select_implementation(hardware, limits, &candidates, PlannerPolicy::default())
         .ok_or(WgpuDeterministicSamplerError::InvalidConfig(
-            "no compatible resident sampler implementation",
-        ))?;
+        "no compatible resident sampler implementation",
+    ))?;
 
     match selected.name
     {
@@ -328,16 +328,11 @@ impl WgpuResidentSampledMiniLlm {
         let vocab_size = snapshot.config.vocab_size;
         let inner = WgpuResidentMiniLlm::new(snapshot, capacity, rank, layers)?;
         let hardware = inner.encoder.adapter.hardware_capabilities();
-        let limits = ExecutionLimits::from_device_capabilities(inner.encoder.adapter.capabilities());
+        let limits =
+            ExecutionLimits::from_device_capabilities(inner.encoder.adapter.capabilities());
         let context = inner.encoder.adapter.context().clone();
-        let sampler = ResidentSampler::select(
-            context,
-            vocab_size,
-            sampling,
-            seed,
-            &hardware,
-            &limits,
-        )?;
+        let sampler =
+            ResidentSampler::select(context, vocab_size, sampling, seed, &hardware, &limits)?;
         let module =
             KernelModule::new(KernelFormat::Wgsl, "main", LOGITS_WGSL.as_bytes().to_vec())?;
         let logits_kernel = inner.encoder.adapter.compile(&module)?;
@@ -578,6 +573,11 @@ mod tests {
         };
         for sampling in [
             SamplingConfig::greedy(),
+            SamplingConfig {
+                temperature: f32::INFINITY,
+                top_k: 5,
+                top_p: 0.9,
+            },
             SamplingConfig {
                 temperature: 1.0,
                 top_k: 0,
