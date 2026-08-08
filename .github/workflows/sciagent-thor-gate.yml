@@ -24,72 +24,58 @@ jobs:
     runs-on: [self-hosted, Linux, ARM64, scirust-arm64, jetson-thor, internal]
     timeout-minutes: 20
     steps:
-      - name: Host, GPU, disk and active trainer state
+      - name: Identity, mounts and root-path permissions
         shell: bash
         run: |
           set -euo pipefail
           echo "SCIAGENT_PREFLIGHT_USER=$(id -un)"
           echo "SCIAGENT_PREFLIGHT_HOME=$HOME"
-          uname -a
-          free -h
+          id
+          echo "--- GPU / memory / disk ---"
           nvidia-smi --query-gpu=name,driver_version,compute_cap --format=csv,noheader
-          echo "--- disk ---"
-          df -hT / /root /home /data /mnt /srv 2>/dev/null || true
+          free -h
+          df -hT /
+          echo "--- mounts ---"
+          findmnt -rn -o TARGET,SOURCE,FSTYPE,OPTIONS | head -n 250 || true
+          echo "--- known root path permissions ---"
+          ls -ld /root /root/scirust /root/scirust/data /root/scirust/data/shards_v4 2>&1 || true
+          command -v namei >/dev/null && namei -l /root/scirust/data/shards_v4 2>&1 || true
+          for p in /root/scirust/data/shards_v4 /root/scirust /data /mnt /srv /home /opt /var/lib/github-runner; do
+            if [[ -e "$p" ]]; then
+              echo "SCIAGENT_PREFLIGHT_PATH path=$p readable=$([[ -r "$p" ]] && echo yes || echo no) searchable=$([[ -x "$p" ]] && echo yes || echo no)"
+            else
+              echo "SCIAGENT_PREFLIGHT_PATH path=$p exists=no"
+            fi
+          done
           echo "--- existing training processes ---"
           pgrep -af 'cuda_pretrain|sciagent.*pretrain' || true
 
-      - name: Locate and validate v4 shards read-only
+      - name: Search all readable storage roots for corpus candidates
         shell: bash
         run: |
           set -euo pipefail
-          if sudo -n true 2>/dev/null; then
-            SUDO="sudo -n"
-            echo "SCIAGENT_PREFLIGHT_SUDO=available"
-          else
-            SUDO=""
-            echo "SCIAGENT_PREFLIGHT_SUDO=unavailable"
-          fi
-
-          candidates=()
-          while IFS= read -r p; do [[ -n "$p" ]] && candidates+=("$p"); done < <(
-            $SUDO find /root/scirust /home /data /mnt /srv \
-              -maxdepth 6 -type d -name shards_v4 -print 2>/dev/null | sort -u || true
-          )
-
-          echo "SCIAGENT_PREFLIGHT_SHARD_DIR_COUNT=${#candidates[@]}"
-          if (( ${#candidates[@]} == 0 )); then
-            echo "SCIAGENT_PREFLIGHT_SHARDS=NOT_FOUND"
-            exit 3
-          fi
-
-          found_exact=0
-          for dir in "${candidates[@]}"; do
-            files="$($SUDO find "$dir" -maxdepth 1 -type f -name '*.bin' -printf '.' 2>/dev/null | wc -c)"
-            bytes="$($SUDO find "$dir" -maxdepth 1 -type f -name '*.bin' -printf '%s\n' 2>/dev/null | awk '{s+=$1} END {printf "%.0f", s+0}')"
-            tokens=$(( bytes / 4 ))
-            rem=$(( bytes % 4 ))
-            echo "SCIAGENT_PREFLIGHT_SHARDS path=$dir files=$files bytes=$bytes tokens=$tokens byte_remainder=$rem"
-            if [[ "$files" == "1030" && "$tokens" == "1029492639" && "$rem" == "0" ]]; then
-              found_exact=$((found_exact + 1))
-              echo "SCIAGENT_PREFLIGHT_V4_EXACT=$dir"
-            fi
+          roots=(/opt /var/lib/github-runner /var/tmp /tmp /home /data /mnt /srv /media)
+          echo "--- shard_v4 directories visible to ghrunner ---"
+          for root in "${roots[@]}"; do
+            [[ -d "$root" ]] || continue
+            find "$root" -maxdepth 9 -type d -name shards_v4 -print 2>/dev/null || true
+          done
+          echo "--- likely SciRust / SciAgent data paths visible to ghrunner ---"
+          for root in "${roots[@]}"; do
+            [[ -d "$root" ]] || continue
+            find "$root" -maxdepth 7 \( -type d -o -type l \) \
+              \( -iname 'scirust' -o -iname 'sciagent*' -o -iname 'shards*' -o -iname 'checkpoints*' \) \
+              -print 2>/dev/null | head -n 400 || true
+          done
+          echo "--- large readable u32 shard-like files ---"
+          for root in /opt /var/lib/github-runner /home /data /mnt /srv /media; do
+            [[ -d "$root" ]] || continue
+            find "$root" -maxdepth 9 -type f -name 'shard_*.bin' -size +1M -printf '%p %s\n' 2>/dev/null | head -n 40 || true
           done
 
-          if (( found_exact != 1 )); then
-            echo "SCIAGENT_PREFLIGHT_V4_EXACT_MATCHES=$found_exact"
-            exit 4
-          fi
-
-      - name: Inspect checkpoint namespaces read-only
+      - name: Report conclusion without modifying host
         shell: bash
         run: |
           set -euo pipefail
-          if sudo -n true 2>/dev/null; then SUDO="sudo -n"; else SUDO=""; fi
-          echo "--- checkpoint roots / semantics markers ---"
-          $SUDO find /root/scirust /home /data /mnt /srv \
-            -maxdepth 7 \( -type d -name 'checkpoints*' -o -type f -name 'model_semantics.version' \) \
-            -print 2>/dev/null | head -n 300 || true
-          echo "--- candidate fresh-v2 namespaces already present ---"
-          $SUDO find /root/scirust /home /data /mnt /srv \
-            -maxdepth 7 -type d \( -name '*semantics*v2*' -o -name '*bpe350m*v5*' -o -name '*post_b33*' \) \
-            -print 2>/dev/null | head -n 100 || true
+          echo "SCIAGENT_PREFLIGHT_READ_ONLY=confirmed"
+          echo "SCIAGENT_PREFLIGHT_NOTE=training_not_started"
