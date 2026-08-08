@@ -2,6 +2,8 @@
 
 use core::marker::PhantomData;
 
+use crate::angular_momentum::clebsch_gordan;
+
 /// Static representation action used to express equivariance without dynamic dispatch.
 pub trait Representation<G, X> {
     /// Apply the representation of `g` to `x`.
@@ -77,6 +79,52 @@ impl<const L: usize, const R: usize, const O: usize> ClebschGordan<L, R, O> {
     /// Construct from a precomputed coefficient tensor.
     pub const fn new(coeff: [[[f64; R]; L]; O]) -> Self { Self { coeff } }
 
+    /// Generate the standard integer-spin SO(3) coupling table.
+    ///
+    /// Dimensions must match `L = 2*j_left + 1`, `R = 2*j_right + 1` and
+    /// `O = 2*j_out + 1`; incompatible angular momenta or dimensions return `None`.
+    /// Basis indices are ordered by magnetic quantum number from `-j` through `+j`.
+    pub fn from_so3(j_left: usize, j_right: usize, j_out: usize) -> Option<Self> {
+        let expected_left = j_left.checked_mul(2)?.checked_add(1)?;
+        let expected_right = j_right.checked_mul(2)?.checked_add(1)?;
+        let expected_out = j_out.checked_mul(2)?.checked_add(1)?;
+        if L != expected_left || R != expected_right || O != expected_out {
+            return None;
+        }
+        if j_left.abs_diff(j_right) > j_out || j_out > j_left.checked_add(j_right)? {
+            return None;
+        }
+
+        let jl = isize::try_from(j_left).ok()?;
+        let jr = isize::try_from(j_right).ok()?;
+        let jo = isize::try_from(j_out).ok()?;
+        let mut coeff = [[[0.0; R]; L]; O];
+        let mut out = 0usize;
+        while out < O {
+            let m_out = isize::try_from(out).ok()? - jo;
+            let mut left = 0usize;
+            while left < L {
+                let m_left = isize::try_from(left).ok()? - jl;
+                let mut right = 0usize;
+                while right < R {
+                    let m_right = isize::try_from(right).ok()? - jr;
+                    coeff[out][left][right] =
+                        clebsch_gordan(j_left, m_left, j_right, m_right, j_out, m_out)?;
+                    right += 1;
+                }
+                left += 1;
+            }
+            out += 1;
+        }
+        Some(Self { coeff })
+    }
+
+    /// Return one coefficient by output, left and right basis indices.
+    #[inline]
+    pub const fn coefficient(&self, out: usize, left: usize, right: usize) -> f64 {
+        self.coeff[out][left][right]
+    }
+
     /// Couple two vectors into the output irrep.
     pub fn couple(&self, left: &[f64; L], right: &[f64; R]) -> [f64; O] {
         let mut out = [0.0; O];
@@ -120,5 +168,25 @@ mod tests {
     fn clebsch_gordan_scalar_dot_product() {
         let cg = ClebschGordan::<2, 2, 1>::new([[[1.0, 0.0], [0.0, 1.0]]]);
         assert_eq!(cg.couple(&[2.0, 3.0], &[5.0, 7.0]), [31.0]);
+    }
+
+    #[test]
+    fn generated_vector_to_scalar_table_has_standard_coefficients() {
+        let cg = ClebschGordan::<3, 3, 1>::from_so3(1, 1, 0).unwrap();
+        let normalization = 3.0_f64.sqrt();
+        assert!((cg.coefficient(0, 2, 0) - 1.0 / normalization).abs() < 1e-14);
+        assert!((cg.coefficient(0, 1, 1) + 1.0 / normalization).abs() < 1e-14);
+        assert!((cg.coefficient(0, 0, 2) - 1.0 / normalization).abs() < 1e-14);
+    }
+
+    #[test]
+    fn generated_table_rejects_wrong_dimensions() {
+        assert!(ClebschGordan::<2, 3, 1>::from_so3(1, 1, 0).is_none());
+    }
+
+    #[test]
+    fn generated_highest_weight_coupling_is_one() {
+        let cg = ClebschGordan::<3, 3, 5>::from_so3(1, 1, 2).unwrap();
+        assert!((cg.coefficient(4, 2, 2) - 1.0).abs() < 1e-14);
     }
 }
