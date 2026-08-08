@@ -2,28 +2,36 @@ name: SciAgent Thor gate
 
 on:
   pull_request:
-    branches: [master]
+    branches: [master, main, develop]
     paths:
       - "scirust-sciagent/**"
-      - "scripts/sciagent_b52_production_preflight.py"
+      - "scirust-cuda/**"
+      - "scirust-gpu/**"
+      - ".github/workflows/sciagent-thor-gate.yml"
+  push:
+    branches: [master, main, develop]
+    paths:
+      - "scirust-sciagent/**"
+      - "scirust-cuda/**"
+      - "scirust-gpu/**"
       - ".github/workflows/sciagent-thor-gate.yml"
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: sciagent-b52-${{ github.event.pull_request.number || github.ref }}
+  group: sciagent-thor-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   sciagent-thor:
-    name: SCIAGENT B52 production preflight guards
+    name: SCIAGENT CUDA parity + 304M benchmark
     if: >
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Linux, ARM64, scirust-arm64, jetson-thor, internal]
-    timeout-minutes: 45
+    timeout-minutes: 90
     env:
       RUST_BACKTRACE: 1
       CARGO_INCREMENTAL: 0
@@ -31,73 +39,23 @@ jobs:
       SCIRUST_REQUIRE_CUDA: "1"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
-          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
-
-      - name: Apply B52 once
-        if: hashFiles('scripts/sciagent_b52_production_preflight.py') != ''
-        run: |
-          set -euo pipefail
-          python3 scripts/sciagent_b52_production_preflight.py
-          cargo +nightly-2026-07-02 fmt --all
-          cargo +nightly-2026-07-02 check -p scirust-sciagent --features cuda --example cuda_pretrain
-          cargo +nightly-2026-07-02 clippy -p scirust-sciagent --features cuda --all-targets -- -D warnings
-
-          tmp="$RUNNER_TEMP/sciagent-b52"
-          rm -rf "$tmp"
-          mkdir -p "$tmp/shards" "$tmp/occupied-ckpt"
-          python3 - "$tmp/shards" <<'PY'
-          import pathlib, struct, sys
-          root = pathlib.Path(sys.argv[1])
-          (root / 'shard_00000.bin').write_bytes(struct.pack('<8I', *range(8)))
-          (root / 'shard_00001.bin').write_bytes(struct.pack('<8I', *range(8, 16)))
-          PY
-          touch "$tmp/occupied-ckpt/historical-marker"
-
-          SCIAGENT_CONFIG=demo \
-          SCIAGENT_SHARDS="$tmp/shards" \
-          SCIAGENT_CKPT="$tmp/fresh-ckpt" \
-          SCIAGENT_REQUIRE_FRESH=1 \
-          SCIAGENT_EXPECT_SHARDS=2 \
-          SCIAGENT_EXPECT_CORPUS_TOKENS=16 \
-          SCIAGENT_PREFLIGHT_ONLY=1 \
-          cargo +nightly-2026-07-02 run -p scirust-sciagent --features cuda --release --example cuda_pretrain \
-            | tee "$tmp/preflight-ok.log"
-          grep -q 'SCIAGENT_PREFLIGHT_OK.*semantics=2.*shards=2.*corpus_tokens=16.*fresh=true' "$tmp/preflight-ok.log"
-          test ! -e "$tmp/fresh-ckpt/step_1"
-
-          if SCIAGENT_CONFIG=demo \
-             SCIAGENT_SHARDS="$tmp/shards" \
-             SCIAGENT_CKPT="$tmp/occupied-ckpt" \
-             SCIAGENT_REQUIRE_FRESH=1 \
-             SCIAGENT_EXPECT_SHARDS=2 \
-             SCIAGENT_EXPECT_CORPUS_TOKENS=16 \
-             SCIAGENT_PREFLIGHT_ONLY=1 \
-             cargo +nightly-2026-07-02 run -p scirust-sciagent --features cuda --release --example cuda_pretrain \
-               >"$tmp/preflight-collision.log" 2>&1; then
-            echo 'ERROR: non-empty checkpoint namespace was accepted' >&2
-            exit 1
-          fi
-          grep -q 'fresh checkpoint namespace refused' "$tmp/preflight-collision.log"
-
-          rm -f scripts/sciagent_b52_production_preflight.py
-          git fetch origin master
-          git checkout origin/master -- .github/workflows/sciagent-thor-gate.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git diff --cached --check
-          git commit -m "feat(sciagent): add fail-closed production preflight"
-          git push origin HEAD:feat/sciagent-b52-production-preflight
-
+      - name: Report Thor CUDA
+        run: nvidia-smi --query-gpu=name,driver_version,compute_cap,memory.total --format=csv,noheader
       - name: Format
         run: cargo +nightly-2026-07-02 fmt --all -- --check
-      - name: CUDA parity
+      - name: SCIAGENT CUDA parity
         run: cargo +nightly-2026-07-02 test -p scirust-sciagent --features cuda --test cuda_parity -- --nocapture
-      - name: Clippy
+      - name: SCIAGENT CUDA clippy
         run: cargo +nightly-2026-07-02 clippy -p scirust-sciagent --features cuda --all-targets -- -D warnings
+      - name: SCIAGENT production sweep
+        env:
+          SCIAGENT_BENCH_BATCHES: "8"
+          SCIAGENT_BENCH_SEQ: "512"
+          SCIAGENT_BENCH_STEPS: "1"
+          SCIAGENT_BENCH_PROMPT: "128"
+          SCIAGENT_BENCH_DECODE_NEW: "8"
+        run: cargo +nightly-2026-07-02 run -p scirust-sciagent --features cuda --release --example cuda_production_bench
