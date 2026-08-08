@@ -9,6 +9,9 @@
 #[rustfmt::skip]
 mod scalar;
 
+/// Integer-angular-momentum coupling coefficients for SO(3).
+#[rustfmt::skip]
+pub mod angular_momentum;
 /// Decomposition of real finite-group characters into irreducible multiplicities.
 #[rustfmt::skip]
 pub mod character_decomposition;
