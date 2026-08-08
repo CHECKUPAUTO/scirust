@@ -9,6 +9,12 @@
 #[rustfmt::skip]
 mod scalar;
 
+/// Certification and inter-reduction helpers for bounded rewriting systems.
+#[rustfmt::skip]
+pub mod completion;
+/// Deterministic conjugacy-class decomposition for finite permutation groups.
+#[rustfmt::skip]
+pub mod conjugacy;
 /// Algebraic laws, products, quotients and actions.
 #[rustfmt::skip]
 pub mod core;
@@ -18,6 +24,9 @@ pub mod discrete;
 /// Equivariant maps and symmetry-aware tensor coupling.
 #[rustfmt::skip]
 pub mod equivariant;
+/// Deterministic fixed-capacity Knuth-Bendix completion.
+#[rustfmt::skip]
+pub mod knuth_bendix;
 /// Lie groups, Lie algebras and Clifford/geometric algebra.
 #[rustfmt::skip]
 pub mod lie;

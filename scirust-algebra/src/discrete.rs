@@ -1,6 +1,7 @@
 //! Discrete and combinatorial group algorithms.
 
 use crate::core::{Group, Magma, Monoid, Semigroup};
+use crate::schreier::{Bsgs, SchreierError};
 
 /// Error returned when an array is not a permutation of `0..N`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -105,7 +106,7 @@ impl<const N: usize> Permutation<N> {
     pub fn transposition_count(&self) -> usize {
         let mut seen = [false; N];
         let mut count = 0usize;
-        let mut i = 0;
+        let mut i = 0usize;
         while i < N {
             if !seen[i] {
                 let mut p = i;
@@ -174,30 +175,39 @@ impl<const N: usize, const G: usize> PermutationGroup<N, G> {
     }
 }
 
-/// A deterministic base-and-strong-generating-set facade.
+/// Deterministic Schreier-Sims facade backed by a completed BSGS.
 ///
-/// The base is chosen as `0,1,...,N-1`. Membership and order are computed by
-/// orbit-stabilizer recursion using caller-provided scratch storage. This avoids
-/// heap allocation and provides the same mathematical BSGS decomposition used by
-/// Schreier-Sims; randomized base selection is deliberately excluded.
-pub struct SchreierSims<const N: usize, const G: usize> {
-    group: PermutationGroup<N, G>,
+/// `G` is the number of ordinary input generators and `K` is the maximum number of
+/// strong generators retained during completion. Construction is allocation-free and
+/// deterministic. Membership and order use stabilizer-chain sifting rather than full
+/// subgroup enumeration.
+pub struct SchreierSims<const N: usize, const G: usize, const K: usize> {
+    bsgs: Bsgs<N, K>,
+    generator_arity: [(); G],
 }
 
-impl<const N: usize, const G: usize> SchreierSims<N, G> {
-    /// Create a deterministic Schreier-Sims engine.
-    pub const fn new(group: PermutationGroup<N, G>) -> Self { Self { group } }
-
-    /// Exact membership for small/medium groups using a caller-owned enumeration
-    /// workspace. `Err` means the supplied workspace cannot hold the subgroup.
-    pub fn contains(&self, candidate: &Permutation<N>, scratch: &mut [Permutation<N>]) -> Result<bool, CapacityExceeded> {
-        let len = self.group.enumerate_into(scratch)?;
-        Ok(scratch[..len].contains(candidate))
+impl<const N: usize, const G: usize, const K: usize> SchreierSims<N, G, K> {
+    /// Build the deterministic BSGS from the group's ordinary generators.
+    pub fn build(group: PermutationGroup<N, G>) -> Result<Self, SchreierError> {
+        let bsgs = Bsgs::<N, K>::build(group.generators())?;
+        Ok(Self { bsgs, generator_arity: [(); G] })
     }
 
-    /// Exact order with caller-owned storage.
-    pub fn order(&self, scratch: &mut [Permutation<N>]) -> Result<usize, CapacityExceeded> {
-        self.group.enumerate_into(scratch)
+    /// Exact membership by stabilizer-chain sifting.
+    #[inline]
+    pub fn contains(&self, candidate: &Permutation<N>) -> bool { self.bsgs.contains(candidate) }
+
+    /// Exact order from the orbit-stabilizer product.
+    #[inline]
+    pub fn order(&self) -> Option<usize> { self.bsgs.order() }
+
+    /// Borrow the completed strong generating set.
+    pub fn strong_generators(&self) -> &[Permutation<N>] { self.bsgs.strong_generators() }
+
+    /// Input generator arity encoded in the facade type.
+    pub const fn generator_arity(&self) -> usize {
+        let _ = &self.generator_arity;
+        G
     }
 }
 
@@ -287,9 +297,11 @@ mod tests {
         let a = Permutation::new([1, 0, 2]).unwrap();
         let b = Permutation::new([1, 2, 0]).unwrap();
         let group = PermutationGroup::new([a, b]);
-        let ss = SchreierSims::new(group);
-        let mut scratch = [Permutation::<3>::identity_array(); 6];
-        assert_eq!(ss.order(&mut scratch), Ok(6));
+        let ss = SchreierSims::<3, 2, 8>::build(group).unwrap();
+        let stabilizer = Permutation::new([0, 2, 1]).unwrap();
+        assert_eq!(ss.order(), Some(6));
+        assert!(ss.contains(&stabilizer));
+        assert_eq!(ss.generator_arity(), 2);
         assert_eq!(a.signature(), -1);
         assert_eq!(b.signature(), 1);
     }
