@@ -9,6 +9,12 @@
 #[rustfmt::skip]
 mod scalar;
 
+/// Integer-angular-momentum coupling coefficients for SO(3).
+#[rustfmt::skip]
+pub mod angular_momentum;
+/// Decomposition of real finite-group characters into irreducible multiplicities.
+#[rustfmt::skip]
+pub mod character_decomposition;
 /// Certification and inter-reduction helpers for bounded rewriting systems.
 #[rustfmt::skip]
 pub mod completion;
@@ -24,6 +30,9 @@ pub mod discrete;
 /// Equivariant maps and symmetry-aware tensor coupling.
 #[rustfmt::skip]
 pub mod equivariant;
+/// Normalized spherical harmonics and integer-spin Wigner rotation primitives.
+#[rustfmt::skip]
+pub mod harmonics;
 /// Deterministic fixed-capacity Knuth-Bendix completion.
 #[rustfmt::skip]
 pub mod knuth_bendix;
@@ -39,5 +48,8 @@ pub mod schreier;
 /// Finite-group representation helpers and harmonic-analysis primitives.
 #[rustfmt::skip]
 pub mod representation;
+/// Complex Wigner D elements and complex spherical harmonics.
+#[rustfmt::skip]
+pub mod wigner;
 
 pub use crate::core::{AbelianGroup, Field, Group, Magma, Monoid, Ring, Semigroup};

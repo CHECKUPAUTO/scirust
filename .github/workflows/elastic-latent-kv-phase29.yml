@@ -1,0 +1,59 @@
+name: Elastic Latent KV Phase 29
+
+on:
+  pull_request:
+    paths:
+      - "scirust-gpu/src/cuda_compute_adapter.rs"
+      - "scirust-gpu/src/cuda_hardware_profile.rs"
+      - "scirust-gpu/tests/cuda_hardware_capabilities.rs"
+      - "experiments/elastic-latent-kv/PHASE29_SPEC.md"
+      - ".github/workflows/elastic-latent-kv-phase29.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt,clippy
+      - run: rustup toolchain install 1.89.0 --profile minimal
+      - run: cargo +nightly-2026-07-02 fmt --all -- --check
+      - run: cargo +nightly-2026-07-02 clippy -p scirust-gpu --all-targets --features cuda --locked -- -D warnings
+      - run: cargo +1.89.0 check -p scirust-gpu --all-targets --features cuda --locked
+      - run: cargo +1.89.0 test -p scirust-gpu --features cuda cuda_hardware_profile::tests --locked
+
+  cuda-thor:
+    runs-on:
+      - self-hosted
+      - Linux
+      - ARM64
+      - scirust-arm64
+      - jetson-thor
+      - internal
+    timeout-minutes: 60
+    env:
+      RUST_BACKTRACE: 1
+      CARGO_INCREMENTAL: 0
+      RUSTFLAGS: "-D warnings"
+      SCIRUST_REQUIRE_CUDA: "1"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Isolate Rust and target state
+        shell: bash
+        run: |
+          tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.phase29-ci.XXXXXX")"
+          mkdir -p "$tmpdir/cargo" "$tmpdir/rustup" "$tmpdir/target" "$tmpdir/tmp"
+          echo "TMPDIR=$tmpdir/tmp" >> "$GITHUB_ENV"
+          echo "CARGO_HOME=$tmpdir/cargo" >> "$GITHUB_ENV"
+          echo "RUSTUP_HOME=$tmpdir/rustup" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=$tmpdir/target" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt,clippy
+      - name: Test real CUDA capability profile (fail closed)
+        run: cargo +nightly-2026-07-02 test -p scirust-gpu --features cuda --test cuda_hardware_capabilities --locked -- --nocapture
+      - name: Clippy CUDA profile path
+        run: cargo +nightly-2026-07-02 clippy -p scirust-gpu --features cuda --test cuda_hardware_capabilities --locked -- -D warnings
