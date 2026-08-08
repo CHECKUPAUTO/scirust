@@ -2,7 +2,7 @@
 
 ## Status
 
-Phase 27 follows Phase 26's promotion of the exact parallel bounded-top-k sampler. Phase 26 deliberately uses the WGPU adapter's legacy `max_workgroup_size[0]` field directly. Phase 27 removes that local hardware-policy check and routes implementation choice through the architecture-neutral compute capability/planner model introduced by compute portability phases #1005–#1011.
+Phase 27 follows Phase 26's promotion of the exact parallel bounded-top-k sampler. Phase 26 deliberately uses the WGPU adapter's legacy `max_workgroup_size[0]` field directly. Phase 27 removes that local hardware-policy check and routes implementation choice through an architecture-neutral compute planner layer shared across backends.
 
 The branch is initially stacked on Phase 26 so Phase 26's validated head remains frozen while this work proceeds.
 
@@ -11,43 +11,48 @@ The branch is initially stacked on Phase 26 so Phase 26's validated head remains
 The Phase 26 policy is deterministic and correct, but the hardware predicate still lives inside the sampled MiniLLM runtime:
 
 - bounded top-k algorithm eligibility is mixed with a direct `max_workgroup_size_x >= 64` check;
-- the rich `HardwareCapabilities` profile does not currently preserve the legacy device's known workgroup limits;
-- `select_candidate()` chooses among hardware candidates for one common `KernelRequirements` value, but it does not yet choose between multiple implementations with different requirements on the same device.
+- `DeviceCapabilities` already exposes concrete workgroup limits, but the generic planner does not model launch-width requirements;
+- `select_candidate()` chooses among hardware candidates for one common `KernelRequirements` value, but it does not choose between multiple implementations with different requirements on the same device.
 
 That is the remaining architecture-policy debt. It should be fixed generically rather than replaced by x86/ARM/NVIDIA-specific branches.
 
 ## Scope
 
-### 1. Rich execution limits
+### 1. Portable execution limits
 
-Extend the architecture-neutral execution capability model with known-or-unknown maximum workgroup dimensions:
+Add an architecture-neutral `ExecutionLimits` companion to the compute capability contracts:
 
-- `ExecutionCapabilities.max_workgroup_size: [Option<u32>; 3]`;
-- the conservative legacy bridge copies each non-zero `DeviceCapabilities.max_workgroup_size` dimension as a known value;
-- missing richer probes remain `None`, never silently converted to zero/unsupported.
+- `ExecutionLimits.max_workgroup_size: [Option<u32>; 3]`;
+- `ExecutionLimits::from_device_capabilities()` preserves the concrete workgroup dimensions already reported by a backend;
+- manually constructed or future partially-probed profiles can leave dimensions as `None`;
+- `None` means unknown, never unsupported or zero.
 
-This is a generic execution limit, not a GPU-vendor identity.
+Keeping launch limits as a separate value avoids pretending they are ISA properties while still making them available to generic implementation planning. A later capability-model revision may fold these limits into a richer backend profile without changing sampler policy.
 
-### 2. Semantic workgroup requirements
+### 2. Semantic implementation requirements
 
-Extend `KernelRequirements` with minimum workgroup dimensions:
+Add `ImplementationRequirements`, composed from:
 
-- `min_workgroup_size: [Option<u32>; 3]`;
-- a known device maximum below a required minimum is `Incompatible`;
-- an unknown maximum is `Indeterminate`;
-- a known sufficient maximum is compatible;
-- dimensions with no minimum remain unconstrained.
+- the existing `KernelRequirements` semantic contract;
+- a portable `WorkgroupRequirement` with minimum dimensions.
 
-Diagnostics must report the dimension, required minimum and observed maximum where known.
+Matching semantics are:
+
+- a known device maximum below a required minimum -> `Incompatible`;
+- an unknown maximum -> `Indeterminate`;
+- a known sufficient maximum -> compatible;
+- dimensions with no minimum -> unconstrained.
+
+Diagnostics report the dimension, required minimum and observed maximum where known.
 
 ### 3. Implementation selection on one device
 
-Add a planner primitive for implementations that each carry their own semantic requirements:
+Add `select_implementation()` for implementations that each carry their own requirements:
 
 - candidate name;
 - explicit static priority;
-- candidate-specific `KernelRequirements`;
-- one shared `HardwareCapabilities` profile;
+- candidate-specific semantic and workgroup requirements;
+- one shared `HardwareCapabilities` profile and `ExecutionLimits` value;
 - the same `PlannerPolicy`, disposition ordering and lexical final tie-break used by the existing device-candidate planner.
 
 No benchmark timing, mutable history, CPU model, architecture family or vendor string may affect the selection.
@@ -62,7 +67,7 @@ Parallel bounded-top-k is an algorithm candidate only when:
 - `2 <= top_k < vocab_size`;
 - `top_k <= PARALLEL_TOP_K_MAX`.
 
-Its hardware requirements include a minimum workgroup X dimension of `PARALLEL_TOP_K_LANES` (64). The sequential oracle candidate has no workgroup-width requirement and lower preference only when both candidates are proven compatible.
+Its implementation requirements include a minimum workgroup X dimension of `PARALLEL_TOP_K_LANES` (64). The sequential oracle candidate has no workgroup-width requirement and lower preference only when both candidates are proven compatible.
 
 Expected behavior:
 
@@ -86,7 +91,7 @@ Sampling math, PCG state, top-k/top-p ordering and Phase 21 device-feedback sema
 
 ## Architecture neutrality
 
-Phase 27 must contain no checks for:
+Phase 27 contains no checks for:
 
 - `target_arch = x86_64` vs `aarch64` in sampler policy;
 - NVIDIA/AMD/Intel/Apple device names;
@@ -94,7 +99,7 @@ Phase 27 must contain no checks for:
 - CPU model names;
 - benchmark-derived runtime thresholds.
 
-The same semantic requirement is valid for WGPU on x86_64, ARM/Jetson, Apple Silicon, future RISC-V hosts, discrete GPUs and software Vulkan implementations.
+The same minimum-workgroup requirement is valid for WGPU on x86_64, ARM/Jetson, Apple Silicon, future RISC-V hosts, discrete GPUs and software Vulkan implementations.
 
 ## Validation
 
