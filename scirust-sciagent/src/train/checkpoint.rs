@@ -1,9 +1,11 @@
 use std::fs;
 use std::path::Path;
 
+use scirust_agent_protocol::Sha256Digest;
 use scirust_core::autodiff::reverse::Tensor;
 use scirust_core::error::Result;
 
+use crate::artifact_provenance::artifact_sha256;
 use crate::config::SciAgentConfig;
 use crate::model::SciAgentModel;
 
@@ -13,6 +15,14 @@ pub struct CheckpointMeta {
     pub loss: f32,
     pub lr: f32,
     pub config: SciAgentConfig,
+}
+
+/// Checkpoint metadata plus the exact SHA-256 identity of the model bytes that
+/// were deserialized into the supplied [`SciAgentModel`].
+#[derive(Clone, Debug)]
+pub struct LoadedCheckpoint {
+    pub meta: CheckpointMeta,
+    pub model_sha256: Sha256Digest,
 }
 
 pub fn save_checkpoint(model: &SciAgentModel, meta: &CheckpointMeta, path: &Path) -> Result<()> {
@@ -83,15 +93,30 @@ pub fn read_meta(path: &Path) -> Result<CheckpointMeta> {
     })
 }
 
-pub fn load_checkpoint(model: &mut SciAgentModel, path: &Path) -> Result<CheckpointMeta> {
+/// Load a checkpoint and return provenance for the exact model bytes that were
+/// deserialized.
+///
+/// The safetensors file is read once. The SHA-256 digest and the tensor parser
+/// both consume that same in-memory byte buffer, so the reported identity cannot
+/// race a second file open and accidentally attest different bytes.
+pub fn load_checkpoint_with_provenance(
+    model: &mut SciAgentModel,
+    path: &Path,
+) -> Result<LoadedCheckpoint> {
     let meta = read_meta(path)?;
 
     let safetensors_path = path.join("model.safetensors");
-    let state = scirust_core::io::safetensors::load_safetensors(&safetensors_path)
+    let bytes = fs::read(&safetensors_path).map_err(|e| format!("Cannot load safetensors: {e}"))?;
+    let model_sha256 = artifact_sha256(&bytes);
+    let state = scirust_core::io::safetensors::deserialize(&bytes)
         .map_err(|e| format!("Cannot load safetensors: {e}"))?;
 
     model.load_state_dict(&state)?;
-    Ok(meta)
+    Ok(LoadedCheckpoint { meta, model_sha256 })
+}
+
+pub fn load_checkpoint(model: &mut SciAgentModel, path: &Path) -> Result<CheckpointMeta> {
+    Ok(load_checkpoint_with_provenance(model, path)?.meta)
 }
 
 pub fn latest_checkpoint(dir: &Path) -> Option<std::path::PathBuf> {
@@ -164,6 +189,33 @@ mod tests {
             "Weights should match after load"
         );
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn checkpoint_provenance_matches_exact_loaded_bytes() {
+        let cfg = SciAgentConfig::debug();
+        let model = SciAgentModel::new(&cfg);
+        let dir = std::env::temp_dir().join(format!(
+            "scirust_checkpoint_provenance_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let meta = CheckpointMeta {
+            step: 7,
+            loss: 0.5,
+            lr: 0.0001,
+            config: cfg.clone(),
+        };
+        save_checkpoint(&model, &meta, &dir).expect("save should succeed");
+
+        let expected_bytes = fs::read(dir.join("model.safetensors")).unwrap();
+        let expected = artifact_sha256(&expected_bytes);
+        let mut loaded_model = SciAgentModel::new(&cfg);
+        let loaded = load_checkpoint_with_provenance(&mut loaded_model, &dir).unwrap();
+
+        assert_eq!(loaded.meta.step, 7);
+        assert_eq!(loaded.model_sha256, expected);
         let _ = fs::remove_dir_all(&dir);
     }
 
