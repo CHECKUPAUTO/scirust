@@ -1,0 +1,296 @@
+name: Elastic Latent KV Phase 28
+
+on:
+  pull_request:
+    paths:
+      - "scirust-core/src/nn/transformer/**"
+      - "scirust-compute/**"
+      - "scirust-gpu/src/deterministic_sampling*.rs"
+      - "scirust-gpu/src/elastic_latent_encoder_device/**"
+      - "scirust-gpu/examples/resident_generation_benchmark.rs"
+      - "scirust-gpu/examples/resident_generation_first_token_probe.rs"
+      - "experiments/elastic-latent-kv/PHASE28_SPEC.md"
+      - ".github/workflows/elastic-latent-kv-phase28.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt,clippy
+      - run: rustup toolchain install 1.89.0 --profile minimal
+      - run: cargo +nightly-2026-07-02 fmt --all -- --check
+      - run: cargo +nightly-2026-07-02 clippy -p scirust-gpu --all-targets --features wgpu --locked -- -D warnings
+      - run: cargo +1.89.0 check -p scirust-gpu --all-targets --features wgpu --locked
+
+  resident-smoke-lavapipe:
+    runs-on: ubuntu-24.04
+    env:
+      WGPU_BACKEND: vulkan
+      SCIRUST_REQUIRE_WGPU: "1"
+      SCIRUST_RESIDENT_BENCH_VOCAB: "256"
+      SCIRUST_RESIDENT_BENCH_PROMPT_TOKENS: "8"
+      SCIRUST_RESIDENT_BENCH_DECODE_TOKENS: "4,8"
+      SCIRUST_RESIDENT_BENCH_TOP_KS: "0,50"
+      SCIRUST_RESIDENT_BENCH_REPEATS: "2"
+      SCIRUST_RESIDENT_BENCH_WARMUP: "1"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: rustup toolchain install 1.89.0 --profile minimal
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
+      - name: Probe 4096-vocabulary production bursts on lavapipe
+        run: |
+          set -euo pipefail
+          for limit in 8 32; do
+            echo "=== Phase 28 lavapipe bounded top-k=50 limit: $limit ==="
+            SCIRUST_RESIDENT_PROBE_TOP_K=50 \
+            SCIRUST_RESIDENT_PROBE_LIMIT="$limit" \
+              cargo +1.89.0 run --quiet --release --locked -p scirust-gpu \
+                --features wgpu --example resident_generation_first_token_probe
+          done
+      - name: Run resident-generation smoke baseline
+        run: |
+          cargo +1.89.0 run --quiet --release --locked -p scirust-gpu \
+            --features wgpu --example resident_generation_benchmark > phase28-lavapipe.csv
+          cat phase28-lavapipe.csv
+      - name: Validate resident-generation smoke rows
+        run: |
+          python3 - <<'PY'
+          import csv
+          import math
+          with open('phase28-lavapipe.csv', newline='', encoding='utf-8') as handle:
+              rows = list(csv.DictReader(handle))
+          assert len(rows) == 4, rows
+          assert {int(row['top_k']) for row in rows} == {0, 50}
+          assert {int(row['requested_decode_tokens']) for row in rows} == {4, 8}
+          for row in rows:
+              requested = int(row['requested_decode_tokens'])
+              generated = int(row['generated_tokens'])
+              assert int(row['vocab_size']) == 256
+              assert int(row['prompt_tokens']) == 8
+              assert int(row['repeats']) == 2
+              assert int(row['warmup']) == 1
+              assert 0 < generated <= requested, row
+              assert int(row['prompt_median_ns']) > 0
+              assert int(row['end_to_end_median_ns']) > 0
+              throughput = float(row['generated_tokens_per_second_end_to_end'])
+              assert math.isfinite(throughput) and throughput > 0.0
+              assert int(row['exact_cpu_wgpu']) == 1, row
+              assert int(row['deterministic_replay']) == 1, row
+              assert int(row['output_fingerprint'], 16) != 0
+              assert int(row['resident_bytes']) > 0
+              assert int(row['prompt_upload_bytes_per_token']) == 4
+              assert int(row['generated_upload_bytes_per_token']) == 0
+              assert int(row['generated_download_bytes_per_token']) == 0
+              assert int(row['last_burst_readback_bytes']) == (4 + requested) * 4
+              assert int(row['sampling_draws']) == generated
+          PY
+
+  resident-jetson-thor:
+    name: Phase 28 resident baseline (Jetson Thor WGPU)
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on:
+      - self-hosted
+      - Linux
+      - ARM64
+      - scirust-arm64
+      - jetson-thor
+      - internal
+    timeout-minutes: 60
+    env:
+      WGPU_BACKEND: vulkan
+      SCIRUST_REQUIRE_WGPU: "1"
+      SCIRUST_RESIDENT_BENCH_VOCAB: "4096"
+      SCIRUST_RESIDENT_BENCH_PROMPT_TOKENS: "16"
+      SCIRUST_RESIDENT_BENCH_DECODE_TOKENS: "8,32"
+      SCIRUST_RESIDENT_BENCH_TOP_KS: "50"
+      SCIRUST_RESIDENT_BENCH_REPEATS: "7"
+      SCIRUST_RESIDENT_BENCH_WARMUP: "3"
+      SCIRUST_THOR_GPU_LOCK: /tmp/scirust-thor-gpu.lock
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 1
+      - name: Detect a real WGPU-capable Thor
+        id: thor
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v nvidia-smi >/dev/null 2>&1 \
+            && nvidia-smi -L 2>/dev/null | grep -q 'NVIDIA Thor' \
+            && command -v vulkaninfo >/dev/null 2>&1 \
+            && vulkaninfo --summary 2>/dev/null | grep -q 'NVIDIA Tegra NVIDIA Thor'; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "Real NVIDIA Thor WGPU/Vulkan device detected."
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Runner is labelled jetson-thor but does not expose the real Thor WGPU/Vulkan device; Phase 28 hardware baseline is deferred."
+          fi
+      - name: Classify Thor occupancy
+        if: steps.thor.outputs.available == 'true'
+        id: occupancy
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v flock >/dev/null
+          exec 9>"$SCIRUST_THOR_GPU_LOCK"
+          flock -x 9
+
+          if ! compute_apps="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null)"; then
+            echo "::error::Phase 28 cannot verify Thor occupancy."
+            exit 1
+          fi
+          if [[ -z "${compute_apps//[[:space:]]/}" ]]; then
+            echo "run_baseline=true" >> "$GITHUB_OUTPUT"
+            echo "Thor is idle; Phase 28 hardware baseline will run."
+            exit 0
+          fi
+
+          managed_training=true
+          printf '%s\n' "$compute_apps"
+          while IFS=',' read -r raw_pid process_name; do
+            pid="$(printf '%s' "$raw_pid" | tr -d '[:space:]')"
+            [[ "$pid" =~ ^[0-9]+$ ]] || { managed_training=false; continue; }
+            process_name="${process_name# }"
+            cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
+            proc_user="$(ps -p "$pid" -o user= 2>/dev/null | xargs || true)"
+            ppid="$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d '[:space:]')"
+            cgroup="$(cat "/proc/$pid/cgroup" 2>/dev/null || true)"
+            echo "pid=$pid user=$proc_user ppid=$ppid process=$process_name cmdline=$cmdline cgroup=$cgroup"
+            if [[ "$process_name" != "/root/scirust/target/release/examples/cuda_pretrain" ]] \
+              || [[ "$cmdline" != *"/root/scirust/target/release/examples/cuda_pretrain"* ]] \
+              || [[ "$proc_user" != "root" ]] \
+              || [[ "$ppid" != "1" ]] \
+              || [[ "$cgroup" != 0::/user.slice/user-0.slice/session-*.scope ]]; then
+              managed_training=false
+            fi
+          done <<< "$compute_apps"
+
+          if [[ "$managed_training" == true ]]; then
+            echo "run_baseline=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Phase 28 Thor baseline deferred: detached SciAgent production cuda_pretrain owns the GPU. No WGPU workload is launched and training is left untouched."
+            exit 0
+          fi
+
+          echo "::error::Phase 28 found unknown GPU compute activity; refusing to hide it or publish contaminated timings."
+          exit 1
+      - name: Report deferred hardware baseline
+        if: steps.thor.outputs.available != 'true' || steps.occupancy.outputs.run_baseline == 'false'
+        run: |
+          echo "Phase 28 software/static gates remain authoritative for this run."
+          echo "The real-Thor performance baseline is deferred until a real idle Thor is available."
+          {
+            echo "## Phase 28 Thor performance baseline: DEFERRED"
+            echo
+            echo "A real idle Thor was not available to this job."
+            echo "No Phase 28 WGPU probe or performance benchmark was launched."
+            echo "No hardware result is reused or fabricated; PR #1024 remains draft until an idle-Thor run records the two CSV rows."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Prepare isolated executable build directory
+        if: steps.thor.outputs.available == 'true' && steps.occupancy.outputs.run_baseline == 'true'
+        run: |
+          tmpdir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/scirust-phase28.XXXXXX")"
+          chmod 700 "$tmpdir"
+          echo "TMPDIR=$tmpdir" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=$tmpdir/target" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        if: steps.thor.outputs.available == 'true' && steps.occupancy.outputs.run_baseline == 'true'
+        with:
+          toolchain: 1.89.0
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+        if: steps.thor.outputs.available == 'true' && steps.occupancy.outputs.run_baseline == 'true'
+        with:
+          shared-key: phase28-resident-wgpu-thor
+          cache-targets: false
+      - name: Report WGPU/Vulkan environment
+        if: steps.thor.outputs.available == 'true' && steps.occupancy.outputs.run_baseline == 'true'
+        run: |
+          uname -a
+          nvidia-smi
+          vulkaninfo --summary
+      - name: Run exclusive Thor correctness and baseline
+        if: steps.thor.outputs.available == 'true' && steps.occupancy.outputs.run_baseline == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v flock >/dev/null
+          exec 9>"$SCIRUST_THOR_GPU_LOCK"
+          echo "Waiting for exclusive Thor GPU access via $SCIRUST_THOR_GPU_LOCK"
+          flock -x 9
+          echo "Exclusive Thor GPU access acquired."
+
+          if ! compute_apps="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null)"; then
+            echo "::error::Phase 28 cannot verify that the Thor remained idle."
+            exit 1
+          fi
+          if [[ -n "${compute_apps//[[:space:]]/}" ]]; then
+            echo "::error::GPU occupancy changed after preflight; refusing contaminated hardware timings."
+            printf '%s\n' "$compute_apps"
+            exit 1
+          fi
+
+          for limit in 8 32; do
+            SCIRUST_RESIDENT_PROBE_TOP_K=50 \
+            SCIRUST_RESIDENT_PROBE_LIMIT="$limit" \
+              rustup run 1.89.0 cargo run --quiet --release --locked -p scirust-gpu \
+                --features wgpu --example resident_generation_first_token_probe
+          done
+
+          if ! compute_apps="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null)"; then
+            echo "::error::Phase 28 cannot verify that the Thor remained idle after probes."
+            exit 1
+          fi
+          if [[ -n "${compute_apps//[[:space:]]/}" ]]; then
+            echo "::error::A compute process appeared while Phase 28 held the shared GPU lock."
+            printf '%s\n' "$compute_apps"
+            exit 1
+          fi
+
+          rustup run 1.89.0 cargo run --quiet --release --locked -p scirust-gpu \
+            --features wgpu --example resident_generation_benchmark > phase28-thor.csv
+          cat phase28-thor.csv
+      - name: Validate real-device resident rows
+        if: steps.thor.outputs.available == 'true' && steps.occupancy.outputs.run_baseline == 'true'
+        run: |
+          python3 - <<'PY'
+          import csv
+          import math
+          with open('phase28-thor.csv', newline='', encoding='utf-8') as handle:
+              rows = list(csv.DictReader(handle))
+          assert len(rows) == 2, rows
+          assert {int(row['top_k']) for row in rows} == {50}
+          assert {int(row['requested_decode_tokens']) for row in rows} == {8, 32}
+          for row in rows:
+              requested = int(row['requested_decode_tokens'])
+              generated = int(row['generated_tokens'])
+              assert int(row['vocab_size']) == 4096
+              assert int(row['d_model']) == 64
+              assert int(row['n_heads']) == 4
+              assert int(row['n_layers']) == 2
+              assert int(row['d_ff']) == 128
+              assert int(row['prompt_tokens']) == 16
+              assert int(row['repeats']) == 7
+              assert int(row['warmup']) == 3
+              assert 0 < generated <= requested, row
+              assert int(row['prompt_median_ns']) > 0
+              assert int(row['end_to_end_median_ns']) > 0
+              throughput = float(row['generated_tokens_per_second_end_to_end'])
+              assert math.isfinite(throughput) and throughput > 0.0
+              assert int(row['exact_cpu_wgpu']) == 1, row
+              assert int(row['deterministic_replay']) == 1, row
+              assert int(row['output_fingerprint'], 16) != 0
+              assert int(row['resident_bytes']) > 0
+              assert int(row['prompt_upload_bytes_per_token']) == 4
+              assert int(row['generated_upload_bytes_per_token']) == 0
+              assert int(row['generated_download_bytes_per_token']) == 0
+              assert int(row['last_burst_readback_bytes']) == (4 + requested) * 4
+              assert int(row['sampling_draws']) == generated
+          PY
