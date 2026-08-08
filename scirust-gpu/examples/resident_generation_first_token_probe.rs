@@ -81,8 +81,8 @@ fn synthetic_tokenizer(vocab_size: usize) -> Result<CharTokenizer, Box<dyn std::
     let mut scalar = 0x1000u32;
     while inserted < needed
     {
-        let character = char::from_u32(scalar)
-            .ok_or("synthetic vocabulary exceeds Unicode scalar range")?;
+        let character =
+            char::from_u32(scalar).ok_or("synthetic vocabulary exceeds Unicode scalar range")?;
         scalar = scalar
             .checked_add(1)
             .ok_or("synthetic vocabulary scalar counter overflowed")?;
