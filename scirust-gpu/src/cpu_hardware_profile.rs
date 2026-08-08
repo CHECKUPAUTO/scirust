@@ -38,8 +38,8 @@ pub(crate) fn hardware_capabilities(capabilities: &DeviceCapabilities) -> Hardwa
         {
             SupportLevel::Unsupported
         };
-        hardware.numeric.arithmetic.set_support(dtype, level);
-        hardware.numeric.accumulation.set_support(dtype, level);
+        hardware.numeric.arithmetic_dtypes.set_support(dtype, level);
+        hardware.numeric.accumulation_dtypes.set_support(dtype, level);
     }
 
     hardware.matrix.accelerated = SupportLevel::Unsupported;
@@ -70,7 +70,7 @@ pub(crate) fn hardware_capabilities(capabilities: &DeviceCapabilities) -> Hardwa
 
     hardware
         .reproducibility
-        .levels
+        .modes
         .set_support(ReproducibilityLevel::Deterministic, SupportLevel::Supported);
 
     hardware
@@ -97,15 +97,24 @@ mod tests {
         let hardware = hardware_capabilities(&legacy_capabilities());
 
         assert_eq!(
-            hardware.numeric.arithmetic.support_level(&DType::F32),
+            hardware
+                .numeric
+                .arithmetic_dtypes
+                .support_level(&DType::F32),
             SupportLevel::Supported
         );
         assert_eq!(
-            hardware.numeric.accumulation.support_level(&DType::F32),
+            hardware
+                .numeric
+                .accumulation_dtypes
+                .support_level(&DType::F32),
             SupportLevel::Supported
         );
         assert_eq!(
-            hardware.numeric.arithmetic.support_level(&DType::F64),
+            hardware
+                .numeric
+                .arithmetic_dtypes
+                .support_level(&DType::F64),
             SupportLevel::Unsupported
         );
         assert_eq!(
@@ -125,14 +134,14 @@ mod tests {
         assert_eq!(
             hardware
                 .reproducibility
-                .levels
+                .modes
                 .support_level(&ReproducibilityLevel::Deterministic),
             SupportLevel::Supported
         );
         assert_eq!(
             hardware
                 .reproducibility
-                .levels
+                .modes
                 .support_level(&ReproducibilityLevel::BitExact),
             SupportLevel::Unknown
         );
