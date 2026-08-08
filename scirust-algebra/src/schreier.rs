@@ -397,9 +397,9 @@ mod tests {
     fn schreier_sims_reports_generator_capacity_exhaustion() {
         let transposition = Permutation::new([1, 0, 2]).unwrap();
         let cycle = Permutation::new([1, 2, 0]).unwrap();
-        assert_eq!(
+        assert!(matches!(
             Bsgs::<3, 2>::build(&[transposition, cycle]),
             Err(SchreierError::CapacityExceeded)
-        );
+        ));
     }
 }
