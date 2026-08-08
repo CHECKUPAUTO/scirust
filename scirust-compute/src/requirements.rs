@@ -551,11 +551,13 @@ mod tests {
                 .issues
                 .contains(&RequirementIssue::IsaUnsupported(IsaFeature::Avx512F))
         );
-        assert!(report
-            .issues
-            .contains(&RequirementIssue::MemorySpaceUnsupported(
-                MemorySpace::Device
-            )));
+        assert!(
+            report
+                .issues
+                .contains(&RequirementIssue::MemorySpaceUnsupported(
+                    MemorySpace::Device
+                ))
+        );
     }
 
     #[test]
