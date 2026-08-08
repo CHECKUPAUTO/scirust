@@ -43,11 +43,19 @@ jobs:
       - run: |
           sudo apt-get update
           sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
-      - name: Probe 4096-vocabulary burst limits on lavapipe
+      - name: Probe 4096-vocabulary bounded and oracle bursts on lavapipe
         run: |
           set -euo pipefail
-          for limit in 1 2 3 4 8; do
-            echo "=== Phase 28 lavapipe burst limit: $limit ==="
+          for limit in 8 32; do
+            echo "=== Phase 28 lavapipe bounded top-k=50 limit: $limit ==="
+            SCIRUST_RESIDENT_PROBE_TOP_K=50 \
+            SCIRUST_RESIDENT_PROBE_LIMIT="$limit" \
+              cargo +1.89.0 run --quiet --release --locked -p scirust-gpu \
+                --features wgpu --example resident_generation_first_token_probe
+          done
+          for limit in 5 6 7 8; do
+            echo "=== Phase 28 lavapipe oracle top-k=0 limit: $limit ==="
+            SCIRUST_RESIDENT_PROBE_TOP_K=0 \
             SCIRUST_RESIDENT_PROBE_LIMIT="$limit" \
               cargo +1.89.0 run --quiet --release --locked -p scirust-gpu \
                 --features wgpu --example resident_generation_first_token_probe
@@ -150,11 +158,22 @@ jobs:
           uname -a
           nvidia-smi
           vulkaninfo --summary
-      - name: Probe burst limits in fresh Thor WGPU processes
+      - name: Probe bounded sampler at production burst sizes
         run: |
           set -euo pipefail
-          for limit in 1 2 3 4 8; do
-            echo "=== Phase 28 Thor burst limit: $limit ==="
+          for limit in 8 32; do
+            echo "=== Phase 28 Thor bounded top-k=50 limit: $limit ==="
+            SCIRUST_RESIDENT_PROBE_TOP_K=50 \
+            SCIRUST_RESIDENT_PROBE_LIMIT="$limit" \
+              rustup run 1.89.0 cargo run --quiet --release --locked -p scirust-gpu \
+                --features wgpu --example resident_generation_first_token_probe
+          done
+      - name: Locate oracle sampler Thor threshold
+        run: |
+          set -euo pipefail
+          for limit in 5 6 7 8; do
+            echo "=== Phase 28 Thor oracle top-k=0 limit: $limit ==="
+            SCIRUST_RESIDENT_PROBE_TOP_K=0 \
             SCIRUST_RESIDENT_PROBE_LIMIT="$limit" \
               rustup run 1.89.0 cargo run --quiet --release --locked -p scirust-gpu \
                 --features wgpu --example resident_generation_first_token_probe
