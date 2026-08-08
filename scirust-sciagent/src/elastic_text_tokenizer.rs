@@ -85,8 +85,8 @@ impl ElasticTextTokenizer {
             json.get("merges")
                 .ok_or(ElasticTextTokenizerError::MissingField("merges"))?,
         )?;
-        let reversible = json.get("version").and_then(serde_json::Value::as_str)
-            == Some("byte_level_v2");
+        let reversible =
+            json.get("version").and_then(serde_json::Value::as_str) == Some("byte_level_v2");
         validate_special_tokens(&vocab)?;
         validate_byte_vocab(&vocab, reversible)?;
         let engine = ElasticBpeEngine::from_ordered_merges(&merges, profile)?;
@@ -436,7 +436,10 @@ mod tests {
         }
         for byte in 0u8..=255
         {
-            vocab.insert(byte_to_unit(byte).to_string(), serde_json::json!(usize::from(byte) + 4));
+            vocab.insert(
+                byte_to_unit(byte).to_string(),
+                serde_json::json!(usize::from(byte) + 4),
+            );
         }
         // a=101, b=102, c=103 in the byte base because ids are byte+4.
         // `b+c` has the higher priority but occurs to the right of `a+b`.
@@ -489,7 +492,8 @@ mod tests {
         let input = canonical_test_json();
         let reference =
             ElasticTextTokenizer::from_json_str(&input, profile(BpeKernel::Reference)).unwrap();
-        let tiny = ElasticTextTokenizer::from_json_str(&input, profile(BpeKernel::TinyScan)).unwrap();
+        let tiny =
+            ElasticTextTokenizer::from_json_str(&input, profile(BpeKernel::TinyScan)).unwrap();
         let indexed =
             ElasticTextTokenizer::from_json_str(&input, profile(BpeKernel::Indexed)).unwrap();
         let heap = ElasticTextTokenizer::from_json_str(&input, profile(BpeKernel::Heap)).unwrap();

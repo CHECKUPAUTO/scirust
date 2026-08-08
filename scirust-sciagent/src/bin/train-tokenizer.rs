@@ -275,7 +275,11 @@ mod tests {
     #[test]
     fn merge_semantics_tag_is_written_without_losing_existing_fields() {
         let path = std::env::temp_dir().join("scirust_tokenizer_semantics_tag.json");
-        fs::write(&path, r#"{"version":"byte_level_v2","vocab":{},"merges":[]}"#).unwrap();
+        fs::write(
+            &path,
+            r#"{"version":"byte_level_v2","vocab":{},"merges":[]}"#,
+        )
+        .unwrap();
         write_merge_semantics_tag(path.to_str().unwrap(), MergeSemanticsArg::CanonicalRankV1)
             .unwrap();
         let value: serde_json::Value =
