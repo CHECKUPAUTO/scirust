@@ -1,0 +1,32 @@
+name: Execution attestation contract
+
+on:
+  pull_request:
+    branches: [master, main, develop]
+    paths:
+      - "scirust-agent-protocol/**"
+      - "docs/execution-attestation-v1.md"
+      - ".github/workflows/execution-attestation-contract.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: attestation v1 + MSRV
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+      - run: rustup toolchain install 1.89.0 --profile minimal
+      - name: Format
+        run: cargo +nightly-2026-07-02 fmt --all -- --check
+      - name: Clippy protocol
+        run: cargo +nightly-2026-07-02 clippy -p scirust-agent-protocol --all-targets --locked -- -D warnings
+      - name: Check MSRV
+        run: cargo +1.89.0 check -p scirust-agent-protocol --all-targets --locked
+      - name: Test protocol and golden fingerprint at MSRV
+        run: cargo +1.89.0 test -p scirust-agent-protocol --locked
