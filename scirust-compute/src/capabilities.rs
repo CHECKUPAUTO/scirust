@@ -4,7 +4,7 @@ use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::{DType, DeviceId};
+use crate::{DType, DeviceId, HardwareCapabilities};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeviceCapabilities {
@@ -31,11 +31,21 @@ impl DeviceCapabilities {
     pub fn supports_dtype(&self, dtype: DType) -> bool {
         self.supported_dtypes.contains(&dtype)
     }
+
+    /// Conservative architecture-neutral hardware view derived from the facts
+    /// represented by this legacy capability structure.
+    ///
+    /// Optional ISA, matrix, memory and reproducibility properties remain
+    /// unknown until a backend or hardware probe advertises them explicitly.
+    pub fn hardware_baseline(&self) -> HardwareCapabilities {
+        HardwareCapabilities::from_device_capabilities(self)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{SupportLevel, VectorModel};
 
     #[test]
     fn reference_capabilities_are_honest() {
@@ -45,5 +55,18 @@ mod tests {
         assert!(capabilities.supports_dtype(DType::F32));
         assert!(!capabilities.supports_dtype(DType::F64));
         assert!(!capabilities.supports_async_execution);
+    }
+
+    #[test]
+    fn hardware_baseline_does_not_invent_optional_features() {
+        let hardware = DeviceCapabilities::reference_cpu().hardware_baseline();
+
+        assert!(hardware.isa.features.is_empty());
+        assert_eq!(hardware.isa.vector_model, VectorModel::Unknown);
+        assert_eq!(
+            hardware.execution.async_execution,
+            SupportLevel::Unsupported
+        );
+        assert_eq!(hardware.matrix.accelerated, SupportLevel::Unknown);
     }
 }
