@@ -269,18 +269,19 @@ impl CudaDecodeModel {
                 CudaDecodeDownMode::CublasLt =>
                 {
                     runtime.matmul_into(&workspace.act, &block.down, &mut workspace.tmp_d);
+                    runtime.add_into(&workspace.h, &workspace.tmp_d, &mut workspace.x);
                 },
                 CudaDecodeDownMode::TiledGemv =>
                 {
-                    runtime.tiled_gemv_into(
+                    runtime.tiled_gemv_add_into(
                         &workspace.act,
                         &block.down,
                         &mut workspace.down_tiled,
-                        &mut workspace.tmp_d,
+                        &workspace.h,
+                        &mut workspace.x,
                     );
                 },
             }
-            runtime.add_into(&workspace.h, &workspace.tmp_d, &mut workspace.x);
         }
 
         runtime.rms_norm_into(

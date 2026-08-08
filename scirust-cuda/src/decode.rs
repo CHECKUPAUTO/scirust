@@ -448,6 +448,29 @@ impl CudaDecodeRuntime {
         );
     }
 
+    pub fn tiled_gemv_add_into(
+        &self,
+        input: &CudaDecodeMatrix,
+        weight: &CudaDecodeMatrix,
+        workspace: &mut CudaBf16TiledGemvWorkspace,
+        residual: &CudaDecodeMatrix,
+        output: &mut CudaDecodeMatrix,
+    ) {
+        assert_eq!(input.rows, 1, "tiled decode GEMV-add is batch-one only");
+        assert_eq!(weight.rows, input.cols, "tiled decode GEMV-add input width");
+        assert_eq!((residual.rows, residual.cols), (1, weight.cols));
+        assert_eq!((output.rows, output.cols), (1, weight.cols));
+        self.tiled_gemv.gemv_kn_add_into(
+            &input.buf,
+            &weight.buf,
+            workspace,
+            &residual.buf,
+            &mut output.buf,
+            input.cols,
+            output.cols,
+        );
+    }
+
     #[must_use]
     pub fn lm_head_argmax_workspace(&self, vocab: usize) -> CudaBf16LmHeadArgmaxWorkspace {
         self.lm_head_argmax.workspace(vocab)
