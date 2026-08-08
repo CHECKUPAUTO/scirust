@@ -4,11 +4,11 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
-use scirust_sciagent::VersionedBpeTokenizer;
 use scirust_sciagent::corpus_paths;
 use scirust_sciagent::train::dataset::{
     content_hash, matches_extension, parse_extensions, skip_source_dir, source_quality,
 };
+use scirust_sciagent::{ElasticHardwareIdentity, StoredElasticProfile, VersionedBpeTokenizer};
 
 #[derive(Parser)]
 #[command(
@@ -24,6 +24,17 @@ struct Args {
 
     #[arg(short, long)]
     tokenizer: String,
+
+    /// Optional persisted ElasticTokenizer execution profile. The profile is
+    /// accepted only for canonical BPE semantics and only when both its ordered
+    /// merge fingerprint and hardware identity match this run.
+    #[arg(long, value_name = "FILE")]
+    elastic_profile: Option<PathBuf>,
+
+    /// Stable deployment-local hardware discriminator used to bind a persisted
+    /// ElasticTokenizer profile. Architecture and OS are added automatically.
+    #[arg(long, default_value = "generic")]
+    elastic_device: String,
 
     /// External directory for generated shards. Defaults to the platform data
     /// directory; paths inside the SciRust checkout are rejected.
@@ -143,7 +154,25 @@ fn main() {
     });
     fs::create_dir_all(&output).expect("Cannot create output dir");
 
-    let tok = VersionedBpeTokenizer::load_json(&args.tokenizer).expect("Failed to load tokenizer");
+    let mut tok =
+        VersionedBpeTokenizer::load_json(&args.tokenizer).expect("Failed to load tokenizer");
+    if let Some(profile_path) = &args.elastic_profile
+    {
+        let stored = StoredElasticProfile::load(profile_path)
+            .expect("Failed to load ElasticTokenizer execution profile");
+        let hardware = ElasticHardwareIdentity::new(
+            std::env::consts::ARCH,
+            std::env::consts::OS,
+            args.elastic_device.clone(),
+        );
+        tok.apply_stored_profile(&stored, &hardware)
+            .expect("ElasticTokenizer execution profile rejected");
+        eprintln!(
+            "Elastic profile applied: hardware={} profile={:?}",
+            hardware.fingerprint(),
+            tok.elastic_profile()
+        );
+    }
     eprintln!(
         "Tokenizer loaded: vocab_size={} merge_semantics={}",
         tok.vocab_size(),
