@@ -15,9 +15,9 @@ use core::fmt;
 
 use super::{U32_BYTES, WgpuResidentMiniLlm, WgpuResidentMiniLlmError};
 use crate::{
-    WgpuComputeBuffer, WgpuComputeEvent, WgpuComputeKernel, WgpuDeterministicSampler,
-    WgpuDeterministicSamplerError, WgpuDeterministicSamplerTelemetry, WgpuLatentLayerBasis,
-    WgpuParallelTopKSampler, PARALLEL_TOP_K_LANES, PARALLEL_TOP_K_MAX,
+    PARALLEL_TOP_K_LANES, PARALLEL_TOP_K_MAX, WgpuComputeBuffer, WgpuComputeEvent,
+    WgpuComputeKernel, WgpuDeterministicSampler, WgpuDeterministicSamplerError,
+    WgpuDeterministicSamplerTelemetry, WgpuLatentLayerBasis, WgpuParallelTopKSampler,
 };
 use scirust_compute::{
     BufferAccess, BufferBinding, ComputeBackend, ComputeError, KernelFormat, KernelModule,
@@ -101,7 +101,8 @@ pub enum WgpuResidentSampledMiniLlmError {
 
 impl fmt::Display for WgpuResidentSampledMiniLlmError {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::MiniLlm(error) => write!(output, "{error}"),
             Self::Sampling(error) => write!(output, "{error}"),
             Self::NoPendingLogits => write!(
@@ -174,11 +175,14 @@ impl ResidentSampler {
             && sampling.top_k <= PARALLEL_TOP_K_MAX
             && max_workgroup_size_x >= PARALLEL_TOP_K_LANES as u32;
 
-        if parallel_eligible {
+        if parallel_eligible
+        {
             Ok(Self::Parallel(WgpuParallelTopKSampler::from_context(
                 context, vocab_size, sampling, seed,
             )?))
-        } else {
+        }
+        else
+        {
             Ok(Self::Sequential(WgpuDeterministicSampler::from_context(
                 context, vocab_size, sampling, seed,
             )?))
@@ -186,7 +190,8 @@ impl ResidentSampler {
     }
 
     fn telemetry(&self) -> WgpuDeterministicSamplerTelemetry {
-        match self {
+        match self
+        {
             Self::Sequential(sampler) => sampler.telemetry(),
             Self::Parallel(sampler) => sampler.telemetry(),
         }
@@ -197,49 +202,56 @@ impl ResidentSampler {
     }
 
     fn logits_buffer(&self) -> &WgpuComputeBuffer {
-        match self {
+        match self
+        {
             Self::Sequential(sampler) => sampler.logits_buffer(),
             Self::Parallel(sampler) => sampler.logits_buffer(),
         }
     }
 
     fn state_buffer(&self) -> &WgpuComputeBuffer {
-        match self {
+        match self
+        {
             Self::Sequential(sampler) => sampler.state_buffer(),
             Self::Parallel(sampler) => sampler.state_buffer(),
         }
     }
 
     fn launch_resident_without_readback(&self) -> Result<(), WgpuDeterministicSamplerError> {
-        match self {
+        match self
+        {
             Self::Sequential(sampler) => sampler.launch_resident_without_readback(),
             Self::Parallel(sampler) => sampler.launch_resident_without_readback(),
         }
     }
 
     fn set_enabled(&self, enabled: bool) -> Result<(), WgpuDeterministicSamplerError> {
-        match self {
+        match self
+        {
             Self::Sequential(sampler) => sampler.set_enabled(enabled),
             Self::Parallel(sampler) => sampler.set_enabled(enabled),
         }
     }
 
     fn sync_host_draws(&mut self, draws: usize) {
-        match self {
+        match self
+        {
             Self::Sequential(sampler) => sampler.sync_host_draws(draws),
             Self::Parallel(sampler) => sampler.sync_host_draws(draws),
         }
     }
 
     fn sample_resident(&mut self) -> Result<usize, WgpuDeterministicSamplerError> {
-        match self {
+        match self
+        {
             Self::Sequential(sampler) => sampler.sample_resident(),
             Self::Parallel(sampler) => sampler.sample_resident(),
         }
     }
 
     fn reset(&mut self) -> Result<(), WgpuDeterministicSamplerError> {
-        match self {
+        match self
+        {
             Self::Sequential(sampler) => sampler.reset(),
             Self::Parallel(sampler) => sampler.reset(),
         }
@@ -268,13 +280,8 @@ impl WgpuResidentSampledMiniLlm {
         let inner = WgpuResidentMiniLlm::new(snapshot, capacity, rank, layers)?;
         let max_workgroup_size_x = inner.encoder.adapter.capabilities().max_workgroup_size[0];
         let context = inner.encoder.adapter.context().clone();
-        let sampler = ResidentSampler::select(
-            context,
-            vocab_size,
-            sampling,
-            seed,
-            max_workgroup_size_x,
-        )?;
+        let sampler =
+            ResidentSampler::select(context, vocab_size, sampling, seed, max_workgroup_size_x)?;
         let module =
             KernelModule::new(KernelFormat::Wgsl, "main", LOGITS_WGSL.as_bytes().to_vec())?;
         let logits_kernel = inner.encoder.adapter.compile(&module)?;
@@ -357,7 +364,8 @@ impl WgpuResidentSampledMiniLlm {
     }
 
     pub fn sample_next(&mut self) -> Result<usize, WgpuResidentSampledMiniLlmError> {
-        if !self.sample_ready {
+        if !self.sample_ready
+        {
             return Err(WgpuResidentSampledMiniLlmError::NoPendingLogits);
         }
         let token = self.sampler.sample_resident()?;
@@ -401,20 +409,23 @@ impl WgpuResidentSampledMiniLlm {
         token_id: usize,
         pos: usize,
     ) -> Result<(), WgpuResidentSampledMiniLlmError> {
-        if pos != self.inner.encoder.steps {
+        if pos != self.inner.encoder.steps
+        {
             return Err(WgpuResidentMiniLlmError::PositionMismatch {
                 expected: self.inner.encoder.steps,
                 actual: pos,
             }
             .into());
         }
-        if pos >= self.inner.max_seq_len {
+        if pos >= self.inner.max_seq_len
+        {
             return Err(WgpuResidentMiniLlmError::InvalidConfig(
                 "MiniLLM position exceeds max_seq_len",
             )
             .into());
         }
-        if token_id >= self.inner.vocab_size {
+        if token_id >= self.inner.vocab_size
+        {
             return Err(WgpuResidentMiniLlmError::TokenOutOfRange {
                 token_id,
                 vocab_size: self.inner.vocab_size,
