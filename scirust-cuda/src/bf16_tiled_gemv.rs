@@ -228,6 +228,7 @@ impl CudaBf16TiledGemv {
     }
 
     /// `[1,K] × [K,N]`, BF16 projection boundary, then BF16 residual add.
+    #[allow(clippy::too_many_arguments)] // Mirrors the explicit GEMV + residual contract.
     pub fn gemv_kn_add_into(
         &self,
         input: &CudaSlice<bf16>,
