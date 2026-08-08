@@ -2,8 +2,7 @@
 //!
 //! Elastic Latent KV already evaluates attention without reconstructing dense keys
 //! and only up-projects the final value context once. For inference we can push that
-//! algebra one step earlier and later: absorb the latent bases into the model weights
-//! themselves.
+//! algebra one step earlier and later by absorbing latent bases into model weights.
 //!
 //! For one GQA KV head with key basis `U_k` and value basis `U_v`:
 //!
@@ -12,18 +11,40 @@
 //! - `Wv_lat = Wv_head * U_v`
 //! - `Wo_lat = U_v^T * Wo_head`
 //!
-//! Decode can therefore project Q/K/V directly into latent coordinates, keep the KV
-//! history latent, accumulate the value context latent, and project that context
-//! directly into model width. No dense K/V cache and no dense per-head value
-//! reconstruction are required.
+//! The V/O identities are position independent. Q/K need an additional RoPE rule:
+//! SCIAGENT rotates Q/K after projection, so a reduced arbitrary basis cannot simply
+//! reuse ordinary RoPE with `head_dim = latent_rank`. The plan classifies each basis
+//! as full identity, a native complete-pair prefix, or a general projected basis.
+//! The first two have a cheap exact rotary operator for their represented subspace;
+//! the general case requires a projected position operator and is quality-gated when
+//! rank is reduced. This distinction is explicit so a CUDA backend cannot silently
+//! turn a mathematical approximation into an exactness claim.
 //!
-//! This module performs only deterministic plan construction. It is independent of
+//! This module performs deterministic plan construction only. It is independent of
 //! CUDA/WGPU so the algebra and memory accounting remain testable on every CI target.
 
 use core::fmt;
 
 use crate::attention::GQAAttention;
 use crate::model::SciAgentModel;
+
+/// How a key-latent basis must handle SCIAGENT's head-local RoPE.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RotaryLatentRule {
+    /// Full-rank identity coordinates: use the existing dense head-local RoPE.
+    FullIdentity,
+    /// The basis selects the first `rank / 2` complete native RoPE pairs.
+    ///
+    /// The latent kernel must retain the **original `d_head` frequency denominator**;
+    /// using `rank` as the denominator would change semantics.
+    NativePairPrefix {
+        rank: usize,
+        frequency_denominator: usize,
+    },
+    /// General basis. A backend must apply the basis-projected position operator
+    /// rather than ordinary latent-width RoPE.
+    ProjectedOperator,
+}
 
 /// Invalid topology, basis, or source-weight shape during absorbed-plan creation.
 #[derive(Debug, Clone, PartialEq)]
@@ -109,6 +130,7 @@ pub struct LatentGqaBases {
     key: Vec<f32>,
     value: Vec<f32>,
     exact_identity: bool,
+    rotary_rule: RotaryLatentRule,
 }
 
 impl LatentGqaBases {
@@ -134,6 +156,29 @@ impl LatentGqaBases {
         let expected_value = checked_product3(n_kv_heads, d_head, value_rank)?;
         require_basis("key", &key, expected_key)?;
         require_basis("value", &value, expected_value)?;
+
+        let key_identity = key_rank == d_head
+            && all_heads_are_identity(&key, n_kv_heads, d_head, key_rank);
+        let value_identity = value_rank == d_head
+            && all_heads_are_identity(&value, n_kv_heads, d_head, value_rank);
+        let exact_identity = key_identity && value_identity;
+        let rotary_rule = if key_identity
+        {
+            RotaryLatentRule::FullIdentity
+        }
+        else if key_rank.is_multiple_of(2)
+            && all_heads_are_native_prefix(&key, n_kv_heads, d_head, key_rank)
+        {
+            RotaryLatentRule::NativePairPrefix {
+                rank: key_rank,
+                frequency_denominator: d_head,
+            }
+        }
+        else
+        {
+            RotaryLatentRule::ProjectedOperator
+        };
+
         Ok(Self {
             n_kv_heads,
             d_head,
@@ -141,7 +186,8 @@ impl LatentGqaBases {
             value_rank,
             key,
             value,
-            exact_identity: false,
+            exact_identity,
+            rotary_rule,
         })
     }
 
@@ -171,7 +217,37 @@ impl LatentGqaBases {
             key,
             value,
             exact_identity: true,
+            rotary_rule: RotaryLatentRule::FullIdentity,
         }
+    }
+
+    /// Deterministic reduced basis made of the first complete native RoPE pairs.
+    ///
+    /// This is intentionally simple: it gives the first CUDA latent path an exact
+    /// positional operator inside the retained subspace. Model quality after dropping
+    /// the remaining pairs is still an approximation and must be measured.
+    pub fn native_pair_prefix(
+        n_kv_heads: usize,
+        d_head: usize,
+        key_rank: usize,
+        value_rank: usize,
+    ) -> Result<Self, ElasticDecodePlanError> {
+        if !key_rank.is_multiple_of(2)
+        {
+            return Err(ElasticDecodePlanError::InvalidTopology(
+                "native RoPE prefix key rank must contain complete pairs",
+            ));
+        }
+        let key = prefix_basis(n_kv_heads, d_head, key_rank)?;
+        let value = prefix_basis(n_kv_heads, d_head, value_rank)?;
+        Self::new(
+            n_kv_heads,
+            d_head,
+            key_rank,
+            value_rank,
+            key,
+            value,
+        )
     }
 
     #[must_use]
@@ -192,6 +268,17 @@ impl LatentGqaBases {
     #[must_use]
     pub const fn value_rank(&self) -> usize {
         self.value_rank
+    }
+
+    #[must_use]
+    pub const fn rotary_rule(&self) -> RotaryLatentRule {
+        self.rotary_rule
+    }
+
+    /// True only for the no-loss full-rank identity representation.
+    #[must_use]
+    pub const fn is_dense_equivalent_identity(&self) -> bool {
+        self.exact_identity
     }
 
     #[must_use]
@@ -222,6 +309,8 @@ pub struct AbsorbedGqaWeights {
     d_head: usize,
     key_rank: usize,
     value_rank: usize,
+    rotary_rule: RotaryLatentRule,
+    dense_equivalent_identity: bool,
     q_latent: Vec<f32>,
     k_latent: Vec<f32>,
     v_latent: Vec<f32>,
@@ -258,6 +347,8 @@ impl AbsorbedGqaWeights {
                 d_head,
                 key_rank,
                 value_rank,
+                rotary_rule: bases.rotary_rule,
+                dense_equivalent_identity: true,
                 q_latent: attention.w_q.weight.data.clone(),
                 k_latent: attention.w_k.weight.data.clone(),
                 v_latent: attention.w_v.weight.data.clone(),
@@ -357,6 +448,8 @@ impl AbsorbedGqaWeights {
             d_head,
             key_rank,
             value_rank,
+            rotary_rule: bases.rotary_rule,
+            dense_equivalent_identity: false,
             q_latent,
             k_latent,
             v_latent,
@@ -392,6 +485,16 @@ impl AbsorbedGqaWeights {
     #[must_use]
     pub const fn value_rank(&self) -> usize {
         self.value_rank
+    }
+
+    #[must_use]
+    pub const fn rotary_rule(&self) -> RotaryLatentRule {
+        self.rotary_rule
+    }
+
+    #[must_use]
+    pub const fn is_dense_equivalent_identity(&self) -> bool {
+        self.dense_equivalent_identity
     }
 
     #[must_use]
@@ -595,6 +698,66 @@ fn checked_product3(
         .ok_or(ElasticDecodePlanError::Overflow)
 }
 
+fn prefix_basis(
+    n_kv_heads: usize,
+    d_head: usize,
+    rank: usize,
+) -> Result<Vec<f32>, ElasticDecodePlanError> {
+    require_rank("prefix", rank, d_head)?;
+    let len = checked_product3(n_kv_heads, d_head, rank)?;
+    let mut basis = vec![0.0; len];
+    for head in 0..n_kv_heads
+    {
+        let base = head * d_head * rank;
+        for diagonal in 0..rank
+        {
+            basis[base + diagonal * rank + diagonal] = 1.0;
+        }
+    }
+    Ok(basis)
+}
+
+fn all_heads_are_identity(
+    basis: &[f32],
+    n_kv_heads: usize,
+    d_head: usize,
+    rank: usize,
+) -> bool {
+    if rank != d_head
+    {
+        return false;
+    }
+    all_heads_are_native_prefix(basis, n_kv_heads, d_head, rank)
+}
+
+fn all_heads_are_native_prefix(
+    basis: &[f32],
+    n_kv_heads: usize,
+    d_head: usize,
+    rank: usize,
+) -> bool {
+    if basis.len() != n_kv_heads.saturating_mul(d_head).saturating_mul(rank)
+    {
+        return false;
+    }
+    for head in 0..n_kv_heads
+    {
+        let head_base = head * d_head * rank;
+        for row in 0..d_head
+        {
+            for col in 0..rank
+            {
+                let expected = if row == col { 1.0f32 } else { 0.0f32 };
+                if basis[head_base + row * rank + col].to_bits() != expected.to_bits()
+                {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -616,17 +779,8 @@ mod tests {
         output
     }
 
-    fn prefix_basis(n_kv_heads: usize, d_head: usize, rank: usize) -> Vec<f32> {
-        let mut basis = vec![0.0; n_kv_heads * d_head * rank];
-        for head in 0..n_kv_heads
-        {
-            let base = head * d_head * rank;
-            for diagonal in 0..rank
-            {
-                basis[base + diagonal * rank + diagonal] = 1.0;
-            }
-        }
-        basis
+    fn prefix(n_kv_heads: usize, d_head: usize, rank: usize) -> Vec<f32> {
+        prefix_basis(n_kv_heads, d_head, rank).unwrap()
     }
 
     fn assert_close(left: &[f32], right: &[f32], tolerance: f32) {
@@ -647,15 +801,39 @@ mod tests {
         assert_eq!(plan.layers().len(), model.layers.len());
         for (layer, absorbed) in model.layers.iter().zip(plan.layers())
         {
-            assert_eq!(absorbed.q_latent(), layer.attn.w_q.weight.data);
-            assert_eq!(absorbed.k_latent(), layer.attn.w_k.weight.data);
-            assert_eq!(absorbed.v_latent(), layer.attn.w_v.weight.data);
-            assert_eq!(absorbed.o_latent(), layer.attn.w_o.weight.data);
+            assert_eq!(absorbed.q_latent(), layer.attn.w_q.weight.data.as_slice());
+            assert_eq!(absorbed.k_latent(), layer.attn.w_k.weight.data.as_slice());
+            assert_eq!(absorbed.v_latent(), layer.attn.w_v.weight.data.as_slice());
+            assert_eq!(absorbed.o_latent(), layer.attn.w_o.weight.data.as_slice());
+            assert_eq!(absorbed.rotary_rule(), RotaryLatentRule::FullIdentity);
+            assert!(absorbed.is_dense_equivalent_identity());
             assert_eq!(
                 absorbed.projection_parameter_count(),
                 absorbed.dense_projection_parameter_count()
             );
         }
+    }
+
+    #[test]
+    fn native_prefix_preserves_complete_rope_pairs_and_original_frequency_denominator() {
+        let bases = LatentGqaBases::native_pair_prefix(2, 32, 16, 12).unwrap();
+        assert_eq!(
+            bases.rotary_rule(),
+            RotaryLatentRule::NativePairPrefix {
+                rank: 16,
+                frequency_denominator: 32,
+            }
+        );
+        assert!(!bases.is_dense_equivalent_identity());
+    }
+
+    #[test]
+    fn arbitrary_key_basis_requires_projected_rope_operator() {
+        let mut key = prefix(1, 8, 4);
+        key[0] = 0.5;
+        key[4] = 0.5;
+        let bases = LatentGqaBases::new(1, 8, 4, 4, key, prefix(1, 8, 4)).unwrap();
+        assert_eq!(bases.rotary_rule(), RotaryLatentRule::ProjectedOperator);
     }
 
     #[test]
@@ -668,8 +846,8 @@ mod tests {
             attention.d_head,
             rank,
             rank,
-            prefix_basis(attention.n_kv_heads, attention.d_head, rank),
-            prefix_basis(attention.n_kv_heads, attention.d_head, rank),
+            prefix(attention.n_kv_heads, attention.d_head, rank),
+            prefix(attention.n_kv_heads, attention.d_head, rank),
         )
         .unwrap();
         let absorbed = AbsorbedGqaWeights::from_attention(attention, &bases).unwrap();
@@ -741,7 +919,7 @@ mod tests {
         let model = SciAgentModel::new(&SciAgentConfig::small());
         let attention = &model.layers[0].attn;
         let rank = attention.d_head / 2;
-        let raw_basis = prefix_basis(attention.n_kv_heads, attention.d_head, rank);
+        let raw_basis = prefix(attention.n_kv_heads, attention.d_head, rank);
         let bases = LatentGqaBases::new(
             attention.n_kv_heads,
             attention.d_head,
@@ -795,13 +973,11 @@ mod tests {
         {
             let rank = layer.attn.d_head / 2;
             bases.push(
-                LatentGqaBases::new(
+                LatentGqaBases::native_pair_prefix(
                     layer.attn.n_kv_heads,
                     layer.attn.d_head,
                     rank,
                     rank,
-                    prefix_basis(layer.attn.n_kv_heads, layer.attn.d_head, rank),
-                    prefix_basis(layer.attn.n_kv_heads, layer.attn.d_head, rank),
                 )
                 .unwrap(),
             );
