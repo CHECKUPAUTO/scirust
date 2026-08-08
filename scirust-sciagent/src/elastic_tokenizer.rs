@@ -28,7 +28,8 @@ pub enum PieceClass {
 
 impl PieceClass {
     const fn index(self) -> usize {
-        match self {
+        match self
+        {
             Self::S => 0,
             Self::M => 1,
             Self::L => 2,
@@ -71,7 +72,8 @@ impl ElasticThresholds {
         xl_max: usize,
         xxl_max: usize,
     ) -> Result<Self, ThresholdError> {
-        if !(s_max < m_max && m_max < l_max && l_max < xl_max && xl_max < xxl_max) {
+        if !(s_max < m_max && m_max < l_max && l_max < xl_max && xl_max < xxl_max)
+        {
             return Err(ThresholdError);
         }
         Ok(Self {
@@ -88,17 +90,28 @@ impl ElasticThresholds {
     /// Classification never splits the piece.  This matters because a valid
     /// merge may cross any arbitrary internal byte offset.
     pub fn classify(self, piece_len: usize) -> PieceClass {
-        if piece_len <= self.s_max {
+        if piece_len <= self.s_max
+        {
             PieceClass::S
-        } else if piece_len <= self.m_max {
+        }
+        else if piece_len <= self.m_max
+        {
             PieceClass::M
-        } else if piece_len <= self.l_max {
+        }
+        else if piece_len <= self.l_max
+        {
             PieceClass::L
-        } else if piece_len <= self.xl_max {
+        }
+        else if piece_len <= self.xl_max
+        {
             PieceClass::Xl
-        } else if piece_len <= self.xxl_max {
+        }
+        else if piece_len <= self.xxl_max
+        {
             PieceClass::Xxl
-        } else {
+        }
+        else
+        {
             PieceClass::Xxxl
         }
     }
@@ -200,7 +213,8 @@ impl CanonicalBpeOracle {
         merges: &[(TokenId, TokenId, TokenId)],
     ) -> Result<Self, DuplicateMergeRule> {
         let mut ranked = BTreeMap::new();
-        for (rank, &(left, right, output)) in merges.iter().enumerate() {
+        for (rank, &(left, right, output)) in merges.iter().enumerate()
+        {
             if ranked
                 .insert((left, right), RankedMerge { output, rank })
                 .is_some()
@@ -222,23 +236,27 @@ impl CanonicalBpeOracle {
     pub fn encode_ids(&self, input: &[TokenId]) -> Vec<TokenId> {
         let mut ids = input.to_vec();
 
-        while ids.len() >= 2 {
+        while ids.len() >= 2
+        {
             let mut best: Option<(usize, usize, TokenId)> = None;
 
-            for (position, pair) in ids.windows(2).enumerate() {
-                let Some(rule) = self.merges.get(&(pair[0], pair[1])) else {
+            for (position, pair) in ids.windows(2).enumerate()
+            {
+                let Some(rule) = self.merges.get(&(pair[0], pair[1])) else
+                {
                     continue;
                 };
                 let candidate = (rule.rank, position, rule.output);
-                if best
-                    .map(|current| (candidate.0, candidate.1) < (current.0, current.1))
-                    .unwrap_or(true)
+                if best.is_none_or(|current| {
+                    (candidate.0, candidate.1) < (current.0, current.1)
+                })
                 {
                     best = Some(candidate);
                 }
             }
 
-            let Some((_, position, output)) = best else {
+            let Some((_, position, output)) = best else
+            {
                 break;
             };
             ids[position] = output;
@@ -264,7 +282,8 @@ mod tests {
         const BC: TokenId = 20;
         const AB: TokenId = 21;
 
-        let oracle = CanonicalBpeOracle::from_ordered_merges(&[(B, C, BC), (A, B, AB)]).unwrap();
+        let oracle =
+            CanonicalBpeOracle::from_ordered_merges(&[(B, C, BC), (A, B, AB)]).unwrap();
         assert_eq!(oracle.encode_ids(&[A, B, C]), vec![A, BC]);
     }
 
