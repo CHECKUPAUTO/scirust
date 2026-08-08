@@ -412,7 +412,7 @@ impl fmt::Display for ElasticTextTokenizerError {
                 "elastic tokenizer requires explicit `merge_semantics`; untagged artifacts remain legacy",
             ),
             Self::UnknownMergeSemantics(value) => {
-                write!(f, "unknown elastic tokenizer merge semantics `{value}")
+                write!(f, "unknown elastic tokenizer merge semantics `{value}`")
             },
             Self::LegacyMergeSemantics => f.write_str(
                 "legacy parallel BPE semantics must use the historical BpeTokenizer compatibility path",
@@ -433,7 +433,7 @@ impl fmt::Display for ElasticTextTokenizerError {
             Self::DuplicateVocabId(id) => write!(f, "elastic tokenizer duplicate vocab id {id}"),
             Self::SparseVocab(id) => write!(f, "elastic tokenizer missing vocab id {id}"),
             Self::InvalidSpecialToken(token) => {
-                write!(f, "elastic tokenizer invalid special token `{token}")
+                write!(f, "elastic tokenizer invalid special token `{token}`")
             },
             Self::MissingByteToken(byte) => {
                 write!(f, "elastic tokenizer missing base token for byte {byte}")
