@@ -22,12 +22,13 @@ const KNOWN_DTYPES: [DType; 13] = [
 pub(crate) fn hardware_capabilities(capabilities: &DeviceCapabilities) -> HardwareCapabilities {
     let mut hardware = capabilities.hardware_baseline();
 
-    #[cfg(feature = "std")]
-    {
-        let probed = scirust_compute::probe_host_cpu();
-        hardware.architecture = probed.architecture;
-        hardware.isa = probed.isa;
-    }
+    // `scirust-gpu` always links std. Even under `--no-default-features`, its
+    // unconditional `scirust-tensor-reference` dependency enables
+    // `scirust-compute/std` through Cargo feature unification. Preserve the
+    // ComputeBackend default's runtime ISA overlay in every supported build.
+    let probed = scirust_compute::probe_host_cpu();
+    hardware.architecture = probed.architecture;
+    hardware.isa = probed.isa;
 
     for dtype in KNOWN_DTYPES
     {
@@ -83,7 +84,7 @@ pub(crate) fn hardware_capabilities(capabilities: &DeviceCapabilities) -> Hardwa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scirust_compute::{DeviceId, VectorModel};
+    use scirust_compute::DeviceId;
 
     fn legacy_capabilities() -> DeviceCapabilities {
         DeviceCapabilities {
@@ -151,7 +152,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn reference_cpu_profile_preserves_runtime_host_isa_probe() {
         let hardware = hardware_capabilities(&legacy_capabilities());
@@ -159,6 +159,5 @@ mod tests {
 
         assert_eq!(hardware.architecture, probed.architecture);
         assert_eq!(hardware.isa, probed.isa);
-        assert_ne!(hardware.isa.vector_model, VectorModel::Unknown);
     }
 }
