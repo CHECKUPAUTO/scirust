@@ -101,7 +101,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[allow(clippy::too_many_arguments)]
 fn emit_case(
     tokenizer: &CharTokenizer,
-    config: &MiniLlmConfig,
+    config: &MiniLLMConfig,
     prompt: &[usize],
     requested_decode: usize,
     top_k: usize,
