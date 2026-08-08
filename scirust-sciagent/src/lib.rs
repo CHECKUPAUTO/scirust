@@ -13,6 +13,7 @@ pub mod elastic_calibration;
 pub mod elastic_engine;
 pub mod elastic_tiny;
 pub mod elastic_tokenizer;
+pub mod execution_attestation;
 pub mod flash_attention;
 pub mod generate;
 #[cfg(feature = "gpu")]
@@ -41,6 +42,9 @@ pub use elastic_tiny::{TINY_SCAN_CAPACITY, TinyScanBpe};
 pub use elastic_tokenizer::{
     BpeKernel, CanonicalBpeOracle, DuplicateMergeRule, ElasticProfile, ElasticThresholds,
     PieceClass, ThresholdError, TokenId,
+};
+pub use execution_attestation::{
+    RuntimeExecutionAttestationInputs, build_runtime_execution_attestation, sha256_digest,
 };
 pub use generate::Generator;
 pub use inference::SciAgentInference;
