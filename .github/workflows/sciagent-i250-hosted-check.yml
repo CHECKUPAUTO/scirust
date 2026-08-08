@@ -17,7 +17,7 @@ on:
       - ".github/workflows/sciagent-i250-hosted-check.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: sciagent-i250-hosted-${{ github.event.pull_request.number || github.ref }}
@@ -35,27 +35,14 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          ref: ${{ github.event_name == 'push' && github.ref_name || github.event.pull_request.head.sha }}
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
-      - name: Apply pinned rustfmt on scratch push
-        if: github.event_name == 'push'
-        run: |
-          cargo +nightly-2026-07-02 fmt --all
-          if ! git diff --quiet -- scirust-core scirust-cuda scirust-sciagent; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add scirust-core scirust-cuda scirust-sciagent
-            git commit -m "style(i250): apply pinned rustfmt"
-            git push origin HEAD:perf/sciagent-i250-resident-kv
-          fi
       - name: Format
         run: cargo +nightly-2026-07-02 fmt --all -- --check
       - name: SLHA score-profile algebra
-        run: cargo +nightly-2026-07-02 test -p scirust-core --lib --locked slha_score_profile -- --nocapture
+        run: cargo +nightly-2026-07-02 test -p scirust-core --lib --locked slha_ -- --nocapture
       - name: Elastic decode planning algebra
         run: cargo +nightly-2026-07-02 test -p scirust-sciagent --lib --locked elastic_ -- --nocapture
       - name: CUDA feature compile
