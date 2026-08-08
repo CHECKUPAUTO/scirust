@@ -1,6 +1,12 @@
 name: SciAgent B39 Thor production benchmark
 
 on:
+  push:
+    branches:
+      - perf/sciagent-b39-thor-production-bench
+    paths:
+      - scirust-sciagent/examples/cuda_production_bench.rs
+      - .github/workflows/sciagent-b39-validate.yml
   pull_request:
     branches:
       - fix/sciagent-b38-checkpoint-lifecycle
@@ -10,6 +16,7 @@ permissions:
 
 jobs:
   validate:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
