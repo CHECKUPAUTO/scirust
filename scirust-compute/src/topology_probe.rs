@@ -3,6 +3,8 @@
 //! The probe is a `std` concern. The topology data model itself remains
 //! available in `no_std` builds.
 
+#![cfg_attr(not(target_os = "linux"), allow(dead_code))]
+
 use crate::SystemTopology;
 
 #[cfg(target_os = "linux")]
