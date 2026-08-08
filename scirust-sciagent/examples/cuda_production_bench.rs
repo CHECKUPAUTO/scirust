@@ -47,7 +47,8 @@ fn batch_list() -> Vec<usize> {
         .collect();
     out.sort_unstable();
     out.dedup();
-    if out.is_empty() {
+    if out.is_empty()
+    {
         out.push(1);
     }
     out
@@ -68,14 +69,19 @@ fn synthetic_tokens(len: usize, vocab: usize) -> Vec<u32> {
 
 fn bench_training(config: &SciAgentConfig, batch: usize, seq: usize, steps: usize) -> Option<f64> {
     let mut model = SciAgentModel::new(config);
-    let Some(mut trainer) = CudaTrainer::from_model(&model) else {
+    let Some(mut trainer) = CudaTrainer::from_model(&model)
+    else
+    {
         eprintln!("no CUDA device available — this benchmark must run on the Thor");
         return None;
     };
 
     // Enough independent windows to avoid wrapping during the warmup+measurement.
     let windows = batch.saturating_mul(steps.saturating_add(4)).max(batch + 1);
-    let tokens = synthetic_tokens(windows.saturating_mul(seq).saturating_add(1), config.vocab_size);
+    let tokens = synthetic_tokens(
+        windows.saturating_mul(seq).saturating_add(1),
+        config.vocab_size,
+    );
 
     // One untimed production step warms NVRTC/cuBLASLt/allocation paths. No eval or
     // checkpoint I/O is enabled; telemetry is flushed at the end of this one step.
@@ -96,7 +102,8 @@ fn bench_training(config: &SciAgentConfig, batch: usize, seq: usize, steps: usiz
         ..Default::default()
     };
     let warm_losses = trainer.pretrain(&tokens, &mut model, config, &warm);
-    if warm_losses.is_empty() {
+    if warm_losses.is_empty()
+    {
         eprintln!("warmup produced no step for B{batch}×T{seq}");
         return None;
     }
@@ -123,7 +130,8 @@ fn bench_training(config: &SciAgentConfig, batch: usize, seq: usize, steps: usiz
     let t0 = Instant::now();
     let losses = trainer.pretrain(&tokens, &mut model, config, &measured);
     let secs = t0.elapsed().as_secs_f64().max(1e-9);
-    if losses.len() != steps {
+    if losses.len() != steps
+    {
         eprintln!(
             "B{batch}×T{seq}: expected {steps} measured steps, got {}",
             losses.len()
@@ -142,7 +150,9 @@ fn bench_training(config: &SciAgentConfig, batch: usize, seq: usize, steps: usiz
 
 fn bench_decode(config: &SciAgentConfig, prompt_len: usize, max_new: usize) {
     let model = SciAgentModel::new(config);
-    let Some(cuda) = CudaModel::from_model(&model) else {
+    let Some(cuda) = CudaModel::from_model(&model)
+    else
+    {
         return;
     };
     let prompt = synthetic_tokens(prompt_len.max(1), config.vocab_size);
@@ -172,15 +182,19 @@ fn bench_decode(config: &SciAgentConfig, prompt_len: usize, max_new: usize) {
     let naive_tps = naive_new as f64 / naive_secs;
 
     let parity = cached == naive;
-    let speedup = if naive_tps > 0.0 {
+    let speedup = if naive_tps > 0.0
+    {
         cached_tps / naive_tps
-    } else {
+    }
+    else
+    {
         f64::NAN
     };
     println!(
         "SCIAGENT_THOR_DECODE prompt={prompt_len} requested_new={max_new} cached_new={cached_new} cached_seconds={cached_secs:.6} cached_tok_s={cached_tps:.3} naive_new={naive_new} naive_seconds={naive_secs:.6} naive_tok_s={naive_tps:.3} speedup={speedup:.3} parity={parity}"
     );
-    if !parity {
+    if !parity
+    {
         eprintln!("ERROR: cached CUDA decoding changed greedy tokens");
         std::process::exit(3);
     }
@@ -209,20 +223,25 @@ fn main() {
     );
 
     let mut best: Option<(usize, f64)> = None;
-    for batch in batches {
+    for batch in batches
+    {
         println!("--- training sweep B{batch}×T{seq} ---");
-        let Some(tok_s) = bench_training(&config, batch, seq, steps) else {
+        let Some(tok_s) = bench_training(&config, batch, seq, steps)
+        else
+        {
             std::process::exit(2);
         };
         let days = corpus_tokens as f64 / tok_s / 86_400.0;
         println!(
             "SCIAGENT_THOR_PASS batch={batch} corpus_tokens={corpus_tokens} tok_s={tok_s:.3} one_pass_days={days:.3}"
         );
-        if best.is_none_or(|(_, best_tps)| tok_s > best_tps) {
+        if best.is_none_or(|(_, best_tps)| tok_s > best_tps)
+        {
             best = Some((batch, tok_s));
         }
     }
-    if let Some((batch, tok_s)) = best {
+    if let Some((batch, tok_s)) = best
+    {
         println!("SCIAGENT_THOR_BEST_TRAIN batch={batch} tok_s={tok_s:.3}");
     }
 
