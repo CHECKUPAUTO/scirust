@@ -45,5 +45,8 @@ pub mod schreier;
 /// Finite-group representation helpers and harmonic-analysis primitives.
 #[rustfmt::skip]
 pub mod representation;
+/// Complex Wigner D elements and complex spherical harmonics.
+#[rustfmt::skip]
+pub mod wigner;
 
 pub use crate::core::{AbelianGroup, Field, Group, Magma, Monoid, Ring, Semigroup};
