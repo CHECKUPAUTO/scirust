@@ -80,11 +80,8 @@ def patch_eval(text: str) -> str:
     new_import = "use scirust_sciagent::cuda_model::{\n    CudaModel, SCIAGENT_MODEL_SEMANTICS_VERSION, read_model_semantics_version,\n};\n"
     text = must_replace(text, old_import, new_import)
 
-    idx = text.find("read_meta(&ckpt")
-    if idx < 0:
-        raise SystemExit("cannot find cuda_eval read_meta(&ckpt)")
-    line_start = text.rfind("\n", 0, idx) + 1
-    guard = r'''    let checkpoint_semantics = read_model_semantics_version(&ckpt).unwrap_or(1);
+    anchor = '''    let dir = latest_checkpoint(Path::new(&ckpt)).unwrap_or_else(|| ckpt.clone().into());\n'''
+    guard = r'''    let checkpoint_semantics = read_model_semantics_version(&dir).unwrap_or(1);
     if checkpoint_semantics != SCIAGENT_MODEL_SEMANTICS_VERSION {
         let allow = matches!(
             std::env::var("SCIAGENT_ALLOW_NONEXACT_RESUME").as_deref(),
@@ -105,9 +102,8 @@ def patch_eval(text: str) -> str:
             SCIAGENT_MODEL_SEMANTICS_VERSION
         );
     }
-
 '''
-    text = text[:line_start] + guard + text[line_start:]
+    text = must_replace(text, anchor, anchor + guard)
     return text
 
 
