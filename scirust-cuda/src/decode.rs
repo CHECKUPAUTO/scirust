@@ -1,10 +1,15 @@
 //! Batch-one CUDA decode runtime for latency-sensitive autoregressive inference.
 //!
 //! This module is deliberately isolated from [`crate::CudaChain`], which remains the
-//! Route-B training/parity implementation.  The decode runtime is allowed to fuse
+//! Route-B training/parity implementation. The decode runtime is allowed to fuse
 //! operations aggressively without changing the kernels used by an active training
-//! run.  Its main primitive combines head-local RoPE, fixed-capacity KV-cache writes,
+//! run. Its main primitive combines head-local RoPE, fixed-capacity KV-cache writes,
 //! single-query GQA score/softmax/context, and head assembly in one CUDA launch.
+//!
+//! Latency-sensitive callers should allocate matrices once with [`CudaDecodeRuntime::matrix`]
+//! and use the `*_into` methods. Convenience allocating wrappers remain available for
+//! tests and small callers, but the SCIAGENT production path performs no device
+//! allocation inside a token step.
 
 use std::sync::Arc;
 
@@ -65,7 +70,7 @@ extern "C" __global__ void decode_rmsnorm_kernel(
         out[c] = f2b(b2f(x[c]) * inv * b2f(w[c]));
 }
 
-// Input is [gate | up], each d_ff wide.  Keeping the two projections adjacent lets
+// Input is [gate | up], each d_ff wide. Keeping the two projections adjacent lets
 // one GEMM replace the historical gate+up pair before this elementwise fusion.
 extern "C" __global__ void decode_swiglu_split_kernel(
     unsigned short* out, const unsigned short* gate_up, const size_t d_ff)
@@ -79,11 +84,11 @@ extern "C" __global__ void decode_swiglu_split_kernel(
     }
 }
 
-// One block owns one query head.  The launch fuses the entire incremental GQA
+// One block owns one query head. The launch fuses the entire incremental GQA
 // attention path:
 //   raw Q/K/V row -> head-local RoPE -> fixed KV append -> scores -> scale ->
 //   softmax -> deterministic left-to-right context -> assembled d_model row.
-// Historical K/V are already bf16 in the fixed caches.  The current K/V are read
+// Historical K/V are already bf16 in the fixed caches. The current K/V are read
 // directly from qkv so no inter-block synchronization is required after the one
 // designated writer per KV head stores them for the *next* token.
 extern "C" __global__ void decode_gqa_kernel(
@@ -110,10 +115,10 @@ extern "C" __global__ void decode_gqa_kernel(
     const size_t seq = pos + 1;
 
     extern __shared__ unsigned char smem_raw[];
-    float* scores = (float*)smem_raw;              // seq floats
-    float* qrot = scores + seq;                    // dh floats
-    float* kcur = qrot + dh;                       // dh floats
-    float* red = kcur + dh;                        // 256 floats
+    float* scores = (float*)smem_raw; // seq floats
+    float* qrot = scores + seq;       // dh floats
+    float* kcur = qrot + dh;          // dh floats
+    float* red = kcur + dh;           // 256 floats
 
     // RoPE frequency restarts in every logical head, matching semantics-v2.
     const size_t pairs = dh / 2;
@@ -137,7 +142,7 @@ extern "C" __global__ void decode_gqa_kernel(
     }
     __syncthreads();
 
-    // Exactly one query-head block writes each KV-head slice.  Other query heads in
+    // Exactly one query-head block writes each KV-head slice. Other query heads in
     // the GQA group use kcur/raw-V for the current position and only need the cache
     // from the next launch onward.
     if ((head % repeat) == 0) {
@@ -148,7 +153,7 @@ extern "C" __global__ void decode_gqa_kernel(
         }
     }
 
-    // QK^T for one query.  Preserve the two bf16 round boundaries used by the
+    // QK^T for one query. Preserve the two bf16 round boundaries used by the
     // legacy path: GEMM output first, then scaled-score output before softmax.
     for (size_t j = tid; j < seq; j += blockDim.x) {
         float acc = 0.0f;
@@ -187,7 +192,7 @@ extern "C" __global__ void decode_gqa_kernel(
     sum = red[0];
 
     // Every probability is rounded through bf16, but remains stored as a float in
-    // its original score slot.  That preserves the legacy softmax boundary without
+    // its original score slot. That preserves the legacy softmax boundary without
     // aliasing the 4-byte score array through a 2-byte pointer.
     for (size_t j = tid; j < seq; j += blockDim.x)
         scores[j] = b2f(f2b(__expf(scores[j] - mx) / sum));
@@ -225,7 +230,7 @@ impl CudaDecodeMatrix {
     }
 }
 
-/// Fixed-capacity resident KV storage.  `pos` is supplied by the caller; no cache
+/// Fixed-capacity resident KV storage. `pos` is supplied by the caller; no cache
 /// reallocation or historical-row copy occurs during decode.
 pub struct CudaDecodeKvCache {
     buf: CudaSlice<bf16>,
@@ -290,6 +295,16 @@ impl CudaDecodeRuntime {
         })
     }
 
+    /// Allocate one persistent bf16 matrix for workspace reuse.
+    pub fn matrix(&self, rows: usize, cols: usize) -> CudaDecodeMatrix {
+        assert!(rows > 0 && cols > 0, "decode matrix must be non-empty");
+        let buf = self
+            .stream
+            .alloc_zeros::<bf16>(rows * cols)
+            .expect("decode CUDA matrix allocation");
+        CudaDecodeMatrix { buf, rows, cols }
+    }
+
     pub fn upload(&self, data: &[f32], rows: usize, cols: usize) -> CudaDecodeMatrix {
         assert_eq!(data.len(), rows * cols, "decode upload shape mismatch");
         let bf: Vec<bf16> = data.iter().map(|&x| bf16::from_f32(x)).collect();
@@ -318,13 +333,18 @@ impl CudaDecodeRuntime {
         host.iter().map(|x| x.to_f32()).collect()
     }
 
-    pub fn embed_token(&self, token: u32, table: &CudaDecodeMatrix) -> CudaDecodeMatrix {
+    pub fn embed_token_into(
+        &self,
+        token: u32,
+        table: &CudaDecodeMatrix,
+        out: &mut CudaDecodeMatrix,
+    ) {
         assert!(table.rows > 0 && table.cols > 0, "decode embedding table empty");
+        assert_eq!((out.rows, out.cols), (1, table.cols), "decode embed output shape");
         let d = table.cols;
-        let mut out = self.stream.alloc_zeros::<bf16>(d).expect("decode embed alloc");
         let (token_a, vocab_a, d_a) = (token as usize, table.rows, d);
         let mut builder = self.stream.launch_builder(&self.kernels.embed_token);
-        builder.arg(&mut out);
+        builder.arg(&mut out.buf);
         builder.arg(&table.buf);
         builder.arg(&token_a);
         builder.arg(&vocab_a);
@@ -334,20 +354,26 @@ impl CudaDecodeRuntime {
                 .launch(LaunchConfig::for_num_elems(d as u32))
                 .expect("decode embed launch");
         }
-        CudaDecodeMatrix {
-            buf: out,
-            rows: 1,
-            cols: d,
-        }
     }
 
-    pub fn add(&self, a: &CudaDecodeMatrix, b: &CudaDecodeMatrix) -> CudaDecodeMatrix {
-        assert_eq!((a.rows, a.cols), (b.rows, b.cols), "decode add shape mismatch");
+    pub fn embed_token(&self, token: u32, table: &CudaDecodeMatrix) -> CudaDecodeMatrix {
+        let mut out = self.matrix(1, table.cols);
+        self.embed_token_into(token, table, &mut out);
+        out
+    }
+
+    pub fn add_into(
+        &self,
+        a: &CudaDecodeMatrix,
+        b: &CudaDecodeMatrix,
+        out: &mut CudaDecodeMatrix,
+    ) {
+        assert_eq!((a.rows, a.cols), (b.rows, b.cols), "decode add input shape");
+        assert_eq!((out.rows, out.cols), (a.rows, a.cols), "decode add output shape");
         let n = a.rows * a.cols;
-        let mut out = self.stream.alloc_zeros::<bf16>(n).expect("decode add alloc");
         let n_a = n;
         let mut builder = self.stream.launch_builder(&self.kernels.add);
-        builder.arg(&mut out);
+        builder.arg(&mut out.buf);
         builder.arg(&a.buf);
         builder.arg(&b.buf);
         builder.arg(&n_a);
@@ -356,29 +382,28 @@ impl CudaDecodeRuntime {
                 .launch(LaunchConfig::for_num_elems(n as u32))
                 .expect("decode add launch");
         }
-        CudaDecodeMatrix {
-            buf: out,
-            rows: a.rows,
-            cols: a.cols,
-        }
     }
 
-    pub fn rms_norm(
+    pub fn add(&self, a: &CudaDecodeMatrix, b: &CudaDecodeMatrix) -> CudaDecodeMatrix {
+        let mut out = self.matrix(a.rows, a.cols);
+        self.add_into(a, b, &mut out);
+        out
+    }
+
+    pub fn rms_norm_into(
         &self,
         x: &CudaDecodeMatrix,
         weight: &CudaDecodeMatrix,
         eps: f32,
-    ) -> CudaDecodeMatrix {
+        out: &mut CudaDecodeMatrix,
+    ) {
         assert_eq!(x.rows, 1, "decode RMSNorm is batch-one only");
         assert_eq!(weight.rows * weight.cols, x.cols, "decode RMSNorm weight shape");
+        assert_eq!((out.rows, out.cols), (1, x.cols), "decode RMSNorm output shape");
         let cols = x.cols;
-        let mut out = self
-            .stream
-            .alloc_zeros::<bf16>(cols)
-            .expect("decode RMSNorm alloc");
         let (cols_a, eps_a) = (cols, eps);
         let mut builder = self.stream.launch_builder(&self.kernels.rmsnorm);
-        builder.arg(&mut out);
+        builder.arg(&mut out.buf);
         builder.arg(&x.buf);
         builder.arg(&weight.buf);
         builder.arg(&cols_a);
@@ -389,24 +414,31 @@ impl CudaDecodeRuntime {
             shared_mem_bytes: 0,
         };
         unsafe { builder.launch(cfg).expect("decode RMSNorm launch") };
-        CudaDecodeMatrix {
-            buf: out,
-            rows: 1,
-            cols,
-        }
     }
 
-    pub fn swiglu_split(&self, gate_up: &CudaDecodeMatrix) -> CudaDecodeMatrix {
+    pub fn rms_norm(
+        &self,
+        x: &CudaDecodeMatrix,
+        weight: &CudaDecodeMatrix,
+        eps: f32,
+    ) -> CudaDecodeMatrix {
+        let mut out = self.matrix(1, x.cols);
+        self.rms_norm_into(x, weight, eps, &mut out);
+        out
+    }
+
+    pub fn swiglu_split_into(
+        &self,
+        gate_up: &CudaDecodeMatrix,
+        out: &mut CudaDecodeMatrix,
+    ) {
         assert_eq!(gate_up.rows, 1, "decode SwiGLU is batch-one only");
         assert_eq!(gate_up.cols % 2, 0, "decode gate/up width must be even");
         let d_ff = gate_up.cols / 2;
-        let mut out = self
-            .stream
-            .alloc_zeros::<bf16>(d_ff)
-            .expect("decode SwiGLU alloc");
+        assert_eq!((out.rows, out.cols), (1, d_ff), "decode SwiGLU output shape");
         let d_ff_a = d_ff;
         let mut builder = self.stream.launch_builder(&self.kernels.swiglu_split);
-        builder.arg(&mut out);
+        builder.arg(&mut out.buf);
         builder.arg(&gate_up.buf);
         builder.arg(&d_ff_a);
         unsafe {
@@ -414,20 +446,23 @@ impl CudaDecodeRuntime {
                 .launch(LaunchConfig::for_num_elems(d_ff as u32))
                 .expect("decode SwiGLU launch");
         }
-        CudaDecodeMatrix {
-            buf: out,
-            rows: 1,
-            cols: d_ff,
-        }
     }
 
-    pub fn matmul(&self, a: &CudaDecodeMatrix, b: &CudaDecodeMatrix) -> CudaDecodeMatrix {
+    pub fn swiglu_split(&self, gate_up: &CudaDecodeMatrix) -> CudaDecodeMatrix {
+        let mut out = self.matrix(1, gate_up.cols / 2);
+        self.swiglu_split_into(gate_up, &mut out);
+        out
+    }
+
+    pub fn matmul_into(
+        &self,
+        a: &CudaDecodeMatrix,
+        b: &CudaDecodeMatrix,
+        out: &mut CudaDecodeMatrix,
+    ) {
         let (m, k, n) = (a.rows, a.cols, b.cols);
         assert_eq!(b.rows, k, "decode matmul inner dimensions");
-        let mut out = self
-            .stream
-            .alloc_zeros::<bf16>(m * n)
-            .expect("decode matmul alloc");
+        assert_eq!((out.rows, out.cols), (m, n), "decode matmul output shape");
         let cfg = MatmulConfig {
             transa: false,
             transb: false,
@@ -448,23 +483,26 @@ impl CudaDecodeRuntime {
         };
         unsafe {
             self.blas
-                .matmul(cfg, &b.buf, &a.buf, &mut out, None, None)
+                .matmul(cfg, &b.buf, &a.buf, &mut out.buf, None, None)
                 .expect("decode cuBLASLt matmul");
-        }
-        CudaDecodeMatrix {
-            buf: out,
-            rows: m,
-            cols: n,
         }
     }
 
-    pub fn matmul_bt(&self, a: &CudaDecodeMatrix, b: &CudaDecodeMatrix) -> CudaDecodeMatrix {
+    pub fn matmul(&self, a: &CudaDecodeMatrix, b: &CudaDecodeMatrix) -> CudaDecodeMatrix {
+        let mut out = self.matrix(a.rows, b.cols);
+        self.matmul_into(a, b, &mut out);
+        out
+    }
+
+    pub fn matmul_bt_into(
+        &self,
+        a: &CudaDecodeMatrix,
+        b: &CudaDecodeMatrix,
+        out: &mut CudaDecodeMatrix,
+    ) {
         let (m, k, n) = (a.rows, a.cols, b.rows);
         assert_eq!(b.cols, k, "decode matmul_bt inner dimensions");
-        let mut out = self
-            .stream
-            .alloc_zeros::<bf16>(m * n)
-            .expect("decode matmul_bt alloc");
+        assert_eq!((out.rows, out.cols), (m, n), "decode matmul_bt output shape");
         let cfg = MatmulConfig {
             transa: true,
             transb: false,
@@ -485,18 +523,19 @@ impl CudaDecodeRuntime {
         };
         unsafe {
             self.blas
-                .matmul(cfg, &b.buf, &a.buf, &mut out, None, None)
+                .matmul(cfg, &b.buf, &a.buf, &mut out.buf, None, None)
                 .expect("decode cuBLASLt matmul_bt");
-        }
-        CudaDecodeMatrix {
-            buf: out,
-            rows: m,
-            cols: n,
         }
     }
 
+    pub fn matmul_bt(&self, a: &CudaDecodeMatrix, b: &CudaDecodeMatrix) -> CudaDecodeMatrix {
+        let mut out = self.matrix(a.rows, b.rows);
+        self.matmul_bt_into(a, b, &mut out);
+        out
+    }
+
     #[allow(clippy::too_many_arguments)]
-    pub fn gqa_decode(
+    pub fn gqa_decode_into(
         &self,
         qkv: &CudaDecodeMatrix,
         kcache: &mut CudaDecodeKvCache,
@@ -506,7 +545,8 @@ impl CudaDecodeRuntime {
         n_heads: usize,
         n_kv_heads: usize,
         theta: f32,
-    ) -> CudaDecodeMatrix {
+        out: &mut CudaDecodeMatrix,
+    ) {
         assert_eq!(qkv.rows, 1, "decode GQA is single-query only");
         assert!(n_heads > 0 && n_kv_heads > 0 && n_heads.is_multiple_of(n_kv_heads));
         assert!(d_model.is_multiple_of(n_heads));
@@ -517,11 +557,8 @@ impl CudaDecodeRuntime {
         assert_eq!(vcache.cols, kv_dim, "decode V-cache width");
         assert_eq!(kcache.capacity, vcache.capacity, "decode KV capacity mismatch");
         assert!(pos < kcache.capacity, "decode position exceeds KV capacity");
+        assert_eq!((out.rows, out.cols), (1, d_model), "decode GQA output shape");
 
-        let mut out = self
-            .stream
-            .alloc_zeros::<bf16>(d_model)
-            .expect("decode GQA output alloc");
         let capacity = kcache.capacity;
         let (pos_a, cap_a, d_a, kv_a, nh_a, nkv_a, theta_a) = (
             pos,
@@ -534,7 +571,7 @@ impl CudaDecodeRuntime {
         );
         let scale_a = 1.0f32 / (dh as f32).sqrt();
         let mut builder = self.stream.launch_builder(&self.kernels.gqa);
-        builder.arg(&mut out);
+        builder.arg(&mut out.buf);
         builder.arg(&qkv.buf);
         builder.arg(&mut kcache.buf);
         builder.arg(&mut vcache.buf);
@@ -556,11 +593,25 @@ impl CudaDecodeRuntime {
             shared_mem_bytes: (shared_floats * std::mem::size_of::<f32>()) as u32,
         };
         unsafe { builder.launch(cfg).expect("decode fused GQA launch") };
-        CudaDecodeMatrix {
-            buf: out,
-            rows: 1,
-            cols: d_model,
-        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn gqa_decode(
+        &self,
+        qkv: &CudaDecodeMatrix,
+        kcache: &mut CudaDecodeKvCache,
+        vcache: &mut CudaDecodeKvCache,
+        pos: usize,
+        d_model: usize,
+        n_heads: usize,
+        n_kv_heads: usize,
+        theta: f32,
+    ) -> CudaDecodeMatrix {
+        let mut out = self.matrix(1, d_model);
+        self.gqa_decode_into(
+            qkv, kcache, vcache, pos, d_model, n_heads, n_kv_heads, theta, &mut out,
+        );
+        out
     }
 }
 
