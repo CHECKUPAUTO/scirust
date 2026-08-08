@@ -1,4 +1,6 @@
-//! Phase 28 diagnostic: isolate first-token parity before and inside device feedback.
+//! Phase 28 diagnostic: isolate one device-feedback burst in a fresh WGPU process.
+
+use std::env;
 
 use scirust_core::nn::sampling::SamplingConfig;
 use scirust_core::nn::transformer::mini_llm::{CharTokenizer, MiniLLM, MiniLLMConfig};
@@ -15,9 +17,19 @@ const N_HEADS: usize = 4;
 const N_LAYERS: usize = 2;
 const D_FF: usize = 128;
 const SEED: u64 = 0x28_00_00_01;
-const BURST_LIMITS: [usize; 5] = [8, 2, 1, 2, 8];
+const DEFAULT_LIMIT: usize = 1;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let limit = env::var("SCIRUST_RESIDENT_PROBE_LIMIT")
+        .ok()
+        .map(|raw| raw.parse::<usize>())
+        .transpose()?
+        .unwrap_or(DEFAULT_LIMIT);
+    if limit == 0 || limit > MAX_SEQ_LEN - PROMPT_TOKENS
+    {
+        return Err("SCIRUST_RESIDENT_PROBE_LIMIT is outside the probe capacity".into());
+    }
+
     let tokenizer = synthetic_tokenizer(VOCAB_SIZE)?;
     let config = MiniLLMConfig {
         vocab_size: VOCAB_SIZE,
@@ -37,7 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut cpu = MiniLLM::new(config.clone(), tokenizer.clone());
     let host_gpu = MiniLLM::new(config.clone(), tokenizer.clone());
     let feedback_gpu = MiniLLM::new(config.clone(), tokenizer.clone());
-    let expected = cpu.generate_ids_cached_sampled(&prompt, 1, &sampling, SEED);
+    let expected = cpu.generate_ids_cached_sampled(&prompt, limit, &sampling, SEED);
     let expected_first = *expected
         .get(prompt.len())
         .ok_or("CPU oracle did not generate a first token")?;
@@ -66,9 +78,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         host_resident.ingest_at(token, position)?;
     }
     let host_first = host_resident.sample_next()?;
+    if host_first != expected_first
+    {
+        return Err(format!(
+            "host-stepped first-token mismatch: cpu={expected_first}, wgpu={host_first}"
+        )
+        .into());
+    }
     println!(
-        "phase28_first_token_probe,mode=host-stepped,top_k=0,cpu_first={expected_first},wgpu_first={host_first},match={},sampling_draws={}",
-        u8::from(host_first == expected_first),
+        "phase28_burst_probe,mode=host-stepped,limit={limit},top_k=0,cpu_first={expected_first},wgpu_first={host_first},match=1,sampling_draws={}",
         host_resident.telemetry().sampling_draws,
     );
 
@@ -80,26 +98,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         sampling,
         SEED,
     )?;
-    for (call, &limit) in BURST_LIMITS.iter().enumerate()
+    let ids = feedback_resident.generate_ids_resident(&prompt, limit)?;
+    let first = ids
+        .get(prompt.len())
+        .map_or_else(|| "end".to_owned(), usize::to_string);
+    let telemetry = feedback_resident.telemetry();
+    let exact = ids == expected;
+    println!(
+        "phase28_burst_probe,mode=device-feedback,limit={limit},top_k=0,cpu_first={expected_first},wgpu_first={first},match={},expected_len={},actual_len={},sampling_draws={},readback_bytes={},expected_fingerprint={:016x},actual_fingerprint={:016x}",
+        u8::from(exact),
+        expected.len(),
+        ids.len(),
+        telemetry.sampling_draws,
+        telemetry.last_burst_readback_bytes,
+        fingerprint(&expected),
+        fingerprint(&ids),
+    );
+    if !exact
     {
-        let mut oracle = MiniLLM::new(config.clone(), tokenizer.clone());
-        let expected = oracle.generate_ids_cached_sampled(&prompt, limit, &sampling, SEED);
-        let ids = feedback_resident.generate_ids_resident(&prompt, limit)?;
-        let first = ids
-            .get(prompt.len())
-            .map_or_else(|| "end".to_owned(), usize::to_string);
-        let telemetry = feedback_resident.telemetry();
-        println!(
-            "phase28_first_token_probe,mode=device-feedback,call={},limit={limit},top_k=0,cpu_first={expected_first},wgpu_first={first},match={},expected_len={},actual_len={},sampling_draws={},readback_bytes={},expected_fingerprint={:016x},actual_fingerprint={:016x}",
-            call + 1,
-            u8::from(ids == expected),
+        return Err(format!(
+            "device-feedback burst mismatch at limit={limit}: expected_len={}, actual_len={}, expected_fingerprint={:016x}, actual_fingerprint={:016x}",
             expected.len(),
             ids.len(),
-            telemetry.sampling_draws,
-            telemetry.last_burst_readback_bytes,
             fingerprint(&expected),
             fingerprint(&ids),
-        );
+        )
+        .into());
     }
 
     Ok(())
