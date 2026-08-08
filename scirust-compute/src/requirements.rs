@@ -22,8 +22,12 @@ pub enum VectorRequirement {
     #[default]
     Any,
     Scalar,
-    Vectorized { min_bits: Option<u32> },
-    FixedWidth { min_bits: Option<u32> },
+    Vectorized {
+        min_bits: Option<u32>,
+    },
+    FixedWidth {
+        min_bits: Option<u32>,
+    },
     Scalable,
 }
 
@@ -286,11 +290,7 @@ fn match_value_set<T, U, N>(
     }
 }
 
-fn match_vector(
-    requirement: VectorRequirement,
-    isa: &IsaCapabilities,
-    state: &mut MatchState,
-) {
+fn match_vector(requirement: VectorRequirement, isa: &IsaCapabilities, state: &mut MatchState) {
     if requirement == VectorRequirement::Any
     {
         return;
@@ -324,12 +324,13 @@ fn match_vector(
         return;
     }
 
-    let min_bits = match requirement
-    {
-        VectorRequirement::Vectorized { min_bits }
-        | VectorRequirement::FixedWidth { min_bits } => min_bits,
-        _ => None,
-    };
+    let min_bits =
+        match requirement
+        {
+            VectorRequirement::Vectorized { min_bits }
+            | VectorRequirement::FixedWidth { min_bits } => min_bits,
+            _ => None,
+        };
 
     if let Some(min_bits) = min_bits
     {
@@ -540,12 +541,16 @@ mod tests {
         };
         let report = match_requirements(&requirements, &hardware());
         assert_eq!(report.disposition, MatchDisposition::Incompatible);
-        assert!(report
-            .issues
-            .contains(&RequirementIssue::StorageDTypeUnsupported(DType::F64)));
-        assert!(report
-            .issues
-            .contains(&RequirementIssue::IsaUnsupported(IsaFeature::Avx512F)));
+        assert!(
+            report
+                .issues
+                .contains(&RequirementIssue::StorageDTypeUnsupported(DType::F64))
+        );
+        assert!(
+            report
+                .issues
+                .contains(&RequirementIssue::IsaUnsupported(IsaFeature::Avx512F))
+        );
         assert!(report
             .issues
             .contains(&RequirementIssue::MemorySpaceUnsupported(
