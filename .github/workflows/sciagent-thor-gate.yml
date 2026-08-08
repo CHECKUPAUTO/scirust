@@ -72,6 +72,13 @@ jobs:
           exec 9>"$SCIRUST_THOR_GPU_LOCK"
           flock -x 9
           rustup run nightly-2026-07-02 cargo test -p scirust-sciagent --features cuda --test cuda_required -- --nocapture
+      - name: Validate CUDA hardware profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          exec 9>"$SCIRUST_THOR_GPU_LOCK"
+          flock -x 9
+          rustup run nightly-2026-07-02 cargo test -p scirust-gpu --features cuda --test cuda_hardware_capabilities -- --nocapture
       - name: SCIAGENT CUDA parity
         shell: bash
         run: |
