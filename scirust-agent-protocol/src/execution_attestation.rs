@@ -219,10 +219,7 @@ pub enum ExecutionAttestationError {
     DigestMismatch,
 }
 
-fn validate_semantic_id(
-    field: &'static str,
-    value: &str,
-) -> Result<(), ExecutionAttestationError> {
+fn validate_semantic_id(field: &'static str, value: &str) -> Result<(), ExecutionAttestationError> {
     let valid = !value.is_empty()
         && value.len() <= MAX_SEMANTIC_TEXT_BYTES
         && value.bytes().all(|byte| {
