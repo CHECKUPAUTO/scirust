@@ -1,8 +1,4 @@
 //! I250 CUDA decode parity gates.
-//!
-//! The latency-oriented decoder is intentionally separate from Route B.  These
-//! tests keep the historical cached decoder as the oracle and require greedy token
-//! streams to remain identical before the fast path can be promoted.
 #![cfg(feature = "cuda")]
 
 use scirust_sciagent::config::SciAgentConfig;
@@ -38,18 +34,14 @@ fn greedy() -> SamplingParams {
 }
 
 #[test]
-fn fused_cuda_decode_matches_b49_cached_greedy() {
+fn fused_cuda_decode_and_device_feedback_match_b49_greedy() {
     let config = tiny_tied();
     let model = SciAgentModel::new(&config);
-    let Some(oracle) = CudaModel::from_model(&model)
-    else
-    {
+    let Some(oracle) = CudaModel::from_model(&model) else {
         eprintln!("cuda: no device, skipping I250 decode parity");
         return;
     };
-    let Some(fast) = CudaDecodeModel::from_model(&model)
-    else
-    {
+    let Some(fast) = CudaDecodeModel::from_model(&model) else {
         eprintln!("cuda: fast decode runtime unavailable, skipping I250 decode parity");
         return;
     };
@@ -59,36 +51,44 @@ fn fused_cuda_decode_matches_b49_cached_greedy() {
         (vec![3u32, 5, 7, 11], 6usize, 0x1250u64),
         (vec![1u32], 8usize, 0x2250u64),
         (vec![9u32, 2, 17, 4, 6, 8], 5usize, 0x3250u64),
-    ]
-    {
+    ] {
         let expected = oracle.generate_cached(&prompt, max_new, &params, seed);
-        let got = fast.generate(&prompt, max_new, &params, seed);
+        let host = fast.generate(&prompt, max_new, &params, seed);
+        let device = fast.generate_greedy_device_feedback(&prompt, max_new);
+        assert_eq!(host, expected, "host-sampler I250 diverged for {prompt:?}");
         assert_eq!(
-            got, expected,
-            "fused CUDA decode diverged from B49 cached oracle for prompt {prompt:?}"
+            device, expected,
+            "device-feedback I250 diverged for {prompt:?}"
         );
     }
 }
 
 #[test]
-fn fused_cuda_decode_preserves_empty_prompt_semantics() {
+fn device_feedback_preserves_empty_prompt_semantics() {
     let config = tiny_tied();
     let model = SciAgentModel::new(&config);
-    let Some(oracle) = CudaModel::from_model(&model)
-    else
-    {
+    let Some(oracle) = CudaModel::from_model(&model) else {
         eprintln!("cuda: no device, skipping I250 empty-prompt parity");
         return;
     };
-    let Some(fast) = CudaDecodeModel::from_model(&model)
-    else
-    {
+    let Some(fast) = CudaDecodeModel::from_model(&model) else {
         eprintln!("cuda: fast decode runtime unavailable, skipping I250 empty-prompt parity");
         return;
     };
     let params = greedy();
-    assert_eq!(
-        fast.generate(&[], 4, &params, 0x4250),
-        oracle.generate_cached(&[], 4, &params, 0x4250)
-    );
+    let expected = oracle.generate_cached(&[], 4, &params, 0x4250);
+    assert_eq!(fast.generate(&[], 4, &params, 0x4250), expected);
+    assert_eq!(fast.generate_greedy_device_feedback(&[], 4), expected);
+}
+
+#[test]
+fn device_feedback_zero_generation_matches_prompt_normalization() {
+    let config = tiny_tied();
+    let model = SciAgentModel::new(&config);
+    let Some(fast) = CudaDecodeModel::from_model(&model) else {
+        eprintln!("cuda: fast decode runtime unavailable, skipping zero-generation gate");
+        return;
+    };
+    assert_eq!(fast.generate_greedy_device_feedback(&[3, 4], 0), vec![3, 4]);
+    assert_eq!(fast.generate_greedy_device_feedback(&[], 0), vec![0]);
 }

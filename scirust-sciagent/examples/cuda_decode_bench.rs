@@ -1,14 +1,9 @@
 //! I250 batch-one CUDA decode benchmark.
 //!
-//! This intentionally excludes the training sweep from `cuda_production_bench` so a
-//! future Thor validation window can measure inference alone. The benchmark keeps
-//! B49's cached decoder as the token-parity oracle and reports the fused path against
-//! the user-facing 250 tok/s target.
-//!
-//! A weight-stream roofline is emitted only when `SCIAGENT_DECODE_MEMORY_GBPS` is
-//! explicitly supplied. Hardware bandwidth must carry an external/runtime provenance;
-//! this benchmark never hard-codes a device capability and never treats an absent
-//! measurement as a known fact.
+//! The primary metric is now greedy device-feedback generation: argmax, token
+//! feedback and generated-token accumulation stay on CUDA and the host performs one
+//! compact `u32[max_new]` readback after the burst. The historical I250 host-sampler
+//! path and B49 cached path are measured as diagnostics/oracles.
 
 use std::time::Instant;
 
@@ -61,16 +56,19 @@ fn synthetic_tokens(len: usize, vocab: usize) -> Vec<u32> {
 fn print_roofline(params: usize, memory_gbps: f64, target_tps: f64, stretch_tps: f64) {
     let weight_bytes = params as f64 * BF16_BYTES_PER_PARAMETER;
     let bytes_per_gb = 1_000_000_000.0;
-    let bf16_roof_tps = memory_gbps * bytes_per_gb / weight_bytes;
+    let roof_tps = memory_gbps * bytes_per_gb / weight_bytes;
     let target_gbps = target_tps * weight_bytes / bytes_per_gb;
     let stretch_gbps = stretch_tps * weight_bytes / bytes_per_gb;
-
     println!(
-        "SCIAGENT_I250_ROOFLINE provenance=explicit_env params={params} precision=bf16 weight_bytes={:.0} memory_gbps={memory_gbps:.3} bf16_weight_stream_roof_tok_s={bf16_roof_tps:.3} target_tok_s={target_tps:.3} target_min_weight_gbps={target_gbps:.3} target_bandwidth_fraction={:.4} stretch_tok_s={stretch_tps:.3} stretch_min_weight_gbps={stretch_gbps:.3} stretch_bandwidth_fraction={:.4}",
+        "SCIAGENT_I250_ROOFLINE provenance=explicit_env params={params} precision=bf16 weight_bytes={:.0} memory_gbps={memory_gbps:.3} bf16_weight_stream_roof_tok_s={roof_tps:.3} target_tok_s={target_tps:.3} target_min_weight_gbps={target_gbps:.3} target_bandwidth_fraction={:.4} stretch_tok_s={stretch_tps:.3} stretch_min_weight_gbps={stretch_gbps:.3} stretch_bandwidth_fraction={:.4}",
         weight_bytes,
         target_gbps / memory_gbps,
         stretch_gbps / memory_gbps,
     );
+}
+
+fn throughput(new_tokens: usize, seconds: f64) -> f64 {
+    new_tokens as f64 / seconds.max(1e-9)
 }
 
 fn main() {
@@ -81,43 +79,33 @@ fn main() {
     let stretch_tps = env_f64("SCIAGENT_DECODE_STRETCH_TPS", 750.0);
     let memory_gbps = env_optional_f64("SCIAGENT_DECODE_MEMORY_GBPS");
     let require_target = env_bool("SCIAGENT_DECODE_REQUIRE_TARGET");
-    assert!(
-        prompt_len + max_new <= config.max_seq_len,
-        "benchmark request exceeds max_seq_len"
-    );
+    assert!(prompt_len + max_new <= config.max_seq_len);
 
-    if let Some(memory_gbps) = memory_gbps
-    {
+    if let Some(memory_gbps) = memory_gbps {
         print_roofline(
             config.total_parameters(),
             memory_gbps,
             target_tps,
             stretch_tps,
         );
-    }
-    else
-    {
+    } else {
         println!(
             "SCIAGENT_I250_ROOFLINE provenance=unknown status=omitted hint=SCIAGENT_DECODE_MEMORY_GBPS"
         );
     }
 
     let model = SciAgentModel::new(&config);
-    let Some(oracle) = CudaModel::from_model(&model)
-    else
-    {
+    let Some(oracle) = CudaModel::from_model(&model) else {
         eprintln!("no CUDA Route-B runtime available");
         std::process::exit(2);
     };
-    let Some(fast) = CudaDecodeModel::from_model(&model)
-    else
-    {
+    let Some(fast) = CudaDecodeModel::from_model(&model) else {
         eprintln!("no fused CUDA decode runtime available");
         std::process::exit(2);
     };
 
     let prompt = synthetic_tokens(prompt_len, config.vocab_size);
-    let params = SamplingParams {
+    let greedy = SamplingParams {
         temperature: 0.0,
         top_p: 1.0,
         top_k: 1,
@@ -126,63 +114,77 @@ fn main() {
     };
     let seed = 0x4932_3530_5448_4F52u64;
 
-    // Warm NVRTC/cuBLASLt and both decode implementations outside the measurement.
-    let _ = fast.generate(&prompt, 1, &params, seed);
-    let _ = oracle.generate_cached(&prompt, 1, &params, seed);
+    // Warm NVRTC/cuBLASLt and all measured paths outside the timing windows.
+    let _ = fast.generate_greedy_device_feedback(&prompt, 1);
+    let _ = fast.generate(&prompt, 1, &greedy, seed);
+    let _ = oracle.generate_cached(&prompt, 1, &greedy, seed);
 
-    let started = Instant::now();
-    let fast_tokens = fast.generate(&prompt, max_new, &params, seed);
-    let fast_seconds = started.elapsed().as_secs_f64().max(1e-9);
-    let fast_new = fast_tokens.len().saturating_sub(prompt.len());
-    let fast_tps = fast_new as f64 / fast_seconds;
+    let device_started = Instant::now();
+    let device_tokens = fast.generate_greedy_device_feedback(&prompt, max_new);
+    let device_seconds = device_started.elapsed().as_secs_f64();
+    let device_new = device_tokens.len().saturating_sub(prompt.len());
+    let device_tps = throughput(device_new, device_seconds);
+
+    let host_started = Instant::now();
+    let host_tokens = fast.generate(&prompt, max_new, &greedy, seed);
+    let host_seconds = host_started.elapsed().as_secs_f64();
+    let host_new = host_tokens.len().saturating_sub(prompt.len());
+    let host_tps = throughput(host_new, host_seconds);
 
     let oracle_started = Instant::now();
-    let oracle_tokens = oracle.generate_cached(&prompt, max_new, &params, seed);
-    let oracle_seconds = oracle_started.elapsed().as_secs_f64().max(1e-9);
+    let oracle_tokens = oracle.generate_cached(&prompt, max_new, &greedy, seed);
+    let oracle_seconds = oracle_started.elapsed().as_secs_f64();
     let oracle_new = oracle_tokens.len().saturating_sub(prompt.len());
-    let oracle_tps = oracle_new as f64 / oracle_seconds;
+    let oracle_tps = throughput(oracle_new, oracle_seconds);
 
-    let parity = fast_tokens == oracle_tokens;
-    let speedup = if oracle_tps > 0.0
-    {
-        fast_tps / oracle_tps
-    }
-    else
-    {
+    let device_parity = device_tokens == oracle_tokens;
+    let host_parity = host_tokens == oracle_tokens;
+    let speedup = if oracle_tps > 0.0 {
+        device_tps / oracle_tps
+    } else {
         f64::NAN
     };
-    let target_met = fast_tps >= target_tps;
-    let stretch_met = fast_tps >= stretch_tps;
+    let feedback_gain = if host_tps > 0.0 {
+        device_tps / host_tps
+    } else {
+        f64::NAN
+    };
+    let target_met = device_tps >= target_tps;
+    let stretch_met = device_tps >= stretch_tps;
 
     println!(
-        "SCIAGENT_I250_DECODE params={} prompt={} requested_new={} fast_new={} fast_seconds={:.6} fast_tok_s={:.3} b49_new={} b49_seconds={:.6} b49_tok_s={:.3} speedup={:.3} target_tok_s={:.3} target_met={} stretch_tok_s={:.3} stretch_met={} parity={}",
+        "SCIAGENT_I250_DECODE params={} prompt={} requested_new={} fast_mode=device_feedback_greedy fast_new={} fast_seconds={:.6} fast_tok_s={:.3} host_sampler_new={} host_sampler_seconds={:.6} host_sampler_tok_s={:.3} feedback_gain={:.3} b49_new={} b49_seconds={:.6} b49_tok_s={:.3} speedup={:.3} generated_h2d_bytes_per_token=0 generated_d2h_bytes_per_token=0 final_readback_bytes={} target_tok_s={:.3} target_met={} stretch_tok_s={:.3} stretch_met={} parity={} host_parity={}",
         config.total_parameters(),
         prompt_len,
         max_new,
-        fast_new,
-        fast_seconds,
-        fast_tps,
+        device_new,
+        device_seconds,
+        device_tps,
+        host_new,
+        host_seconds,
+        host_tps,
+        feedback_gain,
         oracle_new,
         oracle_seconds,
         oracle_tps,
         speedup,
+        max_new * core::mem::size_of::<u32>(),
         target_tps,
         target_met,
         stretch_tps,
         stretch_met,
-        parity
+        device_parity,
+        host_parity,
     );
 
-    if !parity
-    {
-        eprintln!("ERROR: fused CUDA decode diverged from the B49 cached oracle");
+    if !device_parity || !host_parity {
+        eprintln!("ERROR: I250 CUDA decode diverged from the B49 cached oracle");
         std::process::exit(3);
     }
-    if require_target && !target_met
-    {
+    if require_target && !target_met {
         eprintln!(
-            "ERROR: fused CUDA decode {:.3} tok/s is below required {:.3} tok/s",
-            fast_tps, target_tps
+            "ERROR: device-feedback CUDA decode {:.3} tok/s is below required {:.3} tok/s",
+            device_tps, target_tps
         );
         std::process::exit(4);
     }

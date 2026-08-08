@@ -1,15 +1,8 @@
 //! Batch-one CUDA decode runtime for latency-sensitive autoregressive inference.
 //!
-//! This module is deliberately isolated from [`crate::CudaChain`], which remains the
-//! Route-B training/parity implementation. The decode runtime is allowed to fuse
-//! operations aggressively without changing the kernels used by an active training
-//! run. Its main primitive combines head-local RoPE, fixed-capacity KV-cache writes,
-//! single-query GQA score/softmax/context, and head assembly in one CUDA launch.
-//!
-//! Latency-sensitive callers should allocate matrices once with [`CudaDecodeRuntime::matrix`]
-//! and use the `*_into` methods. Convenience allocating wrappers remain available for
-//! tests and small callers, but the SCIAGENT production path performs no device
-//! allocation inside a token step.
+//! This path is isolated from [`crate::CudaChain`] so inference experiments cannot
+//! perturb Route-B training semantics. It owns fixed-capacity KV storage, fused
+//! single-query GQA, fused QKV/gate-up consumers, and a greedy device-feedback path.
 
 use std::sync::Arc;
 
@@ -48,6 +41,18 @@ extern "C" __global__ void decode_embed_token_kernel(
     }
 }
 
+extern "C" __global__ void decode_embed_feedback_kernel(
+    unsigned short* out, const unsigned short* table,
+    const unsigned int* token, const size_t vocab, const size_t d)
+{
+    const size_t c = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (c < d) {
+        const size_t raw = (size_t)token[0];
+        const size_t row = raw < vocab ? raw : vocab - 1;
+        out[c] = table[row * d + c];
+    }
+}
+
 extern "C" __global__ void decode_rmsnorm_kernel(
     unsigned short* out, const unsigned short* x, const unsigned short* w,
     const size_t cols, const float eps)
@@ -70,8 +75,6 @@ extern "C" __global__ void decode_rmsnorm_kernel(
         out[c] = f2b(b2f(x[c]) * inv * b2f(w[c]));
 }
 
-// Input is [gate | up], each d_ff wide. Keeping the two projections adjacent lets
-// one GEMM replace the historical gate+up pair before this elementwise fusion.
 extern "C" __global__ void decode_swiglu_split_kernel(
     unsigned short* out, const unsigned short* gate_up, const size_t d_ff)
 {
@@ -84,13 +87,64 @@ extern "C" __global__ void decode_swiglu_split_kernel(
     }
 }
 
-// One block owns one query head. The launch fuses the entire incremental GQA
-// attention path:
-//   raw Q/K/V row -> head-local RoPE -> fixed KV append -> scores -> scale ->
-//   softmax -> deterministic left-to-right context -> assembled d_model row.
-// Historical K/V are already bf16 in the fixed caches. The current K/V are read
-// directly from qkv so no inter-block synchronization is required after the one
-// designated writer per KV head stores them for the *next* token.
+// Greedy tie rule matches sample_row: lower token index wins an equal logit.
+extern "C" __global__ void decode_argmax_feedback_kernel(
+    const unsigned short* logits,
+    const size_t vocab,
+    unsigned int* current_token,
+    unsigned int* generated,
+    const size_t generated_index)
+{
+    __shared__ float best_values[256];
+    __shared__ unsigned int best_indices[256];
+    const unsigned int tid = threadIdx.x;
+    if (vocab == 0) return;
+
+    // CPU greedy initializes from row[0]. If it is NaN every `v > best` is false.
+    if (isnan(b2f(logits[0]))) {
+        if (tid == 0) {
+            current_token[0] = 0u;
+            generated[generated_index] = 0u;
+        }
+        return;
+    }
+
+    float local_value = -3.402823466e+38F;
+    unsigned int local_index = 0xffffffffu;
+    for (size_t i = tid; i < vocab; i += blockDim.x) {
+        const float value = b2f(logits[i]);
+        if (isnan(value)) continue;
+        const unsigned int index = (unsigned int)i;
+        if (value > local_value || (value == local_value && index < local_index)) {
+            local_value = value;
+            local_index = index;
+        }
+    }
+    best_values[tid] = local_value;
+    best_indices[tid] = local_index;
+    __syncthreads();
+
+    for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1) {
+        if (tid < stride) {
+            const float rhs_value = best_values[tid + stride];
+            const unsigned int rhs_index = best_indices[tid + stride];
+            const float lhs_value = best_values[tid];
+            const unsigned int lhs_index = best_indices[tid];
+            if (rhs_value > lhs_value ||
+                (rhs_value == lhs_value && rhs_index < lhs_index)) {
+                best_values[tid] = rhs_value;
+                best_indices[tid] = rhs_index;
+            }
+        }
+        __syncthreads();
+    }
+
+    if (tid == 0) {
+        current_token[0] = best_indices[0];
+        generated[generated_index] = best_indices[0];
+    }
+}
+
 extern "C" __global__ void decode_gqa_kernel(
     unsigned short* out,
     const unsigned short* qkv,
@@ -115,12 +169,11 @@ extern "C" __global__ void decode_gqa_kernel(
     const size_t seq = pos + 1;
 
     extern __shared__ unsigned char smem_raw[];
-    float* scores = (float*)smem_raw; // seq floats
-    float* qrot = scores + seq;       // dh floats
-    float* kcur = qrot + dh;          // dh floats
-    float* red = kcur + dh;           // 256 floats
+    float* scores = (float*)smem_raw;
+    float* qrot = scores + seq;
+    float* kcur = qrot + dh;
+    float* red = kcur + dh;
 
-    // RoPE frequency restarts in every logical head, matching semantics-v2.
     const size_t pairs = dh / 2;
     for (size_t p = tid; p < pairs; p += blockDim.x) {
         const float freq = powf(theta, -2.0f * (float)p / (float)dh);
@@ -142,9 +195,6 @@ extern "C" __global__ void decode_gqa_kernel(
     }
     __syncthreads();
 
-    // Exactly one query-head block writes each KV-head slice. Other query heads in
-    // the GQA group use kcur/raw-V for the current position and only need the cache
-    // from the next launch onward.
     if ((head % repeat) == 0) {
         for (size_t c = tid; c < dh; c += blockDim.x) {
             const size_t dst = pos * kv_dim + kv * dh + c;
@@ -153,8 +203,6 @@ extern "C" __global__ void decode_gqa_kernel(
         }
     }
 
-    // QK^T for one query. Preserve the two bf16 round boundaries used by the
-    // legacy path: GEMM output first, then scaled-score output before softmax.
     for (size_t j = tid; j < seq; j += blockDim.x) {
         float acc = 0.0f;
         for (size_t c = 0; c < dh; ++c) {
@@ -168,7 +216,6 @@ extern "C" __global__ void decode_gqa_kernel(
     }
     __syncthreads();
 
-    // Same 256-way max/sum reduction shape as the Route-B fast softmax kernel.
     float mx = -3.0e38f;
     for (size_t j = tid; j < seq; j += blockDim.x)
         mx = fmaxf(mx, scores[j]);
@@ -191,15 +238,10 @@ extern "C" __global__ void decode_gqa_kernel(
     }
     sum = red[0];
 
-    // Every probability is rounded through bf16, but remains stored as a float in
-    // its original score slot. That preserves the legacy softmax boundary without
-    // aliasing the 4-byte score array through a 2-byte pointer.
     for (size_t j = tid; j < seq; j += blockDim.x)
         scores[j] = b2f(f2b(__expf(scores[j] - mx) / sum));
     __syncthreads();
 
-    // B49 parity rule: every output channel owns a strict left-to-right fp32
-    // accumulation over sequence positions, followed by one bf16 rounding.
     for (size_t c = tid; c < dh; c += blockDim.x) {
         float acc = 0.0f;
         for (size_t j = 0; j < seq; ++j) {
@@ -213,7 +255,6 @@ extern "C" __global__ void decode_gqa_kernel(
 }
 "#;
 
-/// Device-resident bf16 row-major matrix used only by the decode runtime.
 pub struct CudaDecodeMatrix {
     buf: CudaSlice<bf16>,
     rows: usize,
@@ -221,17 +262,17 @@ pub struct CudaDecodeMatrix {
 }
 
 impl CudaDecodeMatrix {
-    pub fn rows(&self) -> usize {
+    #[must_use]
+    pub const fn rows(&self) -> usize {
         self.rows
     }
 
-    pub fn cols(&self) -> usize {
+    #[must_use]
+    pub const fn cols(&self) -> usize {
         self.cols
     }
 }
 
-/// Fixed-capacity resident KV storage. `pos` is supplied by the caller; no cache
-/// reallocation or historical-row copy occurs during decode.
 pub struct CudaDecodeKvCache {
     buf: CudaSlice<bf16>,
     capacity: usize,
@@ -239,24 +280,40 @@ pub struct CudaDecodeKvCache {
 }
 
 impl CudaDecodeKvCache {
-    pub fn capacity(&self) -> usize {
+    #[must_use]
+    pub const fn capacity(&self) -> usize {
         self.capacity
     }
 
-    pub fn cols(&self) -> usize {
+    #[must_use]
+    pub const fn cols(&self) -> usize {
         self.cols
+    }
+}
+
+pub struct CudaDecodeGreedyFeedback {
+    current_token: CudaSlice<u32>,
+    generated: CudaSlice<u32>,
+    capacity: usize,
+}
+
+impl CudaDecodeGreedyFeedback {
+    #[must_use]
+    pub const fn capacity(&self) -> usize {
+        self.capacity
     }
 }
 
 struct DecodeKernels {
     add: CudaFunction,
     embed_token: CudaFunction,
+    embed_feedback: CudaFunction,
     rmsnorm: CudaFunction,
     swiglu_split: CudaFunction,
+    argmax_feedback: CudaFunction,
     gqa: CudaFunction,
 }
 
-/// Dedicated CUDA runtime for one-token autoregressive decode.
 pub struct CudaDecodeRuntime {
     _ctx: Arc<CudaContext>,
     stream: Arc<CudaStream>,
@@ -265,28 +322,30 @@ pub struct CudaDecodeRuntime {
 }
 
 impl CudaDecodeRuntime {
+    #[must_use]
     pub fn new() -> Option<Self> {
-        if !cuda_libraries_available() || !nvrtc_available()
-        {
+        if !cuda_libraries_available() || !nvrtc_available() {
             return None;
         }
         let ctx = CudaContext::new(0).ok()?;
         let stream = ctx.default_stream();
         let blas = CudaBlasLT::new(stream.clone()).ok()?;
         let ptx = compile_ptx(DECODE_KERNELS_SRC)
-            .map_err(|e| eprintln!("scirust-cuda decode: NVRTC compile failed: {e}"))
+            .map_err(|error| eprintln!("scirust-cuda decode: NVRTC compile failed: {error}"))
             .ok()?;
         let module = ctx
             .load_module(ptx)
-            .map_err(|e| eprintln!("scirust-cuda decode: module load failed: {e}"))
+            .map_err(|error| eprintln!("scirust-cuda decode: module load failed: {error}"))
             .ok()?;
-        let f = |name: &str| module.load_function(name).expect("load decode kernel");
+        let function = |name: &str| module.load_function(name).expect("load decode kernel");
         let kernels = DecodeKernels {
-            add: f("decode_add_kernel"),
-            embed_token: f("decode_embed_token_kernel"),
-            rmsnorm: f("decode_rmsnorm_kernel"),
-            swiglu_split: f("decode_swiglu_split_kernel"),
-            gqa: f("decode_gqa_kernel"),
+            add: function("decode_add_kernel"),
+            embed_token: function("decode_embed_token_kernel"),
+            embed_feedback: function("decode_embed_feedback_kernel"),
+            rmsnorm: function("decode_rmsnorm_kernel"),
+            swiglu_split: function("decode_swiglu_split_kernel"),
+            argmax_feedback: function("decode_argmax_feedback_kernel"),
+            gqa: function("decode_gqa_kernel"),
         };
         Some(Self {
             _ctx: ctx,
@@ -296,7 +355,7 @@ impl CudaDecodeRuntime {
         })
     }
 
-    /// Allocate one persistent bf16 matrix for workspace reuse.
+    #[must_use]
     pub fn matrix(&self, rows: usize, cols: usize) -> CudaDecodeMatrix {
         assert!(rows > 0 && cols > 0, "decode matrix must be non-empty");
         let buf = self
@@ -306,18 +365,17 @@ impl CudaDecodeRuntime {
         CudaDecodeMatrix { buf, rows, cols }
     }
 
+    #[must_use]
     pub fn upload(&self, data: &[f32], rows: usize, cols: usize) -> CudaDecodeMatrix {
         assert_eq!(data.len(), rows * cols, "decode upload shape mismatch");
-        let bf: Vec<bf16> = data.iter().map(|&x| bf16::from_f32(x)).collect();
+        let bf: Vec<bf16> = data.iter().map(|&value| bf16::from_f32(value)).collect();
         let buf = self.stream.clone_htod(&bf).expect("decode CUDA upload");
         CudaDecodeMatrix { buf, rows, cols }
     }
 
+    #[must_use]
     pub fn kv_cache(&self, capacity: usize, cols: usize) -> CudaDecodeKvCache {
-        assert!(
-            capacity > 0 && cols > 0,
-            "decode KV cache must be non-empty"
-        );
+        assert!(capacity > 0 && cols > 0, "decode KV cache must be non-empty");
         let buf = self
             .stream
             .alloc_zeros::<bf16>(capacity * cols)
@@ -329,12 +387,38 @@ impl CudaDecodeRuntime {
         }
     }
 
+    #[must_use]
+    pub fn greedy_feedback(&self, capacity: usize) -> CudaDecodeGreedyFeedback {
+        assert!(capacity > 0, "greedy feedback capacity must be non-zero");
+        let current_token = self
+            .stream
+            .alloc_zeros::<u32>(1)
+            .expect("decode greedy token allocation");
+        let generated = self
+            .stream
+            .alloc_zeros::<u32>(capacity)
+            .expect("decode greedy output allocation");
+        CudaDecodeGreedyFeedback {
+            current_token,
+            generated,
+            capacity,
+        }
+    }
+
+    #[must_use]
     pub fn download(&self, matrix: &CudaDecodeMatrix) -> Vec<f32> {
         let host: Vec<bf16> = self
             .stream
             .clone_dtoh(&matrix.buf)
             .expect("decode CUDA download");
-        host.iter().map(|x| x.to_f32()).collect()
+        host.iter().map(|value| value.to_f32()).collect()
+    }
+
+    #[must_use]
+    pub fn download_feedback(&self, feedback: &CudaDecodeGreedyFeedback) -> Vec<u32> {
+        self.stream
+            .clone_dtoh(&feedback.generated)
+            .expect("decode greedy feedback download")
     }
 
     pub fn embed_token_into(
@@ -343,61 +427,86 @@ impl CudaDecodeRuntime {
         table: &CudaDecodeMatrix,
         out: &mut CudaDecodeMatrix,
     ) {
-        assert!(
-            table.rows > 0 && table.cols > 0,
-            "decode embedding table empty"
-        );
-        assert_eq!(
-            (out.rows, out.cols),
-            (1, table.cols),
-            "decode embed output shape"
-        );
-        let d = table.cols;
-        let (token_a, vocab_a, d_a) = (token as usize, table.rows, d);
+        assert!(table.rows > 0 && table.cols > 0, "decode embedding table empty");
+        assert_eq!((out.rows, out.cols), (1, table.cols), "decode embed output shape");
+        let (token_arg, vocab_arg, d_arg) = (token as usize, table.rows, table.cols);
         let mut builder = self.stream.launch_builder(&self.kernels.embed_token);
         builder.arg(&mut out.buf);
         builder.arg(&table.buf);
-        builder.arg(&token_a);
-        builder.arg(&vocab_a);
-        builder.arg(&d_a);
+        builder.arg(&token_arg);
+        builder.arg(&vocab_arg);
+        builder.arg(&d_arg);
         unsafe {
             builder
-                .launch(LaunchConfig::for_num_elems(d as u32))
+                .launch(LaunchConfig::for_num_elems(table.cols as u32))
                 .expect("decode embed launch");
         }
     }
 
-    pub fn embed_token(&self, token: u32, table: &CudaDecodeMatrix) -> CudaDecodeMatrix {
-        let mut out = self.matrix(1, table.cols);
-        self.embed_token_into(token, table, &mut out);
-        out
+    pub fn embed_feedback_into(
+        &self,
+        feedback: &CudaDecodeGreedyFeedback,
+        table: &CudaDecodeMatrix,
+        out: &mut CudaDecodeMatrix,
+    ) {
+        assert_eq!((out.rows, out.cols), (1, table.cols), "decode feedback embed shape");
+        let (vocab_arg, d_arg) = (table.rows, table.cols);
+        let mut builder = self.stream.launch_builder(&self.kernels.embed_feedback);
+        builder.arg(&mut out.buf);
+        builder.arg(&table.buf);
+        builder.arg(&feedback.current_token);
+        builder.arg(&vocab_arg);
+        builder.arg(&d_arg);
+        unsafe {
+            builder
+                .launch(LaunchConfig::for_num_elems(table.cols as u32))
+                .expect("decode feedback embed launch");
+        }
     }
 
-    pub fn add_into(&self, a: &CudaDecodeMatrix, b: &CudaDecodeMatrix, out: &mut CudaDecodeMatrix) {
+    pub fn greedy_argmax_into(
+        &self,
+        logits: &CudaDecodeMatrix,
+        feedback: &mut CudaDecodeGreedyFeedback,
+        generated_index: usize,
+    ) {
+        assert_eq!(logits.rows, 1, "greedy argmax expects one logits row");
+        assert!(generated_index < feedback.capacity, "greedy feedback index overflow");
+        let (vocab_arg, index_arg) = (logits.cols, generated_index);
+        let mut builder = self.stream.launch_builder(&self.kernels.argmax_feedback);
+        builder.arg(&logits.buf);
+        builder.arg(&vocab_arg);
+        builder.arg(&mut feedback.current_token);
+        builder.arg(&mut feedback.generated);
+        builder.arg(&index_arg);
+        let config = LaunchConfig {
+            grid_dim: (1, 1, 1),
+            block_dim: (256, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        unsafe { builder.launch(config).expect("decode greedy argmax launch") };
+    }
+
+    pub fn add_into(
+        &self,
+        a: &CudaDecodeMatrix,
+        b: &CudaDecodeMatrix,
+        out: &mut CudaDecodeMatrix,
+    ) {
         assert_eq!((a.rows, a.cols), (b.rows, b.cols), "decode add input shape");
-        assert_eq!(
-            (out.rows, out.cols),
-            (a.rows, a.cols),
-            "decode add output shape"
-        );
+        assert_eq!((out.rows, out.cols), (a.rows, a.cols), "decode add output shape");
         let n = a.rows * a.cols;
-        let n_a = n;
+        let n_arg = n;
         let mut builder = self.stream.launch_builder(&self.kernels.add);
         builder.arg(&mut out.buf);
         builder.arg(&a.buf);
         builder.arg(&b.buf);
-        builder.arg(&n_a);
+        builder.arg(&n_arg);
         unsafe {
             builder
                 .launch(LaunchConfig::for_num_elems(n as u32))
                 .expect("decode add launch");
         }
-    }
-
-    pub fn add(&self, a: &CudaDecodeMatrix, b: &CudaDecodeMatrix) -> CudaDecodeMatrix {
-        let mut out = self.matrix(a.rows, a.cols);
-        self.add_into(a, b, &mut out);
-        out
     }
 
     pub fn rms_norm_into(
@@ -408,68 +517,38 @@ impl CudaDecodeRuntime {
         out: &mut CudaDecodeMatrix,
     ) {
         assert_eq!(x.rows, 1, "decode RMSNorm is batch-one only");
-        assert_eq!(
-            weight.rows * weight.cols,
-            x.cols,
-            "decode RMSNorm weight shape"
-        );
-        assert_eq!(
-            (out.rows, out.cols),
-            (1, x.cols),
-            "decode RMSNorm output shape"
-        );
-        let cols = x.cols;
-        let (cols_a, eps_a) = (cols, eps);
+        assert_eq!(weight.rows * weight.cols, x.cols, "decode RMSNorm weight shape");
+        assert_eq!((out.rows, out.cols), (1, x.cols), "decode RMSNorm output shape");
+        let (cols_arg, eps_arg) = (x.cols, eps);
         let mut builder = self.stream.launch_builder(&self.kernels.rmsnorm);
         builder.arg(&mut out.buf);
         builder.arg(&x.buf);
         builder.arg(&weight.buf);
-        builder.arg(&cols_a);
-        builder.arg(&eps_a);
-        let cfg = LaunchConfig {
+        builder.arg(&cols_arg);
+        builder.arg(&eps_arg);
+        let config = LaunchConfig {
             grid_dim: (1, 1, 1),
             block_dim: (256, 1, 1),
             shared_mem_bytes: 0,
         };
-        unsafe { builder.launch(cfg).expect("decode RMSNorm launch") };
-    }
-
-    pub fn rms_norm(
-        &self,
-        x: &CudaDecodeMatrix,
-        weight: &CudaDecodeMatrix,
-        eps: f32,
-    ) -> CudaDecodeMatrix {
-        let mut out = self.matrix(1, x.cols);
-        self.rms_norm_into(x, weight, eps, &mut out);
-        out
+        unsafe { builder.launch(config).expect("decode RMSNorm launch") };
     }
 
     pub fn swiglu_split_into(&self, gate_up: &CudaDecodeMatrix, out: &mut CudaDecodeMatrix) {
         assert_eq!(gate_up.rows, 1, "decode SwiGLU is batch-one only");
         assert_eq!(gate_up.cols % 2, 0, "decode gate/up width must be even");
         let d_ff = gate_up.cols / 2;
-        assert_eq!(
-            (out.rows, out.cols),
-            (1, d_ff),
-            "decode SwiGLU output shape"
-        );
-        let d_ff_a = d_ff;
+        assert_eq!((out.rows, out.cols), (1, d_ff), "decode SwiGLU output shape");
+        let d_ff_arg = d_ff;
         let mut builder = self.stream.launch_builder(&self.kernels.swiglu_split);
         builder.arg(&mut out.buf);
         builder.arg(&gate_up.buf);
-        builder.arg(&d_ff_a);
+        builder.arg(&d_ff_arg);
         unsafe {
             builder
                 .launch(LaunchConfig::for_num_elems(d_ff as u32))
                 .expect("decode SwiGLU launch");
         }
-    }
-
-    pub fn swiglu_split(&self, gate_up: &CudaDecodeMatrix) -> CudaDecodeMatrix {
-        let mut out = self.matrix(1, gate_up.cols / 2);
-        self.swiglu_split_into(gate_up, &mut out);
-        out
     }
 
     pub fn matmul_into(
@@ -481,7 +560,7 @@ impl CudaDecodeRuntime {
         let (m, k, n) = (a.rows, a.cols, b.cols);
         assert_eq!(b.rows, k, "decode matmul inner dimensions");
         assert_eq!((out.rows, out.cols), (m, n), "decode matmul output shape");
-        let cfg = MatmulConfig {
+        let config = MatmulConfig {
             transa: false,
             transb: false,
             transc: false,
@@ -501,15 +580,9 @@ impl CudaDecodeRuntime {
         };
         unsafe {
             self.blas
-                .matmul(cfg, &b.buf, &a.buf, &mut out.buf, None, None)
+                .matmul(config, &b.buf, &a.buf, &mut out.buf, None, None)
                 .expect("decode cuBLASLt matmul");
         }
-    }
-
-    pub fn matmul(&self, a: &CudaDecodeMatrix, b: &CudaDecodeMatrix) -> CudaDecodeMatrix {
-        let mut out = self.matrix(a.rows, b.cols);
-        self.matmul_into(a, b, &mut out);
-        out
     }
 
     pub fn matmul_bt_into(
@@ -520,12 +593,8 @@ impl CudaDecodeRuntime {
     ) {
         let (m, k, n) = (a.rows, a.cols, b.rows);
         assert_eq!(b.cols, k, "decode matmul_bt inner dimensions");
-        assert_eq!(
-            (out.rows, out.cols),
-            (m, n),
-            "decode matmul_bt output shape"
-        );
-        let cfg = MatmulConfig {
+        assert_eq!((out.rows, out.cols), (m, n), "decode matmul_bt output shape");
+        let config = MatmulConfig {
             transa: true,
             transb: false,
             transc: false,
@@ -545,15 +614,9 @@ impl CudaDecodeRuntime {
         };
         unsafe {
             self.blas
-                .matmul(cfg, &b.buf, &a.buf, &mut out.buf, None, None)
+                .matmul(config, &b.buf, &a.buf, &mut out.buf, None, None)
                 .expect("decode cuBLASLt matmul_bt");
         }
-    }
-
-    pub fn matmul_bt(&self, a: &CudaDecodeMatrix, b: &CudaDecodeMatrix) -> CudaDecodeMatrix {
-        let mut out = self.matrix(a.rows, b.rows);
-        self.matmul_bt_into(a, b, &mut out);
-        out
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -577,63 +640,43 @@ impl CudaDecodeRuntime {
         assert_eq!(qkv.cols, d_model + 2 * kv_dim, "decode fused QKV width");
         assert_eq!(kcache.cols, kv_dim, "decode K-cache width");
         assert_eq!(vcache.cols, kv_dim, "decode V-cache width");
-        assert_eq!(
-            kcache.capacity, vcache.capacity,
-            "decode KV capacity mismatch"
-        );
+        assert_eq!(kcache.capacity, vcache.capacity, "decode KV capacity mismatch");
         assert!(pos < kcache.capacity, "decode position exceeds KV capacity");
-        assert_eq!(
-            (out.rows, out.cols),
-            (1, d_model),
-            "decode GQA output shape"
-        );
+        assert_eq!((out.rows, out.cols), (1, d_model), "decode GQA output shape");
 
         let capacity = kcache.capacity;
-        let (pos_a, cap_a, d_a, kv_a, nh_a, nkv_a, theta_a) =
-            (pos, capacity, d_model, kv_dim, n_heads, n_kv_heads, theta);
-        let scale_a = 1.0f32 / (dh as f32).sqrt();
+        let (pos_arg, cap_arg, d_arg, kv_arg, heads_arg, kv_heads_arg, theta_arg) = (
+            pos,
+            capacity,
+            d_model,
+            kv_dim,
+            n_heads,
+            n_kv_heads,
+            theta,
+        );
+        let scale_arg = 1.0f32 / (dh as f32).sqrt();
         let mut builder = self.stream.launch_builder(&self.kernels.gqa);
         builder.arg(&mut out.buf);
         builder.arg(&qkv.buf);
         builder.arg(&mut kcache.buf);
         builder.arg(&mut vcache.buf);
-        builder.arg(&pos_a);
-        builder.arg(&cap_a);
-        builder.arg(&d_a);
-        builder.arg(&kv_a);
-        builder.arg(&nh_a);
-        builder.arg(&nkv_a);
-        builder.arg(&theta_a);
-        builder.arg(&scale_a);
+        builder.arg(&pos_arg);
+        builder.arg(&cap_arg);
+        builder.arg(&d_arg);
+        builder.arg(&kv_arg);
+        builder.arg(&heads_arg);
+        builder.arg(&kv_heads_arg);
+        builder.arg(&theta_arg);
+        builder.arg(&scale_arg);
 
-        // scores + rotated Q + current rotated K + 256-float reduction scratch.
         let seq = pos + 1;
         let shared_floats = seq + 2 * dh + 256;
-        let cfg = LaunchConfig {
+        let config = LaunchConfig {
             grid_dim: (n_heads as u32, 1, 1),
             block_dim: (256, 1, 1),
-            shared_mem_bytes: (shared_floats * std::mem::size_of::<f32>()) as u32,
+            shared_mem_bytes: (shared_floats * core::mem::size_of::<f32>()) as u32,
         };
-        unsafe { builder.launch(cfg).expect("decode fused GQA launch") };
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn gqa_decode(
-        &self,
-        qkv: &CudaDecodeMatrix,
-        kcache: &mut CudaDecodeKvCache,
-        vcache: &mut CudaDecodeKvCache,
-        pos: usize,
-        d_model: usize,
-        n_heads: usize,
-        n_kv_heads: usize,
-        theta: f32,
-    ) -> CudaDecodeMatrix {
-        let mut out = self.matrix(1, d_model);
-        self.gqa_decode_into(
-            qkv, kcache, vcache, pos, d_model, n_heads, n_kv_heads, theta, &mut out,
-        );
-        out
+        unsafe { builder.launch(config).expect("decode fused GQA launch") };
     }
 }
 
@@ -651,8 +694,7 @@ mod tests {
 
     #[test]
     fn decode_kernel_source_compiles_when_nvrtc_is_available() {
-        if !nvrtc_available()
-        {
+        if !nvrtc_available() {
             eprintln!("cuda decode: NVRTC unavailable, skipping compile test");
             return;
         }
