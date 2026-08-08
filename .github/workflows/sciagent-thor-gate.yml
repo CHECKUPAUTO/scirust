@@ -30,13 +30,7 @@ jobs:
     if: >
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
-    runs-on:
-      - self-hosted
-      - Linux
-      - ARM64
-      - scirust-arm64
-      - jetson-thor
-      - internal
+    runs-on: [self-hosted, Linux, ARM64, scirust-arm64, jetson-thor, internal]
     timeout-minutes: 90
     env:
       RUST_BACKTRACE: 1
@@ -44,38 +38,33 @@ jobs:
       RUSTFLAGS: "-D warnings"
       SCIRUST_REQUIRE_CUDA: "1"
     steps:
-      - name: Check out tested branch
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
           fetch-depth: 0
-      - name: Install pinned nightly
-        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
-      - name: Apply B48 once and publish code only
-        if: hashFiles('scripts/sciagent_b48_context_shape.py') != ''
+      - name: Apply B49 once and publish code only
+        if: hashFiles('scripts/sciagent_b49_deterministic_context.py') != ''
         run: |
-          python3 scripts/sciagent_b48_context_shape.py
+          python3 scripts/sciagent_b49_deterministic_context.py
           cargo +nightly-2026-07-02 fmt --all
           cargo +nightly-2026-07-02 check -p scirust-cuda --features cuda
           cargo +nightly-2026-07-02 check -p scirust-sciagent --features cuda --example cuda_production_bench
           cargo +nightly-2026-07-02 clippy -p scirust-cuda --features cuda --all-targets -- -D warnings
           cargo +nightly-2026-07-02 clippy -p scirust-sciagent --features cuda --all-targets -- -D warnings
-          rm -f scripts/sciagent_b48_context_shape.py
+          rm -f scripts/sciagent_b49_deterministic_context.py
           git restore -- .github/workflows
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --check
-          git commit -m "fix(sciagent): make cached context GEMM shape-stable"
+          git commit -m "fix(sciagent): use deterministic attention context reduction"
           git push origin HEAD:perf/sciagent-b39-thor-production-bench
       - name: Report Thor CUDA
         run: |
-          uname -a
-          free -h
-          nvidia-smi
           nvidia-smi --query-gpu=name,driver_version,compute_cap,memory.total --format=csv,noheader
       - name: Format
         run: cargo +nightly-2026-07-02 fmt --all -- --check
@@ -83,12 +72,11 @@ jobs:
         run: cargo +nightly-2026-07-02 test -p scirust-sciagent --features cuda --test cuda_parity -- --nocapture
       - name: SCIAGENT CUDA clippy
         run: cargo +nightly-2026-07-02 clippy -p scirust-sciagent --features cuda --all-targets -- -D warnings
-      - name: SCIAGENT B48 production sweep
+      - name: SCIAGENT B49 production sweep
         env:
           SCIAGENT_BENCH_BATCHES: "8"
           SCIAGENT_BENCH_SEQ: "512"
           SCIAGENT_BENCH_STEPS: "1"
           SCIAGENT_BENCH_PROMPT: "128"
           SCIAGENT_BENCH_DECODE_NEW: "8"
-        run: |
-          cargo +nightly-2026-07-02 run -p scirust-sciagent --features cuda --release --example cuda_production_bench
+        run: cargo +nightly-2026-07-02 run -p scirust-sciagent --features cuda --release --example cuda_production_bench
