@@ -17,6 +17,7 @@ mod implementation;
 mod kernel;
 mod launch;
 mod memory;
+mod profile_encoding;
 mod requirements;
 mod shape;
 mod strides;
@@ -49,6 +50,9 @@ pub use implementation::{
 pub use kernel::{KernelFormat, KernelModule};
 pub use launch::LaunchConfig;
 pub use memory::{Layout, MemorySpace};
+pub use profile_encoding::{
+    ProfileEncodingError, canonical_hardware_profile_bytes, canonical_topology_profile_bytes,
+};
 pub use requirements::{
     CandidateSelection, ExecutionCandidate, KernelRequirements, MatchDisposition, MatchReport,
     PlannerPolicy, RequirementIssue, SupportRequirement, VectorRequirement, match_requirements,

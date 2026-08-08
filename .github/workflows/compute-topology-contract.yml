@@ -4,6 +4,7 @@ on:
   pull_request:
     branches: [master, main, develop]
     paths:
+      - "scirust-compute/src/profile_encoding.rs"
       - "scirust-compute/src/topology.rs"
       - "scirust-compute/src/topology_augmentation.rs"
       - "scirust-compute/src/topology_probe.rs"
@@ -35,5 +36,5 @@ jobs:
         run: cargo +1.89.0 check -p scirust-compute --no-default-features --locked
       - name: Check all targets at MSRV
         run: cargo +1.89.0 check -p scirust-compute --all-targets --all-features --locked
-      - name: Test topology contract
+      - name: Test topology and canonical-profile contracts
         run: cargo +1.89.0 test -p scirust-compute --all-features --locked
