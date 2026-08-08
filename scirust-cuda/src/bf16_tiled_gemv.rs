@@ -11,6 +11,12 @@
 //! atomics are used. The result is deterministic for a fixed tile size and launch
 //! geometry, though its FP32 association intentionally differs from both cuBLASLt and
 //! the one-thread full-K GEMV and therefore requires a token-parity promotion gate.
+//!
+//! A second stage-2 kernel can fuse the residual add. It first rounds the reduced
+//! projection to BF16, then adds the resident BF16 residual in FP32, then rounds the
+//! final sum to BF16. Those are exactly the two visible boundaries of the existing
+//! `matmul -> BF16 temporary -> add -> BF16 output` path, without materializing the
+//! projection temporary or launching a separate add kernel.
 
 use std::sync::Arc;
 
@@ -67,6 +73,25 @@ extern "C" __global__ void scirust_bf16_tiled_gemv_reduce_kernel(
         acc += partials[tile * n + col];
     out[col] = f2b(acc);
 }
+
+extern "C" __global__ void scirust_bf16_tiled_gemv_reduce_add_kernel(
+    unsigned short* out,
+    const float* partials,
+    const unsigned short* residual,
+    const size_t tiles,
+    const size_t n)
+{
+    const size_t col = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (col >= n) return;
+
+    float acc = 0.0f;
+    for (size_t tile = 0; tile < tiles; ++tile)
+        acc += partials[tile * n + col];
+
+    // Preserve projection BF16, then residual-add BF16, as separate boundaries.
+    const float projected = b2f(f2b(acc));
+    out[col] = f2b(b2f(residual[col]) + projected);
+}
 "#;
 
 /// Persistent FP32 partial-sum storage for one tiled GEMV shape.
@@ -99,6 +124,7 @@ pub struct CudaBf16TiledGemv {
     stream: Arc<CudaStream>,
     partial: CudaFunction,
     reduce: CudaFunction,
+    reduce_add: CudaFunction,
     k_tile: usize,
 }
 
@@ -142,11 +168,15 @@ impl CudaBf16TiledGemv {
         let reduce = module
             .load_function("scirust_bf16_tiled_gemv_reduce_kernel")
             .ok()?;
+        let reduce_add = module
+            .load_function("scirust_bf16_tiled_gemv_reduce_add_kernel")
+            .ok()?;
         Some(Self {
             _ctx: ctx,
             stream,
             partial,
             reduce,
+            reduce_add,
             k_tile,
         })
     }
@@ -181,6 +211,60 @@ impl CudaBf16TiledGemv {
         k: usize,
         n: usize,
     ) {
+        self.validate(input, weight, workspace, output, k, n);
+        self.launch_partials(input, weight, workspace, k, n);
+
+        let (tiles_arg, n_arg) = (workspace.k_tiles, n);
+        let mut reduce_builder = self.stream.launch_builder(&self.reduce);
+        reduce_builder.arg(output);
+        reduce_builder.arg(&workspace.partials);
+        reduce_builder.arg(&tiles_arg);
+        reduce_builder.arg(&n_arg);
+        unsafe {
+            reduce_builder
+                .launch(LaunchConfig::for_num_elems(n as u32))
+                .expect("tiled GEMV reduction launch");
+        }
+    }
+
+    /// `[1,K] × [K,N]`, BF16 projection boundary, then BF16 residual add.
+    pub fn gemv_kn_add_into(
+        &self,
+        input: &CudaSlice<bf16>,
+        weight: &CudaSlice<bf16>,
+        workspace: &mut CudaBf16TiledGemvWorkspace,
+        residual: &CudaSlice<bf16>,
+        output: &mut CudaSlice<bf16>,
+        k: usize,
+        n: usize,
+    ) {
+        self.validate(input, weight, workspace, output, k, n);
+        assert_eq!(residual.len(), n, "tiled GEMV residual length");
+        self.launch_partials(input, weight, workspace, k, n);
+
+        let (tiles_arg, n_arg) = (workspace.k_tiles, n);
+        let mut reduce_builder = self.stream.launch_builder(&self.reduce_add);
+        reduce_builder.arg(output);
+        reduce_builder.arg(&workspace.partials);
+        reduce_builder.arg(residual);
+        reduce_builder.arg(&tiles_arg);
+        reduce_builder.arg(&n_arg);
+        unsafe {
+            reduce_builder
+                .launch(LaunchConfig::for_num_elems(n as u32))
+                .expect("tiled GEMV residual reduction launch");
+        }
+    }
+
+    fn validate(
+        &self,
+        input: &CudaSlice<bf16>,
+        weight: &CudaSlice<bf16>,
+        workspace: &CudaBf16TiledGemvWorkspace,
+        output: &CudaSlice<bf16>,
+        k: usize,
+        n: usize,
+    ) {
         assert!(k > 0 && n > 0, "tiled GEMV dimensions must be non-zero");
         assert_eq!(input.len(), k, "tiled GEMV input length");
         assert_eq!(weight.len(), k * n, "tiled GEMV weight length");
@@ -191,7 +275,16 @@ impl CudaBf16TiledGemv {
             k.div_ceil(self.k_tile),
             "tiled GEMV workspace K tile count"
         );
+    }
 
+    fn launch_partials(
+        &self,
+        input: &CudaSlice<bf16>,
+        weight: &CudaSlice<bf16>,
+        workspace: &mut CudaBf16TiledGemvWorkspace,
+        k: usize,
+        n: usize,
+    ) {
         let (k_arg, n_arg, k_tile_arg) = (k, n, self.k_tile);
         let mut partial_builder = self.stream.launch_builder(&self.partial);
         partial_builder.arg(&mut workspace.partials);
@@ -210,18 +303,6 @@ impl CudaBf16TiledGemv {
             partial_builder
                 .launch(partial_config)
                 .expect("tiled GEMV partial launch");
-        }
-
-        let (tiles_arg, n_arg) = (workspace.k_tiles, n);
-        let mut reduce_builder = self.stream.launch_builder(&self.reduce);
-        reduce_builder.arg(output);
-        reduce_builder.arg(&workspace.partials);
-        reduce_builder.arg(&tiles_arg);
-        reduce_builder.arg(&n_arg);
-        unsafe {
-            reduce_builder
-                .launch(LaunchConfig::for_num_elems(n as u32))
-                .expect("tiled GEMV reduction launch");
         }
     }
 }
