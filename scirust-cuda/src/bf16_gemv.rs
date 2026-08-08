@@ -116,12 +116,8 @@ impl CudaBf16Gemv {
             .load_module(ptx)
             .map_err(|error| eprintln!("scirust-cuda bf16 gemv: module load failed: {error}"))
             .ok()?;
-        let gemv_kn = module
-            .load_function("scirust_bf16_gemv_kn_kernel")
-            .ok()?;
-        let swiglu_kn = module
-            .load_function("scirust_bf16_swiglu_kn_kernel")
-            .ok()?;
+        let gemv_kn = module.load_function("scirust_bf16_gemv_kn_kernel").ok()?;
+        let swiglu_kn = module.load_function("scirust_bf16_swiglu_kn_kernel").ok()?;
         Some(Self {
             _ctx: ctx,
             stream,
