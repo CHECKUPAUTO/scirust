@@ -16,6 +16,7 @@ mod ids;
 mod kernel;
 mod launch;
 mod memory;
+mod requirements;
 mod shape;
 mod strides;
 mod tensor;
@@ -37,6 +38,11 @@ pub use ids::{BufferId, EventId, KernelId, StreamId};
 pub use kernel::{KernelFormat, KernelModule};
 pub use launch::LaunchConfig;
 pub use memory::{Layout, MemorySpace};
+pub use requirements::{
+    CandidateSelection, ExecutionCandidate, KernelRequirements, MatchDisposition, MatchReport,
+    PlannerPolicy, RequirementIssue, SupportRequirement, VectorRequirement, match_requirements,
+    select_candidate,
+};
 pub use shape::Shape;
 pub use strides::Strides;
 pub use tensor::TensorSpec;
