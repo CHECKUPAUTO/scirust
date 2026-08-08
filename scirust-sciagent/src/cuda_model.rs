@@ -122,6 +122,22 @@ struct CudaTrainCache {
     normed: CudaMatrix,
 }
 
+/// Teacher-forced diagnostic comparing the cached decoder's prediction logits with
+/// a full-sequence forward under the exact same prefix. This is intentionally a
+/// numerical diagnostic rather than a relaxed correctness criterion: production
+/// greedy parity remains strict until the measured cause of any mismatch is known.
+#[derive(Clone, Debug)]
+pub struct CudaCacheParityStep {
+    pub step: usize,
+    pub expected_token: u32,
+    pub cached_top1: u32,
+    pub full_top1: u32,
+    pub cached_margin: f32,
+    pub full_margin: f32,
+    pub rel_l2: f32,
+    pub max_abs: f32,
+}
+
 /// A [`SciAgentModel`] mirrored into VRAM as bf16 matrices, running the whole
 /// decoder forward on the Tensor-core [`CudaChain`]. Tied-embedding models only.
 pub struct CudaModel {
@@ -214,25 +230,6 @@ impl CudaModel {
         let dh = dy.cols() / n_heads;
         self.chain
             .rope_head_local_backward(dy, dh, seq_len, offset, self.theta)
-    }
-
-    fn rope_heads_backward(
-        &self,
-        dy: &CudaMatrix,
-        n_heads: usize,
-        seq_len: usize,
-        offset: usize,
-    ) -> CudaMatrix {
-        assert!(n_heads > 0 && dy.cols().is_multiple_of(n_heads));
-        let dh = dy.cols() / n_heads;
-        let mut heads = Vec::with_capacity(n_heads);
-        for head in 0..n_heads
-        {
-            let raw = self.chain.slice_cols(dy, head * dh, dh);
-            heads.push(self.chain.rope_backward(&raw, seq_len, offset, self.theta));
-        }
-        let refs: Vec<&CudaMatrix> = heads.iter().collect();
-        self.chain.concat_cols(&refs)
     }
 
     /// Multi-head grouped-query attention over `q` (`t×d_model`) and `k`/`v`
@@ -564,6 +561,96 @@ impl CudaModel {
             logits = self.decode_step_cached(next, pos, &mut kcache, &mut vcache);
         }
         tokens
+    }
+
+    /// Compare KV-cached logits against full-forward logits while forcing both paths
+    /// through exactly the same continuation tokens. One record is emitted for every
+    /// forced token *before* that token is appended, so record 0 compares prompt
+    /// prefill and record N compares the two paths after N identical decode tokens.
+    /// This isolates cache arithmetic from autoregressive error amplification.
+    pub fn cache_parity_teacher_forced(
+        &self,
+        prompt: &[u32],
+        forced_tokens: &[u32],
+    ) -> Vec<CudaCacheParityStep> {
+        let mut prefix: Vec<u32> = if prompt.is_empty()
+        {
+            vec![0]
+        }
+        else
+        {
+            prompt.to_vec()
+        };
+        if forced_tokens.is_empty()
+        {
+            return Vec::new();
+        }
+
+        let mut kcache: Vec<Option<CudaMatrix>> = (0..self.blocks.len()).map(|_| None).collect();
+        let mut vcache: Vec<Option<CudaMatrix>> = (0..self.blocks.len()).map(|_| None).collect();
+        let mut cached_logits = self.prefill_cached(&prefix, &mut kcache, &mut vcache);
+        let mut out = Vec::with_capacity(forced_tokens.len());
+
+        let top2 = |row: &[f32]| -> (u32, f32) {
+            assert!(!row.is_empty(), "top2 requires a non-empty logit row");
+            let mut best_i = 0usize;
+            let mut best = row[0];
+            let mut second = f32::NEG_INFINITY;
+            for (i, &value) in row.iter().enumerate().skip(1)
+            {
+                if value > best
+                {
+                    second = best;
+                    best = value;
+                    best_i = i;
+                }
+                else if value > second
+                {
+                    second = value;
+                }
+            }
+            (best_i as u32, best - second)
+        };
+
+        for (step, &expected_token) in forced_tokens.iter().enumerate()
+        {
+            let full = self.forward(&prefix);
+            let full_last = &full[full.len() - self.vocab..];
+            assert_eq!(cached_logits.len(), self.vocab, "cached logit width");
+
+            let mut num = 0.0f64;
+            let mut den = 0.0f64;
+            let mut max_abs = 0.0f32;
+            for (&cached, &reference) in cached_logits.iter().zip(full_last)
+            {
+                let delta = cached - reference;
+                num += (delta as f64) * (delta as f64);
+                den += (reference as f64) * (reference as f64);
+                max_abs = max_abs.max(delta.abs());
+            }
+            let rel_l2 = (num.sqrt() / den.sqrt().max(1e-30)) as f32;
+            let (cached_top1, cached_margin) = top2(&cached_logits);
+            let (full_top1, full_margin) = top2(full_last);
+            out.push(CudaCacheParityStep {
+                step,
+                expected_token,
+                cached_top1,
+                full_top1,
+                cached_margin,
+                full_margin,
+                rel_l2,
+                max_abs,
+            });
+
+            if step + 1 < forced_tokens.len()
+            {
+                let pos = prefix.len();
+                prefix.push(expected_token);
+                cached_logits =
+                    self.decode_step_cached(expected_token, pos, &mut kcache, &mut vcache);
+            }
+        }
+        out
     }
 
     /// Backward of [`Self::attention`] (the GQA analogue of Route A's

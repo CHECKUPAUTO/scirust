@@ -195,7 +195,38 @@ fn bench_decode(config: &SciAgentConfig, prompt_len: usize, max_new: usize) {
     );
     if !parity
     {
-        eprintln!("ERROR: cached CUDA decoding changed greedy tokens");
+        // Diagnose under the naïve greedy continuation, so cached and full-forward
+        // paths see identical prefixes. This distinguishes a cache-logic error from
+        // a tiny bf16/cuBLASLt rank flip that autoregressive generation amplifies.
+        let forced = &naive[prompt.len()..];
+        let report = cuda.cache_parity_teacher_forced(&prompt, forced);
+        for row in &report
+        {
+            println!(
+                "SCIAGENT_THOR_KV_PARITY step={} expected={} cached_top1={} full_top1={} cached_margin={:.8e} full_margin={:.8e} rel_l2={:.8e} max_abs={:.8e}",
+                row.step,
+                row.expected_token,
+                row.cached_top1,
+                row.full_top1,
+                row.cached_margin,
+                row.full_margin,
+                row.rel_l2,
+                row.max_abs
+            );
+        }
+        if let Some(first) = report.iter().find(|row| row.cached_top1 != row.full_top1)
+        {
+            eprintln!(
+                "ERROR: cached CUDA decoding first teacher-forced top-1 divergence at step {} (cached={} full={}, rel_l2={:.3e}, max_abs={:.3e})",
+                first.step, first.cached_top1, first.full_top1, first.rel_l2, first.max_abs
+            );
+        }
+        else
+        {
+            eprintln!(
+                "ERROR: autoregressive sequence diverged although teacher-forced raw top-1 stayed equal; inspect sampling/repetition state"
+            );
+        }
         std::process::exit(3);
     }
 }
