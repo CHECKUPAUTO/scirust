@@ -43,8 +43,11 @@ jobs:
         run: |
           tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.ci-tmp.XXXXXX")"
           chmod 700 "$tmpdir"
+          mkdir -p "$tmpdir/cargo-home" "$tmpdir/rustup-home"
           echo "TMPDIR=$tmpdir" >> "$GITHUB_ENV"
           echo "CARGO_TARGET_DIR=$tmpdir/target" >> "$GITHUB_ENV"
+          echo "CARGO_HOME=$tmpdir/cargo-home" >> "$GITHUB_ENV"
+          echo "RUSTUP_HOME=$tmpdir/rustup-home" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: nightly-2026-07-02
