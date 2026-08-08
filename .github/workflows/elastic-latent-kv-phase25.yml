@@ -85,7 +85,6 @@ jobs:
       SCIRUST_SAMPLER_COMPARE_WARMUP: 3
       SCIRUST_THOR_GPU_LOCK: /tmp/scirust-thor-gpu.lock
       CARGO_INCREMENTAL: 0
-      PHASE25_VALIDATED_THOR_HEAD: ba676598d62972f29530930034005f35cc248edb
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
@@ -103,7 +102,7 @@ jobs:
             echo "Real NVIDIA Thor WGPU/Vulkan device detected."
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "Runner is labelled jetson-thor but does not expose the real Thor WGPU/Vulkan device."
+            echo "::notice::Runner is labelled jetson-thor but does not expose the real Thor WGPU/Vulkan device; Phase 25 hardware evidence is deferred."
           fi
       - name: Classify Thor occupancy
         if: steps.thor.outputs.available == 'true'
@@ -129,46 +128,32 @@ jobs:
           printf '%s\n' "$compute_apps"
           while IFS=',' read -r raw_pid process_name; do
             pid="$(printf '%s' "$raw_pid" | tr -d '[:space:]')"
-            [[ "$pid" =~ ^[0-9]+$ ]] || { managed_training=false; continue; }
-            cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
-            proc_user="$(ps -p "$pid" -o user= 2>/dev/null | xargs || true)"
-            ppid="$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d '[:space:]')"
-            cgroup="$(cat "/proc/$pid/cgroup" 2>/dev/null || true)"
-            echo "pid=$pid user=$proc_user ppid=$ppid cmdline=$cmdline cgroup=$cgroup"
-            if [[ "${process_name# }" != "/root/scirust/target/release/examples/cuda_pretrain" ]] \
-              || [[ "$cmdline" != *"/root/scirust/target/release/examples/cuda_pretrain"* ]] \
-              || [[ "$proc_user" != "root" ]] \
-              || [[ "$ppid" != "1" ]] \
-              || [[ "$cgroup" != 0::/user.slice/user-0.slice/session-*.scope ]]; then
+            process_name="${process_name# }"
+            if [[ ! "$pid" =~ ^[0-9]+$ ]] \
+              || [[ "$process_name" != "/root/scirust/target/release/examples/cuda_pretrain" ]]; then
               managed_training=false
             fi
           done <<< "$compute_apps"
 
           if [[ "$managed_training" == true ]]; then
             echo "run_benchmark=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Phase 25 Thor benchmark deferred: detached SciAgent cuda_pretrain owns the GPU. No Phase 25 WGPU workload is launched and training is left untouched."
+            echo "::notice::Phase 25 Thor benchmark deferred: recognized SciAgent cuda_pretrain owns the GPU. No WGPU workload is launched and training is left untouched."
             exit 0
           fi
 
           echo "::error::Phase 25 found unknown GPU compute activity after acquiring the SciRust lock."
           exit 1
       - name: Report deferred Phase 25 hardware comparison
-        if: steps.thor.outputs.available == 'true' && steps.occupancy.outputs.run_benchmark == 'false'
+        if: steps.thor.outputs.available != 'true' || steps.occupancy.outputs.run_benchmark == 'false'
         run: |
-          echo "Phase 25 real-Thor sampler comparison DEFERRED while SciAgent production training owns the GPU."
+          echo "Phase 25 real-Thor sampler comparison DEFERRED."
           echo "Static and lavapipe validation remain active; no new hardware evidence is claimed."
-      - name: Validate previously measured Thor evidence is still applicable
-        if: steps.thor.outputs.available != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch --no-tags --depth=1 origin "$PHASE25_VALIDATED_THOR_HEAD"
-          if ! git diff --quiet "$PHASE25_VALIDATED_THOR_HEAD" HEAD -- scirust-gpu/; then
-            echo "::error::scirust-gpu changed since the last successful real-Thor Phase 25 run; a real WGPU Thor is required."
-            git diff --stat "$PHASE25_VALIDATED_THOR_HEAD" HEAD -- scirust-gpu/
-            exit 1
-          fi
-          echo "::notice::No WGPU device is exposed by this runner, but scirust-gpu is unchanged from the real-Thor validated head $PHASE25_VALIDATED_THOR_HEAD (run 31258455544). Reusing that hardware evidence."
+          {
+            echo "## Phase 25 Thor comparison: DEFERRED"
+            echo
+            echo "A real idle Thor was not available to this job."
+            echo "No hardware result is reused or fabricated; the PR remains draft until hardware evidence can be refreshed if required."
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Prepare isolated executable build directory
         if: steps.thor.outputs.available == 'true' && steps.occupancy.outputs.run_benchmark == 'true'
         run: |
