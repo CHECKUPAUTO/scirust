@@ -1,8 +1,11 @@
-//! Phase 28 diagnostic: isolate first-token parity before device feedback.
+//! Phase 28 diagnostic: isolate first-token parity before and inside device feedback.
 
 use scirust_core::nn::sampling::SamplingConfig;
 use scirust_core::nn::transformer::mini_llm::{CharTokenizer, MiniLLM, MiniLLMConfig};
-use scirust_gpu::{WgpuLatentHeadBasis, WgpuLatentLayerBasis, WgpuResidentSampledMiniLlm};
+use scirust_gpu::{
+    WgpuLatentHeadBasis, WgpuLatentLayerBasis, WgpuResidentDeviceFeedbackMiniLlm,
+    WgpuResidentSampledMiniLlm,
+};
 
 const VOCAB_SIZE: usize = 4096;
 const PROMPT_TOKENS: usize = 16;
@@ -31,7 +34,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let mut cpu = MiniLLM::new(config.clone(), tokenizer.clone());
-    let gpu = MiniLLM::new(config.clone(), tokenizer);
+    let host_gpu = MiniLLM::new(config.clone(), tokenizer.clone());
+    let feedback_gpu = MiniLLM::new(config.clone(), tokenizer);
     let expected = cpu.generate_ids_cached_sampled(&prompt, 1, &sampling, SEED);
     let expected_first = *expected
         .get(prompt.len())
@@ -47,27 +51,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.n_heads
     ];
     let layers = vec![WgpuLatentLayerBasis { heads: &heads }; config.n_layers];
-    let mut resident = WgpuResidentSampledMiniLlm::new(
-        gpu.inference_snapshot(),
+
+    let mut host_resident = WgpuResidentSampledMiniLlm::new(
+        host_gpu.inference_snapshot(),
         config.max_seq_len,
         d_head,
         &layers,
         sampling,
         SEED,
     )?;
-
     for (position, &token) in prompt.iter().enumerate()
     {
-        resident.ingest_at(token, position)?;
+        host_resident.ingest_at(token, position)?;
     }
-    let actual_first = resident.sample_next()?;
-
+    let host_first = host_resident.sample_next()?;
     println!(
-        "phase28_first_token_probe,top_k=0,cpu_first={expected_first},wgpu_host_stepped_first={actual_first},match={},sampling_draws={},sample_ready={}",
-        u8::from(actual_first == expected_first),
-        resident.telemetry().sampling_draws,
-        resident.telemetry().sample_ready,
+        "phase28_first_token_probe,mode=host-stepped,top_k=0,cpu_first={expected_first},wgpu_first={host_first},match={},sampling_draws={}",
+        u8::from(host_first == expected_first),
+        host_resident.telemetry().sampling_draws,
     );
+
+    let mut feedback_resident = WgpuResidentDeviceFeedbackMiniLlm::new(
+        feedback_gpu.inference_snapshot(),
+        config.max_seq_len,
+        d_head,
+        &layers,
+        sampling,
+        SEED,
+    )?;
+    for call in 1..=2
+    {
+        let ids = feedback_resident.generate_ids_resident(&prompt, 1)?;
+        let first = ids
+            .get(prompt.len())
+            .map_or_else(|| "end".to_owned(), usize::to_string);
+        let telemetry = feedback_resident.telemetry();
+        println!(
+            "phase28_first_token_probe,mode=device-feedback,call={call},top_k=0,cpu_first={expected_first},wgpu_first={first},len={},sampling_draws={},readback_bytes={}",
+            ids.len(),
+            telemetry.sampling_draws,
+            telemetry.last_burst_readback_bytes,
+        );
+    }
 
     Ok(())
 }
