@@ -75,6 +75,9 @@ jobs:
             exit 0
           fi
 
+          command -v flock >/dev/null
+          exec 9>"$SCIRUST_THOR_GPU_LOCK"
+          flock -x 9
           if ! compute_apps="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null)"; then
             echo "available=false" >> "$GITHUB_OUTPUT"
             echo "reason=runtime-unqueryable" >> "$GITHUB_OUTPUT"
@@ -82,30 +85,40 @@ jobs:
             exit 0
           fi
 
-          if [[ -n "${compute_apps//[[:space:]]/}" ]]; then
-            managed_training=true
-            while IFS=',' read -r raw_pid process_name; do
-              pid="$(printf '%s' "$raw_pid" | tr -d '[:space:]')"
-              [[ "$pid" =~ ^[0-9]+$ ]] || { managed_training=false; continue; }
-              cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
-              cwd="$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)"
-              stderr_target="$(readlink -f "/proc/$pid/fd/2" 2>/dev/null || true)"
-              if [[ "$cmdline" != *"/root/scirust/target/release/examples/cuda_pretrain"* ]] \
-                || [[ "$cwd" != /root/scirust-sciagent-prod-* ]] \
-                || [[ "$stderr_target" != /root/sciagent-production/*/train-*.log ]]; then
-                managed_training=false
-              fi
-            done <<< "$compute_apps"
-            if [[ "$managed_training" == true ]]; then
-              echo "available=false" >> "$GITHUB_OUTPUT"
-              echo "reason=managed-production-training" >> "$GITHUB_OUTPUT"
-              echo "::notice::SciAgent production training owns the GPU; CUDA runtime tests/benchmark are deferred without terminating the training process."
-              exit 0
-            fi
+          if [[ -z "${compute_apps//[[:space:]]/}" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "reason=ready" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
-          echo "available=true" >> "$GITHUB_OUTPUT"
-          echo "reason=ready" >> "$GITHUB_OUTPUT"
+          managed_training=true
+          printf '%s\n' "$compute_apps"
+          while IFS=',' read -r raw_pid process_name; do
+            pid="$(printf '%s' "$raw_pid" | tr -d '[:space:]')"
+            [[ "$pid" =~ ^[0-9]+$ ]] || { managed_training=false; continue; }
+            cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
+            proc_user="$(ps -p "$pid" -o user= 2>/dev/null | xargs || true)"
+            ppid="$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d '[:space:]')"
+            cgroup="$(cat "/proc/$pid/cgroup" 2>/dev/null || true)"
+            echo "pid=$pid user=$proc_user ppid=$ppid cmdline=$cmdline cgroup=$cgroup"
+            if [[ "${process_name# }" != "/root/scirust/target/release/examples/cuda_pretrain" ]] \
+              || [[ "$cmdline" != *"/root/scirust/target/release/examples/cuda_pretrain"* ]] \
+              || [[ "$proc_user" != "root" ]] \
+              || [[ "$ppid" != "1" ]] \
+              || [[ "$cgroup" != 0::/user.slice/user-0.slice/session-*.scope ]]; then
+              managed_training=false
+            fi
+          done <<< "$compute_apps"
+
+          if [[ "$managed_training" == true ]]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "reason=managed-production-training" >> "$GITHUB_OUTPUT"
+            echo "::notice::Detached SciAgent production training owns the GPU; CUDA runtime tests/benchmark are deferred and the training process is left untouched."
+            exit 0
+          fi
+
+          echo "::error::Unknown GPU compute activity remains after acquiring the shared SciRust lock; refusing concurrent CUDA execution."
+          exit 1
       - name: Require CUDA device
         if: steps.cuda-runtime.outputs.available == 'true'
         shell: bash
