@@ -1,4 +1,5 @@
 pub mod agentic;
+pub mod artifact_provenance;
 pub mod attention;
 pub mod block;
 pub mod bpe;
@@ -29,6 +30,9 @@ pub mod swiglu;
 pub mod tokenizer;
 pub mod train;
 
+pub use artifact_provenance::{
+    artifact_sha256, builtin_byte_tokenizer_sha256, embedded_bpe_tokenizer_sha256,
+};
 pub use attention::GQAAttention;
 pub use block::SciAgentBlock;
 pub use bpe::{BpeTokenizer, BpeTrainer};
