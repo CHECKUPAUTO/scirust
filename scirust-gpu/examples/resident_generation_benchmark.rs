@@ -11,9 +11,7 @@ use std::time::Instant;
 
 use scirust_core::nn::sampling::SamplingConfig;
 use scirust_core::nn::transformer::mini_llm::{CharTokenizer, MiniLLM, MiniLLMConfig};
-use scirust_gpu::{
-    WgpuLatentHeadBasis, WgpuLatentLayerBasis, WgpuResidentDeviceFeedbackMiniLlm,
-};
+use scirust_gpu::{WgpuLatentHeadBasis, WgpuLatentLayerBasis, WgpuResidentDeviceFeedbackMiniLlm};
 
 const DEFAULT_VOCAB: usize = 4096;
 const DEFAULT_PROMPT_TOKENS: usize = 16;
@@ -46,14 +44,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let warmup = parse_non_negative("SCIRUST_RESIDENT_BENCH_WARMUP", DEFAULT_WARMUP)?;
     let seed = parse_u64("SCIRUST_RESIDENT_BENCH_SEED", DEFAULT_SEED)?;
 
-    if vocab < 4 {
+    if vocab < 4
+    {
         return Err("SCIRUST_RESIDENT_BENCH_VOCAB must be at least 4".into());
     }
-    if D_MODEL % N_HEADS != 0 {
+    if D_MODEL % N_HEADS != 0
+    {
         return Err("Phase 28 model width must be divisible by the head count".into());
     }
-    for &top_k in &top_ks {
-        if top_k >= vocab && top_k != 0 {
+    for &top_k in &top_ks
+    {
+        if top_k >= vocab && top_k != 0
+        {
             return Err(format!("top_k={top_k} must be zero or smaller than vocab={vocab}").into());
         }
     }
@@ -80,8 +82,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "vocab_size,d_model,n_heads,n_layers,d_ff,prompt_tokens,requested_decode_tokens,generated_tokens,top_k,temperature,top_p,seed,repeats,warmup,prompt_median_ns,end_to_end_median_ns,incremental_decode_proxy_ns,generated_tokens_per_second_end_to_end,exact_cpu_wgpu,deterministic_replay,output_fingerprint,resident_bytes,prompt_upload_bytes_per_token,generated_upload_bytes_per_token,generated_download_bytes_per_token,last_burst_readback_bytes,sampling_draws"
     );
 
-    for &top_k in &top_ks {
-        for &requested_decode in &decode_tokens {
+    for &top_k in &top_ks
+    {
+        for &requested_decode in &decode_tokens
+        {
             emit_case(
                 &tokenizer,
                 &config,
@@ -118,7 +122,8 @@ fn emit_case(
     let gpu = MiniLLM::new(config.clone(), tokenizer.clone());
     let expected = cpu.generate_ids_cached_sampled(prompt, requested_decode, &sampling, seed);
     let generated_tokens = expected.len().saturating_sub(prompt.len());
-    if generated_tokens == 0 {
+    if generated_tokens == 0
+    {
         return Err("Phase 28 expected at least one generated token".into());
     }
 
@@ -141,13 +146,16 @@ fn emit_case(
         seed,
     )?;
 
-    for _ in 0..warmup {
+    for _ in 0..warmup
+    {
         let prompt_only = resident.generate_ids_resident(prompt, 0)?;
-        if prompt_only != prompt {
+        if prompt_only != prompt
+        {
             return Err("prompt-only resident generation changed the prompt".into());
         }
         let full = resident.generate_ids_resident(prompt, requested_decode)?;
-        if full != expected {
+        if full != expected
+        {
             return Err("warmup CPU/WGPU sequence mismatch".into());
         }
         std::hint::black_box(full);
@@ -156,11 +164,13 @@ fn emit_case(
     let mut prompt_elapsed = Vec::with_capacity(repeats);
     let mut full_elapsed = Vec::with_capacity(repeats);
     let mut replay = true;
-    for _ in 0..repeats {
+    for _ in 0..repeats
+    {
         let start = Instant::now();
         let prompt_only = resident.generate_ids_resident(prompt, 0)?;
         prompt_elapsed.push(start.elapsed().as_nanos());
-        if prompt_only != prompt {
+        if prompt_only != prompt
+        {
             return Err("measured prompt-only generation changed the prompt".into());
         }
 
@@ -173,14 +183,14 @@ fn emit_case(
 
     let prompt_median_ns = median(&mut prompt_elapsed);
     let end_to_end_median_ns = median(&mut full_elapsed);
-    let incremental_decode_proxy_ns =
-        end_to_end_median_ns as i128 - prompt_median_ns as i128;
+    let incremental_decode_proxy_ns = end_to_end_median_ns as i128 - prompt_median_ns as i128;
     let generated_tokens_per_second_end_to_end =
         generated_tokens as f64 * 1_000_000_000.0 / end_to_end_median_ns.max(1) as f64;
     let telemetry = resident.telemetry();
     let exact_cpu_wgpu = replay;
 
-    if telemetry.prompt_upload_bytes_per_token != core::mem::size_of::<u32>() {
+    if telemetry.prompt_upload_bytes_per_token != core::mem::size_of::<u32>()
+    {
         return Err("unexpected Phase 28 prompt upload size".into());
     }
     if telemetry.generated_upload_bytes_per_token != 0
@@ -191,14 +201,16 @@ fn emit_case(
     let expected_readback = (4usize + requested_decode)
         .checked_mul(core::mem::size_of::<u32>())
         .ok_or("Phase 28 expected readback size overflows usize")?;
-    if telemetry.last_burst_readback_bytes != expected_readback {
+    if telemetry.last_burst_readback_bytes != expected_readback
+    {
         return Err(format!(
             "unexpected final readback: got {}, expected {expected_readback}",
             telemetry.last_burst_readback_bytes
         )
         .into());
     }
-    if telemetry.sampling_draws != generated_tokens {
+    if telemetry.sampling_draws != generated_tokens
+    {
         return Err(format!(
             "sampling draws {} differ from generated tokens {generated_tokens}",
             telemetry.sampling_draws
@@ -247,13 +259,15 @@ fn synthetic_tokenizer(vocab_size: usize) -> Result<CharTokenizer, Box<dyn std::
     let mut corpus = String::new();
     let mut inserted = 0usize;
     let mut scalar = 0x1000u32;
-    while inserted < needed {
+    while inserted < needed
+    {
         let character = char::from_u32(scalar)
             .ok_or("requested synthetic vocabulary exceeds Unicode scalar range")?;
         scalar = scalar
             .checked_add(1)
             .ok_or("synthetic vocabulary scalar counter overflowed")?;
-        if character == '\0' || character == '�' {
+        if character == '\0' || character == '�'
+        {
             continue;
         }
         corpus.push(character);
@@ -261,7 +275,8 @@ fn synthetic_tokenizer(vocab_size: usize) -> Result<CharTokenizer, Box<dyn std::
     }
 
     let tokenizer = CharTokenizer::new(&[corpus.as_str()]);
-    if tokenizer.vocab_size != vocab_size {
+    if tokenizer.vocab_size != vocab_size
+    {
         return Err(format!(
             "synthetic tokenizer built vocab {}, expected {vocab_size}",
             tokenizer.vocab_size
@@ -279,7 +294,8 @@ fn deterministic_prompt(vocab_size: usize, tokens: usize) -> Vec<usize> {
 
 fn identity_basis(dimension: usize) -> Vec<f32> {
     let mut basis = vec![0.0; dimension * dimension];
-    for index in 0..dimension {
+    for index in 0..dimension
+    {
         basis[index * dimension + index] = 1.0;
     }
     basis
@@ -292,8 +308,10 @@ fn median(values: &mut [u128]) -> u128 {
 
 fn fingerprint(tokens: &[usize]) -> u64 {
     let mut hash = FNV_OFFSET;
-    for &token in tokens {
-        for byte in (token as u64).to_le_bytes() {
+    for &token in tokens
+    {
+        for byte in (token as u64).to_le_bytes()
+        {
             hash ^= u64::from(byte);
             hash = hash.wrapping_mul(FNV_PRIME);
         }
@@ -309,7 +327,8 @@ fn parse_list(name: &str, default: &str) -> Result<Vec<usize>, Box<dyn std::erro
         .filter(|value| !value.is_empty())
         .map(str::parse::<usize>)
         .collect::<Result<Vec<_>, _>>()?;
-    if values.is_empty() {
+    if values.is_empty()
+    {
         return Err(format!("{name} must contain comma-separated integers").into());
     }
     Ok(values)
@@ -320,7 +339,8 @@ fn parse_positive_list(
     default: &str,
 ) -> Result<Vec<usize>, Box<dyn std::error::Error>> {
     let values = parse_list(name, default)?;
-    if values.contains(&0) {
+    if values.contains(&0)
+    {
         return Err(format!("{name} must contain positive integers").into());
     }
     Ok(values)
@@ -332,7 +352,8 @@ fn parse_positive(name: &str, default: usize) -> Result<usize, Box<dyn std::erro
         .map(|raw| raw.parse::<usize>())
         .transpose()?
         .unwrap_or(default);
-    if value == 0 {
+    if value == 0
+    {
         return Err(format!("{name} must be positive").into());
     }
     Ok(value)
