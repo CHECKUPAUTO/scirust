@@ -1,6 +1,6 @@
 use crate::{
-    BufferBinding, ComputeResult, DeviceCapabilities, HardwareCapabilities, KernelModule,
-    LaunchConfig, MemorySpace,
+    BufferBinding, ComputeResult, DeviceCapabilities, ExecutionLimits, HardwareCapabilities,
+    KernelModule, LaunchConfig, MemorySpace,
 };
 
 /// Backend-neutral execution contract.
@@ -34,6 +34,16 @@ pub trait ComputeBackend {
         }
 
         hardware
+    }
+
+    /// Portable execution limits known by this backend.
+    ///
+    /// The default preserves the launch-width facts already carried by the
+    /// legacy [`DeviceCapabilities`] contract. Backends may override this as the
+    /// generic limit model grows richer; callers should use this method rather
+    /// than reconstructing limits from backend-specific state.
+    fn execution_limits(&self) -> ExecutionLimits {
+        ExecutionLimits::from_device_capabilities(self.capabilities())
     }
 
     fn allocate(
