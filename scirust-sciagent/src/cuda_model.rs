@@ -10,6 +10,9 @@
 //! (`tests/cuda_parity.rs`). This is B3 of the Route-B plan (`ROUTE_B.md`): the
 //! whole 350M forward on Tensor cores. Backward + AdamW is B4.
 
+use std::collections::HashMap;
+use std::path::Path;
+
 use scirust_core::autodiff::reverse::Tensor;
 use scirust_core::autodiff::scheduler::LrSchedule;
 use scirust_cuda::{CudaChain, CudaF32, CudaMatrix};
@@ -1004,6 +1007,46 @@ impl BlockMasters {
     }
 }
 
+/// Persisted CUDA optimizer/schedule metadata. Unlike legacy checkpoints that only
+/// saved model weights, B32 checkpoints restore AdamW moments and bias-correction
+/// step exactly. Schedule fields let an interrupted run continue its original LR
+/// curve unless the caller explicitly overrides it.
+#[derive(Clone, Debug)]
+pub struct CudaOptimizerResume {
+    pub step: usize,
+    pub base_lr: f32,
+    pub min_lr: f32,
+    pub warmup_steps: usize,
+    pub total_steps: usize,
+    pub betas: (f32, f32),
+    pub adam_eps: f32,
+    pub weight_decay: f32,
+}
+
+fn optimizer_tensor(chain: &CudaChain, x: &CudaF32, rows: usize, cols: usize) -> Tensor {
+    Tensor::from_vec(chain.download_f32(x), rows, cols)
+}
+
+fn load_optimizer_tensor(
+    chain: &CudaChain,
+    state: &HashMap<String, Tensor>,
+    name: &str,
+    rows: usize,
+    cols: usize,
+) -> std::result::Result<CudaF32, String> {
+    let t = state
+        .get(name)
+        .ok_or_else(|| format!("optimizer checkpoint missing tensor '{name}'"))?;
+    if (t.rows, t.cols) != (rows, cols)
+    {
+        return Err(format!(
+            "optimizer tensor '{name}' has shape {}x{}, expected {rows}x{cols}",
+            t.rows, t.cols
+        ));
+    }
+    Ok(chain.upload_f32(&t.data))
+}
+
 /// Resident diagnostics for one optimizer step. Keeping these tiny buffers alive
 /// lets pretraining enqueue several complete steps before any host synchronization.
 struct CudaStepDiagnostics {
@@ -1308,6 +1351,255 @@ impl CudaTrainer {
         loss
     }
 
+    /// Save AdamW moments + optimizer step next to a model checkpoint. Model fp32
+    /// masters themselves are already represented by `model.safetensors` after
+    /// `sync_to_model`; duplicating them here would add ~1.2 GB without information.
+    pub fn save_optimizer_state(
+        &self,
+        cfg: &CudaPretrainConfig,
+        path: &Path,
+    ) -> std::result::Result<(), String> {
+        let ch = &self.model.chain;
+        let mut tensors: Vec<(String, Tensor)> = Vec::new();
+        let (er, ec) = (self.model.embedding.rows(), self.model.embedding.cols());
+        tensors.push((
+            "embedding.m".into(),
+            optimizer_tensor(ch, &self.m_embedding, er, ec),
+        ));
+        tensors.push((
+            "embedding.v".into(),
+            optimizer_tensor(ch, &self.v_embedding, er, ec),
+        ));
+        let (nr, nc) = (self.model.final_norm.rows(), self.model.final_norm.cols());
+        tensors.push((
+            "final_norm.m".into(),
+            optimizer_tensor(ch, &self.m_final_norm, nr, nc),
+        ));
+        tensors.push((
+            "final_norm.v".into(),
+            optimizer_tensor(ch, &self.v_final_norm, nr, nc),
+        ));
+        for i in 0..self.model.blocks.len()
+        {
+            let b = &self.model.blocks[i];
+            let mm = &self.m_blocks[i];
+            let vv = &self.v_blocks[i];
+            macro_rules! push_pair {
+                ($field:ident) => {{
+                    let rows = b.$field.rows();
+                    let cols = b.$field.cols();
+                    tensors.push((
+                        format!("blocks.{i}.{}.m", stringify!($field)),
+                        optimizer_tensor(ch, &mm.$field, rows, cols),
+                    ));
+                    tensors.push((
+                        format!("blocks.{i}.{}.v", stringify!($field)),
+                        optimizer_tensor(ch, &vv.$field, rows, cols),
+                    ));
+                }};
+            }
+            push_pair!(norm1);
+            push_pair!(wq);
+            push_pair!(wk);
+            push_pair!(wv);
+            push_pair!(wo);
+            push_pair!(norm2);
+            push_pair!(wg);
+            push_pair!(wu);
+            push_pair!(wd);
+        }
+        tensors.sort_by(|a, b| a.0.cmp(&b.0));
+        scirust_core::io::safetensors::save_safetensors(
+            &tensors,
+            path.join("optimizer.safetensors"),
+        )
+        .map_err(|e| format!("cannot save optimizer.safetensors: {e}"))?;
+
+        let meta = serde_json::json!({
+            "version": 1,
+            "step": self.step,
+            "base_lr": cfg.base_lr,
+            "min_lr": cfg.min_lr,
+            "warmup_steps": cfg.warmup_steps,
+            "total_steps": cfg.total_steps,
+            "betas": [cfg.betas.0, cfg.betas.1],
+            "adam_eps": cfg.adam_eps,
+            "weight_decay": cfg.weight_decay,
+        });
+        let encoded = serde_json::to_string_pretty(&meta)
+            .map_err(|e| format!("cannot serialize optimizer metadata: {e}"))?;
+        std::fs::write(path.join("optimizer.json"), encoded)
+            .map_err(|e| format!("cannot write optimizer metadata: {e}"))?;
+        Ok(())
+    }
+
+    /// Restore AdamW state. `Ok(None)` means a legacy checkpoint with no optimizer
+    /// sidecar; malformed/incomplete B32 state is an error and must not silently
+    /// degrade to zero moments.
+    pub fn load_optimizer_state(
+        &mut self,
+        path: &Path,
+    ) -> std::result::Result<Option<CudaOptimizerResume>, String> {
+        let state_path = path.join("optimizer.safetensors");
+        let meta_path = path.join("optimizer.json");
+        let has_state = state_path.exists();
+        let has_meta = meta_path.exists();
+        if !has_state && !has_meta
+        {
+            return Ok(None);
+        }
+        if has_state != has_meta
+        {
+            return Err(format!(
+                "incomplete optimizer checkpoint at {} (need optimizer.safetensors + optimizer.json)",
+                path.display()
+            ));
+        }
+        let state = scirust_core::io::safetensors::load_safetensors(&state_path)
+            .map_err(|e| format!("cannot load {}: {e}", state_path.display()))?;
+        let raw = std::fs::read_to_string(&meta_path)
+            .map_err(|e| format!("cannot read {}: {e}", meta_path.display()))?;
+        let meta: serde_json::Value = serde_json::from_str(&raw)
+            .map_err(|e| format!("cannot parse {}: {e}", meta_path.display()))?;
+        if meta["version"].as_u64() != Some(1)
+        {
+            return Err(format!(
+                "unsupported optimizer checkpoint version in {}",
+                meta_path.display()
+            ));
+        }
+        let step = meta["step"]
+            .as_u64()
+            .ok_or_else(|| "optimizer metadata missing step".to_string())?
+            as usize;
+        if step > u32::MAX as usize
+        {
+            return Err(format!("optimizer step {step} exceeds u32::MAX"));
+        }
+        let number = |key: &str| -> std::result::Result<f32, String> {
+            meta[key]
+                .as_f64()
+                .map(|x| x as f32)
+                .ok_or_else(|| format!("optimizer metadata missing {key}"))
+        };
+        let usize_field = |key: &str| -> std::result::Result<usize, String> {
+            meta[key]
+                .as_u64()
+                .map(|x| x as usize)
+                .ok_or_else(|| format!("optimizer metadata missing {key}"))
+        };
+        let betas = meta["betas"]
+            .as_array()
+            .filter(|x| x.len() == 2)
+            .ok_or_else(|| "optimizer metadata missing betas".to_string())?;
+        let beta0 = betas[0]
+            .as_f64()
+            .ok_or_else(|| "optimizer beta0 invalid".to_string())? as f32;
+        let beta1 = betas[1]
+            .as_f64()
+            .ok_or_else(|| "optimizer beta1 invalid".to_string())? as f32;
+
+        let ch = &self.model.chain;
+        let (er, ec) = (self.model.embedding.rows(), self.model.embedding.cols());
+        self.m_embedding = load_optimizer_tensor(ch, &state, "embedding.m", er, ec)?;
+        self.v_embedding = load_optimizer_tensor(ch, &state, "embedding.v", er, ec)?;
+        let (nr, nc) = (self.model.final_norm.rows(), self.model.final_norm.cols());
+        self.m_final_norm = load_optimizer_tensor(ch, &state, "final_norm.m", nr, nc)?;
+        self.v_final_norm = load_optimizer_tensor(ch, &state, "final_norm.v", nr, nc)?;
+        for i in 0..self.model.blocks.len()
+        {
+            let b = &self.model.blocks[i];
+            macro_rules! load_pair {
+                ($field:ident) => {{
+                    let rows = b.$field.rows();
+                    let cols = b.$field.cols();
+                    self.m_blocks[i].$field = load_optimizer_tensor(
+                        ch,
+                        &state,
+                        &format!("blocks.{i}.{}.m", stringify!($field)),
+                        rows,
+                        cols,
+                    )?;
+                    self.v_blocks[i].$field = load_optimizer_tensor(
+                        ch,
+                        &state,
+                        &format!("blocks.{i}.{}.v", stringify!($field)),
+                        rows,
+                        cols,
+                    )?;
+                }};
+            }
+            load_pair!(norm1);
+            load_pair!(wq);
+            load_pair!(wk);
+            load_pair!(wv);
+            load_pair!(wo);
+            load_pair!(norm2);
+            load_pair!(wg);
+            load_pair!(wu);
+            load_pair!(wd);
+        }
+        self.step = step as u32;
+        Ok(Some(CudaOptimizerResume {
+            step,
+            base_lr: number("base_lr")?,
+            min_lr: number("min_lr")?,
+            warmup_steps: usize_field("warmup_steps")?,
+            total_steps: usize_field("total_steps")?,
+            betas: (beta0, beta1),
+            adam_eps: number("adam_eps")?,
+            weight_decay: number("weight_decay")?,
+        }))
+    }
+
+    /// Save model + optimizer into a hidden partial directory and atomically rename
+    /// it only after both payloads are complete. `latest_checkpoint` therefore never
+    /// selects a crash-torn training state.
+    fn save_training_checkpoint(
+        &self,
+        model: &SciAgentModel,
+        meta: &CheckpointMeta,
+        cfg: &CudaPretrainConfig,
+        final_dir: &Path,
+    ) -> std::result::Result<(), String> {
+        if self.step as usize != meta.step
+        {
+            return Err(format!(
+                "optimizer step {} does not match checkpoint step {}",
+                self.step, meta.step
+            ));
+        }
+        let parent = final_dir.parent().unwrap_or_else(|| Path::new("."));
+        let name = final_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| format!("invalid checkpoint path {}", final_dir.display()))?;
+        let partial = parent.join(format!(".{name}.partial"));
+        if partial.exists()
+        {
+            std::fs::remove_dir_all(&partial)
+                .map_err(|e| format!("cannot remove stale {}: {e}", partial.display()))?;
+        }
+        save_checkpoint(model, meta, &partial)
+            .map_err(|e| format!("cannot save model checkpoint: {e}"))?;
+        self.save_optimizer_state(cfg, &partial)?;
+        if final_dir.exists()
+        {
+            return Err(format!(
+                "checkpoint already exists: {}",
+                final_dir.display()
+            ));
+        }
+        std::fs::rename(&partial, final_dir).map_err(|e| {
+            format!(
+                "cannot atomically publish {} -> {}: {e}",
+                partial.display(),
+                final_dir.display()
+            )
+        })?;
+        Ok(())
+    }
+
     /// Mean cross-entropy over up to `max_windows` non-overlapping `seq_len` windows
     /// of `val_tokens` — **no update** (pure forward), so it measures held-out
     /// generalization rather than the train loss on the repeatedly-seen corpus.
@@ -1544,7 +1836,7 @@ impl CudaTrainer {
                     lr,
                     config: config.clone(),
                 };
-                match save_checkpoint(model, &meta, &dir)
+                match self.save_training_checkpoint(model, &meta, cfg, &dir)
                 {
                     Ok(()) =>
                     {

@@ -215,3 +215,90 @@ fn cuda_cached_generation_preserves_empty_prompt_semantics() {
         cm.generate(&[], 3, &params, 7)
     );
 }
+
+/// B32: an interrupted CUDA run restored from model + optimizer sidecars must take
+/// the same next AdamW step as the uninterrupted trainer. This is the regression
+/// test for moment/bias-correction loss on resume.
+#[test]
+fn cuda_optimizer_resume_matches_uninterrupted_next_step() {
+    use scirust_sciagent::cuda_model::CudaPretrainConfig;
+    use scirust_sciagent::train::checkpoint::{CheckpointMeta, load_checkpoint, save_checkpoint};
+    use std::path::PathBuf;
+
+    let config = tiny_tied();
+    let mut model = SciAgentModel::new(&config);
+    let Some(mut continuous) = CudaTrainer::from_model(&model)
+    else
+    {
+        eprintln!("cuda: no device, skipping optimizer-resume parity");
+        return;
+    };
+    let tokens: Vec<u32> = (0..8)
+        .map(|i| ((i * 7 + 3) % config.vocab_size) as u32)
+        .collect();
+    let targets: Vec<u32> = (0..8)
+        .map(|i| ((i * 5 + 1) % config.vocab_size) as u32)
+        .collect();
+    let (lr, betas, eps, wd) = (3e-3f32, (0.9f32, 0.95f32), 1e-5f32, 0.0f32);
+    for _ in 0..3
+    {
+        continuous.train_step(&tokens, &targets, lr, betas, eps, wd);
+    }
+    continuous.sync_to_model(&mut model);
+
+    let dir = PathBuf::from("/tmp/scirust_cuda_optimizer_resume");
+    let _ = std::fs::remove_dir_all(&dir);
+    let meta = CheckpointMeta {
+        step: 3,
+        loss: 0.0,
+        lr,
+        config: config.clone(),
+    };
+    save_checkpoint(&model, &meta, &dir).expect("save model checkpoint");
+    let cfg = CudaPretrainConfig {
+        base_lr: lr,
+        min_lr: lr * 0.1,
+        warmup_steps: 1,
+        total_steps: 10,
+        betas,
+        adam_eps: eps,
+        weight_decay: wd,
+        ..Default::default()
+    };
+    continuous
+        .save_optimizer_state(&cfg, &dir)
+        .expect("save optimizer state");
+
+    let mut resumed_model = SciAgentModel::new(&config);
+    load_checkpoint(&mut resumed_model, &dir).expect("reload model checkpoint");
+    let mut resumed = CudaTrainer::from_model(&resumed_model).expect("CUDA trainer");
+    let resume_meta = resumed
+        .load_optimizer_state(&dir)
+        .expect("load optimizer state")
+        .expect("B32 optimizer sidecar");
+    assert_eq!(resume_meta.step, 3);
+
+    let loss_a = continuous.train_step(&tokens, &targets, lr, betas, eps, wd);
+    let loss_b = resumed.train_step(&tokens, &targets, lr, betas, eps, wd);
+    assert!(
+        (loss_a - loss_b).abs() < 1e-4,
+        "resume loss mismatch: {loss_a} vs {loss_b}"
+    );
+
+    let mut a = SciAgentModel::new(&config);
+    let mut b = SciAgentModel::new(&config);
+    continuous.sync_to_model(&mut a);
+    resumed.sync_to_model(&mut b);
+    let logits_a = CudaModel::from_model(&a)
+        .expect("CUDA model A")
+        .forward(&tokens);
+    let logits_b = CudaModel::from_model(&b)
+        .expect("CUDA model B")
+        .forward(&tokens);
+    let e = rel_err(&logits_a, &logits_b);
+    assert!(
+        e < 1e-4,
+        "resumed optimizer diverged from uninterrupted step: rel_err {e}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
