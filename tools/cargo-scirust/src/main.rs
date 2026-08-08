@@ -66,6 +66,17 @@ fn real_main() -> AppResult<()> {
         return Ok(());
     };
 
+    // Help must never require a valid Git repository/workspace. In particular,
+    // `affected --help` is a terminal action rather than an analysis request.
+    if command == "affected"
+        && args[1..]
+            .iter()
+            .any(|arg| matches!(arg.as_str(), "-h" | "--help"))
+    {
+        println!("cargo scirust affected [--base REF] [--head REF] [--json]");
+        return Ok(());
+    }
+
     match command {
         "help" | "-h" | "--help" => {
             print_help();
