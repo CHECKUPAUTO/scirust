@@ -55,11 +55,9 @@ concurrency:
 jobs:
   native-arm64:
     name: Native ARM64 (Jetson Thor)
-
     if: >
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
-
     runs-on:
       - self-hosted
       - Linux
@@ -67,19 +65,15 @@ jobs:
       - scirust-arm64
       - jetson-thor
       - internal
-
     timeout-minutes: 120
-
     env:
       RUST_BACKTRACE: 1
       CARGO_INCREMENTAL: 0
       RUSTFLAGS: "-D warnings"
       SCIRUST_THOR_GPU_LOCK: /tmp/scirust-thor-gpu.lock
-
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-
       - name: Display native runner information
         run: |
           uname -a
@@ -87,59 +81,76 @@ jobs:
           nproc
           free -h
           rustc --version 2>/dev/null || true
-
       - name: Prepare executable temporary directory
         run: |
           tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.ci-tmp.XXXXXX")"
           chmod 700 "$tmpdir"
           echo "TMPDIR=$tmpdir" >> "$GITHUB_ENV"
-
       - name: Install pinned nightly toolchain
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
-
       - name: Pin Cargo bin directory for self-hosted steps
         run: echo "$(dirname "$(rustup which cargo --toolchain nightly-2026-07-02)")" >> "$GITHUB_PATH"
-
       - name: Restore Cargo cache
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
         with:
           shared-key: native-arm64-jetson-thor
-
       - name: Check formatting
         run: cargo fmt --all -- --check
-
       - name: Test fractional calculus
         run: cargo test -p scirust-fractional
-
       - name: Test relativity and geodesics
         run: cargo test -p scirust-relativity
-
       - name: Test experimental nonlocal relativity
         run: cargo test -p scirust-nonlocal-relativity
-
       - name: Detect exposed CUDA device
         id: cuda-device
         shell: bash
         run: |
-          if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
+          set -euo pipefail
+          if ! command -v nvidia-smi >/dev/null 2>&1 || ! nvidia-smi -L >/dev/null 2>&1; then
             echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "reason=runtime-unexposed" >> "$GITHUB_OUTPUT"
             echo "This ARM64 runner does not expose a CUDA device; native CPU/ARM64 checks remain active."
+            exit 0
           fi
 
+          if compute_apps="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null)" \
+            && [[ -n "${compute_apps//[[:space:]]/}" ]]; then
+            managed_training=true
+            while IFS=',' read -r raw_pid process_name; do
+              pid="$(printf '%s' "$raw_pid" | tr -d '[:space:]')"
+              [[ "$pid" =~ ^[0-9]+$ ]] || { managed_training=false; continue; }
+              cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
+              cwd="$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)"
+              stderr_target="$(readlink -f "/proc/$pid/fd/2" 2>/dev/null || true)"
+              if [[ "$cmdline" != *"/root/scirust/target/release/examples/cuda_pretrain"* ]] \
+                || [[ "$cwd" != /root/scirust-sciagent-prod-* ]] \
+                || [[ "$stderr_target" != /root/sciagent-production/*/train-*.log ]]; then
+                managed_training=false
+              fi
+            done <<< "$compute_apps"
+            if [[ "$managed_training" == true ]]; then
+              echo "available=false" >> "$GITHUB_OUTPUT"
+              echo "reason=managed-production-training" >> "$GITHUB_OUTPUT"
+              echo "::notice::Native ARM64 CUDA execution deferred because the managed SciAgent production training owns the GPU."
+              exit 0
+            fi
+          fi
+
+          echo "available=true" >> "$GITHUB_OUTPUT"
+          echo "reason=ready" >> "$GITHUB_OUTPUT"
       - name: Report the CUDA device and libraries
         if: steps.cuda-device.outputs.available == 'true'
         run: |
           nvidia-smi
-          nvidia-smi --query-gpu=name,driver_version,compute_cap,memory.total \
-            --format=csv,noheader
-          ldconfig -p | grep -E 'libcuda|libnvrtc' || \
-            echo "no libcuda/libnvrtc entry in the loader cache"
-
+          nvidia-smi --query-gpu=name,driver_version,compute_cap,memory.total --format=csv,noheader
+          ldconfig -p | grep -E 'libcuda|libnvrtc' || echo "no libcuda/libnvrtc entry in the loader cache"
+      - name: Report deferred CUDA execution
+        if: steps.cuda-device.outputs.available != 'true'
+        run: echo "Native ARM64 CUDA runtime execution deferred: ${{ steps.cuda-device.outputs.reason }}"
       - name: Test the canonical Reference kernels on CUDA
         if: steps.cuda-device.outputs.available == 'true'
         env:
@@ -150,9 +161,7 @@ jobs:
           command -v flock >/dev/null
           exec 9>"$SCIRUST_THOR_GPU_LOCK"
           flock -x 9
-          cargo test -p scirust-gpu --features cuda --test cuda_reference \
-            -- --nocapture
-
+          cargo test -p scirust-gpu --features cuda --test cuda_reference -- --nocapture
       - name: Test the canonical facade on CUDA
         if: steps.cuda-device.outputs.available == 'true'
         env:
@@ -162,9 +171,7 @@ jobs:
           set -euo pipefail
           exec 9>"$SCIRUST_THOR_GPU_LOCK"
           flock -x 9
-          cargo test -p scirust --features tensor-canonical-cuda \
-            --test canonical_tensor_cuda -- --nocapture
-
+          cargo test -p scirust --features tensor-canonical-cuda --test canonical_tensor_cuda -- --nocapture
       - name: Test the CUDA raw runtime
         if: steps.cuda-device.outputs.available == 'true'
         env:
@@ -175,7 +182,6 @@ jobs:
           exec 9>"$SCIRUST_THOR_GPU_LOCK"
           flock -x 9
           cargo test -p scirust-cuda --features cuda -- --nocapture
-
       - name: Run Clippy
         run: |
           cargo clippy \
