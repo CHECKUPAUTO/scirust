@@ -1,13 +1,9 @@
 //! Exact bounded top-k sampling with one 64-lane WGPU workgroup.
 //!
-//! This is the Phase 24 parallel candidate-selection primitive. It is additive:
-//! [`crate::WgpuDeterministicSampler`] remains the production/oracle WGPU path
-//! until benchmark evidence justifies integration.
-//!
-//! Only probability comparisons are parallelized. Top-p normalization, final
-//! probability summation, categorical scanning and PCG state mutation remain on
-//! lane 0 in the historical token order so floating-point accumulation order is
-//! unchanged.
+//! The Phase 24 candidate is now resident-capable so Phase 26 can integrate it
+//! into generation without exposing logits to the host. Floating-point
+//! accumulation and PCG mutation remain serialized on lane 0 to preserve exact
+//! seeded behavior.
 
 use core::fmt;
 
@@ -139,8 +135,6 @@ fn main(@builtin(local_invocation_index) lane: u32) {
     let top_p = bitcast<f32>(sampling_state.top_p_bits);
     let order_offset = vocab_size;
 
-    // Max reduction is comparison-only, so parallel evaluation cannot change
-    // floating-point accumulation order. All barriers are unconditional.
     var local_max = -3.402823466e+38;
     if (running) {
         for (var token = lane; token < vocab_size; token = token + LANES) {
@@ -173,8 +167,6 @@ fn main(@builtin(local_invocation_index) lane: u32) {
     }
     workgroupBarrier();
 
-    // TOP_K is specialized into the shader source by the Rust constructor, so
-    // every lane executes the exact same fixed number of barriers.
     for (var rank: u32 = 0u; rank < TOP_K; rank = rank + 1u) {
         var local_position = vocab_size;
         var local_id = vocab_size;
@@ -241,7 +233,6 @@ fn main(@builtin(local_invocation_index) lane: u32) {
     }
     workgroupBarrier();
 
-    // Preserve the scalar accumulation and PCG order exactly.
     if (lane == 0u && running) {
         if (top_p < 1.0) {
             var total = 0.0;
@@ -292,7 +283,8 @@ fn main(@builtin(local_invocation_index) lane: u32) {
 }
 "#;
 
-/// Additive Phase 24 exact parallel bounded-top-k sampler.
+/// Exact parallel bounded-top-k sampler with resident buffer access for the
+/// sampled MiniLLM generation pipeline.
 pub struct WgpuParallelTopKSampler {
     adapter: WgpuComputeAdapter,
     logits: WgpuComputeBuffer,
@@ -442,19 +434,10 @@ impl WgpuParallelTopKSampler {
 
         self.adapter
             .write(&self.logits, 0, bytemuck::cast_slice(logits))?;
-        let event = self.launch()?;
-        self.adapter.wait(&event)?;
-
-        let mut output_id = [0u32; 1];
-        self.adapter.read(
-            &self.state,
-            8 * U32_BYTES,
-            bytemuck::cast_slice_mut(&mut output_id),
-        )?;
-        self.draws = self.draws.saturating_add(1);
-        Ok(output_id[0] as usize)
+        self.sample_resident()
     }
 
+    /// Restore the exact seeded PCG state without reallocating WGPU buffers.
     pub fn reset(&mut self) -> Result<(), WgpuDeterministicSamplerError> {
         let words = [
             self.initial_state as u32,
@@ -471,14 +454,52 @@ impl WgpuParallelTopKSampler {
         Ok(())
     }
 
+    pub(crate) fn logits_buffer(&self) -> &WgpuComputeBuffer {
+        &self.logits
+    }
+
+    pub(crate) fn state_buffer(&self) -> &WgpuComputeBuffer {
+        &self.state
+    }
+
+    pub(crate) fn launch_resident_without_readback(
+        &self,
+    ) -> Result<(), WgpuDeterministicSamplerError> {
+        self.launch()?;
+        Ok(())
+    }
+
+    pub(crate) fn set_enabled(&self, enabled: bool) -> Result<(), WgpuDeterministicSamplerError> {
+        let word = [u32::from(enabled)];
+        self.adapter
+            .write(&self.state, 10 * U32_BYTES, bytemuck::cast_slice(&word))?;
+        Ok(())
+    }
+
+    pub(crate) fn sync_host_draws(&mut self, draws: usize) {
+        self.draws = draws;
+    }
+
+    pub(crate) fn sample_resident(&mut self) -> Result<usize, WgpuDeterministicSamplerError> {
+        let event = self.launch()?;
+        self.adapter.wait(&event)?;
+
+        let mut output_id = [0u32; 1];
+        self.adapter.read(
+            &self.state,
+            8 * U32_BYTES,
+            bytemuck::cast_slice_mut(&mut output_id),
+        )?;
+        self.draws = self.draws.saturating_add(1);
+        Ok(output_id[0] as usize)
+    }
+
     fn launch(&self) -> Result<WgpuComputeEvent, WgpuDeterministicSamplerError> {
         let bindings = [
             binding(0, &self.logits, BufferAccess::ReadOnly),
             binding(1, &self.scratch, BufferAccess::ReadWrite),
             binding(2, &self.state, BufferAccess::ReadWrite),
         ];
-        // The shader encodes @workgroup_size(64); one dispatch group therefore
-        // launches exactly one 64-lane workgroup.
         let config = LaunchConfig::new([1, 1, 1], [1, 1, 1], 0)?;
         Ok(self
             .adapter

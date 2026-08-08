@@ -1,9 +1,9 @@
 //! Seeded sampled MiniLLM inference without host-visible logits.
 //!
-//! This wrapper reuses the Phase 18 resident MiniLLM and the Phase 19
-//! deterministic sampler on the same WGPU context. The LM head writes logits
-//! directly into the sampler's resident logits buffer. Prompt tokens can be
-//! ingested without consuming RNG state, matching `generate_ids_cached_sampled`.
+//! This wrapper reuses the resident MiniLLM and deterministic WGPU samplers on
+//! the same context. Phase 26 promotes the exact 64-lane bounded-top-k sampler
+//! for eligible configurations while retaining the historical sequential
+//! sampler as the deterministic fallback.
 
 mod device_feedback;
 pub use device_feedback::{
@@ -15,8 +15,9 @@ use core::fmt;
 
 use super::{U32_BYTES, WgpuResidentMiniLlm, WgpuResidentMiniLlmError};
 use crate::{
-    WgpuComputeEvent, WgpuComputeKernel, WgpuDeterministicSampler, WgpuDeterministicSamplerError,
-    WgpuLatentLayerBasis,
+    PARALLEL_TOP_K_LANES, PARALLEL_TOP_K_MAX, WgpuComputeBuffer, WgpuComputeEvent,
+    WgpuComputeKernel, WgpuDeterministicSampler, WgpuDeterministicSamplerError,
+    WgpuDeterministicSamplerTelemetry, WgpuLatentLayerBasis, WgpuParallelTopKSampler,
 };
 use scirust_compute::{
     BufferAccess, BufferBinding, ComputeBackend, ComputeError, KernelFormat, KernelModule,
@@ -154,10 +155,112 @@ pub struct WgpuResidentSampledMiniLlmTelemetry {
     pub sample_ready: bool,
 }
 
+enum ResidentSampler {
+    Sequential(WgpuDeterministicSampler),
+    Parallel(WgpuParallelTopKSampler),
+}
+
+impl ResidentSampler {
+    fn select(
+        context: crate::WgpuContext,
+        vocab_size: usize,
+        sampling: SamplingConfig,
+        seed: u64,
+        max_workgroup_size_x: u32,
+    ) -> Result<Self, WgpuDeterministicSamplerError> {
+        let parallel_eligible = sampling.temperature > 0.0
+            && sampling.top_k >= 2
+            && sampling.top_k < vocab_size
+            && sampling.top_k <= PARALLEL_TOP_K_MAX
+            && max_workgroup_size_x >= PARALLEL_TOP_K_LANES as u32;
+
+        if parallel_eligible
+        {
+            Ok(Self::Parallel(WgpuParallelTopKSampler::from_context(
+                context, vocab_size, sampling, seed,
+            )?))
+        }
+        else
+        {
+            Ok(Self::Sequential(WgpuDeterministicSampler::from_context(
+                context, vocab_size, sampling, seed,
+            )?))
+        }
+    }
+
+    fn telemetry(&self) -> WgpuDeterministicSamplerTelemetry {
+        match self
+        {
+            Self::Sequential(sampler) => sampler.telemetry(),
+            Self::Parallel(sampler) => sampler.telemetry(),
+        }
+    }
+
+    fn is_parallel(&self) -> bool {
+        matches!(self, Self::Parallel(_))
+    }
+
+    fn logits_buffer(&self) -> &WgpuComputeBuffer {
+        match self
+        {
+            Self::Sequential(sampler) => sampler.logits_buffer(),
+            Self::Parallel(sampler) => sampler.logits_buffer(),
+        }
+    }
+
+    fn state_buffer(&self) -> &WgpuComputeBuffer {
+        match self
+        {
+            Self::Sequential(sampler) => sampler.state_buffer(),
+            Self::Parallel(sampler) => sampler.state_buffer(),
+        }
+    }
+
+    fn launch_resident_without_readback(&self) -> Result<(), WgpuDeterministicSamplerError> {
+        match self
+        {
+            Self::Sequential(sampler) => sampler.launch_resident_without_readback(),
+            Self::Parallel(sampler) => sampler.launch_resident_without_readback(),
+        }
+    }
+
+    fn set_enabled(&self, enabled: bool) -> Result<(), WgpuDeterministicSamplerError> {
+        match self
+        {
+            Self::Sequential(sampler) => sampler.set_enabled(enabled),
+            Self::Parallel(sampler) => sampler.set_enabled(enabled),
+        }
+    }
+
+    fn sync_host_draws(&mut self, draws: usize) {
+        match self
+        {
+            Self::Sequential(sampler) => sampler.sync_host_draws(draws),
+            Self::Parallel(sampler) => sampler.sync_host_draws(draws),
+        }
+    }
+
+    fn sample_resident(&mut self) -> Result<usize, WgpuDeterministicSamplerError> {
+        match self
+        {
+            Self::Sequential(sampler) => sampler.sample_resident(),
+            Self::Parallel(sampler) => sampler.sample_resident(),
+        }
+    }
+
+    fn reset(&mut self) -> Result<(), WgpuDeterministicSamplerError> {
+        match self
+        {
+            Self::Sequential(sampler) => sampler.reset(),
+            Self::Parallel(sampler) => sampler.reset(),
+        }
+    }
+}
+
 /// Seeded sampled MiniLLM runtime with logits and RNG state resident on WGPU.
 pub struct WgpuResidentSampledMiniLlm {
     inner: WgpuResidentMiniLlm,
-    sampler: WgpuDeterministicSampler,
+    sampler: ResidentSampler,
     logits_kernel: WgpuComputeKernel,
     sample_ready: bool,
     resident_bytes: usize,
@@ -174,8 +277,10 @@ impl WgpuResidentSampledMiniLlm {
     ) -> Result<Self, WgpuResidentSampledMiniLlmError> {
         let vocab_size = snapshot.config.vocab_size;
         let inner = WgpuResidentMiniLlm::new(snapshot, capacity, rank, layers)?;
+        let max_workgroup_size_x = inner.encoder.adapter.capabilities().max_workgroup_size[0];
         let context = inner.encoder.adapter.context().clone();
-        let sampler = WgpuDeterministicSampler::from_context(context, vocab_size, sampling, seed)?;
+        let sampler =
+            ResidentSampler::select(context, vocab_size, sampling, seed, max_workgroup_size_x)?;
         let module =
             KernelModule::new(KernelFormat::Wgsl, "main", LOGITS_WGSL.as_bytes().to_vec())?;
         let logits_kernel = inner.encoder.adapter.compile(&module)?;
@@ -214,9 +319,12 @@ impl WgpuResidentSampledMiniLlm {
         }
     }
 
-    /// Ingest one token and materialise its next-token logits on WGPU without
-    /// consuming the sampling RNG. This is used to prime prompt tokens exactly
-    /// like the CPU cached sampled path.
+    /// Whether Phase 26 selected the exact 64-lane bounded-top-k sampler.
+    #[must_use]
+    pub fn uses_parallel_sampler(&self) -> bool {
+        self.sampler.is_parallel()
+    }
+
     pub fn ingest_at(
         &mut self,
         token_id: usize,
@@ -254,8 +362,6 @@ impl WgpuResidentSampledMiniLlm {
         Ok(())
     }
 
-    /// Consume exactly one RNG draw from the current resident logits and return
-    /// the sampled token id. A second draw requires ingesting another token.
     pub fn sample_next(&mut self) -> Result<usize, WgpuResidentSampledMiniLlmError> {
         if !self.sample_ready
         {
@@ -266,8 +372,6 @@ impl WgpuResidentSampledMiniLlm {
         Ok(token)
     }
 
-    /// Convenience operation for one generated token step: ingest input token,
-    /// then sample exactly once from its resident logits.
     pub fn step_sample_at(
         &mut self,
         token_id: usize,
