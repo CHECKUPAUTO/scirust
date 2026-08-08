@@ -1,0 +1,46 @@
+name: SciAgent WGPU diagnostic
+
+on:
+  push:
+    branches:
+      - perf/sciagent-b39-thor-production-bench
+    paths:
+      - .github/workflows/sciagent-wgpu-diagnostic.yml
+
+permissions:
+  contents: write
+
+jobs:
+  wgpu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: perf/sciagent-b39-thor-production-bench
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+      - name: Install software Vulkan
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mesa-vulkan-drivers libvulkan1 vulkan-tools
+      - name: Run SciAgent WGPU parity and capture log
+        shell: bash
+        run: |
+          set +e
+          mkdir -p ci-diagnostics
+          cargo test -p scirust-sciagent --features gpu --test gpu_parity -- --nocapture \
+            > ci-diagnostics/wgpu.log 2>&1
+          rc=$?
+          printf '%s\n' "$rc" > ci-diagnostics/wgpu.exit
+          tail -n 120 ci-diagnostics/wgpu.log
+          exit 0
+      - name: Publish diagnostic result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rc="$(cat ci-diagnostics/wgpu.exit)"
+          git add ci-diagnostics/wgpu.log ci-diagnostics/wgpu.exit
+          git commit -m "ci(sciagent): WGPU diagnostic exit=$rc"
+          git push origin HEAD:perf/sciagent-b39-thor-production-bench
