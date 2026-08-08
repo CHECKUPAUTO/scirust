@@ -58,10 +58,7 @@ fn linux_online_cpu_ids() -> Option<BTreeSet<u32>> {
 }
 
 #[cfg(target_os = "linux")]
-fn topology_has_cpu_outside_online_set(
-    topology: &SystemTopology,
-    online: &BTreeSet<u32>,
-) -> bool {
+fn topology_has_cpu_outside_online_set(topology: &SystemTopology, online: &BTreeSet<u32>) -> bool {
     topology
         .nodes
         .iter()
