@@ -14,7 +14,6 @@ on:
       - "scirust-compute/**"
       - "scirust-cuda/**"
       - "scirust-gpu/**"
-      - "scirust-sciagent/**"
       - "scirust-tensor-compile/**"
       - "scirust-tensor-core/**"
       - "scirust-tensor-ir/**"
@@ -36,7 +35,6 @@ on:
       - "scirust-compute/**"
       - "scirust-cuda/**"
       - "scirust-gpu/**"
-      - "scirust-sciagent/**"
       - "scirust-tensor-compile/**"
       - "scirust-tensor-core/**"
       - "scirust-tensor-ir/**"
@@ -48,7 +46,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: native-arm64-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -81,36 +79,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
-          fetch-depth: 0
-
-      # BEGIN SCIAGENT B43 ONE-SHOT AUTOFIX
-      - name: Install nightly for B43 one-shot
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'perf/sciagent-b39-thor-production-bench'
-        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
-        with:
-          toolchain: nightly-2026-07-02
-          components: rustfmt
-
-      - name: Apply validated SCIAGENT B40-B43 corrections once (retry 5)
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'perf/sciagent-b39-thor-production-bench'
-        run: |
-          python3 scripts/sciagent_b43_autofix.py
-          cargo +nightly-2026-07-02 fmt --all
-          # The runner token has contents:write but GitHub intentionally forbids it
-          # from changing workflow files. Keep workflow cleanup for the authenticated
-          # repository connector and push only production code/docs from this step.
-          git restore -- .github/workflows
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git diff --cached --check
-          if ! git diff --cached --quiet; then
-            git commit -m "perf(sciagent): finalize exact resume and GQA v2 semantics"
-            git push origin HEAD:perf/sciagent-b39-thor-production-bench
-          fi
-      # END SCIAGENT B43 ONE-SHOT AUTOFIX
 
       - name: Display native runner information
         run: |
@@ -149,6 +117,15 @@ jobs:
       - name: Test experimental nonlocal relativity
         run: cargo test -p scirust-nonlocal-relativity
 
+      # -------------------------------------------------------------------
+      # Real CUDA execution. This runner is the only place in the project
+      # where a CUDA device exists, so it is the only place the canonical
+      # CUDA path can be proved rather than merely compiled.
+      # -------------------------------------------------------------------
+
+      # Diagnostic only. This step never gates anything and no Rust code reads
+      # it: it exists so a failure below can be read against what the machine
+      # actually carried. The proof is the test steps, not this output.
       - name: Report the CUDA device and libraries
         continue-on-error: true
         run: |
@@ -158,6 +135,17 @@ jobs:
           ldconfig -p | grep -E 'libcuda|libnvrtc' || \
             echo "no libcuda/libnvrtc entry in the loader cache"
 
+      # `SCIRUST_REQUIRE_CUDA=1` turns "no device, so skip" into a hard
+      # failure. Without it a machine with no driver would report a green
+      # run having executed nothing at all — which is exactly the kind of
+      # silent pass this job exists to prevent. The job therefore fails if
+      # the driver or a device is missing, if no test actually ran, if a
+      # kernel does not launch, if the readback is wrong, or if a result
+      # disagrees with the CPU reference.
+      #
+      # A missing NVRTC is not part of that variable's job and needs no
+      # special handling: the tests compile kernels for real, so an unusable
+      # runtime compiler fails them on its own.
       - name: Test the canonical Reference kernels on CUDA
         env:
           SCIRUST_REQUIRE_CUDA: "1"
@@ -177,24 +165,6 @@ jobs:
           SCIRUST_REQUIRE_CUDA: "1"
         run: cargo test -p scirust-cuda --features cuda -- --nocapture
 
-      - name: Test SCIAGENT Route-B CUDA parity on Thor
-        env:
-          SCIRUST_REQUIRE_CUDA: "1"
-        run: |
-          cargo test -p scirust-sciagent --features cuda --test cuda_parity \
-            -- --nocapture
-
-      - name: Benchmark SCIAGENT 304M production path on Thor
-        env:
-          SCIAGENT_BENCH_BATCHES: "1,2,4,8"
-          SCIAGENT_BENCH_SEQ: "512"
-          SCIAGENT_BENCH_STEPS: "4"
-          SCIAGENT_BENCH_PROMPT: "128"
-          SCIAGENT_BENCH_DECODE_NEW: "8"
-        run: |
-          cargo run -p scirust-sciagent --features cuda --release \
-            --example cuda_production_bench
-
       - name: Run Clippy
         run: |
           cargo clippy \
@@ -206,5 +176,4 @@ jobs:
             -D warnings
           cargo clippy -p scirust-cuda --features cuda --all-targets -- -D warnings
           cargo clippy -p scirust-gpu --features cuda --all-targets -- -D warnings
-          cargo clippy -p scirust-sciagent --features cuda --all-targets -- -D warnings
           cargo clippy -p scirust --features tensor-canonical-cuda --all-targets -- -D warnings
