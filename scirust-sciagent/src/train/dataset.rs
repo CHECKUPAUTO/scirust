@@ -283,6 +283,63 @@ pub fn content_hash(content: &str) -> u64 {
     h
 }
 
+/// Version of the deterministic train/validation window split. Persisted in exact
+/// optimizer sidecars so a future split-policy change cannot silently resume a run
+/// on a different data trajectory.
+pub const WINDOW_SPLIT_VERSION: u32 = 1;
+
+fn splitmix64(mut x: u64) -> u64 {
+    x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    x ^ (x >> 31)
+}
+
+/// Deterministically partition non-overlapping `seq_len` windows across the entire
+/// token stream. Validation windows are selected by hash, not by corpus position, so
+/// a sorted crates.io corpus cannot turn the held-out set into an alphabetic tail.
+/// Returned values are token start offsets. Validation starts are independently
+/// hash-ordered so a bounded eval sample spans the whole corpus rather than its head.
+pub fn distributed_window_split(
+    token_len: usize,
+    seq_len: usize,
+    val_frac: f32,
+) -> (Vec<usize>, Vec<usize>) {
+    if seq_len == 0 || token_len <= seq_len
+    {
+        return (Vec::new(), Vec::new());
+    }
+    let n_windows = token_len.saturating_sub(1) / seq_len;
+    let frac = val_frac.clamp(0.0, 0.5) as f64;
+    let threshold = (frac * u64::MAX as f64) as u64;
+    let mut train = Vec::with_capacity(n_windows);
+    let mut val = Vec::with_capacity(((n_windows as f64) * frac) as usize + 1);
+    for i in 0..n_windows
+    {
+        let h = splitmix64((i as u64) ^ 0x5641_4C5F_5350_4C49);
+        if frac > 0.0 && h <= threshold
+        {
+            val.push(i * seq_len);
+        }
+        else
+        {
+            train.push(i * seq_len);
+        }
+    }
+    // Tiny test corpora can hash to an empty side. Keep the contract usable while
+    // preserving disjointness; production corpora have millions of windows.
+    if train.is_empty() && !val.is_empty()
+    {
+        train.push(val.pop().expect("non-empty val"));
+    }
+    if frac > 0.0 && val.is_empty() && train.len() > 1
+    {
+        val.push(train.pop().expect("non-empty train"));
+    }
+    val.sort_by_key(|&start| splitmix64((start / seq_len) as u64 ^ 0x4556_414C_4F52_4445));
+    (train, val)
+}
+
 /// Deterministic FNV-1a fingerprint of a token stream, hashing each u32 in
 /// little-endian byte order. Used to fail closed when an exact optimizer/data resume
 /// points at a different corpus than the checkpoint was trained on.
@@ -510,5 +567,20 @@ mod tests {
             source_quality("data.rs", &nums).is_err(),
             "numeric data table"
         );
+    }
+
+    #[test]
+    fn distributed_split_is_deterministic_disjoint_and_spread() {
+        let (train1, val1) = distributed_window_split(100_001, 100, 0.10);
+        let (train2, val2) = distributed_window_split(100_001, 100, 0.10);
+        assert_eq!(train1, train2);
+        assert_eq!(val1, val2);
+        assert!(!train1.is_empty() && !val1.is_empty());
+        let train_set: std::collections::HashSet<_> = train1.iter().copied().collect();
+        assert!(val1.iter().all(|v| !train_set.contains(v)));
+        assert!(val1.iter().all(|v| v % 100 == 0));
+        // Hash-ordering means the first bounded eval windows are not just a prefix.
+        let first_ten = &val1[..10.min(val1.len())];
+        assert!(first_ten.iter().copied().max().unwrap_or(0) > 20_000);
     }
 }

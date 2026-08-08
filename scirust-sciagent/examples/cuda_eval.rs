@@ -20,8 +20,8 @@
 //! Env (shares the `cuda_generate` knobs):
 //! - `SCIAGENT_CKPT` — a checkpoint dir (`step_N/`, or a parent holding `step_*`).
 //! - `SCIAGENT_TOKENIZER` — BPE tokenizer json (required for a non-byte vocab).
-//! - `SCIAGENT_SHARDS` / `SCIAGENT_TEXT` — held-out corpus for the exact val loss +
-//!   nats/char (tail `SCIAGENT_VAL_FRAC`, default 2%). Omit to report train-only.
+//! - `SCIAGENT_SHARDS` / `SCIAGENT_TEXT` — corpus for the same deterministic,
+//!   distributed window holdout used by pretraining (`SCIAGENT_VAL_FRAC`, default 2%).
 //! - `SCIAGENT_SAMPLES` (32), `SCIAGENT_MAX_NEW` (256), `SCIAGENT_SEED` (0 base),
 //!   `SCIAGENT_PROMPT` (`fn `), `SCIAGENT_TEMP` (0.8), `SCIAGENT_TOP_K` (0),
 //!   `SCIAGENT_TOP_P` (0.95), `SCIAGENT_REP_PENALTY` (1.1), `SCIAGENT_REP_WINDOW` (64).
@@ -45,7 +45,7 @@ use scirust_sciagent::cuda_model::CudaModel;
 use scirust_sciagent::generate::SamplingParams;
 use scirust_sciagent::model::SciAgentModel;
 use scirust_sciagent::train::checkpoint::{latest_checkpoint, load_checkpoint, read_meta};
-use scirust_sciagent::train::dataset::ShardLoader;
+use scirust_sciagent::train::dataset::{ShardLoader, distributed_window_split};
 
 fn env_usize(key: &str, default: usize) -> usize {
     std::env::var(key)
@@ -187,14 +187,6 @@ fn rustc_compiles(src: &str, idx: usize) -> Option<bool> {
     }
 }
 
-/// Tail `frac` of `tokens` as the held-out split (matches the pretrain val split).
-fn tail_split(tokens: &[u32], frac: f32) -> &[u32] {
-    let n = tokens.len();
-    let val = ((n as f32) * frac).round() as usize;
-    let val = val.clamp(0, n);
-    &tokens[n - val..]
-}
-
 fn main() {
     let ckpt = match std::env::var("SCIAGENT_CKPT")
     {
@@ -252,12 +244,12 @@ fn main() {
     let val_frac = env_f32("SCIAGENT_VAL_FRAC", 0.02);
     let eval_seq = env_usize("SCIAGENT_EVAL_SEQ", 256).min(meta.config.max_seq_len);
     let eval_windows = env_usize("SCIAGENT_EVAL_WINDOWS", 64);
-    let val_tokens: Option<Vec<u32>> = if let Ok(sd) = std::env::var("SCIAGENT_SHARDS")
+    let corpus_tokens: Option<Vec<u32>> = if let Ok(sd) = std::env::var("SCIAGENT_SHARDS")
     {
         let mut loader = ShardLoader::new();
         match loader.load_dir(&sd)
         {
-            Ok(_) => Some(tail_split(loader.tokens(), val_frac).to_vec()),
+            Ok(_) => Some(loader.into_tokens()),
             Err(e) =>
             {
                 eprintln!("could not load shards from {sd}: {e} — skipping val metrics");
@@ -269,9 +261,7 @@ fn main() {
     {
         match std::fs::read(&text)
         {
-            Ok(b) => Some(
-                tail_split(&b.iter().map(|&x| x as u32).collect::<Vec<_>>(), val_frac).to_vec(),
-            ),
+            Ok(b) => Some(b.into_iter().map(u32::from).collect()),
             Err(e) =>
             {
                 eprintln!("could not read {text}: {e} — skipping val metrics");
@@ -284,31 +274,43 @@ fn main() {
         None
     };
 
-    if let Some(val) = &val_tokens
+    if let Some(corpus) = &corpus_tokens
     {
-        let val_loss = cm.eval_loss(val, eval_seq, eval_windows);
-        // chars/token: decode the whole val stream and count Unicode scalar values.
-        // (For a BPE token, decode(&[id]) returns its text — specials/placeholders
-        // contribute 0 chars; for a byte model each token is one byte.)
+        let (_, val_starts) = distributed_window_split(corpus.len(), eval_seq, val_frac);
+        let selected: Vec<usize> = val_starts
+            .iter()
+            .copied()
+            .take(eval_windows.max(1))
+            .collect();
+        let val_loss = cm.eval_loss_windows(corpus, eval_seq, &selected, eval_windows);
+        let mut metric_tokens = Vec::with_capacity(selected.len() * eval_seq);
+        for &start in &selected
+        {
+            if start + eval_seq <= corpus.len()
+            {
+                metric_tokens.extend_from_slice(&corpus[start..start + eval_seq]);
+            }
+        }
+        // chars/token is measured over the exact distributed windows used for CE.
         let total_chars: usize = match &tokenizer
         {
-            Some(tok) => val
+            Some(tok) => metric_tokens
                 .iter()
                 .map(|&t| tok.decode(&[t as usize]).chars().count())
                 .sum(),
             None =>
             {
-                let bytes: Vec<u8> = val.iter().map(|&t| t as u8).collect();
+                let bytes: Vec<u8> = metric_tokens.iter().map(|&t| t as u8).collect();
                 String::from_utf8_lossy(&bytes).chars().count()
             },
         };
-        let chars_per_token = if val.is_empty()
+        let chars_per_token = if metric_tokens.is_empty()
         {
             0.0
         }
         else
         {
-            total_chars as f32 / val.len() as f32
+            total_chars as f32 / metric_tokens.len() as f32
         };
         let nats_per_char = if chars_per_token > 0.0
         {
@@ -319,13 +321,13 @@ fn main() {
             f32::NAN
         };
         println!(
-            "val   loss (held-out {:.0}% tail): {val_loss:.4} nats/token   (perplexity {:.2})",
+            "val   loss (distributed {:.0}% windows): {val_loss:.4} nats/token   (perplexity {:.2})",
             val_frac * 100.0,
             val_loss.exp()
         );
         println!(
             "chars/token {chars_per_token:.3}  →  nats/char {nats_per_char:.4}  ({} val tokens, {eval_windows} windows × {eval_seq})",
-            val.len()
+            metric_tokens.len()
         );
         let gap = val_loss - train_loss;
         println!(
@@ -426,7 +428,7 @@ fn main() {
     for i in 0..n_samples
     {
         let seed = base_seed + i as u64;
-        let out = cm.generate(&prompt, max_new, &params, seed);
+        let out = cm.generate_cached(&prompt, max_new, &params, seed);
         let generated = &out[prompt.len().min(out.len())..];
 
         // Raw generated bytes → valid UTF-8? For BPE the decoded String is UTF-8 by
