@@ -9,8 +9,9 @@ use core::fmt;
 
 mod sampled;
 pub use sampled::{
-    WgpuResidentSampledMiniLlm, WgpuResidentSampledMiniLlmError,
-    WgpuResidentSampledMiniLlmTelemetry,
+    WgpuResidentDeviceFeedbackMiniLlm, WgpuResidentDeviceFeedbackMiniLlmError,
+    WgpuResidentDeviceFeedbackMiniLlmTelemetry, WgpuResidentSampledMiniLlm,
+    WgpuResidentSampledMiniLlmError, WgpuResidentSampledMiniLlmTelemetry,
 };
 
 use super::{
@@ -45,6 +46,10 @@ struct MiniState {
 
 @compute @workgroup_size(1)
 fn main() {
+    if (mini._pad0 == 2u) {
+        return;
+    }
+
     let d_model = mini.d_model;
     let token_base = mini.token_id * d_model;
     let position = f32(mini.position);
