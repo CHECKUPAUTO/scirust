@@ -44,7 +44,8 @@ jobs:
         shell: bash
         run: |
           tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.phase29-ci.XXXXXX")"
-          mkdir -p "$tmpdir/cargo" "$tmpdir/rustup" "$tmpdir/target"
+          mkdir -p "$tmpdir/cargo" "$tmpdir/rustup" "$tmpdir/target" "$tmpdir/tmp"
+          echo "TMPDIR=$tmpdir/tmp" >> "$GITHUB_ENV"
           echo "CARGO_HOME=$tmpdir/cargo" >> "$GITHUB_ENV"
           echo "RUSTUP_HOME=$tmpdir/rustup" >> "$GITHUB_ENV"
           echo "CARGO_TARGET_DIR=$tmpdir/target" >> "$GITHUB_ENV"
