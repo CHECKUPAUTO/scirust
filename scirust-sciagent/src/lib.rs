@@ -11,6 +11,7 @@ pub mod corpus_paths;
 pub mod cuda_decode;
 #[cfg(feature = "cuda")]
 pub mod cuda_model;
+pub mod elastic_decode_plan;
 pub mod flash_attention;
 pub mod generate;
 #[cfg(feature = "gpu")]
