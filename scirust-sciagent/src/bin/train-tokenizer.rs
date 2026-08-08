@@ -7,14 +7,17 @@ use scirust_sciagent::bpe::BpeTrainer;
 use scirust_sciagent::train::dataset::{
     content_hash, matches_extension, parse_extensions, skip_source_dir, source_quality,
 };
-use scirust_sciagent::{ElasticProfile, ElasticTextTokenizer, ElasticThresholds};
+use scirust_sciagent::{
+    CanonicalBpeTrainer, ElasticProfile, ElasticTextTokenizer, ElasticThresholds,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 enum MergeSemanticsArg {
     /// Historical repeated left-to-right bulk merges. Keeps compatibility with
     /// existing SciAgent shards/checkpoints.
     LegacyParallelV1,
-    /// Canonical global rank-priority merges for ElasticTokenizer execution.
+    /// Canonical global rank-priority merges learned one pair at a time for
+    /// ElasticTokenizer execution.
     CanonicalRankV1,
 }
 
@@ -49,10 +52,11 @@ struct Args {
     #[arg(long)]
     recursive: bool,
 
-    /// Merge execution semantics to record in the new tokenizer artifact.
+    /// Merge semantics and trainer used for the new tokenizer artifact.
     ///
-    /// This does not retroactively migrate existing shards. `legacy-parallel-v1`
-    /// remains the default so existing SciAgent workflows retain their token ids.
+    /// `legacy-parallel-v1` uses the historical batched SciAgent trainer and
+    /// remains the default. `canonical-rank-v1` uses the sequential one-merge-
+    /// at-a-time trainer and produces an ElasticTokenizer artifact.
     #[arg(long, value_enum, default_value_t = MergeSemanticsArg::LegacyParallelV1)]
     merge_semantics: MergeSemanticsArg,
 
@@ -123,23 +127,40 @@ fn main() {
         skipped
     );
 
-    let trainer = BpeTrainer::new(args.vocab_size).min_frequency(args.min_frequency);
-    let tokenizer = trainer.train(&all_texts);
-
-    tokenizer
-        .save_json(&args.output)
-        .expect("Failed to save tokenizer");
-    write_merge_semantics_tag(&args.output, args.merge_semantics)
-        .expect("Failed to write tokenizer merge semantics");
-    if args.merge_semantics == MergeSemanticsArg::CanonicalRankV1
+    let vocab_size = match args.merge_semantics
     {
-        validate_canonical_artifact(&args.output)
-            .expect("Canonical tokenizer failed ElasticTokenizer validation");
-    }
+        MergeSemanticsArg::LegacyParallelV1 =>
+        {
+            let trainer = BpeTrainer::new(args.vocab_size).min_frequency(args.min_frequency);
+            let tokenizer = trainer.train(&all_texts);
+            tokenizer
+                .save_json(&args.output)
+                .expect("Failed to save legacy tokenizer");
+            write_merge_semantics_tag(&args.output, args.merge_semantics)
+                .expect("Failed to write legacy tokenizer merge semantics");
+            tokenizer.vocab_size()
+        },
+        MergeSemanticsArg::CanonicalRankV1 =>
+        {
+            let trainer = CanonicalBpeTrainer::new(args.vocab_size)
+                .expect("Canonical tokenizer vocab size is invalid")
+                .min_frequency(u64::from(args.min_frequency));
+            let artifact = trainer
+                .train(&all_texts)
+                .expect("Canonical BPE training failed");
+            artifact
+                .save_json(&args.output)
+                .expect("Failed to save canonical tokenizer");
+            validate_canonical_artifact(&args.output)
+                .expect("Canonical tokenizer failed ElasticTokenizer validation");
+            artifact.vocab_size()
+        },
+    };
+
     eprintln!(
         "Tokenizer saved to {} (vocab size: {}, merge semantics: {})",
         args.output,
-        tokenizer.vocab_size(),
+        vocab_size,
         args.merge_semantics.as_artifact_tag()
     );
 }
