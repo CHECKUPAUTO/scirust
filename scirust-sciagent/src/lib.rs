@@ -3,6 +3,7 @@ pub mod attention;
 pub mod block;
 pub mod bpe;
 pub mod bpe_dispatch;
+pub mod canonical_bpe_train;
 pub mod ccos;
 pub mod checkpointing;
 pub mod communication;
@@ -38,6 +39,9 @@ pub use attention::GQAAttention;
 pub use block::SciAgentBlock;
 pub use bpe::{BpeTokenizer, BpeTrainer};
 pub use bpe_dispatch::{BpeDispatchError, VersionedBpeTokenizer};
+pub use canonical_bpe_train::{
+    CanonicalBpeArtifact, CanonicalBpeTrainError, CanonicalBpeTrainer,
+};
 pub use ccos::CcosLog;
 pub use communication::SciAgentEndpoint;
 pub use config::SciAgentConfig;
