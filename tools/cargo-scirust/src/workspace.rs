@@ -65,7 +65,9 @@ impl Workspace {
         // the real SciRust workspace above it.
         let metadata = if first.packages.len() == 1 && first.packages[0].name == "cargo-scirust" {
             let root_manifest = find_scirust_manifest(&cwd).ok_or_else(|| {
-                AppError::message("could not locate the SciRust root Cargo.toml from this directory")
+                AppError::message(
+                    "could not locate the SciRust root Cargo.toml from this directory",
+                )
             })?;
             metadata_from(&cwd, Some(&root_manifest))?
         } else {
@@ -91,7 +93,9 @@ impl Workspace {
             let manifest = normalize_existing(Path::new(&package.manifest_path));
             let dir = manifest
                 .parent()
-                .ok_or_else(|| AppError::message("Cargo metadata returned a manifest without a parent"))?
+                .ok_or_else(|| {
+                    AppError::message("Cargo metadata returned a manifest without a parent")
+                })?
                 .to_path_buf();
             packages.push(PackageInfo {
                 id: package.id.clone(),
@@ -330,7 +334,10 @@ fn normalize_existing(path: &Path) -> PathBuf {
 
 fn root_package_owns(path: &Path) -> bool {
     let mut components = path.components();
-    match components.next().and_then(|component| component.as_os_str().to_str()) {
+    match components
+        .next()
+        .and_then(|component| component.as_os_str().to_str())
+    {
         Some("src" | "tests" | "benches" | "examples") => true,
         _ => matches!(path.file_name().and_then(OsStr::to_str), Some("build.rs")),
     }
