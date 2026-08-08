@@ -56,13 +56,10 @@ jobs:
   native-arm64:
     name: Native ARM64 (Jetson Thor)
 
-    # Never execute untrusted code from a fork on the self-hosted runner. PR #994
-    # has a stricter dedicated SCIAGENT Thor gate and must not monopolize the same
-    # single runner twice while its production benchmark is being finalized.
+    # Never execute untrusted code from a fork on the self-hosted runner.
     if: >
       github.event_name != 'pull_request' ||
-      (github.event.pull_request.head.repo.full_name == github.repository &&
-       github.event.pull_request.number != 994)
+      github.event.pull_request.head.repo.full_name == github.repository
 
     runs-on:
       - self-hosted
