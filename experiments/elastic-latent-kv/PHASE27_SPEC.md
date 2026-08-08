@@ -4,7 +4,7 @@
 
 Phase 27 follows Phase 26's promotion of the exact parallel bounded-top-k sampler. Phase 26 deliberately uses the WGPU adapter's legacy `max_workgroup_size[0]` field directly. Phase 27 removes that local hardware-policy check and routes implementation choice through an architecture-neutral compute planner layer shared across backends.
 
-The branch is initially stacked on Phase 26 so Phase 26's validated head remains frozen while this work proceeds.
+The work was originally stacked on Phase 26 while that phase was under validation. After Phase 26 merged into `master`, the Phase 27 branch was synchronized with the Phase 26 merge commit and the review was reopened directly against `master`.
 
 ## Problem
 
