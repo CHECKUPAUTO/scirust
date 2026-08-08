@@ -20,6 +20,15 @@ const PROFILE_KERNELS: [BpeKernel; 4] = [
     BpeKernel::Heap,
 ];
 
+type MedianKey = (usize, u8);
+type MedianCosts = BTreeMap<MedianKey, u64>;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AggregatedTimings {
+    lengths: Vec<usize>,
+    medians: MedianCosts,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct State {
     cost: u128,
@@ -32,7 +41,9 @@ pub struct ElasticProfileFitter;
 
 impl ElasticProfileFitter {
     pub fn fit(measurements: &[CalibrationMeasurement]) -> Result<ElasticProfile, ProfileFitError> {
-        let (lengths, medians) = aggregate_medians(measurements)?;
+        let aggregated = aggregate_medians(measurements)?;
+        let lengths = aggregated.lengths;
+        let medians = aggregated.medians;
         if lengths.len() < PROFILE_CLASSES
         {
             return Err(ProfileFitError::NotEnoughProbeLengths {
@@ -63,7 +74,8 @@ impl ElasticProfileFitter {
                     };
                     for kernel in PROFILE_KERNELS
                     {
-                        let Some(segment_cost) = segment_cost(&lengths, &medians, start, end, kernel)
+                        let Some(segment_cost) =
+                            segment_cost(&lengths, &medians, start, end, kernel)
                         else
                         {
                             continue;
@@ -127,7 +139,7 @@ impl ElasticProfileFitter {
 
 fn aggregate_medians(
     measurements: &[CalibrationMeasurement],
-) -> Result<(Vec<usize>, BTreeMap<(usize, u8), u64>), ProfileFitError> {
+) -> Result<AggregatedTimings, ProfileFitError> {
     if measurements.is_empty()
     {
         return Err(ProfileFitError::NoMeasurements);
@@ -139,18 +151,13 @@ fn aggregate_medians(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
-    let disqualified: BTreeSet<(usize, u8)> = measurements
+    let disqualified: BTreeSet<MedianKey> = measurements
         .iter()
         .filter(|measurement| !measurement.semantic_match)
-        .map(|measurement| {
-            (
-                measurement.piece_len,
-                kernel_order(measurement.kernel),
-            )
-        })
+        .map(|measurement| (measurement.piece_len, kernel_order(measurement.kernel)))
         .collect();
 
-    let mut grouped: BTreeMap<(usize, u8), Vec<u64>> = BTreeMap::new();
+    let mut grouped: BTreeMap<MedianKey, Vec<u64>> = BTreeMap::new();
     for measurement in measurements
     {
         let key = (measurement.piece_len, kernel_order(measurement.kernel));
@@ -158,7 +165,10 @@ fn aggregate_medians(
         {
             continue;
         }
-        grouped.entry(key).or_default().push(measurement.elapsed_nanos);
+        grouped
+            .entry(key)
+            .or_default()
+            .push(measurement.elapsed_nanos);
     }
 
     let mut medians = BTreeMap::new();
@@ -167,12 +177,12 @@ fn aggregate_medians(
         samples.sort_unstable();
         medians.insert(key, integer_median(&samples));
     }
-    Ok((lengths, medians))
+    Ok(AggregatedTimings { lengths, medians })
 }
 
 fn segment_cost(
     lengths: &[usize],
-    medians: &BTreeMap<(usize, u8), u64>,
+    medians: &MedianCosts,
     start: usize,
     end: usize,
     kernel: BpeKernel,
@@ -229,7 +239,8 @@ impl fmt::Display for ProfileFitError {
                 f,
                 "elastic profile fit needs at least six distinct probe lengths, found {found}"
             ),
-            Self::NoFeasibleSixClassProfile => {
+            Self::NoFeasibleSixClassProfile =>
+            {
                 f.write_str("no semantics-safe six-class elastic profile is feasible")
             },
             Self::InvalidThresholds(error) => write!(f, "invalid fitted thresholds: {error}"),
