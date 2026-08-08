@@ -452,3 +452,23 @@ Ran on the Thor: `nvcc` **13.0** lists `compute_110` (driver 580, CUDA 13.0), an
 3. **Scope:** full CUDA resident path (recommended — mixing wgpu+CUDA in one process
    is painful) vs a GEMM-only CUDA shim under the existing wgpu chain (not
    recommended).
+
+## B33 — GQA-correct head-local RoPE
+
+Audit after the throughput work found a model-level positional-encoding defect shared
+by the CPU, WGPU and CUDA paths. Q (`d_model=1024`) and K (`kv_dim=256`) were rotated
+*before* head slicing, so RoPE used different full-width denominators for a query head
+and its shared KV head. That is not the intended GQA geometry: the rotary frequency
+schedule must restart within each `d_head` (64 for the 350M preset).
+
+B33 makes RoPE explicitly head-local everywhere:
+
+- CPU on-tape training and CPU incremental inference;
+- WGPU `gqa_attention` / backward and all resident KV-cache paths;
+- CUDA forward/backward, cached training, and CUDA KV-cached generation.
+
+A regression test duplicates an identical head vector and proves both heads receive
+identical rotations at the same position. This is an intentional model-semantics
+correction. Legacy checkpoints still load structurally, but their learned positional
+basis is the old one; the final post-B22 production run must therefore be trained with
+B33 enabled rather than treating old validation numbers as comparable.

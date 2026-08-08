@@ -534,6 +534,78 @@ impl GpuChain {
         self.ctx.rope_backward_resident(dy, seq_len, offset, theta)
     }
 
+    /// Apply RoPE independently to each logical attention head. Frequency indices
+    /// restart at zero for every `d_head` block, so Q and its shared GQA K head use
+    /// the same rotary basis even when their full projection widths differ.
+    pub fn rope_heads(
+        &self,
+        x: &GpuMatrix,
+        n_heads: usize,
+        seq_len: usize,
+        offset: usize,
+        theta: f32,
+    ) -> BackendResult<GpuMatrix> {
+        if n_heads == 0 || !x.cols().is_multiple_of(n_heads)
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "rope_heads: cols {} not divisible by heads {n_heads}",
+                x.cols()
+            )));
+        }
+        let dh = x.cols() / n_heads;
+        if !dh.is_multiple_of(2)
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "rope_heads: head dim {dh} must be even"
+            )));
+        }
+        let mut out: Option<GpuMatrix> = None;
+        for head in 0..n_heads
+        {
+            let raw = self.slice_cols(x, head * dh, dh)?;
+            let rotated = self.rope(&raw, seq_len, offset, theta)?;
+            let padded = self.place_cols(&rotated, head * dh, x.cols())?;
+            out = Some(match out
+            {
+                None => padded,
+                Some(acc) => self.add(&acc, &padded)?,
+            });
+        }
+        out.ok_or_else(|| BackendError::ShapeMismatch("rope_heads: zero heads".into()))
+    }
+
+    /// Adjoint of [`Self::rope_heads`], independently undoing each head rotation.
+    pub fn rope_heads_backward(
+        &self,
+        dy: &GpuMatrix,
+        n_heads: usize,
+        seq_len: usize,
+        offset: usize,
+        theta: f32,
+    ) -> BackendResult<GpuMatrix> {
+        if n_heads == 0 || !dy.cols().is_multiple_of(n_heads)
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "rope_heads_backward: cols {} not divisible by heads {n_heads}",
+                dy.cols()
+            )));
+        }
+        let dh = dy.cols() / n_heads;
+        let mut out: Option<GpuMatrix> = None;
+        for head in 0..n_heads
+        {
+            let raw = self.slice_cols(dy, head * dh, dh)?;
+            let rotated = self.rope_backward(&raw, seq_len, offset, theta)?;
+            let padded = self.place_cols(&rotated, head * dh, dy.cols())?;
+            out = Some(match out
+            {
+                None => padded,
+                Some(acc) => self.add(&acc, &padded)?,
+            });
+        }
+        out.ok_or_else(|| BackendError::ShapeMismatch("rope_heads_backward: zero heads".into()))
+    }
+
     /// Gather columns `[col_start, col_start+ncols)` of a resident matrix into a
     /// resident `rows × ncols` matrix — e.g. one head's `d_head` slice of a
     /// full-width projection. Backward is [`Self::place_cols`].
@@ -593,9 +665,8 @@ impl GpuChain {
     ///
     /// `q` is `t×(n_heads·dh)`, `k`/`v` are `t×(n_kv_heads·dh)`; returns the
     /// `t×(n_heads·dh)` concatenated context (the caller applies `w_o`). RoPE is
-    /// applied to the *full-width* `q`/`k` exactly as `rope_on_tape` does — each
-    /// uses its own width in the frequency schedule — so the result matches the
-    /// CPU model. Every intermediate stays in VRAM. `v` is not rotated. This
+    /// applied head-locally: the frequency schedule restarts within every `dh`
+    /// slice, so query heads and their shared KV heads use the same rotary basis. Every intermediate stays in VRAM. `v` is not rotated. This
     /// composes brick-17 RoPE, brick-18a slice/place and the single-head
     /// `attention`, all already gradient-checked.
     #[allow(clippy::too_many_arguments)]
@@ -644,8 +715,8 @@ impl GpuChain {
             )));
         }
 
-        let qr = self.rope(q, seq_len, 0, theta)?;
-        let kr = self.rope(k, seq_len, 0, theta)?;
+        let qr = self.rope_heads(q, n_heads, seq_len, 0, theta)?;
+        let kr = self.rope_heads(k, n_kv_heads, seq_len, 0, theta)?;
         let repeat = n_heads / n_kv_heads;
         let mut out: Option<GpuMatrix> = None;
         for head in 0..n_heads
@@ -676,8 +747,7 @@ impl GpuChain {
     /// as [`Self::transformer_block_backward`]). Because a grouped-query key/value
     /// head is shared by `repeat = n_heads/n_kv_heads` query heads, `dk`/`dv`
     /// **accumulate** over those heads (place + add), while `dq` slots are
-    /// disjoint. Finally RoPE's adjoint maps `dqr→dq` and `dkr→dk` (each at its
-    /// own width); `v` is not rotated so `dv` passes straight through.
+    /// disjoint. Finally head-local RoPE adjoints map `dqr→dq` and `dkr→dk`; `v` is not rotated so `dv` passes straight through.
     #[allow(clippy::too_many_arguments)]
     pub fn gqa_attention_backward(
         &self,
@@ -724,8 +794,8 @@ impl GpuChain {
             )));
         }
 
-        let qr = self.rope(q, seq_len, 0, theta)?;
-        let kr = self.rope(k, seq_len, 0, theta)?;
+        let qr = self.rope_heads(q, n_heads, seq_len, 0, theta)?;
+        let kr = self.rope_heads(k, n_kv_heads, seq_len, 0, theta)?;
         let repeat = n_heads / n_kv_heads;
         let scale = 1.0 / (dh as f32).sqrt();
 
@@ -783,8 +853,8 @@ impl GpuChain {
         let dv = dvv.expect("n_heads ≥ 1");
 
         // RoPE adjoint: qr = rope(q), kr = rope(k); v was not rotated.
-        let dq = self.rope_backward(&dqr, seq_len, 0, theta)?;
-        let dk = self.rope_backward(&dkr, seq_len, 0, theta)?;
+        let dq = self.rope_heads_backward(&dqr, n_heads, seq_len, 0, theta)?;
+        let dk = self.rope_heads_backward(&dkr, n_kv_heads, seq_len, 0, theta)?;
         Ok((dq, dk, dv))
     }
 

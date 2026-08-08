@@ -77,30 +77,43 @@ impl GQAAttention {
         seq_len: usize,
         offset: usize,
         theta: f32,
+        n_heads: usize,
     ) -> Var<'t> {
         let (rows, dim) = x.shape();
-        let half = dim / 2;
+        assert!(n_heads > 0 && dim.is_multiple_of(n_heads));
+        let d_head = dim / n_heads;
+        assert!(d_head.is_multiple_of(2));
+        let pairs_per_head = d_head / 2;
         let mut c = vec![0.0f32; rows * dim];
         let mut s = vec![0.0f32; rows * dim];
         for r in 0..rows
         {
             let pos = ((r % seq_len) + offset) as f32;
-            for j in 0..half
+            for head in 0..n_heads
             {
-                let freq = theta.powf(-2.0 * j as f32 / dim as f32);
-                let a = pos * freq;
-                c[r * dim + 2 * j] = a.cos();
-                c[r * dim + 2 * j + 1] = a.cos();
-                s[r * dim + 2 * j] = a.sin();
-                s[r * dim + 2 * j + 1] = a.sin();
+                for j in 0..pairs_per_head
+                {
+                    let freq = theta.powf(-2.0 * j as f32 / d_head as f32);
+                    let a = pos * freq;
+                    let col = head * d_head + 2 * j;
+                    c[r * dim + col] = a.cos();
+                    c[r * dim + col + 1] = a.cos();
+                    s[r * dim + col] = a.sin();
+                    s[r * dim + col + 1] = a.sin();
+                }
             }
         }
-        // Pair-swap-and-negate: column 2j reads −x[2j+1], column 2j+1 reads x[2j].
+        // Pair-swap-and-negate remains block diagonal: each adjacent pair is wholly
+        // inside one head, so no rotation ever crosses a head boundary.
         let mut w = vec![0.0f32; dim * dim];
-        for j in 0..half
+        for head in 0..n_heads
         {
-            w[(2 * j + 1) * dim + 2 * j] = -1.0;
-            w[(2 * j) * dim + (2 * j + 1)] = 1.0;
+            for j in 0..pairs_per_head
+            {
+                let col = head * d_head + 2 * j;
+                w[(col + 1) * dim + col] = -1.0;
+                w[col * dim + col + 1] = 1.0;
+            }
         }
         let c_v = tape.input(Tensor::from_vec(c, rows, dim));
         let s_v = tape.input(Tensor::from_vec(s, rows, dim));
@@ -108,34 +121,31 @@ impl GQAAttention {
         x.hadamard(c_v).add(x.matmul(w_v).hadamard(s_v))
     }
 
-    fn rope_apply(t: &Tensor, offset: usize, theta: f32) -> Tensor {
+    fn rope_apply(t: &Tensor, offset: usize, theta: f32, n_heads: usize) -> Tensor {
         let rows = t.rows;
         let dim = t.cols;
-        let half = dim / 2;
-        let mut cos = vec![0.0f32; rows * half];
-        let mut sin = vec![0.0f32; rows * half];
-        for p in 0..rows
-        {
-            let pos = (p + offset) as f32;
-            for j in 0..half
-            {
-                let freq = theta.powf(-2.0 * j as f32 / dim as f32);
-                let a = pos * freq;
-                cos[p * half + j] = a.cos();
-                sin[p * half + j] = a.sin();
-            }
-        }
+        assert!(n_heads > 0 && dim.is_multiple_of(n_heads));
+        let d_head = dim / n_heads;
+        assert!(d_head.is_multiple_of(2));
+        let pairs_per_head = d_head / 2;
         let mut out = vec![0.0f32; rows * dim];
         for r in 0..rows
         {
-            for j in 0..half
+            let pos = (r + offset) as f32;
+            for head in 0..n_heads
             {
-                let e = t.data[r * dim + 2 * j];
-                let o = t.data[r * dim + 2 * j + 1];
-                let c = cos[r * half + j];
-                let s = sin[r * half + j];
-                out[r * dim + 2 * j] = e * c - o * s;
-                out[r * dim + 2 * j + 1] = e * s + o * c;
+                for j in 0..pairs_per_head
+                {
+                    let freq = theta.powf(-2.0 * j as f32 / d_head as f32);
+                    let a = pos * freq;
+                    let c = a.cos();
+                    let s = a.sin();
+                    let col = head * d_head + 2 * j;
+                    let e = t.data[r * dim + col];
+                    let o = t.data[r * dim + col + 1];
+                    out[r * dim + col] = e * c - o * s;
+                    out[r * dim + col + 1] = e * s + o * c;
+                }
             }
         }
         Tensor::from_vec(out, rows, dim)
@@ -175,8 +185,8 @@ impl GQAAttention {
 
         // On-tape RoPE (per-block positions): gradients flow through the
         // rotation back into w_q / w_k — see `rope_on_tape`.
-        let qr = Self::rope_on_tape(tape, q, seq_len, 0, self.rope_theta);
-        let kr = Self::rope_on_tape(tape, k, seq_len, 0, self.rope_theta);
+        let qr = Self::rope_on_tape(tape, q, seq_len, 0, self.rope_theta, self.n_heads);
+        let kr = Self::rope_on_tape(tape, k, seq_len, 0, self.rope_theta, self.n_kv_heads);
 
         let mut head_out = Vec::with_capacity(h);
         for head in 0..h
@@ -254,8 +264,8 @@ impl GQAAttention {
         let qv = tape.value(q.idx());
         let kv = tape.value(k_cached.idx());
 
-        let qr = tape.input(Self::rope_apply(&qv, pos, self.rope_theta));
-        let kr = tape.input(Self::rope_apply(&kv, 0, self.rope_theta));
+        let qr = tape.input(Self::rope_apply(&qv, pos, self.rope_theta, self.n_heads));
+        let kr = tape.input(Self::rope_apply(&kv, 0, self.rope_theta, self.n_kv_heads));
 
         let mut head_out = Vec::with_capacity(h);
         for head in 0..h
@@ -360,9 +370,9 @@ mod tests {
         let dim = 8usize;
         let data: Vec<f32> = (0..rows * dim).map(|i| (i as f32 * 0.37).sin()).collect();
         let x = tape.input(Tensor::from_vec(data.clone(), rows, dim));
-        let on_tape = GQAAttention::rope_on_tape(&tape, x, rows, 3, 10000.0);
+        let on_tape = GQAAttention::rope_on_tape(&tape, x, rows, 3, 10000.0, 2);
         let got = tape.value(on_tape.idx());
-        let want = GQAAttention::rope_apply(&Tensor::from_vec(data, rows, dim), 3, 10000.0);
+        let want = GQAAttention::rope_apply(&Tensor::from_vec(data, rows, dim), 3, 10000.0, 2);
         for (g, w) in got.data.iter().zip(&want.data)
         {
             assert!((g - w).abs() < 1e-5, "rope mismatch: {g} vs {w}");
@@ -412,6 +422,35 @@ mod tests {
             assert!(
                 (va - vb).abs() < 1e-5,
                 "duplicated batch rows must match: {va} vs {vb}"
+            );
+        }
+    }
+
+    #[test]
+    fn rope_frequency_schedule_restarts_for_each_head() {
+        let rows = 3usize;
+        let d_head = 4usize;
+        let mut data = Vec::with_capacity(rows * d_head * 2);
+        for r in 0..rows
+        {
+            let head = [
+                0.3 + r as f32,
+                -0.7 + 0.1 * r as f32,
+                1.2 - 0.2 * r as f32,
+                0.4 + 0.3 * r as f32,
+            ];
+            data.extend_from_slice(&head);
+            data.extend_from_slice(&head);
+        }
+        let out =
+            GQAAttention::rope_apply(&Tensor::from_vec(data, rows, d_head * 2), 5, 10_000.0, 2);
+        for r in 0..rows
+        {
+            let a = &out.data[r * d_head * 2..r * d_head * 2 + d_head];
+            let b = &out.data[r * d_head * 2 + d_head..(r + 1) * d_head * 2];
+            assert_eq!(
+                a, b,
+                "identical heads at one position must rotate identically"
             );
         }
     }
