@@ -83,6 +83,7 @@ jobs:
       SCIRUST_SAMPLER_COMPARE_TOP_KS: 5,50,200
       SCIRUST_SAMPLER_COMPARE_REPEATS: 7
       SCIRUST_SAMPLER_COMPARE_WARMUP: 3
+      SCIRUST_THOR_GPU_LOCK: /tmp/scirust-thor-gpu.lock
       CARGO_INCREMENTAL: 0
       PHASE25_VALIDATED_THOR_HEAD: ba676598d62972f29530930034005f35cc248edb
     steps:
@@ -104,6 +105,58 @@ jobs:
             echo "available=false" >> "$GITHUB_OUTPUT"
             echo "Runner is labelled jetson-thor but does not expose the real Thor WGPU/Vulkan device."
           fi
+      - name: Classify Thor occupancy
+        if: steps.thor.outputs.available == 'true'
+        id: occupancy
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v flock >/dev/null
+          exec 9>"$SCIRUST_THOR_GPU_LOCK"
+          flock -x 9
+
+          if ! compute_apps="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null)"; then
+            echo "::error::Phase 25 cannot verify Thor occupancy."
+            exit 1
+          fi
+          if [[ -z "${compute_apps//[[:space:]]/}" ]]; then
+            echo "run_benchmark=true" >> "$GITHUB_OUTPUT"
+            echo "Thor is idle; Phase 25 hardware comparison will run."
+            exit 0
+          fi
+
+          managed_training=true
+          printf '%s\n' "$compute_apps"
+          while IFS=',' read -r raw_pid process_name; do
+            pid="$(printf '%s' "$raw_pid" | tr -d '[:space:]')"
+            [[ "$pid" =~ ^[0-9]+$ ]] || { managed_training=false; continue; }
+            cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
+            proc_user="$(ps -p "$pid" -o user= 2>/dev/null | xargs || true)"
+            ppid="$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d '[:space:]')"
+            cgroup="$(cat "/proc/$pid/cgroup" 2>/dev/null || true)"
+            echo "pid=$pid user=$proc_user ppid=$ppid cmdline=$cmdline cgroup=$cgroup"
+            if [[ "${process_name# }" != "/root/scirust/target/release/examples/cuda_pretrain" ]] \
+              || [[ "$cmdline" != *"/root/scirust/target/release/examples/cuda_pretrain"* ]] \
+              || [[ "$proc_user" != "root" ]] \
+              || [[ "$ppid" != "1" ]] \
+              || [[ "$cgroup" != 0::/user.slice/user-0.slice/session-*.scope ]]; then
+              managed_training=false
+            fi
+          done <<< "$compute_apps"
+
+          if [[ "$managed_training" == true ]]; then
+            echo "run_benchmark=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Phase 25 Thor benchmark deferred: detached SciAgent cuda_pretrain owns the GPU. No Phase 25 WGPU workload is launched and training is left untouched."
+            exit 0
+          fi
+
+          echo "::error::Phase 25 found unknown GPU compute activity after acquiring the SciRust lock."
+          exit 1
+      - name: Report deferred Phase 25 hardware comparison
+        if: steps.thor.outputs.available == 'true' && steps.occupancy.outputs.run_benchmark == 'false'
+        run: |
+          echo "Phase 25 real-Thor sampler comparison DEFERRED while SciAgent production training owns the GPU."
+          echo "Static and lavapipe validation remain active; no new hardware evidence is claimed."
       - name: Validate previously measured Thor evidence is still applicable
         if: steps.thor.outputs.available != 'true'
         shell: bash
@@ -117,35 +170,48 @@ jobs:
           fi
           echo "::notice::No WGPU device is exposed by this runner, but scirust-gpu is unchanged from the real-Thor validated head $PHASE25_VALIDATED_THOR_HEAD (run 31258455544). Reusing that hardware evidence."
       - name: Prepare isolated executable build directory
-        if: steps.thor.outputs.available == 'true'
+        if: steps.thor.outputs.available == 'true' && steps.occupancy.outputs.run_benchmark == 'true'
         run: |
-          tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.ci-tmp.XXXXXX")"
+          tmpdir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/scirust-phase25.XXXXXX")"
           chmod 700 "$tmpdir"
           echo "TMPDIR=$tmpdir" >> "$GITHUB_ENV"
           echo "CARGO_TARGET_DIR=$tmpdir/target" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
-        if: steps.thor.outputs.available == 'true'
+        if: steps.thor.outputs.available == 'true' && steps.occupancy.outputs.run_benchmark == 'true'
         with:
           toolchain: 1.89.0
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
-        if: steps.thor.outputs.available == 'true'
+        if: steps.thor.outputs.available == 'true' && steps.occupancy.outputs.run_benchmark == 'true'
         with:
           shared-key: phase25-wgpu-thor
           cache-targets: false
       - name: Report WGPU/Vulkan environment
-        if: steps.thor.outputs.available == 'true'
+        if: steps.thor.outputs.available == 'true' && steps.occupancy.outputs.run_benchmark == 'true'
         run: |
           uname -a
           nvidia-smi
           vulkaninfo --summary
       - name: Run real-device sampler comparison
-        if: steps.thor.outputs.available == 'true'
+        if: steps.thor.outputs.available == 'true' && steps.occupancy.outputs.run_benchmark == 'true'
+        shell: bash
         run: |
+          set -euo pipefail
+          exec 9>"$SCIRUST_THOR_GPU_LOCK"
+          flock -x 9
+          if ! compute_apps="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null)"; then
+            echo "::error::Phase 25 cannot verify the Thor remained idle."
+            exit 1
+          fi
+          if [[ -n "${compute_apps//[[:space:]]/}" ]]; then
+            echo "::error::GPU occupancy changed after Phase 25 preflight; refusing a contaminated comparison."
+            printf '%s\n' "$compute_apps"
+            exit 1
+          fi
           rustup run 1.89.0 cargo run --quiet --release --locked -p scirust-gpu \
             --features wgpu --example deterministic_sampler_compare > phase25-thor.csv
           cat phase25-thor.csv
       - name: Validate exact real-device rows
-        if: steps.thor.outputs.available == 'true'
+        if: steps.thor.outputs.available == 'true' && steps.occupancy.outputs.run_benchmark == 'true'
         run: |
           python3 - <<'PY'
           import csv
