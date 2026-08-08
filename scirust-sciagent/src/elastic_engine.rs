@@ -4,6 +4,7 @@
 //! kernels and out-of-capacity tiny pieces fall back to the canonical oracle;
 //! they never change tokenization and never split a piece.
 
+use crate::elastic_indexed::IndexedBpe;
 use crate::elastic_tiny::TinyScanBpe;
 use crate::elastic_tokenizer::{
     BpeKernel, CanonicalBpeOracle, DuplicateMergeRule, ElasticProfile, PieceClass, TokenId,
@@ -24,6 +25,7 @@ pub struct ElasticEncoding {
 pub struct ElasticBpeEngine {
     reference: CanonicalBpeOracle,
     tiny_scan: TinyScanBpe,
+    indexed: IndexedBpe,
     profile: ElasticProfile,
 }
 
@@ -35,6 +37,7 @@ impl ElasticBpeEngine {
         Ok(Self {
             reference: CanonicalBpeOracle::from_ordered_merges(merges)?,
             tiny_scan: TinyScanBpe::from_ordered_merges(merges)?,
+            indexed: IndexedBpe::from_ordered_merges(merges)?,
             profile,
         })
     }
@@ -68,10 +71,10 @@ impl ElasticBpeEngine {
                     (self.reference.encode_ids(input), BpeKernel::Reference)
                 }
             },
-            // Indexed and Heap are reserved profile identities until their
-            // parity-gated implementations land. Falling back is explicit and
-            // observable through `executed_kernel`.
-            BpeKernel::Reference | BpeKernel::Indexed | BpeKernel::Heap =>
+            BpeKernel::Indexed => (self.indexed.encode_ids(input), BpeKernel::Indexed),
+            // Heap remains a reserved profile identity until its parity-gated
+            // implementation lands. Falling back is explicit and observable.
+            BpeKernel::Reference | BpeKernel::Heap =>
             {
                 (self.reference.encode_ids(input), BpeKernel::Reference)
             },
@@ -120,6 +123,19 @@ mod tests {
     }
 
     #[test]
+    fn router_executes_indexed_kernel_with_canonical_result() {
+        let profile = ElasticProfile::new(thresholds(), [BpeKernel::Indexed; 6]);
+        let engine =
+            ElasticBpeEngine::from_ordered_merges(&[(2, 3, 10), (1, 2, 11)], profile).unwrap();
+
+        let encoded = engine.encode_ids(&[1, 2, 3], 128);
+        assert_eq!(encoded.ids, vec![1, 10]);
+        assert_eq!(encoded.class, PieceClass::L);
+        assert_eq!(encoded.requested_kernel, BpeKernel::Indexed);
+        assert_eq!(encoded.executed_kernel, BpeKernel::Indexed);
+    }
+
+    #[test]
     fn oversized_tiny_request_falls_back_without_chunking() {
         let profile = ElasticProfile::new(thresholds(), [BpeKernel::TinyScan; 6]);
         let engine = ElasticBpeEngine::from_ordered_merges(&[(1, 1, 2)], profile).unwrap();
@@ -133,23 +149,13 @@ mod tests {
     }
 
     #[test]
-    fn reserved_kernel_identity_falls_back_explicitly() {
-        let profile = ElasticProfile::new(
-            thresholds(),
-            [
-                BpeKernel::Indexed,
-                BpeKernel::Indexed,
-                BpeKernel::Indexed,
-                BpeKernel::Heap,
-                BpeKernel::Heap,
-                BpeKernel::Heap,
-            ],
-        );
+    fn reserved_heap_identity_falls_back_explicitly() {
+        let profile = ElasticProfile::new(thresholds(), [BpeKernel::Heap; 6]);
         let engine = ElasticBpeEngine::from_ordered_merges(&[(1, 2, 3)], profile).unwrap();
 
         let encoded = engine.encode_ids(&[1, 2], 8);
         assert_eq!(encoded.ids, vec![3]);
-        assert_eq!(encoded.requested_kernel, BpeKernel::Indexed);
+        assert_eq!(encoded.requested_kernel, BpeKernel::Heap);
         assert_eq!(encoded.executed_kernel, BpeKernel::Reference);
     }
 
@@ -158,11 +164,16 @@ mod tests {
         let merges = [(2, 3, 10), (1, 2, 11)];
         let reference_profile = ElasticProfile::reference_only(thresholds());
         let tiny_profile = ElasticProfile::new(thresholds(), [BpeKernel::TinyScan; 6]);
+        let indexed_profile = ElasticProfile::new(thresholds(), [BpeKernel::Indexed; 6]);
         let mut engine = ElasticBpeEngine::from_ordered_merges(&merges, reference_profile).unwrap();
 
-        let before = engine.encode_ids(&[1, 2, 3], 3).ids;
+        let reference = engine.encode_ids(&[1, 2, 3], 3).ids;
         engine.set_profile(tiny_profile);
-        let after = engine.encode_ids(&[1, 2, 3], 3).ids;
-        assert_eq!(before, after);
+        let tiny = engine.encode_ids(&[1, 2, 3], 3).ids;
+        engine.set_profile(indexed_profile);
+        let indexed = engine.encode_ids(&[1, 2, 3], 3).ids;
+
+        assert_eq!(reference, tiny);
+        assert_eq!(reference, indexed);
     }
 }
