@@ -267,10 +267,15 @@ mod tests {
     }
 
     #[test]
-    fn default_semantics_remains_legacy_compatible() {
-        assert_eq!(
-            MergeSemanticsArg::LegacyParallelV1,
-            MergeSemanticsArg::LegacyParallelV1
-        );
+    fn cli_default_semantics_remains_legacy_compatible() {
+        let args = Args::try_parse_from([
+            "train-tokenizer",
+            "--input",
+            "src",
+            "--output",
+            "tokenizer.json",
+        ])
+        .unwrap();
+        assert_eq!(args.merge_semantics, MergeSemanticsArg::LegacyParallelV1);
     }
 }
