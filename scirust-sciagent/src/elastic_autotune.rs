@@ -152,7 +152,8 @@ impl ElasticAutotuner {
                     {
                         break;
                     };
-                    let elapsed_nanos = u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX);
+                    let elapsed_nanos =
+                        u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX);
                     let semantic_match = output == expected;
                     black_box(&output);
                     measurements.push(CalibrationMeasurement {
@@ -225,11 +226,9 @@ mod tests {
 
     #[test]
     fn autotune_requires_at_least_one_case() {
-        let tuner = ElasticAutotuner::from_ordered_merges(
-            &[(1, 1, 2)],
-            AutotuneConfig::new(0, 1).unwrap(),
-        )
-        .unwrap();
+        let tuner =
+            ElasticAutotuner::from_ordered_merges(&[(1, 1, 2)], AutotuneConfig::new(0, 1).unwrap())
+                .unwrap();
         assert_eq!(tuner.calibrate(&[]), Err(AutotuneError::NoCases));
     }
 
