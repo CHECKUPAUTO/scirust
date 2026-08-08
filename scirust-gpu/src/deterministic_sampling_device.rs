@@ -267,6 +267,9 @@ pub struct WgpuDeterministicSampler {
     vocab_size: usize,
     draws: usize,
     resident_bytes: usize,
+    initial_state: u64,
+    increment: u64,
+    consumes_rng: bool,
 }
 
 impl WgpuDeterministicSampler {
@@ -338,6 +341,9 @@ impl WgpuDeterministicSampler {
             vocab_size,
             draws: 0,
             resident_bytes: logits_bytes + scratch_bytes + state_bytes,
+            initial_state: state_word,
+            increment,
+            consumes_rng: config.temperature > 0.0 && config.top_k != 1,
         })
     }
 
@@ -370,6 +376,30 @@ impl WgpuDeterministicSampler {
 
         self.adapter
             .write(&self.logits, 0, bytemuck::cast_slice(logits))?;
+        self.sample_resident()
+    }
+
+    /// Restore the exact seeded PCG state without reallocating WGPU buffers.
+    pub fn reset(&mut self) -> Result<(), WgpuDeterministicSamplerError> {
+        let words = [
+            self.initial_state as u32,
+            (self.initial_state >> 32) as u32,
+            self.increment as u32,
+            (self.increment >> 32) as u32,
+            0,
+            0,
+        ];
+        self.adapter
+            .write(&self.state, 4 * U32_BYTES, bytemuck::cast_slice(&words))?;
+        self.draws = 0;
+        Ok(())
+    }
+
+    pub(crate) fn logits_buffer(&self) -> &WgpuComputeBuffer {
+        &self.logits
+    }
+
+    pub(crate) fn sample_resident(&mut self) -> Result<usize, WgpuDeterministicSamplerError> {
         let event = self.launch()?;
         self.adapter.wait(&event)?;
 
@@ -379,20 +409,11 @@ impl WgpuDeterministicSampler {
             8 * U32_BYTES,
             bytemuck::cast_slice_mut(&mut output_id),
         )?;
-        if self.config_consumes_rng()?
+        if self.consumes_rng
         {
             self.draws = self.draws.saturating_add(1);
         }
         Ok(output_id[0] as usize)
-    }
-
-    fn config_consumes_rng(&self) -> Result<bool, WgpuDeterministicSamplerError> {
-        let mut words = [0u32; 3];
-        self.adapter
-            .read(&self.state, U32_BYTES, bytemuck::cast_slice_mut(&mut words))?;
-        let temperature = f32::from_bits(words[0]);
-        let top_k = words[1];
-        Ok(temperature > 0.0 && top_k != 1)
     }
 
     fn launch(&self) -> Result<WgpuComputeEvent, WgpuDeterministicSamplerError> {
