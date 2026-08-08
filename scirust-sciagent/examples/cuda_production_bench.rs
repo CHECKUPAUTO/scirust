@@ -220,6 +220,16 @@ fn bench_decode(config: &SciAgentConfig, prompt_len: usize, max_new: usize) {
                 "ERROR: cached CUDA decoding first teacher-forced top-1 divergence at step {} (cached={} full={}, rel_l2={:.3e}, max_abs={:.3e})",
                 first.step, first.cached_top1, first.full_top1, first.rel_l2, first.max_abs
             );
+            if first.step > 0
+            {
+                for layer in cuda.cache_layer_parity_teacher_forced(&prompt, forced, first.step)
+                {
+                    println!(
+                        "SCIAGENT_THOR_KV_LAYER step={} layer={} rel_l2={:.8e} max_abs={:.8e}",
+                        first.step, layer.layer, layer.rel_l2, layer.max_abs
+                    );
+                }
+            }
         }
         else
         {
