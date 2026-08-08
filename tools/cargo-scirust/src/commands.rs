@@ -770,8 +770,9 @@ fn normalize_newlines(bytes: &[u8]) -> Vec<u8> {
 }
 
 fn fingerprint(bytes: &[u8]) -> String {
+    let normalized = normalize_newlines(bytes);
     let mut hash = 0xcbf29ce484222325u64;
-    for &byte in bytes {
+    for byte in normalized {
         hash ^= u64::from(byte);
         hash = hash.wrapping_mul(0x100000001b3);
     }
@@ -901,6 +902,7 @@ mod tests {
     #[test]
     fn fingerprint_is_stable() {
         assert_eq!(fingerprint(b"hello"), "fnv1a64:a430d84680aabd0b");
+        assert_eq!(fingerprint(b"a\r\nb\r\n"), fingerprint(b"a\nb\n"));
     }
 
     #[test]

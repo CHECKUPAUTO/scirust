@@ -221,13 +221,17 @@ impl Workspace {
     fn infer_base(&self) -> AppResult<String> {
         if let Ok(base_ref) = env::var("GITHUB_BASE_REF") {
             if !base_ref.trim().is_empty() {
-                let remote = format!("origin/{base_ref}");
-                if self.git_ref_exists(&remote) {
-                    return Ok(remote);
+                for candidate in [format!("origin/{base_ref}"), base_ref] {
+                    if let Some(base) = self.git_merge_base(&candidate) {
+                        return Ok(base);
+                    }
                 }
-                if self.git_ref_exists(&base_ref) {
-                    return Ok(base_ref);
-                }
+            }
+        }
+
+        for candidate in ["origin/master", "master", "origin/main", "main"] {
+            if let Some(base) = self.git_merge_base(candidate) {
+                return Ok(base);
             }
         }
 
@@ -236,6 +240,22 @@ impl Workspace {
         } else {
             Ok("HEAD".to_string())
         }
+    }
+
+    fn git_merge_base(&self, reference: &str) -> Option<String> {
+        if !self.git_ref_exists(reference) {
+            return None;
+        }
+        let output = Command::new("git")
+            .current_dir(&self.root)
+            .args(["merge-base", "HEAD", reference])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let base = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        (!base.is_empty()).then_some(base)
     }
 
     fn git_ref_exists(&self, reference: &str) -> bool {
