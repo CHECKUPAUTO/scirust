@@ -9,6 +9,7 @@ pub mod config;
 pub mod corpus_paths;
 #[cfg(feature = "cuda")]
 pub mod cuda_model;
+pub mod elastic_autotune;
 pub mod elastic_calibration;
 pub mod elastic_engine;
 pub mod elastic_heap;
@@ -35,6 +36,9 @@ pub use bpe::{BpeTokenizer, BpeTrainer};
 pub use ccos::CcosLog;
 pub use communication::SciAgentEndpoint;
 pub use config::SciAgentConfig;
+pub use elastic_autotune::{
+    AutotuneConfig, AutotuneError, AutotuneResult, CalibrationCase, ElasticAutotuner,
+};
 pub use elastic_calibration::{
     CalibrationError, CalibrationMeasurement, CalibrationReport, CalibrationWinner,
 };
