@@ -137,7 +137,9 @@ pub fn match_implementation(
 
     for (index, dimension) in WorkgroupDimension::ALL.into_iter().enumerate()
     {
-        let Some(required_minimum) = requirements.workgroup.min_size[index] else {
+        let Some(required_minimum) = requirements.workgroup.min_size[index]
+        else
+        {
             continue;
         };
         if required_minimum == 0
@@ -264,9 +266,7 @@ mod tests {
     use alloc::{string::ToString, vec};
 
     use super::*;
-    use crate::{
-        DeviceId, DeviceKind, ExecutionCapabilities, SupportLevel, SupportRequirement,
-    };
+    use crate::{DeviceId, DeviceKind, ExecutionCapabilities, SupportLevel, SupportRequirement};
 
     fn hardware(async_execution: SupportLevel) -> HardwareCapabilities {
         let mut profile =
@@ -289,17 +289,14 @@ mod tests {
             supports_async_execution: true,
         };
         let limits = ExecutionLimits::from_device_capabilities(&capabilities);
-        assert_eq!(
-            limits.max_workgroup_size,
-            [Some(256), Some(8), Some(4)]
-        );
+        assert_eq!(limits.max_workgroup_size, [Some(256), Some(8), Some(4)]);
     }
 
     #[test]
     fn workgroup_matching_preserves_sufficient_insufficient_and_unknown() {
         let kernel = KernelRequirements::default();
-        let requirements = ImplementationRequirements::new(&kernel)
-            .with_workgroup(WorkgroupRequirement::x(64));
+        let requirements =
+            ImplementationRequirements::new(&kernel).with_workgroup(WorkgroupRequirement::x(64));
         let profile = hardware(SupportLevel::Unsupported);
 
         let sufficient = match_implementation(
