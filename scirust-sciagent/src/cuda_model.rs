@@ -24,6 +24,31 @@ use crate::train::checkpoint::{CheckpointMeta, save_checkpoint};
 use crate::train::dataset::{WINDOW_SPLIT_VERSION, distributed_window_split};
 use crate::train::scheduler::WarmupCosineSchedule;
 
+/// SCIAGENT model-math compatibility generation. Version 2 is the B33 transition
+/// from full-projection-width RoPE to GQA-correct head-local RoPE. A checkpoint
+/// without a marker is historical version 1.
+pub const SCIAGENT_MODEL_SEMANTICS_VERSION: u32 = 2;
+const MODEL_SEMANTICS_FILE: &str = "model_semantics.version";
+
+pub fn read_model_semantics_version(path: &Path) -> Option<u32> {
+    std::fs::read_to_string(path.join(MODEL_SEMANTICS_FILE))
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u32>().ok())
+}
+
+fn write_model_semantics_marker(path: &Path) -> std::result::Result<(), String> {
+    std::fs::write(
+        path.join(MODEL_SEMANTICS_FILE),
+        format!("{}\n", SCIAGENT_MODEL_SEMANTICS_VERSION),
+    )
+    .map_err(|e| {
+        format!(
+            "cannot write model semantics marker in {}: {e}",
+            path.display()
+        )
+    })
+}
+
 /// One GQA block's weights mirrored into VRAM (bf16).
 struct CudaBlock {
     norm1: CudaMatrix,
@@ -163,6 +188,8 @@ impl CudaModel {
     /// Apply the existing narrow-matrix RoPE kernel independently to each logical
     /// head, then concatenate the disjoint head blocks. This is the GQA-correct
     /// rotary basis: frequency index zero restarts for every d_head slice.
+    /// GQA-correct RoPE without per-head slicing: one kernel covers the full
+    /// projection while the frequency index restarts every `d_head` columns.
     fn rope_heads(
         &self,
         x: &CudaMatrix,
@@ -172,15 +199,21 @@ impl CudaModel {
     ) -> CudaMatrix {
         assert!(n_heads > 0 && x.cols().is_multiple_of(n_heads));
         let dh = x.cols() / n_heads;
-        assert!(dh.is_multiple_of(2));
-        let mut heads = Vec::with_capacity(n_heads);
-        for head in 0..n_heads
-        {
-            let raw = self.chain.slice_cols(x, head * dh, dh);
-            heads.push(self.chain.rope(&raw, seq_len, offset, self.theta));
-        }
-        let refs: Vec<&CudaMatrix> = heads.iter().collect();
-        self.chain.concat_cols(&refs)
+        self.chain
+            .rope_head_local(x, dh, seq_len, offset, self.theta)
+    }
+
+    fn rope_heads_backward(
+        &self,
+        dy: &CudaMatrix,
+        n_heads: usize,
+        seq_len: usize,
+        offset: usize,
+    ) -> CudaMatrix {
+        assert!(n_heads > 0 && dy.cols().is_multiple_of(n_heads));
+        let dh = dy.cols() / n_heads;
+        self.chain
+            .rope_head_local_backward(dy, dh, seq_len, offset, self.theta)
     }
 
     fn rope_heads_backward(
@@ -1745,6 +1778,7 @@ impl CudaTrainer {
         }
         save_checkpoint(model, meta, &partial)
             .map_err(|e| format!("cannot save model checkpoint: {e}"))?;
+        write_model_semantics_marker(&partial)?;
         self.save_optimizer_state(cfg, &partial)?;
         if final_dir.exists()
         {
@@ -1887,8 +1921,8 @@ impl CudaTrainer {
         }
         self.max_grad_norm = cfg.max_grad_norm;
 
-        let (mut order, val_windows) = distributed_window_split(tokens.len(), s, cfg.val_frac);
-        let n_windows = order.len();
+        let (base_order, val_windows) = distributed_window_split(tokens.len(), s, cfg.val_frac);
+        let n_windows = base_order.len();
         if n_windows == 0
         {
             return losses;
@@ -1913,13 +1947,18 @@ impl CudaTrainer {
         let consumed_windows = cfg.start_step.saturating_mul(batch);
         let mut epoch: u64 = (consumed_windows / n_windows) as u64;
         let mut wi = consumed_windows % n_windows;
-        let reshuffle = |order: &mut [usize], epoch: u64| {
-            shuffle_windows(order, 0x5343_4941_4745_4E54u64 ^ epoch);
+        let mut order = base_order.clone();
+        let set_epoch_order = |order: &mut Vec<usize>, epoch: u64| {
+            // Every epoch permutation is a pure function of (base_order, epoch).
+            // Do not shuffle the previous epoch's permutation: a resumed process
+            // must reconstruct epoch N without replaying epochs 0..N-1.
+            order.clone_from(&base_order);
+            if cfg.shuffle
+            {
+                shuffle_windows(order, 0x5343_4941_4745_4E54u64 ^ epoch);
+            }
         };
-        if cfg.shuffle
-        {
-            reshuffle(&mut order, epoch);
-        }
+        set_epoch_order(&mut order, epoch);
         let (mut best_step, mut best_val) = load_best_validation(&cfg.checkpoint_dir)
             .map(|(step, val)| (Some(step), val))
             .unwrap_or((None, f32::INFINITY));
@@ -1929,6 +1968,9 @@ impl CudaTrainer {
         }
         let mut last_eval: Option<(usize, f32)> = None;
         let t0 = std::time::Instant::now();
+        let mut last_checkpoint_at = t0;
+        let mut last_checkpoint_step: Option<usize> = None;
+        let checkpointing_enabled = cfg.save_interval > 0 || cfg.save_interval_seconds > 0;
         let mut packed_inputs = Vec::with_capacity(batch * s);
         let mut packed_targets = Vec::with_capacity(batch * s);
         let mut pending: Vec<CudaStepDiagnostics> = Vec::with_capacity(telemetry);
@@ -1943,10 +1985,7 @@ impl CudaTrainer {
                 if wi >= order.len()
                 {
                     epoch += 1;
-                    if cfg.shuffle
-                    {
-                        reshuffle(&mut order, epoch);
-                    }
+                    set_epoch_order(&mut order, epoch);
                     wi = 0;
                 }
                 let start = order[wi];
@@ -1971,7 +2010,10 @@ impl CudaTrainer {
             let need_eval = cfg.eval_interval > 0
                 && !val_windows.is_empty()
                 && step.is_multiple_of(cfg.eval_interval);
-            let need_save = cfg.save_interval > 0 && step.is_multiple_of(cfg.save_interval);
+            let need_save_by_step = cfg.save_interval > 0 && step.is_multiple_of(cfg.save_interval);
+            let need_save_by_time = cfg.save_interval_seconds > 0
+                && last_checkpoint_at.elapsed().as_secs() >= cfg.save_interval_seconds;
+            let need_save = need_save_by_step || need_save_by_time;
             let need_flush = pending.len() >= telemetry
                 || need_log
                 || need_eval
@@ -2018,6 +2060,8 @@ impl CudaTrainer {
                     Ok(()) =>
                     {
                         println!("  exact checkpoint → {}", dir.display());
+                        last_checkpoint_step = Some(step);
+                        last_checkpoint_at = std::time::Instant::now();
                         if !val_windows.is_empty()
                         {
                             let v = match last_eval
@@ -2056,7 +2100,12 @@ impl CudaTrainer {
                         }
                         prune_checkpoints(&cfg.checkpoint_dir, cfg.keep_last);
                     },
-                    Err(e) => eprintln!("  checkpoint at step {step} failed: {e}"),
+                    Err(e) =>
+                    {
+                        eprintln!("  checkpoint at step {step} failed: {e}");
+                        // Back off after an I/O failure instead of retrying every step.
+                        last_checkpoint_at = std::time::Instant::now();
+                    },
                 }
             }
         }
@@ -2072,7 +2121,7 @@ impl CudaTrainer {
         // A run target is an exact recovery boundary even when it falls between the
         // periodic save cadence. Historically the example only synced host weights
         // here and falsely claimed a final checkpoint existed.
-        if cfg.save_interval > 0 && step > cfg.start_step && !step.is_multiple_of(cfg.save_interval)
+        if checkpointing_enabled && step > cfg.start_step && last_checkpoint_step != Some(step)
         {
             self.sync_to_model(model);
             let lr = schedule.lr_at(step.saturating_sub(1));
@@ -2152,6 +2201,7 @@ fn save_best_validation_model(
             .map_err(|e| format!("cannot remove stale {}: {e}", old.display()))?;
     }
     save_checkpoint(model, meta, &partial).map_err(|e| format!("cannot save best model: {e}"))?;
+    write_model_semantics_marker(&partial)?;
     let selection = serde_json::json!({
         "version": 1,
         "step": meta.step,
@@ -2272,8 +2322,12 @@ pub struct CudaPretrainConfig {
     pub telemetry_interval: usize,
     /// Print a loss/lr line every this many steps (0 = never).
     pub log_interval: usize,
-    /// Write a checkpoint every this many steps (0 = never).
+    /// Write an exact recovery checkpoint every this many optimizer steps
+    /// (`0` disables the step cadence).
     pub save_interval: usize,
+    /// Optional wall-clock recovery cadence in seconds (`0` disables it). The
+    /// checkpoint is still published only after a completed optimizer step.
+    pub save_interval_seconds: u64,
     /// Directory the `step_N/` checkpoints are written under.
     pub checkpoint_dir: String,
     /// Global gradient-norm clip threshold (`<= 0` disables). Default `1.0` —
@@ -2317,6 +2371,7 @@ impl Default for CudaPretrainConfig {
             telemetry_interval: 25,
             log_interval: 100,
             save_interval: 500,
+            save_interval_seconds: 0,
             checkpoint_dir: "checkpoints".to_string(),
             max_grad_norm: 1.0,
             val_frac: 0.02,

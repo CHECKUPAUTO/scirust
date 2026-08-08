@@ -472,3 +472,13 @@ identical rotations at the same position. This is an intentional model-semantics
 correction. Legacy checkpoints still load structurally, but their learned positional
 basis is the old one; the final post-B22 production run must therefore be trained with
 B33 enabled rather than treating old validation numbers as comparable.
+
+### Checkpoint semantics guard
+
+Post-B33 CUDA recovery checkpoints and model-only `best/` snapshots carry
+`model_semantics.version = 2`. Historical checkpoints have no marker and are treated
+as version 1. `cuda_pretrain` refuses to continue a v1 checkpoint under v2 head-local
+RoPE by default, and `cuda_eval` refuses to present such a mixed-semantics evaluation
+as a valid quality result. A fresh checkpoint directory is required for the final
+production run. `SCIAGENT_ALLOW_NONEXACT_RESUME=1` exists only for explicit research
+experiments and prints a warning.
