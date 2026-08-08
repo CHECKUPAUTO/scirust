@@ -121,7 +121,7 @@ RoPE by default, and `cuda_eval` refuses to present such a mixed-semantics evalu
 as a valid quality result. A fresh checkpoint directory is required for the final
 production run. `SCIAGENT_ALLOW_NONEXACT_RESUME=1` exists only for explicit research
 experiments and prints a warning.
-''' + "\n"
+'''
 
 
 MODEL.write_text(patch_model(MODEL.read_text()))
