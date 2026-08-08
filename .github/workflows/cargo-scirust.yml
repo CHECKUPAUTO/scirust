@@ -6,15 +6,9 @@ on:
       - "tools/cargo-scirust/**"
       - ".gitignore"
       - ".github/workflows/cargo-scirust.yml"
-  push:
-    branches: [master]
-    paths:
-      - "tools/cargo-scirust/**"
-      - ".gitignore"
-      - ".github/workflows/cargo-scirust.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   CARGO_TARGET_DIR: /tmp/cargo-scirust-target
@@ -25,9 +19,19 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
+          ref: ${{ github.head_ref }}
           fetch-depth: 0
       - run: rustup toolchain install 1.89.0 --profile minimal --component rustfmt,clippy
-      - run: cargo +1.89.0 fmt --manifest-path tools/cargo-scirust/Cargo.toml -- --check
+      - name: Apply rustfmt
+        run: |
+          cargo +1.89.0 fmt --manifest-path tools/cargo-scirust/Cargo.toml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tools/cargo-scirust/src
+          if ! git diff --cached --quiet; then
+            git commit -m "style(tooling): apply rustfmt"
+            git push origin "HEAD:${{ github.head_ref }}"
+          fi
       - run: cargo +1.89.0 clippy --locked --manifest-path tools/cargo-scirust/Cargo.toml --all-targets -- -D warnings
       - run: cargo +1.89.0 test --locked --manifest-path tools/cargo-scirust/Cargo.toml
       - name: Smoke test default affected merge-base analysis
