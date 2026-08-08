@@ -175,21 +175,26 @@ extern "C" __global__ void scale_mask_kernel(
     }
 }
 
-// RoPE: interleaved-pair rotation. pos = (row mod seq_len) + offset,
-// freq_p = theta^(-2p/dim), angle = pos*freq_p; one thread per (row, pair).
+// RoPE: interleaved-pair rotation. `head_dim` controls the rotary frequency
+// period. Passing head_dim=dim preserves plain full-width RoPE; passing d_head makes
+// the frequency index restart inside every logical attention head without slicing
+// the matrix into one CUDA launch per head.
 extern "C" __global__ void rope_kernel(
     unsigned short* out, const unsigned short* x, const size_t rows, const size_t dim,
-    const size_t seq_len, const size_t offset, const float theta)
+    const size_t head_dim, const size_t seq_len, const size_t offset, const float theta)
 {
-    size_t pairs = dim / 2;
-    size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    const size_t pairs = dim / 2;
+    const size_t head_pairs = head_dim / 2;
+    const size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < rows * pairs) {
-        size_t r = idx / pairs, p = idx % pairs;
-        float pos = (float)((r % seq_len) + offset);
-        float freq = powf(theta, -2.0f * (float)p / (float)dim);
-        float ang = pos * freq, c = cosf(ang), s = sinf(ang);
-        float x0 = b2f(x[r*dim + 2*p]);
-        float x1 = b2f(x[r*dim + 2*p + 1]);
+        const size_t r = idx / pairs;
+        const size_t p = idx % pairs;
+        const size_t local_p = p % head_pairs;
+        const float pos = (float)((r % seq_len) + offset);
+        const float freq = powf(theta, -2.0f * (float)local_p / (float)head_dim);
+        const float ang = pos * freq, c = cosf(ang), s = sinf(ang);
+        const float x0 = b2f(x[r*dim + 2*p]);
+        const float x1 = b2f(x[r*dim + 2*p + 1]);
         out[r*dim + 2*p]     = f2b(x0 * c - x1 * s);
         out[r*dim + 2*p + 1] = f2b(x0 * s + x1 * c);
     }
@@ -298,21 +303,23 @@ extern "C" __global__ void scale_mask_bwd_kernel(
     }
 }
 
-// RoPE backward — the adjoint (transpose) rotation, same pos/freq as rope_kernel:
-// dx[2p] = c·dy[2p] + s·dy[2p+1], dx[2p+1] = −s·dy[2p] + c·dy[2p+1].
+// RoPE backward — adjoint of rope_kernel with the same head-local frequency period.
 extern "C" __global__ void rope_bwd_kernel(
     unsigned short* dx, const unsigned short* dy, const size_t rows, const size_t dim,
-    const size_t seq_len, const size_t offset, const float theta)
+    const size_t head_dim, const size_t seq_len, const size_t offset, const float theta)
 {
-    size_t pairs = dim / 2;
-    size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    const size_t pairs = dim / 2;
+    const size_t head_pairs = head_dim / 2;
+    const size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < rows * pairs) {
-        size_t r = idx / pairs, p = idx % pairs;
-        float pos = (float)((r % seq_len) + offset);
-        float freq = powf(theta, -2.0f * (float)p / (float)dim);
-        float ang = pos * freq, c = cosf(ang), s = sinf(ang);
-        float ge = b2f(dy[r*dim + 2*p]);
-        float go = b2f(dy[r*dim + 2*p + 1]);
+        const size_t r = idx / pairs;
+        const size_t p = idx % pairs;
+        const size_t local_p = p % head_pairs;
+        const float pos = (float)((r % seq_len) + offset);
+        const float freq = powf(theta, -2.0f * (float)local_p / (float)head_dim);
+        const float ang = pos * freq, c = cosf(ang), s = sinf(ang);
+        const float ge = b2f(dy[r*dim + 2*p]);
+        const float go = b2f(dy[r*dim + 2*p + 1]);
         dx[r*dim + 2*p]     = f2b(c * ge + s * go);
         dx[r*dim + 2*p + 1] = f2b(-s * ge + c * go);
     }
@@ -1437,24 +1444,60 @@ impl CudaChain {
     /// RoPE: interleaved-pair rotation of a `rows × dim` matrix, `pos = (row mod
     /// seq_len) + offset`, `freq_p = theta^(-2p/dim)`. `dim` must be even. One
     /// thread per `(row, pair)`.
+    /// RoPE over the full matrix width (frequency denominator = width). Kept for
+    /// generic callers; GQA uses [`Self::rope_head_local`] instead.
     pub fn rope(&self, x: &CudaMatrix, seq_len: usize, offset: usize, theta: f32) -> CudaMatrix {
+        self.rope_with_head_dim(x, x.cols, seq_len, offset, theta)
+    }
+
+    /// Head-local RoPE in one CUDA launch. `head_dim` must evenly tile the matrix
+    /// width and is the rotary-frequency denominator for every logical head.
+    pub fn rope_head_local(
+        &self,
+        x: &CudaMatrix,
+        head_dim: usize,
+        seq_len: usize,
+        offset: usize,
+        theta: f32,
+    ) -> CudaMatrix {
+        self.rope_with_head_dim(x, head_dim, seq_len, offset, theta)
+    }
+
+    fn rope_with_head_dim(
+        &self,
+        x: &CudaMatrix,
+        head_dim: usize,
+        seq_len: usize,
+        offset: usize,
+        theta: f32,
+    ) -> CudaMatrix {
         assert_eq!(x.cols % 2, 0, "rope: dim must be even, got {}", x.cols);
+        assert!(
+            head_dim > 0 && head_dim.is_multiple_of(2),
+            "rope: head_dim must be positive/even"
+        );
+        assert!(
+            x.cols.is_multiple_of(head_dim),
+            "rope: width must be divisible by head_dim"
+        );
         let (rows, dim) = (x.rows, x.cols);
         let total = rows * (dim / 2);
         let mut out = self
             .stream
             .alloc_zeros::<bf16>(rows * dim)
             .expect("cuda alloc");
-        let (rows_a, dim_a, seq_a, off_a, theta_a) = (rows, dim, seq_len, offset, theta);
+        let (rows_a, dim_a, head_a, seq_a, off_a, theta_a) =
+            (rows, dim, head_dim, seq_len, offset, theta);
         let mut builder = self.stream.launch_builder(&self.kernels().rope);
         builder.arg(&mut out);
         builder.arg(&x.buf);
         builder.arg(&rows_a);
         builder.arg(&dim_a);
+        builder.arg(&head_a);
         builder.arg(&seq_a);
         builder.arg(&off_a);
         builder.arg(&theta_a);
-        // SAFETY: arg order/types match `rope_kernel`; one thread per (row, pair).
+        // SAFETY: kernel covers one adjacent pair and head_dim partitions dim.
         unsafe {
             builder
                 .launch(LaunchConfig::for_num_elems(total as u32))
@@ -1718,9 +1761,32 @@ impl CudaChain {
 
     /// RoPE backward — the adjoint (transpose) rotation, same `pos`/`freq` as
     /// [`Self::rope`]. `dim` (cols) must be even. One thread per `(row, pair)`.
+    /// Full-width RoPE adjoint. GQA uses [`Self::rope_head_local_backward`].
     pub fn rope_backward(
         &self,
         dy: &CudaMatrix,
+        seq_len: usize,
+        offset: usize,
+        theta: f32,
+    ) -> CudaMatrix {
+        self.rope_backward_with_head_dim(dy, dy.cols, seq_len, offset, theta)
+    }
+
+    pub fn rope_head_local_backward(
+        &self,
+        dy: &CudaMatrix,
+        head_dim: usize,
+        seq_len: usize,
+        offset: usize,
+        theta: f32,
+    ) -> CudaMatrix {
+        self.rope_backward_with_head_dim(dy, head_dim, seq_len, offset, theta)
+    }
+
+    fn rope_backward_with_head_dim(
+        &self,
+        dy: &CudaMatrix,
+        head_dim: usize,
         seq_len: usize,
         offset: usize,
         theta: f32,
@@ -1731,22 +1797,32 @@ impl CudaChain {
             "rope_backward: dim must be even, got {}",
             dy.cols
         );
+        assert!(
+            head_dim > 0 && head_dim.is_multiple_of(2),
+            "rope_backward: invalid head_dim"
+        );
+        assert!(
+            dy.cols.is_multiple_of(head_dim),
+            "rope_backward: width/head_dim mismatch"
+        );
         let (rows, dim) = (dy.rows, dy.cols);
         let total = rows * (dim / 2);
         let mut dx = self
             .stream
             .alloc_zeros::<bf16>(rows * dim)
             .expect("cuda alloc");
-        let (rows_a, dim_a, seq_a, off_a, theta_a) = (rows, dim, seq_len, offset, theta);
+        let (rows_a, dim_a, head_a, seq_a, off_a, theta_a) =
+            (rows, dim, head_dim, seq_len, offset, theta);
         let mut builder = self.stream.launch_builder(&self.kernels().rope_bwd);
         builder.arg(&mut dx);
         builder.arg(&dy.buf);
         builder.arg(&rows_a);
         builder.arg(&dim_a);
+        builder.arg(&head_a);
         builder.arg(&seq_a);
         builder.arg(&off_a);
         builder.arg(&theta_a);
-        // SAFETY: arg order/types match `rope_bwd_kernel`; one thread per (row, pair).
+        // SAFETY: kernel covers one adjacent pair and head_dim partitions dim.
         unsafe {
             builder
                 .launch(LaunchConfig::for_num_elems(total as u32))
