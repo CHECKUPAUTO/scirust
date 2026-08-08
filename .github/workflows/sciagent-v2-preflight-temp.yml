@@ -1,0 +1,91 @@
+name: SciAgent v2 production preflight (temporary)
+
+on:
+  push:
+    branches: [ops/sciagent-v2-preflight]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sciagent-v2-production-preflight
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    name: Read-only Thor corpus/checkpoint preflight
+    runs-on: [self-hosted, Linux, ARM64, scirust-arm64, jetson-thor, internal]
+    timeout-minutes: 20
+    steps:
+      - name: Host identity and GPU
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "SCIAGENT_PREFLIGHT_USER=$(id -un)"
+          echo "SCIAGENT_PREFLIGHT_HOME=$HOME"
+          uname -a
+          free -h
+          nvidia-smi --query-gpu=name,driver_version,compute_cap --format=csv,noheader
+          echo "--- disk ---"
+          df -hT / /root /home /data /mnt /srv 2>/dev/null || true
+          echo "--- existing training processes ---"
+          pgrep -af 'cuda_pretrain|sciagent.*pretrain' || true
+
+      - name: Locate and validate v4 shards read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          if sudo -n true 2>/dev/null; then
+            SUDO="sudo -n"
+            echo "SCIAGENT_PREFLIGHT_SUDO=available"
+          else
+            SUDO=""
+            echo "SCIAGENT_PREFLIGHT_SUDO=unavailable"
+          fi
+
+          candidates=()
+          while IFS= read -r p; do
+            [[ -n "$p" ]] && candidates+=("$p")
+          done < <(
+            $SUDO find /root/scirust /home /data /mnt /srv \
+              -maxdepth 6 -type d -name shards_v4 -print 2>/dev/null | sort -u || true
+          )
+
+          echo "SCIAGENT_PREFLIGHT_SHARD_DIR_COUNT=${#candidates[@]}"
+          if (( ${#candidates[@]} == 0 )); then
+            echo "SCIAGENT_PREFLIGHT_SHARDS=NOT_FOUND"
+            exit 3
+          fi
+
+          found_exact=0
+          for dir in "${candidates[@]}"; do
+            files="$($SUDO find "$dir" -maxdepth 1 -type f -name '*.bin' -printf '.' 2>/dev/null | wc -c)"
+            bytes="$($SUDO find "$dir" -maxdepth 1 -type f -name '*.bin' -printf '%s\n' 2>/dev/null | awk '{s+=$1} END {printf "%.0f", s+0}')"
+            tokens=$(( bytes / 4 ))
+            rem=$(( bytes % 4 ))
+            echo "SCIAGENT_PREFLIGHT_SHARDS path=$dir files=$files bytes=$bytes tokens=$tokens byte_remainder=$rem"
+            if [[ "$files" == "1030" && "$tokens" == "1029492639" && "$rem" == "0" ]]; then
+              found_exact=1
+              echo "SCIAGENT_PREFLIGHT_V4_EXACT=$dir"
+            fi
+          done
+
+          if (( found_exact != 1 )); then
+            echo "SCIAGENT_PREFLIGHT_V4_EXACT=NO_UNIQUE_MATCH"
+            exit 4
+          fi
+
+      - name: Inspect existing checkpoint namespaces read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          if sudo -n true 2>/dev/null; then SUDO="sudo -n"; else SUDO=""; fi
+          echo "--- checkpoint roots / semantics markers ---"
+          $SUDO find /root/scirust /home /data /mnt /srv \
+            -maxdepth 7 \( -type d -name 'checkpoints*' -o -type f -name 'model_semantics.version' \) \
+            -print 2>/dev/null | head -n 300 || true
+          echo "--- candidate fresh-v2 namespaces already present ---"
+          $SUDO find /root/scirust /home /data /mnt /srv \
+            -maxdepth 7 -type d \( -name '*semantics*v2*' -o -name '*bpe350m*v5*' -o -name '*post_b33*' \) \
+            -print 2>/dev/null | head -n 100 || true
