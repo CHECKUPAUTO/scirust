@@ -119,7 +119,8 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           fetch-depth: 1
-      - name: Require a real WGPU-capable Thor
+      - name: Detect a real WGPU-capable Thor
+        id: thor
         shell: bash
         run: |
           set -euo pipefail
@@ -127,12 +128,14 @@ jobs:
             && nvidia-smi -L 2>/dev/null | grep -q 'NVIDIA Thor' \
             && command -v vulkaninfo >/dev/null 2>&1 \
             && vulkaninfo --summary 2>/dev/null | grep -q 'NVIDIA Tegra NVIDIA Thor'; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
             echo "Real NVIDIA Thor WGPU/Vulkan device detected."
           else
-            echo "::error::Phase 28 requires a real NVIDIA Thor WGPU/Vulkan device."
-            exit 1
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Runner is labelled jetson-thor but does not expose the real Thor WGPU/Vulkan device; Phase 28 hardware baseline is deferred."
           fi
       - name: Classify Thor occupancy
+        if: steps.thor.outputs.available == 'true'
         id: occupancy
         shell: bash
         run: |
@@ -171,41 +174,41 @@ jobs:
           echo "::error::Phase 28 found unknown GPU compute activity; refusing to hide it or publish contaminated timings."
           exit 1
       - name: Report deferred hardware baseline
-        if: steps.occupancy.outputs.run_baseline == 'false'
+        if: steps.thor.outputs.available != 'true' || steps.occupancy.outputs.run_baseline == 'false'
         run: |
           echo "Phase 28 software/static gates remain authoritative for this run."
-          echo "The real-Thor performance baseline is deferred until the SciAgent production training releases the GPU."
+          echo "The real-Thor performance baseline is deferred until a real idle Thor is available."
           {
             echo "## Phase 28 Thor performance baseline: DEFERRED"
             echo
-            echo "nvidia-smi reports the recognized SciAgent production cuda_pretrain binary as the GPU owner."
+            echo "A real idle Thor was not available to this job."
             echo "No Phase 28 WGPU probe or performance benchmark was launched."
-            echo "This is not hardware-baseline evidence; PR #1024 remains draft until an idle-Thor run records the two CSV rows."
+            echo "No hardware result is reused or fabricated; PR #1024 remains draft until an idle-Thor run records the two CSV rows."
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Prepare isolated executable build directory
-        if: steps.occupancy.outputs.run_baseline == 'true'
+        if: steps.thor.outputs.available == 'true' && steps.occupancy.outputs.run_baseline == 'true'
         run: |
           tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.ci-tmp.XXXXXX")"
           chmod 700 "$tmpdir"
           echo "TMPDIR=$tmpdir" >> "$GITHUB_ENV"
           echo "CARGO_TARGET_DIR=$tmpdir/target" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
-        if: steps.occupancy.outputs.run_baseline == 'true'
+        if: steps.thor.outputs.available == 'true' && steps.occupancy.outputs.run_baseline == 'true'
         with:
           toolchain: 1.89.0
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
-        if: steps.occupancy.outputs.run_baseline == 'true'
+        if: steps.thor.outputs.available == 'true' && steps.occupancy.outputs.run_baseline == 'true'
         with:
           shared-key: phase28-resident-wgpu-thor
           cache-targets: false
       - name: Report WGPU/Vulkan environment
-        if: steps.occupancy.outputs.run_baseline == 'true'
+        if: steps.thor.outputs.available == 'true' && steps.occupancy.outputs.run_baseline == 'true'
         run: |
           uname -a
           nvidia-smi
           vulkaninfo --summary
       - name: Run exclusive Thor correctness and baseline
-        if: steps.occupancy.outputs.run_baseline == 'true'
+        if: steps.thor.outputs.available == 'true' && steps.occupancy.outputs.run_baseline == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -246,7 +249,7 @@ jobs:
             --features wgpu --example resident_generation_benchmark > phase28-thor.csv
           cat phase28-thor.csv
       - name: Validate real-device resident rows
-        if: steps.occupancy.outputs.run_baseline == 'true'
+        if: steps.thor.outputs.available == 'true' && steps.occupancy.outputs.run_baseline == 'true'
         run: |
           python3 - <<'PY'
           import csv
