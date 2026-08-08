@@ -30,8 +30,25 @@ jobs:
         with:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
-      - name: Format
-        run: cargo +nightly-2026-07-02 fmt --all -- --check
+      - name: Apply pinned rustfmt in ephemeral checkout
+        run: cargo +nightly-2026-07-02 fmt --all
+      - name: Collect formatted I250 files
+        run: |
+          mkdir -p /tmp/i250-formatted/scirust-cuda/src
+          mkdir -p /tmp/i250-formatted/scirust-sciagent/src
+          mkdir -p /tmp/i250-formatted/scirust-sciagent/examples
+          mkdir -p /tmp/i250-formatted/scirust-sciagent/tests
+          cp scirust-cuda/src/decode.rs /tmp/i250-formatted/scirust-cuda/src/decode.rs
+          cp scirust-sciagent/src/cuda_decode.rs /tmp/i250-formatted/scirust-sciagent/src/cuda_decode.rs
+          cp scirust-sciagent/examples/cuda_decode_bench.rs /tmp/i250-formatted/scirust-sciagent/examples/cuda_decode_bench.rs
+          cp scirust-sciagent/tests/cuda_decode_parity.rs /tmp/i250-formatted/scirust-sciagent/tests/cuda_decode_parity.rs
+      - name: Upload formatted I250 files
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: i250-rustfmt-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 1
+          path: /tmp/i250-formatted
       - name: CUDA feature compile
         run: cargo +nightly-2026-07-02 check -p scirust-sciagent --features cuda --all-targets --locked
       - name: Strict Clippy
