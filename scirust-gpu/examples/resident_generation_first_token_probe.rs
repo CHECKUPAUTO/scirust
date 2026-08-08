@@ -18,7 +18,7 @@ const N_LAYERS: usize = 2;
 const D_FF: usize = 128;
 const SEED: u64 = 0x28_00_00_01;
 const DEFAULT_LIMIT: usize = 1;
-const DEFAULT_TOP_K: usize = 0;
+const DEFAULT_TOP_K: usize = 50;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let limit = env::var("SCIRUST_RESIDENT_PROBE_LIMIT")
