@@ -8,7 +8,7 @@
 use std::time::Instant;
 
 use scirust_sciagent::config::SciAgentConfig;
-use scirust_sciagent::cuda_decode::CudaDecodeModel;
+use scirust_sciagent::cuda_decode::{CudaDecodeFfnMode, CudaDecodeModel};
 use scirust_sciagent::cuda_model::CudaModel;
 use scirust_sciagent::generate::SamplingParams;
 use scirust_sciagent::model::SciAgentModel;
@@ -104,10 +104,18 @@ fn main() {
         eprintln!("no CUDA Route-B runtime available");
         std::process::exit(2);
     };
-    let Some(fast) = CudaDecodeModel::from_model(&model)
+    let Some(fast) =
+        CudaDecodeModel::from_model_with_ffn_mode(&model, CudaDecodeFfnMode::FusedGemv)
     else
     {
-        eprintln!("no fused CUDA decode runtime available");
+        eprintln!("no fused-GEMV CUDA decode runtime available");
+        std::process::exit(2);
+    };
+    let Some(cublas) =
+        CudaDecodeModel::from_model_with_ffn_mode(&model, CudaDecodeFfnMode::CublasLt)
+    else
+    {
+        eprintln!("no cuBLASLt I250 decode baseline available");
         std::process::exit(2);
     };
 
@@ -123,7 +131,7 @@ fn main() {
 
     // Warm NVRTC/cuBLASLt and all measured paths outside the timing windows.
     let _ = fast.generate_greedy_device_feedback(&prompt, 1);
-    let _ = fast.generate(&prompt, 1, &greedy, seed);
+    let _ = cublas.generate_greedy_device_feedback(&prompt, 1);
     let _ = oracle.generate_cached(&prompt, 1, &greedy, seed);
 
     let device_started = Instant::now();
@@ -132,11 +140,11 @@ fn main() {
     let device_new = device_tokens.len().saturating_sub(prompt.len());
     let device_tps = throughput(device_new, device_seconds);
 
-    let host_started = Instant::now();
-    let host_tokens = fast.generate(&prompt, max_new, &greedy, seed);
-    let host_seconds = host_started.elapsed().as_secs_f64();
-    let host_new = host_tokens.len().saturating_sub(prompt.len());
-    let host_tps = throughput(host_new, host_seconds);
+    let cublas_started = Instant::now();
+    let cublas_tokens = cublas.generate_greedy_device_feedback(&prompt, max_new);
+    let cublas_seconds = cublas_started.elapsed().as_secs_f64();
+    let cublas_new = cublas_tokens.len().saturating_sub(prompt.len());
+    let cublas_tps = throughput(cublas_new, cublas_seconds);
 
     let oracle_started = Instant::now();
     let oracle_tokens = oracle.generate_cached(&prompt, max_new, &greedy, seed);
@@ -145,7 +153,7 @@ fn main() {
     let oracle_tps = throughput(oracle_new, oracle_seconds);
 
     let device_parity = device_tokens == oracle_tokens;
-    let host_parity = host_tokens == oracle_tokens;
+    let cublas_parity = cublas_tokens == oracle_tokens;
     let speedup = if oracle_tps > 0.0
     {
         device_tps / oracle_tps
@@ -154,9 +162,9 @@ fn main() {
     {
         f64::NAN
     };
-    let feedback_gain = if host_tps > 0.0
+    let ffn_gain = if cublas_tps > 0.0
     {
-        device_tps / host_tps
+        device_tps / cublas_tps
     }
     else
     {
@@ -166,17 +174,17 @@ fn main() {
     let stretch_met = device_tps >= stretch_tps;
 
     println!(
-        "SCIAGENT_I250_DECODE params={} prompt={} requested_new={} fast_mode=device_feedback_greedy fast_new={} fast_seconds={:.6} fast_tok_s={:.3} host_sampler_new={} host_sampler_seconds={:.6} host_sampler_tok_s={:.3} feedback_gain={:.3} b49_new={} b49_seconds={:.6} b49_tok_s={:.3} speedup={:.3} generated_h2d_bytes_per_token=0 generated_d2h_bytes_per_token=0 final_readback_bytes={} target_tok_s={:.3} target_met={} stretch_tok_s={:.3} stretch_met={} parity={} host_parity={}",
+        "SCIAGENT_I250_DECODE params={} prompt={} requested_new={} fast_mode=device_feedback_greedy ffn_fast=fused_gemv fast_new={} fast_seconds={:.6} fast_tok_s={:.3} ffn_baseline=cublaslt cublas_new={} cublas_seconds={:.6} cublas_tok_s={:.3} ffn_gain={:.3} b49_new={} b49_seconds={:.6} b49_tok_s={:.3} speedup={:.3} generated_h2d_bytes_per_token=0 generated_d2h_bytes_per_token=0 final_readback_bytes={} target_tok_s={:.3} target_met={} stretch_tok_s={:.3} stretch_met={} parity={} cublas_parity={}",
         config.total_parameters(),
         prompt_len,
         max_new,
         device_new,
         device_seconds,
         device_tps,
-        host_new,
-        host_seconds,
-        host_tps,
-        feedback_gain,
+        cublas_new,
+        cublas_seconds,
+        cublas_tps,
+        ffn_gain,
         oracle_new,
         oracle_seconds,
         oracle_tps,
@@ -187,10 +195,10 @@ fn main() {
         stretch_tps,
         stretch_met,
         device_parity,
-        host_parity,
+        cublas_parity,
     );
 
-    if !device_parity || !host_parity
+    if !device_parity || !cublas_parity
     {
         eprintln!("ERROR: I250 CUDA decode diverged from the B49 cached oracle");
         std::process::exit(3);

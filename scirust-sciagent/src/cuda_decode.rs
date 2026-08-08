@@ -34,8 +34,18 @@ struct DecodeWorkspace {
     ctx: CudaDecodeMatrix,
     tmp_d: CudaDecodeMatrix,
     h: CudaDecodeMatrix,
+    gate_up: CudaDecodeMatrix,
     act: CudaDecodeMatrix,
     logits: CudaDecodeMatrix,
+}
+
+/// FFN projection implementation used by the I250 batch-one decoder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CudaDecodeFfnMode {
+    /// Existing cuBLASLt projection followed by the standalone SwiGLU kernel.
+    CublasLt,
+    /// Decode-native gate/up GEMV with SwiGLU fused into the projection kernel.
+    FusedGemv,
 }
 
 /// Batch-one SCIAGENT decoder with fused projection weights and fixed-capacity KV.
@@ -44,6 +54,7 @@ pub struct CudaDecodeModel {
     embedding: CudaDecodeMatrix,
     final_norm: CudaDecodeMatrix,
     blocks: Vec<DecodeBlock>,
+    ffn_mode: CudaDecodeFfnMode,
     d_model: usize,
     d_ff: usize,
     n_heads: usize,
@@ -56,9 +67,18 @@ pub struct CudaDecodeModel {
 }
 
 impl CudaDecodeModel {
-    /// Mirror one immutable CPU model snapshot into the I250 runtime.
+    /// Mirror one immutable CPU model snapshot into the default fastest I250 runtime.
     #[must_use]
     pub fn from_model(model: &SciAgentModel) -> Option<Self> {
+        Self::from_model_with_ffn_mode(model, CudaDecodeFfnMode::FusedGemv)
+    }
+
+    /// Mirror one immutable CPU model snapshot with an explicit FFN backend.
+    #[must_use]
+    pub fn from_model_with_ffn_mode(
+        model: &SciAgentModel,
+        ffn_mode: CudaDecodeFfnMode,
+    ) -> Option<Self> {
         assert!(
             model.config.tie_embeddings,
             "CudaDecodeModel currently requires tied embeddings"
@@ -122,6 +142,7 @@ impl CudaDecodeModel {
             embedding,
             final_norm,
             blocks,
+            ffn_mode,
             d_model: config.d_model,
             d_ff: config.d_ff,
             n_heads: config.n_heads,
@@ -132,6 +153,11 @@ impl CudaDecodeModel {
             vocab: config.vocab_size,
             max_seq_len: config.max_seq_len,
         })
+    }
+
+    #[must_use]
+    pub const fn ffn_mode(&self) -> CudaDecodeFfnMode {
+        self.ffn_mode
     }
 
     #[must_use]
@@ -162,6 +188,7 @@ impl CudaDecodeModel {
             ctx: runtime.matrix(1, self.d_model),
             tmp_d: runtime.matrix(1, self.d_model),
             h: runtime.matrix(1, self.d_model),
+            gate_up: runtime.matrix(1, 2 * self.d_ff),
             act: runtime.matrix(1, self.d_ff),
             logits: runtime.matrix(1, self.vocab),
         }
@@ -200,7 +227,18 @@ impl CudaDecodeModel {
             runtime.add_into(&workspace.x, &workspace.tmp_d, &mut workspace.h);
 
             runtime.rms_norm_into(&workspace.h, &block.norm2, self.eps, &mut workspace.norm);
-            runtime.swiglu_gemv_into(&workspace.norm, &block.gate_up, &mut workspace.act);
+            match self.ffn_mode
+            {
+                CudaDecodeFfnMode::FusedGemv =>
+                {
+                    runtime.swiglu_gemv_into(&workspace.norm, &block.gate_up, &mut workspace.act);
+                },
+                CudaDecodeFfnMode::CublasLt =>
+                {
+                    runtime.matmul_into(&workspace.norm, &block.gate_up, &mut workspace.gate_up);
+                    runtime.swiglu_split_into(&workspace.gate_up, &mut workspace.act);
+                },
+            }
             runtime.matmul_into(&workspace.act, &block.down, &mut workspace.tmp_d);
             runtime.add_into(&workspace.h, &workspace.tmp_d, &mut workspace.x);
         }
