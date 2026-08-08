@@ -205,8 +205,7 @@ impl CudaModel {
             let inputs = &tokens[cursor..cursor + s];
             let targets = &tokens[cursor + 1..cursor + s + 1];
             let logits = self.forward_resident(inputs);
-            let host = self.chain.download(&logits);
-            total += host_cross_entropy(&host, targets, s, self.vocab) as f64;
+            total += self.chain.cross_entropy_loss(&logits, targets) as f64;
             count += 1;
             cursor += s;
         }
@@ -498,19 +497,6 @@ impl BlockMasters {
 /// Host mean cross-entropy `−(1/rows)·Σ log P[i, tgtᵢ]` over row-major logits —
 /// the pre-update loss (matches `train::cross_entropy_loss`). Kept here so the CUDA
 /// path needs no `scirust-gpu` dependency.
-fn host_cross_entropy(logits: &[f32], targets: &[u32], rows: usize, cols: usize) -> f32 {
-    let mut loss = 0.0f32;
-    for r in 0..rows
-    {
-        let row = &logits[r * cols..(r + 1) * cols];
-        let mx = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-        let sum: f32 = row.iter().map(|&v| (v - mx).exp()).sum();
-        let t = (targets[r] as usize).min(cols - 1);
-        let logp = (row[t] - mx) - sum.ln();
-        loss -= logp;
-    }
-    loss / rows as f32
-}
 
 /// A trainable [`CudaModel`]: the bf16 model plus **fp32 master weights and AdamW
 /// moments** (the mixed-precision contract). Each [`Self::train_step`] runs the
@@ -629,14 +615,10 @@ impl CudaTrainer {
         weight_decay: f32,
     ) -> f32 {
         self.step += 1;
-        let rows = tokens.len();
-        let vocab = self.model.vocab;
-
-        // Forward (resident) → host loss → cross-entropy grad → backward.
+        // Forward and CE stay resident. Only one fp32 loss scalar per token row
+        // crosses to the host; the full rows×vocab logit matrix never does.
         let logits = self.model.forward_resident(tokens);
-        let host = self.model.chain.download(&logits);
-        let loss = host_cross_entropy(&host, targets, rows, vocab);
-        let dlogits = self.model.chain.cross_entropy_grad(&logits, targets);
+        let (loss, dlogits) = self.model.chain.cross_entropy_loss_grad(&logits, targets);
         let grads = self.model.backward(tokens, &dlogits);
 
         // Global gradient-norm clipping: compute ‖g‖ over every weight's grad, then
@@ -763,7 +745,6 @@ impl CudaTrainer {
     /// Returns `NaN` if there isn't a full window.
     pub fn eval_loss(&self, val_tokens: &[u32], seq_len: usize, max_windows: usize) -> f32 {
         let s = seq_len;
-        let vocab = self.model.vocab;
         let mut total = 0.0f64;
         let mut count = 0usize;
         let mut cursor = 0usize;
@@ -772,8 +753,7 @@ impl CudaTrainer {
             let inputs = &val_tokens[cursor..cursor + s];
             let targets = &val_tokens[cursor + 1..cursor + s + 1];
             let logits = self.model.forward_resident(inputs);
-            let host = self.model.chain.download(&logits);
-            total += host_cross_entropy(&host, targets, s, vocab) as f64;
+            total += self.model.chain.cross_entropy_loss(&logits, targets) as f64;
             count += 1;
             cursor += s;
         }
