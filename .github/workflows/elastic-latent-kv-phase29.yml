@@ -53,12 +53,7 @@ jobs:
         with:
           toolchain: nightly-2026-07-02
           components: rustfmt,clippy
-      - name: Require real CUDA device
-        run: |
-          command -v nvidia-smi
-          nvidia-smi -L
-          nvidia-smi --query-gpu=name,driver_version,compute_cap,memory.total --format=csv,noheader
-      - name: Test real CUDA capability profile
+      - name: Test real CUDA capability profile (fail closed)
         run: cargo +nightly-2026-07-02 test -p scirust-gpu --features cuda --test cuda_hardware_capabilities --locked -- --nocapture
       - name: Clippy CUDA profile path
         run: cargo +nightly-2026-07-02 clippy -p scirust-gpu --features cuda --test cuda_hardware_capabilities --locked -- -D warnings
