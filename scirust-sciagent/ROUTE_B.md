@@ -494,3 +494,11 @@ executes that context product with the full-forward `T×T · T×dh` output shape
 zero padding and retains only the last row. This deliberately prioritizes exact model
 semantics; the Thor benchmark decides whether a later dedicated deterministic GEMV
 kernel is needed to recover the O(T) context-product cost without reintroducing drift.
+
+### B49 — deterministic attention context
+
+Thor diagnostics localized the first KV-cache divergence to `weights · V`: K/V,
+QKᵀ scores, scaling and softmax were bit-identical. A shared CUDA row-local context
+kernel now accumulates positions left-to-right in fp32 for both full inference and
+incremental decode, making causal rows independent of matrix row count while keeping
+cached decode O(T·d_head).

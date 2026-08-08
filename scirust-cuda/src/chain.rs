@@ -160,6 +160,25 @@ extern "C" __global__ void softmax_kernel(
     }
 }
 
+// Deterministic attention context: out = weights · values.
+// One thread owns one output element and accumulates positions strictly left-to-right
+// in fp32. Therefore a causal row is invariant to unrelated output rows and to later
+// exact-zero masked positions. Shared by full inference and incremental KV decode.
+extern "C" __global__ void attention_context_kernel(
+    unsigned short* out, const unsigned short* weights, const unsigned short* values,
+    const size_t rows, const size_t seq, const size_t dim)
+{
+    const size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < rows * dim) {
+        const size_t r = idx / dim;
+        const size_t c = idx % dim;
+        float acc = 0.0f;
+        for (size_t j = 0; j < seq; ++j)
+            acc += b2f(weights[r*seq + j]) * b2f(values[j*dim + c]);
+        out[idx] = f2b(acc);
+    }
+}
+
 // Scale a t×t score matrix by `scale`, and (if causal) mask j>i to a large
 // negative so softmax drives it to ~0.
 extern "C" __global__ void scale_mask_kernel(
@@ -786,6 +805,7 @@ struct Kernels {
     slice_rows: CudaFunction,
     place_rows: CudaFunction,
     softmax: CudaFunction,
+    attention_context: CudaFunction,
     scale_mask: CudaFunction,
     rope: CudaFunction,
     embed: CudaFunction,
@@ -869,6 +889,7 @@ impl CudaChain {
             slice_rows: f("slice_rows_kernel"),
             place_rows: f("place_rows_kernel"),
             softmax: f("softmax_fast_kernel"),
+            attention_context: f("attention_context_kernel"),
             scale_mask: f("scale_mask_kernel"),
             rope: f("rope_kernel"),
             embed: f("embed_kernel"),
@@ -1421,6 +1442,40 @@ impl CudaChain {
             buf: out,
             rows,
             cols,
+        }
+    }
+
+    /// Deterministic row-local attention context `weights · values`.
+    /// `weights` is `rows × seq`; `values` is `seq × dim`. Each output element
+    /// accumulates positions in a fixed fp32 order, independent of output row count.
+    pub fn attention_context(&self, weights: &CudaMatrix, values: &CudaMatrix) -> CudaMatrix {
+        assert_eq!(weights.cols, values.rows, "attention_context: seq mismatch");
+        let rows = weights.rows;
+        let seq = weights.cols;
+        let dim = values.cols;
+        let mut out = self
+            .stream
+            .alloc_zeros::<bf16>(rows * dim)
+            .expect("cuda alloc attention context");
+        let (rows_a, seq_a, dim_a) = (rows, seq, dim);
+        let mut builder = self
+            .stream
+            .launch_builder(&self.kernels().attention_context);
+        builder.arg(&mut out);
+        builder.arg(&weights.buf);
+        builder.arg(&values.buf);
+        builder.arg(&rows_a);
+        builder.arg(&seq_a);
+        builder.arg(&dim_a);
+        unsafe {
+            builder
+                .launch(LaunchConfig::for_num_elems((rows * dim) as u32))
+                .expect("launch attention_context_kernel");
+        }
+        CudaMatrix {
+            buf: out,
+            rows,
+            cols: dim,
         }
     }
 
