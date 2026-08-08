@@ -482,3 +482,15 @@ RoPE by default, and `cuda_eval` refuses to present such a mixed-semantics evalu
 as a valid quality result. A fresh checkpoint directory is required for the final
 production run. `SCIAGENT_ALLOW_NONEXACT_RESUME=1` exists only for explicit research
 experiments and prints a warning.
+
+### B48 — shape-stable cached context
+
+Thor B47 localized the production KV-cache divergence exactly: cached K/V, QKᵀ
+scores, scaling and softmax were bit-identical to the same-prefix full-forward path,
+while the first non-zero error appeared in `weights · V`. cuBLASLt selected different
+reduction paths for `1×T · T×dh` and `T×T · T×dh`; the ~0.285% context error then
+amplified across 24 blocks to ~18% in final logits. The cached correctness path now
+executes that context product with the full-forward `T×T · T×dh` output shape using
+zero padding and retains only the last row. This deliberately prioritizes exact model
+semantics; the Thor benchmark decides whether a later dedicated deterministic GEMV
+kernel is needed to recover the O(T) context-product cost without reintroducing drift.
