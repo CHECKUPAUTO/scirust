@@ -47,7 +47,7 @@ fn main() -> ExitCode {
         Err(error) => {
             eprintln!("cargo-scirust: {error}");
             ExitCode::from(1)
-        }
+        },
     }
 }
 
@@ -70,11 +70,11 @@ fn real_main() -> AppResult<()> {
         "help" | "-h" | "--help" => {
             print_help();
             Ok(())
-        }
+        },
         "version" | "-V" | "--version" => {
             println!("cargo-scirust {}", env!("CARGO_PKG_VERSION"));
             Ok(())
-        }
+        },
         "affected" => commands::affected(&Workspace::load()?, &args[1..]),
         "check" => commands::check(&Workspace::load()?, &args[1..]),
         "parity" => commands::parity(&Workspace::load()?, &args[1..]),
