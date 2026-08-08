@@ -30,10 +30,14 @@
 #[cfg(feature = "cuda")]
 mod chain;
 #[cfg(feature = "cuda")]
+mod decode;
+#[cfg(feature = "cuda")]
 mod raw_runtime;
 
 #[cfg(feature = "cuda")]
 pub use chain::{CudaChain, CudaF32, CudaMatrix};
+#[cfg(feature = "cuda")]
+pub use decode::{CudaDecodeKvCache, CudaDecodeMatrix, CudaDecodeRuntime};
 #[cfg(feature = "cuda")]
 pub use raw_runtime::{
     CudaDeviceInfo, CudaRawAccess, CudaRawBinding, CudaRawBuffer, CudaRawCompileOptions,
