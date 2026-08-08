@@ -42,27 +42,21 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
           fetch-depth: 0
+      - name: Merge current master into PR branch once
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin master
+          if git merge-base --is-ancestor origin/master HEAD; then
+            echo "master already contained in branch"
+          else
+            git merge --no-edit origin/master
+            git push origin HEAD:perf/sciagent-b39-thor-production-bench
+          fi
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
-      - name: Apply B50 final cleanup and publish code only
-        if: hashFiles('scripts/sciagent_b50_finalize.py') != ''
-        run: |
-          python3 scripts/sciagent_b50_finalize.py
-          cargo +nightly-2026-07-02 fmt --all
-          cargo +nightly-2026-07-02 check -p scirust-cuda --features cuda
-          cargo +nightly-2026-07-02 check -p scirust-sciagent --features cuda --example cuda_production_bench
-          cargo +nightly-2026-07-02 clippy -p scirust-cuda --features cuda --all-targets -- -D warnings
-          cargo +nightly-2026-07-02 clippy -p scirust-sciagent --features cuda --all-targets -- -D warnings
-          rm -f scripts/sciagent_b50_finalize.py
-          git restore -- .github/workflows
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git diff --cached --check
-          git commit -m "chore(sciagent): finalize Thor-verified Route-B gate"
-          git push origin HEAD:perf/sciagent-b39-thor-production-bench
       - name: Report Thor CUDA
         run: nvidia-smi --query-gpu=name,driver_version,compute_cap,memory.total --format=csv,noheader
       - name: Format
