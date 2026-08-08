@@ -14,8 +14,13 @@ pub struct PretrainDataset {
 
 impl PretrainDataset {
     pub fn from_slice(data: &[u32], seq_len: usize, vocab_size: usize) -> Self {
+        Self::from_vec(data.to_vec(), seq_len, vocab_size)
+    }
+
+    /// Construct without copying an already-owned token buffer.
+    pub fn from_vec(data: Vec<u32>, seq_len: usize, vocab_size: usize) -> Self {
         Self {
-            data: data.to_vec(),
+            data,
             position: 0,
             seq_len,
             vocab_size,
@@ -132,22 +137,59 @@ impl ShardLoader {
 
     pub fn load_bin<P: AsRef<Path>>(&mut self, path: P) -> std::io::Result<()> {
         let bytes = std::fs::read(path.as_ref())?;
-        let mut data = vec![0u32; bytes.len() / 4];
-        for (i, chunk) in bytes.as_chunks::<4>().0.iter().enumerate()
+        if !bytes.len().is_multiple_of(4)
         {
-            data[i] = u32::from_le_bytes(*chunk);
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "{} has {} bytes, not a multiple of 4",
+                    path.as_ref().display(),
+                    bytes.len()
+                ),
+            ));
+        }
+        let mut data = Vec::with_capacity(bytes.len() / 4);
+        for chunk in bytes.as_chunks::<4>().0
+        {
+            data.push(u32::from_le_bytes(*chunk));
         }
         self.buffer = data;
         Ok(())
     }
 
     pub fn load_dir<P: AsRef<Path>>(&mut self, dir: P) -> std::io::Result<()> {
-        let mut all_data = Vec::new();
         let mut entries: Vec<_> = std::fs::read_dir(dir.as_ref())?
             .filter_map(|e| e.ok())
             .filter(|e| e.path().extension().is_some_and(|ext| ext == "bin"))
             .collect();
         entries.sort_by_key(|e| e.file_name());
+
+        // Reserve the final token buffer once. At 1.03B tokens this avoids repeated
+        // reallocations/copies of a ~4.1 GB Vec while the shard set is loaded.
+        let mut total_bytes = 0usize;
+        for entry in &entries
+        {
+            let len = usize::try_from(entry.metadata()?.len()).map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "shard size exceeds usize")
+            })?;
+            if !len.is_multiple_of(4)
+            {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "{} has {len} bytes, not a multiple of 4",
+                        entry.path().display()
+                    ),
+                ));
+            }
+            total_bytes = total_bytes.checked_add(len).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "total shard size overflows usize",
+                )
+            })?;
+        }
+        let mut all_data = Vec::with_capacity(total_bytes / 4);
         for entry in &entries
         {
             let bytes = std::fs::read(entry.path())?;
@@ -171,8 +213,13 @@ impl ShardLoader {
         &self.buffer
     }
 
+    /// Transfer ownership of the raw token vector without a second corpus-sized copy.
+    pub fn into_tokens(self) -> Vec<u32> {
+        self.buffer
+    }
+
     pub fn into_dataset(self, seq_len: usize, vocab_size: usize) -> PretrainDataset {
-        PretrainDataset::from_slice(&self.buffer, seq_len, vocab_size)
+        PretrainDataset::from_vec(self.buffer, seq_len, vocab_size)
     }
 }
 
@@ -232,6 +279,22 @@ pub fn content_hash(content: &str) -> u64 {
     {
         h ^= b as u64;
         h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+/// Deterministic FNV-1a fingerprint of a token stream, hashing each u32 in
+/// little-endian byte order. Used to fail closed when an exact optimizer/data resume
+/// points at a different corpus than the checkpoint was trained on.
+pub fn token_stream_hash(tokens: &[u32]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for &token in tokens
+    {
+        for b in token.to_le_bytes()
+        {
+            h ^= b as u64;
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
     }
     h
 }
