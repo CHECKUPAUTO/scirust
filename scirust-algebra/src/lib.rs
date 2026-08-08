@@ -24,6 +24,9 @@ pub mod discrete;
 /// Equivariant maps and symmetry-aware tensor coupling.
 #[rustfmt::skip]
 pub mod equivariant;
+/// Normalized spherical harmonics and integer-spin Wigner rotation primitives.
+#[rustfmt::skip]
+pub mod harmonics;
 /// Deterministic fixed-capacity Knuth-Bendix completion.
 #[rustfmt::skip]
 pub mod knuth_bendix;
