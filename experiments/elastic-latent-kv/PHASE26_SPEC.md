@@ -2,7 +2,7 @@
 
 ## Status
 
-Implementation phase following the Phase 25 Jetson Thor benchmark.
+Implementation phase following the Phase 25 Jetson Thor benchmark. The integration branch is validated through the normal pull-request CI after formatting is applied with the repository's pinned toolchain.
 
 ## Evidence carried forward
 
