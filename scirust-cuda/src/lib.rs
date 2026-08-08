@@ -30,6 +30,8 @@
 #[cfg(feature = "cuda")]
 mod bf16_gemv;
 #[cfg(feature = "cuda")]
+mod bf16_lm_head_argmax;
+#[cfg(feature = "cuda")]
 mod bf16_tiled_gemv;
 #[cfg(feature = "cuda")]
 mod chain;
@@ -40,6 +42,8 @@ mod raw_runtime;
 
 #[cfg(feature = "cuda")]
 pub use bf16_gemv::CudaBf16Gemv;
+#[cfg(feature = "cuda")]
+pub use bf16_lm_head_argmax::{CudaBf16LmHeadArgmax, CudaBf16LmHeadArgmaxWorkspace};
 #[cfg(feature = "cuda")]
 pub use bf16_tiled_gemv::{CudaBf16TiledGemv, CudaBf16TiledGemvWorkspace};
 #[cfg(feature = "cuda")]
