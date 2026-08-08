@@ -270,9 +270,10 @@ impl StoredElasticProfile {
                 }
                 None
             },
-            ELASTIC_PROFILE_SCHEMA_V2 => Some(
-                required_str(&value, "payload_fingerprint")?.to_string(),
-            ),
+            ELASTIC_PROFILE_SCHEMA_V2 =>
+            {
+                Some(required_str(&value, "payload_fingerprint")?.to_string())
+            },
             _ => unreachable!("schema guard above accepted only v1/v2"),
         };
 
