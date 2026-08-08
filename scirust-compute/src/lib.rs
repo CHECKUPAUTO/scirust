@@ -10,6 +10,8 @@ mod device;
 mod dtype;
 mod error;
 mod hardware;
+#[cfg(feature = "std")]
+mod hwprobe;
 mod ids;
 mod kernel;
 mod launch;
@@ -29,6 +31,8 @@ pub use hardware::{
     IsaCapabilities, IsaFeature, MatrixCapabilities, MemoryCapabilities, NumericCapabilities,
     ReproducibilityCapabilities, ReproducibilityLevel, SupportLevel, VectorModel,
 };
+#[cfg(feature = "std")]
+pub use hwprobe::probe_host_cpu;
 pub use ids::{BufferId, EventId, KernelId, StreamId};
 pub use kernel::{KernelFormat, KernelModule};
 pub use launch::LaunchConfig;
