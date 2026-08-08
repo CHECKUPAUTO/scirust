@@ -106,9 +106,6 @@ jobs:
       - jetson-thor
       - internal
     timeout-minutes: 60
-    concurrency:
-      group: scirust-thor-gpu-${{ github.event.pull_request.number || github.ref }}
-      cancel-in-progress: false
     env:
       WGPU_BACKEND: vulkan
       SCIRUST_REQUIRE_WGPU: "1"
@@ -118,6 +115,7 @@ jobs:
       SCIRUST_RESIDENT_BENCH_TOP_KS: "50"
       SCIRUST_RESIDENT_BENCH_REPEATS: "7"
       SCIRUST_RESIDENT_BENCH_WARMUP: "3"
+      SCIRUST_THOR_GPU_LOCK: /tmp/scirust-thor-gpu.lock
       CARGO_INCREMENTAL: "0"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -154,9 +152,16 @@ jobs:
           uname -a
           nvidia-smi
           vulkaninfo --summary
-      - name: Probe bounded sampler at production burst sizes
+      - name: Run exclusive Thor correctness and baseline
+        shell: bash
         run: |
           set -euo pipefail
+          command -v flock >/dev/null
+          exec 9>"$SCIRUST_THOR_GPU_LOCK"
+          echo "Waiting for exclusive Thor GPU access via $SCIRUST_THOR_GPU_LOCK"
+          flock -x 9
+          echo "Exclusive Thor GPU access acquired."
+
           for limit in 8 32; do
             echo "=== Phase 28 Thor bounded top-k=50 limit: $limit ==="
             SCIRUST_RESIDENT_PROBE_TOP_K=50 \
@@ -164,22 +169,18 @@ jobs:
               rustup run 1.89.0 cargo run --quiet --release --locked -p scirust-gpu \
                 --features wgpu --example resident_generation_first_token_probe
           done
-      - name: Require an idle Thor for performance measurements
-        shell: bash
-        run: |
-          set -euo pipefail
+
           if ! compute_apps="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null)"; then
             echo "::error::Phase 28 cannot verify that the Thor is idle; refusing to publish a performance baseline."
             exit 1
           fi
           if [[ -n "${compute_apps//[[:space:]]/}" ]]; then
-            echo "::error::Phase 28 performance baseline requires an idle Thor; unrelated compute processes are active:"
+            echo "::error::Phase 28 performance baseline requires an idle Thor after acquiring the shared GPU lock; unmanaged compute processes are active:"
             printf '%s\n' "$compute_apps"
             exit 1
           fi
-          echo "Thor compute queue is idle before the Phase 28 baseline."
-      - name: Run real-device resident baseline
-        run: |
+          echo "Thor is idle under the shared GPU lock; starting Phase 28 baseline."
+
           rustup run 1.89.0 cargo run --quiet --release --locked -p scirust-gpu \
             --features wgpu --example resident_generation_benchmark > phase28-thor.csv
           cat phase28-thor.csv
