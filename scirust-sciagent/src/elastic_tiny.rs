@@ -65,20 +65,20 @@ impl TinyScanBpe {
             for position in 0..len - 1
             {
                 let pair = (work[position], work[position + 1]);
-                let Some(rule) = self.merges.get(&pair) else
+                let Some(rule) = self.merges.get(&pair)
+                else
                 {
                     continue;
                 };
                 let candidate = (rule.rank, position, rule.output);
-                if best.is_none_or(|current| {
-                    (candidate.0, candidate.1) < (current.0, current.1)
-                })
+                if best.is_none_or(|current| (candidate.0, candidate.1) < (current.0, current.1))
                 {
                     best = Some(candidate);
                 }
             }
 
-            let Some((_, position, output)) = best else
+            let Some((_, position, output)) = best
+            else
             {
                 break;
             };
