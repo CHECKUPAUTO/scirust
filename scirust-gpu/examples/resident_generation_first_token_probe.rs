@@ -15,6 +15,7 @@ const N_HEADS: usize = 4;
 const N_LAYERS: usize = 2;
 const D_FF: usize = 128;
 const SEED: u64 = 0x28_00_00_01;
+const BURST_LIMITS: [usize; 5] = [8, 2, 1, 2, 8];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tokenizer = synthetic_tokenizer(VOCAB_SIZE)?;
@@ -35,7 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut cpu = MiniLLM::new(config.clone(), tokenizer.clone());
     let host_gpu = MiniLLM::new(config.clone(), tokenizer.clone());
-    let feedback_gpu = MiniLLM::new(config.clone(), tokenizer);
+    let feedback_gpu = MiniLLM::new(config.clone(), tokenizer.clone());
     let expected = cpu.generate_ids_cached_sampled(&prompt, 1, &sampling, SEED);
     let expected_first = *expected
         .get(prompt.len())
@@ -79,18 +80,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         sampling,
         SEED,
     )?;
-    for call in 1..=2
+    for (call, &limit) in BURST_LIMITS.iter().enumerate()
     {
-        let ids = feedback_resident.generate_ids_resident(&prompt, 1)?;
+        let mut oracle = MiniLLM::new(config.clone(), tokenizer.clone());
+        let expected = oracle.generate_ids_cached_sampled(&prompt, limit, &sampling, SEED);
+        let ids = feedback_resident.generate_ids_resident(&prompt, limit)?;
         let first = ids
             .get(prompt.len())
             .map_or_else(|| "end".to_owned(), usize::to_string);
         let telemetry = feedback_resident.telemetry();
         println!(
-            "phase28_first_token_probe,mode=device-feedback,call={call},top_k=0,cpu_first={expected_first},wgpu_first={first},len={},sampling_draws={},readback_bytes={}",
+            "phase28_first_token_probe,mode=device-feedback,call={},limit={limit},top_k=0,cpu_first={expected_first},wgpu_first={first},match={},expected_len={},actual_len={},sampling_draws={},readback_bytes={},expected_fingerprint={:016x},actual_fingerprint={:016x}",
+            call + 1,
+            u8::from(ids == expected),
+            expected.len(),
             ids.len(),
             telemetry.sampling_draws,
             telemetry.last_burst_readback_bytes,
+            fingerprint(&expected),
+            fingerprint(&ids),
         );
     }
 
@@ -144,4 +152,17 @@ fn identity_basis(dimension: usize) -> Vec<f32> {
         basis[index * dimension + index] = 1.0;
     }
     basis
+}
+
+fn fingerprint(tokens: &[usize]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for &token in tokens
+    {
+        for byte in (token as u64).to_le_bytes()
+        {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    hash
 }
