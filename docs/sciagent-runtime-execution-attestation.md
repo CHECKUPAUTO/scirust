@@ -22,6 +22,19 @@ The protocol-level `ExecutionProfile` and the compute-layer canonical profile en
 
 The two profile byte slices must come from `scirust-compute::canonical_hardware_profile_bytes` and `canonical_topology_profile_bytes`. The builder hashes those bytes with SciAgent's architecture-independent FIPS-180-4 SHA-256 and places the resulting canonical lowercase digests into the protocol profile.
 
+## Route-B CUDA semantics
+
+`build_route_b_cuda_execution_attestation` is a narrower bridge for the resident Route-B CUDA path. It fixes only execution semantics already guaranteed by that path:
+
+- backend `Cuda`;
+- logical device ordinal 0, matching `CudaChain::new`;
+- architecture family `NvidiaGpu` after successful CUDA acquisition;
+- numeric mode `bf16-fp32-accum-v1`;
+- reproducibility `NumericallyEquivalent` rather than a cross-device bit-exact claim;
+- versioned Route-B CUDA kernel semantics.
+
+The optional architecture name remains caller-supplied. This layer never parses a product string or guesses a compute capability. Likewise, the hardware-capability and topology fingerprints remain derived from canonical compute-profile bytes supplied by the execution layer. Building the attestation itself opens no CUDA context.
+
 ## Deliberate non-responsibilities
 
 The builder performs no:

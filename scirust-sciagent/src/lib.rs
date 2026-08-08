@@ -29,6 +29,7 @@ pub mod model;
 pub mod norm;
 pub mod planning;
 pub mod quantize;
+pub mod route_b_execution_attestation;
 pub mod sha256;
 pub mod swiglu;
 pub mod tokenizer;
@@ -69,5 +70,9 @@ pub use generate::Generator;
 pub use inference::SciAgentInference;
 pub use model::SciAgentModel;
 pub use norm::RMSNorm;
+pub use route_b_execution_attestation::{
+    ROUTE_B_CUDA_KERNEL_SEMANTICS_V1, ROUTE_B_CUDA_NUMERIC_MODE_V1,
+    RouteBCudaExecutionAttestationInputs, build_route_b_cuda_execution_attestation,
+};
 pub use swiglu::SwiGLUFFN;
 pub use tokenizer::SciAgentTokenizer;
