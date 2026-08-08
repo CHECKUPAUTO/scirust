@@ -32,14 +32,12 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Linux, ARM64, scirust-arm64, jetson-thor, internal]
     timeout-minutes: 90
-    concurrency:
-      group: scirust-thor-gpu-${{ github.event.pull_request.number || github.ref }}
-      cancel-in-progress: false
     env:
       RUST_BACKTRACE: 1
       CARGO_INCREMENTAL: 0
       RUSTFLAGS: "-D warnings"
       SCIRUST_REQUIRE_CUDA: "1"
+      SCIRUST_THOR_GPU_LOCK: /tmp/scirust-thor-gpu.lock
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - name: Prepare isolated executable build directory
@@ -67,9 +65,20 @@ jobs:
       - name: Format
         run: rustup run nightly-2026-07-02 cargo fmt --all -- --check
       - name: Require CUDA device
-        run: rustup run nightly-2026-07-02 cargo test -p scirust-sciagent --features cuda --test cuda_required -- --nocapture
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v flock >/dev/null
+          exec 9>"$SCIRUST_THOR_GPU_LOCK"
+          flock -x 9
+          rustup run nightly-2026-07-02 cargo test -p scirust-sciagent --features cuda --test cuda_required -- --nocapture
       - name: SCIAGENT CUDA parity
-        run: rustup run nightly-2026-07-02 cargo test -p scirust-sciagent --features cuda --test cuda_parity -- --nocapture
+        shell: bash
+        run: |
+          set -euo pipefail
+          exec 9>"$SCIRUST_THOR_GPU_LOCK"
+          flock -x 9
+          rustup run nightly-2026-07-02 cargo test -p scirust-sciagent --features cuda --test cuda_parity -- --nocapture
       - name: SCIAGENT CUDA clippy
         run: rustup run nightly-2026-07-02 cargo clippy -p scirust-sciagent --features cuda --all-targets -- -D warnings
       - name: SCIAGENT production sweep
@@ -79,4 +88,9 @@ jobs:
           SCIAGENT_BENCH_STEPS: "1"
           SCIAGENT_BENCH_PROMPT: "128"
           SCIAGENT_BENCH_DECODE_NEW: "8"
-        run: rustup run nightly-2026-07-02 cargo run -p scirust-sciagent --features cuda --release --example cuda_production_bench
+        shell: bash
+        run: |
+          set -euo pipefail
+          exec 9>"$SCIRUST_THOR_GPU_LOCK"
+          flock -x 9
+          rustup run nightly-2026-07-02 cargo run -p scirust-sciagent --features cuda --release --example cuda_production_bench
