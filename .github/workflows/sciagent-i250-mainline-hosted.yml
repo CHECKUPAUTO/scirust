@@ -1,0 +1,164 @@
+name: SciAgent I250 mainline hosted
+
+on:
+  pull_request:
+    branches: [ci/i250-mainline-base]
+    paths:
+      - "scirust-sciagent/**"
+      - ".github/workflows/sciagent-i250-mainline-hosted.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sciagent-i250-mainline-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  hosted:
+    name: FFN GEMV A/B compile + Clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+      - name: Add explicit cuBLASLt versus fused-GEMV FFN modes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          model = Path("scirust-sciagent/src/cuda_decode.rs")
+          text = model.read_text()
+
+          enum_marker = "/// Batch-one SCIAGENT decoder with fused projection weights and fixed-capacity KV.\n"
+          enum_text = '''/// FFN projection implementation used by the I250 batch-one decoder.\n#[derive(Debug, Clone, Copy, PartialEq, Eq)]\npub enum CudaDecodeFfnMode {\n    /// Existing cuBLASLt projection followed by the standalone SwiGLU kernel.\n    CublasLt,\n    /// Decode-native gate/up GEMV with SwiGLU fused into the projection kernel.\n    FusedGemv,\n}\n\n'''
+          if "pub enum CudaDecodeFfnMode" not in text:
+              if enum_marker not in text:
+                  raise SystemExit("FFN mode insertion marker not found")
+              text = text.replace(enum_marker, enum_text + enum_marker, 1)
+
+          workspace_old = '''struct DecodeWorkspace {\n    x: CudaDecodeMatrix,\n    norm: CudaDecodeMatrix,\n    qkv: CudaDecodeMatrix,\n    ctx: CudaDecodeMatrix,\n    tmp_d: CudaDecodeMatrix,\n    h: CudaDecodeMatrix,\n    act: CudaDecodeMatrix,\n    logits: CudaDecodeMatrix,\n}\n'''
+          workspace_new = '''struct DecodeWorkspace {\n    x: CudaDecodeMatrix,\n    norm: CudaDecodeMatrix,\n    qkv: CudaDecodeMatrix,\n    ctx: CudaDecodeMatrix,\n    tmp_d: CudaDecodeMatrix,\n    h: CudaDecodeMatrix,\n    gate_up: CudaDecodeMatrix,\n    act: CudaDecodeMatrix,\n    logits: CudaDecodeMatrix,\n}\n'''
+          if workspace_new not in text:
+              if workspace_old not in text:
+                  raise SystemExit("DecodeWorkspace marker not found")
+              text = text.replace(workspace_old, workspace_new, 1)
+
+          struct_marker = "    blocks: Vec<DecodeBlock>,\n    d_model: usize,\n"
+          struct_insert = "    blocks: Vec<DecodeBlock>,\n    ffn_mode: CudaDecodeFfnMode,\n    d_model: usize,\n"
+          if "    ffn_mode: CudaDecodeFfnMode," not in text:
+              if struct_marker not in text:
+                  raise SystemExit("CudaDecodeModel field marker not found")
+              text = text.replace(struct_marker, struct_insert, 1)
+
+          ctor_old = '''    /// Mirror one immutable CPU model snapshot into the I250 runtime.\n    #[must_use]\n    pub fn from_model(model: &SciAgentModel) -> Option<Self> {\n        assert!(\n'''
+          ctor_new = '''    /// Mirror one immutable CPU model snapshot into the default fastest I250 runtime.\n    #[must_use]\n    pub fn from_model(model: &SciAgentModel) -> Option<Self> {\n        Self::from_model_with_ffn_mode(model, CudaDecodeFfnMode::FusedGemv)\n    }\n\n    /// Mirror one immutable CPU model snapshot with an explicit FFN backend.\n    #[must_use]\n    pub fn from_model_with_ffn_mode(\n        model: &SciAgentModel,\n        ffn_mode: CudaDecodeFfnMode,\n    ) -> Option<Self> {\n        assert!(\n'''
+          if "pub fn from_model_with_ffn_mode" not in text:
+              if ctor_old not in text:
+                  raise SystemExit("constructor marker not found")
+              text = text.replace(ctor_old, ctor_new, 1)
+
+          init_marker = "            blocks,\n            d_model: config.d_model,\n"
+          init_insert = "            blocks,\n            ffn_mode,\n            d_model: config.d_model,\n"
+          if "            ffn_mode,\n            d_model:" not in text:
+              if init_marker not in text:
+                  raise SystemExit("model init marker not found")
+              text = text.replace(init_marker, init_insert, 1)
+
+          alloc_marker = "            h: runtime.matrix(1, self.d_model),\n            act: runtime.matrix(1, self.d_ff),\n"
+          alloc_insert = "            h: runtime.matrix(1, self.d_model),\n            gate_up: runtime.matrix(1, 2 * self.d_ff),\n            act: runtime.matrix(1, self.d_ff),\n"
+          if "            gate_up: runtime.matrix(1, 2 * self.d_ff)," not in text:
+              if alloc_marker not in text:
+                  raise SystemExit("workspace allocation marker not found")
+              text = text.replace(alloc_marker, alloc_insert, 1)
+
+          old_ffn = '''            runtime.rms_norm_into(&workspace.h, &block.norm2, self.eps, &mut workspace.norm);\n            runtime.swiglu_gemv_into(&workspace.norm, &block.gate_up, &mut workspace.act);\n            runtime.matmul_into(&workspace.act, &block.down, &mut workspace.tmp_d);\n'''
+          new_ffn = '''            runtime.rms_norm_into(&workspace.h, &block.norm2, self.eps, &mut workspace.norm);\n            match self.ffn_mode\n            {\n                CudaDecodeFfnMode::FusedGemv =>\n                {\n                    runtime.swiglu_gemv_into(\n                        &workspace.norm,\n                        &block.gate_up,\n                        &mut workspace.act,\n                    );\n                },\n                CudaDecodeFfnMode::CublasLt =>\n                {\n                    runtime.matmul_into(\n                        &workspace.norm,\n                        &block.gate_up,\n                        &mut workspace.gate_up,\n                    );\n                    runtime.swiglu_split_into(&workspace.gate_up, &mut workspace.act);\n                },\n            }\n            runtime.matmul_into(&workspace.act, &block.down, &mut workspace.tmp_d);\n'''
+          if "match self.ffn_mode" not in text:
+              if old_ffn not in text:
+                  raise SystemExit("FFN dispatch marker not found")
+              text = text.replace(old_ffn, new_ffn, 1)
+
+          getter_marker = '''    #[must_use]\n    pub const fn vocab(&self) -> usize {\n        self.vocab\n    }\n'''
+          getter_insert = '''    #[must_use]\n    pub const fn ffn_mode(&self) -> CudaDecodeFfnMode {\n        self.ffn_mode\n    }\n\n'''
+          if "pub const fn ffn_mode(&self)" not in text:
+              if getter_marker not in text:
+                  raise SystemExit("getter marker not found")
+              text = text.replace(getter_marker, getter_insert + getter_marker, 1)
+          model.write_text(text)
+
+          bench = Path("scirust-sciagent/examples/cuda_decode_bench.rs")
+          text = bench.read_text()
+          text = text.replace(
+              "use scirust_sciagent::cuda_decode::CudaDecodeModel;",
+              "use scirust_sciagent::cuda_decode::{CudaDecodeFfnMode, CudaDecodeModel};",
+              1,
+          )
+          old_fast = '''    let Some(fast) = CudaDecodeModel::from_model(&model)\n    else\n    {\n        eprintln!("no fused CUDA decode runtime available");\n        std::process::exit(2);\n    };\n'''
+          new_fast = '''    let Some(fast) = CudaDecodeModel::from_model_with_ffn_mode(\n        &model,\n        CudaDecodeFfnMode::FusedGemv,\n    )\n    else\n    {\n        eprintln!("no fused-GEMV CUDA decode runtime available");\n        std::process::exit(2);\n    };\n    let Some(cublas) = CudaDecodeModel::from_model_with_ffn_mode(\n        &model,\n        CudaDecodeFfnMode::CublasLt,\n    )\n    else\n    {\n        eprintln!("no cuBLASLt I250 decode baseline available");\n        std::process::exit(2);\n    };\n'''
+          if "let Some(cublas)" not in text:
+              if old_fast not in text:
+                  raise SystemExit("benchmark model marker not found")
+              text = text.replace(old_fast, new_fast, 1)
+
+          old_warm = '''    let _ = fast.generate_greedy_device_feedback(&prompt, 1);\n    let _ = fast.generate(&prompt, 1, &greedy, seed);\n    let _ = oracle.generate_cached(&prompt, 1, &greedy, seed);\n'''
+          new_warm = '''    let _ = fast.generate_greedy_device_feedback(&prompt, 1);\n    let _ = cublas.generate_greedy_device_feedback(&prompt, 1);\n    let _ = oracle.generate_cached(&prompt, 1, &greedy, seed);\n'''
+          if old_warm in text:
+              text = text.replace(old_warm, new_warm, 1)
+
+          host_block = '''    let host_started = Instant::now();\n    let host_tokens = fast.generate(&prompt, max_new, &greedy, seed);\n    let host_seconds = host_started.elapsed().as_secs_f64();\n    let host_new = host_tokens.len().saturating_sub(prompt.len());\n    let host_tps = throughput(host_new, host_seconds);\n\n'''
+          cublas_block = '''    let cublas_started = Instant::now();\n    let cublas_tokens = cublas.generate_greedy_device_feedback(&prompt, max_new);\n    let cublas_seconds = cublas_started.elapsed().as_secs_f64();\n    let cublas_new = cublas_tokens.len().saturating_sub(prompt.len());\n    let cublas_tps = throughput(cublas_new, cublas_seconds);\n\n'''
+          if host_block in text:
+              text = text.replace(host_block, cublas_block, 1)
+
+          text = text.replace(
+              "    let host_parity = host_tokens == oracle_tokens;\n",
+              "    let cublas_parity = cublas_tokens == oracle_tokens;\n",
+              1,
+          )
+          old_gain = '''    let feedback_gain = if host_tps > 0.0\n    {\n        device_tps / host_tps\n    }\n    else\n    {\n        f64::NAN\n    };\n'''
+          new_gain = '''    let ffn_gain = if cublas_tps > 0.0\n    {\n        device_tps / cublas_tps\n    }\n    else\n    {\n        f64::NAN\n    };\n'''
+          if old_gain in text:
+              text = text.replace(old_gain, new_gain, 1)
+
+          old_print = '''        "SCIAGENT_I250_DECODE params={} prompt={} requested_new={} fast_mode=device_feedback_greedy fast_new={} fast_seconds={:.6} fast_tok_s={:.3} host_sampler_new={} host_sampler_seconds={:.6} host_sampler_tok_s={:.3} feedback_gain={:.3} b49_new={} b49_seconds={:.6} b49_tok_s={:.3} speedup={:.3} generated_h2d_bytes_per_token=0 generated_d2h_bytes_per_token=0 final_readback_bytes={} target_tok_s={:.3} target_met={} stretch_tok_s={:.3} stretch_met={} parity={} host_parity={}",\n'''
+          new_print = '''        "SCIAGENT_I250_DECODE params={} prompt={} requested_new={} fast_mode=device_feedback_greedy ffn_fast=fused_gemv fast_new={} fast_seconds={:.6} fast_tok_s={:.3} ffn_baseline=cublaslt cublas_new={} cublas_seconds={:.6} cublas_tok_s={:.3} ffn_gain={:.3} b49_new={} b49_seconds={:.6} b49_tok_s={:.3} speedup={:.3} generated_h2d_bytes_per_token=0 generated_d2h_bytes_per_token=0 final_readback_bytes={} target_tok_s={:.3} target_met={} stretch_tok_s={:.3} stretch_met={} parity={} cublas_parity={}",\n'''
+          if old_print not in text:
+              raise SystemExit("benchmark print marker not found")
+          text = text.replace(old_print, new_print, 1)
+          text = text.replace(
+              '''        host_new,\n        host_seconds,\n        host_tps,\n        feedback_gain,\n''',
+              '''        cublas_new,\n        cublas_seconds,\n        cublas_tps,\n        ffn_gain,\n''',
+              1,
+          )
+          text = text.replace("        host_parity,\n", "        cublas_parity,\n", 1)
+          text = text.replace(
+              "    if !device_parity || !host_parity\n",
+              "    if !device_parity || !cublas_parity\n",
+              1,
+          )
+          bench.write_text(text)
+          PY
+          cargo +nightly-2026-07-02 fmt --all
+      - name: CUDA SCIAGENT compile
+        run: cargo +nightly-2026-07-02 check -p scirust-sciagent --features cuda --all-targets --locked
+      - name: Strict Clippy
+        run: cargo +nightly-2026-07-02 clippy -p scirust-sciagent --features cuda --all-targets --locked -- -D warnings
+      - name: Commit validated A/B sources only
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scirust-sciagent/src/cuda_decode.rs scirust-sciagent/examples/cuda_decode_bench.rs
+          if ! git diff --cached --quiet; then
+            git commit -m "bench(sciagent): compare fused FFN GEMV with cuBLASLt"
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          fi
