@@ -312,21 +312,15 @@ impl<'a> TwoCoreTtDecodePlan<'a> {
         scratch: &mut [f32],
         output: &mut [f32],
     ) -> Result<(), TtDecodeError> {
-        require_length(
-            input.len(),
-            self.input_features,
-            |expected, actual| TtDecodeError::InputLength { expected, actual },
-        )?;
-        require_length(
-            scratch.len(),
-            self.scratch_len,
-            |expected, actual| TtDecodeError::ScratchLength { expected, actual },
-        )?;
-        require_length(
-            output.len(),
-            self.output_features,
-            |expected, actual| TtDecodeError::OutputLength { expected, actual },
-        )?;
+        require_length(input.len(), self.input_features, |expected, actual| {
+            TtDecodeError::InputLength { expected, actual }
+        })?;
+        require_length(scratch.len(), self.scratch_len, |expected, actual| {
+            TtDecodeError::ScratchLength { expected, actual }
+        })?;
+        require_length(output.len(), self.output_features, |expected, actual| {
+            TtDecodeError::OutputLength { expected, actual }
+        })?;
 
         scratch.fill(0.0);
         for i1 in 0..self.in1
@@ -461,7 +455,8 @@ mod tests {
         let expected = dense_reference(&layer, &input);
         let mut scratch = vec![0.0f32; plan.scratch_len()];
         let mut actual = vec![0.0f32; plan.output_features()];
-        plan.forward_into(&input, &mut scratch, &mut actual).unwrap();
+        plan.forward_into(&input, &mut scratch, &mut actual)
+            .unwrap();
         for (index, (&expected, &actual)) in expected.iter().zip(&actual).enumerate()
         {
             assert!(
@@ -487,9 +482,11 @@ mod tests {
         let mut output = vec![0.0f32; plan.output_features()];
         let first_input = [1.0f32, 2.0, 3.0, 4.0];
         let second_input = [-1.0f32, 0.5, -0.25, 0.125];
-        plan.forward_into(&first_input, &mut scratch, &mut output).unwrap();
+        plan.forward_into(&first_input, &mut scratch, &mut output)
+            .unwrap();
         let first = output.clone();
-        plan.forward_into(&second_input, &mut scratch, &mut output).unwrap();
+        plan.forward_into(&second_input, &mut scratch, &mut output)
+            .unwrap();
         let second = output.clone();
         assert_ne!(first, second);
         let expected = dense_reference(&layer, &second_input);
