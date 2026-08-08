@@ -127,6 +127,13 @@ struct CudaTrainCache {
 /// numerical diagnostic rather than a relaxed correctness criterion: production
 /// greedy parity remains strict until the measured cause of any mismatch is known.
 #[derive(Clone, Debug)]
+pub struct CudaCacheLayerParity {
+    pub layer: usize,
+    pub rel_l2: f32,
+    pub max_abs: f32,
+}
+
+#[derive(Clone, Debug)]
 pub struct CudaCacheParityStep {
     pub step: usize,
     pub expected_token: u32,
@@ -651,6 +658,119 @@ impl CudaModel {
             }
         }
         out
+    }
+
+    /// Localize cached-vs-full numerical drift after each complete transformer
+    /// block for one teacher-forced prediction step. `target_step=1` means the state
+    /// after processing `forced_tokens[0]`; step 0 is prefill and is already checked
+    /// directly by `cache_parity_teacher_forced`.
+    pub fn cache_layer_parity_teacher_forced(
+        &self,
+        prompt: &[u32],
+        forced_tokens: &[u32],
+        target_step: usize,
+    ) -> Vec<CudaCacheLayerParity> {
+        assert!(target_step > 0, "layer trace target must be after prefill");
+        assert!(
+            target_step <= forced_tokens.len(),
+            "layer trace target out of range"
+        );
+        let ch = &self.chain;
+        let mut prefix: Vec<u32> = if prompt.is_empty()
+        {
+            vec![0]
+        }
+        else
+        {
+            prompt.to_vec()
+        };
+        let mut kcache: Vec<Option<CudaMatrix>> = (0..self.blocks.len()).map(|_| None).collect();
+        let mut vcache: Vec<Option<CudaMatrix>> = (0..self.blocks.len()).map(|_| None).collect();
+        let _ = self.prefill_cached(&prefix, &mut kcache, &mut vcache);
+
+        let mut cached_trace: Vec<Vec<f32>> = Vec::new();
+        for (step, &token) in forced_tokens.iter().take(target_step).enumerate()
+        {
+            let pos = prefix.len();
+            prefix.push(token);
+            if step + 1 < target_step
+            {
+                let _ = self.decode_step_cached(token, pos, &mut kcache, &mut vcache);
+                continue;
+            }
+
+            // Final teacher-forced token: same decode as production, but retain one
+            // host row after every block solely for this failure diagnostic.
+            let mut x = ch.embed(&[token], &self.embedding);
+            for (layer, b) in self.blocks.iter().enumerate()
+            {
+                let xn = ch.rms_norm(&x, &b.norm1, self.eps);
+                let q = ch.matmul(&xn, &b.wq);
+                let k = ch.matmul(&xn, &b.wk);
+                let v = ch.matmul(&xn, &b.wv);
+                let qr = self.rope_heads(&q, self.n_heads, 1, pos);
+                let kr = self.rope_heads(&k, self.n_kv_heads, 1, pos);
+                kcache[layer] = Some(match kcache[layer].take()
+                {
+                    None => kr,
+                    Some(prev) => ch.concat_rows(&[&prev, &kr]),
+                });
+                vcache[layer] = Some(match vcache[layer].take()
+                {
+                    None => v,
+                    Some(prev) => ch.concat_rows(&[&prev, &v]),
+                });
+                let ctx = self.incremental_attention(
+                    &qr,
+                    kcache[layer].as_ref().expect("K cache"),
+                    vcache[layer].as_ref().expect("V cache"),
+                );
+                let attn_out = ch.matmul(&ctx, &b.wo);
+                let h = ch.add(&x, &attn_out);
+                let hn = ch.rms_norm(&h, &b.norm2, self.eps);
+                let gate = ch.matmul(&hn, &b.wg);
+                let up = ch.matmul(&hn, &b.wu);
+                let act = ch.swiglu(&gate, &up);
+                let mlp = ch.matmul(&act, &b.wd);
+                x = ch.add(&h, &mlp);
+                cached_trace.push(ch.download(&x));
+            }
+        }
+
+        // Independent full-forward trace under the exact same prefix. Causality means
+        // the last row is the mathematical reference for the cached new-token row.
+        let mut full_x = ch.embed(&prefix, &self.embedding);
+        let mut full_trace: Vec<Vec<f32>> = Vec::with_capacity(self.blocks.len());
+        for b in &self.blocks
+        {
+            full_x = self.block(&full_x, b);
+            let last = ch.slice_rows(&full_x, prefix.len() - 1, 1);
+            full_trace.push(ch.download(&last));
+        }
+        assert_eq!(cached_trace.len(), full_trace.len());
+
+        cached_trace
+            .iter()
+            .zip(&full_trace)
+            .enumerate()
+            .map(|(layer, (cached, full))| {
+                let mut num = 0.0f64;
+                let mut den = 0.0f64;
+                let mut max_abs = 0.0f32;
+                for (&a, &b) in cached.iter().zip(full)
+                {
+                    let d = a - b;
+                    num += (d as f64) * (d as f64);
+                    den += (b as f64) * (b as f64);
+                    max_abs = max_abs.max(d.abs());
+                }
+                CudaCacheLayerParity {
+                    layer,
+                    rel_l2: (num.sqrt() / den.sqrt().max(1e-30)) as f32,
+                    max_abs,
+                }
+            })
+            .collect()
     }
 
     /// Backward of [`Self::attention`] (the GQA analogue of Route A's
