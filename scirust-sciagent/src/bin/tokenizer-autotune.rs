@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use clap::Parser;
 use scirust_sciagent::train::dataset::{matches_extension, parse_extensions, skip_source_dir};
 use scirust_sciagent::{
-    AutotuneConfig, BpeMergeSemantics, CalibrationCase, ElasticAutotuner,
-    ElasticHardwareIdentity, StoredElasticProfile, VersionedBpeTokenizer,
+    AutotuneConfig, BpeMergeSemantics, CalibrationCase, ElasticAutotuner, ElasticHardwareIdentity,
+    StoredElasticProfile, VersionedBpeTokenizer,
 };
 
 const DEFAULT_PROBE_LENGTHS: &str = "8,16,32,64,128,256,512,1024,2048,4096";
@@ -86,13 +86,8 @@ fn main() {
         .expect("failed to load byte vocabulary for calibration cases");
     let extensions = parse_extensions(&args.extension);
     let paths = collect_input_paths(&args.input, &extensions, args.recursive);
-    let cases = collect_calibration_cases(
-        &paths,
-        &probe_lengths,
-        args.cases_per_length,
-        &vocab,
-    )
-    .expect("failed to build calibration cases");
+    let cases = collect_calibration_cases(&paths, &probe_lengths, args.cases_per_length, &vocab)
+        .expect("failed to build calibration cases");
 
     let config = AutotuneConfig::new(args.warmup_runs, args.measured_runs)
         .expect("invalid auto-calibration repetition counts");
@@ -106,16 +101,15 @@ fn main() {
         args.warmup_runs,
         args.measured_runs
     );
-    let result = tuner.calibrate(&cases).expect("ElasticTokenizer calibration failed");
+    let result = tuner
+        .calibrate(&cases)
+        .expect("ElasticTokenizer calibration failed");
     let profile = result
         .fit_profile()
         .expect("failed to fit six-class ElasticTokenizer profile");
 
-    let hardware = ElasticHardwareIdentity::new(
-        std::env::consts::ARCH,
-        std::env::consts::OS,
-        args.device,
-    );
+    let hardware =
+        ElasticHardwareIdentity::new(std::env::consts::ARCH, std::env::consts::OS, args.device);
     let stored = StoredElasticProfile::new(canonical.ordered_merges(), hardware.clone(), profile);
     stored
         .save(&args.output)
@@ -141,7 +135,7 @@ fn parse_probe_lengths(input: &str) -> Result<Vec<usize>, String> {
                 .map_err(|_| format!("invalid probe length `{part}`"))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    if lengths.iter().any(|&length| length == 0)
+    if lengths.contains(&0)
     {
         return Err("probe lengths must be greater than zero".to_string());
     }
@@ -179,7 +173,10 @@ fn collect_path(path: &Path, extensions: &[String], recursive: bool, output: &mu
     {
         return;
     };
-    let mut children = entries.flatten().map(|entry| entry.path()).collect::<Vec<_>>();
+    let mut children = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .collect::<Vec<_>>();
     children.sort();
     for child in children
     {
@@ -203,7 +200,8 @@ fn collect_path(path: &Path, extensions: &[String], recursive: bool, output: &mu
 
 fn load_reversible_byte_vocab(path: &Path) -> Result<BTreeMap<String, usize>, String> {
     let input = fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let value: serde_json::Value = serde_json::from_str(&input).map_err(|error| error.to_string())?;
+    let value: serde_json::Value =
+        serde_json::from_str(&input).map_err(|error| error.to_string())?;
     if value.get("version").and_then(serde_json::Value::as_str) != Some("byte_level_v2")
     {
         return Err("tokenizer-autotune currently requires byte_level_v2".to_string());
@@ -258,10 +256,7 @@ fn collect_calibration_cases(
         }
     }
 
-    if let Some((index, _)) = counts
-        .iter()
-        .enumerate()
-        .find(|(_, count)| **count == 0)
+    if let Some((index, _)) = counts.iter().enumerate().find(|(_, count)| **count == 0)
     {
         return Err(format!(
             "no corpus file was large enough for probe length {}",
