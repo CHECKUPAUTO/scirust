@@ -15,6 +15,7 @@ use half::bf16;
 
 use crate::bf16_gemv::CudaBf16Gemv;
 use crate::bf16_lm_head_argmax::{CudaBf16LmHeadArgmax, CudaBf16LmHeadArgmaxWorkspace};
+use crate::bf16_tiled_gemv::{CudaBf16TiledGemv, CudaBf16TiledGemvWorkspace};
 
 const DECODE_KERNELS_SRC: &str = r#"
 __device__ __forceinline__ float b2f(unsigned short h) {
@@ -323,6 +324,7 @@ pub struct CudaDecodeRuntime {
     blas: CudaBlasLT,
     gemv: CudaBf16Gemv,
     lm_head_argmax: CudaBf16LmHeadArgmax,
+    tiled_gemv: CudaBf16TiledGemv,
     kernels: DecodeKernels,
 }
 
@@ -338,6 +340,7 @@ impl CudaDecodeRuntime {
         let blas = CudaBlasLT::new(stream.clone()).ok()?;
         let gemv = CudaBf16Gemv::from_context(ctx.clone(), stream.clone())?;
         let lm_head_argmax = CudaBf16LmHeadArgmax::from_context(ctx.clone(), stream.clone())?;
+        let tiled_gemv = CudaBf16TiledGemv::from_context(ctx.clone(), stream.clone())?;
         let ptx = compile_ptx(DECODE_KERNELS_SRC)
             .map_err(|error| eprintln!("scirust-cuda decode: NVRTC compile failed: {error}"))
             .ok()?;
@@ -361,6 +364,7 @@ impl CudaDecodeRuntime {
             blas,
             gemv,
             lm_head_argmax,
+            tiled_gemv,
             kernels,
         })
     }
@@ -416,6 +420,32 @@ impl CudaDecodeRuntime {
             generated,
             capacity,
         }
+    }
+
+    #[must_use]
+    pub fn tiled_gemv_workspace(&self, k: usize, n: usize) -> CudaBf16TiledGemvWorkspace {
+        self.tiled_gemv.workspace(k, n)
+    }
+
+    pub fn tiled_gemv_into(
+        &self,
+        input: &CudaDecodeMatrix,
+        weight: &CudaDecodeMatrix,
+        workspace: &mut CudaBf16TiledGemvWorkspace,
+        output: &mut CudaDecodeMatrix,
+    ) {
+        assert_eq!(input.rows, 1, "tiled decode GEMV is batch-one only");
+        assert_eq!(weight.rows, input.cols, "tiled decode GEMV input width");
+        assert_eq!(output.rows, 1, "tiled decode GEMV output rows");
+        assert_eq!(weight.cols, output.cols, "tiled decode GEMV output width");
+        self.tiled_gemv.gemv_kn_into(
+            &input.buf,
+            &weight.buf,
+            workspace,
+            &mut output.buf,
+            input.cols,
+            output.cols,
+        );
     }
 
     #[must_use]

@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use scirust_sciagent::config::SciAgentConfig;
 use scirust_sciagent::cuda_decode::{
-    CudaDecodeFfnMode, CudaDecodeLmHeadMode, CudaDecodeModel, CudaDecodeModes,
+    CudaDecodeDownMode, CudaDecodeFfnMode, CudaDecodeLmHeadMode, CudaDecodeModel, CudaDecodeModes,
 };
 use scirust_sciagent::cuda_model::CudaModel;
 use scirust_sciagent::generate::SamplingParams;
@@ -137,15 +137,23 @@ fn main() {
     let fastest = CudaDecodeModes::default();
     let ffn_baseline = CudaDecodeModes {
         ffn: CudaDecodeFfnMode::CublasLt,
+        down: CudaDecodeDownMode::CublasLt,
         lm_head: CudaDecodeLmHeadMode::FusedArgmax,
     };
     let lm_baseline = CudaDecodeModes {
         ffn: CudaDecodeFfnMode::FusedGemv,
+        down: CudaDecodeDownMode::CublasLt,
         lm_head: CudaDecodeLmHeadMode::FullLogits,
     };
     let dense_i250 = CudaDecodeModes {
         ffn: CudaDecodeFfnMode::CublasLt,
+        down: CudaDecodeDownMode::CublasLt,
         lm_head: CudaDecodeLmHeadMode::FullLogits,
+    };
+    let down_candidate = CudaDecodeModes {
+        ffn: CudaDecodeFfnMode::FusedGemv,
+        down: CudaDecodeDownMode::TiledGemv,
+        lm_head: CudaDecodeLmHeadMode::FusedArgmax,
     };
 
     // Warm all implementation modes outside measurement windows.
@@ -153,6 +161,7 @@ fn main() {
     let _ = fast.generate_greedy_device_feedback_with_modes(&prompt, 1, ffn_baseline);
     let _ = fast.generate_greedy_device_feedback_with_modes(&prompt, 1, lm_baseline);
     let _ = fast.generate_greedy_device_feedback_with_modes(&prompt, 1, dense_i250);
+    let _ = fast.generate_greedy_device_feedback_with_modes(&prompt, 1, down_candidate);
     let _ = oracle.generate_cached(&prompt, 1, &greedy, seed);
 
     let (fast_tokens, fast_seconds, fast_tps) = timed_generate(&fast, &prompt, max_new, fastest);
@@ -160,6 +169,8 @@ fn main() {
     let (lm_tokens, lm_seconds, lm_tps) = timed_generate(&fast, &prompt, max_new, lm_baseline);
     let (dense_tokens, dense_seconds, dense_tps) =
         timed_generate(&fast, &prompt, max_new, dense_i250);
+    let (down_tokens, down_seconds, down_tps) =
+        timed_generate(&fast, &prompt, max_new, down_candidate);
 
     let oracle_started = Instant::now();
     let oracle_tokens = oracle.generate_cached(&prompt, max_new, &greedy, seed);
@@ -171,9 +182,11 @@ fn main() {
     let ffn_parity = ffn_tokens == oracle_tokens;
     let lm_parity = lm_tokens == oracle_tokens;
     let dense_parity = dense_tokens == oracle_tokens;
+    let down_parity = down_tokens == oracle_tokens;
     let ffn_gain = fast_tps / ffn_tps.max(1e-9);
     let lm_gain = fast_tps / lm_tps.max(1e-9);
     let stack_gain = fast_tps / dense_tps.max(1e-9);
+    let down_gain = down_tps / fast_tps.max(1e-9);
     let speedup = fast_tps / oracle_tps.max(1e-9);
     let target_met = fast_tps >= target_tps;
     let stretch_met = fast_tps >= stretch_tps;
@@ -208,7 +221,12 @@ fn main() {
         dense_parity,
     );
 
-    if !parity || !ffn_parity || !lm_parity || !dense_parity
+    println!(
+        "SCIAGENT_I250_DOWN baseline_tok_s={:.3} tiled_tok_s={:.3} gain={:.3} seconds={:.6} parity={}",
+        fast_tps, down_tps, down_gain, down_seconds, down_parity
+    );
+
+    if !parity || !ffn_parity || !lm_parity || !dense_parity || !down_parity
     {
         eprintln!("ERROR: an I250 A/B mode diverged from the B49 cached oracle");
         std::process::exit(3);

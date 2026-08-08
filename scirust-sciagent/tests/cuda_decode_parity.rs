@@ -3,7 +3,7 @@
 
 use scirust_sciagent::config::SciAgentConfig;
 use scirust_sciagent::cuda_decode::{
-    CudaDecodeFfnMode, CudaDecodeLmHeadMode, CudaDecodeModel, CudaDecodeModes,
+    CudaDecodeDownMode, CudaDecodeFfnMode, CudaDecodeLmHeadMode, CudaDecodeModel, CudaDecodeModes,
 };
 use scirust_sciagent::cuda_model::CudaModel;
 use scirust_sciagent::generate::SamplingParams;
@@ -67,6 +67,7 @@ fn fused_cuda_decode_and_device_feedback_match_b49_greedy() {
             max_new,
             CudaDecodeModes {
                 ffn: CudaDecodeFfnMode::CublasLt,
+                down: CudaDecodeDownMode::CublasLt,
                 lm_head: CudaDecodeLmHeadMode::FusedArgmax,
             },
         );
@@ -75,6 +76,7 @@ fn fused_cuda_decode_and_device_feedback_match_b49_greedy() {
             max_new,
             CudaDecodeModes {
                 ffn: CudaDecodeFfnMode::FusedGemv,
+                down: CudaDecodeDownMode::CublasLt,
                 lm_head: CudaDecodeLmHeadMode::FullLogits,
             },
         );
@@ -90,6 +92,19 @@ fn fused_cuda_decode_and_device_feedback_match_b49_greedy() {
         assert_eq!(
             lm_baseline, expected,
             "full-logits LM baseline diverged for {prompt:?}"
+        );
+        let down_candidate = fast.generate_greedy_device_feedback_with_modes(
+            &prompt,
+            max_new,
+            CudaDecodeModes {
+                ffn: CudaDecodeFfnMode::FusedGemv,
+                down: CudaDecodeDownMode::TiledGemv,
+                lm_head: CudaDecodeLmHeadMode::FusedArgmax,
+            },
+        );
+        assert_eq!(
+            down_candidate, expected,
+            "tiled down candidate diverged for {prompt:?}"
         );
     }
 }

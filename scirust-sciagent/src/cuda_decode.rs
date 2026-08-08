@@ -7,8 +7,8 @@
 
 use scirust_core::autodiff::reverse::Tensor;
 use scirust_cuda::{
-    CudaBf16LmHeadArgmaxWorkspace, CudaDecodeGreedyFeedback, CudaDecodeKvCache, CudaDecodeMatrix,
-    CudaDecodeRuntime,
+    CudaBf16LmHeadArgmaxWorkspace, CudaBf16TiledGemvWorkspace, CudaDecodeGreedyFeedback,
+    CudaDecodeKvCache, CudaDecodeMatrix, CudaDecodeRuntime,
 };
 
 use crate::generate::{SamplingParams, sample_row, seed_to_state};
@@ -37,6 +37,7 @@ struct DecodeWorkspace {
     h: CudaDecodeMatrix,
     gate_up: CudaDecodeMatrix,
     act: CudaDecodeMatrix,
+    down_tiled: CudaBf16TiledGemvWorkspace,
     logits: CudaDecodeMatrix,
 }
 
@@ -58,10 +59,20 @@ pub enum CudaDecodeLmHeadMode {
     FusedArgmax,
 }
 
+/// FFN down-projection implementation used by batch-one decode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CudaDecodeDownMode {
+    /// Existing cuBLASLt down projection.
+    CublasLt,
+    /// Deterministic two-stage tiled BF16 GEMV candidate.
+    TiledGemv,
+}
+
 /// Runtime-selectable exact/deterministic decode implementation choices.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CudaDecodeModes {
     pub ffn: CudaDecodeFfnMode,
+    pub down: CudaDecodeDownMode,
     pub lm_head: CudaDecodeLmHeadMode,
 }
 
@@ -69,6 +80,7 @@ impl Default for CudaDecodeModes {
     fn default() -> Self {
         Self {
             ffn: CudaDecodeFfnMode::FusedGemv,
+            down: CudaDecodeDownMode::CublasLt,
             lm_head: CudaDecodeLmHeadMode::FusedArgmax,
         }
     }
@@ -200,6 +212,7 @@ impl CudaDecodeModel {
             h: runtime.matrix(1, self.d_model),
             gate_up: runtime.matrix(1, 2 * self.d_ff),
             act: runtime.matrix(1, self.d_ff),
+            down_tiled: runtime.tiled_gemv_workspace(self.d_ff, self.d_model),
             logits: runtime.matrix(1, self.vocab),
         }
     }
@@ -212,6 +225,7 @@ impl CudaDecodeModel {
         caches: &mut [DecodeLayerCache],
         workspace: &mut DecodeWorkspace,
         ffn_mode: CudaDecodeFfnMode,
+        down_mode: CudaDecodeDownMode,
     ) {
         assert_eq!(
             caches.len(),
@@ -250,7 +264,22 @@ impl CudaDecodeModel {
                     runtime.swiglu_split_into(&workspace.gate_up, &mut workspace.act);
                 },
             }
-            runtime.matmul_into(&workspace.act, &block.down, &mut workspace.tmp_d);
+            match down_mode
+            {
+                CudaDecodeDownMode::CublasLt =>
+                {
+                    runtime.matmul_into(&workspace.act, &block.down, &mut workspace.tmp_d);
+                },
+                CudaDecodeDownMode::TiledGemv =>
+                {
+                    runtime.tiled_gemv_into(
+                        &workspace.act,
+                        &block.down,
+                        &mut workspace.down_tiled,
+                        &mut workspace.tmp_d,
+                    );
+                },
+            }
             runtime.add_into(&workspace.h, &workspace.tmp_d, &mut workspace.x);
         }
 
@@ -274,10 +303,11 @@ impl CudaDecodeModel {
         caches: &mut [DecodeLayerCache],
         workspace: &mut DecodeWorkspace,
         ffn_mode: CudaDecodeFfnMode,
+        down_mode: CudaDecodeDownMode,
     ) {
         self.runtime
             .embed_token_into(token, &self.embedding, &mut workspace.x);
-        self.forward_embedded_hidden_resident(pos, caches, workspace, ffn_mode);
+        self.forward_embedded_hidden_resident(pos, caches, workspace, ffn_mode, down_mode);
     }
 
     fn forward_feedback_token_hidden_resident(
@@ -287,10 +317,11 @@ impl CudaDecodeModel {
         caches: &mut [DecodeLayerCache],
         workspace: &mut DecodeWorkspace,
         ffn_mode: CudaDecodeFfnMode,
+        down_mode: CudaDecodeDownMode,
     ) {
         self.runtime
             .embed_feedback_into(feedback, &self.embedding, &mut workspace.x);
-        self.forward_embedded_hidden_resident(pos, caches, workspace, ffn_mode);
+        self.forward_embedded_hidden_resident(pos, caches, workspace, ffn_mode, down_mode);
     }
 
     /// General deterministic host-sampler path retained as an oracle for sampling
@@ -320,6 +351,7 @@ impl CudaDecodeModel {
                 &mut caches,
                 &mut workspace,
                 CudaDecodeFfnMode::FusedGemv,
+                CudaDecodeDownMode::CublasLt,
             );
         }
         self.project_logits_resident(&mut workspace);
@@ -342,6 +374,7 @@ impl CudaDecodeModel {
                 &mut caches,
                 &mut workspace,
                 CudaDecodeFfnMode::FusedGemv,
+                CudaDecodeDownMode::CublasLt,
             );
             self.project_logits_resident(&mut workspace);
             logits = self.runtime.download(&workspace.logits);
@@ -396,6 +429,7 @@ impl CudaDecodeModel {
                 &mut caches,
                 &mut workspace,
                 modes.ffn,
+                modes.down,
             );
         }
 
@@ -417,6 +451,7 @@ impl CudaDecodeModel {
                 &mut caches,
                 &mut workspace,
                 modes.ffn,
+                modes.down,
             );
             self.select_greedy_resident(
                 &mut workspace,
