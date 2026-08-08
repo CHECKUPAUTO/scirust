@@ -120,11 +120,7 @@ impl CanonicalBpeTrainer {
             let token = format!("{}{}", rev[left], rev[right]);
             if vocab.contains_key(&token)
             {
-                return Err(CanonicalBpeTrainError::DuplicateTokenString {
-                    left,
-                    right,
-                    token,
-                });
+                return Err(CanonicalBpeTrainError::DuplicateTokenString { left, right, token });
             }
 
             let output = next_id;
