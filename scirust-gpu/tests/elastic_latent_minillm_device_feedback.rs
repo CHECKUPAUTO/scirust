@@ -2,29 +2,24 @@
 
 use scirust_core::nn::sampling::SamplingConfig;
 use scirust_core::nn::transformer::mini_llm::{CharTokenizer, MiniLLM, MiniLLMConfig};
-use scirust_gpu::{
-    WgpuLatentHeadBasis, WgpuLatentLayerBasis, WgpuResidentDeviceFeedbackMiniLlm,
-};
+use scirust_gpu::{WgpuLatentHeadBasis, WgpuLatentLayerBasis, WgpuResidentDeviceFeedbackMiniLlm};
 
 fn identity_basis(dimension: usize) -> Vec<f32> {
     let mut basis = vec![0.0; dimension * dimension];
-    for index in 0..dimension {
+    for index in 0..dimension
+    {
         basis[index * dimension + index] = 1.0;
     }
     basis
 }
 
-fn build_runtime<'a>(
-    model: &'a MiniLLM,
+fn build_runtime(
+    model: &MiniLLM,
     config: &MiniLLMConfig,
-    basis: &'a [f32],
-    heads: &'a [WgpuLatentHeadBasis<'a>],
-    layers: &'a [WgpuLatentLayerBasis<'a>],
+    layers: &[WgpuLatentLayerBasis<'_>],
     sampling: SamplingConfig,
     seed: u64,
 ) -> WgpuResidentDeviceFeedbackMiniLlm {
-    let _ = basis;
-    let _ = heads;
     WgpuResidentDeviceFeedbackMiniLlm::new(
         model.inference_snapshot(),
         config.max_seq_len,
@@ -61,9 +56,7 @@ fn parity_case(sampling: SamplingConfig, seed: u64, max_tokens: usize) {
         config.n_heads
     ];
     let layers = vec![WgpuLatentLayerBasis { heads: &heads }; config.n_layers];
-    let mut resident = build_runtime(
-        &gpu, &config, &basis, &heads, &layers, sampling, seed,
-    );
+    let mut resident = build_runtime(&gpu, &config, &layers, sampling, seed);
 
     let actual = resident
         .generate_ids_resident(&prompt, max_tokens)
@@ -142,9 +135,7 @@ fn prompt_only_burst_consumes_no_rng_and_reset_replays() {
         config.n_heads
     ];
     let layers = vec![WgpuLatentLayerBasis { heads: &heads }; config.n_layers];
-    let mut resident = build_runtime(
-        &gpu, &config, &basis, &heads, &layers, sampling, seed,
-    );
+    let mut resident = build_runtime(&gpu, &config, &layers, sampling, seed);
     let resident_bytes = resident.telemetry().resident_bytes;
 
     let primed = resident.generate_ids_resident(&prompt, 0).unwrap();
@@ -200,9 +191,7 @@ fn eos_stops_device_rng_and_kv_state_without_per_token_readback() {
         config.n_heads
     ];
     let layers = vec![WgpuLatentLayerBasis { heads: &heads }; config.n_layers];
-    let mut resident = build_runtime(
-        &gpu, &config, &basis, &heads, &layers, sampling, seed,
-    );
+    let mut resident = build_runtime(&gpu, &config, &layers, sampling, seed);
 
     let actual = resident.generate_ids_resident(&prompt, 8).unwrap();
     assert_eq!(actual, expected);
