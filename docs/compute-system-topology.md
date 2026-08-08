@@ -67,6 +67,8 @@ The probe deliberately does **not** infer an interconnect class from CPU archite
 
 On non-Linux systems `probe_host_topology()` currently returns an empty valid snapshot rather than inventing a topology from incomplete portable APIs. The topology model itself remains available under `no_std`; only host probing requires `std`.
 
+The Linux implementation is isolated behind target-specific compilation so Windows and macOS builds do not compile unused sysfs helpers under `-D warnings`.
+
 ## Metrics and determinism
 
 `TransferMetrics` is optional and records provenance as `Reported`, `Measured` or `Declared`.
