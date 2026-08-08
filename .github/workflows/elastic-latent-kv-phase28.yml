@@ -158,16 +158,25 @@ jobs:
           printf '%s\n' "$compute_apps"
           while IFS=',' read -r raw_pid process_name; do
             pid="$(printf '%s' "$raw_pid" | tr -d '[:space:]')"
+            [[ "$pid" =~ ^[0-9]+$ ]] || { managed_training=false; continue; }
             process_name="${process_name# }"
-            if [[ ! "$pid" =~ ^[0-9]+$ ]] \
-              || [[ "$process_name" != "/root/scirust/target/release/examples/cuda_pretrain" ]]; then
+            cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
+            proc_user="$(ps -p "$pid" -o user= 2>/dev/null | xargs || true)"
+            ppid="$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d '[:space:]')"
+            cgroup="$(cat "/proc/$pid/cgroup" 2>/dev/null || true)"
+            echo "pid=$pid user=$proc_user ppid=$ppid process=$process_name cmdline=$cmdline cgroup=$cgroup"
+            if [[ "$process_name" != "/root/scirust/target/release/examples/cuda_pretrain" ]] \
+              || [[ "$cmdline" != *"/root/scirust/target/release/examples/cuda_pretrain"* ]] \
+              || [[ "$proc_user" != "root" ]] \
+              || [[ "$ppid" != "1" ]] \
+              || [[ "$cgroup" != 0::/user.slice/user-0.slice/session-*.scope ]]; then
               managed_training=false
             fi
           done <<< "$compute_apps"
 
           if [[ "$managed_training" == true ]]; then
             echo "run_baseline=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Phase 28 Thor baseline deferred: the recognized SciAgent production cuda_pretrain binary owns the GPU. The process is left untouched."
+            echo "::notice::Phase 28 Thor baseline deferred: detached SciAgent production cuda_pretrain owns the GPU. No WGPU workload is launched and training is left untouched."
             exit 0
           fi
 
@@ -188,7 +197,7 @@ jobs:
       - name: Prepare isolated executable build directory
         if: steps.thor.outputs.available == 'true' && steps.occupancy.outputs.run_baseline == 'true'
         run: |
-          tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.ci-tmp.XXXXXX")"
+          tmpdir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/scirust-phase28.XXXXXX")"
           chmod 700 "$tmpdir"
           echo "TMPDIR=$tmpdir" >> "$GITHUB_ENV"
           echo "CARGO_TARGET_DIR=$tmpdir/target" >> "$GITHUB_ENV"
