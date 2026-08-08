@@ -1,0 +1,45 @@
+name: SciAgent I250 TT hosted check
+
+on:
+  push:
+    branches: [perf/sciagent-i250-tt-direct]
+    paths:
+      - "scirust-core/**"
+      - ".github/workflows/sciagent-i250-tt-hosted-check.yml"
+  pull_request:
+    branches: [ci/i250-hosted-base]
+    paths:
+      - "scirust-core/**"
+      - ".github/workflows/sciagent-i250-tt-hosted-check.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sciagent-i250-tt-hosted-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  hosted-check:
+    name: TT direct format + oracle + Clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+      - name: Format
+        run: cargo +nightly-2026-07-02 fmt --all -- --check
+      - name: TT direct decode oracle
+        run: cargo +nightly-2026-07-02 test -p scirust-core --lib --locked tt_decode -- --nocapture
+      - name: Core compile
+        run: cargo +nightly-2026-07-02 check -p scirust-core --all-targets --locked
+      - name: Core strict Clippy
+        run: cargo +nightly-2026-07-02 clippy -p scirust-core --all-targets --locked -- -D warnings
