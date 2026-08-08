@@ -45,11 +45,17 @@ fn runtime_cuda_adapter_publishes_the_conservative_rich_profile() {
         SupportLevel::Supported
     );
     assert_eq!(
-        hardware.numeric.arithmetic_dtypes.support_level(&DType::F32),
+        hardware
+            .numeric
+            .arithmetic_dtypes
+            .support_level(&DType::F32),
         SupportLevel::Supported
     );
     assert_eq!(
-        hardware.numeric.arithmetic_dtypes.support_level(&DType::F16),
+        hardware
+            .numeric
+            .arithmetic_dtypes
+            .support_level(&DType::F16),
         SupportLevel::Unknown
     );
 
@@ -66,7 +72,10 @@ fn runtime_cuda_adapter_publishes_the_conservative_rich_profile() {
 
     assert_eq!(hardware.execution.async_execution, SupportLevel::Supported);
     assert_eq!(hardware.execution.ordered_streams, SupportLevel::Supported);
-    assert_eq!(hardware.execution.subgroup_operations, SupportLevel::Unknown);
+    assert_eq!(
+        hardware.execution.subgroup_operations,
+        SupportLevel::Unknown
+    );
     assert_eq!(hardware.execution.atomic_i64, SupportLevel::Unknown);
     assert_eq!(hardware.matrix.accelerated, SupportLevel::Unknown);
     assert!(hardware.reproducibility.modes.is_empty());
