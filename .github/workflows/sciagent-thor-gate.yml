@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: sciagent-thor-${{ github.event.pull_request.number || github.ref }}
@@ -39,20 +39,6 @@ jobs:
       SCIRUST_REQUIRE_CUDA: "1"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
-          fetch-depth: 0
-      - name: Merge current master into PR branch once
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin master
-          if git merge-base --is-ancestor origin/master HEAD; then
-            echo "master already contained in branch"
-          else
-            git merge --no-edit origin/master
-            git push origin HEAD:perf/sciagent-b39-thor-production-bench
-          fi
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: nightly-2026-07-02
