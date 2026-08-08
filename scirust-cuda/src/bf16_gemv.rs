@@ -11,13 +11,16 @@
 //!   CUDA thread per output column. Threads in a warp therefore read adjacent BF16
 //!   weights from every input row.
 //! - [`CudaBf16Gemv::swiglu_kn_into`] consumes a fused `[gate | up]` weight matrix
-//!   `[K, 2*Dff]`, accumulates both projections, applies SiLU and writes only the
-//!   final `Dff` BF16 activations. The intermediate gate/up row is never materialized.
+//!   `[K, 2*Dff]`, accumulates both projections, preserves their explicit BF16
+//!   boundaries, applies SiLU and writes only the final `Dff` BF16 activations. The
+//!   intermediate gate/up row is never materialized in global memory.
 //!
-//! Both kernels accumulate strictly left-to-right over `K` in FP32 and round once at
-//! the output BF16 boundary. That fixed reduction order is the CPU/device oracle for
-//! this decode-specific path; token-stream parity against the historical Route-B
-//! decoder remains a separate promotion gate.
+//! Both kernels accumulate strictly left-to-right over `K` in FP32. The generic
+//! GEMV rounds once at its output boundary. Fused SwiGLU separately rounds gate and
+//! up to BF16 before the nonlinearity, then rounds the final activation to BF16.
+//! Those boundaries mirror the existing dense decoder; token-stream parity against
+//! the historical Route-B decoder remains a separate promotion gate because cuBLASLt
+//! may use a different FP32 reduction order.
 
 use std::sync::Arc;
 
@@ -72,8 +75,12 @@ extern "C" __global__ void scirust_bf16_swiglu_kn_kernel(
         gate += x * b2f(gate_up_weight[base]);
         up += x * b2f(gate_up_weight[base + d_ff]);
     }
-    const float silu = gate / (1.0f + __expf(-gate));
-    out[col] = f2b(silu * up);
+
+    // Preserve the same visible boundaries as dense BF16 projection -> SwiGLU.
+    const float gate_bf = b2f(f2b(gate));
+    const float up_bf = b2f(f2b(up));
+    const float silu = gate_bf / (1.0f + __expf(-gate_bf));
+    out[col] = f2b(silu * up_bf);
 }
 "#;
 
