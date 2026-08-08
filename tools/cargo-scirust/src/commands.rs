@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -863,7 +862,7 @@ fn read_piece_lengths(path: &Path) -> AppResult<Vec<usize>> {
     let text = fs::read_to_string(path).map_err(AppError::io)?;
     Ok(text
         .split_terminator('\n')
-        .map(|line| line.strip_suffix('\r').unwrap_or(line).as_bytes().len())
+        .map(|line| line.strip_suffix('\r').unwrap_or(line).len())
         .filter(|&length| length > 0)
         .collect())
 }
