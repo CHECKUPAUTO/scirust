@@ -22,6 +22,7 @@ mod shape;
 mod strides;
 mod tensor;
 mod topology;
+mod topology_augmentation;
 #[cfg(feature = "std")]
 mod topology_probe;
 
@@ -59,6 +60,10 @@ pub use topology::{
     CacheDescriptor, CacheKind, InterconnectClass, MemoryDomainDescriptor, MetricProvenance,
     SystemTopology, TopologyError, TopologyLink, TopologyNode, TopologyNodeId, TopologyNodeKind,
     TopologyRelation, TransferMetrics,
+};
+pub use topology_augmentation::{
+    AcceleratorTopologyDescriptor, AcceleratorTopologyNodes, TopologyAugmentationError,
+    augment_accelerator_topologies, augment_accelerator_topology,
 };
 #[cfg(feature = "std")]
 pub use topology_probe::probe_host_topology;
