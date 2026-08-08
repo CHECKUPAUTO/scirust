@@ -19,6 +19,7 @@ fn profile() -> ExecutionProfile {
         },
         capability_profile_sha256: hash(0x11),
         topology_profile_sha256: hash(0x22),
+        memory_budget_bytes: Some(8 * 1024 * 1024 * 1024),
         numeric_mode: "bf16_tensor_core".to_string(),
         reproducibility: ExecutionReproducibility::Deterministic,
         kernel_semantic_version: "sciagent.decode.v1".to_string(),
@@ -32,8 +33,19 @@ fn profile() -> ExecutionProfile {
 fn v1_profile_has_a_stable_golden_fingerprint() {
     assert_eq!(
         profile().fingerprint().unwrap().as_str(),
-        "872aff14c03ea57da47ca2554981bebc4bd2f81695c4ba649b1fbc88b521d2ea"
+        "f0423da9a3c6c2e43f6e75acd4cd017bd020a0f21d65112a73d1076026c10826"
     );
+}
+
+#[test]
+fn memory_budget_changes_the_golden_execution_identity() {
+    let baseline = profile().fingerprint().unwrap();
+    let mut changed = profile();
+    changed.memory_budget_bytes = Some(4 * 1024 * 1024 * 1024);
+    assert_ne!(changed.fingerprint().unwrap(), baseline);
+
+    changed.memory_budget_bytes = None;
+    assert_ne!(changed.fingerprint().unwrap(), baseline);
 }
 
 #[test]
