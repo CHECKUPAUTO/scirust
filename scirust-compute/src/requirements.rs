@@ -257,7 +257,7 @@ pub fn match_requirements(
     state.finish()
 }
 
-fn match_value_set<T, U, N, F>(
+fn match_value_set<T, U, N>(
     required: &[T],
     available: &CapabilitySet<T>,
     unknown_issue: U,
@@ -265,9 +265,8 @@ fn match_value_set<T, U, N, F>(
     state: &mut MatchState,
 ) where
     T: Clone + PartialEq,
-    U: Fn(T) -> F,
-    N: Fn(T) -> F,
-    F: Into<RequirementIssue>,
+    U: Fn(T) -> RequirementIssue,
+    N: Fn(T) -> RequirementIssue,
 {
     for value in required
     {
@@ -277,11 +276,11 @@ fn match_value_set<T, U, N, F>(
             {},
             SupportLevel::Unsupported =>
             {
-                state.incompatible(unsupported_issue(value.clone()).into());
+                state.incompatible(unsupported_issue(value.clone()));
             },
             SupportLevel::Unknown =>
             {
-                state.unknown(unknown_issue(value.clone()).into());
+                state.unknown(unknown_issue(value.clone()));
             },
         }
     }
@@ -406,7 +405,7 @@ pub fn select_candidate<'a>(
     candidates: &[ExecutionCandidate<'a>],
     policy: PlannerPolicy,
 ) -> Option<CandidateSelection<'a>> {
-    let mut best = None;
+    let mut best: Option<CandidateSelection<'a>> = None;
 
     for candidate in candidates
     {
@@ -549,7 +548,9 @@ mod tests {
             .contains(&RequirementIssue::IsaUnsupported(IsaFeature::Avx512F)));
         assert!(report
             .issues
-            .contains(&RequirementIssue::MemorySpaceUnsupported(MemorySpace::Device)));
+            .contains(&RequirementIssue::MemorySpaceUnsupported(
+                MemorySpace::Device
+            )));
     }
 
     #[test]
