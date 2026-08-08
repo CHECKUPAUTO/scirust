@@ -155,7 +155,6 @@ pub struct WgpuResidentSampledMiniLlmTelemetry {
     pub sample_ready: bool,
 }
 
-#[derive(Debug)]
 enum ResidentSampler {
     Sequential(WgpuDeterministicSampler),
     Parallel(WgpuParallelTopKSampler),
