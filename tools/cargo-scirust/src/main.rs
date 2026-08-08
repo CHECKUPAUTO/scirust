@@ -1,4 +1,4 @@
-mod commands;
+mod complete;
 mod workspace;
 
 use std::fmt;
@@ -55,8 +55,7 @@ fn real_main() -> AppResult<()> {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
 
     // Cargo plugins are invoked as `cargo-scirust scirust ...`; direct binary
-    // invocation is `cargo-scirust ...`. Supporting both makes development and
-    // installation equally predictable.
+    // invocation is `cargo-scirust ...`.
     if args.first().map(String::as_str) == Some("scirust") {
         args.remove(0);
     }
@@ -66,15 +65,13 @@ fn real_main() -> AppResult<()> {
         return Ok(());
     };
 
-    // Help must never require a valid Git repository/workspace. In particular,
-    // `affected --help` is a terminal action rather than an analysis request.
-    if command == "affected"
-        && args[1..]
-            .iter()
-            .any(|arg| matches!(arg.as_str(), "-h" | "--help"))
+    if args[1..]
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "-h" | "--help"))
     {
-        println!("cargo scirust affected [--base REF] [--head REF] [--json]");
-        return Ok(());
+        if print_command_help(command) {
+            return Ok(());
+        }
     }
 
     match command {
@@ -86,35 +83,53 @@ fn real_main() -> AppResult<()> {
             println!("cargo-scirust {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         },
-        "affected" => commands::affected(&Workspace::load()?, &args[1..]),
-        "check" => commands::check(&Workspace::load()?, &args[1..]),
-        "parity" => commands::parity(&Workspace::load()?, &args[1..]),
-        "determinism" => commands::determinism(&Workspace::load()?, &args[1..]),
-        "cost" => commands::cost(&Workspace::load()?, &args[1..]),
-        "features" => commands::features(&Workspace::load()?, &args[1..]),
-        "bench" => commands::bench(&Workspace::load()?, &args[1..]),
-        "calibrate" => commands::calibrate(&Workspace::load()?, &args[1..]),
+        "affected" => complete::affected(&Workspace::load()?, &args[1..]),
+        "check" => complete::check(&Workspace::load()?, &args[1..]),
+        "parity" => complete::parity(&Workspace::load()?, &args[1..]),
+        "determinism" => complete::determinism(&Workspace::load()?, &args[1..]),
+        "cost" => complete::cost(&Workspace::load()?, &args[1..]),
+        "features" => complete::features(&Workspace::load()?, &args[1..]),
+        "bench" => complete::bench(&Workspace::load()?, &args[1..]),
+        "calibrate" => complete::calibrate(&Workspace::load()?, &args[1..]),
         other => Err(AppError::message(format!(
             "unknown command `{other}`; run `cargo scirust help`"
         ))),
     }
 }
 
+fn print_command_help(command: &str) -> bool {
+    match command {
+        "affected" => println!("cargo scirust affected [--base REF] [--head REF] [--json] [--names-only] [--direct-only] [--fail-if-empty]"),
+        "check" => println!("cargo scirust check [--base REF] [--head REF] [--all] [--full] [--dry-run] [--all-features] [--unlocked] [--no-fmt] [--no-clippy] [--no-test]"),
+        "parity" => println!("cargo scirust parity --left \"COMMAND\" --right \"COMMAND\" [--repeat N] [--ignore-stderr] [--allow-failure] [--json]"),
+        "determinism" => println!("cargo scirust determinism [--repeat N] [--ignore-stderr] [--allow-failure] [--json] -- PROGRAM [ARGS...]"),
+        "cost" => println!("cargo scirust cost [--path PATH | -p PACKAGE] [--limit N] [--json] [--no-static] [--measure N] [--warmup N] [--inherit-io] [-- PROGRAM ARGS...]"),
+        "features" => println!("cargo scirust features <package> [--cover pairwise] [--execute] [--max N] [--json] [--allow-incompatible] [--include-default]"),
+        "bench" => println!("cargo scirust bench [--base REF] [--head REF] [--all] [-p PACKAGE] [--repeat N] [--dry-run] [-- <cargo bench args>]"),
+        "calibrate" => {
+            println!("cargo scirust calibrate --tokenizer FILE --input PATH [--input PATH...] --output PROFILE.json [--recursive] [--probe-lengths CSV] [--cases-per-length N] [--warmup-runs N] [--measured-runs N] [--extension CSV] [--device NAME] [--debug] [--dry-run]");
+            println!("cargo scirust calibrate (--pieces FILE | --lengths FILE) [--json]");
+        },
+        _ => return false,
+    }
+    true
+}
+
 fn print_help() {
-    println!("cargo-scirust — fast repository-aware commands for SciRust");
+    println!("cargo-scirust — repository-aware validation, parity, cost and ElasticTokenizer tooling");
     println!();
     println!("USAGE:");
     println!("  cargo scirust <COMMAND> [OPTIONS]");
     println!();
     println!("COMMANDS:");
-    println!("  affected      Map changed files to direct + transitive workspace crates");
-    println!("  check         Run fmt/clippy/tests only where the dependency graph requires");
-    println!("  parity        Compare two commands byte-for-byte (exit/stdout/stderr)");
-    println!("  determinism   Repeat a command and require exact reproducible output");
-    println!("  cost          Scan Rust source for copy/allocation/GPU-sync cost indicators");
-    println!("  features      Inspect features or execute a bounded pairwise feature matrix");
-    println!("  bench         Run cargo bench only for affected or selected crates");
-    println!("  calibrate     Learn S/M/L/XL/XXL/XXXL tokenizer piece-size boundaries");
+    println!("  affected      Map changes to direct/transitive workspace crates");
+    println!("  check         Run locked fmt/clippy/tests only where required");
+    println!("  parity        Compare two successful commands exactly, with repeat/JSON diagnostics");
+    println!("  determinism   Repeat a successful command and require reproducible output");
+    println!("  cost          Static cost audit plus optional measured wall-clock command cost");
+    println!("  features      Inspect or execute a full pairwise compatibility matrix");
+    println!("  bench         Benchmark affected/selected crates, optionally repeatedly");
+    println!("  calibrate     Run full semantics-gated ElasticTokenizer autotune or size-only analysis");
     println!("  version       Print tool version");
     println!();
     println!("Run `cargo scirust <COMMAND> --help` for command-specific usage.");
