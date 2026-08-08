@@ -13,6 +13,7 @@ mod hardware;
 #[cfg(feature = "std")]
 mod hwprobe;
 mod ids;
+mod implementation;
 mod kernel;
 mod launch;
 mod memory;
@@ -38,6 +39,11 @@ pub use hardware::{
 #[cfg(feature = "std")]
 pub use hwprobe::probe_host_cpu;
 pub use ids::{BufferId, EventId, KernelId, StreamId};
+pub use implementation::{
+    ExecutionLimits, ImplementationCandidate, ImplementationIssue, ImplementationMatchReport,
+    ImplementationRequirements, ImplementationSelection, WorkgroupDimension, WorkgroupRequirement,
+    match_implementation, select_implementation,
+};
 pub use kernel::{KernelFormat, KernelModule};
 pub use launch::LaunchConfig;
 pub use memory::{Layout, MemorySpace};
