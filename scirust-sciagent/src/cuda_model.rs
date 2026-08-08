@@ -57,13 +57,19 @@ pub struct CudaModelGrads {
     pub d_final_norm: CudaMatrix,
 }
 
-/// Training-only cache for one attention invocation. Keeping RoPE outputs and
-/// per-head softmax weights avoids rebuilding the whole attention forward in the
-/// backward pass. Inference and parity APIs keep their existing recompute path.
-struct CudaAttentionTrainCache {
+/// Training cache for one sequence's attention.
+struct CudaAttentionSequenceCache {
     qr: CudaMatrix,
     kr: CudaMatrix,
     weights: Vec<CudaMatrix>,
+}
+
+/// Batch attention cache. Each sequence has an independent T×T causal attention
+/// graph even though all projection/MLP matrices are packed as B*T rows.
+struct CudaAttentionTrainCache {
+    sequences: Vec<CudaAttentionSequenceCache>,
+    batch_size: usize,
+    seq_len: usize,
 }
 
 /// Training-only activations for one Transformer block.
@@ -464,12 +470,13 @@ impl CudaModel {
     }
 
     /// Training attention forward retaining only the activations required by its VJP.
-    fn attention_train(
+    /// One sequence's cached training attention.
+    fn attention_train_sequence(
         &self,
         q: &CudaMatrix,
         k: &CudaMatrix,
         v: &CudaMatrix,
-    ) -> (CudaMatrix, CudaAttentionTrainCache) {
+    ) -> (CudaMatrix, CudaAttentionSequenceCache) {
         let ch = &self.chain;
         let dh = self.d_model / self.n_heads;
         let seq = q.rows();
@@ -499,7 +506,7 @@ impl CudaModel {
         }
         (
             out.expect("n_heads >= 1"),
-            CudaAttentionTrainCache {
+            CudaAttentionSequenceCache {
                 qr,
                 kr,
                 weights: weights_all,
@@ -507,14 +514,59 @@ impl CudaModel {
         )
     }
 
+    /// True batched attention: packed projection rows, isolated per-sequence causal
+    /// attention. No token in one sample can attend to another sample.
+    fn attention_train_batched(
+        &self,
+        q: &CudaMatrix,
+        k: &CudaMatrix,
+        v: &CudaMatrix,
+        batch_size: usize,
+        seq_len: usize,
+    ) -> (CudaMatrix, CudaAttentionTrainCache) {
+        assert_eq!(q.rows(), batch_size * seq_len, "batched attention q rows");
+        assert_eq!(k.rows(), q.rows(), "batched attention k rows");
+        assert_eq!(v.rows(), q.rows(), "batched attention v rows");
+        let ch = &self.chain;
+        let mut outputs = Vec::with_capacity(batch_size);
+        let mut sequences = Vec::with_capacity(batch_size);
+        for b in 0..batch_size
+        {
+            let row = b * seq_len;
+            let qs = ch.slice_rows(q, row, seq_len);
+            let ks = ch.slice_rows(k, row, seq_len);
+            let vs = ch.slice_rows(v, row, seq_len);
+            let (out, cache) = self.attention_train_sequence(&qs, &ks, &vs);
+            outputs.push(out);
+            sequences.push(cache);
+        }
+        let refs: Vec<&CudaMatrix> = outputs.iter().collect();
+        (
+            ch.concat_rows(&refs),
+            CudaAttentionTrainCache {
+                sequences,
+                batch_size,
+                seq_len,
+            },
+        )
+    }
+
     /// Training block forward retaining activations instead of recomputing them later.
-    fn block_train(&self, x: &CudaMatrix, b: &CudaBlock) -> (CudaMatrix, CudaBlockTrainCache) {
+    /// Training block forward: dense projections/MLP run over packed B*T rows,
+    /// attention remains strictly separated by sample.
+    fn block_train(
+        &self,
+        x: &CudaMatrix,
+        b: &CudaBlock,
+        batch_size: usize,
+        seq_len: usize,
+    ) -> (CudaMatrix, CudaBlockTrainCache) {
         let ch = &self.chain;
         let xn = ch.rms_norm(x, &b.norm1, self.eps);
         let q = ch.matmul(&xn, &b.wq);
         let k = ch.matmul(&xn, &b.wk);
         let v = ch.matmul(&xn, &b.wv);
-        let (ctx, attention) = self.attention_train(&q, &k, &v);
+        let (ctx, attention) = self.attention_train_batched(&q, &k, &v, batch_size, seq_len);
         let attn_out = ch.matmul(&ctx, &b.wo);
         let h = ch.add(x, &attn_out);
         let hn = ch.rms_norm(&h, &b.norm2, self.eps);
@@ -542,14 +594,27 @@ impl CudaModel {
     }
 
     /// Full training forward with an explicit activation cache.
-    fn forward_train(&self, tokens: &[u32]) -> (CudaMatrix, CudaTrainCache) {
+    /// Full packed B×T training forward with independent attention sequences.
+    fn forward_train(
+        &self,
+        tokens: &[u32],
+        batch_size: usize,
+        seq_len: usize,
+    ) -> (CudaMatrix, CudaTrainCache) {
+        assert!(batch_size > 0 && seq_len > 0, "forward_train: empty batch");
+        assert_eq!(
+            tokens.len(),
+            batch_size * seq_len,
+            "forward_train: B*T mismatch"
+        );
         let ch = &self.chain;
         let mut xs = Vec::with_capacity(self.blocks.len() + 1);
         let mut caches = Vec::with_capacity(self.blocks.len());
         xs.push(ch.embed(tokens, &self.embedding));
         for b in &self.blocks
         {
-            let (out, cache) = self.block_train(xs.last().expect("block input"), b);
+            let (out, cache) =
+                self.block_train(xs.last().expect("block input"), b, batch_size, seq_len);
             xs.push(out);
             caches.push(cache);
         }
@@ -565,11 +630,11 @@ impl CudaModel {
         )
     }
 
-    fn attention_backward_cached(
+    fn attention_backward_sequence_cached(
         &self,
         v: &CudaMatrix,
         dout: &CudaMatrix,
-        cache: &CudaAttentionTrainCache,
+        cache: &CudaAttentionSequenceCache,
     ) -> (CudaMatrix, CudaMatrix, CudaMatrix) {
         let ch = &self.chain;
         let dh = self.d_model / self.n_heads;
@@ -616,6 +681,43 @@ impl CudaModel {
         let dq = ch.rope_backward(&dqr.expect("heads"), seq, 0, self.theta);
         let dk = ch.rope_backward(&dkr.expect("heads"), seq, 0, self.theta);
         (dq, dk, dvv.expect("heads"))
+    }
+
+    fn attention_backward_cached(
+        &self,
+        v: &CudaMatrix,
+        dout: &CudaMatrix,
+        cache: &CudaAttentionTrainCache,
+    ) -> (CudaMatrix, CudaMatrix, CudaMatrix) {
+        let ch = &self.chain;
+        assert_eq!(
+            v.rows(),
+            cache.batch_size * cache.seq_len,
+            "attention backward v rows"
+        );
+        assert_eq!(dout.rows(), v.rows(), "attention backward dout rows");
+        let mut dqs = Vec::with_capacity(cache.batch_size);
+        let mut dks = Vec::with_capacity(cache.batch_size);
+        let mut dvs = Vec::with_capacity(cache.batch_size);
+        for b in 0..cache.batch_size
+        {
+            let row = b * cache.seq_len;
+            let vs = ch.slice_rows(v, row, cache.seq_len);
+            let ds = ch.slice_rows(dout, row, cache.seq_len);
+            let (dq, dk, dv) =
+                self.attention_backward_sequence_cached(&vs, &ds, &cache.sequences[b]);
+            dqs.push(dq);
+            dks.push(dk);
+            dvs.push(dv);
+        }
+        let qrefs: Vec<&CudaMatrix> = dqs.iter().collect();
+        let krefs: Vec<&CudaMatrix> = dks.iter().collect();
+        let vrefs: Vec<&CudaMatrix> = dvs.iter().collect();
+        (
+            ch.concat_rows(&qrefs),
+            ch.concat_rows(&krefs),
+            ch.concat_rows(&vrefs),
+        )
     }
 
     fn block_backward_cached(
@@ -874,12 +976,48 @@ impl CudaTrainer {
         adam_eps: f32,
         weight_decay: f32,
     ) -> f32 {
-        self.step += 1;
+        self.train_step_batch(
+            tokens,
+            targets,
+            1,
+            tokens.len(),
+            lr,
+            betas,
+            adam_eps,
+            weight_decay,
+        )
+    }
 
-        // One uninterrupted CUDA stream: cached forward -> fused resident CE ->
-        // cached backward -> resident grad norm -> AdamW. Host diagnostics are read
-        // only after every optimizer kernel has been queued.
-        let (logits, cache) = self.model.forward_train(tokens);
+    /// One true B×T optimizer step. Dense Transformer GEMMs consume all B*T rows in
+    /// one call; attention is isolated per sequence so samples never cross-attend.
+    #[allow(clippy::too_many_arguments)]
+    pub fn train_step_batch(
+        &mut self,
+        tokens: &[u32],
+        targets: &[u32],
+        batch_size: usize,
+        seq_len: usize,
+        lr: f32,
+        betas: (f32, f32),
+        adam_eps: f32,
+        weight_decay: f32,
+    ) -> f32 {
+        assert!(
+            batch_size > 0 && seq_len > 0,
+            "train_step_batch: empty batch"
+        );
+        assert_eq!(
+            tokens.len(),
+            batch_size * seq_len,
+            "train_step_batch: token shape"
+        );
+        assert_eq!(
+            targets.len(),
+            tokens.len(),
+            "train_step_batch: target shape"
+        );
+        self.step += 1;
+        let (logits, cache) = self.model.forward_train(tokens, batch_size, seq_len);
         let (loss_rows, dlogits) = self
             .model
             .chain
@@ -889,22 +1027,17 @@ impl CudaTrainer {
         let mut grad_refs: Vec<&CudaMatrix> = vec![&grads.d_embedding, &grads.d_final_norm];
         for bg in &grads.blocks
         {
-            grad_refs.push(&bg.dnorm1);
-            grad_refs.push(&bg.dwq);
-            grad_refs.push(&bg.dwk);
-            grad_refs.push(&bg.dwv);
-            grad_refs.push(&bg.dwo);
-            grad_refs.push(&bg.dnorm2);
-            grad_refs.push(&bg.dwg);
-            grad_refs.push(&bg.dwu);
-            grad_refs.push(&bg.dwd);
+            grad_refs.extend([
+                &bg.dnorm1, &bg.dwq, &bg.dwk, &bg.dwv, &bg.dwo, &bg.dnorm2, &bg.dwg, &bg.dwu,
+                &bg.dwd,
+            ]);
         }
         let ch = &self.model.chain;
         let grad_sumsq = ch.global_grad_sumsq(&grad_refs);
         drop(grad_refs);
-
         let step = self.step;
         let max_norm = self.max_grad_norm;
+
         ch.adamw_step_with_norm(
             &mut self.master_embedding,
             &mut self.m_embedding,
@@ -984,9 +1117,6 @@ impl CudaTrainer {
             one(&mut mb.wu, &mut mm.wu, &mut mv.wu, &bg.dwu, &mut b.wu);
             one(&mut mb.wd, &mut mm.wd, &mut mv.wd, &bg.dwd, &mut b.wd);
         }
-
-        // First host reads of the step. Because all work shares one CUDA stream,
-        // these synchronize only after the optimizer has completed.
         let loss = ch.mean_f32(&loss_rows);
         self.last_grad_norm = ch.grad_norm_from_sumsq(&grad_sumsq);
         loss
@@ -1091,6 +1221,7 @@ impl CudaTrainer {
         cfg: &CudaPretrainConfig,
     ) -> Vec<f32> {
         let s = cfg.seq_len;
+        let batch = cfg.batch_size.max(1);
         let mut losses = Vec::new();
         if tokens.len() <= s
         {
@@ -1103,9 +1234,6 @@ impl CudaTrainer {
         }
         self.max_grad_norm = cfg.max_grad_norm;
 
-        // Hold out the tail as a validation split (never trained on) so we can track
-        // generalization, not just train loss on the repeatedly-seen corpus. Keep at
-        // least one train window and one val window, else skip validation.
         let val_len = ((tokens.len() as f32 * cfg.val_frac.max(0.0)) as usize)
             .min(tokens.len().saturating_sub(s + 1));
         let (train_tokens, val_tokens): (&[u32], &[u32]) = if val_len > s + 1
@@ -1129,18 +1257,10 @@ impl CudaTrainer {
         let schedule =
             WarmupCosineSchedule::new(cfg.base_lr, cfg.min_lr, cfg.warmup_steps, cfg.total_steps);
         let mut step = cfg.start_step;
-        // Shuffled window order. Streaming the corpus sequentially makes consecutive
-        // steps see consecutive (often near-duplicate) files, which spikes per-step
-        // loss variance and encourages memorizing adjacent windows — the noisy val
-        // curve of the first real runs. Iterating a *deterministic* shuffle of the
-        // window starts (re-shuffled each epoch) smooths training and improves
-        // generalization; `cfg.shuffle == false` restores the sequential stream.
         let n_windows = train_tokens.len().saturating_sub(1) / s;
         let mut order: Vec<usize> = (0..n_windows).collect();
         let mut epoch: u64 = 0;
         let reshuffle = |order: &mut [usize], epoch: u64| {
-            // Seed from start_step ⊕ epoch so a resume is deterministic yet differs
-            // from the fresh run's ordering.
             shuffle_windows(
                 order,
                 (cfg.start_step as u64).wrapping_add(epoch.wrapping_mul(0x9E37_79B9_7F4A_7C15)),
@@ -1151,30 +1271,38 @@ impl CudaTrainer {
             reshuffle(&mut order, epoch);
         }
         let mut wi = 0usize;
-        // Best-val tracking so retention never prunes the best checkpoint (the val
-        // curve is noisy — the last checkpoint is often not the best).
         let mut best_val = f32::INFINITY;
         let mut best_step: Option<usize> = None;
         let t0 = std::time::Instant::now();
+        let mut packed_inputs = Vec::with_capacity(batch * s);
+        let mut packed_targets = Vec::with_capacity(batch * s);
+
         while step < cfg.total_steps && n_windows > 0
         {
-            if wi >= order.len()
+            packed_inputs.clear();
+            packed_targets.clear();
+            for _ in 0..batch
             {
-                epoch += 1;
-                if cfg.shuffle
+                if wi >= order.len()
                 {
-                    reshuffle(&mut order, epoch);
+                    epoch += 1;
+                    if cfg.shuffle
+                    {
+                        reshuffle(&mut order, epoch);
+                    }
+                    wi = 0;
                 }
-                wi = 0;
+                let start = order[wi] * s;
+                wi += 1;
+                packed_inputs.extend_from_slice(&train_tokens[start..start + s]);
+                packed_targets.extend_from_slice(&train_tokens[start + 1..start + s + 1]);
             }
-            let start = order[wi] * s;
-            wi += 1;
-            let inputs = &train_tokens[start..start + s];
-            let targets = &train_tokens[start + 1..start + s + 1];
             let lr = schedule.lr_at(step);
-            let loss = self.train_step(
-                inputs,
-                targets,
+            let loss = self.train_step_batch(
+                &packed_inputs,
+                &packed_targets,
+                batch,
+                s,
                 lr,
                 cfg.betas,
                 cfg.adam_eps,
@@ -1185,14 +1313,12 @@ impl CudaTrainer {
 
             if cfg.log_interval > 0 && step.is_multiple_of(cfg.log_interval)
             {
-                let done = (step - cfg.start_step) * s;
+                let done = (step - cfg.start_step) * s * batch;
                 let secs = t0.elapsed().as_secs_f64().max(1e-9);
                 let tps = done as f64 / secs;
-                // gnorm is the pre-clip grad norm — a spike shows here even though the
-                // clip keeps it from corrupting the weights.
                 let gnorm = self.last_grad_norm();
                 println!(
-                    "[cuda step {step:>6}] loss {loss:>9.4} | lr {lr:.3e} | gnorm {gnorm:>7.2} | {tps:>8.0} tok/s"
+                    "[cuda step {step:>6}] B{batch}×T{s} loss {loss:>9.4} | lr {lr:.3e} | gnorm {gnorm:>7.2} | {tps:>8.0} tok/s"
                 );
             }
             if cfg.eval_interval > 0
@@ -1217,8 +1343,6 @@ impl CudaTrainer {
                     Ok(()) =>
                     {
                         println!("  checkpoint → {}", dir.display());
-                        // Score this checkpoint on the held-out split and remember the
-                        // best, so pruning never deletes the best model.
                         if !val_tokens.is_empty()
                         {
                             let v = self.eval_loss(val_tokens, s, cfg.eval_windows);
@@ -1229,8 +1353,6 @@ impl CudaTrainer {
                                 println!("    (best val {v:.4} @ step {step} → protected)");
                             }
                         }
-                        // Retention: keep only the last `keep_last` checkpoints plus the
-                        // best-val one, so a long run doesn't fill the disk.
                         prune_checkpoints(&cfg.checkpoint_dir, cfg.keep_last, best_step);
                     },
                     Err(e) => eprintln!("  checkpoint at step {step} failed: {e}"),
@@ -1323,8 +1445,10 @@ pub struct CudaPretrainConfig {
     pub adam_eps: f32,
     /// Decoupled weight decay.
     pub weight_decay: f32,
-    /// Sequence length of each training window.
+    /// Sequence length of each training sample.
     pub seq_len: usize,
+    /// Number of independent sequences packed into each optimizer step.
+    pub batch_size: usize,
     /// Print a loss/lr line every this many steps (0 = never).
     pub log_interval: usize,
     /// Write a checkpoint every this many steps (0 = never).
@@ -1365,6 +1489,7 @@ impl Default for CudaPretrainConfig {
             adam_eps: 1e-5,
             weight_decay: 0.1,
             seq_len: 128,
+            batch_size: 1,
             log_interval: 100,
             save_interval: 500,
             checkpoint_dir: "checkpoints".to_string(),
