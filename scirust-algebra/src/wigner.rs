@@ -1,5 +1,7 @@
 //! Complex Wigner `D` matrix elements for integer-spin SO(3) representations.
 
+use core::ops::Mul;
+
 use crate::harmonics::wigner_small_d;
 
 /// Minimal complex scalar used by representation-theory reference kernels.
@@ -27,16 +29,6 @@ impl Complex64
         Self {
             re: angle.cos(),
             im: angle.sin(),
-        }
-    }
-
-    /// Complex multiplication.
-    #[inline]
-    pub fn mul(self, rhs: Self) -> Self
-    {
-        Self {
-            re: self.re * rhs.re - self.im * rhs.im,
-            im: self.re * rhs.im + self.im * rhs.re,
         }
     }
 
@@ -68,6 +60,21 @@ impl Complex64
     }
 }
 
+impl Mul for Complex64
+{
+    type Output = Self;
+
+    /// Complex multiplication.
+    #[inline]
+    fn mul(self, rhs: Self) -> Self::Output
+    {
+        Self {
+            re: self.re * rhs.re - self.im * rhs.im,
+            im: self.re * rhs.im + self.im * rhs.re,
+        }
+    }
+}
+
 /// Integer-spin Wigner matrix element
 /// `D^l_{m',m}(alpha, beta, gamma)` in the z-y-z Euler convention.
 ///
@@ -85,7 +92,7 @@ pub fn wigner_d(
     let small = wigner_small_d(l, m_prime, m, beta)?;
     let left = Complex64::cis(-(m_prime as f64) * alpha);
     let right = Complex64::cis(-(m as f64) * gamma);
-    Some(left.mul(right).scale(small))
+    Some((left * right).scale(small))
 }
 
 /// Normalized complex spherical harmonic `Y_l^m(theta, phi)` for signed `m`.
@@ -115,7 +122,7 @@ pub fn complex_spherical_harmonic(
     }
     else
     {
-        let sign = if order % 2 == 0 { 1.0 } else { -1.0 };
+        let sign = if order.is_multiple_of(2) { 1.0 } else { -1.0 };
         Some(positive.conjugate().scale(sign))
     }
 }
