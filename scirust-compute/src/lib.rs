@@ -9,6 +9,7 @@ mod capabilities;
 mod device;
 mod dtype;
 mod error;
+mod hardware;
 mod ids;
 mod kernel;
 mod launch;
@@ -23,6 +24,11 @@ pub use capabilities::DeviceCapabilities;
 pub use device::{DeviceId, DeviceKind};
 pub use dtype::DType;
 pub use error::{ComputeError, ComputeResult};
+pub use hardware::{
+    Architecture, ArchitectureFamily, CapabilitySet, ExecutionCapabilities, HardwareCapabilities,
+    IsaCapabilities, IsaFeature, MatrixCapabilities, MemoryCapabilities, NumericCapabilities,
+    ReproducibilityCapabilities, ReproducibilityLevel, SupportLevel, VectorModel,
+};
 pub use ids::{BufferId, EventId, KernelId, StreamId};
 pub use kernel::{KernelFormat, KernelModule};
 pub use launch::LaunchConfig;
