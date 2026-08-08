@@ -225,6 +225,36 @@ fn env_usize(key: &str, default: usize) -> usize {
         .unwrap_or(default)
 }
 
+fn allow_nonexact_resume() -> bool {
+    matches!(
+        std::env::var("SCIAGENT_ALLOW_NONEXACT_RESUME").as_deref(),
+        Ok("1" | "true")
+    )
+}
+
+fn same_f32(a: f32, b: f32) -> bool {
+    a.to_bits() == b.to_bits()
+}
+
+fn enforce_exact_resume(mismatches: &[String]) {
+    if mismatches.is_empty()
+    {
+        return;
+    }
+    if !allow_nonexact_resume()
+    {
+        eprintln!(
+            "exact resume refused: {}. Set SCIAGENT_ALLOW_NONEXACT_RESUME=1 only for an intentional branch experiment.",
+            mismatches.join(", ")
+        );
+        std::process::exit(1);
+    }
+    eprintln!(
+        "WARNING: non-exact resume explicitly allowed: {}",
+        mismatches.join(", ")
+    );
+}
+
 fn main() {
     let ckpt_dir = std::env::var("SCIAGENT_CKPT").unwrap_or_else(|_| "checkpoints/cuda".into());
 
@@ -493,34 +523,33 @@ fn main() {
             None =>
             {},
         }
-        if !mismatches.is_empty()
-        {
-            let allow = matches!(
-                std::env::var("SCIAGENT_ALLOW_NONEXACT_RESUME").as_deref(),
-                Ok("1" | "true")
-            );
-            if !allow
-            {
-                eprintln!(
-                    "exact resume refused: {}. Set SCIAGENT_ALLOW_NONEXACT_RESUME=1 only for an intentional branch experiment.",
-                    mismatches.join(", ")
-                );
-                std::process::exit(1);
-            }
-            eprintln!(
-                "WARNING: non-exact resume explicitly allowed: {}",
-                mismatches.join(", ")
-            );
-        }
+        enforce_exact_resume(&mismatches);
     }
 
-    // Exact B32 resumes inherit the saved optimizer/LR trajectory by default. An
-    // explicit environment override still wins. Legacy checkpoints (no AdamW sidecar)
+    // Exact resumes inherit the saved optimizer/LR trajectory. Explicit changes
+    // are treated as branch experiments and require SCIAGENT_ALLOW_NONEXACT_RESUME=1. Legacy checkpoints (no AdamW sidecar)
     // keep the historical one-time re-warm that cushions their zero-moment restart.
     let steps_env = env_usize("SCIAGENT_STEPS", 300);
-    let total_steps = std::env::var("SCIAGENT_TOTAL_STEPS")
+    let explicit_total_steps = std::env::var("SCIAGENT_TOTAL_STEPS")
         .ok()
-        .and_then(|v| v.parse::<usize>().ok())
+        .and_then(|v| v.parse::<usize>().ok());
+    if explicit_total_steps.is_none()
+    {
+        if let Some(saved) = optimizer_resume.as_ref()
+        {
+            if saved.total_steps <= start_step
+            {
+                eprintln!(
+                    "checkpoint step {start_step} already reached saved target {}; set \
+                     SCIAGENT_TOTAL_STEPS to a larger value plus \
+                     SCIAGENT_ALLOW_NONEXACT_RESUME=1 to intentionally extend the run",
+                    saved.total_steps
+                );
+                std::process::exit(0);
+            }
+        }
+    }
+    let total_steps = explicit_total_steps
         .filter(|&t| t > start_step)
         .or_else(|| {
             optimizer_resume
@@ -565,33 +594,90 @@ fn main() {
             .map(|s| s.min_lr)
             .unwrap_or(base_lr * 0.1)
     };
-    // Global grad-norm clip (default 1.0; SCIAGENT_CLIP overrides, <= 0 disables).
-    let max_grad_norm = std::env::var("SCIAGENT_CLIP")
+    // Trajectory-changing settings inherit the saved run contract by default.
+    let explicit_clip = std::env::var("SCIAGENT_CLIP")
         .ok()
-        .and_then(|v| v.parse().ok())
+        .and_then(|v| v.parse::<f32>().ok());
+    let max_grad_norm = explicit_clip
+        .or_else(|| optimizer_resume.as_ref().and_then(|s| s.max_grad_norm))
         .unwrap_or(1.0f32);
-    // AdamW epsilon (default 1e-5, bf16-appropriate; SCIAGENT_EPS overrides).
-    let adam_eps = std::env::var("SCIAGENT_EPS")
+    let explicit_eps = std::env::var("SCIAGENT_EPS")
         .ok()
-        .and_then(|v| v.parse().ok())
+        .and_then(|v| v.parse::<f32>().ok());
+    let adam_eps = explicit_eps
         .or_else(|| optimizer_resume.as_ref().map(|s| s.adam_eps))
         .unwrap_or(1e-5f32);
-    // Held-out validation fraction (tail; default 2%; SCIAGENT_VAL_FRAC overrides, 0 disables).
-    let val_frac = std::env::var("SCIAGENT_VAL_FRAC")
+    let explicit_val_frac = std::env::var("SCIAGENT_VAL_FRAC")
         .ok()
-        .and_then(|v| v.parse().ok())
+        .and_then(|v| v.parse::<f32>().ok());
+    let val_frac = explicit_val_frac
+        .or_else(|| optimizer_resume.as_ref().and_then(|s| s.val_frac))
         .unwrap_or(0.02f32);
-    // Checkpoint cadence + retention. Saving every 100 steps and never pruning fills
-    // the disk on a long run (each 350M checkpoint is ~1.2 GB fp32) — so save less
-    // often and keep only the last few (SCIAGENT_KEEP) plus the best-val one.
+    // Checkpoint/telemetry cadence does not alter model math.
     let save_interval = env_usize("SCIAGENT_SAVE", 500);
     let keep_last = env_usize("SCIAGENT_KEEP", 3);
-    // Shuffle training windows (default on; SCIAGENT_SHUFFLE=0 restores sequential
-    // streaming). Deterministic per (start_step, epoch), so runs stay reproducible.
-    let shuffle = !matches!(
-        std::env::var("SCIAGENT_SHUFFLE").as_deref(),
-        Ok("0" | "false")
-    );
+    let explicit_shuffle = std::env::var("SCIAGENT_SHUFFLE")
+        .ok()
+        .map(|v| !matches!(v.as_str(), "0" | "false"));
+    let shuffle = explicit_shuffle
+        .or_else(|| optimizer_resume.as_ref().and_then(|s| s.shuffle))
+        .unwrap_or(true);
+    if let Some(saved) = optimizer_resume.as_ref()
+    {
+        let mut mismatches = Vec::new();
+        if total_steps != saved.total_steps
+        {
+            mismatches.push(format!(
+                "total_steps saved={} current={total_steps}",
+                saved.total_steps
+            ));
+        }
+        if warmup_steps != saved.warmup_steps
+        {
+            mismatches.push(format!(
+                "warmup_steps saved={} current={warmup_steps}",
+                saved.warmup_steps
+            ));
+        }
+        if !same_f32(base_lr, saved.base_lr)
+        {
+            mismatches.push(format!("base_lr saved={} current={base_lr}", saved.base_lr));
+        }
+        if !same_f32(min_lr, saved.min_lr)
+        {
+            mismatches.push(format!("min_lr saved={} current={min_lr}", saved.min_lr));
+        }
+        if !same_f32(adam_eps, saved.adam_eps)
+        {
+            mismatches.push(format!(
+                "adam_eps saved={} current={adam_eps}",
+                saved.adam_eps
+            ));
+        }
+        if let Some(v) = saved.max_grad_norm
+        {
+            if !same_f32(max_grad_norm, v)
+            {
+                mismatches.push(format!("clip saved={v} current={max_grad_norm}"));
+            }
+        }
+        if let Some(v) = saved.val_frac
+        {
+            if !same_f32(val_frac, v)
+            {
+                mismatches.push(format!("val_frac saved={v} current={val_frac}"));
+            }
+        }
+        if let Some(v) = saved.shuffle
+        {
+            if shuffle != v
+            {
+                mismatches.push(format!("shuffle saved={v} current={shuffle}"));
+            }
+        }
+        enforce_exact_resume(&mismatches);
+    }
+
     let resume_betas = optimizer_resume.as_ref().map(|s| s.betas);
     let resume_weight_decay = optimizer_resume.as_ref().map(|s| s.weight_decay);
     let cfg = CudaPretrainConfig {
