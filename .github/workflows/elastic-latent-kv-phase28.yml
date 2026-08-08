@@ -162,6 +162,41 @@ jobs:
           flock -x 9
           echo "Exclusive Thor GPU access acquired."
 
+          if ! compute_apps="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null)"; then
+            echo "::error::Phase 28 cannot verify that the Thor is idle; refusing to publish a performance baseline."
+            exit 1
+          fi
+          if [[ -n "${compute_apps//[[:space:]]/}" ]]; then
+            echo "::error::Phase 28 found unmanaged compute before its WGPU probes; collecting provenance without terminating anything."
+            printf '%s\n' "$compute_apps"
+            while IFS=',' read -r raw_pid process_name; do
+              pid="$(printf '%s' "$raw_pid" | tr -d '[:space:]')"
+              [[ "$pid" =~ ^[0-9]+$ ]] || continue
+              echo "::group::Thor GPU process provenance: pid=$pid process=${process_name# }"
+              ps -p "$pid" -o pid=,ppid=,user=,lstart=,etime=,stat=,cmd= || true
+              ppid="$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d '[:space:]')"
+              if [[ "$ppid" =~ ^[0-9]+$ ]]; then
+                echo "parent:"
+                ps -p "$ppid" -o pid=,ppid=,user=,lstart=,etime=,stat=,cmd= || true
+              fi
+              echo "exe:"
+              readlink -f "/proc/$pid/exe" 2>/dev/null || true
+              echo "cwd:"
+              readlink -f "/proc/$pid/cwd" 2>/dev/null || true
+              echo "cmdline:"
+              tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true
+              echo
+              echo "cgroup:"
+              cat "/proc/$pid/cgroup" 2>/dev/null || true
+              if command -v pstree >/dev/null 2>&1; then
+                echo "process tree:"
+                pstree -asp "$pid" || true
+              fi
+              echo "::endgroup::"
+            done <<< "$compute_apps"
+            exit 1
+          fi
+
           for limit in 8 32; do
             echo "=== Phase 28 Thor bounded top-k=50 limit: $limit ==="
             SCIRUST_RESIDENT_PROBE_TOP_K=50 \
@@ -171,11 +206,11 @@ jobs:
           done
 
           if ! compute_apps="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null)"; then
-            echo "::error::Phase 28 cannot verify that the Thor is idle; refusing to publish a performance baseline."
+            echo "::error::Phase 28 cannot verify that the Thor remained idle after its probes."
             exit 1
           fi
           if [[ -n "${compute_apps//[[:space:]]/}" ]]; then
-            echo "::error::Phase 28 performance baseline requires an idle Thor after acquiring the shared GPU lock; unmanaged compute processes are active:"
+            echo "::error::A compute process appeared while Phase 28 held the shared GPU lock; refusing to publish timings."
             printf '%s\n' "$compute_apps"
             exit 1
           fi
