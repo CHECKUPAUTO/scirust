@@ -86,11 +86,18 @@ jobs:
           fetch-depth: 0
 
       # BEGIN SCIAGENT B43 ONE-SHOT AUTOFIX
-      - name: Apply validated SCIAGENT B40-B43 corrections once (retry 3)
+      - name: Install nightly for B43 one-shot
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'perf/sciagent-b39-thor-production-bench'
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt
+
+      - name: Apply validated SCIAGENT B40-B43 corrections once (retry 4)
         if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'perf/sciagent-b39-thor-production-bench'
         run: |
           python3 scripts/sciagent_b43_autofix.py
-          cargo fmt --all
+          cargo +nightly-2026-07-02 fmt --all
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
