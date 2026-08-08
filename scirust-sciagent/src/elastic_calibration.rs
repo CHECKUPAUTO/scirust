@@ -1,9 +1,10 @@
 //! Deterministic selection layer for ElasticTokenizer auto-calibration.
 //!
 //! Timing collection is intentionally kept outside this module. This layer
-//! consumes integer timing samples, rejects measurements whose output did not
-//! match the canonical BPE oracle, aggregates repeated runs by median, and
-//! deterministically selects the fastest valid kernel at every probed length.
+//! consumes integer timing samples, disqualifies any `(piece length, kernel)`
+//! pair that ever disagrees with the canonical BPE oracle, aggregates the
+//! remaining repeated runs by median, and deterministically selects the fastest
+//! valid kernel at every probed length.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -50,15 +51,20 @@ impl CalibrationReport {
             .iter()
             .filter(|m| !m.semantic_match)
             .count();
+        let disqualified: BTreeSet<(usize, u8)> = measurements
+            .iter()
+            .filter(|m| !m.semantic_match)
+            .map(|m| (m.piece_len, kernel_order(m.kernel)))
+            .collect();
 
         let mut grouped: BTreeMap<(usize, u8), (BpeKernel, Vec<u64>)> = BTreeMap::new();
         for measurement in measurements
         {
-            if !measurement.semantic_match
+            let key = (measurement.piece_len, kernel_order(measurement.kernel));
+            if !measurement.semantic_match || disqualified.contains(&key)
             {
                 continue;
             }
-            let key = (measurement.piece_len, kernel_order(measurement.kernel));
             grouped
                 .entry(key)
                 .or_insert_with(|| (measurement.kernel, Vec::new()))
@@ -210,15 +216,32 @@ mod tests {
     }
 
     #[test]
-    fn faster_semantic_mismatch_can_never_win() {
+    fn any_semantic_mismatch_disqualifies_kernel_for_that_length() {
         let report = CalibrationReport::from_measurements(&[
             m(64, BpeKernel::Reference, 100, true),
+            m(64, BpeKernel::Reference, 105, true),
+            m(64, BpeKernel::TinyScan, 10, true),
             m(64, BpeKernel::TinyScan, 1, false),
+            m(64, BpeKernel::TinyScan, 11, true),
         ])
         .unwrap();
 
         assert_eq!(report.winners()[0].kernel, BpeKernel::Reference);
         assert_eq!(report.rejected_semantic_measurements(), 1);
+    }
+
+    #[test]
+    fn mismatch_at_one_length_does_not_poison_other_lengths() {
+        let report = CalibrationReport::from_measurements(&[
+            m(32, BpeKernel::Reference, 100, true),
+            m(32, BpeKernel::TinyScan, 10, true),
+            m(64, BpeKernel::Reference, 100, true),
+            m(64, BpeKernel::TinyScan, 1, false),
+        ])
+        .unwrap();
+
+        assert_eq!(report.winners()[0].kernel, BpeKernel::TinyScan);
+        assert_eq!(report.winners()[1].kernel, BpeKernel::Reference);
     }
 
     #[test]
