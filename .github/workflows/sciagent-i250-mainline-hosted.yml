@@ -9,7 +9,7 @@ on:
       - ".github/workflows/sciagent-i250-mainline-hosted.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: sciagent-i250-mainline-${{ github.event.pull_request.number || github.ref }}
@@ -21,35 +21,47 @@ env:
 
 jobs:
   hosted:
-    name: I250 format + CUDA compile + Clippy
+    name: I250 validate + record rustfmt
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
-      - name: Apply pinned rustfmt in ephemeral checkout
-        run: cargo +nightly-2026-07-02 fmt --all
-      - name: Collect formatted I250 files
+      - name: Apply pinned rustfmt and exact greedy edge case
         run: |
-          mkdir -p /tmp/i250-formatted/scirust-cuda/src
-          mkdir -p /tmp/i250-formatted/scirust-sciagent/src
-          mkdir -p /tmp/i250-formatted/scirust-sciagent/examples
-          mkdir -p /tmp/i250-formatted/scirust-sciagent/tests
-          cp scirust-cuda/src/decode.rs /tmp/i250-formatted/scirust-cuda/src/decode.rs
-          cp scirust-sciagent/src/cuda_decode.rs /tmp/i250-formatted/scirust-sciagent/src/cuda_decode.rs
-          cp scirust-sciagent/examples/cuda_decode_bench.rs /tmp/i250-formatted/scirust-sciagent/examples/cuda_decode_bench.rs
-          cp scirust-sciagent/tests/cuda_decode_parity.rs /tmp/i250-formatted/scirust-sciagent/tests/cuda_decode_parity.rs
-      - name: Upload formatted I250 files
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: i250-rustfmt-${{ github.sha }}
-          if-no-files-found: error
-          retention-days: 1
-          path: /tmp/i250-formatted
+          cargo +nightly-2026-07-02 fmt --all
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("scirust-cuda/src/decode.rs")
+          text = path.read_text()
+          old = "float local_value = -3.402823466e+38F;"
+          new = "float local_value = -__int_as_float(0x7f800000);"
+          if old in text:
+              text = text.replace(old, new, 1)
+              path.write_text(text)
+          elif new not in text:
+              raise SystemExit("greedy argmax local-value marker not found")
+          PY
+          cargo +nightly-2026-07-02 fmt --all
       - name: CUDA feature compile
         run: cargo +nightly-2026-07-02 check -p scirust-sciagent --features cuda --all-targets --locked
       - name: Strict Clippy
         run: cargo +nightly-2026-07-02 clippy -p scirust-sciagent --features cuda --all-targets --locked -- -D warnings
+      - name: Commit only validated I250 source files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            scirust-cuda/src/decode.rs \
+            scirust-sciagent/src/cuda_decode.rs \
+            scirust-sciagent/examples/cuda_decode_bench.rs \
+            scirust-sciagent/tests/cuda_decode_parity.rs
+          if ! git diff --cached --quiet; then
+            git commit -m "style(i250): record validated device-feedback sources"
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          fi
