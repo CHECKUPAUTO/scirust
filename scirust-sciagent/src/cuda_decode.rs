@@ -1,9 +1,13 @@
 //! Latency-oriented CUDA inference path for SCIAGENT.
 //!
 //! The Route-B [`crate::cuda_model::CudaModel`] remains the correctness oracle and
-//! training implementation.  `CudaDecodeModel` is a separate batch-one runtime that
+//! training implementation. `CudaDecodeModel` is a separate batch-one runtime that
 //! fuses Q/K/V and gate/up projections and delegates incremental GQA to
-//! `scirust-cuda`'s fixed-cache fused decode kernel.  It never mutates training state.
+//! `scirust-cuda`'s fixed-cache fused decode kernel. It never mutates training state.
+//!
+//! A generation call allocates its KV cache and activation workspace once. Every
+//! token then reuses those resident buffers; prompt replay stays entirely on-device
+//! until the final prompt logits are actually needed by the sampler.
 
 use scirust_core::autodiff::reverse::Tensor;
 use scirust_cuda::{CudaDecodeKvCache, CudaDecodeMatrix, CudaDecodeRuntime};
@@ -25,6 +29,18 @@ struct DecodeLayerCache {
     v: CudaDecodeKvCache,
 }
 
+struct DecodeWorkspace {
+    x: CudaDecodeMatrix,
+    norm: CudaDecodeMatrix,
+    qkv: CudaDecodeMatrix,
+    ctx: CudaDecodeMatrix,
+    tmp_d: CudaDecodeMatrix,
+    h: CudaDecodeMatrix,
+    gate_up: CudaDecodeMatrix,
+    act: CudaDecodeMatrix,
+    logits: CudaDecodeMatrix,
+}
+
 /// Batch-one SCIAGENT decoder with fused projection weights and fixed-capacity KV.
 pub struct CudaDecodeModel {
     runtime: CudaDecodeRuntime,
@@ -32,6 +48,7 @@ pub struct CudaDecodeModel {
     final_norm: CudaDecodeMatrix,
     blocks: Vec<DecodeBlock>,
     d_model: usize,
+    d_ff: usize,
     n_heads: usize,
     n_kv_heads: usize,
     kv_dim: usize,
@@ -43,7 +60,7 @@ pub struct CudaDecodeModel {
 
 impl CudaDecodeModel {
     /// Build the latency-oriented mirror from the same fp32 model weights used by
-    /// Route B.  Returns `None` when CUDA/cuBLASLt/NVRTC are unavailable.
+    /// Route B. Returns `None` when CUDA/cuBLASLt/NVRTC are unavailable.
     pub fn from_model(model: &SciAgentModel) -> Option<Self> {
         assert!(
             model.config.tie_embeddings,
@@ -109,6 +126,7 @@ impl CudaDecodeModel {
             final_norm,
             blocks,
             d_model: cfg.d_model,
+            d_ff: cfg.d_ff,
             n_heads: cfg.n_heads,
             n_kv_heads: cfg.n_kv_heads,
             kv_dim,
@@ -136,23 +154,39 @@ impl CudaDecodeModel {
             .collect()
     }
 
-    /// Process one input token at its absolute position, append its layer-local K/V
-    /// rows to the fixed caches, and return logits for the following token.
-    fn forward_token(
+    fn workspace(&self) -> DecodeWorkspace {
+        let rt = &self.runtime;
+        DecodeWorkspace {
+            x: rt.matrix(1, self.d_model),
+            norm: rt.matrix(1, self.d_model),
+            qkv: rt.matrix(1, self.d_model + 2 * self.kv_dim),
+            ctx: rt.matrix(1, self.d_model),
+            tmp_d: rt.matrix(1, self.d_model),
+            h: rt.matrix(1, self.d_model),
+            gate_up: rt.matrix(1, 2 * self.d_ff),
+            act: rt.matrix(1, self.d_ff),
+            logits: rt.matrix(1, self.vocab),
+        }
+    }
+
+    /// Process one input token and leave the next-token logits resident in `ws`.
+    /// No CUDA allocation or device-to-host synchronization occurs inside this step.
+    fn forward_token_resident(
         &self,
         token: u32,
         pos: usize,
         caches: &mut [DecodeLayerCache],
-    ) -> Vec<f32> {
+        ws: &mut DecodeWorkspace,
+    ) {
         assert_eq!(caches.len(), self.blocks.len(), "decode cache/layer mismatch");
         let rt = &self.runtime;
-        let mut x = rt.embed_token(token, &self.embedding);
+        rt.embed_token_into(token, &self.embedding, &mut ws.x);
 
         for (block, cache) in self.blocks.iter().zip(caches.iter_mut()) {
-            let xn = rt.rms_norm(&x, &block.norm1, self.eps);
-            let qkv = rt.matmul(&xn, &block.qkv);
-            let ctx = rt.gqa_decode(
-                &qkv,
+            rt.rms_norm_into(&ws.x, &block.norm1, self.eps, &mut ws.norm);
+            rt.matmul_into(&ws.norm, &block.qkv, &mut ws.qkv);
+            rt.gqa_decode_into(
+                &ws.qkv,
                 &mut cache.k,
                 &mut cache.v,
                 pos,
@@ -160,27 +194,27 @@ impl CudaDecodeModel {
                 self.n_heads,
                 self.n_kv_heads,
                 self.theta,
+                &mut ws.ctx,
             );
-            let attn_out = rt.matmul(&ctx, &block.wo);
-            let h = rt.add(&x, &attn_out);
+            rt.matmul_into(&ws.ctx, &block.wo, &mut ws.tmp_d);
+            rt.add_into(&ws.x, &ws.tmp_d, &mut ws.h);
 
-            let hn = rt.rms_norm(&h, &block.norm2, self.eps);
-            let gate_up = rt.matmul(&hn, &block.gate_up);
-            let act = rt.swiglu_split(&gate_up);
-            let mlp = rt.matmul(&act, &block.down);
-            x = rt.add(&h, &mlp);
+            rt.rms_norm_into(&ws.h, &block.norm2, self.eps, &mut ws.norm);
+            rt.matmul_into(&ws.norm, &block.gate_up, &mut ws.gate_up);
+            rt.swiglu_split_into(&ws.gate_up, &mut ws.act);
+            rt.matmul_into(&ws.act, &block.down, &mut ws.tmp_d);
+            rt.add_into(&ws.h, &ws.tmp_d, &mut ws.x);
         }
 
-        let normed = rt.rms_norm(&x, &self.final_norm, self.eps);
-        let logits = rt.matmul_bt(&normed, &self.embedding);
-        rt.download(&logits)
+        rt.rms_norm_into(&ws.x, &self.final_norm, self.eps, &mut ws.norm);
+        rt.matmul_bt_into(&ws.norm, &self.embedding, &mut ws.logits);
     }
 
     /// Autoregressive generation using the fused batch-one CUDA path.
     ///
     /// Prompt prefill is intentionally incremental: replaying the prompt through the
     /// same one-token kernel both populates KV and exercises exactly the production
-    /// decode path.  Sampling uses SCIAGENT's shared deterministic host sampler so
+    /// decode path. Sampling uses SCIAGENT's shared deterministic host sampler so
     /// parity can be checked directly against [`crate::cuda_model::CudaModel`].
     pub fn generate(
         &self,
@@ -208,13 +242,14 @@ impl CudaDecodeModel {
             self.max_seq_len
         );
         let mut caches = self.caches(capacity);
+        let mut ws = self.workspace();
 
-        // Sequential prefill: after the final prompt token, `logits` predicts the
-        // first generated token and every cache contains exactly the prompt prefix.
-        let mut logits = Vec::new();
+        // Sequential prefill stays resident. The only readback is after the final
+        // prompt token, when its logits are actually needed to choose token #1.
         for (pos, &token) in tokens.iter().enumerate() {
-            logits = self.forward_token(token, pos, &mut caches);
+            self.forward_token_resident(token, pos, &mut caches, &mut ws);
         }
+        let mut logits = self.runtime.download(&ws.logits);
 
         let mut rng = seed_to_state(seed);
         for i in 0..max_new {
@@ -225,7 +260,8 @@ impl CudaDecodeModel {
             if next == 0 || i + 1 == max_new {
                 break;
             }
-            logits = self.forward_token(next, pos, &mut caches);
+            self.forward_token_resident(next, pos, &mut caches, &mut ws);
+            logits = self.runtime.download(&ws.logits);
         }
         tokens
     }
