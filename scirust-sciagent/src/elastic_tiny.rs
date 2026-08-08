@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::elastic_tokenizer::{CanonicalBpeOracle, DuplicateMergeRule, TokenId};
+use crate::elastic_tokenizer::{DuplicateMergeRule, TokenId};
 
 /// Maximum number of input ids handled by the stack-only tiny work buffer.
 ///
@@ -89,11 +89,15 @@ impl TinyScanBpe {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::elastic_tokenizer::CanonicalBpeOracle;
 
     fn assert_parity(merges: &[(TokenId, TokenId, TokenId)], input: &[TokenId]) {
         let reference = CanonicalBpeOracle::from_ordered_merges(merges).unwrap();
         let tiny = TinyScanBpe::from_ordered_merges(merges).unwrap();
-        assert_eq!(tiny.try_encode_ids(input).unwrap(), reference.encode_ids(input));
+        assert_eq!(
+            tiny.try_encode_ids(input).unwrap(),
+            reference.encode_ids(input)
+        );
     }
 
     #[test]
