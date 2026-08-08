@@ -17,7 +17,7 @@ on:
       - ".github/workflows/sciagent-i250-hosted-check.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: sciagent-i250-hosted-${{ github.event.pull_request.number || github.ref }}
@@ -35,36 +35,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          ref: ${{ github.event_name == 'push' && github.ref_name || github.event.pull_request.head.sha }}
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
-      - name: Apply pinned Clippy fixes on scratch push
-        if: github.event_name == 'push'
-        run: |
-          cargo +nightly-2026-07-02 clippy -p scirust-core --lib --locked --fix --allow-dirty --allow-staged -- -A clippy::too_many_arguments
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path("scirust-core/src/nn/slha_score_profile.rs")
-          text = path.read_text()
-          needle = "    pub fn score_hot_int4(\n"
-          replacement = "    #[allow(clippy::too_many_arguments)] // Mirrors the SLHA HOT score contract.\n    pub fn score_hot_int4(\n"
-          if replacement not in text:
-              if needle not in text:
-                  raise SystemExit("score_hot_int4 marker not found")
-              text = text.replace(needle, replacement, 1)
-              path.write_text(text)
-          PY
-          cargo +nightly-2026-07-02 fmt --all
-          if ! git diff --quiet -- scirust-core scirust-cuda scirust-sciagent; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add scirust-core scirust-cuda scirust-sciagent
-            git commit -m "style(i250): satisfy strict Clippy"
-            git push origin HEAD:perf/sciagent-i250-resident-kv
-          fi
       - name: Format
         run: cargo +nightly-2026-07-02 fmt --all -- --check
       - name: SLHA score-profile algebra
