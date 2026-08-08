@@ -16,8 +16,8 @@ use crate::{
     WgpuContext, WgpuDeterministicSamplerError, WgpuDeterministicSamplerTelemetry,
 };
 use scirust_compute::{
-    BufferAccess, BufferBinding, ComputeBackend, ComputeError, KernelFormat, KernelModule,
-    LaunchConfig, MemorySpace,
+    BufferAccess, BufferBinding, ComputeBackend, KernelFormat, KernelModule, LaunchConfig,
+    MemorySpace,
 };
 use scirust_core::nn::sampling::SamplingConfig;
 
@@ -354,9 +354,12 @@ impl WgpuParallelTopKSampler {
         ];
 
         let logits_bytes = bytes_for_f32(vocab_size)?;
-        let scratch_elements = vocab_size.checked_mul(2).ok_or(
-            WgpuDeterministicSamplerError::InvalidConfig("sampler scratch size overflows usize"),
-        )?;
+        let scratch_elements =
+            vocab_size
+                .checked_mul(2)
+                .ok_or(WgpuDeterministicSamplerError::InvalidConfig(
+                    "sampler scratch size overflows usize",
+                ))?;
         let scratch_bytes = bytes_for_f32(scratch_elements)?;
         let state_bytes = STATE_WORDS.checked_mul(U32_BYTES).ok_or(
             WgpuDeterministicSamplerError::InvalidConfig("sampler state size overflows usize"),
@@ -553,9 +556,6 @@ fn bytes_for_f32(elements: usize) -> Result<usize, WgpuDeterministicSamplerError
         ))
 }
 
-fn usize_to_u32(
-    value: usize,
-    message: &'static str,
-) -> Result<u32, WgpuDeterministicSamplerError> {
+fn usize_to_u32(value: usize, message: &'static str) -> Result<u32, WgpuDeterministicSamplerError> {
     u32::try_from(value).map_err(|_| WgpuDeterministicSamplerError::InvalidConfig(message))
 }
