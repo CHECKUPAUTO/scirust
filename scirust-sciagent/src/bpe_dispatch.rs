@@ -10,7 +10,9 @@ use std::fs;
 use std::path::Path;
 
 use crate::bpe::BpeTokenizer;
-use crate::elastic_profile_store::CANONICAL_BPE_SEMANTICS_V1;
+use crate::elastic_profile_store::{
+    CANONICAL_BPE_SEMANTICS_V1, ElasticHardwareIdentity, ProfileStoreError, StoredElasticProfile,
+};
 use crate::elastic_text_tokenizer::{
     BpeMergeSemantics, ElasticTextTokenizer, ElasticTextTokenizerError,
 };
@@ -33,9 +35,7 @@ impl VersionedBpeTokenizer {
         match semantics
         {
             BpeMergeSemantics::LegacyParallelV1 => {
-                let path = path
-                    .to_str()
-                    .ok_or(BpeDispatchError::NonUtf8Path)?;
+                let path = path.to_str().ok_or(BpeDispatchError::NonUtf8Path)?;
                 BpeTokenizer::load_json(path)
                     .map(Self::Legacy)
                     .map_err(BpeDispatchError::Io)
@@ -98,7 +98,17 @@ impl VersionedBpeTokenizer {
         }
     }
 
-    /// Applies a calibrated execution profile only to canonical semantics.
+    pub fn elastic_profile(&self) -> Option<ElasticProfile> {
+        match self
+        {
+            Self::Legacy(_) => None,
+            Self::Canonical(tokenizer) => Some(tokenizer.profile()),
+        }
+    }
+
+    /// Applies a profile object only to canonical semantics. Callers that load
+    /// persisted profiles should prefer [`Self::apply_stored_profile`] so the
+    /// tokenizer and hardware bindings are verified first.
     pub fn set_elastic_profile(&mut self, profile: ElasticProfile) -> Result<(), BpeDispatchError> {
         match self
         {
@@ -106,6 +116,26 @@ impl VersionedBpeTokenizer {
             Self::Canonical(tokenizer) =>
             {
                 tokenizer.set_profile(profile);
+                Ok(())
+            },
+        }
+    }
+
+    /// Verifies and applies a persisted hardware-local profile.
+    pub fn apply_stored_profile(
+        &mut self,
+        stored: &StoredElasticProfile,
+        hardware: &ElasticHardwareIdentity,
+    ) -> Result<(), BpeDispatchError> {
+        match self
+        {
+            Self::Legacy(_) => Err(BpeDispatchError::LegacyProfileUnsupported),
+            Self::Canonical(tokenizer) =>
+            {
+                stored
+                    .verify_for(tokenizer.ordered_merges(), hardware)
+                    .map_err(BpeDispatchError::ProfileStore)?;
+                tokenizer.set_profile(stored.profile);
                 Ok(())
             },
         }
@@ -135,6 +165,7 @@ pub enum BpeDispatchError {
     UnknownMergeSemantics(String),
     Canonical(ElasticTextTokenizerError),
     InvalidReferenceProfile(ThresholdError),
+    ProfileStore(ProfileStoreError),
     LegacyProfileUnsupported,
 }
 
@@ -152,6 +183,7 @@ impl fmt::Display for BpeDispatchError {
             Self::InvalidReferenceProfile(error) => {
                 write!(f, "invalid canonical reference profile: {error}")
             },
+            Self::ProfileStore(error) => write!(f, "elastic profile rejected: {error}"),
             Self::LegacyProfileUnsupported => {
                 f.write_str("elastic execution profiles require canonical BPE semantics")
             },
