@@ -41,7 +41,9 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use scirust_sciagent::bpe::BpeTokenizer;
-use scirust_sciagent::cuda_model::CudaModel;
+use scirust_sciagent::cuda_model::{
+    CudaModel, SCIAGENT_MODEL_SEMANTICS_VERSION, read_model_semantics_version,
+};
 use scirust_sciagent::generate::SamplingParams;
 use scirust_sciagent::model::SciAgentModel;
 use scirust_sciagent::train::checkpoint::{latest_checkpoint, load_checkpoint, read_meta};
@@ -198,6 +200,29 @@ fn main() {
         },
     };
     let dir = latest_checkpoint(Path::new(&ckpt)).unwrap_or_else(|| ckpt.clone().into());
+    let checkpoint_semantics = read_model_semantics_version(&dir).unwrap_or(1);
+    if checkpoint_semantics != SCIAGENT_MODEL_SEMANTICS_VERSION
+    {
+        let allow = matches!(
+            std::env::var("SCIAGENT_ALLOW_NONEXACT_RESUME").as_deref(),
+            Ok("1" | "true")
+        );
+        if !allow
+        {
+            eprintln!(
+                "historical checkpoint semantics v{checkpoint_semantics} != current v{}; \
+                 refusing an invalid post-B33 quality comparison. Evaluate a fresh v2 checkpoint, \
+                 or set SCIAGENT_ALLOW_NONEXACT_RESUME=1 only to inspect the mismatch explicitly.",
+                SCIAGENT_MODEL_SEMANTICS_VERSION
+            );
+            std::process::exit(1);
+        }
+        eprintln!(
+            "WARNING: evaluating historical semantics v{checkpoint_semantics} with current v{} math; \
+             metrics are not faithful to the historical model",
+            SCIAGENT_MODEL_SEMANTICS_VERSION
+        );
+    }
     let meta = read_meta(&dir).unwrap_or_else(|e| panic!("read meta {}: {e}", dir.display()));
     let mut model = SciAgentModel::new(&meta.config);
     load_checkpoint(&mut model, &dir).unwrap_or_else(|e| panic!("load {}: {e}", dir.display()));

@@ -472,3 +472,33 @@ identical rotations at the same position. This is an intentional model-semantics
 correction. Legacy checkpoints still load structurally, but their learned positional
 basis is the old one; the final post-B22 production run must therefore be trained with
 B33 enabled rather than treating old validation numbers as comparable.
+
+### Checkpoint semantics guard
+
+Post-B33 CUDA recovery checkpoints and model-only `best/` snapshots carry
+`model_semantics.version = 2`. Historical checkpoints have no marker and are treated
+as version 1. `cuda_pretrain` refuses to continue a v1 checkpoint under v2 head-local
+RoPE by default, and `cuda_eval` refuses to present such a mixed-semantics evaluation
+as a valid quality result. A fresh checkpoint directory is required for the final
+production run. `SCIAGENT_ALLOW_NONEXACT_RESUME=1` exists only for explicit research
+experiments and prints a warning.
+
+### B48 — shape-stable cached context (diagnostic bridge)
+
+Thor B47 localized the production KV-cache divergence exactly: cached K/V, QKᵀ
+scores, scaling and softmax were bit-identical to the same-prefix full-forward path,
+while the first non-zero error appeared in `weights · V`. B48 temporarily forced a
+full-forward output shape to prove that cuBLASLt's shape-dependent reduction order was
+the source. That O(T²) bridge was removed by B49 and is not the production path.
+
+### B49 — deterministic attention context (done, Thor-verified)
+
+Thor diagnostics localized the first KV-cache divergence to `weights · V`: K/V,
+QKᵀ scores, scaling and softmax were bit-identical. A shared CUDA row-local context
+kernel now accumulates positions left-to-right in fp32 for both full inference and
+incremental decode, making causal rows independent of matrix row count while keeping
+cached decode O(T·d_head). On the real 304,088,064-parameter shape, the 2026-08-08
+Thor gate restored **strict greedy parity (`parity=true`)** while cached decode reached
+**33.603 tok/s vs 23.473 tok/s naive (1.432×)**. Training at `B8×T512` measured
+**3,947.734 tok/s**, equivalent to **3.018 days** for one 1,029,492,639-token pass.
+The temporary B44-B48 public diagnostic API was removed after this proof.
