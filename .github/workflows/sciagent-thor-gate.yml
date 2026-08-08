@@ -100,4 +100,13 @@ jobs:
           set -euo pipefail
           exec 9>"$SCIRUST_THOR_GPU_LOCK"
           flock -x 9
+          if ! compute_apps="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null)"; then
+            echo "::error::SCIAGENT cannot verify that the Thor is idle; refusing to publish a contaminated production benchmark."
+            exit 1
+          fi
+          if [[ -n "${compute_apps//[[:space:]]/}" ]]; then
+            echo "::error::SCIAGENT production benchmark requires an idle Thor after acquiring the shared GPU lock; unmanaged compute processes are active:"
+            printf '%s\n' "$compute_apps"
+            exit 1
+          fi
           rustup run nightly-2026-07-02 cargo run -p scirust-sciagent --features cuda --release --example cuda_production_bench
