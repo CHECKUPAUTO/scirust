@@ -9,8 +9,7 @@ use scirust_gpu::{
 
 fn identity_basis(dimension: usize) -> Vec<f32> {
     let mut basis = vec![0.0; dimension * dimension];
-    for index in 0..dimension
-    {
+    for index in 0..dimension {
         basis[index * dimension + index] = 1.0;
     }
     basis
@@ -23,27 +22,22 @@ fn sampled_with_resident_runtime(
     max_seq_len: usize,
 ) -> Vec<usize> {
     let mut ids = prompt.to_vec();
-    if ids.is_empty()
-    {
+    if ids.is_empty() {
         return ids;
     }
 
-    for (pos, &token_id) in prompt.iter().enumerate()
-    {
+    for (pos, &token_id) in prompt.iter().enumerate() {
         runtime.ingest_at(token_id, pos).unwrap();
     }
 
-    for _ in 0..max_tokens
-    {
+    for _ in 0..max_tokens {
         let pos = ids.len();
-        if pos >= max_seq_len
-        {
+        if pos >= max_seq_len {
             break;
         }
         let next = runtime.sample_next().unwrap();
         ids.push(next);
-        if next == 0
-        {
+        if next == 0 {
             break;
         }
         runtime.ingest_at(next, pos).unwrap();
@@ -51,7 +45,12 @@ fn sampled_with_resident_runtime(
     ids
 }
 
-fn parity_case(config: SamplingConfig, seed: u64, max_tokens: usize) {
+fn parity_case(
+    config: SamplingConfig,
+    seed: u64,
+    max_tokens: usize,
+    expect_parallel: bool,
+) {
     let tokenizer = CharTokenizer::new(&["hello world abcdefghijklmnopqrstuvwxyz"]);
     let model_config = MiniLLMConfig {
         vocab_size: tokenizer.vocab_size,
@@ -84,7 +83,13 @@ fn parity_case(config: SamplingConfig, seed: u64, max_tokens: usize) {
         config,
         seed,
     )
-    .expect("Phase 20 validation requires an available WGPU adapter");
+    .expect("Phase 26 validation requires an available WGPU adapter");
+
+    assert_eq!(
+        resident.uses_parallel_sampler(),
+        expect_parallel,
+        "Phase 26 selected the wrong resident sampling backend"
+    );
 
     let actual =
         sampled_with_resident_runtime(&mut resident, &prompt, max_tokens, model_config.max_seq_len);
@@ -98,7 +103,7 @@ fn parity_case(config: SamplingConfig, seed: u64, max_tokens: usize) {
 }
 
 #[test]
-fn resident_sampled_minillm_matches_seeded_temperature_generation() {
+fn resident_sampled_minillm_keeps_sequential_fallback_for_unbounded_sampling() {
     parity_case(
         SamplingConfig {
             temperature: 0.85,
@@ -107,11 +112,12 @@ fn resident_sampled_minillm_matches_seeded_temperature_generation() {
         },
         42,
         8,
+        false,
     );
 }
 
 #[test]
-fn resident_sampled_minillm_matches_seeded_top_k_top_p_generation() {
+fn resident_sampled_minillm_promotes_exact_parallel_top_k() {
     parity_case(
         SamplingConfig {
             temperature: 1.15,
@@ -120,6 +126,7 @@ fn resident_sampled_minillm_matches_seeded_top_k_top_p_generation() {
         },
         7,
         8,
+        true,
     );
 }
 
@@ -160,11 +167,11 @@ fn prompt_priming_consumes_no_rng_and_reset_restores_seeded_stream() {
         sampling,
         seed,
     )
-    .expect("Phase 20 validation requires an available WGPU adapter");
+    .expect("Phase 26 validation requires an available WGPU adapter");
+    assert!(resident.uses_parallel_sampler());
     let resident_bytes = resident.telemetry().resident_bytes;
 
-    for (pos, &token) in prompt.iter().enumerate()
-    {
+    for (pos, &token) in prompt.iter().enumerate() {
         resident.ingest_at(token, pos).unwrap();
     }
     let primed = resident.telemetry();
@@ -187,8 +194,7 @@ fn prompt_priming_consumes_no_rng_and_reset_restores_seeded_stream() {
     assert_eq!(reset.resident_tokens, 0);
     assert_eq!(reset.resident_bytes, resident_bytes);
 
-    for (pos, &token) in prompt.iter().enumerate()
-    {
+    for (pos, &token) in prompt.iter().enumerate() {
         resident.ingest_at(token, pos).unwrap();
     }
     let replayed_first = resident.sample_next().unwrap();
