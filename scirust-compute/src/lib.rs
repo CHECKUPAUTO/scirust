@@ -21,6 +21,8 @@ mod shape;
 mod strides;
 mod tensor;
 mod topology;
+#[cfg(feature = "std")]
+mod topology_probe;
 
 pub use backend::ComputeBackend;
 pub use binding::{BufferAccess, BufferBinding};
@@ -52,3 +54,5 @@ pub use topology::{
     SystemTopology, TopologyError, TopologyLink, TopologyNode, TopologyNodeId, TopologyNodeKind,
     TopologyRelation, TransferMetrics,
 };
+#[cfg(feature = "std")]
+pub use topology_probe::probe_host_topology;
