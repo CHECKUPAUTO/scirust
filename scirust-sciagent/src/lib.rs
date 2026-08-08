@@ -9,6 +9,10 @@ pub mod config;
 pub mod corpus_paths;
 #[cfg(feature = "cuda")]
 pub mod cuda_model;
+pub mod elastic_calibration;
+pub mod elastic_engine;
+pub mod elastic_tiny;
+pub mod elastic_tokenizer;
 pub mod flash_attention;
 pub mod generate;
 #[cfg(feature = "gpu")]
@@ -29,6 +33,15 @@ pub use bpe::{BpeTokenizer, BpeTrainer};
 pub use ccos::CcosLog;
 pub use communication::SciAgentEndpoint;
 pub use config::SciAgentConfig;
+pub use elastic_calibration::{
+    CalibrationError, CalibrationMeasurement, CalibrationReport, CalibrationWinner,
+};
+pub use elastic_engine::{ElasticBpeEngine, ElasticEncoding};
+pub use elastic_tiny::{TINY_SCAN_CAPACITY, TinyScanBpe};
+pub use elastic_tokenizer::{
+    BpeKernel, CanonicalBpeOracle, DuplicateMergeRule, ElasticProfile, ElasticThresholds,
+    PieceClass, ThresholdError, TokenId,
+};
 pub use generate::Generator;
 pub use inference::SciAgentInference;
 pub use model::SciAgentModel;
