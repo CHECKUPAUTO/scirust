@@ -112,9 +112,13 @@ A separate 4096-vocabulary lavapipe probe validates the production bounded path 
 
 The real-device job requires an actually exposed NVIDIA Thor WGPU/Vulkan device. Because Phase 28 creates the first end-to-end resident-generation baseline, there is no previous hardware result that may be reused when the runner lacks the device.
 
-The Thor job first requires the accelerator to be idle. If `nvidia-smi` reports another compute process, Phase 28 fails closed instead of publishing contaminated latency or throughput numbers. This guard was added after a diagnostic runner showed an unrelated `cuda_pretrain` process consuming approximately 86% GPU while the Phase 28 probe was running.
+All SciRust jobs modified by Phase 28 that execute Thor GPU workloads use the host-local exclusive lock `/tmp/scirust-thor-gpu.lock`. Phase 28 holds that lock continuously across its idle check, correctness probes and performance baseline. This serializes participating GitHub Actions jobs without relying on GitHub Actions concurrency groups, whose single-pending-job behavior is unsuitable when several Thor workflows are queued at once.
 
-The Thor job then proves exact `top_k = 50` device-feedback bursts at 8 and 32 tokens and records the corresponding two-row performance baseline. It intentionally contains no minimum throughput, maximum latency or speedup threshold.
+The Thor job also requires the accelerator to be idle after acquiring the shared lock. If `nvidia-smi` reports another compute process, Phase 28 fails closed instead of publishing contaminated latency or throughput numbers. It records non-destructive provenance (`ps`, parent PID, command line, cgroup and process tree) and sends no signal to the process.
+
+A diagnostic on 2026-08-08 found `/root/scirust/target/release/examples/cuda_pretrain` as PID `984748`, running as `root`, started at `17:33:56`, with parent PID `1` and cgroup `/user.slice/user-0.slice/session-4272.scope`. The process remained present after Phase 28 acquired `/tmp/scirust-thor-gpu.lock`, proving that it did not participate in the SciRust CI lock. Because it is a detached root-session process and may represent intentional manual training, Phase 28 must not terminate it automatically.
+
+When the Thor is idle, the job proves exact `top_k = 50` device-feedback bursts at 8 and 32 tokens, rechecks that no unmanaged compute process appeared while the lock was held, and records the corresponding two-row performance baseline. It intentionally contains no minimum throughput, maximum latency or speedup threshold.
 
 ## Interpretation
 
@@ -136,4 +140,5 @@ Phase 28 does not:
 - introduce a performance threshold;
 - claim production-model throughput from this synthetic MiniLLM;
 - infer direct kernel timing from host wall-clock differences;
+- terminate unrelated or manually launched GPU workloads;
 - replace the existing CPU Elastic-Latent-KV final benchmark.
