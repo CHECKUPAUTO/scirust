@@ -14,6 +14,7 @@ pub mod cuda_elastic_decode;
 #[cfg(feature = "cuda")]
 pub mod cuda_model;
 pub mod elastic_decode_plan;
+pub mod elastic_mla_plan;
 pub mod flash_attention;
 pub mod generate;
 #[cfg(feature = "gpu")]
