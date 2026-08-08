@@ -111,6 +111,11 @@ required-features = ["cuda"]
 name = "cuda_production_bench"
 required-features = ["cuda"]
 
+# I250 latency-oriented batch-one decode benchmark — CUDA-only.
+[[example]]
+name = "cuda_decode_bench"
+required-features = ["cuda"]
+
 # Route B generation from a trained checkpoint — CUDA-only.
 [[example]]
 name = "cuda_generate"
