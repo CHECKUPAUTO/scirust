@@ -86,7 +86,7 @@ jobs:
           fetch-depth: 0
 
       # BEGIN SCIAGENT B43 ONE-SHOT AUTOFIX
-      - name: Apply validated SCIAGENT B40-B43 corrections once (retry 2)
+      - name: Apply validated SCIAGENT B40-B43 corrections once (retry 3)
         if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'perf/sciagent-b39-thor-production-bench'
         run: |
           python3 scripts/sciagent_b43_autofix.py
@@ -172,9 +172,6 @@ jobs:
           SCIRUST_REQUIRE_CUDA: "1"
         run: cargo test -p scirust-cuda --features cuda -- --nocapture
 
-      # SCIAGENT Route-B must execute on the real Thor, not merely compile on hosted
-      # CI. These tests cover forward/backward parity, training, cached decode parity,
-      # and exact optimizer resume against the CPU/naive reference paths.
       - name: Test SCIAGENT Route-B CUDA parity on Thor
         env:
           SCIRUST_REQUIRE_CUDA: "1"
@@ -182,9 +179,6 @@ jobs:
           cargo test -p scirust-sciagent --features cuda --test cuda_parity \
             -- --nocapture
 
-      # Short production-shape sweep. The example performs an untimed warm step before
-      # each measurement. Four measured steps are enough to expose batch scaling while
-      # keeping PR CI bounded; the standalone documented command can run longer.
       - name: Benchmark SCIAGENT 304M production path on Thor
         env:
           SCIAGENT_BENCH_BATCHES: "1,2,4,8"
