@@ -11,13 +11,14 @@ use scirust_gpu::{
 
 const VOCAB_SIZE: usize = 4096;
 const PROMPT_TOKENS: usize = 16;
-const MAX_SEQ_LEN: usize = 48;
+const MAX_SEQ_LEN: usize = 64;
 const D_MODEL: usize = 64;
 const N_HEADS: usize = 4;
 const N_LAYERS: usize = 2;
 const D_FF: usize = 128;
 const SEED: u64 = 0x28_00_00_01;
 const DEFAULT_LIMIT: usize = 1;
+const DEFAULT_TOP_K: usize = 0;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let limit = env::var("SCIRUST_RESIDENT_PROBE_LIMIT")
@@ -25,9 +26,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|raw| raw.parse::<usize>())
         .transpose()?
         .unwrap_or(DEFAULT_LIMIT);
+    let top_k = env::var("SCIRUST_RESIDENT_PROBE_TOP_K")
+        .ok()
+        .map(|raw| raw.parse::<usize>())
+        .transpose()?
+        .unwrap_or(DEFAULT_TOP_K);
     if limit == 0 || limit > MAX_SEQ_LEN - PROMPT_TOKENS
     {
         return Err("SCIRUST_RESIDENT_PROBE_LIMIT is outside the probe capacity".into());
+    }
+    if top_k >= VOCAB_SIZE && top_k != 0
+    {
+        return Err("SCIRUST_RESIDENT_PROBE_TOP_K must be zero or smaller than vocab".into());
     }
 
     let tokenizer = synthetic_tokenizer(VOCAB_SIZE)?;
@@ -42,7 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let prompt = deterministic_prompt(VOCAB_SIZE, PROMPT_TOKENS);
     let sampling = SamplingConfig {
         temperature: 0.9,
-        top_k: 0,
+        top_k,
         top_p: 0.92,
     };
 
@@ -81,12 +91,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if host_first != expected_first
     {
         return Err(format!(
-            "host-stepped first-token mismatch: cpu={expected_first}, wgpu={host_first}"
+            "host-stepped first-token mismatch: top_k={top_k}, cpu={expected_first}, wgpu={host_first}"
         )
         .into());
     }
     println!(
-        "phase28_burst_probe,mode=host-stepped,limit={limit},top_k=0,cpu_first={expected_first},wgpu_first={host_first},match=1,sampling_draws={}",
+        "phase28_burst_probe,mode=host-stepped,limit={limit},top_k={top_k},cpu_first={expected_first},wgpu_first={host_first},match=1,sampling_draws={}",
         host_resident.telemetry().sampling_draws,
     );
 
@@ -105,7 +115,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let telemetry = feedback_resident.telemetry();
     let exact = ids == expected;
     println!(
-        "phase28_burst_probe,mode=device-feedback,limit={limit},top_k=0,cpu_first={expected_first},wgpu_first={first},match={},expected_len={},actual_len={},sampling_draws={},readback_bytes={},expected_fingerprint={:016x},actual_fingerprint={:016x}",
+        "phase28_burst_probe,mode=device-feedback,limit={limit},top_k={top_k},cpu_first={expected_first},wgpu_first={first},match={},expected_len={},actual_len={},sampling_draws={},readback_bytes={},expected_fingerprint={:016x},actual_fingerprint={:016x}",
         u8::from(exact),
         expected.len(),
         ids.len(),
@@ -117,7 +127,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !exact
     {
         return Err(format!(
-            "device-feedback burst mismatch at limit={limit}: expected_len={}, actual_len={}, expected_fingerprint={:016x}, actual_fingerprint={:016x}",
+            "device-feedback burst mismatch at top_k={top_k}, limit={limit}: expected_len={}, actual_len={}, expected_fingerprint={:016x}, actual_fingerprint={:016x}",
             expected.len(),
             ids.len(),
             fingerprint(&expected),
