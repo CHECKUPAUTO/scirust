@@ -11,12 +11,15 @@ Version 1 records:
 - backend kind and logical device ordinal;
 - architecture family plus an optional semantic architecture name;
 - SHA-256 fingerprints of the capability profile and topology profile used for selection;
+- caller-provided memory budget, when one constrained selection;
 - semantic numeric mode;
 - reproducibility level;
 - kernel semantic version;
 - optional sampler semantic version;
 - model SHA-256;
 - tokenizer SHA-256.
+
+`memory_budget_bytes = None` means no explicit caller ceiling constrained the selection. `Some(0)` is a real zero-byte constraint and remains distinct in the canonical fingerprint. The budget is an execution-selection input, not a hardware-capacity fact, so it is attested separately from the capability/topology hashes.
 
 The schema intentionally contains no ISA feature list, vector width/model, PCIe topology, benchmark result, timing history, or device-name heuristic.
 
@@ -29,7 +32,7 @@ JSON is the transport representation, not the fingerprint representation.
 - domain separator `scirust.execution-profile.v1\0`;
 - explicit numeric tags for enums;
 - little-endian fixed-width integers;
-- presence tags for optional text;
+- presence tags for optional text and the optional memory budget;
 - length-prefixed UTF-8 strings.
 
 `ExecutionProfile::fingerprint()` computes SHA-256 over those canonical bytes. The implementation is self-contained pure Rust and is checked against NIST SHA-256 vectors. A public integration test pins a golden v1 profile fingerprint, so accidental wire-semantic changes require an explicit schema/version decision.
@@ -57,6 +60,7 @@ This PR defines only the stable protocol contract. A follow-up runtime builder s
 
 - `DeviceKind` → backend kind;
 - `ArchitectureFamily` → execution architecture family;
+- caller memory ceiling → `memory_budget_bytes`;
 - selected reproducibility guarantee → execution reproducibility;
 - canonical capability/topology snapshots → their SHA-256 fingerprints;
 - selected kernel/sampler semantic versions;
