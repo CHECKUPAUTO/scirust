@@ -68,10 +68,9 @@ fn real_main() -> AppResult<()> {
     if args[1..]
         .iter()
         .any(|arg| matches!(arg.as_str(), "-h" | "--help"))
+        && print_command_help(command)
     {
-        if print_command_help(command) {
-            return Ok(());
-        }
+        return Ok(());
     }
 
     match command {
