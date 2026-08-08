@@ -46,22 +46,22 @@ jobs:
         with:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
-      - name: Apply B49 deterministic context and publish code only
-        if: hashFiles('scripts/sciagent_b49_deterministic_context.py') != ''
+      - name: Apply B50 final cleanup and publish code only
+        if: hashFiles('scripts/sciagent_b50_finalize.py') != ''
         run: |
-          python3 scripts/sciagent_b49_deterministic_context.py
+          python3 scripts/sciagent_b50_finalize.py
           cargo +nightly-2026-07-02 fmt --all
           cargo +nightly-2026-07-02 check -p scirust-cuda --features cuda
           cargo +nightly-2026-07-02 check -p scirust-sciagent --features cuda --example cuda_production_bench
           cargo +nightly-2026-07-02 clippy -p scirust-cuda --features cuda --all-targets -- -D warnings
           cargo +nightly-2026-07-02 clippy -p scirust-sciagent --features cuda --all-targets -- -D warnings
-          rm -f scripts/sciagent_b49_deterministic_context.py
+          rm -f scripts/sciagent_b50_finalize.py
           git restore -- .github/workflows
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --check
-          git commit -m "fix(sciagent): use deterministic attention context reduction"
+          git commit -m "chore(sciagent): finalize Thor-verified Route-B gate"
           git push origin HEAD:perf/sciagent-b39-thor-production-bench
       - name: Report Thor CUDA
         run: nvidia-smi --query-gpu=name,driver_version,compute_cap,memory.total --format=csv,noheader
@@ -71,7 +71,7 @@ jobs:
         run: cargo +nightly-2026-07-02 test -p scirust-sciagent --features cuda --test cuda_parity -- --nocapture
       - name: SCIAGENT CUDA clippy
         run: cargo +nightly-2026-07-02 clippy -p scirust-sciagent --features cuda --all-targets -- -D warnings
-      - name: SCIAGENT B49 production sweep
+      - name: SCIAGENT production sweep
         env:
           SCIAGENT_BENCH_BATCHES: "8"
           SCIAGENT_BENCH_SEQ: "512"
