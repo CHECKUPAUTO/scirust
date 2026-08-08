@@ -176,3 +176,42 @@ fn cuda_trainer_reduces_loss() {
     );
     eprintln!("CUDA bf16 Tensor-core training loop reduces loss — PASS");
 }
+
+/// B31: CUDA KV-cached greedy decoding must reproduce the original non-cached
+/// CUDA decoder token-for-token. This pins prompt prefill, absolute-position RoPE,
+/// per-layer K/V cache growth and incremental GQA as one end-to-end contract.
+#[test]
+fn cuda_cached_generation_matches_naive_greedy() {
+    let config = tiny_tied();
+    let model = SciAgentModel::new(&config);
+    let Some(cm) = CudaModel::from_model(&model)
+    else
+    {
+        eprintln!("cuda: no device, skipping cached-generation parity");
+        return;
+    };
+    let prompt = vec![3u32, 5, 7, 11];
+    let params = scirust_sciagent::generate::SamplingParams::default();
+    let naive = cm.generate(&prompt, 6, &params, 0xB31);
+    let cached = cm.generate_cached(&prompt, 6, &params, 0xB31);
+    assert_eq!(cached, naive, "CUDA KV cache changed greedy decode tokens");
+}
+
+/// Empty-prompt behavior is part of the existing CUDA generation API: generation
+/// starts from token 0. The cached path must preserve that behavior exactly.
+#[test]
+fn cuda_cached_generation_preserves_empty_prompt_semantics() {
+    let config = tiny_tied();
+    let model = SciAgentModel::new(&config);
+    let Some(cm) = CudaModel::from_model(&model)
+    else
+    {
+        eprintln!("cuda: no device, skipping cached empty-prompt parity");
+        return;
+    };
+    let params = scirust_sciagent::generate::SamplingParams::default();
+    assert_eq!(
+        cm.generate_cached(&[], 3, &params, 7),
+        cm.generate(&[], 3, &params, 7)
+    );
+}
