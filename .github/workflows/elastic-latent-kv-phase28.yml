@@ -151,6 +151,16 @@ jobs:
           uname -a
           nvidia-smi
           vulkaninfo --summary
+      - name: Probe bounded sampler at production burst sizes
+        run: |
+          set -euo pipefail
+          for limit in 8 32; do
+            echo "=== Phase 28 Thor bounded top-k=50 limit: $limit ==="
+            SCIRUST_RESIDENT_PROBE_TOP_K=50 \
+            SCIRUST_RESIDENT_PROBE_LIMIT="$limit" \
+              rustup run 1.89.0 cargo run --quiet --release --locked -p scirust-gpu \
+                --features wgpu --example resident_generation_first_token_probe
+          done
       - name: Require an idle Thor for performance measurements
         shell: bash
         run: |
@@ -165,16 +175,6 @@ jobs:
             exit 1
           fi
           echo "Thor compute queue is idle before the Phase 28 baseline."
-      - name: Probe bounded sampler at production burst sizes
-        run: |
-          set -euo pipefail
-          for limit in 8 32; do
-            echo "=== Phase 28 Thor bounded top-k=50 limit: $limit ==="
-            SCIRUST_RESIDENT_PROBE_TOP_K=50 \
-            SCIRUST_RESIDENT_PROBE_LIMIT="$limit" \
-              rustup run 1.89.0 cargo run --quiet --release --locked -p scirust-gpu \
-                --features wgpu --example resident_generation_first_token_probe
-          done
       - name: Run real-device resident baseline
         run: |
           rustup run 1.89.0 cargo run --quiet --release --locked -p scirust-gpu \
