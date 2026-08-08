@@ -12,6 +12,9 @@ use scirust_cuda::{
     CudaRawRuntime,
 };
 
+#[path = "cuda_hardware_profile.rs"]
+mod cuda_hardware_profile;
+
 /// Persistent CUDA implementation of [`ComputeBackend`].
 pub struct CudaComputeAdapter {
     runtime: CudaRawRuntime,
@@ -146,6 +149,10 @@ impl ComputeBackend for CudaComputeAdapter {
 
     fn capabilities(&self) -> &DeviceCapabilities {
         &self.capabilities
+    }
+
+    fn hardware_capabilities(&self) -> scirust_compute::HardwareCapabilities {
+        cuda_hardware_profile::hardware_capabilities(&self.capabilities, self.runtime.device_info())
     }
 
     fn allocate(
