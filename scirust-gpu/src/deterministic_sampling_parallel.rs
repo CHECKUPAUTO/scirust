@@ -346,16 +346,20 @@ impl WgpuParallelTopKSampler {
         ];
 
         let logits_bytes = bytes_for_f32(vocab_size)?;
-        let scratch_elements = vocab_size.checked_mul(2).ok_or(
-            WgpuDeterministicSamplerError::InvalidConfig("sampler scratch size overflows usize"),
-        )?;
+        let scratch_elements =
+            vocab_size
+                .checked_mul(2)
+                .ok_or(WgpuDeterministicSamplerError::InvalidConfig(
+                    "sampler scratch size overflows usize",
+                ))?;
         let scratch_bytes = bytes_for_f32(scratch_elements)?;
         let state_bytes = STATE_WORDS.checked_mul(U32_BYTES).ok_or(
             WgpuDeterministicSamplerError::InvalidConfig("sampler state size overflows usize"),
         )?;
 
         let adapter = WgpuComputeAdapter::from_context(context);
-        if adapter.capabilities().max_workgroup_size[0] < PARALLEL_TOP_K_LANES as u32 {
+        if adapter.capabilities().max_workgroup_size[0] < PARALLEL_TOP_K_LANES as u32
+        {
             return Err(WgpuDeterministicSamplerError::InvalidConfig(
                 "WGPU adapter does not support 64-lane workgroups",
             ));
@@ -413,7 +417,8 @@ impl WgpuParallelTopKSampler {
     }
 
     pub fn sample(&mut self, logits: &[f32]) -> Result<usize, WgpuDeterministicSamplerError> {
-        if logits.len() != self.vocab_size {
+        if logits.len() != self.vocab_size
+        {
             return Err(WgpuDeterministicSamplerError::LogitLength {
                 expected: self.vocab_size,
                 actual: logits.len(),
@@ -506,27 +511,32 @@ fn validate_parallel_config(
     vocab_size: usize,
     config: &SamplingConfig,
 ) -> Result<(), WgpuDeterministicSamplerError> {
-    if vocab_size == 0 {
+    if vocab_size == 0
+    {
         return Err(WgpuDeterministicSamplerError::InvalidConfig(
             "sampler vocab size must be non-zero",
         ));
     }
-    if vocab_size >= MAX_EXACT_F32_INDEX {
+    if vocab_size >= MAX_EXACT_F32_INDEX
+    {
         return Err(WgpuDeterministicSamplerError::InvalidConfig(
             "sampler vocab size must be below 2^24 for exact scratch index encoding",
         ));
     }
-    if !config.temperature.is_finite() || config.temperature <= 0.0 {
+    if !config.temperature.is_finite() || config.temperature <= 0.0
+    {
         return Err(WgpuDeterministicSamplerError::InvalidConfig(
             "parallel top-k sampler requires a finite positive temperature",
         ));
     }
-    if !config.top_p.is_finite() || !(0.0..=1.0).contains(&config.top_p) {
+    if !config.top_p.is_finite() || !(0.0..=1.0).contains(&config.top_p)
+    {
         return Err(WgpuDeterministicSamplerError::InvalidConfig(
             "sampler top_p must be finite and in 0..=1",
         ));
     }
-    if config.top_k < 2 || config.top_k >= vocab_size || config.top_k > PARALLEL_TOP_K_MAX {
+    if config.top_k < 2 || config.top_k >= vocab_size || config.top_k > PARALLEL_TOP_K_MAX
+    {
         return Err(WgpuDeterministicSamplerError::InvalidConfig(
             "parallel top-k sampler requires 2 <= top_k < vocab_size and top_k <= 256",
         ));
