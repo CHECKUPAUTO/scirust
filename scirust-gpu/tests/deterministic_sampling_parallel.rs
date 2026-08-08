@@ -2,9 +2,7 @@
 
 use scirust_core::nn::rng::PcgEngine;
 use scirust_core::nn::sampling::{SamplingConfig, sample_token};
-use scirust_gpu::{
-    PARALLEL_TOP_K_LANES, WgpuDeterministicSampler, WgpuParallelTopKSampler,
-};
+use scirust_gpu::{PARALLEL_TOP_K_LANES, WgpuDeterministicSampler, WgpuParallelTopKSampler};
 
 fn logits(draw: usize, vocab: usize) -> Vec<f32> {
     (0..vocab)
@@ -28,7 +26,8 @@ fn parallel_matches_cpu_and_sequential_wgpu() {
     let mut sequential = WgpuDeterministicSampler::new(vocab, config, seed).unwrap();
     let mut parallel = WgpuParallelTopKSampler::new(vocab, config, seed).unwrap();
 
-    for draw in 0..24 {
+    for draw in 0..24
+    {
         let values = logits(draw, vocab);
         let expected = sample_token(&values, &config, &mut cpu);
         assert_eq!(parallel.sample(&values).unwrap(), expected);
@@ -52,15 +51,11 @@ fn ties_and_reset_preserve_exact_stream() {
     let values = vec![0.0; vocab];
     let mut parallel = WgpuParallelTopKSampler::new(vocab, config, seed).unwrap();
     let resident = parallel.telemetry().resident_bytes;
-    let first: Vec<_> = (0..16)
-        .map(|_| parallel.sample(&values).unwrap())
-        .collect();
+    let first: Vec<_> = (0..16).map(|_| parallel.sample(&values).unwrap()).collect();
     assert!(first.iter().all(|&token| token < 3));
 
     parallel.reset().unwrap();
-    let second: Vec<_> = (0..16)
-        .map(|_| parallel.sample(&values).unwrap())
-        .collect();
+    let second: Vec<_> = (0..16).map(|_| parallel.sample(&values).unwrap()).collect();
     assert_eq!(first, second);
     assert_eq!(parallel.telemetry().resident_bytes, resident);
 }
