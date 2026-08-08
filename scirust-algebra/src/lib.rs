@@ -9,6 +9,9 @@
 #[rustfmt::skip]
 mod scalar;
 
+/// Decomposition of real finite-group characters into irreducible multiplicities.
+#[rustfmt::skip]
+pub mod character_decomposition;
 /// Certification and inter-reduction helpers for bounded rewriting systems.
 #[rustfmt::skip]
 pub mod completion;
