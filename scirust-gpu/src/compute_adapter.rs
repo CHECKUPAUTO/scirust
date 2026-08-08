@@ -13,6 +13,9 @@ use scirust_tensor_reference::PreparedReferenceKernel;
 
 use crate::cpu_reference;
 
+#[path = "cpu_hardware_profile.rs"]
+mod cpu_hardware_profile;
+
 /// Adapter exposing the deterministic SciRust CPU path through
 /// `scirust_compute::ComputeBackend`.
 #[derive(Debug)]
@@ -128,6 +131,10 @@ impl ComputeBackend for CpuComputeAdapter {
 
     fn capabilities(&self) -> &DeviceCapabilities {
         &self.capabilities
+    }
+
+    fn hardware_capabilities(&self) -> scirust_compute::HardwareCapabilities {
+        cpu_hardware_profile::hardware_capabilities(&self.capabilities)
     }
 
     fn allocate(
