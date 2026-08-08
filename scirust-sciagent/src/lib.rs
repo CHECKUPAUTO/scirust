@@ -16,6 +16,7 @@ pub mod elastic_heap;
 pub mod elastic_indexed;
 pub mod elastic_profile_fit;
 pub mod elastic_profile_store;
+pub mod elastic_text_tokenizer;
 pub mod elastic_tiny;
 pub mod elastic_tokenizer;
 pub mod flash_attention;
@@ -51,6 +52,9 @@ pub use elastic_profile_fit::{ElasticProfileFitter, ProfileFitError};
 pub use elastic_profile_store::{
     CANONICAL_BPE_SEMANTICS_V1, ELASTIC_PROFILE_SCHEMA_V1, ElasticHardwareIdentity,
     ProfileStoreError, StoredElasticProfile, ordered_merges_fingerprint,
+};
+pub use elastic_text_tokenizer::{
+    BpeMergeSemantics, ElasticTextTokenizer, ElasticTextTokenizerError,
 };
 pub use elastic_tiny::{TINY_SCAN_CAPACITY, TinyScanBpe};
 pub use elastic_tokenizer::{
