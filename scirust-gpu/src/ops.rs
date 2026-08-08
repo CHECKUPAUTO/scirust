@@ -754,13 +754,12 @@ pub fn cpu_slice_rows(x: &[f32], cols: usize, start: usize, count: usize) -> Vec
 
 /// CPU reference for resident multi-head grouped-query attention, single
 /// sequence (`rows = seq_len`) — the oracle for
-/// [`crate::GpuChain::gqa_attention`]. Matches the sciagent model's attention
-/// math exactly: full-width RoPE on `q` and `k` (each using **its own width** in
-/// the frequency, as the model's `rope_on_tape` does — `d_model` for `q`,
-/// `kv_dim` for `k`), then per head `kv = head / (n_heads/n_kv_heads)`,
-/// `softmax((qs·ksᵀ)·(1/√dh) [+ causal]) · vs`, placed into the head's `d_model`
-/// slot and summed. `q` is `[rows, n_heads·dh]`; `k`/`v` are `[rows, n_kv_heads·dh]`;
-/// returns `[rows, n_heads·dh]` (the concatenated context, before `w_o`).
+/// [`crate::GpuChain::gqa_attention`]. RoPE is applied independently inside
+/// each logical `dh` head, so its frequency schedule restarts at zero for every
+/// query head and every shared KV head. This mirrors the GPU `rope_heads` path
+/// and keeps Q/K rotary bases identical even when `d_model != kv_dim`.
+/// `q` is `[rows, n_heads·dh]`; `k`/`v` are `[rows, n_kv_heads·dh]`; the result
+/// is `[rows, n_heads·dh]` (the concatenated context before `w_o`).
 #[allow(clippy::too_many_arguments)]
 pub fn cpu_gqa_attention(
     q: &[f32],
@@ -776,8 +775,6 @@ pub fn cpu_gqa_attention(
 ) -> Vec<f32> {
     let d_model = n_heads * dh;
     let kv_dim = n_kv_heads * dh;
-    let qr = cpu_rope(q, rows, d_model, seq_len, 0, theta);
-    let kr = cpu_rope(k, rows, kv_dim, seq_len, 0, theta);
     let repeat = n_heads / n_kv_heads;
     let scale = 1.0 / (dh as f32).sqrt();
     let mm = |a: &[f32], b: &[f32], m: usize, kk: usize, n: usize| -> Vec<f32> {
@@ -800,8 +797,10 @@ pub fn cpu_gqa_attention(
     for head in 0..n_heads
     {
         let kv = head / repeat;
-        let qs = cpu_slice_cols(&qr, rows, d_model, head * dh, dh); // [rows, dh]
-        let ks = cpu_slice_cols(&kr, rows, kv_dim, kv * dh, dh);
+        let qs = cpu_slice_cols(q, rows, d_model, head * dh, dh);
+        let ks = cpu_slice_cols(k, rows, kv_dim, kv * dh, dh);
+        let qs = cpu_rope(&qs, rows, dh, seq_len, 0, theta);
+        let ks = cpu_rope(&ks, rows, dh, seq_len, 0, theta);
         let vs = cpu_slice_cols(v, rows, kv_dim, kv * dh, dh);
         // scores = qs · ksᵀ  → transpose ks to [dh, rows] first.
         let mut kt = vec![0.0f32; dh * rows];
