@@ -1,0 +1,39 @@
+name: Compute topology contract
+
+on:
+  pull_request:
+    branches: [master, main, develop]
+    paths:
+      - "scirust-compute/src/topology.rs"
+      - "scirust-compute/src/topology_augmentation.rs"
+      - "scirust-compute/src/topology_probe.rs"
+      - "scirust-compute/src/topology_probe/**"
+      - "scirust-compute/src/lib.rs"
+      - ".github/workflows/compute-topology-contract.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: no_std + MSRV topology contract
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Install pinned nightly
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+      - name: Install MSRV
+        run: rustup toolchain install 1.89.0 --profile minimal
+      - name: Format
+        run: cargo +nightly-2026-07-02 fmt --all -- --check
+      - name: Clippy compute contract
+        run: cargo +nightly-2026-07-02 clippy -p scirust-compute --all-targets --all-features --locked -- -D warnings
+      - name: Check no_std at MSRV
+        run: cargo +1.89.0 check -p scirust-compute --no-default-features --locked
+      - name: Check all targets at MSRV
+        run: cargo +1.89.0 check -p scirust-compute --all-targets --all-features --locked
+      - name: Test topology contract
+        run: cargo +1.89.0 test -p scirust-compute --all-features --locked
