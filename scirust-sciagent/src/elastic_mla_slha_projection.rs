@@ -301,7 +301,7 @@ mod tests {
             4,
         )
         .unwrap();
-        let residual_bits = 3;
+        let residual_bits = 2;
         let seed = 0x534c_4841_454c_4153;
         let plan = ElasticMlaSlhaLayerWeights::from_attention(
             attention,
