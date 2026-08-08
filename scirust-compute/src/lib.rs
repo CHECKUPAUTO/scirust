@@ -23,6 +23,7 @@ mod strides;
 mod tensor;
 mod topology;
 mod topology_augmentation;
+mod topology_provider;
 #[cfg(feature = "std")]
 mod topology_probe;
 
@@ -67,3 +68,4 @@ pub use topology_augmentation::{
 };
 #[cfg(feature = "std")]
 pub use topology_probe::probe_host_topology;
+pub use topology_provider::AcceleratorTopologyProvider;
