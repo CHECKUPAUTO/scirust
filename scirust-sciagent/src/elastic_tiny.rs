@@ -31,7 +31,8 @@ impl TinyScanBpe {
         merges: &[(TokenId, TokenId, TokenId)],
     ) -> Result<Self, DuplicateMergeRule> {
         let mut ranked = BTreeMap::new();
-        for (rank, &(left, right, output)) in merges.iter().enumerate() {
+        for (rank, &(left, right, output)) in merges.iter().enumerate()
+        {
             if ranked
                 .insert((left, right), TinyRule { output, rank })
                 .is_some()
@@ -48,7 +49,8 @@ impl TinyScanBpe {
     /// per-call allocation performed by this API; a later scratch/output API
     /// can remove that final allocation without changing semantics.
     pub fn try_encode_ids(&self, input: &[TokenId]) -> Option<Vec<TokenId>> {
-        if input.len() > TINY_SCAN_CAPACITY {
+        if input.len() > TINY_SCAN_CAPACITY
+        {
             return None;
         }
 
@@ -56,24 +58,28 @@ impl TinyScanBpe {
         work[..input.len()].copy_from_slice(input);
         let mut len = input.len();
 
-        while len >= 2 {
+        while len >= 2
+        {
             let mut best: Option<(usize, usize, TokenId)> = None;
 
-            for position in 0..len - 1 {
+            for position in 0..len - 1
+            {
                 let pair = (work[position], work[position + 1]);
-                let Some(rule) = self.merges.get(&pair) else {
+                let Some(rule) = self.merges.get(&pair) else
+                {
                     continue;
                 };
                 let candidate = (rule.rank, position, rule.output);
-                if best
-                    .map(|current| (candidate.0, candidate.1) < (current.0, current.1))
-                    .unwrap_or(true)
+                if best.is_none_or(|current| {
+                    (candidate.0, candidate.1) < (current.0, current.1)
+                })
                 {
                     best = Some(candidate);
                 }
             }
 
-            let Some((_, position, output)) = best else {
+            let Some((_, position, output)) = best else
+            {
                 break;
             };
 
@@ -129,11 +135,14 @@ mod tests {
         let reference = CanonicalBpeOracle::from_ordered_merges(&merges).unwrap();
         let tiny = TinyScanBpe::from_ordered_merges(&merges).unwrap();
 
-        for len in 0..=7 {
+        for len in 0..=7
+        {
             let cases = 3usize.pow(len as u32);
-            for mut encoded in 0..cases {
+            for mut encoded in 0..cases
+            {
                 let mut input = vec![1; len];
-                for token in &mut input {
+                for token in &mut input
+                {
                     *token = encoded % 3 + 1;
                     encoded /= 3;
                 }
