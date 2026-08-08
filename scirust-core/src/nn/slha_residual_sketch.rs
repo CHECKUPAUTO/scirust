@@ -396,7 +396,8 @@ mod tests {
     fn sketch_is_replayable_from_seed_and_basis() {
         let basis = identity_prefix(8, 3);
         let first = SlhaResidualSketch::from_orthonormal_coarse_basis(8, 3, 7, 42, &basis).unwrap();
-        let second = SlhaResidualSketch::from_orthonormal_coarse_basis(8, 3, 7, 42, &basis).unwrap();
+        let second =
+            SlhaResidualSketch::from_orthonormal_coarse_basis(8, 3, 7, 42, &basis).unwrap();
         assert_eq!(first.projection(), second.projection());
         assert_eq!(first.fingerprint(), second.fingerprint());
     }
@@ -404,7 +405,8 @@ mod tests {
     #[test]
     fn hyperplanes_are_orthogonal_to_coarse_basis() {
         let basis = identity_prefix(12, 4);
-        let sketch = SlhaResidualSketch::from_orthonormal_coarse_basis(12, 4, 13, 7, &basis).unwrap();
+        let sketch =
+            SlhaResidualSketch::from_orthonormal_coarse_basis(12, 4, 13, 7, &basis).unwrap();
         for bit in 0..sketch.residual_bits()
         {
             for coarse in 0..4
@@ -423,14 +425,9 @@ mod tests {
     #[test]
     fn vector_and_its_coarse_residual_have_same_sign_sketch() {
         let basis = identity_prefix(8, 3);
-        let sketch = SlhaResidualSketch::from_orthonormal_coarse_basis(
-            8,
-            3,
-            11,
-            0x534c_4841,
-            &basis,
-        )
-        .unwrap();
+        let sketch =
+            SlhaResidualSketch::from_orthonormal_coarse_basis(8, 3, 11, 0x534c_4841, &basis)
+                .unwrap();
         let input = [1.0f32, -2.0, 3.0, 0.5, -0.25, 4.0, -5.0, 2.5];
         let mut residual = input;
         residual[..3].fill(0.0);
@@ -455,7 +452,8 @@ mod tests {
     #[test]
     fn sign_output_uses_exact_declared_bit_count() {
         let basis = identity_prefix(6, 2);
-        let sketch = SlhaResidualSketch::from_orthonormal_coarse_basis(6, 2, 65, 9, &basis).unwrap();
+        let sketch =
+            SlhaResidualSketch::from_orthonormal_coarse_basis(6, 2, 65, 9, &basis).unwrap();
         let input = [1.0f32, 2.0, -1.0, 0.5, -0.25, 3.0];
         let mut words = [0u64; 2];
         sketch.sign_bits_into(&input, &mut words).unwrap();
