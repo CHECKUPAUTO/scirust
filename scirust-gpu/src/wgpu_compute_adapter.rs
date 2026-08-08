@@ -9,6 +9,9 @@ use scirust_compute::{
     MemorySpace,
 };
 
+#[path = "wgpu_hardware_profile.rs"]
+mod wgpu_hardware_profile;
+
 /// Adapter exposing a persistent [`WgpuContext`] through
 /// `scirust_compute::ComputeBackend`.
 ///
@@ -217,6 +220,10 @@ impl ComputeBackend for WgpuComputeAdapter {
 
     fn capabilities(&self) -> &DeviceCapabilities {
         &self.capabilities
+    }
+
+    fn hardware_capabilities(&self) -> scirust_compute::HardwareCapabilities {
+        wgpu_hardware_profile::hardware_capabilities(&self.capabilities)
     }
 
     fn allocate(
