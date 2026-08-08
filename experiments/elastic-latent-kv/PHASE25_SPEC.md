@@ -59,13 +59,19 @@ A small smoke matrix proves that the benchmark compiles, executes, emits structu
 
 ### Jetson Thor
 
-An internal self-hosted `jetson-thor` job runs the release benchmark with the default 4096-token matrix under WGPU/Vulkan. This is the decision-grade performance evidence for promotion because it executes on a real GPU rather than software Vulkan.
+An internal self-hosted `jetson-thor` job runs the release benchmark with the default 4096-token matrix under WGPU/Vulkan. This is the decision-grade performance environment because it executes on a real GPU rather than software Vulkan.
 
 The Thor job is restricted to trusted same-repository pull requests using the same protection pattern as the existing Native ARM64 workflow.
 
+Because the Thor also hosts long-running SciAgent production training, the hardware comparison now participates in the host-local SciRust GPU lock `/tmp/scirust-thor-gpu.lock` and classifies accelerator occupancy before preparing or compiling the real-device benchmark. A recognized detached root `cuda_pretrain` SciAgent session causes the Phase 25 hardware comparison to be **deferred** successfully: no WGPU benchmark is launched, no new performance evidence is claimed, and the training process is left untouched. Unknown compute activity after acquiring the SciRust lock fails closed.
+
+The managed-training classifier uses only process metadata readable by the self-hosted runner: the `nvidia-smi` process name, `/proc/<pid>/cmdline`, process user, parent PID and cgroup. The real-device build directory is created under `$RUNNER_TEMP` rather than inside the Git checkout, reducing its exposure to checkout/workspace cleanup.
+
+A pre-protection run on 2026-08-08 executed the Phase 25 comparison while `cuda_pretrain` was already active and `nvidia-smi` reported 78% GPU utilization. Its sequential/parallel fingerprints matched exactly for `top_k` 5, 50 and 200, so it is useful as additional exactness evidence; its measured latencies and speedups are explicitly not treated as clean performance evidence because the accelerator was contended.
+
 ## Promotion decision
 
-Phase 25 itself does not modify Phase 21. After the real-device results are available:
+Phase 25 itself does not modify Phase 21. After clean real-device results are available:
 
 - if the parallel prototype is materially beneficial and exact across the tested K values, the next phase may integrate it behind an explicit bounded-top-k selection policy;
 - if it is neutral or slower, Phase 22 remains the production path and the next optimization should redesign the parallel algorithm rather than force promotion.
@@ -75,6 +81,8 @@ Phase 25 itself does not modify Phase 21. After the real-device results are avai
 Phase 25 does not:
 
 - claim lavapipe timings as GPU performance;
+- claim timings collected under another active GPU workload as decision-grade performance;
+- terminate, restart or reconfigure a detached SciAgent production training process;
 - impose an arbitrary speedup threshold before data exists;
 - benchmark full language-model generation;
 - change sampling semantics;
