@@ -12,8 +12,26 @@ training throughput and an ETA for one pass over the 1,029,492,639-token v4 corp
 It then compares the original non-cached CUDA generator with the B31 resident KV
 cache and requires greedy token parity.
 
-No performance number in this document is assumed or pre-filled. The authoritative
-numbers are the lines printed on the Jetson AGX Thor.
+The authoritative performance record is always the machine-readable stdout from the
+Jetson AGX Thor. The verified B49 gate on 2026-08-08 produced the current reference
+record below; reruns may replace it when hardware/software changes.
+
+## Verified B49 Thor record — 2026-08-08
+
+Hardware gate: NVIDIA Thor, driver 580.00, compute capability 11.0, CUDA 13.0.
+Model shape: **304,088,064 parameters**, vocab 32,768, `d_model=1024`, 24 layers,
+16 query heads / 4 KV heads, production context 512.
+
+- training `B8×T512`: **3,947.734 tok/s**;
+- v4 corpus size: **1,029,492,639 tokens**;
+- estimated one-pass time at that measured rate: **3.018 days**;
+- cached decode, prompt 128 + 8 greedy tokens: **33.603 tok/s**;
+- naive full-forward decode: **23.473 tok/s**;
+- KV-cache speedup: **1.432×**;
+- strict greedy token parity: **`true`**.
+
+The same gate also passed `rustfmt`, CUDA SciAgent Clippy and all six CUDA parity
+tests, including cached-vs-naive greedy generation and exact optimizer resume.
 
 ## Standard run
 
