@@ -13,6 +13,8 @@ use cudarc::driver::{
 use cudarc::nvrtc::compile_ptx;
 use half::bf16;
 
+use crate::bf16_gemv::CudaBf16Gemv;
+
 const DECODE_KERNELS_SRC: &str = r#"
 __device__ __forceinline__ float b2f(unsigned short h) {
     return __uint_as_float(((unsigned int)h) << 16);
@@ -318,6 +320,7 @@ pub struct CudaDecodeRuntime {
     _ctx: Arc<CudaContext>,
     stream: Arc<CudaStream>,
     blas: CudaBlasLT,
+    gemv: CudaBf16Gemv,
     kernels: DecodeKernels,
 }
 
@@ -331,6 +334,7 @@ impl CudaDecodeRuntime {
         let ctx = CudaContext::new(0).ok()?;
         let stream = ctx.default_stream();
         let blas = CudaBlasLT::new(stream.clone()).ok()?;
+        let gemv = CudaBf16Gemv::from_context(ctx.clone(), stream.clone())?;
         let ptx = compile_ptx(DECODE_KERNELS_SRC)
             .map_err(|error| eprintln!("scirust-cuda decode: NVRTC compile failed: {error}"))
             .ok()?;
@@ -352,6 +356,7 @@ impl CudaDecodeRuntime {
             _ctx: ctx,
             stream,
             blas,
+            gemv,
             kernels,
         })
     }
@@ -557,6 +562,33 @@ impl CudaDecodeRuntime {
             shared_mem_bytes: 0,
         };
         unsafe { builder.launch(config).expect("decode RMSNorm launch") };
+    }
+
+    /// Fused batch-one gate/up projection + SwiGLU using the decode-native GEMV kernel.
+    pub fn swiglu_gemv_into(
+        &self,
+        input: &CudaDecodeMatrix,
+        gate_up_weight: &CudaDecodeMatrix,
+        out: &mut CudaDecodeMatrix,
+    ) {
+        assert_eq!(input.rows, 1, "decode fused SwiGLU is batch-one only");
+        assert_eq!(
+            gate_up_weight.rows, input.cols,
+            "decode fused SwiGLU input width"
+        );
+        assert_eq!(
+            gate_up_weight.cols,
+            out.cols * 2,
+            "decode fused SwiGLU weight width"
+        );
+        assert_eq!(out.rows, 1, "decode fused SwiGLU output rows");
+        self.gemv.swiglu_kn_into(
+            &input.buf,
+            &gate_up_weight.buf,
+            &mut out.buf,
+            input.cols,
+            out.cols,
+        );
     }
 
     pub fn swiglu_split_into(&self, gate_up: &CudaDecodeMatrix, out: &mut CudaDecodeMatrix) {

@@ -34,7 +34,6 @@ struct DecodeWorkspace {
     ctx: CudaDecodeMatrix,
     tmp_d: CudaDecodeMatrix,
     h: CudaDecodeMatrix,
-    gate_up: CudaDecodeMatrix,
     act: CudaDecodeMatrix,
     logits: CudaDecodeMatrix,
 }
@@ -163,7 +162,6 @@ impl CudaDecodeModel {
             ctx: runtime.matrix(1, self.d_model),
             tmp_d: runtime.matrix(1, self.d_model),
             h: runtime.matrix(1, self.d_model),
-            gate_up: runtime.matrix(1, 2 * self.d_ff),
             act: runtime.matrix(1, self.d_ff),
             logits: runtime.matrix(1, self.vocab),
         }
@@ -202,8 +200,7 @@ impl CudaDecodeModel {
             runtime.add_into(&workspace.x, &workspace.tmp_d, &mut workspace.h);
 
             runtime.rms_norm_into(&workspace.h, &block.norm2, self.eps, &mut workspace.norm);
-            runtime.matmul_into(&workspace.norm, &block.gate_up, &mut workspace.gate_up);
-            runtime.swiglu_split_into(&workspace.gate_up, &mut workspace.act);
+            runtime.swiglu_gemv_into(&workspace.norm, &block.gate_up, &mut workspace.act);
             runtime.matmul_into(&workspace.act, &block.down, &mut workspace.tmp_d);
             runtime.add_into(&workspace.h, &workspace.tmp_d, &mut workspace.x);
         }
