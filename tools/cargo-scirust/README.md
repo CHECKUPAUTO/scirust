@@ -1,123 +1,143 @@
 # cargo-scirust
 
-`cargo-scirust` is SciRust's lightweight repository-aware Cargo plugin. It is deliberately a standalone Cargo workspace under `tools/` so installing the developer tool does not compile the full SciRust dependency graph.
+`cargo-scirust` is SciRust's lightweight repository-aware Cargo plugin. It stays in its own workspace under `tools/`, so installing the developer tool does not compile the full SciRust dependency graph.
 
 ## Install
 
-From the SciRust repository:
-
 ```bash
 cargo install --locked --path tools/cargo-scirust --force
-```
-
-Cargo then discovers the binary automatically:
-
-```bash
 cargo scirust help
 ```
 
-The tool keeps SciRust's MSRV contract (`rust-version = 1.89`) and uses only `serde`/`serde_json` in addition to the standard library.
+The tool keeps SciRust's Rust 1.89 MSRV and adds no dependency beyond `serde`/`serde_json`.
 
-## Commands
+## `affected`
 
-### `affected`
-
-Maps Git changes to workspace packages with `cargo metadata`, then follows reverse local path dependencies transitively:
+Maps Git changes to owning crates with `cargo metadata`, then follows reverse local dependencies transitively.
 
 ```bash
 cargo scirust affected
-cargo scirust affected --base origin/master --head HEAD
 cargo scirust affected --base origin/master --head HEAD --json
+cargo scirust affected --names-only
+cargo scirust affected --direct-only
 ```
 
-Without `--base`, the tool first uses the Git merge-base with `GITHUB_BASE_REF` when available, then tries `origin/master`, `master`, `origin/main`, and `main`; only if none can provide a merge-base does it fall back to `HEAD^` (or `HEAD` for a one-commit repository). Without `--head`, tracked working-tree changes plus untracked files are included.
+The default base is the Git merge-base with the PR/base branch when available. Root build-contract changes remain conservative and select the whole workspace. `--fail-if-empty` is useful in CI when an empty selection is itself an error.
 
-Changes to root `Cargo.toml`, `Cargo.lock`, `rust-toolchain*`, or `.cargo/config*` conservatively affect the entire workspace.
+## `check`
 
-### `check`
-
-Runs only the package gates required by the affected dependency closure:
+Runs repository gates only for the affected closure.
 
 ```bash
-cargo scirust check --base origin/master --head HEAD
-cargo scirust check --dry-run
+cargo scirust check
 cargo scirust check --full
+cargo scirust check --all-features
+cargo scirust check --dry-run
 ```
 
-Default gates are workspace `fmt`, affected-package `clippy -D warnings`, and affected-package tests. `--full` additionally runs `cargo +1.89.0 check --all-targets` for those packages. Use `--all` to select every workspace package deliberately.
+Cargo.lock is enforced by default for Clippy, tests and the Rust 1.89 check. `--unlocked` is an explicit escape hatch. `--all` deliberately selects the whole workspace.
 
-### `parity`
+## `parity`
 
-Runs two commands from the SciRust root and compares exit code, stdout, and stderr exactly (CRLF/LF is normalized):
+Compares two commands after normalizing CRLF/LF. Both commands must succeed by default; two identical failures are not a parity pass.
 
 ```bash
 cargo scirust parity \
   --left "cargo run -q -p some-crate --example cpu" \
-  --right "cargo run -q -p some-crate --example wgpu"
+  --right "cargo run -q -p some-crate --example wgpu" \
+  --repeat 5
+
+cargo scirust parity --left "..." --right "..." --json
 ```
 
-Use `--ignore-stderr` only when diagnostics are intentionally backend-specific. Output fingerprints use deterministic FNV-1a-64 and are diagnostic fingerprints, not cryptographic hashes.
+On mismatch the tool reports deterministic FNV-1a diagnostic fingerprints and the first differing normalized byte/line. `--allow-failure` exists only for tests that intentionally compare failure surfaces.
 
-### `determinism`
+## `determinism`
 
-Repeats a command and requires exact exit code/stdout/stderr:
+Repeats a direct command and requires successful, exact normalized output on every run.
 
 ```bash
 cargo scirust determinism --repeat 5 -- cargo test -q -p scirust-core some_test -- --exact
+cargo scirust determinism --repeat 10 --json -- ./target/release/my-harness
 ```
 
-Each run receives `SCIRUST_DETERMINISM_RUN=1..N`, allowing a harness to perturb scheduling or seeds deliberately while the command surface remains deterministic.
+Each run receives `SCIRUST_DETERMINISM_RUN=1..N`. `--ignore-stderr` and `--allow-failure` are explicit opt-outs for specialized harnesses.
 
-### `cost`
+## `cost`
 
-Scans Rust source for explicit source-level indicators of copies, allocations, GPU readbacks/uploads, materialization, and host synchronization:
+The default mode scans Rust source for explicit copy/allocation/materialization/GPU-transfer/host-sync indicators. This remains a source heuristic and is never presented as measured performance.
 
 ```bash
 cargo scirust cost -p scirust-gpu
 cargo scirust cost --path scirust-learning/src --json
 ```
 
-This command is intentionally honest: its output is a **static heuristic**, not measured performance and not an allocation/GPU profiler. It identifies review targets; benchmarks/profilers establish actual cost.
+Measured mode adds real wall-clock samples for a command, with warm-up plus min/median/mean/max reporting:
 
-### `features`
+```bash
+cargo scirust cost --no-static --warmup 2 --measure 9 -- ./target/release/my-bench
+cargo scirust cost -p scirust-gpu --measure 7 --inherit-io -- cargo test -q -p scirust-gpu my_test -- --exact
+```
 
-Lists package features or creates a bounded no-default baseline/single/pair matrix:
+This measures process wall time; it does not claim allocation counts or hardware-counter profiling.
+
+## `features`
+
+Lists features or executes the complete bounded baseline/single/pair matrix.
 
 ```bash
 cargo scirust features scirust-gpu
-cargo scirust features scirust-gpu --cover pairwise --max 128
-cargo scirust features scirust-gpu --cover pairwise --max 128 --execute
+cargo scirust features scirust-gpu --cover pairwise --max 256
+cargo scirust features scirust-gpu --cover pairwise --max 256 --execute
 ```
 
-The `--max` guard prevents accidentally exploding CI time on crates with many features.
+Execution no longer stops at the first failing combination. The final report separates pair-specific incompatibilities (both singles pass, the pair fails) from intrinsic single-feature failures. The command fails when any case fails unless `--allow-incompatible` was deliberately requested. `--json` emits the full matrix.
 
-### `bench`
+## `bench`
 
-Runs `cargo bench` only for affected packages, all packages, or one selected package:
+Runs locked `cargo bench` only for affected, selected, or all workspace crates.
 
 ```bash
-cargo scirust bench --base origin/master --head HEAD
+cargo scirust bench
 cargo scirust bench -p scirust-gpu -- --bench my_bench
-cargo scirust bench --dry-run
+cargo scirust bench -p scirust-gpu --repeat 5
 ```
 
-### `calibrate`
+When repeated, `cargo-scirust` also reports outer process wall-time min/median/mean/max. Criterion or crate-specific benchmark output remains the authoritative inner benchmark measurement.
 
-Derives six deterministic ElasticTokenizer piece-size classes from observed piece byte lengths, without changing token identities or BPE merge ranks:
+## `calibrate`
+
+The primary mode now drives SciAgent's real semantics-gated ElasticTokenizer autotuner:
+
+```bash
+cargo scirust calibrate \
+  --tokenizer data/tokenizer.json \
+  --input scirust-core/src \
+  --input scirust-sciagent/src \
+  --output ~/.local/share/scirust/elastic-profile.json \
+  --recursive \
+  --device local
+```
+
+It runs `tokenizer-autotune` in release mode by default. That harness measures Reference/TinyScan/Indexed/Heap kernels, checks every measured result against canonical BPE token ids, rejects semantic mismatches, fits exactly six contiguous S/M/L/XL/XXL/XXXL execution classes, and persists a hardware-local profile. `--debug` is available only when a debug-build calibration is intentionally desired.
+
+A distribution-only compatibility mode remains available:
 
 ```bash
 cargo scirust calibrate --pieces decoded-pieces.txt
 cargo scirust calibrate --lengths piece-byte-lengths.txt --json
 ```
 
-`--pieces` expects one decoded token piece per line. `--lengths` expects one positive byte length per line. Five equal-frequency nearest-rank cuts create `S`, `M`, `L`, `XL`, `XXL`, and `XXXL` buckets. This is the repository-level calibration primitive; direct export from the ElasticTokenizer can be wired to the same input contract without changing the BPE model.
+This mode does **not** select kernels. It requires at least six distinct positive observed lengths and derives five strictly increasing midpoint boundaries; it cannot silently emit duplicate/unreachable execution classes.
 
 ## Design constraints
 
-- pure Rust tool implementation;
-- no FFI;
+- pure Rust orchestration; no FFI;
 - SciRust MSRV 1.89;
-- deterministic ordering and output where practical;
-- no hidden full-workspace build merely to discover affected packages;
-- conservative behavior when a root build contract changes;
-- performance claims are never inferred from static source heuristics.
+- deterministic ordering/reporting where practical;
+- Cargo.lock enforced by default for executable gates;
+- no hidden full-workspace build merely to discover affected crates;
+- root build-contract changes remain conservative;
+- parity/determinism require successful execution unless explicitly overridden;
+- static source heuristics are never mislabeled as runtime measurements;
+- ElasticTokenizer routing may change execution strategy, never canonical BPE token identity.
