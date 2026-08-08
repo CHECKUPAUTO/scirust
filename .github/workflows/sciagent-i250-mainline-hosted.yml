@@ -80,18 +80,26 @@ jobs:
 
           model = Path("scirust-sciagent/src/cuda_decode.rs")
           text = model.read_text()
-          workspace_field = "    gate_up: CudaDecodeMatrix,\n"
-          if workspace_field in text:
-              text = text.replace(workspace_field, "", 1)
+          old_workspace = '''struct DecodeWorkspace {\n    x: CudaDecodeMatrix,\n    norm: CudaDecodeMatrix,\n    qkv: CudaDecodeMatrix,\n    ctx: CudaDecodeMatrix,\n    tmp_d: CudaDecodeMatrix,\n    h: CudaDecodeMatrix,\n    gate_up: CudaDecodeMatrix,\n    act: CudaDecodeMatrix,\n    logits: CudaDecodeMatrix,\n}\n'''
+          new_workspace = '''struct DecodeWorkspace {\n    x: CudaDecodeMatrix,\n    norm: CudaDecodeMatrix,\n    qkv: CudaDecodeMatrix,\n    ctx: CudaDecodeMatrix,\n    tmp_d: CudaDecodeMatrix,\n    h: CudaDecodeMatrix,\n    act: CudaDecodeMatrix,\n    logits: CudaDecodeMatrix,\n}\n'''
+          if new_workspace not in text:
+              if old_workspace not in text:
+                  raise SystemExit("DecodeWorkspace marker not found")
+              text = text.replace(old_workspace, new_workspace, 1)
+
           workspace_alloc = "            gate_up: runtime.matrix(1, 2 * self.d_ff),\n"
           if workspace_alloc in text:
               text = text.replace(workspace_alloc, "", 1)
-          old = '''            runtime.matmul_into(&workspace.norm, &block.gate_up, &mut workspace.gate_up);\n            runtime.swiglu_split_into(&workspace.gate_up, &mut workspace.act);\n'''
-          new = '''            runtime.swiglu_gemv_into(&workspace.norm, &block.gate_up, &mut workspace.act);\n'''
-          if new not in text:
-              if old not in text:
+
+          old_ffn = '''            runtime.matmul_into(&workspace.norm, &block.gate_up, &mut workspace.gate_up);\n            runtime.swiglu_split_into(&workspace.gate_up, &mut workspace.act);\n'''
+          new_ffn = '''            runtime.swiglu_gemv_into(&workspace.norm, &block.gate_up, &mut workspace.act);\n'''
+          if new_ffn not in text:
+              if old_ffn not in text:
                   raise SystemExit("SCIAGENT FFN marker not found")
-              text = text.replace(old, new, 1)
+              text = text.replace(old_ffn, new_ffn, 1)
+
+          if "    gate_up: CudaDecodeMatrix,\n    down: CudaDecodeMatrix," not in text:
+              raise SystemExit("DecodeBlock gate_up weight was not preserved")
           model.write_text(text)
           PY
           cargo +nightly-2026-07-02 fmt --all
