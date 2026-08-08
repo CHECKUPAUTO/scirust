@@ -99,15 +99,31 @@ fn real_main() -> AppResult<()> {
 
 fn print_command_help(command: &str) -> bool {
     match command {
-        "affected" => println!("cargo scirust affected [--base REF] [--head REF] [--json] [--names-only] [--direct-only] [--fail-if-empty]"),
-        "check" => println!("cargo scirust check [--base REF] [--head REF] [--all] [--full] [--dry-run] [--all-features] [--unlocked] [--no-fmt] [--no-clippy] [--no-test]"),
-        "parity" => println!("cargo scirust parity --left \"COMMAND\" --right \"COMMAND\" [--repeat N] [--ignore-stderr] [--allow-failure] [--json]"),
-        "determinism" => println!("cargo scirust determinism [--repeat N] [--ignore-stderr] [--allow-failure] [--json] -- PROGRAM [ARGS...]"),
-        "cost" => println!("cargo scirust cost [--path PATH | -p PACKAGE] [--limit N] [--json] [--no-static] [--measure N] [--warmup N] [--inherit-io] [-- PROGRAM ARGS...]"),
-        "features" => println!("cargo scirust features <package> [--cover pairwise] [--execute] [--max N] [--json] [--allow-incompatible] [--include-default]"),
-        "bench" => println!("cargo scirust bench [--base REF] [--head REF] [--all] [-p PACKAGE] [--repeat N] [--dry-run] [-- <cargo bench args>]"),
+        "affected" => println!(
+            "cargo scirust affected [--base REF] [--head REF] [--json] [--names-only] [--direct-only] [--fail-if-empty]"
+        ),
+        "check" => println!(
+            "cargo scirust check [--base REF] [--head REF] [--all] [--full] [--dry-run] [--all-features] [--unlocked] [--no-fmt] [--no-clippy] [--no-test]"
+        ),
+        "parity" => println!(
+            "cargo scirust parity --left \"COMMAND\" --right \"COMMAND\" [--repeat N] [--ignore-stderr] [--allow-failure] [--json]"
+        ),
+        "determinism" => println!(
+            "cargo scirust determinism [--repeat N] [--ignore-stderr] [--allow-failure] [--json] -- PROGRAM [ARGS...]"
+        ),
+        "cost" => println!(
+            "cargo scirust cost [--path PATH | -p PACKAGE] [--limit N] [--json] [--no-static] [--measure N] [--warmup N] [--inherit-io] [-- PROGRAM ARGS...]"
+        ),
+        "features" => println!(
+            "cargo scirust features <package> [--cover pairwise] [--execute] [--max N] [--json] [--allow-incompatible] [--include-default]"
+        ),
+        "bench" => println!(
+            "cargo scirust bench [--base REF] [--head REF] [--all] [-p PACKAGE] [--repeat N] [--dry-run] [-- <cargo bench args>]"
+        ),
         "calibrate" => {
-            println!("cargo scirust calibrate --tokenizer FILE --input PATH [--input PATH...] --output PROFILE.json [--recursive] [--probe-lengths CSV] [--cases-per-length N] [--warmup-runs N] [--measured-runs N] [--extension CSV] [--device NAME] [--debug] [--dry-run]");
+            println!(
+                "cargo scirust calibrate --tokenizer FILE --input PATH [--input PATH...] --output PROFILE.json [--recursive] [--probe-lengths CSV] [--cases-per-length N] [--warmup-runs N] [--measured-runs N] [--extension CSV] [--device NAME] [--debug] [--dry-run]"
+            );
             println!("cargo scirust calibrate (--pieces FILE | --lengths FILE) [--json]");
         },
         _ => return false,
@@ -116,7 +132,9 @@ fn print_command_help(command: &str) -> bool {
 }
 
 fn print_help() {
-    println!("cargo-scirust — repository-aware validation, parity, cost and ElasticTokenizer tooling");
+    println!(
+        "cargo-scirust — repository-aware validation, parity, cost and ElasticTokenizer tooling"
+    );
     println!();
     println!("USAGE:");
     println!("  cargo scirust <COMMAND> [OPTIONS]");
@@ -124,12 +142,16 @@ fn print_help() {
     println!("COMMANDS:");
     println!("  affected      Map changes to direct/transitive workspace crates");
     println!("  check         Run locked fmt/clippy/tests only where required");
-    println!("  parity        Compare two successful commands exactly, with repeat/JSON diagnostics");
+    println!(
+        "  parity        Compare two successful commands exactly, with repeat/JSON diagnostics"
+    );
     println!("  determinism   Repeat a successful command and require reproducible output");
     println!("  cost          Static cost audit plus optional measured wall-clock command cost");
     println!("  features      Inspect or execute a full pairwise compatibility matrix");
     println!("  bench         Benchmark affected/selected crates, optionally repeatedly");
-    println!("  calibrate     Run full semantics-gated ElasticTokenizer autotune or size-only analysis");
+    println!(
+        "  calibrate     Run full semantics-gated ElasticTokenizer autotune or size-only analysis"
+    );
     println!("  version       Print tool version");
     println!();
     println!("Run `cargo scirust <COMMAND> --help` for command-specific usage.");

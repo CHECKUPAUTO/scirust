@@ -27,16 +27,24 @@ pub fn affected(ws: &Workspace, args: &[String]) -> AppResult<()> {
             "--direct-only" => direct_only = true,
             "--fail-if-empty" => fail_if_empty = true,
             "-h" | "--help" => {
-                println!("cargo scirust affected [--base REF] [--head REF] [--json] [--names-only] [--direct-only] [--fail-if-empty]");
+                println!(
+                    "cargo scirust affected [--base REF] [--head REF] [--json] [--names-only] [--direct-only] [--fail-if-empty]"
+                );
                 return Ok(());
             },
-            other => return Err(AppError::message(format!("unknown affected option: {other}"))),
+            other => {
+                return Err(AppError::message(format!(
+                    "unknown affected option: {other}"
+                )));
+            },
         }
         i += 1;
     }
 
     if json_output && names_only {
-        return Err(AppError::message("--json and --names-only are mutually exclusive"));
+        return Err(AppError::message(
+            "--json and --names-only are mutually exclusive",
+        ));
     }
 
     let impact = ws.impact(base.as_deref(), head.as_deref())?;
@@ -84,8 +92,12 @@ pub fn check(ws: &Workspace, args: &[String]) -> AppResult<()> {
             "--unlocked" => locked = false,
             "--all-features" => all_features = true,
             "-h" | "--help" => {
-                println!("cargo scirust check [--base REF] [--head REF] [--all] [--full] [--dry-run] [--all-features] [--unlocked] [--no-fmt] [--no-clippy] [--no-test]");
-                println!("  default: fmt + locked clippy + locked tests for the transitive affected closure");
+                println!(
+                    "cargo scirust check [--base REF] [--head REF] [--all] [--full] [--dry-run] [--all-features] [--unlocked] [--no-fmt] [--no-clippy] [--no-test]"
+                );
+                println!(
+                    "  default: fmt + locked clippy + locked tests for the transitive affected closure"
+                );
                 println!("  --full: additionally check selected crates on Rust 1.89");
                 return Ok(());
             },
@@ -185,9 +197,17 @@ struct FeatureResult {
 }
 
 pub fn features(ws: &Workspace, args: &[String]) -> AppResult<()> {
-    if args.is_empty() || args.iter().any(|arg| matches!(arg.as_str(), "-h" | "--help")) {
-        println!("cargo scirust features <package> [--cover pairwise] [--execute] [--max N] [--json] [--allow-incompatible] [--include-default]");
-        println!("Executes the full baseline/single/pair matrix and classifies incompatible pairs instead of stopping at the first failure.");
+    if args.is_empty()
+        || args
+            .iter()
+            .any(|arg| matches!(arg.as_str(), "-h" | "--help"))
+    {
+        println!(
+            "cargo scirust features <package> [--cover pairwise] [--execute] [--max N] [--json] [--allow-incompatible] [--include-default]"
+        );
+        println!(
+            "Executes the full baseline/single/pair matrix and classifies incompatible pairs instead of stopping at the first failure."
+        );
         return Ok(());
     }
 
@@ -213,7 +233,11 @@ pub fn features(ws: &Workspace, args: &[String]) -> AppResult<()> {
             "--json" => json_output = true,
             "--allow-incompatible" => allow_incompatible = true,
             "--include-default" => include_default = true,
-            other => return Err(AppError::message(format!("unknown features option: {other}"))),
+            other => {
+                return Err(AppError::message(format!(
+                    "unknown features option: {other}"
+                )));
+            },
         }
         i += 1;
     }
@@ -258,7 +282,9 @@ pub fn features(ws: &Workspace, args: &[String]) -> AppResult<()> {
     }
 
     let mut cases = Vec::new();
-    cases.push(FeatureCase { features: Vec::new() });
+    cases.push(FeatureCase {
+        features: Vec::new(),
+    });
     for feature in &features {
         cases.push(FeatureCase {
             features: vec![feature.clone()],
@@ -295,7 +321,11 @@ pub fn features(ws: &Workspace, args: &[String]) -> AppResult<()> {
                 .map_err(|error| AppError::message(error.to_string()))?
             );
         } else {
-            println!("Pairwise feature plan for {}: {} cases", package.name, cases.len());
+            println!(
+                "Pairwise feature plan for {}: {} cases",
+                package.name,
+                cases.len()
+            );
             for (index, case) in cases.iter().enumerate() {
                 println!("  {:>3}. {}", index + 1, feature_label(&case.features));
             }
@@ -306,7 +336,12 @@ pub fn features(ws: &Workspace, args: &[String]) -> AppResult<()> {
     let mut results = Vec::with_capacity(cases.len());
     for (index, case) in cases.iter().enumerate() {
         if !json_output {
-            println!("  {:>3}/{} {}", index + 1, cases.len(), feature_label(&case.features));
+            println!(
+                "  {:>3}/{} {}",
+                index + 1,
+                cases.len(),
+                feature_label(&case.features)
+            );
         }
         let mut command = vec![
             "cargo".to_string(),
@@ -371,7 +406,11 @@ pub fn features(ws: &Workspace, args: &[String]) -> AppResult<()> {
             .map_err(|error| AppError::message(error.to_string()))?
         );
     } else {
-        println!("Feature matrix complete: {} pass, {} fail", results.len() - failed, failed);
+        println!(
+            "Feature matrix complete: {} pass, {} fail",
+            results.len() - failed,
+            failed
+        );
         if incompatible_pairs.is_empty() {
             println!("  no pair-specific incompatibility detected");
         } else {
@@ -381,7 +420,11 @@ pub fn features(ws: &Workspace, args: &[String]) -> AppResult<()> {
             }
         }
         for result in results.iter().filter(|result| !result.success) {
-            println!("  FAIL {} (exit {:?})", feature_label(&result.features), result.exit_code);
+            println!(
+                "  FAIL {} (exit {:?})",
+                feature_label(&result.features),
+                result.exit_code
+            );
             if !result.diagnostic.is_empty() {
                 println!("{}", indent(&result.diagnostic, "      "));
             }
@@ -422,7 +465,9 @@ pub fn bench(ws: &Workspace, args: &[String]) -> AppResult<()> {
                 break;
             },
             "-h" | "--help" => {
-                println!("cargo scirust bench [--base REF] [--head REF] [--all] [-p PACKAGE] [--repeat N] [--dry-run] [-- <cargo bench args>]");
+                println!(
+                    "cargo scirust bench [--base REF] [--head REF] [--all] [-p PACKAGE] [--repeat N] [--dry-run] [-- <cargo bench args>]"
+                );
                 return Ok(());
             },
             other => return Err(AppError::message(format!("unknown bench option: {other}"))),
@@ -433,7 +478,9 @@ pub fn bench(ws: &Workspace, args: &[String]) -> AppResult<()> {
     let impact = ws.impact(base.as_deref(), head.as_deref())?;
     let packages = if let Some(package) = package {
         if ws.package(&package).is_none() {
-            return Err(AppError::message(format!("unknown workspace package: {package}")));
+            return Err(AppError::message(format!(
+                "unknown workspace package: {package}"
+            )));
         }
         vec![package]
     } else if all {
@@ -447,7 +494,11 @@ pub fn bench(ws: &Workspace, args: &[String]) -> AppResult<()> {
         return Ok(());
     }
 
-    let mut command = vec!["cargo".to_string(), "bench".to_string(), "--locked".to_string()];
+    let mut command = vec![
+        "cargo".to_string(),
+        "bench".to_string(),
+        "--locked".to_string(),
+    ];
     push_packages(&mut command, &packages);
     command.extend(passthrough);
 
@@ -487,8 +538,12 @@ pub fn parity(ws: &Workspace, args: &[String]) -> AppResult<()> {
             },
             "--json" => json_output = true,
             "-h" | "--help" => {
-                println!("cargo scirust parity --left \"COMMAND\" --right \"COMMAND\" [--repeat N] [--ignore-stderr] [--allow-failure] [--json]");
-                println!("By default both commands must succeed as well as produce identical normalized output.");
+                println!(
+                    "cargo scirust parity --left \"COMMAND\" --right \"COMMAND\" [--repeat N] [--ignore-stderr] [--allow-failure] [--json]"
+                );
+                println!(
+                    "By default both commands must succeed as well as produce identical normalized output."
+                );
                 return Ok(());
             },
             other => return Err(AppError::message(format!("unknown parity option: {other}"))),
@@ -540,15 +595,36 @@ pub fn parity(ws: &Workspace, args: &[String]) -> AppResult<()> {
 
         if !json_output {
             println!("Parity run {run}/{repeat}: {}", verdict(pass));
-            println!("  exit:   {} ({:?} / {:?})", verdict(exit_equal && success_ok), left_out.status.code(), right_out.status.code());
-            println!("  stdout: {}  left={} right={}", verdict(stdout_equal), fingerprint(&left_out.stdout), fingerprint(&right_out.stdout));
+            println!(
+                "  exit:   {} ({:?} / {:?})",
+                verdict(exit_equal && success_ok),
+                left_out.status.code(),
+                right_out.status.code()
+            );
+            println!(
+                "  stdout: {}  left={} right={}",
+                verdict(stdout_equal),
+                fingerprint(&left_out.stdout),
+                fingerprint(&right_out.stdout)
+            );
             if let Some(offset) = stdout_diff {
-                println!("          first difference: byte {offset}, line {}", line_at_offset(&left_stdout, offset));
+                println!(
+                    "          first difference: byte {offset}, line {}",
+                    line_at_offset(&left_stdout, offset)
+                );
             }
             if !ignore_stderr {
-                println!("  stderr: {}  left={} right={}", verdict(stderr_equal), fingerprint(&left_out.stderr), fingerprint(&right_out.stderr));
+                println!(
+                    "  stderr: {}  left={} right={}",
+                    verdict(stderr_equal),
+                    fingerprint(&left_out.stderr),
+                    fingerprint(&right_out.stderr)
+                );
                 if let Some(offset) = stderr_diff {
-                    println!("          first difference: byte {offset}, line {}", line_at_offset(&left_stderr, offset));
+                    println!(
+                        "          first difference: byte {offset}, line {}",
+                        line_at_offset(&left_stderr, offset)
+                    );
                 }
             }
         }
@@ -598,11 +674,19 @@ pub fn determinism(ws: &Workspace, args: &[String]) -> AppResult<()> {
                 break;
             },
             "-h" | "--help" => {
-                println!("cargo scirust determinism [--repeat N] [--ignore-stderr] [--allow-failure] [--json] -- PROGRAM [ARGS...]");
-                println!("By default every run must exit successfully and reproduce normalized stdout/stderr exactly.");
+                println!(
+                    "cargo scirust determinism [--repeat N] [--ignore-stderr] [--allow-failure] [--json] -- PROGRAM [ARGS...]"
+                );
+                println!(
+                    "By default every run must exit successfully and reproduce normalized stdout/stderr exactly."
+                );
                 return Ok(());
             },
-            other => return Err(AppError::message(format!("unknown determinism option before --: {other}"))),
+            other => {
+                return Err(AppError::message(format!(
+                    "unknown determinism option before --: {other}"
+                )));
+            },
         }
         i += 1;
     }
@@ -654,7 +738,13 @@ pub fn determinism(ws: &Workspace, args: &[String]) -> AppResult<()> {
         }));
 
         if !json_output {
-            println!("  run {run}/{repeat}: {} exit={:?} stdout={} stderr={}", verdict(pass), output.status.code(), fingerprint(&output.stdout), fingerprint(&output.stderr));
+            println!(
+                "  run {run}/{repeat}: {} exit={:?} stdout={} stderr={}",
+                verdict(pass),
+                output.status.code(),
+                fingerprint(&output.stdout),
+                fingerprint(&output.stderr)
+            );
             if let Some(offset) = stdout_diff {
                 println!("    stdout first differs at normalized byte {offset}");
             }
@@ -719,7 +809,8 @@ pub fn cost(ws: &Workspace, args: &[String]) -> AppResult<()> {
             },
             "--no-static" => no_static = true,
             "--measure" => {
-                measured_runs = parse_positive_usize(&value_after(args, &mut i, "--measure")?, "--measure")?;
+                measured_runs =
+                    parse_positive_usize(&value_after(args, &mut i, "--measure")?, "--measure")?;
             },
             "--warmup" => {
                 warmup_runs = value_after(args, &mut i, "--warmup")?
@@ -732,8 +823,12 @@ pub fn cost(ws: &Workspace, args: &[String]) -> AppResult<()> {
                 break;
             },
             "-h" | "--help" => {
-                println!("cargo scirust cost [--path PATH | -p PACKAGE] [--limit N] [--json] [--no-static] [--measure N] [--warmup N] [--inherit-io] [-- PROGRAM ARGS...]");
-                println!("Without --measure this is a static source heuristic. With --measure it additionally reports real wall-clock samples for the supplied command.");
+                println!(
+                    "cargo scirust cost [--path PATH | -p PACKAGE] [--limit N] [--json] [--no-static] [--measure N] [--warmup N] [--inherit-io] [-- PROGRAM ARGS...]"
+                );
+                println!(
+                    "Without --measure this is a static source heuristic. With --measure it additionally reports real wall-clock samples for the supplied command."
+                );
                 return Ok(());
             },
             other => return Err(AppError::message(format!("unknown cost option: {other}"))),
@@ -744,7 +839,11 @@ pub fn cost(ws: &Workspace, args: &[String]) -> AppResult<()> {
     let root = match (path, package) {
         (Some(_), Some(_)) => return Err(AppError::message("use only one of --path or --package")),
         (Some(path), None) => {
-            if path.is_absolute() { path } else { ws.root.join(path) }
+            if path.is_absolute() {
+                path
+            } else {
+                ws.root.join(path)
+            }
         },
         (None, Some(name)) => ws
             .package(&name)
@@ -754,7 +853,11 @@ pub fn cost(ws: &Workspace, args: &[String]) -> AppResult<()> {
         (None, None) => ws.root.clone(),
     };
 
-    let findings = if no_static { Vec::new() } else { scan_cost(&root)? };
+    let findings = if no_static {
+        Vec::new()
+    } else {
+        scan_cost(&root)?
+    };
     let mut counts = BTreeMap::<&'static str, usize>::new();
     for finding in &findings {
         *counts.entry(finding.kind).or_default() += 1;
@@ -775,24 +878,31 @@ pub fn cost(ws: &Workspace, args: &[String]) -> AppResult<()> {
         for run in 1..=measured_runs {
             let elapsed = run_timed_command(&ws.root, command, inherit_io)?;
             if !json_output {
-                println!("  measured run {run}/{measured_runs}: {:.3} ms", elapsed as f64 / 1_000_000.0);
+                println!(
+                    "  measured run {run}/{measured_runs}: {:.3} ms",
+                    elapsed as f64 / 1_000_000.0
+                );
             }
             timings.push(elapsed);
         }
     } else if command.is_some() {
-        return Err(AppError::message("a command after `--` requires --measure N"));
+        return Err(AppError::message(
+            "a command after `--` requires --measure N",
+        ));
     }
 
     if json_output {
         let details = findings
             .iter()
             .take(limit)
-            .map(|finding| json!({
-                "kind": finding.kind,
-                "path": finding.path,
-                "line": finding.line,
-                "snippet": finding.snippet,
-            }))
+            .map(|finding| {
+                json!({
+                    "kind": finding.kind,
+                    "path": finding.path,
+                    "line": finding.line,
+                    "snippet": finding.snippet,
+                })
+            })
             .collect::<Vec<_>>();
         println!(
             "{}",
@@ -817,10 +927,19 @@ pub fn cost(ws: &Workspace, args: &[String]) -> AppResult<()> {
         }
         println!("  total                    {:>6}", findings.len());
         for finding in findings.iter().take(limit) {
-            println!("  {}:{} [{}] {}", finding.path.display(), finding.line, finding.kind, finding.snippet.trim());
+            println!(
+                "  {}:{} [{}] {}",
+                finding.path.display(),
+                finding.line,
+                finding.kind,
+                finding.snippet.trim()
+            );
         }
         if findings.len() > limit {
-            println!("  ... {} more (raise --limit to display)", findings.len() - limit);
+            println!(
+                "  ... {} more (raise --limit to display)",
+                findings.len() - limit
+            );
         }
     }
     if !timings.is_empty() {
@@ -851,13 +970,21 @@ pub fn calibrate(ws: &Workspace, args: &[String]) -> AppResult<()> {
         match args[i].as_str() {
             "--pieces" => pieces = Some(PathBuf::from(value_after(args, &mut i, "--pieces")?)),
             "--lengths" => lengths = Some(PathBuf::from(value_after(args, &mut i, "--lengths")?)),
-            "--tokenizer" => tokenizer = Some(PathBuf::from(value_after(args, &mut i, "--tokenizer")?)),
+            "--tokenizer" => {
+                tokenizer = Some(PathBuf::from(value_after(args, &mut i, "--tokenizer")?))
+            },
             "--input" => inputs.push(PathBuf::from(value_after(args, &mut i, "--input")?)),
             "--output" => output = Some(PathBuf::from(value_after(args, &mut i, "--output")?)),
-            "--probe-lengths" => probe_lengths = Some(value_after(args, &mut i, "--probe-lengths")?),
-            "--cases-per-length" => cases_per_length = Some(value_after(args, &mut i, "--cases-per-length")?),
+            "--probe-lengths" => {
+                probe_lengths = Some(value_after(args, &mut i, "--probe-lengths")?)
+            },
+            "--cases-per-length" => {
+                cases_per_length = Some(value_after(args, &mut i, "--cases-per-length")?)
+            },
             "--warmup-runs" => warmup_runs = Some(value_after(args, &mut i, "--warmup-runs")?),
-            "--measured-runs" => measured_runs = Some(value_after(args, &mut i, "--measured-runs")?),
+            "--measured-runs" => {
+                measured_runs = Some(value_after(args, &mut i, "--measured-runs")?)
+            },
             "--extension" => extension = Some(value_after(args, &mut i, "--extension")?),
             "--device" => device = Some(value_after(args, &mut i, "--device")?),
             "--recursive" => recursive = true,
@@ -865,31 +992,41 @@ pub fn calibrate(ws: &Workspace, args: &[String]) -> AppResult<()> {
             "--dry-run" => dry_run = true,
             "--json" => json_output = true,
             "-h" | "--help" => {
-                println!("cargo scirust calibrate --tokenizer FILE --input PATH [--input PATH...] --output PROFILE.json [--recursive] [--probe-lengths CSV] [--cases-per-length N] [--warmup-runs N] [--measured-runs N] [--extension CSV] [--device NAME] [--debug] [--dry-run]");
+                println!(
+                    "cargo scirust calibrate --tokenizer FILE --input PATH [--input PATH...] --output PROFILE.json [--recursive] [--probe-lengths CSV] [--cases-per-length N] [--warmup-runs N] [--measured-runs N] [--extension CSV] [--device NAME] [--debug] [--dry-run]"
+                );
                 println!("cargo scirust calibrate (--pieces FILE | --lengths FILE) [--json]");
-                println!("The tokenizer mode runs SciAgent's semantics-gated ElasticTokenizer autotuner. The pieces/lengths mode is distribution-only and does not select kernels.");
+                println!(
+                    "The tokenizer mode runs SciAgent's semantics-gated ElasticTokenizer autotuner. The pieces/lengths mode is distribution-only and does not select kernels."
+                );
                 return Ok(());
             },
-            other => return Err(AppError::message(format!("unknown calibrate option: {other}"))),
+            other => {
+                return Err(AppError::message(format!(
+                    "unknown calibrate option: {other}"
+                )));
+            },
         }
         i += 1;
     }
 
     if tokenizer.is_some() || !inputs.is_empty() || output.is_some() {
         if pieces.is_some() || lengths.is_some() || json_output {
-            return Err(AppError::message("tokenizer autotune mode cannot be combined with --pieces, --lengths, or --json"));
+            return Err(AppError::message(
+                "tokenizer autotune mode cannot be combined with --pieces, --lengths, or --json",
+            ));
         }
-        let tokenizer = tokenizer.ok_or_else(|| AppError::message("autotune mode requires --tokenizer FILE"))?;
-        let output = output.ok_or_else(|| AppError::message("autotune mode requires --output PROFILE.json"))?;
+        let tokenizer = tokenizer
+            .ok_or_else(|| AppError::message("autotune mode requires --tokenizer FILE"))?;
+        let output = output
+            .ok_or_else(|| AppError::message("autotune mode requires --output PROFILE.json"))?;
         if inputs.is_empty() {
-            return Err(AppError::message("autotune mode requires at least one --input PATH"));
+            return Err(AppError::message(
+                "autotune mode requires at least one --input PATH",
+            ));
         }
 
-        let mut command = vec![
-            "cargo".into(),
-            "run".into(),
-            "--locked".into(),
-        ];
+        let mut command = vec!["cargo".into(), "run".into(), "--locked".into()];
         if !debug {
             command.push("--release".into());
         }
@@ -917,19 +1054,26 @@ pub fn calibrate(ws: &Workspace, args: &[String]) -> AppResult<()> {
         if recursive {
             command.push("--recursive".into());
         }
-        println!("ElasticTokenizer full autotune ({})", if debug { "debug" } else { "release" });
+        println!(
+            "ElasticTokenizer full autotune ({})",
+            if debug { "debug" } else { "release" }
+        );
         return run_command(&ws.root, command, dry_run);
     }
 
     let mut values = match (pieces, lengths) {
         (Some(_), Some(_)) | (None, None) => {
-            return Err(AppError::message("distribution-only calibration requires exactly one of --pieces or --lengths"));
+            return Err(AppError::message(
+                "distribution-only calibration requires exactly one of --pieces or --lengths",
+            ));
         },
         (Some(path), None) => read_piece_lengths(&path)?,
         (None, Some(path)) => read_numeric_lengths(&path)?,
     };
     if values.is_empty() {
-        return Err(AppError::message("calibration input contains no positive piece lengths"));
+        return Err(AppError::message(
+            "calibration input contains no positive piece lengths",
+        ));
     }
     values.sort_unstable();
     let cuts = strict_distribution_cuts(&values)?;
@@ -957,14 +1101,20 @@ pub fn calibrate(ws: &Workspace, args: &[String]) -> AppResult<()> {
     } else {
         println!("ElasticTokenizer distribution-only calibration (distinct-quantile-midpoint-v2)");
         println!("  observations: {}", values.len());
-        println!("  bytes: min={} mean={mean:.3} max={}", values[0], values[values.len() - 1]);
+        println!(
+            "  bytes: min={} mean={mean:.3} max={}",
+            values[0],
+            values[values.len() - 1]
+        );
         println!("  S     <= {} bytes", cuts[0]);
         println!("  M     <= {} bytes", cuts[1]);
         println!("  L     <= {} bytes", cuts[2]);
         println!("  XL    <= {} bytes", cuts[3]);
         println!("  XXL   <= {} bytes", cuts[4]);
         println!("  XXXL   > {} bytes", cuts[4]);
-        println!("  NOTE: this mode does not select BPE kernels; use --tokenizer/--input/--output for full autotune.");
+        println!(
+            "  NOTE: this mode does not select BPE kernels; use --tokenizer/--input/--output for full autotune."
+        );
     }
     Ok(())
 }
@@ -1042,7 +1192,9 @@ fn parse_positive_usize(value: &str, flag: &str) -> AppResult<usize> {
         .parse::<usize>()
         .map_err(|_| AppError::message(format!("{flag} expects a positive integer")))?;
     if parsed == 0 {
-        return Err(AppError::message(format!("{flag} expects a positive integer")));
+        return Err(AppError::message(format!(
+            "{flag} expects a positive integer"
+        )));
     }
     Ok(parsed)
 }
@@ -1276,7 +1428,10 @@ fn collect_rust_files(path: &Path, output: &mut Vec<PathBuf>) -> AppResult<()> {
         let path = entry.path();
         let name = entry.file_name();
         if path.is_dir() {
-            if matches!(name.to_str(), Some("target" | ".git" | "data" | "node_modules")) {
+            if matches!(
+                name.to_str(),
+                Some("target" | ".git" | "data" | "node_modules")
+            ) {
                 continue;
             }
             collect_rust_files(&path, output)?;
@@ -1305,7 +1460,11 @@ fn read_numeric_lengths(path: &Path) -> AppResult<Vec<usize>> {
             continue;
         }
         let value = line.parse::<usize>().map_err(|_| {
-            AppError::message(format!("invalid positive integer at {}:{}", path.display(), index + 1))
+            AppError::message(format!(
+                "invalid positive integer at {}:{}",
+                path.display(),
+                index + 1
+            ))
         })?;
         if value > 0 {
             out.push(value);
@@ -1315,7 +1474,12 @@ fn read_numeric_lengths(path: &Path) -> AppResult<Vec<usize>> {
 }
 
 fn strict_distribution_cuts(sorted: &[usize]) -> AppResult<[usize; 5]> {
-    let distinct = sorted.iter().copied().collect::<BTreeSet<_>>().into_iter().collect::<Vec<_>>();
+    let distinct = sorted
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
     if distinct.len() < 6 {
         return Err(AppError::message(format!(
             "six strict ElasticTokenizer classes require at least six distinct positive lengths; found {}",
@@ -1332,7 +1496,9 @@ fn strict_distribution_cuts(sorted: &[usize]) -> AppResult<[usize; 5]> {
         cuts[k - 1] = left + (right - left) / 2;
     }
     if !cuts.windows(2).all(|pair| pair[0] < pair[1]) {
-        return Err(AppError::message("failed to derive strictly increasing ElasticTokenizer thresholds"));
+        return Err(AppError::message(
+            "failed to derive strictly increasing ElasticTokenizer thresholds",
+        ));
     }
     Ok(cuts)
 }
@@ -1361,9 +1527,15 @@ fn print_timing_summary(label: &str, timings: &[u64]) {
     let mean = sum as f64 / sorted.len() as f64;
     println!("{label} ({} runs)", sorted.len());
     println!("  min:    {:.3} ms", sorted[0] as f64 / 1_000_000.0);
-    println!("  median: {:.3} ms", integer_median(&sorted) as f64 / 1_000_000.0);
+    println!(
+        "  median: {:.3} ms",
+        integer_median(&sorted) as f64 / 1_000_000.0
+    );
     println!("  mean:   {:.3} ms", mean / 1_000_000.0);
-    println!("  max:    {:.3} ms", sorted[sorted.len() - 1] as f64 / 1_000_000.0);
+    println!(
+        "  max:    {:.3} ms",
+        sorted[sorted.len() - 1] as f64 / 1_000_000.0
+    );
 }
 
 fn integer_median(sorted: &[u64]) -> u64 {
