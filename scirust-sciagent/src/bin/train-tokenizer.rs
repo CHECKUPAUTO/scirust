@@ -7,6 +7,7 @@ use scirust_sciagent::bpe::BpeTrainer;
 use scirust_sciagent::train::dataset::{
     content_hash, matches_extension, parse_extensions, skip_source_dir, source_quality,
 };
+use scirust_sciagent::{ElasticProfile, ElasticTextTokenizer, ElasticThresholds};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 enum MergeSemanticsArg {
@@ -130,6 +131,11 @@ fn main() {
         .expect("Failed to save tokenizer");
     write_merge_semantics_tag(&args.output, args.merge_semantics)
         .expect("Failed to write tokenizer merge semantics");
+    if args.merge_semantics == MergeSemanticsArg::CanonicalRankV1
+    {
+        validate_canonical_artifact(&args.output)
+            .expect("Canonical tokenizer failed ElasticTokenizer validation");
+    }
     eprintln!(
         "Tokenizer saved to {} (vocab size: {}, merge semantics: {})",
         args.output,
@@ -152,6 +158,15 @@ fn write_merge_semantics_tag(
         serde_json::Value::String(semantics.as_artifact_tag().to_string()),
     );
     fs::write(path, serde_json::to_string_pretty(&value)?)?;
+    Ok(())
+}
+
+fn validate_canonical_artifact(path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    // These thresholds select Reference for every class, so they have no effect
+    // on token ids. They exist only to construct the validation engine.
+    let thresholds = ElasticThresholds::new(16, 64, 256, 1024, 4096)?;
+    let profile = ElasticProfile::reference_only(thresholds);
+    let _ = ElasticTextTokenizer::load_json(path, profile)?;
     Ok(())
 }
 
@@ -249,5 +264,13 @@ mod tests {
         assert!(value.get("vocab").is_some());
         assert!(value.get("merges").is_some());
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn default_semantics_remains_legacy_compatible() {
+        assert_eq!(
+            MergeSemanticsArg::LegacyParallelV1,
+            MergeSemanticsArg::LegacyParallelV1
+        );
     }
 }
