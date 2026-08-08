@@ -20,6 +20,7 @@ mod requirements;
 mod shape;
 mod strides;
 mod tensor;
+mod topology;
 
 pub use backend::ComputeBackend;
 pub use binding::{BufferAccess, BufferBinding};
@@ -46,3 +47,8 @@ pub use requirements::{
 pub use shape::Shape;
 pub use strides::Strides;
 pub use tensor::TensorSpec;
+pub use topology::{
+    CacheDescriptor, CacheKind, InterconnectClass, MemoryDomainDescriptor, MetricProvenance,
+    SystemTopology, TopologyError, TopologyLink, TopologyNode, TopologyNodeId, TopologyNodeKind,
+    TopologyRelation, TransferMetrics,
+};
