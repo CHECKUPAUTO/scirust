@@ -45,6 +45,9 @@ jobs:
       - run: cargo +1.89.0 test -p scirust-gpu --features wgpu --test accelerator_topology_profiles --locked -- --nocapture
 
   cuda-thor:
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on:
       - self-hosted
       - Linux
