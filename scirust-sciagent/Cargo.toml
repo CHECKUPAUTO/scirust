@@ -106,6 +106,11 @@ required-features = ["gpu", "cuda"]
 name = "cuda_pretrain"
 required-features = ["cuda"]
 
+# Route B production throughput/ETA benchmark — CUDA-only.
+[[example]]
+name = "cuda_production_bench"
+required-features = ["cuda"]
+
 # Route B generation from a trained checkpoint — CUDA-only.
 [[example]]
 name = "cuda_generate"

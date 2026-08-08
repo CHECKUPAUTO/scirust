@@ -15,8 +15,9 @@
 //! - `SCIAGENT_SHARDS` — a dir of little-endian `u32` `.bin` token shards; aborts if
 //!   a token id ≥ the config's `vocab_size` (shards tokenised for another vocab).
 //! - `SCIAGENT_CKPT` (default `checkpoints/cuda`), `SCIAGENT_STEPS` (300),
-//!   `SCIAGENT_SEQ` (128), `SCIAGENT_BATCH` (1), `SCIAGENT_TELEMETRY` (25),
-//!   `SCIAGENT_LR` — run knobs.
+//!   `SCIAGENT_SEQ`, `SCIAGENT_BATCH` (1), `SCIAGENT_TELEMETRY` (25), `SCIAGENT_LR`.
+//! - `SCIAGENT_SAVE=<steps>` explicitly selects a step cadence. When unset, exact
+//!   recovery checkpoints default to `SCIAGENT_SAVE_HOURS=6` wall-clock hours.
 //! - `SCIAGENT_MAX_TOKENS` — cap the corpus (default: **no cap**). Truncation keeps a
 //!   *prefix*, not a sample — the shard walk is alphabetical — so a cap on a crates.io
 //!   corpus trains only on the alphabetically-first crates. Always logged when it bites.
@@ -44,7 +45,9 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use scirust_sciagent::config::SciAgentConfig;
-use scirust_sciagent::cuda_model::{CudaPretrainConfig, CudaTrainer};
+use scirust_sciagent::cuda_model::{
+    CudaPretrainConfig, CudaTrainer, SCIAGENT_MODEL_SEMANTICS_VERSION, read_model_semantics_version,
+};
 use scirust_sciagent::model::SciAgentModel;
 use scirust_sciagent::train::checkpoint::{latest_checkpoint, load_checkpoint, read_meta};
 use scirust_sciagent::train::dataset::{
@@ -284,6 +287,24 @@ fn main() {
     let mut loaded_resume_path: Option<std::path::PathBuf> = None;
     if let Some((path, meta)) = &resume
     {
+        let checkpoint_semantics = read_model_semantics_version(path).unwrap_or(1);
+        if checkpoint_semantics != SCIAGENT_MODEL_SEMANTICS_VERSION
+        {
+            let message = format!(
+                "checkpoint model semantics v{checkpoint_semantics} != current v{} (B33 head-local RoPE)",
+                SCIAGENT_MODEL_SEMANTICS_VERSION
+            );
+            if !allow_nonexact_resume()
+            {
+                eprintln!(
+                    "{message}; refusing to train historical weights under different model math. \
+                     Use a fresh SCIAGENT_CKPT directory for the production run. \
+                     SCIAGENT_ALLOW_NONEXACT_RESUME=1 is research-only."
+                );
+                std::process::exit(1);
+            }
+            eprintln!("WARNING: {message}; non-exact model-semantics override enabled");
+        }
         match load_checkpoint(&mut model, path)
         {
             Ok(_) =>
@@ -618,8 +639,27 @@ fn main() {
     let val_frac = explicit_val_frac
         .or_else(|| optimizer_resume.as_ref().and_then(|s| s.val_frac))
         .unwrap_or(0.02f32);
-    // Checkpoint/telemetry cadence does not alter model math.
-    let save_interval = env_usize("SCIAGENT_SAVE", 500);
+    // Exact recovery points contain model fp32 weights plus AdamW m/v. At the
+    // ~304M production shape, a fixed 500-step default can write hundreds of GB per
+    // corpus pass. Prefer a wall-clock cadence; explicit SCIAGENT_SAVE=<steps> opts
+    // back into a step cadence. SCIAGENT_SAVE_HOURS=0 disables periodic saves.
+    let explicit_save_steps = std::env::var("SCIAGENT_SAVE")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok());
+    let save_interval = explicit_save_steps.unwrap_or(0);
+    let save_interval_seconds = if explicit_save_steps.is_some()
+    {
+        0
+    }
+    else
+    {
+        let hours = std::env::var("SCIAGENT_SAVE_HOURS")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(6.0)
+            .max(0.0);
+        (hours * 3600.0).round().min(u64::MAX as f64) as u64
+    };
     let keep_last = env_usize("SCIAGENT_KEEP", 2);
     let explicit_shuffle = std::env::var("SCIAGENT_SHUFFLE")
         .ok()
@@ -699,6 +739,7 @@ fn main() {
         adam_eps,
         log_interval: 25,
         save_interval,
+        save_interval_seconds,
         checkpoint_dir: ckpt_dir.clone(),
         max_grad_norm,
         val_frac,
@@ -711,7 +752,7 @@ fn main() {
     };
     println!(
         "batch {batch_size} × seq_len {seq_len} | telemetry/{telemetry_interval} | steps {start_step}..{total_steps} | base_lr {base_lr:.1e} | \
-         eps {adam_eps:.0e} | clip {max_grad_norm} | save/{save_interval} keep {keep_last} | \
+         eps {adam_eps:.0e} | clip {max_grad_norm} | save_steps/{save_interval} save_seconds/{save_interval_seconds} keep {keep_last} | \
          shuffle {shuffle} | ckpt → {ckpt_dir}\n"
     );
 
