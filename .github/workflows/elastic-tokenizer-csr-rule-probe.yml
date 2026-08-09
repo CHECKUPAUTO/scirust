@@ -1,0 +1,69 @@
+name: ElasticTokenizer CSR rule-table probe
+
+on:
+  pull_request:
+    paths:
+      - "scirust-sciagent/src/bin/tokenizer-csr-rule-probe.rs"
+      - ".github/workflows/elastic-tokenizer-csr-rule-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  csr-rule-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Install MSRV toolchain
+        run: rustup toolchain install 1.89.0 --profile minimal
+
+      - name: Record runner identity
+        run: |
+          {
+            uname -a
+            echo
+            lscpu
+          } > /tmp/csr-rule-runner.txt
+
+      - name: Train deterministic canonical tokenizer
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin train-tokenizer -- \
+            --input scirust-sciagent/src \
+            --recursive \
+            --extension rs \
+            --vocab-size 2048 \
+            --min-frequency 2 \
+            --merge-semantics canonical-rank-v1 \
+            --output /tmp/csr-rule-tokenizer.json
+
+      - name: Measure flat versus CSR lookup
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin tokenizer-csr-rule-probe -- \
+            --tokenizer /tmp/csr-rule-tokenizer.json \
+            --sweeps 100 \
+            --warmup-rounds 3 \
+            --measured-rounds 11 | tee /tmp/csr-rule-probe.txt
+
+      - name: Publish probe summary
+        if: always()
+        run: |
+          echo "### ElasticTokenizer CSR rule-table probe" >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/csr-rule-probe.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "Informational experiment only; not a merge gate." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elastic-tokenizer-csr-rule-probe
+          path: |
+            /tmp/csr-rule-runner.txt
+            /tmp/csr-rule-probe.txt
+            /tmp/csr-rule-tokenizer.json
+          if-no-files-found: warn
