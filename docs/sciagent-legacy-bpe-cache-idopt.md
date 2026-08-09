@@ -43,6 +43,6 @@ Identity hashing for packed `u64` keys was also rejected after measuring `0.1272
 
 The production tests include an uncached historical reference encoder and exact-ID comparisons for both trained byte-level-v2 tokenizers and the embedded legacy tokenizer. They also cover cache/source consistency, duplicate-rule behavior, save/load reconstruction, and a checked wide fallback above the `u32` domain.
 
-This phase is revalidated against master after Indexed node/candidate compaction merged as PR #1096 at commit `928c0e5e2997a9281d08ab01812c33dbdd3353ca`. The two changes touch independent tokenizer subsystems, but the complete CI matrix remains the merge gate for their combined repository state.
+This phase was first revalidated after Indexed node/candidate compaction merged as PR #1096 at commit `928c0e5e2997a9281d08ab01812c33dbdd3353ca`. CSR-SoA TinyScan then merged independently as PR #1095 at commit `ed0e814073854fb9d74d92cff46372e2dfd8448b`. This branch is updated again after that merge so GitHub regenerates the pull-request merge ref and reruns the complete CI matrix against the current combined tokenizer state before the legacy cache can merge.
 
 All timings above are GitHub-hosted x86_64 evidence, not Jetson AGX Thor throughput claims.
