@@ -11,6 +11,7 @@ use std::fmt;
 use std::fs;
 use std::path::Path;
 
+use crate::elastic_id::PairKey;
 use crate::elastic_profile_store::CANONICAL_BPE_SEMANTICS_V1;
 use crate::elastic_tokenizer::TokenId;
 
@@ -70,6 +71,14 @@ impl CanonicalBpeTrainer {
                 minimum: BASE_VOCAB_SIZE,
             });
         }
+        let maximum = usize::try_from(u32::MAX).expect("SciRust requires usize to hold u32");
+        if vocab_size > maximum
+        {
+            return Err(CanonicalBpeTrainError::VocabTooLarge {
+                requested: vocab_size,
+                maximum,
+            });
+        }
         Ok(Self {
             vocab_size,
             min_frequency: 2,
@@ -84,11 +93,13 @@ impl CanonicalBpeTrainer {
     pub fn train(&self, texts: &[String]) -> Result<CanonicalBpeArtifact, CanonicalBpeTrainError> {
         let (mut vocab, mut rev) = base_vocab();
         let mut next_id = BASE_VOCAB_SIZE;
+        let base_offset =
+            u32::try_from(SPECIAL_TOKENS.len()).expect("special-token count fits compact ids");
         let mut corpus = texts
             .iter()
             .map(|text| {
                 text.bytes()
-                    .map(|byte| SPECIAL_TOKENS.len() + usize::from(byte))
+                    .map(|byte| base_offset + u32::from(byte))
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
@@ -96,12 +107,12 @@ impl CanonicalBpeTrainer {
 
         while next_id < self.vocab_size
         {
-            let mut counts: HashMap<(TokenId, TokenId), u64> = HashMap::new();
+            let mut counts: HashMap<PairKey, u64> = HashMap::new();
             for tokens in &corpus
             {
                 for pair in tokens.windows(2)
                 {
-                    *counts.entry((pair[0], pair[1])).or_insert(0) += 1;
+                    *counts.entry(PairKey::new(pair[0], pair[1])).or_insert(0) += 1;
                 }
             }
 
@@ -111,12 +122,16 @@ impl CanonicalBpeTrainer {
                 .min_by(|(pair_a, count_a), (pair_b, count_b)| {
                     count_b.cmp(count_a).then_with(|| pair_a.cmp(pair_b))
                 });
-            let Some(((left, right), _count)) = best
+            let Some((pair, _count)) = best
             else
             {
                 break;
             };
 
+            let left_u32 = pair.left();
+            let right_u32 = pair.right();
+            let left = usize::try_from(left_u32).expect("u32 token id fits usize");
+            let right = usize::try_from(right_u32).expect("u32 token id fits usize");
             let token = format!("{}{}", rev[left], rev[right]);
             if vocab.contains_key(&token)
             {
@@ -124,6 +139,8 @@ impl CanonicalBpeTrainer {
             }
 
             let output = next_id;
+            let output_u32 =
+                u32::try_from(output).expect("trainer vocab bound guarantees compact output id");
             next_id += 1;
             vocab.insert(token.clone(), output);
             rev.push(token);
@@ -131,7 +148,7 @@ impl CanonicalBpeTrainer {
 
             for tokens in &mut corpus
             {
-                apply_one_merge(tokens, left, right, output);
+                apply_one_merge(tokens, left_u32, right_u32, output_u32);
             }
         }
 
@@ -157,7 +174,7 @@ fn base_vocab() -> (BTreeMap<String, TokenId>, Vec<String>) {
     (vocab, rev)
 }
 
-fn apply_one_merge(tokens: &mut Vec<TokenId>, left: TokenId, right: TokenId, output: TokenId) {
+fn apply_one_merge(tokens: &mut Vec<u32>, left: u32, right: u32, output: u32) {
     if tokens.len() < 2
     {
         return;
@@ -200,6 +217,10 @@ pub enum CanonicalBpeTrainError {
         requested: usize,
         minimum: usize,
     },
+    VocabTooLarge {
+        requested: usize,
+        maximum: usize,
+    },
     DuplicateTokenString {
         left: TokenId,
         right: TokenId,
@@ -216,6 +237,10 @@ impl fmt::Display for CanonicalBpeTrainError {
             Self::VocabTooSmall { requested, minimum } => write!(
                 f,
                 "canonical BPE vocab size {requested} is below the byte-level minimum {minimum}"
+            ),
+            Self::VocabTooLarge { requested, maximum } => write!(
+                f,
+                "canonical BPE vocab size {requested} exceeds compact u32 maximum {maximum}"
             ),
             Self::DuplicateTokenString { left, right, token } => write!(
                 f,
@@ -251,9 +276,19 @@ mod tests {
     }
 
     #[test]
+    fn rejects_vocab_outside_compact_id_domain() {
+        if usize::BITS > 32
+        {
+            let too_large = usize::try_from(u64::from(u32::MAX) + 1).unwrap();
+            assert!(matches!(
+                CanonicalBpeTrainer::new(too_large),
+                Err(CanonicalBpeTrainError::VocabTooLarge { .. })
+            ));
+        }
+    }
+
+    #[test]
     fn tie_break_is_pair_id_ascending_and_deterministic() {
-        // "abac" contains a-b and a-c once each; their counts tie, so (a,b)
-        // wins because the base byte ids preserve byte ordering.
         let artifact = CanonicalBpeTrainer::new(BASE_VOCAB_SIZE + 1)
             .unwrap()
             .min_frequency(1)
