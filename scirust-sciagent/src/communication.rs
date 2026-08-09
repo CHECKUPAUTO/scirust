@@ -61,6 +61,7 @@ impl SciAgentEndpoint {
                 "authority": "proposal_only",
             }),
             requested_capabilities: Vec::new(),
+            execution_attestation: None,
         };
         message.validate()?;
         Ok(message)
@@ -91,6 +92,7 @@ impl SciAgentEndpoint {
                 "authority": "proposal_only",
             }),
             requested_capabilities: Vec::new(),
+            execution_attestation: None,
         };
         message.validate()?;
         Ok(message)
@@ -118,5 +120,6 @@ mod tests {
             .unwrap();
         assert_eq!(message.message_kind, MessageKind::Hypothesis);
         assert_eq!(message.trust_class, TrustClass::UntrustedModelOutput);
+        assert_eq!(message.execution_attestation, None);
     }
 }
