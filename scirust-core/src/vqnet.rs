@@ -7,6 +7,7 @@
 
 mod ansatz;
 mod encoding;
+mod loader_training;
 mod module_state;
 mod nn_module;
 mod optimizer_state;
