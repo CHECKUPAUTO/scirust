@@ -6,6 +6,29 @@
 
 use std::fmt;
 
+/// `prev`/`next` sentinel representing no adjacent node.
+pub const COMPACT_INDEX_NONE: u32 = u32::MAX;
+/// `prev`/`next` sentinel representing a node removed by a merge.
+pub const COMPACT_INDEX_INACTIVE: u32 = u32::MAX - 1;
+/// Largest node index available without colliding with compact sentinels.
+pub const COMPACT_INDEX_MAX: u32 = u32::MAX - 2;
+
+#[inline]
+pub fn try_compact_index(index: usize) -> Result<u32, CompactWordError> {
+    let compact = u32::try_from(index).map_err(|_| CompactWordError::FieldTooWide {
+        field: "node_index",
+        value: index,
+    })?;
+    if compact > COMPACT_INDEX_MAX
+    {
+        return Err(CompactWordError::FieldTooWide {
+            field: "node_index",
+            value: index,
+        });
+    }
+    Ok(compact)
+}
+
 /// Collision-free packed representation of an ordered `(left, right)` token pair.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -101,10 +124,7 @@ impl PriorityKey {
             field: "merge_rank",
             value: rank,
         })?;
-        let left_index = u32::try_from(left_index).map_err(|_| CompactWordError::FieldTooWide {
-            field: "left_node_index",
-            value: left_index,
-        })?;
+        let left_index = try_compact_index(left_index)?;
         Ok(Self::new(rank, left_index))
     }
 
@@ -184,6 +204,18 @@ mod tests {
         if usize::BITS == 64
         {
             assert_eq!(std::mem::size_of::<(usize, usize)>(), 16);
+        }
+    }
+
+    #[test]
+    fn compact_index_sentinels_do_not_overlap_valid_indices() {
+        assert!(COMPACT_INDEX_MAX < COMPACT_INDEX_INACTIVE);
+        assert!(COMPACT_INDEX_INACTIVE < COMPACT_INDEX_NONE);
+        assert_eq!(try_compact_index(0).unwrap(), 0);
+        if usize::BITS > 32
+        {
+            let reserved = usize::try_from(COMPACT_INDEX_INACTIVE).unwrap();
+            assert!(try_compact_index(reserved).is_err());
         }
     }
 
