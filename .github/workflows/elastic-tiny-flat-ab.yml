@@ -58,7 +58,7 @@ jobs:
             --output /tmp/tiny-ab-baseline-profile.json \
             --report /tmp/tiny-ab-baseline-report.json \
             --probe-lengths 8,16,32,64,96,128 \
-            --cases-per-length 3 \
+            --cases-per-length 2 \
             --warmup-runs 2 \
             --measured-runs 11 \
             --device same-github-runner
@@ -73,7 +73,7 @@ jobs:
             --output /tmp/tiny-ab-candidate-profile.json \
             --report /tmp/tiny-ab-candidate-report.json \
             --probe-lengths 8,16,32,64,96,128 \
-            --cases-per-length 3 \
+            --cases-per-length 2 \
             --warmup-runs 2 \
             --measured-runs 11 \
             --device same-github-runner
@@ -89,7 +89,13 @@ jobs:
             | .[]
             | sort_by(.elapsed_nanos) as $g
             | ($g | length) as $n
-            | [$g[0].piece_len, $g[($n / 2 | floor)].elapsed_nanos]
+            | [
+                $g[0].piece_len,
+                (if ($n % 2) == 1
+                 then $g[($n / 2 | floor)].elapsed_nanos
+                 else ((($g[$n / 2 - 1].elapsed_nanos + $g[$n / 2].elapsed_nanos) / 2) | floor)
+                 end)
+              ]
             | @tsv' /tmp/tiny-ab-baseline-report.json > /tmp/tiny-ab-baseline.tsv
 
           jq -r '
@@ -98,7 +104,13 @@ jobs:
             | .[]
             | sort_by(.elapsed_nanos) as $g
             | ($g | length) as $n
-            | [$g[0].piece_len, $g[($n / 2 | floor)].elapsed_nanos]
+            | [
+                $g[0].piece_len,
+                (if ($n % 2) == 1
+                 then $g[($n / 2 | floor)].elapsed_nanos
+                 else ((($g[$n / 2 - 1].elapsed_nanos + $g[$n / 2].elapsed_nanos) / 2) | floor)
+                 end)
+              ]
             | @tsv' /tmp/tiny-ab-candidate-report.json > /tmp/tiny-ab-candidate.tsv
 
           echo -e "piece_len\tbaseline_ns\tflat_ns\tspeedup_x" | tee /tmp/tiny-ab-summary.tsv
@@ -115,6 +127,7 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           echo "Baseline: 00d868f69e982c5ba72786f5fb2d12dbc77eb57e" >> "$GITHUB_STEP_SUMMARY"
           echo "Candidate: a67eb2e78fbddde94ac18158c938a2f0fd483d7b" >> "$GITHUB_STEP_SUMMARY"
+          echo "Protocol: exactly 2 corpus cases per length, 2 warmups, 11 measured runs." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload exact evidence
         if: always()
