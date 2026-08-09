@@ -44,7 +44,8 @@ pub enum MontgomeryError {
 
 impl fmt::Display for MontgomeryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::SingularCurve => write!(
                 formatter,
                 "Montgomery parameters must satisfy B != 0 and A^2 != 4"
@@ -70,7 +71,8 @@ impl MontgomeryCurve {
         let a = Fp::new(prime, a);
         let b = Fp::new(prime, b);
         let four = Fp::new(prime, 4);
-        if b.is_zero() || a.checked_mul(a)? == four {
+        if b.is_zero() || a.checked_mul(a)? == four
+        {
             return Err(MontgomeryError::SingularCurve);
         }
         Ok(Self { prime, a, b })
@@ -124,14 +126,18 @@ impl MontgomeryCurve {
     ) -> Result<MontgomeryPoint, MontgomeryError> {
         self.validate_point(left)?;
         self.validate_point(right)?;
-        match (left, right) {
+        match (left, right)
+        {
             (MontgomeryPoint::Infinity, point) | (point, MontgomeryPoint::Infinity) => Ok(point),
             (
                 MontgomeryPoint::Affine { x: x1, y: y1 },
                 MontgomeryPoint::Affine { x: x2, y: y2 },
-            ) => {
-                if x1 == x2 {
-                    if y1.checked_add(y2)?.is_zero() {
+            ) =>
+            {
+                if x1 == x2
+                {
+                    if y1.checked_add(y2)?.is_zero()
+                    {
                         return Ok(MontgomeryPoint::Infinity);
                     }
                     return self.double(left);
@@ -139,17 +145,20 @@ impl MontgomeryCurve {
 
                 let slope = y2.checked_sub(y1)?.checked_div(x2.checked_sub(x1)?)?;
                 self.finish_addition(x1, y1, x2, slope)
-            }
+            },
         }
     }
 
     /// Double one validated point.
     pub fn double(self, point: MontgomeryPoint) -> Result<MontgomeryPoint, MontgomeryError> {
         self.validate_point(point)?;
-        let MontgomeryPoint::Affine { x, y } = point else {
+        let MontgomeryPoint::Affine { x, y } = point
+        else
+        {
             return Ok(MontgomeryPoint::Infinity);
         };
-        if y.is_zero() {
+        if y.is_zero()
+        {
             return Ok(MontgomeryPoint::Infinity);
         }
 
@@ -168,7 +177,8 @@ impl MontgomeryCurve {
     /// Additive inverse `(x, -y)`; infinity is self-inverse.
     pub fn neg(self, point: MontgomeryPoint) -> Result<MontgomeryPoint, MontgomeryError> {
         self.validate_point(point)?;
-        Ok(match point {
+        Ok(match point
+        {
             MontgomeryPoint::Infinity => MontgomeryPoint::Infinity,
             MontgomeryPoint::Affine { x, y } => MontgomeryPoint::Affine { x, y: y.neg() },
         })
@@ -183,12 +193,15 @@ impl MontgomeryCurve {
         self.validate_point(point)?;
         let mut accumulator = self.identity();
         let mut addend = point;
-        while scalar != 0 {
-            if scalar & 1 == 1 {
+        while scalar != 0
+        {
+            if scalar & 1 == 1
+            {
                 accumulator = self.add(accumulator, addend)?;
             }
             scalar >>= 1;
-            if scalar != 0 {
+            if scalar != 0
+            {
                 addend = self.double(addend)?;
             }
         }
@@ -202,13 +215,16 @@ impl MontgomeryCurve {
     pub fn enumerate(self) -> Vec<MontgomeryPoint> {
         let p = self.prime.value();
         let mut points = vec![MontgomeryPoint::Infinity];
-        for x in 0..p {
-            for y in 0..p {
+        for x in 0..p
+        {
+            for y in 0..p
+            {
                 let point = MontgomeryPoint::Affine {
                     x: Fp::new(self.prime, x),
                     y: Fp::new(self.prime, y),
                 };
-                if self.contains(point) {
+                if self.contains(point)
+                {
                     points.push(point);
                 }
             }
@@ -236,26 +252,30 @@ impl MontgomeryCurve {
     }
 
     fn validate_point(self, point: MontgomeryPoint) -> Result<(), MontgomeryError> {
-        if self.contains_checked(point)? {
+        if self.contains_checked(point)?
+        {
             Ok(())
-        } else {
+        }
+        else
+        {
             Err(MontgomeryError::PointNotOnCurve)
         }
     }
 
     fn contains_checked(self, point: MontgomeryPoint) -> Result<bool, FieldError> {
-        let MontgomeryPoint::Affine { x, y } = point else {
+        let MontgomeryPoint::Affine { x, y } = point
+        else
+        {
             return Ok(true);
         };
-        if x.prime() != self.prime || y.prime() != self.prime {
+        if x.prime() != self.prime || y.prime() != self.prime
+        {
             return Err(FieldError::DifferentPrimes);
         }
         let x2 = x.checked_mul(x)?;
         let x3 = x2.checked_mul(x)?;
         let left = self.b.checked_mul(y.checked_mul(y)?)?;
-        let right = x3
-            .checked_add(self.a.checked_mul(x2)?)?
-            .checked_add(x)?;
+        let right = x3.checked_add(self.a.checked_mul(x2)?)?.checked_add(x)?;
         Ok(left == right)
     }
 }
@@ -264,7 +284,8 @@ impl MontgomeryPoint {
     /// Affine coordinates, or `None` for the point at infinity.
     #[must_use]
     pub const fn affine(self) -> Option<(Fp, Fp)> {
-        match self {
+        match self
+        {
             Self::Infinity => None,
             Self::Affine { x, y } => Some((x, y)),
         }
@@ -286,10 +307,7 @@ mod tests {
             MontgomeryCurve::new(prime, 2, 0),
             Err(MontgomeryError::SingularCurve)
         );
-        assert_eq!(
-            MontgomeryCurve::new(prime, 2, 1),
-            Ok(curve())
-        );
+        assert_eq!(MontgomeryCurve::new(prime, 2, 1), Ok(curve()));
         assert_eq!(
             MontgomeryCurve::new(prime, 15, 1),
             Err(MontgomeryError::SingularCurve)
@@ -308,7 +326,10 @@ mod tests {
         let curve = curve();
         let point = curve.point(1, 2).unwrap();
         assert_eq!(curve.add(point, curve.identity()).unwrap(), point);
-        assert_eq!(curve.add(point, curve.neg(point).unwrap()).unwrap(), curve.identity());
+        assert_eq!(
+            curve.add(point, curve.neg(point).unwrap()).unwrap(),
+            curve.identity()
+        );
         assert_eq!(curve.double(point).unwrap(), curve.point(0, 0).unwrap());
         assert_eq!(curve.scalar_mul(4, point).unwrap(), curve.identity());
     }
@@ -318,7 +339,8 @@ mod tests {
         let curve = curve();
         let point = curve.point(2, 1).unwrap();
         let mut repeated = curve.identity();
-        for _ in 0..7 {
+        for _ in 0..7
+        {
             repeated = curve.add(repeated, point).unwrap();
         }
         assert_eq!(curve.scalar_mul(7, point).unwrap(), repeated);
@@ -332,7 +354,8 @@ mod tests {
         assert_eq!(points.len(), 17);
         assert_eq!(points[0], MontgomeryPoint::Infinity);
         assert_eq!(points[1], curve.point(0, 0).unwrap());
-        for point in points {
+        for point in points
+        {
             assert!(curve.contains(point));
         }
     }
