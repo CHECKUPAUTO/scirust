@@ -1,0 +1,70 @@
+name: Legacy BPE cache performance probe
+
+on:
+  pull_request:
+    paths:
+      - "scirust-sciagent/src/bin/legacy-bpe-cache-probe.rs"
+      - ".github/workflows/legacy-bpe-cache-perf-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  legacy-cache-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Install MSRV toolchain
+        run: rustup toolchain install 1.89.0 --profile minimal
+
+      - name: Record runner identity
+        run: |
+          {
+            uname -a
+            echo
+            lscpu
+          } > /tmp/legacy-bpe-runner.txt
+
+      - name: Train deterministic legacy probe tokenizer
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin train-tokenizer -- \
+            --input scirust-sciagent/src \
+            --recursive \
+            --extension rs \
+            --vocab-size 2048 \
+            --min-frequency 2 \
+            --merge-semantics legacy-parallel-v1 \
+            --output /tmp/legacy-probe-tokenizer.json
+
+      - name: Measure cached legacy encode path
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin legacy-bpe-cache-probe -- \
+            --tokenizer /tmp/legacy-probe-tokenizer.json \
+            --input scirust-sciagent/src/bpe.rs \
+            --input scirust-sciagent/src/model.rs \
+            --input scirust-sciagent/src/inference.rs \
+            --warmup-rounds 3 \
+            --measured-rounds 11 | tee /tmp/legacy-bpe-cache-probe.txt
+
+      - name: Publish probe summary
+        if: always()
+        run: |
+          echo "### Legacy BPE cache probe" >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/legacy-bpe-cache-probe.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "Raw result is informational only and is not a merge gate." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: legacy-bpe-cache-probe
+          path: |
+            /tmp/legacy-bpe-runner.txt
+            /tmp/legacy-bpe-cache-probe.txt
+          if-no-files-found: warn
