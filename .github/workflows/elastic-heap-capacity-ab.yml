@@ -47,7 +47,7 @@ jobs:
           git -C candidate diff -- scirust-sciagent/src/elastic_heap.rs
 
       - name: Install MSRV toolchain
-        run: rustup toolchain install 1.89.0 --profile minimal
+        run: rustup toolchain install 1.89.0 --profile minimal --component rustfmt
 
       - name: Train one deterministic canonical tokenizer
         working-directory: baseline
