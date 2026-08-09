@@ -55,27 +55,7 @@ fn main() {
         .cloned()
         .collect::<BTreeSet<_>>()
     {
-        let status = if baseline.disqualified.contains(&key)
-        {
-            "baseline-semantic-mismatch"
-        }
-        else if candidate.disqualified.contains(&key)
-        {
-            "candidate-semantic-mismatch"
-        }
-        else if !baseline.measurements.contains_key(&key)
-        {
-            "missing-baseline"
-        }
-        else if !candidate.measurements.contains_key(&key)
-        {
-            "missing-candidate"
-        }
-        else
-        {
-            "ok"
-        };
-
+        let status = comparison_status(&baseline, &candidate, &key);
         let baseline_median = baseline
             .measurements
             .get(&key)
@@ -104,6 +84,38 @@ fn main() {
             speedup,
             status
         );
+    }
+}
+
+fn comparison_status(
+    baseline: &RawReport,
+    candidate: &RawReport,
+    key: &MeasurementKey,
+) -> &'static str {
+    if baseline.disqualified.contains(key)
+    {
+        "baseline-semantic-mismatch"
+    }
+    else if candidate.disqualified.contains(key)
+    {
+        "candidate-semantic-mismatch"
+    }
+    else
+    {
+        match (
+            baseline.measurements.get(key),
+            candidate.measurements.get(key),
+        )
+        {
+            (None, _) => "missing-baseline",
+            (_, None) => "missing-candidate",
+            (Some(baseline_samples), Some(candidate_samples))
+                if baseline_samples.len() != candidate_samples.len() =>
+            {
+                "sample-count-mismatch"
+            },
+            (Some(_), Some(_)) => "ok",
+        }
     }
 }
 
@@ -312,6 +324,24 @@ mod tests {
             loaded
                 .disqualified
                 .contains(&(64, "indexed".to_string()))
+        );
+    }
+
+    #[test]
+    fn unequal_sample_counts_are_not_compared() {
+        let baseline = load_temp(
+            "scirust_autotune_compare_v2_samples_a.json",
+            &report("tok", "cases", "hw", 2, 9, true),
+        );
+        let mut candidate = load_temp(
+            "scirust_autotune_compare_v2_samples_b.json",
+            &report("tok", "cases", "hw", 2, 9, true),
+        );
+        let key = (64, "indexed".to_string());
+        candidate.measurements.get_mut(&key).unwrap().push(11);
+        assert_eq!(
+            comparison_status(&baseline, &candidate, &key),
+            "sample-count-mismatch"
         );
     }
 
