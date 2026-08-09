@@ -63,6 +63,11 @@ jobs:
             --measured-runs 7 \
             --device same-github-runner
 
+      - name: Inject identical measurement harness into candidate
+        run: |
+          cp baseline/scirust-sciagent/src/bin/tokenizer-autotune.rs \
+             candidate/scirust-sciagent/src/bin/tokenizer-autotune.rs
+
       - name: Measure compact candidate on exact baseline corpus
         working-directory: candidate
         run: |
@@ -127,6 +132,7 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           echo "Baseline: 00d868f69e982c5ba72786f5fb2d12dbc77eb57e" >> "$GITHUB_STEP_SUMMARY"
           echo "Candidate: b65471544718daadbe52ff4d499bef9abe664771" >> "$GITHUB_STEP_SUMMARY"
+          echo "The same tokenizer-autotune.rs harness from baseline is injected into candidate." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload exact evidence
         if: always()
