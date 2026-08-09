@@ -220,8 +220,8 @@ mod tests {
 
     #[test]
     fn duplicate_pair_is_rejected() {
-        let error = AdaptivePackedRuleTable::try_from_ordered_merges(&[(1, 2, 3), (1, 2, 4)])
-            .unwrap_err();
+        let error =
+            AdaptivePackedRuleTable::try_from_ordered_merges(&[(1, 2, 3), (1, 2, 4)]).unwrap_err();
         assert_eq!(error, DuplicateMergeRule { left: 1, right: 2 });
     }
 
