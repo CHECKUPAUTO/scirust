@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use scirust_stats::describe::{median, quantile};
+use scirust_stats::describe::{mean, median, quantile, std_dev};
 use scirust_stats::htest::{Tail, t_test_two_sample};
 
 use crate::{BpeKernel, CalibrationMeasurement};
@@ -20,6 +20,10 @@ pub struct KernelTimingSummary {
     pub raw_samples: usize,
     pub clean_samples: usize,
     pub dropped_outliers: usize,
+    pub mean_nanos: f64,
+    pub std_dev_nanos: f64,
+    /// Standard deviation divided by mean after Tukey filtering.
+    pub coefficient_of_variation: f64,
     pub median_nanos: f64,
     pub p95_nanos: f64,
     pub q1_nanos: f64,
@@ -119,6 +123,10 @@ impl ElasticModelSelectionReport {
                 left.median_nanos
                     .total_cmp(&right.median_nanos)
                     .then_with(|| left.p95_nanos.total_cmp(&right.p95_nanos))
+                    .then_with(|| {
+                        left.coefficient_of_variation
+                            .total_cmp(&right.coefficient_of_variation)
+                    })
                     .then_with(|| kernel_order(left.kernel).cmp(&kernel_order(right.kernel)))
             });
             let (winner, winner_samples) = groups[0].clone();
@@ -204,12 +212,25 @@ fn summarize(
     raw_samples: usize,
     clean: &[f64],
 ) -> KernelTimingSummary {
+    let mean_nanos = mean(clean);
+    let std_dev_nanos = std_dev(clean);
+    let coefficient_of_variation = if mean_nanos > 0.0 && std_dev_nanos.is_finite()
+    {
+        std_dev_nanos / mean_nanos
+    }
+    else
+    {
+        f64::INFINITY
+    };
     KernelTimingSummary {
         piece_len,
         kernel,
         raw_samples,
         clean_samples: clean.len(),
         dropped_outliers: raw_samples.saturating_sub(clean.len()),
+        mean_nanos,
+        std_dev_nanos,
+        coefficient_of_variation,
         median_nanos: median(clean),
         p95_nanos: quantile(clean, 0.95),
         q1_nanos: quantile(clean, 0.25),
@@ -273,6 +294,7 @@ mod tests {
         let selection = &report.selections()[0];
         assert_eq!(selection.winner.kernel, BpeKernel::Reference);
         assert_eq!(selection.winner.dropped_outliers, 1);
+        assert!(selection.winner.coefficient_of_variation.is_finite());
     }
 
     #[test]
@@ -288,5 +310,6 @@ mod tests {
         assert_eq!(selection.winner.kernel, BpeKernel::Indexed);
         assert!(selection.median_speedup.unwrap() > 1.5);
         assert!(matches!(selection.confidence, SelectionConfidence::Strong));
+        assert!(selection.winner.std_dev_nanos > 0.0);
     }
 }
