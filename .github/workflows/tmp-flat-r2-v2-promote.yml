@@ -1,0 +1,106 @@
+name: Temporary FLAT-R2 v2 promoter
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  BRANCH: feat/flat-r2-scirust-resident-interop-v2
+
+jobs:
+  qualify-and-promote:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ env.BRANCH }}
+          fetch-depth: 0
+      - name: Apply resident interop source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          backend = Path('scirust-gpu/src/wgpu_backend.rs')
+          s = backend.read_text()
+          old = '''    /// Column count.\n    pub fn cols(&self) -> usize {\n        self.cols\n    }\n}\n'''
+          new = '''    /// Column count.\n    pub fn cols(&self) -> usize {\n        self.cols\n    }\n\n    #[cfg(feature = "flat-attention")]\n    pub(crate) fn buffer(&self) -> &wgpu::Buffer {\n        &self.buf\n    }\n\n    #[cfg(feature = "flat-attention")]\n    pub(crate) fn from_external_buffer(\n        buf: wgpu::Buffer,\n        rows: usize,\n        cols: usize,\n    ) -> BackendResult<Self> {\n        let required_bytes = rows\n            .checked_mul(cols)\n            .and_then(|elements| elements.checked_mul(core::mem::size_of::<f32>()))\n            .ok_or_else(|| BackendError::ShapeMismatch("external resident matrix size overflow".into()))?;\n        let required_bytes = u64::try_from(required_bytes)\n            .map_err(|_| BackendError::ShapeMismatch("external resident matrix byte size exceeds u64".into()))?;\n        if buf.size() < required_bytes {\n            return Err(BackendError::ShapeMismatch(format!(\n                "external resident buffer has {} bytes, requires at least {required_bytes}",\n                buf.size()\n            )));\n        }\n        Ok(Self { buf, rows, cols })\n    }\n}\n'''
+          if s.count(old) != 1:
+              raise SystemExit('GpuMatrix impl anchor mismatch')
+          s = s.replace(old, new, 1)
+
+          ctx_anchor = 'impl WgpuContext {\n'
+          ctx_methods = '''impl WgpuContext {\n    #[cfg(feature = "flat-attention")]\n    pub(crate) fn device(&self) -> &wgpu::Device {\n        &self.device\n    }\n\n    #[cfg(feature = "flat-attention")]\n    pub(crate) fn queue(&self) -> &wgpu::Queue {\n        &self.queue\n    }\n\n'''
+          if s.count(ctx_anchor) != 1:
+              raise SystemExit('WgpuContext impl anchor mismatch')
+          s = s.replace(ctx_anchor, ctx_methods, 1)
+          backend.write_text(s)
+
+          chain = Path('scirust-gpu/src/chain.rs')
+          s = chain.read_text()
+          import_anchor = 'use crate::{BackendError, BackendResult};\n'
+          flat_import = '''#[cfg(feature = "flat-attention")]\nuse flat_attention::{\n    ExternalProjectionPass, ExternalProjectionRotaryGroupedPipeline, FlatAttentionConfig,\n    GroupedAttentionShape, RotaryEmbeddingConfig,\n};\n'''
+          if s.count(import_anchor) != 1:
+              raise SystemExit('chain import anchor mismatch')
+          s = s.replace(import_anchor, import_anchor + flat_import, 1)
+
+          struct_old = '''pub struct GpuChain {\n    ctx: WgpuContext,\n}\n'''
+          struct_new = '''pub struct GpuChain {\n    ctx: WgpuContext,\n    #[cfg(feature = "flat-attention")]\n    flat_projection_pipeline: ExternalProjectionRotaryGroupedPipeline,\n}\n'''
+          if s.count(struct_old) != 1:
+              raise SystemExit('GpuChain struct anchor mismatch')
+          s = s.replace(struct_old, struct_new, 1)
+
+          config_anchor = '''pub struct GqaBlockWeights<'a> {\n'''
+          config = '''#[cfg(feature = "flat-attention")]\n#[derive(Debug, Clone, Copy, PartialEq)]\npub struct FlatResidentGqaConfig {\n    pub batch: usize,\n    pub q_heads: usize,\n    pub kv_heads: usize,\n    pub seq_len: usize,\n    pub head_dim: usize,\n    pub causal: bool,\n    pub softmax_scale: Option<f32>,\n    pub theta: f32,\n    pub position_offset: usize,\n}\n\n'''
+          if s.count(config_anchor) != 1:
+              raise SystemExit('GqaBlockWeights anchor mismatch')
+          s = s.replace(config_anchor, config + config_anchor, 1)
+
+          new_old = '''    pub fn new() -> Option<Self> {\n        WgpuContext::new().ok().map(|ctx| Self { ctx })\n    }\n'''
+          new_new = '''    pub fn new() -> Option<Self> {\n        let ctx = WgpuContext::new().ok()?;\n        #[cfg(feature = "flat-attention")]\n        let flat_projection_pipeline =\n            ExternalProjectionRotaryGroupedPipeline::new(ctx.device()).ok()?;\n        Some(Self {\n            ctx,\n            #[cfg(feature = "flat-attention")]\n            flat_projection_pipeline,\n        })\n    }\n'''
+          if s.count(new_old) != 1:
+              raise SystemExit('GpuChain::new anchor mismatch')
+          s = s.replace(new_old, new_new, 1)
+
+          upload_anchor = '''    pub fn upload(&self, data: &[f32], rows: usize, cols: usize) -> GpuMatrix {\n        self.ctx.upload(data, rows, cols)\n    }\n\n'''
+          method = '''    #[cfg(feature = "flat-attention")]\n    pub fn flat_projection_grouped_rope(\n        &self,\n        q: &GpuMatrix,\n        k: &GpuMatrix,\n        v: &GpuMatrix,\n        config: FlatResidentGqaConfig,\n    ) -> BackendResult<GpuMatrix> {\n        let rows = config\n            .batch\n            .checked_mul(config.seq_len)\n            .ok_or_else(|| BackendError::ShapeMismatch("FLAT-R2 batch*seq_len overflow".into()))?;\n        let q_cols = config\n            .q_heads\n            .checked_mul(config.head_dim)\n            .ok_or_else(|| BackendError::ShapeMismatch("FLAT-R2 q_heads*head_dim overflow".into()))?;\n        let kv_cols = config\n            .kv_heads\n            .checked_mul(config.head_dim)\n            .ok_or_else(|| BackendError::ShapeMismatch("FLAT-R2 kv_heads*head_dim overflow".into()))?;\n        if q.rows() != rows || q.cols() != q_cols {\n            return Err(BackendError::ShapeMismatch(format!(\n                "FLAT-R2 Q is {}x{}, expected {rows}x{q_cols}",\n                q.rows(), q.cols()\n            )));\n        }\n        for (name, matrix) in [("K", k), ("V", v)] {\n            if matrix.rows() != rows || matrix.cols() != kv_cols {\n                return Err(BackendError::ShapeMismatch(format!(\n                    "FLAT-R2 {name} is {}x{}, expected {rows}x{kv_cols}",\n                    matrix.rows(), matrix.cols()\n                )));\n            }\n        }\n\n        let shape = GroupedAttentionShape {\n            batch: config.batch,\n            q_heads: config.q_heads,\n            kv_heads: config.kv_heads,\n            seq_len: config.seq_len,\n            head_dim: config.head_dim,\n        };\n        let output = self\n            .flat_projection_pipeline\n            .create_output_buffer(self.ctx.device(), shape)\n            .map_err(|error| BackendError::Execution(format!("FLAT-R2 output allocation: {error}")))?;\n        let mut encoder = self\n            .ctx\n            .device()\n            .create_command_encoder(&wgpu::CommandEncoderDescriptor {\n                label: Some("scirust-flat-r2-resident"),\n            });\n        self.flat_projection_pipeline\n            .encode(\n                self.ctx.device(),\n                &mut encoder,\n                ExternalProjectionPass {\n                    q: q.buffer(),\n                    k: k.buffer(),\n                    v: v.buffer(),\n                    out_and_lse: &output,\n                    shape,\n                    config: FlatAttentionConfig {\n                        causal: config.causal,\n                        softmax_scale: config.softmax_scale,\n                    },\n                    rotary: RotaryEmbeddingConfig {\n                        theta: config.theta,\n                        position_offset: config.position_offset,\n                    },\n                },\n            )\n            .map_err(|error| BackendError::Execution(format!("FLAT-R2 encode: {error}")))?;\n        self.ctx.queue().submit(Some(encoder.finish()));\n        GpuMatrix::from_external_buffer(output, rows, q_cols)\n    }\n\n'''
+          if s.count(upload_anchor) != 1:
+              raise SystemExit('upload anchor mismatch')
+          s = s.replace(upload_anchor, upload_anchor + method, 1)
+          chain.write_text(s)
+
+          lib = Path('scirust-gpu/src/lib.rs')
+          s = lib.read_text()
+          old = '''#[cfg(feature = "wgpu")]\npub use chain::{\n    BlockCache, BlockGrads, BlockWeights, DoraGrads, GpuChain, GqaBlockGrads, GqaBlockWeights,\n    GqaModelGrads, GqaModelWeights, LoraGrads, ModelWeights,\n};\n'''
+          new = old + '''#[cfg(feature = "flat-attention")]\npub use chain::FlatResidentGqaConfig;\n'''
+          if s.count(old) != 1:
+              raise SystemExit('chain re-export anchor mismatch')
+          lib.write_text(s.replace(old, new, 1))
+          PY
+          git diff --check
+      - name: Install pinned toolchains
+        run: |
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt
+      - name: Refresh lock and qualify feature
+        run: |
+          cargo +1.89.0 check -p scirust-gpu --features flat-attention
+          cargo +nightly-2026-07-02 fmt --all
+          cargo +nightly-2026-07-02 fmt --all -- --check
+          cargo +1.89.0 clippy -p scirust-gpu --features flat-attention --all-targets --locked -- -D warnings
+          cargo +1.89.0 test -p scirust-gpu --features flat-attention --lib --locked
+      - name: Commit qualified source only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/tmp-flat-r2-v2-promote.yml
+          git config user.name 'CHECKUPAUTO'
+          git config user.email '194770978+CHECKUPAUTO@users.noreply.github.com'
+          git add Cargo.lock scirust-gpu/src/lib.rs scirust-gpu/src/chain.rs scirust-gpu/src/wgpu_backend.rs
+          git commit -m 'feat(gpu): bridge resident WGPU matrices into FLAT-R2'
+          git push origin HEAD:${BRANCH}
