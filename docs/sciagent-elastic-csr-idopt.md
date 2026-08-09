@@ -38,7 +38,7 @@ SoA removes 7,152 bytes of padding/alignment payload, about 19.4% of the measure
 
 ## TinyScan end-to-end A/B
 
-The production CSR-SoA patch was measured end-to-end against current master `d65ea3dbe6328d5eee657e5fc291a0c58a3d8056`.
+The production CSR-SoA patch was measured end-to-end against master `d65ea3dbe6328d5eee657e5fc291a0c58a3d8056`.
 
 To eliminate branch-age bias, both worktrees started from that exact master commit. Only `elastic_rule_table.rs`, `elastic_tiny.rs`, and the module declaration in `lib.rs` from the candidate were injected into the candidate worktree. One deterministic 1024-token canonical tokenizer was trained once and reused by both builds. The candidate read the exact baseline corpus. There were exactly 2 cases per length, 2 warmups and 11 measured runs.
 
@@ -54,5 +54,9 @@ Both sides reported zero semantic mismatches.
 | 128 | 116,982 ns | 32,781 ns | **3.568592x** |
 
 Under this protocol the fitted six-class kernel sequence changed from baseline `[Heap, Indexed, Heap, Heap, Heap, Heap]` to candidate `[TinyScan, TinyScan, Heap, Heap, Heap, Heap]`, showing that the lookup redesign changes the best execution choice rather than merely improving an isolated microbenchmark.
+
+## Post-Indexed integration gate
+
+Indexed node/candidate compaction was merged independently as PR #1096 at master commit `928c0e5e2997a9281d08ab01812c33dbdd3353ca`. That phase changes `elastic_indexed.rs` and its evidence document only; the CSR-Tiny production files do not overlap it. After #1096 merged, this branch was updated deliberately so GitHub regenerates the pull-request merge ref and reruns the complete CI matrix against the combined master state before CSR-Tiny can merge.
 
 These measurements are GitHub-hosted x86_64 evidence, not Jetson AGX Thor throughput claims. Target-hardware calibration remains a separate gate.
