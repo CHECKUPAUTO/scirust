@@ -16,6 +16,8 @@ env:
   CARGO_INCREMENTAL: 0
   RUSTFLAGS: "-D warnings"
 
+# Production now bounds direct-u32 ingress to <=32 bytes after the first
+# end-to-end run showed small regressions at 64 and 96 bytes.
 jobs:
   text-encode-ab:
     name: Text to Token IDs A/B
