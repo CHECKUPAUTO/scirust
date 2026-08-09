@@ -1,0 +1,76 @@
+name: Temporary ElasticTokenizer robust model-selection qualifier
+
+on:
+  push:
+    branches:
+      - perf/elastic-tokenizer-robust-model-selection
+
+permissions:
+  contents: write
+
+jobs:
+  qualify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: perf/elastic-tokenizer-robust-model-selection
+          fetch-depth: 0
+      - name: Wire SciRust statistics and interleaved timing
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          cargo = Path('scirust-sciagent/Cargo.toml')
+          s = cargo.read_text()
+          anchor = 'scirust-agent-protocol = { path = "../scirust-agent-protocol" }\n'
+          if 'scirust-stats = { path = "../scirust-stats" }' not in s:
+              if s.count(anchor) != 1:
+                  raise SystemExit('Cargo dependency anchor mismatch')
+              s = s.replace(anchor, anchor + 'scirust-stats = { path = "../scirust-stats" }\n', 1)
+          cargo.write_text(s)
+
+          lib = Path('scirust-sciagent/src/lib.rs')
+          s = lib.read_text()
+          mod_anchor = 'pub mod elastic_indexed;\n'
+          if 'pub mod elastic_model_selection;' not in s:
+              if s.count(mod_anchor) != 1:
+                  raise SystemExit('lib module anchor mismatch')
+              s = s.replace(mod_anchor, mod_anchor + 'pub mod elastic_model_selection;\n', 1)
+          export_anchor = 'pub use elastic_indexed::IndexedBpe;\n'
+          export = '''pub use elastic_model_selection::{\n    ElasticModelSelectionReport, KernelSelection, KernelTimingSummary, ModelSelectionError,\n    SelectionConfidence,\n};\n'''
+          if 'ElasticModelSelectionReport' not in s:
+              if s.count(export_anchor) != 1:
+                  raise SystemExit('lib export anchor mismatch')
+              s = s.replace(export_anchor, export_anchor + export, 1)
+          lib.write_text(s)
+
+          p = Path('scirust-sciagent/src/elastic_autotune.rs')
+          s = p.read_text()
+          old = '''            for kernel in CALIBRATION_KERNELS\n            {\n                for _ in 0..self.config.warmup_runs\n                {\n                    let Some(output) = self.run_kernel(kernel, black_box(&case.input_ids))\n                    else\n                    {\n                        break;\n                    };\n                    black_box(output);\n                }\n\n                for _ in 0..self.config.measured_runs\n                {\n                    let start = Instant::now();\n                    let Some(output) = self.run_kernel(kernel, black_box(&case.input_ids))\n                    else\n                    {\n                        break;\n                    };\n                    let elapsed_nanos =\n                        u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX);\n                    let semantic_match = output == expected;\n                    black_box(&output);\n                    measurements.push(CalibrationMeasurement {\n                        piece_len: case.piece_len,\n                        kernel,\n                        elapsed_nanos,\n                        semantic_match,\n                    });\n                }\n            }\n'''
+          new = '''            // Warm every compatible kernel before measurement, then rotate the\n            // starting kernel on every measured round. This deterministic\n            // interleaving spreads thermal/scheduler drift across all models\n            // instead of timing one complete kernel series after another.\n            for _ in 0..self.config.warmup_runs\n            {\n                for kernel in CALIBRATION_KERNELS\n                {\n                    if let Some(output) = self.run_kernel(kernel, black_box(&case.input_ids))\n                    {\n                        black_box(output);\n                    }\n                }\n            }\n\n            for round in 0..self.config.measured_runs\n            {\n                for offset in 0..CALIBRATION_KERNELS.len()\n                {\n                    let kernel = CALIBRATION_KERNELS[(round + offset) % CALIBRATION_KERNELS.len()];\n                    let start = Instant::now();\n                    let Some(output) = self.run_kernel(kernel, black_box(&case.input_ids))\n                    else\n                    {\n                        continue;\n                    };\n                    let elapsed_nanos =\n                        u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX);\n                    let semantic_match = output == expected;\n                    black_box(&output);\n                    measurements.push(CalibrationMeasurement {\n                        piece_len: case.piece_len,\n                        kernel,\n                        elapsed_nanos,\n                        semantic_match,\n                    });\n                }\n            }\n'''
+          if old not in s:
+              raise SystemExit('autotune measurement anchor mismatch')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          git diff --check
+      - name: Install pinned toolchains
+        run: |
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt --component clippy
+      - name: Qualify robust selection
+        run: |
+          cargo +nightly-2026-07-02 fmt --all -- --check || cargo +nightly-2026-07-02 fmt --all
+          cargo +nightly-2026-07-02 clippy -p scirust-sciagent --all-targets --locked -- -D warnings
+          cargo +1.89.0 test -p scirust-sciagent --lib elastic_model_selection --locked
+          cargo +1.89.0 test -p scirust-sciagent --lib elastic_autotune --locked
+          cargo +1.89.0 test -p scirust-sciagent --lib elastic_calibration --locked
+      - name: Remove temporary workflow and commit
+        run: |
+          git rm .github/workflows/tmp-elastic-model-selection-promote.yml
+          git config user.name 'CHECKUPAUTO'
+          git config user.email '194770978+CHECKUPAUTO@users.noreply.github.com'
+          git add Cargo.lock scirust-sciagent/Cargo.toml scirust-sciagent/src/lib.rs scirust-sciagent/src/elastic_autotune.rs scirust-sciagent/src/elastic_model_selection.rs
+          git commit -m 'feat(sciagent): add robust ElasticTokenizer model selection'
+          git push origin HEAD:perf/elastic-tokenizer-robust-model-selection
