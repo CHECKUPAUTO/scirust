@@ -6,6 +6,7 @@
 //! not need to coordinate [`ParameterId`] values by hand.
 
 mod module_state;
+mod nn_module;
 mod optimizer_state;
 
 pub use module_state::{
