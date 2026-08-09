@@ -3,7 +3,15 @@
 baseline (2.13.0). OFFLINE tool: not run in CI. Output fixtures are data only.
 
 Usage:
-    python3 generate_fixtures.py [--torch-bin PATH] [--families elementwise,reductions,normalization,shape,linear,loss,norm_affine,reduction_extra,unary_extra,special,shape_extra,indexing,linear_extra,norm_stoch,positional,attention,quantization,conversion,convolution,linalg,sparse,einsum]
+    python3 generate_fixtures.py
+
+The committed historical fixture corpus is immutable. The official generator
+writes only explicitly registered append-only families. Each append-only family
+owns an independent frozen PRNG seed, so adding a future family cannot alter the
+inputs or hashes of any pre-existing witness.
+
+Before any write, the generator verifies the frozen PyTorch build and validates
+every preserved manifest entry against the bytes already committed on disk.
 
 Provenance rules (LICENSING_AND_PROVENANCE.md):
   - executes the pinned baseline (`torch.__version__` must be 2.13.0),
@@ -16,7 +24,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import sys
 import tomllib
 from pathlib import Path
 
@@ -25,18 +32,77 @@ REGISTRY = REPO / "tensor-operators.toml"
 OUT = REPO / "tests" / "parity" / "fixtures"
 BASELINE_COMMIT = "cf30153c4c131c8164ee7798e5022d810682e2cb"
 SEED = 0xC0FFEE
-MIN_TORCH = (2, 13, 0)
+BASELINE_VERSION = "2.13.0+cu130"
 
-import torch  # noqa: E402  (import after sys.path manipulation if needed)
+# Historical families are retained in source for auditability only.
+# They are immutable witnesses and MUST NOT be dispatched by main().
+HISTORICAL_FAMILIES = (
+    "elementwise",
+    "reductions",
+    "normalization",
+    "shape",
+    "linear",
+    "loss",
+    "norm_affine",
+    "reduction_extra",
+    "unary_extra",
+    "special",
+    "shape_extra",
+    "indexing",
+    "linear_extra",
+    "norm_stoch",
+    "positional",
+    "attention",
+    "quantization",
+    "conversion",
+    "convolution",
+    "linalg",
+    "sparse",
+    "einsum",
+)
+
+# Append-only generation registry.
+#
+# Every family has its own frozen seed. Future families MUST be added with a
+# new independent seed. Historical families must never be added here.
+APPEND_ONLY_FAMILY_SEEDS = {
+    "elementwise_broadcast": 0xC0FFEE01,
+}
+
+# Populated only after verify_baseline_identity() succeeds.
+VERIFIED_BASELINE_COMMIT: str | None = None
+
+# Exact files written by the current invocation. The manifest is built from
+# this set only; pre-existing files on disk are never silently certified.
+GENERATED_FILES: set[Path] = set()
+
+import torch  # noqa: E402
 
 
-def import_torch(path: str | None) -> None:
-    if path:
-        import importlib.util
+def verify_baseline_identity() -> str:
+    """Fail closed unless the executing PyTorch build is the frozen baseline."""
+    if torch.__version__ != BASELINE_VERSION:
+        raise SystemExit(
+            f"ERROR: baseline must be {BASELINE_VERSION}, got "
+            f"{torch.__version__}. Refusing to generate fixtures."
+        )
 
-        # load torch from a specific interpreter is not supported; instead
-        # document that the script must run under that interpreter.
-        print(f"note: running --torch-bin {path}; ensure this interpreter matches", file=sys.stderr)
+    actual_commit = getattr(torch.version, "git_version", None)
+    if not actual_commit:
+        raise SystemExit(
+            "ERROR: torch.version.git_version is unavailable; "
+            "cannot prove frozen-baseline provenance."
+        )
+
+    actual_commit = actual_commit.strip().lower()
+    if actual_commit != BASELINE_COMMIT.lower():
+        raise SystemExit(
+            "ERROR: PyTorch source commit mismatch: "
+            f"expected {BASELINE_COMMIT}, got {actual_commit}. "
+            "Refusing to generate fixtures."
+        )
+
+    return actual_commit
 
 
 UNARY_OPS = {
@@ -77,6 +143,25 @@ BINARY_OPS = {
     "atan2": lambda a, b: torch.atan2(a, b),
 }
 BINARY_DOMAIN = {"div": (0.5, 3.0)}  # second operand lower bound to avoid div-by-0
+
+# APPEND-ONLY Profile 1.0 broadcast witnesses.
+#
+# These shapes intentionally exercise:
+#   - mutual broadcasting on both axes,
+#   - the opposite operand order,
+#   - row broadcast,
+#   - column broadcast,
+#   - scalar-like 2-D (1x1) broadcast.
+#
+# This family owns an independent frozen seed in APPEND_ONLY_FAMILY_SEEDS.
+# It never consumes or depends on the RNG stream of historical fixtures.
+BINARY_BROADCAST_SHAPES = (
+    ((1, 3), (2, 1)),
+    ((2, 1), (1, 3)),
+    ((1, 4), (3, 4)),
+    ((3, 1), (3, 4)),
+    ((1, 1), (2, 3)),
+)
 
 REDUCTIONS = {
     "sum": (lambda x, axis: torch.sum(x, dim=axis), True),
@@ -152,6 +237,48 @@ def gen_elementwise(gen, family_dir: Path) -> list[str]:
         dom_b = BINARY_DOMAIN.get(op, DEFAULT_DOMAIN)
         cases = [build_case(gen, op, "binary", s, DEFAULT_DOMAIN, dom_b) for s in SHAPES]
         write(op, family_dir, cases, note="both operands require_grad; 2-D same shape")
+
+
+def gen_elementwise_broadcast(gen, family_dir: Path) -> None:
+    """PyTorch 2-D binary broadcasting witnesses.
+
+    APPEND-ONLY family with an independent frozen PRNG seed. Its output is
+    intentionally independent of every historical generator function.
+    """
+    for op in BINARY_OPS:
+        domain_b = BINARY_DOMAIN.get(op, DEFAULT_DOMAIN)
+        cases = []
+
+        for shape_a, shape_b in BINARY_BROADCAST_SHAPES:
+            a = seed_tensor(gen, shape_a, *DEFAULT_DOMAIN).requires_grad_(True)
+            b = seed_tensor(gen, shape_b, *domain_b).requires_grad_(True)
+
+            y = BINARY_OPS[op](a, b)
+            gout = seed_tensor(gen, list(y.shape), -1.0, 1.0)
+            ga, gb = torch.autograd.grad(y, (a, b), grad_outputs=gout)
+
+            cases.append({
+                "kind": "binary_broadcast",
+                "shape": list(shape_a),
+                "b_shape": list(shape_b),
+                "out_shape": list(y.shape),
+                "x": flat(a.detach()),
+                "b": flat(b.detach()),
+                "y": flat(y.detach()),
+                "gout": flat(gout),
+                "gx": flat(ga),
+                "gb": flat(gb),
+            })
+
+        write(
+            op,
+            family_dir,
+            cases,
+            note=(
+                "both operands require_grad; deterministic 2-D PyTorch "
+                "broadcasting incl. mutual/row/column/(1,1)"
+            ),
+        )
 
 
 def gen_reductions(gen, family_dir: Path) -> None:
@@ -474,7 +601,7 @@ def gen_linalg(gen, family_dir: Path) -> None:
 
 
 def gen_sparse(gen, family_dir: Path) -> None:
-    """spmv/spmm CSR (f64) + lu_solve (f64) — APPEND fin de séquence."""
+    """spmv/spmm CSR (f64) + solve (f64) — APPEND fin de séquence."""
     cases = []
     for (n, m) in ((5, 4), (3, 6)):
         dens = torch.empty((n, m), dtype=torch.float64).uniform_(-1.0, 1.0, generator=gen)
@@ -500,11 +627,11 @@ def gen_sparse(gen, family_dir: Path) -> None:
         b2 = torch.empty((n, 2), dtype=torch.float64).uniform_(-1.0, 1.0, generator=gen)
         y1 = torch.linalg.solve(a, b1)
         y2 = torch.linalg.solve(a, b2)
-        cases.append({"kind": "lu_solve", "n": n, "a": flat(a.detach()),
+        cases.append({"kind": "solve", "n": n, "a": flat(a.detach()),
                       "b1": flat(b1.detach()), "y1": flat(y1.detach()),
                       "b2": flat(b2.detach()), "y2": flat(y2.detach())})
-    write("lu_solve", family_dir, cases, dtype="f64",
-          note="solve A·x=b, A diagonale dominante, b 1-col et 2-col, f64")
+    write("solve", family_dir, cases, dtype="f64",
+          note="torch.linalg.solve A·x=b, A diagonale dominante, b 1-col et 2-col, f64")
 
 
 def gen_einsum(gen, family_dir: Path) -> None:
@@ -730,110 +857,219 @@ def gen_loss(gen, family_dir: Path) -> None:
 
 
 def write(op: str, family_dir: Path, cases: list[dict], note: str, dtype: str = "f32") -> None:
+    if VERIFIED_BASELINE_COMMIT is None:
+        raise RuntimeError("baseline identity must be verified before writing fixtures")
+
+    try:
+        relative_family = family_dir.relative_to(OUT)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"fixture family is outside the canonical fixture root: {family_dir}"
+        ) from exc
+
+    if (
+        len(relative_family.parts) != 1
+        or relative_family.parts[0] not in APPEND_ONLY_FAMILY_SEEDS
+    ):
+        raise RuntimeError(
+            "historical fixture families are immutable; refusing write to "
+            f"{relative_family}"
+        )
+
     path = family_dir / f"{op}.json"
     data = {
         "op": op,
         "kind": cases[0]["kind"],
         "dtype": dtype,
-        "pytorch": {"version": torch.__version__, "commit": BASELINE_COMMIT,
-                    "generated": "deterministic"},
+        "pytorch": {
+            "version": torch.__version__,
+            "commit": VERIFIED_BASELINE_COMMIT,
+            "generated": "deterministic",
+        },
         "note": note,
         "cases": cases,
     }
     family_dir.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, sort_keys=True, separators=(",", ":")) + "\n")
+    GENERATED_FILES.add(path)
     print(f"  wrote {path.relative_to(REPO)} ({len(cases)} cases)")
 
 
-def manifest(files: dict[str, str]) -> None:
-    m = {"pytorch": {"version": torch.__version__, "source_commit": BASELINE_COMMIT},
-         "generator": "docs/tensor-parity/provenance/generate_fixtures.py",
-         "seed": SEED, "dtype": "f32", "files": files}
+def build_manifest_files(
+    generated_files: set[Path],
+    allowed_ops: set[str],
+) -> dict[str, str]:
+    """Hash exactly the fixtures produced by the current invocation."""
+    files: dict[str, str] = {}
+    for path in sorted(generated_files):
+        if not path.is_file():
+            raise SystemExit(f"ERROR: generated fixture disappeared: {path}")
+        try:
+            relative = path.relative_to(OUT)
+        except ValueError as exc:
+            raise SystemExit(f"ERROR: generated fixture outside OUT: {path}") from exc
+
+        opname = path.stem
+        if opname not in allowed_ops:
+            raise SystemExit(
+                f"ERROR: generated fixture {relative} is not present in tensor-operators.toml"
+            )
+
+        files[str(relative)] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return files
+
+
+def load_existing_manifest() -> dict:
+    """Load and validate the committed manifest before any fixture write."""
+    path = OUT / "manifest.json"
+    if not path.is_file():
+        raise SystemExit("ERROR: committed fixture manifest is missing")
+
+    data = json.loads(path.read_text())
+
+    provenance = data.get("pytorch", {})
+    if provenance.get("version") != BASELINE_VERSION:
+        raise SystemExit(
+            "ERROR: committed manifest baseline version mismatch: "
+            f"{provenance.get('version')!r}"
+        )
+    if provenance.get("source_commit") != BASELINE_COMMIT:
+        raise SystemExit(
+            "ERROR: committed manifest source commit mismatch: "
+            f"{provenance.get('source_commit')!r}"
+        )
+
+    files = data.get("files")
+    if not isinstance(files, dict):
+        raise SystemExit("ERROR: committed manifest has no valid files map")
+
+    return data
+
+
+def verify_preserved_manifest_files(data: dict) -> dict[str, str]:
+    """Verify every non-managed fixture before append-only generation.
+
+    Managed append-only families may be rewritten by this invocation.
+    Everything else is immutable and must already match its committed SHA-256.
+    """
+    managed = set(APPEND_ONLY_FAMILY_SEEDS)
+    preserved: dict[str, str] = {}
+
+    for relative, expected_hash in sorted(data["files"].items()):
+        rel = Path(relative)
+
+        if (
+            rel.is_absolute()
+            or ".." in rel.parts
+            or len(rel.parts) != 2
+        ):
+            raise SystemExit(
+                f"ERROR: unsafe fixture path in manifest: {relative!r}"
+            )
+
+        if rel.parts[0] in managed:
+            continue
+
+        path = OUT / rel
+        if not path.is_file():
+            raise SystemExit(
+                f"ERROR: immutable fixture is missing: {relative}"
+            )
+
+        actual_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+        if actual_hash != expected_hash:
+            raise SystemExit(
+                "ERROR: immutable fixture hash mismatch: "
+                f"{relative}: expected {expected_hash}, got {actual_hash}"
+            )
+
+        preserved[relative] = expected_hash
+
+    actual_preserved = set()
+    for path in OUT.rglob("*.json"):
+        if path == OUT / "manifest.json":
+            continue
+
+        rel = path.relative_to(OUT)
+        if len(rel.parts) != 2:
+            raise SystemExit(
+                f"ERROR: unexpected fixture layout: {rel}"
+            )
+
+        if rel.parts[0] in managed:
+            continue
+
+        actual_preserved.add(str(rel))
+
+    if actual_preserved != set(preserved):
+        missing = sorted(set(preserved) - actual_preserved)
+        unlisted = sorted(actual_preserved - set(preserved))
+        raise SystemExit(
+            "ERROR: immutable fixture inventory mismatch: "
+            f"missing={missing}, unlisted={unlisted}"
+        )
+
+    return preserved
+
+
+def manifest(files: dict[str, str], actual_commit: str) -> None:
+    m = {
+        "pytorch": {
+            "version": torch.__version__,
+            "source_commit": actual_commit,
+        },
+        "generator": "docs/tensor-parity/provenance/generate_fixtures.py",
+        "seed": SEED,
+        "append_only_seeds": APPEND_ONLY_FAMILY_SEEDS,
+        "generation_mode": "immutable-history+append-only",
+        "dtype": "f32",
+        "files": files,
+    }
     (OUT / "manifest.json").write_text(json.dumps(m, sort_keys=True, indent=2) + "\n")
-    print(f"  manifest: {len(files)} files, sha256 recorded")
+    print(
+        f"  manifest: {len(files)} total files; "
+        f"{len(GENERATED_FILES)} append-only files regenerated"
+    )
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--torch-bin", default=None, help="path to the baseline interpreter (informational)")
-    ap.add_argument("--families",
-                    default="elementwise,reductions,normalization,shape,linear,loss,norm_affine,reduction_extra,unary_extra,special,shape_extra,indexing,linear_extra,norm_stoch,positional,attention,quantization,conversion,convolution")
-    args = ap.parse_args()
-    import_torch(args.torch_bin)
+    ap.parse_args()
 
-    ver = tuple(int(p) for p in torch.__version__.split("+")[0].split("."))
-    if ver[:3] != MIN_TORCH:
-        raise SystemExit(
-            f"ERROR: baseline must be 2.13.0, got {torch.__version__}. "
-            "Refusing to generate non-baseline fixtures.")
+    actual_commit = verify_baseline_identity()
+
+    global VERIFIED_BASELINE_COMMIT
+    VERIFIED_BASELINE_COMMIT = actual_commit
+    GENERATED_FILES.clear()
+
+    existing_manifest = load_existing_manifest()
+    preserved_files = verify_preserved_manifest_files(existing_manifest)
 
     with open(REGISTRY, "rb") as fh:
         registry = tomllib.load(fh)
     allowed = {op["name"] for op in registry["operator"]}
 
-    gen = torch.Generator().manual_seed(SEED)
-    families = [f for f in args.families.split(",") if f]
-    for fam in families:
-        fam_dir = OUT / fam
-        if fam == "elementwise":
-            gen_elementwise(gen, fam_dir)
-        elif fam == "reductions":
-            gen_reductions(gen, fam_dir)
-        elif fam == "normalization":
-            gen_normalization(gen, fam_dir)
-        elif fam == "shape":
-            gen_shape(gen, fam_dir)
-        elif fam == "linear":
-            gen_linear(gen, fam_dir)
-        elif fam == "loss":
-            gen_loss(gen, fam_dir)
-        elif fam == "norm_affine":
-            gen_norm_affine(gen, OUT / "normalization")
-        elif fam == "reduction_extra":
-            gen_reduction_extra(gen, OUT / "reductions")
-        elif fam == "unary_extra":
-            gen_unary_extra(gen, OUT / "elementwise")
-        elif fam == "special":
-            gen_special(gen, OUT / "special")
-        elif fam == "shape_extra":
-            gen_shape_extra(gen, OUT / "shape")
-        elif fam == "indexing":
-            gen_indexing(gen, OUT / "indexing")
-        elif fam == "linear_extra":
-            gen_linear_extra(gen, OUT / "linear")
-        elif fam == "norm_stoch":
-            gen_norm_stoch(gen, OUT / "normalization")
-        elif fam == "positional":
-            gen_positional(gen, OUT / "positional")
-        elif fam == "attention":
-            gen_attention(gen, OUT / "attention")
-        elif fam == "quantization":
-            gen_quantization(gen, OUT / "quantization")
-        elif fam == "conversion":
-            gen_conversion(gen, OUT / "conversion")
-        elif fam == "convolution":
-            gen_convolution(gen, OUT / "convolution")
-        elif fam == "linalg":
-            gen_linalg(gen, OUT / "linalg")
-        elif fam == "sparse":
-            gen_sparse(gen, OUT / "sparse")
-        elif fam == "einsum":
-            gen_einsum(gen, OUT / "einsum")
+    # Only append-only families are executable. Historical generator functions
+    # remain in this file for provenance/auditability but are unreachable here.
+    for family, family_seed in APPEND_ONLY_FAMILY_SEEDS.items():
+        gen = torch.Generator().manual_seed(family_seed)
+
+        if family == "elementwise_broadcast":
+            gen_elementwise_broadcast(
+                gen,
+                OUT / "elementwise_broadcast",
+            )
         else:
-            raise SystemExit(f"unknown family {fam}")
-    # Scan global : le manifest reflète toujours exactement le disque
-    # (déterministe ; les runs partiels dérivent les VALEURS — toujours
-    # régénérer la liste complète — mais le manifest ne ment jamais).
-    files: dict[str, str] = {}
-    for p in sorted(OUT.glob("*/*.json")):
-        if p.name in ("manifest.json",):
-            continue
-        opname = p.stem
-        if opname not in allowed:
-            print(f"WARN: {opname} not in registry; skipping hash entry")
-            continue
-        files[str(p.relative_to(OUT))] = hashlib.sha256(p.read_bytes()).hexdigest()
-    manifest(files)
+            raise SystemExit(
+                f"ERROR: unimplemented append-only family {family!r}"
+            )
+
+    generated_files = build_manifest_files(GENERATED_FILES, allowed)
+
+    files = dict(preserved_files)
+    files.update(generated_files)
+
+    manifest(files, actual_commit)
     return 0
 
 

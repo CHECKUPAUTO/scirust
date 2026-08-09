@@ -1596,21 +1596,28 @@ pub fn cat2(a: &TensorND, b: &TensorND, dim: usize) -> Result<TensorND> {
         }
     }
     let mut out_shape = a.shape.clone();
-    out_shape[dim] = a.shape[dim] + b.shape[dim];
+    out_shape[dim] = a.shape[dim]
+        .checked_add(b.shape[dim])
+        .ok_or_else(|| SciRustError::InvalidConfig("parity::cat2: shape overflow".into()))?;
     let mut out = vec![0.0f32; checked_prod(&out_shape)?];
-    for (src, start) in [(&a.data, 0usize), (&b.data, a.shape[dim])]
+    let out_strides = row_strides(&out_shape);
+
+    for (src, src_shape, start) in [
+        (a.data.as_ref(), a.shape.as_slice(), 0usize),
+        (b.data.as_ref(), b.shape.as_slice(), a.shape[dim]),
+    ]
     {
         let mut coords = vec![0usize; 2];
-        for i in 0..src.len()
+        for (i, &value) in src.iter().enumerate()
         {
             let mut rem = i;
             for d in (0..2).rev()
             {
-                coords[d] = rem % a.shape[d];
-                rem /= a.shape[d];
+                coords[d] = rem % src_shape[d];
+                rem /= src_shape[d];
             }
             coords[dim] += start;
-            out[linear_off(&out_shape, &coords, &row_strides(&out_shape))] = src[i];
+            out[linear_off(&out_shape, &coords, &out_strides)] = value;
         }
     }
     Ok(TensorND::new(out, out_shape))
@@ -2455,8 +2462,15 @@ pub fn conv1d(x: &TensorND, w: &TensorND, b: &TensorND) -> Result<TensorND> {
             got: (1, w.shape[1]),
         });
     }
+    if k == 0 || k > l
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::conv1d: kernel {k} incompatible with input length {l}"
+        )));
+    }
     let ol = l - k + 1;
-    let mut out = vec![0.0f32; b_ * cout * ol];
+    let out_shape = vec![b_, cout, ol];
+    let mut out = vec![0.0f32; checked_prod(&out_shape)?];
     for b_i in 0..b_
     {
         for co in 0..cout
@@ -2476,7 +2490,7 @@ pub fn conv1d(x: &TensorND, w: &TensorND, b: &TensorND) -> Result<TensorND> {
             }
         }
     }
-    Ok(TensorND::new(out, vec![b_, cout, ol]))
+    Ok(TensorND::new(out, out_shape))
 }
 
 /// Gradient conv1d : (gx, gw, gb).
@@ -2485,12 +2499,61 @@ pub fn d_conv1d(
     x: &TensorND,
     w: &TensorND,
 ) -> Result<(TensorND, TensorND, TensorND)> {
+    if x.ndim() != 3
+    {
+        return Err(SciRustError::RankMismatch {
+            op: "parity::d_conv1d",
+            expected: 3,
+            got: x.ndim(),
+        });
+    }
+    if w.ndim() != 3
+    {
+        return Err(SciRustError::RankMismatch {
+            op: "parity::d_conv1d",
+            expected: 3,
+            got: w.ndim(),
+        });
+    }
+    if gout.ndim() != 3
+    {
+        return Err(SciRustError::RankMismatch {
+            op: "parity::d_conv1d",
+            expected: 3,
+            got: gout.ndim(),
+        });
+    }
+
     let (b_, cin, l) = (x.shape[0], x.shape[1], x.shape[2]);
-    let (cout, _, k) = (w.shape[0], w.shape[1], w.shape[2]);
+    let (cout, w_cin, k) = (w.shape[0], w.shape[1], w.shape[2]);
+
+    if w_cin != cin
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::d_conv1d: weight input channels {w_cin} != input channels {cin}"
+        )));
+    }
+    if k == 0 || k > l
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::d_conv1d: kernel {k} incompatible with input length {l}"
+        )));
+    }
+
     let ol = l - k + 1;
-    let mut gx = vec![0.0f32; x.numel()];
-    let mut gw = vec![0.0f32; w.numel()];
+    let expected_gout_shape = [b_, cout, ol];
+    if gout.shape.as_slice() != expected_gout_shape
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::d_conv1d: gout shape {:?}, expected {:?}",
+            gout.shape, expected_gout_shape
+        )));
+    }
+
+    let mut gx = vec![0.0f32; checked_prod(&x.shape)?];
+    let mut gw = vec![0.0f32; checked_prod(&w.shape)?];
     let mut gb = vec![0.0f32; cout];
+
     for b_i in 0..b_
     {
         for co in 0..cout
@@ -2511,6 +2574,7 @@ pub fn d_conv1d(
             }
         }
     }
+
     Ok((
         TensorND::new(gx, x.shape.clone()),
         TensorND::new(gw, w.shape.clone()),
@@ -2539,8 +2603,15 @@ pub fn conv2d(x: &TensorND, w: &TensorND, b: &TensorND) -> Result<TensorND> {
             got: (1, w.shape[1]),
         });
     }
+    if kh == 0 || kw == 0 || kh > h || kw > wd
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::conv2d: kernel ({kh}, {kw}) incompatible with input ({h}, {wd})"
+        )));
+    }
     let (oh, ow) = (h - kh + 1, wd - kw + 1);
-    let mut out = vec![0.0f32; b_ * cout * oh * ow];
+    let out_shape = vec![b_, cout, oh, ow];
+    let mut out = vec![0.0f32; checked_prod(&out_shape)?];
     for b_i in 0..b_
     {
         for co in 0..cout
@@ -2566,7 +2637,7 @@ pub fn conv2d(x: &TensorND, w: &TensorND, b: &TensorND) -> Result<TensorND> {
             }
         }
     }
-    Ok(TensorND::new(out, vec![b_, cout, oh, ow]))
+    Ok(TensorND::new(out, out_shape))
 }
 
 /// Gradient conv2d : (gx, gw, gb).
@@ -2575,12 +2646,61 @@ pub fn d_conv2d(
     x: &TensorND,
     w: &TensorND,
 ) -> Result<(TensorND, TensorND, TensorND)> {
+    if x.ndim() != 4
+    {
+        return Err(SciRustError::RankMismatch {
+            op: "parity::d_conv2d",
+            expected: 4,
+            got: x.ndim(),
+        });
+    }
+    if w.ndim() != 4
+    {
+        return Err(SciRustError::RankMismatch {
+            op: "parity::d_conv2d",
+            expected: 4,
+            got: w.ndim(),
+        });
+    }
+    if gout.ndim() != 4
+    {
+        return Err(SciRustError::RankMismatch {
+            op: "parity::d_conv2d",
+            expected: 4,
+            got: gout.ndim(),
+        });
+    }
+
     let (b_, cin, h, wd) = (x.shape[0], x.shape[1], x.shape[2], x.shape[3]);
-    let (cout, _, kh, kw) = (w.shape[0], w.shape[1], w.shape[2], w.shape[3]);
+    let (cout, w_cin, kh, kw) = (w.shape[0], w.shape[1], w.shape[2], w.shape[3]);
+
+    if w_cin != cin
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::d_conv2d: weight input channels {w_cin} != input channels {cin}"
+        )));
+    }
+    if kh == 0 || kw == 0 || kh > h || kw > wd
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::d_conv2d: kernel ({kh}, {kw}) incompatible with input ({h}, {wd})"
+        )));
+    }
+
     let (oh, ow) = (h - kh + 1, wd - kw + 1);
-    let mut gx = vec![0.0f32; x.numel()];
-    let mut gw = vec![0.0f32; w.numel()];
+    let expected_gout_shape = [b_, cout, oh, ow];
+    if gout.shape.as_slice() != expected_gout_shape
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::d_conv2d: gout shape {:?}, expected {:?}",
+            gout.shape, expected_gout_shape
+        )));
+    }
+
+    let mut gx = vec![0.0f32; checked_prod(&x.shape)?];
+    let mut gw = vec![0.0f32; checked_prod(&w.shape)?];
     let mut gb = vec![0.0f32; cout];
+
     for b_i in 0..b_
     {
         for co in 0..cout
@@ -2608,6 +2728,7 @@ pub fn d_conv2d(
             }
         }
     }
+
     Ok((
         TensorND::new(gx, x.shape.clone()),
         TensorND::new(gw, w.shape.clone()),
@@ -2760,12 +2881,57 @@ pub fn avg_pool2d(x: &TensorND, k: usize, stride: usize) -> Result<TensorND> {
 }
 
 /// Gradient avg_pool2d : gout/k² redistribué à chaque position de fenêtre.
-pub fn d_avg_pool2d(gout: &TensorND, k: usize, stride: usize) -> Result<TensorND> {
-    let (b_, c, oh, ow) = (gout.shape[0], gout.shape[1], gout.shape[2], gout.shape[3]);
-    let h = (oh - 1) * stride + k;
-    let wd = (ow - 1) * stride + k;
-    let mut gx = vec![0.0f32; b_ * c * h * wd];
-    let inv = 1.0 / (k * k) as f32;
+///
+/// `x_shape` est obligatoire : la forme de `gout` ne permet pas de retrouver
+/// une bordure d'entrée ignorée par le forward lorsque le dernier pas est
+/// incomplet.
+pub fn d_avg_pool2d(
+    gout: &TensorND,
+    x_shape: &[usize],
+    k: usize,
+    stride: usize,
+) -> Result<TensorND> {
+    if gout.ndim() != 4
+    {
+        return Err(SciRustError::RankMismatch {
+            op: "parity::d_avg_pool2d",
+            expected: 4,
+            got: gout.ndim(),
+        });
+    }
+    if x_shape.len() != 4
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::d_avg_pool2d: x_shape rank {}, expected 4",
+            x_shape.len()
+        )));
+    }
+
+    let (b_, c, h, wd) = (x_shape[0], x_shape[1], x_shape[2], x_shape[3]);
+    if k == 0 || stride == 0 || k > h || k > wd
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::d_avg_pool2d: k {k}, stride {stride}, H {h}, W {wd}"
+        )));
+    }
+
+    let oh = (h - k) / stride + 1;
+    let ow = (wd - k) / stride + 1;
+    let expected_gout_shape = [b_, c, oh, ow];
+    if gout.shape.as_slice() != expected_gout_shape
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::d_avg_pool2d: gout shape {:?}, expected {:?}",
+            gout.shape, expected_gout_shape
+        )));
+    }
+
+    let mut gx = vec![0.0f32; checked_prod(x_shape)?];
+    let area = k.checked_mul(k).ok_or_else(|| {
+        SciRustError::InvalidConfig("parity::d_avg_pool2d: kernel overflow".into())
+    })?;
+    let inv = 1.0 / area as f32;
+
     for b_i in 0..b_
     {
         for c_i in 0..c
@@ -2787,17 +2953,32 @@ pub fn d_avg_pool2d(gout: &TensorND, k: usize, stride: usize) -> Result<TensorND
             }
         }
     }
-    Ok(TensorND::new(gx, vec![b_, c, h, wd]))
+
+    Ok(TensorND::new(gx, x_shape.to_vec()))
 }
 
 /// Cholesky inférieur (2-D carrée f32) : A = L·Lᵀ, méthode de Cholesky classique.
 pub fn cholesky(a: &TensorND) -> Result<TensorND> {
-    let n = a.shape[0];
-    if a.shape.len() != 2 || a.shape[1] != n
+    if a.ndim() != 2
     {
-        return Err("cholesky: attend une matrice carrée 2-D".into());
+        return Err(SciRustError::RankMismatch {
+            op: "parity::cholesky",
+            expected: 2,
+            got: a.ndim(),
+        });
     }
-    let mut l = vec![0.0f32; n * n];
+    let n = a.shape[0];
+    if a.shape[1] != n
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::cholesky: expected square matrix, got {:?}",
+            a.shape
+        )));
+    }
+    let nn = n
+        .checked_mul(n)
+        .ok_or_else(|| SciRustError::InvalidConfig("parity::cholesky: shape overflow".into()))?;
+    let mut l = vec![0.0f32; nn];
     for j in 0..n
     {
         let mut s = a.data[j * n + j];
@@ -2825,6 +3006,48 @@ pub fn cholesky(a: &TensorND) -> Result<TensorND> {
 
 /// spmv CSR f64 : y = A·x (A csr 2-D, x vecteur).
 pub fn spmv_csr(rowptr: &[usize], colidx: &[usize], values: &[f64], x: &[f64]) -> Result<Vec<f64>> {
+    if rowptr.is_empty()
+    {
+        return Err(SciRustError::InvalidConfig(
+            "parity::spmv_csr: rowptr must contain at least one element".into(),
+        ));
+    }
+    if rowptr[0] != 0
+    {
+        return Err(SciRustError::InvalidConfig(
+            "parity::spmv_csr: rowptr must start at zero".into(),
+        ));
+    }
+    if colidx.len() != values.len()
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::spmv_csr: colidx len {} != values len {}",
+            colidx.len(),
+            values.len()
+        )));
+    }
+    if rowptr.windows(2).any(|w| w[0] > w[1])
+    {
+        return Err(SciRustError::InvalidConfig(
+            "parity::spmv_csr: rowptr must be monotonic".into(),
+        ));
+    }
+    if rowptr.last().copied() != Some(values.len())
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::spmv_csr: rowptr end {:?} != nnz {}",
+            rowptr.last(),
+            values.len()
+        )));
+    }
+    if let Some(&j) = colidx.iter().find(|&&j| j >= x.len())
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::spmv_csr: column index {j} out of bounds for x len {}",
+            x.len()
+        )));
+    }
+
     let n = rowptr.len() - 1;
     let mut y = vec![0.0f64; n];
     for i in 0..n
@@ -2847,8 +3070,74 @@ pub fn spmm_csr(
     b: &[f64],
     k: usize,
 ) -> Result<Vec<f64>> {
+    if rowptr.is_empty()
+    {
+        return Err(SciRustError::InvalidConfig(
+            "parity::spmm_csr: rowptr must contain at least one element".into(),
+        ));
+    }
+    if rowptr[0] != 0
+    {
+        return Err(SciRustError::InvalidConfig(
+            "parity::spmm_csr: rowptr must start at zero".into(),
+        ));
+    }
+    if colidx.len() != values.len()
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::spmm_csr: colidx len {} != values len {}",
+            colidx.len(),
+            values.len()
+        )));
+    }
+    if rowptr.windows(2).any(|w| w[0] > w[1])
+    {
+        return Err(SciRustError::InvalidConfig(
+            "parity::spmm_csr: rowptr must be monotonic".into(),
+        ));
+    }
+    if rowptr.last().copied() != Some(values.len())
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::spmm_csr: rowptr end {:?} != nnz {}",
+            rowptr.last(),
+            values.len()
+        )));
+    }
+
+    if k == 0
+    {
+        if !b.is_empty()
+        {
+            return Err(SciRustError::InvalidConfig(
+                "parity::spmm_csr: dense RHS must be empty when k is zero".into(),
+            ));
+        }
+    }
+    else
+    {
+        if b.len().checked_rem(k) != Some(0)
+        {
+            return Err(SciRustError::InvalidConfig(format!(
+                "parity::spmm_csr: dense RHS len {} is not divisible by k {k}",
+                b.len()
+            )));
+        }
+        let b_rows = b.len() / k;
+        if let Some(&j) = colidx.iter().find(|&&j| j >= b_rows)
+        {
+            return Err(SciRustError::InvalidConfig(format!(
+                "parity::spmm_csr: column index {j} out of bounds for dense RHS rows {b_rows}"
+            )));
+        }
+    }
+
     let n = rowptr.len() - 1;
-    let mut y = vec![0.0f64; n * k];
+    let out_len = n.checked_mul(k).ok_or_else(|| {
+        SciRustError::InvalidConfig("parity::spmm_csr: output shape overflow".into())
+    })?;
+    let mut y = vec![0.0f64; out_len];
+
     for i in 0..n
     {
         for p in rowptr[i]..rowptr[i + 1]
@@ -2861,15 +3150,34 @@ pub fn spmm_csr(
             }
         }
     }
+
     Ok(y)
 }
 
 /// solve LU f64 avec pivot partiel : A·x = b (2-D), b colonne ou (n,k).
-pub fn lu_solve_f64(a: &[f64], b: &[f64], n: usize, k: usize) -> Result<Vec<f64>> {
-    if a.len() != n * n
+pub fn solve_f64(a: &[f64], b: &[f64], n: usize, k: usize) -> Result<Vec<f64>> {
+    let nn = n
+        .checked_mul(n)
+        .ok_or_else(|| SciRustError::InvalidConfig("parity::solve_f64: A shape overflow".into()))?;
+    if a.len() != nn
     {
-        return Err("lu_solve: A doit être (n,n)".into());
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::solve_f64: A len {} incompatible with ({n}, {n})",
+            a.len()
+        )));
     }
+
+    let nk = n.checked_mul(k).ok_or_else(|| {
+        SciRustError::InvalidConfig("parity::solve_f64: RHS shape overflow".into())
+    })?;
+    if b.len() != nk
+    {
+        return Err(SciRustError::InvalidConfig(format!(
+            "parity::solve_f64: RHS len {} incompatible with ({n}, {k})",
+            b.len()
+        )));
+    }
+
     let mut lu = a.to_vec();
     let mut piv: Vec<usize> = (0..n).collect();
     for col in 0..n
@@ -2886,7 +3194,7 @@ pub fn lu_solve_f64(a: &[f64], b: &[f64], n: usize, k: usize) -> Result<Vec<f64>
         }
         if bv == 0.0
         {
-            return Err("lu_solve: matrice singulière".into());
+            return Err("solve: matrice singulière".into());
         }
         if best != col
         {
@@ -2999,11 +3307,7 @@ pub fn einsum(spec: &str, ops: &[&TensorND]) -> Result<TensorND> {
             }
         }
     }
-    let mut out_shape: Vec<usize> = out_spec.iter().map(|l| dims[l]).collect();
-    if out_shape.is_empty()
-    {
-        out_shape.push(1);
-    }
+    let out_shape: Vec<usize> = out_spec.iter().map(|l| dims[l]).collect();
     let strides: Vec<Vec<usize>> = ops
         .iter()
         .map(|t| {

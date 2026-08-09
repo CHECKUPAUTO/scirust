@@ -80,7 +80,21 @@ arithmetic, structured errors, reproducible autograd).
 
 ## Acceptance criteria (per claim)
 
-A coverage cell is only marked `parity` when, in the CI harness:
+`impls` records implementations that exist; it is not evidence by itself.
+`verified_impls` records the exact production implementations exercised by a
+direct differential proof. Implementations in `impls` but not in
+`verified_impls` remain experimental. An operator row remains `experimental`
+while only a subset of its implementation cells is verified; row-level
+`parity` means every implementation listed in `impls` is directly verified.
+
+`reference_impl` identifies the independent reference implementation used to
+exercise the frozen witness, and `reference_verified` records that reference
+proof's harness, fixtures, and date. These fields establish **reference parity**
+only: they MUST NOT populate `verified_impls` or upgrade a production
+implementation (`2d`, `nd`, `core`, `simd`, `gpu`, `cuda`, `sparse`) to
+production `parity`.
+
+A production coverage cell is only marked `parity` when, in the CI harness:
 
 1. a differential test runs against a PyTorch 2.13.0 witness for that row
    (generated offline, committed as a fixture — CI does not run Python),

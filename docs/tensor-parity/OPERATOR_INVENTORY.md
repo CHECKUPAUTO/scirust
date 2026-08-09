@@ -124,6 +124,9 @@ file is the human explanation.
   differential tests** against CPU or against each other.
 - Reductions, matmul and softmax each have **3+ independent implementations**
   (CPU-2D, SIMD, GPU, CUDA) — see `DUPLICATION_MAP.md`.
-- The registry `tensor-operators.toml` assigns each PyTorch operator (from the
-  frozen baseline inventory) to a SciRust implementation or to `missing`, with
-  per-row dtype/layout/device/autograd/tolerance metadata.
+- The registry `tensor-operators.toml` records which SciRust implementations
+  exist for each PyTorch operator, with per-row dtype/layout/device/autograd/
+  tolerance metadata. `impls` is inventory only.
+- Differential evidence from `scirust_core::tensor::parity` is tracked
+  separately as reference parity. It does not prove the 2D/ND/SIMD/GPU/CUDA/
+  sparse implementation until the harness calls that implementation directly.
