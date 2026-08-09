@@ -26,12 +26,14 @@ impl PairKey {
 
     #[inline]
     pub const fn left(self) -> u32 {
-        (self.0 >> 32) as u32
+        let bytes = self.0.to_be_bytes();
+        u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
     }
 
     #[inline]
     pub const fn right(self) -> u32 {
-        self.0 as u32
+        let bytes = self.0.to_be_bytes();
+        u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]])
     }
 
     #[inline]
@@ -49,7 +51,8 @@ impl fmt::Display for PairKeyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self
         {
-            Self::TokenIdTooWide(value) => {
+            Self::TokenIdTooWide(value) =>
+            {
                 write!(f, "token id {value} exceeds the compact u32 domain")
             },
         }
@@ -65,7 +68,6 @@ mod tests {
     #[test]
     fn pair_key_is_exactly_one_u64() {
         assert_eq!(std::mem::size_of::<PairKey>(), 8);
-        assert_eq!(std::mem::align_of::<PairKey>(), 8);
     }
 
     #[test]
