@@ -9,7 +9,9 @@
 //! implementation.
 
 use super::VariationalCircuit;
-use crate::autodiff::reverse::{Tensor, Var};
+use crate::autodiff::reverse::{Tape, Tensor, Var};
+use crate::error::{Result as SciRustResult, SciRustError};
+use crate::nn::module::Module;
 use crate::quantum::{Observable, QuantumError, QuantumResult};
 
 /// One real coefficient multiplying a Pauli-product observable.
@@ -94,7 +96,8 @@ impl Hamiltonian {
 /// Coefficients are stored as an `observable_count × hamiltonian_count` matrix,
 /// so an input `[batch, observable_count]` expectation tensor projects directly
 /// to `[batch, hamiltonian_count]` through the existing reverse-mode matrix
-/// multiplication node.
+/// multiplication node. The readout is also a stateless [`Module`]: its fixed
+/// coefficients are problem-definition data, not trainable parameters.
 #[derive(Debug, Clone)]
 pub struct HamiltonianReadout {
     observables: Vec<Observable>,
@@ -234,6 +237,32 @@ impl HamiltonianReadout {
     }
 }
 
+impl Module for HamiltonianReadout {
+    fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t> {
+        self.try_forward(tape, input)
+            .expect("HamiltonianReadout::forward received an invalid expectation tensor")
+    }
+
+    fn try_forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> SciRustResult<Var<'t>> {
+        if !std::ptr::eq(input.tape, tape)
+        {
+            return Err(SciRustError::InvalidConfig(
+                "VQNet Hamiltonian readout input belongs to a different autodiff tape".to_string(),
+            ));
+        }
+
+        self.apply(input).map_err(|error| {
+            SciRustError::InvalidConfig(format!("VQNet Hamiltonian readout: {error}"))
+        })
+    }
+
+    fn parameter_indices(&self) -> Vec<usize> {
+        Vec::new()
+    }
+
+    fn sync(&mut self, _tape: &Tape) {}
+}
+
 fn observables_equivalent(left: &Observable, right: &Observable) -> bool {
     left.terms().len() == right.terms().len()
         && left.terms().iter().all(|left_term| {
@@ -247,9 +276,14 @@ fn observables_equivalent(left: &Observable, right: &Observable) -> bool {
 mod tests {
     use super::*;
     use crate::autodiff::reverse::{Tape, Tensor};
+    use crate::nn::init::Zeros;
+    use crate::nn::linear::Linear;
+    use crate::nn::rng::PcgEngine;
+    use crate::nn::sequential::Sequential;
     use crate::quantum::{Pauli, PauliTerm};
     use crate::vqnet::{
-        EntanglementTopology, EntanglingGate, RotationAxis, VariationalCircuitBuilder,
+        EntanglementTopology, EntanglingGate, ParameterInitializer, QuantumModule, RotationAxis,
+        VariationalCircuitBuilder,
     };
 
     const TOLERANCE: f32 = 4.0e-5;
@@ -372,6 +406,82 @@ mod tests {
             assert!((feature_gradient[sample] - expected).abs() <= TOLERANCE);
         }
         assert!((parameter_gradient[0] - expected_parameter_gradient).abs() <= TOLERANCE);
+    }
+
+    #[test]
+    fn readout_is_stateless_module_inside_hybrid_sequential() {
+        let mut builder = VariationalCircuitBuilder::new(2).unwrap();
+        builder.angle_encoding(RotationAxis::Y, &[0, 1]).unwrap();
+        builder
+            .variational_ansatz(
+                1,
+                &[RotationAxis::Y],
+                EntanglementTopology::None,
+                EntanglingGate::Cnot,
+            )
+            .unwrap();
+        builder.measure_all_z().unwrap();
+        let circuit = builder.build().unwrap();
+
+        let first = Hamiltonian::new(vec![
+            HamiltonianTerm::new(0.5, Observable::z(0)).unwrap(),
+            HamiltonianTerm::new(0.25, Observable::z(1)).unwrap(),
+        ])
+        .unwrap();
+        let second = Hamiltonian::with_offset(
+            vec![
+                HamiltonianTerm::new(-0.75, Observable::z(0)).unwrap(),
+                HamiltonianTerm::new(0.4, Observable::z(1)).unwrap(),
+            ],
+            0.1,
+        )
+        .unwrap();
+        let readout = circuit.hamiltonian_readout(&[first, second]).unwrap();
+        let quantum = QuantumModule::new(circuit, ParameterInitializer::Constant(0.2)).unwrap();
+
+        let mut rng = PcgEngine::new(41);
+        let mut linear = Linear::new(2, 1, &Zeros, &Zeros, &mut rng);
+        linear.weight = Tensor::from_vec(vec![1.0, -1.0], 2, 1);
+        linear.bias = Tensor::from_vec(vec![0.0], 1, 1);
+
+        let mut model = Sequential::new().add(quantum).add(readout).add(linear);
+        let tape = Tape::new();
+        let input = tape.input(Tensor::from_vec(vec![0.2, -0.4], 1, 2));
+        let output = model.forward(&tape, input);
+
+        assert_eq!(output.shape(), (1, 1));
+        let parameter_indices = model.parameter_indices();
+        assert_eq!(parameter_indices.len(), 3);
+
+        output.sum().backward();
+        let quantum_gradient = tape.grad(parameter_indices[0]);
+        assert_eq!(quantum_gradient.shape(), (1, 2));
+        assert!(
+            quantum_gradient
+                .data
+                .iter()
+                .any(|value| value.abs() > 1.0e-5)
+        );
+
+        let state = model.state_dict();
+        assert!(state.contains_key("0.parameters"));
+        assert!(!state.keys().any(|key| key.starts_with("1.")));
+        assert!(state.contains_key("2.weight"));
+        assert!(state.contains_key("2.bias"));
+    }
+
+    #[test]
+    fn module_rejects_input_from_a_different_tape() {
+        let hamiltonian =
+            Hamiltonian::new(vec![HamiltonianTerm::new(1.0, Observable::z(0)).unwrap()]).unwrap();
+        let mut readout =
+            HamiltonianReadout::from_observables(&[Observable::z(0)], &[hamiltonian]).unwrap();
+        let input_tape = Tape::new();
+        let module_tape = Tape::new();
+        let input = input_tape.input(Tensor::from_vec(vec![0.3], 1, 1));
+
+        let error = Module::try_forward(&mut readout, &module_tape, input).unwrap_err();
+        assert_eq!(error.code(), "E_CONFIG");
     }
 
     #[test]
