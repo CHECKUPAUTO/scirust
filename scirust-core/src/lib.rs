@@ -108,6 +108,7 @@ pub mod homomorphic;
 pub mod lazy;
 pub mod quantization;
 pub mod quantum;
+pub mod vqnet;
 pub mod xai;
 
 pub mod amp;
