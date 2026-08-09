@@ -29,36 +29,36 @@ jobs:
           rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt --component clippy
           rustup toolchain install 1.89.0 --profile minimal
 
-      - name: Apply asserted Heap CSR patch
+      - name: Apply signature-based Heap CSR patch
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
           heap = Path("scirust-sciagent/src/elastic_heap.rs")
           text = heap.read_text()
-          old_import = '''use crate::elastic_id::{
-              COMPACT_INDEX_INACTIVE, COMPACT_INDEX_NONE, PackedRule, PairKey, PriorityKey, try_compact_index,
-          };
-          use crate::elastic_tokenizer::{DuplicateMergeRule, TokenId};
-          '''
-          new_import = '''use crate::elastic_id::{
-              COMPACT_INDEX_INACTIVE, COMPACT_INDEX_NONE, PackedRule, PriorityKey, try_compact_index,
-          };
-          use crate::elastic_rule_table::AdaptivePackedRuleTable;
-          use crate::elastic_tokenizer::{DuplicateMergeRule, TokenId};
-          '''
-          if old_import not in text:
-              raise SystemExit("Heap import anchor missing")
-          text = text.replace(old_import, new_import, 1)
+
+          old = "PackedRule, PairKey, PriorityKey, try_compact_index,"
+          if text.count(old) != 1:
+              raise SystemExit(f"expected one Heap PairKey import, found {text.count(old)}")
+          text = text.replace(old, "PackedRule, PriorityKey, try_compact_index,", 1)
+
+          token_import = "use crate::elastic_tokenizer::{DuplicateMergeRule, TokenId};"
+          if text.count(token_import) != 1:
+              raise SystemExit("Heap tokenizer import anchor missing or ambiguous")
           text = text.replace(
-              "    Compact(BTreeMap<PairKey, PackedRule>),",
-              "    Compact(AdaptivePackedRuleTable),",
+              token_import,
+              "use crate::elastic_rule_table::AdaptivePackedRuleTable;\n" + token_import,
               1,
           )
 
+          variant = "    Compact(BTreeMap<PairKey, PackedRule>),"
+          if text.count(variant) != 1:
+              raise SystemExit("Heap compact RuleTable variant anchor missing or ambiguous")
+          text = text.replace(variant, "    Compact(AdaptivePackedRuleTable),", 1)
+
           start = text.index("    fn from_ordered_merges(")
           end = text.index("    fn is_empty(&self)", start)
-          new_constructor = '''    fn from_ordered_merges(
+          text = text[:start] + '''    fn from_ordered_merges(
               merges: &[(TokenId, TokenId, TokenId)],
           ) -> Result<Self, DuplicateMergeRule> {
               if let Some(rules) = AdaptivePackedRuleTable::try_from_ordered_merges(merges)?
@@ -79,40 +79,23 @@ jobs:
               Ok(Self::Wide(ranked))
           }
 
-          '''
-          text = text[:start] + new_constructor + text[end:]
+          ''' + text[end:]
 
-          old_compact = '''    fn get_compact(&self, left: u32, right: u32) -> Option<PackedRule> {
-              match self
-              {
-                  Self::Compact(rules) => rules.get(&PairKey::new(left, right)).copied(),
-                  Self::Wide(_) => None,
-              }
-          }
-          '''
-          new_compact = '''    fn get_compact(&self, left: u32, right: u32) -> Option<PackedRule> {
+          start = text.index("    fn get_compact(&self")
+          end = text.index("    fn get(&self, left: TokenId", start)
+          text = text[:start] + '''    fn get_compact(&self, left: u32, right: u32) -> Option<PackedRule> {
               match self
               {
                   Self::Compact(rules) => rules.get(left, right),
                   Self::Wide(_) => None,
               }
           }
-          '''
-          if old_compact not in text:
-              raise SystemExit("Heap compact lookup anchor missing")
-          text = text.replace(old_compact, new_compact, 1)
 
-          old_wide_adapter = '''            Self::Compact(rules) =>
-              {
-                  let key = PairKey::try_from_usize(left, right).ok()?;
-                  let rule = rules.get(&key)?;
-                  Some(HeapRule {
-                      output: usize::try_from(rule.output()).ok()?,
-                      rank: usize::try_from(rule.rank()).ok()?,
-                  })
-              },
-          '''
-          new_wide_adapter = '''            Self::Compact(rules) =>
+          ''' + text[end:]
+
+          compact_arm = text.index("            Self::Compact(rules) =>", text.index("    fn get(&self, left: TokenId"))
+          wide_arm = text.index("            Self::Wide(rules) =>", compact_arm)
+          text = text[:compact_arm] + '''            Self::Compact(rules) =>
               {
                   let left = u32::try_from(left).ok()?;
                   let right = u32::try_from(right).ok()?;
@@ -122,47 +105,25 @@ jobs:
                       rank: usize::try_from(rule.rank()).ok()?,
                   })
               },
-          '''
-          if old_wide_adapter not in text:
-              raise SystemExit("Heap wide adapter anchor missing")
-          text = text.replace(old_wide_adapter, new_wide_adapter, 1)
+          ''' + text[wide_arm:]
           heap.write_text(text)
 
           rules = Path("scirust-sciagent/src/elastic_rule_table.rs")
           text = rules.read_text()
-          anchor = '''    #[inline]
-              pub(crate) fn get(&self, left: u32, right: u32) -> Option<PackedRule> {
-                  match self
-                  {
-                      Self::Csr(table) => table.get(left, right),
-                      Self::Flat(table) => table.get(left, right),
-                  }
+          get_sig = "    #[inline]\n    pub(crate) fn get(&self, left: u32, right: u32) -> Option<PackedRule> {"
+          if text.count(get_sig) != 1:
+              raise SystemExit("adaptive rule-table get signature missing or ambiguous")
+          is_empty = '''    pub(crate) fn is_empty(&self) -> bool {
+              match self
+              {
+                  Self::Csr(table) => table.rules.is_empty(),
+                  Self::Flat(table) => table.entries.is_empty(),
               }
+          }
 
-              #[cfg(test)]
           '''
-          replacement = '''    pub(crate) fn is_empty(&self) -> bool {
-                  match self
-                  {
-                      Self::Csr(table) => table.rules.is_empty(),
-                      Self::Flat(table) => table.entries.is_empty(),
-                  }
-              }
-
-              #[inline]
-              pub(crate) fn get(&self, left: u32, right: u32) -> Option<PackedRule> {
-                  match self
-                  {
-                      Self::Csr(table) => table.get(left, right),
-                      Self::Flat(table) => table.get(left, right),
-                  }
-              }
-
-              #[cfg(test)]
-          '''
-          if anchor not in text:
-              raise SystemExit("adaptive rule-table method anchor missing")
-          rules.write_text(text.replace(anchor, replacement, 1))
+          text = text.replace(get_sig, is_empty + get_sig, 1)
+          rules.write_text(text)
           PY
 
       - name: Format and validate Heap CSR contracts
