@@ -35,7 +35,7 @@ jobs:
           git diff --check
       - name: Install pinned toolchains
         run: |
-          rustup toolchain install 1.89.0 --profile minimal
+          rustup toolchain install 1.89.0 --profile minimal --component clippy
           rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt
       - name: Qualify host-build surfaces
         run: |
