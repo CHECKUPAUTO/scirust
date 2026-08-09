@@ -328,8 +328,7 @@ impl WgpuResidentSampledMiniLlm {
         let vocab_size = snapshot.config.vocab_size;
         let inner = WgpuResidentMiniLlm::new(snapshot, capacity, rank, layers)?;
         let hardware = inner.encoder.adapter.hardware_capabilities();
-        let limits =
-            ExecutionLimits::from_device_capabilities(inner.encoder.adapter.capabilities());
+        let limits = inner.encoder.adapter.execution_limits();
         let context = inner.encoder.adapter.context().clone();
         let sampler =
             ResidentSampler::select(context, vocab_size, sampling, seed, &hardware, &limits)?;
