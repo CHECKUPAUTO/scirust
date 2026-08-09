@@ -10,6 +10,7 @@ mod encoding;
 mod module_state;
 mod nn_module;
 mod optimizer_state;
+mod readout;
 
 pub use ansatz::{EntanglementTopology, EntanglingGate};
 pub use encoding::AngleEncodingHandle;
@@ -17,6 +18,7 @@ pub use module_state::{
     ParameterInitializer, QuantumForward, QuantumModule, VariationalParameters,
 };
 pub use optimizer_state::{OptimizerSlot, PersistentParameterOptimizer};
+pub use readout::{Hamiltonian, HamiltonianReadout, HamiltonianTerm};
 
 use crate::autodiff::reverse::Var;
 use crate::quantum::{
@@ -64,6 +66,33 @@ impl VariationalCircuit {
     ) -> QuantumResult<Var<'t>> {
         self.layer
             .forward_batch(classical_features, quantum_parameters)
+    }
+
+    /// Builds a fixed Hamiltonian projection against this circuit's exact
+    /// measured-observable basis.
+    pub fn hamiltonian_readout(
+        &self,
+        hamiltonians: &[Hamiltonian],
+    ) -> QuantumResult<HamiltonianReadout> {
+        HamiltonianReadout::from_observables(self.observables(), hamiltonians)
+    }
+
+    /// Executes the existing batched adjoint-backed expectation path and then
+    /// projects those ordered expectations into one or more Hamiltonian values.
+    ///
+    /// The readout must have been built against the same semantic observable
+    /// basis. Its linear projection is ordinary SciRust reverse-mode matrix
+    /// multiplication, so gradients propagate unchanged through the quantum
+    /// adjoint node to encoded features and trainable quantum parameters.
+    pub fn forward_hamiltonians<'t>(
+        &self,
+        classical_features: Var<'t>,
+        quantum_parameters: Var<'t>,
+        readout: &HamiltonianReadout,
+    ) -> QuantumResult<Var<'t>> {
+        readout.validate_circuit(self)?;
+        let expectations = self.forward_batch(classical_features, quantum_parameters)?;
+        readout.apply(expectations)
     }
 
     /// Underlying typed circuit template.
