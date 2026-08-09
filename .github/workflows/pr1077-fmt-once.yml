@@ -1,0 +1,33 @@
+name: PR1077 format once
+
+on:
+  push:
+    branches: [perf/elastic-tokenizer-idopt-nodes-v2]
+
+permissions:
+  contents: write
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: perf/elastic-tokenizer-idopt-nodes-v2
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt
+      - name: Apply pinned rustfmt and self-remove
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +nightly-2026-07-02 fmt --all
+          git rm .github/workflows/pr1077-fmt-once.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "style(sciagent): apply pinned rustfmt"
+          git push origin HEAD:perf/elastic-tokenizer-idopt-nodes-v2
