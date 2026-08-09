@@ -104,10 +104,14 @@ impl CanonicalBpeTrainer {
             })
             .collect::<Vec<_>>();
         let mut merges = Vec::with_capacity(self.vocab_size.saturating_sub(BASE_VOCAB_SIZE));
+        // Pair counting is repeated once per learned merge. Reuse the same hash
+        // allocation so shrinking corpora do not rebuild bucket storage on every
+        // iteration; `clear()` preserves capacity while resetting all counts.
+        let mut counts: HashMap<PairKey, u64> = HashMap::new();
 
         while next_id < self.vocab_size
         {
-            let mut counts: HashMap<PairKey, u64> = HashMap::new();
+            counts.clear();
             for tokens in &corpus
             {
                 for pair in tokens.windows(2)
@@ -117,8 +121,10 @@ impl CanonicalBpeTrainer {
             }
 
             let best = counts
-                .into_iter()
-                .filter(|(_, count)| *count >= self.min_frequency)
+                .iter()
+                .filter_map(|(&pair, &count)| {
+                    (count >= self.min_frequency).then_some((pair, count))
+                })
                 .min_by(|(pair_a, count_a), (pair_b, count_b)| {
                     count_b.cmp(count_a).then_with(|| pair_a.cmp(pair_b))
                 });
