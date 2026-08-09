@@ -18,7 +18,7 @@ jobs:
   hosted-x86-selection:
     name: Hosted x86_64 robust selection
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - name: Install exact MSRV
@@ -60,14 +60,39 @@ jobs:
             --report /tmp/elastic-selection-raw.json \
             --output /tmp/elastic-selection-robust.json
           test "$(jq '.rejected_semantic_measurements' /tmp/elastic-selection-robust.json)" = "0"
-      - name: Publish selection table
+      - name: Run single-case temporal stability calibration
+        run: |
+          ./target/release/tokenizer-autotune \
+            --tokenizer /tmp/elastic-selection-tokenizer.json \
+            --input scirust-sciagent/src \
+            --recursive \
+            --extension rs \
+            --output /tmp/elastic-stability-profile.json \
+            --report /tmp/elastic-stability-raw.json \
+            --probe-lengths 16,64,128,512,2048,8192 \
+            --cases-per-length 1 \
+            --warmup-runs 5 \
+            --measured-runs 63 \
+            --device github-hosted-x86_64
+          ./target/release/tokenizer-model-select \
+            --report /tmp/elastic-stability-raw.json \
+            --output /tmp/elastic-stability.json
+          test "$(jq '.stability_protocol_valid' /tmp/elastic-stability.json)" = "true"
+          test "$(jq '.rejected_semantic_measurements' /tmp/elastic-stability.json)" = "0"
+      - name: Publish selection and stability tables
         run: |
           echo "### ElasticTokenizer robust model selection — hosted x86_64" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| bytes | winner | median ns | p95 ns | runner-up | speedup | Welch p | confidence |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|---:|---|---:|---:|---|---:|---:|---|" >> "$GITHUB_STEP_SUMMARY"
-          jq -r '.selections[] | "| \(.piece_len) | \(.winner) | \(.winner_median_nanos|floor) | \(.winner_p95_nanos|floor) | \(.runner_up // "-") | \((.median_speedup // 0)*1000|round/1000) | \((.welch_p_value // 1)*1000000|round/1000000) | \(.confidence) |"' \
+          echo "| bytes | winner | median ns | p95 ns | CV | runner-up | speedup | Welch p | confidence |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---:|---|---:|---:|---:|---|---:|---:|---|" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.selections[] | "| \(.piece_len) | \(.winner) | \(.winner_median_nanos|floor) | \(.winner_p95_nanos|floor) | \(.winner_coefficient_of_variation*10000|round/10000) | \(.runner_up // "-") | \((.median_speedup // 0)*1000|round/1000) | \((.welch_p_value // 1)*1000000|round/1000000) | \(.confidence) |"' \
             /tmp/elastic-selection-robust.json >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "#### Single-case Allan stability" >> "$GITHUB_STEP_SUMMARY"
+          echo "| bytes | winner | Allan m=1 ns | Allan m=2 ns | Allan m=4 ns | m1/median |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---:|---|---:|---:|---:|---:|" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.selections[] | "| \(.piece_len) | \(.winner) | \((.winner_allan_m1_nanos // 0)|floor) | \((.winner_allan_m2_nanos // 0)|floor) | \((.winner_allan_m4_nanos // 0)|floor) | \((.winner_allan_m1_over_median // 0)*10000|round/10000) |"' \
+            /tmp/elastic-stability.json >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Fitted production profile:" >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
@@ -84,12 +109,15 @@ jobs:
             /tmp/elastic-selection-profile.json
             /tmp/elastic-selection-raw.json
             /tmp/elastic-selection-robust.json
-          if-no-files-found: error
+            /tmp/elastic-stability-profile.json
+            /tmp/elastic-stability-raw.json
+            /tmp/elastic-stability.json
+          if-no-files-found: warn
 
   thor-arm64-selection:
     name: Jetson Thor ARM64 robust selection
     runs-on: [self-hosted, Linux, ARM64, scirust-arm64, jetson-thor, internal]
-    timeout-minutes: 90
+    timeout-minutes: 110
     env:
       CARGO_INCREMENTAL: 0
     steps:
@@ -158,16 +186,43 @@ jobs:
             --report "$ELASTIC_SELECTION_TMP/raw.json" \
             --output "$ELASTIC_SELECTION_TMP/robust.json"
           test "$(jq '.rejected_semantic_measurements' "$ELASTIC_SELECTION_TMP/robust.json")" = "0"
-      - name: Publish Thor selection table
+      - name: Run single-case Thor temporal stability calibration
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$CARGO_TARGET_DIR/release/tokenizer-autotune" \
+            --tokenizer "$ELASTIC_SELECTION_TMP/tokenizer.json" \
+            --input scirust-sciagent/src \
+            --recursive \
+            --extension rs \
+            --output "$ELASTIC_SELECTION_TMP/stability-profile.json" \
+            --report "$ELASTIC_SELECTION_TMP/stability-raw.json" \
+            --probe-lengths 16,64,128,512,2048,8192 \
+            --cases-per-length 1 \
+            --warmup-runs 5 \
+            --measured-runs 63 \
+            --device jetson-agx-thor-arm64
+          "$CARGO_TARGET_DIR/release/tokenizer-model-select" \
+            --report "$ELASTIC_SELECTION_TMP/stability-raw.json" \
+            --output "$ELASTIC_SELECTION_TMP/stability.json"
+          test "$(jq '.stability_protocol_valid' "$ELASTIC_SELECTION_TMP/stability.json")" = "true"
+          test "$(jq '.rejected_semantic_measurements' "$ELASTIC_SELECTION_TMP/stability.json")" = "0"
+      - name: Publish Thor selection and stability tables
         shell: bash
         run: |
           set -euo pipefail
           echo "### ElasticTokenizer robust model selection — Jetson Thor ARM64" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| bytes | winner | median ns | p95 ns | runner-up | speedup | Welch p | confidence |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|---:|---|---:|---:|---|---:|---:|---|" >> "$GITHUB_STEP_SUMMARY"
-          jq -r '.selections[] | "| \(.piece_len) | \(.winner) | \(.winner_median_nanos|floor) | \(.winner_p95_nanos|floor) | \(.runner_up // "-") | \((.median_speedup // 0)*1000|round/1000) | \((.welch_p_value // 1)*1000000|round/1000000) | \(.confidence) |"' \
+          echo "| bytes | winner | median ns | p95 ns | CV | runner-up | speedup | Welch p | confidence |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---:|---|---:|---:|---:|---|---:|---:|---|" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.selections[] | "| \(.piece_len) | \(.winner) | \(.winner_median_nanos|floor) | \(.winner_p95_nanos|floor) | \(.winner_coefficient_of_variation*10000|round/10000) | \(.runner_up // "-") | \((.median_speedup // 0)*1000|round/1000) | \((.welch_p_value // 1)*1000000|round/1000000) | \(.confidence) |"' \
             "$ELASTIC_SELECTION_TMP/robust.json" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "#### Single-case Allan stability" >> "$GITHUB_STEP_SUMMARY"
+          echo "| bytes | winner | Allan m=1 ns | Allan m=2 ns | Allan m=4 ns | m1/median |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---:|---|---:|---:|---:|---:|" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.selections[] | "| \(.piece_len) | \(.winner) | \((.winner_allan_m1_nanos // 0)|floor) | \((.winner_allan_m2_nanos // 0)|floor) | \((.winner_allan_m4_nanos // 0)|floor) | \((.winner_allan_m1_over_median // 0)*10000|round/10000) |"' \
+            "$ELASTIC_SELECTION_TMP/stability.json" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Fitted Thor profile:" >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
@@ -184,4 +239,7 @@ jobs:
             ${{ env.ELASTIC_SELECTION_TMP }}/profile.json
             ${{ env.ELASTIC_SELECTION_TMP }}/raw.json
             ${{ env.ELASTIC_SELECTION_TMP }}/robust.json
+            ${{ env.ELASTIC_SELECTION_TMP }}/stability-profile.json
+            ${{ env.ELASTIC_SELECTION_TMP }}/stability-raw.json
+            ${{ env.ELASTIC_SELECTION_TMP }}/stability.json
           if-no-files-found: warn
