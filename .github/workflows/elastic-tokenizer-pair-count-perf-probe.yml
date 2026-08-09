@@ -1,0 +1,60 @@
+name: ElasticTokenizer pair-count hash probe
+
+on:
+  pull_request:
+    paths:
+      - "scirust-sciagent/src/bin/tokenizer-pair-count-probe.rs"
+      - ".github/workflows/elastic-tokenizer-pair-count-perf-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pair-count-hash-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Install MSRV toolchain
+        run: rustup toolchain install 1.89.0 --profile minimal
+
+      - name: Record runner identity
+        run: |
+          {
+            uname -a
+            echo
+            lscpu
+          } > /tmp/pair-count-runner.txt
+
+      - name: Measure pair-count hash backends
+        run: |
+          args=()
+          for file in scirust-sciagent/src/*.rs; do
+            args+=(--input "$file")
+          done
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin tokenizer-pair-count-probe -- \
+            "${args[@]}" \
+            --warmup-rounds 3 \
+            --measured-rounds 11 | tee /tmp/pair-count-hash-probe.txt
+
+      - name: Publish probe summary
+        if: always()
+        run: |
+          echo "### ElasticTokenizer pair-count hash probe" >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/pair-count-hash-probe.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "Raw result is informational only and is not a merge gate." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elastic-tokenizer-pair-count-hash-probe
+          path: |
+            /tmp/pair-count-runner.txt
+            /tmp/pair-count-hash-probe.txt
+          if-no-files-found: warn
