@@ -88,6 +88,13 @@ capabilities. It makes no claim of quantum advantage.
   The first successful step pins the exact ordered `parameter_indices()` layout,
   and later graph drift is rejected before `Optimizer::step`, preventing silent
   moment reassociation for tape optimizers keyed by temporary node indices.
+- `TrainingSession::train_epoch` adds deterministic epoch orchestration over an
+  ordered iterator of already-batched `(Tensor, Tensor)` pairs. It performs one
+  existing guarded `train_step` and therefore one fresh tape per batch, applies
+  no implicit shuffling, batching, prefetching, or parallel reduction, and
+  computes the reported mean loss by sequential `f64` accumulation. Empty epochs
+  are rejected. Epoch execution is intentionally non-transactional: if a later
+  batch fails, earlier successful parameter updates remain committed.
 - A deterministic optimizer-backed two-sample hybrid binary-classifier example
   at `scirust-core/examples/quantum_hybrid_classifier.rs`; this compatibility
   example continues to use the backward-compatible single-sample,
@@ -110,10 +117,10 @@ capabilities. It makes no claim of quantum advantage.
   reverse-mode execution, deterministic parameter initialization, persistent
   module-owned quantum values, stable optimizer identity across fresh tapes for
   raw-slice AdamW/LAMB, direct `nn::Module` composition, guarded fresh-tape
-  training orchestration, ordinary tape-optimizer participation, and checkpoint
-  state. Broader encoding families, scalable probability reconstruction,
-  dataset/epoch conveniences, and remote-hardware execution remain future
-  facade work.
+  training steps and ordered epoch orchestration, ordinary tape-optimizer
+  participation, and checkpoint state. Broader encoding families, scalable
+  probability reconstruction, richer data-pipeline conveniences, and
+  remote-hardware execution remain future facade work.
 - A real-amplitude MPS simulator remains available for real gates and adjacent
   two-qubit operations. It is not a complex quantum backend and reports no
   general phase support.
@@ -135,7 +142,7 @@ capabilities. It makes no claim of quantum advantage.
 ## Future work
 
 - Expand `scirust_core::vqnet` with broader reusable encoders, scalable
-  probability reconstruction and dataset/epoch training conveniences.
+  probability reconstruction and richer explicit data-pipeline conveniences.
 - Density-matrix and noise simulation.
 - GPU kernels, distributed simulation, stabilizer and tensor-network backends.
 - Hardware topology routing, gate decomposition, remote QPU execution, and
