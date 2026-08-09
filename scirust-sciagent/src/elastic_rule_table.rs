@@ -64,17 +64,22 @@ impl AdaptivePackedRuleTable {
         let flat_payload_bytes = entries
             .len()
             .checked_mul(std::mem::size_of::<(PairKey, PackedRule)>());
-        let offset_bytes = offset_len.and_then(|len| len.checked_mul(std::mem::size_of::<u32>()));
+        let rule_count_fits_u32 = u32::try_from(entries.len()).is_ok();
 
         // Bound CSR index memory by the payload size of the flat compact table.
         // Sparse/pathological high-left-ID tables therefore stay flat instead of
-        // allocating an enormous mostly-empty offset vector.
-        if matches!((offset_bytes, flat_payload_bytes), (Some(offsets), Some(flat)) if offsets <= flat)
+        // allocating an enormous mostly-empty offset vector. The total rule count
+        // must also fit u32 so prefix offsets cannot overflow by construction.
+        if let (Some(offset_len), Some(flat_payload_bytes)) = (offset_len, flat_payload_bytes)
         {
-            return Ok(Some(Self::Csr(CsrSoaRuleTable::from_sorted_entries(
-                entries,
-                offset_len.expect("matched offset length is present"),
-            ))));
+            let offset_bytes = offset_len.checked_mul(std::mem::size_of::<u32>());
+            if rule_count_fits_u32
+                && offset_bytes.is_some_and(|offsets| offsets <= flat_payload_bytes)
+            {
+                return Ok(Some(Self::Csr(CsrSoaRuleTable::from_sorted_entries(
+                    entries, offset_len,
+                ))));
+            }
         }
 
         Ok(Some(Self::Flat(FlatRuleTable { entries })))
@@ -103,13 +108,13 @@ impl CsrSoaRuleTable {
             let left = usize::try_from(key.left()).expect("u32 left id fits usize");
             offsets[left + 1] = offsets[left + 1]
                 .checked_add(1)
-                .expect("compact rule count fits u32");
+                .expect("bounded compact rule count fits u32");
         }
         for index in 1..offsets.len()
         {
             offsets[index] = offsets[index]
                 .checked_add(offsets[index - 1])
-                .expect("compact rule count fits u32");
+                .expect("bounded compact rule count fits u32");
         }
 
         let mut rights = Vec::with_capacity(entries.len());
