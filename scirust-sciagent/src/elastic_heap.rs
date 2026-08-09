@@ -27,12 +27,15 @@ impl RuleTable {
     fn from_ordered_merges(
         merges: &[(TokenId, TokenId, TokenId)],
     ) -> Result<Self, DuplicateMergeRule> {
-        let compact = merges.iter().enumerate().all(|(rank, &(left, right, output))| {
-            u32::try_from(rank).is_ok()
-                && u32::try_from(left).is_ok()
-                && u32::try_from(right).is_ok()
-                && u32::try_from(output).is_ok()
-        });
+        let compact = merges
+            .iter()
+            .enumerate()
+            .all(|(rank, &(left, right, output))| {
+                u32::try_from(rank).is_ok()
+                    && u32::try_from(left).is_ok()
+                    && u32::try_from(right).is_ok()
+                    && u32::try_from(output).is_ok()
+            });
 
         if compact
         {
