@@ -447,10 +447,9 @@ impl BpeTokenizer {
         }
 
         // Legacy: concatenate token strings, skipping specials + `<NNN>` placeholders.
-        // A blanket `starts_with('<')` also swallowed every learned merge that BEGINS
-        // with a literal '<' ("<T", "< ", "<<") — which a Rust corpus is full of
-        // (generics, comparisons, shifts) — silently deleting '<' from decoded code,
-        // so `is_non_text_token` matches only the exact `<NNN>` byte-placeholder shape.
+        // A blanket `starts_with('<')` also swallowed every token starting with '<', deleting the
+        // '<' of generics/comparisons from decoded Rust ("fn f<T>" -> "fn f>").
+        // `is_non_text_token` matches only the exact `<NNN>` byte-placeholder shape.
         let mut out = String::new();
         for &id in ids
         {
@@ -639,7 +638,10 @@ mod tests {
             "a < b && b << 2",
         ]
         {
-            assert_eq!(trained.encode(text), encode_uncached_reference(&trained, text));
+            assert_eq!(
+                trained.encode(text),
+                encode_uncached_reference(&trained, text)
+            );
         }
 
         let embedded = BpeTokenizer::from_embedded().unwrap();
@@ -870,6 +872,6 @@ mod tests {
             s,
             "v2 decode must survive save/load (version tag preserved)"
         );
-        let _ = std::fs::remove_file(path);
+        let _ = fs::remove_file(path);
     }
 }
