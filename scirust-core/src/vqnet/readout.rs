@@ -456,7 +456,12 @@ mod tests {
         output.sum().backward();
         let quantum_gradient = tape.grad(parameter_indices[0]);
         assert_eq!(quantum_gradient.shape(), (1, 2));
-        assert!(quantum_gradient.data.iter().any(|value| value.abs() > 1.0e-5));
+        assert!(
+            quantum_gradient
+                .data
+                .iter()
+                .any(|value| value.abs() > 1.0e-5)
+        );
 
         let state = model.state_dict();
         assert!(state.contains_key("0.parameters"));
@@ -467,10 +472,8 @@ mod tests {
 
     #[test]
     fn module_rejects_input_from_a_different_tape() {
-        let hamiltonian = Hamiltonian::new(vec![
-            HamiltonianTerm::new(1.0, Observable::z(0)).unwrap(),
-        ])
-        .unwrap();
+        let hamiltonian =
+            Hamiltonian::new(vec![HamiltonianTerm::new(1.0, Observable::z(0)).unwrap()]).unwrap();
         let mut readout =
             HamiltonianReadout::from_observables(&[Observable::z(0)], &[hamiltonian]).unwrap();
         let input_tape = Tape::new();
