@@ -11,6 +11,7 @@ mod module_state;
 mod nn_module;
 mod optimizer_state;
 mod readout;
+mod trainer;
 
 pub use ansatz::{EntanglementTopology, EntanglingGate};
 pub use encoding::AngleEncodingHandle;
@@ -19,6 +20,7 @@ pub use module_state::{
 };
 pub use optimizer_state::{OptimizerSlot, PersistentParameterOptimizer};
 pub use readout::{Hamiltonian, HamiltonianReadout, HamiltonianTerm};
+pub use trainer::{TrainStepReport, TrainingSession};
 
 use crate::autodiff::reverse::Var;
 use crate::quantum::{

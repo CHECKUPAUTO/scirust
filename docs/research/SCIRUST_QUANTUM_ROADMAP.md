@@ -70,6 +70,13 @@ capabilities. It makes no claim of quantum advantage.
   modules. Parameter indices participate in ordinary tape optimizers, `sync`
   persists updated quantum values, and `state_dict`/`load_state_dict` integrate
   quantum parameters into the existing hierarchical checkpoint namespace.
+- `TrainingSession<O>` provides a minimal guarded fresh-tape training step while
+  reusing the existing `Module`, `Loss`, `Tape`, and tape `Optimizer` contracts.
+  It validates finite inputs, targets, predictions, scalar loss, gradients, and
+  optimizer-updated parameters; then persists model state with `Module::sync`.
+  The first successful step pins the exact ordered `parameter_indices()` layout,
+  and later graph drift is rejected before `Optimizer::step`, preventing silent
+  moment reassociation for tape optimizers keyed by temporary node indices.
 - A deterministic optimizer-backed two-sample hybrid binary-classifier example
   at `scirust-core/examples/quantum_hybrid_classifier.rs`; this compatibility
   example continues to use the backward-compatible single-sample,
@@ -91,10 +98,10 @@ capabilities. It makes no claim of quantum advantage.
   Hamiltonian linear readout, reverse-mode execution, deterministic parameter
   initialization, persistent module-owned quantum values, stable optimizer
   identity across fresh tapes for raw-slice AdamW/LAMB, direct `nn::Module`
-  composition, ordinary tape-optimizer participation, and checkpoint state.
-  Broader encoding families, basis-probability/readout abstractions,
-  higher-level training helpers, and remote-hardware execution remain future
-  facade work.
+  composition, guarded fresh-tape training orchestration, ordinary tape-optimizer
+  participation, and checkpoint state. Broader encoding families,
+  basis-probability/readout abstractions, dataset/epoch conveniences, and
+  remote-hardware execution remain future facade work.
 - A real-amplitude MPS simulator remains available for real gates and adjacent
   two-qubit operations. It is not a complex quantum backend and reports no
   general phase support.
@@ -116,7 +123,7 @@ capabilities. It makes no claim of quantum advantage.
 ## Future work
 
 - Expand `scirust_core::vqnet` with broader reusable encoders,
-  basis-probability readouts and higher-level training helpers.
+  basis-probability readouts and dataset/epoch training conveniences.
 - Density-matrix and noise simulation.
 - GPU kernels, distributed simulation, stabilizer and tensor-network backends.
 - Hardware topology routing, gate decomposition, remote QPU execution, and
