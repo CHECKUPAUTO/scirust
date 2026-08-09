@@ -199,7 +199,7 @@ fn median(samples: &[u64]) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::hash::{Hash, Hasher as _};
+    use std::hash::Hash;
 
     #[test]
     fn pair_key_hash_is_exact_u64_identity() {
