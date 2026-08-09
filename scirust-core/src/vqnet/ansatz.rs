@@ -85,7 +85,8 @@ impl VariationalCircuitBuilder {
     ) -> QuantumResult<()> {
         match topology
         {
-            EntanglementTopology::None => {},
+            EntanglementTopology::None =>
+            {},
             EntanglementTopology::Linear | EntanglementTopology::Ring =>
             {
                 for control in 0..self.num_qubits().saturating_sub(1)
@@ -228,9 +229,8 @@ mod tests {
         let model = builder.build().unwrap();
 
         let expected = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)];
-        for (operation, &(control, target)) in model.circuit().operations()[4..]
-            .iter()
-            .zip(&expected)
+        for (operation, &(control, target)) in
+            model.circuit().operations()[4..].iter().zip(&expected)
         {
             assert!(matches!(
                 operation,
@@ -280,12 +280,7 @@ mod tests {
 
         assert_eq!(
             builder
-                .variational_ansatz(
-                    1,
-                    &[],
-                    EntanglementTopology::Linear,
-                    EntanglingGate::Cnot,
-                )
+                .variational_ansatz(1, &[], EntanglementTopology::Linear, EntanglingGate::Cnot,)
                 .unwrap_err(),
             QuantumError::InvalidParameterMapping {
                 reason: "variational ansatz needs at least one rotation axis",
