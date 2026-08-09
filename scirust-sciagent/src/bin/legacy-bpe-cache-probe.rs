@@ -154,9 +154,10 @@ fn main() {
     inputs.dedup();
     let texts = inputs
         .iter()
-        .map(|path| fs::read_to_string(path).unwrap_or_else(|error| {
-            panic!("failed to read input {}: {error}", path.display())
-        }))
+        .map(|path| {
+            fs::read_to_string(path)
+                .unwrap_or_else(|error| panic!("failed to read input {}: {error}", path.display()))
+        })
         .collect::<Vec<_>>();
     if texts.is_empty()
     {
