@@ -150,13 +150,10 @@ mod tests {
         let tiny_profile = ElasticProfile::new(thresholds(), [BpeKernel::TinyScan; 6]);
         let reference_profile = ElasticProfile::reference_only(thresholds());
         let tiny =
-            ElasticBpeEngine::from_ordered_merges(&[(2, 3, 10), (1, 2, 11)], tiny_profile)
+            ElasticBpeEngine::from_ordered_merges(&[(2, 3, 10), (1, 2, 11)], tiny_profile).unwrap();
+        let reference =
+            ElasticBpeEngine::from_ordered_merges(&[(2, 3, 10), (1, 2, 11)], reference_profile)
                 .unwrap();
-        let reference = ElasticBpeEngine::from_ordered_merges(
-            &[(2, 3, 10), (1, 2, 11)],
-            reference_profile,
-        )
-        .unwrap();
 
         let mut work = [0u32; TINY_SCAN_CAPACITY];
         work[..3].copy_from_slice(&[1, 2, 3]);
