@@ -4,8 +4,7 @@ use scirust_agent_protocol::{
 };
 
 use crate::cuda_decode::{
-    CudaDecodeDownMode, CudaDecodeFfnMode, CudaDecodeLmHeadMode, CudaDecodeModel,
-    CudaDecodeModes,
+    CudaDecodeDownMode, CudaDecodeFfnMode, CudaDecodeLmHeadMode, CudaDecodeModel, CudaDecodeModes,
 };
 use crate::execution_attestation::{
     RuntimeExecutionAttestationInputs, build_runtime_execution_attestation,
@@ -15,20 +14,16 @@ pub const CUDA_DECODE_NUMERIC_MODE_V1: &str = "bf16-fp32-accum-v1";
 
 const KERNEL_FUSED_CUBLAS_FUSED: &str =
     "sciagent.cuda-decode.fused-gemv.cublas-down.fused-argmax-v1";
-const KERNEL_FUSED_CUBLAS_FULL: &str =
-    "sciagent.cuda-decode.fused-gemv.cublas-down.full-logits-v1";
-const KERNEL_FUSED_TILED_FUSED: &str =
-    "sciagent.cuda-decode.fused-gemv.tiled-down.fused-argmax-v1";
-const KERNEL_FUSED_TILED_FULL: &str =
-    "sciagent.cuda-decode.fused-gemv.tiled-down.full-logits-v1";
+const KERNEL_FUSED_CUBLAS_FULL: &str = "sciagent.cuda-decode.fused-gemv.cublas-down.full-logits-v1";
+const KERNEL_FUSED_TILED_FUSED: &str = "sciagent.cuda-decode.fused-gemv.tiled-down.fused-argmax-v1";
+const KERNEL_FUSED_TILED_FULL: &str = "sciagent.cuda-decode.fused-gemv.tiled-down.full-logits-v1";
 const KERNEL_CUBLAS_CUBLAS_FUSED: &str =
     "sciagent.cuda-decode.cublas-ffn.cublas-down.fused-argmax-v1";
 const KERNEL_CUBLAS_CUBLAS_FULL: &str =
     "sciagent.cuda-decode.cublas-ffn.cublas-down.full-logits-v1";
 const KERNEL_CUBLAS_TILED_FUSED: &str =
     "sciagent.cuda-decode.cublas-ffn.tiled-down.fused-argmax-v1";
-const KERNEL_CUBLAS_TILED_FULL: &str =
-    "sciagent.cuda-decode.cublas-ffn.tiled-down.full-logits-v1";
+const KERNEL_CUBLAS_TILED_FULL: &str = "sciagent.cuda-decode.cublas-ffn.tiled-down.full-logits-v1";
 
 pub struct CudaDecodeExecutionAttestationInputs<'a> {
     pub architecture_name: Option<&'a str>,
@@ -42,7 +37,8 @@ pub struct CudaDecodeExecutionAttestationInputs<'a> {
 
 #[must_use]
 pub const fn cuda_decode_kernel_semantic_version(modes: CudaDecodeModes) -> &'static str {
-    match (modes.ffn, modes.down, modes.lm_head) {
+    match (modes.ffn, modes.down, modes.lm_head)
+    {
         (
             CudaDecodeFfnMode::FusedGemv,
             CudaDecodeDownMode::CublasLt,
@@ -159,8 +155,8 @@ mod tests {
 
     #[test]
     fn changing_decode_mode_changes_attested_kernel_identity() {
-        let base = build_cuda_decode_execution_attestation(CudaDecodeModes::default(), inputs())
-            .unwrap();
+        let base =
+            build_cuda_decode_execution_attestation(CudaDecodeModes::default(), inputs()).unwrap();
         let changed = build_cuda_decode_execution_attestation(
             CudaDecodeModes {
                 lm_head: CudaDecodeLmHeadMode::FullLogits,
