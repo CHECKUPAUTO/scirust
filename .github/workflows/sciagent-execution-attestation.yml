@@ -10,8 +10,16 @@ on:
       - "scirust-sciagent/src/lib.rs"
       - "scirust-sciagent/src/route_b_execution_attestation.rs"
       - "scirust-sciagent/src/sha256.rs"
+      - "scirust-sciagent/src/bpe.rs"
+      - "scirust-sciagent/src/bpe_dispatch.rs"
+      - "scirust-sciagent/src/canonical_bpe_train.rs"
+      - "scirust-sciagent/src/elastic_*.rs"
       - "scirust-sciagent/src/bin/sciagent-dialogue.rs"
       - "scirust-sciagent/src/bin/scientific-orchestrator.rs"
+      - "scirust-sciagent/src/bin/tokenizer-*.rs"
+      - "scirust-sciagent/src/bin/train-tokenizer.rs"
+      - "scirust-sciagent/src/bin/collect-data.rs"
+      - "scirust-sciagent/src/bin/legacy-bpe-*.rs"
       - "scirust-sciagent/src/train/checkpoint.rs"
       - "scirust-sciagent/tokenizer/bpe.json"
       - "scirust-agent-protocol/**"
@@ -23,7 +31,7 @@ permissions:
 
 jobs:
   contract:
-    name: runtime attestation + provenance + MSRV
+    name: runtime attestation + tokenizer + provenance + MSRV
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -38,6 +46,12 @@ jobs:
         run: cargo +nightly-2026-07-02 clippy -p scirust-sciagent --all-targets --locked -- -D warnings
       - name: Check MSRV SciAgent integration targets
         run: cargo +1.89.0 check -p scirust-sciagent --all-targets --locked
+      - name: Test ElasticTokenizer library contracts
+        run: cargo +1.89.0 test -p scirust-sciagent --lib elastic_ --locked
+      - name: Test BPE compatibility contracts
+        run: cargo +1.89.0 test -p scirust-sciagent --lib bpe --locked
+      - name: Test SciAgent tokenizer binaries
+        run: cargo +1.89.0 test -p scirust-sciagent --bins --locked
       - name: Test agent protocol attestation transport
         run: cargo +1.89.0 test -p scirust-agent-protocol --locked
       - name: Test runtime attestation builder
