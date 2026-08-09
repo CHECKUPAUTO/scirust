@@ -263,11 +263,12 @@ impl VariationalCircuitBuilder {
 
     fn allocate_parameter(&mut self) -> QuantumResult<ParameterId> {
         let parameter = ParameterId(self.next_parameter);
-        self.next_parameter = self.next_parameter.checked_add(1).ok_or(
-            QuantumError::NumericalFailure {
-                operation: "VQNet parameter ID allocation",
-            },
-        )?;
+        self.next_parameter =
+            self.next_parameter
+                .checked_add(1)
+                .ok_or(QuantumError::NumericalFailure {
+                    operation: "VQNet parameter ID allocation",
+                })?;
         Ok(parameter)
     }
 }
@@ -315,17 +316,12 @@ mod tests {
     #[test]
     fn builder_assigns_stable_parameter_ids_and_operation_order() {
         let mut builder = VariationalCircuitBuilder::new(2).unwrap();
-        builder
-            .angle_encoding(RotationAxis::Y, &[0, 1])
-            .unwrap();
+        builder.angle_encoding(RotationAxis::Y, &[0, 1]).unwrap();
         builder.hardware_efficient_ansatz(2).unwrap();
         builder.measure_all_z().unwrap();
         let model = builder.build().unwrap();
 
-        assert_eq!(
-            model.input_parameters(),
-            &[ParameterId(0), ParameterId(1)]
-        );
+        assert_eq!(model.input_parameters(), &[ParameterId(0), ParameterId(1)]);
         assert_eq!(
             model.trainable_parameters(),
             &[
@@ -360,9 +356,7 @@ mod tests {
     #[test]
     fn high_level_model_runs_through_existing_autograd_path() {
         let mut builder = VariationalCircuitBuilder::new(1).unwrap();
-        builder
-            .angle_encoding(RotationAxis::Y, &[0])
-            .unwrap();
+        builder.angle_encoding(RotationAxis::Y, &[0]).unwrap();
         builder.hardware_efficient_ansatz(1).unwrap();
         builder.measure_all_z().unwrap();
         let model = builder.build().unwrap();
@@ -376,7 +370,7 @@ mod tests {
         let expected = [(0.2f32 + 0.3).cos(), (-0.4f32 + 0.3).cos()];
         for (actual, expected) in values.iter().zip(expected)
         {
-            assert!((actual - expected).abs() <= TOLERANCE);
+            assert!((*actual - expected).abs() <= TOLERANCE);
         }
 
         output.sum().backward();
@@ -386,11 +380,9 @@ mod tests {
 
         for (actual, expected) in feature_gradient.iter().zip(expected_feature)
         {
-            assert!((actual - expected).abs() <= TOLERANCE);
+            assert!((*actual - expected).abs() <= TOLERANCE);
         }
-        assert!(
-            (parameter_gradient[0] - expected_feature.iter().sum::<f32>()).abs() <= TOLERANCE
-        );
+        assert!((parameter_gradient[0] - expected_feature.iter().sum::<f32>()).abs() <= TOLERANCE);
         assert!(parameter_gradient[1].abs() <= TOLERANCE);
     }
 
@@ -398,7 +390,9 @@ mod tests {
     fn duplicate_encoding_qubits_are_rejected_before_mutation() {
         let mut builder = VariationalCircuitBuilder::new(2).unwrap();
         assert_eq!(
-            builder.angle_encoding(RotationAxis::X, &[0, 0]).unwrap_err(),
+            builder
+                .angle_encoding(RotationAxis::X, &[0, 0])
+                .unwrap_err(),
             QuantumError::DuplicateQubit { qubit: 0 }
         );
         assert!(builder.circuit.operations().is_empty());
