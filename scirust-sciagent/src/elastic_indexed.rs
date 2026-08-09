@@ -8,8 +8,7 @@
 use std::collections::BTreeMap;
 
 use crate::elastic_id::{
-    COMPACT_INDEX_INACTIVE, COMPACT_INDEX_NONE, PackedRule, PairKey, PriorityKey,
-    try_compact_index,
+    COMPACT_INDEX_INACTIVE, COMPACT_INDEX_NONE, PackedRule, PairKey, PriorityKey, try_compact_index,
 };
 use crate::elastic_tokenizer::{DuplicateMergeRule, TokenId};
 
