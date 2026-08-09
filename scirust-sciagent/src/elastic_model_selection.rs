@@ -60,12 +60,16 @@ pub struct ElasticModelSelectionReport {
 
 impl ElasticModelSelectionReport {
     /// Build a robust report from raw autotune measurements.
-    pub fn from_measurements(measurements: &[CalibrationMeasurement]) -> Result<Self, ModelSelectionError> {
-        if measurements.is_empty() {
+    pub fn from_measurements(
+        measurements: &[CalibrationMeasurement],
+    ) -> Result<Self, ModelSelectionError> {
+        if measurements.is_empty()
+        {
             return Err(ModelSelectionError::NoMeasurements);
         }
 
-        let rejected_semantic_measurements = measurements.iter().filter(|m| !m.semantic_match).count();
+        let rejected_semantic_measurements =
+            measurements.iter().filter(|m| !m.semantic_match).count();
         let disqualified: BTreeSet<(usize, u8)> = measurements
             .iter()
             .filter(|m| !m.semantic_match)
@@ -74,9 +78,11 @@ impl ElasticModelSelectionReport {
         let lengths: BTreeSet<usize> = measurements.iter().map(|m| m.piece_len).collect();
 
         let mut grouped: BTreeMap<(usize, u8), (BpeKernel, Vec<f64>)> = BTreeMap::new();
-        for measurement in measurements {
+        for measurement in measurements
+        {
             let key = (measurement.piece_len, kernel_order(measurement.kernel));
-            if !measurement.semantic_match || disqualified.contains(&key) {
+            if !measurement.semantic_match || disqualified.contains(&key)
+            {
                 continue;
             }
             grouped
@@ -87,18 +93,26 @@ impl ElasticModelSelectionReport {
         }
 
         let mut by_length: BTreeMap<usize, Vec<(KernelTimingSummary, Vec<f64>)>> = BTreeMap::new();
-        for ((piece_len, _), (kernel, raw)) in grouped {
+        for ((piece_len, _), (kernel, raw)) in grouped
+        {
             let clean = reject_tukey_outliers(&raw);
-            if clean.is_empty() {
+            if clean.is_empty()
+            {
                 continue;
             }
             let summary = summarize(piece_len, kernel, raw.len(), &clean);
-            by_length.entry(piece_len).or_default().push((summary, clean));
+            by_length
+                .entry(piece_len)
+                .or_default()
+                .push((summary, clean));
         }
 
         let mut selections = Vec::with_capacity(lengths.len());
-        for piece_len in lengths {
-            let Some(groups) = by_length.get_mut(&piece_len) else {
+        for piece_len in lengths
+        {
+            let Some(groups) = by_length.get_mut(&piece_len)
+            else
+            {
                 return Err(ModelSelectionError::NoSemanticallyValidKernel { piece_len });
             };
             groups.sort_by(|(left, _), (right, _)| {
@@ -109,23 +123,32 @@ impl ElasticModelSelectionReport {
             });
             let (winner, winner_samples) = groups[0].clone();
             let runner = groups.get(1).cloned();
-            let (runner_up, median_speedup, welch_p_value, confidence) = if let Some((runner, runner_samples)) = runner {
-                let speedup = if winner.median_nanos > 0.0 {
-                    Some(runner.median_nanos / winner.median_nanos)
-                } else {
-                    None
+            let (runner_up, median_speedup, welch_p_value, confidence) =
+                if let Some((runner, runner_samples)) = runner
+                {
+                    let speedup = if winner.median_nanos > 0.0
+                    {
+                        Some(runner.median_nanos / winner.median_nanos)
+                    }
+                    else
+                    {
+                        None
+                    };
+                    let p =
+                        t_test_two_sample(&winner_samples, &runner_samples, false, Tail::TwoSided)
+                            .map(|result| result.p_value);
+                    let confidence = match p
+                    {
+                        Some(value) if value < 0.01 => SelectionConfidence::Strong,
+                        Some(value) if value < 0.05 => SelectionConfidence::Significant,
+                        _ => SelectionConfidence::Provisional,
+                    };
+                    (Some(runner), speedup, p, confidence)
+                }
+                else
+                {
+                    (None, None, None, SelectionConfidence::Uncontested)
                 };
-                let p = t_test_two_sample(&winner_samples, &runner_samples, false, Tail::TwoSided)
-                    .map(|result| result.p_value);
-                let confidence = match p {
-                    Some(value) if value < 0.01 => SelectionConfidence::Strong,
-                    Some(value) if value < 0.05 => SelectionConfidence::Significant,
-                    _ => SelectionConfidence::Provisional,
-                };
-                (Some(runner), speedup, p, confidence)
-            } else {
-                (None, None, None, SelectionConfidence::Uncontested)
-            };
             selections.push(KernelSelection {
                 piece_len,
                 winner,
@@ -159,7 +182,8 @@ pub enum ModelSelectionError {
 }
 
 fn reject_tukey_outliers(samples: &[f64]) -> Vec<f64> {
-    if samples.len() < 4 {
+    if samples.len() < 4
+    {
         return samples.to_vec();
     }
     let q1 = quantile(samples, 0.25);
@@ -174,7 +198,12 @@ fn reject_tukey_outliers(samples: &[f64]) -> Vec<f64> {
         .collect()
 }
 
-fn summarize(piece_len: usize, kernel: BpeKernel, raw_samples: usize, clean: &[f64]) -> KernelTimingSummary {
+fn summarize(
+    piece_len: usize,
+    kernel: BpeKernel,
+    raw_samples: usize,
+    clean: &[f64],
+) -> KernelTimingSummary {
     KernelTimingSummary {
         piece_len,
         kernel,
@@ -189,7 +218,8 @@ fn summarize(piece_len: usize, kernel: BpeKernel, raw_samples: usize, clean: &[f
 }
 
 const fn kernel_order(kernel: BpeKernel) -> u8 {
-    match kernel {
+    match kernel
+    {
         BpeKernel::Reference => 0,
         BpeKernel::TinyScan => 1,
         BpeKernel::Indexed => 2,
@@ -201,8 +231,18 @@ const fn kernel_order(kernel: BpeKernel) -> u8 {
 mod tests {
     use super::*;
 
-    fn m(piece_len: usize, kernel: BpeKernel, elapsed_nanos: u64, semantic_match: bool) -> CalibrationMeasurement {
-        CalibrationMeasurement { piece_len, kernel, elapsed_nanos, semantic_match }
+    fn m(
+        piece_len: usize,
+        kernel: BpeKernel,
+        elapsed_nanos: u64,
+        semantic_match: bool,
+    ) -> CalibrationMeasurement {
+        CalibrationMeasurement {
+            piece_len,
+            kernel,
+            elapsed_nanos,
+            semantic_match,
+        }
     }
 
     #[test]
@@ -221,10 +261,12 @@ mod tests {
     #[test]
     fn tukey_filter_removes_timing_spike_before_selection() {
         let mut measurements = Vec::new();
-        for value in [100, 101, 99, 100, 5000] {
+        for value in [100, 101, 99, 100, 5000]
+        {
             measurements.push(m(64, BpeKernel::Reference, value, true));
         }
-        for value in [120, 121, 119, 120, 122] {
+        for value in [120, 121, 119, 120, 122]
+        {
             measurements.push(m(64, BpeKernel::Heap, value, true));
         }
         let report = ElasticModelSelectionReport::from_measurements(&measurements).unwrap();
@@ -236,7 +278,8 @@ mod tests {
     #[test]
     fn report_exposes_runner_up_speedup_and_welch_evidence() {
         let mut measurements = Vec::new();
-        for value in 90..110 {
+        for value in 90..110
+        {
             measurements.push(m(128, BpeKernel::Indexed, value, true));
             measurements.push(m(128, BpeKernel::Heap, value + 100, true));
         }

@@ -10,6 +10,7 @@ description = "SCIAGENT — SLM deterministe entraine from scratch, specialise R
 scirust-core = { path = "../scirust-core" }
 scirust-autodiff = { path = "../scirust-autodiff" }
 scirust-agent-protocol = { path = "../scirust-agent-protocol" }
+scirust-stats = { path = "../scirust-stats" }
 scirust-gpu = { path = "../scirust-gpu", optional = true }
 scirust-cuda = { path = "../scirust-cuda", optional = true }
 serde = { version = "1", features = ["derive"] }
