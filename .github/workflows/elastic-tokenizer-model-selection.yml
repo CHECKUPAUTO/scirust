@@ -1,0 +1,87 @@
+name: ElasticTokenizer robust model selection
+
+on:
+  pull_request:
+    paths:
+      - "scirust-sciagent/src/elastic_*.rs"
+      - "scirust-sciagent/src/bin/tokenizer-autotune.rs"
+      - "scirust-sciagent/src/bin/tokenizer-model-select.rs"
+      - "scirust-sciagent/Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/elastic-tokenizer-model-selection.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hosted-x86-selection:
+    name: Hosted x86_64 robust selection
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Install exact MSRV
+        run: rustup toolchain install 1.89.0 --profile minimal
+      - name: Record hardware identity
+        run: |
+          uname -a > /tmp/elastic-selection-hardware.txt
+          lscpu >> /tmp/elastic-selection-hardware.txt
+      - name: Train one deterministic canonical tokenizer
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin train-tokenizer -- \
+            --input scirust-sciagent/src \
+            --recursive \
+            --extension rs \
+            --vocab-size 2048 \
+            --min-frequency 2 \
+            --merge-semantics canonical-rank-v1 \
+            --output /tmp/elastic-selection-tokenizer.json
+      - name: Build measurement and selector binaries before timing
+        run: |
+          cargo +1.89.0 build --locked --release -p scirust-sciagent --bin tokenizer-autotune --bin tokenizer-model-select
+      - name: Run semantics-gated interleaved calibration
+        run: |
+          ./target/release/tokenizer-autotune \
+            --tokenizer /tmp/elastic-selection-tokenizer.json \
+            --input scirust-sciagent/src \
+            --recursive \
+            --extension rs \
+            --output /tmp/elastic-selection-profile.json \
+            --report /tmp/elastic-selection-raw.json \
+            --probe-lengths 8,16,32,64,96,128,192,256,384,512,768,1024,1536,2048,3072,4096,6144,8192 \
+            --cases-per-length 3 \
+            --warmup-runs 3 \
+            --measured-runs 21 \
+            --device github-hosted-x86_64
+      - name: Select robust winners with SciRust statistics
+        run: |
+          ./target/release/tokenizer-model-select \
+            --report /tmp/elastic-selection-raw.json \
+            --output /tmp/elastic-selection-robust.json
+          test "$(jq '.rejected_semantic_measurements' /tmp/elastic-selection-robust.json)" = "0"
+      - name: Publish selection table
+        run: |
+          echo "### ElasticTokenizer robust model selection" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| bytes | winner | median ns | p95 ns | runner-up | speedup | Welch p | confidence |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---:|---|---:|---:|---|---:|---:|---|" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.selections[] | "| \(.piece_len) | \(.winner) | \(.winner_median_nanos|floor) | \(.winner_p95_nanos|floor) | \(.runner_up // "-") | \((.median_speedup // 0)*1000|round/1000) | \((.welch_p_value // 1)*1000000|round/1000000) | \(.confidence) |"' \
+            /tmp/elastic-selection-robust.json >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Fitted production profile:" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/elastic-selection-profile.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload exact model-selection evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elastic-tokenizer-robust-selection-x86_64
+          path: |
+            /tmp/elastic-selection-hardware.txt
+            /tmp/elastic-selection-tokenizer.json
+            /tmp/elastic-selection-profile.json
+            /tmp/elastic-selection-raw.json
+            /tmp/elastic-selection-robust.json
+          if-no-files-found: error
