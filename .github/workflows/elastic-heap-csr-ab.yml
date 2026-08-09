@@ -1,0 +1,129 @@
+name: ElasticTokenizer Heap CSR A/B probe
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/elastic-heap-csr-ab.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  heap-csr-ab:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout baseline master
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ed0e814073854fb9d74d92cff46372e2dfd8448b
+          path: baseline
+
+      - name: Checkout Heap CSR candidate
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: a78db7a91a1a46fe4071ff5c70902144229d4487
+          path: candidate
+
+      - name: Install MSRV toolchain
+        run: rustup toolchain install 1.89.0 --profile minimal
+
+      - name: Record runner identity
+        run: |
+          {
+            uname -a
+            echo
+            lscpu
+          } > /tmp/heap-csr-ab-runner.txt
+
+      - name: Train one deterministic canonical tokenizer
+        working-directory: baseline
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin train-tokenizer -- \
+            --input scirust-sciagent/src \
+            --recursive \
+            --extension rs \
+            --vocab-size 2048 \
+            --min-frequency 2 \
+            --merge-semantics canonical-rank-v1 \
+            --output /tmp/heap-csr-ab-tokenizer.json
+
+      - name: Measure baseline Heap
+        working-directory: baseline
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin tokenizer-autotune -- \
+            --tokenizer /tmp/heap-csr-ab-tokenizer.json \
+            --input scirust-sciagent/src/model.rs \
+            --input scirust-sciagent/src/elastic_heap.rs \
+            --output /tmp/heap-csr-ab-baseline-profile.json \
+            --report /tmp/heap-csr-ab-baseline-report.json \
+            --probe-lengths 128,256,512,1024,2048,4096,8192 \
+            --cases-per-length 1 \
+            --warmup-runs 2 \
+            --measured-runs 7 \
+            --device same-github-runner
+
+      - name: Measure CSR candidate on exact baseline corpus
+        working-directory: candidate
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin tokenizer-autotune -- \
+            --tokenizer /tmp/heap-csr-ab-tokenizer.json \
+            --input ../baseline/scirust-sciagent/src/model.rs \
+            --input ../baseline/scirust-sciagent/src/elastic_heap.rs \
+            --output /tmp/heap-csr-ab-candidate-profile.json \
+            --report /tmp/heap-csr-ab-candidate-report.json \
+            --probe-lengths 128,256,512,1024,2048,4096,8192 \
+            --cases-per-length 1 \
+            --warmup-runs 2 \
+            --measured-runs 7 \
+            --device same-github-runner
+
+      - name: Verify semantic parity and summarize Heap medians
+        run: |
+          test "$(jq '[.measurements[] | select(.semantic_match == false)] | length' /tmp/heap-csr-ab-baseline-report.json)" = "0"
+          test "$(jq '[.measurements[] | select(.semantic_match == false)] | length' /tmp/heap-csr-ab-candidate-report.json)" = "0"
+
+          jq -r '
+            [.measurements[] | select(.kernel == "heap" and .semantic_match)]
+            | group_by(.piece_len)
+            | .[]
+            | sort_by(.elapsed_nanos) as $g
+            | [$g[0].piece_len, $g[($g | length) / 2 | floor].elapsed_nanos]
+            | @tsv' /tmp/heap-csr-ab-baseline-report.json > /tmp/heap-csr-ab-baseline.tsv
+
+          jq -r '
+            [.measurements[] | select(.kernel == "heap" and .semantic_match)]
+            | group_by(.piece_len)
+            | .[]
+            | sort_by(.elapsed_nanos) as $g
+            | [$g[0].piece_len, $g[($g | length) / 2 | floor].elapsed_nanos]
+            | @tsv' /tmp/heap-csr-ab-candidate-report.json > /tmp/heap-csr-ab-candidate.tsv
+
+          echo -e "piece_len\tbaseline_ns\tcsr_ns\tspeedup_x" | tee /tmp/heap-csr-ab-summary.tsv
+          join -t $'\t' -1 1 -2 1 /tmp/heap-csr-ab-baseline.tsv /tmp/heap-csr-ab-candidate.tsv \
+            | awk -F '\t' 'BEGIN { OFS="\t" } { printf "%s\t%s\t%s\t%.6f\n", $1, $2, $3, $2 / $3 }' \
+            | tee -a /tmp/heap-csr-ab-summary.tsv
+
+      - name: Publish A/B summary
+        if: always()
+        run: |
+          echo "### Heap CSR A/B" >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/heap-csr-ab-summary.tsv >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "Baseline: ed0e814073854fb9d74d92cff46372e2dfd8448b" >> "$GITHUB_STEP_SUMMARY"
+          echo "Candidate: a78db7a91a1a46fe4071ff5c70902144229d4487" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload exact evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elastic-heap-csr-ab
+          path: |
+            /tmp/heap-csr-ab-runner.txt
+            /tmp/heap-csr-ab-tokenizer.json
+            /tmp/heap-csr-ab-baseline-report.json
+            /tmp/heap-csr-ab-candidate-report.json
+            /tmp/heap-csr-ab-summary.tsv
+          if-no-files-found: warn
