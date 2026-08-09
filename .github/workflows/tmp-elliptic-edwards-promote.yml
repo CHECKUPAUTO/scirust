@@ -1,0 +1,56 @@
+name: Temporary elliptic Edwards promoter
+
+on:
+  push:
+    branches:
+      - feat/elliptic-twisted-edwards
+
+permissions:
+  contents: write
+
+jobs:
+  qualify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: feat/elliptic-twisted-edwards
+          fetch-depth: 0
+      - name: Wire public module
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scirust-elliptic-discovery/src/lib.rs')
+          s = p.read_text()
+          module_anchor = 'pub mod curve;\n'
+          if s.count(module_anchor) != 1:
+              raise SystemExit('curve module anchor mismatch')
+          s = s.replace(module_anchor, module_anchor + 'pub mod edwards;\n', 1)
+          export_anchor = 'pub use curve::{CurveError, ToyCurve, ToyPoint};\n'
+          if s.count(export_anchor) != 1:
+              raise SystemExit('curve export anchor mismatch')
+          export = 'pub use edwards::{TwistedEdwardsCurve, TwistedEdwardsError, TwistedEdwardsPoint};\n'
+          s = s.replace(export_anchor, export_anchor + export, 1)
+          p.write_text(s)
+          PY
+          git diff --check
+      - name: Install toolchains
+        run: |
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt --component clippy
+      - name: Qualify exact model
+        run: |
+          cargo +nightly-2026-07-02 fmt --all -- --check || cargo +nightly-2026-07-02 fmt --all
+          cargo +nightly-2026-07-02 clippy -p scirust-elliptic-discovery --all-targets --locked -- -D warnings
+          cargo +1.89.0 test -p scirust-elliptic-discovery --locked edwards
+          cargo +1.89.0 test -p scirust-elliptic-discovery --locked
+          cargo +1.89.0 check -p scirust-elliptic-discovery --locked
+      - name: Remove temporary workflow and commit
+        run: |
+          git rm .github/workflows/tmp-elliptic-edwards-promote.yml
+          git config user.name 'CHECKUPAUTO'
+          git config user.email '194770978+CHECKUPAUTO@users.noreply.github.com'
+          git add scirust-elliptic-discovery/src/lib.rs scirust-elliptic-discovery/src/edwards.rs
+          git commit -m 'feat(elliptic): expose exact twisted-Edwards toy model'
+          git push origin HEAD:feat/elliptic-twisted-edwards
