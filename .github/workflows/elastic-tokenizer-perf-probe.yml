@@ -1,0 +1,69 @@
+name: ElasticTokenizer performance probe
+
+on:
+  pull_request:
+    paths:
+      - "scirust-sciagent/src/bin/tokenizer-rule-table-probe.rs"
+      - ".github/workflows/elastic-tokenizer-perf-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rule-table-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Install MSRV toolchain
+        run: |
+          rustup toolchain install 1.89.0 --profile minimal
+
+      - name: Record runner identity
+        run: |
+          {
+            uname -a
+            echo
+            lscpu
+          } > /tmp/elastic-runner.txt
+
+      - name: Train deterministic canonical probe tokenizer
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin train-tokenizer -- \
+            --input scirust-sciagent/src \
+            --recursive \
+            --extension rs \
+            --vocab-size 2048 \
+            --min-frequency 2 \
+            --merge-semantics canonical-rank-v1 \
+            --output /tmp/elastic-probe-tokenizer.json
+
+      - name: Measure packed rule-table backends
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin tokenizer-rule-table-probe -- \
+            --tokenizer /tmp/elastic-probe-tokenizer.json \
+            --sweeps 100 \
+            --warmup-rounds 3 \
+            --measured-rounds 11 | tee /tmp/elastic-rule-table-probe.txt
+
+      - name: Publish probe summary
+        if: always()
+        run: |
+          echo "### ElasticTokenizer rule-table probe" >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/elastic-rule-table-probe.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "Raw result is informational only and is not a merge gate." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elastic-tokenizer-rule-table-probe
+          path: |
+            /tmp/elastic-runner.txt
+            /tmp/elastic-rule-table-probe.txt
+          if-no-files-found: warn
