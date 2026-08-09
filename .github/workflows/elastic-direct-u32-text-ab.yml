@@ -1,0 +1,147 @@
+name: ElasticTokenizer direct u32 text A/B
+
+on:
+  pull_request:
+    branches:
+      - wip/elastic-tokenizer-direct-u32-ingress
+
+permissions:
+  contents: read
+
+concurrency:
+  group: elastic-direct-u32-text-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  text-encode-ab:
+    name: Text to Token IDs A/B
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+
+      - name: Install exact MSRV
+        run: rustup toolchain install 1.89.0 --profile minimal
+
+      - name: Prepare exact baseline worktree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git worktree add /tmp/direct-u32-baseline 5bd11e6d459338aac2b5a63d18c0fdce48dd2785
+          cp scirust-sciagent/src/bin/tokenizer-text-encode-probe.rs \
+            /tmp/direct-u32-baseline/scirust-sciagent/src/bin/tokenizer-text-encode-probe.rs
+
+      - name: Build baseline and candidate before timing
+        shell: bash
+        run: |
+          set -euo pipefail
+          CARGO_TARGET_DIR=/tmp/direct-u32-baseline-target \
+            cargo +1.89.0 build --locked --release \
+              --manifest-path /tmp/direct-u32-baseline/Cargo.toml \
+              -p scirust-sciagent \
+              --bin train-tokenizer \
+              --bin tokenizer-text-encode-probe
+          CARGO_TARGET_DIR=/tmp/direct-u32-candidate-target \
+            cargo +1.89.0 build --locked --release \
+              -p scirust-sciagent \
+              --bin tokenizer-text-encode-probe
+
+      - name: Train one deterministic canonical tokenizer on baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/direct-u32-baseline-target/release/train-tokenizer \
+            --input /tmp/direct-u32-baseline/scirust-sciagent/src \
+            --recursive \
+            --extension rs \
+            --vocab-size 2048 \
+            --min-frequency 2 \
+            --merge-semantics canonical-rank-v1 \
+            --output /tmp/direct-u32-tokenizer.json
+
+      - name: Run balanced text-to-IDs A/B
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(
+            --tokenizer /tmp/direct-u32-tokenizer.json
+            --input /tmp/direct-u32-baseline/scirust-sciagent/src/elastic_text_tokenizer.rs
+            --input /tmp/direct-u32-baseline/scirust-sciagent/src/elastic_tiny.rs
+            --input /tmp/direct-u32-baseline/scirust-sciagent/src/elastic_engine.rs
+            --lengths 8,16,32,64,96,128
+            --sweeps 750
+            --warmup-rounds 3
+            --measured-rounds 11
+          )
+          baseline=/tmp/direct-u32-baseline-target/release/tokenizer-text-encode-probe
+          candidate=/tmp/direct-u32-candidate-target/release/tokenizer-text-encode-probe
+
+          "$baseline" "${args[@]}" > /tmp/baseline-1.txt
+          "$candidate" "${args[@]}" > /tmp/candidate-1.txt
+          "$candidate" "${args[@]}" > /tmp/candidate-2.txt
+          "$baseline" "${args[@]}" > /tmp/baseline-2.txt
+          "$baseline" "${args[@]}" > /tmp/baseline-3.txt
+          "$candidate" "${args[@]}" > /tmp/candidate-3.txt
+
+          python3 - <<'PY'
+          from pathlib import Path
+          from statistics import median
+
+          lengths = (8, 16, 32, 64, 96, 128)
+
+          def read(prefix):
+              runs = []
+              for index in (1, 2, 3):
+                  values = {}
+                  for line in Path(f"/tmp/{prefix}-{index}.txt").read_text().splitlines():
+                      if not line or not line[0].isdigit() or "," not in line:
+                          continue
+                      length, nanos = line.split(",", 1)
+                      values[int(length)] = int(nanos)
+                  assert set(values) == set(lengths), (prefix, index, values)
+                  runs.append(values)
+              return runs
+
+          baseline = read("baseline")
+          candidate = read("candidate")
+
+          rows = []
+          for length in lengths:
+              b = int(median(run[length] for run in baseline))
+              c = int(median(run[length] for run in candidate))
+              speedup = b / c
+              rows.append((length, b, c, speedup))
+
+          print("piece_len,baseline_ns,direct_u32_ns,speedup")
+          for length, b, c, speedup in rows:
+              print(f"{length},{b},{c},{speedup:.6f}")
+
+          summary = Path(__import__("os").environ["GITHUB_STEP_SUMMARY"])
+          with summary.open("a") as out:
+              out.write("### ElasticTokenizer text → Token IDs direct-u32 A/B\n\n")
+              out.write("Exact baseline: `5bd11e6d459338aac2b5a63d18c0fdce48dd2785`. Candidate: current #1119 production code plus this probe only. Both sides read the exact same baseline text cases and the same canonical tokenizer. Each probe verifies TinyScan Token-ID parity against Reference before timing. Balanced order: B,C,C,B,B,C.\n\n")
+              out.write("| bytes | baseline median ns | direct-u32 median ns | speedup |\n")
+              out.write("|---:|---:|---:|---:|\n")
+              for length, b, c, speedup in rows:
+                  out.write(f"| {length} | {b} | {c} | **{speedup:.6f}x** |\n")
+
+          if any(speedup < 0.98 for _, _, _, speedup in rows):
+              raise SystemExit("direct-u32 regressed a measured small-piece length by more than 2%")
+          PY
+
+      - name: Upload raw A/B outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elastic-direct-u32-text-ab
+          path: |
+            /tmp/baseline-*.txt
+            /tmp/candidate-*.txt
+            /tmp/direct-u32-tokenizer.json
+          if-no-files-found: warn
