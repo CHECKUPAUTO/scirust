@@ -110,10 +110,10 @@ pub const fn cuda_decode_kernel_semantic_version(modes: CudaDecodeModes) -> &'st
 fn acquired_profile(
     adapter: &CudaComputeAdapter,
 ) -> Result<CanonicalCudaExecutionProfile, CudaDecodeExecutionAttestationError> {
-    let (device_ordinal, architecture_name, capability_profile_bytes, topology_profile_bytes) =
-        adapter.canonical_execution_profile().map_err(|error| {
-            CudaDecodeExecutionAttestationError::ComputeProfile(error.to_string())
-        })?;
+    let (device_ordinal, architecture_name) = adapter.canonical_execution_identity();
+    let [capability_profile_bytes, topology_profile_bytes] = adapter
+        .canonical_execution_profile_bytes()
+        .map_err(|error| CudaDecodeExecutionAttestationError::ComputeProfile(error.to_string()))?;
 
     Ok(CanonicalCudaExecutionProfile {
         device_ordinal,
