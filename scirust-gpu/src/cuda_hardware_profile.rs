@@ -1,7 +1,8 @@
 use scirust_compute::{
     AcceleratorTopologyDescriptor, AcceleratorTopologyProvider, Architecture, ArchitectureFamily,
     DType, DeviceCapabilities, HardwareCapabilities, MemoryDomainDescriptor, MemorySpace,
-    SupportLevel,
+    SupportLevel, SystemTopology, augment_accelerator_topology, canonical_hardware_profile_bytes,
+    canonical_topology_profile_bytes,
 };
 use scirust_cuda::CudaDeviceInfo;
 
@@ -94,6 +95,38 @@ pub(crate) fn topology_descriptor(
         host_addressable: SupportLevel::Unknown,
     });
     descriptor
+}
+
+impl super::CudaComputeAdapter {
+    /// Return the canonical execution identity derived from this acquired CUDA runtime.
+    ///
+    /// The tuple is `(device_ordinal, architecture_name, hardware_profile_bytes,
+    /// topology_profile_bytes)`. All fields originate from this adapter's driver-backed
+    /// runtime and SciRust's versioned canonical compute encoders.
+    pub fn canonical_execution_profile(
+        &self,
+    ) -> scirust_compute::ComputeResult<(u32, Option<String>, Vec<u8>, Vec<u8>)> {
+        let hardware = hardware_capabilities(self.capabilities(), self.runtime().device_info());
+        let hardware_bytes = canonical_hardware_profile_bytes(&hardware).map_err(|_| {
+            scirust_compute::ComputeError::InvalidArgument("invalid canonical CUDA hardware profile")
+        })?;
+
+        let descriptor = topology_descriptor(self.capabilities(), self.runtime().device_info());
+        let mut topology = SystemTopology::default();
+        augment_accelerator_topology(&mut topology, descriptor).map_err(|_| {
+            scirust_compute::ComputeError::InvalidArgument("invalid canonical CUDA topology profile")
+        })?;
+        let topology_bytes = canonical_topology_profile_bytes(&topology).map_err(|_| {
+            scirust_compute::ComputeError::InvalidArgument("invalid canonical CUDA topology profile")
+        })?;
+
+        Ok((
+            self.capabilities().device.ordinal(),
+            hardware.architecture.name,
+            hardware_bytes,
+            topology_bytes,
+        ))
+    }
 }
 
 impl AcceleratorTopologyProvider for super::CudaComputeAdapter {
