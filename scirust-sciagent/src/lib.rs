@@ -60,7 +60,7 @@ pub use elastic_calibration::{
 };
 pub use elastic_engine::{ElasticBpeEngine, ElasticEncoding};
 pub use elastic_heap::HeapBpe;
-pub use elastic_id::{PairKey, PairKeyError};
+pub use elastic_id::{CompactWordError, PackedRule, PairKey, PairKeyError, PriorityKey};
 pub use elastic_indexed::IndexedBpe;
 pub use elastic_profile_fit::{ElasticProfileFitter, ProfileFitError};
 pub use elastic_profile_store::{
