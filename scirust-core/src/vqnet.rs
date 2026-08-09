@@ -5,10 +5,12 @@
 //! execution path. The builder owns symbolic parameter allocation so callers do
 //! not need to coordinate [`ParameterId`] values by hand.
 
+mod ansatz;
 mod module_state;
 mod nn_module;
 mod optimizer_state;
 
+pub use ansatz::{EntanglementTopology, EntanglingGate};
 pub use module_state::{
     ParameterInitializer, QuantumForward, QuantumModule, VariationalParameters,
 };
