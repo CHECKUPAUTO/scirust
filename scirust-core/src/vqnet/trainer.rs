@@ -264,7 +264,9 @@ where
         }
 
         let last_report = last_report.ok_or_else(|| {
-            SciRustError::InvalidConfig("VQNet training epoch requires at least one batch".to_string())
+            SciRustError::InvalidConfig(
+                "VQNet training epoch requires at least one batch".to_string(),
+            )
         })?;
         let mean_loss = (loss_sum / steps as f64) as f32;
         if !mean_loss.is_finite()
@@ -399,11 +401,7 @@ mod tests {
         let mut model = one_qubit_module();
         let mut session = TrainingSession::new(Sgd::new(0.03));
         let error = session
-            .train_epoch(
-                &mut model,
-                &MseLoss::new(),
-                Vec::<(Tensor, Tensor)>::new(),
-            )
+            .train_epoch(&mut model, &MseLoss::new(), Vec::<(Tensor, Tensor)>::new())
             .unwrap_err();
         assert!(error.to_string().contains("at least one batch"));
         assert_eq!(session.completed_steps(), 0);
