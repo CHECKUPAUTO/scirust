@@ -3,17 +3,95 @@
 //! `IndexedBpe` keeps the piece as an indexed linked list. Merge candidates
 //! carry node generations so only adjacencies touched by a merge need to be
 //! regenerated. Candidate selection is intentionally linear in this phase;
-//! the later `Heap` kernel will replace that scheduler for large pieces while
+//! the later `Heap` kernel replaces that scheduler for large pieces while
 //! preserving the exact same rank-priority semantics.
 
 use std::collections::BTreeMap;
 
+use crate::elastic_id::{PackedRule, PairKey};
 use crate::elastic_tokenizer::{DuplicateMergeRule, TokenId};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct IndexedRule {
     output: TokenId,
     rank: usize,
+}
+
+#[derive(Clone, Debug)]
+enum RuleTable {
+    Compact(BTreeMap<PairKey, PackedRule>),
+    Wide(BTreeMap<(TokenId, TokenId), IndexedRule>),
+}
+
+impl RuleTable {
+    fn from_ordered_merges(
+        merges: &[(TokenId, TokenId, TokenId)],
+    ) -> Result<Self, DuplicateMergeRule> {
+        let compact = merges
+            .iter()
+            .enumerate()
+            .all(|(rank, &(left, right, output))| {
+                u32::try_from(rank).is_ok()
+                    && u32::try_from(left).is_ok()
+                    && u32::try_from(right).is_ok()
+                    && u32::try_from(output).is_ok()
+            });
+
+        if compact
+        {
+            let mut ranked = BTreeMap::new();
+            for (rank, &(left, right, output)) in merges.iter().enumerate()
+            {
+                let key = PairKey::try_from_usize(left, right)
+                    .expect("compact table preflight checked token ids");
+                let rule = PackedRule::try_from_usize(rank, output)
+                    .expect("compact table preflight checked rule fields");
+                if ranked.insert(key, rule).is_some()
+                {
+                    return Err(DuplicateMergeRule { left, right });
+                }
+            }
+            Ok(Self::Compact(ranked))
+        }
+        else
+        {
+            let mut ranked = BTreeMap::new();
+            for (rank, &(left, right, output)) in merges.iter().enumerate()
+            {
+                if ranked
+                    .insert((left, right), IndexedRule { output, rank })
+                    .is_some()
+                {
+                    return Err(DuplicateMergeRule { left, right });
+                }
+            }
+            Ok(Self::Wide(ranked))
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        match self
+        {
+            Self::Compact(rules) => rules.is_empty(),
+            Self::Wide(rules) => rules.is_empty(),
+        }
+    }
+
+    fn get(&self, left: TokenId, right: TokenId) -> Option<IndexedRule> {
+        match self
+        {
+            Self::Compact(rules) =>
+            {
+                let key = PairKey::try_from_usize(left, right).ok()?;
+                let rule = rules.get(&key)?;
+                Some(IndexedRule {
+                    output: usize::try_from(rule.output()).ok()?,
+                    rank: usize::try_from(rule.rank()).ok()?,
+                })
+            },
+            Self::Wide(rules) => rules.get(&(left, right)).copied(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -38,24 +116,16 @@ struct Candidate {
 /// Rank-priority BPE kernel with indexed adjacency maintenance.
 #[derive(Clone, Debug)]
 pub struct IndexedBpe {
-    merges: BTreeMap<(TokenId, TokenId), IndexedRule>,
+    merges: RuleTable,
 }
 
 impl IndexedBpe {
     pub fn from_ordered_merges(
         merges: &[(TokenId, TokenId, TokenId)],
     ) -> Result<Self, DuplicateMergeRule> {
-        let mut ranked = BTreeMap::new();
-        for (rank, &(left, right, output)) in merges.iter().enumerate()
-        {
-            if ranked
-                .insert((left, right), IndexedRule { output, rank })
-                .is_some()
-            {
-                return Err(DuplicateMergeRule { left, right });
-            }
-        }
-        Ok(Self { merges: ranked })
+        Ok(Self {
+            merges: RuleTable::from_ordered_merges(merges)?,
+        })
     }
 
     /// Encodes one complete pre-tokenized piece.
@@ -151,7 +221,7 @@ impl IndexedBpe {
         right: usize,
         candidates: &mut Vec<Candidate>,
     ) {
-        let Some(rule) = self.merges.get(&(nodes[left].token, nodes[right].token))
+        let Some(rule) = self.merges.get(nodes[left].token, nodes[right].token)
         else
         {
             return;
@@ -195,6 +265,12 @@ mod tests {
         let reference = CanonicalBpeOracle::from_ordered_merges(merges).unwrap();
         let indexed = IndexedBpe::from_ordered_merges(merges).unwrap();
         assert_eq!(indexed.encode_ids(input), reference.encode_ids(input));
+    }
+
+    #[test]
+    fn normal_rule_tables_use_compact_words() {
+        let indexed = IndexedBpe::from_ordered_merges(&[(1, 2, 3), (3, 4, 5)]).unwrap();
+        assert!(matches!(indexed.merges, RuleTable::Compact(_)));
     }
 
     #[test]
@@ -255,6 +331,17 @@ mod tests {
         let merges = [(1, 1, 2), (2, 2, 3), (3, 3, 4), (4, 4, 5)];
         let input = vec![1; 1024];
         assert_parity(&merges, &input);
+    }
+
+    #[test]
+    fn wide_rule_fallback_preserves_semantics() {
+        if usize::BITS > 32
+        {
+            let wide = usize::try_from(u64::from(u32::MAX) + 1).unwrap();
+            let indexed = IndexedBpe::from_ordered_merges(&[(wide, 1, 2)]).unwrap();
+            assert!(matches!(indexed.merges, RuleTable::Wide(_)));
+            assert_eq!(indexed.encode_ids(&[wide, 1]), vec![2]);
+        }
     }
 
     #[test]
