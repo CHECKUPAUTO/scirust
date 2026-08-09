@@ -63,6 +63,17 @@ struct Args {
     device: String,
 }
 
+struct RawReportContext<'a> {
+    result: &'a AutotuneResult,
+    profile: ElasticProfile,
+    hardware: &'a ElasticHardwareIdentity,
+    tokenizer_fingerprint: String,
+    probe_lengths: &'a [usize],
+    cases_per_length: usize,
+    warmup_runs: usize,
+    measured_runs: usize,
+}
+
 fn main() {
     let args = Args::parse();
     let probe_lengths = parse_probe_lengths(&args.probe_lengths)
@@ -126,18 +137,18 @@ fn main() {
 
     if let Some(report_path) = &args.report
     {
-        write_raw_report(
-            report_path,
-            &result,
+        let context = RawReportContext {
+            result: &result,
             profile,
-            &hardware,
-            ordered_merges_fingerprint(canonical.ordered_merges()),
-            &probe_lengths,
-            args.cases_per_length,
-            args.warmup_runs,
-            args.measured_runs,
-        )
-        .expect("failed to save ElasticTokenizer raw timing report");
+            hardware: &hardware,
+            tokenizer_fingerprint: ordered_merges_fingerprint(canonical.ordered_merges()),
+            probe_lengths: &probe_lengths,
+            cases_per_length: args.cases_per_length,
+            warmup_runs: args.warmup_runs,
+            measured_runs: args.measured_runs,
+        };
+        write_raw_report(report_path, &context)
+            .expect("failed to save ElasticTokenizer raw timing report");
         eprintln!("raw timing report saved to {report_path:?}");
     }
 
@@ -151,19 +162,12 @@ fn main() {
     eprintln!("profile saved to {:?}", args.output);
 }
 
-#[allow(clippy::too_many_arguments)]
 fn write_raw_report(
     path: &Path,
-    result: &AutotuneResult,
-    profile: ElasticProfile,
-    hardware: &ElasticHardwareIdentity,
-    tokenizer_fingerprint: String,
-    probe_lengths: &[usize],
-    cases_per_length: usize,
-    warmup_runs: usize,
-    measured_runs: usize,
+    context: &RawReportContext<'_>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let measurements = result
+    let measurements = context
+        .result
         .measurements()
         .iter()
         .map(|measurement| {
@@ -175,29 +179,30 @@ fn write_raw_report(
             })
         })
         .collect::<Vec<_>>();
-    let thresholds = profile.thresholds();
-    let kernels = profile
+    let thresholds = context.profile.thresholds();
+    let kernels = context
+        .profile
         .kernels()
         .into_iter()
         .map(kernel_name)
         .collect::<Vec<_>>();
     let value = serde_json::json!({
         "schema_version": AUTOTUNE_REPORT_SCHEMA_V1,
-        "tokenizer_fingerprint": tokenizer_fingerprint,
+        "tokenizer_fingerprint": context.tokenizer_fingerprint,
         "hardware": {
-            "arch": hardware.arch,
-            "os": hardware.os,
-            "device": hardware.device,
-            "fingerprint": hardware.fingerprint(),
+            "arch": context.hardware.arch,
+            "os": context.hardware.os,
+            "device": context.hardware.device,
+            "fingerprint": context.hardware.fingerprint(),
         },
         "calibration": {
-            "probe_lengths": probe_lengths,
-            "cases_per_length": cases_per_length,
-            "warmup_runs": warmup_runs,
-            "measured_runs": measured_runs,
+            "probe_lengths": context.probe_lengths,
+            "cases_per_length": context.cases_per_length,
+            "warmup_runs": context.warmup_runs,
+            "measured_runs": context.measured_runs,
         },
         "measurements": measurements,
-        "rejected_semantic_measurements": result.report().rejected_semantic_measurements(),
+        "rejected_semantic_measurements": context.result.report().rejected_semantic_measurements(),
         "fitted_profile": {
             "thresholds": {
                 "s_max": thresholds.s_max,
