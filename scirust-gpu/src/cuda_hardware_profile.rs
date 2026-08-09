@@ -98,34 +98,44 @@ pub(crate) fn topology_descriptor(
 }
 
 impl super::CudaComputeAdapter {
-    /// Return the canonical execution identity derived from this acquired CUDA runtime.
+    /// Return device ordinal and structured architecture name for this acquired runtime.
+    pub fn canonical_execution_identity(&self) -> (u32, Option<String>) {
+        let hardware = hardware_capabilities(self.capabilities(), self.runtime().device_info());
+        (
+            self.capabilities().device.ordinal(),
+            hardware.architecture.name,
+        )
+    }
+
+    /// Return canonical hardware and topology profile bytes for this acquired runtime.
     ///
-    /// The tuple is `(device_ordinal, architecture_name, hardware_profile_bytes,
-    /// topology_profile_bytes)`. All fields originate from this adapter's driver-backed
-    /// runtime and SciRust's versioned canonical compute encoders.
-    pub fn canonical_execution_profile(
+    /// Index zero is the hardware profile and index one is the topology profile.
+    /// Both are produced by SciRust's versioned canonical compute encoders from
+    /// driver-backed facts owned by this adapter.
+    pub fn canonical_execution_profile_bytes(
         &self,
-    ) -> scirust_compute::ComputeResult<(u32, Option<String>, Vec<u8>, Vec<u8>)> {
+    ) -> scirust_compute::ComputeResult<[Vec<u8>; 2]> {
         let hardware = hardware_capabilities(self.capabilities(), self.runtime().device_info());
         let hardware_bytes = canonical_hardware_profile_bytes(&hardware).map_err(|_| {
-            scirust_compute::ComputeError::InvalidArgument("invalid canonical CUDA hardware profile")
+            scirust_compute::ComputeError::InvalidArgument(
+                "invalid canonical CUDA hardware profile",
+            )
         })?;
 
         let descriptor = topology_descriptor(self.capabilities(), self.runtime().device_info());
         let mut topology = SystemTopology::default();
         augment_accelerator_topology(&mut topology, descriptor).map_err(|_| {
-            scirust_compute::ComputeError::InvalidArgument("invalid canonical CUDA topology profile")
+            scirust_compute::ComputeError::InvalidArgument(
+                "invalid canonical CUDA topology profile",
+            )
         })?;
         let topology_bytes = canonical_topology_profile_bytes(&topology).map_err(|_| {
-            scirust_compute::ComputeError::InvalidArgument("invalid canonical CUDA topology profile")
+            scirust_compute::ComputeError::InvalidArgument(
+                "invalid canonical CUDA topology profile",
+            )
         })?;
 
-        Ok((
-            self.capabilities().device.ordinal(),
-            hardware.architecture.name,
-            hardware_bytes,
-            topology_bytes,
-        ))
+        Ok([hardware_bytes, topology_bytes])
     }
 }
 
