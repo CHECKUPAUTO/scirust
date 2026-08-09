@@ -1,0 +1,154 @@
+name: ElasticTokenizer TinyScan CSR SoA A/B probe
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/elastic-tiny-csr-soa-ab.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tiny-csr-ab:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout current baseline
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: d65ea3dbe6328d5eee657e5fc291a0c58a3d8056
+          path: baseline
+
+      - name: Checkout current candidate base
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: d65ea3dbe6328d5eee657e5fc291a0c58a3d8056
+          path: candidate
+
+      - name: Checkout CSR Tiny patch source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: 1a2a230182f8f0f424010e1e1642eaf297844d00
+          path: patch
+
+      - name: Inject only CSR Tiny production files
+        run: |
+          cp patch/scirust-sciagent/src/elastic_rule_table.rs candidate/scirust-sciagent/src/elastic_rule_table.rs
+          cp patch/scirust-sciagent/src/elastic_tiny.rs candidate/scirust-sciagent/src/elastic_tiny.rs
+          cp patch/scirust-sciagent/src/lib.rs candidate/scirust-sciagent/src/lib.rs
+
+      - name: Install MSRV toolchain
+        run: rustup toolchain install 1.89.0 --profile minimal
+
+      - name: Record runner identity
+        run: |
+          {
+            uname -a
+            echo
+            lscpu
+          } > /tmp/tiny-csr-ab-runner.txt
+
+      - name: Train one deterministic canonical tokenizer
+        working-directory: baseline
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin train-tokenizer -- \
+            --input scirust-sciagent/src/elastic_tiny.rs \
+            --input scirust-sciagent/src/model.rs \
+            --vocab-size 1024 \
+            --min-frequency 2 \
+            --merge-semantics canonical-rank-v1 \
+            --output /tmp/tiny-csr-ab-tokenizer.json
+
+      - name: Measure baseline
+        working-directory: baseline
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin tokenizer-autotune -- \
+            --tokenizer /tmp/tiny-csr-ab-tokenizer.json \
+            --input scirust-sciagent/src/elastic_tiny.rs \
+            --input scirust-sciagent/src/model.rs \
+            --output /tmp/tiny-csr-ab-baseline-profile.json \
+            --report /tmp/tiny-csr-ab-baseline-report.json \
+            --probe-lengths 8,16,32,64,96,128 \
+            --cases-per-length 2 \
+            --warmup-runs 2 \
+            --measured-runs 11 \
+            --device same-github-runner
+
+      - name: Measure CSR SoA candidate on exact baseline corpus
+        working-directory: candidate
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin tokenizer-autotune -- \
+            --tokenizer /tmp/tiny-csr-ab-tokenizer.json \
+            --input ../baseline/scirust-sciagent/src/elastic_tiny.rs \
+            --input ../baseline/scirust-sciagent/src/model.rs \
+            --output /tmp/tiny-csr-ab-candidate-profile.json \
+            --report /tmp/tiny-csr-ab-candidate-report.json \
+            --probe-lengths 8,16,32,64,96,128 \
+            --cases-per-length 2 \
+            --warmup-runs 2 \
+            --measured-runs 11 \
+            --device same-github-runner
+
+      - name: Verify parity and summarize TinyScan medians
+        run: |
+          test "$(jq '[.measurements[] | select(.semantic_match == false)] | length' /tmp/tiny-csr-ab-baseline-report.json)" = "0"
+          test "$(jq '[.measurements[] | select(.semantic_match == false)] | length' /tmp/tiny-csr-ab-candidate-report.json)" = "0"
+
+          jq -r '
+            [.measurements[] | select(.kernel == "tiny_scan" and .semantic_match)]
+            | group_by(.piece_len)
+            | .[]
+            | sort_by(.elapsed_nanos) as $g
+            | ($g | length) as $n
+            | [
+                $g[0].piece_len,
+                (if ($n % 2) == 1
+                 then $g[($n / 2 | floor)].elapsed_nanos
+                 else ((($g[$n / 2 - 1].elapsed_nanos + $g[$n / 2].elapsed_nanos) / 2) | floor)
+                 end)
+              ]
+            | @tsv' /tmp/tiny-csr-ab-baseline-report.json > /tmp/tiny-csr-ab-baseline.tsv
+
+          jq -r '
+            [.measurements[] | select(.kernel == "tiny_scan" and .semantic_match)]
+            | group_by(.piece_len)
+            | .[]
+            | sort_by(.elapsed_nanos) as $g
+            | ($g | length) as $n
+            | [
+                $g[0].piece_len,
+                (if ($n % 2) == 1
+                 then $g[($n / 2 | floor)].elapsed_nanos
+                 else ((($g[$n / 2 - 1].elapsed_nanos + $g[$n / 2].elapsed_nanos) / 2) | floor)
+                 end)
+              ]
+            | @tsv' /tmp/tiny-csr-ab-candidate-report.json > /tmp/tiny-csr-ab-candidate.tsv
+
+          echo -e "piece_len\tbaseline_ns\tcsr_soa_ns\tspeedup_x" | tee /tmp/tiny-csr-ab-summary.tsv
+          join -t $'\t' -1 1 -2 1 /tmp/tiny-csr-ab-baseline.tsv /tmp/tiny-csr-ab-candidate.tsv \
+            | awk -F '\t' 'BEGIN { OFS="\t" } { printf "%s\t%s\t%s\t%.6f\n", $1, $2, $3, $2 / $3 }' \
+            | tee -a /tmp/tiny-csr-ab-summary.tsv
+
+      - name: Publish A/B summary
+        if: always()
+        run: |
+          echo "### TinyScan CSR SoA A/B" >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/tiny-csr-ab-summary.tsv >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "Baseline base: d65ea3dbe6328d5eee657e5fc291a0c58a3d8056" >> "$GITHUB_STEP_SUMMARY"
+          echo "Injected patch: 1a2a230182f8f0f424010e1e1642eaf297844d00" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload exact evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elastic-tiny-csr-soa-ab
+          path: |
+            /tmp/tiny-csr-ab-runner.txt
+            /tmp/tiny-csr-ab-tokenizer.json
+            /tmp/tiny-csr-ab-baseline-report.json
+            /tmp/tiny-csr-ab-candidate-report.json
+            /tmp/tiny-csr-ab-summary.tsv
+          if-no-files-found: warn
