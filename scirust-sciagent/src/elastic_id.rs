@@ -14,7 +14,7 @@ pub struct PairKey(u64);
 impl PairKey {
     #[inline]
     pub const fn new(left: u32, right: u32) -> Self {
-        Self((u64::from(left) << 32) | u64::from(right))
+        Self(((left as u64) << 32) | (right as u64))
     }
 
     #[inline]
@@ -68,6 +68,10 @@ mod tests {
     #[test]
     fn pair_key_is_exactly_one_u64() {
         assert_eq!(std::mem::size_of::<PairKey>(), 8);
+        if usize::BITS == 64
+        {
+            assert_eq!(std::mem::size_of::<(usize, usize)>(), 16);
+        }
     }
 
     #[test]
