@@ -41,12 +41,16 @@ pub enum TwistedEdwardsError {
 
 impl fmt::Display for TwistedEdwardsError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self
+        {
             Self::SingularCurve => write!(
                 formatter,
                 "twisted-Edwards parameters must satisfy a != 0, d != 0 and a != d"
             ),
-            Self::PointNotOnCurve => write!(formatter, "point is not on this twisted-Edwards curve"),
+            Self::PointNotOnCurve =>
+            {
+                write!(formatter, "point is not on this twisted-Edwards curve")
+            },
             Self::ExceptionalDenominator => write!(
                 formatter,
                 "twisted-Edwards affine addition encountered a zero denominator"
@@ -70,7 +74,8 @@ impl TwistedEdwardsCurve {
     pub fn new(prime: ToyPrime, a: u64, d: u64) -> Result<Self, TwistedEdwardsError> {
         let a = Fp::new(prime, a);
         let d = Fp::new(prime, d);
-        if a.is_zero() || d.is_zero() || a == d {
+        if a.is_zero() || d.is_zero() || a == d
+        {
             return Err(TwistedEdwardsError::SingularCurve);
         }
         Ok(Self { prime, a, d })
@@ -136,7 +141,8 @@ impl TwistedEdwardsCurve {
         let one = Fp::new(self.prime, 1);
         let x_denominator = one.checked_add(d_cross)?;
         let y_denominator = one.checked_sub(d_cross)?;
-        if x_denominator.is_zero() || y_denominator.is_zero() {
+        if x_denominator.is_zero() || y_denominator.is_zero()
+        {
             return Err(TwistedEdwardsError::ExceptionalDenominator);
         }
 
@@ -183,12 +189,15 @@ impl TwistedEdwardsCurve {
         self.validate_point(point)?;
         let mut accumulator = self.identity();
         let mut addend = point;
-        while scalar != 0 {
-            if scalar & 1 == 1 {
+        while scalar != 0
+        {
+            if scalar & 1 == 1
+            {
                 accumulator = self.add(accumulator, addend)?;
             }
             scalar >>= 1;
-            if scalar != 0 {
+            if scalar != 0
+            {
                 addend = self.double(addend)?;
             }
         }
@@ -201,13 +210,16 @@ impl TwistedEdwardsCurve {
     pub fn enumerate(self) -> Vec<TwistedEdwardsPoint> {
         let p = self.prime.value();
         let mut points = Vec::new();
-        for x in 0..p {
-            for y in 0..p {
+        for x in 0..p
+        {
+            for y in 0..p
+            {
                 let point = TwistedEdwardsPoint {
                     x: Fp::new(self.prime, x),
                     y: Fp::new(self.prime, y),
                 };
-                if self.contains(point) {
+                if self.contains(point)
+                {
                     points.push(point);
                 }
             }
@@ -216,15 +228,19 @@ impl TwistedEdwardsCurve {
     }
 
     fn validate_point(self, point: TwistedEdwardsPoint) -> Result<(), TwistedEdwardsError> {
-        if self.contains_checked(point)? {
+        if self.contains_checked(point)?
+        {
             Ok(())
-        } else {
+        }
+        else
+        {
             Err(TwistedEdwardsError::PointNotOnCurve)
         }
     }
 
     fn contains_checked(self, point: TwistedEdwardsPoint) -> Result<bool, FieldError> {
-        if point.x.prime() != self.prime || point.y.prime() != self.prime {
+        if point.x.prime() != self.prime || point.y.prime() != self.prime
+        {
             return Err(FieldError::DifferentPrimes);
         }
         let x2 = point.x.checked_mul(point.x)?;
@@ -294,7 +310,8 @@ mod tests {
         let curve = curve();
         let point = curve.point(3, 4).unwrap();
         let mut repeated = curve.identity();
-        for _ in 0..7 {
+        for _ in 0..7
+        {
             repeated = curve.add(repeated, point).unwrap();
         }
         assert_eq!(curve.scalar_mul(7, point).unwrap(), repeated);
@@ -307,7 +324,8 @@ mod tests {
         let points = curve.enumerate();
         assert_eq!(points.len(), 24);
         assert_eq!(points[0], curve.point(0, 1).unwrap());
-        for point in points {
+        for point in points
+        {
             assert!(curve.contains(point));
         }
     }
