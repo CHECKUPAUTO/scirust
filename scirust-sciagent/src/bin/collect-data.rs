@@ -250,7 +250,9 @@ fn ingest_file(
         return;
     }
     let ids = tok.encode_with_special(content, true, true);
-    writer.extend(ids.iter().map(|&i| i as u32));
+    writer.extend(ids.into_iter().map(|id| {
+        u32::try_from(id).expect("token id exceeds the u32 shard format")
+    }));
     stats.kept += 1;
 }
 
