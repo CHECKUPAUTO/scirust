@@ -54,7 +54,12 @@ pub use bpe::{BpeTokenizer, BpeTrainer};
 pub use bpe_dispatch::{BpeDispatchError, VersionedBpeTokenizer};
 pub use canonical_bpe_train::{CanonicalBpeArtifact, CanonicalBpeTrainError, CanonicalBpeTrainer};
 pub use ccos::CcosLog;
-pub use communication::{RuntimeEndpoint, SciAgentEndpoint};
+pub use communication::{
+    COGNO_SCIENTIFIC_EXCHANGE_PAYLOAD_SCHEMA_VERSION,
+    MAX_COGNO_SCIENTIFIC_EXCHANGE_CANONICAL_PAYLOAD_BYTES, RuntimeEndpoint,
+    RuntimeScientificExchangeMessageError, RuntimeScientificExchangePayload,
+    RuntimeScientificExchangePayloadError, RuntimeScientificExchangeVerdict, SciAgentEndpoint,
+};
 pub use config::SciAgentConfig;
 #[cfg(feature = "cuda")]
 pub use cuda_decode_execution_attestation::{
