@@ -50,6 +50,8 @@ capabilities. It makes no claim of quantum advantage.
   accumulate deterministically. Projection is ordinary reverse-mode `matmul`
   plus `add_bias`, so the existing quantum adjoint remains the only quantum
   differentiation implementation and gradients propagate through the readout.
+  Hamiltonian coefficients are fixed problem-definition data, not trainable
+  module parameters; a trainable classical readout remains composable afterward.
 - `QuantumModule` adds persistent trainable quantum state above the fresh-tape
   execution model. `ParameterInitializer` provides zero, finite constant, and
   deterministic seeded-uniform initialization; `VariationalParameters` owns the
