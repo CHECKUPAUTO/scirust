@@ -1,8 +1,8 @@
 //! Compact integer representations for ElasticTokenizer hot paths.
 //!
-//! Token IDs remain API-compatible for now. This module starts the internal
-//! migration by packing two `u32` token IDs into one exact `u64` merge key.
-//! No hashing shortcut or lossy narrowing is involved.
+//! Token IDs remain API-compatible for now. Internal hot-path fields can use
+//! exact `u32` domains and pack two such values into one `u64` word without
+//! changing tokenizer semantics.
 
 use std::fmt;
 
@@ -26,20 +26,113 @@ impl PairKey {
 
     #[inline]
     pub const fn left(self) -> u32 {
-        let bytes = self.0.to_be_bytes();
-        u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
+        high_u32(self.0)
     }
 
     #[inline]
     pub const fn right(self) -> u32 {
-        let bytes = self.0.to_be_bytes();
-        u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]])
+        low_u32(self.0)
     }
 
     #[inline]
     pub const fn raw(self) -> u64 {
         self.0
     }
+}
+
+/// Packed `(merge_rank, output_token_id)` rule payload.
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct PackedRule(u64);
+
+impl PackedRule {
+    #[inline]
+    pub const fn new(rank: u32, output: u32) -> Self {
+        Self(((rank as u64) << 32) | (output as u64))
+    }
+
+    #[inline]
+    pub fn try_from_usize(rank: usize, output: usize) -> Result<Self, CompactWordError> {
+        let rank = u32::try_from(rank).map_err(|_| CompactWordError::FieldTooWide {
+            field: "merge_rank",
+            value: rank,
+        })?;
+        let output = u32::try_from(output).map_err(|_| CompactWordError::FieldTooWide {
+            field: "output_token_id",
+            value: output,
+        })?;
+        Ok(Self::new(rank, output))
+    }
+
+    #[inline]
+    pub const fn rank(self) -> u32 {
+        high_u32(self.0)
+    }
+
+    #[inline]
+    pub const fn output(self) -> u32 {
+        low_u32(self.0)
+    }
+
+    #[inline]
+    pub const fn raw(self) -> u64 {
+        self.0
+    }
+}
+
+/// Packed canonical scheduling key `(merge_rank, left_node_index)`.
+///
+/// Numeric `u64` ordering is exactly lexicographic ordering of these two `u32`
+/// fields, so one integer comparison preserves rank priority and the left-most
+/// tie break.
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct PriorityKey(u64);
+
+impl PriorityKey {
+    #[inline]
+    pub const fn new(rank: u32, left_index: u32) -> Self {
+        Self(((rank as u64) << 32) | (left_index as u64))
+    }
+
+    #[inline]
+    pub fn try_from_usize(rank: usize, left_index: usize) -> Result<Self, CompactWordError> {
+        let rank = u32::try_from(rank).map_err(|_| CompactWordError::FieldTooWide {
+            field: "merge_rank",
+            value: rank,
+        })?;
+        let left_index =
+            u32::try_from(left_index).map_err(|_| CompactWordError::FieldTooWide {
+                field: "left_node_index",
+                value: left_index,
+            })?;
+        Ok(Self::new(rank, left_index))
+    }
+
+    #[inline]
+    pub const fn rank(self) -> u32 {
+        high_u32(self.0)
+    }
+
+    #[inline]
+    pub const fn left_index(self) -> u32 {
+        low_u32(self.0)
+    }
+
+    #[inline]
+    pub const fn raw(self) -> u64 {
+        self.0
+    }
+}
+
+const fn high_u32(word: u64) -> u32 {
+    let bytes = word.to_be_bytes();
+    u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
+}
+
+const fn low_u32(word: u64) -> u32 {
+    let bytes = word.to_be_bytes();
+    u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]])
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -61,13 +154,37 @@ impl fmt::Display for PairKeyError {
 
 impl std::error::Error for PairKeyError {}
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CompactWordError {
+    FieldTooWide {
+        field: &'static str,
+        value: usize,
+    },
+}
+
+impl fmt::Display for CompactWordError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self
+        {
+            Self::FieldTooWide { field, value } =>
+            {
+                write!(f, "{field} value {value} exceeds the compact u32 domain")
+            },
+        }
+    }
+}
+
+impl std::error::Error for CompactWordError {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn pair_key_is_exactly_one_u64() {
+    fn packed_words_are_exactly_one_u64() {
         assert_eq!(std::mem::size_of::<PairKey>(), 8);
+        assert_eq!(std::mem::size_of::<PackedRule>(), 8);
+        assert_eq!(std::mem::size_of::<PriorityKey>(), 8);
         if usize::BITS == 64
         {
             assert_eq!(std::mem::size_of::<(usize, usize)>(), 16);
@@ -107,8 +224,36 @@ mod tests {
     }
 
     #[test]
+    fn packed_rule_roundtrip_is_lossless() {
+        let rule = PackedRule::new(123, 456);
+        assert_eq!(rule.rank(), 123);
+        assert_eq!(rule.output(), 456);
+    }
+
+    #[test]
+    fn priority_key_order_matches_semantic_tuple_order() {
+        let mut priorities = vec![(5u32, 2u32), (1, 90), (1, 3), (9, 0), (5, 1)];
+        let mut keys = priorities
+            .iter()
+            .map(|&(rank, left)| PriorityKey::new(rank, left))
+            .collect::<Vec<_>>();
+        priorities.sort_unstable();
+        keys.sort_unstable();
+        let unpacked = keys
+            .into_iter()
+            .map(|key| (key.rank(), key.left_index()))
+            .collect::<Vec<_>>();
+        assert_eq!(unpacked, priorities);
+    }
+
+    #[test]
     fn usize_narrowing_is_checked() {
         assert_eq!(PairKey::try_from_usize(4, 5).unwrap(), PairKey::new(4, 5));
+        assert_eq!(PackedRule::try_from_usize(6, 7).unwrap(), PackedRule::new(6, 7));
+        assert_eq!(
+            PriorityKey::try_from_usize(8, 9).unwrap(),
+            PriorityKey::new(8, 9)
+        );
         if usize::BITS > 32
         {
             let too_wide = usize::try_from(u64::from(u32::MAX) + 1).unwrap();
@@ -116,6 +261,8 @@ mod tests {
                 PairKey::try_from_usize(too_wide, 0),
                 Err(PairKeyError::TokenIdTooWide(value)) if value == too_wide
             ));
+            assert!(PackedRule::try_from_usize(too_wide, 0).is_err());
+            assert!(PriorityKey::try_from_usize(0, too_wide).is_err());
         }
     }
 }
