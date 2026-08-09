@@ -57,8 +57,9 @@ pub use communication::{RuntimeEndpoint, SciAgentEndpoint};
 pub use config::SciAgentConfig;
 #[cfg(feature = "cuda")]
 pub use cuda_decode_execution_attestation::{
-    CUDA_DECODE_NUMERIC_MODE_V1, CudaDecodeExecutionAttestationExt,
-    CudaDecodeExecutionAttestationInputs, cuda_decode_kernel_semantic_version,
+    CUDA_DECODE_NUMERIC_MODE_V1, CudaDecodeExecutionAttestationError,
+    CudaDecodeExecutionAttestationExt, CudaDecodeExecutionAttestationInputs,
+    cuda_decode_kernel_semantic_version,
 };
 pub use elastic_autotune::{
     AutotuneConfig, AutotuneError, AutotuneResult, CalibrationCase, ElasticAutotuner,
