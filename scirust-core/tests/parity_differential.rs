@@ -1554,7 +1554,7 @@ fn parity_convolution() {
             1e-5,
         );
         let gout = tensor(&c.gout, c.out_shape.as_ref().unwrap());
-        let gx = parity::d_avg_pool2d(&gout, k, k).unwrap();
+        let gx = parity::d_avg_pool2d(&gout, &c.shape, k, k).unwrap();
         assert_close(
             &format!("avgpool gx c{ci}"),
             gx.data.as_ref(),
@@ -1651,11 +1651,13 @@ fn parity_sparse_spmv() {
     }
 }
 
-/// lu_solve (row sparse) : solve A·x=b en f64, tol registre 1e-8.
+/// solve (row sparse) : torch.linalg.solve A·x=b en f64, tol registre 1e-8.
 #[test]
-fn parity_sparse_lu_solve() {
-    let txt = fs::read_to_string(fixtures_dir().join("sparse").join("lu_solve.json")).unwrap();
+fn parity_sparse_solve() {
+    let txt = fs::read_to_string(fixtures_dir().join("sparse").join("solve.json")).unwrap();
     let fx: serde_json::Value = serde_json::from_str(&txt).unwrap();
+    assert_eq!(fx["op"], "solve");
+    assert_eq!(fx["kind"], "solve");
     assert_eq!(fx["dtype"], "f64");
     for (ci, c) in fx["cases"].as_array().unwrap().iter().enumerate()
     {
@@ -1690,12 +1692,12 @@ fn parity_sparse_lu_solve() {
             .iter()
             .map(|v| v.as_f64().unwrap())
             .collect();
-        let got1 = parity::lu_solve_f64(&a, &b1, n, 1)
-            .unwrap_or_else(|e| panic!("lu_solve case {ci}: {e}"));
-        assert_close64(&format!("lu_solve 1col c{ci}"), &got1, &y1, 1e-8, 1e-8);
-        let got2 = parity::lu_solve_f64(&a, &b2, n, 2)
-            .unwrap_or_else(|e| panic!("lu_solve 2col case {ci}: {e}"));
-        assert_close64(&format!("lu_solve 2col c{ci}"), &got2, &y2, 1e-8, 1e-8);
+        let got1 =
+            parity::solve_f64(&a, &b1, n, 1).unwrap_or_else(|e| panic!("solve case {ci}: {e}"));
+        assert_close64(&format!("solve 1col c{ci}"), &got1, &y1, 1e-8, 1e-8);
+        let got2 = parity::solve_f64(&a, &b2, n, 2)
+            .unwrap_or_else(|e| panic!("solve 2col case {ci}: {e}"));
+        assert_close64(&format!("solve 2col c{ci}"), &got2, &y2, 1e-8, 1e-8);
     }
 }
 
@@ -1736,4 +1738,175 @@ fn parity_linear_einsum() {
             1e-4,
         );
     }
+}
+
+//
+// Regression tests discovered by the post-campaign Tensor Parity audit.
+// These cases intentionally cover valid semantics that were not exercised
+// by the original frozen-fixture campaign.
+//
+
+#[test]
+fn regression_cat2_unequal_concat_dimension() {
+    // torch.cat accepts tensors whose concatenation dimension differs,
+    // provided all other dimensions match:
+    // [2, 3] cat [2, 5] along dim=1 -> [2, 8].
+    let a = tensor(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]);
+    let b = tensor(
+        &[10.0, 11.0, 12.0, 13.0, 14.0, 20.0, 21.0, 22.0, 23.0, 24.0],
+        &[2, 5],
+    );
+
+    let out = parity::cat2(&a, &b, 1).expect("valid cat2 must succeed");
+
+    assert_eq!(out.shape, vec![2, 8]);
+    assert_eq!(
+        out.data.as_ref(),
+        &[
+            1.0, 2.0, 3.0, 10.0, 11.0, 12.0, 13.0, 14.0, 4.0, 5.0, 6.0, 20.0, 21.0, 22.0, 23.0,
+            24.0,
+        ],
+    );
+}
+
+#[test]
+fn regression_avg_pool2d_backward_preserves_discarded_border_shape() {
+    // Logical forward input shape is [1, 1, 5, 5].
+    // k=2, stride=2 gives output [1, 1, 2, 2]; row 4 and column 4
+    // are discarded by the forward operation, but backward must still
+    // return a gradient with the ORIGINAL [1, 1, 5, 5] shape.
+    let gout = tensor(&[1.0, 1.0, 1.0, 1.0], &[1, 1, 2, 2]);
+
+    let gx = parity::d_avg_pool2d(&gout, &[1, 1, 5, 5], 2, 2)
+        .expect("valid avg_pool2d backward must succeed");
+
+    assert_eq!(
+        gx.shape,
+        vec![1, 1, 5, 5],
+        "backward must preserve the original input shape, including discarded borders",
+    );
+
+    assert_eq!(
+        gx.data.as_ref(),
+        &[
+            0.25, 0.25, 0.25, 0.25, 0.0, 0.25, 0.25, 0.25, 0.25, 0.0, 0.25, 0.25, 0.25, 0.25, 0.0,
+            0.25, 0.25, 0.25, 0.25, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        ],
+    );
+}
+
+#[test]
+fn regression_einsum_scalar_output_has_rank_zero() {
+    let x = tensor(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]);
+
+    let out = parity::einsum("ij->", &[&x]).expect("valid scalar einsum must succeed");
+
+    assert_eq!(
+        out.shape,
+        Vec::<usize>::new(),
+        "einsum scalar output must have rank zero, not shape [1]",
+    );
+    assert_eq!(out.data.as_ref(), &[21.0]);
+}
+
+#[test]
+fn regression_error_conv1d_kernel_larger_than_input() {
+    let x = tensor(&[1.0, 2.0, 3.0], &[1, 1, 3]);
+    let w = tensor(&[1.0; 5], &[1, 1, 5]);
+    let b = tensor(&[0.0], &[1]);
+
+    let err = parity::conv1d(&x, &w, &b)
+        .expect_err("kernel larger than input must return a structured error");
+    assert!(matches!(err, SciRustError::InvalidConfig(_)));
+}
+
+#[test]
+fn regression_error_conv2d_kernel_larger_than_input() {
+    let x = tensor(&[1.0; 9], &[1, 1, 3, 3]);
+    let w = tensor(&[1.0; 16], &[1, 1, 4, 4]);
+    let b = tensor(&[0.0], &[1]);
+
+    let err = parity::conv2d(&x, &w, &b)
+        .expect_err("kernel larger than input must return a structured error");
+    assert!(matches!(err, SciRustError::InvalidConfig(_)));
+}
+
+#[test]
+fn regression_error_cholesky_scalar_is_structured() {
+    let scalar = tensor(&[1.0], &[]);
+
+    let err =
+        parity::cholesky(&scalar).expect_err("rank-zero input must return a structured error");
+    assert!(matches!(
+        err,
+        SciRustError::RankMismatch { .. } | SciRustError::InvalidConfig(_)
+    ));
+}
+
+#[test]
+fn regression_error_spmv_empty_rowptr_is_structured() {
+    let err = parity::spmv_csr(&[], &[], &[], &[])
+        .expect_err("empty CSR rowptr must return a structured error");
+    assert!(matches!(err, SciRustError::InvalidConfig(_)));
+}
+
+#[test]
+fn regression_error_solve_wrong_rhs_length_is_structured() {
+    let a = [1.0, 0.0, 0.0, 1.0];
+    let b = [1.0];
+
+    let err = parity::solve_f64(&a, &b, 2, 1)
+        .expect_err("wrong RHS length must return a structured error");
+    assert!(matches!(err, SciRustError::InvalidConfig(_)));
+}
+
+#[test]
+fn regression_error_d_conv1d_kernel_larger_than_input() {
+    let x = tensor(&[1.0, 2.0, 3.0], &[1, 1, 3]);
+    let w = tensor(&[1.0; 5], &[1, 1, 5]);
+    let gout = tensor(&[1.0], &[1, 1, 1]);
+
+    let err = parity::d_conv1d(&gout, &x, &w)
+        .expect_err("gradient conv1d must reject a kernel larger than the input");
+    assert!(matches!(err, SciRustError::InvalidConfig(_)));
+}
+
+#[test]
+fn regression_error_d_conv2d_kernel_larger_than_input() {
+    let x = tensor(&[1.0; 9], &[1, 1, 3, 3]);
+    let w = tensor(&[1.0; 16], &[1, 1, 4, 4]);
+    let gout = tensor(&[1.0], &[1, 1, 1, 1]);
+
+    let err = parity::d_conv2d(&gout, &x, &w)
+        .expect_err("gradient conv2d must reject a kernel larger than the input");
+    assert!(matches!(err, SciRustError::InvalidConfig(_)));
+}
+
+#[test]
+fn regression_error_spmm_empty_rowptr_is_structured() {
+    let err = parity::spmm_csr(&[], &[], &[], &[], 1)
+        .expect_err("empty CSR rowptr must return a structured error");
+    assert!(matches!(err, SciRustError::InvalidConfig(_)));
+}
+
+#[test]
+fn regression_error_spmm_inconsistent_nnz_is_structured() {
+    let rowptr = [0usize, 1];
+    let values = [1.0f64];
+
+    let err = parity::spmm_csr(&rowptr, &[], &values, &[1.0], 1)
+        .expect_err("inconsistent CSR nnz arrays must return a structured error");
+    assert!(matches!(err, SciRustError::InvalidConfig(_)));
+}
+
+#[test]
+fn regression_error_spmm_dense_rhs_too_short_is_structured() {
+    let rowptr = [0usize, 1];
+    let colidx = [1usize];
+    let values = [2.0f64];
+    let b = [3.0f64];
+
+    let err = parity::spmm_csr(&rowptr, &colidx, &values, &b, 1)
+        .expect_err("dense RHS too short for CSR column index must return a structured error");
+    assert!(matches!(err, SciRustError::InvalidConfig(_)));
 }

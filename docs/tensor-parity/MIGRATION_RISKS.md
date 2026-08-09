@@ -44,8 +44,9 @@ CI cannot run Python. Differential fixtures must be generated offline
 
 - Mitigation: fixture generation script lives in `docs/tensor-parity/
   provenance/` (not run in CI); committed fixtures carry the baseline commit
-  and a hash; `artifacts/tensor-coverage.json` marks `verified` only when the
-  Rust harness actually passed against those fixtures.
+  and a hash. Evidence from the independent reference kernels is recorded as
+  `reference_verified`; production `verified` evidence is reserved for tests
+  that call the claimed production implementation directly.
 
 ## R5 — Determinism vs PyTorch non-determinism
 
@@ -89,10 +90,12 @@ errors. A parity error-path test would hit a panic, not a `SciRustError`.
 
 `tensor-operators.toml` is hand-edited and will drift from code.
 
-- Mitigation: the coverage matrix is generated; a CI check fails when a
-  registry row's `impl` field names a symbol that does not exist in the
-  crate (compile-time symbol existence check via a small Rust test), and when
-  fixtures referenced by a `verified` row are absent or hash-mismatched.
+- Mitigation: the coverage matrix is generated. `impls` is inventory only;
+  production `parity` requires direct `verified` evidence, while reference
+  evidence is stored separately in `reference_verified`. CI validates the
+  committed fixture manifest and its hashes. A per-stack symbol/direct-call
+  gate remains required before production parity can be promoted
+  automatically.
 
 ## R10 — Scope creep toward torch.compile / in-place / out=
 

@@ -8,98 +8,114 @@
   "generated": true,
   "summary": {
     "total": 74,
-    "parity": 68,
-    "experimental": 0,
+    "parity": 15,
+    "reference_parity": 68,
+    "experimental": 53,
     "missing": 6
   },
   "families": {
     "attention": {
       "total": 1,
-      "parity": 1,
-      "experimental": 0,
+      "parity": 0,
+      "reference_parity": 1,
+      "experimental": 1,
       "missing": 0
     },
     "conversion": {
       "total": 1,
-      "parity": 1,
-      "experimental": 0,
+      "parity": 0,
+      "reference_parity": 1,
+      "experimental": 1,
       "missing": 0
     },
     "convolution": {
       "total": 4,
-      "parity": 4,
-      "experimental": 0,
+      "parity": 0,
+      "reference_parity": 4,
+      "experimental": 4,
       "missing": 0
     },
     "elementwise": {
       "total": 26,
-      "parity": 26,
-      "experimental": 0,
+      "parity": 15,
+      "reference_parity": 26,
+      "experimental": 11,
       "missing": 0
     },
     "indexing": {
       "total": 1,
-      "parity": 1,
-      "experimental": 0,
+      "parity": 0,
+      "reference_parity": 1,
+      "experimental": 1,
       "missing": 0
     },
     "linear": {
       "total": 11,
-      "parity": 7,
-      "experimental": 0,
+      "parity": 0,
+      "reference_parity": 7,
+      "experimental": 7,
       "missing": 4
     },
     "loss": {
       "total": 2,
-      "parity": 2,
-      "experimental": 0,
+      "parity": 0,
+      "reference_parity": 2,
+      "experimental": 2,
       "missing": 0
     },
     "normalization": {
       "total": 6,
-      "parity": 6,
-      "experimental": 0,
+      "parity": 0,
+      "reference_parity": 6,
+      "experimental": 6,
       "missing": 0
     },
     "positional": {
       "total": 1,
-      "parity": 1,
-      "experimental": 0,
+      "parity": 0,
+      "reference_parity": 1,
+      "experimental": 1,
       "missing": 0
     },
     "quantization": {
       "total": 1,
-      "parity": 1,
-      "experimental": 0,
+      "parity": 0,
+      "reference_parity": 1,
+      "experimental": 1,
       "missing": 0
     },
     "reduction": {
       "total": 5,
-      "parity": 5,
-      "experimental": 0,
+      "parity": 0,
+      "reference_parity": 5,
+      "experimental": 5,
       "missing": 0
     },
     "shape": {
       "total": 9,
-      "parity": 9,
-      "experimental": 0,
+      "parity": 0,
+      "reference_parity": 9,
+      "experimental": 9,
       "missing": 0
     },
     "sparse": {
       "total": 3,
-      "parity": 2,
-      "experimental": 0,
+      "parity": 0,
+      "reference_parity": 2,
+      "experimental": 2,
       "missing": 1
     },
     "special": {
       "total": 2,
-      "parity": 2,
-      "experimental": 0,
+      "parity": 0,
+      "reference_parity": 2,
+      "experimental": 2,
       "missing": 0
     },
     "spectral": {
       "total": 1,
       "parity": 0,
+      "reference_parity": 0,
       "experimental": 0,
       "missing": 1
     }
@@ -121,7 +137,16 @@
         "rtol": 0.00001
       },
       "status": "parity",
+      "verified_impls": [
+        "2d"
+      ],
       "verified": {
+        "harness": "scirust-core/tests/production_parity_2d.rs",
+        "fixtures": "tests/parity/fixtures/elementwise",
+        "on": "2026-08-09"
+      },
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -146,8 +171,17 @@
         "atol": 0.00001,
         "rtol": 0.00001
       },
-      "status": "parity",
+      "status": "experimental",
+      "verified_impls": [
+        "2d"
+      ],
       "verified": {
+        "harness": "scirust-core/tests/production_parity_2d.rs",
+        "fixtures": "tests/parity/fixtures/elementwise_broadcast",
+        "on": "2026-08-09"
+      },
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -169,7 +203,16 @@
         "rtol": 0.00001
       },
       "status": "parity",
+      "verified_impls": [
+        "2d"
+      ],
       "verified": {
+        "harness": "scirust-core/tests/production_parity_2d.rs",
+        "fixtures": "tests/parity/fixtures/elementwise",
+        "on": "2026-08-09"
+      },
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -191,7 +234,16 @@
         "rtol": 0.00001
       },
       "status": "parity",
+      "verified_impls": [
+        "2d"
+      ],
       "verified": {
+        "harness": "scirust-core/tests/production_parity_2d.rs",
+        "fixtures": "tests/parity/fixtures/elementwise",
+        "on": "2026-08-09"
+      },
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -213,7 +265,16 @@
         "rtol": 0.00001
       },
       "status": "parity",
+      "verified_impls": [
+        "2d"
+      ],
       "verified": {
+        "harness": "scirust-core/tests/production_parity_2d.rs",
+        "fixtures": "tests/parity/fixtures/elementwise_broadcast",
+        "on": "2026-08-09"
+      },
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -234,8 +295,9 @@
         "atol": 0.00001,
         "rtol": 0.00001
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -256,8 +318,9 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -279,8 +342,9 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -302,8 +366,9 @@
         "atol": 0.0,
         "rtol": 0.0
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -324,9 +389,10 @@
         "atol": 0.0,
         "rtol": 0.0
       },
-      "status": "parity",
+      "status": "experimental",
       "notes": "cat dims 0 et 1, 2-D uniquement",
-      "verified": {
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -347,8 +413,9 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -369,8 +436,9 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -391,8 +459,9 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -414,7 +483,16 @@
         "rtol": 0.00001
       },
       "status": "parity",
+      "verified_impls": [
+        "2d"
+      ],
       "verified": {
+        "harness": "scirust-core/tests/production_parity_2d.rs",
+        "fixtures": "tests/parity/fixtures/elementwise",
+        "on": "2026-08-09"
+      },
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -436,7 +514,16 @@
         "rtol": 0.00001
       },
       "status": "parity",
+      "verified_impls": [
+        "2d"
+      ],
       "verified": {
+        "harness": "scirust-core/tests/production_parity_2d.rs",
+        "fixtures": "tests/parity/fixtures/elementwise",
+        "on": "2026-08-09"
+      },
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -457,8 +544,9 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -482,8 +570,9 @@
         "atol": 0.00001,
         "rtol": 0.00001
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -504,9 +593,10 @@
         "atol": 1e-9,
         "rtol": 1e-9
       },
-      "status": "parity",
+      "status": "experimental",
       "notes": "torch.polygamma(1) err ~3.6e-10 rel vs exact; harness tol 1e-9",
-      "verified": {
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -528,8 +618,17 @@
         "atol": 0.00001,
         "rtol": 0.00001
       },
-      "status": "parity",
+      "status": "experimental",
+      "verified_impls": [
+        "2d"
+      ],
       "verified": {
+        "harness": "scirust-core/tests/production_parity_2d.rs",
+        "fixtures": "tests/parity/fixtures/elementwise_broadcast",
+        "on": "2026-08-09"
+      },
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -550,9 +649,10 @@
         "atol": 0.00001,
         "rtol": 0.00001
       },
-      "status": "parity",
+      "status": "experimental",
       "notes": "RNG stream not compared; compare keep-mask behavior on fixed seeds",
-      "verified": {
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -589,8 +689,9 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -614,8 +715,9 @@
         "atol": 0.0,
         "rtol": 0.0
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -638,8 +740,17 @@
         "atol": 0.00001,
         "rtol": 0.00001
       },
-      "status": "parity",
+      "status": "experimental",
+      "verified_impls": [
+        "2d"
+      ],
       "verified": {
+        "harness": "scirust-core/tests/production_parity_2d.rs",
+        "fixtures": "tests/parity/fixtures/elementwise",
+        "on": "2026-08-09"
+      },
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -660,9 +771,10 @@
         "atol": 0.0,
         "rtol": 0.0
       },
-      "status": "parity",
+      "status": "experimental",
       "notes": "fake_quantize_ste only",
-      "verified": {
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -699,8 +811,9 @@
         "atol": 0.0,
         "rtol": 0.0
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -721,8 +834,9 @@
         "atol": 0.0,
         "rtol": 0.0
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -743,8 +857,9 @@
         "atol": 0.00001,
         "rtol": 0.00001
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -767,8 +882,9 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -789,8 +905,9 @@
         "atol": 1e-10,
         "rtol": 1e-10
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -812,8 +929,9 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -835,7 +953,16 @@
         "rtol": 0.00001
       },
       "status": "parity",
+      "verified_impls": [
+        "2d"
+      ],
       "verified": {
+        "harness": "scirust-core/tests/production_parity_2d.rs",
+        "fixtures": "tests/parity/fixtures/elementwise",
+        "on": "2026-08-09"
+      },
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -857,7 +984,16 @@
         "rtol": 0.00001
       },
       "status": "parity",
+      "verified_impls": [
+        "2d"
+      ],
       "verified": {
+        "harness": "scirust-core/tests/production_parity_2d.rs",
+        "fixtures": "tests/parity/fixtures/elementwise",
+        "on": "2026-08-09"
+      },
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -878,8 +1014,9 @@
         "atol": 0.00001,
         "rtol": 0.00001
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -901,29 +1038,6 @@
       "status": "missing"
     },
     {
-      "name": "lu_solve",
-      "torch": "torch.linalg.solve",
-      "family": "sparse",
-      "impls": [
-        "sparse"
-      ],
-      "dtypes": [
-        "f64"
-      ],
-      "autograd": false,
-      "tolerance": {
-        "atol": 1e-8,
-        "rtol": 1e-8
-      },
-      "status": "parity",
-      "notes": "SparseLu::solve, f64 only",
-      "verified": {
-        "harness": "scirust-core/tests/parity_differential.rs",
-        "fixtures": "tests/parity/fixtures",
-        "on": "2026-08-04"
-      }
-    },
-    {
       "name": "matmul",
       "torch": "torch.matmul",
       "family": "linear",
@@ -942,8 +1056,9 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -965,8 +1080,9 @@
         "atol": 0.0,
         "rtol": 0.0
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -988,8 +1104,9 @@
         "atol": 0.0,
         "rtol": 0.0
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1012,9 +1129,10 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "parity",
+      "status": "experimental",
       "notes": "CUDA deterministic_reduce_mean",
-      "verified": {
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1035,8 +1153,9 @@
         "atol": 0.00001,
         "rtol": 0.00001
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1060,8 +1179,17 @@
         "atol": 0.00001,
         "rtol": 0.00001
       },
-      "status": "parity",
+      "status": "experimental",
+      "verified_impls": [
+        "2d"
+      ],
       "verified": {
+        "harness": "scirust-core/tests/production_parity_2d.rs",
+        "fixtures": "tests/parity/fixtures/elementwise_broadcast",
+        "on": "2026-08-09"
+      },
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1083,7 +1211,16 @@
         "rtol": 0.00001
       },
       "status": "parity",
+      "verified_impls": [
+        "2d"
+      ],
       "verified": {
+        "harness": "scirust-core/tests/production_parity_2d.rs",
+        "fixtures": "tests/parity/fixtures/elementwise",
+        "on": "2026-08-09"
+      },
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1104,9 +1241,10 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "parity",
+      "status": "experimental",
       "notes": "frob_norm only",
-      "verified": {
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1127,8 +1265,9 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1150,8 +1289,9 @@
         "atol": 0.0,
         "rtol": 0.0
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1173,7 +1313,16 @@
         "rtol": 0.00001
       },
       "status": "parity",
+      "verified_impls": [
+        "2d"
+      ],
       "verified": {
+        "harness": "scirust-core/tests/production_parity_2d.rs",
+        "fixtures": "tests/parity/fixtures/elementwise",
+        "on": "2026-08-09"
+      },
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1210,7 +1359,16 @@
         "rtol": 0.00001
       },
       "status": "parity",
+      "verified_impls": [
+        "2d"
+      ],
       "verified": {
+        "harness": "scirust-core/tests/production_parity_2d.rs",
+        "fixtures": "tests/parity/fixtures/elementwise",
+        "on": "2026-08-09"
+      },
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1235,8 +1393,17 @@
         "atol": 0.0,
         "rtol": 0.0
       },
-      "status": "parity",
+      "status": "experimental",
+      "verified_impls": [
+        "2d"
+      ],
       "verified": {
+        "harness": "scirust-core/tests/production_parity_2d.rs",
+        "fixtures": "tests/parity/fixtures/elementwise",
+        "on": "2026-08-09"
+      },
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1260,8 +1427,9 @@
         "atol": 0.0,
         "rtol": 0.0
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1285,9 +1453,10 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "parity",
+      "status": "experimental",
       "notes": "no torch native symbol in 2.13 (RMSNorm is a module); compare via F.rms_norm custom",
-      "verified": {
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1310,9 +1479,10 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "parity",
+      "status": "experimental",
       "notes": "parity compares SciRust rope against a torch reference implementation committed as fixture",
-      "verified": {
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1333,8 +1503,9 @@
         "atol": 0.00001,
         "rtol": 0.00001
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1356,8 +1527,9 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1381,8 +1553,17 @@
         "atol": 0.00001,
         "rtol": 0.00001
       },
-      "status": "parity",
+      "status": "experimental",
+      "verified_impls": [
+        "2d"
+      ],
       "verified": {
+        "harness": "scirust-core/tests/production_parity_2d.rs",
+        "fixtures": "tests/parity/fixtures/elementwise",
+        "on": "2026-08-09"
+      },
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1405,8 +1586,9 @@
         "atol": 0.00001,
         "rtol": 0.00001
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1428,7 +1610,16 @@
         "rtol": 0.00001
       },
       "status": "parity",
+      "verified_impls": [
+        "2d"
+      ],
       "verified": {
+        "harness": "scirust-core/tests/production_parity_2d.rs",
+        "fixtures": "tests/parity/fixtures/elementwise",
+        "on": "2026-08-09"
+      },
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1450,7 +1641,16 @@
         "rtol": 0.00001
       },
       "status": "parity",
+      "verified_impls": [
+        "2d"
+      ],
       "verified": {
+        "harness": "scirust-core/tests/production_parity_2d.rs",
+        "fixtures": "tests/parity/fixtures/elementwise",
+        "on": "2026-08-09"
+      },
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1472,8 +1672,9 @@
         "atol": 0.0,
         "rtol": 0.0
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1498,8 +1699,33 @@
         "atol": 0.00001,
         "rtol": 0.00001
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
+        "harness": "scirust-core/tests/parity_differential.rs",
+        "fixtures": "tests/parity/fixtures",
+        "on": "2026-08-04"
+      }
+    },
+    {
+      "name": "solve",
+      "torch": "torch.linalg.solve",
+      "family": "sparse",
+      "impls": [
+        "sparse"
+      ],
+      "dtypes": [
+        "f64"
+      ],
+      "autograd": false,
+      "tolerance": {
+        "atol": 1e-8,
+        "rtol": 1e-8
+      },
+      "status": "experimental",
+      "notes": "solve A·x=b via LU with partial pivoting, f64 only",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1536,9 +1762,10 @@
         "atol": 1e-10,
         "rtol": 1e-10
       },
-      "status": "parity",
+      "status": "experimental",
       "notes": "csr spmv + spmm_dense; f64 only",
-      "verified": {
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1561,8 +1788,17 @@
         "atol": 0.00001,
         "rtol": 0.00001
       },
-      "status": "parity",
+      "status": "experimental",
+      "verified_impls": [
+        "2d"
+      ],
       "verified": {
+        "harness": "scirust-core/tests/production_parity_2d.rs",
+        "fixtures": "tests/parity/fixtures/elementwise",
+        "on": "2026-08-09"
+      },
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1584,8 +1820,17 @@
         "atol": 0.00001,
         "rtol": 0.00001
       },
-      "status": "parity",
+      "status": "experimental",
+      "verified_impls": [
+        "2d"
+      ],
       "verified": {
+        "harness": "scirust-core/tests/production_parity_2d.rs",
+        "fixtures": "tests/parity/fixtures/elementwise_broadcast",
+        "on": "2026-08-09"
+      },
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1609,9 +1854,10 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "parity",
+      "status": "experimental",
       "notes": "deterministic order (stricter-than-torch); CUDA deterministic_reduce_sum",
-      "verified": {
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1648,7 +1894,16 @@
         "rtol": 0.00001
       },
       "status": "parity",
+      "verified_impls": [
+        "2d"
+      ],
       "verified": {
+        "harness": "scirust-core/tests/production_parity_2d.rs",
+        "fixtures": "tests/parity/fixtures/elementwise",
+        "on": "2026-08-09"
+      },
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1670,7 +1925,16 @@
         "rtol": 0.00001
       },
       "status": "parity",
+      "verified_impls": [
+        "2d"
+      ],
       "verified": {
+        "harness": "scirust-core/tests/production_parity_2d.rs",
+        "fixtures": "tests/parity/fixtures/elementwise",
+        "on": "2026-08-09"
+      },
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1692,9 +1956,10 @@
         "atol": 0.0,
         "rtol": 0.0
       },
-      "status": "parity",
+      "status": "experimental",
       "notes": "storage conversion only in v1",
-      "verified": {
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1717,8 +1982,9 @@
         "atol": 0.0,
         "rtol": 0.0
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1739,8 +2005,9 @@
         "atol": 0.0,
         "rtol": 0.0
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
@@ -1761,8 +2028,9 @@
         "atol": 0.0001,
         "rtol": 0.0001
       },
-      "status": "parity",
-      "verified": {
+      "status": "experimental",
+      "reference_impl": "scirust_core::tensor::parity",
+      "reference_verified": {
         "harness": "scirust-core/tests/parity_differential.rs",
         "fixtures": "tests/parity/fixtures",
         "on": "2026-08-04"
