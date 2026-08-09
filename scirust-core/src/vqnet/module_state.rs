@@ -473,7 +473,8 @@ mod tests {
 
     #[test]
     fn clone_resets_ephemeral_tape_identity() {
-        let mut module = QuantumModule::new(one_qubit_circuit(), ParameterInitializer::Zeros).unwrap();
+        let mut module =
+            QuantumModule::new(one_qubit_circuit(), ParameterInitializer::Zeros).unwrap();
         module.record_parameter_index(17);
         let cloned = module.clone();
 
