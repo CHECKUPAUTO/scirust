@@ -438,7 +438,7 @@ impl fmt::Display for ElasticTextTokenizerError {
                 "elastic tokenizer requires explicit `merge_semantics`; untagged artifacts remain legacy",
             ),
             Self::UnknownMergeSemantics(value) => {
-                write!(f, "unknown elastic tokenizer merge semantics `{value}")
+                write!(f, "unknown elastic tokenizer merge semantics `{value}`")
             },
             Self::LegacyMergeSemantics => f.write_str(
                 "legacy parallel BPE semantics must use the historical BpeTokenizer compatibility path",
