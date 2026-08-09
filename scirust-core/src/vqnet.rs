@@ -22,7 +22,7 @@ pub use module_state::{
 pub use optimizer_state::{OptimizerSlot, PersistentParameterOptimizer};
 pub use probability::{ComputationalBasisReadout, MAX_EXACT_PROBABILITY_QUBITS};
 pub use readout::{Hamiltonian, HamiltonianReadout, HamiltonianTerm};
-pub use trainer::{TrainStepReport, TrainingSession};
+pub use trainer::{EpochReport, TrainStepReport, TrainingSession};
 
 use crate::autodiff::reverse::Var;
 use crate::quantum::{
