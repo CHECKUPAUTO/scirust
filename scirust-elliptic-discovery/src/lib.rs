@@ -22,6 +22,7 @@ pub mod falsify;
 pub mod field;
 pub mod grammar;
 pub mod invariant;
+pub mod montgomery;
 pub mod orders;
 pub mod proof;
 pub mod report;
@@ -56,6 +57,7 @@ pub use falsify::{
 pub use field::{FieldError, Fp, PrimeError, ToyPrime};
 pub use grammar::{PointExpression, Relation, generate_relations};
 pub use invariant::CurveInvariants;
+pub use montgomery::{MontgomeryCurve, MontgomeryError, MontgomeryPoint};
 pub use proof::{
     Justification, PolynomialIdentityCertificate, ProofCertificate, attempt_justification,
     prove_j_zero_identity,
