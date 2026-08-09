@@ -10,6 +10,7 @@ description = "SCIAGENT — SLM deterministe entraine from scratch, specialise R
 scirust-core = { path = "../scirust-core" }
 scirust-autodiff = { path = "../scirust-autodiff" }
 scirust-agent-protocol = { path = "../scirust-agent-protocol" }
+scirust-compute = { path = "../scirust-compute", optional = true }
 scirust-gpu = { path = "../scirust-gpu", optional = true }
 scirust-cuda = { path = "../scirust-cuda", optional = true }
 serde = { version = "1", features = ["derive"] }
@@ -44,8 +45,10 @@ gpu = ["dep:scirust-gpu", "scirust-gpu/wgpu"]
 # Route B: the bf16 + Tensor-core CUDA backend (Jetson Thor). Pulls scirust-cuda's
 # CudaChain and runs the whole resident forward on Tensor cores. Off by default and
 # Thor-only to build (needs the CUDA toolkit); parity vs the CPU model is checked
-# at bf16 tolerance in tests/cuda_parity.rs.
-cuda = ["dep:scirust-cuda", "scirust-cuda/cuda"]
+# at bf16 tolerance in tests/cuda_parity.rs. The compute dependency is pure Rust
+# and supplies the canonical hardware/topology profile encodings used by runtime
+# execution attestation.
+cuda = ["dep:scirust-cuda", "scirust-cuda/cuda", "dep:scirust-compute"]
 # Route B quality-evaluation harness (`cuda_eval`): CUDA generation + `syn`-parse
 # scoring of the generated Rust. Enables `cuda` and pulls `syn`. Opt-in so a plain
 # `--features cuda` build/test doesn't compile `syn`.
