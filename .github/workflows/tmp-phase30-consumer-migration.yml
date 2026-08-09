@@ -1,0 +1,45 @@
+name: Temporary Phase 30 consumer migration
+
+on:
+  push:
+    branches:
+      - feat/flat-r2-resident-wgpu-interop
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: feat/flat-r2-resident-wgpu-interop
+          fetch-depth: 0
+      - name: Apply exact migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scirust-gpu/src/elastic_latent_encoder_device/minillm/sampled.rs')
+          s = p.read_text()
+          old = '''        let limits =\n            ExecutionLimits::from_device_capabilities(inner.encoder.adapter.capabilities());'''
+          new = '''        let limits = inner.encoder.adapter.execution_limits();'''
+          if s.count(old) != 1:
+              raise SystemExit(f'expected exactly one Phase 30 migration anchor, found {s.count(old)}')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          git diff --check
+          git diff -- scirust-gpu/src/elastic_latent_encoder_device/minillm/sampled.rs
+      - name: Remove temporary workflow and commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/tmp-phase30-consumer-migration.yml
+          git config user.name 'CHECKUPAUTO'
+          git config user.email '194770978+CHECKUPAUTO@users.noreply.github.com'
+          git add scirust-gpu/src/elastic_latent_encoder_device/minillm/sampled.rs
+          git commit -m 'refactor(kv-cache): use backend execution-limit contract'
+          git push origin HEAD:feat/flat-r2-resident-wgpu-interop
