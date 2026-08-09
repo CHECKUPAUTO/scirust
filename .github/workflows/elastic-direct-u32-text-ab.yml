@@ -1,0 +1,121 @@
+name: ElasticTokenizer direct u32 text A/B probe
+
+on:
+  pull_request:
+    paths:
+      - "scirust-sciagent/src/bin/tokenizer-text-encode-probe.rs"
+      - ".github/workflows/elastic-direct-u32-text-ab.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  text-ab:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout baseline master
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ed0e814073854fb9d74d92cff46372e2dfd8448b
+          path: baseline
+
+      - name: Checkout direct-ingress candidate
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: 4aba541eac89474d8bb60619e07e2262b5f433db
+          path: candidate
+
+      - name: Checkout identical timing harness
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: bench/elastic-direct-u32-text-ab
+          path: harness
+
+      - name: Inject identical timing harness
+        run: |
+          cp harness/scirust-sciagent/src/bin/tokenizer-text-encode-probe.rs \
+             baseline/scirust-sciagent/src/bin/tokenizer-text-encode-probe.rs
+          cp harness/scirust-sciagent/src/bin/tokenizer-text-encode-probe.rs \
+             candidate/scirust-sciagent/src/bin/tokenizer-text-encode-probe.rs
+
+      - name: Install MSRV toolchain
+        run: rustup toolchain install 1.89.0 --profile minimal
+
+      - name: Record runner identity
+        run: |
+          {
+            uname -a
+            echo
+            lscpu
+          } > /tmp/direct-u32-text-ab-runner.txt
+
+      - name: Train one deterministic canonical tokenizer
+        working-directory: baseline
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin train-tokenizer -- \
+            --input scirust-sciagent/src \
+            --recursive \
+            --extension rs \
+            --vocab-size 2048 \
+            --min-frequency 2 \
+            --merge-semantics canonical-rank-v1 \
+            --output /tmp/direct-u32-text-ab-tokenizer.json
+
+      - name: Measure baseline text-to-IDs
+        working-directory: baseline
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin tokenizer-text-encode-probe -- \
+            --tokenizer /tmp/direct-u32-text-ab-tokenizer.json \
+            --input scirust-sciagent/src/elastic_text_tokenizer.rs \
+            --input scirust-sciagent/src/elastic_tiny.rs \
+            --lengths 8,16,32,64,96,128 \
+            --sweeps 1000 \
+            --warmup-rounds 3 \
+            --measured-rounds 11 | tee /tmp/direct-u32-text-ab-baseline.txt
+
+      - name: Measure candidate on exact baseline text
+        working-directory: candidate
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin tokenizer-text-encode-probe -- \
+            --tokenizer /tmp/direct-u32-text-ab-tokenizer.json \
+            --input ../baseline/scirust-sciagent/src/elastic_text_tokenizer.rs \
+            --input ../baseline/scirust-sciagent/src/elastic_tiny.rs \
+            --lengths 8,16,32,64,96,128 \
+            --sweeps 1000 \
+            --warmup-rounds 3 \
+            --measured-rounds 11 | tee /tmp/direct-u32-text-ab-candidate.txt
+
+      - name: Summarize same-runner speedups
+        run: |
+          grep -E '^[0-9]+,[0-9]+$' /tmp/direct-u32-text-ab-baseline.txt | tr ',' '\t' > /tmp/direct-u32-text-ab-baseline.tsv
+          grep -E '^[0-9]+,[0-9]+$' /tmp/direct-u32-text-ab-candidate.txt | tr ',' '\t' > /tmp/direct-u32-text-ab-candidate.tsv
+          echo -e "piece_len\tbaseline_ns\tdirect_u32_ns\tspeedup_x" | tee /tmp/direct-u32-text-ab-summary.tsv
+          join -t $'\t' -1 1 -2 1 /tmp/direct-u32-text-ab-baseline.tsv /tmp/direct-u32-text-ab-candidate.tsv \
+            | awk -F '\t' 'BEGIN { OFS="\t" } { printf "%s\t%s\t%s\t%.6f\n", $1, $2, $3, $2 / $3 }' \
+            | tee -a /tmp/direct-u32-text-ab-summary.tsv
+
+      - name: Publish A/B summary
+        if: always()
+        run: |
+          echo "### Direct u32 text-to-IDs A/B" >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/direct-u32-text-ab-summary.tsv >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "Baseline: ed0e814073854fb9d74d92cff46372e2dfd8448b" >> "$GITHUB_STEP_SUMMARY"
+          echo "Candidate: 4aba541eac89474d8bb60619e07e2262b5f433db" >> "$GITHUB_STEP_SUMMARY"
+          echo "Each binary checks TinyScan Token IDs against an independent Reference profile before timing." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload exact evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elastic-direct-u32-text-ab
+          path: |
+            /tmp/direct-u32-text-ab-runner.txt
+            /tmp/direct-u32-text-ab-tokenizer.json
+            /tmp/direct-u32-text-ab-baseline.txt
+            /tmp/direct-u32-text-ab-candidate.txt
+            /tmp/direct-u32-text-ab-summary.tsv
+          if-no-files-found: warn
