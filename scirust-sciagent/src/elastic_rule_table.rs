@@ -84,13 +84,10 @@ mod tests {
 
     #[test]
     fn lookup_is_exact_after_key_sorting() {
-        let table = FlatPackedRuleTable::try_from_ordered_merges(&[
-            (7, 9, 20),
-            (1, 2, 21),
-            (7, 3, 22),
-        ])
-        .unwrap()
-        .unwrap();
+        let table =
+            FlatPackedRuleTable::try_from_ordered_merges(&[(7, 9, 20), (1, 2, 21), (7, 3, 22)])
+                .unwrap()
+                .unwrap();
         assert_eq!(table.len(), 3);
         assert_eq!(table.get(7, 9).unwrap().rank(), 0);
         assert_eq!(table.get(7, 9).unwrap().output(), 20);
@@ -101,8 +98,8 @@ mod tests {
 
     #[test]
     fn duplicate_pair_is_rejected_after_sorting() {
-        let error = FlatPackedRuleTable::try_from_ordered_merges(&[(1, 2, 3), (1, 2, 4)])
-            .unwrap_err();
+        let error =
+            FlatPackedRuleTable::try_from_ordered_merges(&[(1, 2, 3), (1, 2, 4)]).unwrap_err();
         assert_eq!(error, DuplicateMergeRule { left: 1, right: 2 });
     }
 
@@ -111,9 +108,11 @@ mod tests {
         if usize::BITS > 32
         {
             let wide = usize::try_from(u64::from(u32::MAX) + 1).unwrap();
-            assert!(FlatPackedRuleTable::try_from_ordered_merges(&[(wide, 1, 2)])
-                .unwrap()
-                .is_none());
+            assert!(
+                FlatPackedRuleTable::try_from_ordered_merges(&[(wide, 1, 2)])
+                    .unwrap()
+                    .is_none()
+            );
         }
     }
 
