@@ -111,11 +111,9 @@ fn build_cuda_decode_execution_attestation(
     }
     if inputs.hardware.architecture.family != ArchitectureFamily::NvidiaGpu
     {
-        return Err(
-            CudaDecodeExecutionAttestationError::NonNvidiaArchitecture(
-                inputs.hardware.architecture.family,
-            ),
-        );
+        return Err(CudaDecodeExecutionAttestationError::NonNvidiaArchitecture(
+            inputs.hardware.architecture.family,
+        ));
     }
     if !inputs
         .topology
@@ -179,7 +177,7 @@ mod tests {
     use super::*;
     use crate::sha256_digest;
     use scirust_compute::{
-        Architecture, DeviceCapabilities, DeviceId, DType, TopologyNode, TopologyNodeId,
+        Architecture, DType, DeviceCapabilities, DeviceId, TopologyNode, TopologyNodeId,
         TopologyNodeKind,
     };
 
@@ -196,7 +194,8 @@ mod tests {
         let mut hardware = capabilities.hardware_baseline();
         hardware.architecture = Architecture::named(ArchitectureFamily::NvidiaGpu, "sm_110");
 
-        let mut accelerator = TopologyNode::new(TopologyNodeId::new(7), TopologyNodeKind::Accelerator);
+        let mut accelerator =
+            TopologyNode::new(TopologyNodeId::new(7), TopologyNodeKind::Accelerator);
         accelerator.device = Some(device);
         accelerator.name = Some("synthetic-cuda".to_string());
         let topology = SystemTopology {
@@ -242,7 +241,10 @@ mod tests {
             attestation.profile.architecture.family,
             ExecutionArchitectureFamily::NvidiaGpu
         );
-        assert_eq!(attestation.profile.architecture.name.as_deref(), Some("sm_110"));
+        assert_eq!(
+            attestation.profile.architecture.name.as_deref(),
+            Some("sm_110")
+        );
         assert_eq!(attestation.verify(), Ok(()));
     }
 
