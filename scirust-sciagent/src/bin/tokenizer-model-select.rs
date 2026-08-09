@@ -271,7 +271,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let metrics = stability_metrics(&measurements);
-        let indexed = metrics.get(&(64, kernel_order(BpeKernel::Indexed))).unwrap();
+        let indexed = metrics
+            .get(&(64, kernel_order(BpeKernel::Indexed)))
+            .unwrap();
         assert!(indexed.allan_m1_nanos > 0.0);
         assert!(indexed.allan_m2_nanos.is_some());
         assert!(indexed.allan_m4_nanos.is_some());
