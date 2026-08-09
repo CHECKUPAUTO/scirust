@@ -30,15 +30,59 @@ jobs:
       - run: cargo +1.89.0 fmt --manifest-path tools/cargo-scirust/Cargo.toml -- --check
       - run: cargo +1.89.0 clippy --locked --manifest-path tools/cargo-scirust/Cargo.toml --all-targets -- -D warnings
       - run: cargo +1.89.0 test --locked --manifest-path tools/cargo-scirust/Cargo.toml
-      - name: Smoke test default affected merge-base analysis
-        run: cargo +1.89.0 run --locked --quiet --manifest-path tools/cargo-scirust/Cargo.toml -- affected --json
-      - name: Smoke test Cargo plugin dispatcher
-        run: cargo +1.89.0 run --locked --quiet --manifest-path tools/cargo-scirust/Cargo.toml -- help
-      - name: Smoke test affected help is terminal
+      - run: cargo +1.89.0 build --locked --manifest-path tools/cargo-scirust/Cargo.toml
+
+      - name: Smoke test help without workspace discovery
         run: |
-          out="$(cargo +1.89.0 run --locked --quiet --manifest-path tools/cargo-scirust/Cargo.toml -- affected --help)"
+          cd /tmp
+          "$CARGO_TARGET_DIR/debug/cargo-scirust" parity --help | grep -Fq 'cargo scirust parity'
+          "$CARGO_TARGET_DIR/debug/cargo-scirust" calibrate --help | grep -Fq 'tokenizer FILE'
+
+      - name: Smoke test affected modes
+        run: |
+          cargo +1.89.0 run --locked --quiet --manifest-path tools/cargo-scirust/Cargo.toml -- affected --json
+          cargo +1.89.0 run --locked --quiet --manifest-path tools/cargo-scirust/Cargo.toml -- affected --names-only >/tmp/affected-names.txt
+
+      - name: Smoke test parity success and failure contract
+        run: |
+          cargo +1.89.0 run --locked --quiet --manifest-path tools/cargo-scirust/Cargo.toml -- \
+            parity --left "printf 'same\\n'" --right "printf 'same\\n'" --repeat 2
+          if cargo +1.89.0 run --locked --quiet --manifest-path tools/cargo-scirust/Cargo.toml -- \
+            parity --left "exit 7" --right "exit 7"; then
+            echo 'identical failures must not pass parity by default' >&2
+            exit 1
+          fi
+          cargo +1.89.0 run --locked --quiet --manifest-path tools/cargo-scirust/Cargo.toml -- \
+            parity --left "exit 7" --right "exit 7" --allow-failure
+
+      - name: Smoke test determinism
+        run: |
+          cargo +1.89.0 run --locked --quiet --manifest-path tools/cargo-scirust/Cargo.toml -- \
+            determinism --repeat 3 -- /usr/bin/printf 'stable\n'
+
+      - name: Smoke test measured cost
+        run: |
+          cargo +1.89.0 run --locked --quiet --manifest-path tools/cargo-scirust/Cargo.toml -- \
+            cost --no-static --warmup 0 --measure 2 -- /usr/bin/true
+
+      - name: Smoke test feature matrix planning
+        run: |
+          cargo +1.89.0 run --locked --quiet --manifest-path tools/cargo-scirust/Cargo.toml -- \
+            features scirust-core --cover pairwise --max 4096 --json >/tmp/features.json
+          grep -Fq '"cases"' /tmp/features.json
+
+      - name: Smoke test distribution-only calibration
+        run: |
+          printf '1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n' >/tmp/piece-lengths.txt
+          cargo +1.89.0 run --locked --quiet --manifest-path tools/cargo-scirust/Cargo.toml -- \
+            calibrate --lengths /tmp/piece-lengths.txt --json >/tmp/calibration.json
+          grep -Fq 'distinct-quantile-midpoint-v2' /tmp/calibration.json
+          grep -Fq '"S_max"' /tmp/calibration.json
+
+      - name: Smoke test full ElasticTokenizer autotune orchestration
+        run: |
+          out="$(cargo +1.89.0 run --locked --quiet --manifest-path tools/cargo-scirust/Cargo.toml -- \
+            calibrate --tokenizer /tmp/tokenizer.json --input scirust-core/src --output /tmp/profile.json --dry-run)"
           echo "$out"
-          grep -Fq 'cargo scirust affected' <<<"$out"
-          if grep -Fq 'SciRust affected analysis' <<<"$out"; then exit 1; fi
-      - name: Smoke test workspace feature discovery
-        run: cargo +1.89.0 run --locked --quiet --manifest-path tools/cargo-scirust/Cargo.toml -- features scirust-core
+          grep -Fq 'tokenizer-autotune' <<<"$out"
+          grep -Fq -- '--release' <<<"$out"
