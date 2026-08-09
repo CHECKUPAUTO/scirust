@@ -1,0 +1,42 @@
+name: Temporary ElasticTokenizer selection finalizer
+
+on:
+  push:
+    branches:
+      - perf/elastic-tokenizer-robust-model-selection
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: perf/elastic-tokenizer-robust-model-selection
+          fetch-depth: 0
+      - name: Install toolchains
+        run: |
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt --component clippy
+      - name: Refresh lock and format
+        run: |
+          cargo +1.89.0 check -p scirust-sciagent
+          cargo +nightly-2026-07-02 fmt --all
+          git diff --check
+      - name: Qualify selection and stability tooling
+        run: |
+          cargo +nightly-2026-07-02 clippy -p scirust-sciagent --all-targets --locked -- -D warnings
+          cargo +1.89.0 test -p scirust-sciagent --lib elastic_model_selection --locked
+          cargo +1.89.0 test -p scirust-sciagent --bin tokenizer-model-select --locked
+          cargo +1.89.0 check -p scirust-sciagent --all-targets --locked
+      - name: Remove temporary workflow and commit
+        run: |
+          git rm .github/workflows/tmp-elastic-selection-finalize.yml
+          git config user.name 'CHECKUPAUTO'
+          git config user.email '194770978+CHECKUPAUTO@users.noreply.github.com'
+          git add Cargo.lock scirust-sciagent/Cargo.toml scirust-sciagent/src/elastic_model_selection.rs scirust-sciagent/src/bin/tokenizer-model-select.rs .github/workflows/elastic-tokenizer-model-selection.yml docs/sciagent-elastic-model-selection.md
+          git commit -m 'feat(sciagent): finalize robust tokenizer evidence stack'
+          git push origin HEAD:perf/elastic-tokenizer-robust-model-selection
