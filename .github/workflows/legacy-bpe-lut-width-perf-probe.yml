@@ -1,0 +1,70 @@
+name: Legacy BPE LUT width performance probe
+
+on:
+  pull_request:
+    paths:
+      - "scirust-sciagent/src/bin/legacy-bpe-lut-width-probe.rs"
+      - ".github/workflows/legacy-bpe-lut-width-perf-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lut-width-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Install MSRV toolchain
+        run: rustup toolchain install 1.89.0 --profile minimal
+
+      - name: Record runner identity
+        run: |
+          {
+            uname -a
+            echo
+            lscpu
+          } > /tmp/legacy-bpe-lut-width-runner.txt
+
+      - name: Train deterministic legacy tokenizer
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin train-tokenizer -- \
+            --input scirust-sciagent/src \
+            --recursive \
+            --extension rs \
+            --vocab-size 2048 \
+            --min-frequency 2 \
+            --merge-semantics legacy-parallel-v1 \
+            --output /tmp/legacy-lut-width-tokenizer.json
+
+      - name: Measure usize versus u32 LUT
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin legacy-bpe-lut-width-probe -- \
+            --tokenizer /tmp/legacy-lut-width-tokenizer.json \
+            --input scirust-sciagent/src/bpe.rs \
+            --input scirust-sciagent/src/model.rs \
+            --input scirust-sciagent/src/inference.rs \
+            --warmup-rounds 3 \
+            --measured-rounds 11 | tee /tmp/legacy-bpe-lut-width-probe.txt
+
+      - name: Publish probe summary
+        if: always()
+        run: |
+          echo "### Legacy BPE LUT width probe" >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/legacy-bpe-lut-width-probe.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "Informational experiment only; not a merge gate." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: legacy-bpe-lut-width-probe
+          path: |
+            /tmp/legacy-bpe-lut-width-runner.txt
+            /tmp/legacy-bpe-lut-width-probe.txt
+          if-no-files-found: warn
