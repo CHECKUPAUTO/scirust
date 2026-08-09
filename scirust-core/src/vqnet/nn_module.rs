@@ -43,8 +43,9 @@ impl Module for QuantumModule {
             ))
         })?;
 
-        self.replace_parameter_tensor(tensor.clone()).map_err(|error| {
-            SciRustError::InvalidConfig(format!("invalid VQNet quantum module state: {error}"))
-        })
+        self.replace_parameter_tensor(tensor.clone())
+            .map_err(|error| {
+                SciRustError::InvalidConfig(format!("invalid VQNet quantum module state: {error}"))
+            })
     }
 }
