@@ -156,11 +156,7 @@ impl HamiltonianReadout {
 
         Ok(Self {
             observables: observables.to_vec(),
-            coefficients: Tensor::from_vec(
-                coefficients,
-                observable_count,
-                hamiltonian_count,
-            ),
+            coefficients: Tensor::from_vec(coefficients, observable_count, hamiltonian_count),
             offsets: Tensor::from_vec(offsets, 1, hamiltonian_count),
         })
     }
@@ -308,8 +304,8 @@ mod tests {
             PauliTerm::new(0, Pauli::X),
         ])
         .unwrap();
-        let hamiltonian = Hamiltonian::new(vec![HamiltonianTerm::new(2.0, reordered).unwrap()])
-            .unwrap();
+        let hamiltonian =
+            Hamiltonian::new(vec![HamiltonianTerm::new(2.0, reordered).unwrap()]).unwrap();
 
         let readout = HamiltonianReadout::from_observables(&[measured], &[hamiltonian]).unwrap();
         assert_eq!(readout.coefficients().data, vec![2.0]);
@@ -317,13 +313,10 @@ mod tests {
 
     #[test]
     fn missing_observable_is_rejected() {
-        let hamiltonian = Hamiltonian::new(vec![
-            HamiltonianTerm::new(1.0, Observable::x(0)).unwrap(),
-        ])
-        .unwrap();
+        let hamiltonian =
+            Hamiltonian::new(vec![HamiltonianTerm::new(1.0, Observable::x(0)).unwrap()]).unwrap();
         assert_eq!(
-            HamiltonianReadout::from_observables(&[Observable::z(0)], &[hamiltonian])
-                .unwrap_err(),
+            HamiltonianReadout::from_observables(&[Observable::z(0)], &[hamiltonian]).unwrap_err(),
             QuantumError::InvalidObservable {
                 reason: "Hamiltonian term is not present in the measured observable basis",
             }
