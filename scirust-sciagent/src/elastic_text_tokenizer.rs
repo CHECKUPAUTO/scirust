@@ -154,9 +154,9 @@ impl ElasticTextTokenizer {
                 {
                     *slot = byte_ids[usize::from(byte)];
                 }
-                if let Some(encoded) =
-                    self.engine
-                        .try_encode_tiny_compact(&mut work, piece_len, piece_len)
+                if let Some(encoded) = self
+                    .engine
+                    .try_encode_tiny_compact(&mut work, piece_len, piece_len)
                 {
                     return encoded;
                 }
