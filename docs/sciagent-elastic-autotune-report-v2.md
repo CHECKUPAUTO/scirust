@@ -23,3 +23,7 @@ Changing case order, a piece length, an input-ID count, or any Token ID changes 
 A strict comparator for v2 reports must reject comparison when tokenizer identity, exact-case fingerprint, hardware fingerprint, or timing protocol differ. It must also refuse to produce a speedup for a `(piece_len, kernel)` group containing a semantic mismatch, a missing side, or a different sample count.
 
 Schema v1 reports intentionally remain non-comparable under that strict contract because they do not bind the exact calibration inputs.
+
+## Validation
+
+The report writer is gated by the repository's pinned nightly rustfmt/Clippy checks, exact MSRV 1.89 all-target check, and SciAgent tokenizer binary tests. The strict comparator remains a separate follow-up so report production and report comparison can be reviewed independently.
