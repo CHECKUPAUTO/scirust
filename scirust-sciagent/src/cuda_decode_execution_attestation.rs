@@ -2,10 +2,7 @@ use scirust_agent_protocol::{
     ExecutionArchitecture, ExecutionArchitectureFamily, ExecutionAttestation,
     ExecutionAttestationError, ExecutionBackendKind, ExecutionReproducibility, Sha256Digest,
 };
-use scirust_compute::{
-    ArchitectureFamily, DeviceKind, HardwareCapabilities, ProfileEncodingError, SystemTopology,
-    canonical_hardware_profile_bytes, canonical_topology_profile_bytes,
-};
+use scirust_gpu::CudaComputeAdapter;
 
 use crate::cuda_decode::{
     CudaDecodeDownMode, CudaDecodeFfnMode, CudaDecodeLmHeadMode, CudaDecodeModel, CudaDecodeModes,
@@ -15,6 +12,11 @@ use crate::execution_attestation::{
 };
 
 pub const CUDA_DECODE_NUMERIC_MODE_V1: &str = "bf16-fp32-accum-v1";
+
+// CudaDecodeRuntime::new currently acquires CUDA device zero. Keep the expected
+// ordinal explicit at the attestation boundary so a separately acquired compute
+// adapter cannot attest a different CUDA device for this decode model.
+const CUDA_DECODE_DEVICE_ORDINAL: u32 = 0;
 
 const KERNEL_FUSED_CUBLAS_FUSED: &str =
     "sciagent.cuda-decode.fused-gemv.cublas-down.fused-argmax-v1";
@@ -29,14 +31,14 @@ const KERNEL_CUBLAS_TILED_FUSED: &str =
     "sciagent.cuda-decode.cublas-ffn.tiled-down.fused-argmax-v1";
 const KERNEL_CUBLAS_TILED_FULL: &str = "sciagent.cuda-decode.cublas-ffn.tiled-down.full-logits-v1";
 
-/// Structured compute facts bound to one already-acquired CUDA decode runtime.
+/// Provenance facts bound to an acquired CUDA compute adapter.
 ///
-/// Capability and topology fingerprints are always derived from SciRust's canonical
-/// compute encodings. Callers cannot inject detached byte strings, a separate device
-/// ordinal, or a second architecture label into the execution profile.
+/// The hardware/topology bytes, device ordinal and architecture identity are not
+/// caller-provided. They are derived from `compute_adapter`'s acquired CUDA raw
+/// runtime through the canonical `scirust-compute` encoders exposed by
+/// `CudaComputeAdapter::canonical_execution_profile`.
 pub struct CudaDecodeExecutionAttestationInputs<'a> {
-    pub hardware: &'a HardwareCapabilities,
-    pub topology: &'a SystemTopology,
+    pub compute_adapter: &'a CudaComputeAdapter,
     pub memory_budget_bytes: Option<u64>,
     pub sampler_semantic_version: Option<&'a str>,
     pub model_sha256: Sha256Digest,
@@ -45,11 +47,19 @@ pub struct CudaDecodeExecutionAttestationInputs<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CudaDecodeExecutionAttestationError {
-    NonCudaDevice(DeviceKind),
-    NonNvidiaArchitecture(ArchitectureFamily),
-    DeviceMissingFromTopology,
-    ProfileEncoding(ProfileEncodingError),
+    ComputeProfile(String),
+    DecodeRuntimeDeviceMismatch {
+        decode_ordinal: u32,
+        profile_ordinal: u32,
+    },
     ExecutionAttestation(ExecutionAttestationError),
+}
+
+struct CanonicalCudaExecutionProfile {
+    device_ordinal: u32,
+    architecture_name: Option<String>,
+    capability_profile_bytes: Vec<u8>,
+    topology_profile_bytes: Vec<u8>,
 }
 
 #[must_use]
@@ -99,61 +109,81 @@ pub const fn cuda_decode_kernel_semantic_version(modes: CudaDecodeModes) -> &'st
     }
 }
 
+fn acquired_profile(
+    adapter: &CudaComputeAdapter,
+) -> Result<CanonicalCudaExecutionProfile, CudaDecodeExecutionAttestationError> {
+    let (device_ordinal, architecture_name, capability_profile_bytes, topology_profile_bytes) =
+        adapter
+            .canonical_execution_profile()
+            .map_err(|error| CudaDecodeExecutionAttestationError::ComputeProfile(error.to_string()))?;
+
+    Ok(CanonicalCudaExecutionProfile {
+        device_ordinal,
+        architecture_name,
+        capability_profile_bytes,
+        topology_profile_bytes,
+    })
+}
+
+fn build_cuda_decode_execution_attestation_from_profile(
+    modes: CudaDecodeModes,
+    profile: CanonicalCudaExecutionProfile,
+    memory_budget_bytes: Option<u64>,
+    sampler_semantic_version: Option<&str>,
+    model_sha256: Sha256Digest,
+    tokenizer_sha256: Sha256Digest,
+) -> Result<ExecutionAttestation, CudaDecodeExecutionAttestationError> {
+    if profile.device_ordinal != CUDA_DECODE_DEVICE_ORDINAL
+    {
+        return Err(
+            CudaDecodeExecutionAttestationError::DecodeRuntimeDeviceMismatch {
+                decode_ordinal: CUDA_DECODE_DEVICE_ORDINAL,
+                profile_ordinal: profile.device_ordinal,
+            },
+        );
+    }
+
+    build_runtime_execution_attestation(RuntimeExecutionAttestationInputs {
+        backend: ExecutionBackendKind::Cuda,
+        device_ordinal: profile.device_ordinal,
+        architecture: ExecutionArchitecture {
+            family: ExecutionArchitectureFamily::NvidiaGpu,
+            name: profile.architecture_name,
+        },
+        capability_profile_bytes: &profile.capability_profile_bytes,
+        topology_profile_bytes: &profile.topology_profile_bytes,
+        memory_budget_bytes,
+        numeric_mode: CUDA_DECODE_NUMERIC_MODE_V1,
+        reproducibility: ExecutionReproducibility::NumericallyEquivalent,
+        kernel_semantic_version: cuda_decode_kernel_semantic_version(modes),
+        sampler_semantic_version,
+        model_sha256,
+        tokenizer_sha256,
+    })
+    .map_err(CudaDecodeExecutionAttestationError::ExecutionAttestation)
+}
+
 fn build_cuda_decode_execution_attestation(
     modes: CudaDecodeModes,
     inputs: CudaDecodeExecutionAttestationInputs<'_>,
 ) -> Result<ExecutionAttestation, CudaDecodeExecutionAttestationError> {
-    if inputs.hardware.device.kind() != DeviceKind::Cuda
-    {
-        return Err(CudaDecodeExecutionAttestationError::NonCudaDevice(
-            inputs.hardware.device.kind(),
-        ));
-    }
-    if inputs.hardware.architecture.family != ArchitectureFamily::NvidiaGpu
-    {
-        return Err(CudaDecodeExecutionAttestationError::NonNvidiaArchitecture(
-            inputs.hardware.architecture.family,
-        ));
-    }
-    if !inputs
-        .topology
-        .nodes
-        .iter()
-        .any(|node| node.device == Some(inputs.hardware.device))
-    {
-        return Err(CudaDecodeExecutionAttestationError::DeviceMissingFromTopology);
-    }
-
-    let capability_profile_bytes = canonical_hardware_profile_bytes(inputs.hardware)
-        .map_err(CudaDecodeExecutionAttestationError::ProfileEncoding)?;
-    let topology_profile_bytes = canonical_topology_profile_bytes(inputs.topology)
-        .map_err(CudaDecodeExecutionAttestationError::ProfileEncoding)?;
-
-    build_runtime_execution_attestation(RuntimeExecutionAttestationInputs {
-        backend: ExecutionBackendKind::Cuda,
-        device_ordinal: inputs.hardware.device.ordinal(),
-        architecture: ExecutionArchitecture {
-            family: ExecutionArchitectureFamily::NvidiaGpu,
-            name: inputs.hardware.architecture.name.clone(),
-        },
-        capability_profile_bytes: &capability_profile_bytes,
-        topology_profile_bytes: &topology_profile_bytes,
-        memory_budget_bytes: inputs.memory_budget_bytes,
-        numeric_mode: CUDA_DECODE_NUMERIC_MODE_V1,
-        reproducibility: ExecutionReproducibility::NumericallyEquivalent,
-        kernel_semantic_version: cuda_decode_kernel_semantic_version(modes),
-        sampler_semantic_version: inputs.sampler_semantic_version,
-        model_sha256: inputs.model_sha256,
-        tokenizer_sha256: inputs.tokenizer_sha256,
-    })
-    .map_err(CudaDecodeExecutionAttestationError::ExecutionAttestation)
+    let profile = acquired_profile(inputs.compute_adapter)?;
+    build_cuda_decode_execution_attestation_from_profile(
+        modes,
+        profile,
+        inputs.memory_budget_bytes,
+        inputs.sampler_semantic_version,
+        inputs.model_sha256,
+        inputs.tokenizer_sha256,
+    )
 }
 
 /// Attestation surface available only from an already-constructed CUDA decode model.
 ///
 /// `CudaDecodeModel::from_model` returns `Some` only after `CudaDecodeRuntime::new`
-/// has acquired the CUDA execution context. Requiring `&self` here prevents callers
-/// from producing an I250 runtime attestation without first acquiring that runtime.
+/// has acquired the decode CUDA context. The additional `CudaComputeAdapter` input
+/// must itself own an acquired CUDA raw runtime and must report the same device
+/// ordinal before any attestation can be produced.
 pub trait CudaDecodeExecutionAttestationExt {
     fn execution_attestation(
         &self,
@@ -176,47 +206,28 @@ impl CudaDecodeExecutionAttestationExt for CudaDecodeModel {
 mod tests {
     use super::*;
     use crate::sha256_digest;
-    use scirust_compute::{
-        Architecture, DType, DeviceCapabilities, DeviceId, TopologyNode, TopologyNodeId,
-        TopologyNodeKind,
-    };
 
-    fn compute_profiles() -> (HardwareCapabilities, SystemTopology) {
-        let device = DeviceId::new(DeviceKind::Cuda, 3);
-        let capabilities = DeviceCapabilities {
-            device,
-            name: "synthetic-cuda".to_string(),
-            supported_dtypes: vec![DType::Bf16],
-            max_buffer_bytes: Some(8 * 1024 * 1024 * 1024),
-            max_workgroup_size: [1024, 1024, 64],
-            supports_async_execution: true,
-        };
-        let mut hardware = capabilities.hardware_baseline();
-        hardware.architecture = Architecture::named(ArchitectureFamily::NvidiaGpu, "sm_110");
-
-        let mut accelerator =
-            TopologyNode::new(TopologyNodeId::new(7), TopologyNodeKind::Accelerator);
-        accelerator.device = Some(device);
-        accelerator.name = Some("synthetic-cuda".to_string());
-        let topology = SystemTopology {
-            nodes: vec![accelerator],
-            links: Vec::new(),
-        };
-        (hardware, topology)
+    fn profile(device_ordinal: u32) -> CanonicalCudaExecutionProfile {
+        CanonicalCudaExecutionProfile {
+            device_ordinal,
+            architecture_name: Some("sm_110".to_string()),
+            capability_profile_bytes: b"canonical-capability-profile".to_vec(),
+            topology_profile_bytes: b"canonical-topology-profile".to_vec(),
+        }
     }
 
-    fn inputs(
-        hardware: &HardwareCapabilities,
-        topology: &SystemTopology,
-    ) -> CudaDecodeExecutionAttestationInputs<'_> {
-        CudaDecodeExecutionAttestationInputs {
-            hardware,
-            topology,
-            memory_budget_bytes: Some(8 * 1024 * 1024 * 1024),
-            sampler_semantic_version: Some("greedy-device-feedback-v1"),
-            model_sha256: sha256_digest(b"model"),
-            tokenizer_sha256: sha256_digest(b"tokenizer"),
-        }
+    fn build(
+        modes: CudaDecodeModes,
+        device_ordinal: u32,
+    ) -> Result<ExecutionAttestation, CudaDecodeExecutionAttestationError> {
+        build_cuda_decode_execution_attestation_from_profile(
+            modes,
+            profile(device_ordinal),
+            Some(8 * 1024 * 1024 * 1024),
+            Some("greedy-device-feedback-v1"),
+            sha256_digest(b"model"),
+            sha256_digest(b"tokenizer"),
+        )
     }
 
     #[test]
@@ -228,15 +239,13 @@ mod tests {
     }
 
     #[test]
-    fn canonical_compute_profiles_drive_architecture_device_and_fingerprints() {
-        let (hardware, topology) = compute_profiles();
-        let attestation = build_cuda_decode_execution_attestation(
-            CudaDecodeModes::default(),
-            inputs(&hardware, &topology),
-        )
-        .unwrap();
+    fn canonical_profile_drives_device_architecture_and_fingerprint() {
+        let attestation = build(CudaDecodeModes::default(), CUDA_DECODE_DEVICE_ORDINAL).unwrap();
 
-        assert_eq!(attestation.profile.device_ordinal, 3);
+        assert_eq!(
+            attestation.profile.device_ordinal,
+            CUDA_DECODE_DEVICE_ORDINAL
+        );
         assert_eq!(
             attestation.profile.architecture.family,
             ExecutionArchitectureFamily::NvidiaGpu
@@ -250,18 +259,13 @@ mod tests {
 
     #[test]
     fn changing_decode_mode_changes_attested_kernel_identity() {
-        let (hardware, topology) = compute_profiles();
-        let base = build_cuda_decode_execution_attestation(
-            CudaDecodeModes::default(),
-            inputs(&hardware, &topology),
-        )
-        .unwrap();
-        let changed = build_cuda_decode_execution_attestation(
+        let base = build(CudaDecodeModes::default(), CUDA_DECODE_DEVICE_ORDINAL).unwrap();
+        let changed = build(
             CudaDecodeModes {
                 lm_head: CudaDecodeLmHeadMode::FullLogits,
                 ..CudaDecodeModes::default()
             },
-            inputs(&hardware, &topology),
+            CUDA_DECODE_DEVICE_ORDINAL,
         )
         .unwrap();
 
@@ -271,30 +275,44 @@ mod tests {
     }
 
     #[test]
-    fn rejects_detached_non_cuda_compute_profile() {
-        let (mut hardware, topology) = compute_profiles();
-        hardware.device = DeviceId::cpu();
+    fn rejects_compute_profile_for_different_cuda_device() {
         assert_eq!(
-            build_cuda_decode_execution_attestation(
-                CudaDecodeModes::default(),
-                inputs(&hardware, &topology),
-            ),
-            Err(CudaDecodeExecutionAttestationError::NonCudaDevice(
-                DeviceKind::Cpu
-            ))
+            build(CudaDecodeModes::default(), CUDA_DECODE_DEVICE_ORDINAL + 1),
+            Err(
+                CudaDecodeExecutionAttestationError::DecodeRuntimeDeviceMismatch {
+                    decode_ordinal: CUDA_DECODE_DEVICE_ORDINAL,
+                    profile_ordinal: CUDA_DECODE_DEVICE_ORDINAL + 1,
+                }
+            )
         );
     }
 
     #[test]
-    fn rejects_topology_that_does_not_contain_attested_device() {
-        let (hardware, mut topology) = compute_profiles();
-        topology.nodes[0].device = Some(DeviceId::new(DeviceKind::Cuda, 4));
+    fn acquired_cuda_adapter_builds_verifiable_profile_when_available() {
+        let adapter = match CudaComputeAdapter::new()
+        {
+            Ok(adapter) => adapter,
+            Err(error) =>
+            {
+                eprintln!("cuda: {error}; skipping acquired-profile test");
+                return;
+            },
+        };
+
+        let attestation = build_cuda_decode_execution_attestation_from_profile(
+            CudaDecodeModes::default(),
+            acquired_profile(&adapter).unwrap(),
+            Some(8 * 1024 * 1024 * 1024),
+            Some("greedy-device-feedback-v1"),
+            sha256_digest(b"model"),
+            sha256_digest(b"tokenizer"),
+        )
+        .unwrap();
+
+        assert_eq!(attestation.verify(), Ok(()));
         assert_eq!(
-            build_cuda_decode_execution_attestation(
-                CudaDecodeModes::default(),
-                inputs(&hardware, &topology),
-            ),
-            Err(CudaDecodeExecutionAttestationError::DeviceMissingFromTopology)
+            attestation.profile.device_ordinal,
+            CUDA_DECODE_DEVICE_ORDINAL
         );
     }
 }
