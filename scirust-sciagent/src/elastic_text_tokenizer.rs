@@ -17,6 +17,7 @@ use crate::elastic_tokenizer::{BpeKernel, DuplicateMergeRule, ElasticProfile, To
 
 const SPECIAL_TOKENS: &[(&str, usize)] = &[("<pad>", 0), ("<bos>", 1), ("<eos>", 2), ("<unk>", 3)];
 const LEGACY_BPE_SEMANTICS_V1: &str = "legacy-parallel-v1";
+const DIRECT_U32_INGRESS_MAX_LEN: usize = 32;
 
 /// Merge semantics declared by a tokenizer artifact.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -144,7 +145,7 @@ impl ElasticTextTokenizer {
     /// reduction kernel; they do not introduce regex or arbitrary boundaries.
     pub fn encode(&self, text: &str) -> ElasticEncoding {
         let piece_len = text.len();
-        if piece_len <= TINY_SCAN_CAPACITY
+        if piece_len <= DIRECT_U32_INGRESS_MAX_LEN
             && self.engine.profile().kernel_for(piece_len) == BpeKernel::TinyScan
         {
             if let Some(byte_ids) = &self.compact_byte_ids
