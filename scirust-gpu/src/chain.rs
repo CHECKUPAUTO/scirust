@@ -18,10 +18,17 @@
 
 use crate::wgpu_backend::{GpuMatrix, WgpuContext};
 use crate::{BackendError, BackendResult};
+#[cfg(feature = "flat-attention")]
+use flat_attention::{
+    ExternalProjectionPass, ExternalProjectionRotaryGroupedPipeline, FlatAttentionConfig,
+    GroupedAttentionShape, RotaryEmbeddingConfig,
+};
 
 /// A handle to a wgpu device for building VRAM-resident matmul chains.
 pub struct GpuChain {
     ctx: WgpuContext,
+    #[cfg(feature = "flat-attention")]
+    flat_projection_pipeline: ExternalProjectionRotaryGroupedPipeline,
 }
 
 /// The resident weights of one pre-norm, single-head transformer block, as
@@ -54,6 +61,20 @@ pub struct BlockWeights<'a> {
 /// with RoPE, then SwiGLU MLP — matching the sciagent `SciAgentBlock`. Unlike
 /// [`BlockWeights`] (single head, square q/k/v), the key/value projections are
 /// `d×(n_kv_heads·dh)` where `dh = d/n_heads`.
+#[cfg(feature = "flat-attention")]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FlatResidentGqaConfig {
+    pub batch: usize,
+    pub q_heads: usize,
+    pub kv_heads: usize,
+    pub seq_len: usize,
+    pub head_dim: usize,
+    pub causal: bool,
+    pub softmax_scale: Option<f32>,
+    pub theta: f32,
+    pub position_offset: usize,
+}
+
 pub struct GqaBlockWeights<'a> {
     /// Pre-attention RMSNorm gain (`d`).
     pub norm1: &'a GpuMatrix,
@@ -211,7 +232,15 @@ pub struct DoraGrads {
 impl GpuChain {
     /// Acquire a GPU device. Returns `None` if no adapter is available.
     pub fn new() -> Option<Self> {
-        WgpuContext::new().ok().map(|ctx| Self { ctx })
+        let ctx = WgpuContext::new().ok()?;
+        #[cfg(feature = "flat-attention")]
+        let flat_projection_pipeline =
+            ExternalProjectionRotaryGroupedPipeline::new(ctx.device()).ok()?;
+        Some(Self {
+            ctx,
+            #[cfg(feature = "flat-attention")]
+            flat_projection_pipeline,
+        })
     }
 
     /// Name of the underlying adapter.
@@ -222,6 +251,91 @@ impl GpuChain {
     /// Upload a row-major `rows×cols` matrix; it stays resident in VRAM.
     pub fn upload(&self, data: &[f32], rows: usize, cols: usize) -> GpuMatrix {
         self.ctx.upload(data, rows, cols)
+    }
+
+    #[cfg(feature = "flat-attention")]
+    pub fn flat_projection_grouped_rope(
+        &self,
+        q: &GpuMatrix,
+        k: &GpuMatrix,
+        v: &GpuMatrix,
+        config: FlatResidentGqaConfig,
+    ) -> BackendResult<GpuMatrix> {
+        let rows = config
+            .batch
+            .checked_mul(config.seq_len)
+            .ok_or_else(|| BackendError::ShapeMismatch("FLAT-R2 batch*seq_len overflow".into()))?;
+        let q_cols = config.q_heads.checked_mul(config.head_dim).ok_or_else(|| {
+            BackendError::ShapeMismatch("FLAT-R2 q_heads*head_dim overflow".into())
+        })?;
+        let kv_cols = config
+            .kv_heads
+            .checked_mul(config.head_dim)
+            .ok_or_else(|| {
+                BackendError::ShapeMismatch("FLAT-R2 kv_heads*head_dim overflow".into())
+            })?;
+        if q.rows() != rows || q.cols() != q_cols
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "FLAT-R2 Q is {}x{}, expected {rows}x{q_cols}",
+                q.rows(),
+                q.cols()
+            )));
+        }
+        for (name, matrix) in [("K", k), ("V", v)]
+        {
+            if matrix.rows() != rows || matrix.cols() != kv_cols
+            {
+                return Err(BackendError::ShapeMismatch(format!(
+                    "FLAT-R2 {name} is {}x{}, expected {rows}x{kv_cols}",
+                    matrix.rows(),
+                    matrix.cols()
+                )));
+            }
+        }
+
+        let shape = GroupedAttentionShape {
+            batch: config.batch,
+            q_heads: config.q_heads,
+            kv_heads: config.kv_heads,
+            seq_len: config.seq_len,
+            head_dim: config.head_dim,
+        };
+        let output = self
+            .flat_projection_pipeline
+            .create_output_buffer(self.ctx.device(), shape)
+            .map_err(|error| {
+                BackendError::Execution(format!("FLAT-R2 output allocation: {error}"))
+            })?;
+        let mut encoder =
+            self.ctx
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("scirust-flat-r2-resident"),
+                });
+        self.flat_projection_pipeline
+            .encode(
+                self.ctx.device(),
+                &mut encoder,
+                ExternalProjectionPass {
+                    q: q.buffer(),
+                    k: k.buffer(),
+                    v: v.buffer(),
+                    out_and_lse: &output,
+                    shape,
+                    config: FlatAttentionConfig {
+                        causal: config.causal,
+                        softmax_scale: config.softmax_scale,
+                    },
+                    rotary: RotaryEmbeddingConfig {
+                        theta: config.theta,
+                        position_offset: config.position_offset,
+                    },
+                },
+            )
+            .map_err(|error| BackendError::Execution(format!("FLAT-R2 encode: {error}")))?;
+        self.ctx.queue().submit(Some(encoder.finish()));
+        GpuMatrix::from_external_buffer(output, rows, q_cols)
     }
 
     /// `C = A·B`, keeping the result resident (no download).
