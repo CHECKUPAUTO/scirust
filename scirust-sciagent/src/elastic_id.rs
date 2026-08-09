@@ -209,8 +209,8 @@ mod tests {
 
     #[test]
     fn compact_index_sentinels_do_not_overlap_valid_indices() {
-        assert!(COMPACT_INDEX_MAX < COMPACT_INDEX_INACTIVE);
-        assert!(COMPACT_INDEX_INACTIVE < COMPACT_INDEX_NONE);
+        const { assert!(COMPACT_INDEX_MAX < COMPACT_INDEX_INACTIVE) };
+        const { assert!(COMPACT_INDEX_INACTIVE < COMPACT_INDEX_NONE) };
         assert_eq!(try_compact_index(0).unwrap(), 0);
         if usize::BITS > 32
         {
