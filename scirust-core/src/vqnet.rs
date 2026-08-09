@@ -6,11 +6,13 @@
 //! not need to coordinate [`ParameterId`] values by hand.
 
 mod ansatz;
+mod encoding;
 mod module_state;
 mod nn_module;
 mod optimizer_state;
 
 pub use ansatz::{EntanglementTopology, EntanglingGate};
+pub use encoding::AngleEncodingHandle;
 pub use module_state::{
     ParameterInitializer, QuantumForward, QuantumModule, VariationalParameters,
 };
