@@ -60,8 +60,8 @@ pub use elastic_heap::HeapBpe;
 pub use elastic_indexed::IndexedBpe;
 pub use elastic_profile_fit::{ElasticProfileFitter, ProfileFitError};
 pub use elastic_profile_store::{
-    CANONICAL_BPE_SEMANTICS_V1, ELASTIC_PROFILE_SCHEMA_V1, ElasticHardwareIdentity,
-    ProfileStoreError, StoredElasticProfile, ordered_merges_fingerprint,
+    CANONICAL_BPE_SEMANTICS_V1, ELASTIC_PROFILE_SCHEMA_V1, ELASTIC_PROFILE_SCHEMA_V2,
+    ElasticHardwareIdentity, ProfileStoreError, StoredElasticProfile, ordered_merges_fingerprint,
 };
 pub use elastic_text_tokenizer::{
     BpeMergeSemantics, ElasticTextTokenizer, ElasticTextTokenizerError,
