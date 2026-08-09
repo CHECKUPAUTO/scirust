@@ -68,6 +68,7 @@ impl FlatPackedRuleTable {
             .map(|index| self.entries[index].1)
     }
 
+    #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
