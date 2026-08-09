@@ -154,9 +154,9 @@ impl ElasticTextTokenizer {
                 {
                     *slot = byte_ids[usize::from(byte)];
                 }
-                if let Some(encoded) =
-                    self.engine
-                        .try_encode_tiny_compact(&mut work, piece_len, piece_len)
+                if let Some(encoded) = self
+                    .engine
+                    .try_encode_tiny_compact(&mut work, piece_len, piece_len)
                 {
                     return encoded;
                 }
@@ -438,7 +438,7 @@ impl fmt::Display for ElasticTextTokenizerError {
                 "elastic tokenizer requires explicit `merge_semantics`; untagged artifacts remain legacy",
             ),
             Self::UnknownMergeSemantics(value) => {
-                write!(f, "unknown elastic tokenizer merge semantics `{value}`")
+                write!(f, "unknown elastic tokenizer merge semantics `{value}")
             },
             Self::LegacyMergeSemantics => f.write_str(
                 "legacy parallel BPE semantics must use the historical BpeTokenizer compatibility path",
