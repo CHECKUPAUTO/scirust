@@ -24,7 +24,7 @@ const LEGACY_BPE_SEMANTICS_V1: &str = "legacy-parallel-v1";
 #[derive(Clone, Debug)]
 pub enum VersionedBpeTokenizer {
     Legacy(BpeTokenizer),
-    Canonical(ElasticTextTokenizer),
+    Canonical(Box<ElasticTextTokenizer>),
 }
 
 impl VersionedBpeTokenizer {
@@ -45,6 +45,7 @@ impl VersionedBpeTokenizer {
             {
                 let profile = reference_profile()?;
                 ElasticTextTokenizer::from_json_str(&input, profile)
+                    .map(Box::new)
                     .map(Self::Canonical)
                     .map_err(BpeDispatchError::Canonical)
             },
