@@ -159,11 +159,8 @@ mod tests {
 
     #[test]
     fn raw_adamw_state_matches_reference_across_fresh_tapes() {
-        let mut module = QuantumModule::new(
-            one_qubit_circuit(),
-            ParameterInitializer::Constant(0.3),
-        )
-        .unwrap();
+        let mut module =
+            QuantumModule::new(one_qubit_circuit(), ParameterInitializer::Constant(0.3)).unwrap();
         let slot = OptimizerSlot::new("classifier.quantum").unwrap();
         let mut optimizer = AdamW::new(0.025).with_weight_decay(0.0);
         let mut reference_optimizer = AdamW::new(0.025).with_weight_decay(0.0);
@@ -200,8 +197,8 @@ mod tests {
 
     #[test]
     fn invalid_optimizer_output_is_transactional() {
-        let module = QuantumModule::new(one_qubit_circuit(), ParameterInitializer::Constant(0.3))
-            .unwrap();
+        let module =
+            QuantumModule::new(one_qubit_circuit(), ParameterInitializer::Constant(0.3)).unwrap();
         let slot = OptimizerSlot::new("classifier.quantum").unwrap();
         let mut optimizer = InvalidOptimizer { calls: 0 };
 
