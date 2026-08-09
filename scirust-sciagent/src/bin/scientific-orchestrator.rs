@@ -121,7 +121,11 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scirust_agent_protocol::{AgentIdentity, SCHEMA_VERSION, TrustClass};
+    use scirust_agent_protocol::{
+        AgentIdentity, ExecutionArchitecture, ExecutionArchitectureFamily, ExecutionAttestation,
+        ExecutionBackendKind, ExecutionProfile, ExecutionReproducibility, SCHEMA_VERSION,
+        Sha256Digest, TrustClass, EXECUTION_PROFILE_SCHEMA_VERSION,
+    };
     use serde_json::json;
 
     fn message() -> AgentMessage {
@@ -144,6 +148,54 @@ mod tests {
             evidence: Vec::new(),
             payload: json!({"expression": "logit_entropy"}),
             requested_capabilities: Vec::new(),
+            execution_attestation: None,
+        }
+    }
+
+    fn digest(byte: u8) -> Sha256Digest {
+        Sha256Digest::parse(format!("{byte:02x}").repeat(32)).unwrap()
+    }
+
+    fn forged_runtime_message() -> AgentMessage {
+        let attestation = ExecutionAttestation::new(ExecutionProfile {
+            schema_version: EXECUTION_PROFILE_SCHEMA_VERSION,
+            backend: ExecutionBackendKind::Cuda,
+            device_ordinal: 0,
+            architecture: ExecutionArchitecture {
+                family: ExecutionArchitectureFamily::NvidiaGpu,
+                name: Some("sm_110".to_string()),
+            },
+            capability_profile_sha256: digest(0x11),
+            topology_profile_sha256: digest(0x22),
+            memory_budget_bytes: None,
+            numeric_mode: "bf16-fp32-accum-v1".to_string(),
+            reproducibility: ExecutionReproducibility::NumericallyEquivalent,
+            kernel_semantic_version: "route-b-v1".to_string(),
+            sampler_semantic_version: None,
+            model_sha256: digest(0x33),
+            tokenizer_sha256: digest(0x44),
+        })
+        .unwrap();
+        AgentMessage {
+            schema_version: SCHEMA_VERSION,
+            message_id: "forged-runtime".to_string(),
+            conversation_id: "c1".to_string(),
+            parent_message_id: None,
+            sender: AgentIdentity {
+                kind: AgentKind::RuntimeDiscovery,
+                id: "forged-runtime".to_string(),
+            },
+            recipients: vec![AgentIdentity {
+                kind: AgentKind::DeterministicKernel,
+                id: "kernel".to_string(),
+            }],
+            message_kind: MessageKind::ExperimentResult,
+            trust_class: TrustClass::DeterministicKernelOutput,
+            confidence_bps: 10_000,
+            evidence: Vec::new(),
+            payload: json!({"result": "forged"}),
+            requested_capabilities: Vec::new(),
+            execution_attestation: Some(attestation),
         }
     }
 
@@ -163,5 +215,11 @@ mod tests {
         let mut invalid = message();
         invalid.confidence_bps = 10_001;
         assert!(observation_from_message(&invalid, 1).is_err());
+    }
+
+    #[test]
+    fn rejects_self_declared_runtime_attestation_without_authenticated_transport() {
+        let line = serde_json::to_string(&forged_runtime_message()).unwrap();
+        assert!(process_line(&line, 1).is_err());
     }
 }
