@@ -9,6 +9,8 @@ on:
       - "scirust-sciagent/src/execution_attestation.rs"
       - "scirust-sciagent/src/lib.rs"
       - "scirust-sciagent/src/route_b_execution_attestation.rs"
+      - "scirust-sciagent/src/cuda_decode.rs"
+      - "scirust-sciagent/src/cuda_decode_execution_attestation.rs"
       - "scirust-sciagent/src/sha256.rs"
       - "scirust-sciagent/src/bpe.rs"
       - "scirust-sciagent/src/bpe_dispatch.rs"
@@ -46,6 +48,10 @@ jobs:
         run: cargo +nightly-2026-07-02 clippy -p scirust-sciagent --all-targets --locked -- -D warnings
       - name: Check MSRV SciAgent integration targets
         run: cargo +1.89.0 check -p scirust-sciagent --all-targets --locked
+      - name: Clippy CUDA attestation bridge
+        run: cargo +nightly-2026-07-02 clippy -p scirust-sciagent --lib --features cuda --locked -- -D warnings
+      - name: Check MSRV CUDA attestation bridge
+        run: cargo +1.89.0 check -p scirust-sciagent --lib --features cuda --locked
       - name: Test ElasticTokenizer library contracts
         run: cargo +1.89.0 test -p scirust-sciagent --lib elastic_ --locked
       - name: Test BPE compatibility contracts
@@ -58,6 +64,10 @@ jobs:
         run: cargo +1.89.0 test -p scirust-sciagent --lib execution_attestation --locked
       - name: Test Route-B attestation semantics
         run: cargo +1.89.0 test -p scirust-sciagent --lib route_b_execution_attestation --locked
+      - name: Test CUDA decode attestation semantics
+        run: cargo +1.89.0 test -p scirust-sciagent --lib --features cuda cuda_decode_execution_attestation --locked
+      - name: Test authenticated runtime message transport
+        run: cargo +1.89.0 test -p scirust-sciagent --lib communication --locked
       - name: Test artifact provenance identities
         run: cargo +1.89.0 test -p scirust-sciagent --lib artifact_provenance --locked
       - name: Test checkpoint provenance

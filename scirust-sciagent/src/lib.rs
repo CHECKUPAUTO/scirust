@@ -13,6 +13,8 @@ pub mod corpus_paths;
 #[cfg(feature = "cuda")]
 pub mod cuda_decode;
 #[cfg(feature = "cuda")]
+pub mod cuda_decode_execution_attestation;
+#[cfg(feature = "cuda")]
 pub mod cuda_model;
 pub mod elastic_autotune;
 pub mod elastic_calibration;
@@ -51,8 +53,13 @@ pub use bpe::{BpeTokenizer, BpeTrainer};
 pub use bpe_dispatch::{BpeDispatchError, VersionedBpeTokenizer};
 pub use canonical_bpe_train::{CanonicalBpeArtifact, CanonicalBpeTrainError, CanonicalBpeTrainer};
 pub use ccos::CcosLog;
-pub use communication::SciAgentEndpoint;
+pub use communication::{RuntimeEndpoint, SciAgentEndpoint};
 pub use config::SciAgentConfig;
+#[cfg(feature = "cuda")]
+pub use cuda_decode_execution_attestation::{
+    CUDA_DECODE_NUMERIC_MODE_V1, CudaDecodeExecutionAttestationExt,
+    CudaDecodeExecutionAttestationInputs, cuda_decode_kernel_semantic_version,
+};
 pub use elastic_autotune::{
     AutotuneConfig, AutotuneError, AutotuneResult, CalibrationCase, ElasticAutotuner,
 };
