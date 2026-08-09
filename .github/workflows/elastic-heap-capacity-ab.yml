@@ -33,7 +33,6 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-
           path = Path("candidate/scirust-sciagent/src/elastic_heap.rs")
           text = path.read_text()
           old = "let mut heap = BinaryHeap::with_capacity(input.len().saturating_sub(1));"
@@ -46,8 +45,10 @@ jobs:
           git -C candidate diff --check
           git -C candidate diff -- scirust-sciagent/src/elastic_heap.rs
 
-      - name: Install MSRV toolchain
-        run: rustup toolchain install 1.89.0 --profile minimal --component rustfmt
+      - name: Install toolchains
+        run: |
+          rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt
+          rustup toolchain install 1.89.0 --profile minimal
 
       - name: Train one deterministic canonical tokenizer
         working-directory: baseline
@@ -64,7 +65,7 @@ jobs:
       - name: Validate candidate before timing
         working-directory: candidate
         run: |
-          cargo +1.89.0 fmt --all -- --check
+          cargo +nightly-2026-07-02 fmt --all -- --check
           cargo +1.89.0 test --locked -p scirust-sciagent elastic_heap --lib
 
       - name: Build both measurement binaries before timing
@@ -114,7 +115,6 @@ jobs:
               | [$g[0].piece_len, $g[($g | length) / 2 | floor].elapsed_nanos]
               | @tsv' "/tmp/heap-capacity-${label}-report.json" > "/tmp/heap-capacity-${label}.tsv"
           done
-
           join -t $'\t' /tmp/heap-capacity-b1.tsv /tmp/heap-capacity-c1.tsv > /tmp/heap-capacity-p1.tsv
           join -t $'\t' /tmp/heap-capacity-b2.tsv /tmp/heap-capacity-c2.tsv > /tmp/heap-capacity-p2.tsv
           join -t $'\t' /tmp/heap-capacity-p1.tsv /tmp/heap-capacity-p2.tsv \
