@@ -1,0 +1,36 @@
+name: Temporary rustfmt PR 1085
+
+on:
+  push:
+    branches:
+      - perf/elastic-tokenizer-autotune-report-v2-real
+    paths:
+      - .github/workflows/temp-rustfmt-1085.yml
+
+permissions:
+  contents: write
+
+jobs:
+  rustfmt-and-remove-self:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: perf/elastic-tokenizer-autotune-report-v2-real
+          fetch-depth: 0
+
+      - name: Install pinned formatter
+        run: rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt
+
+      - name: Format workspace but commit only target
+        run: cargo +nightly-2026-07-02 fmt --all
+
+      - name: Commit formatted target and remove temporary workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scirust-sciagent/src/bin/tokenizer-autotune.rs
+          git rm .github/workflows/temp-rustfmt-1085.yml
+          git commit -m "style(sciagent): apply pinned rustfmt to report v2"
+          git push origin HEAD:perf/elastic-tokenizer-autotune-report-v2-real
