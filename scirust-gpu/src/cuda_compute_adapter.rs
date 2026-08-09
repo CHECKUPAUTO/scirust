@@ -5,7 +5,8 @@ use core::fmt;
 use scirust_compute::{
     BufferAccess, BufferBinding, ComputeBackend, ComputeError, ComputeResult, DType,
     DeviceCapabilities, DeviceId, DeviceKind, KernelFormat, KernelModule, LaunchConfig,
-    MemorySpace,
+    MemorySpace, SystemTopology, augment_accelerator_topology, canonical_hardware_profile_bytes,
+    canonical_topology_profile_bytes,
 };
 use scirust_cuda::{
     CudaRawAccess, CudaRawBinding, CudaRawBuffer, CudaRawEvent, CudaRawKernel, CudaRawLaunchConfig,
@@ -76,6 +77,41 @@ impl CudaComputeAdapter {
     /// Capabilities reported by the acquired CUDA device.
     pub fn capabilities(&self) -> &DeviceCapabilities {
         &self.capabilities
+    }
+
+    /// Canonical capability/topology identity derived from this acquired CUDA runtime.
+    ///
+    /// The returned tuple is `(device_ordinal, architecture_name,
+    /// canonical_hardware_profile_bytes, canonical_topology_profile_bytes)`. Both byte
+    /// strings are produced by `scirust-compute`'s versioned canonical encoders from
+    /// driver-backed facts owned by this adapter; callers cannot substitute a second
+    /// hardware snapshot while retaining this runtime identity.
+    pub fn canonical_execution_profile(
+        &self,
+    ) -> ComputeResult<(u32, Option<String>, Vec<u8>, Vec<u8>)> {
+        let hardware = cuda_hardware_profile::hardware_capabilities(
+            &self.capabilities,
+            self.runtime.device_info(),
+        );
+        let capability_profile_bytes = canonical_hardware_profile_bytes(&hardware)
+            .map_err(|_| ComputeError::InvalidArgument("invalid canonical CUDA hardware profile"))?;
+
+        let descriptor = cuda_hardware_profile::topology_descriptor(
+            &self.capabilities,
+            self.runtime.device_info(),
+        );
+        let mut topology = SystemTopology::default();
+        augment_accelerator_topology(&mut topology, descriptor)
+            .map_err(|_| ComputeError::InvalidArgument("invalid canonical CUDA topology profile"))?;
+        let topology_profile_bytes = canonical_topology_profile_bytes(&topology)
+            .map_err(|_| ComputeError::InvalidArgument("invalid canonical CUDA topology profile"))?;
+
+        Ok((
+            self.capabilities.device.ordinal(),
+            hardware.architecture.name,
+            capability_profile_bytes,
+            topology_profile_bytes,
+        ))
     }
 }
 
@@ -338,6 +374,31 @@ mod tests {
                 .all(|value| *value > 0)
         );
         assert!(capabilities.supports_async_execution);
+    }
+
+    #[test]
+    fn canonical_execution_profile_is_driver_backed_and_self_consistent() {
+        let Some(adapter) = adapter_or_skip()
+        else
+        {
+            return;
+        };
+
+        let (ordinal, architecture_name, hardware_bytes, topology_bytes) = adapter
+            .canonical_execution_profile()
+            .expect("canonical CUDA execution profile");
+
+        assert_eq!(ordinal, adapter.capabilities().device.ordinal());
+        assert_eq!(
+            architecture_name,
+            Some(format!(
+                "sm_{}{}",
+                adapter.runtime().device_info().compute_capability.0,
+                adapter.runtime().device_info().compute_capability.1
+            ))
+        );
+        assert!(!hardware_bytes.is_empty());
+        assert!(!topology_bytes.is_empty());
     }
 
     #[test]
