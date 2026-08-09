@@ -51,7 +51,9 @@ capabilities. It makes no claim of quantum advantage.
   plus `add_bias`, so the existing quantum adjoint remains the only quantum
   differentiation implementation and gradients propagate through the readout.
   Hamiltonian coefficients are fixed problem-definition data, not trainable
-  module parameters; a trainable classical readout remains composable afterward.
+  module parameters. `HamiltonianReadout` also implements `nn::Module`, so it
+  composes directly as `QuantumModule → HamiltonianReadout → Linear` while
+  contributing no trainable indices or checkpoint state of its own.
 - `QuantumModule` adds persistent trainable quantum state above the fresh-tape
   execution model. `ParameterInitializer` provides zero, finite constant, and
   deterministic seeded-uniform initialization; `VariationalParameters` owns the
