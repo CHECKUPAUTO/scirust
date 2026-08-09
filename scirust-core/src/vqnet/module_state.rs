@@ -186,10 +186,8 @@ impl QuantumModule {
         circuit: VariationalCircuit,
         initializer: ParameterInitializer,
     ) -> QuantumResult<Self> {
-        let parameters = VariationalParameters::initialized(
-            circuit.trainable_parameter_count(),
-            initializer,
-        )?;
+        let parameters =
+            VariationalParameters::initialized(circuit.trainable_parameter_count(), initializer)?;
         Ok(Self {
             circuit,
             parameters,
@@ -228,10 +226,7 @@ impl QuantumModule {
     ) -> QuantumResult<QuantumForward<'t>> {
         let parameters = self.parameters.attach(tape);
         let output = self.circuit.forward(classical_features, parameters)?;
-        Ok(QuantumForward {
-            output,
-            parameters,
-        })
+        Ok(QuantumForward { output, parameters })
     }
 
     /// Runs one batched, ordered multi-observable forward pass using persistent
@@ -242,13 +237,8 @@ impl QuantumModule {
         classical_features: Var<'t>,
     ) -> QuantumResult<QuantumForward<'t>> {
         let parameters = self.parameters.attach(tape);
-        let output = self
-            .circuit
-            .forward_batch(classical_features, parameters)?;
-        Ok(QuantumForward {
-            output,
-            parameters,
-        })
+        let output = self.circuit.forward_batch(classical_features, parameters)?;
+        Ok(QuantumForward { output, parameters })
     }
 
     /// Persists an optimizer-updated parameter variable for the next fresh tape.
@@ -382,8 +372,7 @@ mod tests {
     #[test]
     fn module_parameters_survive_a_fresh_tape_optimizer_step() {
         let circuit = one_qubit_circuit();
-        let mut module =
-            QuantumModule::new(circuit, ParameterInitializer::Constant(0.3)).unwrap();
+        let mut module = QuantumModule::new(circuit, ParameterInitializer::Constant(0.3)).unwrap();
         let initial = module.parameters().values().to_vec();
 
         let tape = Tape::new();
