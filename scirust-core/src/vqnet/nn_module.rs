@@ -1,4 +1,5 @@
-//! Integration of [`QuantumModule`] with SciRust's classical [`Module`] stack.
+//! Integration of [`QuantumModule`] with SciRust's classical
+//! [`Module`](crate::nn::module::Module) stack.
 
 use super::QuantumModule;
 use crate::autodiff::reverse::{Tape, Tensor, Var};
