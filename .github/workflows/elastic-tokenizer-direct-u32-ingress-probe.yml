@@ -1,0 +1,72 @@
+name: ElasticTokenizer direct u32 ingress probe
+
+on:
+  pull_request:
+    paths:
+      - "scirust-sciagent/src/bin/tokenizer-ingress-width-probe.rs"
+      - ".github/workflows/elastic-tokenizer-direct-u32-ingress-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  direct-u32-ingress:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Install MSRV toolchain
+        run: rustup toolchain install 1.89.0 --profile minimal
+
+      - name: Record runner identity
+        run: |
+          {
+            uname -a
+            echo
+            lscpu
+          } > /tmp/direct-u32-ingress-runner.txt
+
+      - name: Train deterministic canonical tokenizer
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin train-tokenizer -- \
+            --input scirust-sciagent/src \
+            --recursive \
+            --extension rs \
+            --vocab-size 2048 \
+            --min-frequency 2 \
+            --merge-semantics canonical-rank-v1 \
+            --output /tmp/direct-u32-ingress-tokenizer.json
+
+      - name: Measure current versus direct compact ingress
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin tokenizer-ingress-width-probe -- \
+            --tokenizer /tmp/direct-u32-ingress-tokenizer.json \
+            --input scirust-sciagent/src/elastic_text_tokenizer.rs \
+            --input scirust-sciagent/src/elastic_tiny.rs \
+            --lengths 8,16,32,64,96,128 \
+            --sweeps 1000 \
+            --warmup-rounds 3 \
+            --measured-rounds 11 | tee /tmp/direct-u32-ingress-probe.txt
+
+      - name: Publish probe summary
+        if: always()
+        run: |
+          echo "### ElasticTokenizer direct u32 ingress probe" >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/direct-u32-ingress-probe.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "Informational experiment only; not a merge gate." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elastic-tokenizer-direct-u32-ingress-probe
+          path: |
+            /tmp/direct-u32-ingress-runner.txt
+            /tmp/direct-u32-ingress-probe.txt
+            /tmp/direct-u32-ingress-tokenizer.json
+          if-no-files-found: warn
