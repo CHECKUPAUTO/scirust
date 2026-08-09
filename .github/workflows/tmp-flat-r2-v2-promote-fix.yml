@@ -1,0 +1,62 @@
+name: Temporary FLAT-R2 v2 promoter fix
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  BRANCH: feat/flat-r2-scirust-resident-interop-v2
+
+jobs:
+  qualify-and-promote:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ env.BRANCH }}
+          fetch-depth: 0
+      - name: Apply corrected resident interop source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path('.github/workflows/tmp-flat-r2-v2-promote.yml').read_text()
+          marker = "          python3 - <<'PY'\n"
+          start = workflow.index(marker) + len(marker)
+          end = workflow.index("\n          PY", start)
+          program = textwrap.dedent(workflow[start:end])
+          block_start = program.index("ctx_anchor = 'impl WgpuContext {\\n'")
+          block_end_marker = "s = s.replace(ctx_anchor, ctx_methods, 1)\n"
+          block_end = program.index(block_end_marker, block_start) + len(block_end_marker)
+          program = program[:block_start] + program[block_end:]
+          exec(compile(program, '<flat-r2-v2-patch>', 'exec'))
+          PY
+          git diff --check
+      - name: Install pinned toolchains
+        run: |
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt
+      - name: Refresh lock and qualify feature
+        run: |
+          cargo +1.89.0 check -p scirust-gpu --features flat-attention
+          cargo +nightly-2026-07-02 fmt --all
+          cargo +nightly-2026-07-02 fmt --all -- --check
+          cargo +1.89.0 clippy -p scirust-gpu --features flat-attention --all-targets --locked -- -D warnings
+          cargo +1.89.0 test -p scirust-gpu --features flat-attention --lib --locked
+      - name: Commit qualified source only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/tmp-flat-r2-v2-promote.yml .github/workflows/tmp-flat-r2-v2-promote-fix.yml
+          git config user.name 'CHECKUPAUTO'
+          git config user.email '194770978+CHECKUPAUTO@users.noreply.github.com'
+          git add Cargo.lock scirust-gpu/src/lib.rs scirust-gpu/src/chain.rs scirust-gpu/src/wgpu_backend.rs
+          git commit -m 'feat(gpu): bridge resident WGPU matrices into FLAT-R2'
+          git push origin HEAD:${BRANCH}
