@@ -9,8 +9,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BinaryHeap};
 
 use crate::elastic_id::{
-    try_compact_index, COMPACT_INDEX_INACTIVE, COMPACT_INDEX_NONE, PackedRule, PairKey,
-    PriorityKey,
+    COMPACT_INDEX_INACTIVE, COMPACT_INDEX_NONE, PackedRule, PairKey, PriorityKey, try_compact_index,
 };
 use crate::elastic_tokenizer::{DuplicateMergeRule, TokenId};
 
@@ -241,8 +240,7 @@ impl HeapBpe {
                 {
                     index - 1
                 },
-                next: if usize::try_from(index).expect("compact index fits usize") + 1
-                    < input.len()
+                next: if usize::try_from(index).expect("compact index fits usize") + 1 < input.len()
                 {
                     index + 1
                 }
@@ -343,10 +341,7 @@ impl HeapBpe {
         None
     }
 
-    fn compact_candidate_is_valid(
-        nodes: &[CompactNode],
-        candidate: CompactHeapCandidate,
-    ) -> bool {
+    fn compact_candidate_is_valid(nodes: &[CompactNode], candidate: CompactHeapCandidate) -> bool {
         let left = candidate.priority.left_index();
         let Ok(left_index) = usize::try_from(left)
         else
