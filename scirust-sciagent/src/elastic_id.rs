@@ -101,11 +101,10 @@ impl PriorityKey {
             field: "merge_rank",
             value: rank,
         })?;
-        let left_index =
-            u32::try_from(left_index).map_err(|_| CompactWordError::FieldTooWide {
-                field: "left_node_index",
-                value: left_index,
-            })?;
+        let left_index = u32::try_from(left_index).map_err(|_| CompactWordError::FieldTooWide {
+            field: "left_node_index",
+            value: left_index,
+        })?;
         Ok(Self::new(rank, left_index))
     }
 
@@ -156,10 +155,7 @@ impl std::error::Error for PairKeyError {}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CompactWordError {
-    FieldTooWide {
-        field: &'static str,
-        value: usize,
-    },
+    FieldTooWide { field: &'static str, value: usize },
 }
 
 impl fmt::Display for CompactWordError {
@@ -249,7 +245,10 @@ mod tests {
     #[test]
     fn usize_narrowing_is_checked() {
         assert_eq!(PairKey::try_from_usize(4, 5).unwrap(), PairKey::new(4, 5));
-        assert_eq!(PackedRule::try_from_usize(6, 7).unwrap(), PackedRule::new(6, 7));
+        assert_eq!(
+            PackedRule::try_from_usize(6, 7).unwrap(),
+            PackedRule::new(6, 7)
+        );
         assert_eq!(
             PriorityKey::try_from_usize(8, 9).unwrap(),
             PriorityKey::new(8, 9)
