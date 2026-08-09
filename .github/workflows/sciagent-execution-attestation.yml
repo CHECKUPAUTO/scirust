@@ -5,10 +5,13 @@ on:
     branches: [master, main, develop]
     paths:
       - "scirust-sciagent/src/artifact_provenance.rs"
+      - "scirust-sciagent/src/communication.rs"
       - "scirust-sciagent/src/execution_attestation.rs"
       - "scirust-sciagent/src/lib.rs"
       - "scirust-sciagent/src/route_b_execution_attestation.rs"
       - "scirust-sciagent/src/sha256.rs"
+      - "scirust-sciagent/src/bin/sciagent-dialogue.rs"
+      - "scirust-sciagent/src/bin/scientific-orchestrator.rs"
       - "scirust-sciagent/src/train/checkpoint.rs"
       - "scirust-sciagent/tokenizer/bpe.json"
       - "scirust-agent-protocol/**"
@@ -31,10 +34,12 @@ jobs:
       - run: rustup toolchain install 1.89.0 --profile minimal
       - name: Format
         run: cargo +nightly-2026-07-02 fmt --all -- --check
-      - name: Clippy builder
-        run: cargo +nightly-2026-07-02 clippy -p scirust-sciagent --lib --locked -- -D warnings
-      - name: Check MSRV
-        run: cargo +1.89.0 check -p scirust-sciagent --lib --locked
+      - name: Clippy SciAgent integration targets
+        run: cargo +nightly-2026-07-02 clippy -p scirust-sciagent --all-targets --locked -- -D warnings
+      - name: Check MSRV SciAgent integration targets
+        run: cargo +1.89.0 check -p scirust-sciagent --all-targets --locked
+      - name: Test agent protocol attestation transport
+        run: cargo +1.89.0 test -p scirust-agent-protocol --locked
       - name: Test runtime attestation builder
         run: cargo +1.89.0 test -p scirust-sciagent --lib execution_attestation --locked
       - name: Test Route-B attestation semantics
