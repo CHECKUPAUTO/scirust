@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs;
 
 const SPECIAL_TOKENS: &[(&str, usize)] = &[("<pad>", 0), ("<bos>", 1), ("<eos>", 2), ("<unk>", 3)];
+const BYTE_LUT_LEN: usize = 256;
 
 fn byte_to_str(b: u8) -> String {
     let single = vec![b];
@@ -201,12 +202,7 @@ impl BpeTrainer {
             merges.len()
         );
 
-        BpeTokenizer {
-            vocab,
-            rev,
-            merges,
-            reversible: true,
-        }
+        BpeTokenizer::from_parts(vocab, rev, merges, true)
     }
 }
 
@@ -215,9 +211,14 @@ pub struct BpeTokenizer {
     vocab: BTreeMap<String, usize>,
     rev: Vec<String>,
     merges: Vec<(usize, usize, usize)>,
+    /// Precomputed byte → base-token IDs. Boxed so the 256-entry LUT does not
+    /// inflate enums that store `BpeTokenizer` by value.
+    byte_ids: Box<[usize; BYTE_LUT_LEN]>,
+    /// Historical parallel-merge lookup built once at tokenizer construction.
+    merge_lookup: HashMap<(usize, usize), usize>,
     /// `true` for the **v2** reversible byte-level scheme (`byte_to_unit`), `false`
     /// for a legacy tokenizer (`byte_to_str` + `<NNN>` placeholders, e.g. the
-    /// embedded `bpe.json`). Selects both the byte→key map in `encode` and the
+    /// embedded `bpe.json`). Selects both the byte→key map in the cached LUT and the
     /// `decode` path, so old and new tokenizers stay bit-for-bit compatible with the
     /// data they were trained on.
     reversible: bool,
@@ -232,12 +233,48 @@ impl BpeTokenizer {
         // Infer the scheme: a v2 vocab always contains every 256-byte unit char, so
         // the byte-128 unit ('Ā', U+0100) is present iff this is a v2 tokenizer.
         let reversible = vocab.contains_key(&byte_to_unit(128).to_string());
+        Self::from_parts(vocab, rev, merges, reversible)
+    }
+
+    fn from_parts(
+        vocab: BTreeMap<String, usize>,
+        rev: Vec<String>,
+        merges: Vec<(usize, usize, usize)>,
+        reversible: bool,
+    ) -> Self {
+        let byte_ids = Self::build_byte_ids(&vocab, reversible);
+        let merge_lookup = merges
+            .iter()
+            .map(|&(left, right, output)| ((left, right), output))
+            .collect();
         Self {
             vocab,
             rev,
             merges,
+            byte_ids,
+            merge_lookup,
             reversible,
         }
+    }
+
+    fn build_byte_ids(
+        vocab: &BTreeMap<String, usize>,
+        reversible: bool,
+    ) -> Box<[usize; BYTE_LUT_LEN]> {
+        let mut byte_ids = Box::new([3usize; BYTE_LUT_LEN]);
+        for byte in 0u8..=255
+        {
+            let key = if reversible
+            {
+                byte_to_unit(byte).to_string()
+            }
+            else
+            {
+                byte_to_str(byte)
+            };
+            byte_ids[usize::from(byte)] = vocab.get(&key).copied().unwrap_or(3);
+        }
+        byte_ids
     }
 
     pub fn vocab_size(&self) -> usize {
@@ -248,43 +285,18 @@ impl BpeTokenizer {
         *self.vocab.get(name).unwrap_or(&3)
     }
 
-    /// The base-vocab key for a single byte under this tokenizer's scheme: the
-    /// reversible unit char (v2) or the legacy `byte_to_str` (`<NNN>` for non-ASCII).
-    fn byte_key(&self, b: u8) -> String {
-        if self.reversible
-        {
-            byte_to_unit(b).to_string()
-        }
-        else
-        {
-            byte_to_str(b)
-        }
-    }
-
     pub fn encode(&self, text: &str) -> Vec<usize> {
         let mut ids: Vec<usize> = text
             .bytes()
-            .map(|b| *self.vocab.get(&self.byte_key(b)).unwrap_or(&3))
+            .map(|byte| self.byte_ids[usize::from(byte)])
             .collect();
 
-        if ids.is_empty()
+        if ids.is_empty() || self.merge_lookup.is_empty()
         {
             return ids;
         }
 
-        // Appliquer les merges gloutonnement (optimisé avec lookup table)
-        let merge_lookup: HashMap<(usize, usize), usize> = self
-            .merges
-            .iter()
-            .map(|&(a, b, new_id)| ((a, b), new_id))
-            .collect();
-
-        if merge_lookup.is_empty()
-        {
-            return ids;
-        }
-
-        // Single-pass BPE merge using output buffer (avoids O(n²) remove())
+        // Preserve the historical repeated left-to-right parallel merge passes.
         loop
         {
             let mut out = Vec::with_capacity(ids.len());
@@ -294,7 +306,7 @@ impl BpeTokenizer {
             {
                 if i + 1 < ids.len() && ids[i] != 0 && ids[i + 1] != 0
                 {
-                    if let Some(&new_id) = merge_lookup.get(&(ids[i], ids[i + 1]))
+                    if let Some(&new_id) = self.merge_lookup.get(&(ids[i], ids[i + 1]))
                     {
                         out.push(new_id);
                         i += 2;
@@ -401,14 +413,7 @@ impl BpeTokenizer {
 
     #[allow(dead_code)]
     fn find_merge(&self, left: usize, right: usize) -> Option<usize> {
-        for &(l, r, new_id) in &self.merges
-        {
-            if l == left && r == right
-            {
-                return Some(new_id);
-            }
-        }
-        None
+        self.merge_lookup.get(&(left, right)).copied()
     }
 
     pub fn save_json(&self, path: &str) -> std::io::Result<()> {
@@ -476,18 +481,62 @@ impl BpeTokenizer {
             })
             .unwrap_or_default();
         let reversible = json.get("version").and_then(|v| v.as_str()) == Some("byte_level_v2");
-        Ok(Self {
-            vocab,
-            rev,
-            merges,
-            reversible,
-        })
+        Ok(Self::from_parts(vocab, rev, merges, reversible))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn encode_uncached_reference(tokenizer: &BpeTokenizer, text: &str) -> Vec<usize> {
+        let mut ids = text
+            .bytes()
+            .map(|byte| {
+                let key = if tokenizer.reversible
+                {
+                    byte_to_unit(byte).to_string()
+                }
+                else
+                {
+                    byte_to_str(byte)
+                };
+                tokenizer.vocab.get(&key).copied().unwrap_or(3)
+            })
+            .collect::<Vec<_>>();
+        let merge_lookup = tokenizer
+            .merges
+            .iter()
+            .map(|&(left, right, output)| ((left, right), output))
+            .collect::<HashMap<_, _>>();
+
+        loop
+        {
+            let mut out = Vec::with_capacity(ids.len());
+            let mut any_merged = false;
+            let mut index = 0usize;
+            while index < ids.len()
+            {
+                if index + 1 < ids.len() && ids[index] != 0 && ids[index + 1] != 0
+                {
+                    if let Some(&output) = merge_lookup.get(&(ids[index], ids[index + 1]))
+                    {
+                        out.push(output);
+                        index += 2;
+                        any_merged = true;
+                        continue;
+                    }
+                }
+                out.push(ids[index]);
+                index += 1;
+            }
+            if !any_merged
+            {
+                return ids;
+            }
+            ids = out;
+        }
+    }
 
     #[test]
     fn test_bpe_train_small() {
@@ -506,6 +555,52 @@ mod tests {
 
         let decoded = tok.decode(&encoded);
         assert_eq!(decoded, "low");
+    }
+
+    #[test]
+    fn cached_encode_matches_historical_uncached_semantics() {
+        let trained = BpeTrainer::new(700)
+            .min_frequency(1)
+            .train(&["fn alpha<T>() { alpha::<T>(); } // café — ✅\n".repeat(40)]);
+        for text in [
+            "fn alpha<T>()",
+            "alpha::<T>();",
+            "café — ✅",
+            "",
+            "a < b && b << 2",
+        ]
+        {
+            assert_eq!(trained.encode(text), encode_uncached_reference(&trained, text));
+        }
+
+        let embedded = BpeTokenizer::from_embedded().unwrap();
+        for text in ["Vec<T>", "fn main() {}", "a < b && b << 2", ""]
+        {
+            assert_eq!(
+                embedded.encode(text),
+                encode_uncached_reference(&embedded, text),
+                "legacy embedded cache changed token IDs for {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn lookup_caches_are_built_once_from_source_tables() {
+        let tokenizer = BpeTrainer::new(500)
+            .min_frequency(1)
+            .train(&["abc abc abc café — ✅".repeat(30)]);
+        for byte in 0u8..=255
+        {
+            let key = byte_to_unit(byte).to_string();
+            assert_eq!(
+                tokenizer.byte_ids[usize::from(byte)],
+                tokenizer.vocab.get(&key).copied().unwrap_or(3)
+            );
+        }
+        for &(left, right, output) in &tokenizer.merges
+        {
+            assert_eq!(tokenizer.merge_lookup.get(&(left, right)), Some(&output));
+        }
     }
 
     #[test]
