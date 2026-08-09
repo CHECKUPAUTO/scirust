@@ -115,14 +115,37 @@ impl TinyScanBpe {
         }
     }
 
+    /// Executes TinyScan directly on a caller-owned compact work buffer.
+    ///
+    /// This is an internal ingress optimization. It fails closed when the merge
+    /// table is not compact or `len` exceeds the fixed buffer, so callers can run
+    /// the existing complete-piece fallback without changing semantics.
+    pub(crate) fn try_encode_compact_buffer(
+        &self,
+        work: &mut [u32; TINY_SCAN_CAPACITY],
+        len: usize,
+    ) -> Option<Vec<TokenId>> {
+        if len > TINY_SCAN_CAPACITY || !self.merges.is_compact()
+        {
+            return None;
+        }
+        Some(self.encode_compact_work(work, len))
+    }
+
     fn encode_compact(&self, input: &[TokenId]) -> Vec<TokenId> {
         let mut work = [0u32; TINY_SCAN_CAPACITY];
         for (slot, &token) in work.iter_mut().zip(input)
         {
             *slot = u32::try_from(token).expect("compact input preflight checked token ids");
         }
-        let mut len = input.len();
+        self.encode_compact_work(&mut work, input.len())
+    }
 
+    fn encode_compact_work(
+        &self,
+        work: &mut [u32; TINY_SCAN_CAPACITY],
+        mut len: usize,
+    ) -> Vec<TokenId> {
         while len >= 2
         {
             let mut best: Option<(PriorityKey, u32)> = None;
@@ -232,6 +255,18 @@ mod tests {
     fn tiny_scan_matches_rank_priority_conflict() {
         let merges = [(2, 3, 10), (1, 2, 11)];
         assert_parity(&merges, &[1, 2, 3]);
+    }
+
+    #[test]
+    fn direct_compact_buffer_matches_regular_tiny_path() {
+        let tiny = TinyScanBpe::from_ordered_merges(&[(2, 3, 10), (1, 2, 11)]).unwrap();
+        let expected = tiny.try_encode_ids(&[1, 2, 3]).unwrap();
+        let mut work = [0u32; TINY_SCAN_CAPACITY];
+        work[..3].copy_from_slice(&[1, 2, 3]);
+        assert_eq!(
+            tiny.try_encode_compact_buffer(&mut work, 3).unwrap(),
+            expected
+        );
     }
 
     #[test]
