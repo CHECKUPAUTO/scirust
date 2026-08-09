@@ -1,4 +1,7 @@
 {
+  "append_only_seeds": {
+    "elementwise_broadcast": 3237998081
+  },
   "dtype": "f32",
   "files": {
     "attention/scaled_dot_product_attention.json": "ec885efe023112dbd06986dfa7d636e83109f79cf6ddea1320f424683b2533e5",
@@ -34,6 +37,11 @@
     "elementwise/sub.json": "399ecc4336cdfa615b7c534ee6c9cbb8fc3f407d55bd274e130ef57ceab4e389",
     "elementwise/tan.json": "c243b55f3cc1b311f8a49dda8831aa2e3e670493736334d895c1be374a7cd357",
     "elementwise/tanh.json": "8ef7ca81c6d15c2e75320cafe68ac4cd8655498cacd4f22a55ff5204e2355bec",
+    "elementwise_broadcast/add.json": "9ef55ed4ac5404911194dccec66331456cf47853e4b12c4b310b2b3f4699ea2a",
+    "elementwise_broadcast/atan2.json": "a2f1207a7fbcca79e2478390f73691b90ce6af2cd543ae0dd771d3f310f9e583",
+    "elementwise_broadcast/div.json": "fad433da6346fee5ff27db345b2c43e4f2d709b2d97d49cfa3dec25605c4ff1e",
+    "elementwise_broadcast/mul.json": "29ed963d0412bb1cb719a6051cb99f6aefffb05a142c706eb1965e1db00bccb4",
+    "elementwise_broadcast/sub.json": "5a8828916e518337a6c3362f48e7f0055fcf593a051cb2ccef679d8da7e8bda5",
     "indexing/embedding.json": "d01aefe56ad751e8fbed281eacd2ba8f2bf213f5e59f19345fa0f18cd2f36276",
     "linalg/cholesky.json": "e85c0e276a94a1331ac182bcf998848622a62a41ea7fbd3f7504a02039afb36b",
     "linear/bmm.json": "c6b4e70637b93f5268faa7ac0e3b707c8e4f18ce22b58f64b2f37a6102282060",
@@ -65,11 +73,12 @@
     "shape/slice.json": "92eb217ec6baa2c6c7b52a29a41fcebb9b89cf75e35755b48381fe5ea878dcc5",
     "shape/transpose.json": "679cff96e7f43fe4e45b986874df00c7a5e83779e892232d62968d02e9606cde",
     "shape/unfold.json": "28638cd0d8e619d5aec301add837ff1d0d062f88255a94a70b6b40160bcb3350",
-    "sparse/lu_solve.json": "147ab22dfe36c518a39cecfba84929ce58614448272dcf6dd57b9669e55449cf",
+    "sparse/solve.json": "75e79ddae14e62204da90558286bf8bd67624c79f7c44aca8af58abe269ddb18",
     "sparse/spmv.json": "b50a9f2fea7dac1d6e9a54a887880814037369155e08ba272ac1e9a94df85ebb",
     "special/digamma.json": "b085b259b815746b5dfbcce5b33e9599837227ce504ceae3cdb97a845ed9143c",
     "special/lgamma.json": "a9d442f4325902c3d1f6d6981fdabeed9ec09793842a69103d07c100cb21b726"
   },
+  "generation_mode": "immutable-history+append-only",
   "generator": "docs/tensor-parity/provenance/generate_fixtures.py",
   "pytorch": {
     "source_commit": "cf30153c4c131c8164ee7798e5022d810682e2cb",

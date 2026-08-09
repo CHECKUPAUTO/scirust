@@ -4,8 +4,9 @@ on:
   push:
     branches: [master]
     paths:
-      - scirust-core/src/tensor/**
+      - scirust-core/src/**
       - scirust-core/tests/parity_differential.rs
+      - scirust-core/tests/production_parity_*.rs
       - tensor-operators.toml
       - tests/parity/fixtures/**
       - artifacts/tensor-coverage.csv
@@ -16,8 +17,9 @@ on:
   pull_request:
     branches: [master]
     paths:
-      - scirust-core/src/tensor/**
+      - scirust-core/src/**
       - scirust-core/tests/parity_differential.rs
+      - scirust-core/tests/production_parity_*.rs
       - tensor-operators.toml
       - tests/parity/fixtures/**
       - artifacts/tensor-coverage.csv
@@ -44,6 +46,8 @@ jobs:
         run: cargo +nightly-2026-07-02 clippy -p scirust-core --all-targets --locked -- -D warnings
       - name: Check MSRV
         run: cargo +1.89.0 check -p scirust-core --all-targets --locked
+      - name: Check fixture generator provenance invariants
+        run: python3 tools/tensor-parity/check_generator_provenance.py
       - name: Verify fixture manifest checksums
         run: |
           python3 - <<'PY'
@@ -53,26 +57,64 @@ jobs:
 
           fixture_root = Path('tests/parity/fixtures')
           manifest = json.loads((fixture_root / 'manifest.json').read_text())
-          missing = []
+
+          expected_commit = 'cf30153c4c131c8164ee7798e5022d810682e2cb'
+          version = manifest.get('pytorch', {}).get('version', '')
+          commit = manifest.get('pytorch', {}).get('source_commit')
+
+          provenance_errors = []
+          if not version.startswith('2.13.0'):
+              provenance_errors.append(
+                  f'manifest PyTorch version is not 2.13.0: {version!r}'
+              )
+          if commit != expected_commit:
+              provenance_errors.append(
+                  f'manifest source commit mismatch: expected={expected_commit} actual={commit}'
+              )
+
+          listed = set(manifest['files'])
+          actual_files = {
+              str(path.relative_to(fixture_root))
+              for path in fixture_root.glob('*/*.json')
+              if path.name != 'manifest.json'
+          }
+
+          missing = sorted(listed - actual_files)
+          unlisted = sorted(actual_files - listed)
           mismatched = []
+
           for relative, expected in sorted(manifest['files'].items()):
               path = fixture_root / relative
               if not path.is_file():
-                  missing.append(relative)
                   continue
               actual = hashlib.sha256(path.read_bytes()).hexdigest()
               if actual != expected:
                   mismatched.append((relative, expected, actual))
-          if missing or mismatched:
+
+          if provenance_errors or missing or unlisted or mismatched:
+              for error in provenance_errors:
+                  print(error)
               for relative in missing:
                   print(f'missing fixture: {relative}')
+              for relative in unlisted:
+                  print(f'unlisted fixture: {relative}')
               for relative, expected, actual in mismatched:
-                  print(f'checksum mismatch: {relative}: expected={expected} actual={actual}')
+                  print(
+                      f'checksum mismatch: {relative}: '
+                      f'expected={expected} actual={actual}'
+                  )
               raise SystemExit(1)
-          print(f"verified {len(manifest['files'])} parity fixtures")
+
+          print(
+              f"verified exhaustive manifest for {len(listed)} reference fixtures "
+              f"at PyTorch {version} commit {commit}"
+          )
           PY
-      - name: Run differential parity harness
+      - name: Run reference differential harness
         run: cargo +1.89.0 test -p scirust-core --test parity_differential --locked
+
+      - name: Run 2D production differential harness
+        run: cargo +1.89.0 test -p scirust-core --test production_parity_2d --locked
       - name: Regenerate coverage artifacts with pinned tooling
         run: cargo +1.89.0 run --quiet --manifest-path tools/tensor-parity/Cargo.toml --locked
       - name: Assert generated coverage is current

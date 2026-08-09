@@ -972,6 +972,68 @@ impl Tensor {
     }
 }
 
+/// Compute the symmetric 2-D broadcasting shape used by elementwise binary
+/// operators. Each dimension must either match or be 1.
+///
+/// Unlike `max(a, b)`, this intentionally preserves a zero dimension when it
+/// is paired with 1: `(0, n)` broadcast with `(1, n)` produces `(0, n)`.
+fn binary_broadcast_shape(
+    op: &'static str,
+    a: (usize, usize),
+    b: (usize, usize),
+) -> crate::error::Result<(usize, usize)> {
+    fn dim(a: usize, b: usize) -> Option<usize> {
+        if a == b
+        {
+            Some(a)
+        }
+        else if a == 1
+        {
+            Some(b)
+        }
+        else if b == 1
+        {
+            Some(a)
+        }
+        else
+        {
+            None
+        }
+    }
+
+    match (dim(a.0, b.0), dim(a.1, b.1))
+    {
+        (Some(rows), Some(cols)) => Ok((rows, cols)),
+        _ => Err(crate::error::SciRustError::ShapeMismatch {
+            op,
+            expected: a,
+            got: b,
+        }),
+    }
+}
+
+/// Sum a full output-space gradient back to one operand's original 2-D shape.
+fn reduce_broadcast_gradient(g: &Tensor, target: (usize, usize)) -> Tensor {
+    debug_assert!(
+        (target.0 == g.rows || target.0 == 1) && (target.1 == g.cols || target.1 == 1),
+        "gradient shape {:?} cannot reduce to {:?}",
+        g.shape(),
+        target
+    );
+
+    let mut out = Tensor::zeros(target.0, target.1);
+    for r in 0..g.rows
+    {
+        let tr = if target.0 == 1 { 0 } else { r };
+        for c in 0..g.cols
+        {
+            let tc = if target.1 == 1 { 0 } else { c };
+            out.data[tr * target.1 + tc] += g.data[r * g.cols + c];
+        }
+    }
+    out
+}
+
 impl std::ops::Index<(usize, usize)> for Tensor {
     type Output = f32;
     fn index(&self, (row, col): (usize, usize)) -> &f32 {
@@ -1735,182 +1797,56 @@ impl Tape {
                 },
                 Op::AddBroadcast(a, b) =>
                 {
-                    let av = &values[a].as_cpu();
-                    let bv = &values[b].as_cpu();
-                    grads[a].add_assign(&g);
-                    if bv.rows == 1 && bv.cols == av.cols
-                    {
-                        let mut db = Tensor::zeros(1, bv.cols);
-                        for r in 0..g.rows
-                        {
-                            let off = r * g.cols;
-                            for c in 0..g.cols
-                            {
-                                db.data[c] += g.data[off + c];
-                            }
-                        }
-                        grads[b].add_assign(&db);
-                    }
-                    else if bv.rows == av.rows && bv.cols == 1
-                    {
-                        let mut db = Tensor::zeros(bv.rows, 1);
-                        for r in 0..g.rows
-                        {
-                            let off = r * g.cols;
-                            for c in 0..g.cols
-                            {
-                                db.data[r] += g.data[off + c];
-                            }
-                        }
-                        grads[b].add_assign(&db);
-                    }
-                    else if bv.rows == 1 && bv.cols == 1
-                    {
-                        let s: f32 = g.data.iter().sum();
-                        grads[b].add_assign(&Tensor::from_vec(vec![s], 1, 1));
-                    }
-                    else
-                    {
-                        grads[b].add_assign(&g);
-                    }
+                    let av = values[a].as_cpu();
+                    let bv = values[b].as_cpu();
+                    let ga = reduce_broadcast_gradient(&g, av.shape());
+                    let gb = reduce_broadcast_gradient(&g, bv.shape());
+                    grads[a].add_assign(&ga);
+                    grads[b].add_assign(&gb);
                 },
                 Op::SubBroadcast(a, b) =>
                 {
-                    let av = &values[a].as_cpu();
-                    let bv = &values[b].as_cpu();
-                    grads[a].add_assign(&g);
-                    if bv.rows == 1 && bv.cols == av.cols
-                    {
-                        let mut db = Tensor::zeros(1, bv.cols);
-                        for r in 0..g.rows
-                        {
-                            let off = r * g.cols;
-                            for c in 0..g.cols
-                            {
-                                db.data[c] += g.data[off + c];
-                            }
-                        }
-                        grads[b].sub_assign(&db);
-                    }
-                    else if bv.rows == av.rows && bv.cols == 1
-                    {
-                        let mut db = Tensor::zeros(bv.rows, 1);
-                        for r in 0..g.rows
-                        {
-                            let off = r * g.cols;
-                            for c in 0..g.cols
-                            {
-                                db.data[r] += g.data[off + c];
-                            }
-                        }
-                        grads[b].sub_assign(&db);
-                    }
-                    else if bv.rows == 1 && bv.cols == 1
-                    {
-                        let s: f32 = g.data.iter().sum();
-                        grads[b].sub_assign(&Tensor::from_vec(vec![s], 1, 1));
-                    }
-                    else
-                    {
-                        grads[b].sub_assign(&g);
-                    }
+                    let av = values[a].as_cpu();
+                    let bv = values[b].as_cpu();
+                    let ga = reduce_broadcast_gradient(&g, av.shape());
+                    let gb = reduce_broadcast_gradient(&g, bv.shape());
+                    grads[a].add_assign(&ga);
+                    grads[b].sub_assign(&gb);
                 },
                 Op::MulBroadcast(a, b) =>
                 {
-                    let av = &values[a].as_cpu();
-                    let bv = &values[b].as_cpu();
-                    grads[a].add_assign(&g.hadamard(&bv.broadcast_to(g.rows, g.cols)));
-                    if bv.rows == 1 && bv.cols == av.cols
-                    {
-                        let mut db = Tensor::zeros(1, bv.cols);
-                        for r in 0..g.rows
-                        {
-                            let off = r * g.cols;
-                            for c in 0..g.cols
-                            {
-                                db.data[c] += g.data[off + c] * av.data[off + c];
-                            }
-                        }
-                        grads[b].add_assign(&db);
-                    }
-                    else if bv.rows == av.rows && bv.cols == 1
-                    {
-                        let mut db = Tensor::zeros(bv.rows, 1);
-                        for r in 0..g.rows
-                        {
-                            let off = r * g.cols;
-                            for c in 0..g.cols
-                            {
-                                db.data[r] += g.data[off + c] * av.data[off + c];
-                            }
-                        }
-                        grads[b].add_assign(&db);
-                    }
-                    else if bv.rows == 1 && bv.cols == 1
-                    {
-                        let s: f32 = g
-                            .data
-                            .iter()
-                            .zip(av.data.iter())
-                            .map(|(&gi, &ai)| gi * ai)
-                            .sum();
-                        grads[b].add_assign(&Tensor::from_vec(vec![s], 1, 1));
-                    }
-                    else
-                    {
-                        grads[b].add_assign(&g.hadamard(&av.broadcast_to(g.rows, g.cols)));
-                    }
+                    let av = values[a].as_cpu();
+                    let bv = values[b].as_cpu();
+                    let shape = g.shape();
+                    let av_full = av.broadcast_to(shape.0, shape.1);
+                    let bv_full = bv.broadcast_to(shape.0, shape.1);
+
+                    let ga_full = g.hadamard(&bv_full);
+                    let gb_full = g.hadamard(&av_full);
+
+                    let ga = reduce_broadcast_gradient(&ga_full, av.shape());
+                    let gb = reduce_broadcast_gradient(&gb_full, bv.shape());
+                    grads[a].add_assign(&ga);
+                    grads[b].add_assign(&gb);
                 },
                 Op::DivBroadcast(a, b) =>
                 {
-                    let av = &values[a].as_cpu();
-                    let bv = &values[b].as_cpu();
-                    let b_recip = bv.reciprocal();
-                    grads[a].add_assign(&g.hadamard(&b_recip.broadcast_to(g.rows, g.cols)));
-                    if bv.rows == 1 && bv.cols == av.cols
-                    {
-                        let mut db = Tensor::zeros(1, bv.cols);
-                        for r in 0..g.rows
-                        {
-                            let off = r * g.cols;
-                            for c in 0..g.cols
-                            {
-                                db.data[c] -=
-                                    g.data[off + c] * av.data[off + c] / (bv.data[c] * bv.data[c]);
-                            }
-                        }
-                        grads[b].add_assign(&db);
-                    }
-                    else if bv.rows == av.rows && bv.cols == 1
-                    {
-                        let mut db = Tensor::zeros(bv.rows, 1);
-                        for r in 0..g.rows
-                        {
-                            let off = r * g.cols;
-                            for c in 0..g.cols
-                            {
-                                db.data[r] -=
-                                    g.data[off + c] * av.data[off + c] / (bv.data[r] * bv.data[r]);
-                            }
-                        }
-                        grads[b].add_assign(&db);
-                    }
-                    else if bv.rows == 1 && bv.cols == 1
-                    {
-                        let s: f32 = g
-                            .data
-                            .iter()
-                            .zip(av.data.iter())
-                            .map(|(&gi, &ai)| -gi * ai / (bv.data[0] * bv.data[0]))
-                            .sum();
-                        grads[b].add_assign(&Tensor::from_vec(vec![s], 1, 1));
-                    }
-                    else
-                    {
-                        let a_over_b2 =
-                            av.hadamard(&b_recip.hadamard(&b_recip).broadcast_to(g.rows, g.cols));
-                        grads[b].sub_assign(&g.hadamard(&a_over_b2));
-                    }
+                    let av = values[a].as_cpu();
+                    let bv = values[b].as_cpu();
+                    let shape = g.shape();
+                    let av_full = av.broadcast_to(shape.0, shape.1);
+                    let bv_full = bv.broadcast_to(shape.0, shape.1);
+
+                    let b_recip = bv_full.reciprocal();
+                    let ga_full = g.hadamard(&b_recip);
+
+                    let b_recip_sq = b_recip.hadamard(&b_recip);
+                    let gb_full = g.hadamard(&av_full.hadamard(&b_recip_sq)).neg();
+
+                    let ga = reduce_broadcast_gradient(&ga_full, av.shape());
+                    let gb = reduce_broadcast_gradient(&gb_full, bv.shape());
+                    grads[a].add_assign(&ga);
+                    grads[b].add_assign(&gb);
                 },
                 Op::MatMul(a, b) =>
                 {
@@ -2318,17 +2254,30 @@ impl Tape {
                 {
                     let yv = values[a].as_cpu();
                     let xv = values[b].as_cpu();
-                    let denom = xv.hadamard(xv).add(&yv.hadamard(yv));
-                    // add epsilon guard element-wise for numerical stability at (0,0)
-                    let mut denom_safe = denom.clone();
-                    for d in &mut denom_safe.data
-                    {
-                        *d += 1e-10;
-                    }
-                    let deriv_y = xv.hadamard(&denom_safe.reciprocal());
-                    let deriv_x = yv.hadamard(&denom_safe.reciprocal()).neg();
-                    grads[a].add_hadamard(&g, &deriv_y);
-                    grads[b].add_hadamard(&g, &deriv_x);
+                    let shape = g.shape();
+
+                    // Evaluate the local derivatives in the full broadcasted
+                    // output space, then reduce each VJP to the operand's
+                    // original shape.
+                    let yv_full = yv.broadcast_to(shape.0, shape.1);
+                    let xv_full = xv.broadcast_to(shape.0, shape.1);
+
+                    let denom = xv_full.hadamard(&xv_full).add(&yv_full.hadamard(&yv_full));
+                    let recip = denom.reciprocal();
+
+                    // d atan2(y, x) / dy =  x / (x² + y²)
+                    // d atan2(y, x) / dx = -y / (x² + y²)
+                    //
+                    // Do not inject an epsilon here: parity requires the
+                    // native IEEE/PyTorch singular behaviour at (0, 0).
+                    let gy_full = g.hadamard(&xv_full.hadamard(&recip));
+                    let gx_full = g.hadamard(&yv_full.hadamard(&recip).neg());
+
+                    let gy = reduce_broadcast_gradient(&gy_full, yv.shape());
+                    let gx = reduce_broadcast_gradient(&gx_full, xv.shape());
+
+                    grads[a].add_assign(&gy);
+                    grads[b].add_assign(&gx);
                 },
                 Op::Pow { base, exp } =>
                 {
@@ -4160,20 +4109,30 @@ impl<'t> Var<'t> {
         }
     }
 
-    pub fn atan2(self, x: Var<'t>) -> Var<'t> {
-        self.ensure_same_tape(&x, "atan2").unwrap();
-        let y_val = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let x_val = self.tape.values.borrow()[x.idx].as_cpu().clone();
-        let out = y_val.atan2(&x_val);
+    pub fn try_atan2(self, x: Var<'t>) -> crate::error::Result<Var<'t>> {
+        self.ensure_same_tape(&x, "atan2")?;
+        let out = {
+            let values = self.tape.values.borrow();
+            let y_val = values[self.idx].as_cpu();
+            let x_val = values[x.idx].as_cpu();
+            let shape = binary_broadcast_shape("atan2", y_val.shape(), x_val.shape())?;
+            let yy = y_val.broadcast_to(shape.0, shape.1);
+            let xx = x_val.broadcast_to(shape.0, shape.1);
+            yy.atan2(&xx)
+        };
         let new_idx = self.tape.push_with_saved(
             Op::Atan2(self.idx, x.idx),
             DeviceTensor::cpu(out),
             SavedData::None,
         );
-        Var {
+        Ok(Var {
             tape: self.tape,
             idx: new_idx,
-        }
+        })
+    }
+
+    pub fn atan2(self, x: Var<'t>) -> Var<'t> {
+        self.try_atan2(x).unwrap()
     }
 
     pub fn exp(self) -> Var<'t> {
@@ -4510,15 +4469,10 @@ impl<'t> Var<'t> {
             let values = self.tape.values.borrow();
             let a = values[self.idx].as_cpu();
             let b = values[other.idx].as_cpu();
-            if !((b.rows == a.rows || b.rows == 1) && (b.cols == a.cols || b.cols == 1))
-            {
-                return Err(crate::error::SciRustError::ShapeMismatch {
-                    op: "add_broadcast",
-                    expected: (a.rows, a.cols),
-                    got: (b.rows, b.cols),
-                });
-            }
-            a.zip_broadcasted(b, |x, y| x + y)
+            let shape = binary_broadcast_shape("add_broadcast", a.shape(), b.shape())?;
+            let aa = a.broadcast_to(shape.0, shape.1);
+            let bb = b.broadcast_to(shape.0, shape.1);
+            aa.add(&bb)
         };
         let new_idx = self.tape.push_with_saved(
             Op::AddBroadcast(self.idx, other.idx),
@@ -4530,30 +4484,43 @@ impl<'t> Var<'t> {
             idx: new_idx,
         })
     }
+
     pub fn add_broadcast(self, other: Var<'t>) -> Var<'t> {
         self.try_add_broadcast(other).unwrap()
     }
+
     pub fn add_bias(self, bias: Var<'t>) -> Var<'t> {
         self.add_broadcast(bias)
     }
+
     pub fn try_add_bias(self, bias: Var<'t>) -> crate::error::Result<Var<'t>> {
         self.try_add_broadcast(bias)
     }
 
-    pub fn sub_broadcast(self, other: Var<'t>) -> Var<'t> {
-        self.ensure_same_tape(&other, "sub_broadcast").unwrap();
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
-        let out = a.zip_broadcasted(&b, |x, y| x - y);
+    pub fn try_sub_broadcast(self, other: Var<'t>) -> crate::error::Result<Var<'t>> {
+        self.ensure_same_tape(&other, "sub_broadcast")?;
+        let out = {
+            let values = self.tape.values.borrow();
+            let a = values[self.idx].as_cpu();
+            let b = values[other.idx].as_cpu();
+            let shape = binary_broadcast_shape("sub_broadcast", a.shape(), b.shape())?;
+            let aa = a.broadcast_to(shape.0, shape.1);
+            let bb = b.broadcast_to(shape.0, shape.1);
+            aa.sub(&bb)
+        };
         let new_idx = self.tape.push_with_saved(
             Op::SubBroadcast(self.idx, other.idx),
             DeviceTensor::cpu(out),
             SavedData::None,
         );
-        Var {
+        Ok(Var {
             tape: self.tape,
             idx: new_idx,
-        }
+        })
+    }
+
+    pub fn sub_broadcast(self, other: Var<'t>) -> Var<'t> {
+        self.try_sub_broadcast(other).unwrap()
     }
 
     pub fn try_mul_broadcast(self, other: Var<'t>) -> crate::error::Result<Var<'t>> {
@@ -4562,15 +4529,10 @@ impl<'t> Var<'t> {
             let values = self.tape.values.borrow();
             let a = values[self.idx].as_cpu();
             let b = values[other.idx].as_cpu();
-            if !((b.rows == a.rows || b.rows == 1) && (b.cols == a.cols || b.cols == 1))
-            {
-                return Err(crate::error::SciRustError::ShapeMismatch {
-                    op: "mul_broadcast",
-                    expected: (a.rows, a.cols),
-                    got: (b.rows, b.cols),
-                });
-            }
-            a.zip_broadcasted(b, |x, y| x * y)
+            let shape = binary_broadcast_shape("mul_broadcast", a.shape(), b.shape())?;
+            let aa = a.broadcast_to(shape.0, shape.1);
+            let bb = b.broadcast_to(shape.0, shape.1);
+            aa.hadamard(&bb)
         };
         let new_idx = self.tape.push_with_saved(
             Op::MulBroadcast(self.idx, other.idx),
@@ -4582,29 +4544,41 @@ impl<'t> Var<'t> {
             idx: new_idx,
         })
     }
+
     pub fn mul_broadcast(self, other: Var<'t>) -> Var<'t> {
         self.try_mul_broadcast(other).unwrap()
     }
 
-    pub fn div_broadcast(self, other: Var<'t>) -> Var<'t> {
-        self.ensure_same_tape(&other, "div_broadcast").unwrap();
-        let a = self.tape.values.borrow()[self.idx].as_cpu().clone();
-        let b = self.tape.values.borrow()[other.idx].as_cpu().clone();
-        let out = a.zip_broadcasted(&b, |x, y| x / y);
+    pub fn try_div_broadcast(self, other: Var<'t>) -> crate::error::Result<Var<'t>> {
+        self.ensure_same_tape(&other, "div_broadcast")?;
+        let out = {
+            let values = self.tape.values.borrow();
+            let a = values[self.idx].as_cpu();
+            let b = values[other.idx].as_cpu();
+            let shape = binary_broadcast_shape("div_broadcast", a.shape(), b.shape())?;
+            let aa = a.broadcast_to(shape.0, shape.1);
+            let bb = b.broadcast_to(shape.0, shape.1);
+            aa.div(&bb)
+        };
         let new_idx = self.tape.push_with_saved(
             Op::DivBroadcast(self.idx, other.idx),
             DeviceTensor::cpu(out),
             SavedData::None,
         );
-        Var {
+        Ok(Var {
             tape: self.tape,
             idx: new_idx,
-        }
+        })
+    }
+
+    pub fn div_broadcast(self, other: Var<'t>) -> Var<'t> {
+        self.try_div_broadcast(other).unwrap()
     }
 
     pub fn try_hadamard(self, other: Var<'t>) -> crate::error::Result<Var<'t>> {
         self.try_mul_broadcast(other)
     }
+
     pub fn hadamard(self, other: Var<'t>) -> Var<'t> {
         self.try_hadamard(other).unwrap()
     }
