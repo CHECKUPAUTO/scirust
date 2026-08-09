@@ -95,6 +95,13 @@ capabilities. It makes no claim of quantum advantage.
   computes the reported mean loss by sequential `f64` accumulation. Empty epochs
   are rejected. Epoch execution is intentionally non-transactional: if a later
   batch fails, earlier successful parameter updates remain committed.
+- `TrainingSession::train_loader_epoch` connects that same training path directly
+  to SciRust's native `data::DataLoader`: the core loader selects the requested
+  epoch and owns sampling/batching order, then its iterator is delegated to
+  `train_epoch`. No VQNet dataset, loader, sampler, or shuffle hierarchy is
+  introduced. Together with the epoch-addressable core loader shuffle contract,
+  `(dataset, seed, epoch)` is sufficient to reproduce the same resumed batch
+  order without replaying previous epochs.
 - A deterministic optimizer-backed two-sample hybrid binary-classifier example
   at `scirust-core/examples/quantum_hybrid_classifier.rs`; this compatibility
   example continues to use the backward-compatible single-sample,
@@ -117,10 +124,11 @@ capabilities. It makes no claim of quantum advantage.
   reverse-mode execution, deterministic parameter initialization, persistent
   module-owned quantum values, stable optimizer identity across fresh tapes for
   raw-slice AdamW/LAMB, direct `nn::Module` composition, guarded fresh-tape
-  training steps and ordered epoch orchestration, ordinary tape-optimizer
-  participation, and checkpoint state. Broader encoding families, scalable
-  probability reconstruction, richer data-pipeline conveniences, and
-  remote-hardware execution remain future facade work.
+  training steps, ordered epoch orchestration, and direct integration with the
+  native SciRust `DataLoader`, plus ordinary tape-optimizer participation and
+  checkpoint state. Broader encoding families, scalable probability
+  reconstruction, richer data-pipeline conveniences, and remote-hardware
+  execution remain future facade work.
 - A real-amplitude MPS simulator remains available for real gates and adjacent
   two-qubit operations. It is not a complex quantum backend and reports no
   general phase support.
