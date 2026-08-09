@@ -208,7 +208,10 @@ mod tests {
     fn non_shuffled_epoch_restores_canonical_order() {
         let mut loader = DataLoader::new(scalar_dataset(9), 4, false, 7);
         loader.shuffle_epoch(42);
-        assert_eq!(full_epoch_order(&mut loader), (0..9).map(|i| i as f32).collect::<Vec<_>>());
+        assert_eq!(
+            full_epoch_order(&mut loader),
+            (0..9).map(|i| i as f32).collect::<Vec<_>>()
+        );
     }
 
     #[test]
