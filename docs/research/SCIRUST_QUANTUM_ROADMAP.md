@@ -54,6 +54,14 @@ capabilities. It makes no claim of quantum advantage.
   module parameters. `HamiltonianReadout` also implements `nn::Module`, so it
   composes directly as `QuantumModule → HamiltonianReadout → Linear` while
   contributing no trainable indices or checkpoint state of its own.
+- `ComputationalBasisReadout` reconstructs exact-model computational-basis
+  probabilities from the complete non-empty Pauli-Z moment basis via a fixed
+  Walsh projection. Moment columns use ascending binary-mask order, probability
+  columns use little-endian basis-index order, and the identity contribution is
+  a fixed bias. No clipping or post-renormalization is applied, preserving a
+  strictly linear reverse-mode path into the existing quantum adjoint. Because
+  the explicit Walsh matrix scales as `O(4^n)` and the dense adjoint stores one
+  state per observable, this exact facade is deliberately capped at 10 qubits.
 - `QuantumModule` adds persistent trainable quantum state above the fresh-tape
   execution model. `ParameterInitializer` provides zero, finite constant, and
   deterministic seeded-uniform initialization; `VariationalParameters` owns the
@@ -95,13 +103,14 @@ capabilities. It makes no claim of quantum advantage.
 - The VQNet-like facade currently covers deterministic circuit construction,
   parameter-role mapping, angle encoding and data re-uploading, configurable
   rotation/entanglement ansatz topologies, ordered Pauli measurement,
-  Hamiltonian linear readout, reverse-mode execution, deterministic parameter
-  initialization, persistent module-owned quantum values, stable optimizer
-  identity across fresh tapes for raw-slice AdamW/LAMB, direct `nn::Module`
-  composition, guarded fresh-tape training orchestration, ordinary tape-optimizer
-  participation, and checkpoint state. Broader encoding families,
-  basis-probability/readout abstractions, dataset/epoch conveniences, and
-  remote-hardware execution remain future facade work.
+  Hamiltonian linear readout, exact computational-basis probability readout,
+  reverse-mode execution, deterministic parameter initialization, persistent
+  module-owned quantum values, stable optimizer identity across fresh tapes for
+  raw-slice AdamW/LAMB, direct `nn::Module` composition, guarded fresh-tape
+  training orchestration, ordinary tape-optimizer participation, and checkpoint
+  state. Broader encoding families, scalable probability reconstruction,
+  dataset/epoch conveniences, and remote-hardware execution remain future
+  facade work.
 - A real-amplitude MPS simulator remains available for real gates and adjacent
   two-qubit operations. It is not a complex quantum backend and reports no
   general phase support.
@@ -122,8 +131,8 @@ capabilities. It makes no claim of quantum advantage.
 
 ## Future work
 
-- Expand `scirust_core::vqnet` with broader reusable encoders,
-  basis-probability readouts and dataset/epoch training conveniences.
+- Expand `scirust_core::vqnet` with broader reusable encoders, scalable
+  probability reconstruction and dataset/epoch training conveniences.
 - Density-matrix and noise simulation.
 - GPU kernels, distributed simulation, stabilizer and tensor-network backends.
 - Hardware topology routing, gate decomposition, remote QPU execution, and
