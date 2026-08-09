@@ -51,6 +51,7 @@ pub struct ElasticTextTokenizer {
     vocab: BTreeMap<String, TokenId>,
     rev: Vec<String>,
     merges: Vec<(TokenId, TokenId, TokenId)>,
+    byte_ids: [TokenId; 256],
     reversible: bool,
     engine: ElasticBpeEngine,
 }
@@ -88,7 +89,7 @@ impl ElasticTextTokenizer {
         let reversible =
             json.get("version").and_then(serde_json::Value::as_str) == Some("byte_level_v2");
         validate_special_tokens(&vocab)?;
-        validate_byte_vocab(&vocab, reversible)?;
+        let byte_ids = build_byte_id_lut(&vocab, reversible)?;
         validate_merge_ids(&merges, rev.len())?;
         let engine = ElasticBpeEngine::from_ordered_merges(&merges, profile)?;
 
@@ -96,6 +97,7 @@ impl ElasticTextTokenizer {
             vocab,
             rev,
             merges,
+            byte_ids,
             reversible,
             engine,
         })
@@ -200,17 +202,7 @@ impl ElasticTextTokenizer {
 
     fn base_ids(&self, text: &str) -> Vec<TokenId> {
         text.bytes()
-            .map(|byte| {
-                let key = if self.reversible
-                {
-                    byte_to_unit(byte).to_string()
-                }
-                else
-                {
-                    byte_to_legacy_string(byte)
-                };
-                *self.vocab.get(&key).unwrap_or(&self.special_id("<unk>"))
-            })
+            .map(|byte| self.byte_ids[usize::from(byte)])
             .collect()
     }
 }
@@ -288,10 +280,11 @@ fn validate_special_tokens(
     Ok(())
 }
 
-fn validate_byte_vocab(
+fn build_byte_id_lut(
     vocab: &BTreeMap<String, TokenId>,
     reversible: bool,
-) -> Result<(), ElasticTextTokenizerError> {
+) -> Result<[TokenId; 256], ElasticTextTokenizerError> {
+    let mut byte_ids = [0; 256];
     for byte in 0u8..=255
     {
         let key = if reversible
@@ -302,12 +295,12 @@ fn validate_byte_vocab(
         {
             byte_to_legacy_string(byte)
         };
-        if !vocab.contains_key(&key)
-        {
-            return Err(ElasticTextTokenizerError::MissingByteToken(byte));
-        }
+        byte_ids[usize::from(byte)] = vocab
+            .get(&key)
+            .copied()
+            .ok_or(ElasticTextTokenizerError::MissingByteToken(byte))?;
     }
-    Ok(())
+    Ok(byte_ids)
 }
 
 fn validate_merge_ids(
@@ -524,6 +517,19 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn byte_lookup_table_matches_validated_vocab() {
+        let tokenizer = ElasticTextTokenizer::from_json_str(
+            &canonical_test_json(),
+            profile(BpeKernel::Reference),
+        )
+        .unwrap();
+        for byte in 0u8..=255
+        {
+            assert_eq!(tokenizer.byte_ids[usize::from(byte)], usize::from(byte) + 4);
+        }
     }
 
     #[test]
