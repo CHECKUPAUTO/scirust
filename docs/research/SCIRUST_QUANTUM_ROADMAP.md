@@ -42,6 +42,7 @@ capabilities. It makes no claim of quantum advantage.
   layers reuse the original input `ParameterId` values rather than allocating
   duplicate feature columns, while the existing adjoint path accumulates every
   repeated symbolic occurrence into the original classical-feature gradient.
+  The public feature tensor width is therefore independent of re-upload depth.
 - `QuantumModule` adds persistent trainable quantum state above the fresh-tape
   execution model. `ParameterInitializer` provides zero, finite constant, and
   deterministic seeded-uniform initialization; `VariationalParameters` owns the
