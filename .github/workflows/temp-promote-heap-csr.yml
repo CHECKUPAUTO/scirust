@@ -1,0 +1,185 @@
+name: Temporary Heap CSR promoter
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/temp-promote-heap-csr.yml
+  push:
+    branches:
+      - perf/elastic-tokenizer-heap-csr-rules
+    paths:
+      - .github/workflows/temp-promote-heap-csr.yml
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout production branch
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: perf/elastic-tokenizer-heap-csr-rules
+          fetch-depth: 0
+
+      - name: Install pinned toolchains
+        run: |
+          rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt --component clippy
+          rustup toolchain install 1.89.0 --profile minimal
+
+      - name: Apply asserted Heap CSR patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          heap = Path("scirust-sciagent/src/elastic_heap.rs")
+          text = heap.read_text()
+          old_import = '''use crate::elastic_id::{
+              COMPACT_INDEX_INACTIVE, COMPACT_INDEX_NONE, PackedRule, PairKey, PriorityKey, try_compact_index,
+          };
+          use crate::elastic_tokenizer::{DuplicateMergeRule, TokenId};
+          '''
+          new_import = '''use crate::elastic_id::{
+              COMPACT_INDEX_INACTIVE, COMPACT_INDEX_NONE, PackedRule, PriorityKey, try_compact_index,
+          };
+          use crate::elastic_rule_table::AdaptivePackedRuleTable;
+          use crate::elastic_tokenizer::{DuplicateMergeRule, TokenId};
+          '''
+          if old_import not in text:
+              raise SystemExit("Heap import anchor missing")
+          text = text.replace(old_import, new_import, 1)
+          text = text.replace(
+              "    Compact(BTreeMap<PairKey, PackedRule>),",
+              "    Compact(AdaptivePackedRuleTable),",
+              1,
+          )
+
+          start = text.index("    fn from_ordered_merges(")
+          end = text.index("    fn is_empty(&self)", start)
+          new_constructor = '''    fn from_ordered_merges(
+              merges: &[(TokenId, TokenId, TokenId)],
+          ) -> Result<Self, DuplicateMergeRule> {
+              if let Some(rules) = AdaptivePackedRuleTable::try_from_ordered_merges(merges)?
+              {
+                  return Ok(Self::Compact(rules));
+              }
+
+              let mut ranked = BTreeMap::new();
+              for (rank, &(left, right, output)) in merges.iter().enumerate()
+              {
+                  if ranked
+                      .insert((left, right), HeapRule { output, rank })
+                      .is_some()
+                  {
+                      return Err(DuplicateMergeRule { left, right });
+                  }
+              }
+              Ok(Self::Wide(ranked))
+          }
+
+          '''
+          text = text[:start] + new_constructor + text[end:]
+
+          old_compact = '''    fn get_compact(&self, left: u32, right: u32) -> Option<PackedRule> {
+              match self
+              {
+                  Self::Compact(rules) => rules.get(&PairKey::new(left, right)).copied(),
+                  Self::Wide(_) => None,
+              }
+          }
+          '''
+          new_compact = '''    fn get_compact(&self, left: u32, right: u32) -> Option<PackedRule> {
+              match self
+              {
+                  Self::Compact(rules) => rules.get(left, right),
+                  Self::Wide(_) => None,
+              }
+          }
+          '''
+          if old_compact not in text:
+              raise SystemExit("Heap compact lookup anchor missing")
+          text = text.replace(old_compact, new_compact, 1)
+
+          old_wide_adapter = '''            Self::Compact(rules) =>
+              {
+                  let key = PairKey::try_from_usize(left, right).ok()?;
+                  let rule = rules.get(&key)?;
+                  Some(HeapRule {
+                      output: usize::try_from(rule.output()).ok()?,
+                      rank: usize::try_from(rule.rank()).ok()?,
+                  })
+              },
+          '''
+          new_wide_adapter = '''            Self::Compact(rules) =>
+              {
+                  let left = u32::try_from(left).ok()?;
+                  let right = u32::try_from(right).ok()?;
+                  let rule = rules.get(left, right)?;
+                  Some(HeapRule {
+                      output: usize::try_from(rule.output()).ok()?,
+                      rank: usize::try_from(rule.rank()).ok()?,
+                  })
+              },
+          '''
+          if old_wide_adapter not in text:
+              raise SystemExit("Heap wide adapter anchor missing")
+          text = text.replace(old_wide_adapter, new_wide_adapter, 1)
+          heap.write_text(text)
+
+          rules = Path("scirust-sciagent/src/elastic_rule_table.rs")
+          text = rules.read_text()
+          anchor = '''    #[inline]
+              pub(crate) fn get(&self, left: u32, right: u32) -> Option<PackedRule> {
+                  match self
+                  {
+                      Self::Csr(table) => table.get(left, right),
+                      Self::Flat(table) => table.get(left, right),
+                  }
+              }
+
+              #[cfg(test)]
+          '''
+          replacement = '''    pub(crate) fn is_empty(&self) -> bool {
+                  match self
+                  {
+                      Self::Csr(table) => table.rules.is_empty(),
+                      Self::Flat(table) => table.entries.is_empty(),
+                  }
+              }
+
+              #[inline]
+              pub(crate) fn get(&self, left: u32, right: u32) -> Option<PackedRule> {
+                  match self
+                  {
+                      Self::Csr(table) => table.get(left, right),
+                      Self::Flat(table) => table.get(left, right),
+                  }
+              }
+
+              #[cfg(test)]
+          '''
+          if anchor not in text:
+              raise SystemExit("adaptive rule-table method anchor missing")
+          rules.write_text(text.replace(anchor, replacement, 1))
+          PY
+
+      - name: Format and validate Heap CSR contracts
+        run: |
+          cargo +nightly-2026-07-02 fmt --all
+          cargo +nightly-2026-07-02 clippy -p scirust-sciagent --all-targets --locked -- -D warnings
+          cargo +1.89.0 check -p scirust-sciagent --all-targets --locked
+          cargo +1.89.0 test -p scirust-sciagent --lib elastic_heap --locked
+          cargo +1.89.0 test -p scirust-sciagent --lib elastic_rule_table --locked
+
+      - name: Commit validated delta and remove promoter
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            scirust-sciagent/src/elastic_heap.rs \
+            scirust-sciagent/src/elastic_rule_table.rs
+          git rm .github/workflows/temp-promote-heap-csr.yml
+          git commit -m "perf(sciagent): route Heap through adaptive CSR rules"
+          git push origin HEAD:perf/elastic-tokenizer-heap-csr-rules
