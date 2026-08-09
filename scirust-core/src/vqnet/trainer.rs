@@ -224,8 +224,8 @@ mod tests {
     use crate::nn::loss::MseLoss;
     use crate::quantum::Observable;
     use crate::vqnet::{
-        EntanglementTopology, EntanglingGate, Hamiltonian, HamiltonianTerm,
-        ParameterInitializer, QuantumModule, RotationAxis, VariationalCircuitBuilder,
+        EntanglementTopology, EntanglingGate, Hamiltonian, HamiltonianTerm, ParameterInitializer,
+        QuantumModule, RotationAxis, VariationalCircuitBuilder,
     };
 
     fn one_qubit_module() -> QuantumModule {
@@ -240,7 +240,11 @@ mod tests {
             )
             .unwrap();
         builder.measure_all_z().unwrap();
-        QuantumModule::new(builder.build().unwrap(), ParameterInitializer::Constant(0.2)).unwrap()
+        QuantumModule::new(
+            builder.build().unwrap(),
+            ParameterInitializer::Constant(0.2),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -360,10 +364,8 @@ mod tests {
             .unwrap();
         builder.measure_all_z().unwrap();
         let circuit = builder.build().unwrap();
-        let hamiltonian = Hamiltonian::new(vec![
-            HamiltonianTerm::new(0.5, Observable::z(0)).unwrap(),
-        ])
-        .unwrap();
+        let hamiltonian =
+            Hamiltonian::new(vec![HamiltonianTerm::new(0.5, Observable::z(0)).unwrap()]).unwrap();
         let readout = circuit.hamiltonian_readout(&[hamiltonian]).unwrap();
         let quantum = QuantumModule::new(circuit, ParameterInitializer::Constant(0.2)).unwrap();
         let mut model = crate::nn::sequential::Sequential::new()
