@@ -43,11 +43,16 @@ fetch = ["dep:ureq", "dep:sha2"]
 # and backward on the device. Off by default: it pulls `wgpu` (and a device at
 # runtime), which the pure-Rust default build and the aarch64 check must not need.
 gpu = ["dep:scirust-gpu", "scirust-gpu/wgpu"]
-# Route B: the bf16 + Tensor-core CUDA backend (Jetson Thor). Pulls scirust-cuda's
-# CudaChain and runs the whole resident forward on Tensor cores. Off by default and
-# Thor-only to build (needs the CUDA toolkit); parity vs the CPU model is checked
-# at bf16 tolerance in tests/cuda_parity.rs.
-cuda = ["dep:scirust-cuda", "scirust-cuda/cuda"]
+# Route B: bf16 + Tensor-core CUDA plus the CUDA side of the unified compute
+# adapter. `scirust-gpu/cuda` does not enable WGPU; it exposes driver-backed
+# hardware/topology facts for execution attestation while scirust-cuda remains
+# the latency/runtime implementation used by SCIAGENT decode.
+cuda = [
+    "dep:scirust-cuda",
+    "scirust-cuda/cuda",
+    "dep:scirust-gpu",
+    "scirust-gpu/cuda",
+]
 # Route B quality-evaluation harness (`cuda_eval`): CUDA generation + `syn`-parse
 # scoring of the generated Rust. Enables `cuda` and pulls `syn`. Opt-in so a plain
 # `--features cuda` build/test doesn't compile `syn`.
