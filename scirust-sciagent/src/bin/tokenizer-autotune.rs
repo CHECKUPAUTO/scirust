@@ -5,11 +5,13 @@ use std::path::{Path, PathBuf};
 use clap::Parser;
 use scirust_sciagent::train::dataset::{matches_extension, parse_extensions, skip_source_dir};
 use scirust_sciagent::{
-    AutotuneConfig, BpeMergeSemantics, CalibrationCase, ElasticAutotuner, ElasticHardwareIdentity,
-    StoredElasticProfile, VersionedBpeTokenizer,
+    AutotuneConfig, AutotuneResult, BpeKernel, BpeMergeSemantics, CalibrationCase,
+    ElasticAutotuner, ElasticHardwareIdentity, ElasticProfile, StoredElasticProfile,
+    VersionedBpeTokenizer, ordered_merges_fingerprint,
 };
 
 const DEFAULT_PROBE_LENGTHS: &str = "8,16,32,64,128,256,512,1024,2048,4096";
+const AUTOTUNE_REPORT_SCHEMA_V1: u32 = 1;
 
 #[derive(Parser)]
 #[command(
@@ -28,6 +30,10 @@ struct Args {
     /// Output profile JSON.
     #[arg(short, long)]
     output: PathBuf,
+
+    /// Optional raw timing report for reproducible before/after comparisons.
+    #[arg(long, value_name = "FILE")]
+    report: Option<PathBuf>,
 
     /// Comma-separated byte lengths to probe.
     #[arg(long, default_value = DEFAULT_PROBE_LENGTHS)]
@@ -55,6 +61,17 @@ struct Args {
     /// Stable deployment-local discriminator included in the hardware identity.
     #[arg(long, default_value = "generic")]
     device: String,
+}
+
+struct RawReportContext<'a> {
+    result: &'a AutotuneResult,
+    profile: ElasticProfile,
+    hardware: &'a ElasticHardwareIdentity,
+    tokenizer_fingerprint: &'a str,
+    probe_lengths: &'a [usize],
+    cases_per_length: usize,
+    warmup_runs: usize,
+    measured_runs: usize,
 }
 
 fn main() {
@@ -108,12 +125,33 @@ fn main() {
         .fit_profile()
         .expect("failed to fit six-class ElasticTokenizer profile");
 
-    let hardware =
-        ElasticHardwareIdentity::new(std::env::consts::ARCH, std::env::consts::OS, args.device);
+    let hardware = ElasticHardwareIdentity::new(
+        std::env::consts::ARCH,
+        std::env::consts::OS,
+        args.device.clone(),
+    );
     let stored = StoredElasticProfile::new(canonical.ordered_merges(), hardware.clone(), profile);
     stored
         .save(&args.output)
         .expect("failed to save ElasticTokenizer profile");
+
+    if let Some(report_path) = &args.report
+    {
+        let tokenizer_fingerprint = ordered_merges_fingerprint(canonical.ordered_merges());
+        let context = RawReportContext {
+            result: &result,
+            profile,
+            hardware: &hardware,
+            tokenizer_fingerprint: &tokenizer_fingerprint,
+            probe_lengths: &probe_lengths,
+            cases_per_length: args.cases_per_length,
+            warmup_runs: args.warmup_runs,
+            measured_runs: args.measured_runs,
+        };
+        write_raw_report(report_path, &context)
+            .expect("failed to save ElasticTokenizer raw timing report");
+        eprintln!("raw timing report saved to {report_path:?}");
+    }
 
     eprintln!("hardware fingerprint: {}", hardware.fingerprint());
     eprintln!("fitted thresholds: {:?}", profile.thresholds());
@@ -123,6 +161,72 @@ fn main() {
         result.report().rejected_semantic_measurements()
     );
     eprintln!("profile saved to {:?}", args.output);
+}
+
+fn write_raw_report(
+    path: &Path,
+    context: &RawReportContext<'_>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let measurements = context
+        .result
+        .measurements()
+        .iter()
+        .map(|measurement| {
+            serde_json::json!({
+                "piece_len": measurement.piece_len,
+                "kernel": kernel_name(measurement.kernel),
+                "elapsed_nanos": measurement.elapsed_nanos,
+                "semantic_match": measurement.semantic_match,
+            })
+        })
+        .collect::<Vec<_>>();
+    let thresholds = context.profile.thresholds();
+    let kernels = context
+        .profile
+        .kernels()
+        .into_iter()
+        .map(kernel_name)
+        .collect::<Vec<_>>();
+    let value = serde_json::json!({
+        "schema_version": AUTOTUNE_REPORT_SCHEMA_V1,
+        "tokenizer_fingerprint": context.tokenizer_fingerprint,
+        "hardware": {
+            "arch": context.hardware.arch.as_str(),
+            "os": context.hardware.os.as_str(),
+            "device": context.hardware.device.as_str(),
+            "fingerprint": context.hardware.fingerprint(),
+        },
+        "calibration": {
+            "probe_lengths": context.probe_lengths,
+            "cases_per_length": context.cases_per_length,
+            "warmup_runs": context.warmup_runs,
+            "measured_runs": context.measured_runs,
+        },
+        "measurements": measurements,
+        "rejected_semantic_measurements": context.result.report().rejected_semantic_measurements(),
+        "fitted_profile": {
+            "thresholds": {
+                "s_max": thresholds.s_max,
+                "m_max": thresholds.m_max,
+                "l_max": thresholds.l_max,
+                "xl_max": thresholds.xl_max,
+                "xxl_max": thresholds.xxl_max,
+            },
+            "kernels": kernels,
+        },
+    });
+    fs::write(path, serde_json::to_string_pretty(&value)?)?;
+    Ok(())
+}
+
+const fn kernel_name(kernel: BpeKernel) -> &'static str {
+    match kernel
+    {
+        BpeKernel::Reference => "reference",
+        BpeKernel::TinyScan => "tiny_scan",
+        BpeKernel::Indexed => "indexed",
+        BpeKernel::Heap => "heap",
+    }
 }
 
 fn parse_probe_lengths(input: &str) -> Result<Vec<usize>, String> {
@@ -301,5 +405,13 @@ mod tests {
         chars.sort_unstable();
         chars.dedup();
         assert_eq!(chars.len(), 256);
+    }
+
+    #[test]
+    fn raw_report_kernel_names_are_stable() {
+        assert_eq!(kernel_name(BpeKernel::Reference), "reference");
+        assert_eq!(kernel_name(BpeKernel::TinyScan), "tiny_scan");
+        assert_eq!(kernel_name(BpeKernel::Indexed), "indexed");
+        assert_eq!(kernel_name(BpeKernel::Heap), "heap");
     }
 }
