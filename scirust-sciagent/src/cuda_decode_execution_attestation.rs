@@ -4,26 +4,32 @@ use scirust_agent_protocol::{
 };
 
 use crate::cuda_decode::{
-    CudaDecodeDownMode, CudaDecodeFfnMode, CudaDecodeLmHeadMode, CudaDecodeModes,
+    CudaDecodeDownMode, CudaDecodeFfnMode, CudaDecodeLmHeadMode, CudaDecodeModel,
+    CudaDecodeModes,
 };
 use crate::execution_attestation::{
     RuntimeExecutionAttestationInputs, build_runtime_execution_attestation,
 };
 
-/// Numeric contract of the latency-oriented batch-one CUDA decoder.
 pub const CUDA_DECODE_NUMERIC_MODE_V1: &str = "bf16-fp32-accum-v1";
 
-const KERNEL_FUSED_CUBLAS_FUSED: &str = "sciagent.cuda-decode.fused-gemv.cublas-down.fused-argmax-v1";
-const KERNEL_FUSED_CUBLAS_FULL: &str = "sciagent.cuda-decode.fused-gemv.cublas-down.full-logits-v1";
-const KERNEL_FUSED_TILED_FUSED: &str = "sciagent.cuda-decode.fused-gemv.tiled-down.fused-argmax-v1";
-const KERNEL_FUSED_TILED_FULL: &str = "sciagent.cuda-decode.fused-gemv.tiled-down.full-logits-v1";
-const KERNEL_CUBLAS_CUBLAS_FUSED: &str = "sciagent.cuda-decode.cublas-ffn.cublas-down.fused-argmax-v1";
-const KERNEL_CUBLAS_CUBLAS_FULL: &str = "sciagent.cuda-decode.cublas-ffn.cublas-down.full-logits-v1";
-const KERNEL_CUBLAS_TILED_FUSED: &str = "sciagent.cuda-decode.cublas-ffn.tiled-down.fused-argmax-v1";
-const KERNEL_CUBLAS_TILED_FULL: &str = "sciagent.cuda-decode.cublas-ffn.tiled-down.full-logits-v1";
+const KERNEL_FUSED_CUBLAS_FUSED: &str =
+    "sciagent.cuda-decode.fused-gemv.cublas-down.fused-argmax-v1";
+const KERNEL_FUSED_CUBLAS_FULL: &str =
+    "sciagent.cuda-decode.fused-gemv.cublas-down.full-logits-v1";
+const KERNEL_FUSED_TILED_FUSED: &str =
+    "sciagent.cuda-decode.fused-gemv.tiled-down.fused-argmax-v1";
+const KERNEL_FUSED_TILED_FULL: &str =
+    "sciagent.cuda-decode.fused-gemv.tiled-down.full-logits-v1";
+const KERNEL_CUBLAS_CUBLAS_FUSED: &str =
+    "sciagent.cuda-decode.cublas-ffn.cublas-down.fused-argmax-v1";
+const KERNEL_CUBLAS_CUBLAS_FULL: &str =
+    "sciagent.cuda-decode.cublas-ffn.cublas-down.full-logits-v1";
+const KERNEL_CUBLAS_TILED_FUSED: &str =
+    "sciagent.cuda-decode.cublas-ffn.tiled-down.fused-argmax-v1";
+const KERNEL_CUBLAS_TILED_FULL: &str =
+    "sciagent.cuda-decode.cublas-ffn.tiled-down.full-logits-v1";
 
-/// Facts supplied at the point where an already-acquired [`crate::cuda_decode::CudaDecodeModel`]
-/// is bound to its exact model/tokenizer provenance and canonical compute profile.
 pub struct CudaDecodeExecutionAttestationInputs<'a> {
     pub architecture_name: Option<&'a str>,
     pub capability_profile_bytes: &'a [u8],
@@ -34,22 +40,53 @@ pub struct CudaDecodeExecutionAttestationInputs<'a> {
     pub tokenizer_sha256: Sha256Digest,
 }
 
-/// Return the versioned semantic identity of the exact decode implementation modes.
 #[must_use]
 pub const fn cuda_decode_kernel_semantic_version(modes: CudaDecodeModes) -> &'static str {
     match (modes.ffn, modes.down, modes.lm_head) {
-        (CudaDecodeFfnMode::FusedGemv, CudaDecodeDownMode::CublasLt, CudaDecodeLmHeadMode::FusedArgmax) => KERNEL_FUSED_CUBLAS_FUSED,
-        (CudaDecodeFfnMode::FusedGemv, CudaDecodeDownMode::CublasLt, CudaDecodeLmHeadMode::FullLogits) => KERNEL_FUSED_CUBLAS_FULL,
-        (CudaDecodeFfnMode::FusedGemv, CudaDecodeDownMode::TiledGemv, CudaDecodeLmHeadMode::FusedArgmax) => KERNEL_FUSED_TILED_FUSED,
-        (CudaDecodeFfnMode::FusedGemv, CudaDecodeDownMode::TiledGemv, CudaDecodeLmHeadMode::FullLogits) => KERNEL_FUSED_TILED_FULL,
-        (CudaDecodeFfnMode::CublasLt, CudaDecodeDownMode::CublasLt, CudaDecodeLmHeadMode::FusedArgmax) => KERNEL_CUBLAS_CUBLAS_FUSED,
-        (CudaDecodeFfnMode::CublasLt, CudaDecodeDownMode::CublasLt, CudaDecodeLmHeadMode::FullLogits) => KERNEL_CUBLAS_CUBLAS_FULL,
-        (CudaDecodeFfnMode::CublasLt, CudaDecodeDownMode::TiledGemv, CudaDecodeLmHeadMode::FusedArgmax) => KERNEL_CUBLAS_TILED_FUSED,
-        (CudaDecodeFfnMode::CublasLt, CudaDecodeDownMode::TiledGemv, CudaDecodeLmHeadMode::FullLogits) => KERNEL_CUBLAS_TILED_FULL,
+        (
+            CudaDecodeFfnMode::FusedGemv,
+            CudaDecodeDownMode::CublasLt,
+            CudaDecodeLmHeadMode::FusedArgmax,
+        ) => KERNEL_FUSED_CUBLAS_FUSED,
+        (
+            CudaDecodeFfnMode::FusedGemv,
+            CudaDecodeDownMode::CublasLt,
+            CudaDecodeLmHeadMode::FullLogits,
+        ) => KERNEL_FUSED_CUBLAS_FULL,
+        (
+            CudaDecodeFfnMode::FusedGemv,
+            CudaDecodeDownMode::TiledGemv,
+            CudaDecodeLmHeadMode::FusedArgmax,
+        ) => KERNEL_FUSED_TILED_FUSED,
+        (
+            CudaDecodeFfnMode::FusedGemv,
+            CudaDecodeDownMode::TiledGemv,
+            CudaDecodeLmHeadMode::FullLogits,
+        ) => KERNEL_FUSED_TILED_FULL,
+        (
+            CudaDecodeFfnMode::CublasLt,
+            CudaDecodeDownMode::CublasLt,
+            CudaDecodeLmHeadMode::FusedArgmax,
+        ) => KERNEL_CUBLAS_CUBLAS_FUSED,
+        (
+            CudaDecodeFfnMode::CublasLt,
+            CudaDecodeDownMode::CublasLt,
+            CudaDecodeLmHeadMode::FullLogits,
+        ) => KERNEL_CUBLAS_CUBLAS_FULL,
+        (
+            CudaDecodeFfnMode::CublasLt,
+            CudaDecodeDownMode::TiledGemv,
+            CudaDecodeLmHeadMode::FusedArgmax,
+        ) => KERNEL_CUBLAS_TILED_FUSED,
+        (
+            CudaDecodeFfnMode::CublasLt,
+            CudaDecodeDownMode::TiledGemv,
+            CudaDecodeLmHeadMode::FullLogits,
+        ) => KERNEL_CUBLAS_TILED_FULL,
     }
 }
 
-pub(crate) fn build_cuda_decode_execution_attestation(
+fn build_cuda_decode_execution_attestation(
     modes: CudaDecodeModes,
     inputs: CudaDecodeExecutionAttestationInputs<'_>,
 ) -> Result<ExecutionAttestation, ExecutionAttestationError> {
@@ -70,6 +107,29 @@ pub(crate) fn build_cuda_decode_execution_attestation(
         model_sha256: inputs.model_sha256,
         tokenizer_sha256: inputs.tokenizer_sha256,
     })
+}
+
+/// Attestation surface available only from an already-constructed CUDA decode model.
+///
+/// `CudaDecodeModel::from_model` returns `Some` only after `CudaDecodeRuntime::new`
+/// has acquired the CUDA execution context. Requiring `&self` here prevents callers
+/// from producing an I250 runtime attestation without first acquiring that runtime.
+pub trait CudaDecodeExecutionAttestationExt {
+    fn execution_attestation(
+        &self,
+        modes: CudaDecodeModes,
+        inputs: CudaDecodeExecutionAttestationInputs<'_>,
+    ) -> Result<ExecutionAttestation, ExecutionAttestationError>;
+}
+
+impl CudaDecodeExecutionAttestationExt for CudaDecodeModel {
+    fn execution_attestation(
+        &self,
+        modes: CudaDecodeModes,
+        inputs: CudaDecodeExecutionAttestationInputs<'_>,
+    ) -> Result<ExecutionAttestation, ExecutionAttestationError> {
+        build_cuda_decode_execution_attestation(modes, inputs)
+    }
 }
 
 #[cfg(test)]
