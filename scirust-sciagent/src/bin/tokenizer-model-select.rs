@@ -28,8 +28,13 @@ struct Args {
 fn main() {
     let args = Args::parse();
     let input = fs::read_to_string(&args.report).expect("failed to read autotune report");
-    let value: serde_json::Value = serde_json::from_str(&input).expect("invalid autotune report JSON");
-    if value.get("schema_version").and_then(serde_json::Value::as_u64) != Some(2) {
+    let value: serde_json::Value =
+        serde_json::from_str(&input).expect("invalid autotune report JSON");
+    if value
+        .get("schema_version")
+        .and_then(serde_json::Value::as_u64)
+        != Some(2)
+    {
         panic!("tokenizer-model-select requires autotune report schema_version=2");
     }
 
@@ -78,12 +83,16 @@ fn main() {
         "rejected_semantic_measurements": report.rejected_semantic_measurements(),
         "selections": selections,
     });
-    let encoded = serde_json::to_string_pretty(&output).expect("model-selection report serialization");
+    let encoded =
+        serde_json::to_string_pretty(&output).expect("model-selection report serialization");
 
-    if let Some(path) = args.output {
+    if let Some(path) = args.output
+    {
         fs::write(&path, encoded).expect("failed to write model-selection report");
         eprintln!("robust model-selection report saved to {path:?}");
-    } else {
+    }
+    else
+    {
         println!("{encoded}");
     }
 
@@ -103,7 +112,8 @@ fn parse_measurement(value: &serde_json::Value) -> Result<CalibrationMeasurement
         .get("piece_len")
         .and_then(serde_json::Value::as_u64)
         .ok_or_else(|| "measurement missing piece_len".to_string())?;
-    let piece_len = usize::try_from(piece_len).map_err(|_| "piece_len exceeds usize".to_string())?;
+    let piece_len =
+        usize::try_from(piece_len).map_err(|_| "piece_len exceeds usize".to_string())?;
     let kernel = value
         .get("kernel")
         .and_then(serde_json::Value::as_str)
@@ -126,7 +136,8 @@ fn parse_measurement(value: &serde_json::Value) -> Result<CalibrationMeasurement
 }
 
 const fn parse_kernel(name: &str) -> Option<BpeKernel> {
-    match name.as_bytes() {
+    match name.as_bytes()
+    {
         b"reference" => Some(BpeKernel::Reference),
         b"tiny_scan" => Some(BpeKernel::TinyScan),
         b"indexed" => Some(BpeKernel::Indexed),
@@ -136,7 +147,8 @@ const fn parse_kernel(name: &str) -> Option<BpeKernel> {
 }
 
 const fn kernel_name(kernel: BpeKernel) -> &'static str {
-    match kernel {
+    match kernel
+    {
         BpeKernel::Reference => "reference",
         BpeKernel::TinyScan => "tiny_scan",
         BpeKernel::Indexed => "indexed",
@@ -145,7 +157,8 @@ const fn kernel_name(kernel: BpeKernel) -> &'static str {
 }
 
 const fn confidence_name(confidence: SelectionConfidence) -> &'static str {
-    match confidence {
+    match confidence
+    {
         SelectionConfidence::Strong => "strong",
         SelectionConfidence::Significant => "significant",
         SelectionConfidence::Provisional => "provisional",
@@ -164,7 +177,8 @@ mod tests {
             BpeKernel::TinyScan,
             BpeKernel::Indexed,
             BpeKernel::Heap,
-        ] {
+        ]
+        {
             assert_eq!(parse_kernel(kernel_name(kernel)), Some(kernel));
         }
     }
