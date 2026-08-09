@@ -122,9 +122,9 @@ fn main() {
 mod tests {
     use super::*;
     use scirust_agent_protocol::{
-        AgentIdentity, ExecutionArchitecture, ExecutionArchitectureFamily, ExecutionAttestation,
-        ExecutionBackendKind, ExecutionProfile, ExecutionReproducibility, SCHEMA_VERSION,
-        Sha256Digest, TrustClass, EXECUTION_PROFILE_SCHEMA_VERSION,
+        AgentIdentity, EXECUTION_PROFILE_SCHEMA_VERSION, ExecutionArchitecture,
+        ExecutionArchitectureFamily, ExecutionAttestation, ExecutionBackendKind, ExecutionProfile,
+        ExecutionReproducibility, SCHEMA_VERSION, Sha256Digest, TrustClass,
     };
     use serde_json::json;
 
