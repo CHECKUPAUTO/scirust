@@ -8,12 +8,87 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BinaryHeap};
 
+use crate::elastic_id::{PackedRule, PairKey};
 use crate::elastic_tokenizer::{DuplicateMergeRule, TokenId};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct HeapRule {
     output: TokenId,
     rank: usize,
+}
+
+#[derive(Clone, Debug)]
+enum RuleTable {
+    Compact(BTreeMap<PairKey, PackedRule>),
+    Wide(BTreeMap<(TokenId, TokenId), HeapRule>),
+}
+
+impl RuleTable {
+    fn from_ordered_merges(
+        merges: &[(TokenId, TokenId, TokenId)],
+    ) -> Result<Self, DuplicateMergeRule> {
+        let compact = merges.iter().enumerate().all(|(rank, &(left, right, output))| {
+            u32::try_from(rank).is_ok()
+                && u32::try_from(left).is_ok()
+                && u32::try_from(right).is_ok()
+                && u32::try_from(output).is_ok()
+        });
+
+        if compact
+        {
+            let mut ranked = BTreeMap::new();
+            for (rank, &(left, right, output)) in merges.iter().enumerate()
+            {
+                let key = PairKey::try_from_usize(left, right)
+                    .expect("compact table preflight checked token ids");
+                let rule = PackedRule::try_from_usize(rank, output)
+                    .expect("compact table preflight checked rule fields");
+                if ranked.insert(key, rule).is_some()
+                {
+                    return Err(DuplicateMergeRule { left, right });
+                }
+            }
+            Ok(Self::Compact(ranked))
+        }
+        else
+        {
+            let mut ranked = BTreeMap::new();
+            for (rank, &(left, right, output)) in merges.iter().enumerate()
+            {
+                if ranked
+                    .insert((left, right), HeapRule { output, rank })
+                    .is_some()
+                {
+                    return Err(DuplicateMergeRule { left, right });
+                }
+            }
+            Ok(Self::Wide(ranked))
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        match self
+        {
+            Self::Compact(rules) => rules.is_empty(),
+            Self::Wide(rules) => rules.is_empty(),
+        }
+    }
+
+    fn get(&self, left: TokenId, right: TokenId) -> Option<HeapRule> {
+        match self
+        {
+            Self::Compact(rules) =>
+            {
+                let key = PairKey::try_from_usize(left, right).ok()?;
+                let rule = rules.get(&key)?;
+                Some(HeapRule {
+                    output: usize::try_from(rule.output()).ok()?,
+                    rank: usize::try_from(rule.rank()).ok()?,
+                })
+            },
+            Self::Wide(rules) => rules.get(&(left, right)).copied(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -60,24 +135,16 @@ impl PartialOrd for HeapCandidate {
 /// Rank-priority BPE kernel with heap-scheduled local candidates.
 #[derive(Clone, Debug)]
 pub struct HeapBpe {
-    merges: BTreeMap<(TokenId, TokenId), HeapRule>,
+    merges: RuleTable,
 }
 
 impl HeapBpe {
     pub fn from_ordered_merges(
         merges: &[(TokenId, TokenId, TokenId)],
     ) -> Result<Self, DuplicateMergeRule> {
-        let mut ranked = BTreeMap::new();
-        for (rank, &(left, right, output)) in merges.iter().enumerate()
-        {
-            if ranked
-                .insert((left, right), HeapRule { output, rank })
-                .is_some()
-            {
-                return Err(DuplicateMergeRule { left, right });
-            }
-        }
-        Ok(Self { merges: ranked })
+        Ok(Self {
+            merges: RuleTable::from_ordered_merges(merges)?,
+        })
     }
 
     /// Encodes one complete pre-tokenized piece without artificial chunking.
@@ -155,7 +222,7 @@ impl HeapBpe {
         right: usize,
         heap: &mut BinaryHeap<HeapCandidate>,
     ) {
-        let Some(rule) = self.merges.get(&(nodes[left].token, nodes[right].token))
+        let Some(rule) = self.merges.get(nodes[left].token, nodes[right].token)
         else
         {
             return;
@@ -214,6 +281,12 @@ mod tests {
         let reference = CanonicalBpeOracle::from_ordered_merges(merges).unwrap();
         let heap = HeapBpe::from_ordered_merges(merges).unwrap();
         assert_eq!(heap.encode_ids(input), reference.encode_ids(input));
+    }
+
+    #[test]
+    fn normal_rule_tables_use_compact_words() {
+        let heap = HeapBpe::from_ordered_merges(&[(1, 2, 3), (3, 4, 5)]).unwrap();
+        assert!(matches!(heap.merges, RuleTable::Compact(_)));
     }
 
     #[test]
@@ -281,6 +354,17 @@ mod tests {
         let merges = [(1, 1, 2), (2, 2, 3), (3, 3, 4), (4, 4, 5), (5, 5, 6)];
         let input = vec![1; 8192];
         assert_parity(&merges, &input);
+    }
+
+    #[test]
+    fn wide_rule_fallback_preserves_semantics() {
+        if usize::BITS > 32
+        {
+            let wide = usize::try_from(u64::from(u32::MAX) + 1).unwrap();
+            let heap = HeapBpe::from_ordered_merges(&[(wide, 1, 2)]).unwrap();
+            assert!(matches!(heap.merges, RuleTable::Wide(_)));
+            assert_eq!(heap.encode_ids(&[wide, 1]), vec![2]);
+        }
     }
 
     #[test]
