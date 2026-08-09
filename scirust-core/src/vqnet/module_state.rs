@@ -113,7 +113,7 @@ impl VariationalParameters {
     /// Creates the shared `1 × parameter_count` tape input expected by
     /// [`VariationalCircuit::forward_batch`].
     pub fn attach<'t>(&self, tape: &'t Tape) -> Var<'t> {
-        tape.input(Tensor::from_vec(self.values.clone(), 1, self.values.len()))
+        tape.input(self.as_tensor())
     }
 
     /// Copies an optimizer-updated tape variable back into persistent state.
@@ -122,7 +122,14 @@ impl VariationalParameters {
     /// values must remain finite. The owned state is unchanged on validation
     /// failure.
     pub fn sync_from(&mut self, parameters: Var<'_>) -> QuantumResult<()> {
-        let tensor = parameters.tape.value(parameters.idx());
+        self.sync_tensor(parameters.tape.value(parameters.idx()))
+    }
+
+    pub(super) fn as_tensor(&self) -> Tensor {
+        Tensor::from_vec(self.values.clone(), 1, self.values.len())
+    }
+
+    pub(super) fn sync_tensor(&mut self, tensor: Tensor) -> QuantumResult<()> {
         let expected_count = self.values.len();
         if tensor.shape() != (1, expected_count)
         {
@@ -171,12 +178,30 @@ impl<'t> QuantumForward<'t> {
 /// High-level variational circuit together with persistent trainable values.
 ///
 /// The module does not duplicate optimizer state. Existing SciRust tape
-/// optimizers update [`QuantumForward::parameters`], after which
-/// [`Self::sync_parameters`] persists the new values for the next fresh tape.
-#[derive(Debug, Clone, PartialEq)]
+/// optimizers can update [`QuantumForward::parameters`], while the
+/// `PersistentParameterOptimizer` path can use a stable optimizer key across
+/// fresh tapes. Both paths synchronize validated values back into this module.
+#[derive(Debug)]
 pub struct QuantumModule {
     circuit: VariationalCircuit,
     parameters: VariationalParameters,
+    last_parameter_index: Option<usize>,
+}
+
+impl Clone for QuantumModule {
+    fn clone(&self) -> Self {
+        Self {
+            circuit: self.circuit.clone(),
+            parameters: self.parameters.clone(),
+            last_parameter_index: None,
+        }
+    }
+}
+
+impl PartialEq for QuantumModule {
+    fn eq(&self, other: &Self) -> bool {
+        self.circuit == other.circuit && self.parameters == other.parameters
+    }
 }
 
 impl QuantumModule {
@@ -191,6 +216,7 @@ impl QuantumModule {
         Ok(Self {
             circuit,
             parameters,
+            last_parameter_index: None,
         })
     }
 
@@ -202,6 +228,7 @@ impl QuantumModule {
         Ok(Self {
             circuit,
             parameters,
+            last_parameter_index: None,
         })
     }
 
@@ -244,6 +271,32 @@ impl QuantumModule {
     /// Persists an optimizer-updated parameter variable for the next fresh tape.
     pub fn sync_parameters(&mut self, parameters: Var<'_>) -> QuantumResult<()> {
         self.parameters.sync_from(parameters)
+    }
+
+    pub(super) fn record_parameter_index(&mut self, index: usize) {
+        self.last_parameter_index = Some(index);
+    }
+
+    pub(super) const fn last_parameter_index(&self) -> Option<usize> {
+        self.last_parameter_index
+    }
+
+    pub(super) fn sync_last_from_tape(&mut self, tape: &Tape) -> QuantumResult<()> {
+        if let Some(index) = self.last_parameter_index
+        {
+            self.parameters.sync_tensor(tape.value(index))?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn replace_parameter_tensor(&mut self, tensor: Tensor) -> QuantumResult<()> {
+        self.parameters.sync_tensor(tensor)?;
+        self.last_parameter_index = None;
+        Ok(())
+    }
+
+    pub(super) fn parameter_tensor(&self) -> Tensor {
+        self.parameters.as_tensor()
     }
 }
 
@@ -416,5 +469,15 @@ mod tests {
             }
         );
         assert_eq!(parameters.values(), &[0.1, 0.2]);
+    }
+
+    #[test]
+    fn clone_resets_ephemeral_tape_identity() {
+        let mut module = QuantumModule::new(one_qubit_circuit(), ParameterInitializer::Zeros).unwrap();
+        module.record_parameter_index(17);
+        let cloned = module.clone();
+
+        assert_eq!(module, cloned);
+        assert_eq!(cloned.last_parameter_index(), None);
     }
 }
