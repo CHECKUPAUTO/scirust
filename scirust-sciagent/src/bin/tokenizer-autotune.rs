@@ -470,7 +470,13 @@ mod tests {
         let changed_len = vec![CalibrationCase::new(9, vec![1, 2, 3])];
         let changed_id = vec![CalibrationCase::new(8, vec![1, 2, 4])];
         let fingerprint = calibration_case_fingerprint(&baseline).unwrap();
-        assert_ne!(fingerprint, calibration_case_fingerprint(&changed_len).unwrap());
-        assert_ne!(fingerprint, calibration_case_fingerprint(&changed_id).unwrap());
+        assert_ne!(
+            fingerprint,
+            calibration_case_fingerprint(&changed_len).unwrap()
+        );
+        assert_ne!(
+            fingerprint,
+            calibration_case_fingerprint(&changed_id).unwrap()
+        );
     }
 }
