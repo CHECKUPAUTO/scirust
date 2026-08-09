@@ -34,6 +34,22 @@ capabilities. It makes no claim of quantum advantage.
   hardware-efficient `Ry`/`Rz` layers with nearest-neighbour CNOT entanglement,
   validates ordered measurements, and builds a reusable differentiable
   `VariationalCircuit` backed by `QuantumLayer`.
+- `QuantumModule` adds persistent trainable quantum state above the fresh-tape
+  execution model. `ParameterInitializer` provides zero, finite constant, and
+  deterministic seeded-uniform initialization; `VariationalParameters` owns the
+  values between tapes; and `QuantumForward` exposes the exact tape parameter
+  node for validated synchronization back into the module.
+- `OptimizerSlot` gives trainable quantum state a stable string identity that is
+  independent of temporary reverse-mode tape node indices. The
+  `PersistentParameterOptimizer` adapter reuses SciRust's existing raw-slice
+  AdamW and LAMB implementations, keeps their moment state keyed across fresh
+  tapes, and commits cloned optimizer/parameter state only after finite-output
+  validation.
+- `QuantumModule` implements the existing `nn::Module` contract, so a quantum
+  layer can be placed directly inside `nn::Sequential` between classical
+  modules. Parameter indices participate in ordinary tape optimizers, `sync`
+  persists updated quantum values, and `state_dict`/`load_state_dict` integrate
+  quantum parameters into the existing hierarchical checkpoint namespace.
 - A deterministic optimizer-backed two-sample hybrid binary-classifier example
   at `scirust-core/examples/quantum_hybrid_classifier.rs`; this compatibility
   example continues to use the backward-compatible single-sample,
@@ -51,9 +67,12 @@ capabilities. It makes no claim of quantum advantage.
 
 - The VQNet-like facade currently covers deterministic circuit construction,
   parameter-role mapping, angle encoding, one hardware-efficient ansatz family,
-  ordered Pauli measurement, and reverse-mode execution. Reusable module-owned
-  parameter initialization/state, richer encoder/ansatz libraries, classical
-  readout modules, serialization, and trainer-level ergonomics remain future
+  ordered Pauli measurement, reverse-mode execution, deterministic parameter
+  initialization, persistent module-owned quantum values, stable optimizer
+  identity across fresh tapes for raw-slice AdamW/LAMB, direct `nn::Module`
+  composition, ordinary tape-optimizer participation, and checkpoint state.
+  Richer encoder/ansatz libraries, probability/readout abstractions,
+  higher-level training helpers, and remote-hardware execution remain future
   facade work.
 - A real-amplitude MPS simulator remains available for real gates and adjacent
   two-qubit operations. It is not a complex quantum backend and reports no
@@ -75,9 +94,8 @@ capabilities. It makes no claim of quantum advantage.
 
 ## Future work
 
-- Expand `scirust_core::vqnet` with reusable encoders, ansatz topologies,
-  deterministic parameter initializers, module-owned trainable state, hybrid
-  composition helpers, and training/checkpoint ergonomics.
+- Expand `scirust_core::vqnet` with reusable encoders and ansatz topologies,
+  probability/readout abstractions and higher-level training helpers.
 - Density-matrix and noise simulation.
 - GPU kernels, distributed simulation, stabilizer and tensor-network backends.
 - Hardware topology routing, gate decomposition, remote QPU execution, and
