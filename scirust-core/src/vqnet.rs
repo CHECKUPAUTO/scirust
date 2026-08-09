@@ -5,6 +5,12 @@
 //! execution path. The builder owns symbolic parameter allocation so callers do
 //! not need to coordinate [`ParameterId`] values by hand.
 
+mod module_state;
+
+pub use module_state::{
+    ParameterInitializer, QuantumForward, QuantumModule, VariationalParameters,
+};
+
 use crate::autodiff::reverse::Var;
 use crate::quantum::{
     Circuit, Observable, Operation, Parameter, ParameterId, QuantumError, QuantumLayer,
