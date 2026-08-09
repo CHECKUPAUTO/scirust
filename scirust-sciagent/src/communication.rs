@@ -4,6 +4,134 @@ use scirust_agent_protocol::{
 };
 use serde_json::{Value, json};
 
+pub const COGNO_SCIENTIFIC_EXCHANGE_PAYLOAD_SCHEMA_VERSION: u16 = 1;
+pub const MAX_COGNO_SCIENTIFIC_EXCHANGE_CANONICAL_PAYLOAD_BYTES: usize = 64 * 1024;
+
+/// Deterministic scientific verdict transported to COGNO.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeScientificExchangeVerdict {
+    Confirmed,
+    Contradicted,
+    Inconclusive,
+}
+
+impl RuntimeScientificExchangeVerdict {
+    const fn wire_name(self) -> &'static str {
+        match self
+        {
+            Self::Confirmed => "confirmed",
+            Self::Contradicted => "contradicted",
+            Self::Inconclusive => "inconclusive",
+        }
+    }
+}
+
+/// Versioned scientific-exchange payload emitted by an authenticated
+/// [`RuntimeEndpoint`] for COGNO.
+///
+/// There is deliberately no origin/authority field. COGNO assigns deterministic
+/// provenance only after independently authenticating the sender and verifying
+/// the attached execution profile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeScientificExchangePayload {
+    schema_version: u16,
+    observation_id: u64,
+    preference_id: u64,
+    evidence_id: u64,
+    verdict: RuntimeScientificExchangeVerdict,
+    confidence_bps: u16,
+    canonical_payload: Vec<u8>,
+}
+
+impl RuntimeScientificExchangePayload {
+    pub fn new(
+        observation_id: u64,
+        preference_id: u64,
+        evidence_id: u64,
+        verdict: RuntimeScientificExchangeVerdict,
+        confidence_bps: u16,
+        canonical_payload: Vec<u8>,
+    ) -> Result<Self, RuntimeScientificExchangePayloadError> {
+        let payload = Self {
+            schema_version: COGNO_SCIENTIFIC_EXCHANGE_PAYLOAD_SCHEMA_VERSION,
+            observation_id,
+            preference_id,
+            evidence_id,
+            verdict,
+            confidence_bps,
+            canonical_payload,
+        };
+        payload.validate()?;
+        Ok(payload)
+    }
+
+    pub fn validate(&self) -> Result<(), RuntimeScientificExchangePayloadError> {
+        if self.schema_version != COGNO_SCIENTIFIC_EXCHANGE_PAYLOAD_SCHEMA_VERSION
+        {
+            return Err(RuntimeScientificExchangePayloadError::UnsupportedSchema(
+                self.schema_version,
+            ));
+        }
+        if self.observation_id == 0
+        {
+            return Err(RuntimeScientificExchangePayloadError::ZeroObservationId);
+        }
+        if self.preference_id == 0
+        {
+            return Err(RuntimeScientificExchangePayloadError::ZeroPreferenceId);
+        }
+        if self.evidence_id == 0
+        {
+            return Err(RuntimeScientificExchangePayloadError::ZeroEvidenceId);
+        }
+        if self.confidence_bps > 10_000
+        {
+            return Err(RuntimeScientificExchangePayloadError::ConfidenceOutOfRange(
+                self.confidence_bps,
+            ));
+        }
+        if self.canonical_payload.is_empty()
+        {
+            return Err(RuntimeScientificExchangePayloadError::EmptyCanonicalPayload);
+        }
+        if self.canonical_payload.len() > MAX_COGNO_SCIENTIFIC_EXCHANGE_CANONICAL_PAYLOAD_BYTES
+        {
+            return Err(RuntimeScientificExchangePayloadError::CanonicalPayloadTooLarge);
+        }
+        Ok(())
+    }
+
+    fn wire_value(&self) -> Value {
+        json!({
+            "schema_version": self.schema_version,
+            "observation_id": self.observation_id,
+            "preference_id": self.preference_id,
+            "evidence_id": self.evidence_id,
+            "verdict": self.verdict.wire_name(),
+            "confidence_bps": self.confidence_bps,
+            "canonical_payload": self.canonical_payload,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeScientificExchangePayloadError {
+    UnsupportedSchema(u16),
+    ZeroObservationId,
+    ZeroPreferenceId,
+    ZeroEvidenceId,
+    ConfidenceOutOfRange(u16),
+    EmptyCanonicalPayload,
+    CanonicalPayloadTooLarge,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeScientificExchangeMessageError {
+    InvalidCognoRecipient,
+    Payload(RuntimeScientificExchangePayloadError),
+    Protocol(ProtocolError),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SciAgentEndpoint {
     identity: AgentIdentity,
@@ -164,6 +292,33 @@ impl RuntimeEndpoint {
         message.validate_with_authenticated_sender(&self.identity)?;
         Ok(message)
     }
+
+    pub fn scientific_exchange_result_message(
+        &self,
+        message_id: impl Into<String>,
+        conversation_id: impl Into<String>,
+        parent_message_id: Option<String>,
+        recipient: AgentIdentity,
+        payload: RuntimeScientificExchangePayload,
+        execution_attestation: ExecutionAttestation,
+    ) -> Result<AgentMessage, RuntimeScientificExchangeMessageError> {
+        if recipient.kind != AgentKind::CognoCommunicator
+        {
+            return Err(RuntimeScientificExchangeMessageError::InvalidCognoRecipient);
+        }
+        payload
+            .validate()
+            .map_err(RuntimeScientificExchangeMessageError::Payload)?;
+        self.experiment_result_message(
+            message_id,
+            conversation_id,
+            parent_message_id,
+            recipient,
+            payload.wire_value(),
+            execution_attestation,
+        )
+        .map_err(RuntimeScientificExchangeMessageError::Protocol)
+    }
 }
 
 #[cfg(test)]
@@ -245,5 +400,102 @@ mod tests {
             Ok(())
         );
         assert!(message.validate().is_err());
+    }
+
+    #[test]
+    fn runtime_endpoint_emits_cogno_scientific_exchange_without_origin_field() {
+        let endpoint = RuntimeEndpoint::deterministic_kernel("cuda-decode-local");
+        let payload = RuntimeScientificExchangePayload::new(
+            17,
+            42,
+            117,
+            RuntimeScientificExchangeVerdict::Confirmed,
+            8_500,
+            b"deterministic".to_vec(),
+        )
+        .unwrap();
+        let message = endpoint
+            .scientific_exchange_result_message(
+                "m-runtime-1",
+                "c-1",
+                Some("request-1".to_string()),
+                AgentIdentity {
+                    kind: AgentKind::CognoCommunicator,
+                    id: "cogno".to_string(),
+                },
+                payload,
+                attestation(),
+            )
+            .unwrap();
+
+        assert_eq!(message.payload["schema_version"], 1);
+        assert_eq!(message.payload["observation_id"], 17);
+        assert_eq!(message.payload["preference_id"], 42);
+        assert_eq!(message.payload["evidence_id"], 117);
+        assert_eq!(message.payload["verdict"], "confirmed");
+        assert_eq!(message.payload["confidence_bps"], 8_500);
+        assert!(message.payload.get("origin").is_none());
+        assert!(message.payload.get("authority").is_none());
+        assert_eq!(
+            message.validate_with_authenticated_sender(endpoint.identity()),
+            Ok(())
+        );
+        assert!(message.validate().is_err());
+    }
+
+    #[test]
+    fn scientific_exchange_builder_requires_cogno_recipient() {
+        let endpoint = RuntimeEndpoint::deterministic_kernel("cuda-decode-local");
+        let payload = RuntimeScientificExchangePayload::new(
+            17,
+            42,
+            117,
+            RuntimeScientificExchangeVerdict::Confirmed,
+            8_500,
+            b"deterministic".to_vec(),
+        )
+        .unwrap();
+        assert_eq!(
+            endpoint.scientific_exchange_result_message(
+                "m-runtime-1",
+                "c-1",
+                None,
+                AgentIdentity {
+                    kind: AgentKind::DeterministicKernel,
+                    id: "other".to_string(),
+                },
+                payload,
+                attestation(),
+            ),
+            Err(RuntimeScientificExchangeMessageError::InvalidCognoRecipient)
+        );
+    }
+
+    #[test]
+    fn scientific_exchange_payload_is_bounded() {
+        assert_eq!(
+            RuntimeScientificExchangePayload::new(
+                17,
+                42,
+                117,
+                RuntimeScientificExchangeVerdict::Confirmed,
+                10_001,
+                b"deterministic".to_vec(),
+            ),
+            Err(RuntimeScientificExchangePayloadError::ConfidenceOutOfRange(
+                10_001
+            ))
+        );
+        assert_eq!(
+            RuntimeScientificExchangePayload::new(
+                17,
+                42,
+                117,
+                RuntimeScientificExchangeVerdict::Confirmed,
+                8_500,
+                vec![0; MAX_COGNO_SCIENTIFIC_EXCHANGE_CANONICAL_PAYLOAD_BYTES + 1],
+            ),
+            Err(RuntimeScientificExchangePayloadError::CanonicalPayloadTooLarge)
+        );
     }
 }
