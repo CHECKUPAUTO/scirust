@@ -1,0 +1,147 @@
+name: ElasticTokenizer Heap capacity A/B
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/elastic-heap-capacity-ab.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  BASE_SHA: b715caafa980b862b086e0b6e90dd4dbe687fa8f
+
+jobs:
+  heap-capacity-ab:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - name: Checkout baseline
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ env.BASE_SHA }}
+          path: baseline
+
+      - name: Checkout candidate source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ env.BASE_SHA }}
+          path: candidate
+
+      - name: Apply isolated compact-heap reserve candidate
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("candidate/scirust-sciagent/src/elastic_heap.rs")
+          text = path.read_text()
+          old = "let mut heap = BinaryHeap::with_capacity(input.len().saturating_sub(1));"
+          new = "let mut heap = BinaryHeap::with_capacity(input.len().saturating_sub(1).saturating_mul(2));"
+          if text.count(old) < 2:
+              raise SystemExit("expected compact and wide heap capacity anchors")
+          text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+          git -C candidate diff --check
+          git -C candidate diff -- scirust-sciagent/src/elastic_heap.rs
+
+      - name: Install MSRV toolchain
+        run: rustup toolchain install 1.89.0 --profile minimal
+
+      - name: Train one deterministic canonical tokenizer
+        working-directory: baseline
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin train-tokenizer -- \
+            --input scirust-sciagent/src \
+            --recursive \
+            --extension rs \
+            --vocab-size 2048 \
+            --min-frequency 2 \
+            --merge-semantics canonical-rank-v1 \
+            --output /tmp/heap-capacity-ab-tokenizer.json
+
+      - name: Validate candidate before timing
+        working-directory: candidate
+        run: |
+          cargo +1.89.0 fmt --all -- --check
+          cargo +1.89.0 test --locked -p scirust-sciagent elastic_heap --lib
+
+      - name: Build both measurement binaries before timing
+        run: |
+          cargo +1.89.0 build --locked --release -p scirust-sciagent --bin tokenizer-autotune --manifest-path baseline/Cargo.toml
+          cargo +1.89.0 build --locked --release -p scirust-sciagent --bin tokenizer-autotune --manifest-path candidate/Cargo.toml
+
+      - name: Measure ABBA sequence
+        shell: bash
+        run: |
+          set -euo pipefail
+          measure() {
+            local tree="$1"
+            local label="$2"
+            local prefix="$3"
+            (
+              cd "$tree"
+              ./target/release/tokenizer-autotune \
+                --tokenizer /tmp/heap-capacity-ab-tokenizer.json \
+                --input "$prefix/scirust-sciagent/src/model.rs" \
+                --input "$prefix/scirust-sciagent/src/elastic_heap.rs" \
+                --output "/tmp/heap-capacity-${label}-profile.json" \
+                --report "/tmp/heap-capacity-${label}-report.json" \
+                --probe-lengths 512,1024,2048,4096,8192,16384 \
+                --cases-per-length 1 \
+                --warmup-runs 1 \
+                --measured-runs 5 \
+                --device same-github-runner
+            )
+          }
+          measure baseline b1 .
+          measure candidate c1 ../baseline
+          measure candidate c2 ../baseline
+          measure baseline b2 .
+
+      - name: Verify parity and summarize
+        shell: bash
+        run: |
+          set -euo pipefail
+          for label in b1 c1 c2 b2; do
+            test "$(jq '[.measurements[] | select(.semantic_match == false)] | length' "/tmp/heap-capacity-${label}-report.json")" = "0"
+            jq -r '
+              [.measurements[] | select(.kernel == "heap" and .semantic_match)]
+              | group_by(.piece_len)
+              | .[]
+              | sort_by(.elapsed_nanos) as $g
+              | [$g[0].piece_len, $g[($g | length) / 2 | floor].elapsed_nanos]
+              | @tsv' "/tmp/heap-capacity-${label}-report.json" > "/tmp/heap-capacity-${label}.tsv"
+          done
+
+          join -t $'\t' /tmp/heap-capacity-b1.tsv /tmp/heap-capacity-c1.tsv > /tmp/heap-capacity-p1.tsv
+          join -t $'\t' /tmp/heap-capacity-b2.tsv /tmp/heap-capacity-c2.tsv > /tmp/heap-capacity-p2.tsv
+          join -t $'\t' /tmp/heap-capacity-p1.tsv /tmp/heap-capacity-p2.tsv \
+            | awk -F '\t' 'BEGIN { OFS="\t"; print "piece_len","baseline1_ns","reserve1_ns","baseline2_ns","reserve2_ns","pair1_x","pair2_x","geomean_x" }
+              { r1=$2/$3; r2=$4/$5; printf "%s\t%s\t%s\t%s\t%s\t%.6f\t%.6f\t%.6f\n",$1,$2,$3,$4,$5,r1,r2,sqrt(r1*r2) }' \
+            | tee /tmp/heap-capacity-summary.tsv
+
+      - name: Publish summary
+        if: always()
+        run: |
+          echo "### Heap compact BinaryHeap reserve A/B" >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/heap-capacity-summary.tsv >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "Candidate changes only compact Heap initial capacity from n-1 to 2*(n-1)." >> "$GITHUB_STEP_SUMMARY"
+          echo "Base: $BASE_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elastic-heap-capacity-ab
+          path: |
+            /tmp/heap-capacity-ab-tokenizer.json
+            /tmp/heap-capacity-b1-report.json
+            /tmp/heap-capacity-c1-report.json
+            /tmp/heap-capacity-c2-report.json
+            /tmp/heap-capacity-b2-report.json
+            /tmp/heap-capacity-summary.tsv
+          if-no-files-found: warn
