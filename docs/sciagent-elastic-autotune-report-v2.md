@@ -27,3 +27,5 @@ Schema v1 reports intentionally remain non-comparable under that strict contract
 ## Validation
 
 The report writer is gated by the repository's pinned nightly rustfmt/Clippy checks, exact MSRV 1.89 all-target check, and SciAgent tokenizer binary tests. The strict comparator remains a separate follow-up so report production and report comparison can be reviewed independently.
+
+After Indexed working-set compaction merged as PR #1096 at master commit `928c0e5e2997a9281d08ab01812c33dbdd3353ca`, this branch was updated deliberately so GitHub regenerates its pull-request merge ref and reruns the complete CI matrix against the combined repository state. The report writer does not modify Indexed execution, but current-master validation remains mandatory before merge.
