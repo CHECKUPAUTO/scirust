@@ -22,6 +22,7 @@ pub mod elastic_engine;
 pub mod elastic_heap;
 pub mod elastic_id;
 pub mod elastic_indexed;
+pub mod elastic_model_selection;
 pub mod elastic_profile_fit;
 pub mod elastic_profile_store;
 mod elastic_rule_table;
@@ -70,6 +71,10 @@ pub use elastic_engine::{ElasticBpeEngine, ElasticEncoding};
 pub use elastic_heap::HeapBpe;
 pub use elastic_id::{CompactWordError, PackedRule, PairKey, PairKeyError, PriorityKey};
 pub use elastic_indexed::IndexedBpe;
+pub use elastic_model_selection::{
+    ElasticModelSelectionReport, KernelSelection, KernelTimingSummary, ModelSelectionError,
+    SelectionConfidence,
+};
 pub use elastic_profile_fit::{ElasticProfileFitter, ProfileFitError};
 pub use elastic_profile_store::{
     CANONICAL_BPE_SEMANTICS_V1, ELASTIC_PROFILE_SCHEMA_V1, ELASTIC_PROFILE_SCHEMA_V2,
