@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 
+use crate::elastic_id::PairKey;
+
 const SPECIAL_TOKENS: &[(&str, usize)] = &[("<pad>", 0), ("<bos>", 1), ("<eos>", 2), ("<unk>", 3)];
 const BYTE_LUT_LEN: usize = 256;
 
@@ -207,6 +209,74 @@ impl BpeTrainer {
 }
 
 #[derive(Clone, Debug)]
+enum LegacyMergeLookup {
+    Compact(HashMap<PairKey, u32>),
+    Wide(HashMap<(usize, usize), usize>),
+}
+
+impl LegacyMergeLookup {
+    fn from_merges(merges: &[(usize, usize, usize)]) -> Self {
+        let compact = merges.iter().all(|&(left, right, output)| {
+            u32::try_from(left).is_ok()
+                && u32::try_from(right).is_ok()
+                && u32::try_from(output).is_ok()
+        });
+        if compact
+        {
+            let mut lookup = HashMap::with_capacity(merges.len());
+            for &(left, right, output) in merges
+            {
+                let key = PairKey::try_from_usize(left, right)
+                    .expect("compact merge lookup preflight checked token ids");
+                let output =
+                    u32::try_from(output).expect("compact merge lookup preflight checked output");
+                // Historical `collect()` semantics kept the last duplicate rule.
+                lookup.insert(key, output);
+            }
+            Self::Compact(lookup)
+        }
+        else
+        {
+            Self::Wide(
+                merges
+                    .iter()
+                    .map(|&(left, right, output)| ((left, right), output))
+                    .collect(),
+            )
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        match self
+        {
+            Self::Compact(lookup) => lookup.is_empty(),
+            Self::Wide(lookup) => lookup.is_empty(),
+        }
+    }
+
+    #[inline]
+    fn get(&self, left: usize, right: usize) -> Option<usize> {
+        match self
+        {
+            Self::Compact(lookup) =>
+            {
+                let key = PairKey::try_from_usize(left, right).ok()?;
+                lookup
+                    .get(&key)
+                    .copied()
+                    .and_then(|output| usize::try_from(output).ok())
+            },
+            Self::Wide(lookup) => lookup.get(&(left, right)).copied(),
+        }
+    }
+
+    #[cfg(test)]
+    fn is_compact(&self) -> bool {
+        matches!(self, Self::Compact(_))
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct BpeTokenizer {
     vocab: BTreeMap<String, usize>,
     rev: Vec<String>,
@@ -215,7 +285,9 @@ pub struct BpeTokenizer {
     /// inflate enums that store `BpeTokenizer` by value.
     byte_ids: Box<[usize; BYTE_LUT_LEN]>,
     /// Historical parallel-merge lookup built once at tokenizer construction.
-    merge_lookup: HashMap<(usize, usize), usize>,
+    /// Normal tokenizers use packed `PairKey(u64) -> u32`; artefacts outside that
+    /// exact compact domain keep the historical wide representation end-to-end.
+    merge_lookup: LegacyMergeLookup,
     /// `true` for the **v2** reversible byte-level scheme (`byte_to_unit`), `false`
     /// for a legacy tokenizer (`byte_to_str` + `<NNN>` placeholders, e.g. the
     /// embedded `bpe.json`). Selects both the byte→key map in the cached LUT and the
@@ -243,10 +315,7 @@ impl BpeTokenizer {
         reversible: bool,
     ) -> Self {
         let byte_ids = Self::build_byte_ids(&vocab, reversible);
-        let merge_lookup = merges
-            .iter()
-            .map(|&(left, right, output)| ((left, right), output))
-            .collect();
+        let merge_lookup = LegacyMergeLookup::from_merges(&merges);
         Self {
             vocab,
             rev,
@@ -306,7 +375,7 @@ impl BpeTokenizer {
             {
                 if i + 1 < ids.len() && ids[i] != 0 && ids[i + 1] != 0
                 {
-                    if let Some(&new_id) = self.merge_lookup.get(&(ids[i], ids[i + 1]))
+                    if let Some(new_id) = self.merge_lookup.get(ids[i], ids[i + 1])
                     {
                         out.push(new_id);
                         i += 2;
@@ -413,7 +482,7 @@ impl BpeTokenizer {
 
     #[allow(dead_code)]
     fn find_merge(&self, left: usize, right: usize) -> Option<usize> {
-        self.merge_lookup.get(&(left, right)).copied()
+        self.merge_lookup.get(left, right)
     }
 
     pub fn save_json(&self, path: &str) -> std::io::Result<()> {
@@ -597,9 +666,29 @@ mod tests {
                 tokenizer.vocab.get(&key).copied().unwrap_or(3)
             );
         }
+        assert!(tokenizer.merge_lookup.is_compact());
         for &(left, right, output) in &tokenizer.merges
         {
-            assert_eq!(tokenizer.merge_lookup.get(&(left, right)), Some(&output));
+            assert_eq!(tokenizer.merge_lookup.get(left, right), Some(output));
+        }
+    }
+
+    #[test]
+    fn compact_merge_lookup_keeps_last_duplicate_rule() {
+        let lookup = LegacyMergeLookup::from_merges(&[(1, 2, 3), (1, 2, 4)]);
+        assert!(lookup.is_compact());
+        assert_eq!(lookup.get(1, 2), Some(4));
+    }
+
+    #[test]
+    fn wide_merge_lookup_fallback_preserves_values() {
+        if usize::BITS > 32
+        {
+            let wide = usize::try_from(u64::from(u32::MAX) + 1).unwrap();
+            let lookup = LegacyMergeLookup::from_merges(&[(wide, 1, 2), (1, wide, 3)]);
+            assert!(!lookup.is_compact());
+            assert_eq!(lookup.get(wide, 1), Some(2));
+            assert_eq!(lookup.get(1, wide), Some(3));
         }
     }
 
