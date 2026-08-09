@@ -57,6 +57,9 @@ fn main() {
             serde_json::json!({
                 "piece_len": selection.piece_len,
                 "winner": kernel_name(selection.winner.kernel),
+                "winner_mean_nanos": selection.winner.mean_nanos,
+                "winner_std_dev_nanos": selection.winner.std_dev_nanos,
+                "winner_coefficient_of_variation": selection.winner.coefficient_of_variation,
                 "winner_median_nanos": selection.winner.median_nanos,
                 "winner_p95_nanos": selection.winner.p95_nanos,
                 "winner_q1_nanos": selection.winner.q1_nanos,
@@ -66,6 +69,7 @@ fn main() {
                 "winner_dropped_outliers": selection.winner.dropped_outliers,
                 "runner_up": selection.runner_up.as_ref().map(|summary| kernel_name(summary.kernel)),
                 "runner_up_median_nanos": selection.runner_up.as_ref().map(|summary| summary.median_nanos),
+                "runner_up_coefficient_of_variation": selection.runner_up.as_ref().map(|summary| summary.coefficient_of_variation),
                 "median_speedup": selection.median_speedup,
                 "welch_p_value": selection.welch_p_value,
                 "confidence": confidence_name(selection.confidence),
