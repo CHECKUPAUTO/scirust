@@ -16,6 +16,7 @@ pub mod elastic_autotune;
 pub mod elastic_calibration;
 pub mod elastic_engine;
 pub mod elastic_heap;
+pub mod elastic_id;
 pub mod elastic_indexed;
 pub mod elastic_profile_fit;
 pub mod elastic_profile_store;
@@ -57,6 +58,7 @@ pub use elastic_calibration::{
 };
 pub use elastic_engine::{ElasticBpeEngine, ElasticEncoding};
 pub use elastic_heap::HeapBpe;
+pub use elastic_id::{PairKey, PairKeyError};
 pub use elastic_indexed::IndexedBpe;
 pub use elastic_profile_fit::{ElasticProfileFitter, ProfileFitError};
 pub use elastic_profile_store::{
