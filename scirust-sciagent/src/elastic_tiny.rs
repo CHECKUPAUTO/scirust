@@ -6,7 +6,8 @@
 
 use std::collections::BTreeMap;
 
-use crate::elastic_id::{PackedRule, PairKey, PriorityKey};
+use crate::elastic_id::{PackedRule, PriorityKey};
+use crate::elastic_rule_table::FlatPackedRuleTable;
 use crate::elastic_tokenizer::{DuplicateMergeRule, TokenId};
 
 /// Maximum number of input ids handled by the stack-only tiny work buffer.
@@ -23,7 +24,7 @@ struct TinyRule {
 
 #[derive(Clone, Debug)]
 enum RuleTable {
-    Compact(BTreeMap<PairKey, PackedRule>),
+    Compact(FlatPackedRuleTable),
     Wide(BTreeMap<(TokenId, TokenId), TinyRule>),
 }
 
@@ -31,46 +32,22 @@ impl RuleTable {
     fn from_ordered_merges(
         merges: &[(TokenId, TokenId, TokenId)],
     ) -> Result<Self, DuplicateMergeRule> {
-        let compact = merges
-            .iter()
-            .enumerate()
-            .all(|(rank, &(left, right, output))| {
-                u32::try_from(rank).is_ok()
-                    && u32::try_from(left).is_ok()
-                    && u32::try_from(right).is_ok()
-                    && u32::try_from(output).is_ok()
-            });
+        if let Some(ranked) = FlatPackedRuleTable::try_from_ordered_merges(merges)?
+        {
+            return Ok(Self::Compact(ranked));
+        }
 
-        if compact
+        let mut ranked = BTreeMap::new();
+        for (rank, &(left, right, output)) in merges.iter().enumerate()
         {
-            let mut ranked = BTreeMap::new();
-            for (rank, &(left, right, output)) in merges.iter().enumerate()
+            if ranked
+                .insert((left, right), TinyRule { output, rank })
+                .is_some()
             {
-                let key = PairKey::try_from_usize(left, right)
-                    .expect("compact table preflight checked token ids");
-                let rule = PackedRule::try_from_usize(rank, output)
-                    .expect("compact table preflight checked rule fields");
-                if ranked.insert(key, rule).is_some()
-                {
-                    return Err(DuplicateMergeRule { left, right });
-                }
+                return Err(DuplicateMergeRule { left, right });
             }
-            Ok(Self::Compact(ranked))
         }
-        else
-        {
-            let mut ranked = BTreeMap::new();
-            for (rank, &(left, right, output)) in merges.iter().enumerate()
-            {
-                if ranked
-                    .insert((left, right), TinyRule { output, rank })
-                    .is_some()
-                {
-                    return Err(DuplicateMergeRule { left, right });
-                }
-            }
-            Ok(Self::Wide(ranked))
-        }
+        Ok(Self::Wide(ranked))
     }
 
     fn is_compact(&self) -> bool {
@@ -80,7 +57,7 @@ impl RuleTable {
     fn get_compact(&self, left: u32, right: u32) -> Option<PackedRule> {
         match self
         {
-            Self::Compact(rules) => rules.get(&PairKey::new(left, right)).copied(),
+            Self::Compact(rules) => rules.get(left, right),
             Self::Wide(_) => None,
         }
     }
@@ -90,8 +67,9 @@ impl RuleTable {
         {
             Self::Compact(rules) =>
             {
-                let key = PairKey::try_from_usize(left, right).ok()?;
-                let rule = rules.get(&key)?;
+                let left = u32::try_from(left).ok()?;
+                let right = u32::try_from(right).ok()?;
+                let rule = rules.get(left, right)?;
                 Some(TinyRule {
                     output: usize::try_from(rule.output()).ok()?,
                     rank: usize::try_from(rule.rank()).ok()?,
@@ -245,7 +223,7 @@ mod tests {
     }
 
     #[test]
-    fn normal_rule_tables_use_compact_words() {
+    fn normal_rule_tables_use_flat_compact_storage() {
         let tiny = TinyScanBpe::from_ordered_merges(&[(1, 2, 3), (3, 4, 5)]).unwrap();
         assert!(matches!(tiny.merges, RuleTable::Compact(_)));
     }
