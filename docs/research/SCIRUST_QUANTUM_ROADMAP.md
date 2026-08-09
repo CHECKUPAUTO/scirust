@@ -34,6 +34,12 @@ capabilities. It makes no claim of quantum advantage.
   hardware-efficient `Ry`/`Rz` layers with nearest-neighbour CNOT entanglement,
   validates ordered measurements, and builds a reusable differentiable
   `VariationalCircuit` backed by `QuantumLayer`.
+- `QuantumModule` adds persistent trainable quantum state above the fresh-tape
+  execution model. `ParameterInitializer` provides zero, finite constant, and
+  deterministic seeded-uniform initialization; `VariationalParameters` owns the
+  values between tapes; and `QuantumForward` exposes the exact tape parameter
+  node so existing SciRust 2-D optimizers can update it before validated state
+  synchronization back into the module.
 - A deterministic optimizer-backed two-sample hybrid binary-classifier example
   at `scirust-core/examples/quantum_hybrid_classifier.rs`; this compatibility
   example continues to use the backward-compatible single-sample,
@@ -51,10 +57,11 @@ capabilities. It makes no claim of quantum advantage.
 
 - The VQNet-like facade currently covers deterministic circuit construction,
   parameter-role mapping, angle encoding, one hardware-efficient ansatz family,
-  ordered Pauli measurement, and reverse-mode execution. Reusable module-owned
-  parameter initialization/state, richer encoder/ansatz libraries, classical
-  readout modules, serialization, and trainer-level ergonomics remain future
-  facade work.
+  ordered Pauli measurement, reverse-mode execution, deterministic parameter
+  initialization, and persistent module-owned quantum values. Richer
+  encoder/ansatz libraries, stable multi-module optimizer identity, classical
+  readout modules, serialization/checkpointing, and trainer-level ergonomics
+  remain future facade work.
 - A real-amplitude MPS simulator remains available for real gates and adjacent
   two-qubit operations. It is not a complex quantum backend and reports no
   general phase support.
@@ -75,9 +82,9 @@ capabilities. It makes no claim of quantum advantage.
 
 ## Future work
 
-- Expand `scirust_core::vqnet` with reusable encoders, ansatz topologies,
-  deterministic parameter initializers, module-owned trainable state, hybrid
-  composition helpers, and training/checkpoint ergonomics.
+- Expand `scirust_core::vqnet` with reusable encoders and ansatz topologies,
+  stable optimizer identities across composed modules, hybrid classical readout
+  and composition helpers, and training/checkpoint ergonomics.
 - Density-matrix and noise simulation.
 - GPU kernels, distributed simulation, stabilizer and tensor-network backends.
 - Hardware topology routing, gate decomposition, remote QPU execution, and
