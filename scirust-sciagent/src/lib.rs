@@ -11,6 +11,8 @@ pub mod communication;
 pub mod config;
 pub mod corpus_paths;
 #[cfg(feature = "cuda")]
+pub mod cuda_decode;
+#[cfg(feature = "cuda")]
 pub mod cuda_model;
 pub mod elastic_autotune;
 pub mod elastic_calibration;
