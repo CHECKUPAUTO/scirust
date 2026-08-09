@@ -121,7 +121,8 @@ fn main() {
 
 fn load_canonical_rules(path: &PathBuf) -> Result<Vec<(PairKey, PackedRule)>, String> {
     let input = fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let value: serde_json::Value = serde_json::from_str(&input).map_err(|error| error.to_string())?;
+    let value: serde_json::Value =
+        serde_json::from_str(&input).map_err(|error| error.to_string())?;
     if value
         .get("merge_semantics")
         .and_then(serde_json::Value::as_str)
@@ -166,7 +167,10 @@ fn build_queries(entries: &[(PairKey, PackedRule)]) -> Vec<PairKey> {
     for &(key, _) in entries
     {
         queries.push(key);
-        queries.push(PairKey::new(key.left(), key.right().wrapping_add(0x9e37_79b9)));
+        queries.push(PairKey::new(
+            key.left(),
+            key.right().wrapping_add(0x9e37_79b9),
+        ));
     }
     queries
 }
@@ -186,11 +190,7 @@ fn verify_lookup_parity(
     Ok(())
 }
 
-fn run_tree(
-    tree: &BTreeMap<PairKey, PackedRule>,
-    queries: &[PairKey],
-    sweeps: usize,
-) -> u64 {
+fn run_tree(tree: &BTreeMap<PairKey, PackedRule>, queries: &[PairKey], sweeps: usize) -> u64 {
     let mut checksum = 0u64;
     for _ in 0..sweeps
     {
@@ -270,11 +270,13 @@ mod tests {
     #[test]
     fn duplicate_pair_keys_are_rejected() {
         let key = PairKey::new(1, 2);
-        assert!(FlatRuleTable::from_entries(vec![
-            (key, PackedRule::new(0, 3)),
-            (key, PackedRule::new(1, 4)),
-        ])
-        .is_err());
+        assert!(
+            FlatRuleTable::from_entries(vec![
+                (key, PackedRule::new(0, 3)),
+                (key, PackedRule::new(1, 4)),
+            ])
+            .is_err()
+        );
     }
 
     #[test]
