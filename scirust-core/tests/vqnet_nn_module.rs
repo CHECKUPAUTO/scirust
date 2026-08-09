@@ -6,7 +6,8 @@ use scirust_core::nn::module::Module;
 use scirust_core::nn::rng::PcgEngine;
 use scirust_core::nn::sequential::Sequential;
 use scirust_core::vqnet::{
-    ParameterInitializer, QuantumModule, RotationAxis, VariationalCircuit, VariationalCircuitBuilder,
+    ParameterInitializer, QuantumModule, RotationAxis, VariationalCircuit,
+    VariationalCircuitBuilder,
 };
 use std::collections::HashMap;
 
@@ -24,11 +25,8 @@ fn deterministic_hybrid_model() -> Sequential {
     encoder.weight = Tensor::from_vec(vec![1.0, 0.5], 2, 1);
     encoder.bias = Tensor::from_vec(vec![0.1], 1, 1);
 
-    let quantum = QuantumModule::new(
-        one_qubit_circuit(),
-        ParameterInitializer::Constant(0.3),
-    )
-    .unwrap();
+    let quantum =
+        QuantumModule::new(one_qubit_circuit(), ParameterInitializer::Constant(0.3)).unwrap();
 
     let mut readout = Linear::new(1, 1, &Zeros, &Zeros, &mut rng);
     readout.weight = Tensor::from_vec(vec![1.0], 1, 1);
@@ -78,11 +76,8 @@ fn standard_optimizer_and_sequential_sync_update_quantum_state() {
 
 #[test]
 fn quantum_module_state_dict_round_trips() {
-    let source = QuantumModule::new(
-        one_qubit_circuit(),
-        ParameterInitializer::Constant(0.37),
-    )
-    .unwrap();
+    let source =
+        QuantumModule::new(one_qubit_circuit(), ParameterInitializer::Constant(0.37)).unwrap();
     let state = source.state_dict();
     assert_eq!(state["parameters"].shape(), (1, 2));
 
@@ -109,10 +104,7 @@ fn quantum_module_state_dict_round_trips() {
 #[test]
 fn quantum_module_state_dict_rejects_wrong_shape() {
     let mut module = QuantumModule::new(one_qubit_circuit(), ParameterInitializer::Zeros).unwrap();
-    let wrong = HashMap::from([(
-        "parameters".to_string(),
-        Tensor::from_vec(vec![0.1], 1, 1),
-    )]);
+    let wrong = HashMap::from([("parameters".to_string(), Tensor::from_vec(vec![0.1], 1, 1))]);
 
     assert!(module.load_state_dict(&wrong).is_err());
     assert_eq!(module.parameters().values(), &[0.0, 0.0]);
