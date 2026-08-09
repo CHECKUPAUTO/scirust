@@ -1,7 +1,9 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
 use clap::Parser;
+use scirust_metrology::allan_deviation;
 use scirust_sciagent::{
     BpeKernel, CalibrationMeasurement, ElasticModelSelectionReport, SelectionConfidence,
 };
@@ -23,6 +25,13 @@ struct Args {
     /// Exit nonzero if any selected winner is only provisional.
     #[arg(long)]
     require_significant: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct StabilityMetrics {
+    allan_m1_nanos: f64,
+    allan_m2_nanos: Option<f64>,
+    allan_m4_nanos: Option<f64>,
 }
 
 fn main() {
@@ -49,11 +58,28 @@ fn main() {
 
     let report = ElasticModelSelectionReport::from_measurements(&measurements)
         .expect("robust ElasticTokenizer model selection failed");
+    let cases_per_length = value
+        .get("calibration")
+        .and_then(|calibration| calibration.get("cases_per_length"))
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|count| usize::try_from(count).ok());
+    let stability = if cases_per_length == Some(1)
+    {
+        stability_metrics(&measurements)
+    }
+    else
+    {
+        BTreeMap::new()
+    };
 
     let selections = report
         .selections()
         .iter()
         .map(|selection| {
+            let winner_stability = stability.get(&(
+                selection.piece_len,
+                kernel_order(selection.winner.kernel),
+            ));
             serde_json::json!({
                 "piece_len": selection.piece_len,
                 "winner": kernel_name(selection.winner.kernel),
@@ -67,6 +93,10 @@ fn main() {
                 "winner_raw_samples": selection.winner.raw_samples,
                 "winner_clean_samples": selection.winner.clean_samples,
                 "winner_dropped_outliers": selection.winner.dropped_outliers,
+                "winner_allan_m1_nanos": winner_stability.map(|metrics| metrics.allan_m1_nanos),
+                "winner_allan_m2_nanos": winner_stability.and_then(|metrics| metrics.allan_m2_nanos),
+                "winner_allan_m4_nanos": winner_stability.and_then(|metrics| metrics.allan_m4_nanos),
+                "winner_allan_m1_over_median": winner_stability.map(|metrics| metrics.allan_m1_nanos / selection.winner.median_nanos.max(1.0)),
                 "runner_up": selection.runner_up.as_ref().map(|summary| kernel_name(summary.kernel)),
                 "runner_up_median_nanos": selection.runner_up.as_ref().map(|summary| summary.median_nanos),
                 "runner_up_coefficient_of_variation": selection.runner_up.as_ref().map(|summary| summary.coefficient_of_variation),
@@ -84,6 +114,7 @@ fn main() {
         "source_case_fingerprint": value.get("case_fingerprint"),
         "source_hardware": value.get("hardware"),
         "source_calibration": value.get("calibration"),
+        "stability_protocol_valid": cases_per_length == Some(1),
         "rejected_semantic_measurements": report.rejected_semantic_measurements(),
         "selections": selections,
     });
@@ -109,6 +140,37 @@ fn main() {
         eprintln!("ERROR: at least one ElasticTokenizer winner is statistically provisional");
         std::process::exit(2);
     }
+}
+
+fn stability_metrics(
+    measurements: &[CalibrationMeasurement],
+) -> BTreeMap<(usize, u8), StabilityMetrics> {
+    let mut grouped = BTreeMap::<(usize, u8), Vec<f64>>::new();
+    for measurement in measurements
+    {
+        if measurement.semantic_match
+        {
+            grouped
+                .entry((measurement.piece_len, kernel_order(measurement.kernel)))
+                .or_default()
+                .push(measurement.elapsed_nanos as f64);
+        }
+    }
+    grouped
+        .into_iter()
+        .filter_map(|(key, samples)| {
+            allan_deviation(&samples, 1).map(|allan_m1_nanos| {
+                (
+                    key,
+                    StabilityMetrics {
+                        allan_m1_nanos,
+                        allan_m2_nanos: allan_deviation(&samples, 2),
+                        allan_m4_nanos: allan_deviation(&samples, 4),
+                    },
+                )
+            })
+        })
+        .collect()
 }
 
 fn parse_measurement(value: &serde_json::Value) -> Result<CalibrationMeasurement, String> {
@@ -160,6 +222,16 @@ const fn kernel_name(kernel: BpeKernel) -> &'static str {
     }
 }
 
+const fn kernel_order(kernel: BpeKernel) -> u8 {
+    match kernel
+    {
+        BpeKernel::Reference => 0,
+        BpeKernel::TinyScan => 1,
+        BpeKernel::Indexed => 2,
+        BpeKernel::Heap => 3,
+    }
+}
+
 const fn confidence_name(confidence: SelectionConfidence) -> &'static str {
     match confidence
     {
@@ -185,5 +257,23 @@ mod tests {
         {
             assert_eq!(parse_kernel(kernel_name(kernel)), Some(kernel));
         }
+    }
+
+    #[test]
+    fn allan_metrics_require_repeated_samples_and_are_deterministic() {
+        let measurements = [10, 12, 9, 11, 10, 12, 9, 11]
+            .into_iter()
+            .map(|elapsed_nanos| CalibrationMeasurement {
+                piece_len: 64,
+                kernel: BpeKernel::Indexed,
+                elapsed_nanos,
+                semantic_match: true,
+            })
+            .collect::<Vec<_>>();
+        let metrics = stability_metrics(&measurements);
+        let indexed = metrics.get(&(64, kernel_order(BpeKernel::Indexed))).unwrap();
+        assert!(indexed.allan_m1_nanos > 0.0);
+        assert!(indexed.allan_m2_nanos.is_some());
+        assert!(indexed.allan_m4_nanos.is_some());
     }
 }
