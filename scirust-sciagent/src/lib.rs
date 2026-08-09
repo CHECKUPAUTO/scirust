@@ -22,6 +22,7 @@ pub mod elastic_id;
 pub mod elastic_indexed;
 pub mod elastic_profile_fit;
 pub mod elastic_profile_store;
+mod elastic_rule_table;
 pub mod elastic_text_tokenizer;
 pub mod elastic_tiny;
 pub mod elastic_tokenizer;
