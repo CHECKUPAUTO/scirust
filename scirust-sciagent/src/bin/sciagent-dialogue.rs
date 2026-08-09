@@ -47,6 +47,7 @@ fn build_response(
             "next_stage": "inference_or_deterministic_tool_routing",
         }),
         requested_capabilities: Vec::new(),
+        execution_attestation: None,
     };
     message.validate()?;
     Ok(message)
@@ -130,6 +131,7 @@ mod tests {
             evidence: Vec::new(),
             payload: json!({"question": "Which runtime feature should be tested next?"}),
             requested_capabilities: Vec::new(),
+            execution_attestation: None,
         }
     }
 
@@ -142,6 +144,7 @@ mod tests {
         assert_eq!(response.parent_message_id.as_deref(), Some("question-1"));
         assert_eq!(response.message_kind, MessageKind::Explanation);
         assert_eq!(response.trust_class, TrustClass::UntrustedModelOutput);
+        assert_eq!(response.execution_attestation, None);
     }
 
     #[test]

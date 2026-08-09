@@ -142,10 +142,51 @@ pub struct AgentMessage {
     pub evidence: Vec<EvidenceReference>,
     pub payload: Value,
     pub requested_capabilities: Vec<CapabilityRequest>,
+    /// Optional semantic execution attestation produced by a trusted local
+    /// runtime/discrete kernel path. The field is additive within schema v1:
+    /// historical messages deserialize with `None`, and `None` is omitted when
+    /// serializing so their wire shape remains unchanged.
+    ///
+    /// A message carrying this field cannot be accepted through [`Self::validate`]
+    /// alone because `sender` is self-declared wire data. Callers must use
+    /// [`Self::validate_with_authenticated_sender`] after their transport/runtime
+    /// has authenticated the sender identity independently of this message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_attestation: Option<ExecutionAttestation>,
 }
 
 impl AgentMessage {
+    /// Validate a message when no independently authenticated sender identity is
+    /// available.
+    ///
+    /// Execution attestations fail closed on this path even when the wire-level
+    /// `sender.kind` claims to be a deterministic runtime. A self-declared sender
+    /// must never bootstrap deterministic-kernel trust.
     pub fn validate(&self) -> Result<(), ProtocolError> {
+        self.validate_base()?;
+        self.validate_execution_attestation(None)
+    }
+
+    /// Validate a message against a sender identity authenticated by the calling
+    /// transport/runtime boundary.
+    ///
+    /// The authenticated identity must exactly match the serialized sender. An
+    /// attached execution attestation is then permitted only for authenticated
+    /// `RuntimeDiscovery` or `DeterministicKernel` identities and its fingerprint
+    /// is recomputed before acceptance.
+    pub fn validate_with_authenticated_sender(
+        &self,
+        authenticated_sender: &AgentIdentity,
+    ) -> Result<(), ProtocolError> {
+        self.validate_base()?;
+        if authenticated_sender != &self.sender
+        {
+            return Err(ProtocolError::AuthenticatedSenderMismatch);
+        }
+        self.validate_execution_attestation(Some(authenticated_sender))
+    }
+
+    fn validate_base(&self) -> Result<(), ProtocolError> {
         if self.schema_version != SCHEMA_VERSION
         {
             return Err(ProtocolError::UnsupportedSchema(self.schema_version));
@@ -255,6 +296,36 @@ impl AgentMessage {
         }
         Ok(())
     }
+
+    fn validate_execution_attestation(
+        &self,
+        authenticated_sender: Option<&AgentIdentity>,
+    ) -> Result<(), ProtocolError> {
+        let Some(attestation) = &self.execution_attestation
+        else
+        {
+            return Ok(());
+        };
+        let Some(authenticated_sender) = authenticated_sender
+        else
+        {
+            return Err(ProtocolError::ExecutionAttestationRequiresAuthenticatedSender);
+        };
+
+        if !matches!(
+            authenticated_sender.kind,
+            AgentKind::RuntimeDiscovery | AgentKind::DeterministicKernel
+        )
+        {
+            return Err(ProtocolError::ExecutionAttestationSenderMismatch(
+                authenticated_sender.kind,
+            ));
+        }
+
+        attestation
+            .verify()
+            .map_err(ProtocolError::InvalidExecutionAttestation)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -277,6 +348,10 @@ pub enum ProtocolError {
     CognoObserverMustRemainInternal,
     ModelOutputMustRemainUntrusted,
     KernelOutputTrustMismatch,
+    AuthenticatedSenderMismatch,
+    ExecutionAttestationRequiresAuthenticatedSender,
+    ExecutionAttestationSenderMismatch(AgentKind),
+    InvalidExecutionAttestation(ExecutionAttestationError),
 }
 
 #[cfg(test)]
@@ -319,7 +394,34 @@ mod tests {
             evidence: Vec::new(),
             payload: json!({"text": "test"}),
             requested_capabilities: Vec::new(),
+            execution_attestation: None,
         }
+    }
+
+    fn digest(byte: u8) -> Sha256Digest {
+        Sha256Digest::parse(format!("{byte:02x}").repeat(32)).unwrap()
+    }
+
+    fn execution_attestation() -> ExecutionAttestation {
+        ExecutionAttestation::new(ExecutionProfile {
+            schema_version: EXECUTION_PROFILE_SCHEMA_VERSION,
+            backend: ExecutionBackendKind::Cuda,
+            device_ordinal: 0,
+            architecture: ExecutionArchitecture {
+                family: ExecutionArchitectureFamily::NvidiaGpu,
+                name: Some("sm_110".to_string()),
+            },
+            capability_profile_sha256: digest(0x11),
+            topology_profile_sha256: digest(0x22),
+            memory_budget_bytes: Some(1024),
+            numeric_mode: "bf16-fp32-accum-v1".to_string(),
+            reproducibility: ExecutionReproducibility::NumericallyEquivalent,
+            kernel_semantic_version: "route-b-v1".to_string(),
+            sampler_semantic_version: Some("sampler-v1".to_string()),
+            model_sha256: digest(0x33),
+            tokenizer_sha256: digest(0x44),
+        })
+        .unwrap()
     }
 
     #[test]
@@ -355,6 +457,91 @@ mod tests {
         assert_eq!(
             value.validate(),
             Err(ProtocolError::ModelOutputMustRemainUntrusted)
+        );
+    }
+
+    #[test]
+    fn schema_v1_messages_without_attestation_keep_their_wire_shape() {
+        let value = message(AgentKind::SciAgent, MessageKind::Hypothesis);
+        let encoded = serde_json::to_string(&value).unwrap();
+        assert!(!encoded.contains("execution_attestation"));
+
+        let decoded: AgentMessage = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, value);
+        assert_eq!(decoded.execution_attestation, None);
+    }
+
+    #[test]
+    fn self_declared_runtime_identity_cannot_bootstrap_attestation_trust() {
+        let mut value = message(
+            AgentKind::DeterministicKernel,
+            MessageKind::ExperimentResult,
+        );
+        value.execution_attestation = Some(execution_attestation());
+
+        assert_eq!(
+            value.validate(),
+            Err(ProtocolError::ExecutionAttestationRequiresAuthenticatedSender)
+        );
+    }
+
+    #[test]
+    fn authenticated_deterministic_kernel_can_attach_verified_attestation() {
+        let mut value = message(
+            AgentKind::DeterministicKernel,
+            MessageKind::ExperimentResult,
+        );
+        value.execution_attestation = Some(execution_attestation());
+        let authenticated_sender = value.sender.clone();
+
+        assert_eq!(
+            value.validate_with_authenticated_sender(&authenticated_sender),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn authenticated_sender_must_match_serialized_sender() {
+        let mut value = message(
+            AgentKind::DeterministicKernel,
+            MessageKind::ExperimentResult,
+        );
+        value.execution_attestation = Some(execution_attestation());
+        let authenticated_sender = identity(AgentKind::DeterministicKernel, "different-kernel");
+
+        assert_eq!(
+            value.validate_with_authenticated_sender(&authenticated_sender),
+            Err(ProtocolError::AuthenticatedSenderMismatch)
+        );
+    }
+
+    #[test]
+    fn authenticated_model_sender_cannot_attach_kernel_attestation() {
+        let mut value = message(AgentKind::SciAgent, MessageKind::Hypothesis);
+        value.execution_attestation = Some(execution_attestation());
+        let authenticated_sender = value.sender.clone();
+
+        assert_eq!(
+            value.validate_with_authenticated_sender(&authenticated_sender),
+            Err(ProtocolError::ExecutionAttestationSenderMismatch(
+                AgentKind::SciAgent
+            ))
+        );
+    }
+
+    #[test]
+    fn tampered_execution_attestation_fails_closed_with_authenticated_sender() {
+        let mut attestation = execution_attestation();
+        attestation.profile.numeric_mode = "fp32".to_string();
+        let mut value = message(AgentKind::RuntimeDiscovery, MessageKind::ExperimentResult);
+        value.execution_attestation = Some(attestation);
+        let authenticated_sender = value.sender.clone();
+
+        assert_eq!(
+            value.validate_with_authenticated_sender(&authenticated_sender),
+            Err(ProtocolError::InvalidExecutionAttestation(
+                ExecutionAttestationError::DigestMismatch
+            ))
         );
     }
 }
