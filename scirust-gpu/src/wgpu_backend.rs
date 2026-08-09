@@ -629,6 +629,36 @@ impl GpuMatrix {
     pub fn cols(&self) -> usize {
         self.cols
     }
+
+    #[cfg(feature = "flat-attention")]
+    pub(crate) fn buffer(&self) -> &wgpu::Buffer {
+        &self.buf
+    }
+
+    #[cfg(feature = "flat-attention")]
+    pub(crate) fn from_external_buffer(
+        buf: wgpu::Buffer,
+        rows: usize,
+        cols: usize,
+    ) -> BackendResult<Self> {
+        let required_bytes = rows
+            .checked_mul(cols)
+            .and_then(|elements| elements.checked_mul(core::mem::size_of::<f32>()))
+            .ok_or_else(|| {
+                BackendError::ShapeMismatch("external resident matrix size overflow".into())
+            })?;
+        let required_bytes = u64::try_from(required_bytes).map_err(|_| {
+            BackendError::ShapeMismatch("external resident matrix byte size exceeds u64".into())
+        })?;
+        if buf.size() < required_bytes
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "external resident buffer has {} bytes, requires at least {required_bytes}",
+                buf.size()
+            )));
+        }
+        Ok(Self { buf, rows, cols })
+    }
 }
 
 impl WgpuContext {

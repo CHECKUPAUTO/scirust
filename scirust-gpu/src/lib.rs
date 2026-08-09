@@ -101,6 +101,8 @@ mod wgpu_compute_adapter;
 #[cfg(feature = "wgpu")]
 mod wgpu_reference;
 
+#[cfg(feature = "flat-attention")]
+pub use chain::FlatResidentGqaConfig;
 #[cfg(feature = "wgpu")]
 pub use chain::{
     BlockCache, BlockGrads, BlockWeights, DoraGrads, GpuChain, GqaBlockGrads, GqaBlockWeights,
