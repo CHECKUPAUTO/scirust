@@ -35,10 +35,7 @@ impl ComputationalBasisReadout {
     ///
     /// `observables` must contain exactly one entry for each non-empty Z product
     /// in ascending binary-mask order: mask bit `q` denotes `Z` on qubit `q`.
-    pub fn from_observables(
-        num_qubits: usize,
-        observables: &[Observable],
-    ) -> QuantumResult<Self> {
+    pub fn from_observables(num_qubits: usize, observables: &[Observable]) -> QuantumResult<Self> {
         let dimension = checked_probability_dimension(num_qubits)?;
         let expected = complete_z_moment_basis(num_qubits, dimension)?;
         if observables != expected.as_slice()
@@ -168,10 +165,7 @@ fn checked_probability_dimension(num_qubits: usize) -> QuantumResult<usize> {
         .ok_or(QuantumError::StateDimensionOverflow { num_qubits })
 }
 
-fn complete_z_moment_basis(
-    num_qubits: usize,
-    dimension: usize,
-) -> QuantumResult<Vec<Observable>> {
+fn complete_z_moment_basis(num_qubits: usize, dimension: usize) -> QuantumResult<Vec<Observable>> {
     let mut observables = Vec::with_capacity(dimension - 1);
     for mask in 1..dimension
     {
@@ -288,11 +282,8 @@ mod tests {
     #[test]
     fn probability_readout_has_explicit_qubit_ceiling() {
         assert_eq!(
-            ComputationalBasisReadout::from_observables(
-                MAX_EXACT_PROBABILITY_QUBITS + 1,
-                &[],
-            )
-            .unwrap_err(),
+            ComputationalBasisReadout::from_observables(MAX_EXACT_PROBABILITY_QUBITS + 1, &[],)
+                .unwrap_err(),
             QuantumError::StateDimensionOverflow {
                 num_qubits: MAX_EXACT_PROBABILITY_QUBITS + 1,
             }
@@ -305,10 +296,12 @@ mod tests {
         builder.measure_computational_basis_moments().unwrap();
         let circuit = builder.build().unwrap();
         assert!(circuit.circuit().operations().is_empty());
-        assert!(!circuit
-            .circuit()
-            .operations()
-            .iter()
-            .any(|operation| matches!(operation, Operation::H { .. })));
+        assert!(
+            !circuit
+                .circuit()
+                .operations()
+                .iter()
+                .any(|operation| matches!(operation, Operation::H { .. }))
+        );
     }
 }
