@@ -85,6 +85,14 @@ impl AdaptivePackedRuleTable {
         Ok(Some(Self::Flat(FlatRuleTable { entries })))
     }
 
+    pub(crate) fn is_empty(&self) -> bool {
+        match self
+        {
+            Self::Csr(table) => table.rules.is_empty(),
+            Self::Flat(table) => table.entries.is_empty(),
+        }
+    }
+
     #[inline]
     pub(crate) fn get(&self, left: u32, right: u32) -> Option<PackedRule> {
         match self
