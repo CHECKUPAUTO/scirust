@@ -103,8 +103,7 @@ impl ElasticProfileFitter {
                     };
                     for kernel in PROFILE_KERNELS
                     {
-                        let Some(segment_cost) =
-                            segment_cost(&lengths, &costs, start, end, kernel)
+                        let Some(segment_cost) = segment_cost(&lengths, &costs, start, end, kernel)
                         else
                         {
                             continue;
@@ -114,8 +113,7 @@ impl ElasticProfileFitter {
                             start,
                             kernel,
                         };
-                        if dp[segments][end]
-                            .is_none_or(|current| candidate.cost < current.cost)
+                        if dp[segments][end].is_none_or(|current| candidate.cost < current.cost)
                         {
                             dp[segments][end] = Some(candidate);
                         }
