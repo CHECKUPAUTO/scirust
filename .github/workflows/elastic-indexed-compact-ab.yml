@@ -1,0 +1,128 @@
+name: ElasticTokenizer Indexed compact A/B probe
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/elastic-indexed-compact-ab.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  indexed-ab:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout baseline master
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: bccf562bbb067a07d6b84874e31a75a61c646e46
+          path: baseline
+
+      - name: Checkout compact Indexed candidate
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: cdb82f683914f320432834d20dcda1a6eb2243c1
+          path: candidate
+
+      - name: Install MSRV toolchain
+        run: rustup toolchain install 1.89.0 --profile minimal
+
+      - name: Record runner identity
+        run: |
+          {
+            uname -a
+            echo
+            lscpu
+          } > /tmp/indexed-ab-runner.txt
+
+      - name: Train one deterministic canonical tokenizer
+        working-directory: baseline
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin train-tokenizer -- \
+            --input scirust-sciagent/src/elastic_indexed.rs \
+            --input scirust-sciagent/src/model.rs \
+            --vocab-size 1024 \
+            --min-frequency 2 \
+            --merge-semantics canonical-rank-v1 \
+            --output /tmp/indexed-ab-tokenizer.json
+
+      - name: Measure baseline
+        working-directory: baseline
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin tokenizer-autotune -- \
+            --tokenizer /tmp/indexed-ab-tokenizer.json \
+            --input scirust-sciagent/src/elastic_indexed.rs \
+            --input scirust-sciagent/src/model.rs \
+            --output /tmp/indexed-ab-baseline-profile.json \
+            --report /tmp/indexed-ab-baseline-report.json \
+            --probe-lengths 32,64,128,256,512,1024,2048 \
+            --cases-per-length 1 \
+            --warmup-runs 2 \
+            --measured-runs 7 \
+            --device same-github-runner
+
+      - name: Measure compact candidate on exact baseline corpus
+        working-directory: candidate
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin tokenizer-autotune -- \
+            --tokenizer /tmp/indexed-ab-tokenizer.json \
+            --input ../baseline/scirust-sciagent/src/elastic_indexed.rs \
+            --input ../baseline/scirust-sciagent/src/model.rs \
+            --output /tmp/indexed-ab-candidate-profile.json \
+            --report /tmp/indexed-ab-candidate-report.json \
+            --probe-lengths 32,64,128,256,512,1024,2048 \
+            --cases-per-length 1 \
+            --warmup-runs 2 \
+            --measured-runs 7 \
+            --device same-github-runner
+
+      - name: Verify semantic parity and summarize Indexed medians
+        run: |
+          test "$(jq '[.measurements[] | select(.semantic_match == false)] | length' /tmp/indexed-ab-baseline-report.json)" = "0"
+          test "$(jq '[.measurements[] | select(.semantic_match == false)] | length' /tmp/indexed-ab-candidate-report.json)" = "0"
+
+          jq -r '
+            [.measurements[] | select(.kernel == "indexed" and .semantic_match)]
+            | group_by(.piece_len)
+            | .[]
+            | sort_by(.elapsed_nanos) as $g
+            | [$g[0].piece_len, $g[($g | length) / 2 | floor].elapsed_nanos]
+            | @tsv' /tmp/indexed-ab-baseline-report.json > /tmp/indexed-ab-baseline.tsv
+
+          jq -r '
+            [.measurements[] | select(.kernel == "indexed" and .semantic_match)]
+            | group_by(.piece_len)
+            | .[]
+            | sort_by(.elapsed_nanos) as $g
+            | [$g[0].piece_len, $g[($g | length) / 2 | floor].elapsed_nanos]
+            | @tsv' /tmp/indexed-ab-candidate-report.json > /tmp/indexed-ab-candidate.tsv
+
+          echo -e "piece_len\tbaseline_ns\tcompact_ns\tspeedup_x" | tee /tmp/indexed-ab-summary.tsv
+          join -t $'\t' -1 1 -2 1 /tmp/indexed-ab-baseline.tsv /tmp/indexed-ab-candidate.tsv \
+            | awk -F '\t' 'BEGIN { OFS="\t" } { printf "%s\t%s\t%s\t%.6f\n", $1, $2, $3, $2 / $3 }' \
+            | tee -a /tmp/indexed-ab-summary.tsv
+
+      - name: Publish A/B summary
+        if: always()
+        run: |
+          echo "### Indexed compact A/B" >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/indexed-ab-summary.tsv >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "Baseline: bccf562bbb067a07d6b84874e31a75a61c646e46" >> "$GITHUB_STEP_SUMMARY"
+          echo "Candidate: cdb82f683914f320432834d20dcda1a6eb2243c1" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload exact evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elastic-indexed-compact-ab
+          path: |
+            /tmp/indexed-ab-runner.txt
+            /tmp/indexed-ab-tokenizer.json
+            /tmp/indexed-ab-baseline-report.json
+            /tmp/indexed-ab-candidate-report.json
+            /tmp/indexed-ab-summary.tsv
+          if-no-files-found: warn
