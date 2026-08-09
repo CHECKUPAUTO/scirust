@@ -6,7 +6,7 @@
 
 use crate::elastic_heap::HeapBpe;
 use crate::elastic_indexed::IndexedBpe;
-use crate::elastic_tiny::TinyScanBpe;
+use crate::elastic_tiny::{TINY_SCAN_CAPACITY, TinyScanBpe};
 use crate::elastic_tokenizer::{
     BpeKernel, CanonicalBpeOracle, DuplicateMergeRule, ElasticProfile, PieceClass, TokenId,
 };
@@ -53,6 +53,31 @@ impl ElasticBpeEngine {
         self.profile = profile;
     }
 
+    /// Runs direct compact ingress only when profile routing selects TinyScan.
+    ///
+    /// `None` means callers must execute the existing complete-piece path. This
+    /// keeps Reference/Indexed/Heap routing and any wide-ID fallback unchanged.
+    pub(crate) fn try_encode_tiny_compact(
+        &self,
+        work: &mut [u32; TINY_SCAN_CAPACITY],
+        input_len: usize,
+        piece_len: usize,
+    ) -> Option<ElasticEncoding> {
+        let requested_kernel = self.profile.kernel_for(piece_len);
+        if requested_kernel != BpeKernel::TinyScan
+        {
+            return None;
+        }
+
+        let ids = self.tiny_scan.try_encode_compact_buffer(work, input_len)?;
+        Some(ElasticEncoding {
+            ids,
+            class: self.profile.class_for(piece_len),
+            requested_kernel,
+            executed_kernel: BpeKernel::TinyScan,
+        })
+    }
+
     /// Encodes one complete pre-tokenized piece.
     ///
     /// `piece_len` is the original byte length used for profile routing. `input`
@@ -91,7 +116,6 @@ impl ElasticBpeEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::elastic_tiny::TINY_SCAN_CAPACITY;
     use crate::elastic_tokenizer::ElasticThresholds;
 
     fn thresholds() -> ElasticThresholds {
@@ -119,6 +143,31 @@ mod tests {
         assert_eq!(encoded.class, PieceClass::S);
         assert_eq!(encoded.requested_kernel, BpeKernel::TinyScan);
         assert_eq!(encoded.executed_kernel, BpeKernel::TinyScan);
+    }
+
+    #[test]
+    fn direct_compact_ingress_requires_tiny_routing() {
+        let tiny_profile = ElasticProfile::new(thresholds(), [BpeKernel::TinyScan; 6]);
+        let reference_profile = ElasticProfile::reference_only(thresholds());
+        let tiny =
+            ElasticBpeEngine::from_ordered_merges(&[(2, 3, 10), (1, 2, 11)], tiny_profile)
+                .unwrap();
+        let reference = ElasticBpeEngine::from_ordered_merges(
+            &[(2, 3, 10), (1, 2, 11)],
+            reference_profile,
+        )
+        .unwrap();
+
+        let mut work = [0u32; TINY_SCAN_CAPACITY];
+        work[..3].copy_from_slice(&[1, 2, 3]);
+        let encoded = tiny.try_encode_tiny_compact(&mut work, 3, 3).unwrap();
+        assert_eq!(encoded.ids, vec![1, 10]);
+        assert_eq!(encoded.class, PieceClass::S);
+        assert_eq!(encoded.requested_kernel, BpeKernel::TinyScan);
+        assert_eq!(encoded.executed_kernel, BpeKernel::TinyScan);
+
+        work[..3].copy_from_slice(&[1, 2, 3]);
+        assert!(reference.try_encode_tiny_compact(&mut work, 3, 3).is_none());
     }
 
     #[test]

@@ -12,7 +12,8 @@ use std::path::Path;
 
 use crate::elastic_engine::{ElasticBpeEngine, ElasticEncoding};
 use crate::elastic_profile_store::CANONICAL_BPE_SEMANTICS_V1;
-use crate::elastic_tokenizer::{DuplicateMergeRule, ElasticProfile, TokenId};
+use crate::elastic_tiny::TINY_SCAN_CAPACITY;
+use crate::elastic_tokenizer::{BpeKernel, DuplicateMergeRule, ElasticProfile, TokenId};
 
 const SPECIAL_TOKENS: &[(&str, usize)] = &[("<pad>", 0), ("<bos>", 1), ("<eos>", 2), ("<unk>", 3)];
 const LEGACY_BPE_SEMANTICS_V1: &str = "legacy-parallel-v1";
@@ -52,6 +53,7 @@ pub struct ElasticTextTokenizer {
     rev: Vec<String>,
     merges: Vec<(TokenId, TokenId, TokenId)>,
     byte_ids: [TokenId; 256],
+    compact_byte_ids: Option<[u32; 256]>,
     reversible: bool,
     engine: ElasticBpeEngine,
 }
@@ -90,6 +92,7 @@ impl ElasticTextTokenizer {
             json.get("version").and_then(serde_json::Value::as_str) == Some("byte_level_v2");
         validate_special_tokens(&vocab)?;
         let byte_ids = build_byte_id_lut(&vocab, reversible)?;
+        let compact_byte_ids = build_compact_byte_id_lut(&byte_ids);
         validate_merge_ids(&merges, rev.len())?;
         let engine = ElasticBpeEngine::from_ordered_merges(&merges, profile)?;
 
@@ -98,6 +101,7 @@ impl ElasticTextTokenizer {
             rev,
             merges,
             byte_ids,
+            compact_byte_ids,
             reversible,
             engine,
         })
@@ -139,8 +143,28 @@ impl ElasticTextTokenizer {
     /// SciAgent tokenizer's piece semantics. Execution classes choose only the
     /// reduction kernel; they do not introduce regex or arbitrary boundaries.
     pub fn encode(&self, text: &str) -> ElasticEncoding {
+        let piece_len = text.len();
+        if piece_len <= TINY_SCAN_CAPACITY
+            && self.engine.profile().kernel_for(piece_len) == BpeKernel::TinyScan
+        {
+            if let Some(byte_ids) = &self.compact_byte_ids
+            {
+                let mut work = [0u32; TINY_SCAN_CAPACITY];
+                for (slot, byte) in work.iter_mut().zip(text.bytes())
+                {
+                    *slot = byte_ids[usize::from(byte)];
+                }
+                if let Some(encoded) =
+                    self.engine
+                        .try_encode_tiny_compact(&mut work, piece_len, piece_len)
+                {
+                    return encoded;
+                }
+            }
+        }
+
         let base_ids = self.base_ids(text);
-        self.engine.encode_ids(&base_ids, text.len())
+        self.engine.encode_ids(&base_ids, piece_len)
     }
 
     pub fn encode_with_special(
@@ -303,6 +327,15 @@ fn build_byte_id_lut(
     Ok(byte_ids)
 }
 
+fn build_compact_byte_id_lut(byte_ids: &[TokenId; 256]) -> Option<[u32; 256]> {
+    let mut compact = [0u32; 256];
+    for (slot, &id) in compact.iter_mut().zip(byte_ids)
+    {
+        *slot = u32::try_from(id).ok()?;
+    }
+    Some(compact)
+}
+
 fn validate_merge_ids(
     merges: &[(TokenId, TokenId, TokenId)],
     vocab_size: usize,
@@ -447,7 +480,7 @@ impl From<DuplicateMergeRule> for ElasticTextTokenizerError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::elastic_tokenizer::{BpeKernel, ElasticThresholds};
+    use crate::elastic_tokenizer::ElasticThresholds;
 
     fn profile(kernel: BpeKernel) -> ElasticProfile {
         ElasticProfile::new(
@@ -526,9 +559,21 @@ mod tests {
             profile(BpeKernel::Reference),
         )
         .unwrap();
+        let compact = tokenizer.compact_byte_ids.as_ref().unwrap();
         for byte in 0u8..=255
         {
             assert_eq!(tokenizer.byte_ids[usize::from(byte)], usize::from(byte) + 4);
+            assert_eq!(compact[usize::from(byte)], u32::from(byte) + 4);
+        }
+    }
+
+    #[test]
+    fn compact_byte_lookup_fails_closed_for_wide_ids() {
+        if usize::BITS > 32
+        {
+            let mut byte_ids = [0usize; 256];
+            byte_ids[0] = usize::try_from(u64::from(u32::MAX) + 1).unwrap();
+            assert!(build_compact_byte_id_lut(&byte_ids).is_none());
         }
     }
 
@@ -555,7 +600,9 @@ mod tests {
         let heap = ElasticTextTokenizer::from_json_str(&input, profile(BpeKernel::Heap)).unwrap();
 
         let expected = reference.encode("abc").ids;
-        assert_eq!(tiny.encode("abc").ids, expected);
+        let tiny_encoding = tiny.encode("abc");
+        assert_eq!(tiny_encoding.ids, expected);
+        assert_eq!(tiny_encoding.executed_kernel, BpeKernel::TinyScan);
         assert_eq!(indexed.encode("abc").ids, expected);
         assert_eq!(heap.encode("abc").ids, expected);
     }
