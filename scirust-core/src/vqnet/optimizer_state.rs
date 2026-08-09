@@ -1,10 +1,11 @@
 //! Stable optimizer identity across fresh reverse-mode tapes.
 //!
-//! Tape-node indices are intentionally local to one [`Tape`]. Stateful
-//! optimizers such as Adam therefore need an identity that does not depend on a
-//! node index when a VQNet-like model rebuilds its tape every training step.
-//! This module adapts SciRust's existing raw-slice optimizers to that contract;
-//! it does not reimplement their update rules.
+//! Tape-node indices are intentionally local to one
+//! [`Tape`](crate::autodiff::reverse::Tape). Stateful optimizers such as Adam
+//! therefore need an identity that does not depend on a node index when a
+//! VQNet-like model rebuilds its tape every training step. This module adapts
+//! SciRust's existing raw-slice optimizers to that contract; it does not
+//! reimplement their update rules.
 
 use super::QuantumForward;
 use crate::autodiff::reverse::Tensor;
@@ -105,12 +106,6 @@ impl OptimizerSlot {
         let mut candidate_optimizer = optimizer.clone();
         candidate_optimizer.step(self.key(), &gradient.data, &mut candidate_values);
 
-        if candidate_values.len() != value.data.len()
-        {
-            return Err(QuantumError::NumericalFailure {
-                operation: "VQNet persistent optimizer parameter length",
-            });
-        }
         if !candidate_values.iter().all(|value| value.is_finite())
         {
             return Err(QuantumError::NonFiniteParameter {
@@ -223,9 +218,6 @@ mod tests {
             }
         );
         assert_eq!(optimizer.calls, 0);
-        assert_eq!(
-            tape.value(forward.parameter_index()).data,
-            before.data
-        );
+        assert_eq!(tape.value(forward.parameter_index()).data, before.data);
     }
 }
