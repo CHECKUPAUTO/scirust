@@ -41,14 +41,14 @@ jobs:
           git diff --check
       - name: Install pinned toolchains
         run: |
-          rustup toolchain install 1.89.0 --profile minimal --component clippy
-          rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt,clippy
       - name: Refresh lock and qualify feature
         run: |
           cargo +1.89.0 check -p scirust-gpu --features flat-attention
           cargo +nightly-2026-07-02 fmt --all
           cargo +nightly-2026-07-02 fmt --all -- --check
-          cargo +1.89.0 clippy -p scirust-gpu --features flat-attention --all-targets --locked -- -D warnings
+          cargo +nightly-2026-07-02 clippy -p scirust-gpu --features flat-attention --all-targets --locked -- -D warnings
           cargo +1.89.0 test -p scirust-gpu --features flat-attention --lib --locked
       - name: Commit qualified source only
         shell: bash
