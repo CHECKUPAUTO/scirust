@@ -3714,6 +3714,8 @@ dependencies = [
  "scirust-core",
  "scirust-cuda",
  "scirust-gpu",
+ "scirust-metrology",
+ "scirust-stats",
  "serde",
  "serde_json",
  "sha2",

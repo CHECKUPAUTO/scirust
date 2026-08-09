@@ -132,25 +132,31 @@ impl ElasticAutotuner {
         for case in cases
         {
             let expected = self.reference.encode_ids(black_box(&case.input_ids));
-            for kernel in CALIBRATION_KERNELS
+            // Warm every compatible kernel before measurement, then rotate the
+            // starting kernel on every measured round. This deterministic
+            // interleaving spreads thermal/scheduler drift across all models
+            // instead of timing one complete kernel series after another.
+            for _ in 0..self.config.warmup_runs
             {
-                for _ in 0..self.config.warmup_runs
+                for kernel in CALIBRATION_KERNELS
                 {
-                    let Some(output) = self.run_kernel(kernel, black_box(&case.input_ids))
-                    else
+                    if let Some(output) = self.run_kernel(kernel, black_box(&case.input_ids))
                     {
-                        break;
-                    };
-                    black_box(output);
+                        black_box(output);
+                    }
                 }
+            }
 
-                for _ in 0..self.config.measured_runs
+            for round in 0..self.config.measured_runs
+            {
+                for offset in 0..CALIBRATION_KERNELS.len()
                 {
+                    let kernel = CALIBRATION_KERNELS[(round + offset) % CALIBRATION_KERNELS.len()];
                     let start = Instant::now();
                     let Some(output) = self.run_kernel(kernel, black_box(&case.input_ids))
                     else
                     {
-                        break;
+                        continue;
                     };
                     let elapsed_nanos =
                         u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX);
