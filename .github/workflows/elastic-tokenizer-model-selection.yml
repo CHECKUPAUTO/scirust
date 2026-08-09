@@ -62,7 +62,7 @@ jobs:
           test "$(jq '.rejected_semantic_measurements' /tmp/elastic-selection-robust.json)" = "0"
       - name: Publish selection table
         run: |
-          echo "### ElasticTokenizer robust model selection" >> "$GITHUB_STEP_SUMMARY"
+          echo "### ElasticTokenizer robust model selection — hosted x86_64" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| bytes | winner | median ns | p95 ns | runner-up | speedup | Welch p | confidence |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---:|---|---:|---:|---|---:|---:|---|" >> "$GITHUB_STEP_SUMMARY"
@@ -84,4 +84,102 @@ jobs:
             /tmp/elastic-selection-profile.json
             /tmp/elastic-selection-raw.json
             /tmp/elastic-selection-robust.json
+          if-no-files-found: error
+
+  thor-arm64-selection:
+    name: Jetson Thor ARM64 robust selection
+    runs-on: [self-hosted, Linux, ARM64, scirust-arm64, jetson-thor, internal]
+    timeout-minutes: 90
+    env:
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Prepare isolated build directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.elastic-selection.XXXXXX")"
+          chmod 700 "$tmpdir"
+          echo "CARGO_TARGET_DIR=$tmpdir/target" >> "$GITHUB_ENV"
+          echo "ELASTIC_SELECTION_TMP=$tmpdir" >> "$GITHUB_ENV"
+      - name: Install exact MSRV
+        run: rustup toolchain install 1.89.0 --profile minimal
+      - name: Record Thor identity and system load
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            uname -a
+            echo
+            lscpu
+            echo
+            cat /proc/meminfo
+            echo
+            uptime
+            echo
+            command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader || true
+          } > "$ELASTIC_SELECTION_TMP/hardware.txt"
+      - name: Train the identical deterministic canonical tokenizer
+        run: |
+          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin train-tokenizer -- \
+            --input scirust-sciagent/src \
+            --recursive \
+            --extension rs \
+            --vocab-size 2048 \
+            --min-frequency 2 \
+            --merge-semantics canonical-rank-v1 \
+            --output "$ELASTIC_SELECTION_TMP/tokenizer.json"
+      - name: Build measurement and selector binaries before timing
+        run: |
+          cargo +1.89.0 build --locked --release -p scirust-sciagent --bin tokenizer-autotune --bin tokenizer-model-select
+      - name: Run semantics-gated interleaved calibration on Thor CPU
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$CARGO_TARGET_DIR/release/tokenizer-autotune" \
+            --tokenizer "$ELASTIC_SELECTION_TMP/tokenizer.json" \
+            --input scirust-sciagent/src \
+            --recursive \
+            --extension rs \
+            --output "$ELASTIC_SELECTION_TMP/profile.json" \
+            --report "$ELASTIC_SELECTION_TMP/raw.json" \
+            --probe-lengths 8,16,32,64,96,128,192,256,384,512,768,1024,1536,2048,3072,4096,6144,8192 \
+            --cases-per-length 3 \
+            --warmup-runs 3 \
+            --measured-runs 21 \
+            --device jetson-agx-thor-arm64
+      - name: Select robust Thor winners with SciRust statistics
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$CARGO_TARGET_DIR/release/tokenizer-model-select" \
+            --report "$ELASTIC_SELECTION_TMP/raw.json" \
+            --output "$ELASTIC_SELECTION_TMP/robust.json"
+          test "$(jq '.rejected_semantic_measurements' "$ELASTIC_SELECTION_TMP/robust.json")" = "0"
+      - name: Publish Thor selection table
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "### ElasticTokenizer robust model selection — Jetson Thor ARM64" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| bytes | winner | median ns | p95 ns | runner-up | speedup | Welch p | confidence |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---:|---|---:|---:|---|---:|---:|---|" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.selections[] | "| \(.piece_len) | \(.winner) | \(.winner_median_nanos|floor) | \(.winner_p95_nanos|floor) | \(.runner_up // "-") | \((.median_speedup // 0)*1000|round/1000) | \((.welch_p_value // 1)*1000000|round/1000000) | \(.confidence) |"' \
+            "$ELASTIC_SELECTION_TMP/robust.json" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Fitted Thor profile:" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat "$ELASTIC_SELECTION_TMP/profile.json" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload exact Thor model-selection evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elastic-tokenizer-robust-selection-thor-arm64
+          path: |
+            ${{ env.ELASTIC_SELECTION_TMP }}/hardware.txt
+            ${{ env.ELASTIC_SELECTION_TMP }}/tokenizer.json
+            ${{ env.ELASTIC_SELECTION_TMP }}/profile.json
+            ${{ env.ELASTIC_SELECTION_TMP }}/raw.json
+            ${{ env.ELASTIC_SELECTION_TMP }}/robust.json
           if-no-files-found: error
