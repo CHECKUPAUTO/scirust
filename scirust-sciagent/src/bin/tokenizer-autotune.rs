@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
+use scirust_sciagent::sha256::sha256_hex;
 use scirust_sciagent::train::dataset::{matches_extension, parse_extensions, skip_source_dir};
 use scirust_sciagent::{
     AutotuneConfig, AutotuneResult, BpeKernel, BpeMergeSemantics, CalibrationCase,
@@ -11,7 +12,8 @@ use scirust_sciagent::{
 };
 
 const DEFAULT_PROBE_LENGTHS: &str = "8,16,32,64,128,256,512,1024,2048,4096";
-const AUTOTUNE_REPORT_SCHEMA_V1: u32 = 1;
+const AUTOTUNE_REPORT_SCHEMA_V2: u32 = 2;
+const CASE_FINGERPRINT_DOMAIN: &[u8] = b"scirust-elastic-autotune-cases-v1\0";
 
 #[derive(Parser)]
 #[command(
@@ -68,6 +70,7 @@ struct RawReportContext<'a> {
     profile: ElasticProfile,
     hardware: &'a ElasticHardwareIdentity,
     tokenizer_fingerprint: &'a str,
+    case_fingerprint: &'a str,
     probe_lengths: &'a [usize],
     cases_per_length: usize,
     warmup_runs: usize,
@@ -138,11 +141,14 @@ fn main() {
     if let Some(report_path) = &args.report
     {
         let tokenizer_fingerprint = ordered_merges_fingerprint(canonical.ordered_merges());
+        let case_fingerprint = calibration_case_fingerprint(&cases)
+            .expect("calibration cases cannot be represented in report schema v2");
         let context = RawReportContext {
             result: &result,
             profile,
             hardware: &hardware,
             tokenizer_fingerprint: &tokenizer_fingerprint,
+            case_fingerprint: &case_fingerprint,
             probe_lengths: &probe_lengths,
             cases_per_length: args.cases_per_length,
             warmup_runs: args.warmup_runs,
@@ -161,6 +167,29 @@ fn main() {
         result.report().rejected_semantic_measurements()
     );
     eprintln!("profile saved to {:?}", args.output);
+}
+
+fn calibration_case_fingerprint(cases: &[CalibrationCase]) -> Result<String, String> {
+    let mut canonical = Vec::new();
+    canonical.extend_from_slice(CASE_FINGERPRINT_DOMAIN);
+    append_usize_u64_be(&mut canonical, cases.len(), "case count")?;
+    for case in cases
+    {
+        append_usize_u64_be(&mut canonical, case.piece_len, "piece_len")?;
+        append_usize_u64_be(&mut canonical, case.input_ids.len(), "input id count")?;
+        for &token_id in &case.input_ids
+        {
+            append_usize_u64_be(&mut canonical, token_id, "token id")?;
+        }
+    }
+    Ok(sha256_hex(&canonical))
+}
+
+fn append_usize_u64_be(output: &mut Vec<u8>, value: usize, field: &str) -> Result<(), String> {
+    let value = u64::try_from(value)
+        .map_err(|_| format!("{field} {value} exceeds report schema v2 u64 domain"))?;
+    output.extend_from_slice(&value.to_be_bytes());
+    Ok(())
 }
 
 fn write_raw_report(
@@ -188,8 +217,9 @@ fn write_raw_report(
         .map(kernel_name)
         .collect::<Vec<_>>();
     let value = serde_json::json!({
-        "schema_version": AUTOTUNE_REPORT_SCHEMA_V1,
+        "schema_version": AUTOTUNE_REPORT_SCHEMA_V2,
         "tokenizer_fingerprint": context.tokenizer_fingerprint,
+        "case_fingerprint": context.case_fingerprint,
         "hardware": {
             "arch": context.hardware.arch.as_str(),
             "os": context.hardware.os.as_str(),
@@ -413,5 +443,40 @@ mod tests {
         assert_eq!(kernel_name(BpeKernel::TinyScan), "tiny_scan");
         assert_eq!(kernel_name(BpeKernel::Indexed), "indexed");
         assert_eq!(kernel_name(BpeKernel::Heap), "heap");
+    }
+
+    #[test]
+    fn case_fingerprint_is_deterministic_and_order_sensitive() {
+        let cases = vec![
+            CalibrationCase::new(8, vec![1, 2, 3]),
+            CalibrationCase::new(16, vec![4, 5]),
+        ];
+        assert_eq!(
+            calibration_case_fingerprint(&cases).unwrap(),
+            calibration_case_fingerprint(&cases.clone()).unwrap()
+        );
+
+        let mut reversed = cases.clone();
+        reversed.reverse();
+        assert_ne!(
+            calibration_case_fingerprint(&cases).unwrap(),
+            calibration_case_fingerprint(&reversed).unwrap()
+        );
+    }
+
+    #[test]
+    fn case_fingerprint_binds_piece_lengths_and_token_ids() {
+        let baseline = vec![CalibrationCase::new(8, vec![1, 2, 3])];
+        let changed_len = vec![CalibrationCase::new(9, vec![1, 2, 3])];
+        let changed_id = vec![CalibrationCase::new(8, vec![1, 2, 4])];
+        let fingerprint = calibration_case_fingerprint(&baseline).unwrap();
+        assert_ne!(
+            fingerprint,
+            calibration_case_fingerprint(&changed_len).unwrap()
+        );
+        assert_ne!(
+            fingerprint,
+            calibration_case_fingerprint(&changed_id).unwrap()
+        );
     }
 }
