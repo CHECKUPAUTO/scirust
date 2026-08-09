@@ -1,4 +1,4 @@
-name: ElasticTokenizer Heap CSR A/B probe
+name: ElasticTokenizer Heap CSR counterbalanced A/B
 
 on:
   pull_request:
@@ -9,21 +9,25 @@ on:
 permissions:
   contents: read
 
+env:
+  BASELINE_SHA: ed0e814073854fb9d74d92cff46372e2dfd8448b
+  CANDIDATE_SHA: a78db7a91a1a46fe4071ff5c70902144229d4487
+
 jobs:
   heap-csr-ab:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
-      - name: Checkout baseline master
+      - name: Checkout baseline
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
-          ref: ed0e814073854fb9d74d92cff46372e2dfd8448b
+          ref: ${{ env.BASELINE_SHA }}
           path: baseline
 
       - name: Checkout Heap CSR candidate
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
-          ref: a78db7a91a1a46fe4071ff5c70902144229d4487
+          ref: ${{ env.CANDIDATE_SHA }}
           path: candidate
 
       - name: Install MSRV toolchain
@@ -49,81 +53,104 @@ jobs:
             --merge-semantics canonical-rank-v1 \
             --output /tmp/heap-csr-ab-tokenizer.json
 
-      - name: Measure baseline Heap
-        working-directory: baseline
+      - name: Build both measurement binaries before timing
         run: |
-          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin tokenizer-autotune -- \
-            --tokenizer /tmp/heap-csr-ab-tokenizer.json \
-            --input scirust-sciagent/src/model.rs \
-            --input scirust-sciagent/src/elastic_heap.rs \
-            --output /tmp/heap-csr-ab-baseline-profile.json \
-            --report /tmp/heap-csr-ab-baseline-report.json \
-            --probe-lengths 128,256,512,1024,2048,4096,8192 \
-            --cases-per-length 1 \
-            --warmup-runs 2 \
-            --measured-runs 7 \
-            --device same-github-runner
+          cargo +1.89.0 build --locked --release -p scirust-sciagent --bin tokenizer-autotune --manifest-path baseline/Cargo.toml
+          cargo +1.89.0 build --locked --release -p scirust-sciagent --bin tokenizer-autotune --manifest-path candidate/Cargo.toml
 
-      - name: Measure CSR candidate on exact baseline corpus
-        working-directory: candidate
+      - name: Measure ABBA sequence
+        shell: bash
         run: |
-          cargo +1.89.0 run --locked --release -p scirust-sciagent --bin tokenizer-autotune -- \
-            --tokenizer /tmp/heap-csr-ab-tokenizer.json \
-            --input ../baseline/scirust-sciagent/src/model.rs \
-            --input ../baseline/scirust-sciagent/src/elastic_heap.rs \
-            --output /tmp/heap-csr-ab-candidate-profile.json \
-            --report /tmp/heap-csr-ab-candidate-report.json \
-            --probe-lengths 128,256,512,1024,2048,4096,8192 \
-            --cases-per-length 1 \
-            --warmup-runs 2 \
-            --measured-runs 7 \
-            --device same-github-runner
+          set -euo pipefail
 
-      - name: Verify semantic parity and summarize Heap medians
+          measure() {
+            local tree="$1"
+            local label="$2"
+            local input_prefix="$3"
+            (
+              cd "$tree"
+              ./target/release/tokenizer-autotune \
+                --tokenizer /tmp/heap-csr-ab-tokenizer.json \
+                --input "$input_prefix/scirust-sciagent/src/model.rs" \
+                --input "$input_prefix/scirust-sciagent/src/elastic_heap.rs" \
+                --output "/tmp/heap-csr-ab-${label}-profile.json" \
+                --report "/tmp/heap-csr-ab-${label}-report.json" \
+                --probe-lengths 128,256,512,1024,2048,4096,8192 \
+                --cases-per-length 1 \
+                --warmup-runs 1 \
+                --measured-runs 5 \
+                --device same-github-runner
+            )
+          }
+
+          # ABBA counterbalancing: each implementation is measured once early and once late.
+          measure baseline b1 .
+          measure candidate c1 ../baseline
+          measure candidate c2 ../baseline
+          measure baseline b2 .
+
+      - name: Verify semantic parity
         run: |
-          test "$(jq '[.measurements[] | select(.semantic_match == false)] | length' /tmp/heap-csr-ab-baseline-report.json)" = "0"
-          test "$(jq '[.measurements[] | select(.semantic_match == false)] | length' /tmp/heap-csr-ab-candidate-report.json)" = "0"
+          set -euo pipefail
+          for label in b1 c1 c2 b2; do
+            mismatches="$(jq '[.measurements[] | select(.semantic_match == false)] | length' "/tmp/heap-csr-ab-${label}-report.json")"
+            test "$mismatches" = "0"
+          done
 
-          jq -r '
-            [.measurements[] | select(.kernel == "heap" and .semantic_match)]
-            | group_by(.piece_len)
-            | .[]
-            | sort_by(.elapsed_nanos) as $g
-            | [$g[0].piece_len, $g[($g | length) / 2 | floor].elapsed_nanos]
-            | @tsv' /tmp/heap-csr-ab-baseline-report.json > /tmp/heap-csr-ab-baseline.tsv
+      - name: Summarize paired counterbalanced medians
+        shell: bash
+        run: |
+          set -euo pipefail
 
-          jq -r '
-            [.measurements[] | select(.kernel == "heap" and .semantic_match)]
-            | group_by(.piece_len)
-            | .[]
-            | sort_by(.elapsed_nanos) as $g
-            | [$g[0].piece_len, $g[($g | length) / 2 | floor].elapsed_nanos]
-            | @tsv' /tmp/heap-csr-ab-candidate-report.json > /tmp/heap-csr-ab-candidate.tsv
+          extract_medians() {
+            local label="$1"
+            jq -r '
+              [.measurements[] | select(.kernel == "heap" and .semantic_match)]
+              | group_by(.piece_len)
+              | .[]
+              | sort_by(.elapsed_nanos) as $g
+              | [$g[0].piece_len, $g[($g | length) / 2 | floor].elapsed_nanos]
+              | @tsv' "/tmp/heap-csr-ab-${label}-report.json" \
+              > "/tmp/heap-csr-ab-${label}.tsv"
+          }
 
-          echo -e "piece_len\tbaseline_ns\tcsr_ns\tspeedup_x" | tee /tmp/heap-csr-ab-summary.tsv
-          join -t $'\t' -1 1 -2 1 /tmp/heap-csr-ab-baseline.tsv /tmp/heap-csr-ab-candidate.tsv \
-            | awk -F '\t' 'BEGIN { OFS="\t" } { printf "%s\t%s\t%s\t%.6f\n", $1, $2, $3, $2 / $3 }' \
-            | tee -a /tmp/heap-csr-ab-summary.tsv
+          for label in b1 c1 c2 b2; do
+            extract_medians "$label"
+          done
+
+          join -t $'\t' -1 1 -2 1 /tmp/heap-csr-ab-b1.tsv /tmp/heap-csr-ab-c1.tsv > /tmp/heap-csr-ab-pair1.tsv
+          join -t $'\t' -1 1 -2 1 /tmp/heap-csr-ab-b2.tsv /tmp/heap-csr-ab-c2.tsv > /tmp/heap-csr-ab-pair2.tsv
+          join -t $'\t' -1 1 -2 1 /tmp/heap-csr-ab-pair1.tsv /tmp/heap-csr-ab-pair2.tsv \
+            | awk -F '\t' 'BEGIN { OFS="\t"; print "piece_len","b1_ns","c1_ns","b2_ns","c2_ns","pair1_x","pair2_x","geomean_x" }
+              {
+                r1=$2/$3;
+                r2=$4/$5;
+                printf "%s\t%s\t%s\t%s\t%s\t%.6f\t%.6f\t%.6f\n", $1,$2,$3,$4,$5,r1,r2,sqrt(r1*r2)
+              }' \
+            | tee /tmp/heap-csr-ab-summary.tsv
 
       - name: Publish A/B summary
         if: always()
         run: |
-          echo "### Heap CSR A/B" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Heap CSR counterbalanced A/B" >> "$GITHUB_STEP_SUMMARY"
           echo '```text' >> "$GITHUB_STEP_SUMMARY"
           cat /tmp/heap-csr-ab-summary.tsv >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "Baseline: ed0e814073854fb9d74d92cff46372e2dfd8448b" >> "$GITHUB_STEP_SUMMARY"
-          echo "Candidate: a78db7a91a1a46fe4071ff5c70902144229d4487" >> "$GITHUB_STEP_SUMMARY"
+          echo "Order: baseline → candidate → candidate → baseline" >> "$GITHUB_STEP_SUMMARY"
+          echo "Baseline: $BASELINE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "Candidate: $CANDIDATE_SHA" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload exact evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: elastic-heap-csr-ab
+          name: elastic-heap-csr-counterbalanced-ab
           path: |
             /tmp/heap-csr-ab-runner.txt
             /tmp/heap-csr-ab-tokenizer.json
-            /tmp/heap-csr-ab-baseline-report.json
-            /tmp/heap-csr-ab-candidate-report.json
+            /tmp/heap-csr-ab-b1-report.json
+            /tmp/heap-csr-ab-c1-report.json
+            /tmp/heap-csr-ab-c2-report.json
+            /tmp/heap-csr-ab-b2-report.json
             /tmp/heap-csr-ab-summary.tsv
           if-no-files-found: warn
