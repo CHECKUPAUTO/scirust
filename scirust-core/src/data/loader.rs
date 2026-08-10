@@ -14,6 +14,7 @@ pub struct DataLoader<D: Dataset> {
 
 impl<D: Dataset> DataLoader<D> {
     pub fn new(dataset: D, batch_size: usize, shuffle: bool, seed: u64) -> Self {
+        assert!(batch_size > 0, "DataLoader::new: batch_size must be > 0");
         let n = dataset.n_samples();
         Self {
             dataset,
@@ -25,8 +26,22 @@ impl<D: Dataset> DataLoader<D> {
         }
     }
 
+    /// Selects the deterministic sample order for one epoch.
+    ///
+    /// The permutation is a pure function of the canonical dataset order,
+    /// `seed`, and `epoch`: calling epoch `e` directly produces the same order as
+    /// reaching `e` after any sequence of earlier epochs. Repeating the same
+    /// epoch is therefore idempotent as well, which makes resumed training
+    /// reproducible without replaying prior shuffles.
     pub fn shuffle_epoch(&mut self, epoch: u64) {
         self.epoch = epoch;
+
+        // Always rebuild the canonical order first. Previously Fisher-Yates was
+        // applied to the previous epoch's permutation, making epoch order depend
+        // on call history rather than only (seed, epoch).
+        self.indices.clear();
+        self.indices.extend(0..self.dataset.n_samples());
+
         if self.shuffle
         {
             let mut rng = rand::rngs::StdRng::seed_from_u64(self.seed.wrapping_add(epoch));
@@ -105,6 +120,16 @@ mod tests {
     use super::*;
     use crate::data::InMemoryDataset;
 
+    fn scalar_dataset(n: usize) -> InMemoryDataset {
+        let x_data: Vec<f32> = (0..n).map(|i| i as f32).collect();
+        let y_data = x_data.clone();
+        InMemoryDataset::new(x_data, y_data, 1, 1)
+    }
+
+    fn full_epoch_order(loader: &mut DataLoader<InMemoryDataset>) -> Vec<f32> {
+        loader.iter().flat_map(|(x, _)| x.data).collect()
+    }
+
     #[test]
     fn loader_nd_batch_shape_correct() {
         // Dataset : 8 samples, chaque input = 3*4*5 = 60 elements, target = 2 elements
@@ -149,6 +174,50 @@ mod tests {
             x1.data, x2.data,
             "Same seed should produce identical shuffled batches"
         );
+    }
+
+    #[test]
+    fn shuffle_epoch_is_addressable_independent_of_history() {
+        let dataset = scalar_dataset(32);
+        let mut continuous = DataLoader::new(dataset.clone(), 7, true, 0x51a7);
+        continuous.shuffle_epoch(0);
+        let _ = full_epoch_order(&mut continuous);
+        continuous.shuffle_epoch(1);
+        let _ = full_epoch_order(&mut continuous);
+        continuous.shuffle_epoch(5);
+        let continuous_epoch_five = full_epoch_order(&mut continuous);
+
+        let mut resumed = DataLoader::new(dataset, 7, true, 0x51a7);
+        resumed.shuffle_epoch(5);
+        let resumed_epoch_five = full_epoch_order(&mut resumed);
+
+        assert_eq!(continuous_epoch_five, resumed_epoch_five);
+    }
+
+    #[test]
+    fn repeating_same_epoch_is_idempotent() {
+        let mut loader = DataLoader::new(scalar_dataset(32), 6, true, 1234);
+        loader.shuffle_epoch(9);
+        let first = full_epoch_order(&mut loader);
+        loader.shuffle_epoch(9);
+        let second = full_epoch_order(&mut loader);
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn non_shuffled_epoch_restores_canonical_order() {
+        let mut loader = DataLoader::new(scalar_dataset(9), 4, false, 7);
+        loader.shuffle_epoch(42);
+        assert_eq!(
+            full_epoch_order(&mut loader),
+            (0..9).map(|i| i as f32).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "batch_size must be > 0")]
+    fn zero_batch_size_is_rejected() {
+        let _ = DataLoader::new(scalar_dataset(4), 0, false, 0);
     }
 
     #[test]
