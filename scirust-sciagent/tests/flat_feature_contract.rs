@@ -34,7 +34,10 @@ fn sciagent_flat_feature_exposes_m15_prerotated_decode_boundary() {
     // current absolute position attending over the complete resident prefix.
     assert_eq!(config.query_len, 1);
     assert_eq!(config.kv_len, config.query_position_offset + 1);
-    assert_eq!(config.query_rope_position_offset, config.query_position_offset);
+    assert_eq!(
+        config.query_rope_position_offset,
+        config.query_position_offset
+    );
     assert_eq!(config.kv_rope_position_offset, 0);
     assert!(config.causal);
 
