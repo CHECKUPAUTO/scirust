@@ -512,7 +512,7 @@ mod tests {
             let b = [1.0, 0.0, 0.0, 1.0];
 
             assert_eq!(
-                CudaBackend.gemm_f32(&a, &b, 2, 2, 1),
+                CudaBackend.gemm_f32(&a, &b, 2, 2, 2),
                 Err(BackendError::Unavailable("cuda"))
             );
         }
