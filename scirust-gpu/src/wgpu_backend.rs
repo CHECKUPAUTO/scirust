@@ -613,10 +613,89 @@ pub struct WgpuContextInner {
 ///
 /// Produced by [`crate::GpuChain`] (`upload` / `matmul`); an intermediate stays
 /// in VRAM and feeds the next GEMM without a CPU round-trip.
+#[derive(Clone)]
 pub struct GpuMatrix {
-    buf: wgpu::Buffer,
+    buf: std::sync::Arc<wgpu::Buffer>,
     rows: usize,
     cols: usize,
+}
+
+/// Fixed-capacity dense KV storage resident in WGPU memory.
+///
+/// The backing buffer is allocated exactly once. Appends copy resident rows
+/// directly into their final offset without rebuilding the existing prefix.
+/// [`active_matrix`](Self::active_matrix) returns a zero-copy logical view by
+/// sharing the backing buffer through `Arc`.
+pub struct WgpuDenseKvCache {
+    buf: std::sync::Arc<wgpu::Buffer>,
+    capacity: usize,
+    len: usize,
+    cols: usize,
+}
+
+impl WgpuDenseKvCache {
+    /// Maximum number of resident rows.
+    #[must_use]
+    pub const fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    /// Number of logically active rows.
+    #[must_use]
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Whether the logical cache is empty.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Width of each resident row.
+    #[must_use]
+    pub const fn cols(&self) -> usize {
+        self.cols
+    }
+
+    /// Zero-copy matrix view over the active prefix.
+    #[must_use]
+    pub fn active_matrix(&self) -> GpuMatrix {
+        GpuMatrix {
+            buf: self.buf.clone(),
+            rows: self.len,
+            cols: self.cols,
+        }
+    }
+
+    /// Zero-copy matrix view over the first `rows` active rows.
+    pub fn prefix_matrix(&self, rows: usize) -> BackendResult<GpuMatrix> {
+        if rows > self.len
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "dense KV prefix length {rows} exceeds active length {}",
+                self.len
+            )));
+        }
+        Ok(GpuMatrix {
+            buf: self.buf.clone(),
+            rows,
+            cols: self.cols,
+        })
+    }
+
+    /// Roll the logical cache back without copying or reallocating storage.
+    pub fn truncate(&mut self, len: usize) -> BackendResult<()> {
+        if len > self.len
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "dense KV truncate length {len} exceeds active length {}",
+                self.len
+            )));
+        }
+        self.len = len;
+        Ok(())
+    }
 }
 
 impl GpuMatrix {
@@ -657,7 +736,11 @@ impl GpuMatrix {
                 buf.size()
             )));
         }
-        Ok(Self { buf, rows, cols })
+        Ok(Self {
+            buf: std::sync::Arc::new(buf),
+            rows,
+            cols,
+        })
     }
 }
 
@@ -1012,7 +1095,7 @@ impl WgpuContext {
             self._encode_softmax(&x.buf, &out_buf, x.rows, x.cols);
         }
         Ok(GpuMatrix {
-            buf: out_buf,
+            buf: std::sync::Arc::new(out_buf),
             rows: x.rows,
             cols: x.cols,
         })
@@ -1135,7 +1218,7 @@ impl WgpuContext {
             self._encode_scale_causal_mask(&x.buf, &out_buf, x.rows, x.cols, scale, causal);
         }
         Ok(GpuMatrix {
-            buf: out_buf,
+            buf: std::sync::Arc::new(out_buf),
             rows: x.rows,
             cols: x.cols,
         })
@@ -1243,7 +1326,7 @@ impl WgpuContext {
             );
         }
         Ok(GpuMatrix {
-            buf: out_buf,
+            buf: std::sync::Arc::new(out_buf),
             rows: x.rows,
             cols: x.cols,
         })
@@ -1295,7 +1378,7 @@ impl WgpuContext {
             );
         }
         Ok(GpuMatrix {
-            buf: out_buf,
+            buf: std::sync::Arc::new(out_buf),
             rows: dy.rows,
             cols: dy.cols,
         })
@@ -1409,7 +1492,7 @@ impl WgpuContext {
             );
         }
         Ok(GpuMatrix {
-            buf: out_buf,
+            buf: std::sync::Arc::new(out_buf),
             rows: x.rows,
             cols: ncols,
         })
@@ -1455,7 +1538,7 @@ impl WgpuContext {
             );
         }
         Ok(GpuMatrix {
-            buf: out_buf,
+            buf: std::sync::Arc::new(out_buf),
             rows: x.rows,
             cols: dst_cols,
         })
@@ -1569,7 +1652,7 @@ impl WgpuContext {
         }
         self.queue.submit(Some(encoder.finish()));
         Ok(GpuMatrix {
-            buf: out_buf,
+            buf: std::sync::Arc::new(out_buf),
             rows,
             cols,
         })
@@ -1620,7 +1703,7 @@ impl WgpuContext {
             self.queue.submit(Some(encoder.finish()));
         }
         Ok(GpuMatrix {
-            buf: out_buf,
+            buf: std::sync::Arc::new(out_buf),
             rows: count,
             cols,
         })
@@ -1657,7 +1740,7 @@ impl WgpuContext {
             self._encode_rms_norm(&x.buf, &weight.buf, &out_buf, x.rows, x.cols, eps);
         }
         Ok(GpuMatrix {
-            buf: out_buf,
+            buf: std::sync::Arc::new(out_buf),
             rows: x.rows,
             cols: x.cols,
         })
@@ -1794,7 +1877,7 @@ impl WgpuContext {
             self.queue.submit(Some(encoder.finish()));
         }
         Ok(GpuMatrix {
-            buf: out_buf,
+            buf: std::sync::Arc::new(out_buf),
             rows,
             cols: d,
         })
@@ -1872,7 +1955,7 @@ impl WgpuContext {
             self.queue.submit(Some(encoder.finish()));
         }
         Ok(GpuMatrix {
-            buf: dx,
+            buf: std::sync::Arc::new(dx),
             rows: y.rows,
             cols: y.cols,
         })
@@ -1976,12 +2059,12 @@ impl WgpuContext {
         }
         Ok((
             GpuMatrix {
-                buf: da,
+                buf: std::sync::Arc::new(da),
                 rows: a.rows,
                 cols: a.cols,
             },
             GpuMatrix {
-                buf: db,
+                buf: std::sync::Arc::new(db),
                 rows: a.rows,
                 cols: a.cols,
             },
@@ -2070,7 +2153,7 @@ impl WgpuContext {
             self.queue.submit(Some(encoder.finish()));
         }
         Ok(GpuMatrix {
-            buf: dx,
+            buf: std::sync::Arc::new(dx),
             rows: x.rows,
             cols: x.cols,
         })
@@ -2147,7 +2230,7 @@ impl WgpuContext {
             self.queue.submit(Some(encoder.finish()));
         }
         Ok(GpuMatrix {
-            buf: out,
+            buf: std::sync::Arc::new(out),
             rows: param.rows,
             cols: param.cols,
         })
@@ -2333,7 +2416,7 @@ impl WgpuContext {
             self.queue.submit(Some(encoder.finish()));
         }
         Ok(GpuMatrix {
-            buf: dlogits,
+            buf: std::sync::Arc::new(dlogits),
             rows,
             cols,
         })
@@ -2422,7 +2505,7 @@ impl WgpuContext {
             self.queue.submit(Some(encoder.finish()));
         }
         Ok(GpuMatrix {
-            buf: dtable,
+            buf: std::sync::Arc::new(dtable),
             rows: vocab,
             cols: d,
         })
@@ -2498,7 +2581,7 @@ impl WgpuContext {
             self.queue.submit(Some(encoder.finish()));
         }
         Ok(GpuMatrix {
-            buf: din,
+            buf: std::sync::Arc::new(din),
             rows: dout.rows,
             cols: dout.cols,
         })
@@ -2571,7 +2654,7 @@ impl WgpuContext {
             self.queue.submit(Some(encoder.finish()));
         }
         Ok(GpuMatrix {
-            buf: c_buf,
+            buf: std::sync::Arc::new(c_buf),
             rows: a.rows,
             cols: a.cols,
         })
@@ -2863,6 +2946,105 @@ impl WgpuContext {
         Ok(())
     }
 
+    /// Allocate one fixed-capacity dense resident cache.
+    pub fn dense_kv_cache(&self, capacity: usize, cols: usize) -> BackendResult<WgpuDenseKvCache> {
+        if capacity == 0
+        {
+            return Err(BackendError::ShapeMismatch(
+                "dense KV capacity must be non-zero".into(),
+            ));
+        }
+        if cols == 0
+        {
+            return Err(BackendError::ShapeMismatch(
+                "dense KV width must be non-zero".into(),
+            ));
+        }
+
+        let bytes = capacity
+            .checked_mul(cols)
+            .and_then(|elements| elements.checked_mul(std::mem::size_of::<f32>()))
+            .ok_or_else(|| {
+                BackendError::ShapeMismatch("dense KV allocation size overflow".into())
+            })?;
+        let bytes = u64::try_from(bytes)
+            .map_err(|_| BackendError::ShapeMismatch("dense KV allocation exceeds u64".into()))?;
+
+        let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("dense-kv-cache"),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        Ok(WgpuDenseKvCache {
+            buf: std::sync::Arc::new(buf),
+            capacity,
+            len: 0,
+            cols,
+        })
+    }
+
+    /// Append resident rows into a fixed dense cache without reallocating it.
+    pub fn dense_kv_append(
+        &self,
+        cache: &mut WgpuDenseKvCache,
+        rows: &GpuMatrix,
+    ) -> BackendResult<()> {
+        if rows.cols != cache.cols
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "dense KV append width mismatch: cache {} vs rows {}",
+                cache.cols, rows.cols
+            )));
+        }
+
+        let new_len = cache
+            .len
+            .checked_add(rows.rows)
+            .ok_or_else(|| BackendError::ShapeMismatch("dense KV active length overflow".into()))?;
+        if new_len > cache.capacity
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "dense KV capacity exceeded: {new_len} > {}",
+                cache.capacity
+            )));
+        }
+
+        if rows.rows != 0
+        {
+            let row_bytes = cache
+                .cols
+                .checked_mul(std::mem::size_of::<f32>())
+                .ok_or_else(|| BackendError::ShapeMismatch("dense KV row size overflow".into()))?;
+            let src_bytes = rows.rows.checked_mul(row_bytes).ok_or_else(|| {
+                BackendError::ShapeMismatch("dense KV append size overflow".into())
+            })?;
+            let dst_offset = cache
+                .len
+                .checked_mul(row_bytes)
+                .ok_or_else(|| BackendError::ShapeMismatch("dense KV offset overflow".into()))?;
+
+            let src_bytes = u64::try_from(src_bytes)
+                .map_err(|_| BackendError::ShapeMismatch("dense KV append exceeds u64".into()))?;
+            let dst_offset = u64::try_from(dst_offset)
+                .map_err(|_| BackendError::ShapeMismatch("dense KV offset exceeds u64".into()))?;
+
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("dense-kv-append"),
+                });
+            encoder.copy_buffer_to_buffer(&rows.buf, 0, &cache.buf, dst_offset, src_bytes);
+            self.queue.submit(Some(encoder.finish()));
+        }
+
+        cache.len = new_len;
+        Ok(())
+    }
+
     /// Upload a row-major `rows×cols` matrix to a resident GPU storage buffer.
     pub fn upload(&self, data: &[f32], rows: usize, cols: usize) -> GpuMatrix {
         // wgpu rejects zero-sized buffers; back an empty matrix with a 4-byte
@@ -2885,7 +3067,11 @@ impl WgpuContext {
                     usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
                 })
         };
-        GpuMatrix { buf, rows, cols }
+        GpuMatrix {
+            buf: std::sync::Arc::new(buf),
+            rows,
+            cols,
+        }
     }
 
     /// `C = op(A)·op(B)` with both operands already resident; the result **stays
@@ -2926,7 +3112,7 @@ impl WgpuContext {
             self._encode_gemm(&a.buf, &b.buf, &c_buf, m, k, n, ta, tb, 1.0, 0.0);
         }
         Ok(GpuMatrix {
-            buf: c_buf,
+            buf: std::sync::Arc::new(c_buf),
             rows: m,
             cols: n,
         })

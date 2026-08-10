@@ -159,7 +159,9 @@ pub use fusion::{FusedLayer, FusionNode, plan_fusion};
 #[cfg(feature = "wgpu")]
 pub use tensor::GpuTensor;
 #[cfg(feature = "wgpu")]
-pub use wgpu_backend::{GpuMatrix, WgpuContext, wgpu_scale_causal_mask, wgpu_softmax};
+pub use wgpu_backend::{
+    GpuMatrix, WgpuContext, WgpuDenseKvCache, wgpu_scale_causal_mask, wgpu_softmax,
+};
 #[cfg(feature = "wgpu")]
 pub use wgpu_compute_adapter::{
     WgpuComputeAdapter, WgpuComputeBuffer, WgpuComputeEvent, WgpuComputeKernel, WgpuComputeStream,
