@@ -17,15 +17,15 @@ license-gate = ["std", "dep:scirust-license"]
 # software Vulkan adapter (Mesa lavapipe). See docs/GPU.md (P2.2).
 # Pulls in scirust-core to implement its autograd-tape `GpuEngine` hook.
 wgpu = ["std", "dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:scirust-core"]
-# Optional zero-copy attention bridge. FLAT-R2 is pinned to the reviewed
-# caller-owned WGPU projection encoder commit; enabling this feature also
-# enables SciRust's resident WGPU backend.
+# Optional zero-copy attention bridge. FLAT is pinned to a reviewed, merged
+# caller-owned WGPU commit; enabling this feature also enables SciRust's resident
+# WGPU backend. The pinned revision includes M11 rectangular Q/KV execution.
 flat-attention = ["wgpu", "dep:flat-attention"]
 
 [dependencies]
 scirust-compute = { path = "../scirust-compute", default-features = false }
 # Decodes and executes `KernelFormat::Reference` modules on the CPU adapter.
-# Depends only on scirust-compute and scirust-tensor-compile, neither of which
+# Depends only on scirust-compute and scirust-tensor-reference, neither of which
 # reaches scirust-gpu, so this edge introduces no dependency cycle. It is
 # unconditional: scirust-gpu carries no `#![no_std]` attribute and always links
 # std, so its `std` feature only forwards `scirust-compute/std`. One consequence
@@ -36,7 +36,7 @@ scirust-core = { path = "../scirust-core", optional = true }
 scirust-cuda = { path = "../scirust-cuda", optional = true }
 scirust-license = { path = "../scirust-license", optional = true }
 wgpu = { version = "0.20", optional = true }
-flat-attention = { git = "https://github.com/Memorithm/FLAT-ATTENTION", rev = "e665abee4f803d73668c2d08aaa093a155caa482", default-features = false, features = ["wgpu"], optional = true }
+flat-attention = { git = "https://github.com/Memorithm/FLAT-ATTENTION", rev = "ac24e843c38202c3a2e5049935ca62699d786358", default-features = false, features = ["wgpu"], optional = true }
 pollster = { version = "0.3", optional = true }
 bytemuck = { version = "1", optional = true }
 
