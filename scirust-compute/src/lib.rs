@@ -50,7 +50,7 @@ pub use implementation::{
 };
 pub use kernel::{KernelFormat, KernelModule};
 pub use launch::LaunchConfig;
-pub use memory::{Layout, MemorySpace};
+pub use memory::{HostMemoryPolicy, HostPagePolicy, Layout, MemoryPolicyError, MemorySpace};
 pub use profile_encoding::{
     ProfileEncodingError, canonical_hardware_profile_bytes, canonical_topology_profile_bytes,
 };
