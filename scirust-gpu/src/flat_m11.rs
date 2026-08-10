@@ -142,7 +142,8 @@ impl WgpuFlatM11Bridge {
         output: &GpuMatrix,
         config: FlatM11ResidentConfig,
     ) -> BackendResult<()> {
-        self.record_impl(encoder, q, k, v, output, config, false)
+        let pass = self.external_pass(q, k, v, output, config)?;
+        self.record_impl(encoder, pass, false)
     }
 
     /// Record one zero-copy decode-compatible pass where K is already
@@ -158,7 +159,8 @@ impl WgpuFlatM11Bridge {
         output: &GpuMatrix,
         config: FlatM11ResidentConfig,
     ) -> BackendResult<()> {
-        self.record_impl(encoder, q, k, v, output, config, true)
+        let pass = self.external_pass(q, k, v, output, config)?;
+        self.record_impl(encoder, pass, true)
     }
 
     /// Convenience resident forward using raw projected K.
@@ -184,18 +186,16 @@ impl WgpuFlatM11Bridge {
         self.forward_impl(q, k, v, config, true)
     }
 
-    fn record_impl(
+    fn external_pass<'a>(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
-        q: &GpuMatrix,
-        k: &GpuMatrix,
-        v: &GpuMatrix,
-        output: &GpuMatrix,
+        q: &'a GpuMatrix,
+        k: &'a GpuMatrix,
+        v: &'a GpuMatrix,
+        output: &'a GpuMatrix,
         config: FlatM11ResidentConfig,
-        pre_rotated_k: bool,
-    ) -> BackendResult<()> {
+    ) -> BackendResult<ExternalAsymmetricProjectionPass<'a>> {
         self.validate_matrices(q, k, v, output, config)?;
-        let pass = ExternalAsymmetricProjectionPass {
+        Ok(ExternalAsymmetricProjectionPass {
             q: q.buffer(),
             k: k.buffer(),
             v: v.buffer(),
@@ -203,14 +203,19 @@ impl WgpuFlatM11Bridge {
             shape: config.shape(),
             config: config.attention(),
             rotary: config.rotary(),
-        };
-        let result = if pre_rotated_k
-        {
+        })
+    }
+
+    fn record_impl(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        pass: ExternalAsymmetricProjectionPass<'_>,
+        pre_rotated_k: bool,
+    ) -> BackendResult<()> {
+        let result = if pre_rotated_k {
             self.pipeline
                 .encode_pre_rotated_k(self.ctx.device(), encoder, pass)
-        }
-        else
-        {
+        } else {
             self.pipeline.encode(self.ctx.device(), encoder, pass)
         };
         result.map_err(|error| BackendError::Execution(format!("FLAT M11 encode: {error}")))?;
@@ -232,12 +237,9 @@ impl WgpuFlatM11Bridge {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("scirust-flat-m11-resident"),
                 });
-        if pre_rotated_k
-        {
+        if pre_rotated_k {
             self.record_pre_rotated_k(&mut encoder, q, k, v, &output, config)?;
-        }
-        else
-        {
+        } else {
             self.record(&mut encoder, q, k, v, &output, config)?;
         }
         self.ctx.queue().submit(Some(encoder.finish()));
@@ -276,8 +278,7 @@ fn expect_shape(
     rows: usize,
     cols: usize,
 ) -> BackendResult<()> {
-    if matrix.rows() != rows || matrix.cols() != cols
-    {
+    if matrix.rows() != rows || matrix.cols() != cols {
         return Err(BackendError::ShapeMismatch(format!(
             "FLAT M11 {name} is {}x{}, expected {rows}x{cols}",
             matrix.rows(),
@@ -314,14 +315,11 @@ mod tests {
     ) -> Vec<f32> {
         let mut rotated = raw.to_vec();
         let width = kv_heads * head_dim;
-        for position in 0..kv_len
-        {
+        for position in 0..kv_len {
             let absolute_position = position_offset + position;
-            for head in 0..kv_heads
-            {
+            for head in 0..kv_heads {
                 let head_base = position * width + head * head_dim;
-                for pair in 0..head_dim / 2
-                {
+                for pair in 0..head_dim / 2 {
                     let dim = 2 * pair;
                     let exponent = -2.0 * pair as f32 / head_dim as f32;
                     let frequency = theta.powf(exponent);
@@ -339,8 +337,7 @@ mod tests {
 
     fn assert_close(actual: &[f32], expected: &[f32]) {
         assert_eq!(actual.len(), expected.len());
-        for (index, (&actual, &expected)) in actual.iter().zip(expected).enumerate()
-        {
+        for (index, (&actual, &expected)) in actual.iter().zip(expected).enumerate() {
             let tolerance = ATOL + RTOL * expected.abs();
             let error = (actual - expected).abs();
             assert!(
@@ -352,9 +349,7 @@ mod tests {
 
     #[test]
     fn resident_decode_matches_flat_reference_without_host_qkv_roundtrip() {
-        let Ok(bridge) = WgpuFlatM11Bridge::new()
-        else
-        {
+        let Ok(bridge) = WgpuFlatM11Bridge::new() else {
             eprintln!("wgpu: no adapter, skipping FLAT M11 resident bridge test");
             return;
         };
@@ -396,9 +391,7 @@ mod tests {
 
     #[test]
     fn resident_pre_rotated_k_decode_matches_raw_k_reference() {
-        let Ok(bridge) = WgpuFlatM11Bridge::new()
-        else
-        {
+        let Ok(bridge) = WgpuFlatM11Bridge::new() else {
             eprintln!("wgpu: no adapter, skipping FLAT M15 resident bridge test");
             return;
         };
@@ -431,10 +424,9 @@ mod tests {
         let q_gpu = bridge
             .context()
             .upload(&q, 1, config.q_heads * config.head_dim);
-        let k_gpu =
-            bridge
-                .context()
-                .upload(&rotated_k, config.kv_len, config.kv_heads * config.head_dim);
+        let k_gpu = bridge
+            .context()
+            .upload(&rotated_k, config.kv_len, config.kv_heads * config.head_dim);
         let v_gpu = bridge
             .context()
             .upload(&v, config.kv_len, config.kv_heads * config.head_dim);
@@ -457,9 +449,7 @@ mod tests {
 
     #[test]
     fn resident_bridge_rejects_logically_short_k_even_with_valid_gpu_buffer() {
-        let Ok(bridge) = WgpuFlatM11Bridge::new()
-        else
-        {
+        let Ok(bridge) = WgpuFlatM11Bridge::new() else {
             eprintln!("wgpu: no adapter, skipping FLAT M11 shape test");
             return;
         };
