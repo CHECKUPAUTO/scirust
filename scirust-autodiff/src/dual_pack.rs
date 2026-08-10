@@ -137,7 +137,10 @@ impl<T: DualPackScalar, const W: usize> DualPack<T, W> {
     /// Panics when `lane >= W`.
     #[inline]
     pub fn variable(value: T, lane: usize) -> Self {
-        assert!(lane < W, "DualPack variable lane {lane} is outside width {W}");
+        assert!(
+            lane < W,
+            "DualPack variable lane {lane} is outside width {W}"
+        );
         let mut tangent = [T::zero(); W];
         tangent[lane] = T::one();
         Self { value, tangent }
@@ -163,9 +166,12 @@ impl<T: DualPackScalar, const W: usize> DualPack<T, W> {
         let mut tangent = [T::zero(); W];
         for (out, seed) in tangent.iter_mut().zip(self.tangent)
         {
-            *out = if seed == T::zero() {
+            *out = if seed == T::zero()
+            {
                 T::zero()
-            } else {
+            }
+            else
+            {
                 local_derivative * seed
             };
         }
@@ -277,14 +283,20 @@ impl<T: DualPackScalar, const W: usize> Div for DualPack<T, W> {
         {
             let left_seed = self.tangent[index];
             let right_seed = rhs.tangent[index];
-            let left = if left_seed == T::zero() {
+            let left = if left_seed == T::zero()
+            {
                 T::zero()
-            } else {
+            }
+            else
+            {
                 (T::one() / rhs.value) * left_seed
             };
-            let right = if right_seed == T::zero() {
+            let right = if right_seed == T::zero()
+            {
                 T::zero()
-            } else {
+            }
+            else
+            {
                 (self.value / denominator) * right_seed
             };
             *out = left - right;
