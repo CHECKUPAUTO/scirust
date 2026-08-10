@@ -13,6 +13,7 @@ use std::sync::Arc;
 #[derive(Debug)]
 pub enum CudaUnifiedError {
     Driver(DriverError),
+    RuntimeUnavailable,
     ShapeOverflow,
     TangentLaneOutOfBounds { lane: usize, width: usize },
 }
@@ -22,8 +23,10 @@ impl core::fmt::Display for CudaUnifiedError {
         match self
         {
             Self::Driver(error) => write!(f, "CUDA unified-memory error: {error}"),
+            Self::RuntimeUnavailable => write!(f, "CUDA driver runtime is unavailable"),
             Self::ShapeOverflow => write!(f, "CUDA unified tensor shape overflows usize"),
-            Self::TangentLaneOutOfBounds { lane, width } => {
+            Self::TangentLaneOutOfBounds { lane, width } =>
+            {
                 write!(f, "tangent lane {lane} is outside width {width}")
             },
         }
@@ -52,8 +55,14 @@ pub struct CudaUnifiedF32Buffer {
 
 impl CudaUnifiedF32Buffer {
     /// Allocate managed memory on `device_ordinal` and initialize it to zero.
+    ///
+    /// cudarc's dynamic CUDA loader panics when the driver shared library is not
+    /// installed. CUDA is optional for SciRust's generic builds, so this public
+    /// wrapper translates that loader panic into a typed error instead of letting
+    /// a no-runtime process unwind out of the API.
     pub fn new(device_ordinal: usize, len: usize) -> Result<Self, CudaUnifiedError> {
-        let context = CudaContext::new(device_ordinal)?;
+        let context = std::panic::catch_unwind(|| CudaContext::new(device_ordinal))
+            .map_err(|_| CudaUnifiedError::RuntimeUnavailable)??;
         let allocation_len = len.max(1);
 
         // SAFETY: cudarc marks alloc_unified<T> unsafe because arbitrary T may
@@ -119,17 +128,11 @@ pub struct CudaUnifiedDualMatrixSoA<const W: usize> {
 }
 
 impl<const W: usize> CudaUnifiedDualMatrixSoA<W> {
-    pub fn new(
-        device_ordinal: usize,
-        rows: usize,
-        cols: usize,
-    ) -> Result<Self, CudaUnifiedError> {
+    pub fn new(device_ordinal: usize, rows: usize, cols: usize) -> Result<Self, CudaUnifiedError> {
         let len = rows
             .checked_mul(cols)
             .ok_or(CudaUnifiedError::ShapeOverflow)?;
-        let tangent_len = len
-            .checked_mul(W)
-            .ok_or(CudaUnifiedError::ShapeOverflow)?;
+        let tangent_len = len.checked_mul(W).ok_or(CudaUnifiedError::ShapeOverflow)?;
         Ok(Self {
             rows,
             cols,
@@ -216,7 +219,9 @@ mod tests {
 
     #[test]
     fn managed_memory_round_trip_when_cuda_is_available() {
-        let Ok(mut matrix) = CudaUnifiedDualMatrixSoA::<2>::new(0, 2, 3) else {
+        let Ok(mut matrix) = CudaUnifiedDualMatrixSoA::<2>::new(0, 2, 3)
+        else
+        {
             // CUDA is optional in generic CI. Compilation of this module is the
             // required gate; device semantics are exercised when hardware exists.
             return;
@@ -231,7 +236,9 @@ mod tests {
 
     #[test]
     fn tangent_lane_bounds_are_explicit_when_cuda_is_available() {
-        let Ok(matrix) = CudaUnifiedDualMatrixSoA::<2>::new(0, 1, 1) else {
+        let Ok(matrix) = CudaUnifiedDualMatrixSoA::<2>::new(0, 1, 1)
+        else
+        {
             return;
         };
         assert!(matches!(

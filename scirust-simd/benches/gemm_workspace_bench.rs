@@ -42,19 +42,22 @@ fn bench_gemm_workspace(c: &mut Criterion) {
         });
     });
 
-    group.bench_function(BenchmarkId::new("allocation", "reused_workspace"), |bencher| {
-        bencher.iter(|| {
-            sgemm_tiled_with_workspace(
-                1.0,
-                MatrixView::new(black_box(&a), M, K),
-                MatrixView::new(black_box(&b), K, N),
-                0.0,
-                MatrixViewMut::new(black_box(&mut output), M, N),
-                black_box(&mut workspace),
-            );
-            black_box(output[0]);
-        });
-    });
+    group.bench_function(
+        BenchmarkId::new("allocation", "reused_workspace"),
+        |bencher| {
+            bencher.iter(|| {
+                sgemm_tiled_with_workspace(
+                    1.0,
+                    MatrixView::new(black_box(&a), M, K),
+                    MatrixView::new(black_box(&b), K, N),
+                    0.0,
+                    MatrixViewMut::new(black_box(&mut output), M, N),
+                    black_box(&mut workspace),
+                );
+                black_box(output[0]);
+            });
+        },
+    );
 
     group.finish();
 }

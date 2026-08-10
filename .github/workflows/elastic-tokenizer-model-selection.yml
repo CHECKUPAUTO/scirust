@@ -128,6 +128,9 @@ jobs:
           set -euo pipefail
           tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.elastic-selection.XXXXXX")"
           chmod 700 "$tmpdir"
+          mkdir -p "$tmpdir/tmp"
+          chmod 700 "$tmpdir/tmp"
+          echo "TMPDIR=$tmpdir/tmp" >> "$GITHUB_ENV"
           echo "CARGO_TARGET_DIR=$tmpdir/target" >> "$GITHUB_ENV"
           echo "ELASTIC_SELECTION_TMP=$tmpdir" >> "$GITHUB_ENV"
       - name: Install exact MSRV
