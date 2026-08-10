@@ -19,7 +19,8 @@ license-gate = ["std", "dep:scirust-license"]
 wgpu = ["std", "dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:scirust-core"]
 # Optional zero-copy attention bridge. FLAT is pinned to a reviewed, merged
 # caller-owned WGPU commit; enabling this feature also enables SciRust's resident
-# WGPU backend. The pinned revision includes M11 rectangular Q/KV execution.
+# WGPU backend. The pinned revision includes M11 rectangular Q/KV execution and
+# M15 interoperability for resident caches whose K rows are already RoPE-rotated.
 flat-attention = ["wgpu", "dep:flat-attention"]
 
 [dependencies]
@@ -36,7 +37,7 @@ scirust-core = { path = "../scirust-core", optional = true }
 scirust-cuda = { path = "../scirust-cuda", optional = true }
 scirust-license = { path = "../scirust-license", optional = true }
 wgpu = { version = "0.20", optional = true }
-flat-attention = { git = "https://github.com/Memorithm/FLAT-ATTENTION", rev = "ac24e843c38202c3a2e5049935ca62699d786358", default-features = false, features = ["wgpu"], optional = true }
+flat-attention = { git = "https://github.com/Memorithm/FLAT-ATTENTION", rev = "974ebbaf95f54917dba0dc3f394d9ad1a92e8349", default-features = false, features = ["wgpu"], optional = true }
 pollster = { version = "0.3", optional = true }
 bytemuck = { version = "1", optional = true }
 
