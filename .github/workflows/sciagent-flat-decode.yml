@@ -1,0 +1,34 @@
+name: SciAgent FLAT decode contract
+
+on:
+  pull_request:
+    paths:
+      - "scirust-sciagent/**"
+      - "scirust-gpu/**"
+      - ".github/workflows/sciagent-flat-decode.yml"
+  push:
+    branches: [master]
+    paths:
+      - "scirust-sciagent/**"
+      - "scirust-gpu/**"
+      - ".github/workflows/sciagent-flat-decode.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  flat-decode-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.89.0
+        with:
+          components: clippy,rustfmt
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Compile opt-in FLAT decode feature
+        run: cargo check -p scirust-sciagent --locked --features flat-attention
+      - name: Clippy opt-in FLAT decode feature
+        run: cargo clippy -p scirust-sciagent --all-targets --locked --features flat-attention -- -D warnings
+      - name: M15 compile-time contract
+        run: cargo test -p scirust-sciagent --locked --features flat-attention --test flat_feature_contract
