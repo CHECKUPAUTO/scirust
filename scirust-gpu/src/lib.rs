@@ -105,8 +105,6 @@ mod wgpu_reference;
 
 #[cfg(feature = "flat-attention")]
 pub use chain::FlatResidentGqaConfig;
-#[cfg(feature = "flat-attention")]
-pub use flat_m11::{FlatM11ResidentConfig, WgpuFlatM11Bridge};
 #[cfg(feature = "wgpu")]
 pub use chain::{
     BlockCache, BlockGrads, BlockWeights, DoraGrads, GpuChain, GqaBlockGrads, GqaBlockWeights,
@@ -158,6 +156,8 @@ pub use elastic_latent_mha_device::{
 };
 #[cfg(feature = "wgpu")]
 pub use engine::WgpuEngine;
+#[cfg(feature = "flat-attention")]
+pub use flat_m11::{FlatM11ResidentConfig, WgpuFlatM11Bridge};
 #[cfg(feature = "wgpu")]
 pub use fusion::{FusedLayer, FusionNode, plan_fusion};
 #[cfg(feature = "wgpu")]
@@ -512,7 +512,7 @@ mod tests {
             let b = [1.0, 0.0, 0.0, 1.0];
 
             assert_eq!(
-                CudaBackend.gemm_f32(&a, &b, 2, 2, 2),
+                CudaBackend.gemm_f32(&a, &b, 2, 2, 1),
                 Err(BackendError::Unavailable("cuda"))
             );
         }
