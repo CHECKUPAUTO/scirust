@@ -43,6 +43,11 @@ fetch = ["dep:ureq", "dep:sha2"]
 # and backward on the device. Off by default: it pulls `wgpu` (and a device at
 # runtime), which the pure-Rust default build and the aarch64 check must not need.
 gpu = ["dep:scirust-gpu", "scirust-gpu/wgpu"]
+# Opt-in resident decode integration boundary for FLAT M11/M15. This deliberately
+# composes with `gpu` rather than changing the existing resident decode default;
+# callers must opt in explicitly while the current incremental path remains the
+# fallback/oracle during P6 qualification.
+flat-attention = ["gpu", "scirust-gpu/flat-attention"]
 # Route B: bf16 + Tensor-core CUDA plus the CUDA side of the unified compute
 # adapter. `scirust-gpu/cuda` does not enable WGPU; it exposes driver-backed
 # hardware/topology facts for execution attestation while scirust-cuda remains
