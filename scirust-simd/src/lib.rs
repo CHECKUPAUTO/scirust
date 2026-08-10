@@ -144,6 +144,8 @@ pub mod generic {
 // =============================================================================
 
 pub mod ops {
+    #[cfg(target_arch = "aarch64")]
+    use core::arch::aarch64::*;
     #[cfg(target_arch = "x86")]
     use core::arch::x86::*;
     #[cfg(target_arch = "x86_64")]
@@ -242,20 +244,61 @@ pub mod ops {
         }
     }
 
-    /// Dequantize symmetric **INT4** codes to `f32`: `out[i] = codes[i] as f32 *
-    /// scale`. The multiply runs through the SIMD [`mul_f32`] kernel; because it is
-    /// element-wise (no reduction) and an IEEE-754 multiply is identical per lane and
-    /// scalar, the result is **bit-identical across SIMD widths and platforms** — the
-    /// fast path for scirust's KV-cache codec without breaking determinism.
+    /// Dequantize symmetric **INT4** codes to `f32`: `out[i] = codes[i] as f32 * scale`.
+    ///
+    /// The hot path performs no heap allocation: AVX2 converts eight signed codes
+    /// directly to eight `f32` lanes, AArch64 NEON widens and converts eight lanes,
+    /// and other targets use the scalar tail. `i8 -> f32` is exact and each lane
+    /// performs the same IEEE-754 multiplication as the scalar reference, preserving
+    /// the codec's bit-exact determinism contract.
     pub fn dequantize_int4_into(codes: &[i8], scale: f32, out: &mut [f32]) {
         assert_eq!(
             codes.len(),
             out.len(),
             "dequantize_int4_into: length mismatch"
         );
-        let codes_f: Vec<f32> = codes.iter().map(|&c| c as f32).collect();
-        let scale_v = vec![scale; codes.len()];
-        mul_f32(&codes_f, &scale_v, out);
+        let n = codes.len();
+        let mut i = 0;
+
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        unsafe {
+            if std::arch::is_x86_feature_detected!("avx2")
+            {
+                let scale_v = _mm256_set1_ps(scale);
+                while i + 8 <= n
+                {
+                    let packed = _mm_loadl_epi64(codes.as_ptr().add(i) as *const __m128i);
+                    let ints = _mm256_cvtepi8_epi32(packed);
+                    let floats = _mm256_cvtepi32_ps(ints);
+                    let values = _mm256_mul_ps(floats, scale_v);
+                    _mm256_storeu_ps(out.as_mut_ptr().add(i), values);
+                    i += 8;
+                }
+            }
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        unsafe {
+            let scale_v = vdupq_n_f32(scale);
+            while i + 8 <= n
+            {
+                let packed = vld1_s8(codes.as_ptr().add(i));
+                let wide16 = vmovl_s8(packed);
+                let low32 = vmovl_s16(vget_low_s16(wide16));
+                let high32 = vmovl_s16(vget_high_s16(wide16));
+                let low = vmulq_f32(vcvtq_f32_s32(low32), scale_v);
+                let high = vmulq_f32(vcvtq_f32_s32(high32), scale_v);
+                vst1q_f32(out.as_mut_ptr().add(i), low);
+                vst1q_f32(out.as_mut_ptr().add(i + 4), high);
+                i += 8;
+            }
+        }
+
+        while i < n
+        {
+            out[i] = codes[i] as f32 * scale;
+            i += 1;
+        }
     }
 
     /// Element-wise `out[i] = a[i] + b[i]` for `f64`.
@@ -497,6 +540,7 @@ fn has_sve() -> bool {
 pub fn simd_add_one(data: &mut [f64]) {
     #[cfg(target_arch = "x86_64")]
     use core::arch::x86_64::*;
+
     let n = data.len();
     let mut i = 0;
 
