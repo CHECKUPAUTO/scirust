@@ -10,7 +10,9 @@
 //! introducing a second simulator or quantum backward rule.
 
 use super::VariationalCircuitBuilder;
-use crate::autodiff::reverse::{Tensor, Var};
+use crate::autodiff::reverse::{Tape, Tensor, Var};
+use crate::error::{Result as SciRustResult, SciRustError};
+use crate::nn::module::Module;
 use crate::quantum::{Observable, Pauli, PauliTerm, QuantumError, QuantumResult};
 
 /// Explicit limit for the dense Walsh projection used by this exact readout.
@@ -22,6 +24,10 @@ pub const MAX_EXACT_PROBABILITY_QUBITS: usize = 10;
 
 /// Fixed differentiable Walsh projection from complete Pauli-Z moments to
 /// computational-basis probabilities in little-endian state-index order.
+///
+/// The readout is also a stateless [`Module`]: Walsh coefficients and the
+/// identity bias are fixed problem-definition data and therefore contribute no
+/// trainable parameter indices or checkpoint state.
 #[derive(Debug, Clone)]
 pub struct ComputationalBasisReadout {
     num_qubits: usize,
@@ -132,6 +138,32 @@ impl ComputationalBasisReadout {
     }
 }
 
+impl Module for ComputationalBasisReadout {
+    fn forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> Var<'t> {
+        self.try_forward(tape, input)
+            .expect("ComputationalBasisReadout::forward received invalid Z moments")
+    }
+
+    fn try_forward<'t>(&mut self, tape: &'t Tape, input: Var<'t>) -> SciRustResult<Var<'t>> {
+        if !std::ptr::eq(input.tape, tape)
+        {
+            return Err(SciRustError::InvalidConfig(
+                "VQNet computational probability input belongs to a different autodiff tape"
+                    .to_string(),
+            ));
+        }
+        self.apply(input).map_err(|error| {
+            SciRustError::InvalidConfig(format!("VQNet computational probability readout: {error}"))
+        })
+    }
+
+    fn parameter_indices(&self) -> Vec<usize> {
+        Vec::new()
+    }
+
+    fn sync(&mut self, _tape: &Tape) {}
+}
+
 impl VariationalCircuitBuilder {
     /// Appends the complete non-empty Pauli-Z moment basis in ascending binary
     /// mask order for an exact computational-basis probability readout.
@@ -185,9 +217,18 @@ fn complete_z_moment_basis(num_qubits: usize, dimension: usize) -> QuantumResult
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::autodiff::optim::Sgd;
     use crate::autodiff::reverse::{Tape, Tensor};
+    use crate::nn::init::Zeros;
+    use crate::nn::linear::Linear;
+    use crate::nn::loss::MseLoss;
+    use crate::nn::rng::PcgEngine;
+    use crate::nn::sequential::Sequential;
     use crate::quantum::Operation;
-    use crate::vqnet::{RotationAxis, VariationalCircuitBuilder};
+    use crate::vqnet::{
+        EntanglementTopology, EntanglingGate, ParameterInitializer, QuantumModule, RotationAxis,
+        TrainingSession, VariationalCircuitBuilder,
+    };
 
     const TOLERANCE: f32 = 5.0e-5;
 
@@ -215,7 +256,6 @@ mod tests {
         let observables = complete_z_moment_basis(2, 4).unwrap();
         let readout = ComputationalBasisReadout::from_observables(2, &observables).unwrap();
         let tape = Tape::new();
-        // |00> has <Z0>=<Z1>=<Z0Z1>=1.
         let moments = tape.input(Tensor::from_vec(vec![1.0, 1.0, 1.0], 1, 3));
         let probabilities = readout.apply(moments).unwrap();
         let values = tape.value(probabilities.idx()).data;
@@ -234,7 +274,6 @@ mod tests {
         objective.backward();
 
         let gradient = tape.grad(moments.idx()).data[0];
-        // p0=(1+z)/2, p1=(1-z)/2 => d(2p0-3p1)/dz = 2.5.
         assert!((gradient - 2.5).abs() <= TOLERANCE);
     }
 
@@ -263,6 +302,87 @@ mod tests {
         probabilities.matmul(select_one).backward();
         let gradient = tape.grad(features.idx()).data[0];
         assert!((gradient - 0.5 * x.sin()).abs() <= TOLERANCE);
+    }
+
+    #[test]
+    fn probability_readout_is_stateless_module_in_sequential() {
+        let mut builder = VariationalCircuitBuilder::new(1).unwrap();
+        builder.angle_encoding(RotationAxis::Y, &[0]).unwrap();
+        builder
+            .variational_ansatz(
+                1,
+                &[RotationAxis::Y],
+                EntanglementTopology::None,
+                EntanglingGate::Cnot,
+            )
+            .unwrap();
+        builder.measure_computational_basis_moments().unwrap();
+        let circuit = builder.build().unwrap();
+        let probability = ComputationalBasisReadout::from_circuit(&circuit).unwrap();
+        let quantum = QuantumModule::new(circuit, ParameterInitializer::Constant(0.2)).unwrap();
+
+        let mut rng = PcgEngine::new(17);
+        let mut linear = Linear::new(2, 1, &Zeros, &Zeros, &mut rng);
+        linear.weight = Tensor::from_vec(vec![1.0, -1.0], 2, 1);
+        linear.bias = Tensor::from_vec(vec![0.0], 1, 1);
+        let mut model = Sequential::new().add(quantum).add(probability).add(linear);
+
+        let tape = Tape::new();
+        let input = tape.input(Tensor::from_vec(vec![0.3], 1, 1));
+        let output = model.forward(&tape, input);
+        output.sum().backward();
+
+        let indices = model.parameter_indices();
+        assert_eq!(indices.len(), 3);
+        assert!(tape.grad(indices[0]).data[0].abs() > 1.0e-5);
+        let state = model.state_dict();
+        assert!(state.contains_key("0.parameters"));
+        assert!(!state.keys().any(|key| key.starts_with("1.")));
+        assert!(state.contains_key("2.weight"));
+        assert!(state.contains_key("2.bias"));
+    }
+
+    #[test]
+    fn probability_readout_trains_through_existing_training_session() {
+        let mut builder = VariationalCircuitBuilder::new(1).unwrap();
+        builder.angle_encoding(RotationAxis::Y, &[0]).unwrap();
+        builder
+            .variational_ansatz(
+                1,
+                &[RotationAxis::Y],
+                EntanglementTopology::None,
+                EntanglingGate::Cnot,
+            )
+            .unwrap();
+        builder.measure_computational_basis_moments().unwrap();
+        let circuit = builder.build().unwrap();
+        let probability = ComputationalBasisReadout::from_circuit(&circuit).unwrap();
+        let quantum = QuantumModule::new(circuit, ParameterInitializer::Constant(0.2)).unwrap();
+        let mut model = Sequential::new().add(quantum).add(probability);
+        let mut session = TrainingSession::new(Sgd::new(0.05));
+
+        let report = session
+            .train_step(
+                &mut model,
+                &MseLoss::new(),
+                Tensor::from_vec(vec![0.3], 1, 1),
+                Tensor::from_vec(vec![1.0, 0.0], 1, 2),
+            )
+            .unwrap();
+        assert_eq!(report.prediction().shape(), (1, 2));
+        assert_eq!(report.parameter_indices().len(), 1);
+        assert!(report.loss().is_finite());
+    }
+
+    #[test]
+    fn probability_module_rejects_cross_tape_input() {
+        let observables = complete_z_moment_basis(1, 2).unwrap();
+        let mut readout = ComputationalBasisReadout::from_observables(1, &observables).unwrap();
+        let input_tape = Tape::new();
+        let module_tape = Tape::new();
+        let input = input_tape.input(Tensor::from_vec(vec![0.2], 1, 1));
+        let error = Module::try_forward(&mut readout, &module_tape, input).unwrap_err();
+        assert_eq!(error.code(), "E_CONFIG");
     }
 
     #[test]
