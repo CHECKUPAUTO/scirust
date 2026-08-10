@@ -266,14 +266,19 @@ impl ResidentModel {
         );
     }
 
-    fn new_kv_caches(&self) -> Vec<WgpuDenseKvCache> {
+    fn new_kv_caches(&self, capacity: usize) -> Vec<WgpuDenseKvCache> {
+        assert!(
+            capacity <= self.max_seq_len,
+            "resident KV cache capacity {capacity} exceeds model max_seq_len {}",
+            self.max_seq_len
+        );
         let d_model = self.embedding.cols();
         let d_head = d_model / self.n_heads;
         let kv_dim = self.n_kv_heads * d_head;
         (0..self.blocks.len())
             .map(|_| {
                 self.chain
-                    .dense_kv_cache(self.max_seq_len, kv_dim)
+                    .dense_kv_cache(capacity, kv_dim)
                     .expect("allocate resident dense KV cache")
             })
             .collect()
@@ -372,9 +377,11 @@ impl ResidentModel {
             return Vec::new();
         }
         self.assert_capacity(prompt.len(), max_new);
-        // Per-layer fixed-capacity resident caches of roped keys / raw values.
-        let mut kcache = self.new_kv_caches();
-        let mut vcache = self.new_kv_caches();
+        let capacity = prompt.len() + max_new;
+        // Per-layer fixed-capacity resident caches of roped keys / raw values,
+        // sized to this request instead of the model-wide maximum.
+        let mut kcache = self.new_kv_caches(capacity);
+        let mut vcache = self.new_kv_caches(capacity);
 
         // Prefill the whole prompt in one batched forward, seeding the caches and
         // keeping the logits after the last prompt token.
@@ -438,8 +445,9 @@ impl ResidentModel {
             return Vec::new();
         }
         self.assert_capacity(prompt.len(), max_new);
-        let mut kcache = self.new_kv_caches();
-        let mut vcache = self.new_kv_caches();
+        let capacity = prompt.len() + max_new;
+        let mut kcache = self.new_kv_caches(capacity);
+        let mut vcache = self.new_kv_caches(capacity);
         let mut rng = seed_to_state(seed);
 
         // Prefill the whole prompt in one batched forward, seeding the caches.
@@ -499,10 +507,11 @@ impl ResidentModel {
 
         self.assert_capacity(prompt.len(), max_new);
         draft.assert_capacity(prompt.len(), max_new);
-        let mut tkc = self.new_kv_caches();
-        let mut tvc = self.new_kv_caches();
-        let mut dkc = draft.new_kv_caches();
-        let mut dvc = draft.new_kv_caches();
+        let capacity = prompt.len() + max_new;
+        let mut tkc = self.new_kv_caches(capacity);
+        let mut tvc = self.new_kv_caches(capacity);
+        let mut dkc = draft.new_kv_caches(capacity);
+        let mut dvc = draft.new_kv_caches(capacity);
 
         // Prefill both on the prompt; tlast/dlast predict the first undecided
         // position `cur`, and each cache holds `cur` rows.
@@ -510,28 +519,38 @@ impl ResidentModel {
         let mut dlast = draft.prefill(prompt, &mut dkc, &mut dvc);
         let mut toks = prompt.to_vec();
         let mut cur = prompt.len();
-        let target = prompt.len() + max_new;
+        let target = capacity;
 
         while toks.len() < target
         {
-            // 1. Draft proposes k tokens greedily from its current state.
-            let mut drafts = Vec::with_capacity(k);
-            for i in 0..k
+            let remaining = target - toks.len();
+            if remaining == 1
+            {
+                toks.push(argmax(&tlast) as u32);
+                break;
+            }
+
+            // Keep room for the target correction / free-bonus token.
+            let draft_width = k.min(remaining - 1);
+
+            // 1. Draft proposes draft_width tokens greedily from its current state.
+            let mut drafts = Vec::with_capacity(draft_width);
+            for i in 0..draft_width
             {
                 let d = argmax(&dlast) as u32;
                 drafts.push(d);
                 dlast = draft.decode_step(d, cur + i, &mut dkc, &mut dvc);
             }
-            // 2. Target verifies all k in one wide forward. rows[i] predicts cur+i+1.
+            // 2. Target verifies all drafts in one wide forward. rows[i] predicts cur+i+1.
             let rows = self.decode_batch(&drafts, cur, &mut tkc, &mut tvc);
             stats.rounds += 1;
-            stats.drafted += k;
+            stats.drafted += draft_width;
             stats.target_forwards += 1;
 
             // 3. Accept the longest prefix where draft[i] == target's argmax at cur+i.
             let mut accepted = 0usize;
             let mut prev: &[f32] = &tlast; // logits predicting position cur+accepted
-            for i in 0..k
+            for i in 0..draft_width
             {
                 if drafts[i] == argmax(prev) as u32
                 {
@@ -1862,13 +1881,13 @@ mod tests {
         let tokens: Vec<u32> = vec![5, 2, 9, 1, 7]; // m = 5 at positions 0..5
 
         // Batched: one wide forward.
-        let mut kb = rm.new_kv_caches();
-        let mut vb = rm.new_kv_caches();
+        let mut kb = rm.new_kv_caches(tokens.len());
+        let mut vb = rm.new_kv_caches(tokens.len());
         let batched = rm.decode_batch(&tokens, 0, &mut kb, &mut vb);
 
         // Sequential: one decode_step per token.
-        let mut ks = rm.new_kv_caches();
-        let mut vs = rm.new_kv_caches();
+        let mut ks = rm.new_kv_caches(tokens.len());
+        let mut vs = rm.new_kv_caches(tokens.len());
         let seq: Vec<Vec<f32>> = tokens
             .iter()
             .enumerate()
