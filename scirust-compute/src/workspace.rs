@@ -57,16 +57,21 @@ impl WorkspaceSpec {
     /// Combines two independent workspace requirements into one sequential
     /// layout, including the padding required before the second region.
     pub const fn then(self, next: Self) -> Option<Self> {
-        let align = if self.align_bytes > next.align_bytes {
+        let align = if self.align_bytes > next.align_bytes
+        {
             self.align_bytes
-        } else {
+        }
+        else
+        {
             next.align_bytes
         };
-        let second_offset = match align_up(self.size_bytes, next.align_bytes) {
+        let second_offset = match align_up(self.size_bytes, next.align_bytes)
+        {
             Some(offset) => offset,
             None => return None,
         };
-        let size_bytes = match second_offset.checked_add(next.size_bytes) {
+        let size_bytes = match second_offset.checked_add(next.size_bytes)
+        {
             Some(size) => size,
             None => return None,
         };
@@ -94,7 +99,8 @@ pub enum WorkspaceError {
 
 impl fmt::Display for WorkspaceError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
+        match *self
+        {
             Self::TooSmall {
                 required_bytes,
                 provided_bytes,
@@ -128,7 +134,8 @@ impl<'a> KernelWorkspace<'a> {
     /// Validates `bytes` against `spec` and returns a workspace restricted to
     /// the usable prefix required by the kernel.
     pub fn new(bytes: &'a mut [u8], spec: WorkspaceSpec) -> Result<Self, WorkspaceError> {
-        if bytes.len() < spec.size_bytes {
+        if bytes.len() < spec.size_bytes
+        {
             return Err(WorkspaceError::TooSmall {
                 required_bytes: spec.size_bytes,
                 provided_bytes: bytes.len(),
@@ -173,7 +180,8 @@ impl<'a> KernelWorkspace<'a> {
 
 const fn align_up(value: usize, alignment: usize) -> Option<usize> {
     let mask = alignment - 1;
-    match value.checked_add(mask) {
+    match value.checked_add(mask)
+    {
         Some(sum) => Some(sum & !mask),
         None => None,
     }
@@ -221,8 +229,8 @@ mod tests {
     #[test]
     fn empty_workspace_accepts_empty_slice() {
         let mut storage = [];
-        let workspace = KernelWorkspace::new(&mut storage, WorkspaceSpec::empty())
-            .expect("empty workspace");
+        let workspace =
+            KernelWorkspace::new(&mut storage, WorkspaceSpec::empty()).expect("empty workspace");
         assert!(workspace.is_empty());
     }
 }
