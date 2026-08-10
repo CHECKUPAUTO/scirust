@@ -32,6 +32,10 @@ asm-probe = ["portable-simd"]
 criterion = "0.5"
 
 [[bench]]
+name = "gemm_workspace_bench"
+harness = false
+
+[[bench]]
 name = "hypercomplex_bench"
 harness = false
 required-features = ["portable-simd"]
