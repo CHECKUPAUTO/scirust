@@ -115,17 +115,16 @@ impl WgpuFlatM11Bridge {
     /// Allocate the combined M11 O|LSE backing buffer while exposing only O as
     /// a logical `GpuMatrix`.  The hidden trailing LSE region remains available
     /// to FLAT in the same backing allocation.
-    pub fn create_output(
-        &self,
-        config: FlatM11ResidentConfig,
-    ) -> BackendResult<GpuMatrix> {
+    pub fn create_output(&self, config: FlatM11ResidentConfig) -> BackendResult<GpuMatrix> {
         let shape = config.shape();
         let rows = checked_mul(config.batch, config.query_len, "M11 batch*query_len")?;
         let cols = checked_mul(config.q_heads, config.head_dim, "M11 q_heads*head_dim")?;
         let output = self
             .pipeline
             .create_output_buffer(self.ctx.device(), shape)
-            .map_err(|error| BackendError::Execution(format!("FLAT M11 output allocation: {error}")))?;
+            .map_err(|error| {
+                BackendError::Execution(format!("FLAT M11 output allocation: {error}"))
+            })?;
         GpuMatrix::from_external_buffer(output, rows, cols)
     }
 
@@ -212,7 +211,8 @@ fn expect_shape(
     rows: usize,
     cols: usize,
 ) -> BackendResult<()> {
-    if matrix.rows() != rows || matrix.cols() != cols {
+    if matrix.rows() != rows || matrix.cols() != cols
+    {
         return Err(BackendError::ShapeMismatch(format!(
             "FLAT M11 {name} is {}x{}, expected {rows}x{cols}",
             matrix.rows(),
@@ -241,7 +241,8 @@ mod tests {
 
     fn assert_close(actual: &[f32], expected: &[f32]) {
         assert_eq!(actual.len(), expected.len());
-        for (index, (&actual, &expected)) in actual.iter().zip(expected).enumerate() {
+        for (index, (&actual, &expected)) in actual.iter().zip(expected).enumerate()
+        {
             let tolerance = ATOL + RTOL * expected.abs();
             let error = (actual - expected).abs();
             assert!(
@@ -253,7 +254,9 @@ mod tests {
 
     #[test]
     fn resident_decode_matches_flat_reference_without_host_qkv_roundtrip() {
-        let Ok(bridge) = WgpuFlatM11Bridge::new() else {
+        let Ok(bridge) = WgpuFlatM11Bridge::new()
+        else
+        {
             eprintln!("wgpu: no adapter, skipping FLAT M11 resident bridge test");
             return;
         };
@@ -295,7 +298,9 @@ mod tests {
 
     #[test]
     fn resident_bridge_rejects_logically_short_k_even_with_valid_gpu_buffer() {
-        let Ok(bridge) = WgpuFlatM11Bridge::new() else {
+        let Ok(bridge) = WgpuFlatM11Bridge::new()
+        else
+        {
             eprintln!("wgpu: no adapter, skipping FLAT M11 shape test");
             return;
         };
