@@ -99,6 +99,7 @@ members = [
     "scirust-autodiff",
     "scirust-simd",
     "scirust-compute",
+    "elastic-autotuner",
     "scirust-gpu",
     "scirust-cuda",
     "scirust-core",
