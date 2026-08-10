@@ -10,6 +10,7 @@ mod encoding;
 mod module_state;
 mod nn_module;
 mod optimizer_state;
+mod probability;
 mod readout;
 mod trainer;
 
@@ -19,6 +20,7 @@ pub use module_state::{
     ParameterInitializer, QuantumForward, QuantumModule, VariationalParameters,
 };
 pub use optimizer_state::{OptimizerSlot, PersistentParameterOptimizer};
+pub use probability::{ComputationalBasisReadout, MAX_EXACT_PROBABILITY_QUBITS};
 pub use readout::{Hamiltonian, HamiltonianReadout, HamiltonianTerm};
 pub use trainer::{TrainStepReport, TrainingSession};
 
