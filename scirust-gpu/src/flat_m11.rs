@@ -142,7 +142,8 @@ impl WgpuFlatM11Bridge {
         output: &GpuMatrix,
         config: FlatM11ResidentConfig,
     ) -> BackendResult<()> {
-        self.record_impl(encoder, q, k, v, output, config, false)
+        let pass = self.external_pass(q, k, v, output, config)?;
+        self.record_impl(encoder, pass, false)
     }
 
     /// Record one zero-copy decode-compatible pass where K is already
@@ -158,7 +159,8 @@ impl WgpuFlatM11Bridge {
         output: &GpuMatrix,
         config: FlatM11ResidentConfig,
     ) -> BackendResult<()> {
-        self.record_impl(encoder, q, k, v, output, config, true)
+        let pass = self.external_pass(q, k, v, output, config)?;
+        self.record_impl(encoder, pass, true)
     }
 
     /// Convenience resident forward using raw projected K.
@@ -184,18 +186,16 @@ impl WgpuFlatM11Bridge {
         self.forward_impl(q, k, v, config, true)
     }
 
-    fn record_impl(
+    fn external_pass<'a>(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
-        q: &GpuMatrix,
-        k: &GpuMatrix,
-        v: &GpuMatrix,
-        output: &GpuMatrix,
+        q: &'a GpuMatrix,
+        k: &'a GpuMatrix,
+        v: &'a GpuMatrix,
+        output: &'a GpuMatrix,
         config: FlatM11ResidentConfig,
-        pre_rotated_k: bool,
-    ) -> BackendResult<()> {
+    ) -> BackendResult<ExternalAsymmetricProjectionPass<'a>> {
         self.validate_matrices(q, k, v, output, config)?;
-        let pass = ExternalAsymmetricProjectionPass {
+        Ok(ExternalAsymmetricProjectionPass {
             q: q.buffer(),
             k: k.buffer(),
             v: v.buffer(),
@@ -203,7 +203,15 @@ impl WgpuFlatM11Bridge {
             shape: config.shape(),
             config: config.attention(),
             rotary: config.rotary(),
-        };
+        })
+    }
+
+    fn record_impl(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        pass: ExternalAsymmetricProjectionPass<'_>,
+        pre_rotated_k: bool,
+    ) -> BackendResult<()> {
         let result = if pre_rotated_k
         {
             self.pipeline
