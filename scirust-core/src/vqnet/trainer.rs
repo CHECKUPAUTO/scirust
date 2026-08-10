@@ -41,6 +41,41 @@ impl TrainStepReport {
     }
 }
 
+/// Deterministic summary of one ordered epoch.
+#[derive(Debug, Clone)]
+pub struct EpochReport {
+    steps: usize,
+    mean_loss: f32,
+    last_loss: f32,
+    last_prediction: Tensor,
+}
+
+impl EpochReport {
+    /// Number of successfully completed batches in this epoch.
+    #[must_use]
+    pub const fn steps(&self) -> usize {
+        self.steps
+    }
+
+    /// Arithmetic mean of batch losses in exact iterator order.
+    #[must_use]
+    pub const fn mean_loss(&self) -> f32 {
+        self.mean_loss
+    }
+
+    /// Loss of the final successfully completed batch.
+    #[must_use]
+    pub const fn last_loss(&self) -> f32 {
+        self.last_loss
+    }
+
+    /// Prediction from the final successfully completed batch.
+    #[must_use]
+    pub const fn last_prediction(&self) -> &Tensor {
+        &self.last_prediction
+    }
+}
+
 /// Stateful training session wrapping one existing SciRust tape optimizer.
 ///
 /// The first successful step records the model's exact ordered
@@ -189,6 +224,66 @@ where
         })
     }
 
+    /// Trains over an ordered iterator of already-batched `(input, target)`
+    /// tensors, creating one fresh tape per item via [`Self::train_step`].
+    ///
+    /// Epoch order is exactly iterator order; this helper performs no implicit
+    /// shuffling, batching, parallel reduction, or data copying beyond ownership
+    /// of each supplied tensor. An empty epoch is rejected. If a later batch
+    /// fails, earlier successful batches remain committed; the epoch is
+    /// intentionally sequential rather than transactional.
+    pub fn train_epoch<M, L, I>(
+        &mut self,
+        model: &mut M,
+        loss: &L,
+        batches: I,
+    ) -> Result<EpochReport>
+    where
+        M: Module,
+        L: Loss,
+        I: IntoIterator<Item = (Tensor, Tensor)>,
+    {
+        let mut steps = 0usize;
+        let mut loss_sum = 0.0f64;
+        let mut last_report: Option<TrainStepReport> = None;
+
+        for (input, target) in batches
+        {
+            let report = self.train_step(model, loss, input, target)?;
+            steps = steps.checked_add(1).ok_or_else(|| {
+                SciRustError::InvalidConfig("VQNet epoch batch counter overflow".to_string())
+            })?;
+            loss_sum += f64::from(report.loss());
+            if !loss_sum.is_finite()
+            {
+                return Err(SciRustError::InvalidConfig(
+                    "VQNet epoch loss accumulation must be finite".to_string(),
+                ));
+            }
+            last_report = Some(report);
+        }
+
+        let last_report = last_report.ok_or_else(|| {
+            SciRustError::InvalidConfig(
+                "VQNet training epoch requires at least one batch".to_string(),
+            )
+        })?;
+        let mean_loss = (loss_sum / steps as f64) as f32;
+        if !mean_loss.is_finite()
+        {
+            return Err(SciRustError::InvalidConfig(
+                "VQNet epoch mean loss must be finite".to_string(),
+            ));
+        }
+
+        Ok(EpochReport {
+            steps,
+            mean_loss,
+            last_loss: last_report.loss,
+            last_prediction: last_report.prediction,
+        })
+    }
+
     fn validate_parameter_layout(&self, actual: &[usize]) -> Result<()> {
         if let Some(expected) = &self.parameter_layout
             && expected.as_slice() != actual
@@ -269,6 +364,72 @@ mod tests {
         assert!(first.loss().is_finite());
         assert!(second.loss().is_finite());
         assert_ne!(model.parameters().values()[0], 0.2);
+    }
+
+    #[test]
+    fn ordered_epoch_runs_one_fresh_tape_per_batch() {
+        let mut model = one_qubit_module();
+        let mut session = TrainingSession::new(Sgd::new(0.03));
+        let batches = vec![
+            (
+                Tensor::from_vec(vec![0.1], 1, 1),
+                Tensor::from_vec(vec![0.0], 1, 1),
+            ),
+            (
+                Tensor::from_vec(vec![0.2], 1, 1),
+                Tensor::from_vec(vec![0.1], 1, 1),
+            ),
+            (
+                Tensor::from_vec(vec![-0.3], 1, 1),
+                Tensor::from_vec(vec![-0.1], 1, 1),
+            ),
+        ];
+
+        let report = session
+            .train_epoch(&mut model, &MseLoss::new(), batches)
+            .unwrap();
+        assert_eq!(report.steps(), 3);
+        assert_eq!(session.completed_steps(), 3);
+        assert!(report.mean_loss().is_finite());
+        assert!(report.last_loss().is_finite());
+        assert_eq!(report.last_prediction().shape(), (1, 1));
+        assert!(session.parameter_layout().is_some());
+    }
+
+    #[test]
+    fn empty_epoch_is_rejected_without_advancing_session() {
+        let mut model = one_qubit_module();
+        let mut session = TrainingSession::new(Sgd::new(0.03));
+        let error = session
+            .train_epoch(&mut model, &MseLoss::new(), Vec::<(Tensor, Tensor)>::new())
+            .unwrap_err();
+        assert!(error.to_string().contains("at least one batch"));
+        assert_eq!(session.completed_steps(), 0);
+        assert_eq!(session.parameter_layout(), None);
+    }
+
+    #[test]
+    fn epoch_stops_on_first_failure_after_prior_batches_remain_committed() {
+        let mut model = one_qubit_module();
+        let mut session = TrainingSession::new(Sgd::new(0.03));
+        let before = model.parameters().values().to_vec();
+        let batches = vec![
+            (
+                Tensor::from_vec(vec![0.1], 1, 1),
+                Tensor::from_vec(vec![0.0], 1, 1),
+            ),
+            (
+                Tensor::from_vec(vec![f32::NAN], 1, 1),
+                Tensor::from_vec(vec![0.0], 1, 1),
+            ),
+        ];
+
+        let error = session
+            .train_epoch(&mut model, &MseLoss::new(), batches)
+            .unwrap_err();
+        assert!(error.to_string().contains("training input"));
+        assert_eq!(session.completed_steps(), 1);
+        assert_ne!(model.parameters().values(), before.as_slice());
     }
 
     struct DriftingModule {
