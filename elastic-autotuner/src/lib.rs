@@ -412,7 +412,7 @@ impl std::error::Error for ElasticEvidenceError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scirust_compute::{DeviceId, DeviceKind, HardwareCapabilities};
+    use scirust_compute::{DeviceCapabilities, HardwareCapabilities};
 
     struct Space;
     impl ElasticSearchSpace for Space {
@@ -467,7 +467,9 @@ mod tests {
     }
 
     fn profile() -> ElasticHardwareProfile {
-        let hardware = HardwareCapabilities::unknown(DeviceId::new(DeviceKind::Cpu, 0));
+        let hardware = HardwareCapabilities::from_device_capabilities(
+            &DeviceCapabilities::reference_cpu(),
+        );
         ElasticHardwareProfile::from_capabilities(&hardware).unwrap()
     }
 
@@ -500,7 +502,14 @@ mod tests {
         let tuner = ElasticAutoTuner::new(ElasticConfig::default());
         let hardware = profile();
         let problem = ElasticProblemClass::new("attention", vec![2, 4, 8]);
-        let candidate = ElasticCandidate::new("flat", vec![7], [], true, 0).unwrap();
+        let candidate = ElasticCandidate::new(
+            "flat",
+            vec![7],
+            std::iter::empty::<ElasticParameter>(),
+            true,
+            0,
+        )
+        .unwrap();
         let measurement = ElasticMeasurement {
             sample_count: 10,
             median_ns: 100,
@@ -538,7 +547,14 @@ mod tests {
         let tuner = ElasticAutoTuner::new(ElasticConfig::default());
         let hardware = profile();
         let problem = ElasticProblemClass::new("gemm", vec![9]);
-        let candidate = ElasticCandidate::new("gemm", vec![1], [], true, 0).unwrap();
+        let candidate = ElasticCandidate::new(
+            "gemm",
+            vec![1],
+            std::iter::empty::<ElasticParameter>(),
+            true,
+            0,
+        )
+        .unwrap();
         let plan = tuner
             .plan_from_evidence(
                 hardware.clone(),
