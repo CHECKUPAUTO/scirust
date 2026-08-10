@@ -204,10 +204,13 @@ impl WgpuFlatM11Bridge {
             config: config.attention(),
             rotary: config.rotary(),
         };
-        let result = if pre_rotated_k {
+        let result = if pre_rotated_k
+        {
             self.pipeline
                 .encode_pre_rotated_k(self.ctx.device(), encoder, pass)
-        } else {
+        }
+        else
+        {
             self.pipeline.encode(self.ctx.device(), encoder, pass)
         };
         result.map_err(|error| BackendError::Execution(format!("FLAT M11 encode: {error}")))?;
@@ -229,9 +232,12 @@ impl WgpuFlatM11Bridge {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("scirust-flat-m11-resident"),
                 });
-        if pre_rotated_k {
+        if pre_rotated_k
+        {
             self.record_pre_rotated_k(&mut encoder, q, k, v, &output, config)?;
-        } else {
+        }
+        else
+        {
             self.record(&mut encoder, q, k, v, &output, config)?;
         }
         self.ctx.queue().submit(Some(encoder.finish()));
@@ -422,10 +428,13 @@ mod tests {
             config.theta,
             config.kv_rope_position_offset,
         );
-        let q_gpu = bridge.context().upload(&q, 1, config.q_heads * config.head_dim);
-        let k_gpu = bridge
+        let q_gpu = bridge
             .context()
-            .upload(&rotated_k, config.kv_len, config.kv_heads * config.head_dim);
+            .upload(&q, 1, config.q_heads * config.head_dim);
+        let k_gpu =
+            bridge
+                .context()
+                .upload(&rotated_k, config.kv_len, config.kv_heads * config.head_dim);
         let v_gpu = bridge
             .context()
             .upload(&v, config.kv_len, config.kv_heads * config.head_dim);
