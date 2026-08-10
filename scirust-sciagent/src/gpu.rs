@@ -26,6 +26,8 @@
 
 use scirust_core::autodiff::reverse::{Tape, Tensor};
 use scirust_core::autodiff::scheduler::LrSchedule;
+#[cfg(feature = "flat-attention")]
+use scirust_gpu::{FlatM11ResidentConfig, WgpuFlatM11Bridge};
 use scirust_gpu::{GpuChain, GpuMatrix, GqaBlockWeights, GqaModelWeights, WgpuDenseKvCache};
 
 use crate::config::SciAgentConfig;
@@ -161,6 +163,8 @@ struct OptState {
 /// **Tied-embedding models only** (the resident path uses `E` as the LM head).
 pub struct ResidentModel {
     chain: GpuChain,
+    #[cfg(feature = "flat-attention")]
+    flat_decode: WgpuFlatM11Bridge,
     embedding: GpuMatrix,
     final_norm: GpuMatrix,
     blocks: Vec<ResidentBlock>,
@@ -190,6 +194,8 @@ impl ResidentModel {
             "ResidentModel requires a tied-embedding model (the resident path uses E as the LM head)"
         );
         let chain = GpuChain::new()?;
+        #[cfg(feature = "flat-attention")]
+        let flat_decode = chain.flat_m11_bridge().ok()?;
         let up = |t: &Tensor| chain.upload(&t.data, t.rows, t.cols);
         let zeros =
             |m: &GpuMatrix| chain.upload(&vec![0.0f32; m.rows() * m.cols()], m.rows(), m.cols());
@@ -230,6 +236,8 @@ impl ResidentModel {
         let v_blocks = blocks.iter().map(&opt_of).collect();
         Some(Self {
             chain,
+            #[cfg(feature = "flat-attention")]
+            flat_decode,
             embedding,
             final_norm,
             blocks,
@@ -688,12 +696,9 @@ impl ResidentModel {
             let q = chain.matmul(&xn, &b.wq).expect("wq"); // [1 × d_model]
             let k = chain.matmul(&xn, &b.wk).expect("wk"); // [1 × kv_dim]
             let v = chain.matmul(&xn, &b.wv).expect("wv"); // [1 × kv_dim]
-            // RoPE the single new row at its absolute position (seq_len 1, offset
-            // pos ⇒ position = pos). Frequency indices restart in every head,
-            // exactly as the corrected `gqa_attention` path.
-            let qr = chain
-                .rope_heads(&q, self.n_heads, 1, pos, self.theta)
-                .expect("head-local rope q");
+            // K is stored in the resident cache already RoPE-rotated. In the
+            // opt-in FLAT M15 route Q remains raw here: FLAT fuses Q RoPE and
+            // explicitly consumes K as pre-rotated, preventing double rotation.
             let kr = chain
                 .rope_heads(&k, self.n_kv_heads, 1, pos, self.theta)
                 .expect("head-local rope k");
@@ -707,8 +712,38 @@ impl ResidentModel {
                 .expect("decode append V");
             let kmat = kcache[l].active_matrix();
             let vmat = vcache[l].active_matrix();
-            // Single query attends over all cached keys/values (all ≤ pos ⇒ no mask).
-            let ctx = self.incr_attention(&qr, &kmat, &vmat, dh);
+
+            #[cfg(feature = "flat-attention")]
+            let ctx = self
+                .flat_decode
+                .forward_pre_rotated_k(
+                    &q,
+                    &kmat,
+                    &vmat,
+                    FlatM11ResidentConfig {
+                        batch: 1,
+                        q_heads: self.n_heads,
+                        kv_heads: self.n_kv_heads,
+                        query_len: 1,
+                        kv_len: kmat.rows(),
+                        head_dim: dh,
+                        causal: true,
+                        softmax_scale: None,
+                        query_position_offset: pos,
+                        theta: self.theta,
+                        query_rope_position_offset: pos,
+                        kv_rope_position_offset: 0,
+                    },
+                )
+                .expect("FLAT M15 pre-rotated-K decode");
+
+            #[cfg(not(feature = "flat-attention"))]
+            let ctx = {
+                let qr = chain
+                    .rope_heads(&q, self.n_heads, 1, pos, self.theta)
+                    .expect("head-local rope q");
+                self.incr_attention(&qr, &kmat, &vmat, dh)
+            };
             let attn_out = chain.matmul(&ctx, &b.wo).expect("wo");
             x = chain.add(&x, &attn_out).expect("attn residual");
             // MLP sub-block (pre-norm + residual).

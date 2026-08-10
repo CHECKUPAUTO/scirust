@@ -24,6 +24,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.89.0
         with:
           components: clippy,rustfmt
+      - name: Install Mesa lavapipe
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers
       - name: Format
         run: cargo fmt --all -- --check
       - name: Compile opt-in FLAT decode feature
@@ -32,3 +36,7 @@ jobs:
         run: cargo clippy -p scirust-sciagent --all-targets --locked --features flat-attention -- -D warnings
       - name: M15 compile-time contract
         run: cargo test -p scirust-sciagent --locked --features flat-attention --test flat_feature_contract
+      - name: M15 runtime parity on lavapipe
+        env:
+          WGPU_BACKEND: vulkan
+        run: cargo test -p scirust-sciagent --locked --features flat-attention --test flat_runtime_decode -- --nocapture
