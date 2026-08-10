@@ -1,15 +1,17 @@
-//! Resident SciRust ↔ FLAT M11 bridge.
+//! Resident SciRust ↔ FLAT M11/M15 bridge.
 //!
-//! This module is intentionally separate from [`crate::GpuChain`] while M11 is
-//! being qualified for SciAgent decode.  It proves that SciRust-owned resident
+//! This module is intentionally separate from [`crate::GpuChain`] while FLAT is
+//! being qualified for SciAgent decode. It proves that SciRust-owned resident
 //! `GpuMatrix` buffers can be consumed directly by FLAT's rectangular
 //! projection-layout pipeline and that the resulting O buffer remains resident.
 //!
-//! The bridge never maps or copies Q/K/V through the host.  [`record`] also
-//! leaves command submission and synchronization entirely to the caller, so it
-//! can be inserted into an existing SciRust command stream.
+//! The bridge never maps or copies Q/K/V through the host. [`record`] and
+//! [`record_pre_rotated_k`] also leave command submission and synchronization
+//! entirely to the caller, so they can be inserted into an existing SciRust
+//! command stream.
 //!
 //! [`record`]: WgpuFlatM11Bridge::record
+//! [`record_pre_rotated_k`]: WgpuFlatM11Bridge::record_pre_rotated_k
 
 use crate::wgpu_backend::{GpuMatrix, WgpuContext};
 use crate::{BackendError, BackendResult};
@@ -68,7 +70,7 @@ impl FlatM11ResidentConfig {
     }
 }
 
-/// Reusable M11 pipeline bound to one SciRust WGPU context.
+/// Reusable M11/M15 pipeline bound to one SciRust WGPU context.
 ///
 /// `WgpuContext` is a cheap clone over the same underlying device, so
 /// [`from_context`](Self::from_context) can share a device with other resident
@@ -87,12 +89,12 @@ impl core::fmt::Debug for WgpuFlatM11Bridge {
 }
 
 impl WgpuFlatM11Bridge {
-    /// Acquire a fresh SciRust WGPU context and compile the M11 pipeline.
+    /// Acquire a fresh SciRust WGPU context and compile the FLAT pipeline.
     pub fn new() -> BackendResult<Self> {
         Self::from_context(WgpuContext::new()?)
     }
 
-    /// Compile M11 on an existing SciRust context.  The context clone shares the
+    /// Compile FLAT on an existing SciRust context. The context clone shares the
     /// same device/queue and therefore the same resident-buffer ownership domain.
     pub fn from_context(ctx: WgpuContext) -> BackendResult<Self> {
         let pipeline = ExternalAsymmetricProjectionRotaryGroupedPipeline::new(ctx.device())
@@ -112,8 +114,8 @@ impl WgpuFlatM11Bridge {
         &self.ctx
     }
 
-    /// Allocate the combined M11 O|LSE backing buffer while exposing only O as
-    /// a logical `GpuMatrix`.  The hidden trailing LSE region remains available
+    /// Allocate the combined FLAT O|LSE backing buffer while exposing only O as
+    /// a logical `GpuMatrix`. The hidden trailing LSE region remains available
     /// to FLAT in the same backing allocation.
     pub fn create_output(&self, config: FlatM11ResidentConfig) -> BackendResult<GpuMatrix> {
         let shape = config.shape();
@@ -128,8 +130,9 @@ impl WgpuFlatM11Bridge {
         GpuMatrix::from_external_buffer(output, rows, cols)
     }
 
-    /// Record one zero-copy rectangular attention pass into a caller-owned
-    /// command encoder.  This method does not submit, poll, map or synchronize.
+    /// Record one zero-copy rectangular attention pass with raw projected K.
+    /// Q and K RoPE are both fused by FLAT. This method does not submit, poll,
+    /// map or synchronize.
     pub fn record(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -139,33 +142,88 @@ impl WgpuFlatM11Bridge {
         output: &GpuMatrix,
         config: FlatM11ResidentConfig,
     ) -> BackendResult<()> {
-        self.validate_matrices(q, k, v, output, config)?;
-        self.pipeline
-            .encode(
-                self.ctx.device(),
-                encoder,
-                ExternalAsymmetricProjectionPass {
-                    q: q.buffer(),
-                    k: k.buffer(),
-                    v: v.buffer(),
-                    out_and_lse: output.buffer(),
-                    shape: config.shape(),
-                    config: config.attention(),
-                    rotary: config.rotary(),
-                },
-            )
-            .map_err(|error| BackendError::Execution(format!("FLAT M11 encode: {error}")))?;
-        Ok(())
+        self.record_impl(encoder, q, k, v, output, config, false)
     }
 
-    /// Convenience resident forward: allocate O|LSE, record one pass and submit
-    /// it.  Q/K/V never leave VRAM and O is returned as a resident `GpuMatrix`.
+    /// Record one zero-copy decode-compatible pass where K is already
+    /// RoPE-rotated by the resident cache owner. Q RoPE remains fused in FLAT;
+    /// K is consumed as-is and V remains raw. No submission, polling, mapping or
+    /// synchronization occurs.
+    pub fn record_pre_rotated_k(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        q: &GpuMatrix,
+        k: &GpuMatrix,
+        v: &GpuMatrix,
+        output: &GpuMatrix,
+        config: FlatM11ResidentConfig,
+    ) -> BackendResult<()> {
+        self.record_impl(encoder, q, k, v, output, config, true)
+    }
+
+    /// Convenience resident forward using raw projected K.
     pub fn forward(
         &self,
         q: &GpuMatrix,
         k: &GpuMatrix,
         v: &GpuMatrix,
         config: FlatM11ResidentConfig,
+    ) -> BackendResult<GpuMatrix> {
+        self.forward_impl(q, k, v, config, false)
+    }
+
+    /// Convenience resident forward for a cache whose K rows are already
+    /// RoPE-rotated. Q/K/V never leave VRAM and O remains resident.
+    pub fn forward_pre_rotated_k(
+        &self,
+        q: &GpuMatrix,
+        k: &GpuMatrix,
+        v: &GpuMatrix,
+        config: FlatM11ResidentConfig,
+    ) -> BackendResult<GpuMatrix> {
+        self.forward_impl(q, k, v, config, true)
+    }
+
+    fn record_impl(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        q: &GpuMatrix,
+        k: &GpuMatrix,
+        v: &GpuMatrix,
+        output: &GpuMatrix,
+        config: FlatM11ResidentConfig,
+        pre_rotated_k: bool,
+    ) -> BackendResult<()> {
+        self.validate_matrices(q, k, v, output, config)?;
+        let pass = ExternalAsymmetricProjectionPass {
+            q: q.buffer(),
+            k: k.buffer(),
+            v: v.buffer(),
+            out_and_lse: output.buffer(),
+            shape: config.shape(),
+            config: config.attention(),
+            rotary: config.rotary(),
+        };
+        let result = if pre_rotated_k
+        {
+            self.pipeline
+                .encode_pre_rotated_k(self.ctx.device(), encoder, pass)
+        }
+        else
+        {
+            self.pipeline.encode(self.ctx.device(), encoder, pass)
+        };
+        result.map_err(|error| BackendError::Execution(format!("FLAT M11 encode: {error}")))?;
+        Ok(())
+    }
+
+    fn forward_impl(
+        &self,
+        q: &GpuMatrix,
+        k: &GpuMatrix,
+        v: &GpuMatrix,
+        config: FlatM11ResidentConfig,
+        pre_rotated_k: bool,
     ) -> BackendResult<GpuMatrix> {
         let output = self.create_output(config)?;
         let mut encoder =
@@ -174,7 +232,14 @@ impl WgpuFlatM11Bridge {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("scirust-flat-m11-resident"),
                 });
-        self.record(&mut encoder, q, k, v, &output, config)?;
+        if pre_rotated_k
+        {
+            self.record_pre_rotated_k(&mut encoder, q, k, v, &output, config)?;
+        }
+        else
+        {
+            self.record(&mut encoder, q, k, v, &output, config)?;
+        }
         self.ctx.queue().submit(Some(encoder.finish()));
         Ok(output)
     }
@@ -239,6 +304,39 @@ mod tests {
             .collect()
     }
 
+    fn rotate_k_projection(
+        raw: &[f32],
+        kv_len: usize,
+        kv_heads: usize,
+        head_dim: usize,
+        theta: f32,
+        position_offset: usize,
+    ) -> Vec<f32> {
+        let mut rotated = raw.to_vec();
+        let width = kv_heads * head_dim;
+        for position in 0..kv_len
+        {
+            let absolute_position = position_offset + position;
+            for head in 0..kv_heads
+            {
+                let head_base = position * width + head * head_dim;
+                for pair in 0..head_dim / 2
+                {
+                    let dim = 2 * pair;
+                    let exponent = -2.0 * pair as f32 / head_dim as f32;
+                    let frequency = theta.powf(exponent);
+                    let angle = absolute_position as f32 * frequency;
+                    let (sin, cos) = angle.sin_cos();
+                    let even = raw[head_base + dim];
+                    let odd = raw[head_base + dim + 1];
+                    rotated[head_base + dim] = even * cos - odd * sin;
+                    rotated[head_base + dim + 1] = even * sin + odd * cos;
+                }
+            }
+        }
+        rotated
+    }
+
     fn assert_close(actual: &[f32], expected: &[f32]) {
         assert_eq!(actual.len(), expected.len());
         for (index, (&actual, &expected)) in actual.iter().zip(expected).enumerate()
@@ -287,6 +385,67 @@ mod tests {
         let expected = forward_reference_projection_grouped_rope_asymmetric(
             &q,
             &k,
+            &v,
+            shape,
+            config.attention(),
+            config.rotary(),
+        )
+        .unwrap();
+        assert_close(&actual, &expected.output);
+    }
+
+    #[test]
+    fn resident_pre_rotated_k_decode_matches_raw_k_reference() {
+        let Ok(bridge) = WgpuFlatM11Bridge::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping FLAT M15 resident bridge test");
+            return;
+        };
+        let config = FlatM11ResidentConfig {
+            batch: 1,
+            q_heads: 8,
+            kv_heads: 2,
+            query_len: 1,
+            kv_len: 17,
+            head_dim: 64,
+            causal: true,
+            softmax_scale: None,
+            query_position_offset: 16,
+            theta: 10_000.0,
+            query_rope_position_offset: 16,
+            kv_rope_position_offset: 0,
+        };
+        let shape = config.shape();
+        let q = fixture(shape.q_tensor_len().unwrap(), 0.25);
+        let raw_k = fixture(shape.kv_tensor_len().unwrap(), 0.85);
+        let v = fixture(shape.kv_tensor_len().unwrap(), 1.45);
+        let rotated_k = rotate_k_projection(
+            &raw_k,
+            config.kv_len,
+            config.kv_heads,
+            config.head_dim,
+            config.theta,
+            config.kv_rope_position_offset,
+        );
+        let q_gpu = bridge
+            .context()
+            .upload(&q, 1, config.q_heads * config.head_dim);
+        let k_gpu =
+            bridge
+                .context()
+                .upload(&rotated_k, config.kv_len, config.kv_heads * config.head_dim);
+        let v_gpu = bridge
+            .context()
+            .upload(&v, config.kv_len, config.kv_heads * config.head_dim);
+
+        let output = bridge
+            .forward_pre_rotated_k(&q_gpu, &k_gpu, &v_gpu, config)
+            .unwrap();
+        let actual = bridge.context().download(&output).unwrap();
+        let expected = forward_reference_projection_grouped_rope_asymmetric(
+            &q,
+            &raw_k,
             &v,
             shape,
             config.attention(),
