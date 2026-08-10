@@ -7,9 +7,14 @@
 mod compiled_tape;
 #[path = "differential_tensor.rs"]
 mod differential_tensor;
+#[path = "distance2_coloring.rs"]
+mod distance2_coloring;
 #[path = "sparse_jacobian.rs"]
 mod sparse_jacobian;
 
 pub use compiled_tape::{CompiledTape, CompiledTapeBuilder, TapeSlot};
 pub use differential_tensor::DifferentialTensor;
+pub use distance2_coloring::{
+    Distance2Coloring, Distance2ColoringError, SymmetricSparsityGraph,
+};
 pub use sparse_jacobian::{ColumnColoring, JacobianSparsity, SparsityError};
