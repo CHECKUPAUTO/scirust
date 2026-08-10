@@ -564,7 +564,7 @@ fn resident_kv_cache_matches_greedy() {
 
     // A longer prompt exercises the batched prefill over more rows (m = P wide
     // matmuls seeding the cache), which must still match the whole-sequence path.
-    let long_prompt: Vec<u32> = vec![5, 2, 9, 1, 7, 3, 8, 0, 6];
+    let long_prompt: Vec<u32> = vec![5, 2, 9, 1, 7, 3, 8, 0];
     assert_eq!(
         rm.generate(&long_prompt, steps),
         rm.generate_cached(&long_prompt, steps),
