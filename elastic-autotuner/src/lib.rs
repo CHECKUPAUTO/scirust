@@ -164,7 +164,8 @@ pub enum ElasticCandidateError {
 
 impl core::fmt::Display for ElasticCandidateError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
+        match self
+        {
             Self::DuplicateParameter(name) => write!(f, "duplicate tuning parameter `{name}`"),
         }
     }
@@ -397,7 +398,8 @@ pub enum ElasticEvidenceError {
 
 impl core::fmt::Display for ElasticEvidenceError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
+        match self
+        {
             Self::MissingCorrectnessEvidence => write!(f, "correctness evidence is required"),
             Self::NoMeasurements => write!(f, "at least one timing sample is required"),
             Self::NonDeterministicCandidate => {
@@ -467,9 +469,8 @@ mod tests {
     }
 
     fn profile() -> ElasticHardwareProfile {
-        let hardware = HardwareCapabilities::from_device_capabilities(
-            &DeviceCapabilities::reference_cpu(),
-        );
+        let hardware =
+            HardwareCapabilities::from_device_capabilities(&DeviceCapabilities::reference_cpu());
         ElasticHardwareProfile::from_capabilities(&hardware).unwrap()
     }
 
@@ -494,7 +495,11 @@ mod tests {
         let problem = ElasticProblemClass::new("gemm", vec![1]);
         let ranked = tuner.rank_candidates(&profile(), &problem, &Space, &Constraints, &Cost);
         assert!(ranked.iter().all(|rank| rank.candidate.deterministic));
-        assert!(!ranked.iter().any(|rank| rank.candidate.parameters()[0].value == 64));
+        assert!(
+            !ranked
+                .iter()
+                .any(|rank| rank.candidate.parameters()[0].value == 64)
+        );
     }
 
     #[test]
@@ -526,7 +531,10 @@ mod tests {
                 measurement,
             },
         );
-        assert_eq!(missing.unwrap_err(), ElasticEvidenceError::MissingCorrectnessEvidence);
+        assert_eq!(
+            missing.unwrap_err(),
+            ElasticEvidenceError::MissingCorrectnessEvidence
+        );
 
         let plan = tuner
             .plan_from_evidence(
