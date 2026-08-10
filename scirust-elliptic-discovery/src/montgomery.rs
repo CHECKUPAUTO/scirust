@@ -297,7 +297,7 @@ mod tests {
     use super::*;
 
     fn curve() -> MontgomeryCurve {
-        MontgomeryCurve::new(ToyPrime::new(17).unwrap(), 2, 1).unwrap()
+        MontgomeryCurve::new(ToyPrime::new(17).unwrap(), 3, 1).unwrap()
     }
 
     #[test]
@@ -307,7 +307,7 @@ mod tests {
             MontgomeryCurve::new(prime, 2, 0),
             Err(MontgomeryError::SingularCurve)
         );
-        assert_eq!(MontgomeryCurve::new(prime, 2, 1), Ok(curve()));
+        assert_eq!(MontgomeryCurve::new(prime, 3, 1), Ok(curve()));
         assert_eq!(
             MontgomeryCurve::new(prime, 15, 1),
             Err(MontgomeryError::SingularCurve)
@@ -324,7 +324,7 @@ mod tests {
     #[test]
     fn exact_group_identities_hold() {
         let curve = curve();
-        let point = curve.point(1, 2).unwrap();
+        let point = curve.point(16, 1).unwrap();
         assert_eq!(curve.add(point, curve.identity()).unwrap(), point);
         assert_eq!(
             curve.add(point, curve.neg(point).unwrap()).unwrap(),
@@ -337,7 +337,7 @@ mod tests {
     #[test]
     fn scalar_multiplication_matches_repeated_addition() {
         let curve = curve();
-        let point = curve.point(2, 1).unwrap();
+        let point = curve.point(5, 1).unwrap();
         let mut repeated = curve.identity();
         for _ in 0..7
         {
@@ -351,7 +351,7 @@ mod tests {
     fn enumeration_is_exact_ordered_and_closed() {
         let curve = curve();
         let points = curve.enumerate();
-        assert_eq!(points.len(), 17);
+        assert_eq!(points.len(), 16);
         assert_eq!(points[0], MontgomeryPoint::Infinity);
         assert_eq!(points[1], curve.point(0, 0).unwrap());
         for point in points
