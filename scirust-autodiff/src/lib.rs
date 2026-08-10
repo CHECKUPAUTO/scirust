@@ -1,6 +1,9 @@
 use std::cell::RefCell;
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
+mod dual_pack;
+pub use dual_pack::{DualPack, DualPackScalar};
+
 /// Dual number for forward-mode automatic differentiation.
 ///
 /// A dual number `x + ε·x'` where `ε² = 0`.
