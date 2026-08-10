@@ -1,0 +1,11 @@
+[package]
+name = "elastic-autotuner"
+version = "0.1.0"
+edition = "2021"
+publish = false
+rust-version = "1.89"
+description = "Deterministic hardware-aware kernel autotuning contracts for SciRust"
+license-file = "../LICENSE.md"
+
+[dependencies]
+scirust-compute = { path = "../scirust-compute" }
