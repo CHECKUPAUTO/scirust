@@ -16,7 +16,7 @@
 //! whole forward op-set (bias, activations, im2col) to be device-resident —
 //! tracked as future work in `docs/GPU.md` (P2.2).
 
-use crate::wgpu_backend::{GpuMatrix, WgpuContext};
+use crate::wgpu_backend::{GpuMatrix, WgpuContext, WgpuDenseKvCache};
 use crate::{BackendError, BackendResult};
 #[cfg(feature = "flat-attention")]
 use flat_attention::{
@@ -251,6 +251,20 @@ impl GpuChain {
     /// Upload a row-major `rows×cols` matrix; it stays resident in VRAM.
     pub fn upload(&self, data: &[f32], rows: usize, cols: usize) -> GpuMatrix {
         self.ctx.upload(data, rows, cols)
+    }
+
+    /// Allocate a fixed-capacity dense resident KV cache.
+    pub fn dense_kv_cache(&self, capacity: usize, cols: usize) -> BackendResult<WgpuDenseKvCache> {
+        self.ctx.dense_kv_cache(capacity, cols)
+    }
+
+    /// Append resident rows without reallocating the cache backing storage.
+    pub fn dense_kv_append(
+        &self,
+        cache: &mut WgpuDenseKvCache,
+        rows: &GpuMatrix,
+    ) -> BackendResult<()> {
+        self.ctx.dense_kv_append(cache, rows)
     }
 
     #[cfg(feature = "flat-attention")]
@@ -2023,6 +2037,64 @@ mod tests {
             placed,
             cpu_place_cols(&sliced, rows, ncols, col_start, src_cols)
         );
+    }
+
+    #[test]
+    fn dense_kv_cache_appends_without_rebuilding_logical_prefix() {
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+
+        let cols = 4usize;
+        let mut cache = chain.dense_kv_cache(6, cols).unwrap();
+
+        let a = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let b = vec![9.0f32, 10.0, 11.0, 12.0];
+
+        let ga = chain.upload(&a, 2, cols);
+        let gb = chain.upload(&b, 1, cols);
+
+        chain.dense_kv_append(&mut cache, &ga).unwrap();
+        assert_eq!(cache.len(), 2);
+        assert_eq!(cache.capacity(), 6);
+        assert_eq!(cache.cols(), cols);
+        assert_eq!(chain.download(&cache.active_matrix()).unwrap(), a);
+
+        chain.dense_kv_append(&mut cache, &gb).unwrap();
+        assert_eq!(cache.len(), 3);
+
+        let mut expected = a;
+        expected.extend_from_slice(&b);
+        assert_eq!(chain.download(&cache.active_matrix()).unwrap(), expected);
+    }
+
+    #[test]
+    fn dense_kv_cache_truncate_is_logical_and_capacity_is_enforced() {
+        let Some(chain) = GpuChain::new()
+        else
+        {
+            eprintln!("wgpu: no adapter, skipping");
+            return;
+        };
+
+        let cols = 3usize;
+        let mut cache = chain.dense_kv_cache(3, cols).unwrap();
+        let rows = chain.upload(&[1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0], 3, cols);
+        chain.dense_kv_append(&mut cache, &rows).unwrap();
+
+        cache.truncate(2).unwrap();
+        assert_eq!(cache.len(), 2);
+        assert_eq!(
+            chain.download(&cache.active_matrix()).unwrap(),
+            vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]
+        );
+
+        let two_rows = chain.upload(&[10.0f32; 6], 2, cols);
+        assert!(chain.dense_kv_append(&mut cache, &two_rows).is_err());
+        assert!(cache.truncate(3).is_err());
     }
 
     /// `concat_rows` stacks two equal-width resident matrices bit-exactly (a

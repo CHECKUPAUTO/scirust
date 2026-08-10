@@ -26,7 +26,7 @@
 
 use scirust_core::autodiff::reverse::{Tape, Tensor};
 use scirust_core::autodiff::scheduler::LrSchedule;
-use scirust_gpu::{GpuChain, GpuMatrix, GqaBlockWeights, GqaModelWeights};
+use scirust_gpu::{GpuChain, GpuMatrix, GqaBlockWeights, GqaModelWeights, WgpuDenseKvCache};
 
 use crate::config::SciAgentConfig;
 use crate::generate::{SamplingParams, sample_row, seed_to_state};
@@ -75,18 +75,16 @@ fn argmax(xs: &[f32]) -> usize {
     best
 }
 
-/// Roll a per-layer resident cache back to its first `len` rows (a GPU-side
-/// `slice_rows` per layer; a no-op where the cache is already `len`). Used to
-/// discard rejected speculative rows before feeding the accepted correction.
-fn truncate_cache(chain: &GpuChain, cache: &mut [Option<GpuMatrix>], len: usize) {
+/// Roll every per-layer resident cache back to `len` active rows.
+///
+/// The backing allocations are untouched: speculative rejection only updates
+/// each cache's logical length.
+fn truncate_cache(cache: &mut [WgpuDenseKvCache], len: usize) {
     for slot in cache.iter_mut()
     {
-        if let Some(m) = slot.as_ref()
+        if slot.len() > len
         {
-            if m.rows() > len
-            {
-                *slot = Some(chain.slice_rows(m, 0, len).expect("truncate cache"));
-            }
+            slot.truncate(len).expect("truncate dense KV cache");
         }
     }
 }
@@ -172,6 +170,7 @@ pub struct ResidentModel {
     eps: f32,
     causal: bool,
     vocab: usize,
+    max_seq_len: usize,
     // AdamW state (zero-initialised), one pair per trainable weight, + step count.
     m_embedding: GpuMatrix,
     v_embedding: GpuMatrix,
@@ -240,6 +239,7 @@ impl ResidentModel {
             eps: model.config.eps,
             causal: true,
             vocab: model.config.vocab_size,
+            max_seq_len: model.config.max_seq_len,
             m_embedding,
             v_embedding,
             m_final_norm,
@@ -253,6 +253,30 @@ impl ResidentModel {
     /// Name of the underlying GPU adapter.
     pub fn adapter_name(&self) -> &str {
         self.chain.adapter_name()
+    }
+
+    fn assert_capacity(&self, prompt_len: usize, max_new: usize) {
+        let capacity = prompt_len
+            .checked_add(max_new)
+            .expect("resident decode sequence length overflow");
+        assert!(
+            capacity <= self.max_seq_len,
+            "resident decode request needs {capacity} positions, model max_seq_len is {}",
+            self.max_seq_len
+        );
+    }
+
+    fn new_kv_caches(&self) -> Vec<WgpuDenseKvCache> {
+        let d_model = self.embedding.cols();
+        let d_head = d_model / self.n_heads;
+        let kv_dim = self.n_kv_heads * d_head;
+        (0..self.blocks.len())
+            .map(|_| {
+                self.chain
+                    .dense_kv_cache(self.max_seq_len, kv_dim)
+                    .expect("allocate resident dense KV cache")
+            })
+            .collect()
     }
 
     /// Borrowed `GqaBlockWeights` views over the resident block matrices.
@@ -347,11 +371,10 @@ impl ResidentModel {
         {
             return Vec::new();
         }
-        let n = self.blocks.len();
-        // Per-layer **resident** caches of roped keys / raw values (each grows one
-        // row per step, on-device — no host round-trip).
-        let mut kcache: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
-        let mut vcache: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
+        self.assert_capacity(prompt.len(), max_new);
+        // Per-layer fixed-capacity resident caches of roped keys / raw values.
+        let mut kcache = self.new_kv_caches();
+        let mut vcache = self.new_kv_caches();
 
         // Prefill the whole prompt in one batched forward, seeding the caches and
         // keeping the logits after the last prompt token.
@@ -414,9 +437,9 @@ impl ResidentModel {
         {
             return Vec::new();
         }
-        let n = self.blocks.len();
-        let mut kcache: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
-        let mut vcache: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
+        self.assert_capacity(prompt.len(), max_new);
+        let mut kcache = self.new_kv_caches();
+        let mut vcache = self.new_kv_caches();
         let mut rng = seed_to_state(seed);
 
         // Prefill the whole prompt in one batched forward, seeding the caches.
@@ -474,11 +497,12 @@ impl ResidentModel {
             "draft and target must share a vocab"
         );
 
-        let (nt, nd) = (self.blocks.len(), draft.blocks.len());
-        let mut tkc: Vec<Option<GpuMatrix>> = (0..nt).map(|_| None).collect();
-        let mut tvc: Vec<Option<GpuMatrix>> = (0..nt).map(|_| None).collect();
-        let mut dkc: Vec<Option<GpuMatrix>> = (0..nd).map(|_| None).collect();
-        let mut dvc: Vec<Option<GpuMatrix>> = (0..nd).map(|_| None).collect();
+        self.assert_capacity(prompt.len(), max_new);
+        draft.assert_capacity(prompt.len(), max_new);
+        let mut tkc = self.new_kv_caches();
+        let mut tvc = self.new_kv_caches();
+        let mut dkc = draft.new_kv_caches();
+        let mut dvc = draft.new_kv_caches();
 
         // Prefill both on the prompt; tlast/dlast predict the first undecided
         // position `cur`, and each cache holds `cur` rows.
@@ -531,10 +555,10 @@ impl ResidentModel {
 
             // 5. Drop the rejected rows from both caches, then feed `extra` so both
             //    models are positioned to predict cur+1.
-            truncate_cache(&self.chain, &mut tkc, cur);
-            truncate_cache(&self.chain, &mut tvc, cur);
-            truncate_cache(&draft.chain, &mut dkc, cur);
-            truncate_cache(&draft.chain, &mut dvc, cur);
+            truncate_cache(&mut tkc, cur);
+            truncate_cache(&mut tvc, cur);
+            truncate_cache(&mut dkc, cur);
+            truncate_cache(&mut dvc, cur);
             tlast = self.decode_step(extra, cur, &mut tkc, &mut tvc);
             dlast = draft.decode_step(extra, cur, &mut dkc, &mut dvc);
             stats.target_forwards += 1;
@@ -560,8 +584,8 @@ impl ResidentModel {
     fn prefill(
         &self,
         prompt: &[u32],
-        kcache: &mut [Option<GpuMatrix>],
-        vcache: &mut [Option<GpuMatrix>],
+        kcache: &mut [WgpuDenseKvCache],
+        vcache: &mut [WgpuDenseKvCache],
     ) -> Vec<f32> {
         let chain = &self.chain;
         let p = prompt.len();
@@ -593,8 +617,12 @@ impl ResidentModel {
             let kr = chain
                 .rope_heads(&k, self.n_kv_heads, p, 0, self.theta)
                 .expect("head-local rope k");
-            kcache[l] = Some(kr);
-            vcache[l] = Some(v);
+            chain
+                .dense_kv_append(&mut kcache[l], &kr)
+                .expect("prefill append K");
+            chain
+                .dense_kv_append(&mut vcache[l], &v)
+                .expect("prefill append V");
             let attn_out = chain.matmul(&ctx, &b.wo).expect("wo");
             x = chain.add(&x, &attn_out).expect("attn residual");
             // MLP sub-block (pre-norm + residual).
@@ -617,15 +645,16 @@ impl ResidentModel {
     /// run the full stack using the per-layer KV caches (appending this token's
     /// roped key and raw value to each), and return the `vocab`-wide logits for
     /// this position. `kcache[l]`/`vcache[l]` are the layer-`l` **resident** caches
-    /// (row-major, `kv_dim` columns), each grown by one row here via a GPU-side
-    /// `concat_rows` — nothing leaves VRAM. Reproduces
+    /// (row-major, `kv_dim` columns), each backed by one fixed-capacity allocation.
+    /// Each new row is copied directly to its final offset; nothing leaves VRAM and
+    /// the existing prefix is never rebuilt. Reproduces
     /// [`GpuChain::gqa_transformer_block`] restricted to the single new row.
     fn decode_step(
         &self,
         token: u32,
         pos: usize,
-        kcache: &mut [Option<GpuMatrix>],
-        vcache: &mut [Option<GpuMatrix>],
+        kcache: &mut [WgpuDenseKvCache],
+        vcache: &mut [WgpuDenseKvCache],
     ) -> Vec<f32> {
         let chain = &self.chain;
         let d_model = self.embedding.cols();
@@ -649,22 +678,18 @@ impl ResidentModel {
             let kr = chain
                 .rope_heads(&k, self.n_kv_heads, 1, pos, self.theta)
                 .expect("head-local rope k");
-            // Append this step's roped key / raw value to the resident layer caches
-            // (GPU-side row stack — no download/re-upload round-trip).
-            kcache[l] = Some(match kcache[l].take()
-            {
-                None => kr,
-                Some(prev) => chain.concat_rows(&prev, &kr).expect("concat k"),
-            });
-            vcache[l] = Some(match vcache[l].take()
-            {
-                None => v,
-                Some(prev) => chain.concat_rows(&prev, &v).expect("concat v"),
-            });
-            let kmat = kcache[l].as_ref().unwrap();
-            let vmat = vcache[l].as_ref().unwrap();
+            // Append directly into the fixed backing allocations. Existing cache
+            // rows are never recopied or reallocated.
+            chain
+                .dense_kv_append(&mut kcache[l], &kr)
+                .expect("decode append K");
+            chain
+                .dense_kv_append(&mut vcache[l], &v)
+                .expect("decode append V");
+            let kmat = kcache[l].active_matrix();
+            let vmat = vcache[l].active_matrix();
             // Single query attends over all cached keys/values (all ≤ pos ⇒ no mask).
-            let ctx = self.incr_attention(&qr, kmat, vmat, dh);
+            let ctx = self.incr_attention(&qr, &kmat, &vmat, dh);
             let attn_out = chain.matmul(&ctx, &b.wo).expect("wo");
             x = chain.add(&x, &attn_out).expect("attn residual");
             // MLP sub-block (pre-norm + residual).
@@ -700,8 +725,8 @@ impl ResidentModel {
         &self,
         tokens: &[u32],
         start_pos: usize,
-        kcache: &mut [Option<GpuMatrix>],
-        vcache: &mut [Option<GpuMatrix>],
+        kcache: &mut [WgpuDenseKvCache],
+        vcache: &mut [WgpuDenseKvCache],
     ) -> Vec<Vec<f32>> {
         let chain = &self.chain;
         let d_model = self.embedding.cols();
@@ -722,31 +747,22 @@ impl ResidentModel {
             let kr = chain
                 .rope_heads(&k, self.n_kv_heads, m, start_pos, self.theta)
                 .expect("head-local rope k");
-            // Append all m roped keys / values to the resident caches.
-            kcache[l] = Some(match kcache[l].take()
-            {
-                None => kr,
-                Some(prev) => chain.concat_rows(&prev, &kr).expect("concat k"),
-            });
-            vcache[l] = Some(match vcache[l].take()
-            {
-                None => v,
-                Some(prev) => chain.concat_rows(&prev, &v).expect("concat v"),
-            });
-            let kfull = kcache[l].as_ref().unwrap();
-            let vfull = vcache[l].as_ref().unwrap();
-            let old = kfull.rows() - m; // accepted-context length before this batch
+            // Append all m rows directly into the fixed backing allocations.
+            let old = kcache[l].len();
+            chain
+                .dense_kv_append(&mut kcache[l], &kr)
+                .expect("batch append K");
+            chain
+                .dense_kv_append(&mut vcache[l], &v)
+                .expect("batch append V");
             // Per-row causal attention: query i attends over cache rows [0, old+i].
+            // Prefix views share the fixed cache buffer: no K/V copy is performed.
             let mut ctx_rows: Option<GpuMatrix> = None;
             for i in 0..m
             {
                 let qr_i = chain.slice_rows(&qr, i, 1).expect("slice qr row");
-                let keys_i = chain
-                    .slice_rows(kfull, 0, old + i + 1)
-                    .expect("keys prefix");
-                let vals_i = chain
-                    .slice_rows(vfull, 0, old + i + 1)
-                    .expect("vals prefix");
+                let keys_i = kcache[l].prefix_matrix(old + i + 1).expect("keys prefix");
+                let vals_i = vcache[l].prefix_matrix(old + i + 1).expect("vals prefix");
                 let ctx_i = self.incr_attention(&qr_i, &keys_i, &vals_i, dh); // [1 × d]
                 ctx_rows = Some(match ctx_rows
                 {
@@ -1022,7 +1038,7 @@ impl ResidentModel {
             cursor += s;
             step += 1;
 
-            if cfg.log_interval > 0 && step % cfg.log_interval == 0
+            if cfg.log_interval > 0 && step.is_multiple_of(cfg.log_interval)
             {
                 let done = (step - cfg.start_step) * s;
                 let secs = t0.elapsed().as_secs_f64().max(1e-9);
@@ -1031,7 +1047,7 @@ impl ResidentModel {
                     "[resident step {step:>6}] loss {loss:>9.4} | lr {lr:.3e} | {tps:>8.0} tok/s"
                 );
             }
-            if cfg.save_interval > 0 && step % cfg.save_interval == 0
+            if cfg.save_interval > 0 && step.is_multiple_of(cfg.save_interval)
             {
                 self.sync_to_model(model);
                 let dir = std::path::Path::new(&cfg.checkpoint_dir).join(format!("step_{step}"));
@@ -1846,13 +1862,13 @@ mod tests {
         let tokens: Vec<u32> = vec![5, 2, 9, 1, 7]; // m = 5 at positions 0..5
 
         // Batched: one wide forward.
-        let mut kb: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
-        let mut vb: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
+        let mut kb = rm.new_kv_caches();
+        let mut vb = rm.new_kv_caches();
         let batched = rm.decode_batch(&tokens, 0, &mut kb, &mut vb);
 
         // Sequential: one decode_step per token.
-        let mut ks: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
-        let mut vs: Vec<Option<GpuMatrix>> = (0..n).map(|_| None).collect();
+        let mut ks = rm.new_kv_caches();
+        let mut vs = rm.new_kv_caches();
         let seq: Vec<Vec<f32>> = tokens
             .iter()
             .enumerate()
@@ -1867,14 +1883,14 @@ mod tests {
         // The resulting caches must be identical too (same rows, same bytes).
         for l in 0..n
         {
-            let b = rm.chain.download(kb[l].as_ref().unwrap()).unwrap();
-            let s = rm.chain.download(ks[l].as_ref().unwrap()).unwrap();
+            let b = rm.chain.download(&kb[l].active_matrix()).unwrap();
+            let s = rm.chain.download(&ks[l].active_matrix()).unwrap();
             assert_eq!(
                 b, s,
                 "layer {l} K cache must match after batched vs sequential"
             );
-            let bv = rm.chain.download(vb[l].as_ref().unwrap()).unwrap();
-            let sv = rm.chain.download(vs[l].as_ref().unwrap()).unwrap();
+            let bv = rm.chain.download(&vb[l].active_matrix()).unwrap();
+            let sv = rm.chain.download(&vs[l].active_matrix()).unwrap();
             assert_eq!(
                 bv, sv,
                 "layer {l} V cache must match after batched vs sequential"
