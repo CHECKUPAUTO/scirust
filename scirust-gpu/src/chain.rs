@@ -248,6 +248,15 @@ impl GpuChain {
         self.ctx.adapter_name()
     }
 
+    /// Build the rectangular FLAT M11/M15 bridge on this chain's exact WGPU
+    /// context. The returned bridge shares the same device/queue ownership
+    /// domain as every resident matrix and KV-cache buffer produced by this
+    /// chain; no second adapter/device is created.
+    #[cfg(feature = "flat-attention")]
+    pub fn flat_m11_bridge(&self) -> BackendResult<crate::WgpuFlatM11Bridge> {
+        crate::WgpuFlatM11Bridge::from_context(self.ctx.clone())
+    }
+
     /// Upload a row-major `rows×cols` matrix; it stays resident in VRAM.
     pub fn upload(&self, data: &[f32], rows: usize, cols: usize) -> GpuMatrix {
         self.ctx.upload(data, rows, cols)
