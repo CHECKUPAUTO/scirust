@@ -675,6 +675,50 @@ fn resident_streaming_matches_sampled() {
 /// the all-accepted / bonus path) and (b) a structurally different draft (exercises
 /// rejection + cache rollback), plus the `k = 0` plain-greedy fallback. Skips with
 /// no adapter.
+
+#[test]
+fn resident_speculative_respects_short_final_window() {
+    use scirust_sciagent::gpu::ResidentModel;
+
+    let cfg = tiny_tied();
+    let target_model = SciAgentModel::new(&cfg);
+    let draft_model = SciAgentModel::new(&cfg);
+
+    let Some(target) = ResidentModel::from_model(&target_model)
+    else
+    {
+        eprintln!("wgpu: no adapter, skipping speculative boundary test");
+        return;
+    };
+    let Some(draft) = ResidentModel::from_model(&draft_model)
+    else
+    {
+        eprintln!("wgpu: no adapter, skipping speculative boundary test");
+        return;
+    };
+
+    let prompt = [5, 2, 9, 1];
+    let max_new = 3;
+
+    // k is deliberately much larger than the remaining output budget.
+    // The speculative path must cap its draft width and never overrun the
+    // request-sized resident KV cache.
+    let greedy = target.generate_cached(&prompt, max_new);
+    let (spec, stats) = target.speculative_generate(&draft, &prompt, max_new, 16);
+
+    assert_eq!(
+        spec, greedy,
+        "short final speculative window must match greedy"
+    );
+    assert_eq!(spec.len(), prompt.len() + max_new);
+    assert!(
+        stats.drafted <= max_new.saturating_sub(1),
+        "drafted tokens must be bounded by the remaining request budget"
+    );
+
+    eprintln!("resident speculative short-final-window boundary — PASS");
+}
+
 #[test]
 fn resident_speculative_matches_greedy() {
     use scirust_sciagent::gpu::ResidentModel;
