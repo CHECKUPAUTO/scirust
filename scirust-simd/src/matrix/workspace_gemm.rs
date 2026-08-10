@@ -1,9 +1,8 @@
 //! Reusable packing workspace for the tiled `f32` GEMM hot path.
 //!
-//! The existing `crate::gemm::sgemm_tiled` API owns its packing buffers and is
-//! convenient for one-shot calls. This module exposes the complementary
-//! prepared-workspace form: allocate the pack panels once, then reuse them over
-//! arbitrarily many GEMM invocations without growing or replacing either buffer.
+//! The existing `crate::gemm::sgemm_tiled` API remains the convenient one-shot
+//! entry point. This module exposes a prepared form whose packing storage is
+//! allocated once and then reused by every execution.
 
 use super::backend::{ScalarBackend, SimdBackend};
 use super::view::{MatrixView, MatrixViewMut};
@@ -30,11 +29,7 @@ const MC_N: usize = 256;
 #[cfg(target_arch = "aarch64")]
 const NC_N: usize = 512;
 
-/// Reusable packing storage for [`sgemm_tiled_with_workspace`].
-///
-/// Construction performs the only heap allocations needed by the packed SIMD
-/// kernels. The two buffers retain fixed length and capacity for the lifetime of
-/// the workspace, so repeated GEMM calls do not allocate in their hot path.
+/// Caller-reusable packing storage for [`sgemm_tiled_with_workspace`].
 #[derive(Debug)]
 pub struct GemmWorkspaceF32 {
     a_pack: Vec<f32>,
@@ -42,40 +37,41 @@ pub struct GemmWorkspaceF32 {
 }
 
 impl GemmWorkspaceF32 {
-    /// Allocates packing panels sized for the largest tile used by the current
-    /// architecture-specific kernel.
+    /// Allocate the largest packing panels required by the target-specific path.
     pub fn new() -> Self {
-        #[cfg(target_arch = "x86_64")]
-        {
-            return Self {
-                a_pack: vec![0.0; KC * MC.div_ceil(MR) * MR],
-                b_pack: vec![0.0; KC * NC.div_ceil(NR) * NR],
-            };
-        }
-        #[cfg(target_arch = "aarch64")]
-        {
-            return Self {
-                a_pack: vec![0.0; KC_N * MC_N.div_ceil(MR_N) * MR_N],
-                b_pack: vec![0.0; KC_N * NC_N.div_ceil(NR_N) * NR_N],
-            };
-        }
-        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-        {
-            Self {
-                a_pack: Vec::new(),
-                b_pack: Vec::new(),
-            }
+        Self::new_for_target()
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn new_for_target() -> Self {
+        Self {
+            a_pack: vec![0.0; KC * MC.div_ceil(MR) * MR],
+            b_pack: vec![0.0; KC * NC.div_ceil(NR) * NR],
         }
     }
 
-    /// Current backing-buffer capacities, useful for instrumentation and
-    /// allocation-regression tests.
+    #[cfg(target_arch = "aarch64")]
+    fn new_for_target() -> Self {
+        Self {
+            a_pack: vec![0.0; KC_N * MC_N.div_ceil(MR_N) * MR_N],
+            b_pack: vec![0.0; KC_N * NC_N.div_ceil(NR_N) * NR_N],
+        }
+    }
+
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    fn new_for_target() -> Self {
+        Self {
+            a_pack: Vec::new(),
+            b_pack: Vec::new(),
+        }
+    }
+
+    /// Current capacities, useful for allocation-regression instrumentation.
     pub fn capacities(&self) -> (usize, usize) {
         (self.a_pack.capacity(), self.b_pack.capacity())
     }
 
-    /// Backing-buffer addresses, exposed only as integer identities so tests and
-    /// profilers can prove that repeated execution keeps the same allocations.
+    /// Stable backing-buffer identities for allocation-regression tests.
     pub fn buffer_identities(&self) -> (usize, usize) {
         (self.a_pack.as_ptr() as usize, self.b_pack.as_ptr() as usize)
     }
@@ -87,12 +83,12 @@ impl Default for GemmWorkspaceF32 {
     }
 }
 
-/// Tiled SGEMM using caller-owned reusable packing storage.
+/// `C = alpha·A·B + beta·C`, row-major, using caller-owned reusable scratch.
 ///
-/// `C = alpha·A·B + beta·C`, row-major. On x86_64 this dispatches to the packed
-/// AVX-512 8×16 micro-kernel when AVX-512F is present. On AArch64 it uses the
-/// packed NEON 8×8 micro-kernel. Other targets use the existing scalar oracle.
-/// No buffer in `workspace` is allocated, resized, or replaced by this call.
+/// No allocation, resize, or replacement of `workspace` storage occurs during
+/// this call. x86_64 uses the packed AVX-512 8×16 micro-kernel when AVX-512F is
+/// available; AArch64 uses the packed NEON 8×8 micro-kernel; other paths retain
+/// the existing scalar oracle.
 pub fn sgemm_tiled_with_workspace(
     alpha: f32,
     a: MatrixView<f32>,
@@ -102,94 +98,90 @@ pub fn sgemm_tiled_with_workspace(
     workspace: &mut GemmWorkspaceF32,
 ) {
     let (m, k, n) = (a.rows(), a.cols(), b.cols());
-    assert_eq!(b.rows(), k, "sgemm_tiled_with_workspace: A.cols != B.rows");
-    assert_eq!(c.rows(), m, "sgemm_tiled_with_workspace: C.rows != A.rows");
-    assert_eq!(c.cols(), n, "sgemm_tiled_with_workspace: C.cols != B.cols");
+    assert_eq!(
+        b.rows(),
+        k,
+        "sgemm_tiled_with_workspace: A.cols != B.rows"
+    );
+    assert_eq!(
+        c.rows(),
+        m,
+        "sgemm_tiled_with_workspace: C.rows != A.rows"
+    );
+    assert_eq!(
+        c.cols(),
+        n,
+        "sgemm_tiled_with_workspace: C.cols != B.cols"
+    );
 
     #[cfg(target_arch = "x86_64")]
+    if std::is_x86_feature_detected!("avx512f")
     {
-        if std::is_x86_feature_detected!("avx512f")
-        {
-            // SAFETY: runtime feature detection gates all AVX-512 instructions;
-            // MatrixView/MatrixViewMut validate the row-major extents.
-            unsafe { sgemm_avx512(alpha, a, b, beta, c, workspace) };
-            return;
-        }
+        // SAFETY: AVX-512F is checked above and MatrixView validates extents.
+        unsafe { sgemm_avx512(alpha, a, b, beta, c, workspace) };
+        return;
     }
+
     #[cfg(target_arch = "aarch64")]
+    if std::arch::is_aarch64_feature_detected!("neon")
     {
-        if std::arch::is_aarch64_feature_detected!("neon")
-        {
-            // SAFETY: NEON is detected above and all pointer arithmetic is
-            // bounded by validated row-major matrix views and fixed pack panels.
-            unsafe { sgemm_neon(alpha, a, b, beta, c, workspace) };
-            return;
-        }
+        // SAFETY: NEON availability is checked above; matrix views are bounded.
+        unsafe { sgemm_neon(alpha, a, b, beta, c, workspace) };
+        return;
     }
+
     ScalarBackend.sgemm_f32(alpha, a, b, beta, c);
 }
 
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx512f")]
-unsafe fn scale_c_avx512(beta: f32, m: usize, n: usize, c: *mut f32) {
-    use core::arch::x86_64::*;
+/// Apply beta once before packed K-block accumulation.
+unsafe fn scale_c(beta: f32, m: usize, n: usize, c: *mut f32) {
     if beta == 1.0
     {
         return;
     }
-    let bv = _mm512_set1_ps(beta);
-    for i in 0..m
+    for index in 0..m * n
     {
-        let row = c.add(i * n);
-        let mut j = 0;
-        while j + 16 <= n
+        *c.add(index) = if beta == 0.0
         {
-            let value = if beta == 0.0 {
-                _mm512_setzero_ps()
-            } else {
-                _mm512_mul_ps(_mm512_loadu_ps(row.add(j)), bv)
-            };
-            _mm512_storeu_ps(row.add(j), value);
-            j += 16;
+            0.0
         }
-        let rem = n - j;
-        if rem != 0
+        else
         {
-            let mask = (1_u16 << rem) - 1;
-            let value = if beta == 0.0 {
-                _mm512_setzero_ps()
-            } else {
-                _mm512_mul_ps(_mm512_maskz_loadu_ps(mask, row.add(j)), bv)
-            };
-            _mm512_mask_storeu_ps(row.add(j), mask, value);
-        }
+            *c.add(index) * beta
+        };
     }
 }
 
-#[cfg(target_arch = "x86_64")]
-unsafe fn pack_b_avx512(b: *const f32, ldb: usize, kc: usize, nc: usize, dst: &mut [f32]) {
-    let panels = nc.div_ceil(NR);
-    debug_assert!(dst.len() >= panels * kc * NR);
+/// Pack a B panel as `kc × NR`, padding the final column panel with zeros.
+unsafe fn pack_b<const BLOCK_NR: usize>(
+    b: *const f32,
+    ldb: usize,
+    kc: usize,
+    nc: usize,
+    dst: &mut [f32],
+) {
+    let panels = nc.div_ceil(BLOCK_NR);
+    debug_assert!(dst.len() >= panels * kc * BLOCK_NR);
     for panel in 0..panels
     {
-        let j0 = panel * NR;
-        let nr = NR.min(nc - j0);
-        let base = panel * kc * NR;
+        let j0 = panel * BLOCK_NR;
+        let nr = BLOCK_NR.min(nc - j0);
+        let base = panel * kc * BLOCK_NR;
         for p in 0..kc
         {
-            let src = b.add(p * ldb + j0);
-            let out = base + p * NR;
+            let source = b.add(p * ldb + j0);
+            let output = base + p * BLOCK_NR;
             for j in 0..nr
             {
-                dst[out + j] = *src.add(j);
+                dst[output + j] = *source.add(j);
             }
-            dst[out + nr..out + NR].fill(0.0);
+            dst[output + nr..output + BLOCK_NR].fill(0.0);
         }
     }
 }
 
-#[cfg(target_arch = "x86_64")]
-unsafe fn pack_a_avx512(
+/// Pack an A panel as `kc ×MR`, fusing alpha and padding final rows with zero.
+unsafe fn pack_a<const BLOCK_MR: usize>(
     alpha: f32,
     a: *const f32,
     lda: usize,
@@ -197,21 +189,21 @@ unsafe fn pack_a_avx512(
     kc: usize,
     dst: &mut [f32],
 ) {
-    let panels = mc.div_ceil(MR);
-    debug_assert!(dst.len() >= panels * kc * MR);
+    let panels = mc.div_ceil(BLOCK_MR);
+    debug_assert!(dst.len() >= panels * kc * BLOCK_MR);
     for panel in 0..panels
     {
-        let i0 = panel * MR;
-        let mr = MR.min(mc - i0);
-        let base = panel * kc * MR;
+        let i0 = panel * BLOCK_MR;
+        let mr = BLOCK_MR.min(mc - i0);
+        let base = panel * kc * BLOCK_MR;
         for p in 0..kc
         {
-            let out = base + p * MR;
+            let output = base + p * BLOCK_MR;
             for i in 0..mr
             {
-                dst[out + i] = alpha * *a.add((i0 + i) * lda + p);
+                dst[output + i] = alpha * *a.add((i0 + i) * lda + p);
             }
-            dst[out + mr..out + MR].fill(0.0);
+            dst[output + mr..output + BLOCK_MR].fill(0.0);
         }
     }
 }
@@ -228,22 +220,31 @@ unsafe fn micro_kernel_avx512(
     ldc: usize,
 ) {
     use core::arch::x86_64::*;
-    let mask = if nr == NR { u16::MAX } else { (1_u16 << nr) - 1 };
-    let mut acc = [_mm512_setzero_ps(); MR];
+
+    let mask = if nr == NR
+    {
+        u16::MAX
+    }
+    else
+    {
+        (1_u16 << nr) - 1
+    };
+    let mut accumulators = [_mm512_setzero_ps(); MR];
     for p in 0..kc
     {
-        let bv = _mm512_loadu_ps(b_pack.add(p * NR));
-        let av = a_pack.add(p * MR);
-        for (i, lane) in acc.iter_mut().enumerate()
+        let b_vector = _mm512_loadu_ps(b_pack.add(p * NR));
+        let a_row = a_pack.add(p * MR);
+        for (i, accumulator) in accumulators.iter_mut().enumerate()
         {
-            *lane = _mm512_fmadd_ps(_mm512_set1_ps(*av.add(i)), bv, *lane);
+            *accumulator =
+                _mm512_fmadd_ps(_mm512_set1_ps(*a_row.add(i)), b_vector, *accumulator);
         }
     }
-    for (i, lane) in acc.iter().enumerate().take(mr)
+    for (i, accumulator) in accumulators.iter().enumerate().take(mr)
     {
-        let row = c.add(i * ldc);
-        let prior = _mm512_maskz_loadu_ps(mask, row);
-        _mm512_mask_storeu_ps(row, mask, _mm512_add_ps(prior, *lane));
+        let c_row = c.add(i * ldc);
+        let previous = _mm512_maskz_loadu_ps(mask, c_row);
+        _mm512_mask_storeu_ps(c_row, mask, _mm512_add_ps(previous, *accumulator));
     }
 }
 
@@ -263,14 +264,14 @@ unsafe fn sgemm_avx512(
         return;
     }
     let c_ptr = c.row_slice_mut(0).expect("C base").as_mut_ptr();
-    scale_c_avx512(beta, m, n, c_ptr);
+    scale_c(beta, m, n, c_ptr);
     if k == 0 || alpha == 0.0
     {
         return;
     }
+
     let a_ptr = a.row_slice(0).expect("A base").as_ptr();
     let b_ptr = b.row_slice(0).expect("B base").as_ptr();
-
     let mut jc = 0;
     while jc < n
     {
@@ -280,7 +281,7 @@ unsafe fn sgemm_avx512(
         while pc < k
         {
             let kc = KC.min(k - pc);
-            pack_b_avx512(
+            pack_b::<NR>(
                 b_ptr.add(pc * n + jc),
                 n,
                 kc,
@@ -291,7 +292,7 @@ unsafe fn sgemm_avx512(
             while ic < m
             {
                 let mc = MC.min(m - ic);
-                pack_a_avx512(
+                pack_a::<MR>(
                     alpha,
                     a_ptr.add(ic * k + pc),
                     k,
@@ -330,86 +331,6 @@ unsafe fn sgemm_avx512(
 }
 
 #[cfg(target_arch = "aarch64")]
-unsafe fn scale_c_neon(beta: f32, m: usize, n: usize, c: *mut f32) {
-    use core::arch::aarch64::*;
-    if beta == 1.0
-    {
-        return;
-    }
-    let bv = vdupq_n_f32(beta);
-    for i in 0..m
-    {
-        let row = c.add(i * n);
-        let mut j = 0;
-        while j + 4 <= n
-        {
-            let value = if beta == 0.0 {
-                vdupq_n_f32(0.0)
-            } else {
-                vmulq_f32(vld1q_f32(row.add(j)), bv)
-            };
-            vst1q_f32(row.add(j), value);
-            j += 4;
-        }
-        while j < n
-        {
-            *row.add(j) = if beta == 0.0 { 0.0 } else { *row.add(j) * beta };
-            j += 1;
-        }
-    }
-}
-
-#[cfg(target_arch = "aarch64")]
-unsafe fn pack_b_neon(b: *const f32, ldb: usize, kc: usize, nc: usize, dst: &mut [f32]) {
-    let panels = nc.div_ceil(NR_N);
-    debug_assert!(dst.len() >= panels * kc * NR_N);
-    for panel in 0..panels
-    {
-        let j0 = panel * NR_N;
-        let nr = NR_N.min(nc - j0);
-        let base = panel * kc * NR_N;
-        for p in 0..kc
-        {
-            let src = b.add(p * ldb + j0);
-            let out = base + p * NR_N;
-            for j in 0..nr
-            {
-                dst[out + j] = *src.add(j);
-            }
-            dst[out + nr..out + NR_N].fill(0.0);
-        }
-    }
-}
-
-#[cfg(target_arch = "aarch64")]
-unsafe fn pack_a_neon(
-    alpha: f32,
-    a: *const f32,
-    lda: usize,
-    mc: usize,
-    kc: usize,
-    dst: &mut [f32],
-) {
-    let panels = mc.div_ceil(MR_N);
-    debug_assert!(dst.len() >= panels * kc * MR_N);
-    for panel in 0..panels
-    {
-        let i0 = panel * MR_N;
-        let mr = MR_N.min(mc - i0);
-        let base = panel * kc * MR_N;
-        for p in 0..kc
-        {
-            let out = base + p * MR_N;
-            for i in 0..mr
-            {
-                dst[out + i] = alpha * *a.add((i0 + i) * lda + p);
-            }
-            dst[out + mr..out + MR_N].fill(0.0);
-        }
-    }
-}
-
-#[cfg(target_arch = "aarch64")]
 unsafe fn micro_kernel_neon(
     a_pack: *const f32,
     b_pack: *const f32,
@@ -420,29 +341,31 @@ unsafe fn micro_kernel_neon(
     ldc: usize,
 ) {
     use core::arch::aarch64::*;
-    let mut acc0 = [vdupq_n_f32(0.0); MR_N];
-    let mut acc1 = [vdupq_n_f32(0.0); MR_N];
+
+    let mut low = [vdupq_n_f32(0.0); MR_N];
+    let mut high = [vdupq_n_f32(0.0); MR_N];
     for p in 0..kc
     {
-        let b0 = vld1q_f32(b_pack.add(p * NR_N));
-        let b1 = vld1q_f32(b_pack.add(p * NR_N + 4));
-        let av = a_pack.add(p * MR_N);
+        let b_low = vld1q_f32(b_pack.add(p * NR_N));
+        let b_high = vld1q_f32(b_pack.add(p * NR_N + 4));
+        let a_row = a_pack.add(p * MR_N);
         for i in 0..MR_N
         {
-            let scalar = vdupq_n_f32(*av.add(i));
-            acc0[i] = vfmaq_f32(acc0[i], scalar, b0);
-            acc1[i] = vfmaq_f32(acc1[i], scalar, b1);
+            let a_value = vdupq_n_f32(*a_row.add(i));
+            low[i] = vfmaq_f32(low[i], a_value, b_low);
+            high[i] = vfmaq_f32(high[i], a_value, b_high);
         }
     }
-    let mut tmp = [0.0_f32; NR_N];
+
+    let mut temporary = [0.0_f32; NR_N];
     for i in 0..mr
     {
-        vst1q_f32(tmp.as_mut_ptr(), acc0[i]);
-        vst1q_f32(tmp.as_mut_ptr().add(4), acc1[i]);
-        let row = c.add(i * ldc);
-        for (j, value) in tmp.iter().copied().enumerate().take(nr)
+        vst1q_f32(temporary.as_mut_ptr(), low[i]);
+        vst1q_f32(temporary.as_mut_ptr().add(4), high[i]);
+        let c_row = c.add(i * ldc);
+        for (j, value) in temporary.iter().copied().enumerate().take(nr)
         {
-            *row.add(j) += value;
+            *c_row.add(j) += value;
         }
     }
 }
@@ -462,14 +385,14 @@ unsafe fn sgemm_neon(
         return;
     }
     let c_ptr = c.row_slice_mut(0).expect("C base").as_mut_ptr();
-    scale_c_neon(beta, m, n, c_ptr);
+    scale_c(beta, m, n, c_ptr);
     if k == 0 || alpha == 0.0
     {
         return;
     }
+
     let a_ptr = a.row_slice(0).expect("A base").as_ptr();
     let b_ptr = b.row_slice(0).expect("B base").as_ptr();
-
     let mut jc = 0;
     while jc < n
     {
@@ -479,7 +402,7 @@ unsafe fn sgemm_neon(
         while pc < k
         {
             let kc = KC_N.min(k - pc);
-            pack_b_neon(
+            pack_b::<NR_N>(
                 b_ptr.add(pc * n + jc),
                 n,
                 kc,
@@ -490,7 +413,7 @@ unsafe fn sgemm_neon(
             while ic < m
             {
                 let mc = MC_N.min(m - ic);
-                pack_a_neon(
+                pack_a::<MR_N>(
                     alpha,
                     a_ptr.add(ic * k + pc),
                     k,
@@ -541,9 +464,7 @@ mod tests {
         let b: Vec<f32> = (0..k * n)
             .map(|i| ((i % 61) as f32) * 0.017 - 0.5)
             .collect();
-        let c0: Vec<f32> = (0..m * n)
-            .map(|i| ((i % 17) as f32) * 0.03 - 0.2)
-            .collect();
+        let c0: Vec<f32> = (0..m * n).map(|i| ((i % 17) as f32) * 0.03 - 0.2).collect();
 
         let mut expected = c0.clone();
         ScalarBackend.sgemm_f32(
