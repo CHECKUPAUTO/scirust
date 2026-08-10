@@ -29,7 +29,8 @@ fn target_probabilities(feature: f32) -> [f32; 2] {
 fn main() {
     let features = vec![-0.9f32, -0.3, 0.25, 0.8];
     let mut targets = Vec::with_capacity(features.len() * 2);
-    for &feature in &features {
+    for &feature in &features
+    {
         targets.extend_from_slice(&target_probabilities(feature));
     }
 
@@ -63,12 +64,14 @@ fn main() {
     let mut session = TrainingSession::new(Sgd::new(0.2));
     let mut final_mean_loss = f32::NAN;
 
-    for epoch in 0..40u64 {
+    for epoch in 0..40u64
+    {
         let report = session
             .train_loader_epoch(&mut model, &loss, &mut loader, epoch)
             .expect("deterministic training epoch");
         final_mean_loss = report.mean_loss();
-        if epoch % 10 == 0 || epoch == 39 {
+        if epoch % 10 == 0 || epoch == 39
+        {
             println!("epoch={epoch:02} mean_loss={:.8}", report.mean_loss());
         }
     }
@@ -87,10 +90,14 @@ fn main() {
     println!("target_theta={TARGET_THETA:.6}");
     println!("learned_theta={learned_theta:.6}");
     println!("final_mean_loss={final_mean_loss:.8}");
-    for (sample, (&feature, probabilities)) in features
-        .iter()
-        .zip(prediction.data.chunks_exact(2))
-        .enumerate()
+    let (prediction_pairs, remainder) = prediction.data.as_chunks::<2>();
+    assert!(
+        remainder.is_empty(),
+        "probability output must contain complete two-value samples"
+    );
+
+    for (sample, (&feature, probabilities)) in
+        features.iter().zip(prediction_pairs.iter()).enumerate()
     {
         let target = target_probabilities(feature);
         println!(
