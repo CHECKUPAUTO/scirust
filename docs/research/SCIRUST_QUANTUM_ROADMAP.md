@@ -34,6 +34,26 @@ capabilities. It makes no claim of quantum advantage.
   hardware-efficient `Ry`/`Rz` layers with nearest-neighbour CNOT entanglement,
   validates ordered measurements, and builds a reusable differentiable
   `VariationalCircuit` backed by `QuantumLayer`.
+- Reusable variational templates support caller-ordered `Rx`/`Ry`/`Rz`
+  rotation families, `CNOT` or `CZ` entanglers, and deterministic `None`,
+  `Linear`, `Ring`, and `Full` connectivity. The historical hardware-efficient
+  helper remains exactly representable as `[Ry,Rz] + Linear + CNOT`.
+- `AngleEncodingHandle` exposes deterministic data re-uploading: later encoding
+  layers reuse the original input `ParameterId` values rather than allocating
+  duplicate feature columns, while the existing adjoint path accumulates every
+  repeated symbolic occurrence into the original classical-feature gradient.
+  The public feature tensor width is therefore independent of re-upload depth.
+- `HamiltonianTerm`, `Hamiltonian`, and `HamiltonianReadout` provide fixed real
+  linear combinations of the circuit's measured Pauli products, including an
+  optional identity offset and multiple Hamiltonian outputs per batch. Pauli
+  factors are matched semantically independent of factor order; repeated terms
+  accumulate deterministically. Projection is ordinary reverse-mode `matmul`
+  plus `add_bias`, so the existing quantum adjoint remains the only quantum
+  differentiation implementation and gradients propagate through the readout.
+  Hamiltonian coefficients are fixed problem-definition data, not trainable
+  module parameters. `HamiltonianReadout` also implements `nn::Module`, so it
+  composes directly as `QuantumModule → HamiltonianReadout → Linear` while
+  contributing no trainable indices or checkpoint state of its own.
 - `QuantumModule` adds persistent trainable quantum state above the fresh-tape
   execution model. `ParameterInitializer` provides zero, finite constant, and
   deterministic seeded-uniform initialization; `VariationalParameters` owns the
@@ -50,6 +70,13 @@ capabilities. It makes no claim of quantum advantage.
   modules. Parameter indices participate in ordinary tape optimizers, `sync`
   persists updated quantum values, and `state_dict`/`load_state_dict` integrate
   quantum parameters into the existing hierarchical checkpoint namespace.
+- `TrainingSession<O>` provides a minimal guarded fresh-tape training step while
+  reusing the existing `Module`, `Loss`, `Tape`, and tape `Optimizer` contracts.
+  It validates finite inputs, targets, predictions, scalar loss, gradients, and
+  optimizer-updated parameters; then persists model state with `Module::sync`.
+  The first successful step pins the exact ordered `parameter_indices()` layout,
+  and later graph drift is rejected before `Optimizer::step`, preventing silent
+  moment reassociation for tape optimizers keyed by temporary node indices.
 - A deterministic optimizer-backed two-sample hybrid binary-classifier example
   at `scirust-core/examples/quantum_hybrid_classifier.rs`; this compatibility
   example continues to use the backward-compatible single-sample,
@@ -66,14 +93,15 @@ capabilities. It makes no claim of quantum advantage.
 ## Partially implemented
 
 - The VQNet-like facade currently covers deterministic circuit construction,
-  parameter-role mapping, angle encoding, one hardware-efficient ansatz family,
-  ordered Pauli measurement, reverse-mode execution, deterministic parameter
+  parameter-role mapping, angle encoding and data re-uploading, configurable
+  rotation/entanglement ansatz topologies, ordered Pauli measurement,
+  Hamiltonian linear readout, reverse-mode execution, deterministic parameter
   initialization, persistent module-owned quantum values, stable optimizer
   identity across fresh tapes for raw-slice AdamW/LAMB, direct `nn::Module`
-  composition, ordinary tape-optimizer participation, and checkpoint state.
-  Richer encoder/ansatz libraries, probability/readout abstractions,
-  higher-level training helpers, and remote-hardware execution remain future
-  facade work.
+  composition, guarded fresh-tape training orchestration, ordinary tape-optimizer
+  participation, and checkpoint state. Broader encoding families,
+  basis-probability/readout abstractions, dataset/epoch conveniences, and
+  remote-hardware execution remain future facade work.
 - A real-amplitude MPS simulator remains available for real gates and adjacent
   two-qubit operations. It is not a complex quantum backend and reports no
   general phase support.
@@ -94,8 +122,8 @@ capabilities. It makes no claim of quantum advantage.
 
 ## Future work
 
-- Expand `scirust_core::vqnet` with reusable encoders and ansatz topologies,
-  probability/readout abstractions and higher-level training helpers.
+- Expand `scirust_core::vqnet` with broader reusable encoders,
+  basis-probability readouts and dataset/epoch training conveniences.
 - Density-matrix and noise simulation.
 - GPU kernels, distributed simulation, stabilizer and tensor-network backends.
 - Hardware topology routing, gate decomposition, remote QPU execution, and
