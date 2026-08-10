@@ -39,6 +39,8 @@ mod chain;
 mod decode;
 #[cfg(feature = "cuda")]
 mod raw_runtime;
+#[cfg(feature = "cuda")]
+mod unified;
 
 #[cfg(feature = "cuda")]
 pub use bf16_gemv::CudaBf16Gemv;
@@ -58,6 +60,8 @@ pub use raw_runtime::{
     CudaRawEvent, CudaRawKernel, CudaRawLaunchConfig, CudaRawRuntime, device_count,
     driver_available,
 };
+#[cfg(feature = "cuda")]
+pub use unified::{CudaUnifiedDualMatrixSoA, CudaUnifiedError, CudaUnifiedF32Buffer};
 
 /// Whether this build includes the CUDA backend (the `cuda` feature). `false`
 /// builds carry no CUDA dependency and expose no device API.
