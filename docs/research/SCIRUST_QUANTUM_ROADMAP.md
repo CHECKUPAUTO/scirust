@@ -62,6 +62,9 @@ capabilities. It makes no claim of quantum advantage.
   strictly linear reverse-mode path into the existing quantum adjoint. Because
   the explicit Walsh matrix scales as `O(4^n)` and the dense adjoint stores one
   state per observable, this exact facade is deliberately capped at 10 qubits.
+  `ComputationalBasisReadout` is also a stateless `nn::Module`, so probability
+  vectors compose directly with classical layers and `TrainingSession` without
+  adding trainable indices or checkpoint state.
 - `QuantumModule` adds persistent trainable quantum state above the fresh-tape
   execution model. `ParameterInitializer` provides zero, finite constant, and
   deterministic seeded-uniform initialization; `VariationalParameters` owns the
