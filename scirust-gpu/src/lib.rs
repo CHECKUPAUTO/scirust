@@ -53,6 +53,8 @@ mod compute_adapter;
 mod compute_conformance;
 mod compute_dispatch;
 mod cpu_reference;
+#[cfg(feature = "flat-attention")]
+mod flat_m11;
 
 #[cfg(feature = "wgpu")]
 mod chain;
@@ -103,6 +105,8 @@ mod wgpu_reference;
 
 #[cfg(feature = "flat-attention")]
 pub use chain::FlatResidentGqaConfig;
+#[cfg(feature = "flat-attention")]
+pub use flat_m11::{FlatM11ResidentConfig, WgpuFlatM11Bridge};
 #[cfg(feature = "wgpu")]
 pub use chain::{
     BlockCache, BlockGrads, BlockWeights, DoraGrads, GpuChain, GqaBlockGrads, GqaBlockWeights,
