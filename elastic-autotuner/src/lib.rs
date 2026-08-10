@@ -402,7 +402,8 @@ impl core::fmt::Display for ElasticEvidenceError {
         {
             Self::MissingCorrectnessEvidence => write!(f, "correctness evidence is required"),
             Self::NoMeasurements => write!(f, "at least one timing sample is required"),
-            Self::NonDeterministicCandidate => {
+            Self::NonDeterministicCandidate =>
+            {
                 write!(f, "deterministic-only objective rejected the candidate")
             },
         }

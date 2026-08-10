@@ -26,13 +26,21 @@ pub enum SparseWriteStrategy {
 /// Indexed-access validation error. Validation completes before `out` is touched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SparseAccessError {
-    LengthMismatch { indices: usize, output: usize },
-    IndexOutOfBounds { position: usize, index: usize, source_len: usize },
+    LengthMismatch {
+        indices: usize,
+        output: usize,
+    },
+    IndexOutOfBounds {
+        position: usize,
+        index: usize,
+        source_len: usize,
+    },
 }
 
 impl core::fmt::Display for SparseAccessError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match *self {
+        match *self
+        {
             Self::LengthMismatch { indices, output } => write!(
                 f,
                 "sparse gather length mismatch: {indices} indices for {output} output elements"

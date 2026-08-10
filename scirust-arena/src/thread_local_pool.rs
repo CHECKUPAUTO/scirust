@@ -64,10 +64,7 @@ impl Drop for ResetOnDrop<'_> {
 /// The `for<'arena>` closure bound means the return type `R` cannot contain a
 /// reference tied to the temporary arena borrow, preventing an allocation from
 /// escaping and later being used after reset.
-pub fn with_thread_arena<R, F>(
-    min_capacity_bytes: usize,
-    f: F,
-) -> Result<R, ThreadLocalArenaError>
+pub fn with_thread_arena<R, F>(min_capacity_bytes: usize, f: F) -> Result<R, ThreadLocalArenaError>
 where
     F: for<'arena> FnOnce(&'arena mut PinnedArena) -> R,
 {
