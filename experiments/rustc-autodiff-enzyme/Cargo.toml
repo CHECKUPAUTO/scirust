@@ -1,0 +1,12 @@
+[package]
+name = "scirust-autodiff-enzyme-probe"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Deliberately independent from the root SciRust workspace: rustc AutoDiff is
+# nightly-only and must not affect the framework's Rust 1.89 MSRV gate.
+[workspace]
+
+[dependencies]
+scirust-autodiff = { path = "../../scirust-autodiff" }
