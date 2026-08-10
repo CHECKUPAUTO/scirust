@@ -27,6 +27,7 @@ mod topology_augmentation;
 #[cfg(feature = "std")]
 mod topology_probe;
 mod topology_provider;
+mod workspace;
 
 pub use backend::ComputeBackend;
 pub use binding::{BufferAccess, BufferBinding};
@@ -73,3 +74,4 @@ pub use topology_augmentation::{
 #[cfg(feature = "std")]
 pub use topology_probe::probe_host_topology;
 pub use topology_provider::AcceleratorTopologyProvider;
+pub use workspace::{KernelWorkspace, WorkspaceError, WorkspaceSpec};
