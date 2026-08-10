@@ -397,7 +397,7 @@ dependencies = [
 name = "ciborium"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42e69ffd6f0917f5c029256a24d0161db17cea3997d185db0d35926308770f0e"
+checksum = "42e69ffd6f091c5c029256a24d0161db17cea3997d185db0d35926308770f0e"
 dependencies = [
  "ciborium-io",
  "ciborium-ll",
@@ -896,7 +896,7 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 [[package]]
 name = "flat-attention"
 version = "0.1.0"
-source = "git+https://github.com/Memorithm/FLAT-ATTENTION?rev=e665abee4f803d73668c2d08aaa093a155caa482#e665abee4f803d73668c2d08aaa093a155caa482"
+source = "git+https://github.com/Memorithm/FLAT-ATTENTION?rev=ac24e843c38202c3a2e5049935ca62699d786358#ac24e843c38202c3a2e5049935ca62699d786358"
 dependencies = [
  "pollster",
  "wgpu",
@@ -1004,7 +1004,7 @@ checksum = "c39754e157331b013978ec91992bde1ac089843443c49cbc7f46150b0fad0893"
 name = "futures-task"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "037711b3d59c33004d3856fbdc83b99d4ff37a24768fa1be9ce3538a1cde4393"
+checksum = "037711b3d59c33004d3856fbdc83b99d4ff37a24768fa1be9ce3538a1cde439"
 
 [[package]]
 name = "futures-util"
@@ -1130,7 +1130,7 @@ dependencies = [
 name = "gpu-alloc-types"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98ff03b468aa837d70984d55f5d3f846f6ec31fe34bbb97c4f85219caeee1ca4"
+checksum = "98ff03b468aa837d70984d55f5d3f846f6ec31fe34bbb4f85219caeee1ca4"
 dependencies = [
  "bitflags 2.11.1",
 ]
@@ -1204,7 +1204,7 @@ dependencies = [
 name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca673220bf2a9cc504fe2f9b84a"
 
 [[package]]
 name = "hassle-rs"
@@ -1673,7 +1673,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
+checksum = "bbd2bcb4c963f2ddae06e18729d21c6f395163d0500574c4dc22d2d638b9f"
 
 [[package]]
 name = "leb128fmt"
@@ -1964,7 +1964,7 @@ dependencies = [
 name = "num-rational"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f83d14da390562dca69fc84082e73e548e1ad308d24accdedd2720017cb37824"
+checksum = "f83d14da3905629712d82e1b14efd8064e5c71326f496259e593b455193b6566"
 dependencies = [
  "num-bigint",
  "num-integer",
@@ -1975,7 +1975,7 @@ dependencies = [
 name = "num-traits"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
+checksum = "071dfc062690e90b734c0b2273ce72ad0ffa67f2f17b842e58eb501e16b61247"
 dependencies = [
  "autocfg",
  "libm",
@@ -3483,6 +3483,7 @@ dependencies = [
  "scirust-trader",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -4335,7 +4336,7 @@ dependencies = [
 name = "serde_json"
 version = "1.0.149"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86"
+checksum = "83fc039473c5595ace860812acab3268222035010ab8680ec4215f38ba3d0eed"
 dependencies = [
  "itoa",
  "memchr",
@@ -4471,7 +4472,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
+checksum = "7da8b5736845d9f2fcb837ea5d9e262856b3d99f0112ac924b482481d36c6e1e"
 
 [[package]]
 name = "strum"
