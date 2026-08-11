@@ -1,0 +1,81 @@
+name: tmp-m32-prefill
+
+on:
+  push:
+    branches:
+      - feat/m32-sciagent-flat-prefill
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/m32-sciagent-flat-prefill
+          fetch-depth: 0
+      - name: Wire SciAgent prefill through resident FLAT
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('scirust-sciagent/src/gpu.rs')
+          text = path.read_text()
+          old = '''            // Full causal attention over the prompt (ropes q/k internally).\n            let ctx = chain\n                .gqa_attention(\n                    &q,\n                    &k,\n                    &v,\n                    self.n_heads,\n                    self.n_kv_heads,\n                    p,\n                    self.theta,\n                    true,\n                )\n                .expect("gqa attention");\n'''
+          new = '''            // M32: when the opt-in FLAT feature is enabled, prefill uses the\n            // resident fused grouped-forward pipeline. Q/K/V remain SciRust-owned\n            // device buffers; FLAT fuses Q/K RoPE and causal grouped attention and\n            // returns a resident context matrix. The legacy GpuChain attention path\n            // remains the explicit feature-off oracle/fallback.\n            #[cfg(feature = "flat-attention")]\n            let ctx = {\n                let d_model = q.cols();\n                let dh = d_model / self.n_heads;\n                let config = FlatM11ResidentConfig {\n                    batch: 1,\n                    q_heads: self.n_heads,\n                    kv_heads: self.n_kv_heads,\n                    query_len: p,\n                    kv_len: p,\n                    head_dim: dh,\n                    causal: true,\n                    softmax_scale: None,\n                    query_position_offset: 0,\n                    theta: self.theta,\n                    query_rope_position_offset: 0,\n                    kv_rope_position_offset: 0,\n                };\n                self.flat_decode\n                    .forward(&q, &k, &v, config)\n                    .expect("FLAT M32 resident prefill")\n            };\n\n            #[cfg(not(feature = "flat-attention"))]\n            let ctx = chain\n                .gqa_attention(\n                    &q,\n                    &k,\n                    &v,\n                    self.n_heads,\n                    self.n_kv_heads,\n                    p,\n                    self.theta,\n                    true,\n                )\n                .expect("gqa attention");\n'''
+          if 'FLAT M32 resident prefill' not in text:
+              if old not in text:
+                  raise SystemExit('expected prefill attention block not found')
+              text = text.replace(old, new, 1)
+              path.write_text(text)
+
+          test = Path('scirust-sciagent/tests/flat_runtime_decode.rs')
+          t = test.read_text()
+          t = t.replace('fn flat_m15_runtime_cached_decode_matches_full_greedy()', 'fn flat_m32_prefill_and_m15_decode_match_full_greedy()')
+          t = t.replace('FLAT M15 runtime parity on:', 'FLAT M32 prefill + M15 decode parity on:')
+          t = t.replace('FLAT M15 cached decode must match whole-sequence greedy', 'FLAT M32 prefill + M15 cached decode must match whole-sequence greedy')
+          test.write_text(t)
+          PY
+
+          cat > docs/FLAT_M32_SCIAGENT_PREFILL.md <<'EOF'
+          # FLAT M32 — SciAgent resident prefill integration
+
+          M32 routes SciAgent's opt-in resident prompt prefill attention through the already-qualified FLAT M11 native GQA/MQA grouped-forward pipeline.
+
+          ## Execution boundary
+
+          With `scirust-sciagent/flat-attention` enabled, each prefill layer keeps projected Q/K/V in SciRust-owned WGPU buffers and passes those buffers directly to `WgpuFlatM11Bridge::forward`. FLAT performs fused Q/K RoPE plus causal grouped attention and returns the context as a resident `GpuMatrix`; SciRust then continues with the existing output projection, residual, MLP, cache seeding and final LM head.
+
+          With the feature disabled, the existing `GpuChain::gqa_attention` path is unchanged and remains the explicit oracle/fallback. There is no silent fallback inside the FLAT feature path.
+
+          The prompt K cache is still seeded from SciRust's resident `rope_heads` result because M15 decode consumes pre-rotated K. This is a device-to-device resident operation and does not introduce a host Q/K/V round-trip.
+
+          ## Correctness gate
+
+          `flat_runtime_decode` now exercises the complete M32 prefill + M15 decode route and compares generated tokens against the existing whole-sequence resident greedy path on fixed prompts. The WGPU CI job runs this parity test on lavapipe.
+
+          ## Performance evidence
+
+          M32 makes no new speedup claim. Existing M28 paired resident-attention benchmarks remain low-level evidence for legacy multi-dispatch versus FLAT. A model-level prefill latency claim must be backed by a paired benchmark on the same real adapter, exact commit, model geometry, prompt length, warm-up count and measurement protocol before any promotion statement is made.
+
+          ## Sovereignty
+
+          Rust-native host code plus WGPU/WGSL only. No project-authored C/C++, C ABI bridge, mandatory CUDA C++/`nvcc`, WMMA/WGMMA, CUTLASS, cuDNN, or vendor SDK is introduced.
+          EOF
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('docs/FLAT_M32_SCIAGENT_PREFILL.md')
+          p.write_text('\n'.join(line[10:] if line.startswith('          ') else line for line in p.read_text().splitlines()) + '\n')
+          PY
+
+          git rm .github/workflows/tmp-m32-prefill.yml
+          cargo fmt --all
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scirust-sciagent/src/gpu.rs scirust-sciagent/tests/flat_runtime_decode.rs docs/FLAT_M32_SCIAGENT_PREFILL.md
+          git commit -m 'feat(sciagent): route resident prefill through FLAT'
+          git push origin HEAD:feat/m32-sciagent-flat-prefill
