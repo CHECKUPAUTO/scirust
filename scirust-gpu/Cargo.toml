@@ -24,9 +24,13 @@ wgpu = ["std", "dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:scirust-core"]
 # caller-owned grouped-forward surfaces without changing the feature from opt-in.
 # The exact revision below is a merged, CI-green FLAT default-branch commit.
 flat-attention = ["wgpu", "dep:flat-attention"]
+# Reusable FLAT planning boundary. ElasticAutoTuner depends only on scirust-compute,
+# so this edge stays below model code and introduces no dependency cycle.
+flat-autotune = ["flat-attention", "dep:elastic-autotuner"]
 
 [dependencies]
 scirust-compute = { path = "../scirust-compute", default-features = false }
+elastic-autotuner = { path = "../elastic-autotuner", optional = true }
 # Decodes and executes `KernelFormat::Reference` modules on the CPU adapter.
 # Depends only on scirust-compute and scirust-tensor-reference, neither of which
 # reaches scirust-gpu, so this edge introduces no dependency cycle. It is

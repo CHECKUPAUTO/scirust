@@ -53,6 +53,8 @@ mod compute_adapter;
 mod compute_conformance;
 mod compute_dispatch;
 mod cpu_reference;
+#[cfg(feature = "flat-autotune")]
+pub mod flat_autotune;
 #[cfg(feature = "flat-attention")]
 mod flat_m11;
 #[cfg(feature = "flat-attention")]
