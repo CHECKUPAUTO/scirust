@@ -11,8 +11,8 @@ use std::hint::black_box;
 use std::time::{Duration, Instant};
 
 use flat_attention::{
-    forward_reference_grouped, FlatAttentionConfig, GroupedAttentionShape, GroupedForwardPass,
-    WgpuGroupedForwardPipeline,
+    FlatAttentionConfig, GroupedAttentionShape, GroupedForwardPass, WgpuGroupedForwardPipeline,
+    forward_reference_grouped,
 };
 use scirust_gpu::{GpuMatrix, WgpuContext};
 
@@ -42,10 +42,7 @@ fn fixture(len: usize, phase: f32) -> Vec<f32> {
 fn percentile_ns(samples: &[Duration], percentile: usize) -> u128 {
     let mut values: Vec<u128> = samples.iter().map(Duration::as_nanos).collect();
     values.sort_unstable();
-    let rank = percentile
-        .saturating_mul(values.len())
-        .div_ceil(100)
-        .max(1);
+    let rank = percentile.saturating_mul(values.len()).div_ceil(100).max(1);
     values[rank - 1]
 }
 
@@ -62,14 +59,17 @@ fn max_abs_error(actual: &[f32], expected: &[f32]) -> f32 {
 }
 
 fn assert_close(name: &str, actual: &[f32], expected: &[f32]) -> Result<f32, Box<dyn Error>> {
-    if actual.len() != expected.len() {
+    if actual.len() != expected.len()
+    {
         return Err(format!("{name} length {} != {}", actual.len(), expected.len()).into());
     }
     let mut worst = 0.0f32;
-    for (index, (&actual, &expected)) in actual.iter().zip(expected).enumerate() {
+    for (index, (&actual, &expected)) in actual.iter().zip(expected).enumerate()
+    {
         let abs = (actual - expected).abs();
         let limit = ATOL + RTOL * actual.abs().max(expected.abs());
-        if !actual.is_finite() || abs > limit {
+        if !actual.is_finite() || abs > limit
+        {
             return Err(format!(
                 "{name}[{index}] actual={actual} expected={expected} abs={abs} limit={limit}"
             )
@@ -176,7 +176,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let head_dim = env_usize("SCIRUST_M28_HEAD_DIM", DEFAULT_HEAD_DIM);
     let warmups = env_usize("SCIRUST_M28_WARMUPS", DEFAULT_WARMUPS);
     let repeats = env_usize("SCIRUST_M28_REPEATS", DEFAULT_REPEATS);
-    if seq_len == 0 || head_dim == 0 || warmups == 0 || repeats == 0 {
+    if seq_len == 0 || head_dim == 0 || warmups == 0 || repeats == 0
+    {
         return Err("seq_len, head_dim, warmups and repeats must be non-zero".into());
     }
 
@@ -200,9 +201,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let k_gpu = ctx.upload(&k, seq_len, head_dim);
     let v_gpu = ctx.upload(&v, seq_len, head_dim);
 
-    println!("adapter,causal,seq_len,head_dim,warmups,repeats,naive_median_us,naive_p95_us,flat_fresh_median_us,flat_fresh_p95_us,flat_reused_median_us,flat_reused_p95_us,naive_over_flat_fresh,naive_over_flat_reused,naive_parity_max_abs,flat_parity_max_abs,performance_claim");
+    println!(
+        "adapter,causal,seq_len,head_dim,warmups,repeats,naive_median_us,naive_p95_us,flat_fresh_median_us,flat_fresh_p95_us,flat_reused_median_us,flat_reused_p95_us,naive_over_flat_fresh,naive_over_flat_reused,naive_parity_max_abs,flat_parity_max_abs,performance_claim"
+    );
 
-    for causal in [false, true] {
+    for causal in [false, true]
+    {
         let config = FlatAttentionConfig {
             causal,
             softmax_scale: None,
@@ -224,29 +228,19 @@ fn main() -> Result<(), Box<dyn Error>> {
             shape,
             config,
         )?;
-        let flat_host = ctx.download_buffer(&reused_output, layout.output_elements, layout.output_bytes)?;
+        let flat_host =
+            ctx.download_buffer(&reused_output, layout.output_elements, layout.output_bytes)?;
         let flat_parity = assert_close(
             "FLAT output",
             &flat_host[..layout.q_elements],
             &expected.output,
         )?;
-        assert_close(
-            "FLAT LSE",
-            &flat_host[layout.lse_offset()..],
-            &expected.lse,
-        )?;
+        assert_close("FLAT LSE", &flat_host[layout.lse_offset()..], &expected.lse)?;
 
-        for _ in 0..warmups {
+        for _ in 0..warmups
+        {
             let _ = time_naive(&ctx, &q_gpu, &k_gpu, &v_gpu, causal)?;
-            let _ = time_flat_fresh_output(
-                &ctx,
-                &pipeline,
-                &q_gpu,
-                &k_gpu,
-                &v_gpu,
-                shape,
-                config,
-            )?;
+            let _ = time_flat_fresh_output(&ctx, &pipeline, &q_gpu, &k_gpu, &v_gpu, shape, config)?;
             let _ = time_flat_reused(
                 &ctx,
                 &pipeline,
@@ -262,27 +256,19 @@ fn main() -> Result<(), Box<dyn Error>> {
         let mut naive_samples = Vec::with_capacity(repeats);
         let mut flat_fresh_samples = Vec::with_capacity(repeats);
         let mut flat_reused_samples = Vec::with_capacity(repeats);
-        for iteration in 0..repeats {
-            if iteration.is_multiple_of(2) {
+        for iteration in 0..repeats
+        {
+            if iteration.is_multiple_of(2)
+            {
                 naive_samples.push(time_naive(&ctx, &q_gpu, &k_gpu, &v_gpu, causal)?);
                 flat_fresh_samples.push(time_flat_fresh_output(
-                    &ctx,
-                    &pipeline,
-                    &q_gpu,
-                    &k_gpu,
-                    &v_gpu,
-                    shape,
-                    config,
+                    &ctx, &pipeline, &q_gpu, &k_gpu, &v_gpu, shape, config,
                 )?);
-            } else {
+            }
+            else
+            {
                 flat_fresh_samples.push(time_flat_fresh_output(
-                    &ctx,
-                    &pipeline,
-                    &q_gpu,
-                    &k_gpu,
-                    &v_gpu,
-                    shape,
-                    config,
+                    &ctx, &pipeline, &q_gpu, &k_gpu, &v_gpu, shape, config,
                 )?);
                 naive_samples.push(time_naive(&ctx, &q_gpu, &k_gpu, &v_gpu, causal)?);
             }
