@@ -58,6 +58,8 @@ pub mod flat_autotune;
 #[cfg(feature = "flat-attention")]
 mod flat_m11;
 #[cfg(feature = "flat-attention")]
+mod flat_stable;
+#[cfg(feature = "flat-attention")]
 mod flat_training;
 
 #[cfg(feature = "wgpu")]
@@ -162,6 +164,8 @@ pub use elastic_latent_mha_device::{
 pub use engine::WgpuEngine;
 #[cfg(feature = "flat-attention")]
 pub use flat_m11::{FlatM11ResidentConfig, WgpuFlatM11Bridge};
+#[cfg(feature = "flat-attention")]
+pub use flat_stable::{FlatStableFallbackPolicy, WgpuFlatStableAdapter};
 #[cfg(feature = "flat-attention")]
 pub use flat_training::{
     FlatGroupedTrainingConfig, FlatGroupedTrainingResult, WgpuFlatGroupedTrainingBridge,
