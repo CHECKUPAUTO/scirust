@@ -336,7 +336,8 @@ impl<const W: usize> DualPack<f32, W> {
                 {
                     let dl = _mm_loadu_ps(self.tangent.as_ptr().add(index));
                     let dr = _mm_loadu_ps(rhs.tangent.as_ptr().add(index));
-                    let result = _mm_add_ps(_mm_mul_ps(right_value, dl), _mm_mul_ps(left_value, dr));
+                    let result =
+                        _mm_add_ps(_mm_mul_ps(right_value, dl), _mm_mul_ps(left_value, dr));
                     _mm_storeu_ps(tangent.as_mut_ptr().add(index), result);
                     index += 4;
                 }
