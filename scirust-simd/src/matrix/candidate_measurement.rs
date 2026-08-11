@@ -24,11 +24,14 @@ pub fn summarize_gemm_measurements(
     samples: &[u64],
     scratch: &mut [u64],
 ) -> Result<GemmMeasurementSummary, GemmMeasurementError> {
-    if samples.is_empty() {
+    if samples.is_empty()
+    {
         return Err(GemmMeasurementError::NoSamples);
     }
-    let sample_count = u32::try_from(samples.len()).map_err(|_| GemmMeasurementError::TooManySamples)?;
-    if scratch.len() < samples.len() {
+    let sample_count =
+        u32::try_from(samples.len()).map_err(|_| GemmMeasurementError::TooManySamples)?;
+    if scratch.len() < samples.len()
+    {
         return Err(GemmMeasurementError::ScratchTooSmall {
             required: samples.len(),
             actual: scratch.len(),
@@ -43,7 +46,8 @@ pub fn summarize_gemm_measurements(
     let p95_ns = nearest_rank_sorted(work, 95);
     let p99_ns = nearest_rank_sorted(work, 99);
 
-    for (slot, &sample) in work.iter_mut().zip(samples.iter()) {
+    for (slot, &sample) in work.iter_mut().zip(samples.iter())
+    {
         *slot = sample.abs_diff(median_ns);
     }
     work.sort_unstable();
@@ -67,7 +71,8 @@ pub enum GemmMeasurementError {
 
 impl core::fmt::Display for GemmMeasurementError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match *self {
+        match *self
+        {
             Self::NoSamples => write!(f, "at least one GEMM timing sample is required"),
             Self::TooManySamples => write!(f, "GEMM timing sample count exceeds u32"),
             Self::ScratchTooSmall { required, actual } => write!(
@@ -82,9 +87,12 @@ impl std::error::Error for GemmMeasurementError {}
 
 fn median_sorted(values: &[u64]) -> u64 {
     let middle = values.len() / 2;
-    if values.len() % 2 == 1 {
+    if values.len() % 2 == 1
+    {
         values[middle]
-    } else {
+    }
+    else
+    {
         // Overflow-safe floor average, deterministic for integer nanoseconds.
         let left = values[middle - 1];
         let right = values[middle];
