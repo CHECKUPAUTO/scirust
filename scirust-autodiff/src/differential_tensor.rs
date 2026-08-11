@@ -80,16 +80,16 @@ impl<T, const W: usize> DifferentialTensor<T, W> {
 
     /// Contiguous tangent plane for one direction.
     pub fn tangent(&self, lane: usize) -> &[T] {
-        self.tangents
-            .get(lane)
-            .unwrap_or_else(|| panic!("DifferentialTensor tangent lane {lane} is outside width {W}"))
+        self.tangents.get(lane).unwrap_or_else(|| {
+            panic!("DifferentialTensor tangent lane {lane} is outside width {W}")
+        })
     }
 
     /// Contiguous mutable tangent plane for one direction.
     pub fn tangent_mut(&mut self, lane: usize) -> &mut [T] {
-        self.tangents
-            .get_mut(lane)
-            .unwrap_or_else(|| panic!("DifferentialTensor tangent lane {lane} is outside width {W}"))
+        self.tangents.get_mut(lane).unwrap_or_else(|| {
+            panic!("DifferentialTensor tangent lane {lane} is outside width {W}")
+        })
     }
 
     /// Expose all tangent planes without changing the SoA layout.
@@ -156,10 +156,10 @@ mod tests {
             tensor.set_seed(lane, lane, 1.0);
         }
         tensor.clear_tangents();
-        for lane in 0..3
+        for (lane, id) in ids.iter().copied().enumerate()
         {
             assert!(tensor.tangent(lane).iter().all(|&x| x == 0.0));
-            assert_eq!(tensor.tangent(lane).as_ptr() as usize, ids[lane]);
+            assert_eq!(tensor.tangent(lane).as_ptr() as usize, id);
         }
     }
 
