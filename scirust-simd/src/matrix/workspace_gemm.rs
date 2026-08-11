@@ -98,21 +98,9 @@ pub fn sgemm_tiled_with_workspace(
     workspace: &mut GemmWorkspaceF32,
 ) {
     let (m, k, n) = (a.rows(), a.cols(), b.cols());
-    assert_eq!(
-        b.rows(),
-        k,
-        "sgemm_tiled_with_workspace: A.cols != B.rows"
-    );
-    assert_eq!(
-        c.rows(),
-        m,
-        "sgemm_tiled_with_workspace: C.rows != A.rows"
-    );
-    assert_eq!(
-        c.cols(),
-        n,
-        "sgemm_tiled_with_workspace: C.cols != B.cols"
-    );
+    assert_eq!(b.rows(), k, "sgemm_tiled_with_workspace: A.cols != B.rows");
+    assert_eq!(c.rows(), m, "sgemm_tiled_with_workspace: C.rows != A.rows");
+    assert_eq!(c.cols(), n, "sgemm_tiled_with_workspace: C.cols != B.cols");
 
     #[cfg(target_arch = "x86_64")]
     if std::is_x86_feature_detected!("avx512f")
@@ -236,8 +224,7 @@ unsafe fn micro_kernel_avx512(
         let a_row = a_pack.add(p * MR);
         for (i, accumulator) in accumulators.iter_mut().enumerate()
         {
-            *accumulator =
-                _mm512_fmadd_ps(_mm512_set1_ps(*a_row.add(i)), b_vector, *accumulator);
+            *accumulator = _mm512_fmadd_ps(_mm512_set1_ps(*a_row.add(i)), b_vector, *accumulator);
         }
     }
     for (i, accumulator) in accumulators.iter().enumerate().take(mr)
@@ -281,13 +268,7 @@ unsafe fn sgemm_avx512(
         while pc < k
         {
             let kc = KC.min(k - pc);
-            pack_b::<NR>(
-                b_ptr.add(pc * n + jc),
-                n,
-                kc,
-                nc,
-                &mut workspace.b_pack,
-            );
+            pack_b::<NR>(b_ptr.add(pc * n + jc), n, kc, nc, &mut workspace.b_pack);
             let mut ic = 0;
             while ic < m
             {
@@ -402,13 +383,7 @@ unsafe fn sgemm_neon(
         while pc < k
         {
             let kc = KC_N.min(k - pc);
-            pack_b::<NR_N>(
-                b_ptr.add(pc * n + jc),
-                n,
-                kc,
-                nc,
-                &mut workspace.b_pack,
-            );
+            pack_b::<NR_N>(b_ptr.add(pc * n + jc), n, kc, nc, &mut workspace.b_pack);
             let mut ic = 0;
             while ic < m
             {
@@ -432,15 +407,7 @@ unsafe fn sgemm_neon(
                         let j0 = jc + jp * NR_N;
                         let nr = NR_N.min(n - j0);
                         let b_panel = workspace.b_pack.as_ptr().add(jp * kc * NR_N);
-                        micro_kernel_neon(
-                            a_panel,
-                            b_panel,
-                            kc,
-                            mr,
-                            nr,
-                            c_ptr.add(i0 * n + j0),
-                            n,
-                        );
+                        micro_kernel_neon(a_panel, b_panel, kc, mr, nr, c_ptr.add(i0 * n + j0), n);
                     }
                 }
                 ic += MC_N;
