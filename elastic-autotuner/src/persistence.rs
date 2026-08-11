@@ -300,12 +300,24 @@ impl ElasticPersistedPlan {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ElasticPersistenceError {
-    UnsupportedPersistenceSchema { expected: u32, actual: u32 },
-    UnsupportedPlanSchema { expected: u32, actual: u32 },
-    UnsupportedHardwareSchema { expected: u32, actual: u32 },
+    UnsupportedPersistenceSchema {
+        expected: u32,
+        actual: u32,
+    },
+    UnsupportedPlanSchema {
+        expected: u32,
+        actual: u32,
+    },
+    UnsupportedHardwareSchema {
+        expected: u32,
+        actual: u32,
+    },
     InvalidEvidence(ElasticEvidenceError),
     InvalidMeasurementProtocol(ElasticMeasurementProtocolError),
-    MeasurementProtocolMismatch { protocol_samples: u32, evidence_samples: u32 },
+    MeasurementProtocolMismatch {
+        protocol_samples: u32,
+        evidence_samples: u32,
+    },
     EmptyProvenance,
     EmptyInvalidationDependency,
     NonCanonicalInvalidationDependencies,
@@ -371,12 +383,18 @@ impl core::fmt::Display for ElasticPersistenceError {
             {
                 write!(f, "persisted record has too many invalidation dependencies")
             },
-            Self::CountTooLarge => write!(f, "persisted count does not fit the canonical u32 format"),
+            Self::CountTooLarge =>
+            {
+                write!(f, "persisted count does not fit the canonical u32 format")
+            },
             Self::TruncatedRecord => write!(f, "persisted record is truncated"),
             Self::InvalidMagic => write!(f, "persisted record has an invalid magic header"),
             Self::ChecksumMismatch => write!(f, "persisted record CRC32 integrity check failed"),
             Self::InvalidBoolean => write!(f, "persisted record contains an invalid boolean tag"),
-            Self::InvalidObjective => write!(f, "persisted record contains an invalid objective tag"),
+            Self::InvalidObjective =>
+            {
+                write!(f, "persisted record contains an invalid objective tag")
+            },
             Self::InvalidTimingSource =>
             {
                 write!(f, "persisted record contains an invalid timing-source tag")
@@ -447,7 +465,9 @@ fn encode_measurement(out: &mut Vec<u8>, measurement: ElasticMeasurement) {
     push_u64(out, measurement.mad_ns);
 }
 
-fn decode_measurement(reader: &mut Reader<'_>) -> Result<ElasticMeasurement, ElasticPersistenceError> {
+fn decode_measurement(
+    reader: &mut Reader<'_>,
+) -> Result<ElasticMeasurement, ElasticPersistenceError> {
     Ok(ElasticMeasurement {
         sample_count: reader.read_u32()?,
         median_ns: reader.read_u64()?,
@@ -480,7 +500,8 @@ fn decode_protocol(
 }
 
 const fn objective_code(objective: ElasticObjective) -> u8 {
-    match objective {
+    match objective
+    {
         ElasticObjective::MinLatency => 0,
         ElasticObjective::MaxThroughput => 1,
         ElasticObjective::MinTemporaryMemory => 2,
@@ -490,7 +511,8 @@ const fn objective_code(objective: ElasticObjective) -> u8 {
 }
 
 fn decode_objective(code: u8) -> Result<ElasticObjective, ElasticPersistenceError> {
-    match code {
+    match code
+    {
         0 => Ok(ElasticObjective::MinLatency),
         1 => Ok(ElasticObjective::MaxThroughput),
         2 => Ok(ElasticObjective::MinTemporaryMemory),
@@ -501,14 +523,16 @@ fn decode_objective(code: u8) -> Result<ElasticObjective, ElasticPersistenceErro
 }
 
 const fn timing_code(value: ElasticTimingSource) -> u8 {
-    match value {
+    match value
+    {
         ElasticTimingSource::HostWallClock => 0,
         ElasticTimingSource::DeviceTimestamp => 1,
     }
 }
 
 fn decode_timing(code: u8) -> Result<ElasticTimingSource, ElasticPersistenceError> {
-    match code {
+    match code
+    {
         0 => Ok(ElasticTimingSource::HostWallClock),
         1 => Ok(ElasticTimingSource::DeviceTimestamp),
         _ => Err(ElasticPersistenceError::InvalidTimingSource),
@@ -516,14 +540,16 @@ fn decode_timing(code: u8) -> Result<ElasticTimingSource, ElasticPersistenceErro
 }
 
 const fn residence_code(value: ElasticResidenceMode) -> u8 {
-    match value {
+    match value
+    {
         ElasticResidenceMode::Resident => 0,
         ElasticResidenceMode::TransferInclusive => 1,
     }
 }
 
 fn decode_residence(code: u8) -> Result<ElasticResidenceMode, ElasticPersistenceError> {
-    match code {
+    match code
+    {
         0 => Ok(ElasticResidenceMode::Resident),
         1 => Ok(ElasticResidenceMode::TransferInclusive),
         _ => Err(ElasticPersistenceError::InvalidResidenceMode),
@@ -531,7 +557,8 @@ fn decode_residence(code: u8) -> Result<ElasticResidenceMode, ElasticPersistence
 }
 
 const fn synchronization_code(value: ElasticSynchronizationBoundary) -> u8 {
-    match value {
+    match value
+    {
         ElasticSynchronizationBoundary::PerIteration => 0,
         ElasticSynchronizationBoundary::BatchEnd => 1,
     }
@@ -540,7 +567,8 @@ const fn synchronization_code(value: ElasticSynchronizationBoundary) -> u8 {
 fn decode_synchronization(
     code: u8,
 ) -> Result<ElasticSynchronizationBoundary, ElasticPersistenceError> {
-    match code {
+    match code
+    {
         0 => Ok(ElasticSynchronizationBoundary::PerIteration),
         1 => Ok(ElasticSynchronizationBoundary::BatchEnd),
         _ => Err(ElasticPersistenceError::InvalidSynchronizationBoundary),
@@ -548,7 +576,8 @@ fn decode_synchronization(
 }
 
 fn decode_bool(code: u8) -> Result<bool, ElasticPersistenceError> {
-    match code {
+    match code
+    {
         0 => Ok(false),
         1 => Ok(true),
         _ => Err(ElasticPersistenceError::InvalidBoolean),
