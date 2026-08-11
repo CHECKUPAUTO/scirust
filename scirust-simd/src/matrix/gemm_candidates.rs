@@ -69,7 +69,7 @@ impl GemmProblemSignature {
 }
 
 /// One executable CPU SGEMM family on the current host.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GemmCandidateDescriptor {
     pub path: GemmExecutionPath,
     /// Register tile height.
