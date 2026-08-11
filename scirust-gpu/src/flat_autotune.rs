@@ -27,6 +27,7 @@ use scirust_compute::ComputeBackend;
 
 const FLAT_ELASTIC_FAMILY: &str = "flat-attention-f32-wgpu";
 const FLAT_KERNEL_FAMILY: &str = "flat-m11-external-asymmetric-projection";
+const FLAT_M15_KERNEL_FAMILY: &str = "flat-m15-resident-decode";
 const FLAT_KERNEL_REVISION: &[u8] = b"flat-attention@311f6b89e001d69f53cddcd2f9ba396a6f80c746";
 const FLAT_WGSL_MAX_HEAD_DIM: usize = 128;
 const FLAT_WGSL_QUERY_ROWS: i64 = 4;
@@ -266,6 +267,7 @@ impl FlatElasticPlanner {
         candidate: &ElasticCandidate,
     ) -> Result<(), FlatElasticError> {
         if current_candidate()? == *candidate
+            || (m15_candidate_eligible(self.request) && m15_candidate()? == *candidate)
         {
             Ok(())
         }
@@ -288,6 +290,13 @@ impl ElasticSearchSpace for FlatElasticPlanner {
             if let Ok(candidate) = current_candidate()
             {
                 output.push(candidate);
+            }
+            if m15_candidate_eligible(self.request)
+            {
+                if let Ok(candidate) = m15_candidate()
+                {
+                    output.push(candidate);
+                }
             }
         }
     }
@@ -322,7 +331,17 @@ impl ElasticCostModel for FlatElasticPlanner {
             ElasticObjective::MinLatency
             | ElasticObjective::MaxThroughput
             | ElasticObjective::BalancedLatencyMemory
-            | ElasticObjective::DeterministicOnly => 0,
+            | ElasticObjective::DeterministicOnly =>
+            {
+                if current_candidate().is_ok_and(|current| current == *candidate)
+                {
+                    0
+                }
+                else
+                {
+                    1
+                }
+            },
         }
     }
 }
@@ -390,19 +409,25 @@ impl FlatElasticPlan {
         {
             return Err(FlatElasticError::PlanRegionMismatch);
         }
-        if current_candidate()? != self.candidate
+        if current_candidate()? == self.candidate
         {
-            return Err(FlatElasticError::UnknownCandidate);
-        }
-        let result = match request.kv_representation
-        {
-            FlatKvRepresentation::Raw => bridge.forward(q, k, v, request.config),
-            FlatKvRepresentation::PreRotated =>
+            let result = match request.kv_representation
             {
-                bridge.forward_pre_rotated_k(q, k, v, request.config)
-            },
-        };
-        result.map_err(FlatElasticError::Backend)
+                FlatKvRepresentation::Raw => bridge.forward(q, k, v, request.config),
+                FlatKvRepresentation::PreRotated =>
+                {
+                    bridge.forward_pre_rotated_k(q, k, v, request.config)
+                },
+            };
+            return result.map_err(FlatElasticError::Backend);
+        }
+        if m15_candidate_eligible(request) && m15_candidate()? == self.candidate
+        {
+            return bridge
+                .forward_pre_rotated_k_m15(q, k, v, request.config)
+                .map_err(FlatElasticError::Backend);
+        }
+        Err(FlatElasticError::UnknownCandidate)
     }
 }
 
@@ -618,6 +643,42 @@ fn current_candidate() -> Result<ElasticCandidate, FlatElasticError> {
         0,
     )
     .map_err(FlatElasticError::CandidateEncoding)
+}
+
+fn m15_candidate() -> Result<ElasticCandidate, FlatElasticError> {
+    ElasticCandidate::new(
+        FLAT_M15_KERNEL_FAMILY,
+        FLAT_KERNEL_REVISION.to_vec(),
+        [
+            ElasticParameter {
+                name: "query_rows".into(),
+                value: 1,
+            },
+            ElasticParameter {
+                name: "resident_kv".into(),
+                value: 1,
+            },
+            ElasticParameter {
+                name: "workgroup_size".into(),
+                value: FLAT_WGSL_WORKGROUP_SIZE,
+            },
+        ],
+        false,
+        0,
+    )
+    .map_err(FlatElasticError::CandidateEncoding)
+}
+
+fn m15_candidate_eligible(request: FlatElasticRequest) -> bool {
+    request.problem_kind() == FlatProblemKind::Decode
+        && request.config.causal
+        && request.config.query_len == 1
+        && request.kv_representation == FlatKvRepresentation::PreRotated
+        && request
+            .config
+            .query_position_offset
+            .checked_add(1)
+            .is_some_and(|visible| visible >= request.config.kv_len)
 }
 
 fn problem_class_for(request: FlatElasticRequest) -> Result<ElasticProblemClass, FlatElasticError> {
@@ -949,6 +1010,52 @@ mod tests {
     }
 
     #[test]
+    fn decode_pre_rotated_exposes_m11_and_m15_while_cold_keeps_m11() {
+        let planner = planner(1, 17);
+        let hardware = hardware();
+        let cold = tuner(ElasticMode::Cold, ElasticObjective::MinLatency);
+        let ranked = planner.rank_candidates(&cold, &hardware);
+        assert_eq!(ranked.len(), 2);
+        assert_eq!(ranked[0].candidate, current_candidate().unwrap());
+        assert!(
+            ranked
+                .iter()
+                .any(|ranked| ranked.candidate == m15_candidate().unwrap())
+        );
+
+        let cache = InMemoryElasticPlanCache::default();
+        let plan = match planner.resolve_for_mode(&cold, hardware, &cache).unwrap()
+        {
+            FlatPlanResolution::Production(plan) => plan,
+            FlatPlanResolution::AuditOnly => panic!("cold must resolve a production plan"),
+        };
+        assert_eq!(plan.candidate(), &current_candidate().unwrap());
+    }
+
+    #[test]
+    fn m15_is_not_exposed_outside_fully_visible_pre_rotated_causal_decode() {
+        let cold = tuner(ElasticMode::Cold, ElasticObjective::MinLatency);
+        let hardware = hardware();
+
+        let raw = FlatElasticPlanner::new(
+            FlatElasticRequest::new(config(1, 17), FlatKvRepresentation::Raw).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(raw.rank_candidates(&cold, &hardware).len(), 1);
+
+        let prefill = planner(4, 17);
+        assert_eq!(prefill.rank_candidates(&cold, &hardware).len(), 1);
+
+        let mut partially_visible = config(1, 17);
+        partially_visible.query_position_offset = 0;
+        let partially_visible = FlatElasticPlanner::new(
+            FlatElasticRequest::new(partially_visible, FlatKvRepresentation::PreRotated).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(partially_visible.rank_candidates(&cold, &hardware).len(), 1);
+    }
+
+    #[test]
     fn cold_uses_qualified_heuristic_and_deterministic_only_fails_closed() {
         let planner = planner(1, 17);
         let hardware = hardware();
@@ -1071,6 +1178,33 @@ mod tests {
         ));
         let key = planner.plan_key(&audit, hardware);
         assert!(cache.load(&key).is_none());
+    }
+
+    #[test]
+    fn learn_can_promote_measured_m15_over_the_safe_m11_fallback() {
+        let planner = planner(1, 17);
+        let hardware = hardware();
+        let learn = tuner(ElasticMode::Learn, ElasticObjective::MinLatency);
+        let records = [
+            evidence(current_candidate().unwrap(), 20),
+            evidence(m15_candidate().unwrap(), 10),
+        ];
+        let mut cache = InMemoryElasticPlanCache::default();
+        let promoted = planner
+            .promote_measured_evidence(&learn, hardware.clone(), &records, &mut cache)
+            .unwrap();
+        assert_eq!(promoted.evidence.candidate, m15_candidate().unwrap());
+
+        let resolved = planner.resolve_for_mode(&learn, hardware, &cache).unwrap();
+        match resolved
+        {
+            FlatPlanResolution::Production(plan) =>
+            {
+                assert_eq!(plan.origin(), FlatPlanOrigin::Persisted);
+                assert_eq!(plan.candidate(), &m15_candidate().unwrap());
+            },
+            FlatPlanResolution::AuditOnly => panic!("Learn must resolve the promoted M15 plan"),
+        }
     }
 
     #[test]
