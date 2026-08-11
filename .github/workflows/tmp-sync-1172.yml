@@ -1,0 +1,29 @@
+name: tmp-sync-1172
+
+on:
+  push:
+    branches:
+      - chore/flat-m21-pin
+
+permissions:
+  contents: write
+
+jobs:
+  sync-master:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chore/flat-m21-pin
+          fetch-depth: 0
+      - name: Merge repaired master
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git fetch origin master
+          git merge --no-edit origin/master
+          rm .github/workflows/tmp-sync-1172.yml
+          git add .github/workflows/tmp-sync-1172.yml
+          git commit -m 'chore(gpu): remove temporary sync workflow'
+          git push origin HEAD:chore/flat-m21-pin
