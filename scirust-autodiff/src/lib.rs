@@ -3,6 +3,8 @@ use std::ops::{Add, Div, Mul, Neg, Sub};
 
 mod dual_pack;
 pub use dual_pack::{DualPack, DualPackScalar};
+mod extensions;
+pub use extensions::DifferentialTensor;
 
 /// Dual number for forward-mode automatic differentiation.
 ///
