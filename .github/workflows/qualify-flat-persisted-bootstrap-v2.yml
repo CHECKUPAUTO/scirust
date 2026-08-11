@@ -1,0 +1,84 @@
+name: Qualify FLAT persisted startup bootstrap v2
+
+on:
+  push:
+    branches:
+      - feat/flat-elastic-persisted-bootstrap-final
+
+permissions:
+  contents: write
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: feat/flat-elastic-persisted-bootstrap-final
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+      - name: Install MSRV
+        run: rustup toolchain install 1.89.0 --profile minimal
+      - name: Materialize bootstrap patch from v1 and fix test binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          helper = Path('.github/workflows/qualify-flat-persisted-bootstrap.yml').read_text()
+          prefix = "          python3 <<'PY'\n"
+          suffix = "\n          PY\n          cargo +nightly-2026-07-02 fmt --all"
+          if helper.count(prefix) != 1 or helper.count(suffix) != 1:
+              raise SystemExit('unable to extract v1 bootstrap patch script')
+          script = helper.split(prefix, 1)[1].split(suffix, 1)[0]
+          exec(compile(textwrap.dedent(script), '<bootstrap-v1-patch>', 'exec'))
+
+          p = Path('scirust-gpu/src/flat_autotune.rs')
+          s = p.read_text()
+          start = s.index('    fn persisted_bootstrap_loads_locked_plan_before_request_resolution() {')
+          end = s.index('    #[test]\n    fn persisted_bootstrap_rejects_unselected_missing_timestamp_and_transfer_evidence()', start)
+          block = s[start:end]
+          old = block
+          block = block.replace('        let config = ElasticConfig {', '        let runtime_config = ElasticConfig {', 1)
+          block = block.replace('            config,\n            &hardware,', '            runtime_config,\n            &hardware,', 1)
+          block = block.replace(
+              '        let mut runtime = FlatElasticRuntime::from_hardware(config, hardware, cache);',
+              '        let mut runtime =\n            FlatElasticRuntime::from_hardware(runtime_config, hardware, cache);',
+              1,
+          )
+          if block == old or 'let config = ElasticConfig' in block:
+              raise SystemExit('failed to fix runtime-config shadowing')
+          s = s[:start] + block + s[end:]
+          p.write_text(s)
+          PY
+          cargo +nightly-2026-07-02 fmt --all
+      - name: Qualify bootstrap contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +nightly-2026-07-02 fmt --all -- --check
+          cargo +nightly-2026-07-02 test -p scirust-gpu --features flat-autotune --lib --locked
+          cargo +nightly-2026-07-02 clippy -p scirust-gpu --features flat-autotune --all-targets --locked -- -D warnings
+          cargo +1.89.0 check -p scirust-gpu --features flat-autotune --locked
+      - name: Publish clean qualified bootstrap head
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin feat/flat-elastic-persisted-bootstrap-final
+          test "$(git rev-parse origin/feat/flat-elastic-persisted-bootstrap-final)" = "$GITHUB_SHA"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/qualify-flat-persisted-bootstrap.yml
+          git rm .github/workflows/qualify-flat-persisted-bootstrap-v2.yml
+          git add scirust-gpu/src/flat_autotune.rs
+          git commit -m "feat(autotune): bootstrap validated persisted FLAT plans"
+          git push origin HEAD:feat/flat-elastic-persisted-bootstrap-final
