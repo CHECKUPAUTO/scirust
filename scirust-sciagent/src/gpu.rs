@@ -26,9 +26,16 @@
 
 use scirust_core::autodiff::reverse::{Tape, Tensor};
 use scirust_core::autodiff::scheduler::LrSchedule;
+#[cfg(feature = "flat-autotune")]
+use scirust_gpu::flat_autotune::{
+    ElasticConfig, ElasticMode, ElasticObjective, FlatElasticRequest, FlatElasticRuntime,
+    FlatKvRepresentation, InMemoryElasticPlanCache,
+};
 #[cfg(feature = "flat-attention")]
 use scirust_gpu::{FlatM11ResidentConfig, WgpuFlatM11Bridge};
 use scirust_gpu::{GpuChain, GpuMatrix, GqaBlockWeights, GqaModelWeights, WgpuDenseKvCache};
+#[cfg(feature = "flat-autotune")]
+use std::sync::Mutex;
 
 use crate::config::SciAgentConfig;
 use crate::generate::{SamplingParams, sample_row, seed_to_state};
@@ -165,6 +172,8 @@ pub struct ResidentModel {
     chain: GpuChain,
     #[cfg(feature = "flat-attention")]
     flat_decode: WgpuFlatM11Bridge,
+    #[cfg(feature = "flat-autotune")]
+    flat_autotune: Mutex<FlatElasticRuntime<InMemoryElasticPlanCache>>,
     embedding: GpuMatrix,
     final_norm: GpuMatrix,
     blocks: Vec<ResidentBlock>,
@@ -196,6 +205,18 @@ impl ResidentModel {
         let chain = GpuChain::new()?;
         #[cfg(feature = "flat-attention")]
         let flat_decode = chain.flat_m11_bridge().ok()?;
+        #[cfg(feature = "flat-autotune")]
+        let flat_autotune = Mutex::new(
+            FlatElasticRuntime::in_memory(
+                ElasticConfig {
+                    mode: ElasticMode::Cold,
+                    objective: ElasticObjective::MinLatency,
+                    max_ranked_candidates: 0,
+                },
+                flat_decode.context(),
+            )
+            .ok()?,
+        );
         let up = |t: &Tensor| chain.upload(&t.data, t.rows, t.cols);
         let zeros =
             |m: &GpuMatrix| chain.upload(&vec![0.0f32; m.rows() * m.cols()], m.rows(), m.cols());
@@ -238,6 +259,8 @@ impl ResidentModel {
             chain,
             #[cfg(feature = "flat-attention")]
             flat_decode,
+            #[cfg(feature = "flat-autotune")]
+            flat_autotune,
             embedding,
             final_norm,
             blocks,
@@ -714,27 +737,37 @@ impl ResidentModel {
             let vmat = vcache[l].active_matrix();
 
             #[cfg(feature = "flat-attention")]
+            let flat_config = FlatM11ResidentConfig {
+                batch: 1,
+                q_heads: self.n_heads,
+                kv_heads: self.n_kv_heads,
+                query_len: 1,
+                kv_len: kmat.rows(),
+                head_dim: dh,
+                causal: true,
+                softmax_scale: None,
+                query_position_offset: pos,
+                theta: self.theta,
+                query_rope_position_offset: pos,
+                kv_rope_position_offset: 0,
+            };
+
+            #[cfg(feature = "flat-autotune")]
+            let ctx = {
+                let request =
+                    FlatElasticRequest::new(flat_config, FlatKvRepresentation::PreRotated)
+                        .expect("valid resident FLAT decode request");
+                self.flat_autotune
+                    .lock()
+                    .expect("FLAT ElasticAutoTuner mutex poisoned")
+                    .execute(&self.flat_decode, request, &q, &kmat, &vmat)
+                    .expect("Elastic-selected FLAT M15 pre-rotated-K decode")
+            };
+
+            #[cfg(all(feature = "flat-attention", not(feature = "flat-autotune")))]
             let ctx = self
                 .flat_decode
-                .forward_pre_rotated_k(
-                    &q,
-                    &kmat,
-                    &vmat,
-                    FlatM11ResidentConfig {
-                        batch: 1,
-                        q_heads: self.n_heads,
-                        kv_heads: self.n_kv_heads,
-                        query_len: 1,
-                        kv_len: kmat.rows(),
-                        head_dim: dh,
-                        causal: true,
-                        softmax_scale: None,
-                        query_position_offset: pos,
-                        theta: self.theta,
-                        query_rope_position_offset: pos,
-                        kv_rope_position_offset: 0,
-                    },
-                )
+                .forward_pre_rotated_k(&q, &kmat, &vmat, flat_config)
                 .expect("FLAT M15 pre-rotated-K decode");
 
             #[cfg(not(feature = "flat-attention"))]
