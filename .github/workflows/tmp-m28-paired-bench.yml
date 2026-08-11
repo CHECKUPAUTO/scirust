@@ -62,3 +62,5 @@ jobs:
           git add scirust-gpu/examples/flat_m28_naive_vs_fused.rs scirust-gpu/Cargo.toml .github/workflows/sciagent-flat-decode.yml .github/workflows/tmp-m28-paired-bench.yml
           git commit -m 'bench(gpu): wire paired M28 resident baseline into CI'
           git push origin HEAD:bench/m28-scirust-naive-vs-flat
+
+# trigger-after-pr
