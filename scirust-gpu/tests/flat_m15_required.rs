@@ -121,11 +121,10 @@ fn required_lavapipe_executes_m11_and_m15_against_the_same_oracle() {
     let q_gpu = bridge
         .context()
         .upload(&q, 1, config.q_heads * config.head_dim);
-    let k_gpu = bridge.context().upload(
-        &rotated_k,
-        config.kv_len,
-        config.kv_heads * config.head_dim,
-    );
+    let k_gpu =
+        bridge
+            .context()
+            .upload(&rotated_k, config.kv_len, config.kv_heads * config.head_dim);
     let v_gpu = bridge
         .context()
         .upload(&v, config.kv_len, config.kv_heads * config.head_dim);
