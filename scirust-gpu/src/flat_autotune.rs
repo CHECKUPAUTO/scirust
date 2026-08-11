@@ -664,6 +664,13 @@ fn validate_persisted_bootstrap_record(
     {
         return Err(FlatElasticError::PersistedObjectiveMismatch);
     }
+    if config.objective == ElasticObjective::DeterministicOnly
+        && !record.plan.evidence.candidate.deterministic
+    {
+        return Err(FlatElasticError::Selection(
+            ElasticSelectionError::NonDeterministicCandidate,
+        ));
+    }
     if record.plan.problem.family() != FLAT_ELASTIC_FAMILY
     {
         return Err(FlatElasticError::PersistedProblemFamilyMismatch);
@@ -1185,6 +1192,49 @@ mod tests {
         assert!(matches!(
             persisted_cache_from_records(config, &hardware, &[transfer], &[]),
             Err(FlatElasticError::PersistedRecordNotResident)
+        ));
+    }
+
+    #[test]
+    fn persisted_bootstrap_rejects_nondeterministic_deterministic_only_plan() {
+        let planner = planner(1, 17);
+        let hardware = hardware();
+        let locked = tuner(ElasticMode::Locked, ElasticObjective::MinLatency);
+        let mut plan = measured_plan(
+            &planner,
+            &locked,
+            hardware.clone(),
+            current_candidate().unwrap(),
+        );
+        assert!(!plan.evidence.candidate.deterministic);
+        plan.objective = ElasticObjective::DeterministicOnly;
+        let encoded = ElasticPersistedPlan::new(
+            plan,
+            ElasticMeasurementProtocol::new(
+                1,
+                3,
+                ElasticTimingSource::HostWallClock,
+                ElasticResidenceMode::Resident,
+                ElasticSynchronizationBoundary::PerIteration,
+            ),
+            true,
+            1,
+            b"forged-deterministic-only".to_vec(),
+            vec![FLAT_KERNEL_REVISION.to_vec()],
+        )
+        .unwrap()
+        .encode()
+        .unwrap();
+        let deterministic = ElasticConfig {
+            mode: ElasticMode::Locked,
+            objective: ElasticObjective::DeterministicOnly,
+            max_ranked_candidates: 0,
+        };
+        assert!(matches!(
+            persisted_cache_from_records(deterministic, &hardware, &[encoded], &[]),
+            Err(FlatElasticError::Selection(
+                ElasticSelectionError::NonDeterministicCandidate
+            ))
         ));
     }
 
