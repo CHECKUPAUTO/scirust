@@ -11,6 +11,7 @@ repository = "https://github.com/Memorithm/scirust"
 [dependencies]
 scirust-core = { path = "scirust-core" }
 scirust-simd = { path = "scirust-simd" }
+elastic-autotuner = { path = "elastic-autotuner", optional = true }
 scirust-symbolic = { path = "scirust-symbolic" }
 scirust-learning = { path = "scirust-learning" }
 scirust-solvers = { path = "scirust-solvers" }
@@ -43,6 +44,7 @@ scirust-gpu = { path = "scirust-gpu", optional = true }
 
 [features]
 default = []
+autotune = ["dep:elastic-autotuner", "dep:scirust-compute"]
 openclaw = ["dep:tokio", "dep:serde", "dep:serde_json", "dep:chrono", "dep:rand", "dep:sha2"]
 # The canonical tensor facade with a backend the caller supplies:
 # `scirust::tensor_canonical::{CanonicalProgram, TensorND, ReferencePlanRuntime, …}`.

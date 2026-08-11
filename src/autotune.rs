@@ -27,8 +27,10 @@ use scirust_simd::matrix::candidate_evidence::{
 };
 use scirust_simd::matrix::candidate_plan::{CandidateGemmPlanError, CandidateGemmPlanF32};
 use scirust_simd::matrix::candidate_qualification::{
-    GemmQualificationError, GemmQualificationInput, GemmQualificationPolicy,
-    GemmQualificationReport, qualify_gemm_candidate_f32,
+    GemmQualificationError, qualify_gemm_candidate_f32,
+};
+pub use scirust_simd::matrix::candidate_qualification::{
+    GemmQualificationInput, GemmQualificationPolicy, GemmQualificationReport,
 };
 use scirust_simd::matrix::gemm_candidates::{
     GemmCandidateDescriptor, GemmCandidateError, GemmProblemSignature,
@@ -50,8 +52,8 @@ pub struct SgemmElasticAdapter {
 impl SgemmElasticAdapter {
     /// Prepare the tuning boundary for `m×k · k×n` on the current host.
     pub fn new(m: usize, k: usize, n: usize) -> Result<Self, SgemmElasticError> {
-        let problem = GemmProblemSignature::new(m, k, n)
-            .map_err(SgemmElasticError::CandidateShape)?;
+        let problem =
+            GemmProblemSignature::new(m, k, n).map_err(SgemmElasticError::CandidateShape)?;
         let class_key = problem
             .class_key()
             .map_err(SgemmElasticError::CandidateShape)?;
@@ -96,13 +98,7 @@ impl SgemmElasticAdapter {
         tuner: &ElasticAutoTuner,
         hardware: &ElasticHardwareProfile,
     ) -> Vec<RankedCandidate> {
-        tuner.rank_candidates(
-            hardware,
-            &self.problem_class,
-            self,
-            self,
-            self,
-        )
+        tuner.rank_candidates(hardware, &self.problem_class, self, self, self)
     }
 
     /// Qualify one exact candidate against SciRust's scalar oracle and bind its
@@ -113,26 +109,22 @@ impl SgemmElasticAdapter {
         &self,
         candidate: &ElasticCandidate,
         input: GemmQualificationInput<'_>,
-        policy: GemmQualificationPolicy,
         protocol: ElasticMeasurementProtocol,
         samples_ns: &[u64],
         scratch: &mut [u64],
     ) -> Result<(GemmQualificationReport, ElasticEvidence), SgemmElasticError> {
         let descriptor = self.descriptor_for_candidate(candidate)?;
-        let report = qualify_gemm_candidate_f32(self.problem, descriptor, input, policy)
+        let policy = input.policy;
+        let report = qualify_gemm_candidate_f32(self.problem, descriptor, input)
             .map_err(SgemmElasticError::Qualification)?;
-        let correctness_evidence =
-            encode_gemm_correctness_evidence(self.problem, policy, report)
-                .map_err(SgemmElasticError::CorrectnessEvidence)?;
+        let correctness_evidence = encode_gemm_correctness_evidence(self.problem, policy, report)
+            .map_err(SgemmElasticError::CorrectnessEvidence)?;
         let measurement = protocol
             .summarize(samples_ns, scratch)
             .map_err(SgemmElasticError::MeasurementProtocol)?;
-        let evidence = ElasticEvidence::validated(
-            candidate.clone(),
-            correctness_evidence,
-            measurement,
-        )
-        .map_err(SgemmElasticError::Evidence)?;
+        let evidence =
+            ElasticEvidence::validated(candidate.clone(), correctness_evidence, measurement)
+                .map_err(SgemmElasticError::Evidence)?;
         Ok((report, evidence))
     }
 
@@ -222,7 +214,9 @@ impl ElasticCostModel for SgemmElasticAdapter {
         {
             return u64::MAX;
         }
-        let Ok(descriptor) = self.descriptor_for_candidate(candidate) else {
+        let Ok(descriptor) = self.descriptor_for_candidate(candidate)
+        else
+        {
             return u64::MAX;
         };
         match objective
@@ -301,17 +295,29 @@ impl core::fmt::Display for SgemmElasticError {
         {
             Self::CandidateShape(error) => write!(f, "invalid SGEMM problem: {error}"),
             Self::PreferredPlan(error) => write!(f, "cannot prepare SGEMM reference plan: {error}"),
-            Self::HardwareProfile(error) => write!(f, "cannot encode host hardware profile: {error}"),
+            Self::HardwareProfile(error) =>
+            {
+                write!(f, "cannot encode host hardware profile: {error:?}")
+            },
             Self::CandidateEncoding(error) => write!(f, "cannot encode SGEMM candidate: {error}"),
             Self::TemporaryBytesTooLarge =>
             {
-                write!(f, "SGEMM temporary-byte requirement does not fit canonical u64")
+                write!(
+                    f,
+                    "SGEMM temporary-byte requirement does not fit canonical u64"
+                )
             },
             Self::UnknownCandidate =>
             {
-                write!(f, "Elastic candidate is not executable by this SGEMM adapter")
+                write!(
+                    f,
+                    "Elastic candidate is not executable by this SGEMM adapter"
+                )
             },
-            Self::Qualification(error) => write!(f, "SGEMM correctness qualification failed: {error}"),
+            Self::Qualification(error) =>
+            {
+                write!(f, "SGEMM correctness qualification failed: {error}")
+            },
             Self::CorrectnessEvidence(error) =>
             {
                 write!(f, "SGEMM correctness evidence encoding failed: {error}")
@@ -322,7 +328,10 @@ impl core::fmt::Display for SgemmElasticError {
             },
             Self::Evidence(error) => write!(f, "Elastic evidence rejected: {error}"),
             Self::Selection(error) => write!(f, "Elastic measured selection failed: {error}"),
-            Self::KernelPlan(error) => write!(f, "selected SGEMM plan preparation/execution failed: {error}"),
+            Self::KernelPlan(error) => write!(
+                f,
+                "selected SGEMM plan preparation/execution failed: {error}"
+            ),
         }
     }
 }
@@ -362,7 +371,10 @@ mod tests {
         for candidate in candidates
         {
             let descriptor = adapter.descriptor_for_candidate(&candidate).unwrap();
-            assert_eq!(elastic_candidate_from_descriptor(descriptor).unwrap(), candidate);
+            assert_eq!(
+                elastic_candidate_from_descriptor(descriptor).unwrap(),
+                candidate
+            );
         }
     }
 
@@ -392,8 +404,8 @@ mod tests {
                     b: &b,
                     beta: 0.0,
                     initial_c: &initial_c,
+                    policy: GemmQualificationPolicy::default(),
                 },
-                GemmQualificationPolicy::default(),
                 protocol,
                 &samples,
                 &mut scratch,
@@ -447,8 +459,8 @@ mod tests {
                         b: &b,
                         beta: 0.0,
                         initial_c: &initial_c,
+                        policy: GemmQualificationPolicy::default(),
                     },
-                    GemmQualificationPolicy::default(),
                     protocol,
                     &samples,
                     &mut scratch,
