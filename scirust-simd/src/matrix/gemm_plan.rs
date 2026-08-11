@@ -35,14 +35,26 @@ impl core::fmt::Display for GemmPlanError {
         match *self
         {
             Self::ShapeOverflow => write!(f, "GEMM dimensions overflow usize"),
-            Self::ALength { expected, actual } => {
-                write!(f, "GEMM A length mismatch: expected {expected}, got {actual}")
+            Self::ALength { expected, actual } =>
+            {
+                write!(
+                    f,
+                    "GEMM A length mismatch: expected {expected}, got {actual}"
+                )
             },
-            Self::BLength { expected, actual } => {
-                write!(f, "GEMM B length mismatch: expected {expected}, got {actual}")
+            Self::BLength { expected, actual } =>
+            {
+                write!(
+                    f,
+                    "GEMM B length mismatch: expected {expected}, got {actual}"
+                )
             },
-            Self::CLength { expected, actual } => {
-                write!(f, "GEMM C length mismatch: expected {expected}, got {actual}")
+            Self::CLength { expected, actual } =>
+            {
+                write!(
+                    f,
+                    "GEMM C length mismatch: expected {expected}, got {actual}"
+                )
             },
         }
     }
@@ -141,10 +153,12 @@ impl GemmPlanF32 {
 
         match self.path
         {
-            GemmExecutionPath::Scalar => {
+            GemmExecutionPath::Scalar =>
+            {
                 ScalarBackend.sgemm_f32(alpha, a_view, b_view, beta, c_view);
             },
-            GemmExecutionPath::Avx512Packed | GemmExecutionPath::NeonPacked => {
+            GemmExecutionPath::Avx512Packed | GemmExecutionPath::NeonPacked =>
+            {
                 // `sgemm_tiled_with_workspace` retains a hardware feature guard at
                 // the unsafe-intrinsic boundary. That guard is intentionally kept
                 // even though the plan already selected the path during prepare().
@@ -188,9 +202,7 @@ mod tests {
         let b: Vec<f32> = (0..k * n)
             .map(|index| (index % 31) as f32 * 0.02 - 0.25)
             .collect();
-        let initial: Vec<f32> = (0..m * n)
-            .map(|index| (index % 7) as f32 * 0.01)
-            .collect();
+        let initial: Vec<f32> = (0..m * n).map(|index| (index % 7) as f32 * 0.01).collect();
 
         let mut expected = initial.clone();
         ScalarBackend.sgemm_f32(
