@@ -21,6 +21,10 @@ For a supported forward→backward training request:
 
 The forward path itself is FLAT's fused grouped-attention dispatch and does not materialize the old SciRust NxN score/probability matrices. The backward remains FLAT's correctness-first recomputation kernel.
 
+## Elastic evidence identity
+
+The `flat-autotune` M11/M15 candidate identity is bound to the same immutable FLAT revision pinned in `scirust-gpu/Cargo.toml`. A unit regression guard compares the `flat-attention@<sha>` candidate revision with the manifest `rev = "<sha>"`, so a future FLAT pin bump cannot silently reuse evidence or persisted plans from a different implementation revision.
+
 ## Fallback policy
 
 `FlatStableFallbackPolicy::ReturnError` is deliberate. The opt-in stable adapter never silently switches to the legacy SciRust multi-dispatch attention implementation. A higher-level runtime may choose an explicit fallback after receiving the error, but that policy is outside this adapter.
