@@ -2900,6 +2900,7 @@ dependencies = [
 name = "scirust"
 version = "0.14.0"
 dependencies = [
+ "elastic-autotuner",
  "chrono",
  "rand 0.8.6",
  "scirust-compute",
