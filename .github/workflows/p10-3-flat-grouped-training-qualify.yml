@@ -1,4 +1,5 @@
 name: P10.3 grouped training bridge qualification
+# bootstrap push: workflow already exists on branch
 
 on:
   push:
