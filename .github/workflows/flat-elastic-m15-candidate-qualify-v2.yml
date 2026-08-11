@@ -1,0 +1,138 @@
+name: Temporary FLAT M15 candidate qualification v2
+
+on:
+  push:
+    branches:
+      - feat/flat-elastic-m15-candidate
+
+permissions:
+  contents: write
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+          ref: feat/flat-elastic-m15-candidate
+
+      - name: Install toolchains and lavapipe
+        run: |
+          rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt,clippy
+          rustup toolchain install 1.89.0 --profile minimal
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers
+
+      - name: Apply qualified M15 candidate patch
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/flat-elastic-m15-candidate-qualify.yml').read_text()
+          marker = "          python3 <<'PY'\n"
+          start = workflow.index(marker) + len(marker)
+          end = workflow.index("\n          PY", start)
+          lines = workflow[start:end].splitlines()
+          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines)
+          Path('/tmp/apply_m15.py').write_text(script + '\n')
+          PY
+          python3 /tmp/apply_m15.py
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('scirust-gpu/src/flat_m11.rs')
+          text = path.read_text()
+
+          def once(old, new):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected one refinement match, found {count}: {old[:100]!r}')
+              text = text.replace(old, new, 1)
+
+          once(
+              '    FlatAttentionConfig, WgpuResidentDecodePipeline,\n};\n',
+              '    FlatAttentionConfig,\n};\n#[cfg(feature = "flat-autotune")]\nuse flat_attention::WgpuResidentDecodePipeline;\n',
+          )
+          once(
+              '    pipeline: ExternalAsymmetricProjectionRotaryGroupedPipeline,\n    m15_pipeline: Option<WgpuResidentDecodePipeline>,\n',
+              '    pipeline: ExternalAsymmetricProjectionRotaryGroupedPipeline,\n    #[cfg(feature = "flat-autotune")]\n    m15_pipeline: Option<WgpuResidentDecodePipeline>,\n',
+          )
+          once(
+              '            .field("adapter", &self.ctx.adapter_name())\n            .field("m15_available", &self.m15_pipeline.is_some())\n            .finish_non_exhaustive()\n',
+              '            .field("adapter", &self.ctx.adapter_name())\n            .finish_non_exhaustive()\n',
+          )
+          once(
+              '        let m15_pipeline = WgpuResidentDecodePipeline::new(ctx.device()).ok();\n        Ok(Self {\n            ctx,\n            pipeline,\n            m15_pipeline,\n        })\n',
+              '        #[cfg(feature = "flat-autotune")]\n        let m15_pipeline = WgpuResidentDecodePipeline::new(ctx.device()).ok();\n        Ok(Self {\n            ctx,\n            pipeline,\n            #[cfg(feature = "flat-autotune")]\n            m15_pipeline,\n        })\n',
+          )
+          for signature in [
+              '    pub const fn m15_available(&self) -> bool {\n',
+              '    pub fn record_pre_rotated_k_m15(\n',
+              '    pub fn forward_pre_rotated_k_m15(\n',
+              '    fn infer_kv_capacity(\n',
+          ]:
+              once(signature, '    #[cfg(feature = "flat-autotune")]\n' + signature)
+          once(
+              '        if bytes_per_capacity == 0 || k_bytes % bytes_per_capacity != 0\n',
+              '        if bytes_per_capacity == 0 || !k_bytes.is_multiple_of(bytes_per_capacity)\n',
+          )
+          once(
+              '        if bridge.m15_available()\n        {\n',
+              '        #[cfg(feature = "flat-autotune")]\n        if bridge.m15_available()\n        {\n',
+          )
+          path.write_text(text)
+          PY
+
+      - name: Canonical rustfmt
+        run: |
+          cargo +nightly-2026-07-02 fmt --all
+          cargo +nightly-2026-07-02 fmt --all -- --check
+
+      - name: Locked checks and tests
+        run: |
+          cargo metadata --locked --no-deps >/dev/null
+          cargo +nightly-2026-07-02 check -p scirust-gpu --features flat-autotune --locked
+          cargo +nightly-2026-07-02 test -p scirust-gpu --features flat-autotune --locked
+          cargo +nightly-2026-07-02 test -p scirust --features flat-autotune --lib --locked
+          cargo +nightly-2026-07-02 check -p scirust-gpu --features flat-attention --locked
+
+      - name: Strict Clippy
+        run: |
+          cargo +nightly-2026-07-02 clippy -p scirust-gpu --features flat-autotune --all-targets --locked -- -D warnings
+          cargo +nightly-2026-07-02 clippy -p scirust --features flat-autotune --lib --locked -- -D warnings
+          cargo +nightly-2026-07-02 clippy -p scirust-gpu --features flat-attention --all-targets --locked -- -D warnings
+
+      - name: MSRV 1.89
+        run: |
+          cargo +1.89.0 check -p scirust-gpu --features flat-autotune --all-targets --locked
+          cargo +1.89.0 check -p scirust --features flat-autotune --locked
+          cargo +1.89.0 check -p scirust-gpu --features flat-attention --all-targets --locked
+
+      - name: M15 lavapipe parity
+        env:
+          WGPU_BACKEND: vulkan
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+        run: |
+          cargo +nightly-2026-07-02 test -p scirust-gpu --features flat-autotune resident_pre_rotated_k_decode_matches_raw_k_reference --locked -- --nocapture
+
+      - name: Scope gate
+        run: |
+          test "$(git diff --name-only | sort)" = "$(printf '%s\n' scirust-gpu/src/flat_autotune.rs scirust-gpu/src/flat_m11.rs | sort)"
+
+      - name: Commit qualified implementation and self-clean
+        run: |
+          git config user.name "MEMOPERF"
+          git config user.email "contact@checkupauto.fr"
+          git add scirust-gpu/src/flat_autotune.rs scirust-gpu/src/flat_m11.rs
+          git commit -m "feat(autotune): add specialized FLAT M15 candidate"
+          rm -f .github/workflows/flat-elastic-m15-candidate-qualify.yml
+          rm -f .github/workflows/flat-elastic-m15-candidate-qualify-v2.yml
+          rm -f .github/flat-elastic-m15-candidate-trigger
+          rm -f .github/flat-elastic-m15-candidate-trigger-v2
+          git add -A
+          git commit -m "ci: finalize FLAT M15 candidate head"
+          git push origin HEAD:feat/flat-elastic-m15-candidate
