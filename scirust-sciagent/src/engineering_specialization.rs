@@ -294,10 +294,10 @@ impl fmt::Display for EngineeringSpecializationError {
 
 impl std::error::Error for EngineeringSpecializationError {}
 
-fn canonical_observations(
+fn canonical_observations<'a>(
     side: &'static str,
-    observations: &[HeldOutEngineeringObservation],
-) -> Result<BTreeMap<String, &HeldOutEngineeringObservation>, EngineeringSpecializationError> {
+    observations: &'a [HeldOutEngineeringObservation],
+) -> Result<BTreeMap<String, &'a HeldOutEngineeringObservation>, EngineeringSpecializationError> {
     if observations.is_empty()
     {
         return Err(EngineeringSpecializationError::EmptyHeldOutSet);
@@ -338,7 +338,8 @@ fn measure(
 
     for (task_spec_id, observation) in observations
     {
-        let patch_set_valid = required_measurement(observation.patch_set_valid, task_spec_id, "patch_set_valid")?;
+        let patch_set_valid =
+            required_measurement(observation.patch_set_valid, task_spec_id, "patch_set_valid")?;
         let compile_probability = required_measurement(
             observation.compile_pass_probability,
             task_spec_id,
@@ -352,7 +353,8 @@ fn measure(
                 reason: "compile_pass_probability must be finite and in [0,1]".to_string(),
             });
         }
-        let compile_passed = required_measurement(observation.compile_passed, task_spec_id, "compile_passed")?;
+        let compile_passed =
+            required_measurement(observation.compile_passed, task_spec_id, "compile_passed")?;
         let gate_success = required_measurement(
             observation.first_pass_gate_success,
             task_spec_id,
@@ -363,7 +365,8 @@ fn measure(
             task_spec_id,
             "accepted_candidate",
         )?;
-        let cost = required_measurement(observation.evaluation_cost, task_spec_id, "evaluation_cost")?;
+        let cost =
+            required_measurement(observation.evaluation_cost, task_spec_id, "evaluation_cost")?;
         if cost == 0
         {
             return Err(EngineeringSpecializationError::InvalidObservation {
@@ -412,7 +415,10 @@ fn required_measurement<T: Copy>(
     })
 }
 
-fn validate_probability(name: &'static str, value: f64) -> Result<(), EngineeringSpecializationError> {
+fn validate_probability(
+    name: &'static str,
+    value: f64,
+) -> Result<(), EngineeringSpecializationError> {
     if !value.is_finite() || !(0.0..=1.0).contains(&value)
     {
         return Err(EngineeringSpecializationError::InvalidCriterion(format!(
@@ -516,7 +522,10 @@ mod tests {
         .unwrap();
         assert_eq!(report.decision, SpecializationRetentionDecision::Retain);
         assert!(report.failed_criteria.is_empty());
-        assert_eq!(report.held_out_task_ids, vec!["task-a", "task-b", "task-c", "task-d"]);
+        assert_eq!(
+            report.held_out_task_ids,
+            vec!["task-a", "task-b", "task-c", "task-d"]
+        );
         assert!(report.candidate.valid_patch_set_rate > report.baseline.valid_patch_set_rate);
         assert!(report.candidate.compile_brier_score < report.baseline.compile_brier_score);
         assert!(
@@ -553,7 +562,11 @@ mod tests {
         let error =
             EngineeringSpecializationReport::evaluate(&criterion(), &baseline(), &candidate)
                 .unwrap_err();
-        assert!(error.to_string().contains("missing required held-out measurement"));
+        assert!(
+            error
+                .to_string()
+                .contains("missing required held-out measurement")
+        );
     }
 
     #[test]
