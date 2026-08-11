@@ -120,9 +120,13 @@ impl ElasticRacingPolicy {
             ElasticObjective::MinTemporaryMemory => records.sort_by(|left, right| {
                 memory_key(left).cmp(&memory_key(right))
             }),
-            ElasticObjective::BalancedLatencyMemory => records.sort_by(|left, right| {
-                balanced_key(left, &records).cmp(&balanced_key(right, &records))
-            }),
+            ElasticObjective::BalancedLatencyMemory =>
+            {
+                let snapshot = records.clone();
+                records.sort_by(|left, right| {
+                    balanced_key(left, &snapshot).cmp(&balanced_key(right, &snapshot))
+                });
+            },
             ElasticObjective::MinLatency
             | ElasticObjective::MaxThroughput
             | ElasticObjective::DeterministicOnly => records.sort_by(|left, right| {
@@ -238,9 +242,7 @@ mod tests {
     use crate::measurement_protocol::{
         ElasticResidenceMode, ElasticSynchronizationBoundary, ElasticTimingSource,
     };
-    use crate::{
-        ElasticCandidate, ElasticConfig, ElasticMeasurement, ElasticParameter,
-    };
+    use crate::{ElasticCandidate, ElasticConfig, ElasticMeasurement, ElasticParameter};
 
     fn candidate(id: i64, scratch: u64) -> ElasticCandidate {
         ElasticCandidate::new(
