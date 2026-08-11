@@ -18,8 +18,8 @@
 use crate::wgpu_backend::{GpuMatrix, WgpuContext};
 use crate::{BackendError, BackendResult};
 use flat_attention::{
-    FlatAttentionConfig, GroupedAttentionShape, GroupedBackwardRecomputePass,
-    GroupedForwardPass, WgpuGroupedBackwardRecomputePipeline, WgpuGroupedForwardPipeline,
+    FlatAttentionConfig, GroupedAttentionShape, GroupedBackwardRecomputePass, GroupedForwardPass,
+    WgpuGroupedBackwardRecomputePipeline, WgpuGroupedForwardPipeline,
 };
 
 /// Native grouped-attention shape and masking contract for one training pass.
@@ -118,9 +118,10 @@ impl WgpuFlatGroupedTrainingBridge {
         let forward = WgpuGroupedForwardPipeline::new(ctx.device()).map_err(|error| {
             BackendError::Execution(format!("FLAT M24 grouped forward pipeline: {error}"))
         })?;
-        let backward = WgpuGroupedBackwardRecomputePipeline::new(ctx.device()).map_err(|error| {
-            BackendError::Execution(format!("FLAT grouped backward pipeline: {error}"))
-        })?;
+        let backward =
+            WgpuGroupedBackwardRecomputePipeline::new(ctx.device()).map_err(|error| {
+                BackendError::Execution(format!("FLAT grouped backward pipeline: {error}"))
+            })?;
         Ok(Self {
             ctx,
             forward,
@@ -160,9 +161,10 @@ impl WgpuFlatGroupedTrainingBridge {
         let forward_layout = WgpuGroupedForwardPipeline::layout(shape).map_err(|error| {
             BackendError::ShapeMismatch(format!("FLAT grouped forward layout: {error}"))
         })?;
-        let backward_layout = WgpuGroupedBackwardRecomputePipeline::layout(shape).map_err(
-            |error| BackendError::ShapeMismatch(format!("FLAT grouped backward layout: {error}")),
-        )?;
+        let backward_layout =
+            WgpuGroupedBackwardRecomputePipeline::layout(shape).map_err(|error| {
+                BackendError::ShapeMismatch(format!("FLAT grouped backward layout: {error}"))
+            })?;
 
         let q_rows = config.q_rows()?;
         let kv_rows = config.kv_rows()?;
@@ -290,8 +292,7 @@ impl WgpuFlatGroupedTrainingBridge {
             forward_layout.output_bytes,
         );
 
-        self.backward
-            .encode_prepared(encoder, &prepared_backward);
+        self.backward.encode_prepared(encoder, &prepared_backward);
 
         encoder.copy_buffer_to_buffer(&packed_grads, 0, dq.buffer(), 0, q_bytes);
         encoder.copy_buffer_to_buffer(
@@ -387,7 +388,8 @@ fn expect_shape(
     rows: usize,
     cols: usize,
 ) -> BackendResult<()> {
-    if matrix.rows() != rows || matrix.cols() != cols {
+    if matrix.rows() != rows || matrix.cols() != cols
+    {
         return Err(BackendError::ShapeMismatch(format!(
             "FLAT grouped {name} is {}x{}, expected {rows}x{cols}",
             matrix.rows(),
@@ -416,7 +418,8 @@ mod tests {
 
     fn assert_close(name: &str, actual: &[f32], expected: &[f32]) {
         assert_eq!(actual.len(), expected.len(), "{name}: length mismatch");
-        for (index, (&actual, &expected)) in actual.iter().zip(expected).enumerate() {
+        for (index, (&actual, &expected)) in actual.iter().zip(expected).enumerate()
+        {
             let tolerance = ATOL + RTOL * expected.abs();
             let error = (actual - expected).abs();
             assert!(
@@ -426,9 +429,26 @@ mod tests {
         }
     }
 
+    fn bridge_or_skip(label: &str) -> Option<WgpuFlatGroupedTrainingBridge> {
+        match WgpuFlatGroupedTrainingBridge::new()
+        {
+            Ok(bridge) => Some(bridge),
+            Err(error) =>
+            {
+                if std::env::var_os("SCIRUST_REQUIRE_FLAT_GROUPED_WGPU").is_some()
+                {
+                    panic!("{label}: WGPU FLAT grouped training bridge is required: {error}");
+                }
+                eprintln!("{label}: no WGPU adapter, skipping: {error}");
+                None
+            },
+        }
+    }
+
     fn run_case(config: FlatGroupedTrainingConfig) {
-        let Ok(bridge) = WgpuFlatGroupedTrainingBridge::new() else {
-            eprintln!("wgpu: no adapter, skipping FLAT grouped training bridge test");
+        let Some(bridge) = bridge_or_skip("FLAT grouped training parity")
+        else
+        {
             return;
         };
         let shape = config.shape();
@@ -517,8 +537,9 @@ mod tests {
 
     #[test]
     fn rejects_non_native_head_major_input_shape_before_encoding() {
-        let Ok(bridge) = WgpuFlatGroupedTrainingBridge::new() else {
-            eprintln!("wgpu: no adapter, skipping FLAT grouped shape test");
+        let Some(bridge) = bridge_or_skip("FLAT grouped shape rejection")
+        else
+        {
             return;
         };
         let config = FlatGroupedTrainingConfig {
