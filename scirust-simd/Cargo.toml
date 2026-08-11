@@ -10,12 +10,10 @@ license-file = "../LICENSE.md"
 
 [dependencies]
 libc = "0.2"
-scirust-autodiff = { path = "../scirust-autodiff", optional = true }
 
 [features]
 portable-simd = []
 nightly-simd = []
-autodiff = ["dep:scirust-autodiff"]
 # Transformer-inference stack (attention, KV cache, RMSNorm/LayerNorm,
 # int8/bf16 quantization, the block/model assembly) — a real, tested subsystem
 # with zero consumers anywhere in the workspace as of 2026-07. Gated off by
