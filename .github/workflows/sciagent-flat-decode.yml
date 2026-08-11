@@ -34,9 +34,52 @@ jobs:
         run: cargo check -p scirust-sciagent --locked --features flat-attention
       - name: Clippy opt-in FLAT decode feature
         run: cargo clippy -p scirust-sciagent --all-targets --locked --features flat-attention -- -D warnings
+      - name: Clippy paired FLAT decode benchmark
+        run: cargo clippy -p scirust-gpu --locked --features flat-attention --example flat_decode_bench -- -D warnings
       - name: M15 compile-time contract
         run: cargo test -p scirust-sciagent --locked --features flat-attention --test flat_feature_contract
       - name: M15 runtime parity on lavapipe
         env:
           WGPU_BACKEND: vulkan
         run: cargo test -p scirust-sciagent --locked --features flat-attention --test flat_runtime_decode -- --nocapture
+      - name: Paired old-vs-FLAT decode benchmark smoke on lavapipe
+        env:
+          WGPU_BACKEND: vulkan
+          SCIRUST_FLAT_DECODE_BENCH_Q_HEADS: "4"
+          SCIRUST_FLAT_DECODE_BENCH_KV_HEADS: "2"
+          SCIRUST_FLAT_DECODE_BENCH_HEAD_DIM: "32"
+          SCIRUST_FLAT_DECODE_BENCH_KV_LENS: "1,17"
+          SCIRUST_FLAT_DECODE_BENCH_WARMUPS: "1"
+          SCIRUST_FLAT_DECODE_BENCH_REPEATS: "3"
+        run: |
+          cargo run --quiet --release --locked -p scirust-gpu \
+            --features flat-attention --example flat_decode_bench \
+            > /tmp/flat_decode_bench.csv
+          cat /tmp/flat_decode_bench.csv
+      - name: Validate paired benchmark CSV contract
+        run: |
+          python3 - <<'PY'
+          import csv
+          import math
+
+          with open("/tmp/flat_decode_bench.csv", newline="", encoding="utf-8") as handle:
+              rows = list(csv.DictReader(handle))
+
+          assert len(rows) == 2, rows
+          assert {int(row["kv_len"]) for row in rows} == {1, 17}, rows
+          for row in rows:
+              assert int(row["q_heads"]) == 4, row
+              assert int(row["kv_heads"]) == 2, row
+              assert int(row["head_dim"]) == 32, row
+              assert int(row["warmups"]) == 1, row
+              assert int(row["repeats"]) == 3, row
+              legacy = float(row["legacy_median_us"])
+              flat = float(row["flat_median_us"])
+              ratio = float(row["legacy_over_flat"])
+              parity = float(row["parity_max_abs"])
+              assert math.isfinite(legacy) and legacy > 0.0, row
+              assert math.isfinite(flat) and flat > 0.0, row
+              assert math.isfinite(ratio) and ratio > 0.0, row
+              assert math.isfinite(parity) and parity >= 0.0, row
+          print(f"validated {len(rows)} paired FLAT decode benchmark rows")
+          PY
