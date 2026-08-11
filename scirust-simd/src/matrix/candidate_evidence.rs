@@ -21,10 +21,12 @@ pub fn encode_gemm_correctness_evidence(
     policy: GemmQualificationPolicy,
     report: GemmQualificationReport,
 ) -> Result<Vec<u8>, GemmCorrectnessEvidenceError> {
-    if !report.finite {
+    if !report.finite
+    {
         return Err(GemmCorrectnessEvidenceError::NonFiniteReport);
     }
-    if !report.accepted {
+    if !report.accepted
+    {
         return Err(GemmCorrectnessEvidenceError::RejectedReport);
     }
 
@@ -35,7 +37,8 @@ pub fn encode_gemm_correctness_evidence(
         .m
         .checked_mul(problem.n)
         .ok_or(GemmCorrectnessEvidenceError::DimensionTooLarge)?;
-    if report.element_count != expected_elements {
+    if report.element_count != expected_elements
+    {
         return Err(GemmCorrectnessEvidenceError::ElementCountMismatch {
             expected: expected_elements,
             actual: report.element_count,
@@ -73,10 +76,17 @@ pub enum GemmCorrectnessEvidenceError {
 
 impl core::fmt::Display for GemmCorrectnessEvidenceError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match *self {
-            Self::NonFiniteReport => write!(f, "cannot encode non-finite GEMM qualification evidence"),
+        match *self
+        {
+            Self::NonFiniteReport =>
+            {
+                write!(f, "cannot encode non-finite GEMM qualification evidence")
+            },
             Self::RejectedReport => write!(f, "cannot encode rejected GEMM qualification evidence"),
-            Self::DimensionTooLarge => write!(f, "GEMM evidence field does not fit canonical u64 encoding"),
+            Self::DimensionTooLarge =>
+            {
+                write!(f, "GEMM evidence field does not fit canonical u64 encoding")
+            },
             Self::ElementCountMismatch { expected, actual } => write!(
                 f,
                 "GEMM qualification element count mismatch: expected {expected}, got {actual}"
@@ -102,7 +112,8 @@ fn push_usize(out: &mut Vec<u8>, value: usize) -> Result<(), GemmCorrectnessEvid
 }
 
 const fn path_code(path: GemmExecutionPath) -> u8 {
-    match path {
+    match path
+    {
         GemmExecutionPath::Scalar => 0,
         GemmExecutionPath::Avx512Packed => 1,
         GemmExecutionPath::NeonPacked => 2,
