@@ -19,7 +19,7 @@ pub use elastic_autotuner::{
     InMemoryElasticPlanCache, RankedCandidate,
 };
 
-use crate::{BackendResult, WgpuComputeAdapter};
+use crate::{BackendError, WgpuComputeAdapter};
 use elastic_autotuner::{
     ElasticConstraintSolver, ElasticCostModel, ElasticPlanCache, ElasticPlanKey, ElasticSearchSpace,
 };
@@ -136,10 +136,7 @@ impl FlatElasticPlanner {
         &self,
         context: &WgpuContext,
     ) -> Result<ElasticHardwareProfile, FlatElasticError> {
-        let adapter = WgpuComputeAdapter::from_context(context.clone());
-        let capabilities = ComputeBackend::hardware_capabilities(&adapter);
-        ElasticHardwareProfile::from_capabilities(&capabilities)
-            .map_err(FlatElasticError::HardwareProfile)
+        hardware_profile_from_context(context)
     }
 
     /// Stable cache key for this hardware/problem/objective validity region.
@@ -179,7 +176,7 @@ impl FlatElasticPlanner {
         {
             self.require_current_candidate(&plan.evidence.candidate)?;
             return Ok(FlatPlanResolution::Production(Box::new(FlatElasticPlan {
-                request: self.request,
+                problem_class: self.problem_class.clone(),
                 candidate: plan.evidence.candidate.clone(),
                 elastic_plan: Some(plan),
                 origin: FlatPlanOrigin::Persisted,
@@ -201,7 +198,7 @@ impl FlatElasticPlanner {
                     .candidate;
                 self.require_current_candidate(&candidate)?;
                 Ok(FlatPlanResolution::Production(Box::new(FlatElasticPlan {
-                    request: self.request,
+                    problem_class: self.problem_class.clone(),
                     candidate,
                     elastic_plan: None,
                     origin: FlatPlanOrigin::QualifiedHeuristic,
@@ -350,15 +347,20 @@ pub enum FlatPlanResolution {
 /// the current pinned FLAT revision before this value is constructed.
 #[derive(Debug)]
 pub struct FlatElasticPlan {
-    request: FlatElasticRequest,
+    problem_class: ElasticProblemClass,
     candidate: ElasticCandidate,
     elastic_plan: Option<ElasticExecutionPlan>,
     origin: FlatPlanOrigin,
 }
 
 impl FlatElasticPlan {
-    pub const fn request(&self) -> FlatElasticRequest {
-        self.request
+    pub fn problem_class(&self) -> &ElasticProblemClass {
+        &self.problem_class
+    }
+
+    /// Whether a dynamic request lies inside this plan's qualified validity region.
+    pub fn accepts(&self, request: FlatElasticRequest) -> bool {
+        problem_class_for(request).is_ok_and(|problem| problem == self.problem_class)
     }
 
     pub fn candidate(&self) -> &ElasticCandidate {
@@ -373,23 +375,162 @@ impl FlatElasticPlan {
         self.elastic_plan.as_ref()
     }
 
-    /// Execute with the exact existing zero-copy SciRust ↔ FLAT bridge. This
-    /// does not change SciAgent's default selection policy.
+    /// Execute a request that lies inside this plan's qualified validity region.
+    /// The dynamic geometry/positions come from `request`; the selected candidate comes from
+    /// the plan. This is what lets sequential decode reuse one plan until an H2 boundary.
     pub fn execute(
         &self,
         bridge: &WgpuFlatM11Bridge,
+        request: FlatElasticRequest,
         q: &GpuMatrix,
         k: &GpuMatrix,
         v: &GpuMatrix,
-    ) -> BackendResult<GpuMatrix> {
-        match self.request.kv_representation
+    ) -> Result<GpuMatrix, FlatElasticError> {
+        if !self.accepts(request)
         {
-            FlatKvRepresentation::Raw => bridge.forward(q, k, v, self.request.config),
+            return Err(FlatElasticError::PlanRegionMismatch);
+        }
+        if current_candidate()? != self.candidate
+        {
+            return Err(FlatElasticError::UnknownCandidate);
+        }
+        let result = match request.kv_representation
+        {
+            FlatKvRepresentation::Raw => bridge.forward(q, k, v, request.config),
             FlatKvRepresentation::PreRotated =>
             {
-                bridge.forward_pre_rotated_k(q, k, v, self.request.config)
+                bridge.forward_pre_rotated_k(q, k, v, request.config)
             },
+        };
+        result.map_err(FlatElasticError::Backend)
+    }
+}
+
+/// Stateful execution-policy cache for latency-sensitive FLAT callers.
+///
+/// Planning is repeated only when the request crosses an H2 validity-region boundary. The
+/// runtime never benchmarks: caller-collected evidence must be evaluated/promoted explicitly
+/// through the H3 methods. This type is intentionally below SciAgent so model code asks for an
+/// attention execution policy without knowing FLAT kernel identities.
+pub struct FlatElasticRuntime<C> {
+    tuner: ElasticAutoTuner,
+    hardware: ElasticHardwareProfile,
+    cache: C,
+    active_plan: Option<FlatElasticPlan>,
+}
+
+impl<C: ElasticPlanCache> FlatElasticRuntime<C> {
+    pub const fn from_hardware(
+        config: ElasticConfig,
+        hardware: ElasticHardwareProfile,
+        cache: C,
+    ) -> Self {
+        Self {
+            tuner: ElasticAutoTuner::new(config),
+            hardware,
+            cache,
+            active_plan: None,
         }
+    }
+
+    pub const fn tuner(&self) -> &ElasticAutoTuner {
+        &self.tuner
+    }
+
+    pub const fn hardware(&self) -> &ElasticHardwareProfile {
+        &self.hardware
+    }
+
+    pub const fn cache(&self) -> &C {
+        &self.cache
+    }
+
+    pub fn cache_mut(&mut self) -> &mut C {
+        &mut self.cache
+    }
+
+    pub const fn active_plan(&self) -> Option<&FlatElasticPlan> {
+        self.active_plan.as_ref()
+    }
+
+    /// Resolve at most once per validity region. No measurement or exploration occurs here.
+    pub fn resolve_request(
+        &mut self,
+        request: FlatElasticRequest,
+    ) -> Result<&FlatElasticPlan, FlatElasticError> {
+        let reuse = self
+            .active_plan
+            .as_ref()
+            .is_some_and(|plan| plan.accepts(request));
+        if !reuse
+        {
+            let planner = FlatElasticPlanner::new(request)?;
+            self.active_plan =
+                match planner.resolve_for_mode(&self.tuner, self.hardware.clone(), &self.cache)?
+                {
+                    FlatPlanResolution::Production(plan) => Some(*plan),
+                    FlatPlanResolution::AuditOnly => None,
+                };
+        }
+        self.active_plan
+            .as_ref()
+            .ok_or(FlatElasticError::MissingProductionPlan)
+    }
+
+    pub fn execute(
+        &mut self,
+        bridge: &WgpuFlatM11Bridge,
+        request: FlatElasticRequest,
+        q: &GpuMatrix,
+        k: &GpuMatrix,
+        v: &GpuMatrix,
+    ) -> Result<GpuMatrix, FlatElasticError> {
+        let plan = self.resolve_request(request)?;
+        plan.execute(bridge, request, q, k, v)
+    }
+
+    /// Replay measured evidence without changing the production plan/cache.
+    pub fn evaluate_measured_evidence(
+        &self,
+        request: FlatElasticRequest,
+        evidence: &[ElasticEvidence],
+    ) -> Result<ElasticExecutionPlan, FlatElasticError> {
+        FlatElasticPlanner::new(request)?.evaluate_measured_evidence(
+            &self.tuner,
+            self.hardware.clone(),
+            evidence,
+        )
+    }
+
+    /// Learn-only promotion. The active selection is invalidated so the next production request
+    /// reloads the newly persisted validated plan for its region.
+    pub fn promote_measured_evidence(
+        &mut self,
+        request: FlatElasticRequest,
+        evidence: &[ElasticEvidence],
+    ) -> Result<ElasticExecutionPlan, FlatElasticError> {
+        let plan = FlatElasticPlanner::new(request)?.promote_measured_evidence(
+            &self.tuner,
+            self.hardware.clone(),
+            evidence,
+            &mut self.cache,
+        )?;
+        self.active_plan = None;
+        Ok(plan)
+    }
+}
+
+impl FlatElasticRuntime<InMemoryElasticPlanCache> {
+    /// Construct the normal in-process runtime from the exact resident WGPU context.
+    pub fn in_memory(
+        config: ElasticConfig,
+        context: &WgpuContext,
+    ) -> Result<Self, FlatElasticError> {
+        Ok(Self::from_hardware(
+            config,
+            hardware_profile_from_context(context)?,
+            InMemoryElasticPlanCache::default(),
+        ))
     }
 }
 
@@ -398,12 +539,14 @@ pub enum FlatElasticError {
     InvalidRequest(&'static str),
     RequestOverflow(&'static str),
     HardwareProfile(scirust_compute::ProfileEncodingError),
+    Backend(BackendError),
     CandidateEncoding(ElasticCandidateError),
     Evidence(ElasticEvidenceError),
     Selection(ElasticSelectionError),
     Mode(ElasticModeError),
     NoQualifiedCandidate,
     UnknownCandidate,
+    PlanRegionMismatch,
     MissingProductionPlan,
 }
 
@@ -417,6 +560,7 @@ impl core::fmt::Display for FlatElasticError {
             {
                 write!(f, "cannot encode WGPU hardware profile: {error:?}")
             },
+            Self::Backend(error) => write!(f, "FLAT backend execution failed: {error}"),
             Self::CandidateEncoding(error) => write!(f, "cannot encode FLAT candidate: {error}"),
             Self::Evidence(error) => write!(f, "invalid FLAT tuning evidence: {error}"),
             Self::Selection(error) => write!(f, "cannot select measured FLAT evidence: {error}"),
@@ -425,6 +569,13 @@ impl core::fmt::Display for FlatElasticError {
             Self::UnknownCandidate =>
             {
                 write!(f, "Elastic plan names a stale or foreign FLAT candidate")
+            },
+            Self::PlanRegionMismatch =>
+            {
+                write!(
+                    f,
+                    "FLAT execution request is outside the selected plan validity region"
+                )
             },
             Self::MissingProductionPlan =>
             {
@@ -435,6 +586,15 @@ impl core::fmt::Display for FlatElasticError {
 }
 
 impl std::error::Error for FlatElasticError {}
+
+fn hardware_profile_from_context(
+    context: &WgpuContext,
+) -> Result<ElasticHardwareProfile, FlatElasticError> {
+    let adapter = WgpuComputeAdapter::from_context(context.clone());
+    let capabilities = ComputeBackend::hardware_capabilities(&adapter);
+    ElasticHardwareProfile::from_capabilities(&capabilities)
+        .map_err(FlatElasticError::HardwareProfile)
+}
 
 fn current_candidate() -> Result<ElasticCandidate, FlatElasticError> {
     ElasticCandidate::new(
@@ -712,6 +872,61 @@ mod tests {
         {
             assert_eq!(length_bucket(left), length_bucket(right));
         }
+    }
+
+    #[test]
+    fn selected_plan_reuses_dynamic_requests_inside_one_region() {
+        let planner = planner(1, 17);
+        let cold = tuner(ElasticMode::Cold, ElasticObjective::MinLatency);
+        let cache = InMemoryElasticPlanCache::default();
+        let plan = match planner.resolve_for_mode(&cold, hardware(), &cache).unwrap()
+        {
+            FlatPlanResolution::Production(plan) => plan,
+            FlatPlanResolution::AuditOnly => panic!("cold must resolve a production plan"),
+        };
+        let same_region =
+            FlatElasticRequest::new(config(1, 64), FlatKvRepresentation::PreRotated).unwrap();
+        let next_region =
+            FlatElasticRequest::new(config(1, 65), FlatKvRepresentation::PreRotated).unwrap();
+        assert!(plan.accepts(same_region));
+        assert!(!plan.accepts(next_region));
+    }
+
+    #[test]
+    fn runtime_reuses_region_and_transitions_only_at_bucket_boundary() {
+        let mut runtime = FlatElasticRuntime::from_hardware(
+            ElasticConfig {
+                mode: ElasticMode::Cold,
+                objective: ElasticObjective::MinLatency,
+                max_ranked_candidates: 0,
+            },
+            hardware(),
+            InMemoryElasticPlanCache::default(),
+        );
+        let first =
+            FlatElasticRequest::new(config(1, 17), FlatKvRepresentation::PreRotated).unwrap();
+        let same =
+            FlatElasticRequest::new(config(1, 64), FlatKvRepresentation::PreRotated).unwrap();
+        let next =
+            FlatElasticRequest::new(config(1, 65), FlatKvRepresentation::PreRotated).unwrap();
+
+        let first_class = runtime
+            .resolve_request(first)
+            .unwrap()
+            .problem_class()
+            .clone();
+        let same_class = runtime
+            .resolve_request(same)
+            .unwrap()
+            .problem_class()
+            .clone();
+        assert_eq!(first_class, same_class);
+        let next_class = runtime
+            .resolve_request(next)
+            .unwrap()
+            .problem_class()
+            .clone();
+        assert_ne!(same_class, next_class);
     }
 
     #[test]
