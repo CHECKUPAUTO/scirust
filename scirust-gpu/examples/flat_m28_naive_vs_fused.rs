@@ -23,6 +23,13 @@ const DEFAULT_HEAD_DIM: usize = 64;
 const ATOL: f32 = 8.0e-4;
 const RTOL: f32 = 3.0e-3;
 
+#[derive(Clone, Copy)]
+struct FlatResidentInputs<'a> {
+    q: &'a wgpu::Buffer,
+    k: &'a wgpu::Buffer,
+    v: &'a wgpu::Buffer,
+}
+
 fn env_usize(name: &str, default: usize) -> usize {
     std::env::var(name)
         .ok()
@@ -41,8 +48,7 @@ fn fixture(len: usize, phase: f32) -> Vec<f32> {
 
 fn bytes_f32(values: &[f32]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(std::mem::size_of_val(values));
-    for &value in values
-    {
+    for &value in values {
         bytes.extend_from_slice(&value.to_ne_bytes());
     }
     bytes
@@ -56,8 +62,7 @@ fn flat_input_buffer(ctx: &WgpuContext, values: &[f32], label: &'static str) -> 
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
-    if !bytes.is_empty()
-    {
+    if !bytes.is_empty() {
         ctx.queue().write_buffer(&buffer, 0, &bytes);
     }
     buffer
@@ -83,17 +88,14 @@ fn max_abs_error(actual: &[f32], expected: &[f32]) -> f32 {
 }
 
 fn assert_close(name: &str, actual: &[f32], expected: &[f32]) -> Result<f32, Box<dyn Error>> {
-    if actual.len() != expected.len()
-    {
+    if actual.len() != expected.len() {
         return Err(format!("{name} length {} != {}", actual.len(), expected.len()).into());
     }
     let mut worst = 0.0f32;
-    for (index, (&actual, &expected)) in actual.iter().zip(expected).enumerate()
-    {
+    for (index, (&actual, &expected)) in actual.iter().zip(expected).enumerate() {
         let abs = (actual - expected).abs();
         let limit = ATOL + RTOL * actual.abs().max(expected.abs());
-        if !actual.is_finite() || abs > limit
-        {
+        if !actual.is_finite() || abs > limit {
             return Err(format!(
                 "{name}[{index}] actual={actual} expected={expected} abs={abs} limit={limit}"
             )
@@ -121,9 +123,7 @@ fn naive_attention(
 fn run_flat(
     ctx: &WgpuContext,
     pipeline: &WgpuGroupedForwardPipeline,
-    q: &wgpu::Buffer,
-    k: &wgpu::Buffer,
-    v: &wgpu::Buffer,
+    inputs: FlatResidentInputs<'_>,
     output: &wgpu::Buffer,
     shape: GroupedAttentionShape,
     config: FlatAttentionConfig,
@@ -137,9 +137,9 @@ fn run_flat(
         ctx.device(),
         &mut encoder,
         GroupedForwardPass {
-            q,
-            k,
-            v,
+            q: inputs.q,
+            k: inputs.k,
+            v: inputs.v,
             output,
             shape,
             config,
@@ -167,30 +167,26 @@ fn time_naive(
 fn time_flat_reused(
     ctx: &WgpuContext,
     pipeline: &WgpuGroupedForwardPipeline,
-    q: &wgpu::Buffer,
-    k: &wgpu::Buffer,
-    v: &wgpu::Buffer,
+    inputs: FlatResidentInputs<'_>,
     output: &wgpu::Buffer,
     shape: GroupedAttentionShape,
     config: FlatAttentionConfig,
 ) -> Result<Duration, Box<dyn Error>> {
     let start = Instant::now();
-    run_flat(ctx, pipeline, q, k, v, output, shape, config)?;
+    run_flat(ctx, pipeline, inputs, output, shape, config)?;
     Ok(start.elapsed())
 }
 
 fn time_flat_fresh_output(
     ctx: &WgpuContext,
     pipeline: &WgpuGroupedForwardPipeline,
-    q: &wgpu::Buffer,
-    k: &wgpu::Buffer,
-    v: &wgpu::Buffer,
+    inputs: FlatResidentInputs<'_>,
     shape: GroupedAttentionShape,
     config: FlatAttentionConfig,
 ) -> Result<Duration, Box<dyn Error>> {
     let start = Instant::now();
     let output = pipeline.create_output_buffer(ctx.device(), shape)?;
-    run_flat(ctx, pipeline, q, k, v, &output, shape, config)?;
+    run_flat(ctx, pipeline, inputs, &output, shape, config)?;
     black_box(output);
     Ok(start.elapsed())
 }
@@ -200,8 +196,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let head_dim = env_usize("SCIRUST_M28_HEAD_DIM", DEFAULT_HEAD_DIM);
     let warmups = env_usize("SCIRUST_M28_WARMUPS", DEFAULT_WARMUPS);
     let repeats = env_usize("SCIRUST_M28_REPEATS", DEFAULT_REPEATS);
-    if seq_len == 0 || head_dim == 0 || warmups == 0 || repeats == 0
-    {
+    if seq_len == 0 || head_dim == 0 || warmups == 0 || repeats == 0 {
         return Err("seq_len, head_dim, warmups and repeats must be non-zero".into());
     }
 
@@ -228,13 +223,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     let q_flat = flat_input_buffer(&ctx, &q, "scirust-m28-flat-q");
     let k_flat = flat_input_buffer(&ctx, &k, "scirust-m28-flat-k");
     let v_flat = flat_input_buffer(&ctx, &v, "scirust-m28-flat-v");
+    let flat_inputs = FlatResidentInputs {
+        q: &q_flat,
+        k: &k_flat,
+        v: &v_flat,
+    };
 
     println!(
         "adapter,causal,seq_len,head_dim,warmups,repeats,naive_median_us,naive_p95_us,flat_fresh_median_us,flat_fresh_p95_us,flat_reused_median_us,flat_reused_p95_us,naive_over_flat_fresh,naive_over_flat_reused,naive_parity_max_abs,flat_parity_max_abs,performance_claim"
     );
 
-    for causal in [false, true]
-    {
+    for causal in [false, true] {
         let config = FlatAttentionConfig {
             causal,
             softmax_scale: None,
@@ -249,9 +248,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         run_flat(
             &ctx,
             &pipeline,
-            &q_flat,
-            &k_flat,
-            &v_flat,
+            flat_inputs,
             &reused_output,
             shape,
             config,
@@ -265,17 +262,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         )?;
         assert_close("FLAT LSE", &flat_host[layout.lse_offset()..], &expected.lse)?;
 
-        for _ in 0..warmups
-        {
+        for _ in 0..warmups {
             let _ = time_naive(&ctx, &q_naive, &k_naive, &v_naive, causal)?;
-            let _ =
-                time_flat_fresh_output(&ctx, &pipeline, &q_flat, &k_flat, &v_flat, shape, config)?;
+            let _ = time_flat_fresh_output(&ctx, &pipeline, flat_inputs, shape, config)?;
             let _ = time_flat_reused(
                 &ctx,
                 &pipeline,
-                &q_flat,
-                &k_flat,
-                &v_flat,
+                flat_inputs,
                 &reused_output,
                 shape,
                 config,
@@ -285,28 +278,30 @@ fn main() -> Result<(), Box<dyn Error>> {
         let mut naive_samples = Vec::with_capacity(repeats);
         let mut flat_fresh_samples = Vec::with_capacity(repeats);
         let mut flat_reused_samples = Vec::with_capacity(repeats);
-        for iteration in 0..repeats
-        {
-            if iteration.is_multiple_of(2)
-            {
+        for iteration in 0..repeats {
+            if iteration.is_multiple_of(2) {
                 naive_samples.push(time_naive(&ctx, &q_naive, &k_naive, &v_naive, causal)?);
                 flat_fresh_samples.push(time_flat_fresh_output(
-                    &ctx, &pipeline, &q_flat, &k_flat, &v_flat, shape, config,
+                    &ctx,
+                    &pipeline,
+                    flat_inputs,
+                    shape,
+                    config,
                 )?);
-            }
-            else
-            {
+            } else {
                 flat_fresh_samples.push(time_flat_fresh_output(
-                    &ctx, &pipeline, &q_flat, &k_flat, &v_flat, shape, config,
+                    &ctx,
+                    &pipeline,
+                    flat_inputs,
+                    shape,
+                    config,
                 )?);
                 naive_samples.push(time_naive(&ctx, &q_naive, &k_naive, &v_naive, causal)?);
             }
             flat_reused_samples.push(time_flat_reused(
                 &ctx,
                 &pipeline,
-                &q_flat,
-                &k_flat,
-                &v_flat,
+                flat_inputs,
                 &reused_output,
                 shape,
                 config,
