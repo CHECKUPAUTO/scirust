@@ -24,14 +24,14 @@ jobs:
         run: |
           set -euo pipefail
           python3 -c 'from pathlib import Path; p=Path("Cargo.toml"); s=p.read_text(); n="    \"scirust-provenance\",\n"; assert s.count(n)==1; p.write_text(s.replace(n, n + "    \"scirust-digest\",\n", 1))'
-      - name: Validate digest crate
+      - name: Format and validate digest crate on MSRV
         shell: bash
         run: |
           set -euo pipefail
-          cargo fmt --all -- --check
-          cargo test -p scirust-digest --locked || cargo test -p scirust-digest
-          cargo clippy -p scirust-digest --all-targets -- -D warnings
-          cargo metadata --no-deps --format-version 1 >/dev/null
+          cargo +1.89.0 fmt --all
+          cargo +1.89.0 test -p scirust-digest --locked || cargo +1.89.0 test -p scirust-digest
+          cargo +1.89.0 clippy -p scirust-digest --all-targets -- -D warnings
+          cargo +1.89.0 metadata --no-deps --format-version 1 >/dev/null
       - name: Commit resolved workspace state
         shell: bash
         run: |
