@@ -221,6 +221,154 @@ impl<T: DualPackScalar, const W: usize> DualPack<T, W> {
     }
 }
 
+impl<const W: usize> DualPack<f32, W> {
+    /// Add two packs while processing tangent lanes with explicit architecture
+    /// SIMD where available. The scalar tail preserves support for arbitrary `W`.
+    #[inline]
+    pub fn simd_add(self, rhs: Self) -> Self {
+        let mut tangent = [0.0f32; W];
+        let mut index = 0usize;
+
+        #[cfg(all(target_arch = "x86_64", not(miri)))]
+        unsafe {
+            use core::arch::x86_64::*;
+            if std::arch::is_x86_feature_detected!("avx512f")
+            {
+                while index + 16 <= W
+                {
+                    let a = _mm512_loadu_ps(self.tangent.as_ptr().add(index));
+                    let b = _mm512_loadu_ps(rhs.tangent.as_ptr().add(index));
+                    _mm512_storeu_ps(tangent.as_mut_ptr().add(index), _mm512_add_ps(a, b));
+                    index += 16;
+                }
+            }
+            else if std::arch::is_x86_feature_detected!("avx2")
+            {
+                while index + 8 <= W
+                {
+                    let a = _mm256_loadu_ps(self.tangent.as_ptr().add(index));
+                    let b = _mm256_loadu_ps(rhs.tangent.as_ptr().add(index));
+                    _mm256_storeu_ps(tangent.as_mut_ptr().add(index), _mm256_add_ps(a, b));
+                    index += 8;
+                }
+            }
+            else if std::arch::is_x86_feature_detected!("sse2")
+            {
+                while index + 4 <= W
+                {
+                    let a = _mm_loadu_ps(self.tangent.as_ptr().add(index));
+                    let b = _mm_loadu_ps(rhs.tangent.as_ptr().add(index));
+                    _mm_storeu_ps(tangent.as_mut_ptr().add(index), _mm_add_ps(a, b));
+                    index += 4;
+                }
+            }
+        }
+
+        #[cfg(all(target_arch = "aarch64", not(miri)))]
+        unsafe {
+            use core::arch::aarch64::*;
+            while index + 4 <= W
+            {
+                let a = vld1q_f32(self.tangent.as_ptr().add(index));
+                let b = vld1q_f32(rhs.tangent.as_ptr().add(index));
+                vst1q_f32(tangent.as_mut_ptr().add(index), vaddq_f32(a, b));
+                index += 4;
+            }
+        }
+
+        while index < W
+        {
+            tangent[index] = self.tangent[index] + rhs.tangent[index];
+            index += 1;
+        }
+
+        Self::seeded(self.value + rhs.value, tangent)
+    }
+
+    /// Apply the product rule with explicit SIMD tangent processing. Multiply
+    /// and add remain separate so this path does not silently alter rounding via
+    /// FMA relative to the scalar oracle.
+    #[inline]
+    pub fn simd_mul(self, rhs: Self) -> Self {
+        let mut tangent = [0.0f32; W];
+        let mut index = 0usize;
+
+        #[cfg(all(target_arch = "x86_64", not(miri)))]
+        unsafe {
+            use core::arch::x86_64::*;
+            if std::arch::is_x86_feature_detected!("avx512f")
+            {
+                let left_value = _mm512_set1_ps(self.value);
+                let right_value = _mm512_set1_ps(rhs.value);
+                while index + 16 <= W
+                {
+                    let dl = _mm512_loadu_ps(self.tangent.as_ptr().add(index));
+                    let dr = _mm512_loadu_ps(rhs.tangent.as_ptr().add(index));
+                    let result = _mm512_add_ps(
+                        _mm512_mul_ps(right_value, dl),
+                        _mm512_mul_ps(left_value, dr),
+                    );
+                    _mm512_storeu_ps(tangent.as_mut_ptr().add(index), result);
+                    index += 16;
+                }
+            }
+            else if std::arch::is_x86_feature_detected!("avx2")
+            {
+                let left_value = _mm256_set1_ps(self.value);
+                let right_value = _mm256_set1_ps(rhs.value);
+                while index + 8 <= W
+                {
+                    let dl = _mm256_loadu_ps(self.tangent.as_ptr().add(index));
+                    let dr = _mm256_loadu_ps(rhs.tangent.as_ptr().add(index));
+                    let result = _mm256_add_ps(
+                        _mm256_mul_ps(right_value, dl),
+                        _mm256_mul_ps(left_value, dr),
+                    );
+                    _mm256_storeu_ps(tangent.as_mut_ptr().add(index), result);
+                    index += 8;
+                }
+            }
+            else if std::arch::is_x86_feature_detected!("sse2")
+            {
+                let left_value = _mm_set1_ps(self.value);
+                let right_value = _mm_set1_ps(rhs.value);
+                while index + 4 <= W
+                {
+                    let dl = _mm_loadu_ps(self.tangent.as_ptr().add(index));
+                    let dr = _mm_loadu_ps(rhs.tangent.as_ptr().add(index));
+                    let result =
+                        _mm_add_ps(_mm_mul_ps(right_value, dl), _mm_mul_ps(left_value, dr));
+                    _mm_storeu_ps(tangent.as_mut_ptr().add(index), result);
+                    index += 4;
+                }
+            }
+        }
+
+        #[cfg(all(target_arch = "aarch64", not(miri)))]
+        unsafe {
+            use core::arch::aarch64::*;
+            let left_value = vdupq_n_f32(self.value);
+            let right_value = vdupq_n_f32(rhs.value);
+            while index + 4 <= W
+            {
+                let dl = vld1q_f32(self.tangent.as_ptr().add(index));
+                let dr = vld1q_f32(rhs.tangent.as_ptr().add(index));
+                let result = vaddq_f32(vmulq_f32(right_value, dl), vmulq_f32(left_value, dr));
+                vst1q_f32(tangent.as_mut_ptr().add(index), result);
+                index += 4;
+            }
+        }
+
+        while index < W
+        {
+            tangent[index] = rhs.value * self.tangent[index] + self.value * rhs.tangent[index];
+            index += 1;
+        }
+
+        Self::seeded(self.value * rhs.value, tangent)
+    }
+}
+
 impl<T: DualPackScalar, const W: usize> Add for DualPack<T, W> {
     type Output = Self;
 
@@ -375,5 +523,39 @@ mod tests {
         let result = x + singular;
         assert_eq!(result.tangent[0], 1.0);
         assert_eq!(result.tangent[1], 0.0);
+    }
+
+    fn seeded_f32<const W: usize>(base: f32, slope: f32) -> DualPack<f32, W> {
+        let mut tangent = [0.0f32; W];
+        for (index, value) in tangent.iter_mut().enumerate()
+        {
+            *value = base + index as f32 * slope;
+        }
+        DualPack::seeded(base, tangent)
+    }
+
+    #[test]
+    fn simd_add_matches_scalar_for_tail_width() {
+        let left = seeded_f32::<19>(0.25, 0.125);
+        let right = seeded_f32::<19>(-0.5, 0.0625);
+        assert_eq!(left.simd_add(right), left + right);
+    }
+
+    #[test]
+    fn simd_product_rule_matches_scalar_for_common_widths() {
+        let left8 = seeded_f32::<8>(0.5, 0.125);
+        let right8 = seeded_f32::<8>(-0.25, 0.25);
+        assert_eq!(left8.simd_mul(right8), left8 * right8);
+
+        let left16 = seeded_f32::<16>(0.75, 0.0625);
+        let right16 = seeded_f32::<16>(1.25, -0.03125);
+        assert_eq!(left16.simd_mul(right16), left16 * right16);
+    }
+
+    #[test]
+    fn simd_zero_width_is_valid_and_allocation_free() {
+        let left = DualPack::<f32, 0>::constant(2.0);
+        let right = DualPack::<f32, 0>::constant(3.0);
+        assert_eq!(left.simd_mul(right), DualPack::constant(6.0));
     }
 }
