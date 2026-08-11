@@ -34,9 +34,7 @@ mod thread_local_pool;
 pub use aligned::AlignedVec;
 pub use allocator::{ArenaError, PinnedArena};
 pub use slab::{Slab, SlabHandle};
-pub use thread_local_pool::{
-    ThreadLocalArenaError, thread_arena_capacity, with_thread_arena,
-};
+pub use thread_local_pool::{ThreadLocalArenaError, thread_arena_capacity, with_thread_arena};
 
 // Re-export the maximum alignment constant
 pub const ALIGNMENT: usize = 128;
