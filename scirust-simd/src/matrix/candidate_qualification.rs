@@ -26,6 +26,20 @@ impl Default for GemmQualificationPolicy {
     }
 }
 
+/// Borrowed inputs and scalar coefficients for one SGEMM qualification run.
+///
+/// Keeping the numerical fixture in one typed value makes the qualification
+/// boundary explicit without suppressing strict Clippy argument-count checks.
+#[derive(Debug, Clone, Copy)]
+pub struct GemmQualificationInput<'a> {
+    pub alpha: f32,
+    pub a: &'a [f32],
+    pub b: &'a [f32],
+    pub beta: f32,
+    pub initial_c: &'a [f32],
+    pub policy: GemmQualificationPolicy,
+}
+
 /// Deterministic qualification summary.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GemmQualificationReport {
@@ -45,13 +59,17 @@ pub struct GemmQualificationReport {
 pub fn qualify_gemm_candidate_f32(
     problem: GemmProblemSignature,
     candidate: GemmCandidateDescriptor,
-    alpha: f32,
-    a: &[f32],
-    b: &[f32],
-    beta: f32,
-    initial_c: &[f32],
-    policy: GemmQualificationPolicy,
+    input: GemmQualificationInput<'_>,
 ) -> Result<GemmQualificationReport, GemmQualificationError> {
+    let GemmQualificationInput {
+        alpha,
+        a,
+        b,
+        beta,
+        initial_c,
+        policy,
+    } = input;
+
     if !policy.abs_tolerance.is_finite()
         || !policy.rel_tolerance.is_finite()
         || policy.abs_tolerance < 0.0
@@ -95,8 +113,8 @@ pub fn qualify_gemm_candidate_f32(
     );
 
     let mut observed = initial_c.to_vec();
-    let mut plan = CandidateGemmPlanF32::prepare(problem, candidate)
-        .map_err(GemmQualificationError::Plan)?;
+    let mut plan =
+        CandidateGemmPlanF32::prepare(problem, candidate).map_err(GemmQualificationError::Plan)?;
     plan.execute(alpha, a, b, beta, &mut observed)
         .map_err(GemmQualificationError::Plan)?;
 
@@ -115,14 +133,7 @@ pub fn qualify_gemm_candidate_f32(
         }
         let abs_error = (actual - expected).abs();
         let scale = expected.abs().max(actual.abs());
-        let rel_error = if scale == 0.0
-        {
-            0.0
-        }
-        else
-        {
-            abs_error / scale
-        };
+        let rel_error = if scale == 0.0 { 0.0 } else { abs_error / scale };
         max_abs_error = max_abs_error.max(abs_error);
         max_rel_error = max_rel_error.max(rel_error);
 
@@ -207,12 +218,14 @@ mod tests {
             let report = qualify_gemm_candidate_f32(
                 problem,
                 candidate,
-                0.875,
-                &a,
-                &b,
-                0.25,
-                &c,
-                GemmQualificationPolicy::default(),
+                GemmQualificationInput {
+                    alpha: 0.875,
+                    a: &a,
+                    b: &b,
+                    beta: 0.25,
+                    initial_c: &c,
+                    policy: GemmQualificationPolicy::default(),
+                },
             )
             .unwrap();
             assert!(
@@ -220,7 +233,11 @@ mod tests {
                 "candidate {:?} produced non-finite output",
                 candidate.path
             );
-            assert!(report.accepted, "candidate {:?}: {report:?}", candidate.path);
+            assert!(
+                report.accepted,
+                "candidate {:?}: {report:?}",
+                candidate.path
+            );
         }
     }
 
@@ -231,14 +248,16 @@ mod tests {
         let error = qualify_gemm_candidate_f32(
             problem,
             candidate,
-            1.0,
-            &[1.0],
-            &[1.0],
-            0.0,
-            &[0.0],
-            GemmQualificationPolicy {
-                abs_tolerance: -1.0,
-                rel_tolerance: 0.0,
+            GemmQualificationInput {
+                alpha: 1.0,
+                a: &[1.0],
+                b: &[1.0],
+                beta: 0.0,
+                initial_c: &[0.0],
+                policy: GemmQualificationPolicy {
+                    abs_tolerance: -1.0,
+                    rel_tolerance: 0.0,
+                },
             },
         )
         .unwrap_err();
