@@ -4,9 +4,7 @@
 //! does not benchmark kernels itself; it decides which candidates survive to a
 //! higher-budget measurement round.
 
-use crate::measurement_protocol::{
-    ElasticMeasurementProtocol, ElasticMeasurementProtocolError,
-};
+use crate::measurement_protocol::{ElasticMeasurementProtocol, ElasticMeasurementProtocolError};
 use crate::{
     ElasticAutoTuner, ElasticEvidence, ElasticEvidenceError, ElasticObjective, RankedCandidate,
 };
@@ -97,7 +95,9 @@ impl ElasticRacingPolicy {
             let mut matches = evidence
                 .iter()
                 .filter(|record| record.candidate == ranked_candidate.candidate);
-            let Some(record) = matches.next() else {
+            let Some(record) = matches.next()
+            else
+            {
                 return Err(ElasticRacingError::MissingEvidence { rank_index });
             };
             if matches.next().is_some()
@@ -117,9 +117,7 @@ impl ElasticRacingPolicy {
 
         match tuner.config().objective
         {
-            ElasticObjective::MinTemporaryMemory => records.sort_by(|left, right| {
-                memory_key(left).cmp(&memory_key(right))
-            }),
+            ElasticObjective::MinTemporaryMemory => records.sort_by_key(memory_key),
             ElasticObjective::BalancedLatencyMemory =>
             {
                 let snapshot = records.clone();
@@ -129,9 +127,7 @@ impl ElasticRacingPolicy {
             },
             ElasticObjective::MinLatency
             | ElasticObjective::MaxThroughput
-            | ElasticObjective::DeterministicOnly => records.sort_by(|left, right| {
-                latency_key(left).cmp(&latency_key(right))
-            }),
+            | ElasticObjective::DeterministicOnly => records.sort_by_key(latency_key),
         }
 
         let divisor = usize::try_from(self.survivor_divisor)
@@ -165,26 +161,44 @@ impl core::fmt::Display for ElasticRacingError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match *self
         {
-            Self::InvalidSurvivorDivisor => write!(f, "racing survivor divisor must be at least two"),
+            Self::InvalidSurvivorDivisor =>
+            {
+                write!(f, "racing survivor divisor must be at least two")
+            },
             Self::ZeroMinimumSurvivors => write!(f, "racing must retain at least one survivor"),
             Self::ZeroMeasurementGrowth => write!(f, "measurement growth factor must be non-zero"),
-            Self::MeasurementBudgetOverflow => write!(f, "racing measurement budget overflowed u32"),
-            Self::SurvivorCountOverflow => write!(f, "racing survivor divisor does not fit this target"),
+            Self::MeasurementBudgetOverflow =>
+            {
+                write!(f, "racing measurement budget overflowed u32")
+            },
+            Self::SurvivorCountOverflow =>
+            {
+                write!(f, "racing survivor divisor does not fit this target")
+            },
             Self::NoCandidates => write!(f, "racing requires at least one active candidate"),
             Self::MissingEvidence { rank_index } =>
             {
-                write!(f, "missing racing evidence for ranked candidate {rank_index}")
+                write!(
+                    f,
+                    "missing racing evidence for ranked candidate {rank_index}"
+                )
             },
             Self::DuplicateEvidence { rank_index } =>
             {
-                write!(f, "duplicate racing evidence for ranked candidate {rank_index}")
+                write!(
+                    f,
+                    "duplicate racing evidence for ranked candidate {rank_index}"
+                )
             },
             Self::InvalidEvidence(error) => write!(f, "invalid racing evidence: {error}"),
             Self::NonDeterministicCandidate { rank_index } => write!(
                 f,
                 "deterministic-only racing received non-deterministic candidate {rank_index}"
             ),
-            Self::MeasurementProtocol(error) => write!(f, "invalid racing measurement protocol: {error}"),
+            Self::MeasurementProtocol(error) =>
+            {
+                write!(f, "invalid racing measurement protocol: {error}")
+            },
         }
     }
 }
@@ -326,9 +340,27 @@ mod tests {
             ElasticSynchronizationBoundary::PerIteration,
         );
         let policy = ElasticRacingPolicy::default();
-        assert_eq!(policy.protocol_for_round(base, 0).unwrap().measured_iterations, 5);
-        assert_eq!(policy.protocol_for_round(base, 1).unwrap().measured_iterations, 10);
-        assert_eq!(policy.protocol_for_round(base, 3).unwrap().measured_iterations, 40);
+        assert_eq!(
+            policy
+                .protocol_for_round(base, 0)
+                .unwrap()
+                .measured_iterations,
+            5
+        );
+        assert_eq!(
+            policy
+                .protocol_for_round(base, 1)
+                .unwrap()
+                .measured_iterations,
+            10
+        );
+        assert_eq!(
+            policy
+                .protocol_for_round(base, 3)
+                .unwrap()
+                .measured_iterations,
+            40
+        );
     }
 
     #[test]
