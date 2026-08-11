@@ -59,42 +59,39 @@ jobs:
           old_import = '''use scirust_simd::matrix::candidate_qualification::{
               GemmQualificationError, GemmQualificationInput, GemmQualificationPolicy,
               GemmQualificationReport, qualify_gemm_candidate_f32,
-          };'''
+          };'''.replace('              ', '    ')
           new_import = '''pub use scirust_simd::matrix::candidate_qualification::{
               GemmQualificationInput, GemmQualificationPolicy, GemmQualificationReport,
           };
           use scirust_simd::matrix::candidate_qualification::{
               GemmQualificationError, qualify_gemm_candidate_f32,
-          };'''
+          };'''.replace('          ', '')
           assert old_import in text
           text = text.replace(old_import, new_import, 1)
+
           old_sig = '''        input: GemmQualificationInput<'_>,
                   policy: GemmQualificationPolicy,
-                  protocol: ElasticMeasurementProtocol,'''
+                  protocol: ElasticMeasurementProtocol,'''.replace('                  ', '        ')
           new_sig = '''        input: GemmQualificationInput<'_>,
-                  protocol: ElasticMeasurementProtocol,'''
+                  protocol: ElasticMeasurementProtocol,'''.replace('                  ', '        ')
           assert old_sig in text
           text = text.replace(old_sig, new_sig, 1)
+
           old_call = '''        let report = qualify_gemm_candidate_f32(self.problem, descriptor, input, policy)
                   .map_err(SgemmElasticError::Qualification)?;
               let correctness_evidence =
-                  encode_gemm_correctness_evidence(self.problem, policy, report)'''
+                  encode_gemm_correctness_evidence(self.problem, policy, report)'''.replace('                  ', '            ').replace('              ', '        ')
           new_call = '''        let policy = input.policy;
               let report = qualify_gemm_candidate_f32(self.problem, descriptor, input)
                   .map_err(SgemmElasticError::Qualification)?;
               let correctness_evidence =
-                  encode_gemm_correctness_evidence(self.problem, policy, report)'''
+                  encode_gemm_correctness_evidence(self.problem, policy, report)'''.replace('              ', '        ').replace('                  ', '            ')
           assert old_call in text
           text = text.replace(old_call, new_call, 1)
+
           text = text.replace(
-              '''                    initial_c: &initial_c,
-                          },
-                          GemmQualificationPolicy::default(),
-                          protocol,''',
-              '''                    initial_c: &initial_c,
-                          policy: GemmQualificationPolicy::default(),
-                      },
-                          protocol,''',
+              '                    initial_c: &initial_c,\n                },\n                GemmQualificationPolicy::default(),\n                protocol,',
+              '                    initial_c: &initial_c,\n                    policy: GemmQualificationPolicy::default(),\n                },\n                protocol,',
           )
           source.write_text(text)
 
@@ -136,6 +133,7 @@ jobs:
         run: |
           git diff --check
           git rm .github/workflows/tmp-qualify-sgemm-elastic-integration.yml
+          git rm -f .tmp-sgemm-elastic-trigger
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add Cargo.toml Cargo.lock src/lib.rs src/autotune.rs
