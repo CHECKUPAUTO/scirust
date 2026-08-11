@@ -15,6 +15,8 @@
 
 use crate::wgpu_backend::{GpuMatrix, WgpuContext};
 use crate::{BackendError, BackendResult};
+#[cfg(feature = "flat-autotune")]
+use flat_attention::WgpuResidentDecodePipeline;
 use flat_attention::{
     AsymmetricGroupedAttentionShape, AsymmetricRotaryEmbeddingConfig,
     ExternalAsymmetricProjectionPass, ExternalAsymmetricProjectionRotaryGroupedPipeline,
@@ -78,6 +80,8 @@ impl FlatM11ResidentConfig {
 pub struct WgpuFlatM11Bridge {
     ctx: WgpuContext,
     pipeline: ExternalAsymmetricProjectionRotaryGroupedPipeline,
+    #[cfg(feature = "flat-autotune")]
+    m15_pipeline: Option<WgpuResidentDecodePipeline>,
 }
 
 impl core::fmt::Debug for WgpuFlatM11Bridge {
@@ -99,7 +103,14 @@ impl WgpuFlatM11Bridge {
     pub fn from_context(ctx: WgpuContext) -> BackendResult<Self> {
         let pipeline = ExternalAsymmetricProjectionRotaryGroupedPipeline::new(ctx.device())
             .map_err(|error| BackendError::Execution(format!("FLAT M11 pipeline: {error}")))?;
-        Ok(Self { ctx, pipeline })
+        #[cfg(feature = "flat-autotune")]
+        let m15_pipeline = WgpuResidentDecodePipeline::new(ctx.device()).ok();
+        Ok(Self {
+            ctx,
+            pipeline,
+            #[cfg(feature = "flat-autotune")]
+            m15_pipeline,
+        })
     }
 
     /// Underlying adapter name, useful for benchmark provenance.
@@ -112,6 +123,15 @@ impl WgpuFlatM11Bridge {
     #[must_use]
     pub fn context(&self) -> &WgpuContext {
         &self.ctx
+    }
+
+    /// Whether the pinned FLAT M15 specialized resident-decode pipeline compiled
+    /// successfully on this exact WGPU device. The generic M11 path remains usable
+    /// when this is false.
+    #[must_use]
+    #[cfg(feature = "flat-autotune")]
+    pub const fn m15_available(&self) -> bool {
+        self.m15_pipeline.is_some()
     }
 
     /// Allocate the combined FLAT O|LSE backing buffer while exposing only O as
@@ -163,6 +183,31 @@ impl WgpuFlatM11Bridge {
         self.record_impl(encoder, pass, true)
     }
 
+    /// Record the specialized FLAT M15 `q_len=1` resident-decode kernel over
+    /// framework-owned fixed-capacity K/V buffers. K must already be RoPE-rotated.
+    /// The physical KV capacity is inferred from the resident backing allocation,
+    /// while `config.kv_len` remains the logical live prefix.
+    #[cfg(feature = "flat-autotune")]
+    pub fn record_pre_rotated_k_m15(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        q: &GpuMatrix,
+        k: &GpuMatrix,
+        v: &GpuMatrix,
+        output: &GpuMatrix,
+        config: FlatM11ResidentConfig,
+    ) -> BackendResult<()> {
+        let pipeline = self.m15_pipeline.as_ref().ok_or_else(|| {
+            BackendError::Execution("FLAT M15 resident decode pipeline unavailable".into())
+        })?;
+        let kv_capacity = self.infer_kv_capacity(k, v, config)?;
+        let pass = self.external_pass(q, k, v, output, config)?;
+        pipeline
+            .encode_external_pre_rotated_k(self.ctx.device(), encoder, pass, kv_capacity)
+            .map_err(|error| BackendError::Execution(format!("FLAT M15 encode: {error}")))?;
+        Ok(())
+    }
+
     /// Convenience resident forward using raw projected K.
     pub fn forward(
         &self,
@@ -184,6 +229,27 @@ impl WgpuFlatM11Bridge {
         config: FlatM11ResidentConfig,
     ) -> BackendResult<GpuMatrix> {
         self.forward_impl(q, k, v, config, true)
+    }
+
+    /// Convenience resident forward through the specialized FLAT M15 decode kernel.
+    #[cfg(feature = "flat-autotune")]
+    pub fn forward_pre_rotated_k_m15(
+        &self,
+        q: &GpuMatrix,
+        k: &GpuMatrix,
+        v: &GpuMatrix,
+        config: FlatM11ResidentConfig,
+    ) -> BackendResult<GpuMatrix> {
+        let output = self.create_output(config)?;
+        let mut encoder =
+            self.ctx
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("scirust-flat-m15-resident-decode"),
+                });
+        self.record_pre_rotated_k_m15(&mut encoder, q, k, v, &output, config)?;
+        self.ctx.queue().submit(Some(encoder.finish()));
+        Ok(output)
     }
 
     fn external_pass<'a>(
@@ -250,6 +316,51 @@ impl WgpuFlatM11Bridge {
         }
         self.ctx.queue().submit(Some(encoder.finish()));
         Ok(output)
+    }
+
+    #[cfg(feature = "flat-autotune")]
+    fn infer_kv_capacity(
+        &self,
+        k: &GpuMatrix,
+        v: &GpuMatrix,
+        config: FlatM11ResidentConfig,
+    ) -> BackendResult<usize> {
+        let k_bytes = k.buffer().size();
+        let v_bytes = v.buffer().size();
+        if k_bytes != v_bytes
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "FLAT M15 K/V backing allocations differ: K={k_bytes} bytes, V={v_bytes} bytes"
+            )));
+        }
+        let batch_heads = checked_mul(config.batch, config.kv_heads, "M15 batch*kv_heads")?;
+        let scalars_per_capacity =
+            checked_mul(batch_heads, config.head_dim, "M15 batch*kv_heads*head_dim")?;
+        let bytes_per_capacity = checked_mul(
+            scalars_per_capacity,
+            core::mem::size_of::<f32>(),
+            "M15 bytes per KV capacity row",
+        )?;
+        let bytes_per_capacity = u64::try_from(bytes_per_capacity).map_err(|_| {
+            BackendError::ShapeMismatch("FLAT M15 capacity byte width exceeds u64".into())
+        })?;
+        if bytes_per_capacity == 0 || !k_bytes.is_multiple_of(bytes_per_capacity)
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "FLAT M15 K backing allocation {k_bytes} is not divisible by {bytes_per_capacity} bytes per capacity row"
+            )));
+        }
+        let capacity = usize::try_from(k_bytes / bytes_per_capacity).map_err(|_| {
+            BackendError::ShapeMismatch("FLAT M15 inferred KV capacity exceeds usize".into())
+        })?;
+        if capacity < config.kv_len
+        {
+            return Err(BackendError::ShapeMismatch(format!(
+                "FLAT M15 inferred KV capacity {capacity} is smaller than live length {}",
+                config.kv_len
+            )));
+        }
+        Ok(capacity)
     }
 
     fn validate_matrices(
@@ -461,6 +572,17 @@ mod tests {
         )
         .unwrap();
         assert_close(&actual, &expected.output);
+
+        #[cfg(feature = "flat-autotune")]
+        if bridge.m15_available()
+        {
+            let m15_output = bridge
+                .forward_pre_rotated_k_m15(&q_gpu, &k_gpu, &v_gpu, config)
+                .unwrap();
+            let m15_actual = bridge.context().download(&m15_output).unwrap();
+            assert_close(&m15_actual, &expected.output);
+            assert_close(&m15_actual, &actual);
+        }
     }
 
     #[test]
