@@ -29,6 +29,7 @@ mod elastic_rule_table;
 pub mod elastic_text_tokenizer;
 pub mod elastic_tiny;
 pub mod elastic_tokenizer;
+pub mod engineering_trajectory_ingest;
 pub mod execution_attestation;
 pub mod flash_attention;
 pub mod generate;
@@ -93,6 +94,11 @@ pub use elastic_tiny::{TINY_SCAN_CAPACITY, TinyScanBpe};
 pub use elastic_tokenizer::{
     BpeKernel, CanonicalBpeOracle, DuplicateMergeRule, ElasticProfile, ElasticThresholds,
     PieceClass, ThresholdError, TokenId,
+};
+pub use engineering_trajectory_ingest::{
+    EngineeringDataset, EngineeringDatasetExample, EngineeringDatasetManifest,
+    EngineeringDatasetSplit, EngineeringIngestConfig, EngineeringTrajectoryIngestError,
+    RSI_ENGINEERING_TRAJECTORY_SCHEMA_VERSION, SCIAGENT_ENGINEERING_DATASET_MANIFEST_VERSION,
 };
 pub use execution_attestation::{
     RuntimeExecutionAttestationInputs, build_runtime_execution_attestation, sha256_digest,
