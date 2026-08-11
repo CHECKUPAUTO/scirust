@@ -7,6 +7,8 @@
 //! search space; a cost model ranks statically valid candidates; measurement and
 //! correctness evidence can later promote a candidate into an execution plan.
 
+mod evidence_validation;
+
 use scirust_compute::{
     HardwareCapabilities, ProfileEncodingError, canonical_hardware_profile_bytes,
 };
@@ -358,22 +360,15 @@ impl ElasticAutoTuner {
     }
 
     /// Promote already-qualified evidence into a plan. Timing collection itself
-    /// belongs to the measurement layer; this function cannot accept evidence
-    /// with an empty correctness proof or zero samples.
+    /// belongs to the measurement layer; this function revalidates evidence even
+    /// when it arrived from storage or another process boundary.
     pub fn plan_from_evidence(
         &self,
         hardware: ElasticHardwareProfile,
         problem: ElasticProblemClass,
         evidence: ElasticEvidence,
     ) -> Result<ElasticExecutionPlan, ElasticEvidenceError> {
-        if evidence.correctness_evidence.is_empty()
-        {
-            return Err(ElasticEvidenceError::MissingCorrectnessEvidence);
-        }
-        if evidence.measurement.sample_count == 0
-        {
-            return Err(ElasticEvidenceError::NoMeasurements);
-        }
+        evidence.validate()?;
         if self.config.objective == ElasticObjective::DeterministicOnly
             && !evidence.candidate.deterministic
         {
@@ -393,6 +388,8 @@ impl ElasticAutoTuner {
 pub enum ElasticEvidenceError {
     MissingCorrectnessEvidence,
     NoMeasurements,
+    NonMonotonicQuantiles,
+    MadExceedsP99,
     NonDeterministicCandidate,
 }
 
@@ -402,6 +399,11 @@ impl core::fmt::Display for ElasticEvidenceError {
         {
             Self::MissingCorrectnessEvidence => write!(f, "correctness evidence is required"),
             Self::NoMeasurements => write!(f, "at least one timing sample is required"),
+            Self::NonMonotonicQuantiles =>
+            {
+                write!(f, "timing quantiles must satisfy median <= p95 <= p99")
+            },
+            Self::MadExceedsP99 => write!(f, "timing MAD must not exceed p99 latency"),
             Self::NonDeterministicCandidate =>
             {
                 write!(f, "deterministic-only objective rejected the candidate")
@@ -549,6 +551,39 @@ mod tests {
             )
             .unwrap();
         assert_eq!(plan.schema_version, ELASTIC_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn plan_promotion_rejects_incoherent_measurement() {
+        let tuner = ElasticAutoTuner::new(ElasticConfig::default());
+        let hardware = profile();
+        let problem = ElasticProblemClass::new("gemm", vec![3]);
+        let candidate = ElasticCandidate::new(
+            "gemm",
+            vec![1],
+            std::iter::empty::<ElasticParameter>(),
+            true,
+            0,
+        )
+        .unwrap();
+        let error = tuner
+            .plan_from_evidence(
+                hardware,
+                problem,
+                ElasticEvidence {
+                    candidate,
+                    correctness_evidence: vec![1],
+                    measurement: ElasticMeasurement {
+                        sample_count: 3,
+                        median_ns: 10,
+                        p95_ns: 20,
+                        p99_ns: 15,
+                        mad_ns: 1,
+                    },
+                },
+            )
+            .unwrap_err();
+        assert_eq!(error, ElasticEvidenceError::NonMonotonicQuantiles);
     }
 
     #[test]
