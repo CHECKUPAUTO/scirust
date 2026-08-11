@@ -26,8 +26,7 @@ use scirust_gpu::{BackendResult, WgpuComputeAdapter};
 
 const FLAT_ELASTIC_FAMILY: &str = "flat-attention-f32-wgpu";
 const FLAT_KERNEL_FAMILY: &str = "flat-m11-external-asymmetric-projection";
-const FLAT_KERNEL_REVISION: &[u8] =
-    b"flat-attention@311f6b89e001d69f53cddcd2f9ba396a6f80c746";
+const FLAT_KERNEL_REVISION: &[u8] = b"flat-attention@311f6b89e001d69f53cddcd2f9ba396a6f80c746";
 const FLAT_WGSL_MAX_HEAD_DIM: usize = 128;
 const FLAT_WGSL_QUERY_ROWS: i64 = 4;
 const FLAT_WGSL_KV_TILE: i64 = 8;
@@ -44,7 +43,8 @@ pub enum FlatKvRepresentation {
 
 impl FlatKvRepresentation {
     const fn class_id(self) -> u8 {
-        match self {
+        match self
+        {
             Self::Raw => 0,
             Self::PreRotated => 1,
         }
@@ -61,7 +61,8 @@ pub enum FlatProblemKind {
 
 impl FlatProblemKind {
     const fn class_id(self) -> u8 {
-        match self {
+        match self
+        {
             Self::Decode => 0,
             Self::Prefill => 1,
             Self::CrossAttention => 2,
@@ -89,11 +90,16 @@ impl FlatElasticRequest {
     }
 
     pub const fn problem_kind(self) -> FlatProblemKind {
-        if self.config.query_len == 1 {
+        if self.config.query_len == 1
+        {
             FlatProblemKind::Decode
-        } else if !self.config.causal && self.config.query_len != self.config.kv_len {
+        }
+        else if !self.config.causal && self.config.query_len != self.config.kv_len
+        {
             FlatProblemKind::CrossAttention
-        } else {
+        }
+        else
+        {
             FlatProblemKind::Prefill
         }
     }
@@ -141,7 +147,11 @@ impl FlatElasticPlanner {
         tuner: &ElasticAutoTuner,
         hardware: ElasticHardwareProfile,
     ) -> ElasticPlanKey {
-        ElasticPlanKey::new(hardware, self.problem_class.clone(), tuner.config().objective)
+        ElasticPlanKey::new(
+            hardware,
+            self.problem_class.clone(),
+            tuner.config().objective,
+        )
     }
 
     /// Statically rank every currently executable FLAT candidate.
@@ -167,12 +177,12 @@ impl FlatElasticPlanner {
             .map_err(FlatElasticError::Mode)?
         {
             self.require_current_candidate(&plan.evidence.candidate)?;
-            return Ok(FlatPlanResolution::Production(FlatElasticPlan {
+            return Ok(FlatPlanResolution::Production(Box::new(FlatElasticPlan {
                 request: self.request,
                 candidate: plan.evidence.candidate.clone(),
                 elastic_plan: Some(plan),
                 origin: FlatPlanOrigin::Persisted,
-            }));
+            })));
         }
 
         match tuner
@@ -180,7 +190,8 @@ impl FlatElasticPlanner {
             .map_err(FlatElasticError::Mode)?
         {
             ElasticStartupStrategy::QualifiedHeuristic
-            | ElasticStartupStrategy::QualifiedHeuristicThenExplore => {
+            | ElasticStartupStrategy::QualifiedHeuristicThenExplore =>
+            {
                 let candidate = self
                     .rank_candidates(tuner, &hardware)
                     .into_iter()
@@ -188,18 +199,19 @@ impl FlatElasticPlanner {
                     .ok_or(FlatElasticError::NoQualifiedCandidate)?
                     .candidate;
                 self.require_current_candidate(&candidate)?;
-                Ok(FlatPlanResolution::Production(FlatElasticPlan {
+                Ok(FlatPlanResolution::Production(Box::new(FlatElasticPlan {
                     request: self.request,
                     candidate,
                     elastic_plan: None,
                     origin: FlatPlanOrigin::QualifiedHeuristic,
-                }))
-            }
+                })))
+            },
             ElasticStartupStrategy::AuditOnly => Ok(FlatPlanResolution::AuditOnly),
             ElasticStartupStrategy::PersistedOnly
-            | ElasticStartupStrategy::PersistedThenExplore => {
+            | ElasticStartupStrategy::PersistedThenExplore =>
+            {
                 Err(FlatElasticError::MissingProductionPlan)
-            }
+            },
         }
     }
 
@@ -209,9 +221,12 @@ impl FlatElasticPlanner {
         &self,
         candidate: &ElasticCandidate,
     ) -> Result<(), FlatElasticError> {
-        if current_candidate()? == *candidate {
+        if current_candidate()? == *candidate
+        {
             Ok(())
-        } else {
+        }
+        else
+        {
             Err(FlatElasticError::UnknownCandidate)
         }
     }
@@ -224,8 +239,10 @@ impl ElasticSearchSpace for FlatElasticPlanner {
         problem: &ElasticProblemClass,
         output: &mut Vec<ElasticCandidate>,
     ) {
-        if problem == &self.problem_class {
-            if let Ok(candidate) = current_candidate() {
+        if problem == &self.problem_class
+        {
+            if let Ok(candidate) = current_candidate()
+            {
                 output.push(candidate);
             }
         }
@@ -251,10 +268,12 @@ impl ElasticCostModel for FlatElasticPlanner {
         candidate: &ElasticCandidate,
         objective: ElasticObjective,
     ) -> u64 {
-        if problem != &self.problem_class || self.require_current_candidate(candidate).is_err() {
+        if problem != &self.problem_class || self.require_current_candidate(candidate).is_err()
+        {
             return u64::MAX;
         }
-        match objective {
+        match objective
+        {
             ElasticObjective::MinTemporaryMemory => candidate.temporary_bytes,
             ElasticObjective::MinLatency
             | ElasticObjective::MaxThroughput
@@ -275,7 +294,7 @@ pub enum FlatPlanOrigin {
 #[derive(Debug)]
 pub enum FlatPlanResolution {
     /// A concrete exact FLAT path may execute production work.
-    Production(FlatElasticPlan),
+    Production(Box<FlatElasticPlan>),
     /// Audit mode has no persisted production selection to replay.
     AuditOnly,
 }
@@ -316,11 +335,13 @@ impl FlatElasticPlan {
         k: &GpuMatrix,
         v: &GpuMatrix,
     ) -> BackendResult<GpuMatrix> {
-        match self.request.kv_representation {
+        match self.request.kv_representation
+        {
             FlatKvRepresentation::Raw => bridge.forward(q, k, v, self.request.config),
-            FlatKvRepresentation::PreRotated => {
+            FlatKvRepresentation::PreRotated =>
+            {
                 bridge.forward_pre_rotated_k(q, k, v, self.request.config)
-            }
+            },
         }
     }
 }
@@ -339,17 +360,25 @@ pub enum FlatElasticError {
 
 impl core::fmt::Display for FlatElasticError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
+        match self
+        {
             Self::InvalidRequest(message) => write!(f, "invalid FLAT request: {message}"),
             Self::RequestOverflow(field) => write!(f, "FLAT request `{field}` exceeds index space"),
-            Self::HardwareProfile(error) => {
+            Self::HardwareProfile(error) =>
+            {
                 write!(f, "cannot encode WGPU hardware profile: {error:?}")
-            }
+            },
             Self::CandidateEncoding(error) => write!(f, "cannot encode FLAT candidate: {error}"),
             Self::Mode(error) => write!(f, "Elastic mode rejected FLAT plan resolution: {error}"),
             Self::NoQualifiedCandidate => write!(f, "no qualified FLAT candidate for this request"),
-            Self::UnknownCandidate => write!(f, "Elastic plan names a stale or foreign FLAT candidate"),
-            Self::MissingProductionPlan => write!(f, "selected Elastic mode requires a persisted FLAT plan"),
+            Self::UnknownCandidate =>
+            {
+                write!(f, "Elastic plan names a stale or foreign FLAT candidate")
+            },
+            Self::MissingProductionPlan =>
+            {
+                write!(f, "selected Elastic mode requires a persisted FLAT plan")
+            },
         }
     }
 }
@@ -382,10 +411,13 @@ fn current_candidate() -> Result<ElasticCandidate, FlatElasticError> {
 
 fn problem_class_for(request: FlatElasticRequest) -> Result<ElasticProblemClass, FlatElasticError> {
     let config = request.config;
-    let head_ratio = config
-        .q_heads
-        .checked_div(config.kv_heads)
-        .ok_or(FlatElasticError::InvalidRequest("kv_heads must be non-zero"))?;
+    let head_ratio =
+        config
+            .q_heads
+            .checked_div(config.kv_heads)
+            .ok_or(FlatElasticError::InvalidRequest(
+                "kv_heads must be non-zero",
+            ))?;
     let head_ratio = u32::try_from(head_ratio)
         .map_err(|_| FlatElasticError::RequestOverflow("q_heads/kv_heads"))?;
     let head_dim = u16::try_from(config.head_dim)
@@ -406,7 +438,8 @@ fn problem_class_for(request: FlatElasticRequest) -> Result<ElasticProblemClass,
 }
 
 fn length_bucket(length: usize) -> u8 {
-    match length {
+    match length
+    {
         0 => 0,
         1 => 1,
         2..=4 => 2,
@@ -431,28 +464,34 @@ fn validate_request(config: FlatM11ResidentConfig) -> Result<(), FlatElasticErro
             "batch, heads, lengths, and head_dim must be non-zero",
         ));
     }
-    if !config.q_heads.is_multiple_of(config.kv_heads) {
+    if !config.q_heads.is_multiple_of(config.kv_heads)
+    {
         return Err(FlatElasticError::InvalidRequest(
             "q_heads must be divisible by kv_heads",
         ));
     }
-    if config.head_dim > FLAT_WGSL_MAX_HEAD_DIM {
+    if config.head_dim > FLAT_WGSL_MAX_HEAD_DIM
+    {
         return Err(FlatElasticError::InvalidRequest(
             "head_dim exceeds the pinned portable FLAT limit",
         ));
     }
-    if !config.head_dim.is_multiple_of(2) {
+    if !config.head_dim.is_multiple_of(2)
+    {
         return Err(FlatElasticError::InvalidRequest(
             "RoPE head_dim must contain complete even/odd pairs",
         ));
     }
-    if !config.theta.is_finite() || config.theta <= 0.0 {
+    if !config.theta.is_finite() || config.theta <= 0.0
+    {
         return Err(FlatElasticError::InvalidRequest(
             "RoPE theta must be finite and positive",
         ));
     }
-    if let Some(scale) = config.softmax_scale {
-        if !scale.is_finite() || scale <= 0.0 {
+    if let Some(scale) = config.softmax_scale
+    {
+        if !scale.is_finite() || scale <= 0.0
+        {
             return Err(FlatElasticError::InvalidRequest(
                 "softmax scale must be finite and positive",
             ));
@@ -478,7 +517,8 @@ fn validate_request(config: FlatM11ResidentConfig) -> Result<(), FlatElasticErro
         .query_position_offset
         .checked_add(config.query_len)
         .ok_or(FlatElasticError::RequestOverflow("causal query range"))?;
-    if causal_exclusive > u32::MAX as usize {
+    if causal_exclusive > u32::MAX as usize
+    {
         return Err(FlatElasticError::RequestOverflow("causal query range"));
     }
     Ok(())
@@ -492,7 +532,8 @@ fn validate_position(
     let final_position = offset
         .checked_add(length.saturating_sub(1))
         .ok_or(FlatElasticError::RequestOverflow(field))?;
-    if final_position > u32::MAX as usize {
+    if final_position > u32::MAX as usize
+    {
         return Err(FlatElasticError::RequestOverflow(field));
     }
     Ok(())
@@ -523,11 +564,8 @@ mod tests {
 
     fn planner(query_len: usize, kv_len: usize) -> FlatElasticPlanner {
         FlatElasticPlanner::new(
-            FlatElasticRequest::new(
-                config(query_len, kv_len),
-                FlatKvRepresentation::PreRotated,
-            )
-            .unwrap(),
+            FlatElasticRequest::new(config(query_len, kv_len), FlatKvRepresentation::PreRotated)
+                .unwrap(),
         )
         .unwrap()
     }
@@ -616,11 +654,13 @@ mod tests {
         let resolved = planner
             .resolve_for_mode(&cold, hardware.clone(), &cache)
             .unwrap();
-        match resolved {
-            FlatPlanResolution::Production(plan) => {
+        match resolved
+        {
+            FlatPlanResolution::Production(plan) =>
+            {
                 assert_eq!(plan.origin(), FlatPlanOrigin::QualifiedHeuristic);
                 assert!(plan.elastic_plan().is_none());
-            }
+            },
             FlatPlanResolution::AuditOnly => panic!("cold mode must produce a safe heuristic"),
         }
 
@@ -642,17 +682,22 @@ mod tests {
             Err(FlatElasticError::Mode(ElasticModeError::LockedPlanMissing))
         ));
 
-        let plan = measured_plan(&planner, &locked, hardware.clone(), current_candidate().unwrap());
+        let plan = measured_plan(
+            &planner,
+            &locked,
+            hardware.clone(),
+            current_candidate().unwrap(),
+        );
         let key = planner.plan_key(&locked, hardware.clone());
         cache.store(key, plan);
-        let resolved = planner
-            .resolve_for_mode(&locked, hardware, &cache)
-            .unwrap();
-        match resolved {
-            FlatPlanResolution::Production(plan) => {
+        let resolved = planner.resolve_for_mode(&locked, hardware, &cache).unwrap();
+        match resolved
+        {
+            FlatPlanResolution::Production(plan) =>
+            {
                 assert_eq!(plan.origin(), FlatPlanOrigin::Persisted);
                 assert!(plan.elastic_plan().is_some());
-            }
+            },
             FlatPlanResolution::AuditOnly => panic!("locked mode had a persisted plan"),
         }
     }
@@ -663,7 +708,9 @@ mod tests {
         let audit = tuner(ElasticMode::Audit, ElasticObjective::MinLatency);
         let cache = InMemoryElasticPlanCache::default();
         assert!(matches!(
-            planner.resolve_for_mode(&audit, hardware(), &cache).unwrap(),
+            planner
+                .resolve_for_mode(&audit, hardware(), &cache)
+                .unwrap(),
             FlatPlanResolution::AuditOnly
         ));
     }
