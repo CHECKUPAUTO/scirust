@@ -29,14 +29,17 @@ impl CandidateGemmPlanF32 {
         problem: GemmProblemSignature,
         candidate: GemmCandidateDescriptor,
     ) -> Result<Self, CandidateGemmPlanError> {
-        if !available_gemm_candidates_f32(problem).contains(&candidate) {
+        if !available_gemm_candidates_f32(problem).contains(&candidate)
+        {
             return Err(CandidateGemmPlanError::CandidateUnavailable);
         }
-        let workspace = match candidate.path {
+        let workspace = match candidate.path
+        {
             GemmExecutionPath::Scalar => None,
-            GemmExecutionPath::Avx512Packed | GemmExecutionPath::NeonPacked => {
+            GemmExecutionPath::Avx512Packed | GemmExecutionPath::NeonPacked =>
+            {
                 Some(GemmWorkspaceF32::new())
-            }
+            },
         };
         Ok(Self {
             problem,
@@ -74,19 +77,22 @@ impl CandidateGemmPlanF32 {
         let a_expected = checked_product(self.problem.m, self.problem.k)?;
         let b_expected = checked_product(self.problem.k, self.problem.n)?;
         let c_expected = checked_product(self.problem.m, self.problem.n)?;
-        if a.len() != a_expected {
+        if a.len() != a_expected
+        {
             return Err(CandidateGemmPlanError::ALength {
                 expected: a_expected,
                 actual: a.len(),
             });
         }
-        if b.len() != b_expected {
+        if b.len() != b_expected
+        {
             return Err(CandidateGemmPlanError::BLength {
                 expected: b_expected,
                 actual: b.len(),
             });
         }
-        if c.len() != c_expected {
+        if c.len() != c_expected
+        {
             return Err(CandidateGemmPlanError::CLength {
                 expected: c_expected,
                 actual: c.len(),
@@ -96,17 +102,20 @@ impl CandidateGemmPlanF32 {
         let a_view = MatrixView::new(a, self.problem.m, self.problem.k);
         let b_view = MatrixView::new(b, self.problem.k, self.problem.n);
         let c_view = MatrixViewMut::new(c, self.problem.m, self.problem.n);
-        match self.candidate.path {
-            GemmExecutionPath::Scalar => {
+        match self.candidate.path
+        {
+            GemmExecutionPath::Scalar =>
+            {
                 ScalarBackend.sgemm_f32(alpha, a_view, b_view, beta, c_view);
-            }
-            GemmExecutionPath::Avx512Packed | GemmExecutionPath::NeonPacked => {
+            },
+            GemmExecutionPath::Avx512Packed | GemmExecutionPath::NeonPacked =>
+            {
                 let workspace = self
                     .workspace
                     .as_mut()
                     .ok_or(CandidateGemmPlanError::MissingWorkspace)?;
                 sgemm_tiled_with_workspace(alpha, a_view, b_view, beta, c_view, workspace);
-            }
+            },
         }
         Ok(())
     }
@@ -124,19 +133,35 @@ pub enum CandidateGemmPlanError {
 
 impl core::fmt::Display for CandidateGemmPlanError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match *self {
-            Self::CandidateUnavailable => write!(f, "GEMM candidate is not executable on this host"),
+        match *self
+        {
+            Self::CandidateUnavailable =>
+            {
+                write!(f, "GEMM candidate is not executable on this host")
+            },
             Self::ShapeOverflow => write!(f, "GEMM dimensions overflow usize"),
             Self::MissingWorkspace => write!(f, "packed GEMM candidate has no prepared workspace"),
-            Self::ALength { expected, actual } => {
-                write!(f, "GEMM A length mismatch: expected {expected}, got {actual}")
-            }
-            Self::BLength { expected, actual } => {
-                write!(f, "GEMM B length mismatch: expected {expected}, got {actual}")
-            }
-            Self::CLength { expected, actual } => {
-                write!(f, "GEMM C length mismatch: expected {expected}, got {actual}")
-            }
+            Self::ALength { expected, actual } =>
+            {
+                write!(
+                    f,
+                    "GEMM A length mismatch: expected {expected}, got {actual}"
+                )
+            },
+            Self::BLength { expected, actual } =>
+            {
+                write!(
+                    f,
+                    "GEMM B length mismatch: expected {expected}, got {actual}"
+                )
+            },
+            Self::CLength { expected, actual } =>
+            {
+                write!(
+                    f,
+                    "GEMM C length mismatch: expected {expected}, got {actual}"
+                )
+            },
         }
     }
 }
@@ -174,13 +199,16 @@ mod tests {
             MatrixViewMut::new(&mut expected, problem.m, problem.n),
         );
 
-        for candidate in available_gemm_candidates_f32(problem) {
+        for candidate in available_gemm_candidates_f32(problem)
+        {
             let mut plan = CandidateGemmPlanF32::prepare(problem, candidate).unwrap();
             let identities = plan.workspace_identities();
-            for _ in 0..2 {
+            for _ in 0..2
+            {
                 let mut got = initial.clone();
                 plan.execute(0.875, &a, &b, 0.25, &mut got).unwrap();
-                for index in 0..got.len() {
+                for index in 0..got.len()
+                {
                     let tolerance = 1e-3 * (1.0 + expected[index].abs());
                     assert!(
                         (got[index] - expected[index]).abs() <= tolerance,
