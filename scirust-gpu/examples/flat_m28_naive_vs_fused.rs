@@ -268,9 +268,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         for _ in 0..warmups
         {
             let _ = time_naive(&ctx, &q_naive, &k_naive, &v_naive, causal)?;
-            let _ = time_flat_fresh_output(
-                &ctx, &pipeline, &q_flat, &k_flat, &v_flat, shape, config,
-            )?;
+            let _ =
+                time_flat_fresh_output(&ctx, &pipeline, &q_flat, &k_flat, &v_flat, shape, config)?;
             let _ = time_flat_reused(
                 &ctx,
                 &pipeline,
