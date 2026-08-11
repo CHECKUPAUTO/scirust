@@ -111,9 +111,13 @@ pub enum GemmCandidateError {
 
 impl core::fmt::Display for GemmCandidateError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
+        match self
+        {
             Self::ShapeOverflow => write!(f, "GEMM dimensions overflow usize"),
-            Self::DimensionTooLarge => write!(f, "GEMM dimension does not fit canonical u64 encoding"),
+            Self::DimensionTooLarge =>
+            {
+                write!(f, "GEMM dimension does not fit canonical u64 encoding")
+            },
         }
     }
 }
@@ -143,7 +147,8 @@ pub fn available_gemm_candidates_f32(
     });
 
     #[cfg(target_arch = "x86_64")]
-    if std::is_x86_feature_detected!("avx512f") {
+    if std::is_x86_feature_detected!("avx512f")
+    {
         let a_elems = AVX512_KC * AVX512_MC.div_ceil(AVX512_MR) * AVX512_MR;
         let b_elems = AVX512_KC * AVX512_NC.div_ceil(AVX512_NR) * AVX512_NR;
         candidates.push(GemmCandidateDescriptor {
@@ -159,7 +164,8 @@ pub fn available_gemm_candidates_f32(
     }
 
     #[cfg(target_arch = "aarch64")]
-    if std::arch::is_aarch64_feature_detected!("neon") {
+    if std::arch::is_aarch64_feature_detected!("neon")
+    {
         let a_elems = NEON_KC * NEON_MC.div_ceil(NEON_MR) * NEON_MR;
         let b_elems = NEON_KC * NEON_NC.div_ceil(NEON_NR) * NEON_NR;
         candidates.push(GemmCandidateDescriptor {
@@ -178,7 +184,8 @@ pub fn available_gemm_candidates_f32(
 }
 
 const fn path_code(path: GemmExecutionPath) -> i64 {
-    match path {
+    match path
+    {
         GemmExecutionPath::Scalar => 0,
         GemmExecutionPath::Avx512Packed => 1,
         GemmExecutionPath::NeonPacked => 2,
@@ -191,8 +198,14 @@ mod tests {
 
     #[test]
     fn class_key_is_stable_and_dimension_order_sensitive() {
-        let a = GemmProblemSignature::new(16, 32, 64).unwrap().class_key().unwrap();
-        let b = GemmProblemSignature::new(16, 64, 32).unwrap().class_key().unwrap();
+        let a = GemmProblemSignature::new(16, 32, 64)
+            .unwrap()
+            .class_key()
+            .unwrap();
+        let b = GemmProblemSignature::new(16, 64, 32)
+            .unwrap()
+            .class_key()
+            .unwrap();
         assert_ne!(a, b);
         assert_eq!(&a[0..4], &GEMM_PROBLEM_SCHEMA_VERSION.to_le_bytes());
     }
@@ -216,7 +229,8 @@ mod tests {
         let second = available_gemm_candidates_f32(problem);
         assert_eq!(first, second);
         assert_eq!(first[0].path, GemmExecutionPath::Scalar);
-        for candidate in first {
+        for candidate in first
+        {
             assert!(candidate.mr > 0);
             assert!(candidate.nr > 0);
             assert!(candidate.kc > 0);
