@@ -119,7 +119,12 @@ pub fn hash_reader<R: Read>(domain: &[u8], reader: &mut R) -> io::Result<Digest3
     let mut buf = [0u8; 64 * 1024];
     loop
     {
-        let n = reader.read(&mut buf)?;
+        let n = match reader.read(&mut buf)
+        {
+            Ok(n) => n,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        };
         if n == 0
         {
             break;
@@ -166,6 +171,35 @@ mod tests {
         assert_eq!(
             hash_reader(b"file", &mut reader).unwrap(),
             hash_bytes(b"file", &data)
+        );
+    }
+
+    #[test]
+    fn reader_retries_interrupted_reads_without_losing_state() {
+        struct InterruptedOnce<'a> {
+            first: bool,
+            inner: &'a [u8],
+        }
+
+        impl Read for InterruptedOnce<'_> {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                if self.first
+                {
+                    self.first = false;
+                    return Err(io::Error::from(io::ErrorKind::Interrupted));
+                }
+                self.inner.read(buf)
+            }
+        }
+
+        let data = b"reader progress survives interrupted reads";
+        let mut reader = InterruptedOnce {
+            first: true,
+            inner: data,
+        };
+        assert_eq!(
+            hash_reader(b"file", &mut reader).unwrap(),
+            hash_bytes(b"file", data)
         );
     }
 
