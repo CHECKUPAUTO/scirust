@@ -41,8 +41,8 @@ jobs:
           old_latency = 'records.sort_by(|left, right| latency_key(left).cmp(&latency_key(right)))'
           assert text.count(old_memory) == 1
           assert text.count(old_latency) == 1
-          text = text.replace(old_memory, 'records.sort_by_key(|entry| memory_key(entry))', 1)
-          text = text.replace(old_latency, 'records.sort_by_key(|entry| latency_key(entry))', 1)
+          text = text.replace(old_memory, 'records.sort_by_key(memory_key)', 1)
+          text = text.replace(old_latency, 'records.sort_by_key(latency_key)', 1)
           path.write_text(text)
           PY
           cargo +nightly-2026-07-02 fmt --all
