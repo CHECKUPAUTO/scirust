@@ -123,15 +123,16 @@ impl ElasticMeasurementProtocol {
     }
 
     /// Stable, dependency-free binary identity for persistence/evidence records.
-    pub fn canonical_bytes(self) -> Result<[u8; 12], ElasticMeasurementProtocolError> {
+    /// Layout: schema, warmups, measured iterations, timing, residence, sync.
+    pub fn canonical_bytes(self) -> Result<[u8; 15], ElasticMeasurementProtocolError> {
         self.validate()?;
-        let mut out = [0_u8; 12];
+        let mut out = [0_u8; 15];
         out[0..4].copy_from_slice(&self.schema_version.to_le_bytes());
         out[4..8].copy_from_slice(&self.warmup_iterations.to_le_bytes());
         out[8..12].copy_from_slice(&self.measured_iterations.to_le_bytes());
-        out[3] ^= timing_code(self.timing_source) << 4;
-        out[7] ^= residence_code(self.residence_mode) << 4;
-        out[11] ^= synchronization_code(self.synchronization) << 4;
+        out[12] = timing_code(self.timing_source);
+        out[13] = residence_code(self.residence_mode);
+        out[14] = synchronization_code(self.synchronization);
         Ok(out)
     }
 }
@@ -273,6 +274,8 @@ mod tests {
         .canonical_bytes()
         .unwrap();
         assert_ne!(baseline, changed);
+        assert_eq!(baseline.len(), 15);
+        assert_eq!(&baseline[0..4], &ELASTIC_MEASUREMENT_PROTOCOL_SCHEMA_VERSION.to_le_bytes());
     }
 
     #[test]
