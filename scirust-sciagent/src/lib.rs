@@ -29,6 +29,7 @@ mod elastic_rule_table;
 pub mod elastic_text_tokenizer;
 pub mod elastic_tiny;
 pub mod elastic_tokenizer;
+pub mod engineering_specialization;
 pub mod engineering_trajectory_ingest;
 pub mod execution_attestation;
 pub mod flash_attention;
@@ -94,6 +95,12 @@ pub use elastic_tiny::{TINY_SCAN_CAPACITY, TinyScanBpe};
 pub use elastic_tokenizer::{
     BpeKernel, CanonicalBpeOracle, DuplicateMergeRule, ElasticProfile, ElasticThresholds,
     PieceClass, ThresholdError, TokenId,
+};
+pub use engineering_specialization::{
+    ENGINEERING_SPECIALIZATION_CRITERION_VERSION, ENGINEERING_SPECIALIZATION_REPORT_VERSION,
+    EngineeringSpecializationCriterion, EngineeringSpecializationError,
+    EngineeringSpecializationReport, HeldOutEngineeringMetrics, HeldOutEngineeringObservation,
+    SpecializationRetentionDecision,
 };
 pub use engineering_trajectory_ingest::{
     EngineeringDataset, EngineeringDatasetExample, EngineeringDatasetManifest,
