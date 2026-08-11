@@ -1,6 +1,6 @@
 # FLAT M28 — SciRust resident baseline
 
-This slice measures SciRust's existing resident WGPU attention composition against FLAT's public fused grouped-forward pipeline on the same `WgpuContext` and the same resident Q/K/V buffers.
+This slice measures SciRust's existing resident WGPU attention composition against FLAT's public fused grouped-forward pipeline on the same `WgpuContext`. Each path receives its own pre-resident Q/K/V buffers populated from exactly the same deterministic bytes; buffer creation/upload is outside timing. This keeps the comparison on one WGPU device without exposing SciRust's private `GpuMatrix` storage handle solely for benchmarking.
 
 The SciRust baseline is the existing public composition:
 
