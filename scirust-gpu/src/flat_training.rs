@@ -19,8 +19,7 @@ use crate::wgpu_backend::{GpuMatrix, WgpuContext};
 use crate::{BackendError, BackendResult};
 use flat_attention::{
     FlatAttentionConfig, GroupedAttentionShape, GroupedBackwardRecomputePass,
-    GroupedForwardPass, PreparedGroupedBackwardRecompute, WgpuGroupedBackwardRecomputePipeline,
-    WgpuGroupedForwardPipeline,
+    GroupedForwardPass, WgpuGroupedBackwardRecomputePipeline, WgpuGroupedForwardPipeline,
 };
 
 /// Native grouped-attention shape and masking contract for one training pass.
@@ -87,7 +86,6 @@ pub struct FlatGroupedTrainingResult {
     pub dv: GpuMatrix,
     _packed_forward: wgpu::Buffer,
     _packed_grads: wgpu::Buffer,
-    _prepared_backward: PreparedGroupedBackwardRecompute,
 }
 
 /// Reusable grouped forward/backward pipelines bound to one SciRust WGPU context.
@@ -219,8 +217,9 @@ impl WgpuFlatGroupedTrainingBridge {
                 BackendError::Execution(format!("FLAT grouped gradient allocation: {error}"))
             })?;
 
-        // Prepare backward before mutating the caller's command encoder so all
-        // fallible buffer/shape/bind-group validation is fail-closed up front.
+        // Keep backward validation fail-closed before mutating the caller's
+        // encoder. The concrete prepared type stays internal to FLAT and is
+        // intentionally not exposed through the SciRust public API.
         let prepared_backward = self
             .backward
             .prepare(
@@ -318,7 +317,6 @@ impl WgpuFlatGroupedTrainingBridge {
             dv,
             _packed_forward: packed_forward,
             _packed_grads: packed_grads,
-            _prepared_backward: prepared_backward,
         })
     }
 
