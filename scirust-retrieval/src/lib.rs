@@ -28,14 +28,14 @@ pub mod contrastive;
 pub mod feedback;
 
 pub use forgetting::{BoundedSemanticMemory, DecaySchedule, DocMeta};
-pub use hybrid::{reciprocal_rank_fusion, Bm25Index, HybridRetriever};
+pub use hybrid::{Bm25Index, HybridRetriever, reciprocal_rank_fusion};
 pub use index::DenseIndex;
 pub use ivf::IvfIndex;
 pub use license::RetrievalAccess;
 pub use vsa::{Cleaned, CleanupMemory};
 
 #[cfg(feature = "fusion")]
-pub use vsa::{fuse_observations, FusionStrategy};
+pub use vsa::{FusionStrategy, fuse_observations};
 
 #[cfg(feature = "ann")]
 pub use ann::LshIndex;
@@ -80,25 +80,31 @@ pub enum RetrievalError {
 
 impl fmt::Display for RetrievalError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            RetrievalError::DimMismatch { expected, got } => {
+        match self
+        {
+            RetrievalError::DimMismatch { expected, got } =>
+            {
                 write!(
                     f,
                     "vector dimension {got} does not match index dimension {expected}"
                 )
-            }
-            RetrievalError::EmptyInput => {
+            },
+            RetrievalError::EmptyInput =>
+            {
                 write!(f, "operation requires at least one element")
-            }
-            RetrievalError::NonFiniteInput => {
+            },
+            RetrievalError::NonFiniteInput =>
+            {
                 write!(f, "input contains NaN or infinite values")
-            }
-            RetrievalError::ZeroVector => {
+            },
+            RetrievalError::ZeroVector =>
+            {
                 write!(f, "operation requires a nonzero vector")
-            }
-            RetrievalError::InvalidParameter { reason } => {
+            },
+            RetrievalError::InvalidParameter { reason } =>
+            {
                 write!(f, "invalid parameter: {reason}")
-            }
+            },
         }
     }
 }
