@@ -1,4 +1,4 @@
-# registration trigger v2
+# registration trigger v3
 name: Fix M31 FLAT revision identity
 
 on:
@@ -37,7 +37,14 @@ jobs:
           new = 'flat-attention@24d3340edeb059e40e0fe0c400e814685701d855'
           if s.count(old) != 1:
               raise SystemExit(f'expected exactly one old FLAT identity, found {s.count(old)}')
-          p.write_text(s.replace(old, new, 1))
+          s = s.replace(old, new, 1)
+          marker = 'const FLAT_WGSL_MAX_HEAD_DIM: usize = 128;\n'
+          guard = '''\n#[cfg(test)]\n#[test]\nfn flat_candidate_revision_matches_manifest_pin() {\n    let revision = FLAT_KERNEL_REVISION\n        .strip_prefix(b"flat-attention@")\n        .expect("FLAT candidate revision must use the flat-attention@<sha> identity");\n    let revision = core::str::from_utf8(revision).expect("FLAT revision SHA must be UTF-8");\n    let dependency = include_str!("../Cargo.toml")\n        .lines()\n        .find(|line| line.trim_start().starts_with("flat-attention = {"))\n        .expect("scirust-gpu manifest must declare the FLAT dependency");\n    let expected = format!("rev = \\"{revision}\\"");\n    assert!(\n        dependency.contains(&expected),\n        "Elastic candidate identity {revision} does not match Cargo FLAT pin: {dependency}"\n    );\n}\n\n'''
+          if 'fn flat_candidate_revision_matches_manifest_pin()' not in s:
+              if s.count(marker) != 1:
+                  raise SystemExit(f'expected one insertion marker, found {s.count(marker)}')
+              s = s.replace(marker, guard + marker, 1)
+          p.write_text(s)
           PY
           grep -F 'rev = "24d3340edeb059e40e0fe0c400e814685701d855"' scirust-gpu/Cargo.toml
           grep -F 'flat-attention@24d3340edeb059e40e0fe0c400e814685701d855' scirust-gpu/src/flat_autotune.rs
