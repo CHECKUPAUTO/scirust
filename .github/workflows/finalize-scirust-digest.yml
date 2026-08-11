@@ -1,0 +1,44 @@
+name: Finalize scirust-digest
+
+on:
+  push:
+    branches:
+      - feat/scirust-digest
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feat/scirust-digest
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@1.89
+        with:
+          components: rustfmt, clippy
+      - name: Register workspace member
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -c 'from pathlib import Path; p=Path("Cargo.toml"); s=p.read_text(); n="    \"scirust-provenance\",\n"; assert s.count(n)==1; p.write_text(s.replace(n, n + "    \"scirust-digest\",\n", 1))'
+      - name: Validate digest crate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo test -p scirust-digest --locked || cargo test -p scirust-digest
+          cargo clippy -p scirust-digest --all-targets -- -D warnings
+          cargo metadata --no-deps --format-version 1 >/dev/null
+      - name: Commit resolved workspace state
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/finalize-scirust-digest.yml
+          git add Cargo.toml Cargo.lock scirust-digest
+          git commit -m "feat(digest): add domain-separated content hashing"
+          git push origin HEAD:feat/scirust-digest
