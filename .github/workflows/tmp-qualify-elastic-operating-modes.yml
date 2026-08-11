@@ -4,18 +4,22 @@ on:
   push:
     branches:
       - feat/elastic-operating-modes
+  pull_request:
+    branches:
+      - master
 
 permissions:
   contents: write
 
 jobs:
   qualify:
-    if: github.actor != 'github-actions[bot]'
+    if: github.actor != 'github-actions[bot]' && (github.event_name == 'push' || github.head_ref == 'feat/elastic-operating-modes')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           fetch-depth: 0
+          ref: feat/elastic-operating-modes
 
       - name: Install pinned nightly toolchain
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
