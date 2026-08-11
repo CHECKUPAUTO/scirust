@@ -156,7 +156,10 @@ impl core::fmt::Display for ElasticMeasurementProtocolError {
             ),
             Self::ZeroMeasuredIterations =>
             {
-                write!(f, "measurement protocol requires at least one measured iteration")
+                write!(
+                    f,
+                    "measurement protocol requires at least one measured iteration"
+                )
             },
             Self::IterationCountTooLarge =>
             {
@@ -192,29 +195,29 @@ fn median_sorted(values: &[u64]) -> u64 {
 
 fn nearest_rank_sorted(values: &[u64], percentile: usize) -> u64 {
     debug_assert!((1..=100).contains(&percentile));
-    let rank = percentile
-        .saturating_mul(values.len())
-        .div_ceil(100)
-        .max(1);
+    let rank = percentile.saturating_mul(values.len()).div_ceil(100).max(1);
     values[rank - 1]
 }
 
 const fn timing_code(source: ElasticTimingSource) -> u8 {
-    match source {
+    match source
+    {
         ElasticTimingSource::HostWallClock => 0,
         ElasticTimingSource::DeviceTimestamp => 1,
     }
 }
 
 const fn residence_code(mode: ElasticResidenceMode) -> u8 {
-    match mode {
+    match mode
+    {
         ElasticResidenceMode::Resident => 0,
         ElasticResidenceMode::TransferInclusive => 1,
     }
 }
 
 const fn synchronization_code(boundary: ElasticSynchronizationBoundary) -> u8 {
-    match boundary {
+    match boundary
+    {
         ElasticSynchronizationBoundary::PerIteration => 0,
         ElasticSynchronizationBoundary::BatchEnd => 1,
     }
@@ -275,7 +278,10 @@ mod tests {
         .unwrap();
         assert_ne!(baseline, changed);
         assert_eq!(baseline.len(), 15);
-        assert_eq!(&baseline[0..4], &ELASTIC_MEASUREMENT_PROTOCOL_SCHEMA_VERSION.to_le_bytes());
+        assert_eq!(
+            &baseline[0..4],
+            &ELASTIC_MEASUREMENT_PROTOCOL_SCHEMA_VERSION.to_le_bytes()
+        );
     }
 
     #[test]

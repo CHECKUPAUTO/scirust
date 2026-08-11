@@ -20,14 +20,26 @@ impl core::fmt::Display for ElasticSelectionError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self
         {
-            Self::NoRankedCandidates => write!(f, "no statically qualified candidates were supplied"),
-            Self::NoMeasuredCandidate => write!(f, "no measured evidence matched a ranked candidate"),
+            Self::NoRankedCandidates =>
+            {
+                write!(f, "no statically qualified candidates were supplied")
+            },
+            Self::NoMeasuredCandidate =>
+            {
+                write!(f, "no measured evidence matched a ranked candidate")
+            },
             Self::InvalidEvidence(error) => write!(f, "invalid measured evidence: {error}"),
             Self::NonDeterministicCandidate =>
             {
-                write!(f, "deterministic-only selection received a non-deterministic candidate")
+                write!(
+                    f,
+                    "deterministic-only selection received a non-deterministic candidate"
+                )
             },
-            Self::DuplicateEvidence => write!(f, "multiple evidence records exist for one candidate"),
+            Self::DuplicateEvidence =>
+            {
+                write!(f, "multiple evidence records exist for one candidate")
+            },
         }
     }
 }
@@ -59,7 +71,9 @@ impl ElasticAutoTuner {
             let mut records = evidence
                 .iter()
                 .filter(|record| record.candidate == ranked_candidate.candidate);
-            let Some(record) = records.next() else {
+            let Some(record) = records.next()
+            else
+            {
                 continue;
             };
             if records.next().is_some()
@@ -130,9 +144,10 @@ fn select_balanced<'a>(matched: &[(usize, &'a ElasticEvidence)]) -> (usize, &'a 
         .iter()
         .copied()
         .filter(|candidate| {
-            !matched.iter().copied().any(|other| {
-                dominates(other.1, candidate.1)
-            })
+            !matched
+                .iter()
+                .copied()
+                .any(|other| dominates(other.1, candidate.1))
         })
         .min_by_key(|entry| entry.0)
         .unwrap()
