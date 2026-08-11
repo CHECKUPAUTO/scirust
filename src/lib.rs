@@ -33,6 +33,9 @@ pub use scirust_simd as simd;
 pub use scirust_solvers as solvers;
 pub use scirust_symbolic as symbolic;
 
+#[cfg(feature = "autotune")]
+pub mod autotune;
+
 /// One-import entry point: `use scirust::prelude::*;` brings the tensor,
 /// autodiff, neural-network, error, and symbolic essentials into scope — the
 /// exact symbols the README quickstart uses — so a first program needs a single
