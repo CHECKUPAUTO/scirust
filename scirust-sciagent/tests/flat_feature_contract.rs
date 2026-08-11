@@ -1,5 +1,10 @@
 #![cfg(feature = "flat-attention")]
 
+#[cfg(feature = "flat-autotune")]
+use scirust_gpu::flat_autotune::{
+    ElasticConfig, ElasticMode, ElasticObjective, FlatElasticRequest, FlatElasticRuntime,
+    FlatKvRepresentation, InMemoryElasticPlanCache,
+};
 use scirust_gpu::{FlatM11ResidentConfig, GpuMatrix, WgpuFlatM11Bridge};
 
 fn pre_rotated_decode_contract(
@@ -51,4 +56,32 @@ fn sciagent_flat_feature_exposes_m15_prerotated_decode_boundary() {
         &GpuMatrix,
         FlatM11ResidentConfig,
     ) = pre_rotated_decode_contract;
+}
+
+#[cfg(feature = "flat-autotune")]
+#[test]
+fn sciagent_flat_autotune_feature_exposes_region_runtime_boundary() {
+    let config = FlatM11ResidentConfig {
+        batch: 1,
+        q_heads: 8,
+        kv_heads: 2,
+        query_len: 1,
+        kv_len: 17,
+        head_dim: 64,
+        causal: true,
+        softmax_scale: None,
+        query_position_offset: 16,
+        theta: 10_000.0,
+        query_rope_position_offset: 16,
+        kv_rope_position_offset: 0,
+    };
+    let request = FlatElasticRequest::new(config, FlatKvRepresentation::PreRotated).unwrap();
+    assert_eq!(request.config.kv_len, 17);
+    let _runtime_type: Option<FlatElasticRuntime<InMemoryElasticPlanCache>> = None;
+    let cold = ElasticConfig {
+        mode: ElasticMode::Cold,
+        objective: ElasticObjective::MinLatency,
+        max_ranked_candidates: 0,
+    };
+    assert_eq!(cold.mode, ElasticMode::Cold);
 }

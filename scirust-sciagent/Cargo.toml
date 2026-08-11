@@ -48,6 +48,9 @@ gpu = ["dep:scirust-gpu", "scirust-gpu/wgpu"]
 # callers must opt in explicitly while the current incremental path remains the
 # fallback/oracle during P6 qualification.
 flat-attention = ["gpu", "scirust-gpu/flat-attention"]
+# Route resident FLAT decode through the universal ElasticAutoTuner. This remains opt-in;
+# the direct `flat-attention` route stays available as the qualified oracle/fallback.
+flat-autotune = ["flat-attention", "scirust-gpu/flat-autotune"]
 # Route B: bf16 + Tensor-core CUDA plus the CUDA side of the unified compute
 # adapter. `scirust-gpu/cuda` does not enable WGPU; it exposes driver-backed
 # hardware/topology facts for execution attestation while scirust-cuda remains
