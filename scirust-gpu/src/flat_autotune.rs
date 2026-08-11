@@ -28,7 +28,26 @@ use scirust_compute::ComputeBackend;
 const FLAT_ELASTIC_FAMILY: &str = "flat-attention-f32-wgpu";
 const FLAT_KERNEL_FAMILY: &str = "flat-m11-external-asymmetric-projection";
 const FLAT_M15_KERNEL_FAMILY: &str = "flat-m15-resident-decode";
-const FLAT_KERNEL_REVISION: &[u8] = b"flat-attention@311f6b89e001d69f53cddcd2f9ba396a6f80c746";
+const FLAT_KERNEL_REVISION: &[u8] = b"flat-attention@24d3340edeb059e40e0fe0c400e814685701d855";
+
+#[cfg(test)]
+#[test]
+fn flat_candidate_revision_matches_manifest_pin() {
+    let revision = FLAT_KERNEL_REVISION
+        .strip_prefix(b"flat-attention@")
+        .expect("FLAT candidate revision must use the flat-attention@<sha> identity");
+    let revision = core::str::from_utf8(revision).expect("FLAT revision SHA must be UTF-8");
+    let dependency = include_str!("../Cargo.toml")
+        .lines()
+        .find(|line| line.trim_start().starts_with("flat-attention = {"))
+        .expect("scirust-gpu manifest must declare the FLAT dependency");
+    let expected = format!("rev = \"{revision}\"");
+    assert!(
+        dependency.contains(&expected),
+        "Elastic candidate identity {revision} does not match Cargo FLAT pin: {dependency}"
+    );
+}
+
 const FLAT_WGSL_MAX_HEAD_DIM: usize = 128;
 const FLAT_WGSL_QUERY_ROWS: i64 = 4;
 const FLAT_WGSL_KV_TILE: i64 = 8;
