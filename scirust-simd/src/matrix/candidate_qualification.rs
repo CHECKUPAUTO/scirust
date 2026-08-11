@@ -63,19 +63,22 @@ pub fn qualify_gemm_candidate_f32(
     let a_expected = checked_product(problem.m, problem.k)?;
     let b_expected = checked_product(problem.k, problem.n)?;
     let c_expected = checked_product(problem.m, problem.n)?;
-    if a.len() != a_expected {
+    if a.len() != a_expected
+    {
         return Err(GemmQualificationError::ALength {
             expected: a_expected,
             actual: a.len(),
         });
     }
-    if b.len() != b_expected {
+    if b.len() != b_expected
+    {
         return Err(GemmQualificationError::BLength {
             expected: b_expected,
             actual: b.len(),
         });
     }
-    if initial_c.len() != c_expected {
+    if initial_c.len() != c_expected
+    {
         return Err(GemmQualificationError::CLength {
             expected: c_expected,
             actual: initial_c.len(),
@@ -102,20 +105,30 @@ pub fn qualify_gemm_candidate_f32(
     let mut finite = true;
     let mut accepted = true;
 
-    for (&expected, &actual) in oracle.iter().zip(&observed) {
-        if !expected.is_finite() || !actual.is_finite() {
+    for (&expected, &actual) in oracle.iter().zip(&observed)
+    {
+        if !expected.is_finite() || !actual.is_finite()
+        {
             finite = false;
             accepted = false;
             continue;
         }
         let abs_error = (actual - expected).abs();
         let scale = expected.abs().max(actual.abs());
-        let rel_error = if scale == 0.0 { 0.0 } else { abs_error / scale };
+        let rel_error = if scale == 0.0
+        {
+            0.0
+        }
+        else
+        {
+            abs_error / scale
+        };
         max_abs_error = max_abs_error.max(abs_error);
         max_rel_error = max_rel_error.max(rel_error);
 
         let allowed = policy.abs_tolerance + policy.rel_tolerance * expected.abs();
-        if abs_error > allowed {
+        if abs_error > allowed
+        {
             accepted = false;
         }
     }
@@ -142,12 +155,25 @@ pub enum GemmQualificationError {
 
 impl core::fmt::Display for GemmQualificationError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::InvalidTolerance => write!(f, "GEMM qualification tolerances must be finite and non-negative"),
+        match self
+        {
+            Self::InvalidTolerance => write!(
+                f,
+                "GEMM qualification tolerances must be finite and non-negative"
+            ),
             Self::ShapeOverflow => write!(f, "GEMM dimensions overflow usize"),
-            Self::ALength { expected, actual } => write!(f, "GEMM A length mismatch: expected {expected}, got {actual}"),
-            Self::BLength { expected, actual } => write!(f, "GEMM B length mismatch: expected {expected}, got {actual}"),
-            Self::CLength { expected, actual } => write!(f, "GEMM C length mismatch: expected {expected}, got {actual}"),
+            Self::ALength { expected, actual } => write!(
+                f,
+                "GEMM A length mismatch: expected {expected}, got {actual}"
+            ),
+            Self::BLength { expected, actual } => write!(
+                f,
+                "GEMM B length mismatch: expected {expected}, got {actual}"
+            ),
+            Self::CLength { expected, actual } => write!(
+                f,
+                "GEMM C length mismatch: expected {expected}, got {actual}"
+            ),
             Self::Plan(error) => write!(f, "GEMM candidate plan failed: {error}"),
         }
     }
@@ -176,7 +202,8 @@ mod tests {
             .collect();
         let c = vec![0.125_f32; problem.m * problem.n];
 
-        for candidate in available_gemm_candidates_f32(problem) {
+        for candidate in available_gemm_candidates_f32(problem)
+        {
             let report = qualify_gemm_candidate_f32(
                 problem,
                 candidate,
@@ -188,7 +215,11 @@ mod tests {
                 GemmQualificationPolicy::default(),
             )
             .unwrap();
-            assert!(report.finite, "candidate {:?} produced non-finite output", candidate.path);
+            assert!(
+                report.finite,
+                "candidate {:?} produced non-finite output",
+                candidate.path
+            );
             assert!(report.accepted, "candidate {:?}: {report:?}", candidate.path);
         }
     }
