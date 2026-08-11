@@ -17,6 +17,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install pinned nightly toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+
       - name: Apply pinned rustfmt
         run: cargo +nightly-2026-07-02 fmt --all
 
@@ -42,6 +48,11 @@ jobs:
           print("canonicalized:", *sorted(changed), sep="\n- ")
           PY
           git diff --check
+
+      - name: Validate both format gates
+        run: |
+          cargo +nightly-2026-07-02 fmt --all -- --check
+          cargo +nightly-2026-07-02 fmt --manifest-path scirust-hypermemory/Cargo.toml --all -- --check
 
       - name: Validate ElasticAutoTuner
         run: |
