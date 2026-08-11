@@ -20,8 +20,8 @@ wgpu = ["std", "dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:scirust-core"]
 # Optional zero-copy attention bridge. FLAT is pinned to a reviewed, merged
 # caller-owned WGPU commit; enabling this feature also enables SciRust's resident
 # WGPU backend. The pinned revision retains the qualified M15 decode contract and
-# includes the M19-M24 native GQA/MQA backward, device-resident training-chain and
-# caller-owned grouped-forward surfaces without changing the feature from opt-in.
+# includes the M19-M30 grouped forward/backward, resident training-chain, runtime
+# telemetry and stable api::v1 surfaces without changing the feature from opt-in.
 # The exact revision below is a merged, CI-green FLAT default-branch commit.
 flat-attention = ["wgpu", "dep:flat-attention"]
 # Reusable FLAT planning boundary. ElasticAutoTuner depends only on scirust-compute,
@@ -43,7 +43,7 @@ scirust-core = { path = "../scirust-core", optional = true }
 scirust-cuda = { path = "../scirust-cuda", optional = true }
 scirust-license = { path = "../scirust-license", optional = true }
 wgpu = { version = "0.20", optional = true }
-flat-attention = { git = "https://github.com/Memorithm/FLAT-ATTENTION", rev = "311f6b89e001d69f53cddcd2f9ba396a6f80c746", default-features = false, features = ["wgpu"], optional = true }
+flat-attention = { git = "https://github.com/Memorithm/FLAT-ATTENTION", rev = "24d3340edeb059e40e0fe0c400e814685701d855", default-features = false, features = ["wgpu"], optional = true }
 pollster = { version = "0.3", optional = true }
 bytemuck = { version = "1", optional = true }
 
