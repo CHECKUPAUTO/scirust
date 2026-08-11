@@ -90,13 +90,13 @@ impl FlatElasticRequest {
     }
 
     pub const fn problem_kind(self) -> FlatProblemKind {
-        if self.config.query_len == 1
-        {
-            FlatProblemKind::Decode
-        }
-        else if !self.config.causal && self.config.query_len != self.config.kv_len
+        if !self.config.causal && self.config.query_len != self.config.kv_len
         {
             FlatProblemKind::CrossAttention
+        }
+        else if self.config.query_len == 1
+        {
+            FlatProblemKind::Decode
         }
         else
         {
@@ -624,6 +624,43 @@ mod tests {
         let next_region = planner(1, 65);
         assert_eq!(left.problem_class(), same_region.problem_class());
         assert_ne!(left.problem_class(), next_region.problem_class());
+    }
+
+    #[test]
+    fn noncausal_rectangular_single_query_is_cross_attention() {
+        let mut cross = config(1, 17);
+        cross.causal = false;
+        let request = FlatElasticRequest::new(cross, FlatKvRepresentation::PreRotated).unwrap();
+        assert_eq!(request.problem_kind(), FlatProblemKind::CrossAttention);
+    }
+
+    #[test]
+    fn every_length_bucket_boundary_is_an_explicit_plan_transition() {
+        for (left, right) in [
+            (1, 2),
+            (4, 5),
+            (16, 17),
+            (64, 65),
+            (256, 257),
+            (1024, 1025),
+            (4096, 4097),
+        ]
+        {
+            assert_ne!(length_bucket(left), length_bucket(right));
+        }
+
+        for (left, right) in [
+            (2, 4),
+            (5, 16),
+            (17, 64),
+            (65, 256),
+            (257, 1024),
+            (1025, 4096),
+            (4097, 8192),
+        ]
+        {
+            assert_eq!(length_bucket(left), length_bucket(right));
+        }
     }
 
     #[test]
