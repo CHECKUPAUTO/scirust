@@ -25,7 +25,7 @@ jobs:
       - name: Install MSRV
         run: rustup toolchain install 1.89.0 --profile minimal
 
-      - name: Wire opt-in facade feature
+      - name: Wire opt-in facade and strict plan layout
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -42,8 +42,7 @@ jobs:
           if 'flat-autotune = [' not in text:
               if text.count(needle) != 1:
                   raise SystemExit("unexpected Cargo.toml autotune feature anchor")
-              text = text.replace(needle, addition)
-              cargo.write_text(text)
+              cargo.write_text(text.replace(needle, addition))
 
           lib = Path("src/lib.rs")
           text = lib.read_text()
@@ -52,8 +51,27 @@ jobs:
           if 'pub mod flat_autotune;' not in text:
               if text.count(needle) != 1:
                   raise SystemExit("unexpected src/lib.rs autotune module anchor")
-              text = text.replace(needle, addition)
-              lib.write_text(text)
+              lib.write_text(text.replace(needle, addition))
+
+          planner = Path("src/flat_autotune.rs")
+          text = planner.read_text()
+          text = text.replace(
+              'Production(FlatElasticPlan),',
+              'Production(Box<FlatElasticPlan>),',
+          )
+          text = text.replace(
+              'FlatPlanResolution::Production(FlatElasticPlan {',
+              'FlatPlanResolution::Production(Box::new(FlatElasticPlan {',
+          )
+          text = text.replace(
+              'origin: FlatPlanOrigin::Persisted,\n            }));',
+              'origin: FlatPlanOrigin::Persisted,\n            })));',
+          )
+          text = text.replace(
+              'origin: FlatPlanOrigin::QualifiedHeuristic,\n                }))',
+              'origin: FlatPlanOrigin::QualifiedHeuristic,\n                })))',
+          )
+          planner.write_text(text)
           PY
 
       - name: Canonical format
@@ -63,7 +81,7 @@ jobs:
 
       - name: Locked metadata and check
         run: |
-          cargo +nightly-2026-07-02 metadata --locked --no-deps >/dev/null
+          cargo +nightly-2026-07-02 metadata --locked --format-version 1 --no-deps >/dev/null
           cargo +nightly-2026-07-02 check -p scirust --features flat-autotune --locked
 
       - name: Focused tests
