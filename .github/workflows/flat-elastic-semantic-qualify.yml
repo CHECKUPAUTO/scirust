@@ -29,90 +29,18 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-
           path = Path("src/flat_autotune.rs")
           text = path.read_text()
-
-          old = '''    pub const fn problem_kind(self) -> FlatProblemKind {
-        if self.config.query_len == 1
-        {
-            FlatProblemKind::Decode
-        }
-        else if !self.config.causal && self.config.query_len != self.config.kv_len
-        {
-            FlatProblemKind::CrossAttention
-        }
-        else
-        {
-            FlatProblemKind::Prefill
-        }
-    }
-'''
-          new = '''    pub const fn problem_kind(self) -> FlatProblemKind {
-        if !self.config.causal && self.config.query_len != self.config.kv_len
-        {
-            FlatProblemKind::CrossAttention
-        }
-        else if self.config.query_len == 1
-        {
-            FlatProblemKind::Decode
-        }
-        else
-        {
-            FlatProblemKind::Prefill
-        }
-    }
-'''
+          old = "    pub const fn problem_kind(self) -> FlatProblemKind {\n        if self.config.query_len == 1\n        {\n            FlatProblemKind::Decode\n        }\n        else if !self.config.causal && self.config.query_len != self.config.kv_len\n        {\n            FlatProblemKind::CrossAttention\n        }\n        else\n        {\n            FlatProblemKind::Prefill\n        }\n    }\n"
+          new = "    pub const fn problem_kind(self) -> FlatProblemKind {\n        if !self.config.causal && self.config.query_len != self.config.kv_len\n        {\n            FlatProblemKind::CrossAttention\n        }\n        else if self.config.query_len == 1\n        {\n            FlatProblemKind::Decode\n        }\n        else\n        {\n            FlatProblemKind::Prefill\n        }\n    }\n"
           if text.count(old) != 1:
               raise SystemExit("unexpected problem_kind anchor")
           text = text.replace(old, new)
-
-          anchor = '''    #[test]
-    fn current_candidate_is_exact_and_stale_candidates_fail_closed() {
-'''
-          addition = '''    #[test]
-    fn noncausal_rectangular_single_query_is_cross_attention() {
-        let mut cross = config(1, 17);
-        cross.causal = false;
-        let request =
-            FlatElasticRequest::new(cross, FlatKvRepresentation::PreRotated).unwrap();
-        assert_eq!(request.problem_kind(), FlatProblemKind::CrossAttention);
-    }
-
-    #[test]
-    fn every_length_bucket_boundary_is_an_explicit_plan_transition() {
-        for (left, right) in [
-            (1, 2),
-            (4, 5),
-            (16, 17),
-            (64, 65),
-            (256, 257),
-            (1024, 1025),
-            (4096, 4097),
-        ]
-        {
-            assert_ne!(length_bucket(left), length_bucket(right));
-        }
-
-        for (left, right) in [
-            (2, 4),
-            (5, 16),
-            (17, 64),
-            (65, 256),
-            (257, 1024),
-            (1025, 4096),
-            (4097, 8192),
-        ]
-        {
-            assert_eq!(length_bucket(left), length_bucket(right));
-        }
-    }
-
-'''
+          anchor = "    #[test]\n    fn current_candidate_is_exact_and_stale_candidates_fail_closed() {\n"
+          addition = "    #[test]\n    fn noncausal_rectangular_single_query_is_cross_attention() {\n        let mut cross = config(1, 17);\n        cross.causal = false;\n        let request =\n            FlatElasticRequest::new(cross, FlatKvRepresentation::PreRotated).unwrap();\n        assert_eq!(request.problem_kind(), FlatProblemKind::CrossAttention);\n    }\n\n    #[test]\n    fn every_length_bucket_boundary_is_an_explicit_plan_transition() {\n        for (left, right) in [\n            (1, 2),\n            (4, 5),\n            (16, 17),\n            (64, 65),\n            (256, 257),\n            (1024, 1025),\n            (4096, 4097),\n        ]\n        {\n            assert_ne!(length_bucket(left), length_bucket(right));\n        }\n\n        for (left, right) in [\n            (2, 4),\n            (5, 16),\n            (17, 64),\n            (65, 256),\n            (257, 1024),\n            (1025, 4096),\n            (4097, 8192),\n        ]\n        {\n            assert_eq!(length_bucket(left), length_bucket(right));\n        }\n    }\n\n"
           if text.count(anchor) != 1:
               raise SystemExit("unexpected test insertion anchor")
-          text = text.replace(anchor, addition + anchor)
-          path.write_text(text)
+          path.write_text(text.replace(anchor, addition + anchor))
           PY
 
       - name: Canonical format
@@ -142,6 +70,6 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add src/flat_autotune.rs
-          git rm .github/workflows/flat-elastic-semantic-qualify.yml
+          git rm .github/workflows/flat-elastic-semantic-qualify.yml .github/flat-elastic-semantic-trigger
           git commit -m "fix(autotune): classify FLAT cross attention before decode"
           git push origin HEAD:feat/flat-elastic-planner
