@@ -1,4 +1,5 @@
 pub mod backend;
+pub mod candidate_evidence;
 pub mod candidate_plan;
 pub mod candidate_qualification;
 pub mod gemm_candidates;
