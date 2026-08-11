@@ -5,6 +5,7 @@
 //! callers receive `None` and must route the complete piece to another kernel.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use crate::elastic_id::{PackedRule, PriorityKey};
 use crate::elastic_rule_table::AdaptivePackedRuleTable;
@@ -24,7 +25,7 @@ struct TinyRule {
 
 #[derive(Clone, Debug)]
 enum RuleTable {
-    Compact(AdaptivePackedRuleTable),
+    Compact(Arc<AdaptivePackedRuleTable>),
     Wide(BTreeMap<(TokenId, TokenId), TinyRule>),
 }
 
@@ -34,7 +35,7 @@ impl RuleTable {
     ) -> Result<Self, DuplicateMergeRule> {
         if let Some(rules) = AdaptivePackedRuleTable::try_from_ordered_merges(merges)?
         {
-            return Ok(Self::Compact(rules));
+            return Ok(Self::Compact(Arc::new(rules)));
         }
 
         let mut ranked = BTreeMap::new();
@@ -93,6 +94,21 @@ impl TinyScanBpe {
         Ok(Self {
             merges: RuleTable::from_ordered_merges(merges)?,
         })
+    }
+
+    pub(crate) fn from_shared_compact_rules(rules: Arc<AdaptivePackedRuleTable>) -> Self {
+        Self {
+            merges: RuleTable::Compact(rules),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn compact_rule_table(&self) -> Option<&Arc<AdaptivePackedRuleTable>> {
+        match &self.merges
+        {
+            RuleTable::Compact(rules) => Some(rules),
+            RuleTable::Wide(_) => None,
+        }
     }
 
     /// Encodes a complete piece when it fits the tiny work buffer.
