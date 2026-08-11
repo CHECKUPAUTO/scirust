@@ -1,0 +1,144 @@
+name: tmp qualify SGEMM Elastic integration
+
+on:
+  push:
+    branches:
+      - feat/scirust-sgemm-elastic-integration
+
+permissions:
+  contents: write
+
+jobs:
+  qualify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+
+      - name: Patch facade, feature and lock edge
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          cargo = Path("Cargo.toml")
+          text = cargo.read_text()
+          dep = 'scirust-simd = { path = "scirust-simd" }\n'
+          assert text.count(dep) == 1
+          assert 'elastic-autotuner = { path = "elastic-autotuner", optional = true }' not in text
+          text = text.replace(
+              dep,
+              dep + 'elastic-autotuner = { path = "elastic-autotuner", optional = true }\n',
+              1,
+          )
+          features = '[features]\ndefault = []\n'
+          assert text.count(features) == 1
+          text = text.replace(
+              features,
+              features + 'autotune = ["dep:elastic-autotuner", "dep:scirust-compute"]\n',
+              1,
+          )
+          cargo.write_text(text)
+
+          lib = Path("src/lib.rs")
+          text = lib.read_text()
+          marker = 'pub use scirust_symbolic as symbolic;\n'
+          assert text.count(marker) == 1
+          assert 'pub mod autotune;' not in text
+          text = text.replace(
+              marker,
+              marker + '\n#[cfg(feature = "autotune")]\npub mod autotune;\n',
+              1,
+          )
+          lib.write_text(text)
+
+          source = Path("src/autotune.rs")
+          text = source.read_text()
+          old_import = '''use scirust_simd::matrix::candidate_qualification::{
+              GemmQualificationError, GemmQualificationInput, GemmQualificationPolicy,
+              GemmQualificationReport, qualify_gemm_candidate_f32,
+          };'''
+          new_import = '''pub use scirust_simd::matrix::candidate_qualification::{
+              GemmQualificationInput, GemmQualificationPolicy, GemmQualificationReport,
+          };
+          use scirust_simd::matrix::candidate_qualification::{
+              GemmQualificationError, qualify_gemm_candidate_f32,
+          };'''
+          assert old_import in text
+          text = text.replace(old_import, new_import, 1)
+          old_sig = '''        input: GemmQualificationInput<'_>,
+                  policy: GemmQualificationPolicy,
+                  protocol: ElasticMeasurementProtocol,'''
+          new_sig = '''        input: GemmQualificationInput<'_>,
+                  protocol: ElasticMeasurementProtocol,'''
+          assert old_sig in text
+          text = text.replace(old_sig, new_sig, 1)
+          old_call = '''        let report = qualify_gemm_candidate_f32(self.problem, descriptor, input, policy)
+                  .map_err(SgemmElasticError::Qualification)?;
+              let correctness_evidence =
+                  encode_gemm_correctness_evidence(self.problem, policy, report)'''
+          new_call = '''        let policy = input.policy;
+              let report = qualify_gemm_candidate_f32(self.problem, descriptor, input)
+                  .map_err(SgemmElasticError::Qualification)?;
+              let correctness_evidence =
+                  encode_gemm_correctness_evidence(self.problem, policy, report)'''
+          assert old_call in text
+          text = text.replace(old_call, new_call, 1)
+          text = text.replace(
+              '''                    initial_c: &initial_c,
+                          },
+                          GemmQualificationPolicy::default(),
+                          protocol,''',
+              '''                    initial_c: &initial_c,
+                          policy: GemmQualificationPolicy::default(),
+                      },
+                          protocol,''',
+          )
+          source.write_text(text)
+
+          lock = Path("Cargo.lock")
+          text = lock.read_text()
+          marker = '[[package]]\nname = "scirust"\nversion = "0.14.0"\ndependencies = [\n'
+          assert text.count(marker) == 1
+          start = text.index(marker)
+          end = text.index('\n]\n', start)
+          root_section = text[start:end]
+          assert '"elastic-autotuner"' not in root_section
+          text = text[: start + len(marker)] + ' "elastic-autotuner",\n' + text[start + len(marker) :]
+          lock.write_text(text)
+          PY
+
+      - name: Canonical format
+        run: cargo +nightly-2026-07-02 fmt --all
+
+      - name: Validate locked dependency graph
+        run: cargo metadata --locked --no-deps >/dev/null
+
+      - name: Check autotune facade
+        run: cargo check -p scirust --features autotune --locked
+
+      - name: Test autotune facade
+        run: cargo test -p scirust --features autotune --lib --locked
+
+      - name: Clippy autotune facade
+        run: cargo +nightly-2026-07-02 clippy -p scirust --features autotune --lib --locked -- -D warnings
+
+      - name: MSRV check autotune facade
+        shell: bash
+        run: |
+          rustup toolchain install 1.89.0 --profile minimal --no-self-update
+          cargo +1.89.0 check -p scirust --features autotune --locked
+
+      - name: Verify diff and self-clean
+        shell: bash
+        run: |
+          git diff --check
+          git rm .github/workflows/tmp-qualify-sgemm-elastic-integration.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add Cargo.toml Cargo.lock src/lib.rs src/autotune.rs
+          git diff --cached --check
+          git commit -m "feat(autotune): expose measured SGEMM tuning facade"
+          git push origin HEAD:feat/scirust-sgemm-elastic-integration
