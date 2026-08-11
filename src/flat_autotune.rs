@@ -13,8 +13,9 @@
 pub use elastic_autotuner::operating_mode::{ElasticModeError, ElasticStartupStrategy};
 pub use elastic_autotuner::{
     ElasticAutoTuner, ElasticCandidate, ElasticCandidateError, ElasticConfig, ElasticEvidence,
-    ElasticExecutionPlan, ElasticHardwareProfile, ElasticMode, ElasticObjective, ElasticParameter,
-    ElasticProblemClass, ElasticSelectionError, InMemoryElasticPlanCache, RankedCandidate,
+    ElasticEvidenceError, ElasticExecutionPlan, ElasticHardwareProfile, ElasticMode,
+    ElasticObjective, ElasticParameter, ElasticProblemClass, ElasticSelectionError,
+    InMemoryElasticPlanCache, RankedCandidate,
 };
 pub use scirust_gpu::{FlatM11ResidentConfig, GpuMatrix, WgpuContext, WgpuFlatM11Bridge};
 
@@ -215,6 +216,52 @@ impl FlatElasticPlanner {
         }
     }
 
+    /// Evaluate caller-collected, already-qualified evidence outside the latency-sensitive
+    /// execution path. This method never reads a clock, launches a benchmark, mutates the plan
+    /// cache, or broadens the statically qualified candidate set.
+    pub fn evaluate_measured_evidence(
+        &self,
+        tuner: &ElasticAutoTuner,
+        hardware: ElasticHardwareProfile,
+        evidence: &[ElasticEvidence],
+    ) -> Result<ElasticExecutionPlan, FlatElasticError> {
+        tuner
+            .require_measurement()
+            .map_err(FlatElasticError::Mode)?;
+        for record in evidence
+        {
+            self.require_current_candidate(&record.candidate)?;
+        }
+        let ranked = self.rank_candidates(tuner, &hardware);
+        let selected = tuner
+            .select_measured_evidence(&ranked, evidence)
+            .map_err(FlatElasticError::Selection)?;
+        tuner
+            .plan_from_evidence(hardware, self.problem_class.clone(), selected)
+            .map_err(FlatElasticError::Evidence)
+    }
+
+    /// Promote already-qualified measured evidence to the production cache. Exploration and
+    /// selection mutation are both required, so the existing mode contract permits this only
+    /// in `Learn`. `Audit` may call `evaluate_measured_evidence` but cannot enter this method.
+    pub fn promote_measured_evidence<C: ElasticPlanCache>(
+        &self,
+        tuner: &ElasticAutoTuner,
+        hardware: ElasticHardwareProfile,
+        evidence: &[ElasticEvidence],
+        cache: &mut C,
+    ) -> Result<ElasticExecutionPlan, FlatElasticError> {
+        tuner
+            .require_exploration()
+            .map_err(FlatElasticError::Mode)?;
+        let plan = self.evaluate_measured_evidence(tuner, hardware.clone(), evidence)?;
+        let key = self.plan_key(tuner, hardware);
+        tuner
+            .store_plan_for_mode(cache, key, plan.clone())
+            .map_err(FlatElasticError::Mode)?;
+        Ok(plan)
+    }
+
     /// Fail closed when persisted evidence names a stale, modified, or foreign
     /// kernel rather than silently mapping it onto the current qualified path.
     pub fn require_current_candidate(
@@ -352,6 +399,8 @@ pub enum FlatElasticError {
     RequestOverflow(&'static str),
     HardwareProfile(scirust_compute::ProfileEncodingError),
     CandidateEncoding(ElasticCandidateError),
+    Evidence(ElasticEvidenceError),
+    Selection(ElasticSelectionError),
     Mode(ElasticModeError),
     NoQualifiedCandidate,
     UnknownCandidate,
@@ -369,6 +418,8 @@ impl core::fmt::Display for FlatElasticError {
                 write!(f, "cannot encode WGPU hardware profile: {error:?}")
             },
             Self::CandidateEncoding(error) => write!(f, "cannot encode FLAT candidate: {error}"),
+            Self::Evidence(error) => write!(f, "invalid FLAT tuning evidence: {error}"),
+            Self::Selection(error) => write!(f, "cannot select measured FLAT evidence: {error}"),
             Self::Mode(error) => write!(f, "Elastic mode rejected FLAT plan resolution: {error}"),
             Self::NoQualifiedCandidate => write!(f, "no qualified FLAT candidate for this request"),
             Self::UnknownCandidate =>
@@ -749,6 +800,105 @@ mod tests {
                 .resolve_for_mode(&audit, hardware(), &cache)
                 .unwrap(),
             FlatPlanResolution::AuditOnly
+        ));
+    }
+
+    fn evidence(candidate: ElasticCandidate, median_ns: u64) -> ElasticEvidence {
+        ElasticEvidence::validated(
+            candidate,
+            vec![1],
+            ElasticMeasurement {
+                sample_count: 5,
+                median_ns,
+                p95_ns: median_ns + 1,
+                p99_ns: median_ns + 2,
+                mad_ns: 1,
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn cold_and_locked_cannot_evaluate_new_measurements() {
+        let planner = planner(1, 17);
+        let hardware = hardware();
+        let records = [evidence(current_candidate().unwrap(), 10)];
+        for mode in [ElasticMode::Cold, ElasticMode::Locked]
+        {
+            let tuner = tuner(mode, ElasticObjective::MinLatency);
+            assert!(matches!(
+                planner.evaluate_measured_evidence(&tuner, hardware.clone(), &records),
+                Err(FlatElasticError::Mode(ElasticModeError::MeasurementForbidden { mode: rejected }))
+                    if rejected == mode
+            ));
+        }
+    }
+
+    #[test]
+    fn audit_can_replay_evidence_but_cannot_promote_selection() {
+        let planner = planner(1, 17);
+        let hardware = hardware();
+        let audit = tuner(ElasticMode::Audit, ElasticObjective::MinLatency);
+        let records = [evidence(current_candidate().unwrap(), 10)];
+        let plan = planner
+            .evaluate_measured_evidence(&audit, hardware.clone(), &records)
+            .unwrap();
+        assert_eq!(plan.evidence.candidate, records[0].candidate);
+
+        let mut cache = InMemoryElasticPlanCache::default();
+        assert!(matches!(
+            planner.promote_measured_evidence(&audit, hardware.clone(), &records, &mut cache,),
+            Err(FlatElasticError::Mode(
+                ElasticModeError::ExplorationForbidden {
+                    mode: ElasticMode::Audit
+                }
+            ))
+        ));
+        let key = planner.plan_key(&audit, hardware);
+        assert!(cache.load(&key).is_none());
+    }
+
+    #[test]
+    fn learn_promotes_validated_evidence_and_resolves_persisted_plan() {
+        let planner = planner(1, 17);
+        let hardware = hardware();
+        let learn = tuner(ElasticMode::Learn, ElasticObjective::MinLatency);
+        let records = [evidence(current_candidate().unwrap(), 10)];
+        let mut cache = InMemoryElasticPlanCache::default();
+        let promoted = planner
+            .promote_measured_evidence(&learn, hardware.clone(), &records, &mut cache)
+            .unwrap();
+        assert_eq!(promoted.evidence.candidate, records[0].candidate);
+
+        let resolved = planner.resolve_for_mode(&learn, hardware, &cache).unwrap();
+        match resolved
+        {
+            FlatPlanResolution::Production(plan) =>
+            {
+                assert_eq!(plan.origin(), FlatPlanOrigin::Persisted);
+                assert_eq!(plan.candidate(), &records[0].candidate);
+            },
+            FlatPlanResolution::AuditOnly => panic!("Learn must resolve the promoted plan"),
+        }
+    }
+
+    #[test]
+    fn foreign_evidence_fails_closed_before_measured_selection() {
+        let planner = planner(1, 17);
+        let learn = tuner(ElasticMode::Learn, ElasticObjective::MinLatency);
+        let current = current_candidate().unwrap();
+        let foreign = ElasticCandidate::new(
+            "foreign-flat-family",
+            current.kernel_revision.clone(),
+            current.parameters().iter().cloned(),
+            false,
+            0,
+        )
+        .unwrap();
+        let records = [evidence(foreign, 1)];
+        assert!(matches!(
+            planner.evaluate_measured_evidence(&learn, hardware(), &records),
+            Err(FlatElasticError::UnknownCandidate)
         ));
     }
 
