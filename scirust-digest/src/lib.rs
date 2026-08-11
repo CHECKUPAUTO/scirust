@@ -32,7 +32,8 @@ impl Digest32 {
     pub fn to_hex(&self) -> String {
         const HEX: &[u8; 16] = b"0123456789abcdef";
         let mut out = String::with_capacity(DIGEST_LEN * 2);
-        for &b in &self.0 {
+        for &b in &self.0
+        {
             out.push(HEX[(b >> 4) as usize] as char);
             out.push(HEX[(b & 0x0f) as usize] as char);
         }
@@ -40,12 +41,14 @@ impl Digest32 {
     }
 
     pub fn from_hex(hex: &str) -> Result<Self, ParseDigestError> {
-        if hex.len() != DIGEST_LEN * 2 {
+        if hex.len() != DIGEST_LEN * 2
+        {
             return Err(ParseDigestError);
         }
         let bytes = hex.as_bytes();
         let mut out = [0u8; DIGEST_LEN];
-        for (i, slot) in out.iter_mut().enumerate() {
+        for (i, slot) in out.iter_mut().enumerate()
+        {
             let hi = hex_value(bytes[i * 2]).ok_or(ParseDigestError)?;
             let lo = hex_value(bytes[i * 2 + 1]).ok_or(ParseDigestError)?;
             *slot = (hi << 4) | lo;
@@ -114,9 +117,11 @@ pub fn hash_bytes(domain: &[u8], bytes: &[u8]) -> Digest32 {
 pub fn hash_reader<R: Read>(domain: &[u8], reader: &mut R) -> io::Result<Digest32> {
     let mut state = DigestState::new(domain);
     let mut buf = [0u8; 64 * 1024];
-    loop {
+    loop
+    {
         let n = reader.read(&mut buf)?;
-        if n == 0 {
+        if n == 0
+        {
             break;
         }
         state.update(&buf[..n]);
@@ -125,7 +130,8 @@ pub fn hash_reader<R: Read>(domain: &[u8], reader: &mut R) -> io::Result<Digest3
 }
 
 fn hex_value(c: u8) -> Option<u8> {
-    match c {
+    match c
+    {
         b'0'..=b'9' => Some(c - b'0'),
         b'a'..=b'f' => Some(c - b'a' + 10),
         b'A'..=b'F' => Some(c - b'A' + 10),
