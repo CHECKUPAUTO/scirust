@@ -1,0 +1,70 @@
+name: tmp restore Elastic rustfmt baseline
+
+on:
+  push:
+    branches:
+      - fix/elastic-rustfmt-baseline
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+
+      - name: Apply pinned rustfmt
+        run: cargo +nightly-2026-07-02 fmt --all
+
+      - name: Restrict repair to Elastic files
+        shell: bash
+        run: |
+          python3 <<'PY'
+          import subprocess
+          allowed = {
+              "elastic-autotuner/src/measured_selection.rs",
+              "elastic-autotuner/src/measurement_protocol.rs",
+              "elastic-autotuner/src/persistence.rs",
+              "elastic-autotuner/src/racing.rs",
+          }
+          changed = set(
+              line for line in subprocess.check_output(
+                  ["git", "diff", "--name-only"], text=True
+              ).splitlines() if line
+          )
+          unexpected = changed - allowed
+          assert changed, "rustfmt produced no repair"
+          assert not unexpected, f"unexpected rustfmt drift: {sorted(unexpected)}"
+          print("canonicalized:", *sorted(changed), sep="\n- ")
+          PY
+          git diff --check
+
+      - name: Validate ElasticAutoTuner
+        run: |
+          cargo test -p elastic-autotuner --locked
+          cargo +nightly-2026-07-02 clippy -p elastic-autotuner --all-targets --locked -- -D warnings
+
+      - name: MSRV check
+        shell: bash
+        run: |
+          rustup toolchain install 1.89.0 --profile minimal --no-self-update
+          cargo +1.89.0 check -p elastic-autotuner --all-targets --locked
+
+      - name: Commit repair and self-clean
+        shell: bash
+        run: |
+          git rm .github/workflows/tmp-fix-elastic-rustfmt-baseline.yml
+          git rm -f .tmp-elastic-rustfmt-trigger
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add elastic-autotuner/src/measured_selection.rs \
+                  elastic-autotuner/src/measurement_protocol.rs \
+                  elastic-autotuner/src/persistence.rs \
+                  elastic-autotuner/src/racing.rs
+          git diff --cached --check
+          git commit -m "style(autotuner): restore pinned-nightly rustfmt baseline"
+          git push origin HEAD:fix/elastic-rustfmt-baseline
