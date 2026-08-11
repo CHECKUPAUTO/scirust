@@ -1,0 +1,54 @@
+name: FLAT Elastic WGPU
+
+on:
+  push:
+    branches: [master, main, develop]
+    paths:
+      - "scirust-gpu/src/flat_autotune.rs"
+      - "scirust-gpu/src/flat_m11.rs"
+      - "scirust-gpu/tests/flat_m15_required.rs"
+      - "scirust-gpu/Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/flat-autotune-wgpu.yml"
+  pull_request:
+    branches: [master, main, develop]
+    paths:
+      - "scirust-gpu/src/flat_autotune.rs"
+      - "scirust-gpu/src/flat_m11.rs"
+      - "scirust-gpu/tests/flat_m15_required.rs"
+      - "scirust-gpu/Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/flat-autotune-wgpu.yml"
+
+permissions:
+  contents: read
+
+env:
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  m15-parity:
+    name: M11/M15 parity (lavapipe)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Install pinned nightly
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+      - name: Install Mesa lavapipe
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
+          vulkaninfo --summary
+      - name: Check formatting
+        run: cargo +nightly-2026-07-02 fmt --all -- --check
+      - name: Execute M11 and M15 against the same oracle
+        env:
+          SCIRUST_REQUIRE_WGPU: "1"
+        run: cargo +nightly-2026-07-02 test -p scirust-gpu --features flat-autotune --test flat_m15_required --locked -- --nocapture
+      - name: Lint FLAT Elastic path
+        run: cargo +nightly-2026-07-02 clippy -p scirust-gpu --features flat-autotune --all-targets --locked -- -D warnings
