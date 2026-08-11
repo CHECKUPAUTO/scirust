@@ -27,6 +27,34 @@ jobs:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
 
+      - name: Restore strict Clippy baseline
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path("elastic-autotuner/src/racing.rs")
+          text = path.read_text()
+          old_memory = '''            ElasticObjective::MinTemporaryMemory => records.sort_by(|left, right| {
+              memory_key(left).cmp(&memory_key(right))
+          }),'''
+          new_memory = '''            ElasticObjective::MinTemporaryMemory =>
+          {
+              records.sort_by_key(|entry| memory_key(entry))
+          },'''
+          old_latency = '''            | ElasticObjective::DeterministicOnly => records.sort_by(|left, right| {
+              latency_key(left).cmp(&latency_key(right))
+          }),'''
+          new_latency = '''            | ElasticObjective::DeterministicOnly =>
+          {
+              records.sort_by_key(|entry| latency_key(entry))
+          },'''
+          assert text.count(old_memory) == 1
+          assert text.count(old_latency) == 1
+          text = text.replace(old_memory, new_memory, 1)
+          text = text.replace(old_latency, new_latency, 1)
+          path.write_text(text)
+          PY
+
       - name: Apply pinned rustfmt
         run: cargo +nightly-2026-07-02 fmt --all
 
@@ -47,8 +75,8 @@ jobs:
               ).splitlines() if line
           )
           unexpected = changed - allowed
-          assert changed, "rustfmt produced no repair"
-          assert not unexpected, f"unexpected rustfmt drift: {sorted(unexpected)}"
+          assert changed, "repair produced no diff"
+          assert not unexpected, f"unexpected repair drift: {sorted(unexpected)}"
           print("canonicalized:", *sorted(changed), sep="\n- ")
           PY
           git diff --check
@@ -81,5 +109,5 @@ jobs:
                   elastic-autotuner/src/persistence.rs \
                   elastic-autotuner/src/racing.rs
           git diff --cached --check
-          git commit -m "style(autotuner): restore pinned-nightly rustfmt baseline"
+          git commit -m "style(autotuner): restore pinned-nightly rustfmt and clippy baseline"
           git push origin HEAD:fix/elastic-rustfmt-baseline
