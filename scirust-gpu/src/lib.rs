@@ -55,6 +55,8 @@ mod compute_dispatch;
 mod cpu_reference;
 #[cfg(feature = "flat-attention")]
 mod flat_m11;
+#[cfg(feature = "flat-attention")]
+mod flat_training;
 
 #[cfg(feature = "wgpu")]
 mod chain;
@@ -158,6 +160,10 @@ pub use elastic_latent_mha_device::{
 pub use engine::WgpuEngine;
 #[cfg(feature = "flat-attention")]
 pub use flat_m11::{FlatM11ResidentConfig, WgpuFlatM11Bridge};
+#[cfg(feature = "flat-attention")]
+pub use flat_training::{
+    FlatGroupedTrainingConfig, FlatGroupedTrainingResult, WgpuFlatGroupedTrainingBridge,
+};
 #[cfg(feature = "wgpu")]
 pub use fusion::{FusedLayer, FusionNode, plan_fusion};
 #[cfg(feature = "wgpu")]

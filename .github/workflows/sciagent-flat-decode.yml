@@ -34,6 +34,8 @@ jobs:
         run: cargo check -p scirust-sciagent --locked --features flat-attention
       - name: Clippy opt-in FLAT decode feature
         run: cargo clippy -p scirust-sciagent --all-targets --locked --features flat-attention -- -D warnings
+      - name: Clippy resident grouped training bridge
+        run: cargo clippy -p scirust-gpu --all-targets --locked --features flat-attention -- -D warnings
       - name: Clippy paired FLAT decode benchmark
         run: cargo clippy -p scirust-gpu --locked --features flat-attention --example flat_decode_bench -- -D warnings
       - name: M15 compile-time contract
@@ -42,6 +44,11 @@ jobs:
         env:
           WGPU_BACKEND: vulkan
         run: cargo test -p scirust-sciagent --locked --features flat-attention --test flat_runtime_decode -- --nocapture
+      - name: P10.3 resident grouped training parity on lavapipe
+        env:
+          WGPU_BACKEND: vulkan
+          SCIRUST_REQUIRE_FLAT_GROUPED_WGPU: "1"
+        run: cargo test -p scirust-gpu --locked --features flat-attention flat_training -- --nocapture
       - name: Paired old-vs-FLAT decode benchmark smoke on lavapipe
         env:
           WGPU_BACKEND: vulkan
