@@ -45,6 +45,8 @@ scirust-gpu = { path = "scirust-gpu", optional = true }
 [features]
 default = []
 autotune = ["dep:elastic-autotuner", "dep:scirust-compute"]
+# FLAT attention planning through the universal ElasticAutoTuner. Still opt-in: this composes the existing WGPU/FLAT bridge with the tuner.
+flat-autotune = ["autotune", "dep:scirust-gpu", "scirust-gpu/flat-attention"]
 openclaw = ["dep:tokio", "dep:serde", "dep:serde_json", "dep:chrono", "dep:rand", "dep:sha2"]
 # The canonical tensor facade with a backend the caller supplies:
 # `scirust::tensor_canonical::{CanonicalProgram, TensorND, ReferencePlanRuntime, …}`.
