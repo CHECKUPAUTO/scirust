@@ -111,20 +111,34 @@ jobs:
           assert text.count(old_call) == 1
           text = text.replace(old_call, new_call, 1)
 
-          old_fixture = (
+          fixture = (
               '                    initial_c: &initial_c,\n'
               '                },\n'
               '                GemmQualificationPolicy::default(),\n'
               '                protocol,'
           )
-          new_fixture = (
+          replacement = (
               '                    initial_c: &initial_c,\n'
               '                    policy: GemmQualificationPolicy::default(),\n'
               '                },\n'
               '                protocol,'
           )
-          assert text.count(old_fixture) == 2
-          text = text.replace(old_fixture, new_fixture)
+          nested_fixture = (
+              '                        initial_c: &initial_c,\n'
+              '                    },\n'
+              '                    GemmQualificationPolicy::default(),\n'
+              '                    protocol,'
+          )
+          nested_replacement = (
+              '                        initial_c: &initial_c,\n'
+              '                        policy: GemmQualificationPolicy::default(),\n'
+              '                    },\n'
+              '                    protocol,'
+          )
+          assert text.count(fixture) == 1
+          assert text.count(nested_fixture) == 1
+          text = text.replace(fixture, replacement, 1)
+          text = text.replace(nested_fixture, nested_replacement, 1)
           source.write_text(text)
 
           lock = Path("Cargo.lock")
@@ -141,6 +155,23 @@ jobs:
 
       - name: Canonical format
         run: cargo +nightly-2026-07-02 fmt --all
+
+      - name: Apply inherited strict-Clippy baseline locally
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path("elastic-autotuner/src/racing.rs")
+          text = path.read_text()
+          old_memory = 'records.sort_by(|left, right| memory_key(left).cmp(&memory_key(right)))'
+          old_latency = 'records.sort_by(|left, right| latency_key(left).cmp(&latency_key(right)))'
+          assert text.count(old_memory) == 1
+          assert text.count(old_latency) == 1
+          text = text.replace(old_memory, 'records.sort_by_key(|entry| memory_key(entry))', 1)
+          text = text.replace(old_latency, 'records.sort_by_key(|entry| latency_key(entry))', 1)
+          path.write_text(text)
+          PY
+          cargo +nightly-2026-07-02 fmt --all
 
       - name: Validate locked dependency graph
         run: cargo metadata --locked --no-deps >/dev/null
@@ -160,7 +191,7 @@ jobs:
           rustup toolchain install 1.89.0 --profile minimal --no-self-update
           cargo +1.89.0 check -p scirust --features autotune --locked
 
-      - name: Verify diff and self-clean
+      - name: Verify intended diff and self-clean
         shell: bash
         run: |
           git diff --check
