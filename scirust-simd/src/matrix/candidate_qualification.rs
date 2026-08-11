@@ -42,6 +42,7 @@ pub struct GemmQualificationReport {
 /// This function allocates oracle/candidate output buffers because qualification
 /// is an out-of-band planning step. Repeated candidate execution itself remains
 /// allocation-free through [`CandidateGemmPlanF32`].
+#[allow(clippy::too_many_arguments)]
 pub fn qualify_gemm_candidate_f32(
     problem: GemmProblemSignature,
     candidate: GemmCandidateDescriptor,
