@@ -37,7 +37,8 @@ pub struct ElasticModePermissions {
 
 impl ElasticModePermissions {
     pub const fn for_mode(mode: ElasticMode) -> Self {
-        match mode {
+        match mode
+        {
             ElasticMode::Cold => Self {
                 may_use_heuristic_plan: true,
                 may_use_persisted_plan: false,
@@ -84,22 +85,31 @@ impl ElasticAutoTuner {
         &self,
         has_valid_persisted_plan: bool,
     ) -> Result<ElasticStartupStrategy, ElasticModeError> {
-        match self.config().mode {
+        match self.config().mode
+        {
             ElasticMode::Cold => Ok(ElasticStartupStrategy::QualifiedHeuristic),
-            ElasticMode::Learn => {
-                if has_valid_persisted_plan {
+            ElasticMode::Learn =>
+            {
+                if has_valid_persisted_plan
+                {
                     Ok(ElasticStartupStrategy::PersistedThenExplore)
-                } else {
+                }
+                else
+                {
                     Ok(ElasticStartupStrategy::QualifiedHeuristicThenExplore)
                 }
-            }
-            ElasticMode::Locked => {
-                if has_valid_persisted_plan {
+            },
+            ElasticMode::Locked =>
+            {
+                if has_valid_persisted_plan
+                {
                     Ok(ElasticStartupStrategy::PersistedOnly)
-                } else {
+                }
+                else
+                {
                     Err(ElasticModeError::LockedPlanMissing)
                 }
-            }
+            },
             ElasticMode::Audit => Ok(ElasticStartupStrategy::AuditOnly),
         }
     }
@@ -113,19 +123,23 @@ impl ElasticAutoTuner {
         cache: &C,
         key: &ElasticPlanKey,
     ) -> Result<Option<ElasticExecutionPlan>, ElasticModeError> {
-        if self.config().mode == ElasticMode::Cold {
+        if self.config().mode == ElasticMode::Cold
+        {
             return Ok(None);
         }
 
         let plan = cache.load(key);
-        match plan {
-            Some(plan) => {
+        match plan
+        {
+            Some(plan) =>
+            {
                 validate_cached_plan(key, &plan)?;
                 Ok(Some(plan))
-            }
-            None if self.config().mode == ElasticMode::Locked => {
+            },
+            None if self.config().mode == ElasticMode::Locked =>
+            {
                 Err(ElasticModeError::LockedPlanMissing)
-            }
+            },
             None => Ok(None),
         }
     }
@@ -140,7 +154,8 @@ impl ElasticAutoTuner {
         key: ElasticPlanKey,
         plan: ElasticExecutionPlan,
     ) -> Result<(), ElasticModeError> {
-        if !self.mode_permissions().may_mutate_selection {
+        if !self.mode_permissions().may_mutate_selection
+        {
             return Err(ElasticModeError::SelectionMutationForbidden {
                 mode: self.config().mode,
             });
@@ -151,9 +166,12 @@ impl ElasticAutoTuner {
     }
 
     pub fn require_exploration(&self) -> Result<(), ElasticModeError> {
-        if self.mode_permissions().may_explore {
+        if self.mode_permissions().may_explore
+        {
             Ok(())
-        } else {
+        }
+        else
+        {
             Err(ElasticModeError::ExplorationForbidden {
                 mode: self.config().mode,
             })
@@ -161,9 +179,12 @@ impl ElasticAutoTuner {
     }
 
     pub fn require_measurement(&self) -> Result<(), ElasticModeError> {
-        if self.mode_permissions().may_measure {
+        if self.mode_permissions().may_measure
+        {
             Ok(())
-        } else {
+        }
+        else
+        {
             Err(ElasticModeError::MeasurementForbidden {
                 mode: self.config().mode,
             })
@@ -184,17 +205,21 @@ pub enum ElasticModeError {
 
 impl core::fmt::Display for ElasticModeError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match *self {
+        match *self
+        {
             Self::LockedPlanMissing => write!(f, "locked mode requires a validated persisted plan"),
-            Self::ExplorationForbidden { mode } => {
+            Self::ExplorationForbidden { mode } =>
+            {
                 write!(f, "exploration is forbidden in {mode:?} mode")
-            }
-            Self::MeasurementForbidden { mode } => {
+            },
+            Self::MeasurementForbidden { mode } =>
+            {
                 write!(f, "measurement is forbidden in {mode:?} mode")
-            }
-            Self::SelectionMutationForbidden { mode } => {
+            },
+            Self::SelectionMutationForbidden { mode } =>
+            {
                 write!(f, "selection mutation is forbidden in {mode:?} mode")
-            }
+            },
             Self::CacheKeyMismatch => write!(f, "cached plan does not match its plan-cache key"),
             Self::UnsupportedPlanSchema { expected, actual } => write!(
                 f,
@@ -211,7 +236,8 @@ fn validate_cached_plan(
     key: &ElasticPlanKey,
     plan: &ElasticExecutionPlan,
 ) -> Result<(), ElasticModeError> {
-    if plan.schema_version != ELASTIC_SCHEMA_VERSION {
+    if plan.schema_version != ELASTIC_SCHEMA_VERSION
+    {
         return Err(ElasticModeError::UnsupportedPlanSchema {
             expected: ELASTIC_SCHEMA_VERSION,
             actual: plan.schema_version,
@@ -233,8 +259,9 @@ fn validate_cached_plan(
 mod tests {
     use super::*;
     use crate::{
-        ElasticCandidate, ElasticConfig, ElasticEvidence, ElasticHardwareProfile, ElasticMeasurement,
-        ElasticObjective, ElasticParameter, ElasticProblemClass, InMemoryElasticPlanCache,
+        ElasticCandidate, ElasticConfig, ElasticEvidence, ElasticHardwareProfile,
+        ElasticMeasurement, ElasticObjective, ElasticParameter, ElasticProblemClass,
+        InMemoryElasticPlanCache,
     };
     use scirust_compute::{DeviceCapabilities, HardwareCapabilities};
 
@@ -318,11 +345,16 @@ mod tests {
 
     #[test]
     fn only_learn_may_explore_and_mutate_selection() {
-        for mode in [ElasticMode::Cold, ElasticMode::Locked, ElasticMode::Audit] {
+        for mode in [ElasticMode::Cold, ElasticMode::Locked, ElasticMode::Audit]
+        {
             assert!(tuner(mode).require_exploration().is_err());
             let (key, plan) = plan(ElasticObjective::MinLatency);
             let mut cache = InMemoryElasticPlanCache::default();
-            assert!(tuner(mode).store_plan_for_mode(&mut cache, key, plan).is_err());
+            assert!(
+                tuner(mode)
+                    .store_plan_for_mode(&mut cache, key, plan)
+                    .is_err()
+            );
         }
 
         let (key, plan) = plan(ElasticObjective::MinLatency);
