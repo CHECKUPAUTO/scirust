@@ -16,6 +16,7 @@ mod bench {
     use std::path::{Path, PathBuf};
     use std::time::Instant;
 
+    use elastic_autotuner::ElasticPlanKey;
     use elastic_autotuner::measurement_protocol::{
         ElasticMeasurementProtocol, ElasticResidenceMode, ElasticSynchronizationBoundary,
         ElasticTimingSource,
@@ -26,8 +27,9 @@ mod bench {
         forward_reference_projection_grouped_rope_asymmetric,
     };
     use scirust_gpu::flat_autotune::{
-        ElasticAutoTuner, ElasticCandidate, ElasticConfig, ElasticEvidence, ElasticMode,
-        ElasticObjective, FlatElasticPlanner, FlatElasticRequest, FlatKvRepresentation,
+        ElasticAutoTuner, ElasticCandidate, ElasticConfig, ElasticEvidence, ElasticExecutionPlan,
+        ElasticMode, ElasticObjective, FlatElasticPlanner, FlatElasticRequest,
+        FlatKvRepresentation,
     };
     use scirust_gpu::{BackendResult, FlatM11ResidentConfig, GpuMatrix, WgpuFlatM11Bridge};
 
@@ -355,6 +357,12 @@ mod bench {
             )
             .into_bytes();
             let source_dependency = format!("scirust@{source_revision}").into_bytes();
+            let plan_key = ElasticPlanKey::new(
+                selected.hardware.clone(),
+                selected.problem.clone(),
+                selected.objective,
+            );
+            let record_name = record_file_name(&selected);
             let record = ElasticPersistedPlan::new(
                 selected,
                 protocol,
@@ -371,9 +379,59 @@ mod bench {
             let encoded = record
                 .encode()
                 .expect("encode canonical selected-plan record");
-            let path = dir.join(format!("flat-elastic-kv-{kv_len}.elauto"));
+            let path = dir.join(record_name);
+            if path.exists()
+            {
+                let existing = fs::read(&path).expect("read existing selected-plan record");
+                let existing = ElasticPersistedPlan::decode(&existing)
+                    .expect("existing evidence record must remain canonically decodable");
+                let existing_key = ElasticPlanKey::new(
+                    existing.plan.hardware,
+                    existing.plan.problem,
+                    existing.plan.objective,
+                );
+                assert_eq!(
+                    existing_key, plan_key,
+                    "evidence record filename collision across different validity regions"
+                );
+            }
             fs::write(&path, encoded).expect("write selected-plan record");
             eprintln!("record={}", path.display());
+        }
+    }
+
+    fn record_file_name(plan: &ElasticExecutionPlan) -> String {
+        let mut hash = 0xcbf2_9ce4_8422_2325u64;
+        stable_hash_bytes(&mut hash, &plan.schema_version.to_le_bytes());
+        stable_hash_component(&mut hash, plan.hardware.canonical_bytes());
+        stable_hash_component(&mut hash, plan.problem.family().as_bytes());
+        stable_hash_component(&mut hash, plan.problem.class_key());
+        stable_hash_bytes(&mut hash, &[objective_id(plan.objective)]);
+        format!("flat-elastic-plan-{hash:016x}.elauto")
+    }
+
+    fn stable_hash_component(hash: &mut u64, bytes: &[u8]) {
+        let len = u64::try_from(bytes.len()).expect("plan-key component length exceeds u64");
+        stable_hash_bytes(hash, &len.to_le_bytes());
+        stable_hash_bytes(hash, bytes);
+    }
+
+    fn stable_hash_bytes(hash: &mut u64, bytes: &[u8]) {
+        for &byte in bytes
+        {
+            *hash ^= u64::from(byte);
+            *hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+
+    const fn objective_id(objective: ElasticObjective) -> u8 {
+        match objective
+        {
+            ElasticObjective::MinLatency => 0,
+            ElasticObjective::MaxThroughput => 1,
+            ElasticObjective::MinTemporaryMemory => 2,
+            ElasticObjective::BalancedLatencyMemory => 3,
+            ElasticObjective::DeterministicOnly => 4,
         }
     }
 
