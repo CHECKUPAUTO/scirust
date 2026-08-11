@@ -15,14 +15,16 @@ pub mod rerank;
 pub mod vector;
 pub mod vsa;
 
-// `learned` extras — backed by scirust-core (autodiff/nn) and scirust-graph.
-#[cfg(feature = "learned")]
+// Fine-grained learned/graph capabilities. The `learned` Cargo feature remains a
+// backward-compatible umbrella, but external consumers can now select only the
+// capability they need.
+#[cfg(feature = "ann")]
 pub mod ann;
-#[cfg(feature = "learned")]
+#[cfg(feature = "causal-rerank")]
 pub mod causal_rerank;
-#[cfg(feature = "learned")]
+#[cfg(feature = "contrastive")]
 pub mod contrastive;
-#[cfg(feature = "learned")]
+#[cfg(feature = "feedback")]
 pub mod feedback;
 
 pub use forgetting::{BoundedSemanticMemory, DecaySchedule, DocMeta};
@@ -35,11 +37,11 @@ pub use vsa::{Cleaned, CleanupMemory};
 #[cfg(feature = "fusion")]
 pub use vsa::{FusionStrategy, fuse_observations};
 
-#[cfg(feature = "learned")]
+#[cfg(feature = "ann")]
 pub use ann::LshIndex;
-#[cfg(feature = "learned")]
+#[cfg(feature = "contrastive")]
 pub use contrastive::{ContrastiveConfig, ProjectedEncoder, ProjectionHead};
-#[cfg(feature = "learned")]
+#[cfg(feature = "feedback")]
 pub use feedback::ImprovementLoop;
 
 use std::fmt;
@@ -123,9 +125,11 @@ pub trait Encoder {
     }
 }
 
-/// The default [`Encoder`] is scirust-core's MiniLLM transformer. Only available
-/// with the `learned` feature; the pure core brings its own embeddings.
-#[cfg(feature = "learned")]
+/// Adapter for scirust-core's MiniLLM transformer embedding engine.
+///
+/// Kept behind its own feature so ANN/projection consumers are not forced to
+/// compile a concrete encoder they do not use.
+#[cfg(feature = "scirust-encoder")]
 impl Encoder for scirust_core::embed::EmbeddingEngine {
     fn embedding_dim(&self) -> usize {
         self.dim()
@@ -184,13 +188,13 @@ impl<E: Encoder> SemanticRetriever<E> {
     }
 }
 
-#[cfg(all(test, feature = "learned"))]
+#[cfg(all(test, feature = "scirust-encoder"))]
 mod tests {
     use super::*;
     use scirust_core::embed::EmbeddingEngine;
 
     #[test]
-    fn projected_encoder_drives_the_semantic_retriever() {
+    fn scirust_encoder_drives_the_semantic_retriever() {
         let engine = EmbeddingEngine::new(&["hello world", "rust is fast"]);
         let mut retriever = SemanticRetriever::new(engine);
 
