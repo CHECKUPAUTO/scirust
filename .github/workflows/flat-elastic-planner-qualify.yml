@@ -1,0 +1,96 @@
+name: Temporary FLAT Elastic planner qualification
+
+on:
+  push:
+    branches:
+      - feat/flat-elastic-planner
+
+permissions:
+  contents: write
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: feat/flat-elastic-planner
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+
+      - name: Install MSRV
+        run: rustup toolchain install 1.89.0 --profile minimal
+
+      - name: Wire opt-in facade feature
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          cargo = Path("Cargo.toml")
+          text = cargo.read_text()
+          needle = 'autotune = ["dep:elastic-autotuner", "dep:scirust-compute"]\n'
+          addition = (
+              needle
+              + '# FLAT attention planning through the universal ElasticAutoTuner. '\
+                'Still opt-in: this composes the existing WGPU/FLAT bridge with the tuner.\n'
+              + 'flat-autotune = ["autotune", "dep:scirust-gpu", "scirust-gpu/flat-attention"]\n'
+          )
+          if 'flat-autotune = [' not in text:
+              if text.count(needle) != 1:
+                  raise SystemExit("unexpected Cargo.toml autotune feature anchor")
+              text = text.replace(needle, addition)
+              cargo.write_text(text)
+
+          lib = Path("src/lib.rs")
+          text = lib.read_text()
+          needle = '#[cfg(feature = "autotune")]\npub mod autotune;\n'
+          addition = needle + '\n#[cfg(feature = "flat-autotune")]\npub mod flat_autotune;\n'
+          if 'pub mod flat_autotune;' not in text:
+              if text.count(needle) != 1:
+                  raise SystemExit("unexpected src/lib.rs autotune module anchor")
+              text = text.replace(needle, addition)
+              lib.write_text(text)
+          PY
+
+      - name: Canonical format
+        run: |
+          rustfmt +nightly-2026-07-02 --edition 2021 src/flat_autotune.rs
+          cargo +nightly-2026-07-02 fmt --all -- --check
+
+      - name: Locked metadata and check
+        run: |
+          cargo +nightly-2026-07-02 metadata --locked --no-deps >/dev/null
+          cargo +nightly-2026-07-02 check -p scirust --features flat-autotune --locked
+
+      - name: Focused tests
+        run: cargo +nightly-2026-07-02 test -p scirust --features flat-autotune --lib --locked
+
+      - name: Strict Clippy
+        run: cargo +nightly-2026-07-02 clippy -p scirust --features flat-autotune --lib --locked -- -D warnings
+
+      - name: MSRV check
+        run: cargo +1.89.0 check -p scirust --features flat-autotune --locked
+
+      - name: Verify scoped functional changes
+        run: |
+          changed="$(git diff --name-only HEAD)"
+          printf '%s\n' "$changed"
+          unexpected="$(printf '%s\n' "$changed" | grep -Ev '^(Cargo.toml|src/lib.rs|src/flat_autotune.rs)$' || true)"
+          if [ -n "$unexpected" ]; then
+            echo "Unexpected changed paths:"
+            printf '%s\n' "$unexpected"
+            exit 1
+          fi
+
+      - name: Finalize qualified branch head
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add Cargo.toml src/lib.rs src/flat_autotune.rs
+          git rm .github/workflows/flat-elastic-planner-qualify.yml
+          git commit -m "feat(autotune): expose FLAT Elastic planner facade"
+          git push origin HEAD:feat/flat-elastic-planner
