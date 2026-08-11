@@ -3150,6 +3150,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "scirust-digest"
+version = "0.1.0"
+dependencies = [
+ "sha2",
+]
+
+[[package]]
 name = "scirust-discovery"
 version = "0.1.0"
 dependencies = [
