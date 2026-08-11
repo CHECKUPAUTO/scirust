@@ -38,6 +38,8 @@ jobs:
         run: cargo clippy -p scirust-gpu --all-targets --locked --features flat-attention -- -D warnings
       - name: Clippy paired FLAT decode benchmark
         run: cargo clippy -p scirust-gpu --locked --features flat-attention --example flat_decode_bench -- -D warnings
+      - name: Clippy M28 SciRust naive vs FLAT benchmark
+        run: cargo clippy -p scirust-gpu --locked --features flat-attention --example flat_m28_naive_vs_fused -- -D warnings
       - name: M15 compile-time contract
         run: cargo test -p scirust-sciagent --locked --features flat-attention --test flat_feature_contract
       - name: M15 runtime parity on lavapipe
@@ -89,4 +91,50 @@ jobs:
               assert math.isfinite(ratio) and ratio > 0.0, row
               assert math.isfinite(parity) and parity >= 0.0, row
           print(f"validated {len(rows)} paired FLAT decode benchmark rows")
+          PY
+      - name: M28 paired resident attention benchmark smoke on lavapipe
+        env:
+          WGPU_BACKEND: vulkan
+          SCIRUST_M28_SEQ_LEN: "16"
+          SCIRUST_M28_HEAD_DIM: "32"
+          SCIRUST_M28_WARMUPS: "1"
+          SCIRUST_M28_REPEATS: "3"
+        run: |
+          cargo run --quiet --release --locked -p scirust-gpu \
+            --features flat-attention --example flat_m28_naive_vs_fused \
+            > /tmp/flat_m28_naive_vs_fused.csv
+          cat /tmp/flat_m28_naive_vs_fused.csv
+      - name: Validate M28 paired benchmark CSV contract
+        run: |
+          python3 - <<'PY'
+          import csv
+          import math
+
+          with open("/tmp/flat_m28_naive_vs_fused.csv", newline="", encoding="utf-8") as handle:
+              rows = list(csv.DictReader(handle))
+
+          assert len(rows) == 2, rows
+          assert {row["causal"] for row in rows} == {"false", "true"}, rows
+          for row in rows:
+              assert int(row["seq_len"]) == 16, row
+              assert int(row["head_dim"]) == 32, row
+              assert int(row["warmups"]) == 1, row
+              assert int(row["repeats"]) == 3, row
+              for key in (
+                  "naive_median_us",
+                  "naive_p95_us",
+                  "flat_fresh_median_us",
+                  "flat_fresh_p95_us",
+                  "flat_reused_median_us",
+                  "flat_reused_p95_us",
+                  "naive_over_flat_fresh",
+                  "naive_over_flat_reused",
+              ):
+                  value = float(row[key])
+                  assert math.isfinite(value) and value > 0.0, (key, row)
+              for key in ("naive_parity_max_abs", "flat_parity_max_abs"):
+                  value = float(row[key])
+                  assert math.isfinite(value) and value >= 0.0, (key, row)
+              assert row["performance_claim"] == "none", row
+          print(f"validated {len(rows)} M28 paired benchmark rows")
           PY
