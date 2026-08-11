@@ -1,0 +1,37 @@
+name: Sync scirust-digest with master
+
+on:
+  push:
+    branches:
+      - feat/scirust-digest
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feat/scirust-digest
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@1.89
+        with:
+          components: rustfmt, clippy
+      - name: Merge current master
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin master
+          git merge --no-edit origin/master
+      - name: Validate digest after sync
+        run: |
+          cargo +1.89.0 fmt --all -- --check
+          cargo +1.89.0 test -p scirust-digest --locked
+          cargo +1.89.0 clippy -p scirust-digest --all-targets -- -D warnings
+      - name: Remove helper and push
+        run: |
+          git rm .github/workflows/sync-scirust-digest-master.yml
+          git commit -m "ci(digest): remove master-sync helper"
+          git push origin HEAD:feat/scirust-digest
