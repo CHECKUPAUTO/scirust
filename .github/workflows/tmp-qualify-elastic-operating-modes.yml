@@ -17,6 +17,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install pinned nightly toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+
       - name: Expose operating-mode API
         shell: bash
         run: |
@@ -51,6 +57,7 @@ jobs:
         run: |
           git diff --check
           git rm .github/workflows/tmp-qualify-elastic-operating-modes.yml
+          git rm -f .tmp-elastic-mode-trigger
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add elastic-autotuner/src/lib.rs elastic-autotuner/src/operating_mode.rs
