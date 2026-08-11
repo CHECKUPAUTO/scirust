@@ -8,6 +8,9 @@
 //! correctness evidence can later promote a candidate into an execution plan.
 
 mod evidence_validation;
+mod measured_selection;
+
+pub use measured_selection::ElasticSelectionError;
 
 use scirust_compute::{
     HardwareCapabilities, ProfileEncodingError, canonical_hardware_profile_bytes,
