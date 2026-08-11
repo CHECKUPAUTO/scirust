@@ -1,0 +1,176 @@
+name: Temporary FLAT M15 candidate qualification
+
+on:
+  push:
+    branches:
+      - feat/flat-elastic-m15-candidate
+
+permissions:
+  contents: write
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+          ref: feat/flat-elastic-m15-candidate
+
+      - name: Install pinned nightly
+        run: |
+          rustup toolchain install nightly-2026-07-02 --profile minimal --component rustfmt,clippy
+          rustup toolchain install 1.89.0 --profile minimal
+
+      - name: Install lavapipe
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers
+
+      - name: Apply M15 candidate patch
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: Path, old: str, new: str) -> None:
+              text = path.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one match, found {count}: {old[:80]!r}")
+              path.write_text(text.replace(old, new, 1))
+
+          bridge = Path("scirust-gpu/src/flat_m11.rs")
+          replace_once(
+              bridge,
+              """    ExternalAsymmetricProjectionPass, ExternalAsymmetricProjectionRotaryGroupedPipeline,\n    FlatAttentionConfig,\n""",
+              """    ExternalAsymmetricProjectionPass, ExternalAsymmetricProjectionRotaryGroupedPipeline,\n    FlatAttentionConfig, WgpuResidentDecodePipeline,\n""",
+          )
+          replace_once(
+              bridge,
+              """pub struct WgpuFlatM11Bridge {\n    ctx: WgpuContext,\n    pipeline: ExternalAsymmetricProjectionRotaryGroupedPipeline,\n}\n""",
+              """pub struct WgpuFlatM11Bridge {\n    ctx: WgpuContext,\n    pipeline: ExternalAsymmetricProjectionRotaryGroupedPipeline,\n    m15_pipeline: Option<WgpuResidentDecodePipeline>,\n}\n""",
+          )
+          replace_once(
+              bridge,
+              """        f.debug_struct(\"WgpuFlatM11Bridge\")\n            .field(\"adapter\", &self.ctx.adapter_name())\n            .finish_non_exhaustive()\n""",
+              """        f.debug_struct(\"WgpuFlatM11Bridge\")\n            .field(\"adapter\", &self.ctx.adapter_name())\n            .field(\"m15_available\", &self.m15_pipeline.is_some())\n            .finish_non_exhaustive()\n""",
+          )
+          replace_once(
+              bridge,
+              """        let pipeline = ExternalAsymmetricProjectionRotaryGroupedPipeline::new(ctx.device())\n            .map_err(|error| BackendError::Execution(format!(\"FLAT M11 pipeline: {error}\")))?;\n        Ok(Self { ctx, pipeline })\n""",
+              """        let pipeline = ExternalAsymmetricProjectionRotaryGroupedPipeline::new(ctx.device())\n            .map_err(|error| BackendError::Execution(format!(\"FLAT M11 pipeline: {error}\")))?;\n        let m15_pipeline = WgpuResidentDecodePipeline::new(ctx.device()).ok();\n        Ok(Self {\n            ctx,\n            pipeline,\n            m15_pipeline,\n        })\n""",
+          )
+          replace_once(
+              bridge,
+              """    pub fn context(&self) -> &WgpuContext {\n        &self.ctx\n    }\n\n""",
+              """    pub fn context(&self) -> &WgpuContext {\n        &self.ctx\n    }\n\n    /// Whether the pinned FLAT M15 specialized resident-decode pipeline compiled\n    /// successfully on this exact WGPU device. The generic M11 path remains usable\n    /// when this is false.\n    #[must_use]\n    pub const fn m15_available(&self) -> bool {\n        self.m15_pipeline.is_some()\n    }\n\n""",
+          )
+          replace_once(
+              bridge,
+              """    pub fn record_pre_rotated_k(\n        &self,\n        encoder: &mut wgpu::CommandEncoder,\n        q: &GpuMatrix,\n        k: &GpuMatrix,\n        v: &GpuMatrix,\n        output: &GpuMatrix,\n        config: FlatM11ResidentConfig,\n    ) -> BackendResult<()> {\n        let pass = self.external_pass(q, k, v, output, config)?;\n        self.record_impl(encoder, pass, true)\n    }\n\n""",
+              """    pub fn record_pre_rotated_k(\n        &self,\n        encoder: &mut wgpu::CommandEncoder,\n        q: &GpuMatrix,\n        k: &GpuMatrix,\n        v: &GpuMatrix,\n        output: &GpuMatrix,\n        config: FlatM11ResidentConfig,\n    ) -> BackendResult<()> {\n        let pass = self.external_pass(q, k, v, output, config)?;\n        self.record_impl(encoder, pass, true)\n    }\n\n    /// Record the specialized FLAT M15 `q_len=1` resident-decode kernel over\n    /// framework-owned fixed-capacity K/V buffers. K must already be RoPE-rotated.\n    /// The physical KV capacity is inferred from the resident backing allocation,\n    /// while `config.kv_len` remains the logical live prefix.\n    pub fn record_pre_rotated_k_m15(\n        &self,\n        encoder: &mut wgpu::CommandEncoder,\n        q: &GpuMatrix,\n        k: &GpuMatrix,\n        v: &GpuMatrix,\n        output: &GpuMatrix,\n        config: FlatM11ResidentConfig,\n    ) -> BackendResult<()> {\n        let pipeline = self.m15_pipeline.as_ref().ok_or_else(|| {\n            BackendError::Execution(\"FLAT M15 resident decode pipeline unavailable\".into())\n        })?;\n        let kv_capacity = self.infer_kv_capacity(k, v, config)?;\n        let pass = self.external_pass(q, k, v, output, config)?;\n        pipeline\n            .encode_external_pre_rotated_k(self.ctx.device(), encoder, pass, kv_capacity)\n            .map_err(|error| BackendError::Execution(format!(\"FLAT M15 encode: {error}\")))?;\n        Ok(())\n    }\n\n""",
+          )
+          replace_once(
+              bridge,
+              """    pub fn forward_pre_rotated_k(\n        &self,\n        q: &GpuMatrix,\n        k: &GpuMatrix,\n        v: &GpuMatrix,\n        config: FlatM11ResidentConfig,\n    ) -> BackendResult<GpuMatrix> {\n        self.forward_impl(q, k, v, config, true)\n    }\n\n""",
+              """    pub fn forward_pre_rotated_k(\n        &self,\n        q: &GpuMatrix,\n        k: &GpuMatrix,\n        v: &GpuMatrix,\n        config: FlatM11ResidentConfig,\n    ) -> BackendResult<GpuMatrix> {\n        self.forward_impl(q, k, v, config, true)\n    }\n\n    /// Convenience resident forward through the specialized FLAT M15 decode kernel.\n    pub fn forward_pre_rotated_k_m15(\n        &self,\n        q: &GpuMatrix,\n        k: &GpuMatrix,\n        v: &GpuMatrix,\n        config: FlatM11ResidentConfig,\n    ) -> BackendResult<GpuMatrix> {\n        let output = self.create_output(config)?;\n        let mut encoder =\n            self.ctx\n                .device()\n                .create_command_encoder(&wgpu::CommandEncoderDescriptor {\n                    label: Some(\"scirust-flat-m15-resident-decode\"),\n                });\n        self.record_pre_rotated_k_m15(&mut encoder, q, k, v, &output, config)?;\n        self.ctx.queue().submit(Some(encoder.finish()));\n        Ok(output)\n    }\n\n""",
+          )
+          replace_once(
+              bridge,
+              """    fn validate_matrices(\n        &self,\n""",
+              """    fn infer_kv_capacity(\n        &self,\n        k: &GpuMatrix,\n        v: &GpuMatrix,\n        config: FlatM11ResidentConfig,\n    ) -> BackendResult<usize> {\n        let k_bytes = k.buffer().size();\n        let v_bytes = v.buffer().size();\n        if k_bytes != v_bytes\n        {\n            return Err(BackendError::ShapeMismatch(format!(\n                \"FLAT M15 K/V backing allocations differ: K={k_bytes} bytes, V={v_bytes} bytes\"\n            )));\n        }\n        let batch_heads = checked_mul(config.batch, config.kv_heads, \"M15 batch*kv_heads\")?;\n        let scalars_per_capacity =\n            checked_mul(batch_heads, config.head_dim, \"M15 batch*kv_heads*head_dim\")?;\n        let bytes_per_capacity = checked_mul(\n            scalars_per_capacity,\n            core::mem::size_of::<f32>(),\n            \"M15 bytes per KV capacity row\",\n        )?;\n        let bytes_per_capacity = u64::try_from(bytes_per_capacity).map_err(|_| {\n            BackendError::ShapeMismatch(\"FLAT M15 capacity byte width exceeds u64\".into())\n        })?;\n        if bytes_per_capacity == 0 || k_bytes % bytes_per_capacity != 0\n        {\n            return Err(BackendError::ShapeMismatch(format!(\n                \"FLAT M15 K backing allocation {k_bytes} is not divisible by {bytes_per_capacity} bytes per capacity row\"\n            )));\n        }\n        let capacity = usize::try_from(k_bytes / bytes_per_capacity).map_err(|_| {\n            BackendError::ShapeMismatch(\"FLAT M15 inferred KV capacity exceeds usize\".into())\n        })?;\n        if capacity < config.kv_len\n        {\n            return Err(BackendError::ShapeMismatch(format!(\n                \"FLAT M15 inferred KV capacity {capacity} is smaller than live length {}\",\n                config.kv_len\n            )));\n        }\n        Ok(capacity)\n    }\n\n    fn validate_matrices(\n        &self,\n""",
+          )
+          replace_once(
+              bridge,
+              """        assert_close(&actual, &expected.output);\n    }\n\n    #[test]\n    fn resident_bridge_rejects_logically_short_k_even_with_valid_gpu_buffer() {\n""",
+              """        assert_close(&actual, &expected.output);\n\n        if bridge.m15_available()\n        {\n            let m15_output = bridge\n                .forward_pre_rotated_k_m15(&q_gpu, &k_gpu, &v_gpu, config)\n                .unwrap();\n            let m15_actual = bridge.context().download(&m15_output).unwrap();\n            assert_close(&m15_actual, &expected.output);\n            assert_close(&m15_actual, &actual);\n        }\n    }\n\n    #[test]\n    fn resident_bridge_rejects_logically_short_k_even_with_valid_gpu_buffer() {\n""",
+          )
+
+          planner = Path("scirust-gpu/src/flat_autotune.rs")
+          replace_once(
+              planner,
+              """const FLAT_KERNEL_FAMILY: &str = \"flat-m11-external-asymmetric-projection\";\nconst FLAT_KERNEL_REVISION: &[u8] = b\"flat-attention@311f6b89e001d69f53cddcd2f9ba396a6f80c746\";\n""",
+              """const FLAT_KERNEL_FAMILY: &str = \"flat-m11-external-asymmetric-projection\";\nconst FLAT_M15_KERNEL_FAMILY: &str = \"flat-m15-resident-decode\";\nconst FLAT_KERNEL_REVISION: &[u8] = b\"flat-attention@311f6b89e001d69f53cddcd2f9ba396a6f80c746\";\n""",
+          )
+          replace_once(
+              planner,
+              """        if current_candidate()? == *candidate\n        {\n            Ok(())\n        }\n        else\n        {\n            Err(FlatElasticError::UnknownCandidate)\n        }\n""",
+              """        if current_candidate()? == *candidate\n            || (m15_candidate_eligible(self.request) && m15_candidate()? == *candidate)\n        {\n            Ok(())\n        }\n        else\n        {\n            Err(FlatElasticError::UnknownCandidate)\n        }\n""",
+          )
+          replace_once(
+              planner,
+              """            if let Ok(candidate) = current_candidate()\n            {\n                output.push(candidate);\n            }\n""",
+              """            if let Ok(candidate) = current_candidate()\n            {\n                output.push(candidate);\n            }\n            if m15_candidate_eligible(self.request)\n            {\n                if let Ok(candidate) = m15_candidate()\n                {\n                    output.push(candidate);\n                }\n            }\n""",
+          )
+          replace_once(
+              planner,
+              """        match objective\n        {\n            ElasticObjective::MinTemporaryMemory => candidate.temporary_bytes,\n            ElasticObjective::MinLatency\n            | ElasticObjective::MaxThroughput\n            | ElasticObjective::BalancedLatencyMemory\n            | ElasticObjective::DeterministicOnly => 0,\n        }\n""",
+              """        match objective\n        {\n            ElasticObjective::MinTemporaryMemory => candidate.temporary_bytes,\n            ElasticObjective::MinLatency\n            | ElasticObjective::MaxThroughput\n            | ElasticObjective::BalancedLatencyMemory\n            | ElasticObjective::DeterministicOnly =>\n            {\n                if current_candidate().is_ok_and(|current| current == *candidate)\n                {\n                    0\n                }\n                else\n                {\n                    1\n                }\n            },\n        }\n""",
+          )
+          replace_once(
+              planner,
+              """        if current_candidate()? != self.candidate\n        {\n            return Err(FlatElasticError::UnknownCandidate);\n        }\n        let result = match request.kv_representation\n        {\n            FlatKvRepresentation::Raw => bridge.forward(q, k, v, request.config),\n            FlatKvRepresentation::PreRotated =>\n            {\n                bridge.forward_pre_rotated_k(q, k, v, request.config)\n            },\n        };\n        result.map_err(FlatElasticError::Backend)\n""",
+              """        if current_candidate()? == self.candidate\n        {\n            let result = match request.kv_representation\n            {\n                FlatKvRepresentation::Raw => bridge.forward(q, k, v, request.config),\n                FlatKvRepresentation::PreRotated =>\n                {\n                    bridge.forward_pre_rotated_k(q, k, v, request.config)\n                },\n            };\n            return result.map_err(FlatElasticError::Backend);\n        }\n        if m15_candidate_eligible(request) && m15_candidate()? == self.candidate\n        {\n            return bridge\n                .forward_pre_rotated_k_m15(q, k, v, request.config)\n                .map_err(FlatElasticError::Backend);\n        }\n        Err(FlatElasticError::UnknownCandidate)\n""",
+          )
+          replace_once(
+              planner,
+              """fn problem_class_for(request: FlatElasticRequest) -> Result<ElasticProblemClass, FlatElasticError> {\n""",
+              """fn m15_candidate() -> Result<ElasticCandidate, FlatElasticError> {\n    ElasticCandidate::new(\n        FLAT_M15_KERNEL_FAMILY,\n        FLAT_KERNEL_REVISION.to_vec(),\n        [\n            ElasticParameter {\n                name: \"query_rows\".into(),\n                value: 1,\n            },\n            ElasticParameter {\n                name: \"resident_kv\".into(),\n                value: 1,\n            },\n            ElasticParameter {\n                name: \"workgroup_size\".into(),\n                value: FLAT_WGSL_WORKGROUP_SIZE,\n            },\n        ],\n        false,\n        0,\n    )\n    .map_err(FlatElasticError::CandidateEncoding)\n}\n\nfn m15_candidate_eligible(request: FlatElasticRequest) -> bool {\n    request.problem_kind() == FlatProblemKind::Decode\n        && request.config.causal\n        && request.config.query_len == 1\n        && request.kv_representation == FlatKvRepresentation::PreRotated\n        && request\n            .config\n            .query_position_offset\n            .checked_add(1)\n            .is_some_and(|visible| visible >= request.config.kv_len)\n}\n\nfn problem_class_for(request: FlatElasticRequest) -> Result<ElasticProblemClass, FlatElasticError> {\n""",
+          )
+          replace_once(
+              planner,
+              """    #[test]\n    fn cold_uses_qualified_heuristic_and_deterministic_only_fails_closed() {\n""",
+              """    #[test]\n    fn decode_pre_rotated_exposes_m11_and_m15_while_cold_keeps_m11() {\n        let planner = planner(1, 17);\n        let hardware = hardware();\n        let cold = tuner(ElasticMode::Cold, ElasticObjective::MinLatency);\n        let ranked = planner.rank_candidates(&cold, &hardware);\n        assert_eq!(ranked.len(), 2);\n        assert_eq!(ranked[0].candidate, current_candidate().unwrap());\n        assert!(ranked\n            .iter()\n            .any(|ranked| ranked.candidate == m15_candidate().unwrap()));\n\n        let cache = InMemoryElasticPlanCache::default();\n        let plan = match planner.resolve_for_mode(&cold, hardware, &cache).unwrap()\n        {\n            FlatPlanResolution::Production(plan) => plan,\n            FlatPlanResolution::AuditOnly => panic!(\"cold must resolve a production plan\"),\n        };\n        assert_eq!(plan.candidate(), &current_candidate().unwrap());\n    }\n\n    #[test]\n    fn m15_is_not_exposed_outside_fully_visible_pre_rotated_causal_decode() {\n        let cold = tuner(ElasticMode::Cold, ElasticObjective::MinLatency);\n        let hardware = hardware();\n\n        let raw = FlatElasticPlanner::new(\n            FlatElasticRequest::new(config(1, 17), FlatKvRepresentation::Raw).unwrap(),\n        )\n        .unwrap();\n        assert_eq!(raw.rank_candidates(&cold, &hardware).len(), 1);\n\n        let prefill = planner(4, 17);\n        assert_eq!(prefill.rank_candidates(&cold, &hardware).len(), 1);\n\n        let mut partially_visible = config(1, 17);\n        partially_visible.query_position_offset = 0;\n        let partially_visible = FlatElasticPlanner::new(\n            FlatElasticRequest::new(partially_visible, FlatKvRepresentation::PreRotated).unwrap(),\n        )\n        .unwrap();\n        assert_eq!(partially_visible.rank_candidates(&cold, &hardware).len(), 1);\n    }\n\n    #[test]\n    fn cold_uses_qualified_heuristic_and_deterministic_only_fails_closed() {\n""",
+          )
+          replace_once(
+              planner,
+              """    #[test]\n    fn learn_promotes_validated_evidence_and_resolves_persisted_plan() {\n""",
+              """    #[test]\n    fn learn_can_promote_measured_m15_over_the_safe_m11_fallback() {\n        let planner = planner(1, 17);\n        let hardware = hardware();\n        let learn = tuner(ElasticMode::Learn, ElasticObjective::MinLatency);\n        let records = [\n            evidence(current_candidate().unwrap(), 20),\n            evidence(m15_candidate().unwrap(), 10),\n        ];\n        let mut cache = InMemoryElasticPlanCache::default();\n        let promoted = planner\n            .promote_measured_evidence(&learn, hardware.clone(), &records, &mut cache)\n            .unwrap();\n        assert_eq!(promoted.evidence.candidate, m15_candidate().unwrap());\n\n        let resolved = planner.resolve_for_mode(&learn, hardware, &cache).unwrap();\n        match resolved\n        {\n            FlatPlanResolution::Production(plan) =>\n            {\n                assert_eq!(plan.origin(), FlatPlanOrigin::Persisted);\n                assert_eq!(plan.candidate(), &m15_candidate().unwrap());\n            },\n            FlatPlanResolution::AuditOnly => panic!(\"Learn must resolve the promoted M15 plan\"),\n        }\n    }\n\n    #[test]\n    fn learn_promotes_validated_evidence_and_resolves_persisted_plan() {\n""",
+          )
+          PY
+
+      - name: Canonical rustfmt
+        run: |
+          cargo +nightly-2026-07-02 fmt --all
+          cargo +nightly-2026-07-02 fmt --all -- --check
+
+      - name: Locked checks and tests
+        run: |
+          cargo metadata --locked --no-deps >/dev/null
+          cargo +nightly-2026-07-02 check -p scirust-gpu --features flat-autotune --locked
+          cargo +nightly-2026-07-02 test -p scirust-gpu --features flat-autotune --locked
+          cargo +nightly-2026-07-02 test -p scirust --features flat-autotune --lib --locked
+
+      - name: Strict Clippy
+        run: |
+          cargo +nightly-2026-07-02 clippy -p scirust-gpu --features flat-autotune --all-targets --locked -- -D warnings
+          cargo +nightly-2026-07-02 clippy -p scirust --features flat-autotune --lib --locked -- -D warnings
+
+      - name: MSRV 1.89
+        run: |
+          cargo +1.89.0 check -p scirust-gpu --features flat-autotune --all-targets --locked
+          cargo +1.89.0 check -p scirust --features flat-autotune --locked
+
+      - name: M15 lavapipe parity
+        env:
+          WGPU_BACKEND: vulkan
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+        run: |
+          cargo +nightly-2026-07-02 test -p scirust-gpu --features flat-autotune resident_pre_rotated_k_decode_matches_raw_k_reference --locked -- --nocapture
+
+      - name: Scope gate
+        run: |
+          test "$(git diff --name-only | sort)" = "$(printf '%s\n' scirust-gpu/src/flat_autotune.rs scirust-gpu/src/flat_m11.rs | sort)"
+
+      - name: Commit qualified implementation and self-clean
+        run: |
+          git config user.name "MEMOPERF"
+          git config user.email "contact@checkupauto.fr"
+          git add scirust-gpu/src/flat_autotune.rs scirust-gpu/src/flat_m11.rs
+          git commit -m "feat(autotune): add specialized FLAT M15 candidate"
+          rm -f .github/workflows/flat-elastic-m15-candidate-qualify.yml
+          rm -f .github/flat-elastic-m15-candidate-trigger
+          git add -A
+          git commit -m "ci: finalize FLAT M15 candidate head"
+          git push origin HEAD:feat/flat-elastic-m15-candidate
