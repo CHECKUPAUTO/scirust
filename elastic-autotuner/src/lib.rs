@@ -9,6 +9,7 @@
 
 mod evidence_validation;
 mod measured_selection;
+pub mod measurement_protocol;
 
 pub use measured_selection::ElasticSelectionError;
 
