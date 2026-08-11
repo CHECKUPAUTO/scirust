@@ -7,6 +7,7 @@
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BinaryHeap};
+use std::sync::Arc;
 
 use crate::elastic_id::{
     COMPACT_INDEX_INACTIVE, COMPACT_INDEX_NONE, PackedRule, PriorityKey, try_compact_index,
@@ -22,7 +23,7 @@ struct HeapRule {
 
 #[derive(Clone, Debug)]
 enum RuleTable {
-    Compact(AdaptivePackedRuleTable),
+    Compact(Arc<AdaptivePackedRuleTable>),
     Wide(BTreeMap<(TokenId, TokenId), HeapRule>),
 }
 
@@ -32,7 +33,7 @@ impl RuleTable {
     ) -> Result<Self, DuplicateMergeRule> {
         if let Some(rules) = AdaptivePackedRuleTable::try_from_ordered_merges(merges)?
         {
-            return Ok(Self::Compact(rules));
+            return Ok(Self::Compact(Arc::new(rules)));
         }
 
         let mut ranked = BTreeMap::new();
@@ -178,6 +179,21 @@ impl HeapBpe {
         Ok(Self {
             merges: RuleTable::from_ordered_merges(merges)?,
         })
+    }
+
+    pub(crate) fn from_shared_compact_rules(rules: Arc<AdaptivePackedRuleTable>) -> Self {
+        Self {
+            merges: RuleTable::Compact(rules),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn compact_rule_table(&self) -> Option<&Arc<AdaptivePackedRuleTable>> {
+        match &self.merges
+        {
+            RuleTable::Compact(rules) => Some(rules),
+            RuleTable::Wide(_) => None,
+        }
     }
 
     /// Encodes one complete pre-tokenized piece without artificial chunking.
