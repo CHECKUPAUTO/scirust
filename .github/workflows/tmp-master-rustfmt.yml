@@ -1,0 +1,32 @@
+name: tmp-master-rustfmt
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  format-baseline:
+    if: github.head_ref == 'fix/master-nightly-rustfmt-1172'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/master-nightly-rustfmt-1172
+          fetch-depth: 0
+      - name: Apply repository-pinned rustfmt
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          git diff --check
+      - name: Commit canonical formatting and remove temporary workflow
+        run: |
+          set -euo pipefail
+          rm .github/workflows/tmp-master-rustfmt.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'style: restore canonical pinned-nightly rustfmt baseline'
+          git push origin HEAD:fix/master-nightly-rustfmt-1172
