@@ -4,8 +4,11 @@
 //! tiny pieces fall back to the canonical oracle; routing never changes
 //! tokenization and never splits a piece.
 
+use std::sync::Arc;
+
 use crate::elastic_heap::HeapBpe;
 use crate::elastic_indexed::IndexedBpe;
+use crate::elastic_rule_table::AdaptivePackedRuleTable;
 use crate::elastic_tiny::TinyScanBpe;
 use crate::elastic_tokenizer::{
     BpeKernel, CanonicalBpeOracle, DuplicateMergeRule, ElasticProfile, PieceClass, TokenId,
@@ -36,11 +39,31 @@ impl ElasticBpeEngine {
         merges: &[(TokenId, TokenId, TokenId)],
         profile: ElasticProfile,
     ) -> Result<Self, DuplicateMergeRule> {
+        let reference = CanonicalBpeOracle::from_ordered_merges(merges)?;
+        let shared_rules = AdaptivePackedRuleTable::try_from_ordered_merges(merges)?;
+        let (tiny_scan, indexed, heap) = if let Some(rules) = shared_rules
+        {
+            let rules = Arc::new(rules);
+            (
+                TinyScanBpe::from_shared_compact_rules(Arc::clone(&rules)),
+                IndexedBpe::from_shared_compact_rules(Arc::clone(&rules)),
+                HeapBpe::from_shared_compact_rules(rules),
+            )
+        }
+        else
+        {
+            (
+                TinyScanBpe::from_ordered_merges(merges)?,
+                IndexedBpe::from_ordered_merges(merges)?,
+                HeapBpe::from_ordered_merges(merges)?,
+            )
+        };
+
         Ok(Self {
-            reference: CanonicalBpeOracle::from_ordered_merges(merges)?,
-            tiny_scan: TinyScanBpe::from_ordered_merges(merges)?,
-            indexed: IndexedBpe::from_ordered_merges(merges)?,
-            heap: HeapBpe::from_ordered_merges(merges)?,
+            reference,
+            tiny_scan,
+            indexed,
+            heap,
             profile,
         })
     }
@@ -96,6 +119,20 @@ mod tests {
 
     fn thresholds() -> ElasticThresholds {
         ElasticThresholds::new(16, 64, 256, 1024, 4096).unwrap()
+    }
+
+    #[test]
+    fn router_shares_one_compact_rule_table_across_optimized_kernels() {
+        let profile = ElasticProfile::reference_only(thresholds());
+        let engine =
+            ElasticBpeEngine::from_ordered_merges(&[(1, 2, 3), (3, 4, 5)], profile).unwrap();
+        let tiny = engine.tiny_scan.compact_rule_table().unwrap();
+        let indexed = engine.indexed.compact_rule_table().unwrap();
+        let heap = engine.heap.compact_rule_table().unwrap();
+
+        assert!(Arc::ptr_eq(tiny, indexed));
+        assert!(Arc::ptr_eq(tiny, heap));
+        assert_eq!(Arc::strong_count(tiny), 3);
     }
 
     #[test]
