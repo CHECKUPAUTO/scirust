@@ -21,7 +21,8 @@ wgpu = ["std", "dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:scirust-core"]
 # caller-owned WGPU commit; enabling this feature also enables SciRust's resident
 # WGPU backend. The pinned revision retains the qualified M15 decode contract and
 # includes the M19-M22 native GQA/MQA backward, prepared-dispatch and validation
-# surfaces without changing the feature from opt-in.
+# surfaces without changing the feature from opt-in. The exact revision below is
+# a merged, CI-green FLAT default-branch commit.
 flat-attention = ["wgpu", "dep:flat-attention"]
 
 [dependencies]
