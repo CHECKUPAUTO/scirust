@@ -1,10 +1,10 @@
 //! Paired M28 resident-attention benchmark: SciRust's existing naive multi-dispatch
 //! WGPU composition versus FLAT's public fused grouped-forward pipeline.
 //!
-//! The two paths share one SciRust-owned WGPU context, the same resident Q/K/V
-//! buffers, shape, causal flag and scalar oracle. Upload and readback are outside
-//! the timed region. The benchmark reports measurements only; it does not promote
-//! a generic speedup claim.
+//! The two paths share one SciRust-owned WGPU context and use separate resident
+//! Q/K/V buffers populated from identical bytes. Shape, causal flag and scalar
+//! oracle are identical. Upload and readback are outside the timed region. The
+//! benchmark reports measurements only; it does not promote a generic speedup claim.
 
 use std::error::Error;
 use std::hint::black_box;
@@ -37,6 +37,30 @@ fn fixture(len: usize, phase: f32) -> Vec<f32> {
             x.sin() * 0.65 + (x * 0.41).cos() * 0.35
         })
         .collect()
+}
+
+fn bytes_f32(values: &[f32]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(std::mem::size_of_val(values));
+    for &value in values
+    {
+        bytes.extend_from_slice(&value.to_ne_bytes());
+    }
+    bytes
+}
+
+fn flat_input_buffer(ctx: &WgpuContext, values: &[f32], label: &'static str) -> wgpu::Buffer {
+    let bytes = bytes_f32(values);
+    let buffer = ctx.device().create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size: bytes.len().max(4) as u64,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    if !bytes.is_empty()
+    {
+        ctx.queue().write_buffer(&buffer, 0, &bytes);
+    }
+    buffer
 }
 
 fn percentile_ns(samples: &[Duration], percentile: usize) -> u128 {
@@ -97,9 +121,9 @@ fn naive_attention(
 fn run_flat(
     ctx: &WgpuContext,
     pipeline: &WgpuGroupedForwardPipeline,
-    q: &GpuMatrix,
-    k: &GpuMatrix,
-    v: &GpuMatrix,
+    q: &wgpu::Buffer,
+    k: &wgpu::Buffer,
+    v: &wgpu::Buffer,
     output: &wgpu::Buffer,
     shape: GroupedAttentionShape,
     config: FlatAttentionConfig,
@@ -113,9 +137,9 @@ fn run_flat(
         ctx.device(),
         &mut encoder,
         GroupedForwardPass {
-            q: q.buffer(),
-            k: k.buffer(),
-            v: v.buffer(),
+            q,
+            k,
+            v,
             output,
             shape,
             config,
@@ -143,9 +167,9 @@ fn time_naive(
 fn time_flat_reused(
     ctx: &WgpuContext,
     pipeline: &WgpuGroupedForwardPipeline,
-    q: &GpuMatrix,
-    k: &GpuMatrix,
-    v: &GpuMatrix,
+    q: &wgpu::Buffer,
+    k: &wgpu::Buffer,
+    v: &wgpu::Buffer,
     output: &wgpu::Buffer,
     shape: GroupedAttentionShape,
     config: FlatAttentionConfig,
@@ -158,9 +182,9 @@ fn time_flat_reused(
 fn time_flat_fresh_output(
     ctx: &WgpuContext,
     pipeline: &WgpuGroupedForwardPipeline,
-    q: &GpuMatrix,
-    k: &GpuMatrix,
-    v: &GpuMatrix,
+    q: &wgpu::Buffer,
+    k: &wgpu::Buffer,
+    v: &wgpu::Buffer,
     shape: GroupedAttentionShape,
     config: FlatAttentionConfig,
 ) -> Result<Duration, Box<dyn Error>> {
@@ -197,9 +221,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let q = fixture(elements, 0.2);
     let k = fixture(elements, 0.8);
     let v = fixture(elements, 1.4);
-    let q_gpu = ctx.upload(&q, seq_len, head_dim);
-    let k_gpu = ctx.upload(&k, seq_len, head_dim);
-    let v_gpu = ctx.upload(&v, seq_len, head_dim);
+
+    let q_naive = ctx.upload(&q, seq_len, head_dim);
+    let k_naive = ctx.upload(&k, seq_len, head_dim);
+    let v_naive = ctx.upload(&v, seq_len, head_dim);
+    let q_flat = flat_input_buffer(&ctx, &q, "scirust-m28-flat-q");
+    let k_flat = flat_input_buffer(&ctx, &k, "scirust-m28-flat-k");
+    let v_flat = flat_input_buffer(&ctx, &v, "scirust-m28-flat-v");
 
     println!(
         "adapter,causal,seq_len,head_dim,warmups,repeats,naive_median_us,naive_p95_us,flat_fresh_median_us,flat_fresh_p95_us,flat_reused_median_us,flat_reused_p95_us,naive_over_flat_fresh,naive_over_flat_reused,naive_parity_max_abs,flat_parity_max_abs,performance_claim"
@@ -213,7 +241,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         };
         let expected = forward_reference_grouped(&q, &k, &v, shape, config)?;
 
-        let naive = naive_attention(&ctx, &q_gpu, &k_gpu, &v_gpu, causal)?;
+        let naive = naive_attention(&ctx, &q_naive, &k_naive, &v_naive, causal)?;
         let naive_host = ctx.download(&naive)?;
         let naive_parity = assert_close("SciRust naive output", &naive_host, &expected.output)?;
 
@@ -221,9 +249,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         run_flat(
             &ctx,
             &pipeline,
-            &q_gpu,
-            &k_gpu,
-            &v_gpu,
+            &q_flat,
+            &k_flat,
+            &v_flat,
             &reused_output,
             shape,
             config,
@@ -239,14 +267,16 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         for _ in 0..warmups
         {
-            let _ = time_naive(&ctx, &q_gpu, &k_gpu, &v_gpu, causal)?;
-            let _ = time_flat_fresh_output(&ctx, &pipeline, &q_gpu, &k_gpu, &v_gpu, shape, config)?;
+            let _ = time_naive(&ctx, &q_naive, &k_naive, &v_naive, causal)?;
+            let _ = time_flat_fresh_output(
+                &ctx, &pipeline, &q_flat, &k_flat, &v_flat, shape, config,
+            )?;
             let _ = time_flat_reused(
                 &ctx,
                 &pipeline,
-                &q_gpu,
-                &k_gpu,
-                &v_gpu,
+                &q_flat,
+                &k_flat,
+                &v_flat,
                 &reused_output,
                 shape,
                 config,
@@ -260,24 +290,24 @@ fn main() -> Result<(), Box<dyn Error>> {
         {
             if iteration.is_multiple_of(2)
             {
-                naive_samples.push(time_naive(&ctx, &q_gpu, &k_gpu, &v_gpu, causal)?);
+                naive_samples.push(time_naive(&ctx, &q_naive, &k_naive, &v_naive, causal)?);
                 flat_fresh_samples.push(time_flat_fresh_output(
-                    &ctx, &pipeline, &q_gpu, &k_gpu, &v_gpu, shape, config,
+                    &ctx, &pipeline, &q_flat, &k_flat, &v_flat, shape, config,
                 )?);
             }
             else
             {
                 flat_fresh_samples.push(time_flat_fresh_output(
-                    &ctx, &pipeline, &q_gpu, &k_gpu, &v_gpu, shape, config,
+                    &ctx, &pipeline, &q_flat, &k_flat, &v_flat, shape, config,
                 )?);
-                naive_samples.push(time_naive(&ctx, &q_gpu, &k_gpu, &v_gpu, causal)?);
+                naive_samples.push(time_naive(&ctx, &q_naive, &k_naive, &v_naive, causal)?);
             }
             flat_reused_samples.push(time_flat_reused(
                 &ctx,
                 &pipeline,
-                &q_gpu,
-                &k_gpu,
-                &v_gpu,
+                &q_flat,
+                &k_flat,
+                &v_flat,
                 &reused_output,
                 shape,
                 config,
