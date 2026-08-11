@@ -95,8 +95,8 @@ pub fn qualify_gemm_candidate_f32(
     );
 
     let mut observed = initial_c.to_vec();
-    let mut plan = CandidateGemmPlanF32::prepare(problem, candidate)
-        .map_err(GemmQualificationError::Plan)?;
+    let mut plan =
+        CandidateGemmPlanF32::prepare(problem, candidate).map_err(GemmQualificationError::Plan)?;
     plan.execute(alpha, a, b, beta, &mut observed)
         .map_err(GemmQualificationError::Plan)?;
 
@@ -115,14 +115,7 @@ pub fn qualify_gemm_candidate_f32(
         }
         let abs_error = (actual - expected).abs();
         let scale = expected.abs().max(actual.abs());
-        let rel_error = if scale == 0.0
-        {
-            0.0
-        }
-        else
-        {
-            abs_error / scale
-        };
+        let rel_error = if scale == 0.0 { 0.0 } else { abs_error / scale };
         max_abs_error = max_abs_error.max(abs_error);
         max_rel_error = max_rel_error.max(rel_error);
 
@@ -220,7 +213,11 @@ mod tests {
                 "candidate {:?} produced non-finite output",
                 candidate.path
             );
-            assert!(report.accepted, "candidate {:?}: {report:?}", candidate.path);
+            assert!(
+                report.accepted,
+                "candidate {:?}: {report:?}",
+                candidate.path
+            );
         }
     }
 

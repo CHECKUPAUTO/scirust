@@ -103,10 +103,7 @@ fn median_sorted(values: &[u64]) -> u64 {
 fn nearest_rank_sorted(values: &[u64], percentile: usize) -> u64 {
     debug_assert!((1..=100).contains(&percentile));
     // nearest-rank index = ceil(p*N/100)-1, computed without floating point.
-    let rank = percentile
-        .saturating_mul(values.len())
-        .div_ceil(100)
-        .max(1);
+    let rank = percentile.saturating_mul(values.len()).div_ceil(100).max(1);
     values[rank - 1]
 }
 

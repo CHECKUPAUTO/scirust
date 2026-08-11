@@ -106,7 +106,8 @@ fn push_u32(out: &mut Vec<u8>, value: u32) {
 }
 
 fn push_usize(out: &mut Vec<u8>, value: usize) -> Result<(), GemmCorrectnessEvidenceError> {
-    let value = u64::try_from(value).map_err(|_| GemmCorrectnessEvidenceError::DimensionTooLarge)?;
+    let value =
+        u64::try_from(value).map_err(|_| GemmCorrectnessEvidenceError::DimensionTooLarge)?;
     out.extend_from_slice(&value.to_le_bytes());
     Ok(())
 }
@@ -167,7 +168,8 @@ mod tests {
         let other_problem = GemmProblemSignature::new(7, 5, 3).unwrap();
         let mut other_report = report;
         other_report.element_count = 21;
-        let changed = encode_gemm_correctness_evidence(other_problem, policy, other_report).unwrap();
+        let changed =
+            encode_gemm_correctness_evidence(other_problem, policy, other_report).unwrap();
         assert_ne!(baseline, changed);
     }
 
