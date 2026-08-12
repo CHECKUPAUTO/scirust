@@ -23,7 +23,7 @@ jobs:
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Linux, ARM64, scirust-arm64, jetson-thor, internal]
-    timeout-minutes: 120
+    timeout-minutes: 360
     env:
       CARGO_INCREMENTAL: 0
       RUSTFLAGS: "-D warnings"
@@ -31,8 +31,18 @@ jobs:
       SCIRUST_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
       SCIRUST_M28_WARMUPS: "3"
       SCIRUST_M28_REPEATS: "9"
+      WGPU_BACKEND: vulkan
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact source revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          echo "source_revision=$actual"
+          test "$actual" = "$SCIRUST_SOURCE_REVISION"
       - name: Prepare executable temporary directory
         shell: bash
         run: |
@@ -52,32 +62,106 @@ jobs:
           --features flat-attention --example flat_m28_naive_vs_fused
       - name: Physical Thor paired benchmark
         shell: bash
+        timeout-minutes: 330
         run: |
           set -euo pipefail
           command -v flock >/dev/null
-          command -v nvidia-smi >/dev/null
-          exec 9>"$SCIRUST_THOR_GPU_LOCK"
-          flock -x 9
-
-          active="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null || true)"
-          if [[ -n "${active//[[:space:]]/}" ]]; then
-            echo "::error::M28 release evidence requires an idle Thor; active compute detected:"
-            printf '%s\n' "$active"
+          if ! command -v nvidia-smi >/dev/null 2>&1; then
+            echo "::error::nvidia-smi is required to qualify the physical Thor state"
+            exit 1
+          fi
+          if ! command -v vulkaninfo >/dev/null 2>&1; then
+            echo "::error::vulkaninfo is required to qualify the physical Thor Vulkan adapter"
             exit 1
           fi
 
-          echo "source_revision=$SCIRUST_SOURCE_REVISION"
-          nvidia-smi --query-gpu=name,driver_version --format=csv,noheader
+          exec 9>"$SCIRUST_THOR_GPU_LOCK"
+          flock -x 9
+
+          gpu_inventory="$(nvidia-smi --query-gpu=name,driver_version --format=csv,noheader)" || {
+            echo "::error::cannot query NVIDIA GPU inventory"
+            exit 1
+          }
+          printf '%s\n' "$gpu_inventory"
+          grep -F "NVIDIA Thor" <<< "$gpu_inventory" >/dev/null || {
+            echo "::error::expected physical NVIDIA Thor was not found"
+            exit 1
+          }
+
+          vulkan_summary="$(vulkaninfo --summary 2>&1)" || {
+            printf '%s\n' "$vulkan_summary"
+            echo "::error::cannot query Vulkan adapter inventory"
+            exit 1
+          }
+          printf '%s\n' "$vulkan_summary"
+          grep -F "NVIDIA Tegra NVIDIA Thor" <<< "$vulkan_summary" >/dev/null || {
+            echo "::error::physical Thor is not exposed through Vulkan"
+            exit 1
+          }
+
+          deadline=$((SECONDS + 18000))
+          while true; do
+            if ! active="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null)"; then
+              echo "::error::M28 cannot verify Thor compute occupancy"
+              exit 1
+            fi
+            if [[ -z "${active//[[:space:]]/}" ]]; then
+              echo "Thor is idle and reserved; proceeding with M28 qualification."
+              break
+            fi
+
+            managed_training=true
+            while IFS=',' read -r raw_pid process_name; do
+              pid="$(printf '%s' "$raw_pid" | tr -d '[:space:]')"
+              process_name="$(printf '%s' "$process_name" | xargs)"
+              [[ "$pid" =~ ^[0-9]+$ ]] || { managed_training=false; continue; }
+              cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
+              proc_user="$(ps -p "$pid" -o user= 2>/dev/null | xargs || true)"
+              ppid="$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d '[:space:]')"
+              cgroup="$(cat "/proc/$pid/cgroup" 2>/dev/null || true)"
+              echo "pid=$pid user=$proc_user ppid=$ppid process=$process_name"
+              if [[ "$process_name" != "/root/scirust/target/release/examples/cuda_pretrain" ]] \
+                || [[ "$cmdline" != *"/root/scirust/target/release/examples/cuda_pretrain"* ]] \
+                || [[ "$proc_user" != "root" ]] \
+                || [[ "$ppid" != "1" ]] \
+                || [[ "$cgroup" != 0::/user.slice/user-0.slice/session-*.scope ]]; then
+                managed_training=false
+              fi
+            done <<< "$active"
+
+            if [[ "$managed_training" != true ]]; then
+              echo "::error::Unknown GPU compute activity is active while M28 owns the SciRust reservation:"
+              printf '%s\n' "$active"
+              exit 1
+            fi
+            if (( SECONDS >= deadline )); then
+              echo "::error::Managed production training still owns the Thor after the five-hour M28 reservation window; benchmark was not run concurrently or fabricated:"
+              printf '%s\n' "$active"
+              exit 1
+            fi
+
+            echo "Managed production training owns the Thor; M28 keeps the next-device reservation and waits without interruption."
+            sleep 60
+          done
+
+          echo "source_revision=$(git rev-parse HEAD)"
           echo "benchmark_scope=resident_wgpu_same_context_upload_readback_excluded"
           echo "warmups=$SCIRUST_M28_WARMUPS repeats=$SCIRUST_M28_REPEATS"
 
           for seq in 128 512; do
             for dim in 64 128; do
               echo "=== geometry seq_len=$seq head_dim=$dim ==="
+              out="$RUNNER_TEMP/flat-m28-thor-${seq}-${dim}.csv"
               SCIRUST_M28_SEQ_LEN="$seq" \
               SCIRUST_M28_HEAD_DIM="$dim" \
               rustup run nightly-2026-07-02 cargo run --release --locked -p scirust-gpu \
-                --features flat-attention --example flat_m28_naive_vs_fused
+                --features flat-attention --example flat_m28_naive_vs_fused \
+                | tee "$out"
+              grep -F "NVIDIA Tegra NVIDIA Thor," "$out" >/dev/null || {
+                echo "::error::M28 benchmark did not execute on the physical Thor WGPU adapter"
+                exit 1
+              }
+              grep -F ',none' "$out" >/dev/null
             done
           done
 
