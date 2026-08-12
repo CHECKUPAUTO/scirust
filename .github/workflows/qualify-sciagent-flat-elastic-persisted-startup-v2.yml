@@ -1,0 +1,73 @@
+name: Qualify SciAgent persisted FLAT startup v2
+
+on:
+  push:
+    branches:
+      - feat/sciagent-flat-elastic-persisted-startup-v2
+
+permissions:
+  contents: write
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: feat/sciagent-flat-elastic-persisted-startup-v2
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+      - name: Install MSRV
+        run: rustup toolchain install 1.89.0 --profile minimal
+      - name: Add startup-only persisted plan API
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path('scirust-sciagent/src/gpu.rs')
+          s = p.read_text()
+          if 'configure_flat_autotune_persisted' in s or 'from_model_with_persisted_flat_plans' in s:
+              raise SystemExit('persisted startup API already present unexpectedly')
+          marker = '    /// Name of the underlying GPU adapter.\n'
+          count = s.count(marker)
+          if count != 1:
+              raise SystemExit(f'unexpected adapter marker count: {count}')
+          addition = '''    /// Replace the default Cold FLAT Elastic runtime with caller-supplied\n    /// persisted plans before decode begins. Record discovery and file I/O stay\n    /// outside the resident model; this method only validates encoded bytes and\n    /// installs the resulting in-memory cache.\n    #[cfg(feature = "flat-autotune")]\n    pub fn configure_flat_autotune_persisted(\n        &mut self,\n        config: ElasticConfig,\n        encoded_records: &[Vec<u8>],\n        required_invalidation_dependencies: &[Vec<u8>],\n    ) -> Result<(), scirust_gpu::flat_autotune::FlatElasticError> {\n        let runtime = FlatElasticRuntime::in_memory_with_persisted_records(\n            config,\n            self.flat_decode.context(),\n            encoded_records,\n            required_invalidation_dependencies,\n        )?;\n        self.flat_autotune = Mutex::new(runtime);\n        Ok(())\n    }\n\n    /// Build a resident model and install validated persisted FLAT plans at the\n    /// startup boundary. `Ok(None)` means no GPU adapter was available; invalid\n    /// or stale persisted input is returned separately as `Err`.\n    #[cfg(feature = "flat-autotune")]\n    pub fn from_model_with_persisted_flat_plans(\n        model: &SciAgentModel,\n        config: ElasticConfig,\n        encoded_records: &[Vec<u8>],\n        required_invalidation_dependencies: &[Vec<u8>],\n    ) -> Result<Option<Self>, scirust_gpu::flat_autotune::FlatElasticError> {\n        let Some(mut resident) = Self::from_model(model) else {\n            return Ok(None);\n        };\n        resident.configure_flat_autotune_persisted(\n            config,\n            encoded_records,\n            required_invalidation_dependencies,\n        )?;\n        Ok(Some(resident))\n    }\n\n'''
+          p.write_text(s.replace(marker, addition + marker, 1))
+          PY
+          cargo +nightly-2026-07-02 fmt --all
+          test "$(grep -c 'configure_flat_autotune_persisted' scirust-sciagent/src/gpu.rs)" -ge 2
+          test "$(grep -c 'from_model_with_persisted_flat_plans' scirust-sciagent/src/gpu.rs)" -eq 1
+          if grep -n 'std::fs' scirust-sciagent/src/gpu.rs; then
+            echo 'filesystem I/O leaked into SciAgent resident GPU runtime' >&2
+            exit 1
+          fi
+      - name: Qualify SciAgent feature surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +nightly-2026-07-02 fmt --all -- --check
+          cargo +nightly-2026-07-02 check -p scirust-sciagent --features flat-autotune --locked
+          cargo +nightly-2026-07-02 clippy -p scirust-sciagent --features flat-autotune --all-targets --locked -- -D warnings
+          cargo +nightly-2026-07-02 test -p scirust-gpu --features flat-autotune --lib --locked
+          cargo +1.89.0 check -p scirust-sciagent --features flat-autotune --locked
+      - name: Publish clean implementation head
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin feat/sciagent-flat-elastic-persisted-startup-v2
+          test "$(git rev-parse origin/feat/sciagent-flat-elastic-persisted-startup-v2)" = "$GITHUB_SHA"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/qualify-sciagent-flat-elastic-persisted-startup-v2.yml
+          git add scirust-sciagent/src/gpu.rs
+          git commit -m "feat(sciagent): load persisted FLAT plans at startup"
+          git push origin HEAD:feat/sciagent-flat-elastic-persisted-startup-v2
