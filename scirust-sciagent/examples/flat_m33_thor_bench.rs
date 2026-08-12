@@ -58,21 +58,25 @@ fn main() {
     };
     let model = SciAgentModel::new(&config);
     let Some(resident) = ResidentModel::from_model(&model)
-    else {
+    else
+    {
         eprintln!("FLAT M33 requires a real WGPU adapter; none was available");
         std::process::exit(2);
     };
     let prompt = prompt(prompt_len, vocab);
 
-    for _ in 0..warmups {
+    for _ in 0..warmups
+    {
         let _ = resident.generate_cached(&prompt, 1);
         let _ = resident.generate_cached(&prompt, new_tokens);
     }
 
     let mut prefill_ms = Vec::with_capacity(repeats);
     let mut decode_ms_per_token = Vec::with_capacity(repeats);
-    for index in 0..repeats {
-        let (prefill, total) = if index.is_multiple_of(2) {
+    for index in 0..repeats
+    {
+        let (prefill, total) = if index.is_multiple_of(2)
+        {
             let prefill = elapsed(|| {
                 let _ = resident.generate_cached(&prompt, 1);
             });
@@ -80,7 +84,9 @@ fn main() {
                 let _ = resident.generate_cached(&prompt, new_tokens);
             });
             (prefill, total)
-        } else {
+        }
+        else
+        {
             let total = elapsed(|| {
                 let _ = resident.generate_cached(&prompt, new_tokens);
             });

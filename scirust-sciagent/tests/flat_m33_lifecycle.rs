@@ -24,7 +24,8 @@ fn config() -> SciAgentConfig {
 fn flat_m33_cache_reset_replay_and_eos_are_deterministic() {
     let model = SciAgentModel::new(&config());
     let Some(resident) = ResidentModel::from_model(&model)
-    else {
+    else
+    {
         eprintln!("wgpu: no adapter, skipping FLAT M33 lifecycle parity");
         return;
     };
