@@ -1,27 +1,27 @@
-# Soumission Correctness — ARCHIVÉ (non soumis en 2026)
+# Correctness submission — ARCHIVED (not submitted in 2026)
 
-> **Statut (2026-07-11, décision utilisateur)** : soumission reportée — le
-> draft n'a pas été soumis à Correctness '26 et est archivé en l'état,
-> prêt pour une édition future (CFP analogue attendu vers juin-juillet de
-> chaque année). **Chiffres arrêtés aux commits `0c2f1bf`/`014795f` du
-> 2026-07-10** (évidence brute : `docs/evidence/`) ; avant toute soumission
-> future, re-mesurer O1 (x86 + Jetson), re-vérifier la bibliographie, et
-> reprendre les TODO ci-dessous. Voir `paper/PAPER_PLAN.md` §7.
+> **Status (2026-07-11, user decision)**: submission postponed — the
+> draft was not submitted to Correctness '26 and is archived as is,
+> ready for a future edition (analogous CFP expected around June-July of
+> each year). **Figures frozen at commits `0c2f1bf`/`014795f` of
+> 2026-07-10** (raw evidence: `docs/evidence/`); before any future
+> submission, re-measure O1 (x86 + Jetson), re-verify the bibliography, and
+> take up the TODOs below. See `paper/PAPER_PLAN.md` §7.
 
-Draft du papier « Determinism as Certification Evidence: A Fully Auditable
-Rust Stack for Bit-Reproducible Training and Quantized Edge Inference ».
+Draft of the paper "Determinism as Certification Evidence: A Fully Auditable
+Rust Stack for Bit-Reproducible Training and Quantized Edge Inference".
 
-- **Deadline visée à l'époque** : 23 juillet 2026 (notification :
-  1er septembre 2026) — non tenue par décision, pas par retard.
-- **Format** : ACM `acmart` option `sigconf` ; papier régulier = 7 à 8 pages
-  de contenu (tout compris **sauf** les références) ; repli papier court =
-  4 pages. CFP : <https://correctness-workshop.github.io/2026/>.
-- **Sources** : `main.tex` + `references.bib` (références vérifiées le
-  2026-07-10 — ne rien ajouter sans vérification).
+- **Deadline targeted at the time**: 23 July 2026 (notification:
+  1 September 2026) — not met by decision, not by delay.
+- **Format**: ACM `acmart` option `sigconf`; regular paper = 7 to 8 pages
+  of content (all included **except** references); short paper fallback =
+  4 pages. CFP: <https://correctness-workshop.github.io/2026/>.
+- **Sources**: `main.tex` + `references.bib` (references verified on
+  2026-07-10 — do not add anything without verification).
 
-## Compiler
+## Compiling
 
-Aucune chaîne TeX n'est requise dans le dépôt ; deux options :
+No TeX toolchain is required in the repository; two options:
 
 ```bash
 # Option 1 — machine locale avec TeX Live :
@@ -31,19 +31,19 @@ cd paper/correctness26 && latexmk -pdf main.tex
 # (la classe acmart est fournie par Overleaf).
 ```
 
-## Contenu et discipline
+## Content and discipline
 
-Chaque claim du papier est adossée à la table claims → évidence de
-`paper/PAPER_PLAN.md` (tests CI T1-T4/R1-R4/Q1-Q3/S1-S3/A1, protocoles
-O1-O2). Les chiffres de la section « cost of determinism » proviennent des
-runs consignés dans `LIVESTATE.md` (x86-64 4 cœurs + Jetson AGX Thor 14
-cœurs, MAXN, horloges épinglées, 3 runs × 30 reps par plateforme).
+Each claim of the paper is backed by the claims → evidence table of
+`paper/PAPER_PLAN.md` (CI tests T1-T4/R1-R4/Q1-Q3/S1-S3/A1, protocols
+O1-O2). The figures of the "cost of determinism" section come from the
+runs recorded in `docs/archive/LIVESTATE.md` (x86-64 4 cores + Jetson AGX Thor 14
+cores, MAXN, pinned clocks, 3 runs × 30 reps per platform).
 
-## TODO avant soumission (marqués `TODO` dans main.tex)
+## TODO before submission (marked `TODO` in main.tex)
 
-1. Affiliation exacte de l'auteur.
-2. Lien d'artefact public pour les relecteurs (ou déclaration d'accès).
-3. Vérifier au CFP si la soumission doit être anonyme
+1. Exact affiliation of the author.
+2. Public artifact link for the reviewers (or an access statement).
+3. Check with the CFP whether the submission must be anonymous
    (`[sigconf,review,anonymous]`).
-4. Relecture de longueur après compilation : viser ≤ 8 pages hors
-   références (couper d'abord dans §2 et §7 si dépassement).
+4. Length review after compilation: aim for ≤ 8 pages excluding
+   references (cut first in §2 and §7 if over).

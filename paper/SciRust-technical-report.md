@@ -780,10 +780,10 @@ candidate papers delivered** — is tracked in `docs/RESEARCH_ROADMAP.md`.
 
 CLI commands surface much of this work, including `scirust certify` (IBP, CROWN,
 zonotope, DeepPoly and randomized-smoothing bounds side by side, plus a complete
-branch-and-bound decision), `scirust lm --opt …` (train the N-D decoder LM with
+branch-and-bound decision), `scirust lm --opt adam|adamw|lion|schedule-free|ademamix|soap|lookahead|lamb|adan|adafactor|shampoo|prodigy` (train the N-D decoder LM with
 any of the optimizers above), `scirust conformal`, `scirust calibrate`, the
 sequence-model demos (`mamba`, `deltanet`, `retnet`, `gla`, `hgrn`, `rwkv`), the
-quantizers (`gptq`, `awq`, `bitnet`), `scirust pinn`, and `scirust quantum`
+quantizers (`scirust gptq`, `scirust awq`, `scirust bitnet`), `scirust pinn`, and `scirust quantum`
 (the MPS quantum-circuit simulator).
 
 ## 16. Pattern Detection & Algorithm Creation

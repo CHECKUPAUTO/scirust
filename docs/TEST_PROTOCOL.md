@@ -199,7 +199,7 @@ It builds `scirust-core --bin bench_reduction_overhead` in release, runs it 3×
 `bench-o1-jetson-<UTC>/` (platform report incl. nvpmodel state, raw bench
 tables, test results). The bundle stays on the device (`.gitignore`d); the
 median table is what gets pasted into `paper/PAPER_PLAN.md` §4 (O1, Jetson
-leg) and one line into `LIVESTATE.md`. The script never changes device
+leg) and one line into `docs/archive/LIVESTATE.md`. The script never changes device
 clocks/power state unless `--pin-clocks` is passed explicitly.
 
 ---
@@ -226,6 +226,6 @@ on x86-64). Exit code 0 ⇔ `verdict=PASS` ⇔ this machine reproduces the
 x86-64 results bit for bit. A timestamped evidence bundle
 `proof-portable-f32-<UTC>/` (platform report, raw report, SHA-256 of the
 canonical lines) stays on the machine (`.gitignore`d); the verdict, commit
-and canonical SHA are what get reported in `LIVESTATE.md`. Comparing the
+and canonical SHA are what get reported in `docs/archive/LIVESTATE.md`. Comparing the
 `canonical.sha256` of two machines (same `--full` mode) is an equivalent,
 stronger statement: identical hash ⇔ every printed bit matched.

@@ -1,144 +1,143 @@
-# TDI-2 — Résultats de l’évaluation continue préenregistrée
+# TDI-2 — Results of the preregistered continuous evaluation
 
-Date d’exécution : 12 juillet 2026  
-Branche : `tdi-2-branching`  
-Préenregistrement : `3c8f54d`  
-Implémentation gelée : `ccbfc31`
+Execution date: 12 July 2026<br>
+Branch: `tdi-2-branching`<br>
+Preregistration: `3c8f54d`<br>
+Frozen implementation: `ccbfc31`
 
-## Correction technique préalable
+## Prior technical correction
 
-La première tentative d’exécution a échoué avant toute production de
-résultats en raison d’un dépassement intermédiaire lors de la comparaison
-de deux rationnels `u128` sur le holdout de largeur 4.
+The first execution attempt failed before producing any results due to an
+intermediate overflow when comparing two `u128` rationals on the width-4
+holdout.
 
-La comparaison par produits croisés a été remplacée par une comparaison
-exacte fondée sur les quotients successifs de l’algorithme d’Euclide.
+The cross-product comparison was replaced by an exact comparison based on
+the successive quotients of the Euclidean algorithm.
 
-Cette correction :
+This correction:
 
-- ne change aucune population ;
-- ne change aucun horizon ;
-- ne change aucune caractéristique ;
-- ne change aucun modèle ;
-- ne change aucune métrique ;
-- ne consulte aucun résultat de holdout ;
-- ajoute un test avec des rationnels proches de `u128::MAX`.
+- changes no population;
+- changes no horizon;
+- changes no feature;
+- changes no model;
+- changes no metric;
+- consults no holdout result;
+- adds a test with rationals close to `u128::MAX`.
 
-## Validation logicielle
+## Software validation
 
-- formatage : réussi ;
-- tests workspace : réussi ;
-- tests `tdi-core` : 38 réussis ;
-- Clippy avec `-D warnings` : réussi ;
-- vérification Git : réussie ;
-- exécution du benchmark : réussie.
+- formatting: passed;
+- workspace tests: passed;
+- `tdi-core` tests: 38 passed;
+- Clippy with `-D warnings`: passed;
+- Git verification: passed;
+- benchmark execution: passed.
 
-## Population effectivement analysée
+## Population actually analyzed
 
-| Ensemble | Largeur | Systèmes acceptés | Exclus à l’horizon 2 |
+| Set | Width | Accepted systems | Excluded at horizon 2 |
 |---|---:|---:|---:|
-| Apprentissage | 3 | 12 000 | 55 |
-| Holdout principal | 3 | 4 000 | 24 |
-| Holdout hors distribution | 4 | 4 000 | 0 |
+| Training | 3 | 12,000 | 55 |
+| Main holdout | 3 | 4,000 | 24 |
+| Out-of-distribution holdout | 4 | 4,000 | 0 |
 
-Les exclusions correspondent uniquement aux systèmes dont les distributions
-étaient déjà exactement identiques à l’horizon d’observation 2.
+The exclusions correspond only to systems whose distributions were already
+exactly identical at observation horizon 2.
 
-## Holdout principal — largeur 3
+## Main holdout — width 3
 
-### Baseline appariée
+### Paired baseline
 
-- MSE : `0.001816873`
-- MAE : `0.018304843`
-- R² : `0.393556075`
-- Spearman : `0.411338780`
+- MSE: `0.001816873`
+- MAE: `0.018304843`
+- R²: `0.393556075`
+- Spearman: `0.411338780`
 
 ### Baseline + TDI-2
 
-- MSE : `0.001579275`
-- MAE : `0.017156635`
-- R² : `0.472862476`
-- Spearman : `0.557910624`
+- MSE: `0.001579275`
+- MAE: `0.017156635`
+- R²: `0.472862476`
+- Spearman: `0.557910624`
 
-### Gain observé
+### Observed gain
 
-- amélioration MSE : `0.000237598`
-- réduction relative MSE : `13.077285 %`
-- amélioration MAE : `0.001148208`
+- MSE improvement: `0.000237598`
+- relative MSE reduction: `13.077285 %`
+- MAE improvement: `0.001148208`
 
-### Bootstrap apparié déterministe — 2 000 réplications
+### Deterministic paired bootstrap — 2,000 replications
 
-- IC 95 % amélioration MSE :
+- 95 % CI of MSE improvement:
   `[0.000162544, 0.000315743]`
-- médiane amélioration MSE :
+- median MSE improvement:
   `0.000236356`
-- IC 95 % amélioration MAE :
+- 95 % CI of MAE improvement:
   `[0.000788787, 0.001495130]`
-- médiane amélioration MAE :
+- median MAE improvement:
   `0.001151804`
 
-## Verdict principal préenregistré
+## Primary preregistered verdict
 
-Le critère principal est **réussi** :
+The primary criterion is **passed**:
 
-1. réduction relative de MSE supérieure à 5 % ;
-2. borne inférieure de l’IC 95 % MSE strictement positive ;
-3. borne inférieure de l’IC 95 % MAE strictement positive.
+1. relative MSE reduction greater than 5 %;
+2. lower bound of the 95 % MSE CI strictly positive;
+3. lower bound of the 95 % MAE CI strictly positive.
 
-Le gain de TDI-2 sur la baseline appariée est donc statistiquement robuste
-sur le holdout principal de largeur 3.
+The gain of TDI-2 over the paired baseline is therefore statistically robust
+on the main width-3 holdout.
 
-## Holdout hors distribution — largeur 4
+## Out-of-distribution holdout — width 4
 
-### Baseline appariée
+### Paired baseline
 
-- MSE : `0.157274396`
-- MAE : `0.372795169`
-- R² : `-109506.813463054`
-- Spearman : `-0.507018418`
+- MSE: `0.157274396`
+- MAE: `0.372795169`
+- R²: `-109506.813463054`
+- Spearman: `-0.507018418`
 
 ### Baseline + TDI-2
 
-- MSE : `0.147526127`
-- MAE : `0.366151366`
-- R² : `-102719.239290951`
-- Spearman : `-0.489819920`
+- MSE: `0.147526127`
+- MAE: `0.366151366`
+- R²: `-102719.239290951`
+- Spearman: `-0.489819920`
 
-### Gain observé
+### Observed gain
 
-- amélioration MSE : `0.009748269`
-- réduction relative MSE : `6.198256 %`
-- amélioration MAE : `0.006643803`
+- MSE improvement: `0.009748269`
+- relative MSE reduction: `6.198256 %`
+- MAE improvement: `0.006643803`
 
-Le critère minimal préenregistré du holdout hors distribution demandait
-uniquement une amélioration MSE positive. Il est donc formellement réussi.
+The preregistered minimal criterion of the out-of-distribution holdout only
+required a positive MSE improvement. It is therefore formally passed.
 
-## Réserve scientifique majeure
+## Major scientific caveat
 
-La confirmation hors distribution ne doit pas être présentée comme une
-bonne généralisation absolue.
+The out-of-distribution confirmation must not be presented as good absolute
+generalization.
 
-Malgré une amélioration relative face à la baseline :
+Despite a relative improvement over the baseline:
 
-- les deux modèles ont un R² extrêmement négatif ;
-- les deux corrélations de Spearman sont négatives ;
-- les erreurs absolues sont très élevées ;
-- un modèle entraîné en largeur 3 est manifestement mal calibré en largeur 4.
+- both models have extremely negative R²;
+- both Spearman correlations are negative;
+- the absolute errors are very high;
+- a model trained at width 3 is manifestly poorly calibrated at width 4.
 
-La conclusion honnête est donc :
+The honest conclusion is therefore:
 
-- **succès confirmatoire sur le holdout principal de largeur 3** ;
-- **gain relatif TDI-2 également observé en largeur 4** ;
-- **absence de validité prédictive absolue hors distribution** ;
-- **nécessité d’une étude séparée de transfert inter-largeurs**.
+- **confirmatory success on the main width-3 holdout**;
+- **relative TDI-2 gain also observed at width 4**;
+- **absence of absolute predictive validity out of distribution**;
+- **need for a separate cross-width transfer study**.
 
 ## Conclusion
 
-TDI-2 apporte une information prédictive incrémentale au-delà de
-l’entropie et de la topologie appariées au même horizon d’observation.
+TDI-2 provides incremental predictive information beyond entropy and
+topology matched at the same observation horizon.
 
-Le résultat principal est positif et soutenu par les intervalles bootstrap.
-Il établit un signal prospectif incrémental dans la population de largeur 3.
+The main result is positive and supported by the bootstrap intervals.
+It establishes an incremental prospective signal in the width-3 population.
 
-Il n’établit pas encore une loi universelle indépendante de la taille du
-système.
+It does not yet establish a universal law independent of system size.

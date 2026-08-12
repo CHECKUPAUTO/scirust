@@ -5,9 +5,9 @@
 > `<placeholder>`, have it reviewed by your data-protection officer (DPO) and
 > qualified counsel, and publish it at the URL referenced in
 > [LICENSING.md](../LICENSING.md) § 5. It is drafted to meet the transparency
-> requirements of Articles 13–14 of Regulation (EU) 2016/679 (**GDPR**). Provide a
-> French-language version for French data subjects (Loi « Toubon »):
-> [PRIVACY_NOTICE.fr.md](PRIVACY_NOTICE.fr.md).
+> requirements of Articles 13–14 of Regulation (EU) 2016/679 (**GDPR**). Where
+> French-language requirements apply to the relevant offer, service, or customer
+> documentation, provide an appropriate French version and obtain legal review.
 
 ## 1. Who is responsible (controller)
 

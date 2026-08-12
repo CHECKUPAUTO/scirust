@@ -1,115 +1,106 @@
 # scirust-mcp
 
-Serveur [Model Context Protocol](https://modelcontextprotocol.io) (MCP) pour
-SciRust : expose les capacités de la plateforme — solveurs numériques, outils
-de développement du SLM `scirust-sciagent`, et à terme la découverte d'actifs
-OT/IT de `scirust-discovery` — comme des **outils MCP standard**, appelables
-par n'importe quel agent : le SLM embarqué de SciRust, Claude, ChatGPT, ou un
-simple script.
+[Model Context Protocol](https://modelcontextprotocol.io) (MCP) server for
+SciRust: exposes the platform's capabilities — numerical solvers, development
+tools for the `scirust-sciagent` SLM, and eventually OT/IT asset discovery from
+`scirust-discovery` — as **standard MCP tools**, callable by any agent:
+SciRust's embedded SLM, Claude, ChatGPT, or a simple script.
 
-## Pourquoi MCP plutôt qu'un format d'appel d'outil maison
+## Why MCP rather than a homegrown tool-call format
 
-Le SLM `scirust-sciagent` avait déjà un mini-format d'appel d'outil interne
-(`scirust_sciagent::agentic::{Tool, AgentRouter}`, un JSON `{"name": ...,
-"params": ...}` ad hoc). Cela marche pour un seul agent développé en interne,
-mais ne se généralise pas : chaque nouvel agent externe (Claude Desktop,
-ChatGPT, un script d'automatisation industrielle) devrait réimplémenter son
-propre parsing pour parler à SciRust.
+The `scirust-sciagent` SLM already had a small internal tool-call format
+(`scirust_sciagent::agentic::{Tool, AgentRouter}`, an ad hoc JSON `{"name": ...,
+"params": ...}`). That works for a single agent developed in-house, but does not
+generalize: every new external agent (Claude Desktop, ChatGPT, an industrial
+automation script) would have to reimplement its own parsing to talk to SciRust.
 
-MCP (publié par Anthropic en novembre 2024, spécification stable depuis juin
-2025) est devenu le standard de facto pour ce problème : JSON-RPC 2.0,
-primitives **tools** (fonctions appelables, schéma JSON d'entrée),
-**resources** (données en lecture seule) et **prompts** ; découverte
-dynamique (`tools/list`) plutôt que glue code codée en dur par intégration ;
-transport `stdio` (sous-processus local — ce que ce crate implémente) ou
-`Streamable HTTP` (distant, avec OAuth 2.1). C'est ce que Claude Desktop,
-les IDE (VS Code, JetBrains), et un nombre croissant d'agents savent déjà
-parler nativement. Choisir MCP signifie que connecter SciRust à *n'importe
-quel* agent devient une question de configuration, pas de code.
+MCP (published by Anthropic in November 2024, stable specification since June
+2025) has become the de facto standard for this problem: JSON-RPC 2.0,
+**tools** primitives (callable functions, JSON input schema), **resources**
+(read-only data) and **prompts**; dynamic discovery (`tools/list`) rather than
+hard-coded glue code per integration; `stdio` transport (local subprocess — what
+this crate implements) or `Streamable HTTP` (remote, with OAuth 2.1). This is
+what Claude Desktop, IDEs (VS Code, JetBrains), and a growing number of agents
+already speak natively. Choosing MCP means that connecting SciRust to *any*
+agent becomes a matter of configuration, not code.
 
-`scirust-mcp` **réutilise** l'implémentation existante des outils de
-développement du SLM (`scirust_sciagent::agentic::tools::Tool::builtins()`)
-plutôt que de la dupliquer — voir `src/tools/dev.rs`. MCP est ici une couche
-de *transport* supplémentaire au-dessus de capacités qui existaient déjà, pas
-une réécriture.
+`scirust-mcp` **reuses** the existing implementation of the SLM's development
+tools (`scirust_sciagent::agentic::tools::Tool::builtins()`) rather than
+duplicating it — see `src/tools/dev.rs`. MCP is here an additional *transport*
+layer on top of capabilities that already existed, not a rewrite.
 
-## Profils de capacités
+## Capability profiles
 
-Le serveur démarre en profil **production**. Ce profil n'enregistre ni les
-outils `dev_*` (lecture/recherche de fichiers, build, tests, git) ni le
-passe-plat `scirust_cli`; une injection de prompt ne peut donc pas les utiliser
-pour lire les secrets du processus ou démarrer un sous-processus.
+The server starts in the **production** profile. This profile registers neither
+the `dev_*` tools (file read/search, build, tests, git) nor the `scirust_cli`
+pass-through; a prompt injection therefore cannot use them to read the
+process's secrets or spawn a subprocess.
 
-Le profil `development` doit être activé explicitement avec
-`SCIRUST_MCP_PROFILE=development`. Il est réservé à un checkout local de
-confiance. Ses chemins sont canonicalisés et confinés à `SCIAGENT_ROOT` (la
-racine du workspace par défaut), y compris après résolution des liens
-symboliques. Les lectures, plages de lignes, sorties, arguments et temps
-d'exécution sont bornés.
+The `development` profile must be enabled explicitly with
+`SCIRUST_MCP_PROFILE=development`. It is reserved for a trusted local checkout.
+Its paths are canonicalized and confined to `SCIAGENT_ROOT` (the workspace root
+by default), including after symlink resolution. Reads, line ranges, outputs,
+arguments and execution times are bounded.
 
-## Outils disponibles
+## Available tools
 
-| Outil | Domaine | Description |
+| Tool | Domain | Description |
 |---|---|---|
-| `dev_search`, `dev_grep`, `dev_read`, `dev_explain`, `dev_build`, `dev_test`, `dev_status` | Développement opt-in | Disponibles uniquement dans le profil `development` |
-| `linalg_eigen_symmetric` | Algèbre linéaire | Décomposition en valeurs propres symétrique (Householder + QL implicite, voir `scirust-solvers`) |
-| `linalg_svd` | Algèbre linéaire | SVD générale (Jacobi à un côté) |
-| `linalg_gmres` | Algèbre linéaire | GMRES(m) pour systèmes non symétriques |
-| `discovery_scan` | Découverte OT/IT | Sonde des cibles réseau (OPC-UA, Modbus, mDNS) via `scirust-discovery`, sous portée signée — voir `scirust-discovery/README.md` |
-| `sis_verify_sif_loop` | Sûreté procédés (IEC 61511) | PFDavg total + SIL atteint d'une boucle SIF multi-sous-systèmes via `scirust-sis` |
-| `sis_size_proof_test_interval` | Sûreté procédés (IEC 61511) | Intervalle de test de preuve maximal pour un PFDavg cible, par inversion numérique |
-| `sim_epidemic` | Simulation (`scirust-sim`) | Épidémie SIR : R0, pic infecté et jour du pic, taux d'attaque final |
-| `sim_battery_discharge` | Simulation (`scirust-sim`) | Cellule Thévenin 1-RC + thermique (plante `scirust-bms`) à courant constant : SoC, tension, température finales |
-| `sim_grid_stability` | Simulation (`scirust-sim`) | Équation d'oscillation machine-réseau (plante `scirust-grid`) : synchronisme, équilibre, fréquence petit signal, transitoire |
-| `scirust_cli` | Passe-plat opt-in | Disponible uniquement dans le profil `development` |
+| `dev_search`, `dev_grep`, `dev_read`, `dev_explain`, `dev_build`, `dev_test`, `dev_status` | Opt-in development | Available only in the `development` profile |
+| `linalg_eigen_symmetric` | Linear algebra | Symmetric eigendecomposition (Householder + implicit QL, see `scirust-solvers`) |
+| `linalg_svd` | Linear algebra | General SVD (one-sided Jacobi) |
+| `linalg_gmres` | Linear algebra | GMRES(m) for non-symmetric systems |
+| `discovery_scan` | OT/IT discovery | Probes network targets (OPC-UA, Modbus, mDNS) via `scirust-discovery`, under a signed scope — see `scirust-discovery/README.md` |
+| `sis_verify_sif_loop` | Process safety (IEC 61511) | Total PFDavg + achieved SIL of a multi-subsystem SIF loop via `scirust-sis` |
+| `sis_size_proof_test_interval` | Process safety (IEC 61511) | Maximum proof test interval for a target PFDavg, by numerical inversion |
+| `sim_epidemic` | Simulation (`scirust-sim`) | SIR epidemic: R0, infected peak and day of peak, final attack rate |
+| `sim_battery_discharge` | Simulation (`scirust-sim`) | Thévenin 1-RC cell + thermal (plant `scirust-bms`) at constant current: final SoC, voltage, temperature |
+| `sim_grid_stability` | Simulation (`scirust-sim`) | Machine-grid swing equation (plant `scirust-grid`): synchronism, equilibrium, small-signal frequency, transient |
+| `scirust_cli` | Opt-in pass-through | Available only in the `development` profile |
 
-`discovery_scan` ne peut jamais s'auto-autoriser depuis la conversation : la
-clé qui vérifie la signature de la portée vit côté serveur
-(`SCIRUST_DISCOVERY_KEY`), jamais dans les arguments de l'appel d'outil.
-Sans cette variable définie par l'opérateur, l'outil refuse tout — voir
-`scirust-discovery/README.md`.
+`discovery_scan` can never self-authorize from the conversation: the key that
+verifies the scope signature lives server-side (`SCIRUST_DISCOVERY_KEY`), never
+in the tool-call arguments. Without this variable set by the operator, the tool
+refuses everything — see `scirust-discovery/README.md`.
 
-Un nouveau domaine (ex. `scirust-discovery`, un futur `scirust-pdm` exposé)
-s'ajoute en implémentant `fn xxx_tools() -> Vec<McpTool>` dans
-`src/tools/` et en l'enregistrant dans
-[`default_registry`](src/lib.rs) — aucune autre modification requise pour
-que tous les clients MCP existants le voient.
+A new domain (e.g. `scirust-discovery`, a future exposed `scirust-pdm`) is
+added by implementing `fn xxx_tools() -> Vec<McpTool>` in `src/tools/` and
+registering it in [`default_registry`](src/lib.rs) — no other change is
+required for all existing MCP clients to see it.
 
-## Auditabilité
+## Auditability
 
-Chaque `tools/call` — succès ou échec — est ajouté à un journal hash-chaîné
-SHA-256 (`src/audit.rs`, `AuditLog`), sur le même principe que
-`scirust-func-safety::audit` (chaque entrée contient le hash de la
-précédente, ce qui rend toute falsification après coup détectable), mais
-avec un vrai SHA-256 (réutilisation de `scirust_sciagent::sha256`, du
-domaine public FIPS 180-4) plutôt qu'un hash maison — pour une trace
-d'intégrité d'audit, la résistance aux collisions n'est pas
-négociable. Le journal stocke le **hash** des arguments et du résultat, pas
-leur contenu en clair : il peut être exporté sans exposer de données
-potentiellement sensibles issues d'une infrastructure cliente. Pour préserver
-le format public historique, `AuditLog::export_json` produit toujours le tableau
-d'entrées seul. `AuditLog::export_snapshot_json` produit une enveloppe versionnée
-avec l'ancre précédant la fenêtre conservée, la tête, le prochain numéro de
-séquence et les entrées ; `AuditExport::from_json` en vérifie la cohérence après
-rotation.
+Every `tools/call` — success or failure — is appended to a SHA-256 hash-chained
+log (`src/audit.rs`, `AuditLog`), on the same principle as
+`scirust-func-safety::audit` (each entry contains the hash of the previous one,
+which makes any subsequent tampering detectable), but with a real SHA-256
+(reusing `scirust_sciagent::sha256`, from the public-domain FIPS 180-4) rather
+than a homegrown hash — for an audit integrity trail, collision resistance is
+non-negotiable. The log stores the **hash** of the arguments and the result,
+not their plaintext content: it can be exported without exposing potentially
+sensitive data from a client infrastructure. To preserve the historical public
+format, `AuditLog::export_json` always produces the array of entries alone.
+`AuditLog::export_snapshot_json` produces a versioned envelope with the anchor
+preceding the window preserved, the head, the next sequence number and the
+entries; `AuditExport::from_json` checks its consistency after rotation.
 
-Cette chaîne SHA-256 n'est toutefois ni une signature ni un MAC : elle ne prouve
-pas l'identité du producteur, et un acteur pouvant remplacer l'export entier peut
-recalculer tous ses hashes. Pour obtenir une preuve d'altération, conservez la
-`head` par un canal de confiance indépendant puis utilisez
-`AuditExport::validate_against_head`. Une `anchor` de confiance établit la
-continuité avec le passé, mais n'authentifie pas seule les entrées suivantes.
+This SHA-256 chain is, however, neither a signature nor a MAC: it does not prove
+the identity of the producer, and an actor able to replace the entire export can
+recompute all of its hashes. To obtain proof of tampering, keep the `head`
+through an independent trusted channel, then use
+`AuditExport::validate_against_head`. A trusted `anchor` establishes continuity
+with the past, but does not by itself authenticate the following entries.
 
-## Utilisation
+## Usage
 
 ```bash
 cargo run -p scirust-mcp --bin scirust-mcp
 ```
 
-Le serveur lit des requêtes JSON-RPC 2.0 sur stdin (une par ligne) et écrit
-les réponses sur stdout (une par ligne) — c'est le transport `stdio` du MCP,
-compatible avec Claude Desktop et tout autre client MCP standard. Exemple de
-configuration Claude Desktop (`claude_desktop_config.json`) :
+The server reads JSON-RPC 2.0 requests on stdin (one per line) and writes
+responses to stdout (one per line) — this is MCP's `stdio` transport,
+compatible with Claude Desktop and any other standard MCP client. Example
+Claude Desktop configuration (`claude_desktop_config.json`):
 
 ```json
 {
@@ -117,29 +108,29 @@ configuration Claude Desktop (`claude_desktop_config.json`) :
     "scirust": {
       "command": "cargo",
       "args": ["run", "--release", "-p", "scirust-mcp", "--bin", "scirust-mcp"],
-      "cwd": "/chemin/vers/scirust"
+      "cwd": "/path/to/scirust"
     }
   }
 }
 ```
 
-`SCIRUST_BIN` (variable d'environnement) pointe l'outil `scirust_cli` vers un
-binaire `scirust` déjà compilé (`cargo install --path scirust-cli`) plutôt
-que de le reconstruire à chaque appel.
+`SCIRUST_BIN` (environment variable) points the `scirust_cli` tool to an
+already-compiled `scirust` binary (`cargo install --path scirust-cli`) rather
+than rebuilding it on every call.
 
-Pour une session locale de développement uniquement :
+For a local development session only:
 
 ```bash
 SCIRUST_MCP_PROFILE=development SCIAGENT_ROOT="$PWD" \
   cargo run -p scirust-mcp --bin scirust-mcp
 ```
 
-Toute autre valeur de `SCIRUST_MCP_PROFILE` est refusée au démarrage.
+Any other value of `SCIRUST_MCP_PROFILE` is refused at startup.
 
 ## Sources
 
-- Model Context Protocol — spécification : <https://modelcontextprotocol.io>
-- Anthropic, « Introducing the Model Context Protocol », nov. 2024.
-- Comparaison avec Google Agent2Agent (A2A, avril 2025) : MCP est « un agent
-  utilise un outil », A2A est « un agent délègue à un autre agent » — les
-  deux sont complémentaires, pas concurrents.
+- Model Context Protocol — specification: <https://modelcontextprotocol.io>
+- Anthropic, "Introducing the Model Context Protocol", Nov. 2024.
+- Comparison with Google Agent2Agent (A2A, April 2025): MCP is "an agent uses a
+  tool", A2A is "an agent delegates to another agent" — the two are
+  complementary, not competing.

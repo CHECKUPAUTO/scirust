@@ -176,6 +176,55 @@ literature, with automatic noise-type detection:
   frequency is known. Quality benchmark:
   `cargo run -p scirust-signal --example denoise_benchmark`.
 
+#### 8.1.2 Advanced denoising and real-data validation
+
+For real-time and embedded processing, `denoise::streaming` provides causal
+sample-by-sample filters, including `StreamingNlm` and `StreamingVst`.
+`StreamingVst` wraps a streaming denoiser with a variance-stabilizing transform
+selected during calibration with `detect_noise_model`. The repository includes a
+deterministic embedded demonstration:
+
+```bash
+cargo run --release -p scirust-signal --example vst_streaming_embedded
+```
+
+The advanced signal-dependent-noise work is documented in
+`docs/project-notes/TSHF_RESEARCH_2026-07-16.md` and includes:
+
+- **`denoise::vst`** — variance-stabilizing transforms and `vst_denoise`,
+  including Anscombe/GAT and multiplicative-noise paths. The experimental
+  protocol is executable with:
+
+```bash
+cargo run -p scirust-signal --example vst_protocol
+```
+
+- **`denoise::multichannel`** — channel-coupled denoising operators including
+  `wiener_spatial` and `vector_median`. The measured gate report is exposed by
+  `phase2_gate_report()`.
+
+- **`denoise::compand`** — bounded robust transforms including `soft_clip` and
+  `soft_clip_robust`.
+
+The corresponding 2-D VST path is available through `vst_denoise2d` in
+`scirust_vision::denoise`.
+
+Real-data validation is checked in addition to synthetic fixtures:
+
+- ECG: `tests/data/ecg_mitbih.csv` and `tests/real_data_ecg.rs`, with
+  `denoise_real_ecg`.
+- Bearing vibration: `tests/real_data_vibration.rs`, with
+  `classify_real_bearing`.
+- Speech: `tests/real_data_audio.rs`, with `denoise_real_speech`. The current
+  example explicitly documents that generic `denoise_auto` can over-process
+  speech and recommends `stft_wiener_auto` directly for that case.
+
+The general benchmark remains available with:
+
+```bash
+cargo run -p scirust-signal --example denoise_benchmark
+```
+
 ### 8.2 OPC-UA Connector (`scirust-opcua`)
 
 Connects industrial PLCs/SCADA to the SciRust pipeline:
@@ -265,6 +314,89 @@ SciRust is the framework of choice for those who prioritize **understanding** an
 
 ---
 *For more technical details, see the full report in `paper/SciRust-technical-report.md`.*
+
+## 10. Event Detection (`scirust-events`)
+
+SciRust provides a deterministic event-processing stack through
+`scirust-events-core`, `scirust-events-models`, and `scirust-events-runtime`.
+`EventStream` produces deterministic windows from an input sequence, while
+detectors such as `SpikeDetector` can be executed through `EventRuntime`.
+
+```rust
+use scirust_events_core::EventStream;
+
+let mut stream =
+    EventStream::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 3, 2);
+
+assert_eq!(stream.next_window().unwrap().data, vec![1.0, 2.0, 3.0]);
+assert_eq!(stream.next_window().unwrap().data, vec![3.0, 4.0, 5.0]);
+assert!(stream.next_window().is_none());
+```
+
+## 11. Neuro-Symbolic Reasoning (`scirust-neuro-symbolic`)
+
+`scirust-neuro-symbolic` combines symbolic and differentiable reasoning.
+The current workflow tests exercise a Datalog engine together with
+`DifferentiableLogicLayer`.
+
+```rust
+use scirust_core::autodiff::reverse::Tensor;
+use scirust_neuro_symbolic::neural::DifferentiableLogicLayer;
+
+let layer = DifferentiableLogicLayer::new("LogicLayer");
+let a = Tensor::from_vec(vec![0.8], 1, 1);
+let b = Tensor::from_vec(vec![0.7], 1, 1);
+
+let result = layer.fuzzy_and(&a, &b);
+assert!((result.data[0] - 0.56).abs() < 1e-6);
+```
+
+`fuzzy_and` uses the product T-norm. The same layer also provides `fuzzy_or`,
+and its `DifferentiableReasoner` implementation folds multiple inputs
+left-to-right with fuzzy-AND semantics.
+
+## 12. Network Intrusion Detection (`scirust-ids`)
+
+`scirust-ids` implements an integrated intrusion-detection pipeline. The current
+engine combines flow analysis, protocol parsing, statistical detectors, alert
+correlation, ML anomaly detection, and SIEM export.
+
+The detector set includes `PortScanDetector`, `DdosDetector`,
+`BruteForceDetector`, `DnsTunnelDetector`, and `BeaconDetector`. The capture
+layer exposes `NetworkCapture`, `SimulatedCapture`, and `RawPacket`, while
+`FlowWindow` provides the analysis window consumed by `IdsEngine`.
+
+A minimal flow-analysis pattern, matching the current `ids_demo` example:
+
+```rust
+use scirust_ids::*;
+
+let mut engine = IdsEngine::with_defaults();
+let mut window = FlowWindow::new(0.0, 60.0);
+
+let mut flow =
+    Flow::new("192.168.1.100", "10.0.0.5", 40001, 22);
+
+flow.start_time = 0.5;
+flow.end_time = 0.55;
+window.push(flow);
+
+let report = engine.analyze(&window, 1000.0);
+assert!(report.timestamp >= 0.0);
+```
+
+The repository demo exercises four scenarios: vertical port scanning, SYN-flood
+DDoS behaviour, SSH brute force, and C2-style beaconing.
+
+```bash
+cargo run -p ids_demo
+```
+
+The IDS crate can also be tested independently:
+
+```bash
+cargo test -p scirust-ids
+```
 
 ## 13. Research → Functions (N-D autograd extensions)
 

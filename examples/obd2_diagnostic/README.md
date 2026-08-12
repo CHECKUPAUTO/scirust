@@ -1,216 +1,212 @@
-# Assistant de diagnostic automobile OBD2 (exemple SciRust)
+# OBD2 automotive diagnostic assistant (SciRust example)
 
-Une **petite IA** (un réseau de neurones MLP) spécialisée dans le diagnostic
-automobile : elle lit un **code défaut OBD2** + quelques symptômes et propose la
-**cause racine** la plus probable, classe toutes les hypothèses par
-probabilité, et suggère l'action de réparation.
+A **small AI** (an MLP neural network) specialized in automotive diagnostics: it
+reads an **OBD2 fault code** + a few symptoms and proposes the **most likely
+root cause**, ranks all hypotheses by probability, and suggests the repair
+action.
 
-C'est le même moteur que la démo `quickstart_v2` (autograd `Tape`, couches
-`Linear`/`ReLU`, optimiseur `Adam`), mais **spécialisé** pour un métier.
+It is the same engine as the `quickstart_v2` demo (autograd `Tape`, `Linear`/
+`ReLU` layers, `Adam` optimizer), but **specialized** for a trade.
 
-## Lancer
+## Running
 
-**Version simple** (25 cas, 5 causes) — démo pédagogique :
+**Simple version** (25 cases, 5 causes) — pedagogical demo:
 
 ```bash
 cargo run -p obd2_diagnostic --release
 ```
 
-**Version massive** (10 000 cas synthétiques, 10 causes) — entraînement production :
+**Massive version** (10,000 synthetic cases, 10 causes) — production training:
 
 ```bash
 cargo run -p obd2_diagnostic --release --bin obd2_massive
 ```
 
-**Version ultra-massive** (100 000 cas synthétiques, 10 causes, modèle très profond) — défi à grande échelle :
+**Ultra-massive version** (100,000 synthetic cases, 10 causes, very deep model) — large-scale challenge:
 
 ```bash
 cargo run -p obd2_diagnostic --release --bin obd2_ultra
 ```
 
-**Version MÉGAVERSE** (1 000 000 cas synthétiques, 1000 causes, classification extrême) — le défi ultime :
+**MEGAVERSE version** (1,000,000 synthetic cases, 1000 causes, extreme classification) — the ultimate challenge:
 
 ```bash
 cargo run -p obd2_diagnostic --release --bin obd2_megaverse       # 8 epochs
-cargo run -p obd2_diagnostic --release --bin obd2_megaverse -- 3  # nb epochs au choix
+cargo run -p obd2_diagnostic --release --bin obd2_megaverse -- 3  # number of epochs of your choice
 ```
 
-**Version DONNÉES RÉELLES** (43 139 relevés d'une Opel Corsa 2012, détection d'anomalie mélange) :
+**REAL DATA version** (43,139 records from a 2012 Opel Corsa, fuel-mixture anomaly detection):
 
 ```bash
-cargo run -p obd2_diagnostic --release --bin obd2_real                # défauts : CSV committé, 40 epochs
-cargo run -p obd2_diagnostic --release --bin obd2_real -- <csv> <ep>  # CSV + epochs au choix
+cargo run -p obd2_diagnostic --release --bin obd2_real                # defaults: committed CSV, 40 epochs
+cargo run -p obd2_diagnostic --release --bin obd2_real -- <csv> <ep>  # CSV + epochs of your choice
 ```
 
-## Ce que fait le programme
+## What the program does
 
-1. **Encode** chaque situation d'atelier en 7 nombres (le code défaut + des
-   relevés : correction carburant long terme, débit d'air MAF, ralenti…).
-2. **S'entraîne** sur 25 cas de réparations « validées ».
-3. **Diagnostique** des cas nouveaux : hypothèses classées par % + action.
+1. **Encodes** each workshop situation into 7 numbers (the fault code + records:
+   long-term fuel trim, MAF air flow, idle…).
+2. **Trains** on 25 cases of "validated" repairs.
+3. **Diagnoses** new cases: hypotheses ranked by % + action.
 
-## L'idée clé : désambiguïser la cause racine
+## The key idea: disambiguating the root cause
 
-Un même code (`P0171`, mélange trop pauvre) peut avoir **plusieurs** causes.
-L'IA apprend que le **débit d'air (MAF)** départage les deux plus fréquentes :
+The same code (`P0171`, mixture too lean) can have **several** causes. The AI
+learns that the **air flow (MAF)** separates the two most frequent ones:
 
-| Code | Correction carburant | Débit d'air MAF | → Cause prédite |
-|------|----------------------|-----------------|-----------------|
-| P0171 | +21 % (élevée) | **normal** | Prise d'air / fuite de dépression |
-| P0171 | +18 % (élevée) | **bas** | Capteur MAF défectueux |
+| Code | Fuel trim | MAF air flow | → Predicted cause |
+|------|-----------|--------------|-------------------|
+| P0171 | +21 % (high) | **normal** | Air intake leak / vacuum leak |
+| P0171 | +18 % (high) | **low** | Faulty MAF sensor |
 
-Même code, mêmes symptômes principaux — un seul relevé change le diagnostic.
+Same code, same main symptoms — a single record changes the diagnosis.
 
-## L'adapter à VOS données
+## Adapting it to YOUR data
 
-- **Ajouter une cause racine** : ajoutez une entrée dans `CAUSES` et `ACTIONS`,
-  augmentez `N_CLASSES`, et fournissez des exemples dans `training_data()`.
-- **Ajouter un symptôme** (ex. régime moteur, température) : augmentez
-  `N_FEATURES` et ajoutez la colonne à chaque ligne.
-- **Vraies données** : remplacez `training_data()` par votre historique de
-  réparations validées (un cas = features + cause confirmée).
+- **Add a root cause**: add an entry in `CAUSES` and `ACTIONS`, increase
+  `N_CLASSES`, and provide examples in `training_data()`.
+- **Add a symptom** (e.g. engine speed, temperature): increase `N_FEATURES` and
+  add the column to each row.
+- **Real data**: replace `training_data()` with your history of validated
+  repairs (one case = features + confirmed cause).
 
-## Version massive (entraînement production)
+## Massive version (production training)
 
-Le binary `obd2_massive` inclut :
-- **10 000+ cas synthétiques** répartis en train/val/test
-- **10 causes racines** (au lieu de 5)
-- **Bruit réaliste** (~2 % pendant l'entraînement, ~8 % au test)
-- **Modèle plus profond** : 10 → 64 → 32 → 10
-- **Métriques de performance** : train/val/test accuracy
+The `obd2_massive` binary includes:
+- **10,000+ synthetic cases** split into train/val/test
+- **10 root causes** (instead of 5)
+- **Realistic noise** (~2 % during training, ~8 % at test)
+- **Deeper model**: 10 → 64 → 32 → 10
+- **Performance metrics**: train/val/test accuracy
 
-Résultats sur données synthétiques :
-- Précision train : 99.88 %
-- Meilleure précision validation : 79.80 %
-- Précision test : 56.60 % (566 / 1000 cas bruités)
+Results on synthetic data:
+- Train accuracy: 99.88 %
+- Best validation accuracy: 79.80 %
+- Test accuracy: 56.60 % (566 / 1000 noisy cases)
 
-Le 56.6 % sur 10 classes reflète la séparabilité réelle des patterns générés.
-Avec de vraies données d'atelier (signatures causales plus fortes), les
-résultats seraient meilleurs.
+The 56.6 % over 10 classes reflects the real separability of the generated
+patterns. With real workshop data (stronger causal signatures), the results
+would be better.
 
-## Version MÉGAVERSE (1M cas × 1000 causes)
+## MEGAVERSE version (1M cases × 1000 causes)
 
-Le binary `obd2_megaverse` pousse le framework à l'échelle :
-- **1 000 000 cas synthétiques** (800K train / 100K val / 100K test)
-- **1000 causes racines**, chacune avec une signature unique de 8 capteurs
-  anormaux (haut/bas) parmi 20 — unicité vérifiée à la génération
-- **Mini-batches de 256** via le support multi-batch natif (matmul batché +
-  CrossEntropy à labels entiers) : 3 125 graphes d'autodiff par epoch au
-  lieu de 800 000
-- **Shuffle Fisher-Yates** de l'ordre des exemples à chaque epoch
-- **Bruit** : ±0.03 à l'entraînement, ±0.05 au test (plus dur)
+The `obd2_megaverse` binary pushes the framework to scale:
+- **1,000,000 synthetic cases** (800K train / 100K val / 100K test)
+- **1000 root causes**, each with a unique signature of 8 abnormal sensors
+  (high/low) among 20 — uniqueness verified at generation
+- **Mini-batches of 256** via the native multi-batch support (batched matmul +
+  integer-label CrossEntropy): 3,125 autodiff graphs per epoch instead of
+  800,000
+- **Fisher-Yates shuffle** of the example order at each epoch
+- **Noise**: ±0.03 at training, ±0.05 at test (harder)
 
-Résultats mesurés (modèle 20 → 256 → 128 → 1000, ~167K paramètres,
-Adam lr=0.001, seed 42) :
+Measured results (model 20 → 256 → 128 → 1000, ~167K parameters,
+Adam lr=0.001, seed 42):
 
-| Métrique | Valeur |
-|----------|--------|
-| Génération des 1M cas | 0.07 s |
-| Entraînement (3 epochs) | 157 s (~52 s/epoch) |
-| Validation | **100.00 %** dès l'epoch 1 |
-| **Test (100 000 cas)** | **100.00 %** (100000/100000) |
-| Baseline aléatoire | 0.10 % |
+| Metric | Value |
+|--------|-------|
+| Generation of the 1M cases | 0.07 s |
+| Training (3 epochs) | 157 s (~52 s/epoch) |
+| Validation | **100.00 %** from epoch 1 |
+| **Test (100,000 cases)** | **100.00 %** (100000/100000) |
+| Random baseline | 0.10 % |
 
-Le 100 % s'explique : chaque cause possède une signature de capteurs
-**unique et bien séparée** du bruit (écart signal ~0.3-0.45 vs bruit ±0.05).
-Le réseau n'a « plus qu'à » apprendre 1000 régions de décision dans un
-espace à 20 dimensions — ce que 800K exemples rendent possible. C'est une
-démonstration de **capacité et de passage à l'échelle du framework**
-(1M cas, 1000 classes, minutes de calcul), pas une mesure de difficulté
-du diagnostic réel.
+The 100 % is explained: each cause has a **unique signature, well separated**
+from the noise (signal gap ~0.3-0.45 vs noise ±0.05). The network just has to
+learn 1000 decision regions in a 20-dimensional space — which 800K examples
+make possible. This is a demonstration of the **framework's capacity and
+scaling** (1M cases, 1000 classes, minutes of compute), not a measure of real
+diagnostic difficulty.
 
-La v1 de ce binary plafonnait à ~0.1 % : signatures en collision
-(périodicité modulo 20 → 20 signatures pour 1000 causes), données jamais
-mélangées (oubli catastrophique) et un graphe d'autodiff par exemple
-(~9 h par epoch). Le commentaire d'en-tête de `main_megaverse.rs` détaille
-les trois corrections.
+The v1 of this binary plateaued at ~0.1 %: colliding signatures (periodicity
+modulo 20 → 20 signatures for 1000 causes), never-shuffled data (catastrophic
+forgetting) and one autodiff graph per example (~9 h per epoch). The header
+comment of `main_megaverse.rs` details the three fixes.
 
-## Version DONNÉES RÉELLES (`obd2_real`)
+## REAL DATA version (`obd2_real`)
 
-Fini le synthétique : le binary `obd2_real` s'entraîne sur de la **vraie
-télémétrie d'atelier** — 43 139 relevés d'une Opel Corsa 1.2 (2012) captés
-via un adaptateur ELM327 (dataset Hugging Face
+No more synthetic: the `obd2_real` binary trains on **real workshop
+telemetry** — 43,139 records from an Opel Corsa 1.2 (2012) captured via an
+ELM327 adapter (Hugging Face dataset
 [`PedroCuisinier2025/OBD2_panel_opel_2012`](https://huggingface.co/datasets/PedroCuisinier2025/OBD2_panel_opel_2012),
-licence CC-BY-4.0 ; l'échantillon committé dans `data/opel_corsa_telemetry.csv`
-est 1 relevé complet sur 5 du dataset original de 394 406 lignes).
+CC-BY-4.0 license; the sample committed in `data/opel_corsa_telemetry.csv`
+is 1 record out of every 5 of the original 394,406-line dataset).
 
-**Principe** : le modèle apprend la relation *saine* entre 10 capteurs
-(RPM, MAF, charge moteur, sondes O2, pressions/températures…) et la
-**correction carburant long terme** (`LONG_FUEL_TRIM_1`). Au diagnostic,
-un résidu |trim observé − trim prédit| au-delà du seuil (p99 des résidus
-de validation) signale une **anomalie du mélange** — la logique P0171 du
-premier exemple, apprise cette fois sur données réelles.
+**Principle**: the model learns the *healthy* relationship between 10 sensors
+(RPM, MAF, engine load, O2 sensors, pressures/temperatures…) and the
+**long-term fuel trim** (`LONG_FUEL_TRIM_1`). At diagnosis, a residual
+|observed trim − predicted trim| beyond the threshold (p99 of the validation
+residuals) signals a **mixture anomaly** — the P0171 logic of the first
+example, this time learned on real data.
 
-Résultats mesurés (split par segments de conduite, sans fuite temporelle) :
+Measured results (split by driving segments, no temporal leakage):
 
-| Métrique | Valeur |
-|----------|--------|
-| Train / Val / Test | 28 538 / 7 139 / 7 462 relevés (segments distincts) |
-| MAE baseline (moyenne) | 6.61 % trim |
-| **MAE modèle (test)** | **2.74 % trim** |
-| Seuil d'anomalie (p99) | ±8.85 % trim |
-| Entraînement | 1.5 s (40 epochs, batch 256) |
-| Prise d'air simulée (+14 % trim) | ⚠ détectée (résidu 14.8 %) |
+| Metric | Value |
+|--------|-------|
+| Train / Val / Test | 28,538 / 7,139 / 7,462 records (distinct segments) |
+| Baseline MAE (mean) | 6.61 % trim |
+| **Model MAE (test)** | **2.74 % trim** |
+| Anomaly threshold (p99) | ±8.85 % trim |
+| Training | 1.5 s (40 epochs, batch 256) |
+| Simulated air intake leak (+14 % trim) | ⚠ detected (residual 14.8 %) |
 
-Anecdote de vraies données : cette Opel affiche un trim long terme moyen de
-**+14.4 %** — la voiture réelle a probablement elle-même une petite prise
-d'air ou un MAF vieillissant. C'est exactement le genre de signal que le
-modèle apprend à contextualiser.
+A real-data anecdote: this Opel shows an average long-term trim of **+14.4 %** —
+the actual car probably has a small air intake leak itself or an aging MAF.
+That is exactly the kind of signal the model learns to contextualize.
 
-Limite honnête : corrompre *un seul* capteur (ex. MAF −35 %) n'est pas
-toujours détecté sur un relevé isolé — les capteurs corrélés (charge,
-pression) « compensent » dans la prédiction. C'est justement ce que
-`POST /trip/{id}/reading` (voir section API ci-dessous) adresse : un biais
-persistant mais discret devient statistiquement visible sur plusieurs
-relevés d'un même trajet, là où un relevé isolé le manque.
+Honest limitation: corrupting *a single* sensor (e.g. MAF −35 %) is not always
+detected on an isolated record — the correlated sensors (load, pressure)
+"compensate" in the prediction. This is precisely what
+`POST /trip/{id}/reading` (see API section below) addresses: a persistent but
+subtle bias becomes statistically visible over several records of the same
+trip, where an isolated record misses it.
 
-## Poids sauvegardés (safetensors)
+## Saved weights (safetensors)
 
-Les modèles entraînés sont sérialisés dans `models/` au format
-**safetensors** via `scirust_core::io::safetensors::save_state_dict` :
+The trained models are serialized in `models/` in the **safetensors** format
+via `scirust_core::io::safetensors::save_state_dict`:
 
-- `models/obd2_real_fueltrim.safetensors` (12 Ko) — poids + **métadonnées
-  embarquées** : noms des features, moyennes/écarts-types de normalisation,
-  seuil d'anomalie, source des données. Le fichier est **auto-suffisant** :
-  une future API de diagnostic n'a besoin que de lui.
-- `models/obd2_megaverse.safetensors` (~660 Ko) — poids du classifieur
-  1000 causes + métadonnées (architecture, seed, précision test).
+- `models/obd2_real_fueltrim.safetensors` (12 KB) — weights + **embedded
+  metadata**: feature names, normalization means/standard deviations, anomaly
+  threshold, data source. The file is **self-sufficient**: a future diagnostic
+  API needs only it.
+- `models/obd2_megaverse.safetensors` (~660 KB) — weights of the 1000-cause
+  classifier + metadata (architecture, seed, test accuracy).
 
-Le round-trip est vérifié à chaque run : rechargement dans un modèle
-vierge via `load_state_dict` → écart maximal de prédiction = 0.
+The round-trip is verified at every run: reloading into a blank model via
+`load_state_dict` → maximum prediction gap = 0.
 
-## API de diagnostic (`obd2_api`)
+## Diagnostic API (`obd2_api`)
 
-Le binary `obd2_api` expose **les deux modèles entraînés** (fueltrim +
-mégaverse) via une API HTTP **sans aucune dépendance externe** (serveur
-`std::net::TcpListener`, JSON minimal fait main). Chaque modèle est chargé
-depuis son fichier safetensors auto-suffisant : l'architecture du réseau
-est reconstruite depuis les shapes des tenseurs, la normalisation et le
-seuil d'anomalie viennent des métadonnées embarquées — rien n'est codé en
-dur côté serveur.
+The `obd2_api` binary exposes **both trained models** (fueltrim + megaverse)
+through an HTTP API **with no external dependency whatsoever** (`std::net::TcpListener`
+server, minimal hand-written JSON). Each model is loaded from its
+self-sufficient safetensors file: the network architecture is reconstructed
+from the tensor shapes, and the normalization and anomaly threshold come from
+the embedded metadata — nothing is hard-coded server-side.
 
-Testé automatiquement (`cargo test -p obd2_diagnostic --bin obd2_api`) :
-parsing JSON, logique du seuil glissant (déterministe, sans modèle), et
-les deux modèles contre leurs poids réels committés — 17 tests.
+Automatically tested (`cargo test -p obd2_diagnostic --bin obd2_api`): JSON
+parsing, sliding-threshold logic (deterministic, without a model), and both
+models against their real committed weights — 17 tests.
 
 ```bash
 cargo run -p obd2_diagnostic --release --bin obd2_api            # port 8080
-cargo run -p obd2_diagnostic --release --bin obd2_api -- 9090    # port choisi
+cargo run -p obd2_diagnostic --release --bin obd2_api -- 9090    # chosen port
 ```
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /health` | état du service, modèles chargés |
-| `GET /model` | features attendues, cible, seuil (modèle fueltrim) |
-| `GET /model/megaverse` | architecture, classes, précision (modèle mégaverse) |
-| `POST /diagnose` | relevés capteurs JSON → trim prédit, résidu, verdict |
-| `POST /diagnose/megaverse` | 20 features brutes → top-3 causes prédites |
-| `POST /trip/start` | démarre un trajet → `trip_id` |
-| `POST /trip/{id}/reading` | ajoute un relevé au trajet → résidu glissant |
-| `GET /trip/{id}/status` | stats du trajet sans ajouter de relevé |
-| `POST /feedback` | cas confirmé en atelier → archivé (JSONL) pour un futur ré-entraînement |
+| `GET /health` | service status, loaded models |
+| `GET /model` | expected features, target, threshold (fueltrim model) |
+| `GET /model/megaverse` | architecture, classes, accuracy (megaverse model) |
+| `POST /diagnose` | JSON sensor records → predicted trim, residual, verdict |
+| `POST /diagnose/megaverse` | 20 raw features → top-3 predicted causes |
+| `POST /trip/start` | starts a trip → `trip_id` |
+| `POST /trip/{id}/reading` | adds a record to the trip → sliding residual |
+| `GET /trip/{id}/status` | trip stats without adding a record |
+| `POST /feedback` | workshop-confirmed case → archived (JSONL) for future retraining |
 
-Exemple (relevé réel sain du CSV) :
+Example (real healthy record from the CSV):
 
 ```bash
 curl -s localhost:8080/diagnose -d '{"RPM":1898,"SPEED":39,
@@ -222,85 +218,81 @@ curl -s localhost:8080/diagnose -d '{"RPM":1898,"SPEED":39,
 ```json
 {"trim_observe_pct":17.97,"trim_predit_pct":17.49,"residu_pct":0.48,
  "seuil_pct":8.85,"anomalie":false,"verdict":"sain",
- "interpretation":"Le trim observé est cohérent avec l'état moteur…"}
+ "interpretation":"The observed trim is consistent with the engine state…"}
 ```
 
-Le même relevé avec un trim gonflé de +14 % (symptôme de prise d'air)
-renvoie `"verdict":"anomalie_melange_pauvre"` avec les suspects classiques
-P0171 ; un trim anormalement bas renvoie `"anomalie_melange_riche"`
-(logique P0172). Champ manquant → HTTP 400 avec le nom du capteur attendu.
+The same record with a trim inflated by +14 % (air-intake-leak symptom) returns
+`"verdict":"anomalie_melange_pauvre"` with the classic P0171 suspects; an
+abnormally low trim returns `"anomalie_melange_riche"` (P0172 logic). Missing
+field → HTTP 400 with the name of the expected sensor.
 
-### Résidu glissant sur un trajet (`/trip/*`)
+### Sliding residual over a trip (`/trip/*`)
 
-Un biais persistant mais discret (ex. MAF légèrement sous-évaluant) peut
-rester sous le seuil de détection sur un relevé isolé. `POST
-/trip/{id}/reading` accumule le résidu **signé** relevé après relevé et
-compare sa moyenne à un seuil resserré en 1/√n (le bruit indépendant par
-relevé s'annule dans une moyenne, pas un biais systématique) :
+A persistent but subtle bias (e.g. a MAF slightly underestimating) can remain
+below the detection threshold on an isolated record. `POST /trip/{id}/reading`
+accumulates the **signed** residual record after record and compares its mean
+to a threshold tightened in 1/√n (the record-independent noise cancels out in a
+mean, unlike a systematic bias):
 
 ```bash
 curl -s -X POST localhost:8080/trip/start                # → {"trip_id":1}
-# puis, à chaque relevé du trajet (même schéma que /diagnose) :
-curl -s localhost:8080/trip/1/reading -d '{...mêmes champs que /diagnose...}'
+# then, at each record of the trip (same schema as /diagnose):
+curl -s localhost:8080/trip/1/reading -d '{...same fields as /diagnose...}'
 ```
 
-Testé en pratique : un biais constant de +3 % (bien sous le seuil ponctuel
-de 8.85 %) reste `"anomalie":false` pendant 8 relevés, puis bascule à
-`"anomalie":true` au 9ᵉ relevé — le seuil effectif (8.85/√n, plancher 1.0)
-passe sous 3 % exactement à ce moment-là.
+Tested in practice: a constant bias of +3 % (well below the pointwise threshold
+of 8.85 %) stays `"anomalie":false` for 8 records, then flips to
+`"anomalie":true` at the 9th record — the effective threshold (8.85/√n, floor
+1.0) drops below 3 % exactly at that moment.
 
-### Multi-modèles et feedback atelier
+### Multi-model and workshop feedback
 
-`POST /diagnose/megaverse` interroge le classifieur 1000 causes (démo de
-passage à l'échelle, cf. plus haut) avec 20 features brutes ; réponse
-identique aux prédictions obtenues pendant l'entraînement (vérifié :
-`{"features":[…signature classe 200…]}` → `"cause_id":200` à 100 %).
+`POST /diagnose/megaverse` queries the 1000-cause classifier (scaling demo, see
+above) with 20 raw features; the response is identical to the predictions
+obtained during training (verified: `{"features":[…class 200 signature…]}` →
+`"cause_id":200` at 100 %).
 
-`POST /feedback` archive un cas confirmé (relevés + `cause_confirmee` +
-`notes` optionnel) dans `data/feedback.jsonl`, horodaté, un JSON par ligne
-— la base de départ du ré-entraînement décrit ci-dessous.
+`POST /feedback` archives a confirmed case (records + `cause_confirmee` +
+optional `notes`) in `data/feedback.jsonl`, timestamped, one JSON per line —
+the starting base for the retraining described below.
 
-## Ré-entraînement depuis le feedback (`obd2_retrain`)
+## Retraining from feedback (`obd2_retrain`)
 
-Ferme la boucle : `obd2_retrain` recharge le CSV atelier **et**
-`data/feedback.jsonl`, puis entraîne **deux fois** le même modèle
-(architecture et hyperparamètres identiques, même split de test jamais
-touché) — une fois sur le CSV seul (baseline), une fois CSV + feedback
-(augmenté) — pour comparer honnêtement les deux MAE plutôt que de
-présumer que plus de données améliore toujours le résultat.
+Closes the loop: `obd2_retrain` reloads the workshop CSV **and**
+`data/feedback.jsonl`, then trains **twice** the same model (identical
+architecture and hyperparameters, same never-touched test split) — once on the
+CSV alone (baseline), once on CSV + feedback (augmented) — to honestly compare
+the two MAEs rather than assuming that more data always improves the result.
 
 ```bash
 cargo run -p obd2_diagnostic --release --bin obd2_retrain
-# ou avec des chemins/epochs personnalisés :
+# or with custom paths/epochs:
 cargo run -p obd2_diagnostic --release --bin obd2_retrain -- <csv> <feedback.jsonl> <epochs>
 ```
 
-Seuls les cas de feedback avec les 10 capteurs **et** le trim confirmé
-sont exploitables pour cette régression (`cause_confirmee` est un texte
-libre, pas une cible numérique — il attendra un futur classifieur de
-causes entraîné sur historique d'atelier labellisé). Sans fichier de
-feedback (premier run), l'entraînement augmenté est simplement identique
-à la baseline — pas une erreur.
+Only feedback cases with the 10 sensors **and** the confirmed trim are usable
+for this regression (`cause_confirmee` is free text, not a numeric target — it
+will await a future cause classifier trained on labeled workshop history).
+Without a feedback file (first run), the augmented training is simply identical
+to the baseline — not an error.
 
-Le modèle augmenté écrase `models/obd2_real_fueltrim.safetensors` en
-préservant exactement le schéma de métadonnées dont dépend `obd2_api`
-(features, normalisation, seuil, source), plus deux clés de traçabilité :
-`feedback_cases_used` et `baseline_mae_no_feedback_pct`. Round-trip
-vérifié à chaque run, comme pour `obd2_real`.
+The augmented model overwrites `models/obd2_real_fueltrim.safetensors` while
+preserving exactly the metadata schema `obd2_api` depends on (features,
+normalization, threshold, source), plus two traceability keys:
+`feedback_cases_used` and `baseline_mae_no_feedback_pct`. Round-trip verified
+at each run, as for `obd2_real`.
 
-Vérifié en pratique (30 relevés dupliqués du CSV comme cas de feedback
-factices, uniquement pour valider la mécanique du pipeline — pas une
-mesure de gain réel puisque le modèle les avait déjà vus) : chargement,
-fusion, ré-entraînement, sauvegarde et rechargement par `obd2_api`
-fonctionnent de bout en bout, métadonnées `feedback_cases_used: 30`
-correctement embarquées.
+Verified in practice (30 records duplicated from the CSV as dummy feedback
+cases, only to validate the pipeline mechanics — not a measure of real gain
+since the model had already seen them): loading, merging, retraining, saving
+and reloading by `obd2_api` work end to end, with the `feedback_cases_used: 30`
+metadata correctly embedded.
 
-## Honnêteté sur les limites
+## Honesty about limitations
 
-Les versions massive/ultra/mégaverse restent **synthétiques** : l'IA y
-apprend des patterns générés. La version `obd2_real` s'entraîne sur de
-vraies données, mais d'**une seule voiture saine** : elle détecte des
-anomalies de mélange par rapport à la normale apprise, elle ne classifie
-pas 1000 causes racines sur données réelles (il faudrait un historique
-d'atelier labellisé « cause confirmée » pour ça). Cet exemple est
-**pédagogique & d'entraînement**, pas un outil de diagnostic homologué.
+The massive/ultra/megaverse versions remain **synthetic**: the AI there learns
+generated patterns. The `obd2_real` version trains on real data, but from
+**a single healthy car**: it detects mixture anomalies relative to the learned
+norm, it does not classify 1000 root causes on real data (that would require a
+workshop history labeled "confirmed cause"). This example is **educational &
+training-oriented**, not a certified diagnostic tool.

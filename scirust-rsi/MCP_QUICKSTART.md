@@ -1,107 +1,105 @@
-# Faire évoluer un algorithme depuis votre LLM (serveur MCP)
+# Evolving an algorithm from your LLM (MCP server)
 
-Ce guide permet à un **utilisateur non-technique** de demander à son LLM, en
-langage naturel, de **se connecter à scirust** et de faire évoluer un
-algorithme à partir d'exemples qu'il fournit.
+This guide lets a **non-technical user** ask their LLM, in natural language, to
+**connect to scirust** and evolve an algorithm from examples they provide.
 
-Le mécanisme est le **Model Context Protocol (MCP)** : scirust expose un petit
-serveur (`scirust-rsi-mcp`) que votre client LLM appelle comme un outil. Le
-serveur fait évoluer un programme arithmétique (sur une entrée `x`) pour
-reproduire vos exemples *entrée → sortie*, sous les garanties de scirust
-(borné, élitiste/non-régressif, reproductible, sandboxé).
+The mechanism is the **Model Context Protocol (MCP)**: scirust exposes a small
+server (`scirust-rsi-mcp`) that your LLM client calls like a tool. The server
+evolves an arithmetic program (over an input `x`) to reproduce your
+*input → output* examples, under scirust's guarantees (bounded, elitist/
+non-regressive, reproducible, sandboxed).
 
-> ⚠️ Une configuration **unique** est nécessaire : un LLM ne peut se connecter à
-> un outil externe qu'après l'avoir déclaré une fois dans un client compatible
-> MCP (Claude Desktop, Claude Code, etc.). Un LLM purement web sans support MCP
-> ne peut pas s'y connecter — voir la note en bas.
+> ⚠️ A **one-time** configuration is required: an LLM can only connect to an
+> external tool after declaring it once in an MCP-compatible client (Claude
+> Desktop, Claude Code, etc.). A purely web-based LLM without MCP support
+> cannot connect to it — see the note at the bottom.
 
-## 1. Compiler le serveur (une fois)
+## 1. Compile the server (once)
 
 ```sh
 cargo build -p scirust-rsi --bin scirust-rsi-mcp --features mcp --release
-# binaire produit : target/release/scirust-rsi-mcp
+# produced binary: target/release/scirust-rsi-mcp
 ```
 
-## 2. Déclarer le serveur dans votre client (une fois)
+## 2. Declare the server in your client (once)
 
-**Claude Code** (CLI) :
+**Claude Code** (CLI):
 
 ```sh
-claude mcp add scirust -- /chemin/absolu/vers/target/release/scirust-rsi-mcp
+claude mcp add scirust -- /absolute/path/to/target/release/scirust-rsi-mcp
 ```
 
-**Claude Desktop** — ajoutez ceci à `claude_desktop_config.json` :
+**Claude Desktop** — add this to `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "scirust": {
-      "command": "/chemin/absolu/vers/target/release/scirust-rsi-mcp"
+      "command": "/absolute/path/to/target/release/scirust-rsi-mcp"
     }
   }
 }
 ```
 
-Redémarrez le client. L'outil `evolve_algorithm` est maintenant disponible.
+Restart the client. The `evolve_algorithm` tool is now available.
 
-## 3. La commande à coller dans votre LLM
+## 3. The command to paste into your LLM
 
-Copiez-collez (en adaptant vos exemples) :
+Copy-paste (adapting your examples):
 
-> Connecte-toi au serveur MCP « scirust » et utilise l'outil
-> **`evolve_algorithm`** pour faire évoluer un programme qui reproduit ces
-> exemples entrée → sortie :
+> Connect to the "scirust" MCP server and use the **`evolve_algorithm`** tool
+> to evolve a program that reproduces these input → output examples:
 >
 > `1 → 2, 2 → 4, 3 → 6, 4 → 8`
 >
-> (autrement dit : doubler l'entrée). Donne-moi le programme évolué, son erreur,
-> et vérifie qu'il colle à chaque exemple.
+> (in other words: double the input). Give me the evolved program, its error,
+> and check that it matches every example.
 
-Le LLM appellera l'outil avec `examples = [[1,2],[2,4],[3,6],[4,8]]` et vous
-répondra avec le programme trouvé (ici `x x +`, soit `2·x`), son erreur (0), et
-le tableau de vérification.
+The LLM will call the tool with `examples = [[1,2],[2,4],[3,6],[4,8]]` and
+answer you with the program found (here `x x +`, i.e. `2·x`), its error (0),
+and the verification table.
 
-### Faire évoluer *votre* algorithme de départ
+### Evolving *your* starting algorithm
 
-Si vous avez déjà un algorithme et voulez l'améliorer, donnez-le comme point de
-départ — le résultat ne sera **jamais pire** que le vôtre (sélection élitiste) :
+If you already have an algorithm and want to improve it, give it as a starting
+point — the result will **never be worse** than yours (elitist selection):
 
-> … utilise `evolve_algorithm` avec mes exemples `-1 → 2, 0 → 1, 1 → 2, 2 → 5`
-> et **`seed_program` = "x x *"** comme point de départ. Améliore-le jusqu'à
-> coller aux exemples.
+> … use `evolve_algorithm` with my examples `-1 → 2, 0 → 1, 1 → 2, 2 → 5`
+> and **`seed_program` = "x x *"** as the starting point. Improve it until it
+> matches the examples.
 
-## L'outil `evolve_algorithm`
+## The `evolve_algorithm` tool
 
-| Argument | Requis | Défaut | Rôle |
+| Argument | Required | Default | Role |
 |---|---|---|---|
-| `examples` | oui | — | paires `[entrée, sortie]`, ex. `[[1,2],[2,4]]` |
-| `seed_program` | non | `"x"` | programme de départ (notation polonaise inversée) |
-| `max_iters` | non | `1500` | plafond d'itérations (toujours borné) |
-| `samples` | non | `32` | candidats proposés par tour (best-of-n) |
-| `seed` | non | `0` | graine RNG → run reproductible |
+| `examples` | yes | — | `[input, output]` pairs, e.g. `[[1,2],[2,4]]` |
+| `seed_program` | no | `"x"` | starting program (reverse Polish notation) |
+| `max_iters` | no | `1500` | iteration cap (always bounded) |
+| `samples` | no | `32` | candidates proposed per round (best-of-n) |
+| `seed` | no | `0` | RNG seed → reproducible run |
 
-Le programme est exprimé en **notation polonaise inversée** sur `x`, avec les
-jetons `x`, des nombres, et `+ - * /`. Exemple : `x x * 1 +` signifie `x² + 1`.
+The program is expressed in **reverse Polish notation** over `x`, with the
+tokens `x`, numbers, and `+ - * /`. Example: `x x * 1 +` means `x² + 1`.
 
-## Ce que scirust garantit (et ce qu'il ne fait pas)
+## What scirust guarantees (and what it does not do)
 
-- **Borné** : `max_iters` ⇒ l'évolution se termine toujours.
-- **Non-régressif** : adoption élitiste ⇒ le résultat n'est jamais pire que le
-  programme de départ.
-- **Reproductible** : même `seed` ⇒ même résultat.
-- **Sandboxé** : seul un interpréteur arithmétique fixe est exécuté — aucun code
-  généré n'est lancé, aucun accès à la machine, pas d'auto-réécriture.
+- **Bounded**: `max_iters` ⇒ evolution always terminates.
+- **Non-regressive**: elitist adoption ⇒ the result is never worse than the
+  starting program.
+- **Reproducible**: same `seed` ⇒ same result.
+- **Sandboxed**: only a fixed arithmetic interpreter is executed — no generated
+  code is run, no access to the machine, no self-rewriting.
 
-L'évolution tourne **localement et hors-ligne** dans le serveur : aucune clé API
-n'est requise. Le LLM ne sert qu'à traduire votre demande en appel d'outil et à
-vous expliquer le résultat.
+Evolution runs **locally and offline** in the server: no API key is required.
+The LLM only serves to translate your request into a tool call and to explain
+the result to you.
 
-## Limite & alternative
+## Limitation & alternative
 
-Un LLM web sans support MCP (p. ex. une interface de chat basique) ne peut pas se
-connecter à un binaire local. Deux options dans ce cas :
+A web LLM without MCP support (e.g. a basic chat interface) cannot connect to
+a local binary. Two options in that case:
 
-1. Utiliser un client compatible MCP (Claude Desktop / Claude Code) — recommandé.
-2. Héberger ce moteur derrière une **API HTTP** que le LLM peut appeler (non
-   inclus ici ; le cœur `scirust_rsi::progevo::evolve` est directement
-   réutilisable pour ça).
+1. Use an MCP-compatible client (Claude Desktop / Claude Code) — recommended.
+2. Host this engine behind an **HTTP API** that the LLM can call (not included
+   here; the core `scirust_rsi::progevo::evolve` is directly reusable for
+   that).

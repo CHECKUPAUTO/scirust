@@ -1,8 +1,5 @@
 # Licensing SciRust
 
-_Français : [LICENSING.fr.md](LICENSING.fr.md) — required for contracts with
-consumers resident in France (Loi « Toubon »)._
-
 SciRust is source-available under the complete **PolyForm Noncommercial
 License 1.0.0** in [LICENSE.md](LICENSE.md). Preserve that file and its
 `Required Notice:` line when distributing any copy or modified version.

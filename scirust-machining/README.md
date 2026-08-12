@@ -1,108 +1,108 @@
 # scirust-machining
 
-**Bibliothèque de calcul pour l'ingénierie mécanique et la productique — pur Rust, déterministe, sans dépendance d'exécution.**
+**Computation library for mechanical engineering and manufacturing — pure Rust, deterministic, no runtime dependency.**
 
-`scirust-machining` regroupe **458 modules** (~1800 fonctions publiques, 2863 tests) couvrant la chaîne de calcul du génie mécanique et de la fabrication : de la cinématique de coupe au dimensionnement des éléments de machines, de la mécanique des fluides à la thermique, en passant par les vibrations, la métrologie, la qualité et l'énergétique.
+`scirust-machining` groups **458 modules** (~1800 public functions, 2863 tests) covering the computation chain of mechanical engineering and manufacturing: from cutting kinematics to machine-element design, from fluid mechanics to thermal engineering, including vibrations, metrology, quality and energetics.
 
-La documentation est en **français**, les identifiants (fonctions, types, paramètres) en **anglais**.
+The documentation is in **French**, the identifiers (functions, types, parameters) in **English**.
 
 ```toml
 [dependencies]
-scirust-machining = { path = "…" }   # aucune dépendance d'exécution
+scirust-machining = { path = "…" }   # no runtime dependency
 ```
 
 ---
 
-## Philosophie : des modèles d'ingénieur honnêtes
+## Philosophy: honest engineering models
 
-Chaque module suit trois principes stricts, vérifiables dans le code :
+Each module follows three strict principles, verifiable in the code:
 
-1. **Aucune constante physique inventée.** Les grandeurs matériau / procédé / installation — coefficient de coupe `kc1.1`, exposant de Taylor `n`, facteur de forme de Lewis `Y`, coefficient de frottement `µ`, indice de travail de Bond `Wi`, coefficient de Seebeck… — sont **fournies par l'appelant** d'après un catalogue, une norme ou des essais. La crate calcule leurs *conséquences* ; elle n'introduit jamais de valeur « par défaut » qui serait invérifiable. Les seules constantes exposées sont **universelles** et nommées (π via `core::f64::consts`, constante de Wien, limite de Betz 16/27, μ₀…).
+1. **No invented physical constants.** Material / process / installation quantities — cutting coefficient `kc1.1`, Taylor exponent `n`, Lewis form factor `Y`, friction coefficient `µ`, Bond work index `Wi`, Seebeck coefficient… — are **provided by the caller** from a catalog, a standard or trials. The crate computes their *consequences*; it never introduces an unverifiable "default" value. The only exposed constants are **universal** and named (π via `core::f64::consts`, Wien constant, Betz limit 16/27, μ₀…).
 
-2. **Une section « Limite honnête » par module.** L'en-tête `//!` de chaque fichier énonce explicitement les hypothèses et le domaine de validité du modèle (régime permanent, élasticité linéaire, écoulement incompressible, corps gris, petites oscillations…) — ce que la formule *ne* dit pas.
+2. **An "honest limit" section per module.** The `//!` header of each file explicitly states the assumptions and validity domain of the model (steady state, linear elasticity, incompressible flow, gray body, small oscillations…) — what the formula does *not* say.
 
-3. **Des tests d'identités physiques.** Chaque module vérifie des réciprocités, des cas limites, des proportionnalités et un cas chiffré réaliste — pas des nombres magiques — plus un test de panique sur entrée invalide. Les fonctions gardent leurs entrées par `assert!` avec messages en français.
+3. **Physical identity tests.** Each module verifies reciprocities, edge cases, proportionalities and one realistic worked example — not magic numbers — plus a panic test on invalid input. The functions guard their inputs with `assert!` and French messages.
 
 ```rust
 use scirust_machining::{spindle_speed_rpm, mrr_turning_cm3_min};
 
-// Chariotage d'un acier Ø80 mm à Vc = 200 m/min, ap = 3 mm, f = 0,25 mm/tr.
-let n = spindle_speed_rpm(200.0, 80.0);          // ≈ 796 tr/min
+// Turning of a Ø80 mm steel at Vc = 200 m/min, ap = 3 mm, f = 0.25 mm/rev.
+let n = spindle_speed_rpm(200.0, 80.0);          // ≈ 796 rpm
 let q = mrr_turning_cm3_min(200.0, 3.0, 0.25);   // 150 cm³/min
 ```
 
-Tous les identifiants sont ré-exportés à plat depuis la racine de la crate ; ils sont aussi accessibles par leur module (`scirust_machining::kinematics::spindle_speed_rpm`).
+All identifiers are re-exported flat from the crate root; they are also reachable through their module (`scirust_machining::kinematics::spindle_speed_rpm`).
 
 ---
 
-## Domaines couverts
+## Covered domains
 
-Les familles ci-dessous sont **illustratives** (un échantillon par thème), pas exhaustives — voir la rustdoc pour la liste complète.
+The families below are **illustrative** (a sample per theme), not exhaustive — see the rustdoc for the complete list.
 
-### Coupe & usinage
-Cinématique de coupe (`Vc↔N`, `Vf`, MRR en tournage/fraisage/perçage), effort et puissance par le modèle de **Kienzle**, durée de vie outil par **Taylor**, économie d'usinage de **Gilbert**, temps de coupe, rugosité théorique, angle de cisaillement de **Merchant**, température de coupe, géométrie de foret, brochage, taillage à la fraise-mère, alésage, tournage conique, moletage.
+### Cutting & machining
+Cutting kinematics (`Vc↔N`, `Vf`, MRR in turning/milling/drilling), force and power by the **Kienzle** model, tool life by **Taylor**, **Gilbert** machining economics, cutting time, theoretical roughness, **Merchant** shear angle, cutting temperature, drill geometry, broaching, hobbing, boring, taper turning, knurling.
 
-### Formage & fabrication
-Emboutissage, pliage (développé, facteur K), roulage, laminage à plat, forgeage (Hollomon), extrusion, tréfilage, fluotournage (loi du sinus), découpage/poinçonnage, roulage de filet, rétreint, compactage de poudre.
+### Forming & fabrication
+Deep drawing, bending (developed length, K factor), roll forming, flat rolling, forging (Hollomon), extrusion, wire drawing, flow forming (sine law), blanking/punching, thread rolling, necking, powder compaction.
 
-### Assemblage & procédés spéciaux
-Soudage (apport de chaleur, préchauffage, équivalent carbone, dilution, refroidissement, cordon d'angle, groupe de cordons), CND (ultrasons, courants de Foucault, radiographie), fonderie (Chvorinov, masselottes, retrait), moulage par injection, EDM, ECM, découpe laser/jet d'eau, brasage, collage, revêtement (électrolytique, anodisation).
+### Assembly & special processes
+Welding (heat input, preheating, carbon equivalent, dilution, cooling, fillet weld, weld group), NDT (ultrasound, eddy current, radiography), casting (Chvorinov, risers, shrinkage), injection molding, EDM, ECM, laser/waterjet cutting, brazing, adhesive bonding, coating (electrolytic, anodizing).
 
-### Éléments de machines
-Engrenages (droits/hélicoïdaux/coniques/roue-vis, **Lewis**, **ISO 6336**, épicycloïdal, jeu de denture, grippage, usure et charge dynamique de **Buckingham**), roulements & paliers (L10 **ISO 281**, statique **ISO 76**, frottement de Palmgren, hydrostatique, PV), ressorts (hélicoïdaux, Belleville, coniques, ondulés, à force constante, spiral, de torsion), courroies & chaînes, embrayages et freins (disque, cône, centrifuge, à bande, à courants de Foucault), accouplements (hydrodynamique, magnétique, convertisseur de couple), arbres, clavettes, goupilles, vis, boulonnerie (précharge, serrage à l'angle, bride ASME).
+### Machine elements
+Gears (spur/helical/bevel/worm, **Lewis**, **ISO 6336**, epicyclic, backlash, scuffing, **Buckingham** wear and dynamic load), bearings (L10 **ISO 281**, static **ISO 76**, Palmgren friction, hydrostatic, PV), springs (helical, Belleville, conical, wave, constant-force, spiral, torsion), belts & chains, clutches and brakes (disc, cone, centrifugal, band, eddy-current), couplings (hydrodynamic, magnetic, torque converter), shafts, keys, pins, screws, bolting (preload, torque-angle tightening, ASME flange).
 
-### Résistance des matériaux & structure
-Poutres (réactions, flèches, charges réparties, poutre continue par les trois moments, sur fondation élastique de Winkler), flambement (Euler, Rankine, plaque, coque, poteau-poutre), sections (modules, centres de cisaillement, flux de Jourawski), contraintes (Mohr, von Mises, combinées, concentration, Hertz), plasticité (Ramberg-Osgood, flexion plastique), énergie (Castigliano, Strain energy).
+### Strength of materials & structures
+Beams (reactions, deflections, distributed loads, continuous beam by the three-moment theorem, on Winkler elastic foundation), buckling (Euler, Rankine, plate, shell, beam-column), sections (moduli, shear centers, Jourawski shear flow), stresses (Mohr, von Mises, combined, concentration, Hertz), plasticity (Ramberg-Osgood, plastic bending), energy (Castigliano, strain energy).
 
-### Dynamique, vibration & fatigue
-Cinématique/dynamique du solide, mécanismes (quatre barres, bielle-manivelle, cames, croix de Malte, genouillère), équilibrage, vitesses critiques, vibrations (1 et 2 ddl, forcées, isolation, Coulomb, amortisseur accordé, balourd, **ISO 10816**), fatigue (Goodman/Soderberg/Gerber, Coffin-Manson, Paris, Weibull, endurance).
+### Dynamics, vibration & fatigue
+Rigid-body kinematics/dynamics, mechanisms (four-bar, crank-slider, cams, Geneva drive, toggle), balancing, critical speeds, vibrations (1 and 2 dof, forced, isolation, Coulomb, tuned damper, unbalance, **ISO 10816**), fatigue (Goodman/Soderberg/Gerber, Coffin-Manson, Paris, Weibull, endurance).
 
-### Mécanique des fluides & hydraulique
-Bernoulli, pertes de charge (Darcy, Colebrook), débitmétrie (Venturi, diaphragme, Pitot, rotamètre), surface libre (déversoirs, canal, ressaut, vanne de fond, Parshall), cavitation/NPSH, coup de bélier, cheminée d'équilibre, sédimentation de Stokes, écoulement compressible (tuyère bloquée, isentropique), pipeline de gaz (Weymouth), siphon, éjecteur.
+### Fluid mechanics & hydraulics
+Bernoulli, pressure losses (Darcy, Colebrook), flow measurement (Venturi, orifice plate, Pitot, rotameter), free surface (weirs, channel, hydraulic jump, underflow gate, Parshall), cavitation/NPSH, water hammer, surge tank, Stokes sedimentation, compressible flow (choked nozzle, isentropic), gas pipeline (Weymouth), siphon, ejector.
 
-### Machines à fluide
-Pompes (centrifuges, à engrenages, à palettes, péristaltique, vitesse spécifique, lois d'affinité, NPSH), ventilateurs, compresseurs (alternatif, surpresseur Roots), turbines hydrauliques, éoliennes (limite de Betz), vérins hydrauliques/pneumatiques, presse hydraulique, palier hydrostatique.
+### Fluid machinery
+Pumps (centrifugal, gear, vane, peristaltic, specific speed, affinity laws, NPSH), fans, compressors (reciprocating, Roots blower), hydraulic turbines, wind turbines (Betz limit), hydraulic/pneumatic cylinders, hydraulic press, hydrostatic bearing.
 
-### Thermique & énergétique
-Conduction (permanente/transitoire, résistances, ailettes, isolation critique), convection, rayonnement (Stefan-Boltzmann, facteurs de forme, réseau de résistances, écrans), échangeurs (DTLM, NTU, encrassement), diphasique (condensation de Nusselt, ébullition de Rohsenow/Zuber), cycles thermodynamiques, réfrigération, pompe à chaleur, psychrométrie, combustion, chaudière, tour de refroidissement, thermoélectricité (Peltier, Seebeck).
+### Thermal & energetics
+Conduction (steady/transient, resistances, fins, critical insulation), convection, radiation (Stefan-Boltzmann, view factors, resistance network, shields), heat exchangers (LMTD, NTU, fouling), two-phase (Nusselt condensation, Rohsenow/Zuber boiling), thermodynamic cycles, refrigeration, heat pump, psychrometry, combustion, boiler, cooling tower, thermoelectricity (Peltier, Seebeck).
 
-### Procédés & équipements
-Silos (Janssen), broyage (Bond/Rittinger/Kick), cyclones, filtration sur gâteau, agitation, transport pneumatique, convoyeurs (bande, vis, godets).
+### Processes & equipment
+Silos (Janssen), grinding (Bond/Rittinger/Kick), cyclones, cake filtration, agitation, pneumatic conveying, conveyors (belt, screw, bucket).
 
-### Métrologie & qualité
-Contrôle dimensionnel (barre sinus, cales, erreur d'Abbe/cosinus, verre étalon, planéité, battement), GD&T, incertitude, MSA, cartes de contrôle, échantillonnage, capabilité, Six Sigma (DPMO), Taguchi, AMDEC (RPN).
+### Metrology & quality
+Dimensional inspection (sine bar, gauge blocks, Abbe/cosine error, optical flat, flatness, runout), GD&T, uncertainty, MSA, control charts, sampling, capability, Six Sigma (DPMO), Taguchi, FMEA (RPN).
 
-### Production, économie & ergonomie
-Ordonnancement (Johnson, CPM, PERT), équilibrage de ligne, Little's law, takt time, EOQ, courbe d'apprentissage, prévision, SMED, OEE, coût machine, rentabilité ; ergonomie (NIOSH, WBGT, vibrations main-bras et corps entier).
+### Production, economics & ergonomics
+Scheduling (Johnson, CPM, PERT), line balancing, Little's law, takt time, EOQ, learning curve, forecasting, SMED, OEE, machine cost, profitability; ergonomics (NIOSH, WBGT, hand-arm and whole-body vibration).
 
-### Instrumentation & mécatronique
-Jauges de déformation et rosettes, thermocouple, actionneurs (solénoïde à réluctance, bobine mobile), piézoélectricité, moteurs (asynchrone, CC, triphasé, variateur V/f, démarrage), asservissement (PID, premier/second ordre, Bode), analyse vibratoire (ordres, fréquences de défaut de roulement).
+### Instrumentation & mechatronics
+Strain gauges and rosettes, thermocouple, actuators (reluctance solenoid, moving coil), piezoelectricity, motors (asynchronous, DC, three-phase, V/f drive, starting), control (PID, first/second order, Bode), vibration analysis (orders, bearing defect frequencies).
 
 ---
 
-## Conventions d'unités
+## Unit conventions
 
-SI cohérent, avec les conventions usuelles des fiches techniques rappelées par chaque fonction : `Vc` en m/min, longueurs/diamètres en mm, régimes en tr/min, avances en mm, efforts en N, puissances en kW ou W, couples en N·m, pressions en Pa, températures en K (sauf mention °C), angles en radians pour les fonctions trigonométriques.
+Coherent SI, with the usual datasheet conventions recalled by each function: `Vc` in m/min, lengths/diameters in mm, speeds in rpm, feeds in mm, forces in N, powers in kW or W, torques in N·m, pressures in Pa, temperatures in K (unless stated °C), angles in radians for trigonometric functions.
 
-## Exemples exécutables
+## Runnable examples
 
 ```bash
 cargo run -p scirust-machining --example atelier
 ```
 
-`examples/atelier.rs` enchaîne les modules sur un cas concret de chariotage : choix du régime de coupe → vérification de la puissance broche → durée de vie outil → optimum économique → temps et coût → état de surface → tolérance → vérification d'un pignon.
+`examples/atelier.rs` chains the modules on a concrete turning case: cutting speed selection → spindle power check → tool life → economic optimum → time and cost → surface finish → tolerance → gear check.
 
 ## Tests
 
 ```bash
-cargo test  -p scirust-machining          # 2863 tests d'identités physiques
+cargo test  -p scirust-machining          # 2863 physical identity tests
 cargo clippy -p scirust-machining --all-targets -- -D warnings
 ```
 
-## Positionnement dans SciRust
+## Position within SciRust
 
-Cette crate complète les autres briques mécaniques de l'écosystème : `scirust-tolerance` (tolérancement inertiel/statistique, ISO 286/1101), `scirust-metrology` (incertitude GUM), `scirust-fatigue` (rainflow, Palmgren-Miner) et `scirust-fab` (contrôle de procédé). Elle en constitue le **cœur de calcul déterministe**.
+This crate completes the other mechanical bricks of the ecosystem: `scirust-tolerance` (inertial/statistical tolerancing, ISO 286/1101), `scirust-metrology` (GUM uncertainty), `scirust-fatigue` (rainflow, Palmgren-Miner) and `scirust-fab` (process control). It constitutes its **deterministic computation core**.
 
-## Licence
+## License
 
-Voir le dépôt racine `scirust`.
+See the `scirust` root repository.

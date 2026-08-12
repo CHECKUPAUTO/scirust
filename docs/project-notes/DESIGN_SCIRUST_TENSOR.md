@@ -1,25 +1,25 @@
 # Design Specification: scirust-tensor
 
-## 1. Architecture de crates/modules
+## 1. Crate/module architecture
 
-Le module **scirust-tensor** est structuré comme une suite de crates spécialisées, garantissant une séparation claire entre la logique d'algèbre, la planification et l'exécution.
+The **scirust-tensor** module is structured as a suite of specialized crates, guaranteeing a clear separation between algebra logic, planning and execution.
 
-*   **scirust-tensor-core** : Définit le type `TensorND` (N-dimensionnel), les types de formes (Shapes) et les primitives de manipulation de strides. C'est le socle commun sans dépendances lourdes.
-*   **scirust-tensor-einsum** : Contient le parseur de signatures de style Einstein (ex: `"ij,jk->ik"`) et la logique de réduction en opérations de contraction binaires.
-*   **scirust-tensor-contraction** : Implémente le **Contraction Planner**. Il décide de l'ordre optimal des multiplications pour minimiser les FLOPs et la mémoire. Contient les kernels CPU/SIMD de base.
-*   **scirust-tensor-compile** : Le "compilateur de graphe". Il transforme une suite d'opérations en un graphe d'exécution optimisé (élimination de redondances, fusion d'opérateurs).
-*   **scirust-tensor-runtime** : Moteur d'exécution léger. Il gère l'allocation de buffers et l'exécution des graphes compilés, compatible avec le format SRT1.
-*   **scirust-tensor-examples** : Démonstrations (Transformer Multi-Head Attention via einsum).
+*   **scirust-tensor-core**: Defines the `TensorND` (N-dimensional) type, the shape types (Shapes) and stride-manipulation primitives. It is the common foundation with no heavy dependencies.
+*   **scirust-tensor-einsum**: Contains the Einstein-style signature parser (e.g. `"ij,jk->ik"`) and the logic for reducing to binary contraction operations.
+*   **scirust-tensor-contraction**: Implements the **Contraction Planner**. It decides the optimal multiplication order to minimize FLOPs and memory. Contains the base CPU/SIMD kernels.
+*   **scirust-tensor-compile**: The "graph compiler". It transforms a sequence of operations into an optimized execution graph (redundancy elimination, operator fusion).
+*   **scirust-tensor-runtime**: Lightweight execution engine. It manages buffer allocation and execution of compiled graphs, compatible with the SRT1 format.
+*   **scirust-tensor-examples**: Demonstrations (Transformer Multi-Head Attention via einsum).
 
-**Dépendances** : `runtime` -> `compile` -> `contraction` -> `einsum` -> `core`.
-**Hardware** : Core/Einsum/Planner sont 100% CPU. Les kernels de `contraction` et le `runtime` sont extensibles au GPU.
+**Dependencies**: `runtime` -> `compile` -> `contraction` -> `einsum` -> `core`.
+**Hardware**: Core/Einsum/Planner are 100% CPU. The `contraction` kernels and the `runtime` are GPU-extensible.
 
-## 2. Types Rust principaux
+## 2. Main Rust types
 
 ```rust
 use std::collections::HashMap;
 
-/// Tenseur N-dimensionnel avec gestion explicite des strides pour le déterminisme.
+/// N-dimensional tensor with explicit stride management for determinism.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TensorND {
     pub data: Vec<f32>,
@@ -27,19 +27,19 @@ pub struct TensorND {
     pub strides: Vec<usize>,
 }
 
-/// Représentation d'une opération einsum analysée.
+/// Representation of a parsed einsum operation.
 pub struct EinsumPattern {
     pub inputs: Vec<Vec<char>>,
     pub output: Vec<char>,
 }
 
-/// Un plan de contraction est une séquence d'étapes de calcul.
+/// A contraction plan is a sequence of computation steps.
 pub struct ContractionPlan {
     pub steps: Vec<ContractionStep>,
 }
 
 pub enum ContractionStep {
-    /// Multiplication de deux tenseurs avec réorganisation optionnelle.
+    /// Multiplication of two tensors with optional reorganization.
     Contract {
         left: usize,
         right: usize,
@@ -47,14 +47,14 @@ pub enum ContractionStep {
         indices_right: Vec<char>,
         out_indices: Vec<char>,
     },
-    /// Opération unitaire (ex: somme sur un axe).
+    /// Unitary operation (e.g. sum over an axis).
     Reduce {
         input: usize,
         axis: usize,
     },
 }
 
-/// Noeud d'un graphe d'opérations optimisées.
+/// Node of an optimized operation graph.
 pub enum TensorOp {
     MatMul(usize, usize),
     Add(usize, usize),
@@ -62,15 +62,15 @@ pub enum TensorOp {
     Fused(FusedOp),
 }
 
-/// Noeud d'un graphe d'opérations fusionnées.
+/// Node of a fused operation graph.
 pub enum FusedOp {
-    /// MatMul + Add Bias + ReLU fusionné en une seule passe mémoire.
+    /// MatMul + Add Bias + ReLU fused into a single memory pass.
     LinearReLU {
         input_idx: usize,
         weight_idx: usize,
         bias_idx: usize,
     },
-    /// Contraction optimisée.
+    /// Optimized contraction.
     OptimizedContraction(ContractionPlan),
 }
 
@@ -80,21 +80,21 @@ pub struct TensorGraph {
 }
 ```
 
-## 3. Pipeline complet d'algèbre tensorielle
+## 3. Complete tensor algebra pipeline
 
-1.  **Parsing de signature** : La chaîne `"bij,bjk->bik"` est transformée en `EinsumPattern`. On vérifie la cohérence des dimensions.
-2.  **Contraction Planning** : Pour plus de 2 tenseurs, un algorithme glouton (ou exhaustif pour les petits graphes) calcule le coût en FLOPs de chaque ordre possible (ex: `(A*B)*C` vs `A*(B*C)`).
-3.  **Construction du Graphe** : Les opérations (matmul, transpose, add) sont insérées dans un `TensorGraph`.
-4.  **Optimisation et Fusion** :
-    *   **Permute Fusion** : Si une permutation d'axes précède un MatMul, on fusionne les deux en manipulant les strides dans le kernel GEMM.
-    *   **Operator Fusion** : On identifie les patterns `Linear -> Bias -> ReLU` et on les remplace par un seul kernel `FusedOp`.
-5.  **Exécution CPU** : Utilisation de `scirust-simd` pour des kernels tillés (blocking) garantissant le déterminisme bit-à-bit (sommation fixe).
-6.  **Exécution GPU** : Si disponible, dispatch vers des shaders WGSL (`wgpu`) ou des kernels Tensor Cores (`cuBLAS`).
+1.  **Signature parsing**: The string `"bij,bjk->bik"` is transformed into an `EinsumPattern`. Dimension consistency is checked.
+2.  **Contraction Planning**: For more than 2 tensors, a greedy algorithm (or exhaustive for small graphs) computes the FLOP cost of each possible order (e.g. `(A*B)*C` vs `A*(B*C)`).
+3.  **Graph Construction**: The operations (matmul, transpose, add) are inserted into a `TensorGraph`.
+4.  **Optimization and Fusion**:
+    *   **Permute Fusion**: If an axis permutation precedes a MatMul, the two are fused by manipulating the strides inside the GEMM kernel.
+    *   **Operator Fusion**: `Linear -> Bias -> ReLU` patterns are identified and replaced by a single `FusedOp` kernel.
+5.  **CPU Execution**: Use of `scirust-simd` for tiled (blocking) kernels guaranteeing bit-for-bit determinism (fixed summation).
+6.  **GPU Execution**: If available, dispatch to WGSL shaders (`wgpu`) or Tensor Core kernels (`cuBLAS`).
 
-## 4. Version MVP (v1)
+## 4. MVP version (v1)
 
-*   **Fonctionnalités** : Einsum binaire, transposition automatique, kernels CPU optimisés via Rayon (déterministe).
-*   **API Rust** :
+*   **Features**: Binary einsum, automatic transposition, optimized CPU kernels via Rayon (deterministic).
+*   **Rust API**:
 ```rust
 use scirust_tensor_einsum::einsum;
 
@@ -104,45 +104,45 @@ let b = TensorND::rand(&[20, 30]);
 // C[i, k] = sum_j A[i, j] * B[j, k]
 let c = einsum("ij,jk->ik", &[&a, &b]).unwrap();
 ```
-*   **Métriques attendues** : Overhead de parsing < 1ms, latence GEMM CPU compétitive avec `scirust-core`.
+*   **Expected metrics**: Parsing overhead < 1ms, CPU GEMM latency competitive with `scirust-core`.
 
-## 5. Version avancée (v2)
+## 5. Advanced version (v2)
 
-*   **Planner Automatique** : Support d'einsum à N tenseurs (ex: `"ij,jk,kl->il"`) avec recherche du chemin de contraction optimal.
-*   **Compilation XLA-like** : Génération d'un plan d'exécution statique réutilisable pour l'inférence.
-*   **Fusion automatique d'opérateurs** : Heuristique de fusion multi-couches.
-*   **Support GPU complet** : Kernels wgpu optimisés pour les contractions binaires.
-*   **JIT de kernels** : backend à concevoir et tester ; aucun driver MIR factice n'est distribué.
+*   **Automatic Planner**: Support for N-tensor einsum (e.g. `"ij,jk,kl->il"`) with optimal contraction-path search.
+*   **XLA-like compilation**: Generation of a reusable static execution plan for inference.
+*   **Automatic operator fusion**: Multi-layer fusion heuristic.
+*   **Full GPU support**: wgpu kernels optimized for binary contractions.
+*   **Kernel JIT**: backend to design and test; no dummy MIR driver is shipped.
 
-## 6. Métriques à suivre
+## 6. Metrics to track
 
-*   **Performance** : GFLOPS, latence p50/p99.
-*   **Mémoire** : Nombre de buffers intermédiaires économisés par fusion.
-*   **Optimisation** : Nombre d'opérations éliminées du graphe initial.
-*   **Déterminisme** : Fingerprint (hash) de la sortie bit-à-bit identique sur 1 et N threads.
+*   **Performance**: GFLOPS, p50/p99 latency.
+*   **Memory**: Number of intermediate buffers saved by fusion.
+*   **Optimization**: Number of operations eliminated from the initial graph.
+*   **Determinism**: Fingerprint (hash) of the output bit-for-bit identical on 1 and N threads.
 
-## 7. Déterminisme et SRT1
+## 7. Determinism and SRT1
 
-*   **Ordre de réduction** : Toutes les réductions (sommes) utilisent un ordre fixe (généralement croissant par index) pour éviter les instabilités du flottant liées à l'associativité.
-*   **Frozen Graph** : Le graphe optimisé est sérialisé dans le format **SRT1**, incluant les formes et les types de kernels choisis.
-*   **Validation par Oracle** : Chaque plan de contraction complexe est validé par un oracle "naïf" (boucles imbriquées) lors des tests d'intégration.
+*   **Reduction order**: All reductions (sums) use a fixed order (generally increasing by index) to avoid float instabilities related to associativity.
+*   **Frozen Graph**: The optimized graph is serialized into the **SRT1** format, including the shapes and the chosen kernel types.
+*   **Oracle Validation**: Each complex contraction plan is validated by a "naive" oracle (nested loops) during integration tests.
 
-## 8. Quantification int8 et QSR1
+## 8. int8 quantization and QSR1
 
-*   **Quantification des tenseurs** : Stockage des échelles (scales) et des points zéro (zero points) dans le format QSR1.
-*   **Einsum int8** : Accumulation systématique en `i32` pour éviter l'overflow, suivie d'une requantisation fixe déterministe.
-*   **Validation** : Chaque opération quantifiée est comparée à son équivalent f32 via oracle avec une erreur bornée.
+*   **Tensor quantization**: Storage of scales and zero points in the QSR1 format.
+*   **int8 einsum**: Systematic `i32` accumulation to avoid overflow, followed by deterministic fixed requantization.
+*   **Validation**: Each quantized operation is compared to its f32 equivalent via oracle with bounded error.
 
-## 9. Risques techniques
+## 9. Technical risks
 
-*   **Compilateur XLA-like complexe** : Difficulté de gérer tous les cas de fusion. *Mitigation : Commencer par des patterns prédéfinis.*
-*   **Fusion sur GPU** : Nécessite l'écriture manuelle de kernels WGSL complexes. *Mitigation : Utiliser des templates de kernels.*
-*   **Déterminisme cross-architecture** : Hors scope, focus sur la stabilité cross-thread sur une même machine.
+*   **Complex XLA-like compiler**: Difficulty of handling all fusion cases. *Mitigation: Start with predefined patterns.*
+*   **GPU fusion**: Requires manual writing of complex WGSL kernels. *Mitigation: Use kernel templates.*
+*   **Cross-architecture determinism**: Out of scope; focus on cross-thread stability on a single machine.
 
-## 10. Checklist de validation
+## 10. Validation checklist
 
-*   [ ] Tests unitaires pour einsum (parsing et exécution).
-*   [ ] Tests d'intégration pour contraction planner (FLOPs optimality).
-*   [ ] Tests de déterminisme (fingerprint stable).
-*   [ ] Validation par oracle CPU (loop-based reference).
-*   [ ] Benchmarks de performance (GFLOPS).
+*   [ ] Unit tests for einsum (parsing and execution).
+*   [ ] Integration tests for contraction planner (FLOPs optimality).
+*   [ ] Determinism tests (stable fingerprint).
+*   [ ] CPU oracle validation (loop-based reference).
+*   [ ] Performance benchmarks (GFLOPS).
