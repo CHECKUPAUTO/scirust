@@ -45,6 +45,19 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Require persistent physical Thor runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "runner_name=$RUNNER_NAME"
+          case "$RUNNER_NAME" in
+            tarek-scirust-arm64-01|tarek-scirust-arm64-02|tarek-scirust-arm64-03|tarek-scirust-arm64-04)
+              ;;
+            *)
+              echo "::error::M33 physical evidence requires one of the persistent tarek-scirust-arm64-01..04 runners; refusing $RUNNER_NAME before build"
+              exit 1
+              ;;
+          esac
       - name: Verify exact source revision
         shell: bash
         run: |
@@ -75,6 +88,7 @@ jobs:
             --features flat-attention --test flat_runtime_decode --locked --no-run
           rustup run nightly-2026-07-02 cargo build -p scirust-sciagent \
             --features flat-attention --release --locked --example flat_m33_thor_bench
+          test -x "$GITHUB_WORKSPACE/target/release/examples/flat_m33_thor_bench"
       - name: Exclusive M33 correctness + real Thor model-level benchmark
         shell: bash
         timeout-minutes: 330
@@ -91,6 +105,41 @@ jobs:
 
           compute_processes() {
             nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null
+          }
+
+          settle_idle() {
+            local phase="$1"
+            local settled=0
+            while (( settled < settle_required )); do
+              local training
+              training="$(training_processes)"
+              local active
+              if ! active="$(compute_processes)"; then
+                echo "::error::M33 cannot verify Thor compute occupancy during $phase"
+                exit 1
+              fi
+
+              if [[ -n "${training//[[:space:]]/}" ]]; then
+                echo "SciAgent cuda_pretrain is active; M33 $phase remains blocked."
+                printf '%s\n' "$training"
+                settled=0
+              elif [[ -n "${active//[[:space:]]/}" ]]; then
+                echo "::error::Unknown GPU compute activity is active while M33 owns the Thor reservation during $phase:"
+                printf '%s\n' "$active"
+                exit 1
+              else
+                settled=$((settled + settle_step))
+                if (( settled == settle_step || settled % 60 == 0 )); then
+                  echo "Thor continuously idle for $phase: ${settled}/${settle_required}s"
+                fi
+              fi
+
+              if (( SECONDS >= deadline )); then
+                echo "::error::Thor never reached the required ${settle_required}s continuous idle window for $phase before the five-hour deadline"
+                exit 1
+              fi
+              sleep "$settle_step"
+            done
           }
 
           exec 9>"$SCIRUST_THOR_GPU_LOCK"
@@ -120,38 +169,7 @@ jobs:
           deadline=$((SECONDS + 18000))
           settle_step=5
           settle_required="$SCIRUST_THOR_IDLE_SETTLE_SECONDS"
-          settled=0
-          while (( settled < settle_required )); do
-            training="$(training_processes)"
-            if ! active="$(compute_processes)"; then
-              echo "::error::M33 cannot verify Thor compute occupancy"
-              exit 1
-            fi
-
-            if [[ -n "${training//[[:space:]]/}" ]]; then
-              echo "SciAgent cuda_pretrain is active; M33 qualification remains blocked."
-              printf '%s\n' "$training"
-              settled=0
-            elif [[ -n "${active//[[:space:]]/}" ]]; then
-              echo "::error::Unknown GPU compute activity is active while M33 owns the Thor reservation:"
-              printf '%s\n' "$active"
-              exit 1
-            else
-              settled=$((settled + settle_step))
-              if (( settled == settle_step || settled % 60 == 0 )); then
-                echo "Thor continuously idle: ${settled}/${settle_required}s"
-              fi
-            fi
-
-            if (( SECONDS >= deadline )); then
-              echo "::error::Thor never reached the required ${settle_required}s continuous idle window before the five-hour deadline"
-              exit 1
-            fi
-            sleep "$settle_step"
-          done
-
-          echo "Thor idle/cooldown qualification satisfied for ${settle_required}s."
-          nvidia-smi --query-gpu=temperature.gpu,utilization.gpu,clocks.gr,clocks.sm,power.draw --format=csv,noheader || true
+          settle_idle "pre-parity qualification"
 
           contamination="$RUNNER_TEMP/flat-m33-thor-contamination.txt"
           : > "$contamination"
@@ -195,9 +213,18 @@ jobs:
             exit 1
           fi
 
-          rustup run nightly-2026-07-02 cargo run -p scirust-sciagent \
-            --features flat-attention --release --locked --example flat_m33_thor_bench \
-            | tee "$RUNNER_TEMP/flat-m33-thor.csv"
+          echo "Parity gates completed; restarting the full idle/cooldown window before performance timing."
+          settle_idle "post-parity performance cooldown"
+          if [[ -s "$contamination" ]]; then
+            echo "::error::SciAgent training appeared before the M33 performance window; evidence is invalid"
+            cat "$contamination"
+            exit 1
+          fi
+          nvidia-smi --query-gpu=temperature.gpu,utilization.gpu,clocks.gr,clocks.sm,power.draw --format=csv,noheader || true
+
+          benchmark="$GITHUB_WORKSPACE/target/release/examples/flat_m33_thor_bench"
+          test -x "$benchmark"
+          "$benchmark" | tee "$RUNNER_TEMP/flat-m33-thor.csv"
 
           if [[ -s "$contamination" ]]; then
             echo "::error::SciAgent training appeared during the measured M33 window; all timing evidence from this run is invalid"
