@@ -281,6 +281,50 @@ impl ResidentModel {
         })
     }
 
+    /// Replace the default Cold FLAT Elastic runtime with caller-supplied
+    /// persisted plans before decode begins. Record discovery and file I/O stay
+    /// outside the resident model; this method only validates encoded bytes and
+    /// installs the resulting in-memory cache.
+    #[cfg(feature = "flat-autotune")]
+    pub fn configure_flat_autotune_persisted(
+        &mut self,
+        config: ElasticConfig,
+        encoded_records: &[Vec<u8>],
+        required_invalidation_dependencies: &[Vec<u8>],
+    ) -> Result<(), scirust_gpu::flat_autotune::FlatElasticError> {
+        let runtime = FlatElasticRuntime::in_memory_with_persisted_records(
+            config,
+            self.flat_decode.context(),
+            encoded_records,
+            required_invalidation_dependencies,
+        )?;
+        self.flat_autotune = Mutex::new(runtime);
+        Ok(())
+    }
+
+    /// Build a resident model and install validated persisted FLAT plans at the
+    /// startup boundary. `Ok(None)` means no GPU adapter was available; invalid
+    /// or stale persisted input is returned separately as `Err`.
+    #[cfg(feature = "flat-autotune")]
+    pub fn from_model_with_persisted_flat_plans(
+        model: &SciAgentModel,
+        config: ElasticConfig,
+        encoded_records: &[Vec<u8>],
+        required_invalidation_dependencies: &[Vec<u8>],
+    ) -> Result<Option<Self>, scirust_gpu::flat_autotune::FlatElasticError> {
+        let Some(mut resident) = Self::from_model(model)
+        else
+        {
+            return Ok(None);
+        };
+        resident.configure_flat_autotune_persisted(
+            config,
+            encoded_records,
+            required_invalidation_dependencies,
+        )?;
+        Ok(Some(resident))
+    }
+
     /// Name of the underlying GPU adapter.
     pub fn adapter_name(&self) -> &str {
         self.chain.adapter_name()
