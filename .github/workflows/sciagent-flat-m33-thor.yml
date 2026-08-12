@@ -105,7 +105,7 @@ jobs:
           command -v vulkaninfo >/dev/null
 
           training_processes() {
-            pgrep -af 'cuda_pretrain' || true
+            pgrep -af '[c]uda_pretrain' || true
           }
 
           compute_processes() {
