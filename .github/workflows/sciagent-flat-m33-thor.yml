@@ -30,6 +30,7 @@ jobs:
       RUSTFLAGS: "-D warnings"
       SCIRUST_THOR_GPU_LOCK: /tmp/scirust-thor-gpu.lock
       SCIRUST_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+      SCIRUST_THOR_IDLE_SETTLE_SECONDS: "300"
       SCIAGENT_FLAT_M33_PROMPT: "64"
       SCIAGENT_FLAT_M33_NEW: "16"
       SCIAGENT_FLAT_M33_WARMUPS: "2"
@@ -39,8 +40,18 @@ jobs:
       SCIAGENT_FLAT_M33_Q_HEADS: "8"
       SCIAGENT_FLAT_M33_KV_HEADS: "2"
       SCIAGENT_FLAT_M33_D_FF: "1408"
+      WGPU_BACKEND: vulkan
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact source revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          echo "source_revision=$actual"
+          test "$actual" = "$SCIRUST_SOURCE_REVISION"
       - name: Prepare executable temporary directory
         shell: bash
         run: |
@@ -54,84 +65,166 @@ jobs:
           components: rustfmt, clippy
       - name: Format
         run: rustup run nightly-2026-07-02 cargo fmt --all -- --check
-      - name: M33 lifecycle parity
-        run: >-
-          rustup run nightly-2026-07-02 cargo test -p scirust-sciagent
-          --features flat-attention --test flat_m33_lifecycle --locked -- --nocapture
-      - name: M32 prefill + M15 decode parity
-        run: >-
-          rustup run nightly-2026-07-02 cargo test -p scirust-sciagent
-          --features flat-attention --test flat_runtime_decode --locked -- --nocapture
-      - name: M33 real Thor model-level benchmark
+      - name: Build M33 qualification binaries without touching the GPU
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup run nightly-2026-07-02 cargo test -p scirust-sciagent \
+            --features flat-attention --test flat_m33_lifecycle --locked --no-run
+          rustup run nightly-2026-07-02 cargo test -p scirust-sciagent \
+            --features flat-attention --test flat_runtime_decode --locked --no-run
+          rustup run nightly-2026-07-02 cargo build -p scirust-sciagent \
+            --features flat-attention --release --locked --example flat_m33_thor_bench
+      - name: Exclusive M33 correctness + real Thor model-level benchmark
         shell: bash
         timeout-minutes: 330
         run: |
           set -euo pipefail
           command -v flock >/dev/null
-          if ! command -v nvidia-smi >/dev/null 2>&1; then
-            echo "::error::nvidia-smi is required to qualify the physical Thor state"
-            exit 1
-          fi
+          command -v pgrep >/dev/null
+          command -v nvidia-smi >/dev/null
+          command -v vulkaninfo >/dev/null
 
-          # Reserve the next idle-device boundary before inspecting occupancy. Holding
-          # this shared SciRust lock prevents another cooperative GPU workflow from
-          # taking the Thor between the idle observation and the M33 benchmark.
+          training_processes() {
+            pgrep -af 'cuda_pretrain' || true
+          }
+
+          compute_processes() {
+            nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null
+          }
+
           exec 9>"$SCIRUST_THOR_GPU_LOCK"
           flock -x 9
-          nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader || true
+
+          gpu_inventory="$(nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader)" || {
+            echo "::error::cannot query NVIDIA GPU inventory"
+            exit 1
+          }
+          printf '%s\n' "$gpu_inventory"
+          grep -F "NVIDIA Thor" <<< "$gpu_inventory" >/dev/null || {
+            echo "::error::expected physical NVIDIA Thor was not found"
+            exit 1
+          }
+
+          vulkan_summary="$(vulkaninfo --summary 2>&1)" || {
+            printf '%s\n' "$vulkan_summary"
+            echo "::error::cannot query Vulkan adapter inventory"
+            exit 1
+          }
+          printf '%s\n' "$vulkan_summary"
+          grep -F "NVIDIA Tegra NVIDIA Thor" <<< "$vulkan_summary" >/dev/null || {
+            echo "::error::physical Thor is not exposed through Vulkan"
+            exit 1
+          }
 
           deadline=$((SECONDS + 18000))
-          while true; do
-            if ! active="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null)"; then
+          settle_step=5
+          settle_required="$SCIRUST_THOR_IDLE_SETTLE_SECONDS"
+          settled=0
+          while (( settled < settle_required )); do
+            training="$(training_processes)"
+            if ! active="$(compute_processes)"; then
               echo "::error::M33 cannot verify Thor compute occupancy"
               exit 1
             fi
-            if [[ -z "${active//[[:space:]]/}" ]]; then
-              echo "Thor is idle and reserved; proceeding with M33 qualification."
-              break
-            fi
 
-            # A detached production cuda_pretrain is a known, valuable workload. It
-            # may finish naturally; never kill/reset it. Any other activity is not a
-            # controlled qualification environment and therefore fails closed.
-            managed_training=true
-            while IFS=',' read -r raw_pid process_name; do
-              pid="$(printf '%s' "$raw_pid" | tr -d '[:space:]')"
-              process_name="$(printf '%s' "$process_name" | xargs)"
-              [[ "$pid" =~ ^[0-9]+$ ]] || { managed_training=false; continue; }
-              cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
-              proc_user="$(ps -p "$pid" -o user= 2>/dev/null | xargs || true)"
-              ppid="$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d '[:space:]')"
-              cgroup="$(cat "/proc/$pid/cgroup" 2>/dev/null || true)"
-              echo "pid=$pid user=$proc_user ppid=$ppid process=$process_name"
-              if [[ "$process_name" != "/root/scirust/target/release/examples/cuda_pretrain" ]] \
-                || [[ "$cmdline" != *"/root/scirust/target/release/examples/cuda_pretrain"* ]] \
-                || [[ "$proc_user" != "root" ]] \
-                || [[ "$ppid" != "1" ]] \
-                || [[ "$cgroup" != 0::/user.slice/user-0.slice/session-*.scope ]]; then
-                managed_training=false
+            if [[ -n "${training//[[:space:]]/}" ]]; then
+              echo "SciAgent cuda_pretrain is active; M33 qualification remains blocked."
+              printf '%s\n' "$training"
+              settled=0
+            elif [[ -n "${active//[[:space:]]/}" ]]; then
+              echo "::error::Unknown GPU compute activity is active while M33 owns the Thor reservation:"
+              printf '%s\n' "$active"
+              exit 1
+            else
+              settled=$((settled + settle_step))
+              if (( settled == settle_step || settled % 60 == 0 )); then
+                echo "Thor continuously idle: ${settled}/${settle_required}s"
               fi
-            done <<< "$active"
-
-            if [[ "$managed_training" != true ]]; then
-              echo "::error::Unknown GPU compute activity is active while M33 owns the SciRust reservation:"
-              printf '%s\n' "$active"
-              exit 1
             fi
+
             if (( SECONDS >= deadline )); then
-              echo "::error::Managed production training still owns the Thor after the five-hour M33 reservation window; benchmark was not run concurrently or fabricated:"
-              printf '%s\n' "$active"
+              echo "::error::Thor never reached the required ${settle_required}s continuous idle window before the five-hour deadline"
               exit 1
             fi
-
-            echo "Managed production training owns the Thor; M33 keeps the next-device reservation and waits without interruption."
-            sleep 60
+            sleep "$settle_step"
           done
 
-          # The same lock descriptor remains held here, making the idle check and the
-          # benchmark one atomic qualification boundary with respect to SciRust jobs.
+          echo "Thor idle/cooldown qualification satisfied for ${settle_required}s."
+          nvidia-smi --query-gpu=temperature.gpu,utilization.gpu,clocks.gr,clocks.sm,power.draw --format=csv,noheader || true
+
+          contamination="$RUNNER_TEMP/flat-m33-thor-contamination.txt"
+          : > "$contamination"
+          (
+            while true; do
+              training="$(training_processes)"
+              if [[ -n "${training//[[:space:]]/}" ]]; then
+                {
+                  date -u +'%Y-%m-%dT%H:%M:%SZ'
+                  printf '%s\n' "$training"
+                } >> "$contamination"
+                exit 0
+              fi
+              sleep 1
+            done
+          ) &
+          watchdog_pid=$!
+          cleanup_watchdog() {
+            kill "$watchdog_pid" 2>/dev/null || true
+            wait "$watchdog_pid" 2>/dev/null || true
+          }
+          trap cleanup_watchdog EXIT
+
+          echo "source_revision=$(git rev-parse HEAD)"
+          echo "thor_idle_settle_seconds=$SCIRUST_THOR_IDLE_SETTLE_SECONDS"
+          echo "sciagent_contamination_watch=continuous_1s"
+
+          rustup run nightly-2026-07-02 cargo test -p scirust-sciagent \
+            --features flat-attention --test flat_m33_lifecycle --locked -- --nocapture
+          if [[ -s "$contamination" ]]; then
+            echo "::error::SciAgent training appeared during M33 lifecycle parity; qualification invalid"
+            cat "$contamination"
+            exit 1
+          fi
+
+          rustup run nightly-2026-07-02 cargo test -p scirust-sciagent \
+            --features flat-attention --test flat_runtime_decode --locked -- --nocapture
+          if [[ -s "$contamination" ]]; then
+            echo "::error::SciAgent training appeared during M32/M15 parity; qualification invalid"
+            cat "$contamination"
+            exit 1
+          fi
+
           rustup run nightly-2026-07-02 cargo run -p scirust-sciagent \
             --features flat-attention --release --locked --example flat_m33_thor_bench \
             | tee "$RUNNER_TEMP/flat-m33-thor.csv"
+
+          if [[ -s "$contamination" ]]; then
+            echo "::error::SciAgent training appeared during the measured M33 window; all timing evidence from this run is invalid"
+            cat "$contamination"
+            exit 1
+          fi
+          if [[ -n "$(training_processes)" ]]; then
+            echo "::error::SciAgent training is active immediately after M33 timing"
+            training_processes
+            exit 1
+          fi
+
           test "$(wc -l < "$RUNNER_TEMP/flat-m33-thor.csv")" -ge 2
           grep -F ',none' "$RUNNER_TEMP/flat-m33-thor.csv"
+
+          cleanup_watchdog
+          trap - EXIT
+
+          if ! post_active="$(compute_processes)"; then
+            echo "::error::M33 cannot verify post-benchmark Thor compute occupancy"
+            exit 1
+          fi
+          if [[ -n "${post_active//[[:space:]]/}" ]]; then
+            echo "::error::GPU compute activity is present immediately after M33 qualification; evidence is not accepted"
+            printf '%s\n' "$post_active"
+            exit 1
+          fi
+
+          nvidia-smi --query-gpu=temperature.gpu,utilization.gpu,clocks.gr,clocks.sm,power.draw --format=csv,noheader || true
+          echo "performance_claim=none"
