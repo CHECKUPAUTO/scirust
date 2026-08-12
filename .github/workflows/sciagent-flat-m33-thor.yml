@@ -28,7 +28,7 @@ jobs:
     env:
       CARGO_INCREMENTAL: 0
       RUSTFLAGS: "-D warnings"
-      SCIRUST_THOR_GPU_LOCK: /tmp/scirust-thor-gpu.lock
+      SCIRUST_THOR_GPU_LOCK: /var/lib/github-runner/.scirust-thor-gpu.lock
       SCIRUST_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
       SCIRUST_THOR_IDLE_SETTLE_SECONDS: "300"
       SCIAGENT_FLAT_M33_PROMPT: "64"
@@ -142,8 +142,25 @@ jobs:
             done
           }
 
-          exec 9>"$SCIRUST_THOR_GPU_LOCK"
+          if [[ ! -d /var/lib/github-runner ]]; then
+            echo "::error::persistent Thor shared-state directory is unavailable"
+            exit 1
+          fi
+          if [[ ! -e "$SCIRUST_THOR_GPU_LOCK" ]]; then
+            old_umask="$(umask)"
+            umask 000
+            : > "$SCIRUST_THOR_GPU_LOCK"
+            umask "$old_umask"
+          fi
+          if [[ ! -r "$SCIRUST_THOR_GPU_LOCK" || ! -w "$SCIRUST_THOR_GPU_LOCK" ]]; then
+            echo "::error::shared Thor lock is not readable/writable by this persistent runner"
+            ls -l "$SCIRUST_THOR_GPU_LOCK" || true
+            exit 1
+          fi
+          stat -Lc 'gpu_lock_path=%n device_inode=%d:%i mode=%a owner=%U:%G' "$SCIRUST_THOR_GPU_LOCK"
+          exec 9<>"$SCIRUST_THOR_GPU_LOCK"
           flock -x 9
+          echo "gpu_lock_acquired=true runner=$RUNNER_NAME"
 
           gpu_inventory="$(nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader)" || {
             echo "::error::cannot query NVIDIA GPU inventory"
