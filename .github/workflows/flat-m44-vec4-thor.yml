@@ -100,10 +100,14 @@ jobs:
         timeout-minutes: 330
         run: |
           set -euo pipefail
-          command -v flock >/dev/null
-          command -v pgrep >/dev/null
-          command -v nvidia-smi >/dev/null
-          command -v vulkaninfo >/dev/null
+          for prerequisite in flock pgrep nvidia-smi vulkaninfo; do
+            if ! path="$(command -v "$prerequisite" 2>/dev/null)"; then
+              echo "::error::required physical-Thor prerequisite is missing: $prerequisite"
+              printf 'PATH=%s\n' "$PATH"
+              exit 1
+            fi
+            echo "prerequisite=$prerequisite path=$path"
+          done
 
           training_processes() {
             pgrep -af 'cuda_pretrain' || true
