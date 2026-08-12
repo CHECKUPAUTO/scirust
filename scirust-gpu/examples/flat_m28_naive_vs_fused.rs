@@ -279,7 +279,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             // reused-output ratio is not structurally coupled to always running third.
             match iteration % 3
             {
-                0 => {
+                0 =>
+                {
                     naive_samples.push(time_naive(&ctx, &q_naive, &k_naive, &v_naive, causal)?);
                     flat_fresh_samples.push(time_flat_fresh_output(
                         &ctx,
@@ -296,8 +297,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                         shape,
                         config,
                     )?);
-                }
-                1 => {
+                },
+                1 =>
+                {
                     flat_fresh_samples.push(time_flat_fresh_output(
                         &ctx,
                         &pipeline,
@@ -314,8 +316,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                         config,
                     )?);
                     naive_samples.push(time_naive(&ctx, &q_naive, &k_naive, &v_naive, causal)?);
-                }
-                _ => {
+                },
+                _ =>
+                {
                     flat_reused_samples.push(time_flat_reused(
                         &ctx,
                         &pipeline,
@@ -332,7 +335,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         shape,
                         config,
                     )?);
-                }
+                },
             }
         }
 
