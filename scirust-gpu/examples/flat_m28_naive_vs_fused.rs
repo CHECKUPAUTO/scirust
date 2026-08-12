@@ -236,7 +236,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     println!(
-        "adapter,causal,seq_len,head_dim,warmups,repeats,naive_median_us,naive_p95_us,flat_fresh_median_us,flat_fresh_p95_us,flat_reused_median_us,flat_reused_p95_us,naive_over_flat_fresh,naive_over_flat_reused,naive_parity_max_abs,flat_parity_max_abs,performance_claim"
+        "adapter,backend,causal,seq_len,head_dim,warmups,repeats,naive_median_us,naive_p95_us,flat_fresh_median_us,flat_fresh_p95_us,flat_reused_median_us,flat_reused_p95_us,naive_over_flat_fresh,naive_over_flat_reused,naive_parity_max_abs,flat_parity_max_abs,performance_claim"
     );
 
     for causal in [false, true]
@@ -346,8 +346,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         let naive_over_flat_reused = naive_median as f64 / flat_reused_median.max(1) as f64;
 
         println!(
-            "{},{},{},{},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.6},{:.6},{:.8},{:.8},none",
+            "{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.6},{:.6},{:.8},{:.8},none",
             ctx.adapter_name().replace(',', ";"),
+            ctx.adapter_backend().replace(',', ";"),
             causal,
             seq_len,
             head_dim,
