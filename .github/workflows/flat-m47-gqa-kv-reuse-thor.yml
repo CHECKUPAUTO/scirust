@@ -1,0 +1,255 @@
+name: FLAT M47 GQA K/V reuse Thor candidate
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [master]
+    paths:
+      - "ci/flat_m47_gqa_kv_reuse_candidate.rs"
+      - ".github/workflows/flat-m47-gqa-kv-reuse-thor.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flat-m47-gqa-kv-reuse-thor-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gqa-kv-reuse-thor:
+    name: GQA K/V reuse candidate on physical Thor
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, ARM64, scirust-arm64, jetson-thor, internal]
+    timeout-minutes: 360
+    env:
+      CARGO_INCREMENTAL: 0
+      RUSTFLAGS: "-D warnings"
+      SCIRUST_THOR_GPU_LOCK: /dev/nvidia0
+      SCIRUST_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+      FLAT_M47_CANDIDATE_REV: 8fc226a1ba80117e080ded24c8a428321a984ab5
+      SCIRUST_M47_Q_HEADS: "8"
+      SCIRUST_M47_KV_HEADS: "2"
+      SCIRUST_M47_WARMUPS: "3"
+      SCIRUST_M47_REPEATS: "12"
+      SCIRUST_THOR_IDLE_SETTLE_SECONDS: "300"
+      WGPU_BACKEND: vulkan
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Require persistent physical Thor runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "runner_name=$RUNNER_NAME"
+          case "$RUNNER_NAME" in
+            tarek-scirust-arm64-01|tarek-scirust-arm64-02|tarek-scirust-arm64-03|tarek-scirust-arm64-04) ;;
+            *)
+              echo "::error::M47 physical evidence requires one of the persistent tarek-scirust-arm64-01..04 runners; refusing $RUNNER_NAME"
+              exit 1
+              ;;
+          esac
+
+      - name: Verify exact source revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          echo "source_revision=$actual"
+          test "$actual" = "$SCIRUST_SOURCE_REVISION"
+
+      - name: Prepare isolated executable build directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.ci-tmp.XXXXXX")"
+          chmod 700 "$tmpdir"
+          mkdir -p "$tmpdir/cargo-home" "$tmpdir/rustup-home" "$tmpdir/target"
+          echo "TMPDIR=$tmpdir" >> "$GITHUB_ENV"
+          echo "CARGO_HOME=$tmpdir/cargo-home" >> "$GITHUB_ENV"
+          echo "RUSTUP_HOME=$tmpdir/rustup-home" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=$tmpdir/target" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt
+
+      - name: Format candidate harness
+        run: rustup run nightly-2026-07-02 rustfmt --check --edition 2021 ci/flat_m47_gqa_kv_reuse_candidate.rs
+
+      - name: Build exact M47 candidate without touching product lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate="$RUNNER_TEMP/flat-m47-gqa-kv-reuse-candidate"
+          rm -rf "$candidate"
+          mkdir -p "$candidate/src"
+          cp ci/flat_m47_gqa_kv_reuse_candidate.rs "$candidate/src/main.rs"
+          cat > "$candidate/Cargo.toml" <<EOF
+          [package]
+          name = "flat-m47-gqa-kv-reuse-candidate"
+          version = "0.0.0"
+          edition = "2021"
+          publish = false
+
+          [dependencies]
+          scirust-gpu = { path = "$GITHUB_WORKSPACE/scirust-gpu", default-features = false, features = ["wgpu"] }
+          flat-attention = { git = "https://github.com/Memorithm/FLAT-ATTENTION", rev = "$FLAT_M47_CANDIDATE_REV", default-features = false, features = ["wgpu"] }
+          wgpu = "0.20"
+          EOF
+          rustup run nightly-2026-07-02 cargo build --release --manifest-path "$candidate/Cargo.toml"
+          grep -F "$FLAT_M47_CANDIDATE_REV" "$candidate/Cargo.lock" >/dev/null
+          test "$(git status --short -- Cargo.lock scirust-gpu/Cargo.toml | wc -l)" -eq 0
+          echo "FLAT_M47_CANDIDATE_BIN=$CARGO_TARGET_DIR/release/flat-m47-gqa-kv-reuse-candidate" >> "$GITHUB_ENV"
+          test -x "$CARGO_TARGET_DIR/release/flat-m47-gqa-kv-reuse-candidate"
+
+      - name: Exclusive physical Thor GQA K/V-reuse benchmark
+        shell: bash
+        timeout-minutes: 330
+        run: |
+          set -euo pipefail
+          for prerequisite in flock pgrep stat nvidia-smi vulkaninfo; do
+            command -v "$prerequisite" >/dev/null || {
+              echo "::error::required physical-Thor prerequisite is missing: $prerequisite"
+              exit 1
+            }
+          done
+
+          training_processes() {
+            pgrep -af '[c]uda_pretrain' || true
+          }
+          compute_processes() {
+            nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null
+          }
+
+          if [[ ! -c "$SCIRUST_THOR_GPU_LOCK" ]]; then
+            echo "::error::physical Thor lock target is not an NVIDIA character device: $SCIRUST_THOR_GPU_LOCK"
+            ls -l /dev/nvidia* 2>/dev/null || true
+            exit 1
+          fi
+          if [[ ! -r "$SCIRUST_THOR_GPU_LOCK" || ! -w "$SCIRUST_THOR_GPU_LOCK" ]]; then
+            echo "::error::physical Thor device lock is not readable/writable by this runner"
+            ls -l "$SCIRUST_THOR_GPU_LOCK" || true
+            exit 1
+          fi
+          stat -Lc 'gpu_lock_target=%n st_dev=%d inode=%i rdev_hex=%t:%T mode=%a owner=%U:%G type=%F' "$SCIRUST_THOR_GPU_LOCK"
+          exec 9<>"$SCIRUST_THOR_GPU_LOCK"
+          flock -x 9
+          echo "gpu_lock_acquired=true runner=$RUNNER_NAME"
+          if flock -n "$SCIRUST_THOR_GPU_LOCK" -c 'true'; then
+            echo "::error::physical GPU lock does not contend across independent file descriptions"
+            exit 1
+          fi
+          echo "gpu_lock_self_contention=pass"
+
+          gpu_inventory="$(nvidia-smi --query-gpu=name,driver_version --format=csv,noheader)" || {
+            echo "::error::cannot query NVIDIA GPU inventory"
+            exit 1
+          }
+          printf '%s\n' "$gpu_inventory"
+          grep -F "NVIDIA Thor" <<< "$gpu_inventory" >/dev/null || {
+            echo "::error::expected physical NVIDIA Thor was not found"
+            exit 1
+          }
+          vulkan_summary="$(vulkaninfo --summary 2>&1)" || {
+            echo "::error::cannot query Vulkan adapter inventory"
+            exit 1
+          }
+          grep -F "NVIDIA Tegra NVIDIA Thor" <<< "$vulkan_summary" >/dev/null || {
+            printf '%s\n' "$vulkan_summary"
+            echo "::error::physical Thor is not exposed through Vulkan"
+            exit 1
+          }
+
+          deadline=$((SECONDS + 18000))
+          settle_step=5
+          settle_required="$SCIRUST_THOR_IDLE_SETTLE_SECONDS"
+          settled=0
+          while (( settled < settle_required )); do
+            training="$(training_processes)"
+            if ! active="$(compute_processes)"; then
+              echo "::error::M47 cannot verify Thor compute occupancy"
+              exit 1
+            fi
+            if [[ -n "${training//[[:space:]]/}" ]]; then
+              echo "SciAgent cuda_pretrain is active; M47 timing remains blocked."
+              printf '%s\n' "$training"
+              settled=0
+            elif [[ -n "${active//[[:space:]]/}" ]]; then
+              echo "::error::unknown GPU compute activity is active while M47 owns Thor:"
+              printf '%s\n' "$active"
+              exit 1
+            else
+              settled=$((settled + settle_step))
+              if (( settled == settle_step || settled % 60 == 0 )); then
+                echo "Thor continuously idle: ${settled}/${settle_required}s"
+              fi
+            fi
+            if (( SECONDS >= deadline )); then
+              echo "::error::Thor never reached the required continuous idle window before deadline"
+              exit 1
+            fi
+            sleep "$settle_step"
+          done
+
+          contamination="$RUNNER_TEMP/flat-m47-gqa-kv-reuse-contamination.txt"
+          : > "$contamination"
+          (
+            while true; do
+              training="$(training_processes)"
+              if [[ -n "${training//[[:space:]]/}" ]]; then
+                { date -u +'%Y-%m-%dT%H:%M:%SZ'; printf '%s\n' "$training"; } >> "$contamination"
+                exit 0
+              fi
+              sleep 1
+            done
+          ) &
+          watchdog_pid=$!
+          cleanup_watchdog() {
+            kill "$watchdog_pid" 2>/dev/null || true
+            wait "$watchdog_pid" 2>/dev/null || true
+          }
+          trap cleanup_watchdog EXIT
+
+          echo "source_revision=$(git rev-parse HEAD)"
+          echo "flat_candidate_revision=$FLAT_M47_CANDIDATE_REV"
+          echo "benchmark_scope=resident_same_context_prepared_upload_readback_excluded"
+          echo "comparison=M45_Q4Vec4Grouped_vs_M47_Q4Vec4GroupedKvReuse"
+          echo "q_heads=$SCIRUST_M47_Q_HEADS kv_heads=$SCIRUST_M47_KV_HEADS"
+          echo "warmups=$SCIRUST_M47_WARMUPS repeats=$SCIRUST_M47_REPEATS"
+          echo "thor_idle_settle_seconds=$SCIRUST_THOR_IDLE_SETTLE_SECONDS"
+
+          for seq in 128 512; do
+            for dim in 64 128; do
+              out="$RUNNER_TEMP/flat-m47-gqa-kv-reuse-${seq}-${dim}.csv"
+              SCIRUST_M47_SEQ_LEN="$seq" \
+              SCIRUST_M47_HEAD_DIM="$dim" \
+              "$FLAT_M47_CANDIDATE_BIN" | tee "$out"
+
+              if [[ -s "$contamination" || -n "$(training_processes)" ]]; then
+                echo "::error::SciAgent training appeared during M47 timing; evidence is invalid"
+                cat "$contamination" || true
+                exit 1
+              fi
+              grep -F "NVIDIA Tegra NVIDIA Thor,Vulkan," "$out" >/dev/null
+              grep -F 'Q4Vec4Grouped,Q4Vec4GroupedKvReuse,' "$out" >/dev/null
+              grep -F ',none' "$out" >/dev/null
+            done
+          done
+
+          cleanup_watchdog
+          trap - EXIT
+          if ! post_active="$(compute_processes)"; then
+            echo "::error::cannot verify post-benchmark Thor occupancy"
+            exit 1
+          fi
+          if [[ -n "${post_active//[[:space:]]/}" ]]; then
+            echo "::error::GPU compute activity is present after M47 timing"
+            printf '%s\n' "$post_active"
+            exit 1
+          fi
+          echo "performance_claim=none"
