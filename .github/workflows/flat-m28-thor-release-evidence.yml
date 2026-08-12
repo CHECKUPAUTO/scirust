@@ -6,6 +6,7 @@ on:
     paths:
       - "scirust-gpu/**"
       - "docs/FLAT_M28_SCIRUST_BASELINE.md"
+      - "scirust-sciagent/PRODUCTION_PRETRAIN.md"
       - ".github/workflows/flat-m28-thor-release-evidence.yml"
   workflow_dispatch:
 
@@ -27,15 +28,29 @@ jobs:
     env:
       CARGO_INCREMENTAL: 0
       RUSTFLAGS: "-D warnings"
-      SCIRUST_THOR_GPU_LOCK: /tmp/scirust-thor-gpu.lock
+      SCIRUST_THOR_GPU_LOCK: /dev/nvidia0
       SCIRUST_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
       SCIRUST_M28_WARMUPS: "3"
       SCIRUST_M28_REPEATS: "9"
+      SCIRUST_THOR_IDLE_SETTLE_SECONDS: "300"
       WGPU_BACKEND: vulkan
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Require persistent physical Thor runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "runner_name=$RUNNER_NAME"
+          case "$RUNNER_NAME" in
+            tarek-scirust-arm64-01|tarek-scirust-arm64-02|tarek-scirust-arm64-03|tarek-scirust-arm64-04)
+              ;;
+            *)
+              echo "::error::M28 physical evidence requires one of the persistent tarek-scirust-arm64-01..04 runners; refusing $RUNNER_NAME before build"
+              exit 1
+              ;;
+          esac
       - name: Verify exact source revision
         shell: bash
         run: |
@@ -57,15 +72,20 @@ jobs:
       - name: Format
         run: rustup run nightly-2026-07-02 cargo fmt --all -- --check
       - name: Build M28 benchmark
-        run: >-
-          rustup run nightly-2026-07-02 cargo build --release --locked -p scirust-gpu
-          --features flat-attention --example flat_m28_naive_vs_fused
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup run nightly-2026-07-02 cargo build --release --locked -p scirust-gpu \
+            --features flat-attention --example flat_m28_naive_vs_fused
+          test -x "$GITHUB_WORKSPACE/target/release/examples/flat_m28_naive_vs_fused"
       - name: Physical Thor paired benchmark
         shell: bash
         timeout-minutes: 330
         run: |
           set -euo pipefail
           command -v flock >/dev/null
+          command -v pgrep >/dev/null
+          command -v stat >/dev/null
           if ! command -v nvidia-smi >/dev/null 2>&1; then
             echo "::error::nvidia-smi is required to qualify the physical Thor state"
             exit 1
@@ -75,8 +95,33 @@ jobs:
             exit 1
           fi
 
-          exec 9>"$SCIRUST_THOR_GPU_LOCK"
+          training_processes() {
+            pgrep -af '[c]uda_pretrain' || true
+          }
+
+          compute_processes() {
+            nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null
+          }
+
+          if [[ ! -c "$SCIRUST_THOR_GPU_LOCK" ]]; then
+            echo "::error::physical Thor lock target is not an NVIDIA character device: $SCIRUST_THOR_GPU_LOCK"
+            ls -l /dev/nvidia* 2>/dev/null || true
+            exit 1
+          fi
+          if [[ ! -r "$SCIRUST_THOR_GPU_LOCK" || ! -w "$SCIRUST_THOR_GPU_LOCK" ]]; then
+            echo "::error::physical Thor device lock is not readable/writable by this persistent runner"
+            ls -l "$SCIRUST_THOR_GPU_LOCK" || true
+            exit 1
+          fi
+          stat -Lc 'gpu_lock_target=%n st_dev=%d inode=%i rdev_hex=%t:%T mode=%a owner=%U:%G type=%F' "$SCIRUST_THOR_GPU_LOCK"
+          exec 9<>"$SCIRUST_THOR_GPU_LOCK"
           flock -x 9
+          echo "gpu_lock_acquired=true runner=$RUNNER_NAME"
+          if flock -n "$SCIRUST_THOR_GPU_LOCK" -c 'true'; then
+            echo "::error::physical GPU lock does not contend across independent file descriptions"
+            exit 1
+          fi
+          echo "gpu_lock_self_contention=pass"
 
           gpu_inventory="$(nvidia-smi --query-gpu=name,driver_version --format=csv,noheader)" || {
             echo "::error::cannot query NVIDIA GPU inventory"
@@ -100,63 +145,90 @@ jobs:
           }
 
           deadline=$((SECONDS + 18000))
-          while true; do
-            if ! active="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null)"; then
+          settle_step=5
+          settle_required="$SCIRUST_THOR_IDLE_SETTLE_SECONDS"
+          settled=0
+          while (( settled < settle_required )); do
+            training="$(training_processes)"
+            if ! active="$(compute_processes)"; then
               echo "::error::M28 cannot verify Thor compute occupancy"
               exit 1
             fi
-            if [[ -z "${active//[[:space:]]/}" ]]; then
-              echo "Thor is idle and reserved; proceeding with M28 qualification."
-              break
-            fi
 
-            managed_training=true
-            while IFS=',' read -r raw_pid process_name; do
-              pid="$(printf '%s' "$raw_pid" | tr -d '[:space:]')"
-              process_name="$(printf '%s' "$process_name" | xargs)"
-              [[ "$pid" =~ ^[0-9]+$ ]] || { managed_training=false; continue; }
-              cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
-              proc_user="$(ps -p "$pid" -o user= 2>/dev/null | xargs || true)"
-              ppid="$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d '[:space:]')"
-              cgroup="$(cat "/proc/$pid/cgroup" 2>/dev/null || true)"
-              echo "pid=$pid user=$proc_user ppid=$ppid process=$process_name"
-              if [[ "$process_name" != "/root/scirust/target/release/examples/cuda_pretrain" ]] \
-                || [[ "$cmdline" != *"/root/scirust/target/release/examples/cuda_pretrain"* ]] \
-                || [[ "$proc_user" != "root" ]] \
-                || [[ "$ppid" != "1" ]] \
-                || [[ "$cgroup" != 0::/user.slice/user-0.slice/session-*.scope ]]; then
-                managed_training=false
+            if [[ -n "${training//[[:space:]]/}" ]]; then
+              echo "SciAgent cuda_pretrain is active; M28 timing remains blocked."
+              printf '%s\n' "$training"
+              settled=0
+            elif [[ -n "${active//[[:space:]]/}" ]]; then
+              echo "::error::Unknown GPU compute activity is active while M28 owns the Thor reservation:"
+              printf '%s\n' "$active"
+              exit 1
+            else
+              settled=$((settled + settle_step))
+              if (( settled == settle_step || settled % 60 == 0 )); then
+                echo "Thor continuously idle: ${settled}/${settle_required}s"
               fi
-            done <<< "$active"
-
-            if [[ "$managed_training" != true ]]; then
-              echo "::error::Unknown GPU compute activity is active while M28 owns the SciRust reservation:"
-              printf '%s\n' "$active"
-              exit 1
             fi
+
             if (( SECONDS >= deadline )); then
-              echo "::error::Managed production training still owns the Thor after the five-hour M28 reservation window; benchmark was not run concurrently or fabricated:"
-              printf '%s\n' "$active"
+              echo "::error::Thor never reached the required ${settle_required}s continuous idle window before the five-hour deadline"
               exit 1
             fi
-
-            echo "Managed production training owns the Thor; M28 keeps the next-device reservation and waits without interruption."
-            sleep 60
+            sleep "$settle_step"
           done
+
+          echo "Thor idle/cooldown qualification satisfied for ${settle_required}s."
+          nvidia-smi --query-gpu=temperature.gpu,utilization.gpu,clocks.gr,clocks.sm,power.draw --format=csv,noheader || true
+
+          contamination="$RUNNER_TEMP/flat-m28-thor-contamination.txt"
+          : > "$contamination"
+          (
+            while true; do
+              training="$(training_processes)"
+              if [[ -n "${training//[[:space:]]/}" ]]; then
+                {
+                  date -u +'%Y-%m-%dT%H:%M:%SZ'
+                  printf '%s\n' "$training"
+                } >> "$contamination"
+                exit 0
+              fi
+              sleep 1
+            done
+          ) &
+          watchdog_pid=$!
+          cleanup_watchdog() {
+            kill "$watchdog_pid" 2>/dev/null || true
+            wait "$watchdog_pid" 2>/dev/null || true
+          }
+          trap cleanup_watchdog EXIT
 
           echo "source_revision=$(git rev-parse HEAD)"
           echo "benchmark_scope=resident_wgpu_same_context_upload_readback_excluded"
           echo "warmups=$SCIRUST_M28_WARMUPS repeats=$SCIRUST_M28_REPEATS"
+          echo "thor_idle_settle_seconds=$SCIRUST_THOR_IDLE_SETTLE_SECONDS"
+          echo "sciagent_contamination_watch=continuous_1s"
 
+          benchmark="$GITHUB_WORKSPACE/target/release/examples/flat_m28_naive_vs_fused"
+          test -x "$benchmark"
           for seq in 128 512; do
             for dim in 64 128; do
               echo "=== geometry seq_len=$seq head_dim=$dim ==="
               out="$RUNNER_TEMP/flat-m28-thor-${seq}-${dim}.csv"
               SCIRUST_M28_SEQ_LEN="$seq" \
               SCIRUST_M28_HEAD_DIM="$dim" \
-              rustup run nightly-2026-07-02 cargo run --release --locked -p scirust-gpu \
-                --features flat-attention --example flat_m28_naive_vs_fused \
-                | tee "$out"
+              "$benchmark" | tee "$out"
+
+              if [[ -s "$contamination" ]]; then
+                echo "::error::SciAgent training appeared during the measured M28 window; all timing evidence from this run is invalid"
+                cat "$contamination"
+                exit 1
+              fi
+              if [[ -n "$(training_processes)" ]]; then
+                echo "::error::SciAgent training is active immediately after a measured geometry"
+                training_processes
+                exit 1
+              fi
+
               grep -F "NVIDIA Tegra NVIDIA Thor,Vulkan," "$out" >/dev/null || {
                 echo "::error::M28 benchmark did not execute through Vulkan on the physical Thor WGPU adapter"
                 exit 1
@@ -165,4 +237,18 @@ jobs:
             done
           done
 
+          cleanup_watchdog
+          trap - EXIT
+
+          if ! post_active="$(compute_processes)"; then
+            echo "::error::M28 cannot verify post-benchmark Thor compute occupancy"
+            exit 1
+          fi
+          if [[ -n "${post_active//[[:space:]]/}" ]]; then
+            echo "::error::GPU compute activity is present immediately after M28 timing; evidence is not accepted"
+            printf '%s\n' "$post_active"
+            exit 1
+          fi
+
+          nvidia-smi --query-gpu=temperature.gpu,utilization.gpu,clocks.gr,clocks.sm,power.draw --format=csv,noheader || true
           echo "performance_claim=none"

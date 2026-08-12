@@ -32,10 +32,45 @@ The 251,341-update budget is a raw-token-equivalent pass for capacity planning. 
 2% of deterministic windows are held out for validation, it is not a claim that every
 train window is visited exactly once.
 
+## Shared physical-Thor GPU lock
+
+Every production CUDA command and every physical-Thor performance qualification uses
+one advisory lock on the physical NVIDIA device inode:
+
+```text
+/dev/nvidia0
+```
+
+This is deliberate. The persistent Actions runners are separate systemd services, and
+a pathname on `/tmp` or on a runner-private mount can resolve to different inodes. The
+Thor qualification probe demonstrated that `/dev/nvidia0` is the same character device
+across multiple persistent runners (`rdev 195:0`) and that independent `flock`
+descriptions serialize on that inode.
+
+Do not create, replace, chmod, or remove this device node as part of the runbook. Before
+using it, verify that it is a readable/writable character device and that `flock` is
+available:
+
+```bash
+export SCIRUST_THOR_GPU_LOCK=/dev/nvidia0
+test -c "$SCIRUST_THOR_GPU_LOCK"
+test -r "$SCIRUST_THOR_GPU_LOCK"
+test -w "$SCIRUST_THOR_GPU_LOCK"
+command -v flock >/dev/null
+stat -Lc 'gpu_lock_target=%n st_dev=%d inode=%i rdev_hex=%t:%T mode=%a owner=%U:%G type=%F' \
+  "$SCIRUST_THOR_GPU_LOCK"
+```
+
+Physical qualification workflows perform the same checks and also verify that a second
+independent file description cannot acquire the lock while the qualification descriptor
+holds it.
+
 ## Stage 1 — read-only/fresh preflight and corpus fingerprint
 
 Run from the root shell on the Thor **after B52 is merged into `master`**. The checkpoint
-path below is deliberately new. Do not create files in it before the preflight.
+path below is deliberately new. Do not create files in it before the preflight. The
+preflight initializes CUDA, so it takes the same Thor lock as training and performance
+qualification even though it exits before optimizer update 1.
 
 ```bash
 set -euo pipefail
@@ -56,8 +91,14 @@ export SCIAGENT_EXPECT_CORPUS_TOKENS=1029492639
 export SCIAGENT_SEQ=512
 export SCIAGENT_BATCH=8
 export SCIAGENT_PREFLIGHT_ONLY=1
+export SCIRUST_THOR_GPU_LOCK=/dev/nvidia0
 
-cargo +nightly-2026-07-02 run \
+test -c "$SCIRUST_THOR_GPU_LOCK"
+test -r "$SCIRUST_THOR_GPU_LOCK"
+test -w "$SCIRUST_THOR_GPU_LOCK"
+command -v flock >/dev/null
+flock -x "$SCIRUST_THOR_GPU_LOCK" \
+  cargo +nightly-2026-07-02 run \
   -p scirust-sciagent --features cuda --release --example cuda_pretrain \
   | tee logs/sciagent-v2-preflight.log
 
@@ -76,6 +117,15 @@ optimizer update 1. If any invariant differs, it exits non-zero.
 
 Only after Stage 1 succeeds, use the exact `HASH` produced there. `SCIAGENT_REQUIRE_FRESH`
 stays enabled for the initial launch so an accidental checkpoint collision is fatal.
+
+The production trainer and every physical-Thor performance qualification must share the
+same advisory GPU lock. This makes an idle benchmark window a real mutual-exclusion
+contract instead of an inference from a single `nvidia-smi` sample. An already-running
+trainer that predates this rule does **not** own the lock; do not kill it for a
+qualification. Let it stop cleanly at an exact checkpoint and restart it with the
+wrapper below before relying on the lock for future evidence. Until then, qualification
+also detects the legacy process independently with `pgrep` and waits without
+interruption.
 
 ```bash
 set -euo pipefail
@@ -108,13 +158,23 @@ export SCIAGENT_SHUFFLE=1
 export SCIAGENT_TELEMETRY=25
 export SCIAGENT_SAVE_HOURS=6
 export SCIAGENT_KEEP=2
+export SCIRUST_THOR_GPU_LOCK=/dev/nvidia0
 
-nohup cargo +nightly-2026-07-02 run \
+test -c "$SCIRUST_THOR_GPU_LOCK"
+test -r "$SCIRUST_THOR_GPU_LOCK"
+test -w "$SCIRUST_THOR_GPU_LOCK"
+command -v flock >/dev/null
+nohup flock -x "$SCIRUST_THOR_GPU_LOCK" \
+  cargo +nightly-2026-07-02 run \
   -p scirust-sciagent --features cuda --release --example cuda_pretrain \
   > logs/sciagent-bpe350m-v5-semantics-v2.log 2>&1 &
 
 echo $! | tee logs/sciagent-bpe350m-v5-semantics-v2.pid
 ```
+
+The PID file identifies the lock-holding `flock` wrapper; the actual `cuda_pretrain`
+process runs as its child. Keep the wrapper alive for the whole training run. Do not
+launch a second unwrapped trainer while the lock is part of the qualification contract.
 
 The run is considered started only after the log confirms all of the following before
 normal step telemetry: the 350m config, 1,030 shards, 1,029,492,639 tokens, the expected
@@ -128,3 +188,7 @@ corpus identity gates and trajectory settings unchanged. `cuda_pretrain` loads t
 newest exact checkpoint and restores model weights, AdamW m/v, bias-correction step,
 shuffle/window cursor, LR schedule and the saved run contract; trajectory mismatches
 fail closed unless a research-only non-exact override is explicitly requested.
+
+Every restart must use the same `flock -x "$SCIRUST_THOR_GPU_LOCK"` wrapper as Stage 2.
+A restart without that wrapper invalidates any claim that a benchmark holding the lock
+had exclusive access to the Thor.
