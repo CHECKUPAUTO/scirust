@@ -1,0 +1,59 @@
+name: FLAT M34 Thor evidence
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - ".github/workflows/flat-m34-thor-evidence.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  thor-vulkan:
+    name: FLAT M34 physical Vulkan parity
+    runs-on: [self-hosted, Linux, ARM64, scirust-arm64, jetson-thor, internal]
+    timeout-minutes: 60
+    env:
+      WGPU_BACKEND: vulkan
+      FLAT_REQUIRE_WGPU: "1"
+      RUSTFLAGS: "-D warnings"
+      FLAT_M34_SHA: "1165cbbb2fa116bfeb59d7c0c4927834e82969a1"
+    steps:
+      - name: Prepare evidence workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/flat-m34-evidence"
+          git clone --no-tags https://github.com/Memorithm/FLAT-ATTENTION.git "$RUNNER_TEMP/flat-m34-evidence"
+          cd "$RUNNER_TEMP/flat-m34-evidence"
+          git checkout --detach "$FLAT_M34_SHA"
+          test "$(git rev-parse HEAD)" = "$FLAT_M34_SHA"
+          tmpdir="$(mktemp -d "$RUNNER_TEMP/flat-m34-evidence/.ci-tmp.XXXXXX")"
+          chmod 700 "$tmpdir"
+          echo "TMPDIR=$tmpdir" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: 1.89.0
+          components: rustfmt, clippy
+      - name: Report physical Vulkan adapter
+        working-directory: ${{ runner.temp }}/flat-m34-evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          nvidia-smi --query-gpu=name,driver_version --format=csv,noheader || true
+          vulkaninfo --summary || true
+          active="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null || true)"
+          if [[ -n "${active//[[:space:]]/}" ]]; then
+            echo "::notice::Other GPU work is active. M34 is correctness-only; no timing from this run is performance evidence."
+            printf '%s\n' "$active"
+          fi
+      - name: Strict host gates
+        working-directory: ${{ runner.temp }}/flat-m34-evidence
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --all-targets --all-features -- -D warnings
+      - name: Full physical Vulkan WGPU parity
+        working-directory: ${{ runner.temp }}/flat-m34-evidence
+        run: cargo test --features wgpu --tests -- --nocapture
