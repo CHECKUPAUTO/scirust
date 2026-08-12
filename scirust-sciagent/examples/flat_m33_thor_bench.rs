@@ -1,3 +1,4 @@
+#[cfg(feature = "flat-attention")]
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "flat-attention")]
