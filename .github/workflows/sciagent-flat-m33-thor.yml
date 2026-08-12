@@ -15,12 +15,12 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: feat/m33-sciagent-flat-decode-qualification
-          fetch-depth: 2
+          fetch-depth: 1
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: nightly-2026-07-02
           components: rustfmt
-      - name: Fix rustdoc, restore qualification workflow, and push
+      - name: Patch only the observed source lint
         shell: bash
         run: |
           set -euo pipefail
@@ -31,13 +31,13 @@ jobs:
           old = '    /// + M15 incremental decode route as [`Self::generate_cached`], terminating\n'
           new = '    /// plus M15 incremental decode route as [`Self::generate_cached`], terminating\n'
           if old not in text:
+              echo = None
               raise SystemExit('observed M33 rustdoc continuation not found')
           path.write_text(text.replace(old, new, 1))
           PY
           rustup run nightly-2026-07-02 cargo fmt --all
-          git checkout HEAD^ -- .github/workflows/sciagent-flat-m33-thor.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add scirust-sciagent/src/gpu.rs .github/workflows/sciagent-flat-m33-thor.yml
+          git add scirust-sciagent/src/gpu.rs
           git commit -m 'style(sciagent): fix M33 EOS rustdoc'
           git push origin HEAD:feat/m33-sciagent-flat-decode-qualification
