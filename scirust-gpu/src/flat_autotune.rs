@@ -11,7 +11,9 @@
 //! invents a production selection when no persisted plan exists.
 
 pub use crate::{FlatM11ResidentConfig, GpuMatrix, WgpuContext, WgpuFlatM11Bridge};
+pub use elastic_autotuner::measurement_protocol::ElasticResidenceMode;
 pub use elastic_autotuner::operating_mode::{ElasticModeError, ElasticStartupStrategy};
+pub use elastic_autotuner::persistence::{ElasticPersistedPlan, ElasticPersistenceError};
 pub use elastic_autotuner::{
     ElasticAutoTuner, ElasticCandidate, ElasticCandidateError, ElasticConfig, ElasticEvidence,
     ElasticEvidenceError, ElasticExecutionPlan, ElasticHardwareProfile, ElasticMode,
@@ -24,6 +26,7 @@ use elastic_autotuner::{
     ElasticConstraintSolver, ElasticCostModel, ElasticPlanCache, ElasticPlanKey, ElasticSearchSpace,
 };
 use scirust_compute::ComputeBackend;
+use std::collections::BTreeSet;
 
 const FLAT_ELASTIC_FAMILY: &str = "flat-attention-f32-wgpu";
 const FLAT_KERNEL_FAMILY: &str = "flat-m11-external-asymmetric-projection";
@@ -576,6 +579,140 @@ impl FlatElasticRuntime<InMemoryElasticPlanCache> {
             InMemoryElasticPlanCache::default(),
         ))
     }
+
+    /// Construct an in-process runtime after decoding and validating caller-supplied
+    /// persisted records. This boundary performs no filesystem I/O: callers own
+    /// record discovery/loading and provide the exact bytes before decode begins.
+    ///
+    /// Every record must be an explicitly selected resident measurement for the
+    /// exact runtime hardware/objective, name a current FLAT candidate revision,
+    /// carry the current FLAT revision as an invalidation dependency, and contain
+    /// every caller-required dependency. Duplicate validity-region keys fail closed.
+    pub fn in_memory_with_persisted_records(
+        config: ElasticConfig,
+        context: &WgpuContext,
+        encoded_records: &[Vec<u8>],
+        required_invalidation_dependencies: &[Vec<u8>],
+    ) -> Result<Self, FlatElasticError> {
+        let hardware = hardware_profile_from_context(context)?;
+        let cache = persisted_cache_from_records(
+            config,
+            &hardware,
+            encoded_records,
+            required_invalidation_dependencies,
+        )?;
+        Ok(Self::from_hardware(config, hardware, cache))
+    }
+}
+
+fn persisted_cache_from_records(
+    config: ElasticConfig,
+    hardware: &ElasticHardwareProfile,
+    encoded_records: &[Vec<u8>],
+    required_invalidation_dependencies: &[Vec<u8>],
+) -> Result<InMemoryElasticPlanCache, FlatElasticError> {
+    let mut cache = InMemoryElasticPlanCache::default();
+    let mut seen_keys = BTreeSet::new();
+
+    for encoded in encoded_records
+    {
+        let record =
+            ElasticPersistedPlan::decode(encoded).map_err(FlatElasticError::Persistence)?;
+        validate_persisted_bootstrap_record(
+            &record,
+            config,
+            hardware,
+            required_invalidation_dependencies,
+        )?;
+        let key = ElasticPlanKey::new(
+            record.plan.hardware.clone(),
+            record.plan.problem.clone(),
+            record.plan.objective,
+        );
+        if !seen_keys.insert(key.clone())
+        {
+            return Err(FlatElasticError::DuplicatePersistedPlanKey);
+        }
+        cache.store(key, record.plan);
+    }
+    Ok(cache)
+}
+
+fn validate_persisted_bootstrap_record(
+    record: &ElasticPersistedPlan,
+    config: ElasticConfig,
+    hardware: &ElasticHardwareProfile,
+    required_invalidation_dependencies: &[Vec<u8>],
+) -> Result<(), FlatElasticError> {
+    if !record.selected
+    {
+        return Err(FlatElasticError::PersistedRecordNotSelected);
+    }
+    if record.recorded_unix_ns == 0
+    {
+        return Err(FlatElasticError::PersistedRecordMissingTimestamp);
+    }
+    if record.measurement_protocol.residence_mode != ElasticResidenceMode::Resident
+    {
+        return Err(FlatElasticError::PersistedRecordNotResident);
+    }
+    if &record.plan.hardware != hardware
+    {
+        return Err(FlatElasticError::PersistedHardwareMismatch);
+    }
+    if record.plan.objective != config.objective
+    {
+        return Err(FlatElasticError::PersistedObjectiveMismatch);
+    }
+    if config.objective == ElasticObjective::DeterministicOnly
+        && !record.plan.evidence.candidate.deterministic
+    {
+        return Err(FlatElasticError::Selection(
+            ElasticSelectionError::NonDeterministicCandidate,
+        ));
+    }
+    if record.plan.problem.family() != FLAT_ELASTIC_FAMILY
+    {
+        return Err(FlatElasticError::PersistedProblemFamilyMismatch);
+    }
+    require_known_candidate_identity(&record.plan.evidence.candidate)?;
+    require_invalidation_dependency(record, FLAT_KERNEL_REVISION)?;
+    for dependency in required_invalidation_dependencies
+    {
+        require_invalidation_dependency(record, dependency)?;
+    }
+    Ok(())
+}
+
+fn require_known_candidate_identity(candidate: &ElasticCandidate) -> Result<(), FlatElasticError> {
+    if *candidate == current_candidate()? || *candidate == m15_candidate()?
+    {
+        Ok(())
+    }
+    else
+    {
+        Err(FlatElasticError::UnknownCandidate)
+    }
+}
+
+fn require_invalidation_dependency(
+    record: &ElasticPersistedPlan,
+    required: &[u8],
+) -> Result<(), FlatElasticError> {
+    if !required.is_empty()
+        && record
+            .invalidation_dependencies
+            .iter()
+            .any(|dependency| dependency.as_slice() == required)
+    {
+        Ok(())
+    }
+    else
+    {
+        Err(FlatElasticError::MissingInvalidationDependency(
+            required.to_vec(),
+        ))
+    }
 }
 
 #[derive(Debug)]
@@ -588,6 +725,15 @@ pub enum FlatElasticError {
     Evidence(ElasticEvidenceError),
     Selection(ElasticSelectionError),
     Mode(ElasticModeError),
+    Persistence(ElasticPersistenceError),
+    PersistedRecordNotSelected,
+    PersistedRecordMissingTimestamp,
+    PersistedRecordNotResident,
+    PersistedHardwareMismatch,
+    PersistedObjectiveMismatch,
+    PersistedProblemFamilyMismatch,
+    MissingInvalidationDependency(Vec<u8>),
+    DuplicatePersistedPlanKey,
     NoQualifiedCandidate,
     UnknownCandidate,
     PlanRegionMismatch,
@@ -609,6 +755,40 @@ impl core::fmt::Display for FlatElasticError {
             Self::Evidence(error) => write!(f, "invalid FLAT tuning evidence: {error}"),
             Self::Selection(error) => write!(f, "cannot select measured FLAT evidence: {error}"),
             Self::Mode(error) => write!(f, "Elastic mode rejected FLAT plan resolution: {error}"),
+            Self::Persistence(error) => write!(f, "invalid persisted Elastic record: {error}"),
+            Self::PersistedRecordNotSelected => write!(
+                f,
+                "persisted Elastic record is not a selected production plan"
+            ),
+            Self::PersistedRecordMissingTimestamp => write!(
+                f,
+                "persisted Elastic record has no caller-supplied timestamp"
+            ),
+            Self::PersistedRecordNotResident => write!(
+                f,
+                "persisted FLAT evidence must use resident measurement semantics"
+            ),
+            Self::PersistedHardwareMismatch =>
+            {
+                write!(f, "persisted FLAT plan targets different hardware")
+            },
+            Self::PersistedObjectiveMismatch =>
+            {
+                write!(f, "persisted FLAT plan targets a different objective")
+            },
+            Self::PersistedProblemFamilyMismatch =>
+            {
+                write!(f, "persisted plan is not a FLAT attention problem")
+            },
+            Self::MissingInvalidationDependency(dependency) => write!(
+                f,
+                "persisted FLAT plan is missing invalidation dependency `{}`",
+                String::from_utf8_lossy(dependency)
+            ),
+            Self::DuplicatePersistedPlanKey => write!(
+                f,
+                "multiple persisted records target the same FLAT validity region"
+            ),
             Self::NoQualifiedCandidate => write!(f, "no qualified FLAT candidate for this request"),
             Self::UnknownCandidate =>
             {
@@ -833,6 +1013,9 @@ fn validate_position(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use elastic_autotuner::measurement_protocol::{
+        ElasticMeasurementProtocol, ElasticSynchronizationBoundary, ElasticTimingSource,
+    };
     use elastic_autotuner::{ElasticMeasurement, ElasticPlanCache};
     use scirust_compute::{DeviceCapabilities, HardwareCapabilities};
 
@@ -896,6 +1079,225 @@ mod tests {
         tuner
             .plan_from_evidence(hardware, planner.problem_class().clone(), evidence)
             .unwrap()
+    }
+
+    fn encoded_persisted_plan(
+        planner: &FlatElasticPlanner,
+        hardware: ElasticHardwareProfile,
+        candidate: ElasticCandidate,
+        selected: bool,
+        recorded_unix_ns: u64,
+        residence_mode: ElasticResidenceMode,
+        dependencies: Vec<Vec<u8>>,
+    ) -> Vec<u8> {
+        let locked = tuner(ElasticMode::Locked, ElasticObjective::MinLatency);
+        let plan = measured_plan(planner, &locked, hardware, candidate);
+        ElasticPersistedPlan::new(
+            plan,
+            ElasticMeasurementProtocol::new(
+                1,
+                3,
+                ElasticTimingSource::HostWallClock,
+                residence_mode,
+                ElasticSynchronizationBoundary::PerIteration,
+            ),
+            selected,
+            recorded_unix_ns,
+            b"flat-bootstrap-test".to_vec(),
+            dependencies,
+        )
+        .unwrap()
+        .encode()
+        .unwrap()
+    }
+
+    #[test]
+    fn persisted_bootstrap_loads_locked_plan_before_request_resolution() {
+        let planner = planner(1, 17);
+        let hardware = hardware();
+        let required = b"scirust@test-source".to_vec();
+        let encoded = encoded_persisted_plan(
+            &planner,
+            hardware.clone(),
+            m15_candidate().unwrap(),
+            true,
+            1,
+            ElasticResidenceMode::Resident,
+            vec![FLAT_KERNEL_REVISION.to_vec(), required.clone()],
+        );
+        let runtime_config = ElasticConfig {
+            mode: ElasticMode::Locked,
+            objective: ElasticObjective::MinLatency,
+            max_ranked_candidates: 0,
+        };
+        let cache =
+            persisted_cache_from_records(runtime_config, &hardware, &[encoded], &[required])
+                .unwrap();
+        let mut runtime = FlatElasticRuntime::from_hardware(runtime_config, hardware, cache);
+        let request =
+            FlatElasticRequest::new(config(1, 17), FlatKvRepresentation::PreRotated).unwrap();
+        let resolved = runtime.resolve_request(request).unwrap();
+        assert_eq!(resolved.origin(), FlatPlanOrigin::Persisted);
+        assert_eq!(resolved.candidate(), &m15_candidate().unwrap());
+    }
+
+    #[test]
+    fn persisted_bootstrap_rejects_unselected_missing_timestamp_and_transfer_evidence() {
+        let planner = planner(1, 17);
+        let hardware = hardware();
+        let config = ElasticConfig {
+            mode: ElasticMode::Locked,
+            objective: ElasticObjective::MinLatency,
+            max_ranked_candidates: 0,
+        };
+        let deps = vec![FLAT_KERNEL_REVISION.to_vec()];
+
+        let unselected = encoded_persisted_plan(
+            &planner,
+            hardware.clone(),
+            current_candidate().unwrap(),
+            false,
+            1,
+            ElasticResidenceMode::Resident,
+            deps.clone(),
+        );
+        assert!(matches!(
+            persisted_cache_from_records(config, &hardware, &[unselected], &[]),
+            Err(FlatElasticError::PersistedRecordNotSelected)
+        ));
+
+        let no_timestamp = encoded_persisted_plan(
+            &planner,
+            hardware.clone(),
+            current_candidate().unwrap(),
+            true,
+            0,
+            ElasticResidenceMode::Resident,
+            deps.clone(),
+        );
+        assert!(matches!(
+            persisted_cache_from_records(config, &hardware, &[no_timestamp], &[]),
+            Err(FlatElasticError::PersistedRecordMissingTimestamp)
+        ));
+
+        let transfer = encoded_persisted_plan(
+            &planner,
+            hardware.clone(),
+            current_candidate().unwrap(),
+            true,
+            1,
+            ElasticResidenceMode::TransferInclusive,
+            deps,
+        );
+        assert!(matches!(
+            persisted_cache_from_records(config, &hardware, &[transfer], &[]),
+            Err(FlatElasticError::PersistedRecordNotResident)
+        ));
+    }
+
+    #[test]
+    fn persisted_bootstrap_rejects_nondeterministic_deterministic_only_plan() {
+        let planner = planner(1, 17);
+        let hardware = hardware();
+        let locked = tuner(ElasticMode::Locked, ElasticObjective::MinLatency);
+        let mut plan = measured_plan(
+            &planner,
+            &locked,
+            hardware.clone(),
+            current_candidate().unwrap(),
+        );
+        assert!(!plan.evidence.candidate.deterministic);
+        plan.objective = ElasticObjective::DeterministicOnly;
+        let encoded = ElasticPersistedPlan::new(
+            plan,
+            ElasticMeasurementProtocol::new(
+                1,
+                3,
+                ElasticTimingSource::HostWallClock,
+                ElasticResidenceMode::Resident,
+                ElasticSynchronizationBoundary::PerIteration,
+            ),
+            true,
+            1,
+            b"forged-deterministic-only".to_vec(),
+            vec![FLAT_KERNEL_REVISION.to_vec()],
+        )
+        .unwrap()
+        .encode()
+        .unwrap();
+        let deterministic = ElasticConfig {
+            mode: ElasticMode::Locked,
+            objective: ElasticObjective::DeterministicOnly,
+            max_ranked_candidates: 0,
+        };
+        assert!(matches!(
+            persisted_cache_from_records(deterministic, &hardware, &[encoded], &[]),
+            Err(FlatElasticError::Selection(
+                ElasticSelectionError::NonDeterministicCandidate
+            ))
+        ));
+    }
+
+    #[test]
+    fn persisted_bootstrap_rejects_missing_dependencies_stale_candidates_and_duplicates() {
+        let planner = planner(1, 17);
+        let hardware = hardware();
+        let config = ElasticConfig {
+            mode: ElasticMode::Locked,
+            objective: ElasticObjective::MinLatency,
+            max_ranked_candidates: 0,
+        };
+        let required = b"scirust@test-source".to_vec();
+        let current = current_candidate().unwrap();
+        let encoded = encoded_persisted_plan(
+            &planner,
+            hardware.clone(),
+            current.clone(),
+            true,
+            1,
+            ElasticResidenceMode::Resident,
+            vec![FLAT_KERNEL_REVISION.to_vec()],
+        );
+        assert!(matches!(
+            persisted_cache_from_records(config, &hardware, &[encoded], &[required]),
+            Err(FlatElasticError::MissingInvalidationDependency(_))
+        ));
+
+        let stale = ElasticCandidate::new(
+            FLAT_KERNEL_FAMILY,
+            b"flat-attention@stale".to_vec(),
+            current.parameters().iter().cloned(),
+            false,
+            0,
+        )
+        .unwrap();
+        let stale = encoded_persisted_plan(
+            &planner,
+            hardware.clone(),
+            stale,
+            true,
+            1,
+            ElasticResidenceMode::Resident,
+            vec![FLAT_KERNEL_REVISION.to_vec()],
+        );
+        assert!(matches!(
+            persisted_cache_from_records(config, &hardware, &[stale], &[]),
+            Err(FlatElasticError::UnknownCandidate)
+        ));
+
+        let valid = encoded_persisted_plan(
+            &planner,
+            hardware.clone(),
+            current_candidate().unwrap(),
+            true,
+            1,
+            ElasticResidenceMode::Resident,
+            vec![FLAT_KERNEL_REVISION.to_vec()],
+        );
+        assert!(matches!(
+            persisted_cache_from_records(config, &hardware, &[valid.clone(), valid], &[]),
+            Err(FlatElasticError::DuplicatePersistedPlanKey)
+        ));
     }
 
     #[test]
