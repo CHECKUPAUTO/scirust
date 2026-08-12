@@ -18,98 +18,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  m33-thor:
-    name: FLAT M33 resident decode + KV benchmark
-    if: >
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, Linux, ARM64, scirust-arm64, jetson-thor, internal]
-    timeout-minutes: 90
-    env:
-      CARGO_INCREMENTAL: 0
-      RUSTFLAGS: "-D warnings"
-      SCIRUST_THOR_GPU_LOCK: /tmp/scirust-thor-gpu.lock
-      SCIRUST_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
-      SCIAGENT_FLAT_M33_PROMPT: "64"
-      SCIAGENT_FLAT_M33_NEW: "16"
-      SCIAGENT_FLAT_M33_WARMUPS: "2"
-      SCIAGENT_FLAT_M33_REPEATS: "5"
-      SCIAGENT_FLAT_M33_D_MODEL: "512"
-      SCIAGENT_FLAT_M33_LAYERS: "8"
-      SCIAGENT_FLAT_M33_Q_HEADS: "8"
-      SCIAGENT_FLAT_M33_KV_HEADS: "2"
-      SCIAGENT_FLAT_M33_D_FF: "1408"
+  deferred:
+    name: FLAT M33 Thor gate deferred
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-      - name: Prepare executable temporary directory
-        shell: bash
+      - name: Preserve production training and release Thor runner
         run: |
-          set -euo pipefail
-          tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.ci-tmp.XXXXXX")"
-          chmod 700 "$tmpdir"
-          echo "TMPDIR=$tmpdir" >> "$GITHUB_ENV"
-      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
-        with:
-          toolchain: nightly-2026-07-02
-          components: rustfmt, clippy
-      - name: Wait safely for an idle physical Thor
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! command -v nvidia-smi >/dev/null 2>&1; then
-            echo "::error::nvidia-smi is required to qualify the physical Thor state"
-            exit 1
-          fi
-          nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader || true
-          for attempt in $(seq 1 60); do
-            active="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null || true)"
-            if [[ -z "${active//[[:space:]]/}" ]]; then
-              echo "Thor is idle and ready for M33 qualification"
-              exit 0
-            fi
-            unexpected=false
-            while IFS=',' read -r raw_pid raw_name; do
-              [[ -n "${raw_pid//[[:space:]]/}" ]] || continue
-              process_name="$(printf '%s' "$raw_name" | xargs)"
-              if [[ "$process_name" != "/root/scirust/target/release/examples/cuda_pretrain" ]]; then
-                unexpected=true
-              fi
-            done <<< "$active"
-            if [[ "$unexpected" == true ]]; then
-              echo "::error::Unknown GPU compute activity blocks deterministic M33 measurement:"
-              printf '%s\n' "$active"
-              exit 1
-            fi
-            echo "::notice::Managed SciAgent production training owns the Thor; leaving it untouched and waiting 30s ($attempt/60)."
-            sleep 30
-          done
-          echo "::error::Managed production training kept the Thor busy for the 30-minute qualification window."
+          echo "M33 real-device benchmark is deliberately deferred while the managed SciAgent production training owns the Thor and FLAT M34 portability needs the self-hosted runner."
+          echo "This job must be restored to the physical Thor benchmark gate before M33 merges."
           exit 1
-      - name: Format
-        run: rustup run nightly-2026-07-02 cargo fmt --all -- --check
-      - name: M33 lifecycle parity
-        run: >-
-          rustup run nightly-2026-07-02 cargo test -p scirust-sciagent
-          --features flat-attention --test flat_m33_lifecycle --locked -- --nocapture
-      - name: M32 prefill + M15 decode parity
-        run: >-
-          rustup run nightly-2026-07-02 cargo test -p scirust-sciagent
-          --features flat-attention --test flat_runtime_decode --locked -- --nocapture
-      - name: M33 real Thor model-level benchmark
-        shell: bash
-        run: |
-          set -euo pipefail
-          command -v flock >/dev/null
-          exec 9>"$SCIRUST_THOR_GPU_LOCK"
-          flock -x 9
-          active="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null || true)"
-          if [[ -n "${active//[[:space:]]/}" ]]; then
-            echo "::error::M33 benchmark lost the idle-device boundary before execution:"
-            printf '%s\n' "$active"
-            exit 1
-          fi
-          rustup run nightly-2026-07-02 cargo run -p scirust-sciagent \
-            --features flat-attention --release --locked --example flat_m33_thor_bench \
-            | tee "$RUNNER_TEMP/flat-m33-thor.csv"
-          test "$(wc -l < "$RUNNER_TEMP/flat-m33-thor.csv")" -ge 2
-          grep -F ',none' "$RUNNER_TEMP/flat-m33-thor.csv"
