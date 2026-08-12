@@ -1,4 +1,4 @@
-name: FLAT M28 Thor release evidence
+name: FLAT M28 Thor prepared candidate
 
 on:
   pull_request:
@@ -6,6 +6,7 @@ on:
     paths:
       - "scirust-gpu/**"
       - "docs/FLAT_M28_SCIRUST_BASELINE.md"
+      - ".github/scripts/prepare_flat_m28_prepared_candidate.py"
       - ".github/workflows/flat-m28-thor-release-evidence.yml"
   workflow_dispatch:
 
@@ -18,7 +19,7 @@ concurrency:
 
 jobs:
   m28-thor:
-    name: SciRust multi-dispatch vs FLAT on physical Thor
+    name: SciRust vs FLAT prepared candidate on physical Thor
     if: >
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
@@ -30,7 +31,8 @@ jobs:
       SCIRUST_THOR_GPU_LOCK: /tmp/scirust-thor-gpu.lock
       SCIRUST_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
       SCIRUST_M28_WARMUPS: "3"
-      SCIRUST_M28_REPEATS: "9"
+      SCIRUST_M28_REPEATS: "12"
+      SCIRUST_M28_CANDIDATE_FLAT_REV: "f8e1be6a073596b446d298910eb04c122c7e29b0"
       WGPU_BACKEND: vulkan
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -43,6 +45,7 @@ jobs:
           actual="$(git rev-parse HEAD)"
           echo "source_revision=$actual"
           test "$actual" = "$SCIRUST_SOURCE_REVISION"
+          sha256sum .github/scripts/prepare_flat_m28_prepared_candidate.py
       - name: Prepare executable temporary directory
         shell: bash
         run: |
@@ -54,9 +57,19 @@ jobs:
         with:
           toolchain: nightly-2026-07-02
           components: rustfmt, clippy
-      - name: Format
+      - name: Materialize FLAT prepared candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/prepare_flat_m28_prepared_candidate.py
+          grep -F "rev = \"$SCIRUST_M28_CANDIDATE_FLAT_REV\"" scirust-gpu/Cargo.toml
+          rustup run nightly-2026-07-02 cargo update -p flat-attention --precise "$SCIRUST_M28_CANDIDATE_FLAT_REV"
+          rustup run nightly-2026-07-02 cargo fmt --all
+          echo "candidate_flat_revision=$SCIRUST_M28_CANDIDATE_FLAT_REV"
+          git diff -- scirust-gpu/Cargo.toml Cargo.lock scirust-gpu/examples/flat_m28_naive_vs_fused.rs
+      - name: Format candidate
         run: rustup run nightly-2026-07-02 cargo fmt --all -- --check
-      - name: Build M28 benchmark
+      - name: Build M28 candidate benchmark
         run: >-
           rustup run nightly-2026-07-02 cargo build --release --locked -p scirust-gpu
           --features flat-attention --example flat_m28_naive_vs_fused
@@ -106,7 +119,7 @@ jobs:
               exit 1
             fi
             if [[ -z "${active//[[:space:]]/}" ]]; then
-              echo "Thor is idle and reserved; proceeding with M28 qualification."
+              echo "Thor is idle and reserved; proceeding with M28 candidate qualification."
               break
             fi
 
@@ -135,7 +148,7 @@ jobs:
               exit 1
             fi
             if (( SECONDS >= deadline )); then
-              echo "::error::Managed production training still owns the Thor after the five-hour M28 reservation window; benchmark was not run concurrently or fabricated:"
+              echo "::error::Managed production training still owns the Thor after the five-hour M28 reservation window; candidate benchmark was not run concurrently or fabricated:"
               printf '%s\n' "$active"
               exit 1
             fi
@@ -145,7 +158,8 @@ jobs:
           done
 
           echo "source_revision=$(git rev-parse HEAD)"
-          echo "benchmark_scope=resident_wgpu_same_context_upload_readback_excluded"
+          echo "candidate_flat_revision=$SCIRUST_M28_CANDIDATE_FLAT_REV"
+          echo "benchmark_scope=resident_wgpu_same_context_upload_readback_excluded_candidate_transform"
           echo "warmups=$SCIRUST_M28_WARMUPS repeats=$SCIRUST_M28_REPEATS"
 
           for seq in 128 512; do
@@ -157,6 +171,10 @@ jobs:
               rustup run nightly-2026-07-02 cargo run --release --locked -p scirust-gpu \
                 --features flat-attention --example flat_m28_naive_vs_fused \
                 | tee "$out"
+              head -n 1 "$out" | grep -F "flat_prepared_median_us" >/dev/null || {
+                echo "::error::prepared candidate columns are missing"
+                exit 1
+              }
               grep -F "NVIDIA Tegra NVIDIA Thor,Vulkan," "$out" >/dev/null || {
                 echo "::error::M28 benchmark did not execute through Vulkan on the physical Thor WGPU adapter"
                 exit 1
