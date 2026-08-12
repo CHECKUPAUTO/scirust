@@ -137,10 +137,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let repeats = env_usize("SCIRUST_M50_REPEATS", DEFAULT_REPEATS);
     if q_heads == 0
         || kv_heads == 0
-        || q_heads % kv_heads != 0
+        || !q_heads.is_multiple_of(kv_heads)
         || seq_len == 0
         || head_dim == 0
-        || head_dim % 2 != 0
+        || !head_dim.is_multiple_of(2)
         || warmups == 0
         || repeats < 4
     {
