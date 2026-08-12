@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use flat_attention::api::wgpu::PreparedGroupedForward;
 use flat_attention::{
     forward_reference_grouped, FlatAttentionConfig, GroupedAttentionShape, GroupedForwardPass,
-    GroupedForwardKernelVariant, WgpuGroupedForwardPipeline,
+    WgpuGroupedForwardPipeline,
 };
 use scirust_gpu::{GpuMatrix, WgpuContext};
 
@@ -147,11 +147,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         seq_len,
         head_dim,
     };
-    if portable.kernel_variant_for_shape(shape) != GroupedForwardKernelVariant::Q4PortableGrouped {
-        return Err("portable grouped kernel selection drifted".into());
+    let portable_variant = format!("{:?}", portable.kernel_variant_for_shape(shape));
+    let vec4_variant = format!("{:?}", vec4.kernel_variant_for_shape(shape));
+    if portable_variant != "Q4PortableGrouped" {
+        return Err(format!("portable grouped kernel selection drifted: {portable_variant}").into());
     }
-    if vec4.kernel_variant_for_shape(shape) != GroupedForwardKernelVariant::Q4Vec4Mha {
-        return Err("vec4 candidate was not selected for qualified MHA geometry".into());
+    if vec4_variant != "Q4Vec4Mha" {
+        return Err(format!(
+            "vec4 candidate was not selected for qualified MHA geometry: {vec4_variant}"
+        )
+        .into());
     }
 
     let layout = WgpuGroupedForwardPipeline::layout(shape)?;
@@ -204,8 +209,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                 config,
             },
         )?;
-        if vec4_prepared.kernel_variant() != GroupedForwardKernelVariant::Q4Vec4Mha {
-            return Err("prepared vec4 request selected a different kernel".into());
+        let prepared_variant = format!("{:?}", vec4_prepared.kernel_variant());
+        if prepared_variant != "Q4Vec4Mha" {
+            return Err(format!("prepared vec4 request selected {prepared_variant}").into());
         }
 
         let _ = time_prepared(&ctx, &portable, &portable_prepared);
@@ -215,14 +221,20 @@ fn main() -> Result<(), Box<dyn Error>> {
             layout.output_elements,
             layout.output_bytes,
         )?;
-        let vec4_host = ctx.download_buffer(&vec4_output, layout.output_elements, layout.output_bytes)?;
+        let vec4_host =
+            ctx.download_buffer(&vec4_output, layout.output_elements, layout.output_bytes)?;
         let portable_parity = assert_close(
             "portable O",
             &portable_host[..layout.q_elements],
             &expected.output,
         )?;
-        assert_close("portable LSE", &portable_host[layout.lse_offset()..], &expected.lse)?;
-        let vec4_parity = assert_close("vec4 O", &vec4_host[..layout.q_elements], &expected.output)?;
+        assert_close(
+            "portable LSE",
+            &portable_host[layout.lse_offset()..],
+            &expected.lse,
+        )?;
+        let vec4_parity =
+            assert_close("vec4 O", &vec4_host[..layout.q_elements], &expected.output)?;
         assert_close("vec4 LSE", &vec4_host[layout.lse_offset()..], &expected.lse)?;
 
         for _ in 0..warmups {
@@ -258,7 +270,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let portable_median = median_ns(&portable_samples);
         let vec4_median = median_ns(&vec4_samples);
         println!(
-            "{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.6},{:.6},{:.6},{:.8},{:.8},{:.8},{:?},none",
+            "{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.6},{:.6},{:.6},{:.8},{:.8},{:.8},{},none",
             ctx.adapter_name().replace(',', ";"),
             ctx.adapter_backend().replace(',', ";"),
             causal,
@@ -278,7 +290,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             naive_parity,
             portable_parity,
             vec4_parity,
-            vec4_prepared.kernel_variant(),
+            prepared_variant,
         );
     }
 
