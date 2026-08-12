@@ -1,0 +1,84 @@
+name: FLAT M28 Thor release evidence
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "scirust-gpu/**"
+      - "docs/FLAT_M28_SCIRUST_BASELINE.md"
+      - ".github/workflows/flat-m28-thor-release-evidence.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flat-m28-thor-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  m28-thor:
+    name: SciRust multi-dispatch vs FLAT on physical Thor
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, ARM64, scirust-arm64, jetson-thor, internal]
+    timeout-minutes: 120
+    env:
+      CARGO_INCREMENTAL: 0
+      RUSTFLAGS: "-D warnings"
+      SCIRUST_THOR_GPU_LOCK: /tmp/scirust-thor-gpu.lock
+      SCIRUST_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+      SCIRUST_M28_WARMUPS: "3"
+      SCIRUST_M28_REPEATS: "9"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Prepare executable temporary directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.ci-tmp.XXXXXX")"
+          chmod 700 "$tmpdir"
+          echo "TMPDIR=$tmpdir" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: nightly-2026-07-02
+          components: rustfmt, clippy
+      - name: Format
+        run: rustup run nightly-2026-07-02 cargo fmt --all -- --check
+      - name: Build M28 benchmark
+        run: >-
+          rustup run nightly-2026-07-02 cargo build --release --locked -p scirust-gpu
+          --features flat-attention --example flat_m28_naive_vs_fused
+      - name: Physical Thor paired benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v flock >/dev/null
+          command -v nvidia-smi >/dev/null
+          exec 9>"$SCIRUST_THOR_GPU_LOCK"
+          flock -x 9
+
+          active="$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null || true)"
+          if [[ -n "${active//[[:space:]]/}" ]]; then
+            echo "::error::M28 release evidence requires an idle Thor; active compute detected:"
+            printf '%s\n' "$active"
+            exit 1
+          fi
+
+          echo "source_revision=$SCIRUST_SOURCE_REVISION"
+          nvidia-smi --query-gpu=name,driver_version --format=csv,noheader
+          echo "benchmark_scope=resident_wgpu_same_context_upload_readback_excluded"
+          echo "warmups=$SCIRUST_M28_WARMUPS repeats=$SCIRUST_M28_REPEATS"
+
+          for seq in 128 512; do
+            for dim in 64 128; do
+              echo "=== geometry seq_len=$seq head_dim=$dim ==="
+              SCIRUST_M28_SEQ_LEN="$seq" \
+              SCIRUST_M28_HEAD_DIM="$dim" \
+              rustup run nightly-2026-07-02 cargo run --release --locked -p scirust-gpu \
+                --features flat-attention --example flat_m28_naive_vs_fused
+            done
+          done
+
+          echo "performance_claim=none"
