@@ -129,8 +129,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let ctx = WgpuContext::new()?;
     let portable = WgpuGroupedForwardPipeline::new(ctx.device())?;
-    let grouped_vec4 =
-        WgpuGroupedForwardPipeline::with_grouped_vectorization(ctx.device(), true)?;
+    let grouped_vec4 = WgpuGroupedForwardPipeline::with_grouped_vectorization(ctx.device(), true)?;
     let shape = GroupedAttentionShape {
         batch: 1,
         q_heads,
@@ -210,11 +209,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             layout.output_elements,
             layout.output_bytes,
         )?;
-        let grouped_host = ctx.download_buffer(
-            &grouped_output,
-            layout.output_elements,
-            layout.output_bytes,
-        )?;
+        let grouped_host =
+            ctx.download_buffer(&grouped_output, layout.output_elements, layout.output_bytes)?;
         let portable_parity = assert_close(
             "portable O",
             &portable_host[..layout.q_elements],
