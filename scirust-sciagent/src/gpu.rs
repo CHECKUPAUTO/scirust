@@ -648,7 +648,35 @@ impl ResidentModel {
             let q = chain.matmul(&xn, &b.wq).expect("wq"); // [P × d_model]
             let k = chain.matmul(&xn, &b.wk).expect("wk"); // [P × kv_dim]
             let v = chain.matmul(&xn, &b.wv).expect("wv"); // [P × kv_dim]
-            // Full causal attention over the prompt (ropes q/k internally).
+            // M32: when the opt-in FLAT feature is enabled, prefill uses the
+            // resident fused grouped-forward pipeline. Q/K/V remain SciRust-owned
+            // device buffers; FLAT fuses Q/K RoPE and causal grouped attention and
+            // returns a resident context matrix. The legacy GpuChain attention path
+            // remains the explicit feature-off oracle/fallback.
+            #[cfg(feature = "flat-attention")]
+            let ctx = {
+                let d_model = q.cols();
+                let dh = d_model / self.n_heads;
+                let config = FlatM11ResidentConfig {
+                    batch: 1,
+                    q_heads: self.n_heads,
+                    kv_heads: self.n_kv_heads,
+                    query_len: p,
+                    kv_len: p,
+                    head_dim: dh,
+                    causal: true,
+                    softmax_scale: None,
+                    query_position_offset: 0,
+                    theta: self.theta,
+                    query_rope_position_offset: 0,
+                    kv_rope_position_offset: 0,
+                };
+                self.flat_decode
+                    .forward(&q, &k, &v, config)
+                    .expect("FLAT M32 resident prefill")
+            };
+
+            #[cfg(not(feature = "flat-attention"))]
             let ctx = chain
                 .gqa_attention(
                     &q,

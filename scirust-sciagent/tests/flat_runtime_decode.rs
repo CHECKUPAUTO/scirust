@@ -21,7 +21,7 @@ fn flat_decode_config() -> SciAgentConfig {
 }
 
 #[test]
-fn flat_m15_runtime_cached_decode_matches_full_greedy() {
+fn flat_m32_prefill_and_m15_decode_match_full_greedy() {
     let config = flat_decode_config();
     let model = SciAgentModel::new(&config);
     let Some(resident) = ResidentModel::from_model(&model)
@@ -31,7 +31,10 @@ fn flat_m15_runtime_cached_decode_matches_full_greedy() {
         return;
     };
 
-    eprintln!("FLAT M15 runtime parity on: {}", resident.adapter_name());
+    eprintln!(
+        "FLAT M32 prefill + M15 decode parity on: {}",
+        resident.adapter_name()
+    );
     for (prompt, steps) in [
         (vec![3u32, 7, 1, 4], 6usize),
         (vec![5u32, 2, 9, 1, 7, 3, 8, 0], 5usize),
@@ -42,7 +45,7 @@ fn flat_m15_runtime_cached_decode_matches_full_greedy() {
         assert_eq!(
             cached,
             full,
-            "FLAT M15 cached decode must match whole-sequence greedy for prompt len {}",
+            "FLAT M32 prefill + M15 cached decode must match whole-sequence greedy for prompt len {}",
             prompt.len()
         );
     }
