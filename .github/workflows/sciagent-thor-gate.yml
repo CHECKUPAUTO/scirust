@@ -1,4 +1,5 @@
 name: SciAgent Thor gate
+# I250 diagnostic dispatch marker.
 
 on:
   pull_request:
