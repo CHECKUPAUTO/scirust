@@ -157,8 +157,8 @@ jobs:
               rustup run nightly-2026-07-02 cargo run --release --locked -p scirust-gpu \
                 --features flat-attention --example flat_m28_naive_vs_fused \
                 | tee "$out"
-              grep -F "NVIDIA Tegra NVIDIA Thor," "$out" >/dev/null || {
-                echo "::error::M28 benchmark did not execute on the physical Thor WGPU adapter"
+              grep -F "NVIDIA Tegra NVIDIA Thor,Vulkan," "$out" >/dev/null || {
+                echo "::error::M28 benchmark did not execute through Vulkan on the physical Thor WGPU adapter"
                 exit 1
               }
               grep -F ',none' "$out" >/dev/null

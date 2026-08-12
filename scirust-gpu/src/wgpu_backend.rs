@@ -607,6 +607,7 @@ pub struct WgpuContextInner {
     slice_cols_pipeline: wgpu::ComputePipeline,
     place_cols_pipeline: wgpu::ComputePipeline,
     adapter_name: String,
+    adapter_backend: String,
 }
 
 /// A row-major `f32` matrix resident in GPU memory (a storage buffer + shape).
@@ -775,8 +776,9 @@ impl WgpuContext {
     /// Build a fresh context: acquire an adapter/device and compile every compute
     /// pipeline. The uncached path behind [`WgpuContext::new`].
     fn new_uncached() -> BackendResult<Self> {
+        let backends = wgpu::util::backend_bits_from_env().unwrap_or_else(wgpu::Backends::all);
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
+            backends,
             ..Default::default()
         });
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -785,7 +787,9 @@ impl WgpuContext {
             compatible_surface: None,
         }))
         .ok_or(BackendError::Unavailable("wgpu"))?;
-        let adapter_name = adapter.get_info().name;
+        let adapter_info = adapter.get_info();
+        let adapter_name = adapter_info.name;
+        let adapter_backend = format!("{:?}", adapter_info.backend);
         let (device, queue) = pollster::block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
                 label: Some("scirust-gpu"),
@@ -1040,6 +1044,7 @@ impl WgpuContext {
                 slice_cols_pipeline,
                 place_cols_pipeline,
                 adapter_name,
+                adapter_backend,
             }),
         })
     }
@@ -2673,6 +2678,11 @@ impl WgpuContext {
     /// Name of the underlying adapter (e.g. `"llvmpipe (LLVM 20, 256 bits)"`).
     pub fn adapter_name(&self) -> &str {
         &self.adapter_name
+    }
+
+    /// Backend selected for this context (for example `Vulkan`, `Metal`, or `Dx12`).
+    pub fn adapter_backend(&self) -> &str {
+        &self.adapter_backend
     }
 
     /// Download a storage buffer back to CPU.
