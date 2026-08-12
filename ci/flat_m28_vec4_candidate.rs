@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 
 use flat_attention::api::wgpu::PreparedGroupedForward;
 use flat_attention::{
-    forward_reference_grouped, FlatAttentionConfig, GroupedAttentionShape, GroupedForwardPass,
-    WgpuGroupedForwardPipeline,
+    FlatAttentionConfig, GroupedAttentionShape, GroupedForwardPass, WgpuGroupedForwardPipeline,
+    forward_reference_grouped,
 };
 use scirust_gpu::{GpuMatrix, WgpuContext};
 
@@ -35,7 +35,8 @@ fn fixture(len: usize, phase: f32) -> Vec<f32> {
 
 fn bytes_f32(values: &[f32]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(std::mem::size_of_val(values));
-    for &value in values {
+    for &value in values
+    {
         bytes.extend_from_slice(&value.to_ne_bytes());
     }
     bytes
@@ -65,14 +66,17 @@ fn median_ns(samples: &[Duration]) -> u128 {
 }
 
 fn assert_close(name: &str, actual: &[f32], expected: &[f32]) -> Result<f32, Box<dyn Error>> {
-    if actual.len() != expected.len() {
+    if actual.len() != expected.len()
+    {
         return Err(format!("{name}: length {} != {}", actual.len(), expected.len()).into());
     }
     let mut worst = 0.0f32;
-    for (index, (&actual, &expected)) in actual.iter().zip(expected).enumerate() {
+    for (index, (&actual, &expected)) in actual.iter().zip(expected).enumerate()
+    {
         let abs = (actual - expected).abs();
         let limit = ATOL + RTOL * actual.abs().max(expected.abs());
-        if !actual.is_finite() || abs > limit {
+        if !actual.is_finite() || abs > limit
+        {
             return Err(format!(
                 "{name}[{index}] actual={actual} expected={expected} abs={abs} limit={limit}"
             )
@@ -133,7 +137,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let head_dim = env_usize("SCIRUST_M28_HEAD_DIM", 64);
     let warmups = env_usize("SCIRUST_M28_WARMUPS", 3);
     let repeats = env_usize("SCIRUST_M28_REPEATS", 12);
-    if seq_len == 0 || !matches!(head_dim, 64 | 128) || warmups == 0 || repeats < 3 {
+    if seq_len == 0 || !matches!(head_dim, 64 | 128) || warmups == 0 || repeats < 3
+    {
         return Err("candidate requires seq_len>0, head_dim=64|128, warmups>0, repeats>=3".into());
     }
 
@@ -149,10 +154,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
     let portable_variant = format!("{:?}", portable.kernel_variant_for_shape(shape));
     let vec4_variant = format!("{:?}", vec4.kernel_variant_for_shape(shape));
-    if portable_variant != "Q4PortableGrouped" {
-        return Err(format!("portable grouped kernel selection drifted: {portable_variant}").into());
+    if portable_variant != "Q4PortableGrouped"
+    {
+        return Err(
+            format!("portable grouped kernel selection drifted: {portable_variant}").into(),
+        );
     }
-    if vec4_variant != "Q4Vec4Mha" {
+    if vec4_variant != "Q4Vec4Mha"
+    {
         return Err(format!(
             "vec4 candidate was not selected for qualified MHA geometry: {vec4_variant}"
         )
@@ -175,7 +184,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         "adapter,backend,causal,seq_len,head_dim,warmups,repeats,naive_median_us,naive_p95_us,portable_median_us,portable_p95_us,vec4_median_us,vec4_p95_us,naive_over_portable,naive_over_vec4,portable_over_vec4,naive_parity_max_abs,portable_parity_max_abs,vec4_parity_max_abs,candidate_variant,performance_claim"
     );
 
-    for causal in [false, true] {
+    for causal in [false, true]
+    {
         let config = FlatAttentionConfig {
             causal,
             softmax_scale: None,
@@ -210,7 +220,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             },
         )?;
         let prepared_variant = format!("{:?}", vec4_prepared.kernel_variant());
-        if prepared_variant != "Q4Vec4Mha" {
+        if prepared_variant != "Q4Vec4Mha"
+        {
             return Err(format!("prepared vec4 request selected {prepared_variant}").into());
         }
 
@@ -237,7 +248,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             assert_close("vec4 O", &vec4_host[..layout.q_elements], &expected.output)?;
         assert_close("vec4 LSE", &vec4_host[layout.lse_offset()..], &expected.lse)?;
 
-        for _ in 0..warmups {
+        for _ in 0..warmups
+        {
             let _ = time_naive(&ctx, &q_naive, &k_naive, &v_naive, causal)?;
             black_box(time_prepared(&ctx, &portable, &portable_prepared));
             black_box(time_prepared(&ctx, &vec4, &vec4_prepared));
@@ -246,23 +258,28 @@ fn main() -> Result<(), Box<dyn Error>> {
         let mut naive_samples = Vec::with_capacity(repeats);
         let mut portable_samples = Vec::with_capacity(repeats);
         let mut vec4_samples = Vec::with_capacity(repeats);
-        for iteration in 0..repeats {
-            match iteration % 3 {
-                0 => {
+        for iteration in 0..repeats
+        {
+            match iteration % 3
+            {
+                0 =>
+                {
                     naive_samples.push(time_naive(&ctx, &q_naive, &k_naive, &v_naive, causal)?);
                     portable_samples.push(time_prepared(&ctx, &portable, &portable_prepared));
                     vec4_samples.push(time_prepared(&ctx, &vec4, &vec4_prepared));
-                }
-                1 => {
+                },
+                1 =>
+                {
                     portable_samples.push(time_prepared(&ctx, &portable, &portable_prepared));
                     vec4_samples.push(time_prepared(&ctx, &vec4, &vec4_prepared));
                     naive_samples.push(time_naive(&ctx, &q_naive, &k_naive, &v_naive, causal)?);
-                }
-                _ => {
+                },
+                _ =>
+                {
                     vec4_samples.push(time_prepared(&ctx, &vec4, &vec4_prepared));
                     naive_samples.push(time_naive(&ctx, &q_naive, &k_naive, &v_naive, causal)?);
                     portable_samples.push(time_prepared(&ctx, &portable, &portable_prepared));
-                }
+                },
             }
         }
 
