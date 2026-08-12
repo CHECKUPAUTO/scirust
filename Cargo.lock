@@ -903,7 +903,7 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 [[package]]
 name = "flat-attention"
 version = "0.1.0"
-source = "git+https://github.com/Memorithm/FLAT-ATTENTION?rev=24d3340edeb059e40e0fe0c400e814685701d855#24d3340edeb059e40e0fe0c400e814685701d855"
+source = "git+https://github.com/Memorithm/FLAT-ATTENTION?rev=f8e1be6a073596b446d298910eb04c122c7e29b0#f8e1be6a073596b446d298910eb04c122c7e29b0"
 dependencies = [
  "pollster",
  "wgpu",
@@ -5346,7 +5346,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
