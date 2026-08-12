@@ -32,10 +32,40 @@ The 251,341-update budget is a raw-token-equivalent pass for capacity planning. 
 2% of deterministic windows are held out for validation, it is not a claim that every
 train window is visited exactly once.
 
+## Shared physical-Thor GPU lock
+
+Every production CUDA command and every physical-Thor performance qualification uses
+one advisory lock on the **shared host filesystem**:
+
+```text
+/var/lib/github-runner/.scirust-thor-gpu.lock
+```
+
+Do not move this lock back under `/tmp`. The four persistent Actions runners are
+separate systemd services, and `/tmp` may be private to a service namespace. The
+`/var/lib/github-runner` path is the persistent runner state visible on the Thor host,
+so all `tarek-scirust-arm64-01..04` services and the root production shell contend on
+the same host inode.
+
+From the root shell, create the lock without replacing its inode and make it usable by
+the runner service account:
+
+```bash
+export SCIRUST_THOR_GPU_LOCK=/var/lib/github-runner/.scirust-thor-gpu.lock
+touch "$SCIRUST_THOR_GPU_LOCK"
+chmod 0666 "$SCIRUST_THOR_GPU_LOCK"
+```
+
+Never remove or atomically replace the lock file while a trainer or qualification may
+be running. `touch`/`chmod` preserve the inode. Physical qualification workflows print
+the lock device/inode before taking it so evidence can be audited.
+
 ## Stage 1 — read-only/fresh preflight and corpus fingerprint
 
 Run from the root shell on the Thor **after B52 is merged into `master`**. The checkpoint
-path below is deliberately new. Do not create files in it before the preflight.
+path below is deliberately new. Do not create files in it before the preflight. The
+preflight initializes CUDA, so it takes the same Thor lock as training and performance
+qualification even though it exits before optimizer update 1.
 
 ```bash
 set -euo pipefail
@@ -56,8 +86,13 @@ export SCIAGENT_EXPECT_CORPUS_TOKENS=1029492639
 export SCIAGENT_SEQ=512
 export SCIAGENT_BATCH=8
 export SCIAGENT_PREFLIGHT_ONLY=1
+export SCIRUST_THOR_GPU_LOCK=/var/lib/github-runner/.scirust-thor-gpu.lock
 
-cargo +nightly-2026-07-02 run \
+touch "$SCIRUST_THOR_GPU_LOCK"
+chmod 0666 "$SCIRUST_THOR_GPU_LOCK"
+command -v flock >/dev/null
+flock -x "$SCIRUST_THOR_GPU_LOCK" \
+  cargo +nightly-2026-07-02 run \
   -p scirust-sciagent --features cuda --release --example cuda_pretrain \
   | tee logs/sciagent-v2-preflight.log
 
@@ -80,9 +115,11 @@ stays enabled for the initial launch so an accidental checkpoint collision is fa
 The production trainer and every physical-Thor performance qualification must share the
 same advisory GPU lock. This makes an idle benchmark window a real mutual-exclusion
 contract instead of an inference from a single `nvidia-smi` sample. An already-running
-trainer that predates this rule does **not** own the lock; stop it cleanly at an exact
-checkpoint and restart it with the wrapper below before relying on the lock for
-qualification evidence.
+trainer that predates this rule does **not** own the lock; do not kill it for a
+qualification. Let it stop cleanly at an exact checkpoint and restart it with the
+wrapper below before relying on the lock for future evidence. Until then, qualification
+also detects the legacy process independently with `pgrep` and waits without
+interruption.
 
 ```bash
 set -euo pipefail
@@ -115,8 +152,10 @@ export SCIAGENT_SHUFFLE=1
 export SCIAGENT_TELEMETRY=25
 export SCIAGENT_SAVE_HOURS=6
 export SCIAGENT_KEEP=2
-export SCIRUST_THOR_GPU_LOCK=/tmp/scirust-thor-gpu.lock
+export SCIRUST_THOR_GPU_LOCK=/var/lib/github-runner/.scirust-thor-gpu.lock
 
+touch "$SCIRUST_THOR_GPU_LOCK"
+chmod 0666 "$SCIRUST_THOR_GPU_LOCK"
 command -v flock >/dev/null
 nohup flock -x "$SCIRUST_THOR_GPU_LOCK" \
   cargo +nightly-2026-07-02 run \
