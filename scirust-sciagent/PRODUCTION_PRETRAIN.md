@@ -77,6 +77,13 @@ optimizer update 1. If any invariant differs, it exits non-zero.
 Only after Stage 1 succeeds, use the exact `HASH` produced there. `SCIAGENT_REQUIRE_FRESH`
 stays enabled for the initial launch so an accidental checkpoint collision is fatal.
 
+The production trainer and every physical-Thor performance qualification must share the
+same advisory GPU lock. This makes an idle benchmark window a real mutual-exclusion
+contract instead of an inference from a single `nvidia-smi` sample. An already-running
+trainer that predates this rule does **not** own the lock; stop it cleanly at an exact
+checkpoint and restart it with the wrapper below before relying on the lock for
+qualification evidence.
+
 ```bash
 set -euo pipefail
 cd /root/scirust
@@ -108,13 +115,20 @@ export SCIAGENT_SHUFFLE=1
 export SCIAGENT_TELEMETRY=25
 export SCIAGENT_SAVE_HOURS=6
 export SCIAGENT_KEEP=2
+export SCIRUST_THOR_GPU_LOCK=/tmp/scirust-thor-gpu.lock
 
-nohup cargo +nightly-2026-07-02 run \
+command -v flock >/dev/null
+nohup flock -x "$SCIRUST_THOR_GPU_LOCK" \
+  cargo +nightly-2026-07-02 run \
   -p scirust-sciagent --features cuda --release --example cuda_pretrain \
   > logs/sciagent-bpe350m-v5-semantics-v2.log 2>&1 &
 
 echo $! | tee logs/sciagent-bpe350m-v5-semantics-v2.pid
 ```
+
+The PID file identifies the lock-holding `flock` wrapper; the actual `cuda_pretrain`
+process runs as its child. Keep the wrapper alive for the whole training run. Do not
+launch a second unwrapped trainer while the lock is part of the qualification contract.
 
 The run is considered started only after the log confirms all of the following before
 normal step telemetry: the 350m config, 1,030 shards, 1,029,492,639 tokens, the expected
@@ -128,3 +142,7 @@ corpus identity gates and trajectory settings unchanged. `cuda_pretrain` loads t
 newest exact checkpoint and restores model weights, AdamW m/v, bias-correction step,
 shuffle/window cursor, LR schedule and the saved run contract; trajectory mismatches
 fail closed unless a research-only non-exact override is explicitly requested.
+
+Every restart must use the same `flock -x "$SCIRUST_THOR_GPU_LOCK"` wrapper as Stage 2.
+A restart without that wrapper invalidates any claim that a benchmark holding the lock
+had exclusive access to the Thor.
