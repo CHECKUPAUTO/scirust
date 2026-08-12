@@ -65,13 +65,17 @@ jobs:
           actual="$(git rev-parse HEAD)"
           echo "source_revision=$actual"
           test "$actual" = "$SCIRUST_SOURCE_REVISION"
-      - name: Prepare executable temporary directory
+      - name: Prepare isolated executable build directory
         shell: bash
         run: |
           set -euo pipefail
           tmpdir="$(mktemp -d "$GITHUB_WORKSPACE/.ci-tmp.XXXXXX")"
           chmod 700 "$tmpdir"
+          mkdir -p "$tmpdir/cargo-home" "$tmpdir/rustup-home" "$tmpdir/target"
           echo "TMPDIR=$tmpdir" >> "$GITHUB_ENV"
+          echo "CARGO_HOME=$tmpdir/cargo-home" >> "$GITHUB_ENV"
+          echo "RUSTUP_HOME=$tmpdir/rustup-home" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=$tmpdir/target" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: nightly-2026-07-02
@@ -88,7 +92,7 @@ jobs:
             --features flat-attention --test flat_runtime_decode --locked --no-run
           rustup run nightly-2026-07-02 cargo build -p scirust-sciagent \
             --features flat-attention --release --locked --example flat_m33_thor_bench
-          test -x "$GITHUB_WORKSPACE/target/release/examples/flat_m33_thor_bench"
+          test -x "$CARGO_TARGET_DIR/release/examples/flat_m33_thor_bench"
       - name: Exclusive M33 correctness + real Thor model-level benchmark
         shell: bash
         timeout-minutes: 330
@@ -240,7 +244,7 @@ jobs:
           fi
           nvidia-smi --query-gpu=temperature.gpu,utilization.gpu,clocks.gr,clocks.sm,power.draw --format=csv,noheader || true
 
-          benchmark="$GITHUB_WORKSPACE/target/release/examples/flat_m33_thor_bench"
+          benchmark="$CARGO_TARGET_DIR/release/examples/flat_m33_thor_bench"
           test -x "$benchmark"
           "$benchmark" | tee "$RUNNER_TEMP/flat-m33-thor.csv"
 
